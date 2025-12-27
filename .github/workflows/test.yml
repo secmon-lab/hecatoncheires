@@ -1,0 +1,32 @@
+name: Unit test
+
+on:
+  push:
+    paths:
+      - 'pkg/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Taskfile.yml'
+      - 'graphql/**'
+      - 'frontend/**'
+      - '.github/workflows/test.yml'
+
+jobs:
+  testing:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout upstream repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+          cache-dependency-path: go.sum
+
+      # Run tests
+      - name: Run tests
+        run: go test ./...

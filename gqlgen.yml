@@ -1,0 +1,40 @@
+# Where are all the schema files located? globs are supported eg  src/**/*.graphqls
+schema:
+  - graphql/*.graphql
+
+# Where should the generated server code go?
+exec:
+  filename: pkg/controller/graphql/generated.go
+  package: graphql
+
+# Where should any generated models go?
+model:
+  filename: pkg/domain/model/graphql/models_gen.go
+  package: graphql
+
+# Where should the resolver implementations go?
+resolver:
+  layout: follow-schema
+  dir: pkg/controller/graphql
+  package: graphql
+  filename_template: "{name}.resolvers.go"
+
+# gqlgen will search for any type names in the schema in these go packages
+# if they match it will use them, otherwise it will generate them.
+# Commented out for initial implementation as no models exist yet
+# autobind:
+#   - "github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+
+# This section declares type mapping between the GraphQL and go type systems
+models:
+  ID:
+    model:
+      - github.com/99designs/gqlgen/graphql.ID
+      - github.com/99designs/gqlgen/graphql.Int
+      - github.com/99designs/gqlgen/graphql.Int64
+      - github.com/99designs/gqlgen/graphql.Int32
+  Int:
+    model:
+      - github.com/99designs/gqlgen/graphql.Int
+      - github.com/99designs/gqlgen/graphql.Int64
+      - github.com/99designs/gqlgen/graphql.Int32
