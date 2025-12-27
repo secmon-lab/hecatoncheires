@@ -1,0 +1,28 @@
+# https://taskfile.dev
+
+version: "3"
+
+tasks:
+  default:
+    cmds:
+      - task: graphql
+      - task: mock
+
+  graphql:
+    desc: "Generate GraphQL code"
+    cmds:
+      - go tool gqlgen generate
+
+  mock:
+    aliases:
+      - m
+    desc: "Generate mock files"
+    cmds:
+      - echo "Mock generation will be added when interfaces are defined"
+
+  run:
+    desc: "Run the application"
+    deps:
+      - build
+    cmds:
+      - ./hecatoncheires serve
