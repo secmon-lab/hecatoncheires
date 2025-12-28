@@ -2,8 +2,31 @@
 
 package graphql
 
+import (
+	"time"
+)
+
+type CreateRiskInput struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
 type Mutation struct {
 }
 
 type Query struct {
+}
+
+type Risk struct {
+	ID          int       `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+type UpdateRiskInput struct {
+	ID          int    `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }

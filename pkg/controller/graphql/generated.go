@@ -10,9 +10,11 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/introspection"
+	graphql1 "github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql"
 	gqlparser "github.com/vektah/gqlparser/v2"
 	"github.com/vektah/gqlparser/v2/ast"
 )
@@ -46,19 +48,37 @@ type DirectiveRoot struct {
 
 type ComplexityRoot struct {
 	Mutation struct {
-		Noop func(childComplexity int) int
+		CreateRisk func(childComplexity int, input graphql1.CreateRiskInput) int
+		DeleteRisk func(childComplexity int, id int) int
+		Noop       func(childComplexity int) int
+		UpdateRisk func(childComplexity int, input graphql1.UpdateRiskInput) int
 	}
 
 	Query struct {
 		Health func(childComplexity int) int
+		Risk   func(childComplexity int, id int) int
+		Risks  func(childComplexity int) int
+	}
+
+	Risk struct {
+		CreatedAt   func(childComplexity int) int
+		Description func(childComplexity int) int
+		ID          func(childComplexity int) int
+		Name        func(childComplexity int) int
+		UpdatedAt   func(childComplexity int) int
 	}
 }
 
 type MutationResolver interface {
 	Noop(ctx context.Context) (*bool, error)
+	CreateRisk(ctx context.Context, input graphql1.CreateRiskInput) (*graphql1.Risk, error)
+	UpdateRisk(ctx context.Context, input graphql1.UpdateRiskInput) (*graphql1.Risk, error)
+	DeleteRisk(ctx context.Context, id int) (bool, error)
 }
 type QueryResolver interface {
 	Health(ctx context.Context) (string, error)
+	Risks(ctx context.Context) ([]*graphql1.Risk, error)
+	Risk(ctx context.Context, id int) (*graphql1.Risk, error)
 }
 
 type executableSchema struct {
@@ -80,12 +100,45 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 	_ = ec
 	switch typeName + "." + field {
 
+	case "Mutation.createRisk":
+		if e.complexity.Mutation.CreateRisk == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_createRisk_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.CreateRisk(childComplexity, args["input"].(graphql1.CreateRiskInput)), true
+	case "Mutation.deleteRisk":
+		if e.complexity.Mutation.DeleteRisk == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_deleteRisk_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.DeleteRisk(childComplexity, args["id"].(int)), true
 	case "Mutation.noop":
 		if e.complexity.Mutation.Noop == nil {
 			break
 		}
 
 		return e.complexity.Mutation.Noop(childComplexity), true
+	case "Mutation.updateRisk":
+		if e.complexity.Mutation.UpdateRisk == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_updateRisk_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.UpdateRisk(childComplexity, args["input"].(graphql1.UpdateRiskInput)), true
 
 	case "Query.health":
 		if e.complexity.Query.Health == nil {
@@ -93,6 +146,54 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Query.Health(childComplexity), true
+	case "Query.risk":
+		if e.complexity.Query.Risk == nil {
+			break
+		}
+
+		args, err := ec.field_Query_risk_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Query.Risk(childComplexity, args["id"].(int)), true
+	case "Query.risks":
+		if e.complexity.Query.Risks == nil {
+			break
+		}
+
+		return e.complexity.Query.Risks(childComplexity), true
+
+	case "Risk.createdAt":
+		if e.complexity.Risk.CreatedAt == nil {
+			break
+		}
+
+		return e.complexity.Risk.CreatedAt(childComplexity), true
+	case "Risk.description":
+		if e.complexity.Risk.Description == nil {
+			break
+		}
+
+		return e.complexity.Risk.Description(childComplexity), true
+	case "Risk.id":
+		if e.complexity.Risk.ID == nil {
+			break
+		}
+
+		return e.complexity.Risk.ID(childComplexity), true
+	case "Risk.name":
+		if e.complexity.Risk.Name == nil {
+			break
+		}
+
+		return e.complexity.Risk.Name(childComplexity), true
+	case "Risk.updatedAt":
+		if e.complexity.Risk.UpdatedAt == nil {
+			break
+		}
+
+		return e.complexity.Risk.UpdatedAt(childComplexity), true
 
 	}
 	return 0, false
@@ -101,7 +202,10 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 	opCtx := graphql.GetOperationContext(ctx)
 	ec := executionContext{opCtx, e, 0, 0, make(chan graphql.DeferredResult)}
-	inputUnmarshalMap := graphql.BuildUnmarshalerMap()
+	inputUnmarshalMap := graphql.BuildUnmarshalerMap(
+		ec.unmarshalInputCreateRiskInput,
+		ec.unmarshalInputUpdateRiskInput,
+	)
 	first := true
 
 	switch opCtx.Operation.Operation {
@@ -198,12 +302,38 @@ func (ec *executionContext) introspectType(name string) (*introspection.Type, er
 }
 
 var sources = []*ast.Source{
-	{Name: "../../../graphql/schema.graphql", Input: `type Query {
+	{Name: "../../../graphql/schema.graphql", Input: `scalar Time
+
+type Risk {
+  id: Int!
+  name: String!
+  description: String!
+  createdAt: Time!
+  updatedAt: Time!
+}
+
+input CreateRiskInput {
+  name: String!
+  description: String!
+}
+
+input UpdateRiskInput {
+  id: Int!
+  name: String!
+  description: String!
+}
+
+type Query {
   health: String!
+  risks: [Risk!]!
+  risk(id: Int!): Risk
 }
 
 type Mutation {
   noop: Boolean
+  createRisk(input: CreateRiskInput!): Risk!
+  updateRisk(input: UpdateRiskInput!): Risk!
+  deleteRisk(id: Int!): Boolean!
 }
 `, BuiltIn: false},
 }
@@ -213,6 +343,39 @@ var parsedSchema = gqlparser.MustLoadSchema(sources...)
 
 // region    ***************************** args.gotpl *****************************
 
+func (ec *executionContext) field_Mutation_createRisk_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNCreateRiskInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateRiskInput)
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_deleteRisk_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_updateRisk_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNUpdateRiskInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateRiskInput)
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg0
+	return args, nil
+}
+
 func (ec *executionContext) field_Query___type_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -221,6 +384,17 @@ func (ec *executionContext) field_Query___type_args(ctx context.Context, rawArgs
 		return nil, err
 	}
 	args["name"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_Query_risk_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg0
 	return args, nil
 }
 
@@ -305,6 +479,153 @@ func (ec *executionContext) fieldContext_Mutation_noop(_ context.Context, field 
 	return fc, nil
 }
 
+func (ec *executionContext) _Mutation_createRisk(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_createRisk,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().CreateRisk(ctx, fc.Args["input"].(graphql1.CreateRiskInput))
+		},
+		nil,
+		ec.marshalNRisk2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐRisk,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_createRisk(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Risk_id(ctx, field)
+			case "name":
+				return ec.fieldContext_Risk_name(ctx, field)
+			case "description":
+				return ec.fieldContext_Risk_description(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Risk_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Risk_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Risk", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_createRisk_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_updateRisk(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_updateRisk,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().UpdateRisk(ctx, fc.Args["input"].(graphql1.UpdateRiskInput))
+		},
+		nil,
+		ec.marshalNRisk2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐRisk,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_updateRisk(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Risk_id(ctx, field)
+			case "name":
+				return ec.fieldContext_Risk_name(ctx, field)
+			case "description":
+				return ec.fieldContext_Risk_description(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Risk_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Risk_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Risk", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_updateRisk_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_deleteRisk(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_deleteRisk,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().DeleteRisk(ctx, fc.Args["id"].(int))
+		},
+		nil,
+		ec.marshalNBoolean2bool,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_deleteRisk(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_deleteRisk_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Query_health(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -330,6 +651,100 @@ func (ec *executionContext) fieldContext_Query_health(_ context.Context, field g
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type String does not have child fields")
 		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_risks(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Query_risks,
+		func(ctx context.Context) (any, error) {
+			return ec.resolvers.Query().Risks(ctx)
+		},
+		nil,
+		ec.marshalNRisk2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐRiskᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Query_risks(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Risk_id(ctx, field)
+			case "name":
+				return ec.fieldContext_Risk_name(ctx, field)
+			case "description":
+				return ec.fieldContext_Risk_description(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Risk_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Risk_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Risk", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_risk(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Query_risk,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Query().Risk(ctx, fc.Args["id"].(int))
+		},
+		nil,
+		ec.marshalORisk2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐRisk,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Query_risk(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Risk_id(ctx, field)
+			case "name":
+				return ec.fieldContext_Risk_name(ctx, field)
+			case "description":
+				return ec.fieldContext_Risk_description(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Risk_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Risk_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Risk", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_risk_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
 	}
 	return fc, nil
 }
@@ -437,6 +852,151 @@ func (ec *executionContext) fieldContext_Query___schema(_ context.Context, field
 				return ec.fieldContext___Schema_directives(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type __Schema", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Risk_id(ctx context.Context, field graphql.CollectedField, obj *graphql1.Risk) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Risk_id,
+		func(ctx context.Context) (any, error) {
+			return obj.ID, nil
+		},
+		nil,
+		ec.marshalNInt2int,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Risk_id(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Risk",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Risk_name(ctx context.Context, field graphql.CollectedField, obj *graphql1.Risk) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Risk_name,
+		func(ctx context.Context) (any, error) {
+			return obj.Name, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Risk_name(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Risk",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Risk_description(ctx context.Context, field graphql.CollectedField, obj *graphql1.Risk) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Risk_description,
+		func(ctx context.Context) (any, error) {
+			return obj.Description, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Risk_description(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Risk",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Risk_createdAt(ctx context.Context, field graphql.CollectedField, obj *graphql1.Risk) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Risk_createdAt,
+		func(ctx context.Context) (any, error) {
+			return obj.CreatedAt, nil
+		},
+		nil,
+		ec.marshalNTime2timeᚐTime,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Risk_createdAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Risk",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Risk_updatedAt(ctx context.Context, field graphql.CollectedField, obj *graphql1.Risk) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Risk_updatedAt,
+		func(ctx context.Context) (any, error) {
+			return obj.UpdatedAt, nil
+		},
+		nil,
+		ec.marshalNTime2timeᚐTime,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Risk_updatedAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Risk",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
 		},
 	}
 	return fc, nil
@@ -1888,6 +2448,81 @@ func (ec *executionContext) fieldContext___Type_isOneOf(_ context.Context, field
 
 // region    **************************** input.gotpl *****************************
 
+func (ec *executionContext) unmarshalInputCreateRiskInput(ctx context.Context, obj any) (graphql1.CreateRiskInput, error) {
+	var it graphql1.CreateRiskInput
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"name", "description"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "name":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("name"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Name = data
+		case "description":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("description"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Description = data
+		}
+	}
+
+	return it, nil
+}
+
+func (ec *executionContext) unmarshalInputUpdateRiskInput(ctx context.Context, obj any) (graphql1.UpdateRiskInput, error) {
+	var it graphql1.UpdateRiskInput
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"id", "name", "description"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "id":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("id"))
+			data, err := ec.unmarshalNInt2int(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ID = data
+		case "name":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("name"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Name = data
+		case "description":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("description"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Description = data
+		}
+	}
+
+	return it, nil
+}
+
 // endregion **************************** input.gotpl *****************************
 
 // region    ************************** interface.gotpl ***************************
@@ -1919,6 +2554,27 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_noop(ctx, field)
 			})
+		case "createRisk":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_createRisk(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "updateRisk":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_updateRisk(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "deleteRisk":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_deleteRisk(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -1983,6 +2639,47 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 			}
 
 			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "risks":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_risks(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "risk":
+			field := field
+
+			innerFunc := func(ctx context.Context, _ *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_risk(ctx, field)
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
 		case "__type":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Query___type(ctx, field)
@@ -1991,6 +2688,65 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Query___schema(ctx, field)
 			})
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var riskImplementors = []string{"Risk"}
+
+func (ec *executionContext) _Risk(ctx context.Context, sel ast.SelectionSet, obj *graphql1.Risk) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, riskImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("Risk")
+		case "id":
+			out.Values[i] = ec._Risk_id(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "name":
+			out.Values[i] = ec._Risk_name(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "description":
+			out.Values[i] = ec._Risk_description(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "createdAt":
+			out.Values[i] = ec._Risk_createdAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "updatedAt":
+			out.Values[i] = ec._Risk_updatedAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -2365,6 +3121,85 @@ func (ec *executionContext) marshalNBoolean2bool(ctx context.Context, sel ast.Se
 	return res
 }
 
+func (ec *executionContext) unmarshalNCreateRiskInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateRiskInput(ctx context.Context, v any) (graphql1.CreateRiskInput, error) {
+	res, err := ec.unmarshalInputCreateRiskInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) unmarshalNInt2int(ctx context.Context, v any) (int, error) {
+	res, err := graphql.UnmarshalInt(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNInt2int(ctx context.Context, sel ast.SelectionSet, v int) graphql.Marshaler {
+	_ = sel
+	res := graphql.MarshalInt(v)
+	if res == graphql.Null {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+	}
+	return res
+}
+
+func (ec *executionContext) marshalNRisk2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐRisk(ctx context.Context, sel ast.SelectionSet, v graphql1.Risk) graphql.Marshaler {
+	return ec._Risk(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNRisk2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐRiskᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.Risk) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNRisk2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐRisk(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNRisk2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐRisk(ctx context.Context, sel ast.SelectionSet, v *graphql1.Risk) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._Risk(ctx, sel, v)
+}
+
 func (ec *executionContext) unmarshalNString2string(ctx context.Context, v any) (string, error) {
 	res, err := graphql.UnmarshalString(v)
 	return res, graphql.ErrorOnPath(ctx, err)
@@ -2379,6 +3214,27 @@ func (ec *executionContext) marshalNString2string(ctx context.Context, sel ast.S
 		}
 	}
 	return res
+}
+
+func (ec *executionContext) unmarshalNTime2timeᚐTime(ctx context.Context, v any) (time.Time, error) {
+	res, err := graphql.UnmarshalTime(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNTime2timeᚐTime(ctx context.Context, sel ast.SelectionSet, v time.Time) graphql.Marshaler {
+	_ = sel
+	res := graphql.MarshalTime(v)
+	if res == graphql.Null {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+	}
+	return res
+}
+
+func (ec *executionContext) unmarshalNUpdateRiskInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateRiskInput(ctx context.Context, v any) (graphql1.UpdateRiskInput, error) {
+	res, err := ec.unmarshalInputUpdateRiskInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
 }
 
 func (ec *executionContext) marshalN__Directive2githubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐDirective(ctx context.Context, sel ast.SelectionSet, v introspection.Directive) graphql.Marshaler {
@@ -2662,6 +3518,13 @@ func (ec *executionContext) marshalOBoolean2ᚖbool(ctx context.Context, sel ast
 	_ = ctx
 	res := graphql.MarshalBoolean(*v)
 	return res
+}
+
+func (ec *executionContext) marshalORisk2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐRisk(ctx context.Context, sel ast.SelectionSet, v *graphql1.Risk) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	return ec._Risk(ctx, sel, v)
 }
 
 func (ec *executionContext) unmarshalOString2ᚖstring(ctx context.Context, v any) (*string, error) {

@@ -1,0 +1,102 @@
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: none;
+  border-radius: 4px;
+  font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  font-weight: 400;
+  cursor: pointer;
+  transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  outline: none;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 12px;
+  box-shadow: 0 2px 2px 0 rgba(153, 153, 153, 0.14), 0 3px 1px -2px rgba(153, 153, 153, 0.2), 0 1px 5px 0 rgba(153, 153, 153, 0.12);
+}
+
+.button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* Sizes */
+.sm {
+  padding: 6px 16px;
+}
+
+.md {
+  padding: 10px 24px;
+}
+
+.lg {
+  padding: 12px 32px;
+  font-size: 14px;
+}
+
+/* Variants */
+.primary {
+  background: linear-gradient(60deg, #ab47bc, #8e24aa);
+  color: #ffffff;
+  box-shadow: 0 4px 20px 0 rgba(0, 0, 0, 0.14), 0 7px 10px -5px rgba(156, 39, 176, 0.4);
+}
+
+.primary:hover:not(:disabled) {
+  box-shadow: 0 14px 26px -12px rgba(156, 39, 176, 0.42), 0 4px 23px 0 rgba(0, 0, 0, 0.12), 0 8px 10px -5px rgba(156, 39, 176, 0.2);
+}
+
+.primary:active:not(:disabled) {
+  box-shadow: 0 4px 20px 0 rgba(0, 0, 0, 0.14), 0 7px 10px -5px rgba(156, 39, 176, 0.4);
+}
+
+.secondary {
+  background: linear-gradient(60deg, #26c6da, #00acc1);
+  color: #ffffff;
+  box-shadow: 0 4px 20px 0 rgba(0, 0, 0, 0.14), 0 7px 10px -5px rgba(0, 172, 193, 0.4);
+}
+
+.secondary:hover:not(:disabled) {
+  box-shadow: 0 14px 26px -12px rgba(0, 188, 212, 0.42), 0 4px 23px 0 rgba(0, 0, 0, 0.12), 0 8px 10px -5px rgba(0, 188, 212, 0.2);
+}
+
+.secondary:active:not(:disabled) {
+  box-shadow: 0 4px 20px 0 rgba(0, 0, 0, 0.14), 0 7px 10px -5px rgba(0, 172, 193, 0.4);
+}
+
+.danger {
+  background: linear-gradient(60deg, #ef5350, #e53935);
+  color: #ffffff;
+  box-shadow: 0 4px 20px 0 rgba(0, 0, 0, 0.14), 0 7px 10px -5px rgba(244, 67, 54, 0.4);
+}
+
+.danger:hover:not(:disabled) {
+  box-shadow: 0 14px 26px -12px rgba(244, 67, 54, 0.42), 0 4px 23px 0 rgba(0, 0, 0, 0.12), 0 8px 10px -5px rgba(244, 67, 54, 0.2);
+}
+
+.danger:active:not(:disabled) {
+  box-shadow: 0 4px 20px 0 rgba(0, 0, 0, 0.14), 0 7px 10px -5px rgba(244, 67, 54, 0.4);
+}
+
+.outline {
+  background-color: transparent;
+  color: #999;
+  border: 1px solid #ddd;
+  box-shadow: none;
+}
+
+.outline:hover:not(:disabled) {
+  background-color: rgba(153, 153, 153, 0.1);
+  border-color: #999;
+  color: #555;
+}
+
+.outline:active:not(:disabled) {
+  background-color: rgba(153, 153, 153, 0.2);
+}
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+}

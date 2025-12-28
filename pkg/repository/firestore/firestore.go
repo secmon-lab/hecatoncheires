@@ -10,20 +10,39 @@ import (
 
 type Firestore struct {
 	client *firestore.Client
-	// Future: Add data storage fields here
+	risk   *riskRepository
 }
 
 var _ interfaces.Repository = &Firestore{}
 
-func New(ctx context.Context, projectID string) (*Firestore, error) {
-	client, err := firestore.NewClient(ctx, projectID)
+type Option func(*Firestore)
+
+func WithCollectionPrefix(prefix string) Option {
+	return func(f *Firestore) {
+		f.risk.collectionPrefix = prefix
+	}
+}
+
+func New(ctx context.Context, projectID, databaseID string, opts ...Option) (*Firestore, error) {
+	client, err := firestore.NewClientWithDatabase(ctx, projectID, databaseID)
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to create firestore client")
+		return nil, goerr.Wrap(err, "failed to create firestore client", goerr.V("projectID", projectID), goerr.V("databaseID", databaseID))
 	}
 
-	return &Firestore{
+	f := &Firestore{
 		client: client,
-	}, nil
+		risk:   newRiskRepository(client),
+	}
+
+	for _, opt := range opts {
+		opt(f)
+	}
+
+	return f, nil
+}
+
+func (f *Firestore) Risk() interfaces.RiskRepository {
+	return f.risk
 }
 
 func (f *Firestore) Close() error {

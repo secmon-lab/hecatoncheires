@@ -12,7 +12,7 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/controller/graphql"
 	httpctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/http"
-	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
+	"github.com/secmon-lab/hecatoncheires/pkg/repository/firestore"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/urfave/cli/v3"
@@ -21,6 +21,8 @@ import (
 func cmdServe() *cli.Command {
 	var addr string
 	var enableGraphiQL bool
+	var projectID string
+	var databaseID string
 
 	return &cli.Command{
 		Name:    "serve",
@@ -41,10 +43,28 @@ func cmdServe() *cli.Command {
 				Sources:     cli.EnvVars("HECATONCHEIRES_GRAPHIQL"),
 				Destination: &enableGraphiQL,
 			},
+			&cli.StringFlag{
+				Name:        "firestore-project-id",
+				Usage:       "Firestore Project ID (required)",
+				Required:    true,
+				Sources:     cli.EnvVars("HECATONCHEIRES_FIRESTORE_PROJECT_ID", "GCP_PROJECT_ID"),
+				Destination: &projectID,
+			},
+			&cli.StringFlag{
+				Name:        "firestore-database-id",
+				Usage:       "Firestore Database ID",
+				Value:       "(default)",
+				Sources:     cli.EnvVars("HECATONCHEIRES_FIRESTORE_DATABASE_ID"),
+				Destination: &databaseID,
+			},
 		},
 		Action: func(ctx context.Context, c *cli.Command) error {
-			// Initialize repository (using memory for now)
-			repo := memory.New()
+			// Initialize Firestore repository
+			repo, err := firestore.New(ctx, projectID, databaseID)
+			if err != nil {
+				return goerr.Wrap(err, "failed to initialize firestore repository")
+			}
+			defer repo.Close()
 
 			// Initialize use cases
 			uc := usecase.New(repo)

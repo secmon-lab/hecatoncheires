@@ -1,0 +1,45 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - 64px);
+  text-align: center;
+}
+
+.logoContainer {
+  margin-bottom: 24px;
+  animation: fadeInUp 0.6s ease-out;
+}
+
+.logo {
+  color: #9c27b0;
+  filter: drop-shadow(0 4px 12px rgba(156, 39, 176, 0.3));
+}
+
+.title {
+  margin: 0 0 16px 0;
+  font-size: 48px;
+  font-weight: 300;
+  color: #3c4858;
+  animation: fadeInUp 0.6s ease-out 0.1s both;
+}
+
+.subtitle {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 300;
+  color: #999;
+  animation: fadeInUp 0.6s ease-out 0.2s both;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
