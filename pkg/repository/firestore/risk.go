@@ -72,7 +72,11 @@ func (r *riskRepository) getNextID(ctx context.Context) (int64, error) {
 			return goerr.Wrap(err, "failed to get counter value")
 		}
 
-		nextID = currentValue.(int64) + 1
+		val, ok := currentValue.(int64)
+		if !ok {
+			return goerr.New("counter value is not of type int64", goerr.V("value", currentValue))
+		}
+		nextID = val + 1
 		return tx.Update(counterRef, []firestore.Update{
 			{Path: "value", Value: nextID},
 		})
