@@ -8,10 +8,10 @@ on:
       - '**'
 
 env:
-  TAG_NAME: beehive:${{ github.sha }}
+  TAG_NAME: hecatoncheires:${{ github.sha }}
   BUILD_VERSION: ${{ github.sha }}
-  GITHUB_IMAGE_REPO: ghcr.io/${{ github.repository_owner }}/beehive
-  GITHUB_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/beehive:${{ github.sha }}
+  GITHUB_IMAGE_REPO: ghcr.io/${{ github.repository_owner }}/hecatoncheires
+  GITHUB_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/hecatoncheires:${{ github.sha }}
 
 jobs:
   build:
