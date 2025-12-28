@@ -7,6 +7,7 @@ import RiskForm from './RiskForm'
 import RiskDeleteDialog from './RiskDeleteDialog'
 import { GET_RISKS, DELETE_RISK } from '../graphql/risk'
 import styles from './RiskList.module.css'
+import type { ReactElement } from 'react'
 
 interface Risk {
   id: number
@@ -94,7 +95,7 @@ export default function RiskList() {
             <Trash2 size={16} />
           </button>
         </div>
-      )) as (row: Risk) => JSX.Element,
+      )) as (row: Risk) => ReactElement,
       width: '120px',
     },
   ]
