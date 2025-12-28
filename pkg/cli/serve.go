@@ -64,7 +64,11 @@ func cmdServe() *cli.Command {
 			if err != nil {
 				return goerr.Wrap(err, "failed to initialize firestore repository")
 			}
-			defer repo.Close()
+			defer func() {
+				if err := repo.Close(); err != nil {
+					logging.Default().Error("failed to close firestore repository", "error", err.Error())
+				}
+			}()
 
 			// Initialize use cases
 			uc := usecase.New(repo)
