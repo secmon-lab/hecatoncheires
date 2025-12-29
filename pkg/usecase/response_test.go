@@ -96,7 +96,11 @@ func TestResponseUseCase_UpdateResponse(t *testing.T) {
 		}
 
 		// Update response
-		updated, err := uc.UpdateResponse(ctx, created.ID, "Updated", "Updated Description", []string{"U456"}, "https://new.com", types.ResponseStatusInProgress)
+		title := "Updated"
+		desc := "Updated Description"
+		url := "https://new.com"
+		status := types.ResponseStatusInProgress
+		updated, err := uc.UpdateResponse(ctx, created.ID, &title, &desc, []string{"U456"}, &url, &status, nil)
 		if err != nil {
 			t.Fatalf("failed to update response: %v", err)
 		}
@@ -115,9 +119,26 @@ func TestResponseUseCase_UpdateResponse(t *testing.T) {
 		}
 	})
 
+	t.Run("partial update - status only", func(t *testing.T) {
+		created, _ := uc.CreateResponse(ctx, "Test", "Description", []string{"U123"}, "", types.ResponseStatusTodo, nil)
+		status := types.ResponseStatusInProgress
+		updated, err := uc.UpdateResponse(ctx, created.ID, nil, nil, nil, nil, &status, nil)
+		if err != nil {
+			t.Fatalf("failed to update response: %v", err)
+		}
+
+		if updated.Title != "Test" {
+			t.Error("title should not change")
+		}
+		if updated.Status != types.ResponseStatusInProgress {
+			t.Errorf("expected status=%s, got %s", types.ResponseStatusInProgress, updated.Status)
+		}
+	})
+
 	t.Run("empty title fails", func(t *testing.T) {
 		created, _ := uc.CreateResponse(ctx, "Test", "Description", []string{"U123"}, "", types.ResponseStatusTodo, nil)
-		_, err := uc.UpdateResponse(ctx, created.ID, "", "Description", []string{"U123"}, "", types.ResponseStatusTodo)
+		emptyTitle := ""
+		_, err := uc.UpdateResponse(ctx, created.ID, &emptyTitle, nil, nil, nil, nil, nil)
 		if err == nil {
 			t.Error("expected error for empty title")
 		}
@@ -125,16 +146,53 @@ func TestResponseUseCase_UpdateResponse(t *testing.T) {
 
 	t.Run("invalid status fails", func(t *testing.T) {
 		created, _ := uc.CreateResponse(ctx, "Test", "Description", []string{"U123"}, "", types.ResponseStatusTodo, nil)
-		_, err := uc.UpdateResponse(ctx, created.ID, "Test", "Description", []string{"U123"}, "", types.ResponseStatus("invalid"))
+		invalidStatus := types.ResponseStatus("invalid")
+		_, err := uc.UpdateResponse(ctx, created.ID, nil, nil, nil, nil, &invalidStatus, nil)
 		if err == nil {
 			t.Error("expected error for invalid status")
 		}
 	})
 
 	t.Run("non-existent response fails", func(t *testing.T) {
-		_, err := uc.UpdateResponse(ctx, 99999, "Test", "Description", []string{"U123"}, "", types.ResponseStatusTodo)
+		status := types.ResponseStatusTodo
+		_, err := uc.UpdateResponse(ctx, 99999, nil, nil, nil, nil, &status, nil)
 		if err == nil {
 			t.Error("expected error for non-existent response")
+		}
+	})
+
+	t.Run("update risk associations", func(t *testing.T) {
+		// Create risks
+		risk1, _ := repo.Risk().Create(ctx, &model.Risk{Name: "Risk 1"})
+		risk2, _ := repo.Risk().Create(ctx, &model.Risk{Name: "Risk 2"})
+		risk3, _ := repo.Risk().Create(ctx, &model.Risk{Name: "Risk 3"})
+
+		// Create response linked to risk1 and risk2
+		response, _ := uc.CreateResponse(ctx, "Test", "Description", []string{"U123"}, "", types.ResponseStatusTodo, []int64{risk1.ID, risk2.ID})
+
+		// Update to link to risk2 and risk3 (remove risk1, add risk3)
+		riskIDs := []int64{risk2.ID, risk3.ID}
+		_, err := uc.UpdateResponse(ctx, response.ID, nil, nil, nil, nil, nil, riskIDs)
+		if err != nil {
+			t.Fatalf("failed to update response risk associations: %v", err)
+		}
+
+		// Verify risk1 is no longer linked
+		responses1, _ := repo.RiskResponse().GetResponsesByRisk(ctx, risk1.ID)
+		if len(responses1) != 0 {
+			t.Error("risk1 should not be linked")
+		}
+
+		// Verify risk2 is still linked
+		responses2, _ := repo.RiskResponse().GetResponsesByRisk(ctx, risk2.ID)
+		if len(responses2) != 1 || responses2[0].ID != response.ID {
+			t.Error("risk2 should be linked")
+		}
+
+		// Verify risk3 is now linked
+		responses3, _ := repo.RiskResponse().GetResponsesByRisk(ctx, risk3.ID)
+		if len(responses3) != 1 || responses3[0].ID != response.ID {
+			t.Error("risk3 should be linked")
 		}
 	})
 }

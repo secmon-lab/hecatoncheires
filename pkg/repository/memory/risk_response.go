@@ -153,6 +153,40 @@ func (r *riskResponseRepository) GetRisksByResponse(ctx context.Context, respons
 	return risks, nil
 }
 
+func (r *riskResponseRepository) GetRisksByResponses(ctx context.Context, responseIDs []int64) (map[int64][]*model.Risk, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	// Build a map of responseID to riskIDs
+	responseToRiskIDs := make(map[int64][]int64)
+	for _, responseID := range responseIDs {
+		responseToRiskIDs[responseID] = make([]int64, 0)
+	}
+
+	for _, rr := range r.riskResponses {
+		if _, exists := responseToRiskIDs[rr.ResponseID]; exists {
+			responseToRiskIDs[rr.ResponseID] = append(responseToRiskIDs[rr.ResponseID], rr.RiskID)
+		}
+	}
+
+	// Fetch all risks
+	result := make(map[int64][]*model.Risk)
+	for responseID, riskIDs := range responseToRiskIDs {
+		risks := make([]*model.Risk, 0, len(riskIDs))
+		for _, riskID := range riskIDs {
+			risk, err := r.riskRepo.Get(ctx, riskID)
+			if err != nil {
+				// Skip if risk was deleted
+				continue
+			}
+			risks = append(risks, risk)
+		}
+		result[responseID] = risks
+	}
+
+	return result, nil
+}
+
 func (r *riskResponseRepository) DeleteByResponse(ctx context.Context, responseID int64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

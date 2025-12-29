@@ -10,12 +10,14 @@ import (
 // DataLoaders holds all data loaders for batching queries
 type DataLoaders struct {
 	ResponsesByRiskLoader *ResponsesByRiskLoader
+	RisksByResponseLoader *RisksByResponseLoader
 }
 
 // NewDataLoaders creates a new instance of DataLoaders
 func NewDataLoaders(repo interfaces.Repository) *DataLoaders {
 	return &DataLoaders{
 		ResponsesByRiskLoader: NewResponsesByRiskLoader(repo),
+		RisksByResponseLoader: NewRisksByResponseLoader(repo),
 	}
 }
 
@@ -56,6 +58,11 @@ func NewRisksByResponseLoader(repo interfaces.Repository) *RisksByResponseLoader
 // Load fetches risks for a single response ID
 func (l *RisksByResponseLoader) Load(ctx context.Context, responseID int64) ([]*model.Risk, error) {
 	return l.repo.RiskResponse().GetRisksByResponse(ctx, responseID)
+}
+
+// LoadMany fetches risks for multiple response IDs in a single batch
+func (l *RisksByResponseLoader) LoadMany(ctx context.Context, responseIDs []int64) (map[int64][]*model.Risk, error) {
+	return l.repo.RiskResponse().GetRisksByResponses(ctx, responseIDs)
 }
 
 // dataLoadersKey is the context key for data loaders

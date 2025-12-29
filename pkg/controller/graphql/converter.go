@@ -143,14 +143,27 @@ func enrichResponse(ctx context.Context, uc *usecase.UseCases, response *graphql
 		}
 	}
 
-	// Enrich risks
-	risks, err := uc.Response.GetRisksByResponse(ctx, int64(response.ID))
-	if err == nil {
-		gqlRisks := make([]*graphql1.Risk, len(risks))
-		for i, risk := range risks {
-			gqlRisks[i] = toGraphQLRisk(risk)
+	// Enrich risks using dataloader if available
+	loaders := GetDataLoaders(ctx)
+	if loaders != nil && loaders.RisksByResponseLoader != nil {
+		risks, err := loaders.RisksByResponseLoader.Load(ctx, int64(response.ID))
+		if err == nil {
+			gqlRisks := make([]*graphql1.Risk, len(risks))
+			for i, risk := range risks {
+				gqlRisks[i] = toGraphQLRisk(risk)
+			}
+			response.Risks = gqlRisks
 		}
-		response.Risks = gqlRisks
+	} else {
+		// Fallback to direct query if DataLoader is not available
+		risks, err := uc.Response.GetRisksByResponse(ctx, int64(response.ID))
+		if err == nil {
+			gqlRisks := make([]*graphql1.Risk, len(risks))
+			for i, risk := range risks {
+				gqlRisks[i] = toGraphQLRisk(risk)
+			}
+			response.Risks = gqlRisks
+		}
 	}
 
 	return response

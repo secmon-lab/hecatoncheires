@@ -131,14 +131,29 @@ func (r *mutationResolver) CreateResponse(ctx context.Context, input graphql1.Cr
 
 // UpdateResponse is the resolver for the updateResponse field.
 func (r *mutationResolver) UpdateResponse(ctx context.Context, input graphql1.UpdateResponseInput) (*graphql1.Response, error) {
+	var status *types.ResponseStatus
+	if input.Status != nil {
+		s := toDomainResponseStatus(*input.Status)
+		status = &s
+	}
+
+	var riskIDs []int64
+	if input.RiskIDs != nil {
+		riskIDs = make([]int64, len(input.RiskIDs))
+		for i, id := range input.RiskIDs {
+			riskIDs[i] = int64(id)
+		}
+	}
+
 	response, err := r.uc.Response.UpdateResponse(
 		ctx,
 		int64(input.ID),
 		input.Title,
 		input.Description,
 		input.ResponderIDs,
-		stringPtrToString(input.URL),
-		toDomainResponseStatus(input.Status),
+		input.URL,
+		status,
+		riskIDs,
 	)
 	if err != nil {
 		errutil.Handle(ctx, err, "failed to update response")

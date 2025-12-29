@@ -244,6 +244,60 @@ func (r *riskResponseRepository) GetRisksByResponse(ctx context.Context, respons
 	return risks, nil
 }
 
+func (r *riskResponseRepository) GetRisksByResponses(ctx context.Context, responseIDs []int64) (map[int64][]*model.Risk, error) {
+	if len(responseIDs) == 0 {
+		return make(map[int64][]*model.Risk), nil
+	}
+
+	// Firestore has a limit of 30 items in an IN query, so we need to batch
+	const batchSize = 30
+	result := make(map[int64][]*model.Risk)
+
+	// Initialize result map
+	for _, responseID := range responseIDs {
+		result[responseID] = make([]*model.Risk, 0)
+	}
+
+	for i := 0; i < len(responseIDs); i += batchSize {
+		end := i + batchSize
+		if end > len(responseIDs) {
+			end = len(responseIDs)
+		}
+
+		batch := responseIDs[i:end]
+		query := r.client.Collection(r.riskResponsesCollection()).Where("response_id", "in", batch)
+		iter := query.Documents(ctx)
+
+		for {
+			doc, err := iter.Next()
+			if err == iterator.Done {
+				break
+			}
+			if err != nil {
+				iter.Stop()
+				return nil, goerr.Wrap(err, "failed to iterate risk-response links")
+			}
+
+			var linkDoc riskResponseDocument
+			if err := doc.DataTo(&linkDoc); err != nil {
+				iter.Stop()
+				return nil, goerr.Wrap(err, "failed to unmarshal risk-response link")
+			}
+
+			risk, err := r.riskRepo.Get(ctx, linkDoc.RiskID)
+			if err != nil {
+				// Skip if risk was deleted
+				continue
+			}
+
+			result[linkDoc.ResponseID] = append(result[linkDoc.ResponseID], risk)
+		}
+		iter.Stop()
+	}
+
+	return result, nil
+}
+
 func (r *riskResponseRepository) DeleteByResponse(ctx context.Context, responseID int64) error {
 	query := r.client.Collection(r.riskResponsesCollection()).Where("response_id", "==", responseID)
 	iter := query.Documents(ctx)

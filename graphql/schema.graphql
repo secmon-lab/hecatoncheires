@@ -117,11 +117,11 @@ input CreateResponseInput {
 
 input UpdateResponseInput {
   id: Int!
-  title: String!
-  description: String!
-  responderIDs: [String!]!
+  title: String
+  description: String
+  responderIDs: [String!]
   url: String
-  status: ResponseStatus!
+  status: ResponseStatus
   riskIDs: [Int!]
 }
 

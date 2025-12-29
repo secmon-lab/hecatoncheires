@@ -126,11 +126,18 @@ func cmdServe() *cli.Command {
 				usecase.WithAuth(authUC),
 			)
 
-			// Create GraphQL handler
+			// Create GraphQL handler with dataloaders
 			resolver := graphql.NewResolver(repo, uc)
-			gqlHandler := handler.NewDefaultServer(
+			srv := handler.NewDefaultServer(
 				graphql.NewExecutableSchema(graphql.Config{Resolvers: resolver}),
 			)
+
+			// Wrap with dataloader middleware
+			loaders := graphql.NewDataLoaders(repo)
+			gqlHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				ctx := graphql.WithDataLoaders(r.Context(), loaders)
+				srv.ServeHTTP(w, r.WithContext(ctx))
+			})
 
 			// Create HTTP server with auth
 			httpHandler := httpctrl.New(gqlHandler,

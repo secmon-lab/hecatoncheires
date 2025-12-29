@@ -110,13 +110,13 @@ type Team struct {
 }
 
 type UpdateResponseInput struct {
-	ID           int            `json:"id"`
-	Title        string         `json:"title"`
-	Description  string         `json:"description"`
-	ResponderIDs []string       `json:"responderIDs"`
-	URL          *string        `json:"url,omitempty"`
-	Status       ResponseStatus `json:"status"`
-	RiskIDs      []int          `json:"riskIDs,omitempty"`
+	ID           int             `json:"id"`
+	Title        *string         `json:"title,omitempty"`
+	Description  *string         `json:"description,omitempty"`
+	ResponderIDs []string        `json:"responderIDs,omitempty"`
+	URL          *string         `json:"url,omitempty"`
+	Status       *ResponseStatus `json:"status,omitempty"`
+	RiskIDs      []int           `json:"riskIDs,omitempty"`
 }
 
 type UpdateRiskInput struct {

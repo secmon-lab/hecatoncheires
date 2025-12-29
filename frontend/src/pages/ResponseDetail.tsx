@@ -78,12 +78,7 @@ export default function ResponseDetail() {
       variables: {
         input: {
           id: response.id,
-          title: response.title,
-          description: response.description,
-          responderIDs: response.responders.map((r) => r.id),
-          url: response.url || '',
           status: newStatus,
-          riskIDs: response.risks.map((r) => r.id),
         },
       },
     })

@@ -52,10 +52,18 @@ func (r *Firestore) DeleteToken(ctx context.Context, tokenID auth.TokenID) error
 	}
 
 	docRef := r.client.Collection(tokensCollection).Doc(tokenID.String())
-	if _, err := docRef.Delete(ctx); err != nil {
+
+	// Check if document exists first
+	_, err := docRef.Get(ctx)
+	if err != nil {
 		if status.Code(err) == codes.NotFound {
 			return ErrNotFound
 		}
+		return goerr.Wrap(err, "failed to get token from firestore")
+	}
+
+	// Delete the document
+	if _, err := docRef.Delete(ctx); err != nil {
 		return goerr.Wrap(err, "failed to delete token from firestore")
 	}
 

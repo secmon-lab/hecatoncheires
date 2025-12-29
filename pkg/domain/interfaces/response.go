@@ -22,6 +22,7 @@ type RiskResponseRepository interface {
 	GetResponsesByRisk(ctx context.Context, riskID int64) ([]*model.Response, error)
 	GetResponsesByRisks(ctx context.Context, riskIDs []int64) (map[int64][]*model.Response, error)
 	GetRisksByResponse(ctx context.Context, responseID int64) ([]*model.Risk, error)
+	GetRisksByResponses(ctx context.Context, responseIDs []int64) (map[int64][]*model.Risk, error)
 	DeleteByResponse(ctx context.Context, responseID int64) error
 	DeleteByRisk(ctx context.Context, riskID int64) error
 }

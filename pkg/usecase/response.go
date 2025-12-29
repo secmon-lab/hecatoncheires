@@ -66,40 +66,96 @@ func (uc *ResponseUseCase) CreateResponse(ctx context.Context, title, descriptio
 	return created, nil
 }
 
-func (uc *ResponseUseCase) UpdateResponse(ctx context.Context, id int64, title, description string, responderIDs []string, url string, status types.ResponseStatus) (*model.Response, error) {
-	if title == "" {
-		return nil, goerr.New("response title is required")
-	}
-
-	// Validate status
-	if !status.IsValid() {
-		return nil, goerr.New("invalid response status", goerr.V("status", status))
-	}
-
-	// Ensure responderIDs is not nil
-	if responderIDs == nil {
-		responderIDs = []string{}
-	}
-
-	// Get existing response to preserve CreatedAt
+func (uc *ResponseUseCase) UpdateResponse(ctx context.Context, id int64, title *string, description *string, responderIDs []string, url *string, status *types.ResponseStatus, riskIDs []int64) (*model.Response, error) {
+	// Get existing response
 	existing, err := uc.repo.Response().Get(ctx, id)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to get existing response", goerr.V("id", id))
 	}
 
+	// Build response with only updated fields
 	response := &model.Response{
 		ID:           id,
-		Title:        title,
-		Description:  description,
-		ResponderIDs: responderIDs,
-		URL:          url,
-		Status:       status,
-		CreatedAt:    existing.CreatedAt, // Preserve creation time
+		Title:        existing.Title,
+		Description:  existing.Description,
+		ResponderIDs: existing.ResponderIDs,
+		URL:          existing.URL,
+		Status:       existing.Status,
+		CreatedAt:    existing.CreatedAt,
+	}
+
+	// Update only provided fields
+	if title != nil {
+		if *title == "" {
+			return nil, goerr.New("response title cannot be empty")
+		}
+		response.Title = *title
+	}
+
+	if description != nil {
+		response.Description = *description
+	}
+
+	if responderIDs != nil {
+		response.ResponderIDs = responderIDs
+	}
+
+	if url != nil {
+		response.URL = *url
+	}
+
+	if status != nil {
+		if !status.IsValid() {
+			return nil, goerr.New("invalid response status", goerr.V("status", *status))
+		}
+		response.Status = *status
 	}
 
 	updated, err := uc.repo.Response().Update(ctx, response)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to update response", goerr.V("id", id))
+	}
+
+	// Update risk associations if riskIDs provided
+	if riskIDs != nil {
+		// Get current risk associations
+		currentRisks, err := uc.repo.RiskResponse().GetRisksByResponse(ctx, id)
+		if err != nil {
+			return updated, goerr.Wrap(err, "failed to get current risk associations")
+		}
+
+		// Build sets for comparison
+		currentRiskIDSet := make(map[int64]bool)
+		for _, risk := range currentRisks {
+			currentRiskIDSet[risk.ID] = true
+		}
+
+		newRiskIDSet := make(map[int64]bool)
+		for _, riskID := range riskIDs {
+			newRiskIDSet[riskID] = true
+		}
+
+		// Remove links that are no longer needed
+		for riskID := range currentRiskIDSet {
+			if !newRiskIDSet[riskID] {
+				if err := uc.repo.RiskResponse().Unlink(ctx, riskID, id); err != nil {
+					return updated, goerr.Wrap(err, "failed to unlink response from risk",
+						goerr.V("responseID", id),
+						goerr.V("riskID", riskID))
+				}
+			}
+		}
+
+		// Add new links
+		for riskID := range newRiskIDSet {
+			if !currentRiskIDSet[riskID] {
+				if err := uc.repo.RiskResponse().Link(ctx, riskID, id); err != nil {
+					return updated, goerr.Wrap(err, "failed to link response to risk",
+						goerr.V("responseID", id),
+						goerr.V("riskID", riskID))
+				}
+			}
+		}
 	}
 
 	return updated, nil
