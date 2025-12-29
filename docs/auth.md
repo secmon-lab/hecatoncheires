@@ -31,30 +31,54 @@ Hecatoncheires supports Slack OAuth authentication via OpenID Connect (OIDC). Th
 
    **Note**: Slack requires HTTPS for OAuth callbacks. HTTP URLs (including `http://localhost`) are not supported.
 
-3. Under **Scopes** → **User Token Scopes** (NOT Bot Token Scopes), add:
-   - `openid` (required for OpenID Connect)
-   - `profile` (to get user's name and basic info)
-   - `email` (to get user's email address)
+3. Under **Scopes**:
+   - **User Token Scopes** (required for user authentication):
+     - `openid` (required for OpenID Connect)
+     - `profile` (to get user's name and basic info)
+     - `email` (to get user's email address)
 
-   **Important**: These must be **User Token Scopes**, not Bot Token Scopes, because we're authenticating users, not installing a bot.
+   - **Bot Token Scopes** (optional, for displaying user avatars):
+     - `users:read` (to fetch user profile information including avatar images)
+
+   **Important**: User Token Scopes and Bot Token Scopes serve different purposes:
+   - User Token Scopes authenticate users via OpenID Connect
+   - Bot Token Scopes allow the application to fetch additional user information using the Bot Token
 
 4. Click "Save Changes"
 
-### 3. Get Credentials
+### 3. Install App to Workspace (for Bot Token)
+
+If you want to display user avatars, you need to install the app to your workspace to get a Bot Token:
+
+1. Go to **Install App** in the left sidebar
+2. Click "Install to Workspace"
+3. Review and authorize the permissions
+4. After installation, you'll see **Bot User OAuth Token** - copy this value
+
+**Note**: The Bot Token is only needed if you want to fetch user avatars. The application works without it, but avatars won't be displayed.
+
+### 4. Get Credentials
 
 1. Go to **Basic Information**
 2. Under **App Credentials**, you'll find:
    - **Client ID**: Copy this value
    - **Client Secret**: Click "Show" and copy this value
 
-### 4. Configure Environment Variables
+3. If you installed the app, go to **OAuth & Permissions**:
+   - **Bot User OAuth Token**: Copy this value (starts with `xoxb-`)
+
+### 5. Configure Environment Variables
 
 Set the following environment variables:
 
 ```bash
+# Required for Slack authentication
 export HECATONCHEIRES_BASE_URL="https://your-ngrok-id.ngrok.io"
 export HECATONCHEIRES_SLACK_CLIENT_ID="your-client-id"
 export HECATONCHEIRES_SLACK_CLIENT_SECRET="your-client-secret"
+
+# Optional: for displaying user avatars
+export HECATONCHEIRES_SLACK_BOT_TOKEN="xoxb-your-bot-token"
 ```
 
 For local development with ngrok:
@@ -68,10 +92,11 @@ Or use CLI flags:
 ./hecatoncheires serve \
   --base-url="https://your-ngrok-id.ngrok.io" \
   --slack-client-id="your-client-id" \
-  --slack-client-secret="your-client-secret"
+  --slack-client-secret="your-client-secret" \
+  --slack-bot-token="xoxb-your-bot-token"
 ```
 
-### 5. Start the Server
+### 6. Start the Server
 
 ```bash
 ./hecatoncheires serve
@@ -82,7 +107,7 @@ If Slack authentication is properly configured, you'll see:
 Slack authentication enabled
 ```
 
-If any configuration is missing, the system will run in anonymous mode:
+If any required configuration is missing, the system will run in anonymous mode:
 ```
 No authentication configured, running in anonymous mode
 ```
@@ -91,19 +116,23 @@ No authentication configured, running in anonymous mode
 
 ### 1. Login
 
-Navigate to your server's login endpoint:
-```
-https://your-server.com/api/auth/login
-```
-(or `https://your-ngrok-id.ngrok.io/api/auth/login` for local development)
+The frontend automatically handles the login flow. When an unauthenticated user accesses the application:
 
-This redirects you to Slack for authentication.
+1. The frontend's `AuthGuard` component detects unauthenticated state
+2. It displays a login page with a "Sign in with Slack" button
+3. Clicking the button redirects to `/api/auth/login`
+4. The backend redirects to Slack for authentication
 
 ### 2. Authorization
 
-1. Slack will ask you to authorize the app
-2. After authorization, Slack redirects back to your callback URL
-3. The server creates a session token and sets cookies
+1. Slack asks the user to authorize the app
+2. After authorization, Slack redirects back to `/api/auth/callback`
+3. The backend:
+   - Validates the OAuth callback
+   - Exchanges the authorization code for user tokens
+   - Creates a session token
+   - Sets HTTPOnly cookies (`token_id` and `token_secret`)
+   - Redirects to `/` (home page)
 
 ### 3. Access Protected Resources
 
@@ -111,18 +140,19 @@ After login, authentication tokens are stored in HTTPOnly cookies:
 - `token_id`: Token identifier
 - `token_secret`: Token secret (for verification)
 
-These cookies are automatically sent with subsequent requests.
+These cookies are automatically sent with subsequent requests. The backend middleware validates these tokens for all protected endpoints.
 
 ### 4. Check Authentication Status
+
+The frontend uses `/api/auth/me` to check authentication status:
 
 ```bash
 curl https://your-server.com/api/auth/me
 ```
 
-Response:
+Response for authenticated users:
 ```json
 {
-  "id": "T-xxxxxxxxx",
   "sub": "U-xxxxxxxxx",
   "email": "user@example.com",
   "name": "User Name",
@@ -130,18 +160,55 @@ Response:
 }
 ```
 
-### 5. Logout
-
-Navigate to your server's logout endpoint:
+Response for anonymous mode:
+```json
+{
+  "sub": "anonymous",
+  "email": "anonymous@localhost",
+  "name": "Anonymous",
+  "is_anonymous": true
+}
 ```
-https://your-server.com/api/auth/logout
+
+### 5. User Avatar
+
+If `HECATONCHEIRES_SLACK_BOT_TOKEN` is configured, the frontend fetches user avatar from:
+
+```bash
+curl https://your-server.com/api/auth/user-info?user=U-xxxxxxxxx
 ```
 
-This deletes the session token and clears cookies.
+Response:
+```json
+{
+  "id": "U-xxxxxxxxx",
+  "name": "User Name",
+  "profile": {
+    "image_48": "https://avatars.slack-edge.com/..."
+  }
+}
+```
+
+The backend uses Slack's `users.info` API with the Bot Token to fetch this information.
+
+### 6. Logout
+
+The frontend handles logout by calling `/api/auth/logout` (POST):
+
+```bash
+curl -X POST https://your-server.com/api/auth/logout
+```
+
+The backend:
+1. Deletes the session token from storage
+2. Clears authentication cookies
+3. Returns success response
+
+The frontend then redirects to `/` and shows the login page.
 
 ## Anonymous Mode (Development)
 
-When Slack OAuth is not configured, the system runs in anonymous mode:
+When Slack OAuth is not configured (missing `BASE_URL`, `CLIENT_ID`, or `CLIENT_SECRET`), the system runs in anonymous mode:
 
 - No login required
 - All requests are treated as anonymous user
@@ -180,6 +247,11 @@ This is useful for:
    - Expired tokens are automatically deleted
    - Token cache TTL: 5 minutes
 
+5. **Error Handling**:
+   - Backend returns HTTP 401 for unauthenticated requests
+   - Frontend handles authentication redirects
+   - Backend never redirects to login page (frontend responsibility)
+
 ### Firestore Security Rules
 
 If using Firestore for token storage, configure security rules:
@@ -205,8 +277,8 @@ service cloud.firestore {
 
 ### Callback fails with "redirect_uri_mismatch"
 
-- Ensure the callback URL in Slack app settings exactly matches `HECATONCHEIRES_SLACK_CALLBACK_URL`
-- Check for trailing slashes
+- Ensure the callback URL in Slack app settings exactly matches `${HECATONCHEIRES_BASE_URL}/api/auth/callback`
+- Check for trailing slashes (BASE_URL should not have trailing slash)
 - Verify you're using HTTPS (Slack does not accept HTTP URLs)
 
 ### Token verification fails
@@ -224,14 +296,22 @@ service cloud.firestore {
 - Ensure values are not empty strings
 - Verify `BASE_URL` doesn't have a trailing slash
 
+### User avatars not displaying
+
+- Verify `HECATONCHEIRES_SLACK_BOT_TOKEN` is set
+- Ensure the app is installed to your workspace
+- Verify the bot token has `users:read` scope
+- Check that the bot token starts with `xoxb-`
+
 ## API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/auth/login` | GET | Initiates OAuth flow |
-| `/api/auth/callback` | GET | OAuth callback handler |
-| `/api/auth/logout` | GET | Logs out and deletes token |
+| `/api/auth/login` | GET | Initiates OAuth flow (redirects to Slack) |
+| `/api/auth/callback` | GET | OAuth callback handler (internal use) |
+| `/api/auth/logout` | POST | Logs out and deletes token |
 | `/api/auth/me` | GET | Returns current user info |
+| `/api/auth/user-info` | GET | Returns Slack user profile (requires `user` query param) |
 
 ## Token Management
 
@@ -262,8 +342,9 @@ service cloud.firestore {
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `HECATONCHEIRES_BASE_URL` | No* | - | Base URL of the application (e.g., `https://your-domain.com`) |
-| `HECATONCHEIRES_SLACK_CLIENT_ID` | No* | - | Slack OAuth client ID |
-| `HECATONCHEIRES_SLACK_CLIENT_SECRET` | No* | - | Slack OAuth client secret |
+| `HECATONCHEIRES_BASE_URL` | Yes* | - | Base URL of the application (e.g., `https://your-domain.com`). No trailing slash. |
+| `HECATONCHEIRES_SLACK_CLIENT_ID` | Yes* | - | Slack OAuth client ID |
+| `HECATONCHEIRES_SLACK_CLIENT_SECRET` | Yes* | - | Slack OAuth client secret |
+| `HECATONCHEIRES_SLACK_BOT_TOKEN` | No | - | Slack Bot User OAuth Token (for fetching user avatars) |
 
-\* If any of these are missing, the system runs in anonymous mode. The callback URL is automatically constructed as `${BASE_URL}/api/auth/callback`.
+\* If any of `BASE_URL`, `CLIENT_ID`, or `CLIENT_SECRET` are missing, the system runs in anonymous mode. The callback URL is automatically constructed as `${BASE_URL}/api/auth/callback`.
