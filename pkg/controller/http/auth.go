@@ -1,18 +1,44 @@
 package http
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
-	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
-	"github.com/secmon-lab/hecatoncheires/pkg/utils/safe"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
 type AuthUseCase = usecase.AuthUseCaseInterface
+
+type userInfoResponse struct {
+	ID      string        `json:"id"`
+	Name    string        `json:"name"`
+	Profile profileImages `json:"profile"`
+}
+
+type profileImages struct {
+	Image48 string `json:"image_48"`
+}
+
+type userMeResponse struct {
+	Sub         string `json:"sub"`
+	Email       string `json:"email"`
+	Name        string `json:"name"`
+	IsAnonymous bool   `json:"is_anonymous"`
+}
+
+type errorResponse struct {
+	Error string `json:"error"`
+}
+
+type successResponse struct {
+	Success bool `json:"success"`
+}
 
 // generateState generates a random state parameter for OAuth
 func generateState() (string, error) {
@@ -35,7 +61,7 @@ func authLoginHandler(authUC AuthUseCase) http.HandlerFunc {
 		// Generate state parameter to prevent CSRF
 		state, err := generateState()
 		if err != nil {
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			errutil.HandleHTTP(r.Context(), w, err, http.StatusInternalServerError)
 			return
 		}
 
@@ -63,13 +89,13 @@ func authCallbackHandler(authUC AuthUseCase) http.HandlerFunc {
 		// Verify state parameter
 		stateCookie, err := r.Cookie("oauth_state")
 		if err != nil {
-			http.Error(w, "Missing state parameter", http.StatusBadRequest)
+			errutil.HandleHTTP(r.Context(), w, goerr.Wrap(err, "missing oauth_state cookie"), http.StatusBadRequest)
 			return
 		}
 
 		state := r.URL.Query().Get("state")
 		if state == "" || state != stateCookie.Value {
-			http.Error(w, "Invalid state parameter", http.StatusBadRequest)
+			errutil.HandleHTTP(r.Context(), w, goerr.New("invalid state parameter"), http.StatusBadRequest)
 			return
 		}
 
@@ -88,15 +114,14 @@ func authCallbackHandler(authUC AuthUseCase) http.HandlerFunc {
 		// Get authorization code
 		code := r.URL.Query().Get("code")
 		if code == "" {
-			http.Error(w, "Missing authorization code", http.StatusBadRequest)
+			errutil.HandleHTTP(r.Context(), w, goerr.New("missing authorization code"), http.StatusBadRequest)
 			return
 		}
 
 		// Exchange code for token
 		token, err := authUC.HandleCallback(r.Context(), code)
 		if err != nil {
-			logging.From(r.Context()).Error("Authentication failed", logging.ErrAttr(err))
-			http.Error(w, "Authentication failed", http.StatusInternalServerError)
+			errutil.HandleHTTP(r.Context(), w, err, http.StatusInternalServerError)
 			return
 		}
 
@@ -137,7 +162,7 @@ func authLogoutHandler(authUC AuthUseCase) http.HandlerFunc {
 		if err == nil {
 			tokenID := auth.TokenID(tokenIDCookie.Value)
 			if err := authUC.Logout(r.Context(), tokenID); err != nil {
-				logging.From(r.Context()).Error("Failed to logout, but ignored", logging.ErrAttr(err))
+				errutil.Handle(r.Context(), err, "failed to logout")
 			}
 		}
 
@@ -165,8 +190,16 @@ func authLogoutHandler(authUC AuthUseCase) http.HandlerFunc {
 		http.SetCookie(w, clearTokenID)
 		http.SetCookie(w, clearTokenSecret)
 
-		w.WriteHeader(http.StatusOK)
-		safe.Write(r.Context(), w, []byte(`{"success": true}`))
+		writeJSON(r.Context(), w, http.StatusOK, successResponse{Success: true})
+	}
+}
+
+// writeJSON writes a JSON response with proper error handling
+func writeJSON(ctx context.Context, w http.ResponseWriter, statusCode int, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		errutil.Handle(ctx, err, "failed to encode JSON response")
 	}
 }
 
@@ -175,7 +208,7 @@ func authUserInfoHandler(authUC AuthUseCase) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := r.URL.Query().Get("user")
 		if userID == "" {
-			http.Error(w, `{"error": "user parameter required"}`, http.StatusBadRequest)
+			writeJSON(r.Context(), w, http.StatusBadRequest, errorResponse{Error: "user parameter required"})
 			return
 		}
 
@@ -183,23 +216,29 @@ func authUserInfoHandler(authUC AuthUseCase) http.HandlerFunc {
 		concreteAuth, ok := authUC.(*usecase.AuthUseCase)
 		if !ok {
 			// NoAuthn mode - return placeholder
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			safe.Write(r.Context(), w, []byte(`{"id": "anonymous", "name": "Anonymous", "profile": {"image_48": ""}}`))
+			writeJSON(r.Context(), w, http.StatusOK, userInfoResponse{
+				ID:   "anonymous",
+				Name: "Anonymous",
+				Profile: profileImages{
+					Image48: "",
+				},
+			})
 			return
 		}
 
 		userInfo, err := concreteAuth.GetSlackUserInfo(r.Context(), userID)
 		if err != nil {
-			logging.From(r.Context()).Error("Failed to get user info", logging.ErrAttr(err))
-			http.Error(w, `{"error": "Failed to get user info"}`, http.StatusInternalServerError)
+			errutil.HandleHTTP(r.Context(), w, err, http.StatusInternalServerError)
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		response := `{"id": "` + userInfo.ID + `", "name": "` + userInfo.RealName + `", "profile": {"image_48": "` + userInfo.Profile.Image48 + `"}}`
-		safe.Write(r.Context(), w, []byte(response))
+		writeJSON(r.Context(), w, http.StatusOK, userInfoResponse{
+			ID:   userInfo.ID,
+			Name: userInfo.RealName,
+			Profile: profileImages{
+				Image48: userInfo.Profile.Image48,
+			},
+		})
 	}
 }
 
@@ -209,22 +248,24 @@ func authMeHandler(authUC AuthUseCase) http.HandlerFunc {
 		// For NoAuthn mode, always return anonymous user
 		if authUC.IsNoAuthn() {
 			token := auth.NewAnonymousUser()
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			userInfo := `{"sub": "` + token.Sub + `", "email": "` + token.Email + `", "name": "` + token.Name + `", "is_anonymous": true}`
-			safe.Write(r.Context(), w, []byte(userInfo))
+			writeJSON(r.Context(), w, http.StatusOK, userMeResponse{
+				Sub:         token.Sub,
+				Email:       token.Email,
+				Name:        token.Name,
+				IsAnonymous: true,
+			})
 			return
 		}
 		// Get tokens from cookies
 		tokenIDCookie, err := r.Cookie("token_id")
 		if err != nil {
-			http.Error(w, `{"error": "Not authenticated"}`, http.StatusUnauthorized)
+			writeJSON(r.Context(), w, http.StatusUnauthorized, errorResponse{Error: "Not authenticated"})
 			return
 		}
 
 		tokenSecretCookie, err := r.Cookie("token_secret")
 		if err != nil {
-			http.Error(w, `{"error": "Not authenticated"}`, http.StatusUnauthorized)
+			writeJSON(r.Context(), w, http.StatusUnauthorized, errorResponse{Error: "Not authenticated"})
 			return
 		}
 
@@ -234,18 +275,16 @@ func authMeHandler(authUC AuthUseCase) http.HandlerFunc {
 		// Validate token
 		token, err := authUC.ValidateToken(r.Context(), tokenID, tokenSecret)
 		if err != nil {
-			http.Error(w, `{"error": "Invalid token"}`, http.StatusUnauthorized)
+			errutil.HandleHTTP(r.Context(), w, err, http.StatusUnauthorized)
 			return
 		}
 
 		// Return user info with is_anonymous flag
-		isAnonymous := "false"
-		if token.IsAnonymous() {
-			isAnonymous = "true"
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		userInfo := `{"sub": "` + token.Sub + `", "email": "` + token.Email + `", "name": "` + token.Name + `", "is_anonymous": ` + isAnonymous + `}`
-		safe.Write(r.Context(), w, []byte(userInfo))
+		writeJSON(r.Context(), w, http.StatusOK, userMeResponse{
+			Sub:         token.Sub,
+			Email:       token.Email,
+			Name:        token.Name,
+			IsAnonymous: token.IsAnonymous(),
+		})
 	}
 }

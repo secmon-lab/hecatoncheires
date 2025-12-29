@@ -11,30 +11,25 @@ import (
 
 // Handle logs the error with a message and returns an appropriate user-facing error.
 // This function ensures that all errors, especially 5xx errors, are properly logged.
-func Handle(ctx context.Context, err error, msg string) error {
+func Handle(ctx context.Context, err error, msg string) {
 	if err == nil {
-		return nil
+		return
 	}
 
 	logger := logging.Default()
 
 	// Extract goerr values for structured logging
-	var ge *goerr.Error
-	if errors.As(err, &ge) {
+	if ge := goerr.Unwrap(err); ge != nil {
 		// Log with all context from goerr
 		logger.Error(msg,
 			"error", err.Error(),
 			"values", ge.Values(),
-			"stack", ge.Stacks(),
+			"stack", ge.StackTrace(),
 		)
 	} else {
 		// Log standard error
 		logger.Error(msg, "error", err.Error())
 	}
-
-	// Return the error as-is for GraphQL to handle
-	// GraphQL will return it to the client
-	return err
 }
 
 // HandleHTTP logs the error and writes an appropriate HTTP error response.

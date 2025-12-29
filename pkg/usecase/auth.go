@@ -293,10 +293,10 @@ func (uc *AuthUseCase) Logout(ctx context.Context, tokenID auth.TokenID) error {
 
 // SlackUserInfo represents Slack user information from users.info API
 type SlackUserInfo struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
 	RealName string `json:"real_name"`
-	Profile struct {
+	Profile  struct {
 		Image24  string `json:"image_24"`
 		Image32  string `json:"image_32"`
 		Image48  string `json:"image_48"`
