@@ -89,7 +89,7 @@ func authCallbackHandler(authUC AuthUseCase) http.HandlerFunc {
 		// Verify state parameter
 		stateCookie, err := r.Cookie("oauth_state")
 		if err != nil {
-			errutil.HandleHTTP(r.Context(), w, goerr.Wrap(err, "missing oauth_state cookie"), http.StatusBadRequest)
+			errutil.HandleHTTP(r.Context(), w, err, http.StatusBadRequest)
 			return
 		}
 
@@ -259,13 +259,13 @@ func authMeHandler(authUC AuthUseCase) http.HandlerFunc {
 		// Get tokens from cookies
 		tokenIDCookie, err := r.Cookie("token_id")
 		if err != nil {
-			writeJSON(r.Context(), w, http.StatusUnauthorized, errorResponse{Error: "Not authenticated"})
+			errutil.HandleHTTP(r.Context(), w, err, http.StatusUnauthorized)
 			return
 		}
 
 		tokenSecretCookie, err := r.Cookie("token_secret")
 		if err != nil {
-			writeJSON(r.Context(), w, http.StatusUnauthorized, errorResponse{Error: "Not authenticated"})
+			errutil.HandleHTTP(r.Context(), w, err, http.StatusUnauthorized)
 			return
 		}
 
