@@ -7,7 +7,7 @@ export default function Sidebar() {
     <aside className={styles.sidebar}>
       <Link to="/" className={styles.logoContainer}>
         <div className={styles.logo}>
-          <Shield size={32} className={styles.logoIcon} />
+          <img src="/logo.png" alt="Hecatoncheires" className={styles.logoIcon} />
           <span className={styles.logoText}>Hecatoncheires</span>
         </div>
       </Link>
