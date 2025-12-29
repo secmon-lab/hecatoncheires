@@ -1,12 +1,13 @@
 .layout {
   display: flex;
   min-height: 100vh;
-  background-color: #eeeeee;
+  background-color: var(--bg-default);
+  padding-top: var(--topbar-height);
 }
 
 .main {
   flex: 1;
-  margin-left: 260px;
+  margin-left: var(--sidebar-width);
   display: flex;
   flex-direction: column;
 }
