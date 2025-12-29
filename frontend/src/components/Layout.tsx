@@ -9,12 +9,12 @@ interface LayoutProps {
   children?: ReactNode
 }
 
-export default function Layout({ title = 'Dashboard', children }: LayoutProps) {
+export default function Layout({ children }: LayoutProps) {
   return (
     <div className={styles.layout}>
       <Sidebar />
       <div className={styles.main}>
-        <TopBar title={title} />
+        <TopBar />
         <main className={styles.content}>
           {children || <Outlet />}
         </main>

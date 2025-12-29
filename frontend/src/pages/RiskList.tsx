@@ -47,11 +47,11 @@ export default function RiskList() {
     const categoryMap = new Map(allCategories.map((cat: { id: string; name: string }, index: number) => [cat.id, { ...cat, index }]))
     const categories = categoryIDs
       .map(id => categoryMap.get(id))
-      .filter(Boolean)
+      .filter((cat): cat is { id: string; name: string; index: number } => cat !== undefined)
 
     return (
       <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-        {categories.map((cat: { id: string; name: string; index: number }) => (
+        {categories.map((cat) => (
           <Chip key={cat.id} variant="category" colorIndex={cat.index}>
             {cat.name}
           </Chip>
@@ -66,11 +66,11 @@ export default function RiskList() {
     const teamMap = new Map(allTeams.map((team: { id: string; name: string }, index: number) => [team.id, { ...team, index }]))
     const teams = teamIDs
       .map(id => teamMap.get(id))
-      .filter(Boolean)
+      .filter((team): team is { id: string; name: string; index: number } => team !== undefined)
 
     return (
       <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-        {teams.map((team: { id: string; name: string; index: number }) => (
+        {teams.map((team) => (
           <Chip key={team.id} variant="team" colorIndex={team.index}>
             {team.name}
           </Chip>
@@ -84,11 +84,11 @@ export default function RiskList() {
     const userMap = new Map(usersData.slackUsers.map((user: { id: string; realName: string; imageUrl?: string }) => [user.id, user]))
     const users = assigneeIDs
       .map(id => userMap.get(id))
-      .filter(Boolean)
+      .filter((user): user is { id: string; realName: string; imageUrl?: string } => user !== undefined)
 
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-        {users.map((user: { id: string; realName: string; imageUrl?: string }) => (
+        {users.map((user) => (
           <div key={user.id} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             {user.imageUrl && (
               <img
