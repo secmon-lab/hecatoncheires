@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
@@ -166,7 +167,7 @@ name = "重複チーム"
 			}
 
 			if tt.wantErr && err != nil && tt.errMsg != "" {
-				if errStr := err.Error(); !contains(errStr, tt.errMsg) {
+				if errStr := err.Error(); !strings.Contains(errStr, tt.errMsg) {
 					t.Errorf("LoadAppConfiguration() error message = %v, want to contain %v", errStr, tt.errMsg)
 				}
 			}
@@ -178,7 +179,3 @@ name = "重複チーム"
 	}
 }
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		(len(s) > 0 && (s[:len(substr)] == substr || contains(s[1:], substr))))
-}
