@@ -1,29 +1,264 @@
 .container {
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+/* Top Cards Grid */
+.topCardsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.topCard {
+  border-radius: 4px;
+  padding: 20px;
+  color: white;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 4px 20px 0 rgba(0, 0, 0, 0.14), 0 7px 10px -5px rgba(0, 0, 0, 0.4);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.topCard:hover {
+  transform: translateY(-4px);
+}
+
+.topCardIcon {
+  position: absolute;
+  top: -15px;
+  right: 20px;
+  background: rgba(255, 255, 255, 0.2);
+  width: 64px;
+  height: 64px;
+  border-radius: 4px;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 100vh;
-  font-family: system-ui, -apple-system, sans-serif;
-  background-color: #f5f5f5;
 }
 
-.card {
-  padding: 2rem;
-  background-color: white;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  text-align: center;
+.topCardContent {
+  margin-bottom: 16px;
 }
 
-.title {
-  font-size: 2.5rem;
-  margin: 0 0 1rem 0;
-  color: #333;
+.topCardLabel {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 300;
+  opacity: 0.9;
+  text-transform: uppercase;
 }
 
-.subtitle {
-  font-size: 1.2rem;
+.topCardValue {
   margin: 0;
-  color: #666;
+  font-size: 28px;
+  font-weight: 300;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.unit {
+  font-size: 18px;
+  font-weight: 300;
+}
+
+.topCardFooter {
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  padding-top: 12px;
+}
+
+.topCardLink {
+  font-size: 12px;
+  opacity: 0.8;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Charts Grid */
+.chartsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.chartCard {
+  background: white;
+  border-radius: 4px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px 0 rgba(0, 0, 0, 0.14);
+  transition: box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.chartCard:hover {
+  box-shadow: 0 4px 20px 0 rgba(0, 0, 0, 0.14);
+}
+
+.chartHeader {
+  padding: 16px;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 80px;
+  margin: 16px 16px 0 16px;
+  border-radius: 4px;
+  box-shadow: 0 4px 20px 0 rgba(0, 0, 0, 0.14), 0 7px 10px -5px rgba(0, 0, 0, 0.4);
+  position: relative;
+  top: -20px;
+  margin-bottom: -20px;
+}
+
+.chartIcon {
+  opacity: 0.9;
+}
+
+.chartContent {
+  padding: 24px;
+}
+
+.chartTitle {
+  margin: 0 0 4px 0;
+  font-size: 18px;
+  font-weight: 400;
+  color: #3c4858;
+}
+
+.chartSubtitle {
+  margin: 0 0 16px 0;
+  font-size: 14px;
+  color: #999;
+}
+
+.chartPlaceholder {
+  height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f9f9f9;
+  border-radius: 4px;
+  color: #999;
+  font-style: italic;
+  margin-bottom: 16px;
+}
+
+.chartFooter {
+  border-top: 1px solid #eee;
+  padding-top: 12px;
+}
+
+.chartTime {
+  font-size: 12px;
+  color: #999;
+}
+
+/* Bottom Section */
+.bottomSection {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+  gap: 24px;
+}
+
+.tasksCard,
+.employeesCard {
+  background: white;
+  border-radius: 4px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px 0 rgba(0, 0, 0, 0.14);
+}
+
+.tasksHeader,
+.employeesHeader {
+  padding: 20px;
+  color: white;
+  margin: 16px 16px 0 16px;
+  border-radius: 4px;
+  box-shadow: 0 4px 20px 0 rgba(0, 0, 0, 0.14), 0 7px 10px -5px rgba(0, 0, 0, 0.4);
+  position: relative;
+  top: -20px;
+  margin-bottom: -20px;
+}
+
+.tasksTitle,
+.employeesTitle {
+  margin: 0 0 12px 0;
+  font-size: 18px;
+  font-weight: 300;
+}
+
+.employeesSubtitle {
+  margin: 0;
+  font-size: 14px;
+  opacity: 0.8;
+}
+
+.tasksTabs {
+  display: flex;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.taskTab {
+  background: transparent;
+  border: none;
+  color: white;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 8px 12px;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+  border-radius: 4px;
+}
+
+.taskTab:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.taskTab.active {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.tasksContent,
+.employeesContent {
+  padding: 24px;
+}
+
+.taskItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid #eee;
+  font-size: 14px;
+  color: #555;
+}
+
+.taskItem:last-child {
+  border-bottom: none;
+}
+
+.checkbox {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+.employeesTable {
+  width: 100%;
+}
+
+.employeesRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+  padding: 12px 0;
+  font-size: 14px;
+  color: #555;
+  font-weight: 500;
 }

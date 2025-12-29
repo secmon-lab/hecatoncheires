@@ -1,7 +1,33 @@
+scalar Time
+
+type Risk {
+  id: Int!
+  name: String!
+  description: String!
+  createdAt: Time!
+  updatedAt: Time!
+}
+
+input CreateRiskInput {
+  name: String!
+  description: String!
+}
+
+input UpdateRiskInput {
+  id: Int!
+  name: String!
+  description: String!
+}
+
 type Query {
   health: String!
+  risks: [Risk!]!
+  risk(id: Int!): Risk
 }
 
 type Mutation {
   noop: Boolean
+  createRisk(input: CreateRiskInput!): Risk!
+  updateRisk(input: UpdateRiskInput!): Risk!
+  deleteRisk(id: Int!): Boolean!
 }

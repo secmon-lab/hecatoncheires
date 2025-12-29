@@ -9,6 +9,7 @@ import (
 	"github.com/99designs/gqlgen/graphql/playground"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/frontend"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/safe"
@@ -57,13 +58,17 @@ func New(gqlHandler http.Handler, opts ...Options) *Server {
 	// Static file serving for SPA (catch-all, must be last)
 	staticFS, err := fs.Sub(frontend.StaticFiles, "dist")
 	if err != nil {
-		logging.Default().Error("failed to create sub FS for frontend static files", "error", err)
+		// Log error and continue - the server can still serve GraphQL
+		logging.Default().Error("failed to create sub FS for frontend static files",
+			"error", goerr.Wrap(err, "failed to create sub FS for frontend static files").Error(),
+		)
 	} else {
 		// Check if index.html exists
 		if _, err := staticFS.Open("index.html"); err == nil {
 			// Serve static files and handle SPA routing
 			r.Get("/*", spaHandler(staticFS))
 		} else {
+			// This is a warning, not a critical error
 			logging.Default().Warn("index.html not found in frontend dist", "error", err)
 		}
 	}

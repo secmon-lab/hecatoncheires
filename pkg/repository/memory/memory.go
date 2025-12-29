@@ -5,11 +5,17 @@ import (
 )
 
 type Memory struct {
-	// Future: Add data storage fields here
+	risk *riskRepository
 }
 
 var _ interfaces.Repository = &Memory{}
 
 func New() *Memory {
-	return &Memory{}
+	return &Memory{
+		risk: newRiskRepository(),
+	}
+}
+
+func (m *Memory) Risk() interfaces.RiskRepository {
+	return m.risk
 }

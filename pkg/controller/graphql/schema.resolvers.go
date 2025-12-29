@@ -7,6 +7,10 @@ package graphql
 
 import (
 	"context"
+
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	graphql1 "github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
 // Noop is the resolver for the noop field.
@@ -16,10 +20,64 @@ func (r *mutationResolver) Noop(ctx context.Context) (*bool, error) {
 	return &result, nil
 }
 
+// CreateRisk is the resolver for the createRisk field.
+func (r *mutationResolver) CreateRisk(ctx context.Context, input graphql1.CreateRiskInput) (*graphql1.Risk, error) {
+	risk, err := r.uc.Risk.CreateRisk(ctx, input.Name, input.Description)
+	if err != nil {
+		return nil, errutil.Handle(ctx, err, "failed to create risk")
+	}
+
+	return toGraphQLRisk(risk), nil
+}
+
+// UpdateRisk is the resolver for the updateRisk field.
+func (r *mutationResolver) UpdateRisk(ctx context.Context, input graphql1.UpdateRiskInput) (*graphql1.Risk, error) {
+	risk, err := r.uc.Risk.UpdateRisk(ctx, int64(input.ID), input.Name, input.Description)
+	if err != nil {
+		return nil, errutil.Handle(ctx, err, "failed to update risk")
+	}
+
+	return toGraphQLRisk(risk), nil
+}
+
+// DeleteRisk is the resolver for the deleteRisk field.
+func (r *mutationResolver) DeleteRisk(ctx context.Context, id int) (bool, error) {
+	if err := r.uc.Risk.DeleteRisk(ctx, int64(id)); err != nil {
+		return false, errutil.Handle(ctx, err, "failed to delete risk")
+	}
+
+	return true, nil
+}
+
 // Health is the resolver for the health field.
 func (r *queryResolver) Health(ctx context.Context) (string, error) {
 	// TODO: Remove this dummy implementation when real health check is added
 	return "OK", nil
+}
+
+// Risks is the resolver for the risks field.
+func (r *queryResolver) Risks(ctx context.Context) ([]*graphql1.Risk, error) {
+	risks, err := r.uc.Risk.ListRisks(ctx)
+	if err != nil {
+		return nil, errutil.Handle(ctx, err, "failed to list risks")
+	}
+
+	gqlRisks := make([]*graphql1.Risk, len(risks))
+	for i, risk := range risks {
+		gqlRisks[i] = toGraphQLRisk(risk)
+	}
+
+	return gqlRisks, nil
+}
+
+// Risk is the resolver for the risk field.
+func (r *queryResolver) Risk(ctx context.Context, id int) (*graphql1.Risk, error) {
+	risk, err := r.uc.Risk.GetRisk(ctx, int64(id))
+	if err != nil {
+		return nil, errutil.Handle(ctx, err, "failed to get risk")
+	}
+
+	return toGraphQLRisk(risk), nil
 }
 
 // Mutation returns MutationResolver implementation.
@@ -30,3 +88,15 @@ func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
+
+// Helper functions
+
+func toGraphQLRisk(risk *model.Risk) *graphql1.Risk {
+	return &graphql1.Risk{
+		ID:          int(risk.ID),
+		Name:        risk.Name,
+		Description: risk.Description,
+		CreatedAt:   risk.CreatedAt,
+		UpdatedAt:   risk.UpdatedAt,
+	}
+}
