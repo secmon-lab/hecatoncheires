@@ -1,17 +1,17 @@
 export const colors = {
-  // Primary purple gradient (from the image)
+  // Primary blue gradient (from the logo)
   primary: {
-    main: '#9c27b0',      // Vibrant purple
-    light: '#ba68c8',
-    dark: '#7b1fa2',
-    gradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    main: '#2E5CB8',      // Logo primary blue
+    light: '#5B8DEE',     // Light blue
+    dark: '#1E3A8A',      // Dark blue
+    gradient: 'linear-gradient(135deg, #2E5CB8 0%, #5B8DEE 50%, #4DD4D4 100%)',
     contrastText: '#ffffff',
   },
-  // Secondary colors matching the dashboard
+  // Secondary colors matching the logo
   secondary: {
-    main: '#00bcd4',      // Cyan
-    light: '#4dd0e1',
-    dark: '#0097a7',
+    main: '#4DD4D4',      // Cyan/Aqua from logo
+    light: '#7DE5E5',
+    dark: '#2BA7A7',
     contrastText: '#ffffff',
   },
   // Card colors from the design
@@ -32,9 +32,13 @@ export const colors = {
     cyanLight: '#4dd0e1',
     cyanGradient: 'linear-gradient(135deg, #26C6DA 0%, #00ACC1 100%)',
 
-    purple: '#9c27b0',
-    purpleLight: '#ba68c8',
-    purpleGradient: 'linear-gradient(135deg, #AB47BC 0%, #8E24AA 100%)',
+    purple: '#8B5CF6',
+    purpleLight: '#A78BFA',
+    purpleGradient: 'linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)',
+
+    blue: '#2E5CB8',
+    blueLight: '#5B8DEE',
+    blueGradient: 'linear-gradient(135deg, #2E5CB8 0%, #5B8DEE 100%)',
   },
   success: {
     main: '#4caf50',
@@ -70,15 +74,15 @@ export const colors = {
     hint: '#95a5a6',
     white: '#ffffff',
   },
-  // Sidebar specific colors (purple gradient)
+  // Sidebar specific colors (white base, flat design)
   sidebar: {
-    background: 'linear-gradient(180deg, #667eea 0%, #764ba2 100%)',
-    backgroundSolid: '#667eea',
-    text: '#ffffff',
-    textSecondary: 'rgba(255, 255, 255, 0.7)',
-    active: 'rgba(255, 255, 255, 0.2)',
-    hover: 'rgba(255, 255, 255, 0.1)',
-    border: 'rgba(255, 255, 255, 0.1)',
+    background: '#ffffff',
+    backgroundSolid: '#ffffff',
+    text: '#2E5CB8',
+    textSecondary: 'rgba(46, 92, 184, 0.7)',
+    active: '#E3F2FD',
+    hover: 'rgba(46, 92, 184, 0.08)',
+    border: 'rgba(46, 92, 184, 0.12)',
   },
   // Divider
   divider: '#e0e0e0',

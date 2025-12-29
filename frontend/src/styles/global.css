@@ -1,22 +1,23 @@
 :root {
-  /* Primary colors */
-  --color-primary: #9c27b0;
-  --color-primary-light: #ba68c8;
-  --color-primary-dark: #7b1fa2;
-  --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  /* Primary colors (from logo) */
+  --color-primary: #2E5CB8;
+  --color-primary-light: #5B8DEE;
+  --color-primary-dark: #1E3A8A;
+  --gradient-primary: linear-gradient(135deg, #2E5CB8 0%, #5B8DEE 50%, #4DD4D4 100%);
   --color-primary-contrast: #ffffff;
 
-  /* Secondary colors */
-  --color-secondary: #00bcd4;
-  --color-secondary-light: #4dd0e1;
-  --color-secondary-dark: #0097a7;
+  /* Secondary colors (cyan from logo) */
+  --color-secondary: #4DD4D4;
+  --color-secondary-light: #7DE5E5;
+  --color-secondary-dark: #2BA7A7;
 
   /* Card gradients */
   --gradient-orange: linear-gradient(135deg, #FFA726 0%, #FB8C00 100%);
   --gradient-green: linear-gradient(135deg, #66BB6A 0%, #43A047 100%);
   --gradient-red: linear-gradient(135deg, #EF5350 0%, #E53935 100%);
-  --gradient-cyan: linear-gradient(135deg, #26C6DA 0%, #00ACC1 100%);
-  --gradient-purple: linear-gradient(135deg, #AB47BC 0%, #8E24AA 100%);
+  --gradient-cyan: linear-gradient(135deg, #4DD4D4 0%, #2BA7A7 100%);
+  --gradient-purple: linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%);
+  --gradient-blue: linear-gradient(135deg, #2E5CB8 0%, #5B8DEE 100%);
 
   /* Status colors */
   --color-success: #4caf50;
@@ -44,14 +45,14 @@
   --text-hint: #95a5a6;
   --text-white: #ffffff;
 
-  /* Sidebar colors */
-  --sidebar-bg: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
-  --sidebar-bg-solid: #667eea;
-  --sidebar-text: #ffffff;
-  --sidebar-text-secondary: rgba(255, 255, 255, 0.7);
-  --sidebar-active: rgba(255, 255, 255, 0.2);
-  --sidebar-hover: rgba(255, 255, 255, 0.1);
-  --sidebar-border: rgba(255, 255, 255, 0.1);
+  /* Sidebar colors (white base, flat design) */
+  --sidebar-bg: #ffffff;
+  --sidebar-bg-solid: #ffffff;
+  --sidebar-text: #2E5CB8;
+  --sidebar-text-secondary: rgba(46, 92, 184, 0.7);
+  --sidebar-active: #E3F2FD;
+  --sidebar-hover: rgba(46, 92, 184, 0.08);
+  --sidebar-border: rgba(46, 92, 184, 0.12);
 
   /* Divider */
   --divider: #e0e0e0;

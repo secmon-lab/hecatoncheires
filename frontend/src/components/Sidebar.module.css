@@ -7,14 +7,16 @@
   position: fixed;
   left: 0;
   top: 0;
-  box-shadow: var(--shadow-xl);
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.05);
 }
 
 .logoContainer {
-  padding: var(--spacing-lg) 20px;
+  height: 64px;
+  padding: 0 20px;
   border-bottom: 1px solid var(--sidebar-border);
   text-decoration: none;
-  display: block;
+  display: flex;
+  align-items: center;
   transition: background-color var(--transition-fast);
 }
 
@@ -30,8 +32,10 @@
 }
 
 .logoIcon {
-  color: var(--sidebar-text);
+  width: 40px;
+  height: 40px;
   flex-shrink: 0;
+  object-fit: contain;
 }
 
 .logoText {
