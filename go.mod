@@ -12,6 +12,7 @@ require (
 	github.com/m-mizutani/clog v0.1.0
 	github.com/m-mizutani/goerr/v2 v2.0.0
 	github.com/m-mizutani/masq v0.2.0
+	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/urfave/cli/v3 v3.6.1
 	github.com/vektah/gqlparser/v2 v2.5.31
 	google.golang.org/api v0.256.0

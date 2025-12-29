@@ -5,7 +5,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'danger' | 'outline'
   size?: 'sm' | 'md' | 'lg'
   icon?: ReactNode
-  children: ReactNode
+  children?: ReactNode
 }
 
 export default function Button({
@@ -26,7 +26,7 @@ export default function Button({
   return (
     <button className={classNames} {...props}>
       {icon && <span className={styles.icon}>{icon}</span>}
-      <span>{children}</span>
+      {children && <span>{children}</span>}
     </button>
   )
 }

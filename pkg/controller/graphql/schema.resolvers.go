@@ -8,8 +8,8 @@ package graphql
 import (
 	"context"
 
-	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	graphql1 "github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
@@ -22,7 +22,28 @@ func (r *mutationResolver) Noop(ctx context.Context) (*bool, error) {
 
 // CreateRisk is the resolver for the createRisk field.
 func (r *mutationResolver) CreateRisk(ctx context.Context, input graphql1.CreateRiskInput) (*graphql1.Risk, error) {
-	risk, err := r.uc.Risk.CreateRisk(ctx, input.Name, input.Description)
+	categoryIDs := make([]types.CategoryID, len(input.CategoryIDs))
+	for i, id := range input.CategoryIDs {
+		categoryIDs[i] = types.CategoryID(id)
+	}
+
+	teamIDs := make([]types.TeamID, len(input.ResponseTeamIDs))
+	for i, id := range input.ResponseTeamIDs {
+		teamIDs[i] = types.TeamID(id)
+	}
+
+	risk, err := r.uc.Risk.CreateRisk(
+		ctx,
+		input.Name,
+		input.Description,
+		categoryIDs,
+		input.SpecificImpact,
+		types.LikelihoodID(input.LikelihoodID),
+		types.ImpactID(input.ImpactID),
+		teamIDs,
+		input.AssigneeIDs,
+		input.DetectionIndicators,
+	)
 	if err != nil {
 		errutil.Handle(ctx, err, "failed to create risk")
 		return nil, err
@@ -33,7 +54,29 @@ func (r *mutationResolver) CreateRisk(ctx context.Context, input graphql1.Create
 
 // UpdateRisk is the resolver for the updateRisk field.
 func (r *mutationResolver) UpdateRisk(ctx context.Context, input graphql1.UpdateRiskInput) (*graphql1.Risk, error) {
-	risk, err := r.uc.Risk.UpdateRisk(ctx, int64(input.ID), input.Name, input.Description)
+	categoryIDs := make([]types.CategoryID, len(input.CategoryIDs))
+	for i, id := range input.CategoryIDs {
+		categoryIDs[i] = types.CategoryID(id)
+	}
+
+	teamIDs := make([]types.TeamID, len(input.ResponseTeamIDs))
+	for i, id := range input.ResponseTeamIDs {
+		teamIDs[i] = types.TeamID(id)
+	}
+
+	risk, err := r.uc.Risk.UpdateRisk(
+		ctx,
+		int64(input.ID),
+		input.Name,
+		input.Description,
+		categoryIDs,
+		input.SpecificImpact,
+		types.LikelihoodID(input.LikelihoodID),
+		types.ImpactID(input.ImpactID),
+		teamIDs,
+		input.AssigneeIDs,
+		input.DetectionIndicators,
+	)
 	if err != nil {
 		errutil.Handle(ctx, err, "failed to update risk")
 		return nil, err
@@ -85,6 +128,84 @@ func (r *queryResolver) Risk(ctx context.Context, id int) (*graphql1.Risk, error
 	return toGraphQLRisk(risk), nil
 }
 
+// RiskConfiguration is the resolver for the riskConfiguration field.
+func (r *queryResolver) RiskConfiguration(ctx context.Context) (*graphql1.RiskConfiguration, error) {
+	config, err := r.uc.Risk.GetRiskConfiguration()
+	if err != nil {
+		errutil.Handle(ctx, err, "failed to get risk configuration")
+		return nil, err
+	}
+
+	categories := make([]*graphql1.Category, len(config.Categories))
+	for i, cat := range config.Categories {
+		categories[i] = &graphql1.Category{
+			ID:          cat.ID,
+			Name:        cat.Name,
+			Description: cat.Description,
+		}
+	}
+
+	likelihoodLevels := make([]*graphql1.LikelihoodLevel, len(config.Likelihood))
+	for i, level := range config.Likelihood {
+		likelihoodLevels[i] = &graphql1.LikelihoodLevel{
+			ID:          level.ID,
+			Name:        level.Name,
+			Description: level.Description,
+			Score:       level.Score,
+		}
+	}
+
+	impactLevels := make([]*graphql1.ImpactLevel, len(config.Impact))
+	for i, level := range config.Impact {
+		impactLevels[i] = &graphql1.ImpactLevel{
+			ID:          level.ID,
+			Name:        level.Name,
+			Description: level.Description,
+			Score:       level.Score,
+		}
+	}
+
+	teams := make([]*graphql1.Team, len(config.Teams))
+	for i, team := range config.Teams {
+		teams[i] = &graphql1.Team{
+			ID:   team.ID,
+			Name: team.Name,
+		}
+	}
+
+	return &graphql1.RiskConfiguration{
+		Categories:       categories,
+		LikelihoodLevels: likelihoodLevels,
+		ImpactLevels:     impactLevels,
+		Teams:            teams,
+	}, nil
+}
+
+// SlackUsers is the resolver for the slackUsers field.
+func (r *queryResolver) SlackUsers(ctx context.Context) ([]*graphql1.SlackUser, error) {
+	if r.uc.Auth == nil {
+		return []*graphql1.SlackUser{}, nil
+	}
+
+	users, err := r.uc.Auth.GetSlackUsers(ctx)
+	if err != nil {
+		errutil.Handle(ctx, err, "failed to get Slack users")
+		return nil, err
+	}
+
+	gqlUsers := make([]*graphql1.SlackUser, len(users))
+	for i, user := range users {
+		gqlUsers[i] = &graphql1.SlackUser{
+			ID:       user.ID,
+			Name:     user.Name,
+			RealName: user.RealName,
+			ImageURL: user.ImageURL,
+		}
+	}
+
+	return gqlUsers, nil
+}
+
 // Mutation returns MutationResolver implementation.
 func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
 
@@ -93,15 +214,3 @@ func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
-
-// Helper functions
-
-func toGraphQLRisk(risk *model.Risk) *graphql1.Risk {
-	return &graphql1.Risk{
-		ID:          int(risk.ID),
-		Name:        risk.Name,
-		Description: risk.Description,
-		CreatedAt:   risk.CreatedAt,
-		UpdatedAt:   risk.UpdatedAt,
-	}
-}

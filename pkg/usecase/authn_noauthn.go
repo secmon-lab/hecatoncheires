@@ -57,3 +57,8 @@ func (uc *NoAuthnUseCase) Logout(ctx context.Context, tokenID auth.TokenID) erro
 func (uc *NoAuthnUseCase) IsNoAuthn() bool {
 	return true
 }
+
+// GetSlackUsers returns an empty list in no-auth mode
+func (uc *NoAuthnUseCase) GetSlackUsers(ctx context.Context) ([]*SlackUser, error) {
+	return []*SlackUser{}, nil
+}

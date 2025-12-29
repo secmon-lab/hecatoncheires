@@ -360,3 +360,94 @@ func (uc *AuthUseCase) GetSlackUserInfo(ctx context.Context, userID string) (*Sl
 
 	return result.User, nil
 }
+
+// SlackUser represents a Slack user for GraphQL
+type SlackUser struct {
+	ID       string
+	Name     string
+	RealName string
+	ImageURL *string
+}
+
+// GetSlackUsers fetches all users in the workspace
+func (uc *AuthUseCase) GetSlackUsers(ctx context.Context) ([]*SlackUser, error) {
+	if uc.botToken == "" {
+		return nil, goerr.New("bot token not configured")
+	}
+
+	// Check cache first
+	if cached := uc.cache.getUsers(); cached != nil {
+		return cached, nil
+	}
+
+	apiURL := "https://slack.com/api/users.list"
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to create request")
+	}
+
+	req.Header.Set("Authorization", "Bearer "+uc.botToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to call Slack API")
+	}
+	defer safe.Close(ctx, resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, goerr.New("Slack API returned error", goerr.V("status", resp.StatusCode))
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to read response")
+	}
+
+	var result struct {
+		OK      bool `json:"ok"`
+		Members []struct {
+			ID       string `json:"id"`
+			Name     string `json:"name"`
+			RealName string `json:"real_name"`
+			Deleted  bool   `json:"deleted"`
+			IsBot    bool   `json:"is_bot"`
+			Profile  struct {
+				Image48 string `json:"image_48"`
+			} `json:"profile"`
+		} `json:"members"`
+		Error string `json:"error"`
+	}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, goerr.Wrap(err, "failed to parse response")
+	}
+
+	if !result.OK {
+		return nil, goerr.New("Slack API error", goerr.V("error", result.Error))
+	}
+
+	users := make([]*SlackUser, 0, len(result.Members))
+	for _, member := range result.Members {
+		// Skip deleted users and bots
+		if member.Deleted || member.IsBot {
+			continue
+		}
+
+		var imageURL *string
+		if member.Profile.Image48 != "" {
+			imageURL = &member.Profile.Image48
+		}
+
+		users = append(users, &SlackUser{
+			ID:       member.ID,
+			Name:     member.Name,
+			RealName: member.RealName,
+			ImageURL: imageURL,
+		})
+	}
+
+	// Cache the result
+	uc.cache.setUsers(users)
+
+	return users, nil
+}

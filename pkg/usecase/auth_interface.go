@@ -13,4 +13,5 @@ type AuthUseCaseInterface interface {
 	ValidateToken(ctx context.Context, tokenID auth.TokenID, tokenSecret auth.TokenSecret) (*auth.Token, error)
 	Logout(ctx context.Context, tokenID auth.TokenID) error
 	IsNoAuthn() bool // Added to identify NoAuthnUseCase
+	GetSlackUsers(ctx context.Context) ([]*SlackUser, error)
 }

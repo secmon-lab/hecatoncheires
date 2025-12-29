@@ -8,17 +8,25 @@ import (
 	"cloud.google.com/go/firestore"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 type riskDocument struct {
-	ID          int64     `firestore:"id"`
-	Name        string    `firestore:"name"`
-	Description string    `firestore:"description"`
-	CreatedAt   time.Time `firestore:"created_at"`
-	UpdatedAt   time.Time `firestore:"updated_at"`
+	ID                  int64     `firestore:"id"`
+	Name                string    `firestore:"name"`
+	Description         string    `firestore:"description"`
+	CategoryIDs         []string  `firestore:"category_ids"`
+	SpecificImpact      string    `firestore:"specific_impact"`
+	LikelihoodID        string    `firestore:"likelihood_id"`
+	ImpactID            string    `firestore:"impact_id"`
+	ResponseTeamIDs     []string  `firestore:"response_team_ids"`
+	AssigneeIDs         []string  `firestore:"assignee_ids"`
+	DetectionIndicators string    `firestore:"detection_indicators"`
+	CreatedAt           time.Time `firestore:"created_at"`
+	UpdatedAt           time.Time `firestore:"updated_at"`
 }
 
 type riskRepository struct {
@@ -49,6 +57,62 @@ func (r *riskRepository) counterCollection() string {
 
 func (r *riskRepository) riskCounterDoc() string {
 	return "risk_counter"
+}
+
+// toDocument converts model.Risk to riskDocument
+func toDocument(risk *model.Risk) *riskDocument {
+	categoryIDs := make([]string, len(risk.CategoryIDs))
+	for i, id := range risk.CategoryIDs {
+		categoryIDs[i] = string(id)
+	}
+
+	teamIDs := make([]string, len(risk.ResponseTeamIDs))
+	for i, id := range risk.ResponseTeamIDs {
+		teamIDs[i] = string(id)
+	}
+
+	return &riskDocument{
+		ID:                  risk.ID,
+		Name:                risk.Name,
+		Description:         risk.Description,
+		CategoryIDs:         categoryIDs,
+		SpecificImpact:      risk.SpecificImpact,
+		LikelihoodID:        string(risk.LikelihoodID),
+		ImpactID:            string(risk.ImpactID),
+		ResponseTeamIDs:     teamIDs,
+		AssigneeIDs:         risk.AssigneeIDs,
+		DetectionIndicators: risk.DetectionIndicators,
+		CreatedAt:           risk.CreatedAt,
+		UpdatedAt:           risk.UpdatedAt,
+	}
+}
+
+// toModel converts riskDocument to model.Risk
+func toModel(doc *riskDocument) *model.Risk {
+	categoryIDs := make([]types.CategoryID, len(doc.CategoryIDs))
+	for i, id := range doc.CategoryIDs {
+		categoryIDs[i] = types.CategoryID(id)
+	}
+
+	teamIDs := make([]types.TeamID, len(doc.ResponseTeamIDs))
+	for i, id := range doc.ResponseTeamIDs {
+		teamIDs[i] = types.TeamID(id)
+	}
+
+	return &model.Risk{
+		ID:                  doc.ID,
+		Name:                doc.Name,
+		Description:         doc.Description,
+		CategoryIDs:         categoryIDs,
+		SpecificImpact:      doc.SpecificImpact,
+		LikelihoodID:        types.LikelihoodID(doc.LikelihoodID),
+		ImpactID:            types.ImpactID(doc.ImpactID),
+		ResponseTeamIDs:     teamIDs,
+		AssigneeIDs:         doc.AssigneeIDs,
+		DetectionIndicators: doc.DetectionIndicators,
+		CreatedAt:           doc.CreatedAt,
+		UpdatedAt:           doc.UpdatedAt,
+	}
 }
 
 func (r *riskRepository) getNextID(ctx context.Context) (int64, error) {
@@ -96,26 +160,18 @@ func (r *riskRepository) Create(ctx context.Context, risk *model.Risk) (*model.R
 	}
 
 	now := time.Now().UTC()
-	doc := &riskDocument{
-		ID:          id,
-		Name:        risk.Name,
-		Description: risk.Description,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
+	risk.ID = id
+	risk.CreatedAt = now
+	risk.UpdatedAt = now
+
+	doc := toDocument(risk)
 
 	docRef := r.client.Collection(r.risksCollection()).Doc(fmt.Sprintf("%d", id))
 	if _, err := docRef.Set(ctx, doc); err != nil {
 		return nil, goerr.Wrap(err, "failed to create risk")
 	}
 
-	return &model.Risk{
-		ID:          doc.ID,
-		Name:        doc.Name,
-		Description: doc.Description,
-		CreatedAt:   doc.CreatedAt,
-		UpdatedAt:   doc.UpdatedAt,
-	}, nil
+	return toModel(doc), nil
 }
 
 func (r *riskRepository) Get(ctx context.Context, id int64) (*model.Risk, error) {
@@ -133,13 +189,7 @@ func (r *riskRepository) Get(ctx context.Context, id int64) (*model.Risk, error)
 		return nil, goerr.Wrap(err, "failed to unmarshal risk", goerr.V("id", id))
 	}
 
-	return &model.Risk{
-		ID:          riskDoc.ID,
-		Name:        riskDoc.Name,
-		Description: riskDoc.Description,
-		CreatedAt:   riskDoc.CreatedAt,
-		UpdatedAt:   riskDoc.UpdatedAt,
-	}, nil
+	return toModel(&riskDoc), nil
 }
 
 func (r *riskRepository) List(ctx context.Context) ([]*model.Risk, error) {
@@ -161,13 +211,7 @@ func (r *riskRepository) List(ctx context.Context) ([]*model.Risk, error) {
 			return nil, goerr.Wrap(err, "failed to unmarshal risk")
 		}
 
-		risks = append(risks, &model.Risk{
-			ID:          riskDoc.ID,
-			Name:        riskDoc.Name,
-			Description: riskDoc.Description,
-			CreatedAt:   riskDoc.CreatedAt,
-			UpdatedAt:   riskDoc.UpdatedAt,
-		})
+		risks = append(risks, toModel(&riskDoc))
 	}
 
 	return risks, nil
@@ -190,25 +234,16 @@ func (r *riskRepository) Update(ctx context.Context, risk *model.Risk) (*model.R
 	}
 
 	now := time.Now().UTC()
-	updated := &riskDocument{
-		ID:          existing.ID,
-		Name:        risk.Name,
-		Description: risk.Description,
-		CreatedAt:   existing.CreatedAt,
-		UpdatedAt:   now,
-	}
+	risk.CreatedAt = existing.CreatedAt
+	risk.UpdatedAt = now
+
+	updated := toDocument(risk)
 
 	if _, err := docRef.Set(ctx, updated); err != nil {
 		return nil, goerr.Wrap(err, "failed to update risk", goerr.V("id", risk.ID))
 	}
 
-	return &model.Risk{
-		ID:          updated.ID,
-		Name:        updated.Name,
-		Description: updated.Description,
-		CreatedAt:   updated.CreatedAt,
-		UpdatedAt:   updated.UpdatedAt,
-	}, nil
+	return toModel(updated), nil
 }
 
 func (r *riskRepository) Delete(ctx context.Context, id int64) error {

@@ -25,6 +25,7 @@ func cmdServe() *cli.Command {
 	var enableGraphiQL bool
 	var projectID string
 	var databaseID string
+	var configPath string
 	var slackCfg config.Slack
 
 	flags := []cli.Flag{
@@ -47,6 +48,13 @@ func cmdServe() *cli.Command {
 			Value:       true,
 			Sources:     cli.EnvVars("HECATONCHEIRES_GRAPHIQL"),
 			Destination: &enableGraphiQL,
+		},
+		&cli.StringFlag{
+			Name:        "config",
+			Usage:       "Path to configuration file (TOML)",
+			Value:       "./config.toml",
+			Sources:     cli.EnvVars("HECATONCHEIRES_CONFIG"),
+			Destination: &configPath,
 		},
 		&cli.StringFlag{
 			Name:        "firestore-project-id",
@@ -73,6 +81,21 @@ func cmdServe() *cli.Command {
 		Usage:   "Start HTTP server",
 		Flags:   flags,
 		Action: func(ctx context.Context, c *cli.Command) error {
+			// Load application configuration
+			var appConfig *config.AppConfig
+			if _, err := os.Stat(configPath); err == nil {
+				appConfig, err = config.LoadAppConfiguration(configPath)
+				if err != nil {
+					return goerr.Wrap(err, "failed to load configuration file", goerr.V("path", configPath))
+				}
+				logging.Default().Info("Configuration loaded", "path", configPath)
+			} else if !os.IsNotExist(err) {
+				return goerr.Wrap(err, "failed to check configuration file", goerr.V("path", configPath))
+			} else {
+				logging.Default().Warn("Configuration file not found, using empty configuration", "path", configPath)
+				appConfig = &config.AppConfig{}
+			}
+
 			// Initialize Firestore repository
 			repo, err := firestore.New(ctx, projectID, databaseID)
 			if err != nil {
@@ -83,9 +106,6 @@ func cmdServe() *cli.Command {
 					logging.Default().Error("failed to close firestore repository", "error", err.Error())
 				}
 			}()
-
-			// Initialize use cases
-			uc := usecase.New(repo)
 
 			// Configure authentication
 			authUC, err := slackCfg.Configure(repo, baseURL)
@@ -98,6 +118,13 @@ func cmdServe() *cli.Command {
 			} else {
 				logging.Default().Info("No authentication configured, running in anonymous mode")
 			}
+
+			// Initialize use cases with configuration and auth
+			riskConfig := appConfig.ToDomainRiskConfig()
+			uc := usecase.New(repo,
+				usecase.WithRiskConfig(riskConfig),
+				usecase.WithAuth(authUC),
+			)
 
 			// Create GraphQL handler
 			resolver := graphql.NewResolver(repo, uc)

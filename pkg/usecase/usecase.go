@@ -2,16 +2,40 @@ package usecase
 
 import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 )
 
 type UseCases struct {
-	repo interfaces.Repository
-	Risk *RiskUseCase
+	repo       interfaces.Repository
+	riskConfig *config.RiskConfig
+	Risk       *RiskUseCase
+	Auth       AuthUseCaseInterface
 }
 
-func New(repo interfaces.Repository) *UseCases {
-	return &UseCases{
-		repo: repo,
-		Risk: NewRiskUseCase(repo),
+type Option func(*UseCases)
+
+func WithRiskConfig(cfg *config.RiskConfig) Option {
+	return func(uc *UseCases) {
+		uc.riskConfig = cfg
 	}
+}
+
+func WithAuth(auth AuthUseCaseInterface) Option {
+	return func(uc *UseCases) {
+		uc.Auth = auth
+	}
+}
+
+func New(repo interfaces.Repository, opts ...Option) *UseCases {
+	uc := &UseCases{
+		repo: repo,
+	}
+
+	for _, opt := range opts {
+		opt(uc)
+	}
+
+	uc.Risk = NewRiskUseCase(repo, uc.riskConfig)
+
+	return uc
 }
