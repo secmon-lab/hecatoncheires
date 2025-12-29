@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
@@ -132,7 +133,7 @@ type SlackIDToken struct {
 // HandleCallback processes the OAuth callback
 func (uc *AuthUseCase) HandleCallback(ctx context.Context, code string) (*auth.Token, error) {
 	// Exchange code for access token
-	tokenResp, err := uc.exchangeCodeForToken(code)
+	tokenResp, err := uc.exchangeCodeForToken(ctx, code)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to exchange code for token")
 	}
@@ -161,18 +162,26 @@ func (uc *AuthUseCase) HandleCallback(ctx context.Context, code string) (*auth.T
 }
 
 // exchangeCodeForToken exchanges the authorization code for an access token
-func (uc *AuthUseCase) exchangeCodeForToken(code string) (*SlackTokenResponse, error) {
+func (uc *AuthUseCase) exchangeCodeForToken(ctx context.Context, code string) (*SlackTokenResponse, error) {
 	data := url.Values{}
 	data.Set("client_id", uc.clientID)
 	data.Set("client_secret", uc.clientSecret)
 	data.Set("code", code)
 	data.Set("redirect_uri", uc.callbackURL)
 
-	resp, err := http.PostForm("https://slack.com/api/openid.connect.token", data)
+	encodedData := data.Encode()
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://slack.com/api/openid.connect.token", strings.NewReader(encodedData))
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to create request")
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.ContentLength = int64(len(encodedData))
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to make token request")
 	}
-	defer safe.Close(context.Background(), resp.Body)
+	defer safe.Close(ctx, resp.Body)
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
