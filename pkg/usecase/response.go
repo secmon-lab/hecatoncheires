@@ -55,9 +55,15 @@ func (uc *ResponseUseCase) CreateResponse(ctx context.Context, title, descriptio
 	// Link to risks if provided
 	for _, riskID := range riskIDs {
 		if err := uc.repo.RiskResponse().Link(ctx, riskID, created.ID); err != nil {
-			// If link fails, we should still return the created response but log the error
-			// The caller can handle the linking separately if needed
-			return created, goerr.Wrap(err, "failed to link response to risk",
+			// Rollback: delete the created response to maintain atomicity
+			if delErr := uc.repo.Response().Delete(ctx, created.ID); delErr != nil {
+				// Log cleanup error but return the primary linking error
+				return nil, goerr.Wrap(err, "failed to link response to risk and rollback failed",
+					goerr.V("responseID", created.ID),
+					goerr.V("riskID", riskID),
+					goerr.V("rollbackError", delErr))
+			}
+			return nil, goerr.Wrap(err, "failed to link response to risk, response creation rolled back",
 				goerr.V("responseID", created.ID),
 				goerr.V("riskID", riskID))
 		}

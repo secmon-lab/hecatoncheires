@@ -12,10 +12,10 @@ import (
 
 func TestResponseUseCase_CreateResponse(t *testing.T) {
 	ctx := context.Background()
-	repo := memory.New()
-	uc := usecase.NewResponseUseCase(repo)
 
 	t.Run("successful creation", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewResponseUseCase(repo)
 		response, err := uc.CreateResponse(ctx, "Test Response", "Description", []string{"U123"}, "https://example.com", types.ResponseStatusTodo, nil)
 		if err != nil {
 			t.Fatalf("failed to create response: %v", err)
@@ -33,6 +33,8 @@ func TestResponseUseCase_CreateResponse(t *testing.T) {
 	})
 
 	t.Run("empty title fails", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewResponseUseCase(repo)
 		_, err := uc.CreateResponse(ctx, "", "Description", []string{"U123"}, "", types.ResponseStatusTodo, nil)
 		if err == nil {
 			t.Error("expected error for empty title")
@@ -40,6 +42,8 @@ func TestResponseUseCase_CreateResponse(t *testing.T) {
 	})
 
 	t.Run("invalid status fails", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewResponseUseCase(repo)
 		_, err := uc.CreateResponse(ctx, "Test", "Description", []string{"U123"}, "", types.ResponseStatus("invalid"), nil)
 		if err == nil {
 			t.Error("expected error for invalid status")
@@ -47,6 +51,8 @@ func TestResponseUseCase_CreateResponse(t *testing.T) {
 	})
 
 	t.Run("default status to backlog", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewResponseUseCase(repo)
 		response, err := uc.CreateResponse(ctx, "Test", "Description", []string{"U123"}, "", "", nil)
 		if err != nil {
 			t.Fatalf("failed to create response: %v", err)
@@ -58,6 +64,8 @@ func TestResponseUseCase_CreateResponse(t *testing.T) {
 	})
 
 	t.Run("with risk IDs", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewResponseUseCase(repo)
 		// Create a risk first
 		risk, err := repo.Risk().Create(ctx, &model.Risk{
 			Name: "Test Risk",
@@ -79,6 +87,30 @@ func TestResponseUseCase_CreateResponse(t *testing.T) {
 
 		if len(responses) != 1 || responses[0].ID != response.ID {
 			t.Error("response should be linked to risk")
+		}
+	})
+
+	t.Run("rollback on link failure", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewResponseUseCase(repo)
+		// Try to create response with non-existent risk ID
+		nonExistentRiskID := int64(999999)
+		_, err := uc.CreateResponse(ctx, "Test Response", "Description", []string{"U123"}, "", types.ResponseStatusTodo, []int64{nonExistentRiskID})
+		if err == nil {
+			t.Fatal("expected error when linking to non-existent risk")
+		}
+
+		// Verify the response was NOT created (rollback succeeded)
+		allResponses, err := repo.Response().List(ctx)
+		if err != nil {
+			t.Fatalf("failed to list responses: %v", err)
+		}
+
+		// Check that no response with the title exists
+		for _, r := range allResponses {
+			if r.Title == "Test Response" {
+				t.Error("response should have been rolled back after link failure")
+			}
 		}
 	})
 }
