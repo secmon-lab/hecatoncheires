@@ -1,22 +1,57 @@
 .topBar {
-  height: 64px;
-  background-color: #ffffff;
+  height: var(--topbar-height);
+  background-color: var(--topbar-bg);
   border-bottom: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 32px;
-  position: sticky;
+  position: fixed;
   top: 0;
-  z-index: 100;
-  box-shadow: 0 1px 4px 0 rgba(0, 0, 0, 0.14);
+  left: 0;
+  right: 0;
+  width: 100%;
+  z-index: 1000;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.leftSection {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  color: var(--topbar-text);
+  transition: opacity var(--transition-fast);
+}
+
+.logo:hover {
+  opacity: 0.8;
+}
+
+.logoIcon {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+.logoText {
+  font-size: 18px;
+  font-weight: 300;
+  letter-spacing: 0.5px;
 }
 
 .title {
   margin: 0;
   font-size: 18px;
   font-weight: 300;
-  color: #555;
+  color: var(--topbar-text);
 }
 
 .actions {
@@ -29,7 +64,7 @@
   height: 40px;
   border: none;
   background-color: transparent;
-  color: #555;
+  color: var(--topbar-icon);
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -39,6 +74,6 @@
 }
 
 .iconButton:hover {
-  background-color: rgba(153, 153, 153, 0.2);
-  color: #333;
+  background-color: var(--topbar-hover);
+  color: var(--topbar-text);
 }

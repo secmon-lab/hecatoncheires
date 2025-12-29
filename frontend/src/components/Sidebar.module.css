@@ -1,47 +1,13 @@
 .sidebar {
-  width: 260px;
-  height: 100vh;
+  width: var(--sidebar-width);
+  height: calc(100vh - var(--topbar-height));
   background: var(--sidebar-bg);
   display: flex;
   flex-direction: column;
   position: fixed;
   left: 0;
-  top: 0;
+  top: var(--topbar-height);
   box-shadow: var(--shadow-sidebar);
-}
-
-.logoContainer {
-  height: 64px;
-  padding: 0 20px;
-  border-bottom: 1px solid var(--sidebar-border);
-  text-decoration: none;
-  display: flex;
-  align-items: center;
-  transition: background-color var(--transition-fast);
-}
-
-.logoContainer:hover {
-  background-color: var(--sidebar-hover);
-}
-
-.logo {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-md);
-  color: var(--sidebar-text);
-}
-
-.logoIcon {
-  width: 40px;
-  height: 40px;
-  flex-shrink: 0;
-  object-fit: contain;
-}
-
-.logoText {
-  font-size: 18px;
-  font-weight: 300;
-  letter-spacing: 0.5px;
 }
 
 .nav {
@@ -56,23 +22,22 @@
   align-items: center;
   gap: var(--spacing-md);
   padding: var(--spacing-md) 20px;
-  color: var(--sidebar-text-secondary);
+  color: var(--sidebar-text);
   text-decoration: none;
-  font-size: 14px;
-  font-weight: 300;
+  font-size: 13px;
+  font-weight: 400;
   transition: all var(--transition-fast);
   position: relative;
 }
 
 .navItem:hover {
-  background-color: var(--sidebar-hover);
-  color: var(--sidebar-text);
+  background-color: var(--sidebar-hover-bg);
+  color: var(--sidebar-text-active);
 }
 
 .navItem.active {
-  background-color: var(--sidebar-active);
-  color: var(--sidebar-text);
-  box-shadow: var(--shadow-md);
+  background-color: var(--sidebar-active-bg);
+  color: var(--sidebar-text-active);
 }
 
 .navItem.active::before {
@@ -82,5 +47,5 @@
   top: 0;
   bottom: 0;
   width: 3px;
-  background-color: var(--sidebar-text);
+  background-color: var(--sidebar-active-border);
 }
