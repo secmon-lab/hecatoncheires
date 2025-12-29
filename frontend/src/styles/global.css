@@ -51,10 +51,10 @@
   --sidebar-bg: #ffffff;
   --sidebar-bg-solid: #ffffff;
   --sidebar-text: #2E5CB8;
-  --sidebar-text-secondary: rgba(46, 92, 184, 0.7);
+  --sidebar-text-secondary: rgba(var(--color-primary-rgb), 0.7);
   --sidebar-active: #E3F2FD;
-  --sidebar-hover: rgba(46, 92, 184, 0.08);
-  --sidebar-border: rgba(46, 92, 184, 0.12);
+  --sidebar-hover: rgba(var(--color-primary-rgb), 0.08);
+  --sidebar-border: rgba(var(--color-primary-rgb), 0.12);
 
   /* Divider */
   --divider: #e0e0e0;
