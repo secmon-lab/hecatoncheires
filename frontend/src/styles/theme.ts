@@ -1,6 +1,10 @@
+// RGB color values for dynamic rgba usage
+const primaryColorRGB = '46, 92, 184'
+
 export const colors = {
   // Primary blue gradient (from the logo)
   primary: {
+    rgb: primaryColorRGB,
     main: '#2E5CB8',      // Logo primary blue
     light: '#5B8DEE',     // Light blue
     dark: '#1E3A8A',      // Dark blue
@@ -79,10 +83,10 @@ export const colors = {
     background: '#ffffff',
     backgroundSolid: '#ffffff',
     text: '#2E5CB8',
-    textSecondary: 'rgba(46, 92, 184, 0.7)',
+    textSecondary: `rgba(${primaryColorRGB}, 0.7)`,
     active: '#E3F2FD',
-    hover: 'rgba(46, 92, 184, 0.08)',
-    border: 'rgba(46, 92, 184, 0.12)',
+    hover: `rgba(${primaryColorRGB}, 0.08)`,
+    border: `rgba(${primaryColorRGB}, 0.12)`,
   },
   // Divider
   divider: '#e0e0e0',
