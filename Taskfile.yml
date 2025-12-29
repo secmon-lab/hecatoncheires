@@ -19,10 +19,3 @@ tasks:
     desc: "Generate mock files"
     cmds:
       - echo "Mock generation will be added when interfaces are defined"
-
-  run:
-    desc: "Run the application"
-    deps:
-      - build
-    cmds:
-      - ./hecatoncheires serve

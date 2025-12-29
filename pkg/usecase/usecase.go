@@ -9,6 +9,7 @@ type UseCases struct {
 	repo       interfaces.Repository
 	riskConfig *config.RiskConfig
 	Risk       *RiskUseCase
+	Response   *ResponseUseCase
 	Auth       AuthUseCaseInterface
 }
 
@@ -36,6 +37,7 @@ func New(repo interfaces.Repository, opts ...Option) *UseCases {
 	}
 
 	uc.Risk = NewRiskUseCase(repo, uc.riskConfig)
+	uc.Response = NewResponseUseCase(repo)
 
 	return uc
 }

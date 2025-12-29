@@ -1,9 +1,21 @@
 package graphql
 
 import (
+	"context"
+
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	graphql1 "github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 )
+
+// stringPtrToString converts *string to string
+func stringPtrToString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
 
 // toGraphQLRisk converts domain Risk to GraphQL Risk
 func toGraphQLRisk(risk *model.Risk) *graphql1.Risk {
@@ -33,7 +45,113 @@ func toGraphQLRisk(risk *model.Risk) *graphql1.Risk {
 		AssigneeIDs:         risk.AssigneeIDs,
 		Assignees:           []*graphql1.SlackUser{}, // Resolved by field resolver
 		DetectionIndicators: risk.DetectionIndicators,
+		Responses:           []*graphql1.Response{}, // Resolved by field resolver
 		CreatedAt:           risk.CreatedAt,
 		UpdatedAt:           risk.UpdatedAt,
 	}
+}
+
+// toGraphQLResponse converts domain Response to GraphQL Response
+func toGraphQLResponse(response *model.Response) *graphql1.Response {
+	// Store ResponderIDs temporarily in Responders for field resolver
+	responders := make([]*graphql1.SlackUser, len(response.ResponderIDs))
+	for i, id := range response.ResponderIDs {
+		responders[i] = &graphql1.SlackUser{ID: id}
+	}
+
+	return &graphql1.Response{
+		ID:          int(response.ID),
+		Title:       response.Title,
+		Description: response.Description,
+		Responders:  responders, // Will be enriched by field resolver
+		URL:         &response.URL,
+		Status:      toGraphQLResponseStatus(response.Status),
+		Risks:       []*graphql1.Risk{}, // Resolved by field resolver
+		CreatedAt:   response.CreatedAt,
+		UpdatedAt:   response.UpdatedAt,
+	}
+}
+
+// toGraphQLResponseStatus converts domain ResponseStatus to GraphQL ResponseStatus
+func toGraphQLResponseStatus(status types.ResponseStatus) graphql1.ResponseStatus {
+	switch status {
+	case types.ResponseStatusBacklog:
+		return graphql1.ResponseStatusBacklog
+	case types.ResponseStatusTodo:
+		return graphql1.ResponseStatusTodo
+	case types.ResponseStatusInProgress:
+		return graphql1.ResponseStatusInProgress
+	case types.ResponseStatusBlocked:
+		return graphql1.ResponseStatusBlocked
+	case types.ResponseStatusCompleted:
+		return graphql1.ResponseStatusCompleted
+	case types.ResponseStatusAbandoned:
+		return graphql1.ResponseStatusAbandoned
+	default:
+		return graphql1.ResponseStatusBacklog
+	}
+}
+
+// toDomainResponseStatus converts GraphQL ResponseStatus to domain ResponseStatus
+func toDomainResponseStatus(status graphql1.ResponseStatus) types.ResponseStatus {
+	switch status {
+	case graphql1.ResponseStatusBacklog:
+		return types.ResponseStatusBacklog
+	case graphql1.ResponseStatusTodo:
+		return types.ResponseStatusTodo
+	case graphql1.ResponseStatusInProgress:
+		return types.ResponseStatusInProgress
+	case graphql1.ResponseStatusBlocked:
+		return types.ResponseStatusBlocked
+	case graphql1.ResponseStatusCompleted:
+		return types.ResponseStatusCompleted
+	case graphql1.ResponseStatusAbandoned:
+		return types.ResponseStatusAbandoned
+	default:
+		return types.ResponseStatusBacklog
+	}
+}
+
+// enrichResponse enriches a Response with responder and risk information
+func enrichResponse(ctx context.Context, uc *usecase.UseCases, response *graphql1.Response) *graphql1.Response {
+	// Enrich responders
+	if uc.Auth != nil && len(response.Responders) > 0 {
+		responderIDs := make([]string, len(response.Responders))
+		for i, responder := range response.Responders {
+			responderIDs[i] = responder.ID
+		}
+
+		users, err := uc.Auth.GetSlackUsers(ctx)
+		if err == nil {
+			userMap := make(map[string]*graphql1.SlackUser)
+			for _, user := range users {
+				userMap[user.ID] = &graphql1.SlackUser{
+					ID:       user.ID,
+					Name:     user.Name,
+					RealName: user.RealName,
+					ImageURL: user.ImageURL,
+				}
+			}
+
+			enrichedResponders := make([]*graphql1.SlackUser, 0, len(responderIDs))
+			for _, id := range responderIDs {
+				if user, ok := userMap[id]; ok {
+					enrichedResponders = append(enrichedResponders, user)
+				}
+			}
+			response.Responders = enrichedResponders
+		}
+	}
+
+	// Enrich risks
+	risks, err := uc.Response.GetRisksByResponse(ctx, int64(response.ID))
+	if err == nil {
+		gqlRisks := make([]*graphql1.Risk, len(risks))
+		for i, risk := range risks {
+			gqlRisks[i] = toGraphQLRisk(risk)
+		}
+		response.Risks = gqlRisks
+	}
+
+	return response
 }

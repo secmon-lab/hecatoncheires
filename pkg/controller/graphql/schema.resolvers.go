@@ -95,6 +95,89 @@ func (r *mutationResolver) DeleteRisk(ctx context.Context, id int) (bool, error)
 	return true, nil
 }
 
+// CreateResponse is the resolver for the createResponse field.
+func (r *mutationResolver) CreateResponse(ctx context.Context, input graphql1.CreateResponseInput) (*graphql1.Response, error) {
+	var status types.ResponseStatus
+	if input.Status != nil {
+		status = toDomainResponseStatus(*input.Status)
+	} else {
+		status = types.ResponseStatusBacklog
+	}
+
+	var riskIDs []int64
+	if input.RiskIDs != nil {
+		riskIDs = make([]int64, len(input.RiskIDs))
+		for i, id := range input.RiskIDs {
+			riskIDs[i] = int64(id)
+		}
+	}
+
+	response, err := r.uc.Response.CreateResponse(
+		ctx,
+		input.Title,
+		input.Description,
+		input.ResponderIDs,
+		stringPtrToString(input.URL),
+		status,
+		riskIDs,
+	)
+	if err != nil {
+		errutil.Handle(ctx, err, "failed to create response")
+		return nil, err
+	}
+
+	return toGraphQLResponse(response), nil
+}
+
+// UpdateResponse is the resolver for the updateResponse field.
+func (r *mutationResolver) UpdateResponse(ctx context.Context, input graphql1.UpdateResponseInput) (*graphql1.Response, error) {
+	response, err := r.uc.Response.UpdateResponse(
+		ctx,
+		int64(input.ID),
+		input.Title,
+		input.Description,
+		input.ResponderIDs,
+		stringPtrToString(input.URL),
+		toDomainResponseStatus(input.Status),
+	)
+	if err != nil {
+		errutil.Handle(ctx, err, "failed to update response")
+		return nil, err
+	}
+
+	return toGraphQLResponse(response), nil
+}
+
+// DeleteResponse is the resolver for the deleteResponse field.
+func (r *mutationResolver) DeleteResponse(ctx context.Context, id int) (bool, error) {
+	if err := r.uc.Response.DeleteResponse(ctx, int64(id)); err != nil {
+		errutil.Handle(ctx, err, "failed to delete response")
+		return false, err
+	}
+
+	return true, nil
+}
+
+// LinkResponseToRisk is the resolver for the linkResponseToRisk field.
+func (r *mutationResolver) LinkResponseToRisk(ctx context.Context, responseID int, riskID int) (bool, error) {
+	if err := r.uc.Response.LinkResponseToRisk(ctx, int64(responseID), int64(riskID)); err != nil {
+		errutil.Handle(ctx, err, "failed to link response to risk")
+		return false, err
+	}
+
+	return true, nil
+}
+
+// UnlinkResponseFromRisk is the resolver for the unlinkResponseFromRisk field.
+func (r *mutationResolver) UnlinkResponseFromRisk(ctx context.Context, responseID int, riskID int) (bool, error) {
+	if err := r.uc.Response.UnlinkResponseFromRisk(ctx, int64(responseID), int64(riskID)); err != nil {
+		errutil.Handle(ctx, err, "failed to unlink response from risk")
+		return false, err
+	}
+
+	return true, nil
+}
+
 // Health is the resolver for the health field.
 func (r *queryResolver) Health(ctx context.Context) (string, error) {
 	// TODO: Remove this dummy implementation when real health check is added
@@ -206,11 +289,90 @@ func (r *queryResolver) SlackUsers(ctx context.Context) ([]*graphql1.SlackUser, 
 	return gqlUsers, nil
 }
 
+// Responses is the resolver for the responses field.
+func (r *queryResolver) Responses(ctx context.Context) ([]*graphql1.Response, error) {
+	responses, err := r.uc.Response.ListResponses(ctx)
+	if err != nil {
+		errutil.Handle(ctx, err, "failed to list responses")
+		return nil, err
+	}
+
+	gqlResponses := make([]*graphql1.Response, len(responses))
+	for i, response := range responses {
+		gqlResponses[i] = enrichResponse(ctx, r.uc, toGraphQLResponse(response))
+	}
+
+	return gqlResponses, nil
+}
+
+// Response is the resolver for the response field.
+func (r *queryResolver) Response(ctx context.Context, id int) (*graphql1.Response, error) {
+	response, err := r.uc.Response.GetResponse(ctx, int64(id))
+	if err != nil {
+		errutil.Handle(ctx, err, "failed to get response")
+		return nil, err
+	}
+
+	return enrichResponse(ctx, r.uc, toGraphQLResponse(response)), nil
+}
+
+// ResponsesByRisk is the resolver for the responsesByRisk field.
+func (r *queryResolver) ResponsesByRisk(ctx context.Context, riskID int) ([]*graphql1.Response, error) {
+	responses, err := r.uc.Response.GetResponsesByRisk(ctx, int64(riskID))
+	if err != nil {
+		errutil.Handle(ctx, err, "failed to get responses by risk")
+		return nil, err
+	}
+
+	gqlResponses := make([]*graphql1.Response, len(responses))
+	for i, response := range responses {
+		gqlResponses[i] = enrichResponse(ctx, r.uc, toGraphQLResponse(response))
+	}
+
+	return gqlResponses, nil
+}
+
+// Responses is the resolver for the responses field on Risk.
+func (r *riskResolver) Responses(ctx context.Context, obj *graphql1.Risk) ([]*graphql1.Response, error) {
+	loaders := GetDataLoaders(ctx)
+	if loaders == nil || loaders.ResponsesByRiskLoader == nil {
+		// Fallback to direct query if DataLoader is not available
+		responses, err := r.uc.Response.GetResponsesByRisk(ctx, int64(obj.ID))
+		if err != nil {
+			errutil.Handle(ctx, err, "failed to get responses by risk")
+			return nil, err
+		}
+
+		gqlResponses := make([]*graphql1.Response, len(responses))
+		for i, response := range responses {
+			gqlResponses[i] = enrichResponse(ctx, r.uc, toGraphQLResponse(response))
+		}
+		return gqlResponses, nil
+	}
+
+	responses, err := loaders.ResponsesByRiskLoader.Load(ctx, int64(obj.ID))
+	if err != nil {
+		errutil.Handle(ctx, err, "failed to load responses by risk")
+		return nil, err
+	}
+
+	gqlResponses := make([]*graphql1.Response, len(responses))
+	for i, response := range responses {
+		gqlResponses[i] = enrichResponse(ctx, r.uc, toGraphQLResponse(response))
+	}
+
+	return gqlResponses, nil
+}
+
 // Mutation returns MutationResolver implementation.
 func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
 
 // Query returns QueryResolver implementation.
 func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 
+// Risk returns RiskResolver implementation.
+func (r *Resolver) Risk() RiskResolver { return &riskResolver{r} }
+
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
+type riskResolver struct{ *Resolver }
