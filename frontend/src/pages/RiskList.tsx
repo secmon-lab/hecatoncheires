@@ -44,20 +44,18 @@ export default function RiskList() {
   const renderCategories = (categoryIDs: string[]) => {
     if (!configData?.riskConfiguration?.categories) return null
     const allCategories = configData.riskConfiguration.categories
+    const categoryMap = new Map(allCategories.map((cat: { id: string; name: string }, index: number) => [cat.id, { ...cat, index }]))
     const categories = categoryIDs
-      .map(id => allCategories.find((cat: { id: string; name: string }) => cat.id === id))
+      .map(id => categoryMap.get(id))
       .filter(Boolean)
 
     return (
       <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-        {categories.map((cat: { id: string; name: string }) => {
-          const index = allCategories.findIndex((c: { id: string }) => c.id === cat.id)
-          return (
-            <Chip key={cat.id} variant="category" colorIndex={index}>
-              {cat.name}
-            </Chip>
-          )
-        })}
+        {categories.map((cat: { id: string; name: string; index: number }) => (
+          <Chip key={cat.id} variant="category" colorIndex={cat.index}>
+            {cat.name}
+          </Chip>
+        ))}
       </div>
     )
   }
@@ -65,28 +63,27 @@ export default function RiskList() {
   const renderTeams = (teamIDs: string[]) => {
     if (!configData?.riskConfiguration?.teams) return null
     const allTeams = configData.riskConfiguration.teams
+    const teamMap = new Map(allTeams.map((team: { id: string; name: string }, index: number) => [team.id, { ...team, index }]))
     const teams = teamIDs
-      .map(id => allTeams.find((team: { id: string; name: string }) => team.id === id))
+      .map(id => teamMap.get(id))
       .filter(Boolean)
 
     return (
       <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-        {teams.map((team: { id: string; name: string }) => {
-          const index = allTeams.findIndex((t: { id: string }) => t.id === team.id)
-          return (
-            <Chip key={team.id} variant="team" colorIndex={index}>
-              {team.name}
-            </Chip>
-          )
-        })}
+        {teams.map((team: { id: string; name: string; index: number }) => (
+          <Chip key={team.id} variant="team" colorIndex={team.index}>
+            {team.name}
+          </Chip>
+        ))}
       </div>
     )
   }
 
   const renderAssignees = (assigneeIDs: string[]) => {
     if (!usersData?.slackUsers) return null
+    const userMap = new Map(usersData.slackUsers.map((user: { id: string; realName: string; imageUrl?: string }) => [user.id, user]))
     const users = assigneeIDs
-      .map(id => usersData.slackUsers.find((user: { id: string; realName: string; imageUrl?: string }) => user.id === id))
+      .map(id => userMap.get(id))
       .filter(Boolean)
 
     return (

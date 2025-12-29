@@ -98,25 +98,28 @@ export default function RiskDetail() {
 
   // Get configuration items
   const allCategories = configData?.riskConfiguration?.categories || []
+  const categoryMap = new Map(allCategories.map((c: any, index: number) => [c.id, { ...c, index }]))
   const categories = risk.categoryIDs
-    .map(id => allCategories.find((c: any) => c.id === id))
+    .map(id => categoryMap.get(id))
     .filter(Boolean)
 
-  const likelihood = configData?.riskConfiguration.likelihoodLevels.find(
+  const likelihood = configData?.riskConfiguration?.likelihoodLevels.find(
     (l: any) => l.id === risk.likelihoodID
   )
 
-  const impact = configData?.riskConfiguration.impactLevels.find(
+  const impact = configData?.riskConfiguration?.impactLevels.find(
     (i: any) => i.id === risk.impactID
   )
 
   const allTeams = configData?.riskConfiguration?.teams || []
+  const teamMap = new Map(allTeams.map((t: any, index: number) => [t.id, { ...t, index }]))
   const teams = risk.responseTeamIDs
-    .map(id => allTeams.find((t: any) => t.id === id))
+    .map(id => teamMap.get(id))
     .filter(Boolean)
 
+  const userMap = new Map((usersData?.slackUsers || []).map((u: any) => [u.id, u]))
   const assignees = risk.assigneeIDs
-    .map(id => usersData?.slackUsers.find((u: any) => u.id === id))
+    .map(id => userMap.get(id))
     .filter(Boolean)
 
   return (
@@ -164,14 +167,11 @@ export default function RiskDetail() {
             <div className={styles.section}>
               <h3 className={styles.sectionTitle}>Categories</h3>
               <div className={styles.chips}>
-                {categories.map((cat: any) => {
-                  const index = allCategories.findIndex((c: any) => c.id === cat.id)
-                  return (
-                    <Chip key={cat.id} variant="category" colorIndex={index}>
-                      {cat.name}
-                    </Chip>
-                  )
-                })}
+                {categories.map((cat: any) => (
+                  <Chip key={cat.id} variant="category" colorIndex={cat.index}>
+                    {cat.name}
+                  </Chip>
+                ))}
               </div>
             </div>
           )}
@@ -215,14 +215,11 @@ export default function RiskDetail() {
             <div className={styles.section}>
               <h3 className={styles.sectionTitle}>Response Teams</h3>
               <div className={styles.chips}>
-                {teams.map((team: any) => {
-                  const index = allTeams.findIndex((t: any) => t.id === team.id)
-                  return (
-                    <Chip key={team.id} variant="team" colorIndex={index}>
-                      {team.name}
-                    </Chip>
-                  )
-                })}
+                {teams.map((team: any) => (
+                  <Chip key={team.id} variant="team" colorIndex={team.index}>
+                    {team.name}
+                  </Chip>
+                ))}
               </div>
             </div>
           )}

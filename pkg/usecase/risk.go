@@ -27,6 +27,30 @@ func (uc *RiskUseCase) CreateRisk(ctx context.Context, name, description string,
 		return nil, goerr.New("risk name is required")
 	}
 
+	// Validate category IDs
+	for _, id := range categoryIDs {
+		if err := uc.ValidateCategoryID(id); err != nil {
+			return nil, goerr.Wrap(err, "invalid category ID")
+		}
+	}
+
+	// Validate likelihood ID
+	if err := uc.ValidateLikelihoodID(likelihoodID); err != nil {
+		return nil, goerr.Wrap(err, "invalid likelihood ID")
+	}
+
+	// Validate impact ID
+	if err := uc.ValidateImpactID(impactID); err != nil {
+		return nil, goerr.Wrap(err, "invalid impact ID")
+	}
+
+	// Validate team IDs
+	for _, id := range responseTeamIDs {
+		if err := uc.ValidateTeamID(id); err != nil {
+			return nil, goerr.Wrap(err, "invalid team ID")
+		}
+	}
+
 	risk := &model.Risk{
 		Name:                name,
 		Description:         description,
@@ -50,6 +74,30 @@ func (uc *RiskUseCase) CreateRisk(ctx context.Context, name, description string,
 func (uc *RiskUseCase) UpdateRisk(ctx context.Context, id int64, name, description string, categoryIDs []types.CategoryID, specificImpact string, likelihoodID types.LikelihoodID, impactID types.ImpactID, responseTeamIDs []types.TeamID, assigneeIDs []string, detectionIndicators string) (*model.Risk, error) {
 	if name == "" {
 		return nil, goerr.New("risk name is required")
+	}
+
+	// Validate category IDs
+	for _, cid := range categoryIDs {
+		if err := uc.ValidateCategoryID(cid); err != nil {
+			return nil, goerr.Wrap(err, "invalid category ID")
+		}
+	}
+
+	// Validate likelihood ID
+	if err := uc.ValidateLikelihoodID(likelihoodID); err != nil {
+		return nil, goerr.Wrap(err, "invalid likelihood ID")
+	}
+
+	// Validate impact ID
+	if err := uc.ValidateImpactID(impactID); err != nil {
+		return nil, goerr.Wrap(err, "invalid impact ID")
+	}
+
+	// Validate team IDs
+	for _, tid := range responseTeamIDs {
+		if err := uc.ValidateTeamID(tid); err != nil {
+			return nil, goerr.Wrap(err, "invalid team ID")
+		}
 	}
 
 	risk := &model.Risk{
