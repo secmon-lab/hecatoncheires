@@ -70,15 +70,17 @@ export default function ResponseForm({ response, initialRiskID, onClose }: Respo
   const [updateResponse, { loading: updating }] = useMutation(UPDATE_RESPONSE, {
     update(cache, { data }) {
       if (!data?.updateResponse) return
-      cache.modify({
-        fields: {
-          responses(existingResponses = []) {
-            return existingResponses.map((responseRef: Response) =>
-              responseRef.id === data.updateResponse.id ? data.updateResponse : responseRef
-            )
+      const existing = cache.readQuery<{ responses: Response[] }>({ query: GET_RESPONSES })
+      if (existing) {
+        cache.writeQuery({
+          query: GET_RESPONSES,
+          data: {
+            responses: existing.responses.map((r) =>
+              r.id === data.updateResponse.id ? data.updateResponse : r
+            ),
           },
-        },
-      })
+        })
+      }
     },
     onCompleted: () => {
       onClose()
