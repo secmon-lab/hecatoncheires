@@ -249,8 +249,7 @@ func (r *riskResponseRepository) DeleteByResponse(ctx context.Context, responseI
 	iter := query.Documents(ctx)
 	defer iter.Stop()
 
-	batch := r.client.Batch()
-	count := 0
+	bulkWriter := r.client.BulkWriter(ctx)
 
 	for {
 		doc, err := iter.Next()
@@ -261,24 +260,12 @@ func (r *riskResponseRepository) DeleteByResponse(ctx context.Context, responseI
 			return goerr.Wrap(err, "failed to iterate risk-response links for deletion", goerr.V("responseID", responseID))
 		}
 
-		batch.Delete(doc.Ref)
-		count++
-
-		// Firestore batch has a limit of 500 operations
-		if count >= 500 {
-			if _, err := batch.Commit(ctx); err != nil {
-				return goerr.Wrap(err, "failed to commit batch delete", goerr.V("responseID", responseID))
-			}
-			batch = r.client.Batch()
-			count = 0
+		if _, err := bulkWriter.Delete(doc.Ref); err != nil {
+			return goerr.Wrap(err, "failed to delete risk-response link", goerr.V("responseID", responseID))
 		}
 	}
 
-	if count > 0 {
-		if _, err := batch.Commit(ctx); err != nil {
-			return goerr.Wrap(err, "failed to commit batch delete", goerr.V("responseID", responseID))
-		}
-	}
+	bulkWriter.End()
 
 	return nil
 }
@@ -288,8 +275,7 @@ func (r *riskResponseRepository) DeleteByRisk(ctx context.Context, riskID int64)
 	iter := query.Documents(ctx)
 	defer iter.Stop()
 
-	batch := r.client.Batch()
-	count := 0
+	bulkWriter := r.client.BulkWriter(ctx)
 
 	for {
 		doc, err := iter.Next()
@@ -300,24 +286,12 @@ func (r *riskResponseRepository) DeleteByRisk(ctx context.Context, riskID int64)
 			return goerr.Wrap(err, "failed to iterate risk-response links for deletion", goerr.V("riskID", riskID))
 		}
 
-		batch.Delete(doc.Ref)
-		count++
-
-		// Firestore batch has a limit of 500 operations
-		if count >= 500 {
-			if _, err := batch.Commit(ctx); err != nil {
-				return goerr.Wrap(err, "failed to commit batch delete", goerr.V("riskID", riskID))
-			}
-			batch = r.client.Batch()
-			count = 0
+		if _, err := bulkWriter.Delete(doc.Ref); err != nil {
+			return goerr.Wrap(err, "failed to delete risk-response link", goerr.V("riskID", riskID))
 		}
 	}
 
-	if count > 0 {
-		if _, err := batch.Commit(ctx); err != nil {
-			return goerr.Wrap(err, "failed to commit batch delete", goerr.V("riskID", riskID))
-		}
-	}
+	bulkWriter.End()
 
 	return nil
 }
