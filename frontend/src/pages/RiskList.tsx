@@ -1,13 +1,12 @@
 import { useState } from 'react'
-import { useQuery, useMutation } from '@apollo/client'
+import { useQuery } from '@apollo/client'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Edit, Trash2 } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import Table from '../components/Table'
 import Button from '../components/Button'
 import Chip from '../components/Chip'
 import RiskForm from './RiskForm'
-import RiskDeleteDialog from './RiskDeleteDialog'
-import { GET_RISKS, DELETE_RISK, GET_RISK_CONFIGURATION, GET_SLACK_USERS } from '../graphql/risk'
+import { GET_RISKS, GET_RISK_CONFIGURATION, GET_SLACK_USERS } from '../graphql/risk'
 import styles from './RiskList.module.css'
 import type { ReactElement } from 'react'
 
@@ -29,44 +28,13 @@ interface Risk {
 export default function RiskList() {
   const navigate = useNavigate()
   const [isFormOpen, setIsFormOpen] = useState(false)
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
-  const [selectedRisk, setSelectedRisk] = useState<Risk | null>(null)
 
   const { data, loading, error } = useQuery(GET_RISKS)
   const { data: configData } = useQuery(GET_RISK_CONFIGURATION)
   const { data: usersData } = useQuery(GET_SLACK_USERS)
-  const [deleteRisk] = useMutation(DELETE_RISK, {
-    update(cache) {
-      if (!selectedRisk) return
-      const normalizedId = cache.identify({ id: selectedRisk.id, __typename: 'Risk' })
-      cache.evict({ id: normalizedId })
-      cache.gc()
-    },
-    onCompleted: () => {
-      setIsDeleteDialogOpen(false)
-      setSelectedRisk(null)
-    },
-  })
-
-  const handleEdit = (risk: Risk) => {
-    setSelectedRisk(risk)
-    setIsFormOpen(true)
-  }
-
-  const handleDelete = (risk: Risk) => {
-    setSelectedRisk(risk)
-    setIsDeleteDialogOpen(true)
-  }
 
   const handleFormClose = () => {
     setIsFormOpen(false)
-    setSelectedRisk(null)
-  }
-
-  const handleDeleteConfirm = () => {
-    if (selectedRisk) {
-      deleteRisk({ variables: { id: selectedRisk.id } })
-    }
   }
 
   const handleRowClick = (risk: Risk) => {
@@ -207,14 +175,7 @@ export default function RiskList() {
       <RiskForm
         isOpen={isFormOpen}
         onClose={handleFormClose}
-        risk={selectedRisk}
-      />
-
-      <RiskDeleteDialog
-        isOpen={isDeleteDialogOpen}
-        onClose={() => setIsDeleteDialogOpen(false)}
-        onConfirm={handleDeleteConfirm}
-        riskName={selectedRisk?.name || ''}
+        risk={null}
       />
     </div>
   )
