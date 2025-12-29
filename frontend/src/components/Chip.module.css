@@ -22,39 +22,39 @@
 
 /* Variants */
 .chip.default {
-  background: var(--color-gray-100);
-  color: var(--color-gray-800);
-  border: 1px solid var(--color-gray-300);
+  background: #e5e5e5;
+  color: #1a1a1a;
+  border: 1px solid #b0b0b0;
 }
 
 .chip.category {
-  background: var(--color-blue-100);
-  color: var(--color-blue-800);
-  border: 1px solid var(--color-blue-300);
+  background: #2563eb;
+  color: #ffffff;
+  border: 1px solid #1d4ed8;
 }
 
 .chip.team {
-  background: var(--color-purple-100);
-  color: var(--color-purple-800);
-  border: 1px solid var(--color-purple-300);
+  background: #7c3aed;
+  color: #ffffff;
+  border: 1px solid #6d28d9;
 }
 
 .chip.user {
-  background: var(--color-green-100);
-  color: var(--color-green-800);
-  border: 1px solid var(--color-green-300);
+  background: #059669;
+  color: #ffffff;
+  border: 1px solid #047857;
 }
 
 .chip.primary {
-  background: var(--color-primary-100);
-  color: var(--color-primary-800);
-  border: 1px solid var(--color-primary-300);
+  background: #2563eb;
+  color: #ffffff;
+  border: 1px solid #1d4ed8;
 }
 
 .chip.secondary {
-  background: var(--color-gray-200);
-  color: var(--color-gray-700);
-  border: 1px solid var(--color-gray-400);
+  background: #6b7280;
+  color: #ffffff;
+  border: 1px solid #4b5563;
 }
 
 .icon {

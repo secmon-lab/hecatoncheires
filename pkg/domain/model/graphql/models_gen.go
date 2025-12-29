@@ -3,6 +3,10 @@
 package graphql
 
 import (
+	"bytes"
+	"fmt"
+	"io"
+	"strconv"
 	"time"
 )
 
@@ -10,6 +14,15 @@ type Category struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
+}
+
+type CreateResponseInput struct {
+	Title        string          `json:"title"`
+	Description  string          `json:"description"`
+	ResponderIDs []string        `json:"responderIDs"`
+	URL          *string         `json:"url,omitempty"`
+	Status       *ResponseStatus `json:"status,omitempty"`
+	RiskIDs      []int           `json:"riskIDs,omitempty"`
 }
 
 type CreateRiskInput struct {
@@ -44,6 +57,18 @@ type Mutation struct {
 type Query struct {
 }
 
+type Response struct {
+	ID          int            `json:"id"`
+	Title       string         `json:"title"`
+	Description string         `json:"description"`
+	Responders  []*SlackUser   `json:"responders"`
+	URL         *string        `json:"url,omitempty"`
+	Status      ResponseStatus `json:"status"`
+	Risks       []*Risk        `json:"risks"`
+	CreatedAt   time.Time      `json:"createdAt"`
+	UpdatedAt   time.Time      `json:"updatedAt"`
+}
+
 type Risk struct {
 	ID                  int              `json:"id"`
 	Name                string           `json:"name"`
@@ -60,6 +85,7 @@ type Risk struct {
 	AssigneeIDs         []string         `json:"assigneeIDs"`
 	Assignees           []*SlackUser     `json:"assignees"`
 	DetectionIndicators string           `json:"detectionIndicators"`
+	Responses           []*Response      `json:"responses"`
 	CreatedAt           time.Time        `json:"createdAt"`
 	UpdatedAt           time.Time        `json:"updatedAt"`
 }
@@ -83,6 +109,16 @@ type Team struct {
 	Name string `json:"name"`
 }
 
+type UpdateResponseInput struct {
+	ID           int             `json:"id"`
+	Title        *string         `json:"title,omitempty"`
+	Description  *string         `json:"description,omitempty"`
+	ResponderIDs []string        `json:"responderIDs,omitempty"`
+	URL          *string         `json:"url,omitempty"`
+	Status       *ResponseStatus `json:"status,omitempty"`
+	RiskIDs      []int           `json:"riskIDs,omitempty"`
+}
+
 type UpdateRiskInput struct {
 	ID                  int      `json:"id"`
 	Name                string   `json:"name"`
@@ -94,4 +130,67 @@ type UpdateRiskInput struct {
 	ResponseTeamIDs     []string `json:"responseTeamIDs"`
 	AssigneeIDs         []string `json:"assigneeIDs"`
 	DetectionIndicators string   `json:"detectionIndicators"`
+}
+
+type ResponseStatus string
+
+const (
+	ResponseStatusBacklog    ResponseStatus = "BACKLOG"
+	ResponseStatusTodo       ResponseStatus = "TODO"
+	ResponseStatusInProgress ResponseStatus = "IN_PROGRESS"
+	ResponseStatusBlocked    ResponseStatus = "BLOCKED"
+	ResponseStatusCompleted  ResponseStatus = "COMPLETED"
+	ResponseStatusAbandoned  ResponseStatus = "ABANDONED"
+)
+
+var AllResponseStatus = []ResponseStatus{
+	ResponseStatusBacklog,
+	ResponseStatusTodo,
+	ResponseStatusInProgress,
+	ResponseStatusBlocked,
+	ResponseStatusCompleted,
+	ResponseStatusAbandoned,
+}
+
+func (e ResponseStatus) IsValid() bool {
+	switch e {
+	case ResponseStatusBacklog, ResponseStatusTodo, ResponseStatusInProgress, ResponseStatusBlocked, ResponseStatusCompleted, ResponseStatusAbandoned:
+		return true
+	}
+	return false
+}
+
+func (e ResponseStatus) String() string {
+	return string(e)
+}
+
+func (e *ResponseStatus) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = ResponseStatus(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid ResponseStatus", str)
+	}
+	return nil
+}
+
+func (e ResponseStatus) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *ResponseStatus) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e ResponseStatus) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
 }

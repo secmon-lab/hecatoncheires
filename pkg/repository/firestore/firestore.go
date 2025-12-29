@@ -9,8 +9,10 @@ import (
 )
 
 type Firestore struct {
-	client *firestore.Client
-	risk   *riskRepository
+	client       *firestore.Client
+	risk         *riskRepository
+	response     *responseRepository
+	riskResponse *riskResponseRepository
 }
 
 var _ interfaces.Repository = &Firestore{}
@@ -20,6 +22,8 @@ type Option func(*Firestore)
 func WithCollectionPrefix(prefix string) Option {
 	return func(f *Firestore) {
 		f.risk.collectionPrefix = prefix
+		f.response.collectionPrefix = prefix
+		f.riskResponse.collectionPrefix = prefix
 	}
 }
 
@@ -29,9 +33,15 @@ func New(ctx context.Context, projectID, databaseID string, opts ...Option) (*Fi
 		return nil, goerr.Wrap(err, "failed to create firestore client", goerr.V("projectID", projectID), goerr.V("databaseID", databaseID))
 	}
 
+	riskRepo := newRiskRepository(client)
+	responseRepo := newResponseRepository(client)
+	riskResponseRepo := newRiskResponseRepository(client, responseRepo, riskRepo)
+
 	f := &Firestore{
-		client: client,
-		risk:   newRiskRepository(client),
+		client:       client,
+		risk:         riskRepo,
+		response:     responseRepo,
+		riskResponse: riskResponseRepo,
 	}
 
 	for _, opt := range opts {
@@ -43,6 +53,14 @@ func New(ctx context.Context, projectID, databaseID string, opts ...Option) (*Fi
 
 func (f *Firestore) Risk() interfaces.RiskRepository {
 	return f.risk
+}
+
+func (f *Firestore) Response() interfaces.ResponseRepository {
+	return f.response
+}
+
+func (f *Firestore) RiskResponse() interfaces.RiskResponseRepository {
+	return f.riskResponse
 }
 
 func (f *Firestore) Close() error {

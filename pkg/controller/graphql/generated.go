@@ -41,6 +41,7 @@ type Config struct {
 type ResolverRoot interface {
 	Mutation() MutationResolver
 	Query() QueryResolver
+	Risk() RiskResolver
 }
 
 type DirectiveRoot struct {
@@ -68,18 +69,38 @@ type ComplexityRoot struct {
 	}
 
 	Mutation struct {
-		CreateRisk func(childComplexity int, input graphql1.CreateRiskInput) int
-		DeleteRisk func(childComplexity int, id int) int
-		Noop       func(childComplexity int) int
-		UpdateRisk func(childComplexity int, input graphql1.UpdateRiskInput) int
+		CreateResponse         func(childComplexity int, input graphql1.CreateResponseInput) int
+		CreateRisk             func(childComplexity int, input graphql1.CreateRiskInput) int
+		DeleteResponse         func(childComplexity int, id int) int
+		DeleteRisk             func(childComplexity int, id int) int
+		LinkResponseToRisk     func(childComplexity int, responseID int, riskID int) int
+		Noop                   func(childComplexity int) int
+		UnlinkResponseFromRisk func(childComplexity int, responseID int, riskID int) int
+		UpdateResponse         func(childComplexity int, input graphql1.UpdateResponseInput) int
+		UpdateRisk             func(childComplexity int, input graphql1.UpdateRiskInput) int
 	}
 
 	Query struct {
 		Health            func(childComplexity int) int
+		Response          func(childComplexity int, id int) int
+		Responses         func(childComplexity int) int
+		ResponsesByRisk   func(childComplexity int, riskID int) int
 		Risk              func(childComplexity int, id int) int
 		RiskConfiguration func(childComplexity int) int
 		Risks             func(childComplexity int) int
 		SlackUsers        func(childComplexity int) int
+	}
+
+	Response struct {
+		CreatedAt   func(childComplexity int) int
+		Description func(childComplexity int) int
+		ID          func(childComplexity int) int
+		Responders  func(childComplexity int) int
+		Risks       func(childComplexity int) int
+		Status      func(childComplexity int) int
+		Title       func(childComplexity int) int
+		URL         func(childComplexity int) int
+		UpdatedAt   func(childComplexity int) int
 	}
 
 	Risk struct {
@@ -98,6 +119,7 @@ type ComplexityRoot struct {
 		Name                func(childComplexity int) int
 		ResponseTeamIDs     func(childComplexity int) int
 		ResponseTeams       func(childComplexity int) int
+		Responses           func(childComplexity int) int
 		SpecificImpact      func(childComplexity int) int
 		UpdatedAt           func(childComplexity int) int
 	}
@@ -127,6 +149,11 @@ type MutationResolver interface {
 	CreateRisk(ctx context.Context, input graphql1.CreateRiskInput) (*graphql1.Risk, error)
 	UpdateRisk(ctx context.Context, input graphql1.UpdateRiskInput) (*graphql1.Risk, error)
 	DeleteRisk(ctx context.Context, id int) (bool, error)
+	CreateResponse(ctx context.Context, input graphql1.CreateResponseInput) (*graphql1.Response, error)
+	UpdateResponse(ctx context.Context, input graphql1.UpdateResponseInput) (*graphql1.Response, error)
+	DeleteResponse(ctx context.Context, id int) (bool, error)
+	LinkResponseToRisk(ctx context.Context, responseID int, riskID int) (bool, error)
+	UnlinkResponseFromRisk(ctx context.Context, responseID int, riskID int) (bool, error)
 }
 type QueryResolver interface {
 	Health(ctx context.Context) (string, error)
@@ -134,6 +161,12 @@ type QueryResolver interface {
 	Risk(ctx context.Context, id int) (*graphql1.Risk, error)
 	RiskConfiguration(ctx context.Context) (*graphql1.RiskConfiguration, error)
 	SlackUsers(ctx context.Context) ([]*graphql1.SlackUser, error)
+	Responses(ctx context.Context) ([]*graphql1.Response, error)
+	Response(ctx context.Context, id int) (*graphql1.Response, error)
+	ResponsesByRisk(ctx context.Context, riskID int) ([]*graphql1.Response, error)
+}
+type RiskResolver interface {
+	Responses(ctx context.Context, obj *graphql1.Risk) ([]*graphql1.Response, error)
 }
 
 type executableSchema struct {
@@ -224,6 +257,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.LikelihoodLevel.Score(childComplexity), true
 
+	case "Mutation.createResponse":
+		if e.complexity.Mutation.CreateResponse == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_createResponse_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.CreateResponse(childComplexity, args["input"].(graphql1.CreateResponseInput)), true
 	case "Mutation.createRisk":
 		if e.complexity.Mutation.CreateRisk == nil {
 			break
@@ -235,6 +279,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.CreateRisk(childComplexity, args["input"].(graphql1.CreateRiskInput)), true
+	case "Mutation.deleteResponse":
+		if e.complexity.Mutation.DeleteResponse == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_deleteResponse_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.DeleteResponse(childComplexity, args["id"].(int)), true
 	case "Mutation.deleteRisk":
 		if e.complexity.Mutation.DeleteRisk == nil {
 			break
@@ -246,12 +301,45 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.DeleteRisk(childComplexity, args["id"].(int)), true
+	case "Mutation.linkResponseToRisk":
+		if e.complexity.Mutation.LinkResponseToRisk == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_linkResponseToRisk_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.LinkResponseToRisk(childComplexity, args["responseID"].(int), args["riskID"].(int)), true
 	case "Mutation.noop":
 		if e.complexity.Mutation.Noop == nil {
 			break
 		}
 
 		return e.complexity.Mutation.Noop(childComplexity), true
+	case "Mutation.unlinkResponseFromRisk":
+		if e.complexity.Mutation.UnlinkResponseFromRisk == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_unlinkResponseFromRisk_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.UnlinkResponseFromRisk(childComplexity, args["responseID"].(int), args["riskID"].(int)), true
+	case "Mutation.updateResponse":
+		if e.complexity.Mutation.UpdateResponse == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_updateResponse_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.UpdateResponse(childComplexity, args["input"].(graphql1.UpdateResponseInput)), true
 	case "Mutation.updateRisk":
 		if e.complexity.Mutation.UpdateRisk == nil {
 			break
@@ -270,6 +358,34 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Query.Health(childComplexity), true
+	case "Query.response":
+		if e.complexity.Query.Response == nil {
+			break
+		}
+
+		args, err := ec.field_Query_response_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Query.Response(childComplexity, args["id"].(int)), true
+	case "Query.responses":
+		if e.complexity.Query.Responses == nil {
+			break
+		}
+
+		return e.complexity.Query.Responses(childComplexity), true
+	case "Query.responsesByRisk":
+		if e.complexity.Query.ResponsesByRisk == nil {
+			break
+		}
+
+		args, err := ec.field_Query_responsesByRisk_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Query.ResponsesByRisk(childComplexity, args["riskID"].(int)), true
 	case "Query.risk":
 		if e.complexity.Query.Risk == nil {
 			break
@@ -299,6 +415,61 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Query.SlackUsers(childComplexity), true
+
+	case "Response.createdAt":
+		if e.complexity.Response.CreatedAt == nil {
+			break
+		}
+
+		return e.complexity.Response.CreatedAt(childComplexity), true
+	case "Response.description":
+		if e.complexity.Response.Description == nil {
+			break
+		}
+
+		return e.complexity.Response.Description(childComplexity), true
+	case "Response.id":
+		if e.complexity.Response.ID == nil {
+			break
+		}
+
+		return e.complexity.Response.ID(childComplexity), true
+	case "Response.responders":
+		if e.complexity.Response.Responders == nil {
+			break
+		}
+
+		return e.complexity.Response.Responders(childComplexity), true
+	case "Response.risks":
+		if e.complexity.Response.Risks == nil {
+			break
+		}
+
+		return e.complexity.Response.Risks(childComplexity), true
+	case "Response.status":
+		if e.complexity.Response.Status == nil {
+			break
+		}
+
+		return e.complexity.Response.Status(childComplexity), true
+	case "Response.title":
+		if e.complexity.Response.Title == nil {
+			break
+		}
+
+		return e.complexity.Response.Title(childComplexity), true
+	case "Response.url":
+		if e.complexity.Response.URL == nil {
+			break
+		}
+
+		return e.complexity.Response.URL(childComplexity), true
+	case "Response.updatedAt":
+		if e.complexity.Response.UpdatedAt == nil {
+			break
+		}
+
+		return e.complexity.Response.UpdatedAt(childComplexity), true
 
 	case "Risk.assigneeIDs":
 		if e.complexity.Risk.AssigneeIDs == nil {
@@ -390,6 +561,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Risk.ResponseTeams(childComplexity), true
+	case "Risk.responses":
+		if e.complexity.Risk.Responses == nil {
+			break
+		}
+
+		return e.complexity.Risk.Responses(childComplexity), true
 	case "Risk.specificImpact":
 		if e.complexity.Risk.SpecificImpact == nil {
 			break
@@ -474,7 +651,9 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 	opCtx := graphql.GetOperationContext(ctx)
 	ec := executionContext{opCtx, e, 0, 0, make(chan graphql.DeferredResult)}
 	inputUnmarshalMap := graphql.BuildUnmarshalerMap(
+		ec.unmarshalInputCreateResponseInput,
 		ec.unmarshalInputCreateRiskInput,
+		ec.unmarshalInputUpdateResponseInput,
 		ec.unmarshalInputUpdateRiskInput,
 	)
 	first := true
@@ -614,6 +793,27 @@ type RiskConfiguration {
   teams: [Team!]!
 }
 
+enum ResponseStatus {
+  BACKLOG
+  TODO
+  IN_PROGRESS
+  BLOCKED
+  COMPLETED
+  ABANDONED
+}
+
+type Response {
+  id: Int!
+  title: String!
+  description: String!
+  responders: [SlackUser!]!
+  url: String
+  status: ResponseStatus!
+  risks: [Risk!]!
+  createdAt: Time!
+  updatedAt: Time!
+}
+
 type Risk {
   id: Int!
   name: String!
@@ -630,6 +830,7 @@ type Risk {
   assigneeIDs: [String!]!
   assignees: [SlackUser!]!
   detectionIndicators: String!
+  responses: [Response!]!
   createdAt: Time!
   updatedAt: Time!
 }
@@ -659,12 +860,34 @@ input UpdateRiskInput {
   detectionIndicators: String!
 }
 
+input CreateResponseInput {
+  title: String!
+  description: String!
+  responderIDs: [String!]!
+  url: String
+  status: ResponseStatus
+  riskIDs: [Int!]
+}
+
+input UpdateResponseInput {
+  id: Int!
+  title: String
+  description: String
+  responderIDs: [String!]
+  url: String
+  status: ResponseStatus
+  riskIDs: [Int!]
+}
+
 type Query {
   health: String!
   risks: [Risk!]!
   risk(id: Int!): Risk
   riskConfiguration: RiskConfiguration!
   slackUsers: [SlackUser!]!
+  responses: [Response!]!
+  response(id: Int!): Response
+  responsesByRisk(riskID: Int!): [Response!]!
 }
 
 type Mutation {
@@ -672,6 +895,11 @@ type Mutation {
   createRisk(input: CreateRiskInput!): Risk!
   updateRisk(input: UpdateRiskInput!): Risk!
   deleteRisk(id: Int!): Boolean!
+  createResponse(input: CreateResponseInput!): Response!
+  updateResponse(input: UpdateResponseInput!): Response!
+  deleteResponse(id: Int!): Boolean!
+  linkResponseToRisk(responseID: Int!, riskID: Int!): Boolean!
+  unlinkResponseFromRisk(responseID: Int!, riskID: Int!): Boolean!
 }
 `, BuiltIn: false},
 }
@@ -680,6 +908,17 @@ var parsedSchema = gqlparser.MustLoadSchema(sources...)
 // endregion ************************** generated!.gotpl **************************
 
 // region    ***************************** args.gotpl *****************************
+
+func (ec *executionContext) field_Mutation_createResponse_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNCreateResponseInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateResponseInput)
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg0
+	return args, nil
+}
 
 func (ec *executionContext) field_Mutation_createRisk_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
@@ -692,6 +931,17 @@ func (ec *executionContext) field_Mutation_createRisk_args(ctx context.Context, 
 	return args, nil
 }
 
+func (ec *executionContext) field_Mutation_deleteResponse_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg0
+	return args, nil
+}
+
 func (ec *executionContext) field_Mutation_deleteRisk_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -700,6 +950,49 @@ func (ec *executionContext) field_Mutation_deleteRisk_args(ctx context.Context, 
 		return nil, err
 	}
 	args["id"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_linkResponseToRisk_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "responseID", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["responseID"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "riskID", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["riskID"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_unlinkResponseFromRisk_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "responseID", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["responseID"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "riskID", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["riskID"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_updateResponse_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNUpdateResponseInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateResponseInput)
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg0
 	return args, nil
 }
 
@@ -722,6 +1015,28 @@ func (ec *executionContext) field_Query___type_args(ctx context.Context, rawArgs
 		return nil, err
 	}
 	args["name"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_Query_response_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_Query_responsesByRisk_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "riskID", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["riskID"] = arg0
 	return args, nil
 }
 
@@ -1191,6 +1506,8 @@ func (ec *executionContext) fieldContext_Mutation_createRisk(ctx context.Context
 				return ec.fieldContext_Risk_assignees(ctx, field)
 			case "detectionIndicators":
 				return ec.fieldContext_Risk_detectionIndicators(ctx, field)
+			case "responses":
+				return ec.fieldContext_Risk_responses(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Risk_createdAt(ctx, field)
 			case "updatedAt":
@@ -1268,6 +1585,8 @@ func (ec *executionContext) fieldContext_Mutation_updateRisk(ctx context.Context
 				return ec.fieldContext_Risk_assignees(ctx, field)
 			case "detectionIndicators":
 				return ec.fieldContext_Risk_detectionIndicators(ctx, field)
+			case "responses":
+				return ec.fieldContext_Risk_responses(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Risk_createdAt(ctx, field)
 			case "updatedAt":
@@ -1325,6 +1644,251 @@ func (ec *executionContext) fieldContext_Mutation_deleteRisk(ctx context.Context
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Mutation_deleteRisk_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_createResponse(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_createResponse,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().CreateResponse(ctx, fc.Args["input"].(graphql1.CreateResponseInput))
+		},
+		nil,
+		ec.marshalNResponse2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐResponse,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_createResponse(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Response_id(ctx, field)
+			case "title":
+				return ec.fieldContext_Response_title(ctx, field)
+			case "description":
+				return ec.fieldContext_Response_description(ctx, field)
+			case "responders":
+				return ec.fieldContext_Response_responders(ctx, field)
+			case "url":
+				return ec.fieldContext_Response_url(ctx, field)
+			case "status":
+				return ec.fieldContext_Response_status(ctx, field)
+			case "risks":
+				return ec.fieldContext_Response_risks(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Response_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Response_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Response", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_createResponse_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_updateResponse(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_updateResponse,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().UpdateResponse(ctx, fc.Args["input"].(graphql1.UpdateResponseInput))
+		},
+		nil,
+		ec.marshalNResponse2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐResponse,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_updateResponse(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Response_id(ctx, field)
+			case "title":
+				return ec.fieldContext_Response_title(ctx, field)
+			case "description":
+				return ec.fieldContext_Response_description(ctx, field)
+			case "responders":
+				return ec.fieldContext_Response_responders(ctx, field)
+			case "url":
+				return ec.fieldContext_Response_url(ctx, field)
+			case "status":
+				return ec.fieldContext_Response_status(ctx, field)
+			case "risks":
+				return ec.fieldContext_Response_risks(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Response_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Response_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Response", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_updateResponse_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_deleteResponse(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_deleteResponse,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().DeleteResponse(ctx, fc.Args["id"].(int))
+		},
+		nil,
+		ec.marshalNBoolean2bool,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_deleteResponse(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_deleteResponse_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_linkResponseToRisk(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_linkResponseToRisk,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().LinkResponseToRisk(ctx, fc.Args["responseID"].(int), fc.Args["riskID"].(int))
+		},
+		nil,
+		ec.marshalNBoolean2bool,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_linkResponseToRisk(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_linkResponseToRisk_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_unlinkResponseFromRisk(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_unlinkResponseFromRisk,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().UnlinkResponseFromRisk(ctx, fc.Args["responseID"].(int), fc.Args["riskID"].(int))
+		},
+		nil,
+		ec.marshalNBoolean2bool,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_unlinkResponseFromRisk(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_unlinkResponseFromRisk_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -1414,6 +1978,8 @@ func (ec *executionContext) fieldContext_Query_risks(_ context.Context, field gr
 				return ec.fieldContext_Risk_assignees(ctx, field)
 			case "detectionIndicators":
 				return ec.fieldContext_Risk_detectionIndicators(ctx, field)
+			case "responses":
+				return ec.fieldContext_Risk_responses(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Risk_createdAt(ctx, field)
 			case "updatedAt":
@@ -1480,6 +2046,8 @@ func (ec *executionContext) fieldContext_Query_risk(ctx context.Context, field g
 				return ec.fieldContext_Risk_assignees(ctx, field)
 			case "detectionIndicators":
 				return ec.fieldContext_Risk_detectionIndicators(ctx, field)
+			case "responses":
+				return ec.fieldContext_Risk_responses(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Risk_createdAt(ctx, field)
 			case "updatedAt":
@@ -1576,6 +2144,177 @@ func (ec *executionContext) fieldContext_Query_slackUsers(_ context.Context, fie
 			}
 			return nil, fmt.Errorf("no field named %q was found under type SlackUser", field.Name)
 		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_responses(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Query_responses,
+		func(ctx context.Context) (any, error) {
+			return ec.resolvers.Query().Responses(ctx)
+		},
+		nil,
+		ec.marshalNResponse2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐResponseᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Query_responses(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Response_id(ctx, field)
+			case "title":
+				return ec.fieldContext_Response_title(ctx, field)
+			case "description":
+				return ec.fieldContext_Response_description(ctx, field)
+			case "responders":
+				return ec.fieldContext_Response_responders(ctx, field)
+			case "url":
+				return ec.fieldContext_Response_url(ctx, field)
+			case "status":
+				return ec.fieldContext_Response_status(ctx, field)
+			case "risks":
+				return ec.fieldContext_Response_risks(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Response_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Response_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Response", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_response(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Query_response,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Query().Response(ctx, fc.Args["id"].(int))
+		},
+		nil,
+		ec.marshalOResponse2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐResponse,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Query_response(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Response_id(ctx, field)
+			case "title":
+				return ec.fieldContext_Response_title(ctx, field)
+			case "description":
+				return ec.fieldContext_Response_description(ctx, field)
+			case "responders":
+				return ec.fieldContext_Response_responders(ctx, field)
+			case "url":
+				return ec.fieldContext_Response_url(ctx, field)
+			case "status":
+				return ec.fieldContext_Response_status(ctx, field)
+			case "risks":
+				return ec.fieldContext_Response_risks(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Response_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Response_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Response", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_response_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_responsesByRisk(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Query_responsesByRisk,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Query().ResponsesByRisk(ctx, fc.Args["riskID"].(int))
+		},
+		nil,
+		ec.marshalNResponse2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐResponseᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Query_responsesByRisk(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Response_id(ctx, field)
+			case "title":
+				return ec.fieldContext_Response_title(ctx, field)
+			case "description":
+				return ec.fieldContext_Response_description(ctx, field)
+			case "responders":
+				return ec.fieldContext_Response_responders(ctx, field)
+			case "url":
+				return ec.fieldContext_Response_url(ctx, field)
+			case "status":
+				return ec.fieldContext_Response_status(ctx, field)
+			case "risks":
+				return ec.fieldContext_Response_risks(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Response_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Response_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Response", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_responsesByRisk_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
 	}
 	return fc, nil
 }
@@ -1683,6 +2422,315 @@ func (ec *executionContext) fieldContext_Query___schema(_ context.Context, field
 				return ec.fieldContext___Schema_directives(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type __Schema", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Response_id(ctx context.Context, field graphql.CollectedField, obj *graphql1.Response) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Response_id,
+		func(ctx context.Context) (any, error) {
+			return obj.ID, nil
+		},
+		nil,
+		ec.marshalNInt2int,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Response_id(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Response",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Response_title(ctx context.Context, field graphql.CollectedField, obj *graphql1.Response) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Response_title,
+		func(ctx context.Context) (any, error) {
+			return obj.Title, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Response_title(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Response",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Response_description(ctx context.Context, field graphql.CollectedField, obj *graphql1.Response) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Response_description,
+		func(ctx context.Context) (any, error) {
+			return obj.Description, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Response_description(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Response",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Response_responders(ctx context.Context, field graphql.CollectedField, obj *graphql1.Response) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Response_responders,
+		func(ctx context.Context) (any, error) {
+			return obj.Responders, nil
+		},
+		nil,
+		ec.marshalNSlackUser2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackUserᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Response_responders(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Response",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_SlackUser_id(ctx, field)
+			case "name":
+				return ec.fieldContext_SlackUser_name(ctx, field)
+			case "realName":
+				return ec.fieldContext_SlackUser_realName(ctx, field)
+			case "imageUrl":
+				return ec.fieldContext_SlackUser_imageUrl(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type SlackUser", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Response_url(ctx context.Context, field graphql.CollectedField, obj *graphql1.Response) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Response_url,
+		func(ctx context.Context) (any, error) {
+			return obj.URL, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Response_url(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Response",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Response_status(ctx context.Context, field graphql.CollectedField, obj *graphql1.Response) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Response_status,
+		func(ctx context.Context) (any, error) {
+			return obj.Status, nil
+		},
+		nil,
+		ec.marshalNResponseStatus2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐResponseStatus,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Response_status(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Response",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type ResponseStatus does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Response_risks(ctx context.Context, field graphql.CollectedField, obj *graphql1.Response) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Response_risks,
+		func(ctx context.Context) (any, error) {
+			return obj.Risks, nil
+		},
+		nil,
+		ec.marshalNRisk2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐRiskᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Response_risks(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Response",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Risk_id(ctx, field)
+			case "name":
+				return ec.fieldContext_Risk_name(ctx, field)
+			case "description":
+				return ec.fieldContext_Risk_description(ctx, field)
+			case "categoryIDs":
+				return ec.fieldContext_Risk_categoryIDs(ctx, field)
+			case "categories":
+				return ec.fieldContext_Risk_categories(ctx, field)
+			case "specificImpact":
+				return ec.fieldContext_Risk_specificImpact(ctx, field)
+			case "likelihoodID":
+				return ec.fieldContext_Risk_likelihoodID(ctx, field)
+			case "likelihoodLevel":
+				return ec.fieldContext_Risk_likelihoodLevel(ctx, field)
+			case "impactID":
+				return ec.fieldContext_Risk_impactID(ctx, field)
+			case "impactLevel":
+				return ec.fieldContext_Risk_impactLevel(ctx, field)
+			case "responseTeamIDs":
+				return ec.fieldContext_Risk_responseTeamIDs(ctx, field)
+			case "responseTeams":
+				return ec.fieldContext_Risk_responseTeams(ctx, field)
+			case "assigneeIDs":
+				return ec.fieldContext_Risk_assigneeIDs(ctx, field)
+			case "assignees":
+				return ec.fieldContext_Risk_assignees(ctx, field)
+			case "detectionIndicators":
+				return ec.fieldContext_Risk_detectionIndicators(ctx, field)
+			case "responses":
+				return ec.fieldContext_Risk_responses(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Risk_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Risk_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Risk", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Response_createdAt(ctx context.Context, field graphql.CollectedField, obj *graphql1.Response) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Response_createdAt,
+		func(ctx context.Context) (any, error) {
+			return obj.CreatedAt, nil
+		},
+		nil,
+		ec.marshalNTime2timeᚐTime,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Response_createdAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Response",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Response_updatedAt(ctx context.Context, field graphql.CollectedField, obj *graphql1.Response) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Response_updatedAt,
+		func(ctx context.Context) (any, error) {
+			return obj.UpdatedAt, nil
+		},
+		nil,
+		ec.marshalNTime2timeᚐTime,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Response_updatedAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Response",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
 		},
 	}
 	return fc, nil
@@ -2162,6 +3210,55 @@ func (ec *executionContext) fieldContext_Risk_detectionIndicators(_ context.Cont
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Risk_responses(ctx context.Context, field graphql.CollectedField, obj *graphql1.Risk) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Risk_responses,
+		func(ctx context.Context) (any, error) {
+			return ec.resolvers.Risk().Responses(ctx, obj)
+		},
+		nil,
+		ec.marshalNResponse2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐResponseᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Risk_responses(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Risk",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Response_id(ctx, field)
+			case "title":
+				return ec.fieldContext_Response_title(ctx, field)
+			case "description":
+				return ec.fieldContext_Response_description(ctx, field)
+			case "responders":
+				return ec.fieldContext_Response_responders(ctx, field)
+			case "url":
+				return ec.fieldContext_Response_url(ctx, field)
+			case "status":
+				return ec.fieldContext_Response_status(ctx, field)
+			case "risks":
+				return ec.fieldContext_Response_risks(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Response_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Response_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Response", field.Name)
 		},
 	}
 	return fc, nil
@@ -3995,6 +5092,68 @@ func (ec *executionContext) fieldContext___Type_isOneOf(_ context.Context, field
 
 // region    **************************** input.gotpl *****************************
 
+func (ec *executionContext) unmarshalInputCreateResponseInput(ctx context.Context, obj any) (graphql1.CreateResponseInput, error) {
+	var it graphql1.CreateResponseInput
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"title", "description", "responderIDs", "url", "status", "riskIDs"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "title":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("title"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Title = data
+		case "description":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("description"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Description = data
+		case "responderIDs":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("responderIDs"))
+			data, err := ec.unmarshalNString2ᚕstringᚄ(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ResponderIDs = data
+		case "url":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("url"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.URL = data
+		case "status":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("status"))
+			data, err := ec.unmarshalOResponseStatus2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐResponseStatus(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Status = data
+		case "riskIDs":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("riskIDs"))
+			data, err := ec.unmarshalOInt2ᚕintᚄ(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.RiskIDs = data
+		}
+	}
+
+	return it, nil
+}
+
 func (ec *executionContext) unmarshalInputCreateRiskInput(ctx context.Context, obj any) (graphql1.CreateRiskInput, error) {
 	var it graphql1.CreateRiskInput
 	asMap := map[string]any{}
@@ -4072,6 +5231,75 @@ func (ec *executionContext) unmarshalInputCreateRiskInput(ctx context.Context, o
 				return it, err
 			}
 			it.DetectionIndicators = data
+		}
+	}
+
+	return it, nil
+}
+
+func (ec *executionContext) unmarshalInputUpdateResponseInput(ctx context.Context, obj any) (graphql1.UpdateResponseInput, error) {
+	var it graphql1.UpdateResponseInput
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"id", "title", "description", "responderIDs", "url", "status", "riskIDs"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "id":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("id"))
+			data, err := ec.unmarshalNInt2int(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ID = data
+		case "title":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("title"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Title = data
+		case "description":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("description"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Description = data
+		case "responderIDs":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("responderIDs"))
+			data, err := ec.unmarshalOString2ᚕstringᚄ(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ResponderIDs = data
+		case "url":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("url"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.URL = data
+		case "status":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("status"))
+			data, err := ec.unmarshalOResponseStatus2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐResponseStatus(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Status = data
+		case "riskIDs":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("riskIDs"))
+			data, err := ec.unmarshalOInt2ᚕintᚄ(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.RiskIDs = data
 		}
 	}
 
@@ -4377,6 +5605,41 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		case "createResponse":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_createResponse(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "updateResponse":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_updateResponse(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "deleteResponse":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_deleteResponse(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "linkResponseToRisk":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_linkResponseToRisk(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "unlinkResponseFromRisk":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_unlinkResponseFromRisk(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -4526,6 +5789,69 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 			}
 
 			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "responses":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_responses(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "response":
+			field := field
+
+			innerFunc := func(ctx context.Context, _ *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_response(ctx, field)
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "responsesByRisk":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_responsesByRisk(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
 		case "__type":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Query___type(ctx, field)
@@ -4534,6 +5860,82 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Query___schema(ctx, field)
 			})
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var responseImplementors = []string{"Response"}
+
+func (ec *executionContext) _Response(ctx context.Context, sel ast.SelectionSet, obj *graphql1.Response) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, responseImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("Response")
+		case "id":
+			out.Values[i] = ec._Response_id(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "title":
+			out.Values[i] = ec._Response_title(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "description":
+			out.Values[i] = ec._Response_description(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "responders":
+			out.Values[i] = ec._Response_responders(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "url":
+			out.Values[i] = ec._Response_url(ctx, field, obj)
+		case "status":
+			out.Values[i] = ec._Response_status(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "risks":
+			out.Values[i] = ec._Response_risks(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "createdAt":
+			out.Values[i] = ec._Response_createdAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "updatedAt":
+			out.Values[i] = ec._Response_updatedAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -4571,81 +5973,117 @@ func (ec *executionContext) _Risk(ctx context.Context, sel ast.SelectionSet, obj
 		case "id":
 			out.Values[i] = ec._Risk_id(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "name":
 			out.Values[i] = ec._Risk_name(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "description":
 			out.Values[i] = ec._Risk_description(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "categoryIDs":
 			out.Values[i] = ec._Risk_categoryIDs(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "categories":
 			out.Values[i] = ec._Risk_categories(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "specificImpact":
 			out.Values[i] = ec._Risk_specificImpact(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "likelihoodID":
 			out.Values[i] = ec._Risk_likelihoodID(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "likelihoodLevel":
 			out.Values[i] = ec._Risk_likelihoodLevel(ctx, field, obj)
 		case "impactID":
 			out.Values[i] = ec._Risk_impactID(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "impactLevel":
 			out.Values[i] = ec._Risk_impactLevel(ctx, field, obj)
 		case "responseTeamIDs":
 			out.Values[i] = ec._Risk_responseTeamIDs(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "responseTeams":
 			out.Values[i] = ec._Risk_responseTeams(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "assigneeIDs":
 			out.Values[i] = ec._Risk_assigneeIDs(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "assignees":
 			out.Values[i] = ec._Risk_assignees(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "detectionIndicators":
 			out.Values[i] = ec._Risk_detectionIndicators(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
+		case "responses":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Risk_responses(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "createdAt":
 			out.Values[i] = ec._Risk_createdAt(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "updatedAt":
 			out.Values[i] = ec._Risk_updatedAt(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
@@ -5224,6 +6662,11 @@ func (ec *executionContext) marshalNCategory2ᚖgithubᚗcomᚋsecmonᚑlabᚋhe
 	return ec._Category(ctx, sel, v)
 }
 
+func (ec *executionContext) unmarshalNCreateResponseInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateResponseInput(ctx context.Context, v any) (graphql1.CreateResponseInput, error) {
+	res, err := ec.unmarshalInputCreateResponseInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
 func (ec *executionContext) unmarshalNCreateRiskInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateRiskInput(ctx context.Context, v any) (graphql1.CreateRiskInput, error) {
 	res, err := ec.unmarshalInputCreateRiskInput(ctx, v)
 	return res, graphql.ErrorOnPath(ctx, err)
@@ -5351,6 +6794,74 @@ func (ec *executionContext) marshalNLikelihoodLevel2ᚖgithubᚗcomᚋsecmonᚑl
 		return graphql.Null
 	}
 	return ec._LikelihoodLevel(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNResponse2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐResponse(ctx context.Context, sel ast.SelectionSet, v graphql1.Response) graphql.Marshaler {
+	return ec._Response(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNResponse2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐResponseᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.Response) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNResponse2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐResponse(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNResponse2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐResponse(ctx context.Context, sel ast.SelectionSet, v *graphql1.Response) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._Response(ctx, sel, v)
+}
+
+func (ec *executionContext) unmarshalNResponseStatus2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐResponseStatus(ctx context.Context, v any) (graphql1.ResponseStatus, error) {
+	var res graphql1.ResponseStatus
+	err := res.UnmarshalGQL(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNResponseStatus2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐResponseStatus(ctx context.Context, sel ast.SelectionSet, v graphql1.ResponseStatus) graphql.Marshaler {
+	return v
 }
 
 func (ec *executionContext) marshalNRisk2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐRisk(ctx context.Context, sel ast.SelectionSet, v graphql1.Risk) graphql.Marshaler {
@@ -5593,6 +7104,11 @@ func (ec *executionContext) marshalNTime2timeᚐTime(ctx context.Context, sel as
 		}
 	}
 	return res
+}
+
+func (ec *executionContext) unmarshalNUpdateResponseInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateResponseInput(ctx context.Context, v any) (graphql1.UpdateResponseInput, error) {
+	res, err := ec.unmarshalInputUpdateResponseInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
 }
 
 func (ec *executionContext) unmarshalNUpdateRiskInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateRiskInput(ctx context.Context, v any) (graphql1.UpdateRiskInput, error) {
@@ -5890,6 +7406,42 @@ func (ec *executionContext) marshalOImpactLevel2ᚖgithubᚗcomᚋsecmonᚑlab�
 	return ec._ImpactLevel(ctx, sel, v)
 }
 
+func (ec *executionContext) unmarshalOInt2ᚕintᚄ(ctx context.Context, v any) ([]int, error) {
+	if v == nil {
+		return nil, nil
+	}
+	var vSlice []any
+	vSlice = graphql.CoerceList(v)
+	var err error
+	res := make([]int, len(vSlice))
+	for i := range vSlice {
+		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithIndex(i))
+		res[i], err = ec.unmarshalNInt2int(ctx, vSlice[i])
+		if err != nil {
+			return nil, err
+		}
+	}
+	return res, nil
+}
+
+func (ec *executionContext) marshalOInt2ᚕintᚄ(ctx context.Context, sel ast.SelectionSet, v []int) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	ret := make(graphql.Array, len(v))
+	for i := range v {
+		ret[i] = ec.marshalNInt2int(ctx, sel, v[i])
+	}
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
 func (ec *executionContext) marshalOLikelihoodLevel2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐLikelihoodLevel(ctx context.Context, sel ast.SelectionSet, v *graphql1.LikelihoodLevel) graphql.Marshaler {
 	if v == nil {
 		return graphql.Null
@@ -5897,11 +7449,70 @@ func (ec *executionContext) marshalOLikelihoodLevel2ᚖgithubᚗcomᚋsecmonᚑl
 	return ec._LikelihoodLevel(ctx, sel, v)
 }
 
+func (ec *executionContext) marshalOResponse2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐResponse(ctx context.Context, sel ast.SelectionSet, v *graphql1.Response) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	return ec._Response(ctx, sel, v)
+}
+
+func (ec *executionContext) unmarshalOResponseStatus2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐResponseStatus(ctx context.Context, v any) (*graphql1.ResponseStatus, error) {
+	if v == nil {
+		return nil, nil
+	}
+	var res = new(graphql1.ResponseStatus)
+	err := res.UnmarshalGQL(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalOResponseStatus2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐResponseStatus(ctx context.Context, sel ast.SelectionSet, v *graphql1.ResponseStatus) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	return v
+}
+
 func (ec *executionContext) marshalORisk2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐRisk(ctx context.Context, sel ast.SelectionSet, v *graphql1.Risk) graphql.Marshaler {
 	if v == nil {
 		return graphql.Null
 	}
 	return ec._Risk(ctx, sel, v)
+}
+
+func (ec *executionContext) unmarshalOString2ᚕstringᚄ(ctx context.Context, v any) ([]string, error) {
+	if v == nil {
+		return nil, nil
+	}
+	var vSlice []any
+	vSlice = graphql.CoerceList(v)
+	var err error
+	res := make([]string, len(vSlice))
+	for i := range vSlice {
+		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithIndex(i))
+		res[i], err = ec.unmarshalNString2string(ctx, vSlice[i])
+		if err != nil {
+			return nil, err
+		}
+	}
+	return res, nil
+}
+
+func (ec *executionContext) marshalOString2ᚕstringᚄ(ctx context.Context, sel ast.SelectionSet, v []string) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	ret := make(graphql.Array, len(v))
+	for i := range v {
+		ret[i] = ec.marshalNString2string(ctx, sel, v[i])
+	}
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
 }
 
 func (ec *executionContext) unmarshalOString2ᚖstring(ctx context.Context, v any) (*string, error) {

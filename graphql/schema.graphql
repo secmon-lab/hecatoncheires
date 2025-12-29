@@ -39,6 +39,27 @@ type RiskConfiguration {
   teams: [Team!]!
 }
 
+enum ResponseStatus {
+  BACKLOG
+  TODO
+  IN_PROGRESS
+  BLOCKED
+  COMPLETED
+  ABANDONED
+}
+
+type Response {
+  id: Int!
+  title: String!
+  description: String!
+  responders: [SlackUser!]!
+  url: String
+  status: ResponseStatus!
+  risks: [Risk!]!
+  createdAt: Time!
+  updatedAt: Time!
+}
+
 type Risk {
   id: Int!
   name: String!
@@ -55,6 +76,7 @@ type Risk {
   assigneeIDs: [String!]!
   assignees: [SlackUser!]!
   detectionIndicators: String!
+  responses: [Response!]!
   createdAt: Time!
   updatedAt: Time!
 }
@@ -84,12 +106,34 @@ input UpdateRiskInput {
   detectionIndicators: String!
 }
 
+input CreateResponseInput {
+  title: String!
+  description: String!
+  responderIDs: [String!]!
+  url: String
+  status: ResponseStatus
+  riskIDs: [Int!]
+}
+
+input UpdateResponseInput {
+  id: Int!
+  title: String
+  description: String
+  responderIDs: [String!]
+  url: String
+  status: ResponseStatus
+  riskIDs: [Int!]
+}
+
 type Query {
   health: String!
   risks: [Risk!]!
   risk(id: Int!): Risk
   riskConfiguration: RiskConfiguration!
   slackUsers: [SlackUser!]!
+  responses: [Response!]!
+  response(id: Int!): Response
+  responsesByRisk(riskID: Int!): [Response!]!
 }
 
 type Mutation {
@@ -97,4 +141,9 @@ type Mutation {
   createRisk(input: CreateRiskInput!): Risk!
   updateRisk(input: UpdateRiskInput!): Risk!
   deleteRisk(id: Int!): Boolean!
+  createResponse(input: CreateResponseInput!): Response!
+  updateResponse(input: UpdateResponseInput!): Response!
+  deleteResponse(id: Int!): Boolean!
+  linkResponseToRisk(responseID: Int!, riskID: Int!): Boolean!
+  unlinkResponseFromRisk(responseID: Int!, riskID: Int!): Boolean!
 }

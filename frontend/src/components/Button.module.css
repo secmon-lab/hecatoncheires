@@ -96,6 +96,22 @@
   background-color: rgba(153, 153, 153, 0.2);
 }
 
+.ghost {
+  background-color: transparent;
+  color: var(--text-secondary);
+  border: none;
+  box-shadow: none;
+}
+
+.ghost:hover:not(:disabled) {
+  background-color: rgba(153, 153, 153, 0.1);
+  color: var(--text-primary);
+}
+
+.ghost:active:not(:disabled) {
+  background-color: rgba(153, 153, 153, 0.2);
+}
+
 .icon {
   display: inline-flex;
   align-items: center;

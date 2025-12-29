@@ -32,6 +32,17 @@ export const GET_RISK = gql`
   query GetRisk($id: Int!) {
     risk(id: $id) {
       ...RiskFields
+      responses {
+        id
+        title
+        status
+        responders {
+          id
+          name
+          realName
+          imageUrl
+        }
+      }
     }
   }
 `

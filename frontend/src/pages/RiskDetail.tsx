@@ -1,11 +1,12 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@apollo/client'
-import { ArrowLeft, Edit, MoreVertical, Trash2 } from 'lucide-react'
+import { ArrowLeft, Edit, MoreVertical, Trash2, Plus } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import Button from '../components/Button'
 import Chip from '../components/Chip'
 import RiskForm from './RiskForm'
 import RiskDeleteDialog from './RiskDeleteDialog'
+import ResponseForm from './ResponseForm'
 import { GET_RISK, GET_RISK_CONFIGURATION, GET_SLACK_USERS } from '../graphql/risk'
 import styles from './RiskDetail.module.css'
 
@@ -20,8 +21,32 @@ interface Risk {
   responseTeamIDs: string[]
   assigneeIDs: string[]
   detectionIndicators: string
+  responses?: Array<{
+    id: number
+    title: string
+    status: string
+    responders: Array<{ id: string; name: string; realName: string; imageUrl?: string }>
+  }>
   createdAt: string
   updatedAt: string
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  BACKLOG: 'Backlog',
+  TODO: 'To Do',
+  IN_PROGRESS: 'In Progress',
+  BLOCKED: 'Blocked',
+  COMPLETED: 'Completed',
+  ABANDONED: 'Abandoned',
+}
+
+const STATUS_COLORS: Record<string, number> = {
+  BACKLOG: 0,
+  TODO: 1,
+  IN_PROGRESS: 2,
+  BLOCKED: 3,
+  COMPLETED: 4,
+  ABANDONED: 5,
 }
 
 export default function RiskDetail() {
@@ -29,10 +54,11 @@ export default function RiskDetail() {
   const navigate = useNavigate()
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
+  const [isResponseFormOpen, setIsResponseFormOpen] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
-  const { data: riskData, loading: riskLoading, error: riskError } = useQuery(GET_RISK, {
+  const { data: riskData, loading: riskLoading, error: riskError, refetch } = useQuery(GET_RISK, {
     variables: { id: parseInt(id || '0') },
     skip: !id,
   })
@@ -57,6 +83,10 @@ export default function RiskDetail() {
   const handleDeleteConfirm = () => {
     setIsDeleteDialogOpen(false)
     navigate('/risks')
+  }
+
+  const handleResponseClick = (responseId: number) => {
+    navigate(`/responses/${responseId}`)
   }
 
   useEffect(() => {
@@ -227,11 +257,14 @@ export default function RiskDetail() {
           {assignees && assignees.length > 0 && (
             <div className={styles.section}>
               <h3 className={styles.sectionTitle}>Assignees</h3>
-              <div className={styles.chips}>
+              <div className={styles.assignees}>
                 {assignees.map((user: any) => (
-                  <Chip key={user.id} variant="user">
-                    {user.realName || user.name}
-                  </Chip>
+                  <div key={user.id} className={styles.assignee}>
+                    {user.imageUrl && (
+                      <img src={user.imageUrl} alt={user.realName} className={styles.avatar} />
+                    )}
+                    <span>{user.realName || user.name}</span>
+                  </div>
                 ))}
               </div>
             </div>
@@ -241,6 +274,74 @@ export default function RiskDetail() {
             <div className={styles.section}>
               <h3 className={styles.sectionTitle}>Detection Indicators / Triggers</h3>
               <p className={styles.text}>{risk.detectionIndicators}</p>
+            </div>
+          )}
+
+          {risk.responses && risk.responses.length > 0 && (
+            <div className={styles.section}>
+              <div className={styles.sectionHeader}>
+                <h3 className={styles.sectionTitle}>Related Responses</h3>
+                <Button
+                  variant="outline"
+                  icon={<Plus size={16} />}
+                  onClick={() => setIsResponseFormOpen(true)}
+                >
+                  Add Response
+                </Button>
+              </div>
+              <table className={styles.responseTable}>
+                <thead>
+                  <tr>
+                    <th>Title</th>
+                    <th>Responders</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {risk.responses.map((response) => (
+                    <tr
+                      key={response.id}
+                      className={styles.responseRow}
+                      onClick={() => handleResponseClick(response.id)}
+                    >
+                      <td className={styles.titleCell}>{response.title}</td>
+                      <td className={styles.respondersCell}>
+                        <div className={styles.responders}>
+                          {response.responders.map((user) => (
+                            <div key={user.id} className={styles.responder}>
+                              {user.imageUrl && (
+                                <img src={user.imageUrl} alt={user.realName} className={styles.responderAvatar} />
+                              )}
+                              <span>{user.realName || user.name}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </td>
+                      <td className={styles.statusCell}>
+                        <Chip variant="status" colorIndex={STATUS_COLORS[response.status] || 0}>
+                          {STATUS_LABELS[response.status] || response.status}
+                        </Chip>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {(!risk.responses || risk.responses.length === 0) && (
+            <div className={styles.section}>
+              <div className={styles.sectionHeader}>
+                <h3 className={styles.sectionTitle}>Related Responses</h3>
+                <Button
+                  variant="outline"
+                  icon={<Plus size={16} />}
+                  onClick={() => setIsResponseFormOpen(true)}
+                >
+                  Add Response
+                </Button>
+              </div>
+              <p className={styles.text}>No responses yet.</p>
             </div>
           )}
 
@@ -269,6 +370,16 @@ export default function RiskDetail() {
         onConfirm={handleDeleteConfirm}
         riskName={risk.name}
       />
+
+      {isResponseFormOpen && (
+        <ResponseForm
+          initialRiskID={risk.id}
+          onClose={() => {
+            setIsResponseFormOpen(false)
+            refetch()
+          }}
+        />
+      )}
     </div>
   )
 }

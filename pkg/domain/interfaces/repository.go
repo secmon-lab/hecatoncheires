@@ -9,6 +9,8 @@ import (
 // Repository defines the interface for data persistence
 type Repository interface {
 	Risk() RiskRepository
+	Response() ResponseRepository
+	RiskResponse() RiskResponseRepository
 
 	// Auth methods
 	PutToken(ctx context.Context, token *auth.Token) error

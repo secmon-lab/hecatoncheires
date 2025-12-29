@@ -3,6 +3,8 @@ import Layout from './components/Layout'
 import Top from './pages/Top'
 import RiskList from './pages/RiskList'
 import RiskDetail from './pages/RiskDetail'
+import ResponseList from './pages/ResponseList'
+import ResponseDetail from './pages/ResponseDetail'
 import { AuthGuard } from './components/auth/auth-guard'
 
 function App() {
@@ -16,6 +18,10 @@ function App() {
           <Route path="/risks" element={<Layout title="Risk Management" />}>
             <Route index element={<RiskList />} />
             <Route path=":id" element={<RiskDetail />} />
+          </Route>
+          <Route path="/responses" element={<Layout title="Response Management" />}>
+            <Route index element={<ResponseList />} />
+            <Route path=":id" element={<ResponseDetail />} />
           </Route>
         </Routes>
       </AuthGuard>
