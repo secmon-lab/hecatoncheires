@@ -1,8 +1,10 @@
 :root {
   /* Primary colors (from logo) */
+  --color-primary-rgb: 46, 92, 184;
   --color-primary: #2E5CB8;
   --color-primary-light: #5B8DEE;
   --color-primary-dark: #1E3A8A;
+  --color-primary-shadow: rgba(var(--color-primary-rgb), 0.4);
   --gradient-primary: linear-gradient(135deg, #2E5CB8 0%, #5B8DEE 50%, #4DD4D4 100%);
   --color-primary-contrast: #ffffff;
 
