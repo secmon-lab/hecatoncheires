@@ -1,0 +1,97 @@
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.chip.sm {
+  padding: 0.125rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+.chip.md {
+  padding: 0.25rem 0.75rem;
+  font-size: 0.875rem;
+}
+
+/* Variants */
+.chip.default {
+  background: var(--color-gray-100);
+  color: var(--color-gray-800);
+  border: 1px solid var(--color-gray-300);
+}
+
+.chip.category {
+  background: var(--color-blue-100);
+  color: var(--color-blue-800);
+  border: 1px solid var(--color-blue-300);
+}
+
+.chip.team {
+  background: var(--color-purple-100);
+  color: var(--color-purple-800);
+  border: 1px solid var(--color-purple-300);
+}
+
+.chip.user {
+  background: var(--color-green-100);
+  color: var(--color-green-800);
+  border: 1px solid var(--color-green-300);
+}
+
+.chip.primary {
+  background: var(--color-primary-100);
+  color: var(--color-primary-800);
+  border: 1px solid var(--color-primary-300);
+}
+
+.chip.secondary {
+  background: var(--color-gray-200);
+  color: var(--color-gray-700);
+  border: 1px solid var(--color-gray-400);
+}
+
+.icon {
+  display: flex;
+  align-items: center;
+  font-size: 1rem;
+}
+
+.label {
+  line-height: 1.2;
+}
+
+.removeButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.125rem;
+  height: 1.125rem;
+  margin-left: 0.125rem;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  color: currentColor;
+  opacity: 0.6;
+  transition: all 0.2s ease;
+}
+
+.removeButton:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.removeButton:focus {
+  outline: 2px solid currentColor;
+  outline-offset: 1px;
+}

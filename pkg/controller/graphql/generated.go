@@ -47,6 +47,26 @@ type DirectiveRoot struct {
 }
 
 type ComplexityRoot struct {
+	Category struct {
+		Description func(childComplexity int) int
+		ID          func(childComplexity int) int
+		Name        func(childComplexity int) int
+	}
+
+	ImpactLevel struct {
+		Description func(childComplexity int) int
+		ID          func(childComplexity int) int
+		Name        func(childComplexity int) int
+		Score       func(childComplexity int) int
+	}
+
+	LikelihoodLevel struct {
+		Description func(childComplexity int) int
+		ID          func(childComplexity int) int
+		Name        func(childComplexity int) int
+		Score       func(childComplexity int) int
+	}
+
 	Mutation struct {
 		CreateRisk func(childComplexity int, input graphql1.CreateRiskInput) int
 		DeleteRisk func(childComplexity int, id int) int
@@ -55,17 +75,50 @@ type ComplexityRoot struct {
 	}
 
 	Query struct {
-		Health func(childComplexity int) int
-		Risk   func(childComplexity int, id int) int
-		Risks  func(childComplexity int) int
+		Health            func(childComplexity int) int
+		Risk              func(childComplexity int, id int) int
+		RiskConfiguration func(childComplexity int) int
+		Risks             func(childComplexity int) int
+		SlackUsers        func(childComplexity int) int
 	}
 
 	Risk struct {
-		CreatedAt   func(childComplexity int) int
-		Description func(childComplexity int) int
-		ID          func(childComplexity int) int
-		Name        func(childComplexity int) int
-		UpdatedAt   func(childComplexity int) int
+		AssigneeIDs         func(childComplexity int) int
+		Assignees           func(childComplexity int) int
+		Categories          func(childComplexity int) int
+		CategoryIDs         func(childComplexity int) int
+		CreatedAt           func(childComplexity int) int
+		Description         func(childComplexity int) int
+		DetectionIndicators func(childComplexity int) int
+		ID                  func(childComplexity int) int
+		ImpactID            func(childComplexity int) int
+		ImpactLevel         func(childComplexity int) int
+		LikelihoodID        func(childComplexity int) int
+		LikelihoodLevel     func(childComplexity int) int
+		Name                func(childComplexity int) int
+		ResponseTeamIDs     func(childComplexity int) int
+		ResponseTeams       func(childComplexity int) int
+		SpecificImpact      func(childComplexity int) int
+		UpdatedAt           func(childComplexity int) int
+	}
+
+	RiskConfiguration struct {
+		Categories       func(childComplexity int) int
+		ImpactLevels     func(childComplexity int) int
+		LikelihoodLevels func(childComplexity int) int
+		Teams            func(childComplexity int) int
+	}
+
+	SlackUser struct {
+		ID       func(childComplexity int) int
+		ImageURL func(childComplexity int) int
+		Name     func(childComplexity int) int
+		RealName func(childComplexity int) int
+	}
+
+	Team struct {
+		ID   func(childComplexity int) int
+		Name func(childComplexity int) int
 	}
 }
 
@@ -79,6 +132,8 @@ type QueryResolver interface {
 	Health(ctx context.Context) (string, error)
 	Risks(ctx context.Context) ([]*graphql1.Risk, error)
 	Risk(ctx context.Context, id int) (*graphql1.Risk, error)
+	RiskConfiguration(ctx context.Context) (*graphql1.RiskConfiguration, error)
+	SlackUsers(ctx context.Context) ([]*graphql1.SlackUser, error)
 }
 
 type executableSchema struct {
@@ -99,6 +154,75 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 	ec := executionContext{nil, e, 0, 0, nil}
 	_ = ec
 	switch typeName + "." + field {
+
+	case "Category.description":
+		if e.complexity.Category.Description == nil {
+			break
+		}
+
+		return e.complexity.Category.Description(childComplexity), true
+	case "Category.id":
+		if e.complexity.Category.ID == nil {
+			break
+		}
+
+		return e.complexity.Category.ID(childComplexity), true
+	case "Category.name":
+		if e.complexity.Category.Name == nil {
+			break
+		}
+
+		return e.complexity.Category.Name(childComplexity), true
+
+	case "ImpactLevel.description":
+		if e.complexity.ImpactLevel.Description == nil {
+			break
+		}
+
+		return e.complexity.ImpactLevel.Description(childComplexity), true
+	case "ImpactLevel.id":
+		if e.complexity.ImpactLevel.ID == nil {
+			break
+		}
+
+		return e.complexity.ImpactLevel.ID(childComplexity), true
+	case "ImpactLevel.name":
+		if e.complexity.ImpactLevel.Name == nil {
+			break
+		}
+
+		return e.complexity.ImpactLevel.Name(childComplexity), true
+	case "ImpactLevel.score":
+		if e.complexity.ImpactLevel.Score == nil {
+			break
+		}
+
+		return e.complexity.ImpactLevel.Score(childComplexity), true
+
+	case "LikelihoodLevel.description":
+		if e.complexity.LikelihoodLevel.Description == nil {
+			break
+		}
+
+		return e.complexity.LikelihoodLevel.Description(childComplexity), true
+	case "LikelihoodLevel.id":
+		if e.complexity.LikelihoodLevel.ID == nil {
+			break
+		}
+
+		return e.complexity.LikelihoodLevel.ID(childComplexity), true
+	case "LikelihoodLevel.name":
+		if e.complexity.LikelihoodLevel.Name == nil {
+			break
+		}
+
+		return e.complexity.LikelihoodLevel.Name(childComplexity), true
+	case "LikelihoodLevel.score":
+		if e.complexity.LikelihoodLevel.Score == nil {
+			break
+		}
+
+		return e.complexity.LikelihoodLevel.Score(childComplexity), true
 
 	case "Mutation.createRisk":
 		if e.complexity.Mutation.CreateRisk == nil {
@@ -157,13 +281,49 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Query.Risk(childComplexity, args["id"].(int)), true
+	case "Query.riskConfiguration":
+		if e.complexity.Query.RiskConfiguration == nil {
+			break
+		}
+
+		return e.complexity.Query.RiskConfiguration(childComplexity), true
 	case "Query.risks":
 		if e.complexity.Query.Risks == nil {
 			break
 		}
 
 		return e.complexity.Query.Risks(childComplexity), true
+	case "Query.slackUsers":
+		if e.complexity.Query.SlackUsers == nil {
+			break
+		}
 
+		return e.complexity.Query.SlackUsers(childComplexity), true
+
+	case "Risk.assigneeIDs":
+		if e.complexity.Risk.AssigneeIDs == nil {
+			break
+		}
+
+		return e.complexity.Risk.AssigneeIDs(childComplexity), true
+	case "Risk.assignees":
+		if e.complexity.Risk.Assignees == nil {
+			break
+		}
+
+		return e.complexity.Risk.Assignees(childComplexity), true
+	case "Risk.categories":
+		if e.complexity.Risk.Categories == nil {
+			break
+		}
+
+		return e.complexity.Risk.Categories(childComplexity), true
+	case "Risk.categoryIDs":
+		if e.complexity.Risk.CategoryIDs == nil {
+			break
+		}
+
+		return e.complexity.Risk.CategoryIDs(childComplexity), true
 	case "Risk.createdAt":
 		if e.complexity.Risk.CreatedAt == nil {
 			break
@@ -176,24 +336,135 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Risk.Description(childComplexity), true
+	case "Risk.detectionIndicators":
+		if e.complexity.Risk.DetectionIndicators == nil {
+			break
+		}
+
+		return e.complexity.Risk.DetectionIndicators(childComplexity), true
 	case "Risk.id":
 		if e.complexity.Risk.ID == nil {
 			break
 		}
 
 		return e.complexity.Risk.ID(childComplexity), true
+	case "Risk.impactID":
+		if e.complexity.Risk.ImpactID == nil {
+			break
+		}
+
+		return e.complexity.Risk.ImpactID(childComplexity), true
+	case "Risk.impactLevel":
+		if e.complexity.Risk.ImpactLevel == nil {
+			break
+		}
+
+		return e.complexity.Risk.ImpactLevel(childComplexity), true
+	case "Risk.likelihoodID":
+		if e.complexity.Risk.LikelihoodID == nil {
+			break
+		}
+
+		return e.complexity.Risk.LikelihoodID(childComplexity), true
+	case "Risk.likelihoodLevel":
+		if e.complexity.Risk.LikelihoodLevel == nil {
+			break
+		}
+
+		return e.complexity.Risk.LikelihoodLevel(childComplexity), true
 	case "Risk.name":
 		if e.complexity.Risk.Name == nil {
 			break
 		}
 
 		return e.complexity.Risk.Name(childComplexity), true
+	case "Risk.responseTeamIDs":
+		if e.complexity.Risk.ResponseTeamIDs == nil {
+			break
+		}
+
+		return e.complexity.Risk.ResponseTeamIDs(childComplexity), true
+	case "Risk.responseTeams":
+		if e.complexity.Risk.ResponseTeams == nil {
+			break
+		}
+
+		return e.complexity.Risk.ResponseTeams(childComplexity), true
+	case "Risk.specificImpact":
+		if e.complexity.Risk.SpecificImpact == nil {
+			break
+		}
+
+		return e.complexity.Risk.SpecificImpact(childComplexity), true
 	case "Risk.updatedAt":
 		if e.complexity.Risk.UpdatedAt == nil {
 			break
 		}
 
 		return e.complexity.Risk.UpdatedAt(childComplexity), true
+
+	case "RiskConfiguration.categories":
+		if e.complexity.RiskConfiguration.Categories == nil {
+			break
+		}
+
+		return e.complexity.RiskConfiguration.Categories(childComplexity), true
+	case "RiskConfiguration.impactLevels":
+		if e.complexity.RiskConfiguration.ImpactLevels == nil {
+			break
+		}
+
+		return e.complexity.RiskConfiguration.ImpactLevels(childComplexity), true
+	case "RiskConfiguration.likelihoodLevels":
+		if e.complexity.RiskConfiguration.LikelihoodLevels == nil {
+			break
+		}
+
+		return e.complexity.RiskConfiguration.LikelihoodLevels(childComplexity), true
+	case "RiskConfiguration.teams":
+		if e.complexity.RiskConfiguration.Teams == nil {
+			break
+		}
+
+		return e.complexity.RiskConfiguration.Teams(childComplexity), true
+
+	case "SlackUser.id":
+		if e.complexity.SlackUser.ID == nil {
+			break
+		}
+
+		return e.complexity.SlackUser.ID(childComplexity), true
+	case "SlackUser.imageUrl":
+		if e.complexity.SlackUser.ImageURL == nil {
+			break
+		}
+
+		return e.complexity.SlackUser.ImageURL(childComplexity), true
+	case "SlackUser.name":
+		if e.complexity.SlackUser.Name == nil {
+			break
+		}
+
+		return e.complexity.SlackUser.Name(childComplexity), true
+	case "SlackUser.realName":
+		if e.complexity.SlackUser.RealName == nil {
+			break
+		}
+
+		return e.complexity.SlackUser.RealName(childComplexity), true
+
+	case "Team.id":
+		if e.complexity.Team.ID == nil {
+			break
+		}
+
+		return e.complexity.Team.ID(childComplexity), true
+	case "Team.name":
+		if e.complexity.Team.Name == nil {
+			break
+		}
+
+		return e.complexity.Team.Name(childComplexity), true
 
 	}
 	return 0, false
@@ -304,10 +575,61 @@ func (ec *executionContext) introspectType(name string) (*introspection.Type, er
 var sources = []*ast.Source{
 	{Name: "../../../graphql/schema.graphql", Input: `scalar Time
 
+type Category {
+  id: String!
+  name: String!
+  description: String!
+}
+
+type LikelihoodLevel {
+  id: String!
+  name: String!
+  description: String!
+  score: Int!
+}
+
+type ImpactLevel {
+  id: String!
+  name: String!
+  description: String!
+  score: Int!
+}
+
+type Team {
+  id: String!
+  name: String!
+}
+
+type SlackUser {
+  id: String!
+  name: String!
+  realName: String!
+  imageUrl: String
+}
+
+type RiskConfiguration {
+  categories: [Category!]!
+  likelihoodLevels: [LikelihoodLevel!]!
+  impactLevels: [ImpactLevel!]!
+  teams: [Team!]!
+}
+
 type Risk {
   id: Int!
   name: String!
   description: String!
+  categoryIDs: [String!]!
+  categories: [Category!]!
+  specificImpact: String!
+  likelihoodID: String!
+  likelihoodLevel: LikelihoodLevel
+  impactID: String!
+  impactLevel: ImpactLevel
+  responseTeamIDs: [String!]!
+  responseTeams: [Team!]!
+  assigneeIDs: [String!]!
+  assignees: [SlackUser!]!
+  detectionIndicators: String!
   createdAt: Time!
   updatedAt: Time!
 }
@@ -315,18 +637,34 @@ type Risk {
 input CreateRiskInput {
   name: String!
   description: String!
+  categoryIDs: [String!]!
+  specificImpact: String!
+  likelihoodID: String!
+  impactID: String!
+  responseTeamIDs: [String!]!
+  assigneeIDs: [String!]!
+  detectionIndicators: String!
 }
 
 input UpdateRiskInput {
   id: Int!
   name: String!
   description: String!
+  categoryIDs: [String!]!
+  specificImpact: String!
+  likelihoodID: String!
+  impactID: String!
+  responseTeamIDs: [String!]!
+  assigneeIDs: [String!]!
+  detectionIndicators: String!
 }
 
 type Query {
   health: String!
   risks: [Risk!]!
   risk(id: Int!): Risk
+  riskConfiguration: RiskConfiguration!
+  slackUsers: [SlackUser!]!
 }
 
 type Mutation {
@@ -450,6 +788,325 @@ func (ec *executionContext) field___Type_fields_args(ctx context.Context, rawArg
 
 // region    **************************** field.gotpl *****************************
 
+func (ec *executionContext) _Category_id(ctx context.Context, field graphql.CollectedField, obj *graphql1.Category) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Category_id,
+		func(ctx context.Context) (any, error) {
+			return obj.ID, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Category_id(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Category",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Category_name(ctx context.Context, field graphql.CollectedField, obj *graphql1.Category) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Category_name,
+		func(ctx context.Context) (any, error) {
+			return obj.Name, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Category_name(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Category",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Category_description(ctx context.Context, field graphql.CollectedField, obj *graphql1.Category) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Category_description,
+		func(ctx context.Context) (any, error) {
+			return obj.Description, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Category_description(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Category",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImpactLevel_id(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImpactLevel) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImpactLevel_id,
+		func(ctx context.Context) (any, error) {
+			return obj.ID, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImpactLevel_id(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImpactLevel",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImpactLevel_name(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImpactLevel) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImpactLevel_name,
+		func(ctx context.Context) (any, error) {
+			return obj.Name, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImpactLevel_name(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImpactLevel",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImpactLevel_description(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImpactLevel) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImpactLevel_description,
+		func(ctx context.Context) (any, error) {
+			return obj.Description, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImpactLevel_description(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImpactLevel",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImpactLevel_score(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImpactLevel) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImpactLevel_score,
+		func(ctx context.Context) (any, error) {
+			return obj.Score, nil
+		},
+		nil,
+		ec.marshalNInt2int,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImpactLevel_score(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImpactLevel",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _LikelihoodLevel_id(ctx context.Context, field graphql.CollectedField, obj *graphql1.LikelihoodLevel) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_LikelihoodLevel_id,
+		func(ctx context.Context) (any, error) {
+			return obj.ID, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_LikelihoodLevel_id(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "LikelihoodLevel",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _LikelihoodLevel_name(ctx context.Context, field graphql.CollectedField, obj *graphql1.LikelihoodLevel) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_LikelihoodLevel_name,
+		func(ctx context.Context) (any, error) {
+			return obj.Name, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_LikelihoodLevel_name(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "LikelihoodLevel",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _LikelihoodLevel_description(ctx context.Context, field graphql.CollectedField, obj *graphql1.LikelihoodLevel) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_LikelihoodLevel_description,
+		func(ctx context.Context) (any, error) {
+			return obj.Description, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_LikelihoodLevel_description(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "LikelihoodLevel",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _LikelihoodLevel_score(ctx context.Context, field graphql.CollectedField, obj *graphql1.LikelihoodLevel) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_LikelihoodLevel_score,
+		func(ctx context.Context) (any, error) {
+			return obj.Score, nil
+		},
+		nil,
+		ec.marshalNInt2int,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_LikelihoodLevel_score(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "LikelihoodLevel",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Mutation_noop(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -510,6 +1167,30 @@ func (ec *executionContext) fieldContext_Mutation_createRisk(ctx context.Context
 				return ec.fieldContext_Risk_name(ctx, field)
 			case "description":
 				return ec.fieldContext_Risk_description(ctx, field)
+			case "categoryIDs":
+				return ec.fieldContext_Risk_categoryIDs(ctx, field)
+			case "categories":
+				return ec.fieldContext_Risk_categories(ctx, field)
+			case "specificImpact":
+				return ec.fieldContext_Risk_specificImpact(ctx, field)
+			case "likelihoodID":
+				return ec.fieldContext_Risk_likelihoodID(ctx, field)
+			case "likelihoodLevel":
+				return ec.fieldContext_Risk_likelihoodLevel(ctx, field)
+			case "impactID":
+				return ec.fieldContext_Risk_impactID(ctx, field)
+			case "impactLevel":
+				return ec.fieldContext_Risk_impactLevel(ctx, field)
+			case "responseTeamIDs":
+				return ec.fieldContext_Risk_responseTeamIDs(ctx, field)
+			case "responseTeams":
+				return ec.fieldContext_Risk_responseTeams(ctx, field)
+			case "assigneeIDs":
+				return ec.fieldContext_Risk_assigneeIDs(ctx, field)
+			case "assignees":
+				return ec.fieldContext_Risk_assignees(ctx, field)
+			case "detectionIndicators":
+				return ec.fieldContext_Risk_detectionIndicators(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Risk_createdAt(ctx, field)
 			case "updatedAt":
@@ -563,6 +1244,30 @@ func (ec *executionContext) fieldContext_Mutation_updateRisk(ctx context.Context
 				return ec.fieldContext_Risk_name(ctx, field)
 			case "description":
 				return ec.fieldContext_Risk_description(ctx, field)
+			case "categoryIDs":
+				return ec.fieldContext_Risk_categoryIDs(ctx, field)
+			case "categories":
+				return ec.fieldContext_Risk_categories(ctx, field)
+			case "specificImpact":
+				return ec.fieldContext_Risk_specificImpact(ctx, field)
+			case "likelihoodID":
+				return ec.fieldContext_Risk_likelihoodID(ctx, field)
+			case "likelihoodLevel":
+				return ec.fieldContext_Risk_likelihoodLevel(ctx, field)
+			case "impactID":
+				return ec.fieldContext_Risk_impactID(ctx, field)
+			case "impactLevel":
+				return ec.fieldContext_Risk_impactLevel(ctx, field)
+			case "responseTeamIDs":
+				return ec.fieldContext_Risk_responseTeamIDs(ctx, field)
+			case "responseTeams":
+				return ec.fieldContext_Risk_responseTeams(ctx, field)
+			case "assigneeIDs":
+				return ec.fieldContext_Risk_assigneeIDs(ctx, field)
+			case "assignees":
+				return ec.fieldContext_Risk_assignees(ctx, field)
+			case "detectionIndicators":
+				return ec.fieldContext_Risk_detectionIndicators(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Risk_createdAt(ctx, field)
 			case "updatedAt":
@@ -685,6 +1390,30 @@ func (ec *executionContext) fieldContext_Query_risks(_ context.Context, field gr
 				return ec.fieldContext_Risk_name(ctx, field)
 			case "description":
 				return ec.fieldContext_Risk_description(ctx, field)
+			case "categoryIDs":
+				return ec.fieldContext_Risk_categoryIDs(ctx, field)
+			case "categories":
+				return ec.fieldContext_Risk_categories(ctx, field)
+			case "specificImpact":
+				return ec.fieldContext_Risk_specificImpact(ctx, field)
+			case "likelihoodID":
+				return ec.fieldContext_Risk_likelihoodID(ctx, field)
+			case "likelihoodLevel":
+				return ec.fieldContext_Risk_likelihoodLevel(ctx, field)
+			case "impactID":
+				return ec.fieldContext_Risk_impactID(ctx, field)
+			case "impactLevel":
+				return ec.fieldContext_Risk_impactLevel(ctx, field)
+			case "responseTeamIDs":
+				return ec.fieldContext_Risk_responseTeamIDs(ctx, field)
+			case "responseTeams":
+				return ec.fieldContext_Risk_responseTeams(ctx, field)
+			case "assigneeIDs":
+				return ec.fieldContext_Risk_assigneeIDs(ctx, field)
+			case "assignees":
+				return ec.fieldContext_Risk_assignees(ctx, field)
+			case "detectionIndicators":
+				return ec.fieldContext_Risk_detectionIndicators(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Risk_createdAt(ctx, field)
 			case "updatedAt":
@@ -727,6 +1456,30 @@ func (ec *executionContext) fieldContext_Query_risk(ctx context.Context, field g
 				return ec.fieldContext_Risk_name(ctx, field)
 			case "description":
 				return ec.fieldContext_Risk_description(ctx, field)
+			case "categoryIDs":
+				return ec.fieldContext_Risk_categoryIDs(ctx, field)
+			case "categories":
+				return ec.fieldContext_Risk_categories(ctx, field)
+			case "specificImpact":
+				return ec.fieldContext_Risk_specificImpact(ctx, field)
+			case "likelihoodID":
+				return ec.fieldContext_Risk_likelihoodID(ctx, field)
+			case "likelihoodLevel":
+				return ec.fieldContext_Risk_likelihoodLevel(ctx, field)
+			case "impactID":
+				return ec.fieldContext_Risk_impactID(ctx, field)
+			case "impactLevel":
+				return ec.fieldContext_Risk_impactLevel(ctx, field)
+			case "responseTeamIDs":
+				return ec.fieldContext_Risk_responseTeamIDs(ctx, field)
+			case "responseTeams":
+				return ec.fieldContext_Risk_responseTeams(ctx, field)
+			case "assigneeIDs":
+				return ec.fieldContext_Risk_assigneeIDs(ctx, field)
+			case "assignees":
+				return ec.fieldContext_Risk_assignees(ctx, field)
+			case "detectionIndicators":
+				return ec.fieldContext_Risk_detectionIndicators(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Risk_createdAt(ctx, field)
 			case "updatedAt":
@@ -745,6 +1498,84 @@ func (ec *executionContext) fieldContext_Query_risk(ctx context.Context, field g
 	if fc.Args, err = ec.field_Query_risk_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_riskConfiguration(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Query_riskConfiguration,
+		func(ctx context.Context) (any, error) {
+			return ec.resolvers.Query().RiskConfiguration(ctx)
+		},
+		nil,
+		ec.marshalNRiskConfiguration2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐRiskConfiguration,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Query_riskConfiguration(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "categories":
+				return ec.fieldContext_RiskConfiguration_categories(ctx, field)
+			case "likelihoodLevels":
+				return ec.fieldContext_RiskConfiguration_likelihoodLevels(ctx, field)
+			case "impactLevels":
+				return ec.fieldContext_RiskConfiguration_impactLevels(ctx, field)
+			case "teams":
+				return ec.fieldContext_RiskConfiguration_teams(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type RiskConfiguration", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_slackUsers(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Query_slackUsers,
+		func(ctx context.Context) (any, error) {
+			return ec.resolvers.Query().SlackUsers(ctx)
+		},
+		nil,
+		ec.marshalNSlackUser2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackUserᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Query_slackUsers(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_SlackUser_id(ctx, field)
+			case "name":
+				return ec.fieldContext_SlackUser_name(ctx, field)
+			case "realName":
+				return ec.fieldContext_SlackUser_realName(ctx, field)
+			case "imageUrl":
+				return ec.fieldContext_SlackUser_imageUrl(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type SlackUser", field.Name)
+		},
 	}
 	return fc, nil
 }
@@ -944,6 +1775,398 @@ func (ec *executionContext) fieldContext_Risk_description(_ context.Context, fie
 	return fc, nil
 }
 
+func (ec *executionContext) _Risk_categoryIDs(ctx context.Context, field graphql.CollectedField, obj *graphql1.Risk) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Risk_categoryIDs,
+		func(ctx context.Context) (any, error) {
+			return obj.CategoryIDs, nil
+		},
+		nil,
+		ec.marshalNString2ᚕstringᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Risk_categoryIDs(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Risk",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Risk_categories(ctx context.Context, field graphql.CollectedField, obj *graphql1.Risk) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Risk_categories,
+		func(ctx context.Context) (any, error) {
+			return obj.Categories, nil
+		},
+		nil,
+		ec.marshalNCategory2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCategoryᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Risk_categories(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Risk",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Category_id(ctx, field)
+			case "name":
+				return ec.fieldContext_Category_name(ctx, field)
+			case "description":
+				return ec.fieldContext_Category_description(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Category", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Risk_specificImpact(ctx context.Context, field graphql.CollectedField, obj *graphql1.Risk) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Risk_specificImpact,
+		func(ctx context.Context) (any, error) {
+			return obj.SpecificImpact, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Risk_specificImpact(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Risk",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Risk_likelihoodID(ctx context.Context, field graphql.CollectedField, obj *graphql1.Risk) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Risk_likelihoodID,
+		func(ctx context.Context) (any, error) {
+			return obj.LikelihoodID, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Risk_likelihoodID(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Risk",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Risk_likelihoodLevel(ctx context.Context, field graphql.CollectedField, obj *graphql1.Risk) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Risk_likelihoodLevel,
+		func(ctx context.Context) (any, error) {
+			return obj.LikelihoodLevel, nil
+		},
+		nil,
+		ec.marshalOLikelihoodLevel2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐLikelihoodLevel,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Risk_likelihoodLevel(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Risk",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_LikelihoodLevel_id(ctx, field)
+			case "name":
+				return ec.fieldContext_LikelihoodLevel_name(ctx, field)
+			case "description":
+				return ec.fieldContext_LikelihoodLevel_description(ctx, field)
+			case "score":
+				return ec.fieldContext_LikelihoodLevel_score(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type LikelihoodLevel", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Risk_impactID(ctx context.Context, field graphql.CollectedField, obj *graphql1.Risk) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Risk_impactID,
+		func(ctx context.Context) (any, error) {
+			return obj.ImpactID, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Risk_impactID(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Risk",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Risk_impactLevel(ctx context.Context, field graphql.CollectedField, obj *graphql1.Risk) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Risk_impactLevel,
+		func(ctx context.Context) (any, error) {
+			return obj.ImpactLevel, nil
+		},
+		nil,
+		ec.marshalOImpactLevel2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImpactLevel,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Risk_impactLevel(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Risk",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_ImpactLevel_id(ctx, field)
+			case "name":
+				return ec.fieldContext_ImpactLevel_name(ctx, field)
+			case "description":
+				return ec.fieldContext_ImpactLevel_description(ctx, field)
+			case "score":
+				return ec.fieldContext_ImpactLevel_score(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type ImpactLevel", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Risk_responseTeamIDs(ctx context.Context, field graphql.CollectedField, obj *graphql1.Risk) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Risk_responseTeamIDs,
+		func(ctx context.Context) (any, error) {
+			return obj.ResponseTeamIDs, nil
+		},
+		nil,
+		ec.marshalNString2ᚕstringᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Risk_responseTeamIDs(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Risk",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Risk_responseTeams(ctx context.Context, field graphql.CollectedField, obj *graphql1.Risk) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Risk_responseTeams,
+		func(ctx context.Context) (any, error) {
+			return obj.ResponseTeams, nil
+		},
+		nil,
+		ec.marshalNTeam2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐTeamᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Risk_responseTeams(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Risk",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Team_id(ctx, field)
+			case "name":
+				return ec.fieldContext_Team_name(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Team", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Risk_assigneeIDs(ctx context.Context, field graphql.CollectedField, obj *graphql1.Risk) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Risk_assigneeIDs,
+		func(ctx context.Context) (any, error) {
+			return obj.AssigneeIDs, nil
+		},
+		nil,
+		ec.marshalNString2ᚕstringᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Risk_assigneeIDs(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Risk",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Risk_assignees(ctx context.Context, field graphql.CollectedField, obj *graphql1.Risk) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Risk_assignees,
+		func(ctx context.Context) (any, error) {
+			return obj.Assignees, nil
+		},
+		nil,
+		ec.marshalNSlackUser2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackUserᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Risk_assignees(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Risk",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_SlackUser_id(ctx, field)
+			case "name":
+				return ec.fieldContext_SlackUser_name(ctx, field)
+			case "realName":
+				return ec.fieldContext_SlackUser_realName(ctx, field)
+			case "imageUrl":
+				return ec.fieldContext_SlackUser_imageUrl(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type SlackUser", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Risk_detectionIndicators(ctx context.Context, field graphql.CollectedField, obj *graphql1.Risk) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Risk_detectionIndicators,
+		func(ctx context.Context) (any, error) {
+			return obj.DetectionIndicators, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Risk_detectionIndicators(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Risk",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Risk_createdAt(ctx context.Context, field graphql.CollectedField, obj *graphql1.Risk) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -997,6 +2220,330 @@ func (ec *executionContext) fieldContext_Risk_updatedAt(_ context.Context, field
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RiskConfiguration_categories(ctx context.Context, field graphql.CollectedField, obj *graphql1.RiskConfiguration) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_RiskConfiguration_categories,
+		func(ctx context.Context) (any, error) {
+			return obj.Categories, nil
+		},
+		nil,
+		ec.marshalNCategory2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCategoryᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_RiskConfiguration_categories(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RiskConfiguration",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Category_id(ctx, field)
+			case "name":
+				return ec.fieldContext_Category_name(ctx, field)
+			case "description":
+				return ec.fieldContext_Category_description(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Category", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RiskConfiguration_likelihoodLevels(ctx context.Context, field graphql.CollectedField, obj *graphql1.RiskConfiguration) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_RiskConfiguration_likelihoodLevels,
+		func(ctx context.Context) (any, error) {
+			return obj.LikelihoodLevels, nil
+		},
+		nil,
+		ec.marshalNLikelihoodLevel2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐLikelihoodLevelᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_RiskConfiguration_likelihoodLevels(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RiskConfiguration",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_LikelihoodLevel_id(ctx, field)
+			case "name":
+				return ec.fieldContext_LikelihoodLevel_name(ctx, field)
+			case "description":
+				return ec.fieldContext_LikelihoodLevel_description(ctx, field)
+			case "score":
+				return ec.fieldContext_LikelihoodLevel_score(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type LikelihoodLevel", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RiskConfiguration_impactLevels(ctx context.Context, field graphql.CollectedField, obj *graphql1.RiskConfiguration) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_RiskConfiguration_impactLevels,
+		func(ctx context.Context) (any, error) {
+			return obj.ImpactLevels, nil
+		},
+		nil,
+		ec.marshalNImpactLevel2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImpactLevelᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_RiskConfiguration_impactLevels(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RiskConfiguration",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_ImpactLevel_id(ctx, field)
+			case "name":
+				return ec.fieldContext_ImpactLevel_name(ctx, field)
+			case "description":
+				return ec.fieldContext_ImpactLevel_description(ctx, field)
+			case "score":
+				return ec.fieldContext_ImpactLevel_score(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type ImpactLevel", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _RiskConfiguration_teams(ctx context.Context, field graphql.CollectedField, obj *graphql1.RiskConfiguration) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_RiskConfiguration_teams,
+		func(ctx context.Context) (any, error) {
+			return obj.Teams, nil
+		},
+		nil,
+		ec.marshalNTeam2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐTeamᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_RiskConfiguration_teams(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "RiskConfiguration",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Team_id(ctx, field)
+			case "name":
+				return ec.fieldContext_Team_name(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Team", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _SlackUser_id(ctx context.Context, field graphql.CollectedField, obj *graphql1.SlackUser) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_SlackUser_id,
+		func(ctx context.Context) (any, error) {
+			return obj.ID, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_SlackUser_id(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "SlackUser",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _SlackUser_name(ctx context.Context, field graphql.CollectedField, obj *graphql1.SlackUser) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_SlackUser_name,
+		func(ctx context.Context) (any, error) {
+			return obj.Name, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_SlackUser_name(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "SlackUser",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _SlackUser_realName(ctx context.Context, field graphql.CollectedField, obj *graphql1.SlackUser) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_SlackUser_realName,
+		func(ctx context.Context) (any, error) {
+			return obj.RealName, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_SlackUser_realName(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "SlackUser",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _SlackUser_imageUrl(ctx context.Context, field graphql.CollectedField, obj *graphql1.SlackUser) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_SlackUser_imageUrl,
+		func(ctx context.Context) (any, error) {
+			return obj.ImageURL, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_SlackUser_imageUrl(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "SlackUser",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Team_id(ctx context.Context, field graphql.CollectedField, obj *graphql1.Team) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Team_id,
+		func(ctx context.Context) (any, error) {
+			return obj.ID, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Team_id(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Team",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Team_name(ctx context.Context, field graphql.CollectedField, obj *graphql1.Team) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Team_name,
+		func(ctx context.Context) (any, error) {
+			return obj.Name, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Team_name(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Team",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
 		},
 	}
 	return fc, nil
@@ -2455,7 +4002,7 @@ func (ec *executionContext) unmarshalInputCreateRiskInput(ctx context.Context, o
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"name", "description"}
+	fieldsInOrder := [...]string{"name", "description", "categoryIDs", "specificImpact", "likelihoodID", "impactID", "responseTeamIDs", "assigneeIDs", "detectionIndicators"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -2476,6 +4023,55 @@ func (ec *executionContext) unmarshalInputCreateRiskInput(ctx context.Context, o
 				return it, err
 			}
 			it.Description = data
+		case "categoryIDs":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("categoryIDs"))
+			data, err := ec.unmarshalNString2ᚕstringᚄ(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.CategoryIDs = data
+		case "specificImpact":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("specificImpact"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.SpecificImpact = data
+		case "likelihoodID":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("likelihoodID"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.LikelihoodID = data
+		case "impactID":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("impactID"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ImpactID = data
+		case "responseTeamIDs":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("responseTeamIDs"))
+			data, err := ec.unmarshalNString2ᚕstringᚄ(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ResponseTeamIDs = data
+		case "assigneeIDs":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("assigneeIDs"))
+			data, err := ec.unmarshalNString2ᚕstringᚄ(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.AssigneeIDs = data
+		case "detectionIndicators":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("detectionIndicators"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.DetectionIndicators = data
 		}
 	}
 
@@ -2489,7 +4085,7 @@ func (ec *executionContext) unmarshalInputUpdateRiskInput(ctx context.Context, o
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"id", "name", "description"}
+	fieldsInOrder := [...]string{"id", "name", "description", "categoryIDs", "specificImpact", "likelihoodID", "impactID", "responseTeamIDs", "assigneeIDs", "detectionIndicators"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -2517,6 +4113,55 @@ func (ec *executionContext) unmarshalInputUpdateRiskInput(ctx context.Context, o
 				return it, err
 			}
 			it.Description = data
+		case "categoryIDs":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("categoryIDs"))
+			data, err := ec.unmarshalNString2ᚕstringᚄ(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.CategoryIDs = data
+		case "specificImpact":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("specificImpact"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.SpecificImpact = data
+		case "likelihoodID":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("likelihoodID"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.LikelihoodID = data
+		case "impactID":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("impactID"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ImpactID = data
+		case "responseTeamIDs":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("responseTeamIDs"))
+			data, err := ec.unmarshalNString2ᚕstringᚄ(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ResponseTeamIDs = data
+		case "assigneeIDs":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("assigneeIDs"))
+			data, err := ec.unmarshalNString2ᚕstringᚄ(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.AssigneeIDs = data
+		case "detectionIndicators":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("detectionIndicators"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.DetectionIndicators = data
 		}
 	}
 
@@ -2530,6 +4175,163 @@ func (ec *executionContext) unmarshalInputUpdateRiskInput(ctx context.Context, o
 // endregion ************************** interface.gotpl ***************************
 
 // region    **************************** object.gotpl ****************************
+
+var categoryImplementors = []string{"Category"}
+
+func (ec *executionContext) _Category(ctx context.Context, sel ast.SelectionSet, obj *graphql1.Category) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, categoryImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("Category")
+		case "id":
+			out.Values[i] = ec._Category_id(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "name":
+			out.Values[i] = ec._Category_name(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "description":
+			out.Values[i] = ec._Category_description(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var impactLevelImplementors = []string{"ImpactLevel"}
+
+func (ec *executionContext) _ImpactLevel(ctx context.Context, sel ast.SelectionSet, obj *graphql1.ImpactLevel) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, impactLevelImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("ImpactLevel")
+		case "id":
+			out.Values[i] = ec._ImpactLevel_id(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "name":
+			out.Values[i] = ec._ImpactLevel_name(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "description":
+			out.Values[i] = ec._ImpactLevel_description(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "score":
+			out.Values[i] = ec._ImpactLevel_score(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var likelihoodLevelImplementors = []string{"LikelihoodLevel"}
+
+func (ec *executionContext) _LikelihoodLevel(ctx context.Context, sel ast.SelectionSet, obj *graphql1.LikelihoodLevel) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, likelihoodLevelImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("LikelihoodLevel")
+		case "id":
+			out.Values[i] = ec._LikelihoodLevel_id(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "name":
+			out.Values[i] = ec._LikelihoodLevel_name(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "description":
+			out.Values[i] = ec._LikelihoodLevel_description(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "score":
+			out.Values[i] = ec._LikelihoodLevel_score(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
 
 var mutationImplementors = []string{"Mutation"}
 
@@ -2680,6 +4482,50 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 			}
 
 			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "riskConfiguration":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_riskConfiguration(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "slackUsers":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_slackUsers(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
 		case "__type":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Query___type(ctx, field)
@@ -2737,6 +4583,60 @@ func (ec *executionContext) _Risk(ctx context.Context, sel ast.SelectionSet, obj
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		case "categoryIDs":
+			out.Values[i] = ec._Risk_categoryIDs(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "categories":
+			out.Values[i] = ec._Risk_categories(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "specificImpact":
+			out.Values[i] = ec._Risk_specificImpact(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "likelihoodID":
+			out.Values[i] = ec._Risk_likelihoodID(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "likelihoodLevel":
+			out.Values[i] = ec._Risk_likelihoodLevel(ctx, field, obj)
+		case "impactID":
+			out.Values[i] = ec._Risk_impactID(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "impactLevel":
+			out.Values[i] = ec._Risk_impactLevel(ctx, field, obj)
+		case "responseTeamIDs":
+			out.Values[i] = ec._Risk_responseTeamIDs(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "responseTeams":
+			out.Values[i] = ec._Risk_responseTeams(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "assigneeIDs":
+			out.Values[i] = ec._Risk_assigneeIDs(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "assignees":
+			out.Values[i] = ec._Risk_assignees(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "detectionIndicators":
+			out.Values[i] = ec._Risk_detectionIndicators(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		case "createdAt":
 			out.Values[i] = ec._Risk_createdAt(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
@@ -2744,6 +4644,155 @@ func (ec *executionContext) _Risk(ctx context.Context, sel ast.SelectionSet, obj
 			}
 		case "updatedAt":
 			out.Values[i] = ec._Risk_updatedAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var riskConfigurationImplementors = []string{"RiskConfiguration"}
+
+func (ec *executionContext) _RiskConfiguration(ctx context.Context, sel ast.SelectionSet, obj *graphql1.RiskConfiguration) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, riskConfigurationImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("RiskConfiguration")
+		case "categories":
+			out.Values[i] = ec._RiskConfiguration_categories(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "likelihoodLevels":
+			out.Values[i] = ec._RiskConfiguration_likelihoodLevels(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "impactLevels":
+			out.Values[i] = ec._RiskConfiguration_impactLevels(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "teams":
+			out.Values[i] = ec._RiskConfiguration_teams(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var slackUserImplementors = []string{"SlackUser"}
+
+func (ec *executionContext) _SlackUser(ctx context.Context, sel ast.SelectionSet, obj *graphql1.SlackUser) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, slackUserImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("SlackUser")
+		case "id":
+			out.Values[i] = ec._SlackUser_id(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "name":
+			out.Values[i] = ec._SlackUser_name(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "realName":
+			out.Values[i] = ec._SlackUser_realName(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "imageUrl":
+			out.Values[i] = ec._SlackUser_imageUrl(ctx, field, obj)
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var teamImplementors = []string{"Team"}
+
+func (ec *executionContext) _Team(ctx context.Context, sel ast.SelectionSet, obj *graphql1.Team) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, teamImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("Team")
+		case "id":
+			out.Values[i] = ec._Team_id(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "name":
+			out.Values[i] = ec._Team_name(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
@@ -3121,9 +5170,117 @@ func (ec *executionContext) marshalNBoolean2bool(ctx context.Context, sel ast.Se
 	return res
 }
 
+func (ec *executionContext) marshalNCategory2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCategoryᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.Category) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNCategory2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCategory(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNCategory2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCategory(ctx context.Context, sel ast.SelectionSet, v *graphql1.Category) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._Category(ctx, sel, v)
+}
+
 func (ec *executionContext) unmarshalNCreateRiskInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateRiskInput(ctx context.Context, v any) (graphql1.CreateRiskInput, error) {
 	res, err := ec.unmarshalInputCreateRiskInput(ctx, v)
 	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNImpactLevel2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImpactLevelᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.ImpactLevel) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNImpactLevel2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImpactLevel(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNImpactLevel2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImpactLevel(ctx context.Context, sel ast.SelectionSet, v *graphql1.ImpactLevel) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._ImpactLevel(ctx, sel, v)
 }
 
 func (ec *executionContext) unmarshalNInt2int(ctx context.Context, v any) (int, error) {
@@ -3140,6 +5297,60 @@ func (ec *executionContext) marshalNInt2int(ctx context.Context, sel ast.Selecti
 		}
 	}
 	return res
+}
+
+func (ec *executionContext) marshalNLikelihoodLevel2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐLikelihoodLevelᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.LikelihoodLevel) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNLikelihoodLevel2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐLikelihoodLevel(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNLikelihoodLevel2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐLikelihoodLevel(ctx context.Context, sel ast.SelectionSet, v *graphql1.LikelihoodLevel) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._LikelihoodLevel(ctx, sel, v)
 }
 
 func (ec *executionContext) marshalNRisk2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐRisk(ctx context.Context, sel ast.SelectionSet, v graphql1.Risk) graphql.Marshaler {
@@ -3200,6 +5411,74 @@ func (ec *executionContext) marshalNRisk2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecato
 	return ec._Risk(ctx, sel, v)
 }
 
+func (ec *executionContext) marshalNRiskConfiguration2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐRiskConfiguration(ctx context.Context, sel ast.SelectionSet, v graphql1.RiskConfiguration) graphql.Marshaler {
+	return ec._RiskConfiguration(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNRiskConfiguration2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐRiskConfiguration(ctx context.Context, sel ast.SelectionSet, v *graphql1.RiskConfiguration) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._RiskConfiguration(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNSlackUser2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackUserᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.SlackUser) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNSlackUser2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackUser(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNSlackUser2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackUser(ctx context.Context, sel ast.SelectionSet, v *graphql1.SlackUser) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._SlackUser(ctx, sel, v)
+}
+
 func (ec *executionContext) unmarshalNString2string(ctx context.Context, v any) (string, error) {
 	res, err := graphql.UnmarshalString(v)
 	return res, graphql.ErrorOnPath(ctx, err)
@@ -3214,6 +5493,90 @@ func (ec *executionContext) marshalNString2string(ctx context.Context, sel ast.S
 		}
 	}
 	return res
+}
+
+func (ec *executionContext) unmarshalNString2ᚕstringᚄ(ctx context.Context, v any) ([]string, error) {
+	var vSlice []any
+	vSlice = graphql.CoerceList(v)
+	var err error
+	res := make([]string, len(vSlice))
+	for i := range vSlice {
+		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithIndex(i))
+		res[i], err = ec.unmarshalNString2string(ctx, vSlice[i])
+		if err != nil {
+			return nil, err
+		}
+	}
+	return res, nil
+}
+
+func (ec *executionContext) marshalNString2ᚕstringᚄ(ctx context.Context, sel ast.SelectionSet, v []string) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	for i := range v {
+		ret[i] = ec.marshalNString2string(ctx, sel, v[i])
+	}
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNTeam2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐTeamᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.Team) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNTeam2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐTeam(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNTeam2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐTeam(ctx context.Context, sel ast.SelectionSet, v *graphql1.Team) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._Team(ctx, sel, v)
 }
 
 func (ec *executionContext) unmarshalNTime2timeᚐTime(ctx context.Context, v any) (time.Time, error) {
@@ -3518,6 +5881,20 @@ func (ec *executionContext) marshalOBoolean2ᚖbool(ctx context.Context, sel ast
 	_ = ctx
 	res := graphql.MarshalBoolean(*v)
 	return res
+}
+
+func (ec *executionContext) marshalOImpactLevel2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImpactLevel(ctx context.Context, sel ast.SelectionSet, v *graphql1.ImpactLevel) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	return ec._ImpactLevel(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalOLikelihoodLevel2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐLikelihoodLevel(ctx context.Context, sel ast.SelectionSet, v *graphql1.LikelihoodLevel) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	return ec._LikelihoodLevel(ctx, sel, v)
 }
 
 func (ec *executionContext) marshalORisk2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐRisk(ctx context.Context, sel ast.SelectionSet, v *graphql1.Risk) graphql.Marshaler {

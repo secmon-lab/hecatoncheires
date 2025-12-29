@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import Layout from './components/Layout'
 import Top from './pages/Top'
 import RiskList from './pages/RiskList'
+import RiskDetail from './pages/RiskDetail'
 import { AuthGuard } from './components/auth/auth-guard'
 
 function App() {
@@ -14,6 +15,7 @@ function App() {
           </Route>
           <Route path="/risks" element={<Layout title="Risk Management" />}>
             <Route index element={<RiskList />} />
+            <Route path=":id" element={<RiskDetail />} />
           </Route>
         </Routes>
       </AuthGuard>

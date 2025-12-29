@@ -6,9 +6,36 @@ import (
 	"time"
 )
 
-type CreateRiskInput struct {
+type Category struct {
+	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
+}
+
+type CreateRiskInput struct {
+	Name                string   `json:"name"`
+	Description         string   `json:"description"`
+	CategoryIDs         []string `json:"categoryIDs"`
+	SpecificImpact      string   `json:"specificImpact"`
+	LikelihoodID        string   `json:"likelihoodID"`
+	ImpactID            string   `json:"impactID"`
+	ResponseTeamIDs     []string `json:"responseTeamIDs"`
+	AssigneeIDs         []string `json:"assigneeIDs"`
+	DetectionIndicators string   `json:"detectionIndicators"`
+}
+
+type ImpactLevel struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Score       int    `json:"score"`
+}
+
+type LikelihoodLevel struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Score       int    `json:"score"`
 }
 
 type Mutation struct {
@@ -18,15 +45,53 @@ type Query struct {
 }
 
 type Risk struct {
-	ID          int       `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ID                  int              `json:"id"`
+	Name                string           `json:"name"`
+	Description         string           `json:"description"`
+	CategoryIDs         []string         `json:"categoryIDs"`
+	Categories          []*Category      `json:"categories"`
+	SpecificImpact      string           `json:"specificImpact"`
+	LikelihoodID        string           `json:"likelihoodID"`
+	LikelihoodLevel     *LikelihoodLevel `json:"likelihoodLevel,omitempty"`
+	ImpactID            string           `json:"impactID"`
+	ImpactLevel         *ImpactLevel     `json:"impactLevel,omitempty"`
+	ResponseTeamIDs     []string         `json:"responseTeamIDs"`
+	ResponseTeams       []*Team          `json:"responseTeams"`
+	AssigneeIDs         []string         `json:"assigneeIDs"`
+	Assignees           []*SlackUser     `json:"assignees"`
+	DetectionIndicators string           `json:"detectionIndicators"`
+	CreatedAt           time.Time        `json:"createdAt"`
+	UpdatedAt           time.Time        `json:"updatedAt"`
+}
+
+type RiskConfiguration struct {
+	Categories       []*Category        `json:"categories"`
+	LikelihoodLevels []*LikelihoodLevel `json:"likelihoodLevels"`
+	ImpactLevels     []*ImpactLevel     `json:"impactLevels"`
+	Teams            []*Team            `json:"teams"`
+}
+
+type SlackUser struct {
+	ID       string  `json:"id"`
+	Name     string  `json:"name"`
+	RealName string  `json:"realName"`
+	ImageURL *string `json:"imageUrl,omitempty"`
+}
+
+type Team struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type UpdateRiskInput struct {
-	ID          int    `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	ID                  int      `json:"id"`
+	Name                string   `json:"name"`
+	Description         string   `json:"description"`
+	CategoryIDs         []string `json:"categoryIDs"`
+	SpecificImpact      string   `json:"specificImpact"`
+	LikelihoodID        string   `json:"likelihoodID"`
+	ImpactID            string   `json:"impactID"`
+	ResponseTeamIDs     []string `json:"responseTeamIDs"`
+	AssigneeIDs         []string `json:"assigneeIDs"`
+	DetectionIndicators string   `json:"detectionIndicators"`
 }

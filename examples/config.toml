@@ -1,0 +1,113 @@
+# Hecatoncheires Configuration Example
+# This file shows example configuration for the risk management system
+
+# Category definitions
+# Categories are used to classify risks
+[[category]]
+id = "data-breach"
+name = "Data Breach"
+description = "Risk of personal or confidential information leakage"
+
+[[category]]
+id = "system-failure"
+name = "System Failure"
+description = "Risk of system or service downtime and failures"
+
+[[category]]
+id = "compliance"
+name = "Compliance"
+description = "Risk of regulatory or internal policy violations"
+
+[[category]]
+id = "supply-chain"
+name = "Supply Chain"
+description = "Risks related to external vendors and third-party services"
+
+[[category]]
+id = "insider-threat"
+name = "Insider Threat"
+description = "Intentional or unintentional threats from employees and related parties"
+
+# Likelihood levels (score: 1-5, higher is more likely)
+[[likelihood]]
+id = "very-low"
+name = "Very Low"
+description = "Extremely unlikely to occur (less than once per year)"
+score = 1
+
+[[likelihood]]
+id = "low"
+name = "Low"
+description = "Unlikely to occur (a few times per year)"
+score = 2
+
+[[likelihood]]
+id = "medium"
+name = "Medium"
+description = "Moderately likely to occur (about once per month)"
+score = 3
+
+[[likelihood]]
+id = "high"
+name = "High"
+description = "Likely to occur (about once per week)"
+score = 4
+
+[[likelihood]]
+id = "very-high"
+name = "Very High"
+description = "Very likely to occur (almost daily)"
+score = 5
+
+# Impact levels (score: 1-5, higher is more severe)
+[[impact]]
+id = "negligible"
+name = "Negligible"
+description = "Little to no impact on business operations"
+score = 1
+
+[[impact]]
+id = "minor"
+name = "Minor"
+description = "Limited impact with no disruption to business continuity"
+score = 2
+
+[[impact]]
+id = "moderate"
+name = "Moderate"
+description = "Some business impact requiring response"
+score = 3
+
+[[impact]]
+id = "major"
+name = "Major"
+description = "Significant impact requiring urgent response"
+score = 4
+
+[[impact]]
+id = "critical"
+name = "Critical"
+description = "Critical impact on business continuity requiring highest priority response"
+score = 5
+
+# Team definitions
+# Teams represent organizations responsible for handling risks
+[[team]]
+id = "security-team"
+name = "Security Team"
+
+[[team]]
+id = "infrastructure-team"
+name = "Infrastructure Team"
+
+[[team]]
+id = "development-team"
+name = "Development Team"
+
+[[team]]
+id = "compliance-team"
+name = "Compliance Team"
+
+[[team]]
+id = "business-team"
+name = "Business Team"

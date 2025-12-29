@@ -1,9 +1,60 @@
 scalar Time
 
+type Category {
+  id: String!
+  name: String!
+  description: String!
+}
+
+type LikelihoodLevel {
+  id: String!
+  name: String!
+  description: String!
+  score: Int!
+}
+
+type ImpactLevel {
+  id: String!
+  name: String!
+  description: String!
+  score: Int!
+}
+
+type Team {
+  id: String!
+  name: String!
+}
+
+type SlackUser {
+  id: String!
+  name: String!
+  realName: String!
+  imageUrl: String
+}
+
+type RiskConfiguration {
+  categories: [Category!]!
+  likelihoodLevels: [LikelihoodLevel!]!
+  impactLevels: [ImpactLevel!]!
+  teams: [Team!]!
+}
+
 type Risk {
   id: Int!
   name: String!
   description: String!
+  categoryIDs: [String!]!
+  categories: [Category!]!
+  specificImpact: String!
+  likelihoodID: String!
+  likelihoodLevel: LikelihoodLevel
+  impactID: String!
+  impactLevel: ImpactLevel
+  responseTeamIDs: [String!]!
+  responseTeams: [Team!]!
+  assigneeIDs: [String!]!
+  assignees: [SlackUser!]!
+  detectionIndicators: String!
   createdAt: Time!
   updatedAt: Time!
 }
@@ -11,18 +62,34 @@ type Risk {
 input CreateRiskInput {
   name: String!
   description: String!
+  categoryIDs: [String!]!
+  specificImpact: String!
+  likelihoodID: String!
+  impactID: String!
+  responseTeamIDs: [String!]!
+  assigneeIDs: [String!]!
+  detectionIndicators: String!
 }
 
 input UpdateRiskInput {
   id: Int!
   name: String!
   description: String!
+  categoryIDs: [String!]!
+  specificImpact: String!
+  likelihoodID: String!
+  impactID: String!
+  responseTeamIDs: [String!]!
+  assigneeIDs: [String!]!
+  detectionIndicators: String!
 }
 
 type Query {
   health: String!
   risks: [Risk!]!
   risk(id: Int!): Risk
+  riskConfiguration: RiskConfiguration!
+  slackUsers: [SlackUser!]!
 }
 
 type Mutation {

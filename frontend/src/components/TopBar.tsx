@@ -7,7 +7,7 @@ interface TopBarProps {
   title: string
 }
 
-export default function TopBar({ title }: TopBarProps) {
+export default function TopBar({}: TopBarProps) {
   return (
     <header className={styles.topBar}>
       <div className={styles.leftSection}>

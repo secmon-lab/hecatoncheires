@@ -6,26 +6,37 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 )
 
 type RiskUseCase struct {
-	repo interfaces.Repository
+	repo       interfaces.Repository
+	riskConfig *config.RiskConfig
 }
 
-func NewRiskUseCase(repo interfaces.Repository) *RiskUseCase {
+func NewRiskUseCase(repo interfaces.Repository, cfg *config.RiskConfig) *RiskUseCase {
 	return &RiskUseCase{
-		repo: repo,
+		repo:       repo,
+		riskConfig: cfg,
 	}
 }
 
-func (uc *RiskUseCase) CreateRisk(ctx context.Context, name, description string) (*model.Risk, error) {
+func (uc *RiskUseCase) CreateRisk(ctx context.Context, name, description string, categoryIDs []types.CategoryID, specificImpact string, likelihoodID types.LikelihoodID, impactID types.ImpactID, responseTeamIDs []types.TeamID, assigneeIDs []string, detectionIndicators string) (*model.Risk, error) {
 	if name == "" {
 		return nil, goerr.New("risk name is required")
 	}
 
 	risk := &model.Risk{
-		Name:        name,
-		Description: description,
+		Name:                name,
+		Description:         description,
+		CategoryIDs:         categoryIDs,
+		SpecificImpact:      specificImpact,
+		LikelihoodID:        likelihoodID,
+		ImpactID:            impactID,
+		ResponseTeamIDs:     responseTeamIDs,
+		AssigneeIDs:         assigneeIDs,
+		DetectionIndicators: detectionIndicators,
 	}
 
 	created, err := uc.repo.Risk().Create(ctx, risk)
@@ -36,15 +47,22 @@ func (uc *RiskUseCase) CreateRisk(ctx context.Context, name, description string)
 	return created, nil
 }
 
-func (uc *RiskUseCase) UpdateRisk(ctx context.Context, id int64, name, description string) (*model.Risk, error) {
+func (uc *RiskUseCase) UpdateRisk(ctx context.Context, id int64, name, description string, categoryIDs []types.CategoryID, specificImpact string, likelihoodID types.LikelihoodID, impactID types.ImpactID, responseTeamIDs []types.TeamID, assigneeIDs []string, detectionIndicators string) (*model.Risk, error) {
 	if name == "" {
 		return nil, goerr.New("risk name is required")
 	}
 
 	risk := &model.Risk{
-		ID:          id,
-		Name:        name,
-		Description: description,
+		ID:                  id,
+		Name:                name,
+		Description:         description,
+		CategoryIDs:         categoryIDs,
+		SpecificImpact:      specificImpact,
+		LikelihoodID:        likelihoodID,
+		ImpactID:            impactID,
+		ResponseTeamIDs:     responseTeamIDs,
+		AssigneeIDs:         assigneeIDs,
+		DetectionIndicators: detectionIndicators,
 	}
 
 	updated, err := uc.repo.Risk().Update(ctx, risk)
@@ -79,4 +97,67 @@ func (uc *RiskUseCase) ListRisks(ctx context.Context) ([]*model.Risk, error) {
 	}
 
 	return risks, nil
+}
+
+func (uc *RiskUseCase) GetRiskConfiguration() (*config.RiskConfig, error) {
+	if uc.riskConfig == nil {
+		return &config.RiskConfig{}, nil
+	}
+	return uc.riskConfig, nil
+}
+
+func (uc *RiskUseCase) ValidateCategoryID(id types.CategoryID) error {
+	if uc.riskConfig == nil {
+		return nil
+	}
+
+	for _, cat := range uc.riskConfig.Categories {
+		if types.CategoryID(cat.ID) == id {
+			return nil
+		}
+	}
+
+	return goerr.New("category ID not found in configuration", goerr.V("id", id))
+}
+
+func (uc *RiskUseCase) ValidateLikelihoodID(id types.LikelihoodID) error {
+	if uc.riskConfig == nil {
+		return nil
+	}
+
+	for _, level := range uc.riskConfig.Likelihood {
+		if types.LikelihoodID(level.ID) == id {
+			return nil
+		}
+	}
+
+	return goerr.New("likelihood ID not found in configuration", goerr.V("id", id))
+}
+
+func (uc *RiskUseCase) ValidateImpactID(id types.ImpactID) error {
+	if uc.riskConfig == nil {
+		return nil
+	}
+
+	for _, level := range uc.riskConfig.Impact {
+		if types.ImpactID(level.ID) == id {
+			return nil
+		}
+	}
+
+	return goerr.New("impact ID not found in configuration", goerr.V("id", id))
+}
+
+func (uc *RiskUseCase) ValidateTeamID(id types.TeamID) error {
+	if uc.riskConfig == nil {
+		return nil
+	}
+
+	for _, team := range uc.riskConfig.Teams {
+		if types.TeamID(team.ID) == id {
+			return nil
+		}
+	}
+
+	return goerr.New("team ID not found in configuration", goerr.V("id", id))
 }
