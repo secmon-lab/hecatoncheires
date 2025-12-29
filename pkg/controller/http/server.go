@@ -18,6 +18,7 @@ import (
 type Server struct {
 	router         *chi.Mux
 	enableGraphiQL bool
+	authUC         AuthUseCase
 }
 
 type Options func(*Server)
@@ -25,6 +26,12 @@ type Options func(*Server)
 func WithGraphiQL(enabled bool) Options {
 	return func(s *Server) {
 		s.enableGraphiQL = enabled
+	}
+}
+
+func WithAuth(authUC AuthUseCase) Options {
+	return func(s *Server) {
+		s.authUC = authUC
 	}
 }
 
@@ -46,6 +53,10 @@ func New(gqlHandler http.Handler, opts ...Options) *Server {
 
 	// GraphQL endpoint (must be registered before catch-all route)
 	r.Route("/graphql", func(r chi.Router) {
+		// Apply GraphQL-specific auth middleware
+		if s.authUC != nil {
+			r.Use(graphqlAuthMiddleware(s.authUC))
+		}
 		r.Post("/", gqlHandler.ServeHTTP)
 		r.Get("/", gqlHandler.ServeHTTP) // Support GET for introspection
 	})
@@ -53,6 +64,17 @@ func New(gqlHandler http.Handler, opts ...Options) *Server {
 	// GraphiQL playground
 	if s.enableGraphiQL {
 		r.Get("/graphiql", playground.Handler("GraphQL playground", "/graphql").ServeHTTP)
+	}
+
+	// Auth endpoints (if auth is configured)
+	if s.authUC != nil {
+		r.Route("/api/auth", func(r chi.Router) {
+			r.Get("/login", authLoginHandler(s.authUC))
+			r.Get("/callback", authCallbackHandler(s.authUC))
+			r.Post("/logout", authLogoutHandler(s.authUC))
+			r.Get("/me", authMeHandler(s.authUC))
+			r.Get("/user-info", authUserInfoHandler(s.authUC))
+		})
 	}
 
 	// Static file serving for SPA (catch-all, must be last)
@@ -65,8 +87,14 @@ func New(gqlHandler http.Handler, opts ...Options) *Server {
 	} else {
 		// Check if index.html exists
 		if _, err := staticFS.Open("index.html"); err == nil {
-			// Serve static files and handle SPA routing
-			r.Get("/*", spaHandler(staticFS))
+			// Serve static files and handle SPA routing with auth
+			r.Group(func(r chi.Router) {
+				// Apply auth middleware to frontend routes
+				if s.authUC != nil {
+					r.Use(authMiddleware(s.authUC))
+				}
+				r.Get("/*", spaHandler(staticFS))
+			})
 		} else {
 			// This is a warning, not a critical error
 			logging.Default().Warn("index.html not found in frontend dist", "error", err)

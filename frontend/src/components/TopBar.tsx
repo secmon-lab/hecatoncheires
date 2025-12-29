@@ -1,5 +1,6 @@
-import { Bell, User } from 'lucide-react'
+import { Bell } from 'lucide-react'
 import styles from './TopBar.module.css'
+import { UserMenu } from './UserMenu'
 
 interface TopBarProps {
   title: string
@@ -14,9 +15,7 @@ export default function TopBar({ title }: TopBarProps) {
         <button className={styles.iconButton}>
           <Bell size={20} />
         </button>
-        <button className={styles.iconButton}>
-          <User size={20} />
-        </button>
+        <UserMenu />
       </div>
     </header>
   )

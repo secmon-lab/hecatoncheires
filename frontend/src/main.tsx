@@ -2,11 +2,13 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ApolloClient, InMemoryCache, ApolloProvider } from '@apollo/client'
 import App from './App.tsx'
+import { AuthProvider } from './contexts/auth-context.tsx'
 import './styles/global.css'
 
 const client = new ApolloClient({
   uri: '/graphql',
   cache: new InMemoryCache(),
+  credentials: 'include', // Include cookies for authentication
 })
 
 const rootElement = document.getElementById('root')
@@ -16,8 +18,10 @@ if (!rootElement) {
 
 createRoot(rootElement).render(
   <StrictMode>
-    <ApolloProvider client={client}>
-      <App />
-    </ApolloProvider>
+    <AuthProvider>
+      <ApolloProvider client={client}>
+        <App />
+      </ApolloProvider>
+    </AuthProvider>
   </StrictMode>,
 )

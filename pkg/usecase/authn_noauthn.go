@@ -1,0 +1,59 @@
+package usecase
+
+import (
+	"context"
+	"encoding/json"
+
+	"github.com/m-mizutani/goerr/v2"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
+)
+
+// NoAuthnUseCase provides a mock authentication that always returns an anonymous user
+type NoAuthnUseCase struct {
+	repo interfaces.Repository
+}
+
+// NewNoAuthnUseCase creates a new NoAuthnUseCase instance
+func NewNoAuthnUseCase(repo interfaces.Repository) *NoAuthnUseCase {
+	return &NoAuthnUseCase{
+		repo: repo,
+	}
+}
+
+// GetAuthURL returns a dummy URL (should not be called in no-auth mode)
+func (uc *NoAuthnUseCase) GetAuthURL(state string) string {
+	return "/"
+}
+
+// HandleCallback handles OAuth callback (should not be called in no-auth mode)
+func (uc *NoAuthnUseCase) HandleCallback(ctx context.Context, code string) (*auth.Token, error) {
+	// In no-auth mode, this should not be called, but we create an anonymous token anyway
+	token := auth.NewAnonymousUser()
+	if err := uc.repo.PutToken(ctx, token); err != nil {
+		logger := logging.From(ctx)
+		if data, jsonErr := json.Marshal(token); jsonErr == nil {
+			logger.Error("failed to save token", "error", err, "token", string(data))
+		}
+		return nil, goerr.Wrap(err, "failed to store anonymous token", goerr.V("token", token))
+	}
+	return token, nil
+}
+
+// ValidateToken always returns an anonymous user token
+func (uc *NoAuthnUseCase) ValidateToken(ctx context.Context, tokenID auth.TokenID, tokenSecret auth.TokenSecret) (*auth.Token, error) {
+	// Always return anonymous user
+	return auth.NewAnonymousUser(), nil
+}
+
+// Logout does nothing in no-auth mode
+func (uc *NoAuthnUseCase) Logout(ctx context.Context, tokenID auth.TokenID) error {
+	// No-op in no-auth mode
+	return nil
+}
+
+// IsNoAuthn returns true for NoAuthnUseCase
+func (uc *NoAuthnUseCase) IsNoAuthn() bool {
+	return true
+}
