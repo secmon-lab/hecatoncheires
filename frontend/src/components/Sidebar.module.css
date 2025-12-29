@@ -7,7 +7,7 @@
   position: fixed;
   left: 0;
   top: 0;
-  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.05);
+  box-shadow: var(--shadow-sidebar);
 }
 
 .logoContainer {
@@ -21,7 +21,7 @@
 }
 
 .logoContainer:hover {
-  background-color: rgba(255, 255, 255, 0.05);
+  background-color: var(--sidebar-hover);
 }
 
 .logo {
