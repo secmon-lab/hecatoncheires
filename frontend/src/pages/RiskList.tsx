@@ -22,10 +22,15 @@ export default function RiskList() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [selectedRisk, setSelectedRisk] = useState<Risk | null>(null)
 
-  const { data, loading, error, refetch } = useQuery(GET_RISKS)
+  const { data, loading, error } = useQuery(GET_RISKS)
   const [deleteRisk] = useMutation(DELETE_RISK, {
+    update(cache) {
+      if (!selectedRisk) return
+      const normalizedId = cache.identify({ id: selectedRisk.id, __typename: 'Risk' })
+      cache.evict({ id: normalizedId })
+      cache.gc()
+    },
     onCompleted: () => {
-      refetch()
       setIsDeleteDialogOpen(false)
       setSelectedRisk(null)
     },
@@ -44,7 +49,6 @@ export default function RiskList() {
   const handleFormClose = () => {
     setIsFormOpen(false)
     setSelectedRisk(null)
-    refetch()
   }
 
   const handleDeleteConfirm = () => {

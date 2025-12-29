@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useMutation } from '@apollo/client'
 import Modal from '../components/Modal'
 import Button from '../components/Button'
-import { CREATE_RISK, UPDATE_RISK } from '../graphql/risk'
+import { CREATE_RISK, UPDATE_RISK, GET_RISKS } from '../graphql/risk'
 import styles from './RiskForm.module.css'
 
 interface Risk {
@@ -23,6 +23,16 @@ export default function RiskForm({ isOpen, onClose, risk }: RiskFormProps) {
   const [errors, setErrors] = useState<{ name?: string; description?: string }>({})
 
   const [createRisk, { loading: creating }] = useMutation(CREATE_RISK, {
+    update(cache, { data }) {
+      if (!data?.createRisk) return
+      const existingRisks = cache.readQuery<{ risks: Risk[] }>({ query: GET_RISKS })
+      if (existingRisks) {
+        cache.writeQuery({
+          query: GET_RISKS,
+          data: { risks: [...existingRisks.risks, data.createRisk] },
+        })
+      }
+    },
     onCompleted: () => {
       onClose()
       resetForm()
@@ -33,6 +43,18 @@ export default function RiskForm({ isOpen, onClose, risk }: RiskFormProps) {
   })
 
   const [updateRisk, { loading: updating }] = useMutation(UPDATE_RISK, {
+    update(cache, { data }) {
+      if (!data?.updateRisk) return
+      cache.modify({
+        fields: {
+          risks(existingRisks = []) {
+            return existingRisks.map((riskRef: Risk) =>
+              riskRef.id === data.updateRisk.id ? data.updateRisk : riskRef
+            )
+          },
+        },
+      })
+    },
     onCompleted: () => {
       onClose()
       resetForm()
