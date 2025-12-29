@@ -125,7 +125,7 @@ export default function RiskList() {
       <div className={styles.header}>
         <div>
           <h2 className={styles.title}>Risk Management</h2>
-          <p className={styles.subtitle}>Manage and track security risks</p>
+          <p className={styles.subtitle}>Manage and track risks</p>
         </div>
         <Button
           variant="primary"
