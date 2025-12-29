@@ -3,11 +3,7 @@ import { Link } from 'react-router-dom'
 import styles from './TopBar.module.css'
 import { UserMenu } from './UserMenu'
 
-interface TopBarProps {
-  title: string
-}
-
-export default function TopBar({}: TopBarProps) {
+export default function TopBar() {
   return (
     <header className={styles.topBar}>
       <div className={styles.leftSection}>
