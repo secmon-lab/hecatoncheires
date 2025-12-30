@@ -74,15 +74,20 @@ func (r *slackRepository) PutMessage(ctx context.Context, msg *slack.Message) er
 	channelRef := r.channelsCollection().Doc(channelID)
 	if err := r.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
 		_, err := tx.Get(channelRef)
-		if err != nil && err != iterator.Done {
-			// Channel doesn't exist, create it
-			channelData := &slackChannel{
-				ChannelID:     channelID,
-				TeamID:        msg.TeamID(),
-				LastMessageAt: msg.CreatedAt(),
-				MessageCount:  1,
+		if err != nil {
+			// Check if channel doesn't exist
+			if status.Code(err) == codes.NotFound {
+				// Channel doesn't exist, create it
+				channelData := &slackChannel{
+					ChannelID:     channelID,
+					TeamID:        msg.TeamID(),
+					LastMessageAt: msg.CreatedAt(),
+					MessageCount:  1,
+				}
+				return tx.Set(channelRef, channelData)
 			}
-			return tx.Set(channelRef, channelData)
+			// Other error, propagate it
+			return err
 		}
 
 		// Channel exists, update metadata
