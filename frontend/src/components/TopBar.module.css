@@ -12,13 +12,33 @@
   right: 0;
   width: 100%;
   z-index: 1000;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--shadow-md);
 }
 
 .leftSection {
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 16px;
+}
+
+.menuButton {
+  width: var(--touch-target-min);
+  height: var(--touch-target-min);
+  border: none;
+  background-color: transparent;
+  color: var(--topbar-icon);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.menuButton:hover {
+  background-color: var(--topbar-hover);
+  color: var(--topbar-text);
 }
 
 .logo {
@@ -45,6 +65,7 @@
   font-size: 18px;
   font-weight: 300;
   letter-spacing: 0.5px;
+  white-space: nowrap;
 }
 
 .title {
@@ -76,4 +97,29 @@
 .iconButton:hover {
   background-color: var(--topbar-hover);
   color: var(--topbar-text);
+}
+
+@media (max-width: var(--breakpoint-mobile)) {
+  .topBar {
+    padding: 0 16px;
+  }
+
+  .leftSection {
+    gap: 8px;
+  }
+
+  .logoText {
+    display: none;
+  }
+
+  .iconButton {
+    width: var(--touch-target-min);
+    height: var(--touch-target-min);
+  }
+}
+
+@media (min-width: calc(var(--breakpoint-mobile) + 1px)) and (max-width: var(--breakpoint-tablet)) {
+  .topBar {
+    padding: 0 24px;
+  }
 }

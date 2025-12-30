@@ -21,19 +21,20 @@
 .select {
   padding: 12px 16px;
   border: 1px solid #e0e0e0;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-size: 14px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   color: #212121;
-  transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all var(--transition-fast);
+  min-height: var(--touch-target-min);
 }
 
 .input:focus,
 .textarea:focus,
 .select:focus {
   outline: none;
-  border-color: #673ab7;
-  box-shadow: 0 0 0 3px rgba(103, 58, 183, 0.1);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-shadow);
 }
 
 .input:disabled,
@@ -44,21 +45,42 @@
 }
 
 .inputError {
-  border-color: #f44336;
+  border-color: var(--color-error);
 }
 
 .inputError:focus {
-  border-color: #f44336;
-  box-shadow: 0 0 0 3px rgba(244, 67, 54, 0.1);
+  border-color: var(--color-error);
+  box-shadow: 0 0 0 3px var(--color-error-shadow);
 }
 
 .textarea {
   resize: vertical;
-  min-height: 80px;
+  min-height: 100px;
 }
 
 .error {
   font-size: 12px;
-  color: #f44336;
+  color: var(--color-error);
   margin-top: -4px;
+}
+
+@media (max-width: var(--breakpoint-mobile)) {
+  .form {
+    gap: 16px;
+  }
+
+  .input,
+  .textarea,
+  .select {
+    font-size: 16px;
+    padding: 14px 16px;
+  }
+
+  .textarea {
+    min-height: 120px;
+  }
+
+  .label {
+    font-size: 13px;
+  }
 }

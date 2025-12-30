@@ -5,9 +5,10 @@
 
 .header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: 32px;
+  margin-bottom: 24px;
+  gap: var(--spacing-md);
 }
 
 .title {
@@ -25,6 +26,36 @@
 
 .tableWrapper {
   margin-top: 24px;
+}
+
+@media (max-width: var(--breakpoint-mobile)) {
+  .header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--spacing-md);
+  }
+
+  .title {
+    font-size: 20px;
+  }
+
+  .subtitle {
+    font-size: 13px;
+  }
+
+  .tableWrapper {
+    margin-top: 16px;
+  }
+}
+
+@media (min-width: calc(var(--breakpoint-mobile) + 1px)) and (max-width: var(--breakpoint-tablet)) {
+  .header {
+    margin-bottom: 20px;
+  }
+
+  .title {
+    font-size: 22px;
+  }
 }
 
 .actions {
@@ -52,8 +83,8 @@
 }
 
 .actionButton.danger:hover {
-  background-color: rgba(244, 67, 54, 0.1);
-  color: #f44336;
+  background-color: var(--color-error-shadow);
+  color: var(--color-error);
 }
 
 .loading,

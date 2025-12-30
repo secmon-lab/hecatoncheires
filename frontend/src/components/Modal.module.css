@@ -8,8 +8,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
-  animation: fadeIn 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 1100;
+  animation: fadeIn var(--transition-fast);
+  padding: var(--spacing-md);
 }
 
 @keyframes fadeIn {
@@ -22,15 +23,15 @@
 }
 
 .modal {
-  background-color: #ffffff;
-  border-radius: 8px;
-  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.25), 0 10px 10px rgba(0, 0, 0, 0.22);
+  background-color: var(--bg-paper);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xl);
   max-width: 1200px;
   width: 90%;
   max-height: 90vh;
   display: flex;
   flex-direction: column;
-  animation: slideUp 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  animation: slideUp var(--transition-fast);
   overflow-y: auto;
 }
 
@@ -50,32 +51,32 @@
   align-items: center;
   justify-content: space-between;
   padding: 24px;
-  border-bottom: 1px solid #e0e0e0;
+  border-bottom: 1px solid var(--divider);
 }
 
 .title {
   margin: 0;
   font-size: 20px;
   font-weight: 600;
-  color: #212121;
+  color: var(--text-primary);
 }
 
 .closeButton {
   background: none;
   border: none;
-  padding: 4px;
+  padding: var(--spacing-xs);
   cursor: pointer;
-  color: #757575;
-  border-radius: 4px;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all var(--transition-fast);
 }
 
 .closeButton:hover {
-  background-color: #f5f5f5;
-  color: #212121;
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .content {
@@ -86,8 +87,66 @@
 
 .footer {
   padding: 16px 24px;
-  border-top: 1px solid #e0e0e0;
+  border-top: 1px solid var(--divider);
   display: flex;
   gap: 12px;
   justify-content: flex-end;
+}
+
+@media (max-width: var(--breakpoint-mobile)) {
+  .backdrop {
+    padding: 0;
+    align-items: flex-end;
+  }
+
+  .modal {
+    width: 100%;
+    max-width: 100%;
+    max-height: 95vh;
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+    animation: slideUpMobile var(--transition-normal);
+  }
+
+  @keyframes slideUpMobile {
+    from {
+      transform: translateY(100%);
+    }
+    to {
+      transform: translateY(0);
+    }
+  }
+
+  .header {
+    padding: 20px 16px;
+  }
+
+  .title {
+    font-size: 18px;
+  }
+
+  .content {
+    padding: 16px;
+  }
+
+  .footer {
+    padding: 12px 16px;
+    flex-direction: column-reverse;
+    gap: 8px;
+  }
+
+  .footer > * {
+    width: 100%;
+  }
+}
+
+@media (min-width: calc(var(--breakpoint-mobile) + 1px)) and (max-width: var(--breakpoint-tablet)) {
+  .modal {
+    width: 95%;
+    max-width: 720px;
+  }
+
+  .header,
+  .content {
+    padding: 20px;
+  }
 }
