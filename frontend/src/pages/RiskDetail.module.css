@@ -1,7 +1,6 @@
 .container {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 1.5rem;
 }
 
 .header {
@@ -9,11 +8,25 @@
   justify-content: space-between;
   align-items: center;
   margin-bottom: 1.5rem;
+  gap: var(--spacing-md);
 }
 
 .actions {
   display: flex;
   gap: 0.75rem;
+  flex-shrink: 0;
+}
+
+@media (max-width: 767px) {
+  .header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--spacing-md);
+  }
+
+  .actions {
+    justify-content: flex-end;
+  }
 }
 
 .content {
@@ -60,6 +73,12 @@
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 1rem;
+}
+
+@media (max-width: 767px) {
+  .row {
+    grid-template-columns: 1fr;
+  }
 }
 
 .sectionTitle {
@@ -122,6 +141,34 @@
   padding: 1rem 0 0 0;
   margin-top: 1.25rem;
   border-top: 1px solid #d0d0d0;
+}
+
+@media (max-width: 767px) {
+  .metadata {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .titleSection {
+    padding: 1rem;
+  }
+
+  .title {
+    font-size: 1.5rem;
+  }
+
+  .sections {
+    padding: 1rem;
+  }
+
+  .responseTable {
+    display: block;
+    overflow-x: auto;
+  }
+
+  .titleCell {
+    max-width: 200px;
+  }
 }
 
 .metadataItem {

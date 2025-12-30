@@ -1,4 +1,5 @@
 import { ReactNode } from 'react'
+import { useIsMobile } from '../hooks/useMediaQuery'
 import styles from './Table.module.css'
 
 interface Column<T> {
@@ -18,6 +19,43 @@ export default function Table<T extends { id: number | string }>({
   data,
   onRowClick,
 }: TableProps<T>) {
+  const isMobile = useIsMobile()
+
+  if (data.length === 0) {
+    return (
+      <div className={styles.emptyState}>
+        <p>No data available</p>
+      </div>
+    )
+  }
+
+  if (isMobile) {
+    return (
+      <div className={styles.cardContainer}>
+        {data.map((row) => (
+          <div
+            key={row.id}
+            className={`${styles.card} ${onRowClick ? styles.clickable : ''}`}
+            onClick={() => onRowClick?.(row)}
+          >
+            {columns.map((column, index) => {
+              const value = typeof column.accessor === 'function'
+                ? column.accessor(row)
+                : String(row[column.accessor])
+
+              return (
+                <div key={index} className={styles.cardRow}>
+                  <div className={styles.cardLabel}>{column.header}</div>
+                  <div className={styles.cardValue}>{value}</div>
+                </div>
+              )
+            })}
+          </div>
+        ))}
+      </div>
+    )
+  }
+
   return (
     <div className={styles.tableContainer}>
       <table className={styles.table}>
@@ -35,29 +73,21 @@ export default function Table<T extends { id: number | string }>({
           </tr>
         </thead>
         <tbody>
-          {data.length === 0 ? (
-            <tr>
-              <td colSpan={columns.length} className={styles.emptyCell}>
-                No data available
-              </td>
+          {data.map((row) => (
+            <tr
+              key={row.id}
+              className={onRowClick ? styles.clickableRow : ''}
+              onClick={() => onRowClick?.(row)}
+            >
+              {columns.map((column, index) => (
+                <td key={index} className={styles.td}>
+                  {typeof column.accessor === 'function'
+                    ? column.accessor(row)
+                    : String(row[column.accessor])}
+                </td>
+              ))}
             </tr>
-          ) : (
-            data.map((row) => (
-              <tr
-                key={row.id}
-                className={onRowClick ? styles.clickableRow : ''}
-                onClick={() => onRowClick?.(row)}
-              >
-                {columns.map((column, index) => (
-                  <td key={index} className={styles.td}>
-                    {typeof column.accessor === 'function'
-                      ? column.accessor(row)
-                      : String(row[column.accessor])}
-                  </td>
-                ))}
-              </tr>
-            ))
-          )}
+          ))}
         </tbody>
       </table>
     </div>

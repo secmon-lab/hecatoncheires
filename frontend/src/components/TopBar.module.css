@@ -18,7 +18,27 @@
 .leftSection {
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 16px;
+}
+
+.menuButton {
+  width: var(--touch-target-min);
+  height: var(--touch-target-min);
+  border: none;
+  background-color: transparent;
+  color: var(--topbar-icon);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.menuButton:hover {
+  background-color: var(--topbar-hover);
+  color: var(--topbar-text);
 }
 
 .logo {
@@ -45,6 +65,7 @@
   font-size: 18px;
   font-weight: 300;
   letter-spacing: 0.5px;
+  white-space: nowrap;
 }
 
 .title {
@@ -76,4 +97,29 @@
 .iconButton:hover {
   background-color: var(--topbar-hover);
   color: var(--topbar-text);
+}
+
+@media (max-width: 767px) {
+  .topBar {
+    padding: 0 16px;
+  }
+
+  .leftSection {
+    gap: 8px;
+  }
+
+  .logoText {
+    display: none;
+  }
+
+  .iconButton {
+    width: var(--touch-target-min);
+    height: var(--touch-target-min);
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .topBar {
+    padding: 0 24px;
+  }
 }

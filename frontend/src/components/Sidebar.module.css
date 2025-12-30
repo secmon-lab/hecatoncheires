@@ -8,6 +8,8 @@
   left: 0;
   top: var(--topbar-height);
   box-shadow: var(--shadow-sidebar);
+  transition: transform var(--transition-normal);
+  z-index: 1000;
 }
 
 .nav {
@@ -22,9 +24,10 @@
   align-items: center;
   gap: var(--spacing-md);
   padding: var(--spacing-md) 20px;
+  min-height: var(--touch-target-min);
   color: var(--sidebar-text);
   text-decoration: none;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 400;
   transition: all var(--transition-fast);
   position: relative;
@@ -48,4 +51,20 @@
   bottom: 0;
   width: 3px;
   background-color: var(--sidebar-active-border);
+}
+
+@media (max-width: 1023px) {
+  .sidebar {
+    transform: translateX(-100%);
+    box-shadow: var(--shadow-xl);
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  .navItem {
+    font-size: 15px;
+    padding: var(--spacing-md) 24px;
+  }
 }

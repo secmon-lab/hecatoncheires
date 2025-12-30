@@ -3,6 +3,27 @@
   min-height: 100vh;
   background-color: var(--bg-default);
   padding-top: var(--topbar-height);
+  position: relative;
+}
+
+.backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  z-index: 999;
+  animation: fadeIn var(--transition-fast);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .main {
@@ -10,10 +31,27 @@
   margin-left: var(--sidebar-width);
   display: flex;
   flex-direction: column;
+  transition: margin-left var(--transition-normal);
 }
 
 .content {
   flex: 1;
-  padding: 32px;
+  padding: var(--content-padding);
   overflow-y: auto;
+}
+
+@media (max-width: 1023px) {
+  .main {
+    margin-left: 0;
+  }
+
+  .content {
+    padding: var(--content-padding-tablet);
+  }
+}
+
+@media (max-width: 767px) {
+  .content {
+    padding: var(--content-padding-mobile);
+  }
 }

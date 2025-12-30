@@ -98,6 +98,19 @@
   --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-normal: 300ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-slow: 500ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Breakpoints */
+  --breakpoint-mobile: 767px;
+  --breakpoint-tablet: 1023px;
+  --breakpoint-desktop: 1024px;
+
+  /* Responsive spacing */
+  --content-padding: 32px;
+  --content-padding-tablet: 24px;
+  --content-padding-mobile: 16px;
+
+  /* Touch target size */
+  --touch-target-min: 44px;
 }
 
 * {
