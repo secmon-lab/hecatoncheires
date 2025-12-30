@@ -11,6 +11,7 @@ type UseCases struct {
 	Risk       *RiskUseCase
 	Response   *ResponseUseCase
 	Auth       AuthUseCaseInterface
+	Slack      *SlackUseCases
 }
 
 type Option func(*UseCases)
@@ -38,6 +39,7 @@ func New(repo interfaces.Repository, opts ...Option) *UseCases {
 
 	uc.Risk = NewRiskUseCase(repo, uc.riskConfig)
 	uc.Response = NewResponseUseCase(repo)
+	uc.Slack = NewSlackUseCases(repo)
 
 	return uc
 }

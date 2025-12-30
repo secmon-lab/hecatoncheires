@@ -16,9 +16,11 @@ import (
 )
 
 type Server struct {
-	router         *chi.Mux
-	enableGraphiQL bool
-	authUC         AuthUseCase
+	router              *chi.Mux
+	enableGraphiQL      bool
+	authUC              AuthUseCase
+	slackWebhookHandler *SlackWebhookHandler
+	slackSigningSecret  string
 }
 
 type Options func(*Server)
@@ -32,6 +34,13 @@ func WithGraphiQL(enabled bool) Options {
 func WithAuth(authUC AuthUseCase) Options {
 	return func(s *Server) {
 		s.authUC = authUC
+	}
+}
+
+func WithSlackWebhook(handler *SlackWebhookHandler, signingSecret string) Options {
+	return func(s *Server) {
+		s.slackWebhookHandler = handler
+		s.slackSigningSecret = signingSecret
 	}
 }
 
@@ -74,6 +83,17 @@ func New(gqlHandler http.Handler, opts ...Options) *Server {
 			r.Post("/logout", authLogoutHandler(s.authUC))
 			r.Get("/me", authMeHandler(s.authUC))
 			r.Get("/user-info", authUserInfoHandler(s.authUC))
+		})
+	}
+
+	// Slack webhook endpoint (if configured) - No auth required, uses signature verification
+	if s.slackWebhookHandler != nil {
+		r.Route("/hooks/slack", func(r chi.Router) {
+			// Apply Slack signature verification middleware to all /hooks/slack/* routes
+			r.Use(SlackSignatureMiddleware(s.slackSigningSecret))
+
+			// Event webhook endpoint
+			r.Post("/event", s.slackWebhookHandler.ServeHTTP)
 		})
 	}
 

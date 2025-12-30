@@ -34,9 +34,13 @@ Hecatoncheires is an AI native risk management system built with Go and React. I
 - Error discrimination must be done by error types, not by parsing error messages
 
 ### Testing Best Practices
+- ALWAYS write tests for ALL code you create. This is NON-NEGOTIABLE.
+- Writing code without tests is UNACCEPTABLE.
 - Use standard Go testing package
 - Use Memory repository from `pkg/repository/memory` for repository testing
 - Test both memory and firestore implementations when applicable
+- Every function, method, and handler MUST have corresponding tests
+- Tests must be written BEFORE declaring the task complete
 
 ### Code Visibility
 - Do not expose unnecessary methods, variables and types
@@ -129,10 +133,12 @@ In principle, do not trust developers who use this library from outside
 ### Check
 
 When making changes, before finishing the task, always:
+- **WRITE TESTS FIRST - This is MANDATORY, not optional**
 - Run `go vet ./...`, `go fmt ./...` to format the code
 - Run `golangci-lint run ./...` to check lint error
 - Run `gosec -exclude-generated -quiet ./...` to check security issue
-- Run tests to ensure no impact on other code
+- Run `zenv go test ./...` to ensure ALL tests pass
+- Verify test coverage for your changes - EVERY new function/method MUST be tested
 
 ### Language
 

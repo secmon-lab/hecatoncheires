@@ -139,11 +139,21 @@ func cmdServe() *cli.Command {
 				srv.ServeHTTP(w, r.WithContext(ctx))
 			})
 
-			// Create HTTP server with auth
-			httpHandler := httpctrl.New(gqlHandler,
+			// Create HTTP server options
+			httpOpts := []httpctrl.Options{
 				httpctrl.WithGraphiQL(enableGraphiQL),
 				httpctrl.WithAuth(authUC),
-			)
+			}
+
+			// Add Slack webhook handler if configured
+			if slackCfg.IsWebhookConfigured() {
+				slackWebhookHandler := httpctrl.NewSlackWebhookHandler(uc.Slack)
+				httpOpts = append(httpOpts, httpctrl.WithSlackWebhook(slackWebhookHandler, slackCfg.SigningSecret()))
+				logging.Default().Info("Slack webhook handler enabled")
+			}
+
+			// Create HTTP server
+			httpHandler := httpctrl.New(gqlHandler, httpOpts...)
 			server := &http.Server{
 				Addr:              addr,
 				Handler:           httpHandler,
