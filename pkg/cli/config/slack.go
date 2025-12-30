@@ -9,9 +9,10 @@ import (
 )
 
 type Slack struct {
-	clientID     string
-	clientSecret string
-	botToken     string
+	clientID      string
+	clientSecret  string
+	botToken      string
+	signingSecret string
 }
 
 func (x *Slack) Flags() []cli.Flag {
@@ -36,6 +37,13 @@ func (x *Slack) Flags() []cli.Flag {
 			Category:    "Slack",
 			Destination: &x.botToken,
 			Sources:     cli.EnvVars("HECATONCHEIRES_SLACK_BOT_TOKEN"),
+		},
+		&cli.StringFlag{
+			Name:        "slack-signing-secret",
+			Usage:       "Slack Signing Secret (for webhook verification)",
+			Category:    "Slack",
+			Destination: &x.signingSecret,
+			Sources:     cli.EnvVars("HECATONCHEIRES_SLACK_SIGNING_SECRET"),
 		},
 	}
 }
@@ -68,4 +76,14 @@ func (x *Slack) BotToken() string {
 // IsConfigured checks if Slack configuration is complete
 func (x *Slack) IsConfigured() bool {
 	return x.clientID != "" && x.clientSecret != ""
+}
+
+// IsWebhookConfigured checks if Slack webhook is configured
+func (x *Slack) IsWebhookConfigured() bool {
+	return x.signingSecret != ""
+}
+
+// SigningSecret returns the Slack signing secret
+func (x *Slack) SigningSecret() string {
+	return x.signingSecret
 }
