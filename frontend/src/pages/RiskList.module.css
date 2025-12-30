@@ -28,7 +28,7 @@
   margin-top: 24px;
 }
 
-@media (max-width: 767px) {
+@media (max-width: var(--breakpoint-mobile)) {
   .header {
     flex-direction: column;
     align-items: stretch;
@@ -48,7 +48,7 @@
   }
 }
 
-@media (min-width: 768px) and (max-width: 1023px) {
+@media (min-width: calc(var(--breakpoint-mobile) + 1px)) and (max-width: var(--breakpoint-tablet)) {
   .header {
     margin-bottom: 20px;
   }
@@ -83,8 +83,8 @@
 }
 
 .actionButton.danger:hover {
-  background-color: rgba(244, 67, 54, 0.1);
-  color: #f44336;
+  background-color: var(--color-error-shadow);
+  color: var(--color-error);
 }
 
 .loading,

@@ -38,13 +38,13 @@ export default function Table<T extends { id: number | string }>({
             className={`${styles.card} ${onRowClick ? styles.clickable : ''}`}
             onClick={() => onRowClick?.(row)}
           >
-            {columns.map((column, index) => {
+            {columns.map((column) => {
               const value = typeof column.accessor === 'function'
                 ? column.accessor(row)
                 : String(row[column.accessor])
 
               return (
-                <div key={index} className={styles.cardRow}>
+                <div key={column.header} className={styles.cardRow}>
                   <div className={styles.cardLabel}>{column.header}</div>
                   <div className={styles.cardValue}>{value}</div>
                 </div>

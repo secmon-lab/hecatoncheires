@@ -53,7 +53,7 @@
   background-color: var(--sidebar-active-border);
 }
 
-@media (max-width: 1023px) {
+@media (max-width: var(--breakpoint-tablet)) {
   .sidebar {
     transform: translateX(-100%);
     box-shadow: var(--shadow-xl);

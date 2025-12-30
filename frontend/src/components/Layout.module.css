@@ -40,7 +40,7 @@
   overflow-y: auto;
 }
 
-@media (max-width: 1023px) {
+@media (max-width: var(--breakpoint-tablet)) {
   .main {
     margin-left: 0;
   }
@@ -50,7 +50,7 @@
   }
 }
 
-@media (max-width: 767px) {
+@media (max-width: var(--breakpoint-mobile)) {
   .content {
     padding: var(--content-padding-mobile);
   }

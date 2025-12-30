@@ -28,9 +28,11 @@
   --color-warning: #ff9800;
   --color-warning-light: #ffb74d;
   --color-warning-dark: #f57c00;
+  --color-error-rgb: 244, 67, 54;
   --color-error: #f44336;
   --color-error-light: #e57373;
   --color-error-dark: #d32f2f;
+  --color-error-shadow: rgba(var(--color-error-rgb), 0.1);
   --color-info: #2196f3;
   --color-info-light: #64b5f6;
   --color-info-dark: #1976d2;
@@ -39,6 +41,7 @@
   --bg-default: #f5f5f5;
   --bg-paper: #ffffff;
   --bg-dark: #2d3436;
+  --bg-hover: #f9f9f9;
 
   /* Text colors */
   --text-primary: #2c3e50;
@@ -99,7 +102,11 @@
   --transition-normal: 300ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-slow: 500ms cubic-bezier(0.4, 0, 0.2, 1);
 
-  /* Breakpoints */
+  /* Breakpoints
+   * NOTE: These values must match the breakpoints defined in src/styles/breakpoints.ts
+   * The TypeScript file is the single source of truth for media query logic.
+   * If you need to change breakpoints, update breakpoints.ts first, then update these CSS variables.
+   */
   --breakpoint-mobile: 767px;
   --breakpoint-tablet: 1023px;
   --breakpoint-desktop: 1024px;

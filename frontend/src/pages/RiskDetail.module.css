@@ -17,7 +17,7 @@
   flex-shrink: 0;
 }
 
-@media (max-width: 767px) {
+@media (max-width: var(--breakpoint-mobile)) {
   .header {
     flex-direction: column;
     align-items: stretch;
@@ -75,7 +75,7 @@
   gap: 1rem;
 }
 
-@media (max-width: 767px) {
+@media (max-width: var(--breakpoint-mobile)) {
   .row {
     grid-template-columns: 1fr;
   }
@@ -143,7 +143,7 @@
   border-top: 1px solid #d0d0d0;
 }
 
-@media (max-width: 767px) {
+@media (max-width: var(--breakpoint-mobile)) {
   .metadata {
     flex-direction: column;
     gap: 0.75rem;

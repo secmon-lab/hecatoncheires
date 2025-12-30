@@ -50,7 +50,7 @@
 
 .inputError:focus {
   border-color: var(--color-error);
-  box-shadow: 0 0 0 3px rgba(244, 67, 54, 0.1);
+  box-shadow: 0 0 0 3px var(--color-error-shadow);
 }
 
 .textarea {
@@ -64,7 +64,7 @@
   margin-top: -4px;
 }
 
-@media (max-width: 767px) {
+@media (max-width: var(--breakpoint-mobile)) {
   .form {
     gap: 16px;
   }
