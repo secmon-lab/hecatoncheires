@@ -102,10 +102,6 @@ func New(gqlHandler http.Handler, opts ...Options) (*Server, error) {
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to bind dist dir for static")
 	}
-	// Check if index.html exists
-	if _, err := staticFS.Open("index.html"); err != nil {
-		return nil, goerr.Wrap(err, "index.html is not available")
-	}
 
 	r.Get("/*", spaHandler(staticFS))
 
