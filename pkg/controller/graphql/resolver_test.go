@@ -37,7 +37,10 @@ func setupTestServer(t *testing.T) (*httptest.Server, *memory.Repository, *useca
 	schema := gqlctrl.NewExecutableSchema(gqlctrl.Config{Resolvers: resolver})
 	gqlHandler := handler.NewDefaultServer(schema)
 
-	srv := httpctrl.New(gqlHandler, httpctrl.WithGraphiQL(false))
+	srv, err := httpctrl.New(gqlHandler, httpctrl.WithGraphiQL(false))
+	if err != nil {
+		t.Fatalf("failed to create http server: %v", err)
+	}
 	testServer := httptest.NewServer(srv)
 
 	return testServer, repo, uc

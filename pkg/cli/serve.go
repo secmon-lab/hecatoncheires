@@ -153,7 +153,10 @@ func cmdServe() *cli.Command {
 			}
 
 			// Create HTTP server
-			httpHandler := httpctrl.New(gqlHandler, httpOpts...)
+			httpHandler, err := httpctrl.New(gqlHandler, httpOpts...)
+			if err != nil {
+				return goerr.Wrap(err, "failed to create http server")
+			}
 			server := &http.Server{
 				Addr:              addr,
 				Handler:           httpHandler,

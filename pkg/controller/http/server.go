@@ -44,7 +44,7 @@ func WithSlackWebhook(handler *SlackWebhookHandler, signingSecret string) Option
 	}
 }
 
-func New(gqlHandler http.Handler, opts ...Options) *Server {
+func New(gqlHandler http.Handler, opts ...Options) (*Server, error) {
 	r := chi.NewRouter()
 
 	s := &Server{
@@ -62,9 +62,9 @@ func New(gqlHandler http.Handler, opts ...Options) *Server {
 
 	// GraphQL endpoint (must be registered before catch-all route)
 	r.Route("/graphql", func(r chi.Router) {
-		// Apply GraphQL-specific auth middleware
+		// Apply auth middleware
 		if s.authUC != nil {
-			r.Use(graphqlAuthMiddleware(s.authUC))
+			r.Use(authMiddleware(s.authUC))
 		}
 		r.Post("/", gqlHandler.ServeHTTP)
 		r.Get("/", gqlHandler.ServeHTTP) // Support GET for introspection
@@ -100,28 +100,16 @@ func New(gqlHandler http.Handler, opts ...Options) *Server {
 	// Static file serving for SPA (catch-all, must be last)
 	staticFS, err := fs.Sub(frontend.StaticFiles, "dist")
 	if err != nil {
-		// Log error and continue - the server can still serve GraphQL
-		logging.Default().Error("failed to create sub FS for frontend static files",
-			"error", goerr.Wrap(err, "failed to create sub FS for frontend static files").Error(),
-		)
-	} else {
-		// Check if index.html exists
-		if _, err := staticFS.Open("index.html"); err == nil {
-			// Serve static files and handle SPA routing with auth
-			r.Group(func(r chi.Router) {
-				// Apply auth middleware to frontend routes
-				if s.authUC != nil {
-					r.Use(authMiddleware(s.authUC))
-				}
-				r.Get("/*", spaHandler(staticFS))
-			})
-		} else {
-			// This is a warning, not a critical error
-			logging.Default().Warn("index.html not found in frontend dist", "error", err)
-		}
+		return nil, goerr.Wrap(err, "failed to bind dist dir for static")
+	}
+	// Check if index.html exists
+	if _, err := staticFS.Open("index.html"); err != nil {
+		return nil, goerr.Wrap(err, "index.html is not available")
 	}
 
-	return s
+	r.Get("/*", spaHandler(staticFS))
+
+	return s, nil
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
