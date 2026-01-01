@@ -25,6 +25,11 @@ func TestNew(t *testing.T) {
 			token:   "",
 			wantErr: true,
 		},
+		{
+			name:    "whitespace token",
+			token:   "   ",
+			wantErr: false, // Not validated, but will fail on API call
+		},
 	}
 
 	for _, tt := range tests {
@@ -45,6 +50,18 @@ func TestNew(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNew_WithRetryOption(t *testing.T) {
+	// Test that the service is created with retry option
+	svc, err := notion.New("test-token")
+	if err != nil {
+		t.Fatalf("Failed to create service: %v", err)
+	}
+	if svc == nil {
+		t.Fatal("Service should not be nil")
+	}
+	// The retry option is internal, but we've tested it's created without error
 }
 
 func TestQueryUpdatedPages_Integration(t *testing.T) {

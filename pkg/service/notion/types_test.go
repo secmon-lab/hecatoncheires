@@ -110,6 +110,32 @@ func TestBlocks_ToMarkdown(t *testing.T) {
 			want: "1. First\n2. Second\n3. Third\n",
 		},
 		{
+			name: "nested numbered list",
+			blocks: notion.Blocks{
+				{
+					Type: "numbered_list_item",
+					Content: map[string]interface{}{
+						"rich_text": []notionapi.RichText{{PlainText: "Parent 1"}},
+					},
+					Children: notion.Blocks{
+						{
+							Type: "numbered_list_item",
+							Content: map[string]interface{}{
+								"rich_text": []notionapi.RichText{{PlainText: "Child 1.1"}},
+							},
+						},
+					},
+				},
+				{
+					Type: "numbered_list_item",
+					Content: map[string]interface{}{
+						"rich_text": []notionapi.RichText{{PlainText: "Parent 2"}},
+					},
+				},
+			},
+			want: "1. Parent 1\n  1. Child 1.1\n2. Parent 2\n",
+		},
+		{
 			name: "code block",
 			blocks: notion.Blocks{
 				{
@@ -313,5 +339,108 @@ func TestBlocks_ToMarkdown_ComplexNesting(t *testing.T) {
 
 	if got != want {
 		t.Errorf("ToMarkdown() with complex nesting:\ngot  = %q\nwant = %q", got, want)
+	}
+}
+
+func TestBlocks_ToMarkdown_NestedNumberedLists(t *testing.T) {
+	blocks := notion.Blocks{
+		{
+			Type: "numbered_list_item",
+			Content: map[string]interface{}{
+				"rich_text": []notionapi.RichText{
+					{PlainText: "First item"},
+				},
+			},
+			Children: notion.Blocks{
+				{
+					Type: "numbered_list_item",
+					Content: map[string]interface{}{
+						"rich_text": []notionapi.RichText{
+							{PlainText: "Nested first"},
+						},
+					},
+				},
+				{
+					Type: "numbered_list_item",
+					Content: map[string]interface{}{
+						"rich_text": []notionapi.RichText{
+							{PlainText: "Nested second"},
+						},
+					},
+				},
+			},
+		},
+		{
+			Type: "numbered_list_item",
+			Content: map[string]interface{}{
+				"rich_text": []notionapi.RichText{
+					{PlainText: "Second item"},
+				},
+			},
+		},
+	}
+
+	// Nested numbered lists should start from 1
+	want := "1. First item\n  1. Nested first\n  2. Nested second\n2. Second item\n"
+	got := blocks.ToMarkdown()
+
+	if got != want {
+		t.Errorf("ToMarkdown() with nested numbered lists:\ngot  = %q\nwant = %q", got, want)
+	}
+}
+
+func TestBlocks_ToMarkdown_ToggleWithNumberedList(t *testing.T) {
+	blocks := notion.Blocks{
+		{
+			Type: "numbered_list_item",
+			Content: map[string]interface{}{
+				"rich_text": []notionapi.RichText{
+					{PlainText: "First item"},
+				},
+			},
+		},
+		{
+			Type: "toggle",
+			Content: map[string]interface{}{
+				"rich_text": []notionapi.RichText{
+					{PlainText: "Toggle content"},
+				},
+			},
+			Children: notion.Blocks{
+				{
+					Type: "numbered_list_item",
+					Content: map[string]interface{}{
+						"rich_text": []notionapi.RichText{
+							{PlainText: "Toggle nested first"},
+						},
+					},
+				},
+				{
+					Type: "numbered_list_item",
+					Content: map[string]interface{}{
+						"rich_text": []notionapi.RichText{
+							{PlainText: "Toggle nested second"},
+						},
+					},
+				},
+			},
+		},
+		{
+			Type: "numbered_list_item",
+			Content: map[string]interface{}{
+				"rich_text": []notionapi.RichText{
+					{PlainText: "Second item"},
+				},
+			},
+		},
+	}
+
+	// Toggle block should have its own numbered list context starting from 1
+	// Note: After toggle, the numbered list restarts from 1 because toggle uses continue
+	want := "1. First item\n<details><summary>Toggle content</summary>\n  1. Toggle nested first\n  2. Toggle nested second\n</details>\n1. Second item\n"
+	got := blocks.ToMarkdown()
+
+	if got != want {
+		t.Errorf("ToMarkdown() with toggle and numbered list:\ngot  = %q\nwant = %q", got, want)
 	}
 }

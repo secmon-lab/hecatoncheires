@@ -54,7 +54,7 @@ func (c *client) QueryUpdatedPages(ctx context.Context, dbID string, since time.
 
 			// Process each page
 			for _, pageObj := range resp.Results {
-				page, err := c.fetchPageDetails(ctx, pageObj.ID.String())
+				page, err := c.fetchPageDetails(ctx, pageObj)
 				if err != nil {
 					if !yield(nil, err) {
 						return
@@ -76,18 +76,12 @@ func (c *client) QueryUpdatedPages(ctx context.Context, dbID string, since time.
 	}
 }
 
-// fetchPageDetails retrieves detailed information about a page including its blocks
-func (c *client) fetchPageDetails(ctx context.Context, pageID string) (*Page, error) {
-	// Get page properties
-	pageObj, err := c.api.Page.Get(ctx, notionapi.PageID(pageID))
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to get page", goerr.V("pageID", pageID))
-	}
-
+// fetchPageDetails builds Page from notionapi.Page and fetches its blocks
+func (c *client) fetchPageDetails(ctx context.Context, pageObj notionapi.Page) (*Page, error) {
 	// Get page blocks
-	blocks, err := c.fetchBlocksRecursively(ctx, pageID)
+	blocks, err := c.fetchBlocksRecursively(ctx, pageObj.ID.String())
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to fetch page blocks", goerr.V("pageID", pageID))
+		return nil, goerr.Wrap(err, "failed to fetch page blocks", goerr.V("pageID", pageObj.ID.String()))
 	}
 
 	// Convert properties to map

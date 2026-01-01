@@ -150,7 +150,7 @@ func (b Blocks) toMarkdownWithIndent(sb *strings.Builder, indent int, nlCtx *num
 			sb.WriteString(text)
 			sb.WriteString("</summary>\n")
 			if len(block.Children) > 0 {
-				block.Children.toMarkdownWithIndent(sb, indent+1, nlCtx)
+				block.Children.toMarkdownWithIndent(sb, indent+1, &numberedListContext{})
 			}
 			sb.WriteString(indentStr)
 			sb.WriteString("</details>\n")
@@ -185,7 +185,12 @@ func (b Blocks) toMarkdownWithIndent(sb *strings.Builder, indent int, nlCtx *num
 
 		// Process children for most block types (except toggle which handles it specially)
 		if block.Type != "toggle" && len(block.Children) > 0 {
-			block.Children.toMarkdownWithIndent(sb, indent+1, nlCtx)
+			// Create new numberedListContext for nested lists to reset numbering
+			if block.Type == "numbered_list_item" || block.Type == "bulleted_list_item" {
+				block.Children.toMarkdownWithIndent(sb, indent+1, &numberedListContext{})
+			} else {
+				block.Children.toMarkdownWithIndent(sb, indent+1, nlCtx)
+			}
 		}
 	}
 }
