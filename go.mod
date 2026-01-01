@@ -8,6 +8,7 @@ require (
 	github.com/fatih/color v1.18.0
 	github.com/go-chi/chi/v5 v5.2.3
 	github.com/google/uuid v1.6.0
+	github.com/jomei/notionapi v1.13.3
 	github.com/lestrrat-go/jwx/v2 v2.1.6
 	github.com/m-mizutani/clog v0.1.0
 	github.com/m-mizutani/goerr/v2 v2.0.0
