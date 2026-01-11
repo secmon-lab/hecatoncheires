@@ -1,0 +1,274 @@
+/* SourceTypeSelector styles */
+.typeList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.typeCard {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-md);
+  padding: var(--spacing-lg);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-paper);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-align: left;
+  width: 100%;
+}
+
+.typeCard:hover {
+  border-color: var(--color-primary);
+  background: var(--bg-subtle);
+  box-shadow: var(--card-shadow);
+}
+
+.typeIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: var(--radius-md);
+  background: var(--bg-muted);
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+
+.typeInfo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.typeName {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+.typeDescription {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* NotionDBForm styles */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-label);
+}
+
+.input,
+.textarea {
+  padding: var(--spacing-md-sm) var(--spacing-md);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  font-size: 0.9375rem;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  color: var(--text-body);
+  transition: all var(--transition-fast);
+  min-height: var(--touch-target-min);
+  background-color: var(--bg-paper);
+}
+
+.input:focus,
+.textarea:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-shadow);
+}
+
+.input:disabled,
+.textarea:disabled {
+  background-color: var(--bg-subtle);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.inputError {
+  border-color: var(--color-error);
+}
+
+.inputError:focus {
+  border-color: var(--color-error);
+  box-shadow: 0 0 0 3px var(--color-error-shadow);
+}
+
+.textarea {
+  resize: vertical;
+  min-height: 6.25rem;
+}
+
+.error {
+  font-size: 0.75rem;
+  color: var(--color-error);
+  margin-top: calc(-1 * var(--spacing-xs));
+}
+
+.hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.inputWithButton {
+  display: flex;
+  gap: var(--spacing-sm);
+}
+
+.inputWithButton .input {
+  flex: 1;
+}
+
+.spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Validation result styles */
+.validationSuccess,
+.validationError {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
+  border-radius: var(--radius-md);
+}
+
+.validationSuccess {
+  background: rgba(76, 175, 80, 0.1);
+  border: 1px solid var(--color-success);
+  color: var(--color-success-dark);
+}
+
+.validationError {
+  background: var(--color-error-shadow);
+  border: 1px solid var(--color-error);
+  color: var(--color-error-dark);
+}
+
+.validationContent {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.validationTitle {
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.validationDetail {
+  font-size: 0.875rem;
+}
+
+.validationLink {
+  font-size: 0.75rem;
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.validationLink:hover {
+  text-decoration: underline;
+}
+
+/* Checkbox styles */
+.checkboxField {
+  display: flex;
+  align-items: center;
+}
+
+.checkboxLabel {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  cursor: pointer;
+  font-size: 0.9375rem;
+  color: var(--text-body);
+}
+
+.checkbox {
+  width: 1.125rem;
+  height: 1.125rem;
+  cursor: pointer;
+  accent-color: var(--color-primary);
+}
+
+/* SourceDeleteDialog styles */
+.deleteDialogContent {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.deleteDialogMessage {
+  font-size: 0.9375rem;
+  color: var(--text-body);
+  line-height: 1.6;
+}
+
+.deleteDialogWarning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md);
+  background: var(--color-error-shadow);
+  border-radius: var(--radius-md);
+  color: var(--color-error-dark);
+  font-size: 0.875rem;
+}
+
+/* Responsive styles */
+@media (max-width: 767px) {
+  .form {
+    gap: var(--spacing-md);
+  }
+
+  .input,
+  .textarea {
+    font-size: 1rem;
+    padding: var(--spacing-md-lg) var(--spacing-md);
+  }
+
+  .textarea {
+    min-height: 7.5rem;
+  }
+
+  .label {
+    font-size: 0.8125rem;
+  }
+
+  .inputWithButton {
+    flex-direction: column;
+  }
+
+  .typeCard {
+    padding: var(--spacing-md);
+  }
+}

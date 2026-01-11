@@ -69,15 +69,32 @@ type ComplexityRoot struct {
 	}
 
 	Mutation struct {
+		CreateNotionDBSource   func(childComplexity int, input graphql1.CreateNotionDBSourceInput) int
 		CreateResponse         func(childComplexity int, input graphql1.CreateResponseInput) int
 		CreateRisk             func(childComplexity int, input graphql1.CreateRiskInput) int
 		DeleteResponse         func(childComplexity int, id int) int
 		DeleteRisk             func(childComplexity int, id int) int
+		DeleteSource           func(childComplexity int, id string) int
 		LinkResponseToRisk     func(childComplexity int, responseID int, riskID int) int
 		Noop                   func(childComplexity int) int
 		UnlinkResponseFromRisk func(childComplexity int, responseID int, riskID int) int
 		UpdateResponse         func(childComplexity int, input graphql1.UpdateResponseInput) int
 		UpdateRisk             func(childComplexity int, input graphql1.UpdateRiskInput) int
+		UpdateSource           func(childComplexity int, input graphql1.UpdateSourceInput) int
+		ValidateNotionDb       func(childComplexity int, databaseID string) int
+	}
+
+	NotionDBConfig struct {
+		DatabaseID    func(childComplexity int) int
+		DatabaseTitle func(childComplexity int) int
+		DatabaseURL   func(childComplexity int) int
+	}
+
+	NotionDBValidationResult struct {
+		DatabaseTitle func(childComplexity int) int
+		DatabaseURL   func(childComplexity int) int
+		ErrorMessage  func(childComplexity int) int
+		Valid         func(childComplexity int) int
 	}
 
 	Query struct {
@@ -89,6 +106,8 @@ type ComplexityRoot struct {
 		RiskConfiguration func(childComplexity int) int
 		Risks             func(childComplexity int) int
 		SlackUsers        func(childComplexity int) int
+		Source            func(childComplexity int, id string) int
+		Sources           func(childComplexity int) int
 	}
 
 	Response struct {
@@ -138,6 +157,17 @@ type ComplexityRoot struct {
 		RealName func(childComplexity int) int
 	}
 
+	Source struct {
+		Config      func(childComplexity int) int
+		CreatedAt   func(childComplexity int) int
+		Description func(childComplexity int) int
+		Enabled     func(childComplexity int) int
+		ID          func(childComplexity int) int
+		Name        func(childComplexity int) int
+		SourceType  func(childComplexity int) int
+		UpdatedAt   func(childComplexity int) int
+	}
+
 	Team struct {
 		ID   func(childComplexity int) int
 		Name func(childComplexity int) int
@@ -154,6 +184,10 @@ type MutationResolver interface {
 	DeleteResponse(ctx context.Context, id int) (bool, error)
 	LinkResponseToRisk(ctx context.Context, responseID int, riskID int) (bool, error)
 	UnlinkResponseFromRisk(ctx context.Context, responseID int, riskID int) (bool, error)
+	CreateNotionDBSource(ctx context.Context, input graphql1.CreateNotionDBSourceInput) (*graphql1.Source, error)
+	UpdateSource(ctx context.Context, input graphql1.UpdateSourceInput) (*graphql1.Source, error)
+	DeleteSource(ctx context.Context, id string) (bool, error)
+	ValidateNotionDb(ctx context.Context, databaseID string) (*graphql1.NotionDBValidationResult, error)
 }
 type QueryResolver interface {
 	Health(ctx context.Context) (string, error)
@@ -164,6 +198,8 @@ type QueryResolver interface {
 	Responses(ctx context.Context) ([]*graphql1.Response, error)
 	Response(ctx context.Context, id int) (*graphql1.Response, error)
 	ResponsesByRisk(ctx context.Context, riskID int) ([]*graphql1.Response, error)
+	Sources(ctx context.Context) ([]*graphql1.Source, error)
+	Source(ctx context.Context, id string) (*graphql1.Source, error)
 }
 type RiskResolver interface {
 	Responses(ctx context.Context, obj *graphql1.Risk) ([]*graphql1.Response, error)
@@ -257,6 +293,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.LikelihoodLevel.Score(childComplexity), true
 
+	case "Mutation.createNotionDBSource":
+		if e.complexity.Mutation.CreateNotionDBSource == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_createNotionDBSource_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.CreateNotionDBSource(childComplexity, args["input"].(graphql1.CreateNotionDBSourceInput)), true
 	case "Mutation.createResponse":
 		if e.complexity.Mutation.CreateResponse == nil {
 			break
@@ -301,6 +348,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.DeleteRisk(childComplexity, args["id"].(int)), true
+	case "Mutation.deleteSource":
+		if e.complexity.Mutation.DeleteSource == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_deleteSource_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.DeleteSource(childComplexity, args["id"].(string)), true
 	case "Mutation.linkResponseToRisk":
 		if e.complexity.Mutation.LinkResponseToRisk == nil {
 			break
@@ -351,6 +409,72 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.UpdateRisk(childComplexity, args["input"].(graphql1.UpdateRiskInput)), true
+	case "Mutation.updateSource":
+		if e.complexity.Mutation.UpdateSource == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_updateSource_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.UpdateSource(childComplexity, args["input"].(graphql1.UpdateSourceInput)), true
+	case "Mutation.validateNotionDB":
+		if e.complexity.Mutation.ValidateNotionDb == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_validateNotionDB_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.ValidateNotionDb(childComplexity, args["databaseID"].(string)), true
+
+	case "NotionDBConfig.databaseID":
+		if e.complexity.NotionDBConfig.DatabaseID == nil {
+			break
+		}
+
+		return e.complexity.NotionDBConfig.DatabaseID(childComplexity), true
+	case "NotionDBConfig.databaseTitle":
+		if e.complexity.NotionDBConfig.DatabaseTitle == nil {
+			break
+		}
+
+		return e.complexity.NotionDBConfig.DatabaseTitle(childComplexity), true
+	case "NotionDBConfig.databaseURL":
+		if e.complexity.NotionDBConfig.DatabaseURL == nil {
+			break
+		}
+
+		return e.complexity.NotionDBConfig.DatabaseURL(childComplexity), true
+
+	case "NotionDBValidationResult.databaseTitle":
+		if e.complexity.NotionDBValidationResult.DatabaseTitle == nil {
+			break
+		}
+
+		return e.complexity.NotionDBValidationResult.DatabaseTitle(childComplexity), true
+	case "NotionDBValidationResult.databaseURL":
+		if e.complexity.NotionDBValidationResult.DatabaseURL == nil {
+			break
+		}
+
+		return e.complexity.NotionDBValidationResult.DatabaseURL(childComplexity), true
+	case "NotionDBValidationResult.errorMessage":
+		if e.complexity.NotionDBValidationResult.ErrorMessage == nil {
+			break
+		}
+
+		return e.complexity.NotionDBValidationResult.ErrorMessage(childComplexity), true
+	case "NotionDBValidationResult.valid":
+		if e.complexity.NotionDBValidationResult.Valid == nil {
+			break
+		}
+
+		return e.complexity.NotionDBValidationResult.Valid(childComplexity), true
 
 	case "Query.health":
 		if e.complexity.Query.Health == nil {
@@ -415,6 +539,23 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Query.SlackUsers(childComplexity), true
+	case "Query.source":
+		if e.complexity.Query.Source == nil {
+			break
+		}
+
+		args, err := ec.field_Query_source_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Query.Source(childComplexity, args["id"].(string)), true
+	case "Query.sources":
+		if e.complexity.Query.Sources == nil {
+			break
+		}
+
+		return e.complexity.Query.Sources(childComplexity), true
 
 	case "Response.createdAt":
 		if e.complexity.Response.CreatedAt == nil {
@@ -630,6 +771,55 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.SlackUser.RealName(childComplexity), true
 
+	case "Source.config":
+		if e.complexity.Source.Config == nil {
+			break
+		}
+
+		return e.complexity.Source.Config(childComplexity), true
+	case "Source.createdAt":
+		if e.complexity.Source.CreatedAt == nil {
+			break
+		}
+
+		return e.complexity.Source.CreatedAt(childComplexity), true
+	case "Source.description":
+		if e.complexity.Source.Description == nil {
+			break
+		}
+
+		return e.complexity.Source.Description(childComplexity), true
+	case "Source.enabled":
+		if e.complexity.Source.Enabled == nil {
+			break
+		}
+
+		return e.complexity.Source.Enabled(childComplexity), true
+	case "Source.id":
+		if e.complexity.Source.ID == nil {
+			break
+		}
+
+		return e.complexity.Source.ID(childComplexity), true
+	case "Source.name":
+		if e.complexity.Source.Name == nil {
+			break
+		}
+
+		return e.complexity.Source.Name(childComplexity), true
+	case "Source.sourceType":
+		if e.complexity.Source.SourceType == nil {
+			break
+		}
+
+		return e.complexity.Source.SourceType(childComplexity), true
+	case "Source.updatedAt":
+		if e.complexity.Source.UpdatedAt == nil {
+			break
+		}
+
+		return e.complexity.Source.UpdatedAt(childComplexity), true
+
 	case "Team.id":
 		if e.complexity.Team.ID == nil {
 			break
@@ -651,10 +841,12 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 	opCtx := graphql.GetOperationContext(ctx)
 	ec := executionContext{opCtx, e, 0, 0, make(chan graphql.DeferredResult)}
 	inputUnmarshalMap := graphql.BuildUnmarshalerMap(
+		ec.unmarshalInputCreateNotionDBSourceInput,
 		ec.unmarshalInputCreateResponseInput,
 		ec.unmarshalInputCreateRiskInput,
 		ec.unmarshalInputUpdateResponseInput,
 		ec.unmarshalInputUpdateRiskInput,
+		ec.unmarshalInputUpdateSourceInput,
 	)
 	first := true
 
@@ -879,6 +1071,51 @@ input UpdateResponseInput {
   riskIDs: [Int!]
 }
 
+# Source types
+enum SourceType {
+  NOTION_DB
+}
+
+type Source {
+  id: String!
+  name: String!
+  sourceType: SourceType!
+  description: String!
+  enabled: Boolean!
+  config: SourceConfig!
+  createdAt: Time!
+  updatedAt: Time!
+}
+
+union SourceConfig = NotionDBConfig
+
+type NotionDBConfig {
+  databaseID: String!
+  databaseTitle: String!
+  databaseURL: String!
+}
+
+input CreateNotionDBSourceInput {
+  name: String
+  description: String
+  databaseID: String!
+  enabled: Boolean
+}
+
+input UpdateSourceInput {
+  id: String!
+  name: String
+  description: String
+  enabled: Boolean
+}
+
+type NotionDBValidationResult {
+  valid: Boolean!
+  databaseTitle: String
+  databaseURL: String
+  errorMessage: String
+}
+
 type Query {
   health: String!
   risks: [Risk!]!
@@ -888,6 +1125,8 @@ type Query {
   responses: [Response!]!
   response(id: Int!): Response
   responsesByRisk(riskID: Int!): [Response!]!
+  sources: [Source!]!
+  source(id: String!): Source
 }
 
 type Mutation {
@@ -900,6 +1139,10 @@ type Mutation {
   deleteResponse(id: Int!): Boolean!
   linkResponseToRisk(responseID: Int!, riskID: Int!): Boolean!
   unlinkResponseFromRisk(responseID: Int!, riskID: Int!): Boolean!
+  createNotionDBSource(input: CreateNotionDBSourceInput!): Source!
+  updateSource(input: UpdateSourceInput!): Source!
+  deleteSource(id: String!): Boolean!
+  validateNotionDB(databaseID: String!): NotionDBValidationResult!
 }
 `, BuiltIn: false},
 }
@@ -908,6 +1151,17 @@ var parsedSchema = gqlparser.MustLoadSchema(sources...)
 // endregion ************************** generated!.gotpl **************************
 
 // region    ***************************** args.gotpl *****************************
+
+func (ec *executionContext) field_Mutation_createNotionDBSource_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNCreateNotionDBSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateNotionDBSourceInput)
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg0
+	return args, nil
+}
 
 func (ec *executionContext) field_Mutation_createResponse_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
@@ -946,6 +1200,17 @@ func (ec *executionContext) field_Mutation_deleteRisk_args(ctx context.Context, 
 	var err error
 	args := map[string]any{}
 	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_deleteSource_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNString2string)
 	if err != nil {
 		return nil, err
 	}
@@ -1007,6 +1272,28 @@ func (ec *executionContext) field_Mutation_updateRisk_args(ctx context.Context, 
 	return args, nil
 }
 
+func (ec *executionContext) field_Mutation_updateSource_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNUpdateSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateSourceInput)
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_validateNotionDB_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "databaseID", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["databaseID"] = arg0
+	return args, nil
+}
+
 func (ec *executionContext) field_Query___type_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -1044,6 +1331,17 @@ func (ec *executionContext) field_Query_risk_args(ctx context.Context, rawArgs m
 	var err error
 	args := map[string]any{}
 	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_Query_source_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNString2string)
 	if err != nil {
 		return nil, err
 	}
@@ -1895,6 +2193,419 @@ func (ec *executionContext) fieldContext_Mutation_unlinkResponseFromRisk(ctx con
 	return fc, nil
 }
 
+func (ec *executionContext) _Mutation_createNotionDBSource(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_createNotionDBSource,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().CreateNotionDBSource(ctx, fc.Args["input"].(graphql1.CreateNotionDBSourceInput))
+		},
+		nil,
+		ec.marshalNSource2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSource,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_createNotionDBSource(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Source_id(ctx, field)
+			case "name":
+				return ec.fieldContext_Source_name(ctx, field)
+			case "sourceType":
+				return ec.fieldContext_Source_sourceType(ctx, field)
+			case "description":
+				return ec.fieldContext_Source_description(ctx, field)
+			case "enabled":
+				return ec.fieldContext_Source_enabled(ctx, field)
+			case "config":
+				return ec.fieldContext_Source_config(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Source_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Source_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Source", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_createNotionDBSource_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_updateSource(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_updateSource,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().UpdateSource(ctx, fc.Args["input"].(graphql1.UpdateSourceInput))
+		},
+		nil,
+		ec.marshalNSource2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSource,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_updateSource(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Source_id(ctx, field)
+			case "name":
+				return ec.fieldContext_Source_name(ctx, field)
+			case "sourceType":
+				return ec.fieldContext_Source_sourceType(ctx, field)
+			case "description":
+				return ec.fieldContext_Source_description(ctx, field)
+			case "enabled":
+				return ec.fieldContext_Source_enabled(ctx, field)
+			case "config":
+				return ec.fieldContext_Source_config(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Source_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Source_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Source", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_updateSource_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_deleteSource(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_deleteSource,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().DeleteSource(ctx, fc.Args["id"].(string))
+		},
+		nil,
+		ec.marshalNBoolean2bool,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_deleteSource(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_deleteSource_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_validateNotionDB(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_validateNotionDB,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().ValidateNotionDb(ctx, fc.Args["databaseID"].(string))
+		},
+		nil,
+		ec.marshalNNotionDBValidationResult2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐNotionDBValidationResult,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_validateNotionDB(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "valid":
+				return ec.fieldContext_NotionDBValidationResult_valid(ctx, field)
+			case "databaseTitle":
+				return ec.fieldContext_NotionDBValidationResult_databaseTitle(ctx, field)
+			case "databaseURL":
+				return ec.fieldContext_NotionDBValidationResult_databaseURL(ctx, field)
+			case "errorMessage":
+				return ec.fieldContext_NotionDBValidationResult_errorMessage(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type NotionDBValidationResult", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_validateNotionDB_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _NotionDBConfig_databaseID(ctx context.Context, field graphql.CollectedField, obj *graphql1.NotionDBConfig) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_NotionDBConfig_databaseID,
+		func(ctx context.Context) (any, error) {
+			return obj.DatabaseID, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_NotionDBConfig_databaseID(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "NotionDBConfig",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _NotionDBConfig_databaseTitle(ctx context.Context, field graphql.CollectedField, obj *graphql1.NotionDBConfig) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_NotionDBConfig_databaseTitle,
+		func(ctx context.Context) (any, error) {
+			return obj.DatabaseTitle, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_NotionDBConfig_databaseTitle(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "NotionDBConfig",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _NotionDBConfig_databaseURL(ctx context.Context, field graphql.CollectedField, obj *graphql1.NotionDBConfig) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_NotionDBConfig_databaseURL,
+		func(ctx context.Context) (any, error) {
+			return obj.DatabaseURL, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_NotionDBConfig_databaseURL(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "NotionDBConfig",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _NotionDBValidationResult_valid(ctx context.Context, field graphql.CollectedField, obj *graphql1.NotionDBValidationResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_NotionDBValidationResult_valid,
+		func(ctx context.Context) (any, error) {
+			return obj.Valid, nil
+		},
+		nil,
+		ec.marshalNBoolean2bool,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_NotionDBValidationResult_valid(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "NotionDBValidationResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _NotionDBValidationResult_databaseTitle(ctx context.Context, field graphql.CollectedField, obj *graphql1.NotionDBValidationResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_NotionDBValidationResult_databaseTitle,
+		func(ctx context.Context) (any, error) {
+			return obj.DatabaseTitle, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_NotionDBValidationResult_databaseTitle(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "NotionDBValidationResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _NotionDBValidationResult_databaseURL(ctx context.Context, field graphql.CollectedField, obj *graphql1.NotionDBValidationResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_NotionDBValidationResult_databaseURL,
+		func(ctx context.Context) (any, error) {
+			return obj.DatabaseURL, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_NotionDBValidationResult_databaseURL(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "NotionDBValidationResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _NotionDBValidationResult_errorMessage(ctx context.Context, field graphql.CollectedField, obj *graphql1.NotionDBValidationResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_NotionDBValidationResult_errorMessage,
+		func(ctx context.Context) (any, error) {
+			return obj.ErrorMessage, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_NotionDBValidationResult_errorMessage(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "NotionDBValidationResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Query_health(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -2313,6 +3024,112 @@ func (ec *executionContext) fieldContext_Query_responsesByRisk(ctx context.Conte
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Query_responsesByRisk_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_sources(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Query_sources,
+		func(ctx context.Context) (any, error) {
+			return ec.resolvers.Query().Sources(ctx)
+		},
+		nil,
+		ec.marshalNSource2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSourceᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Query_sources(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Source_id(ctx, field)
+			case "name":
+				return ec.fieldContext_Source_name(ctx, field)
+			case "sourceType":
+				return ec.fieldContext_Source_sourceType(ctx, field)
+			case "description":
+				return ec.fieldContext_Source_description(ctx, field)
+			case "enabled":
+				return ec.fieldContext_Source_enabled(ctx, field)
+			case "config":
+				return ec.fieldContext_Source_config(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Source_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Source_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Source", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_source(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Query_source,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Query().Source(ctx, fc.Args["id"].(string))
+		},
+		nil,
+		ec.marshalOSource2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSource,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Query_source(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Source_id(ctx, field)
+			case "name":
+				return ec.fieldContext_Source_name(ctx, field)
+			case "sourceType":
+				return ec.fieldContext_Source_sourceType(ctx, field)
+			case "description":
+				return ec.fieldContext_Source_description(ctx, field)
+			case "enabled":
+				return ec.fieldContext_Source_enabled(ctx, field)
+			case "config":
+				return ec.fieldContext_Source_config(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Source_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Source_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Source", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_source_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -3583,6 +4400,238 @@ func (ec *executionContext) fieldContext_SlackUser_imageUrl(_ context.Context, f
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Source_id(ctx context.Context, field graphql.CollectedField, obj *graphql1.Source) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Source_id,
+		func(ctx context.Context) (any, error) {
+			return obj.ID, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Source_id(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Source",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Source_name(ctx context.Context, field graphql.CollectedField, obj *graphql1.Source) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Source_name,
+		func(ctx context.Context) (any, error) {
+			return obj.Name, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Source_name(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Source",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Source_sourceType(ctx context.Context, field graphql.CollectedField, obj *graphql1.Source) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Source_sourceType,
+		func(ctx context.Context) (any, error) {
+			return obj.SourceType, nil
+		},
+		nil,
+		ec.marshalNSourceType2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSourceType,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Source_sourceType(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Source",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type SourceType does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Source_description(ctx context.Context, field graphql.CollectedField, obj *graphql1.Source) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Source_description,
+		func(ctx context.Context) (any, error) {
+			return obj.Description, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Source_description(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Source",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Source_enabled(ctx context.Context, field graphql.CollectedField, obj *graphql1.Source) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Source_enabled,
+		func(ctx context.Context) (any, error) {
+			return obj.Enabled, nil
+		},
+		nil,
+		ec.marshalNBoolean2bool,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Source_enabled(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Source",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Source_config(ctx context.Context, field graphql.CollectedField, obj *graphql1.Source) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Source_config,
+		func(ctx context.Context) (any, error) {
+			return obj.Config, nil
+		},
+		nil,
+		ec.marshalNSourceConfig2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSourceConfig,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Source_config(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Source",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type SourceConfig does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Source_createdAt(ctx context.Context, field graphql.CollectedField, obj *graphql1.Source) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Source_createdAt,
+		func(ctx context.Context) (any, error) {
+			return obj.CreatedAt, nil
+		},
+		nil,
+		ec.marshalNTime2timeᚐTime,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Source_createdAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Source",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Source_updatedAt(ctx context.Context, field graphql.CollectedField, obj *graphql1.Source) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Source_updatedAt,
+		func(ctx context.Context) (any, error) {
+			return obj.UpdatedAt, nil
+		},
+		nil,
+		ec.marshalNTime2timeᚐTime,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Source_updatedAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Source",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
 		},
 	}
 	return fc, nil
@@ -5092,6 +6141,54 @@ func (ec *executionContext) fieldContext___Type_isOneOf(_ context.Context, field
 
 // region    **************************** input.gotpl *****************************
 
+func (ec *executionContext) unmarshalInputCreateNotionDBSourceInput(ctx context.Context, obj any) (graphql1.CreateNotionDBSourceInput, error) {
+	var it graphql1.CreateNotionDBSourceInput
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"name", "description", "databaseID", "enabled"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "name":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("name"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Name = data
+		case "description":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("description"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Description = data
+		case "databaseID":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("databaseID"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.DatabaseID = data
+		case "enabled":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("enabled"))
+			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Enabled = data
+		}
+	}
+
+	return it, nil
+}
+
 func (ec *executionContext) unmarshalInputCreateResponseInput(ctx context.Context, obj any) (graphql1.CreateResponseInput, error) {
 	var it graphql1.CreateResponseInput
 	asMap := map[string]any{}
@@ -5396,9 +6493,77 @@ func (ec *executionContext) unmarshalInputUpdateRiskInput(ctx context.Context, o
 	return it, nil
 }
 
+func (ec *executionContext) unmarshalInputUpdateSourceInput(ctx context.Context, obj any) (graphql1.UpdateSourceInput, error) {
+	var it graphql1.UpdateSourceInput
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"id", "name", "description", "enabled"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "id":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("id"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ID = data
+		case "name":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("name"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Name = data
+		case "description":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("description"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Description = data
+		case "enabled":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("enabled"))
+			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Enabled = data
+		}
+	}
+
+	return it, nil
+}
+
 // endregion **************************** input.gotpl *****************************
 
 // region    ************************** interface.gotpl ***************************
+
+func (ec *executionContext) _SourceConfig(ctx context.Context, sel ast.SelectionSet, obj graphql1.SourceConfig) graphql.Marshaler {
+	switch obj := (obj).(type) {
+	case nil:
+		return graphql.Null
+	case graphql1.NotionDBConfig:
+		return ec._NotionDBConfig(ctx, sel, &obj)
+	case *graphql1.NotionDBConfig:
+		if obj == nil {
+			return graphql.Null
+		}
+		return ec._NotionDBConfig(ctx, sel, obj)
+	default:
+		if obj, ok := obj.(graphql.Marshaler); ok {
+			return obj
+		} else {
+			panic(fmt.Errorf("unexpected type %T; non-generated variants of SourceConfig must implement graphql.Marshaler", obj))
+		}
+	}
+}
 
 // endregion ************************** interface.gotpl ***************************
 
@@ -5640,6 +6805,128 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		case "createNotionDBSource":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_createNotionDBSource(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "updateSource":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_updateSource(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "deleteSource":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_deleteSource(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "validateNotionDB":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_validateNotionDB(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var notionDBConfigImplementors = []string{"NotionDBConfig", "SourceConfig"}
+
+func (ec *executionContext) _NotionDBConfig(ctx context.Context, sel ast.SelectionSet, obj *graphql1.NotionDBConfig) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, notionDBConfigImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("NotionDBConfig")
+		case "databaseID":
+			out.Values[i] = ec._NotionDBConfig_databaseID(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "databaseTitle":
+			out.Values[i] = ec._NotionDBConfig_databaseTitle(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "databaseURL":
+			out.Values[i] = ec._NotionDBConfig_databaseURL(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var notionDBValidationResultImplementors = []string{"NotionDBValidationResult"}
+
+func (ec *executionContext) _NotionDBValidationResult(ctx context.Context, sel ast.SelectionSet, obj *graphql1.NotionDBValidationResult) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, notionDBValidationResultImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("NotionDBValidationResult")
+		case "valid":
+			out.Values[i] = ec._NotionDBValidationResult_valid(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "databaseTitle":
+			out.Values[i] = ec._NotionDBValidationResult_databaseTitle(ctx, field, obj)
+		case "databaseURL":
+			out.Values[i] = ec._NotionDBValidationResult_databaseURL(ctx, field, obj)
+		case "errorMessage":
+			out.Values[i] = ec._NotionDBValidationResult_errorMessage(ctx, field, obj)
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -5843,6 +7130,47 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 				if res == graphql.Null {
 					atomic.AddUint32(&fs.Invalids, 1)
 				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "sources":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_sources(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "source":
+			field := field
+
+			innerFunc := func(ctx context.Context, _ *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_source(ctx, field)
 				return res
 			}
 
@@ -6190,6 +7518,80 @@ func (ec *executionContext) _SlackUser(ctx context.Context, sel ast.SelectionSet
 			}
 		case "imageUrl":
 			out.Values[i] = ec._SlackUser_imageUrl(ctx, field, obj)
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var sourceImplementors = []string{"Source"}
+
+func (ec *executionContext) _Source(ctx context.Context, sel ast.SelectionSet, obj *graphql1.Source) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, sourceImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("Source")
+		case "id":
+			out.Values[i] = ec._Source_id(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "name":
+			out.Values[i] = ec._Source_name(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "sourceType":
+			out.Values[i] = ec._Source_sourceType(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "description":
+			out.Values[i] = ec._Source_description(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "enabled":
+			out.Values[i] = ec._Source_enabled(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "config":
+			out.Values[i] = ec._Source_config(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "createdAt":
+			out.Values[i] = ec._Source_createdAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "updatedAt":
+			out.Values[i] = ec._Source_updatedAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -6662,6 +8064,11 @@ func (ec *executionContext) marshalNCategory2ᚖgithubᚗcomᚋsecmonᚑlabᚋhe
 	return ec._Category(ctx, sel, v)
 }
 
+func (ec *executionContext) unmarshalNCreateNotionDBSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateNotionDBSourceInput(ctx context.Context, v any) (graphql1.CreateNotionDBSourceInput, error) {
+	res, err := ec.unmarshalInputCreateNotionDBSourceInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
 func (ec *executionContext) unmarshalNCreateResponseInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateResponseInput(ctx context.Context, v any) (graphql1.CreateResponseInput, error) {
 	res, err := ec.unmarshalInputCreateResponseInput(ctx, v)
 	return res, graphql.ErrorOnPath(ctx, err)
@@ -6794,6 +8201,20 @@ func (ec *executionContext) marshalNLikelihoodLevel2ᚖgithubᚗcomᚋsecmonᚑl
 		return graphql.Null
 	}
 	return ec._LikelihoodLevel(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNNotionDBValidationResult2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐNotionDBValidationResult(ctx context.Context, sel ast.SelectionSet, v graphql1.NotionDBValidationResult) graphql.Marshaler {
+	return ec._NotionDBValidationResult(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNNotionDBValidationResult2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐNotionDBValidationResult(ctx context.Context, sel ast.SelectionSet, v *graphql1.NotionDBValidationResult) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._NotionDBValidationResult(ctx, sel, v)
 }
 
 func (ec *executionContext) marshalNResponse2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐResponse(ctx context.Context, sel ast.SelectionSet, v graphql1.Response) graphql.Marshaler {
@@ -6990,6 +8411,84 @@ func (ec *executionContext) marshalNSlackUser2ᚖgithubᚗcomᚋsecmonᚑlabᚋh
 	return ec._SlackUser(ctx, sel, v)
 }
 
+func (ec *executionContext) marshalNSource2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSource(ctx context.Context, sel ast.SelectionSet, v graphql1.Source) graphql.Marshaler {
+	return ec._Source(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNSource2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSourceᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.Source) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNSource2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSource(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNSource2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSource(ctx context.Context, sel ast.SelectionSet, v *graphql1.Source) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._Source(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNSourceConfig2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSourceConfig(ctx context.Context, sel ast.SelectionSet, v graphql1.SourceConfig) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._SourceConfig(ctx, sel, v)
+}
+
+func (ec *executionContext) unmarshalNSourceType2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSourceType(ctx context.Context, v any) (graphql1.SourceType, error) {
+	var res graphql1.SourceType
+	err := res.UnmarshalGQL(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNSourceType2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSourceType(ctx context.Context, sel ast.SelectionSet, v graphql1.SourceType) graphql.Marshaler {
+	return v
+}
+
 func (ec *executionContext) unmarshalNString2string(ctx context.Context, v any) (string, error) {
 	res, err := graphql.UnmarshalString(v)
 	return res, graphql.ErrorOnPath(ctx, err)
@@ -7113,6 +8612,11 @@ func (ec *executionContext) unmarshalNUpdateResponseInput2githubᚗcomᚋsecmon�
 
 func (ec *executionContext) unmarshalNUpdateRiskInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateRiskInput(ctx context.Context, v any) (graphql1.UpdateRiskInput, error) {
 	res, err := ec.unmarshalInputUpdateRiskInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) unmarshalNUpdateSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateSourceInput(ctx context.Context, v any) (graphql1.UpdateSourceInput, error) {
+	res, err := ec.unmarshalInputUpdateSourceInput(ctx, v)
 	return res, graphql.ErrorOnPath(ctx, err)
 }
 
@@ -7477,6 +8981,13 @@ func (ec *executionContext) marshalORisk2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecato
 		return graphql.Null
 	}
 	return ec._Risk(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalOSource2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSource(ctx context.Context, sel ast.SelectionSet, v *graphql1.Source) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	return ec._Source(ctx, sel, v)
 }
 
 func (ec *executionContext) unmarshalOString2ᚕstringᚄ(ctx context.Context, v any) ([]string, error) {

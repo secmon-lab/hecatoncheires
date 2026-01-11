@@ -8,6 +8,7 @@ package graphql
 import (
 	"context"
 
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	graphql1 "github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
@@ -193,6 +194,58 @@ func (r *mutationResolver) UnlinkResponseFromRisk(ctx context.Context, responseI
 	return true, nil
 }
 
+// CreateNotionDBSource is the resolver for the createNotionDBSource field.
+func (r *mutationResolver) CreateNotionDBSource(ctx context.Context, input graphql1.CreateNotionDBSourceInput) (*graphql1.Source, error) {
+	ucInput := toUseCaseCreateNotionDBSourceInput(input)
+
+	source, err := r.uc.Source.CreateNotionDBSource(ctx, ucInput)
+	if err != nil {
+		errutil.Handle(ctx, err, "failed to create Notion DB source")
+		return nil, err
+	}
+
+	return toGraphQLSource(source)
+}
+
+// UpdateSource is the resolver for the updateSource field.
+func (r *mutationResolver) UpdateSource(ctx context.Context, input graphql1.UpdateSourceInput) (*graphql1.Source, error) {
+	ucInput := toUseCaseUpdateSourceInput(input)
+
+	source, err := r.uc.Source.UpdateSource(ctx, ucInput)
+	if err != nil {
+		errutil.Handle(ctx, err, "failed to update source")
+		return nil, err
+	}
+
+	return toGraphQLSource(source)
+}
+
+// DeleteSource is the resolver for the deleteSource field.
+func (r *mutationResolver) DeleteSource(ctx context.Context, id string) (bool, error) {
+	if err := r.uc.Source.DeleteSource(ctx, model.SourceID(id)); err != nil {
+		errutil.Handle(ctx, err, "failed to delete source")
+		return false, err
+	}
+
+	return true, nil
+}
+
+// ValidateNotionDb is the resolver for the validateNotionDB field.
+func (r *mutationResolver) ValidateNotionDb(ctx context.Context, databaseID string) (*graphql1.NotionDBValidationResult, error) {
+	result, err := r.uc.Source.ValidateNotionDB(ctx, databaseID)
+	if err != nil {
+		errutil.Handle(ctx, err, "failed to validate Notion DB")
+		return nil, err
+	}
+
+	return &graphql1.NotionDBValidationResult{
+		Valid:         result.Valid,
+		DatabaseTitle: &result.DatabaseTitle,
+		DatabaseURL:   &result.DatabaseURL,
+		ErrorMessage:  &result.ErrorMessage,
+	}, nil
+}
+
 // Health is the resolver for the health field.
 func (r *queryResolver) Health(ctx context.Context) (string, error) {
 	// TODO: Remove this dummy implementation when real health check is added
@@ -345,6 +398,37 @@ func (r *queryResolver) ResponsesByRisk(ctx context.Context, riskID int) ([]*gra
 	}
 
 	return gqlResponses, nil
+}
+
+// Sources is the resolver for the sources field.
+func (r *queryResolver) Sources(ctx context.Context) ([]*graphql1.Source, error) {
+	sources, err := r.uc.Source.ListSources(ctx)
+	if err != nil {
+		errutil.Handle(ctx, err, "failed to list sources")
+		return nil, err
+	}
+
+	gqlSources := make([]*graphql1.Source, len(sources))
+	for i, source := range sources {
+		gqlSource, err := toGraphQLSource(source)
+		if err != nil {
+			return nil, err
+		}
+		gqlSources[i] = gqlSource
+	}
+
+	return gqlSources, nil
+}
+
+// Source is the resolver for the source field.
+func (r *queryResolver) Source(ctx context.Context, id string) (*graphql1.Source, error) {
+	source, err := r.uc.Source.GetSource(ctx, model.SourceID(id))
+	if err != nil {
+		errutil.Handle(ctx, err, "failed to get source")
+		return nil, err
+	}
+
+	return toGraphQLSource(source)
 }
 
 // Responses is the resolver for the responses field on Risk.

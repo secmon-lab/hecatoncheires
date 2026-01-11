@@ -15,6 +15,16 @@ type Service interface {
 	// QueryUpdatedPages retrieves pages updated since the specified time from a database
 	// Returns an iterator that yields Page and error pairs
 	QueryUpdatedPages(ctx context.Context, dbID string, since time.Time) iter.Seq2[*Page, error]
+
+	// GetDatabaseMetadata retrieves metadata for a Notion database
+	GetDatabaseMetadata(ctx context.Context, dbID string) (*DatabaseMetadata, error)
+}
+
+// DatabaseMetadata contains metadata about a Notion database
+type DatabaseMetadata struct {
+	ID    string
+	Title string
+	URL   string
 }
 
 // Page represents a Notion page with its properties and content
