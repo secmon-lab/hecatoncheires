@@ -204,7 +204,7 @@ func (r *mutationResolver) CreateNotionDBSource(ctx context.Context, input graph
 		return nil, err
 	}
 
-	return toGraphQLSource(source), nil
+	return toGraphQLSource(source)
 }
 
 // UpdateSource is the resolver for the updateSource field.
@@ -217,7 +217,7 @@ func (r *mutationResolver) UpdateSource(ctx context.Context, input graphql1.Upda
 		return nil, err
 	}
 
-	return toGraphQLSource(source), nil
+	return toGraphQLSource(source)
 }
 
 // DeleteSource is the resolver for the deleteSource field.
@@ -410,7 +410,11 @@ func (r *queryResolver) Sources(ctx context.Context) ([]*graphql1.Source, error)
 
 	gqlSources := make([]*graphql1.Source, len(sources))
 	for i, source := range sources {
-		gqlSources[i] = toGraphQLSource(source)
+		gqlSource, err := toGraphQLSource(source)
+		if err != nil {
+			return nil, err
+		}
+		gqlSources[i] = gqlSource
 	}
 
 	return gqlSources, nil
@@ -424,7 +428,7 @@ func (r *queryResolver) Source(ctx context.Context, id string) (*graphql1.Source
 		return nil, err
 	}
 
-	return toGraphQLSource(source), nil
+	return toGraphQLSource(source)
 }
 
 // Responses is the resolver for the responses field on Risk.

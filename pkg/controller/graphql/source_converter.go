@@ -1,21 +1,27 @@
 package graphql
 
 import (
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	graphql1 "github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 )
 
 // toGraphQLSource converts domain Source to GraphQL Source
-func toGraphQLSource(source *model.Source) *graphql1.Source {
+func toGraphQLSource(source *model.Source) (*graphql1.Source, error) {
 	if source == nil {
-		return nil
+		return nil, nil
+	}
+
+	sourceType, err := toGraphQLSourceType(source.SourceType)
+	if err != nil {
+		return nil, err
 	}
 
 	gqlSource := &graphql1.Source{
 		ID:          string(source.ID),
 		Name:        source.Name,
-		SourceType:  toGraphQLSourceType(source.SourceType),
+		SourceType:  sourceType,
 		Description: source.Description,
 		Enabled:     source.Enabled,
 		CreatedAt:   source.CreatedAt,
@@ -30,16 +36,16 @@ func toGraphQLSource(source *model.Source) *graphql1.Source {
 		}
 	}
 
-	return gqlSource
+	return gqlSource, nil
 }
 
 // toGraphQLSourceType converts domain SourceType to GraphQL SourceType
-func toGraphQLSourceType(st model.SourceType) graphql1.SourceType {
+func toGraphQLSourceType(st model.SourceType) (graphql1.SourceType, error) {
 	switch st {
 	case model.SourceTypeNotionDB:
-		return graphql1.SourceTypeNotionDb
+		return graphql1.SourceTypeNotionDb, nil
 	default:
-		return graphql1.SourceTypeNotionDb
+		return "", goerr.New("unsupported source type", goerr.V("sourceType", st))
 	}
 }
 

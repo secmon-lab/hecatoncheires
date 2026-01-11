@@ -92,7 +92,7 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
         variables: { databaseID: databaseID.trim() },
       })
 
-      const validation = result.data?.validateNotionDB as ValidationResult
+      const validation: ValidationResult | null = result.data?.validateNotionDB ?? null
       setValidationResult(validation)
 
       if (validation?.valid && validation.databaseTitle && !name) {
