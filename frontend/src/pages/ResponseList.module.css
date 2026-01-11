@@ -42,13 +42,13 @@
   transition: all var(--transition-fast);
   background-color: var(--bg-paper);
   color: var(--text-muted, #6B7280);
-  border: 1px solid #E5E7EB;
+  border: 1px solid var(--border-default);
   min-height: var(--touch-target-min);
 }
 
 .filterButton:hover {
-  background-color: #F8FAFC;
-  border-color: #CBD5E1;
+  background-color: var(--bg-highlight);
+  border-color: var(--border-hover);
   color: var(--text-body, #374151);
 }
 

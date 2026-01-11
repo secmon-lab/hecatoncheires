@@ -82,6 +82,40 @@ The application follows Domain-Driven Design (DDD) with clean architecture:
 - Development mode: Hot reload on port 5173
 - Production mode: Served from embedded files
 
+##### Frontend CSS Styling Guidelines
+**NEVER hardcode color values, spacing, or sizes in CSS files.** Always use CSS variables defined in `frontend/src/styles/global.css`.
+
+**Colors - Always use semantic variables:**
+- Borders: `var(--border-default)`, `var(--border-light)`, `var(--border-medium)`, `var(--border-hover)`, `var(--border-strong)`
+- Backgrounds: `var(--bg-paper)`, `var(--bg-subtle)`, `var(--bg-muted)`, `var(--bg-highlight)`
+- Text: `var(--text-heading)`, `var(--text-body)`, `var(--text-muted)`, `var(--text-label)`
+- Status: `var(--color-error)`, `var(--color-success)`, `var(--color-warning)`, `var(--color-info)`
+- Primary: `var(--color-primary)`, `var(--color-primary-light)`, `var(--color-primary-dark)`
+
+**Spacing - Always use spacing variables:**
+- `var(--spacing-xs)` (4px), `var(--spacing-sm)` (8px), `var(--spacing-md-sm)` (12px)
+- `var(--spacing-md-lg)` (14px), `var(--spacing-md)` (16px), `var(--spacing-lg)` (24px)
+- `var(--spacing-xl)` (32px), `var(--spacing-xxl)` (48px)
+
+**Units - Use rem for responsiveness:**
+- Convert pixel values to rem (1rem = 16px)
+- Examples: `20px` → `1.25rem`, `10px` → `0.625rem`
+- Exception: 1px borders can remain as px
+
+**Bad examples (DO NOT DO THIS):**
+```css
+border: 1px solid #E5E7EB;  /* Hardcoded color */
+padding: 14px 16px;         /* Hardcoded spacing */
+right: 20px;                /* Hardcoded size */
+```
+
+**Good examples:**
+```css
+border: 1px solid var(--border-default);
+padding: var(--spacing-md-lg) var(--spacing-md);
+right: 1.25rem;
+```
+
 #### Storage Backends
 - **Firestore**: Production-ready persistent storage
 - **Memory**: In-memory storage for testing and development

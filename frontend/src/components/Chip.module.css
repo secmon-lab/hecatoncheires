@@ -23,9 +23,9 @@
 
 /* Variants - Improved contrast ratios (WCAG AA compliant) */
 .chip.default {
-  background: #F3F4F6;
-  color: #374151;
-  border: 1px solid #D1D5DB;
+  background: var(--bg-muted);
+  color: var(--text-body);
+  border: 1px solid var(--border-strong);
 }
 
 .chip.category {
@@ -53,9 +53,9 @@
 }
 
 .chip.secondary {
-  background: #F3F4F6;
-  color: #374151;
-  border: 1px solid #D1D5DB;
+  background: var(--bg-muted);
+  color: var(--text-body);
+  border: 1px solid var(--border-strong);
 }
 
 /* Status variants */

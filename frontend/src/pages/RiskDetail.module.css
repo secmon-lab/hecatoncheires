@@ -38,7 +38,7 @@
 
 .titleSection {
   padding: 1.75rem 1.5rem;
-  border-bottom: 1px solid #E5E7EB;
+  border-bottom: 1px solid var(--border-default);
 }
 
 .title {
@@ -140,7 +140,7 @@
   gap: 2.5rem;
   padding: 1.25rem 0 0 0;
   margin-top: 1.5rem;
-  border-top: 1px solid #E5E7EB;
+  border-top: 1px solid var(--border-default);
 }
 
 @media (max-width: var(--breakpoint-mobile)) {
@@ -345,9 +345,9 @@
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
-  background: #F3F4F6;
+  background: var(--bg-muted);
   border-radius: 0.5rem;
-  border: 1px solid #E5E7EB;
+  border: 1px solid var(--border-default);
 }
 
 .avatar {
