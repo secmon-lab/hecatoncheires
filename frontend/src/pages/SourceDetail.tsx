@@ -6,7 +6,7 @@ import Button from '../components/Button'
 import Chip from '../components/Chip'
 import Modal from '../components/Modal'
 import SourceDeleteDialog from '../components/source/SourceDeleteDialog'
-import { GET_SOURCE, UPDATE_SOURCE } from '../graphql/source'
+import { GET_SOURCE, GET_SOURCES, UPDATE_SOURCE } from '../graphql/source'
 import styles from './SourceDetail.module.css'
 
 interface NotionDBConfig {
@@ -50,18 +50,10 @@ export default function SourceDetail() {
   })
 
   const [updateSource, { loading: updating }] = useMutation(UPDATE_SOURCE, {
-    update(cache, { data: updateData }) {
-      if (!updateData?.updateSource) return
-      cache.modify({
-        fields: {
-          sources(existingSources = []) {
-            return existingSources.map((sourceRef: Source) =>
-              sourceRef.id === updateData.updateSource.id ? updateData.updateSource : sourceRef
-            )
-          },
-        },
-      })
-    },
+    refetchQueries: [
+      { query: GET_SOURCES },
+      { query: GET_SOURCE, variables: { id } },
+    ],
     onCompleted: () => {
       setIsEditModalOpen(false)
     },

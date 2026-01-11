@@ -155,31 +155,39 @@ func (r *sourceRepository) List(ctx context.Context) ([]*model.Source, error) {
 
 func (r *sourceRepository) Update(ctx context.Context, source *model.Source) (*model.Source, error) {
 	docRef := r.client.Collection(r.sourcesCollection()).Doc(string(source.ID))
-
-	doc, err := docRef.Get(ctx)
-	if err != nil {
-		if status.Code(err) == codes.NotFound {
-			return nil, goerr.Wrap(ErrNotFound, "source not found", goerr.V("id", source.ID))
-		}
-		return nil, goerr.Wrap(err, "failed to get source", goerr.V("id", source.ID))
-	}
-
-	var existing sourceDocument
-	if err := doc.DataTo(&existing); err != nil {
-		return nil, goerr.Wrap(err, "failed to unmarshal source", goerr.V("id", source.ID))
-	}
-
 	now := time.Now().UTC()
-	source.CreatedAt = existing.CreatedAt
-	source.UpdatedAt = now
 
-	updated := sourceToDocument(source)
+	var updatedSource *model.Source
+	err := r.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		doc, err := tx.Get(docRef)
+		if err != nil {
+			if status.Code(err) == codes.NotFound {
+				return goerr.Wrap(ErrNotFound, "source not found", goerr.V("id", source.ID))
+			}
+			return goerr.Wrap(err, "failed to get source in transaction", goerr.V("id", source.ID))
+		}
 
-	if _, err := docRef.Set(ctx, updated); err != nil {
-		return nil, goerr.Wrap(err, "failed to update source", goerr.V("id", source.ID))
+		var existing sourceDocument
+		if err := doc.DataTo(&existing); err != nil {
+			return goerr.Wrap(err, "failed to unmarshal source in transaction", goerr.V("id", source.ID))
+		}
+
+		source.CreatedAt = existing.CreatedAt
+		source.UpdatedAt = now
+		updatedDoc := sourceToDocument(source)
+
+		if err := tx.Set(docRef, updatedDoc); err != nil {
+			return goerr.Wrap(err, "failed to update source in transaction", goerr.V("id", source.ID))
+		}
+		updatedSource = sourceToModel(updatedDoc)
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
 	}
 
-	return sourceToModel(updated), nil
+	return updatedSource, nil
 }
 
 func (r *sourceRepository) Delete(ctx context.Context, id model.SourceID) error {
