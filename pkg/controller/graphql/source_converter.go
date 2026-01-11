@@ -1,0 +1,73 @@
+package graphql
+
+import (
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	graphql1 "github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
+)
+
+// toGraphQLSource converts domain Source to GraphQL Source
+func toGraphQLSource(source *model.Source) *graphql1.Source {
+	if source == nil {
+		return nil
+	}
+
+	gqlSource := &graphql1.Source{
+		ID:          string(source.ID),
+		Name:        source.Name,
+		SourceType:  toGraphQLSourceType(source.SourceType),
+		Description: source.Description,
+		Enabled:     source.Enabled,
+		CreatedAt:   source.CreatedAt,
+		UpdatedAt:   source.UpdatedAt,
+	}
+
+	if source.NotionDBConfig != nil {
+		gqlSource.Config = &graphql1.NotionDBConfig{
+			DatabaseID:    source.NotionDBConfig.DatabaseID,
+			DatabaseTitle: source.NotionDBConfig.DatabaseTitle,
+			DatabaseURL:   source.NotionDBConfig.DatabaseURL,
+		}
+	}
+
+	return gqlSource
+}
+
+// toGraphQLSourceType converts domain SourceType to GraphQL SourceType
+func toGraphQLSourceType(st model.SourceType) graphql1.SourceType {
+	switch st {
+	case model.SourceTypeNotionDB:
+		return graphql1.SourceTypeNotionDb
+	default:
+		return graphql1.SourceTypeNotionDb
+	}
+}
+
+// toUseCaseCreateNotionDBSourceInput converts GraphQL input to UseCase input
+func toUseCaseCreateNotionDBSourceInput(input graphql1.CreateNotionDBSourceInput) usecase.CreateNotionDBSourceInput {
+	ucInput := usecase.CreateNotionDBSourceInput{
+		DatabaseID: input.DatabaseID,
+	}
+	if input.Name != nil {
+		ucInput.Name = *input.Name
+	}
+	if input.Description != nil {
+		ucInput.Description = *input.Description
+	}
+	if input.Enabled != nil {
+		ucInput.Enabled = *input.Enabled
+	} else {
+		ucInput.Enabled = true
+	}
+	return ucInput
+}
+
+// toUseCaseUpdateSourceInput converts GraphQL input to UseCase input
+func toUseCaseUpdateSourceInput(input graphql1.UpdateSourceInput) usecase.UpdateSourceInput {
+	return usecase.UpdateSourceInput{
+		ID:          model.SourceID(input.ID),
+		Name:        input.Name,
+		Description: input.Description,
+		Enabled:     input.Enabled,
+	}
+}

@@ -10,10 +10,21 @@ import (
 	"time"
 )
 
+type SourceConfig interface {
+	IsSourceConfig()
+}
+
 type Category struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
+}
+
+type CreateNotionDBSourceInput struct {
+	Name        *string `json:"name,omitempty"`
+	Description *string `json:"description,omitempty"`
+	DatabaseID  string  `json:"databaseID"`
+	Enabled     *bool   `json:"enabled,omitempty"`
 }
 
 type CreateResponseInput struct {
@@ -52,6 +63,21 @@ type LikelihoodLevel struct {
 }
 
 type Mutation struct {
+}
+
+type NotionDBConfig struct {
+	DatabaseID    string `json:"databaseID"`
+	DatabaseTitle string `json:"databaseTitle"`
+	DatabaseURL   string `json:"databaseURL"`
+}
+
+func (NotionDBConfig) IsSourceConfig() {}
+
+type NotionDBValidationResult struct {
+	Valid         bool    `json:"valid"`
+	DatabaseTitle *string `json:"databaseTitle,omitempty"`
+	DatabaseURL   *string `json:"databaseURL,omitempty"`
+	ErrorMessage  *string `json:"errorMessage,omitempty"`
 }
 
 type Query struct {
@@ -104,6 +130,17 @@ type SlackUser struct {
 	ImageURL *string `json:"imageUrl,omitempty"`
 }
 
+type Source struct {
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	SourceType  SourceType   `json:"sourceType"`
+	Description string       `json:"description"`
+	Enabled     bool         `json:"enabled"`
+	Config      SourceConfig `json:"config"`
+	CreatedAt   time.Time    `json:"createdAt"`
+	UpdatedAt   time.Time    `json:"updatedAt"`
+}
+
 type Team struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
@@ -130,6 +167,13 @@ type UpdateRiskInput struct {
 	ResponseTeamIDs     []string `json:"responseTeamIDs"`
 	AssigneeIDs         []string `json:"assigneeIDs"`
 	DetectionIndicators string   `json:"detectionIndicators"`
+}
+
+type UpdateSourceInput struct {
+	ID          string  `json:"id"`
+	Name        *string `json:"name,omitempty"`
+	Description *string `json:"description,omitempty"`
+	Enabled     *bool   `json:"enabled,omitempty"`
 }
 
 type ResponseStatus string
@@ -190,6 +234,59 @@ func (e *ResponseStatus) UnmarshalJSON(b []byte) error {
 }
 
 func (e ResponseStatus) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
+}
+
+type SourceType string
+
+const (
+	SourceTypeNotionDb SourceType = "NOTION_DB"
+)
+
+var AllSourceType = []SourceType{
+	SourceTypeNotionDb,
+}
+
+func (e SourceType) IsValid() bool {
+	switch e {
+	case SourceTypeNotionDb:
+		return true
+	}
+	return false
+}
+
+func (e SourceType) String() string {
+	return string(e)
+}
+
+func (e *SourceType) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = SourceType(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid SourceType", str)
+	}
+	return nil
+}
+
+func (e SourceType) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *SourceType) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e SourceType) MarshalJSON() ([]byte, error) {
 	var buf bytes.Buffer
 	e.MarshalGQL(&buf)
 	return buf.Bytes(), nil

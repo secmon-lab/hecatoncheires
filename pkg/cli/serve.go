@@ -14,6 +14,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/controller/graphql"
 	httpctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/http"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/firestore"
+	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/urfave/cli/v3"
@@ -26,6 +27,7 @@ func cmdServe() *cli.Command {
 	var projectID string
 	var databaseID string
 	var configPath string
+	var notionToken string
 	var slackCfg config.Slack
 
 	flags := []cli.Flag{
@@ -69,6 +71,12 @@ func cmdServe() *cli.Command {
 			Value:       "(default)",
 			Sources:     cli.EnvVars("HECATONCHEIRES_FIRESTORE_DATABASE_ID"),
 			Destination: &databaseID,
+		},
+		&cli.StringFlag{
+			Name:        "notion-api-token",
+			Usage:       "Notion API token for Source integration",
+			Sources:     cli.EnvVars("HECATONCHEIRES_NOTION_API_TOKEN"),
+			Destination: &notionToken,
 		},
 	}
 
@@ -121,10 +129,24 @@ func cmdServe() *cli.Command {
 
 			// Initialize use cases with configuration and auth
 			riskConfig := appConfig.ToDomainRiskConfig()
-			uc := usecase.New(repo,
+			ucOpts := []usecase.Option{
 				usecase.WithRiskConfig(riskConfig),
 				usecase.WithAuth(authUC),
-			)
+			}
+
+			// Initialize Notion service if token is provided
+			if notionToken != "" {
+				notionSvc, err := notion.New(notionToken)
+				if err != nil {
+					return goerr.Wrap(err, "failed to initialize notion service")
+				}
+				ucOpts = append(ucOpts, usecase.WithNotion(notionSvc))
+				logging.Default().Info("Notion service enabled")
+			} else {
+				logging.Default().Info("Notion API token not configured, Source features will be limited")
+			}
+
+			uc := usecase.New(repo, ucOpts...)
 
 			// Create GraphQL handler with dataloaders
 			resolver := graphql.NewResolver(repo, uc)

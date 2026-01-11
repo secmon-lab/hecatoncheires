@@ -264,3 +264,64 @@ func TestQueryUpdatedPages_MarkdownOutput(t *testing.T) {
 		t.Log("No pages found in November 2024")
 	}
 }
+
+func TestGetDatabaseMetadata_Integration(t *testing.T) {
+	token := os.Getenv("TEST_NOTION_API_TOKEN")
+	if token == "" {
+		t.Skip("TEST_NOTION_API_TOKEN environment variable not set")
+	}
+
+	dbID := os.Getenv("TEST_NOTION_DATABASE_ID")
+	if dbID == "" {
+		t.Skip("TEST_NOTION_DATABASE_ID environment variable not set")
+	}
+
+	svc, err := notion.New(token)
+	if err != nil {
+		t.Fatalf("Failed to create service: %v", err)
+	}
+
+	ctx := context.Background()
+	metadata, err := svc.GetDatabaseMetadata(ctx, dbID)
+	if err != nil {
+		t.Fatalf("GetDatabaseMetadata failed: %v", err)
+	}
+
+	if metadata == nil {
+		t.Fatal("GetDatabaseMetadata returned nil")
+	}
+
+	if metadata.ID == "" {
+		t.Error("Database ID is empty")
+	}
+
+	if metadata.Title == "" {
+		t.Log("Warning: Database Title is empty (this may be expected if the database has no title)")
+	}
+
+	if metadata.URL == "" {
+		t.Error("Database URL is empty")
+	}
+
+	t.Logf("Database ID: %s", metadata.ID)
+	t.Logf("Database Title: %s", metadata.Title)
+	t.Logf("Database URL: %s", metadata.URL)
+}
+
+func TestGetDatabaseMetadata_InvalidDBID(t *testing.T) {
+	token := os.Getenv("TEST_NOTION_API_TOKEN")
+	if token == "" {
+		t.Skip("TEST_NOTION_API_TOKEN environment variable not set")
+	}
+
+	svc, err := notion.New(token)
+	if err != nil {
+		t.Fatalf("Failed to create service: %v", err)
+	}
+
+	ctx := context.Background()
+	_, err = svc.GetDatabaseMetadata(ctx, "invalid-db-id-12345")
+	if err == nil {
+		t.Error("GetDatabaseMetadata should fail with invalid database ID")
+	}
+}

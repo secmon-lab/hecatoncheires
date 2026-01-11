@@ -12,6 +12,7 @@ type Repository interface {
 	Response() ResponseRepository
 	RiskResponse() RiskResponseRepository
 	Slack() SlackRepository
+	Source() SourceRepository
 
 	// Auth methods
 	PutToken(ctx context.Context, token *auth.Token) error

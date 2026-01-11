@@ -125,6 +125,51 @@ input UpdateResponseInput {
   riskIDs: [Int!]
 }
 
+# Source types
+enum SourceType {
+  NOTION_DB
+}
+
+type Source {
+  id: String!
+  name: String!
+  sourceType: SourceType!
+  description: String!
+  enabled: Boolean!
+  config: SourceConfig!
+  createdAt: Time!
+  updatedAt: Time!
+}
+
+union SourceConfig = NotionDBConfig
+
+type NotionDBConfig {
+  databaseID: String!
+  databaseTitle: String!
+  databaseURL: String!
+}
+
+input CreateNotionDBSourceInput {
+  name: String
+  description: String
+  databaseID: String!
+  enabled: Boolean
+}
+
+input UpdateSourceInput {
+  id: String!
+  name: String
+  description: String
+  enabled: Boolean
+}
+
+type NotionDBValidationResult {
+  valid: Boolean!
+  databaseTitle: String
+  databaseURL: String
+  errorMessage: String
+}
+
 type Query {
   health: String!
   risks: [Risk!]!
@@ -134,6 +179,8 @@ type Query {
   responses: [Response!]!
   response(id: Int!): Response
   responsesByRisk(riskID: Int!): [Response!]!
+  sources: [Source!]!
+  source(id: String!): Source
 }
 
 type Mutation {
@@ -146,4 +193,8 @@ type Mutation {
   deleteResponse(id: Int!): Boolean!
   linkResponseToRisk(responseID: Int!, riskID: Int!): Boolean!
   unlinkResponseFromRisk(responseID: Int!, riskID: Int!): Boolean!
+  createNotionDBSource(input: CreateNotionDBSourceInput!): Source!
+  updateSource(input: UpdateSourceInput!): Source!
+  deleteSource(id: String!): Boolean!
+  validateNotionDB(databaseID: String!): NotionDBValidationResult!
 }

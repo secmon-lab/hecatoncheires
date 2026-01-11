@@ -230,3 +230,22 @@ func (c *client) convertBlock(ctx context.Context, blockObj notionapi.Block) (Bl
 
 	return block, nil
 }
+
+// GetDatabaseMetadata retrieves metadata for a Notion database
+func (c *client) GetDatabaseMetadata(ctx context.Context, dbID string) (*DatabaseMetadata, error) {
+	db, err := c.api.Database.Get(ctx, notionapi.DatabaseID(dbID))
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to get database", goerr.V("dbID", dbID))
+	}
+
+	title := ""
+	for _, rt := range db.Title {
+		title += rt.PlainText
+	}
+
+	return &DatabaseMetadata{
+		ID:    db.ID.String(),
+		Title: title,
+		URL:   db.URL,
+	}, nil
+}
