@@ -13,15 +13,16 @@
 
 .title {
   margin: 0;
-  font-size: 24px;
-  font-weight: 300;
-  color: #3c4858;
+  font-size: 32px;
+  font-weight: 600;
+  color: var(--text-heading, #1A1A2E);
 }
 
 .subtitle {
-  margin: 4px 0 0 0;
-  font-size: 14px;
-  color: #999;
+  margin: 6px 0 0 0;
+  font-size: 15px;
+  color: var(--text-muted, #6B7280);
+  line-height: 1.5;
 }
 
 .tableWrapper {
@@ -36,11 +37,11 @@
   }
 
   .title {
-    font-size: 20px;
+    font-size: 24px;
   }
 
   .subtitle {
-    font-size: 13px;
+    font-size: 14px;
   }
 
   .tableWrapper {
@@ -54,7 +55,7 @@
   }
 
   .title {
-    font-size: 22px;
+    font-size: 28px;
   }
 }
 

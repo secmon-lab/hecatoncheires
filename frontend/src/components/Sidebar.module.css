@@ -22,8 +22,8 @@
 .navItem {
   display: flex;
   align-items: center;
-  gap: var(--spacing-md);
-  padding: var(--spacing-md) 20px;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
   min-height: var(--touch-target-min);
   color: var(--sidebar-text);
   text-decoration: none;

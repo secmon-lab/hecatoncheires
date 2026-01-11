@@ -13,13 +13,16 @@
 
 .header h1 {
   margin: 0 0 8px 0;
-  font-size: 28px;
+  font-size: 32px;
   font-weight: 600;
+  color: var(--text-heading, #1A1A2E);
 }
 
 .header p {
   margin: 0;
-  color: var(--text-secondary);
+  font-size: 15px;
+  color: var(--text-muted, #6B7280);
+  line-height: 1.5;
 }
 
 .filters {
@@ -32,20 +35,21 @@
 .filterButton {
   padding: 8px 16px;
   border: none;
-  border-radius: 20px;
-  font-size: 13px;
+  border-radius: 1.25rem;
+  font-size: 14px;
   font-weight: 500;
   cursor: pointer;
   transition: all var(--transition-fast);
   background-color: var(--bg-paper);
-  color: var(--text-secondary);
-  border: 1px solid var(--divider);
+  color: var(--text-muted, #6B7280);
+  border: 1px solid var(--border-default);
   min-height: var(--touch-target-min);
 }
 
 .filterButton:hover {
-  background-color: var(--bg-hover);
-  border-color: var(--text-secondary);
+  background-color: var(--bg-highlight);
+  border-color: var(--border-hover);
+  color: var(--text-body, #374151);
 }
 
 .filterButton.active {
@@ -53,7 +57,7 @@
   color: var(--text-white);
   border-color: transparent;
   box-shadow: var(--shadow-md);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 @media (max-width: var(--breakpoint-mobile)) {
@@ -72,14 +76,14 @@
   }
 
   .filterButton {
-    font-size: 12px;
+    font-size: 13px;
     padding: 10px 14px;
   }
 }
 
 @media (min-width: calc(var(--breakpoint-mobile) + 1px)) and (max-width: var(--breakpoint-tablet)) {
   .header h1 {
-    font-size: 26px;
+    font-size: 28px;
   }
 }
 
