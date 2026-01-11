@@ -72,11 +72,16 @@ export const colors = {
   },
   // Text colors
   text: {
-    primary: '#2c3e50',
-    secondary: '#7f8c8d',
+    primary: '#1A1A2E',
+    secondary: '#6B7280',
     disabled: '#bdc3c7',
-    hint: '#95a5a6',
+    hint: '#9CA3AF',
     white: '#ffffff',
+    // Semantic text colors
+    heading: '#1A1A2E',
+    label: '#64748B',
+    body: '#374151',
+    muted: '#6B7280',
   },
   // Sidebar specific colors (white base, flat design)
   sidebar: {
@@ -142,4 +147,43 @@ export const typography = {
     semibold: 600,
     bold: 700,
   },
+  // Semantic typography scales
+  pageTitle: {
+    fontSize: '32px',
+    fontWeight: 600,
+    lineHeight: 1.2,
+  },
+  sectionLabel: {
+    fontSize: '13px',
+    fontWeight: 500,
+    lineHeight: 1.4,
+  },
+  bodyText: {
+    fontSize: '15px',
+    fontWeight: 400,
+    lineHeight: 1.6,
+  },
+}
+
+// Card and panel tokens
+export const card = {
+  background: '#ffffff',
+  border: '#E5E7EB',
+  radius: '12px',
+  padding: '20px 24px',
+  shadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
+}
+
+// Level card (LIKELIHOOD/IMPACT)
+export const levelCard = {
+  background: 'linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 100%)',
+  border: '#E2E8F0',
+}
+
+// Table tokens
+export const table = {
+  headerBg: '#F8FAFC',
+  headerBorder: '#E2E8F0',
+  rowBorder: '#F1F5F9',
+  rowHover: '#F8FAFC',
 }

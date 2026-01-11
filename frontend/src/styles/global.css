@@ -44,11 +44,17 @@
   --bg-hover: #f9f9f9;
 
   /* Text colors */
-  --text-primary: #2c3e50;
-  --text-secondary: #7f8c8d;
+  --text-primary: #1A1A2E;
+  --text-secondary: #6B7280;
   --text-disabled: #bdc3c7;
-  --text-hint: #95a5a6;
+  --text-hint: #9CA3AF;
   --text-white: #ffffff;
+
+  /* Semantic text colors (for refined typography) */
+  --text-heading: #1A1A2E;
+  --text-label: #64748B;
+  --text-body: #374151;
+  --text-muted: #6B7280;
 
   /* TopBar colors (dark theme) */
   --topbar-bg: #2D3436;
@@ -69,7 +75,7 @@
   --sidebar-active: #E3F2FD;
   --sidebar-hover: rgba(var(--color-primary-rgb), 0.08);
   --sidebar-border: rgba(var(--color-primary-rgb), 0.12);
-  --sidebar-width: 260px;
+  --sidebar-width: 200px;
 
   /* Divider */
   --divider: #e0e0e0;
@@ -87,6 +93,23 @@
   --radius-md: 8px;
   --radius-lg: 12px;
   --radius-xl: 16px;
+
+  /* Card & Panel styles */
+  --card-bg: #ffffff;
+  --card-border: #E5E7EB;
+  --card-radius: 12px;
+  --card-padding: 20px 24px;
+  --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+
+  /* Level card (LIKELIHOOD/IMPACT) */
+  --level-card-bg: linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 100%);
+  --level-card-border: #E2E8F0;
+
+  /* Table styles */
+  --table-header-bg: #F8FAFC;
+  --table-header-border: #E2E8F0;
+  --table-row-border: #F1F5F9;
+  --table-row-hover: #F8FAFC;
 
   /* Shadows */
   --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.1);

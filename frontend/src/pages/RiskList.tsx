@@ -108,11 +108,12 @@ export default function RiskList() {
     {
       header: 'ID',
       accessor: 'id' as keyof Risk,
-      width: '80px',
+      width: '48px',
     },
     {
       header: 'Name',
       accessor: 'name' as keyof Risk,
+      width: '200px',
     },
     {
       header: 'Category',

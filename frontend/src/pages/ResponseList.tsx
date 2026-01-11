@@ -83,8 +83,8 @@ export default function ResponseList() {
   }
 
   const columns = [
-    { header: 'Title', accessor: 'title' as keyof Response },
-    { header: 'Status', accessor: (response: Response) => renderStatus(response.status) },
+    { header: 'Title', accessor: 'title' as keyof Response, width: '280px' },
+    { header: 'Status', accessor: (response: Response) => renderStatus(response.status), width: '100px' },
     { header: 'Responders', accessor: (response: Response) => renderResponders(response.responders) },
     { header: 'Description', accessor: 'description' as keyof Response },
   ]
