@@ -1,0 +1,224 @@
+.container {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.selector {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: var(--touch-target-min);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-paper);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.selector:hover:not(.selectorDisabled) {
+  border-color: var(--border-hover);
+}
+
+.selectorOpen {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-shadow);
+}
+
+.selectorError {
+  border-color: var(--color-error);
+}
+
+.selectorError:focus {
+  box-shadow: 0 0 0 3px var(--color-error-shadow);
+}
+
+.selectorDisabled {
+  background-color: var(--bg-subtle);
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.selectedItems {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs);
+  flex: 1;
+  min-width: 0;
+}
+
+.placeholder {
+  color: var(--text-muted);
+  font-size: 0.9375rem;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--bg-muted);
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+  color: var(--text-body);
+}
+
+.tagRemove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: color var(--transition-fast);
+  margin-left: var(--spacing-xs);
+}
+
+.tagRemove:hover:not(:disabled) {
+  color: var(--color-error);
+}
+
+.tagRemove:disabled {
+  cursor: not-allowed;
+}
+
+.chevron {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: transform var(--transition-fast);
+}
+
+.chevronOpen {
+  transform: rotate(180deg);
+}
+
+.dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: var(--spacing-xs);
+  background: var(--bg-paper);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15), 0 2px 8px rgba(0, 0, 0, 0.1);
+  z-index: 1000;
+  max-height: 18.75rem;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.searchContainer {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.searchIcon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.searchInput {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 0.875rem;
+  color: var(--text-body);
+  outline: none;
+}
+
+.searchInput::placeholder {
+  color: var(--text-muted);
+}
+
+.channelList {
+  overflow-y: auto;
+  max-height: 15rem;
+}
+
+.channelItem {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  width: 100%;
+  padding: var(--spacing-md-sm) var(--spacing-md);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--transition-fast);
+  color: var(--text-body);
+}
+
+.channelItem:hover {
+  background: var(--bg-subtle);
+}
+
+.channelIcon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.channelName {
+  font-size: 0.875rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.loading,
+.emptyState {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-lg);
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.error {
+  font-size: 0.75rem;
+  color: var(--color-error);
+}
+
+/* Responsive styles */
+@media (max-width: 767px) {
+  .selector {
+    min-height: 3rem;
+    padding: var(--spacing-md-sm) var(--spacing-md);
+  }
+
+  .tag {
+    font-size: 0.75rem;
+  }
+
+  .dropdown {
+    max-height: 15.625rem;
+  }
+
+  .channelList {
+    max-height: 12.5rem;
+  }
+}

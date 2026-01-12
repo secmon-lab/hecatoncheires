@@ -1,6 +1,7 @@
-import { Database } from 'lucide-react'
+import { Database, MessageSquare } from 'lucide-react'
 import Modal from '../Modal'
 import Button from '../Button'
+import { SOURCE_TYPE } from '../../constants/source'
 import styles from './source.module.css'
 
 interface SourceTypeSelectorProps {
@@ -18,10 +19,16 @@ interface SourceTypeOption {
 
 const sourceTypes: SourceTypeOption[] = [
   {
-    type: 'NOTION_DB',
+    type: SOURCE_TYPE.NOTION_DB,
     name: 'Notion Database',
     description: 'Connect to a Notion database to monitor and track changes',
     icon: <Database size={24} />,
+  },
+  {
+    type: SOURCE_TYPE.SLACK,
+    name: 'Slack Channels',
+    description: 'Monitor Slack channels for risk-related discussions and incidents',
+    icon: <MessageSquare size={24} />,
   },
 ]
 

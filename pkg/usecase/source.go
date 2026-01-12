@@ -7,19 +7,22 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
+	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 )
 
 // SourceUseCase handles source-related business logic
 type SourceUseCase struct {
-	repo   interfaces.Repository
-	notion notion.Service
+	repo         interfaces.Repository
+	notion       notion.Service
+	slackService slack.Service
 }
 
 // NewSourceUseCase creates a new SourceUseCase instance
-func NewSourceUseCase(repo interfaces.Repository, notionService notion.Service) *SourceUseCase {
+func NewSourceUseCase(repo interfaces.Repository, notionService notion.Service, slackService slack.Service) *SourceUseCase {
 	return &SourceUseCase{
-		repo:   repo,
-		notion: notionService,
+		repo:         repo,
+		notion:       notionService,
+		slackService: slackService,
 	}
 }
 
@@ -186,4 +189,180 @@ func (uc *SourceUseCase) ValidateNotionDB(ctx context.Context, databaseID string
 		DatabaseTitle: metadata.Title,
 		DatabaseURL:   metadata.URL,
 	}, nil
+}
+
+// CreateSlackSourceInput represents input for creating a Slack source
+type CreateSlackSourceInput struct {
+	Name        string
+	Description string
+	ChannelIDs  []string
+	Enabled     bool
+}
+
+// SlackChannelInfo represents channel information returned from the API
+type SlackChannelInfo struct {
+	ID   string
+	Name string
+}
+
+// CreateSlackSource creates a new Slack source
+func (uc *SourceUseCase) CreateSlackSource(ctx context.Context, input CreateSlackSourceInput) (*model.Source, error) {
+	if len(input.ChannelIDs) == 0 {
+		return nil, goerr.New("at least one channel ID is required")
+	}
+
+	// Resolve channel names if slack service is available
+	var channels []model.SlackChannel
+	if uc.slackService != nil {
+		names, err := uc.slackService.GetChannelNames(ctx, input.ChannelIDs)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to get channel names")
+		}
+
+		for _, id := range input.ChannelIDs {
+			name := names[id]
+			if name == "" {
+				name = id // Use ID as fallback if name not found
+			}
+			channels = append(channels, model.SlackChannel{
+				ID:   id,
+				Name: name,
+			})
+		}
+	} else {
+		// No slack service, just store IDs without names
+		for _, id := range input.ChannelIDs {
+			channels = append(channels, model.SlackChannel{
+				ID:   id,
+				Name: id,
+			})
+		}
+	}
+
+	name := input.Name
+	if name == "" {
+		name = "Slack Source"
+	}
+
+	source := &model.Source{
+		Name:        name,
+		SourceType:  model.SourceTypeSlack,
+		Description: input.Description,
+		Enabled:     input.Enabled,
+		SlackConfig: &model.SlackConfig{
+			Channels: channels,
+		},
+	}
+
+	created, err := uc.repo.Source().Create(ctx, source)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to create source")
+	}
+
+	return created, nil
+}
+
+// UpdateSlackSourceInput represents input for updating a Slack source
+type UpdateSlackSourceInput struct {
+	ID          model.SourceID
+	Name        *string
+	Description *string
+	ChannelIDs  []string
+	Enabled     *bool
+}
+
+// UpdateSlackSource updates a Slack source
+func (uc *SourceUseCase) UpdateSlackSource(ctx context.Context, input UpdateSlackSourceInput) (*model.Source, error) {
+	if input.ID == "" {
+		return nil, goerr.New("source ID is required")
+	}
+
+	existing, err := uc.repo.Source().Get(ctx, input.ID)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to get source")
+	}
+
+	if existing.SourceType != model.SourceTypeSlack {
+		return nil, goerr.New("source is not a Slack source", goerr.V("sourceType", existing.SourceType))
+	}
+
+	if input.Name != nil {
+		existing.Name = *input.Name
+	}
+	if input.Description != nil {
+		existing.Description = *input.Description
+	}
+	if input.Enabled != nil {
+		existing.Enabled = *input.Enabled
+	}
+
+	// Update channels if provided
+	if input.ChannelIDs != nil {
+		var channels []model.SlackChannel
+		if uc.slackService != nil && len(input.ChannelIDs) > 0 {
+			names, err := uc.slackService.GetChannelNames(ctx, input.ChannelIDs)
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to get channel names")
+			}
+
+			for _, id := range input.ChannelIDs {
+				name := names[id]
+				if name == "" {
+					name = id
+				}
+				channels = append(channels, model.SlackChannel{
+					ID:   id,
+					Name: name,
+				})
+			}
+		} else {
+			for _, id := range input.ChannelIDs {
+				channels = append(channels, model.SlackChannel{
+					ID:   id,
+					Name: id,
+				})
+			}
+		}
+		existing.SlackConfig = &model.SlackConfig{
+			Channels: channels,
+		}
+	}
+
+	updated, err := uc.repo.Source().Update(ctx, existing)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to update source")
+	}
+
+	return updated, nil
+}
+
+// ListSlackChannels lists available Slack channels
+func (uc *SourceUseCase) ListSlackChannels(ctx context.Context) ([]SlackChannelInfo, error) {
+	if uc.slackService == nil {
+		return nil, goerr.New("Slack service is not configured")
+	}
+
+	channels, err := uc.slackService.ListJoinedChannels(ctx)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to list Slack channels")
+	}
+
+	result := make([]SlackChannelInfo, len(channels))
+	for i, ch := range channels {
+		result[i] = SlackChannelInfo{
+			ID:   ch.ID,
+			Name: ch.Name,
+		}
+	}
+
+	return result, nil
+}
+
+// GetSlackChannelNames retrieves channel names for given IDs
+func (uc *SourceUseCase) GetSlackChannelNames(ctx context.Context, ids []string) (map[string]string, error) {
+	if uc.slackService == nil {
+		return nil, goerr.New("Slack service is not configured")
+	}
+
+	return uc.slackService.GetChannelNames(ctx, ids)
 }

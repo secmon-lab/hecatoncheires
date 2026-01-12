@@ -1,0 +1,147 @@
+package slack
+
+import (
+	"context"
+	"sync"
+	"time"
+
+	"github.com/m-mizutani/goerr/v2"
+	"github.com/slack-go/slack"
+)
+
+const (
+	// DefaultCacheTTL is the default TTL for channel name cache
+	DefaultCacheTTL = 45 * time.Second
+)
+
+// cacheEntry holds a cached channel name with expiration
+type cacheEntry struct {
+	name      string
+	expiresAt time.Time
+}
+
+// client implements Service interface
+type client struct {
+	api      *slack.Client
+	cacheTTL time.Duration
+
+	mu    sync.RWMutex
+	cache map[string]cacheEntry
+}
+
+// Option is a functional option for client configuration
+type Option func(*client)
+
+// WithCacheTTL sets the TTL for channel name cache
+func WithCacheTTL(ttl time.Duration) Option {
+	return func(c *client) {
+		c.cacheTTL = ttl
+	}
+}
+
+// New creates a new Slack service with the provided bot token
+func New(token string, opts ...Option) (Service, error) {
+	if token == "" {
+		return nil, goerr.New("Slack bot token is required")
+	}
+
+	c := &client{
+		api:      slack.New(token),
+		cacheTTL: DefaultCacheTTL,
+		cache:    make(map[string]cacheEntry),
+	}
+
+	for _, opt := range opts {
+		opt(c)
+	}
+
+	return c, nil
+}
+
+// ListJoinedChannels retrieves the list of channels the bot has joined
+func (c *client) ListJoinedChannels(ctx context.Context) ([]Channel, error) {
+	var channels []Channel
+	var cursor string
+
+	for {
+		params := &slack.GetConversationsParameters{
+			Types:           []string{"public_channel", "private_channel"},
+			ExcludeArchived: true,
+			Limit:           100,
+			Cursor:          cursor,
+		}
+
+		convs, nextCursor, err := c.api.GetConversationsContext(ctx, params)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to get conversations")
+		}
+
+		for _, conv := range convs {
+			// Only include channels the bot is a member of
+			if conv.IsMember {
+				channels = append(channels, Channel{
+					ID:   conv.ID,
+					Name: conv.Name,
+				})
+			}
+		}
+
+		if nextCursor == "" {
+			break
+		}
+		cursor = nextCursor
+	}
+
+	return channels, nil
+}
+
+// GetChannelNames retrieves channel names for the given IDs with caching
+func (c *client) GetChannelNames(ctx context.Context, ids []string) (map[string]string, error) {
+	result := make(map[string]string)
+	var missingIDs []string
+
+	now := time.Now()
+
+	// Check cache first
+	c.mu.RLock()
+	for _, id := range ids {
+		if entry, ok := c.cache[id]; ok && entry.expiresAt.After(now) {
+			result[id] = entry.name
+		} else {
+			missingIDs = append(missingIDs, id)
+		}
+	}
+	c.mu.RUnlock()
+
+	// Fetch missing channels from API
+	if len(missingIDs) > 0 {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+
+		for _, id := range missingIDs {
+			// Double-check cache after acquiring write lock
+			if entry, ok := c.cache[id]; ok && entry.expiresAt.After(now) {
+				result[id] = entry.name
+				continue
+			}
+
+			info, err := c.api.GetConversationInfoContext(ctx, &slack.GetConversationInfoInput{
+				ChannelID: id,
+			})
+			if err != nil {
+				// If we can't get the channel info, skip it
+				// The caller will use the fallback name
+				continue
+			}
+
+			name := info.Name
+			result[id] = name
+			c.cache[id] = cacheEntry{
+				name:      name,
+				expiresAt: now.Add(c.cacheTTL),
+			}
+		}
+	}
+
+	return result, nil
+}

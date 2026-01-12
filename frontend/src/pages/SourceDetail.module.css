@@ -327,3 +327,28 @@ code.configValue {
   cursor: pointer;
   accent-color: var(--color-primary);
 }
+
+/* Slack channel list styles */
+.channelList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-xs);
+}
+
+.channelTag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--bg-muted);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+  color: var(--text-body);
+}
+
+.channelTag svg {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}

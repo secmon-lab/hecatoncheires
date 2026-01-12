@@ -15,6 +15,7 @@ import (
 	httpctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/http"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/firestore"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
+	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/urfave/cli/v3"
@@ -144,6 +145,18 @@ func cmdServe() *cli.Command {
 				logging.Default().Info("Notion service enabled")
 			} else {
 				logging.Default().Info("Notion API token not configured, Source features will be limited")
+			}
+
+			// Initialize Slack service for Source integration if bot token is provided
+			if slackCfg.BotToken() != "" {
+				slackSvc, err := slack.New(slackCfg.BotToken())
+				if err != nil {
+					return goerr.Wrap(err, "failed to initialize slack service")
+				}
+				ucOpts = append(ucOpts, usecase.WithSlackService(slackSvc))
+				logging.Default().Info("Slack service enabled for Source integration")
+			} else {
+				logging.Default().Info("Slack Bot Token not configured, Slack Source features will be limited")
 			}
 
 			uc := usecase.New(repo, ucOpts...)

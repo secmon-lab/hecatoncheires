@@ -40,6 +40,19 @@ func copySource(source *model.Source) *model.Source {
 		}
 	}
 
+	if source.SlackConfig != nil {
+		channels := make([]model.SlackChannel, len(source.SlackConfig.Channels))
+		for i, ch := range source.SlackConfig.Channels {
+			channels[i] = model.SlackChannel{
+				ID:   ch.ID,
+				Name: ch.Name,
+			}
+		}
+		copied.SlackConfig = &model.SlackConfig{
+			Channels: channels,
+		}
+	}
+
 	return copied
 }
 

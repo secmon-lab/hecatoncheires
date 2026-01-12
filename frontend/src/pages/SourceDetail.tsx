@@ -1,19 +1,33 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation } from '@apollo/client'
-import { ArrowLeft, Edit, MoreVertical, Trash2, Database, CheckCircle, XCircle, ExternalLink } from 'lucide-react'
+import { ArrowLeft, Edit, MoreVertical, Trash2, Database, MessageSquare, CheckCircle, XCircle, ExternalLink, Hash } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import Button from '../components/Button'
 import Chip from '../components/Chip'
 import Modal from '../components/Modal'
 import SourceDeleteDialog from '../components/source/SourceDeleteDialog'
 import { GET_SOURCE, GET_SOURCES, UPDATE_SOURCE } from '../graphql/source'
+import { SOURCE_TYPE } from '../constants/source'
 import styles from './SourceDetail.module.css'
 
 interface NotionDBConfig {
+  __typename: 'NotionDBConfig'
   databaseID: string
   databaseTitle: string
   databaseURL: string
 }
+
+interface SlackChannel {
+  id: string
+  name: string
+}
+
+interface SlackConfig {
+  __typename: 'SlackConfig'
+  channels: SlackChannel[]
+}
+
+type SourceConfig = NotionDBConfig | SlackConfig | null
 
 interface Source {
   id: string
@@ -21,7 +35,7 @@ interface Source {
   sourceType: string
   description: string
   enabled: boolean
-  config: NotionDBConfig | null
+  config: SourceConfig
   createdAt: string
   updatedAt: string
 }
@@ -141,7 +155,8 @@ export default function SourceDetail() {
 
   const renderSourceType = (sourceType: string) => {
     const typeLabels: Record<string, { label: string; icon: React.ReactNode }> = {
-      NOTION_DB: { label: 'Notion Database', icon: <Database size={20} /> },
+      [SOURCE_TYPE.NOTION_DB]: { label: 'Notion Database', icon: <Database size={20} /> },
+      [SOURCE_TYPE.SLACK]: { label: 'Slack', icon: <MessageSquare size={20} /> },
     }
     const typeInfo = typeLabels[sourceType] || { label: sourceType, icon: null }
 
@@ -235,38 +250,59 @@ export default function SourceDetail() {
             {renderSourceType(source.sourceType)}
           </div>
 
-          {source.sourceType === 'NOTION_DB' && source.config && (
-            <>
-              <div className={styles.section}>
-                <h3 className={styles.sectionTitle}>Notion Database</h3>
-                <div className={styles.configCard}>
+          {source.sourceType === SOURCE_TYPE.NOTION_DB && source.config && source.config.__typename === 'NotionDBConfig' && (
+            <div className={styles.section}>
+              <h3 className={styles.sectionTitle}>Notion Database</h3>
+              <div className={styles.configCard}>
+                <div className={styles.configItem}>
+                  <span className={styles.configLabel}>Database ID</span>
+                  <code className={styles.configValue}>{source.config.databaseID}</code>
+                </div>
+                {source.config.databaseTitle && (
                   <div className={styles.configItem}>
-                    <span className={styles.configLabel}>Database ID</span>
-                    <code className={styles.configValue}>{source.config.databaseID}</code>
+                    <span className={styles.configLabel}>Database Title</span>
+                    <span className={styles.configValue}>{source.config.databaseTitle}</span>
                   </div>
-                  {source.config.databaseTitle && (
-                    <div className={styles.configItem}>
-                      <span className={styles.configLabel}>Database Title</span>
-                      <span className={styles.configValue}>{source.config.databaseTitle}</span>
-                    </div>
-                  )}
-                  {source.config.databaseURL && (
-                    <div className={styles.configItem}>
-                      <span className={styles.configLabel}>Database URL</span>
-                      <a
-                        href={source.config.databaseURL}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={styles.configLink}
-                      >
-                        Open in Notion
-                        <ExternalLink size={14} />
-                      </a>
-                    </div>
-                  )}
+                )}
+                {source.config.databaseURL && (
+                  <div className={styles.configItem}>
+                    <span className={styles.configLabel}>Database URL</span>
+                    <a
+                      href={source.config.databaseURL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={styles.configLink}
+                    >
+                      Open in Notion
+                      <ExternalLink size={14} />
+                    </a>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {source.sourceType === SOURCE_TYPE.SLACK && source.config && source.config.__typename === 'SlackConfig' && (
+            <div className={styles.section}>
+              <h3 className={styles.sectionTitle}>Slack Channels</h3>
+              <div className={styles.configCard}>
+                <div className={styles.configItem}>
+                  <span className={styles.configLabel}>Monitored Channels</span>
+                  <div className={styles.channelList}>
+                    {source.config.channels.length > 0 ? (
+                      source.config.channels.map((channel) => (
+                        <div key={channel.id} className={styles.channelTag}>
+                          <Hash size={14} />
+                          <span>{channel.name || channel.id}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <span className={styles.configValue}>No channels configured</span>
+                    )}
+                  </div>
                 </div>
               </div>
-            </>
+            </div>
           )}
 
           <div className={styles.metadata}>

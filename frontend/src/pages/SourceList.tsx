@@ -1,21 +1,36 @@
 import { useState } from 'react'
 import { useQuery } from '@apollo/client'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Database, CheckCircle, XCircle } from 'lucide-react'
+import { Plus, Database, MessageSquare, CheckCircle, XCircle } from 'lucide-react'
 import Table from '../components/Table'
 import Button from '../components/Button'
 import Chip from '../components/Chip'
 import SourceTypeSelector from '../components/source/SourceTypeSelector'
 import NotionDBForm from '../components/source/NotionDBForm'
+import SlackForm from '../components/source/SlackForm'
 import { GET_SOURCES } from '../graphql/source'
+import { SOURCE_TYPE, FORM_STEP, type FormStep } from '../constants/source'
 import styles from './SourceList.module.css'
 import type { ReactElement } from 'react'
 
 interface NotionDBConfig {
+  __typename: 'NotionDBConfig'
   databaseID: string
   databaseTitle: string
   databaseURL: string
 }
+
+interface SlackChannel {
+  id: string
+  name: string
+}
+
+interface SlackConfig {
+  __typename: 'SlackConfig'
+  channels: SlackChannel[]
+}
+
+type SourceConfig = NotionDBConfig | SlackConfig | null
 
 interface Source {
   id: string
@@ -23,30 +38,30 @@ interface Source {
   sourceType: string
   description: string
   enabled: boolean
-  config: NotionDBConfig | null
+  config: SourceConfig
   createdAt: string
   updatedAt: string
 }
 
-type SourceFormStep = 'closed' | 'select-type' | 'notion-db-form'
-
 export default function SourceList() {
   const navigate = useNavigate()
-  const [formStep, setFormStep] = useState<SourceFormStep>('closed')
+  const [formStep, setFormStep] = useState<FormStep>(FORM_STEP.CLOSED)
 
   const { data, loading, error } = useQuery(GET_SOURCES)
 
   const handleOpenForm = () => {
-    setFormStep('select-type')
+    setFormStep(FORM_STEP.SELECT_TYPE)
   }
 
   const handleFormClose = () => {
-    setFormStep('closed')
+    setFormStep(FORM_STEP.CLOSED)
   }
 
   const handleTypeSelect = (type: string) => {
-    if (type === 'NOTION_DB') {
-      setFormStep('notion-db-form')
+    if (type === SOURCE_TYPE.NOTION_DB) {
+      setFormStep(FORM_STEP.NOTION_DB_FORM)
+    } else if (type === SOURCE_TYPE.SLACK) {
+      setFormStep(FORM_STEP.SLACK_FORM)
     }
   }
 
@@ -56,7 +71,8 @@ export default function SourceList() {
 
   const renderSourceType = (sourceType: string): ReactElement => {
     const typeLabels: Record<string, { label: string; icon: ReactElement }> = {
-      NOTION_DB: { label: 'Notion DB', icon: <Database size={14} /> },
+      [SOURCE_TYPE.NOTION_DB]: { label: 'Notion DB', icon: <Database size={14} /> },
+      [SOURCE_TYPE.SLACK]: { label: 'Slack', icon: <MessageSquare size={14} /> },
     }
     const typeInfo = typeLabels[sourceType] || { label: sourceType, icon: null }
 
@@ -146,13 +162,18 @@ export default function SourceList() {
       </div>
 
       <SourceTypeSelector
-        isOpen={formStep === 'select-type'}
+        isOpen={formStep === FORM_STEP.SELECT_TYPE}
         onClose={handleFormClose}
         onSelect={handleTypeSelect}
       />
 
       <NotionDBForm
-        isOpen={formStep === 'notion-db-form'}
+        isOpen={formStep === FORM_STEP.NOTION_DB_FORM}
+        onClose={handleFormClose}
+      />
+
+      <SlackForm
+        isOpen={formStep === FORM_STEP.SLACK_FORM}
         onClose={handleFormClose}
       />
     </div>
