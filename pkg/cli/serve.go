@@ -163,11 +163,11 @@ func cmdServe() *cli.Command {
 			// Initialize Slack service for Source integration if bot token is provided
 			var slackSvc slack.Service
 			if slackCfg.BotToken() != "" {
-				var err error
-				slackSvc, err = slack.New(slackCfg.BotToken())
+				svc, err := slack.New(slackCfg.BotToken())
 				if err != nil {
 					return goerr.Wrap(err, "failed to initialize slack service")
 				}
+				slackSvc = svc
 				ucOpts = append(ucOpts, usecase.WithSlackService(slackSvc))
 				logging.Default().Info("Slack service enabled for Source integration")
 			} else {
