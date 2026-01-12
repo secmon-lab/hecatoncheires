@@ -20,6 +20,7 @@ interface Channel {
 interface FormErrors {
   channels?: string
   name?: string
+  form?: string
 }
 
 export default function SlackForm({ isOpen, onClose }: SlackFormProps) {
@@ -48,6 +49,10 @@ export default function SlackForm({ isOpen, onClose }: SlackFormProps) {
     },
     onError: (error) => {
       console.error('Create source error:', error)
+      setErrors((prev) => ({
+        ...prev,
+        form: error.message || 'Failed to create source. Please try again.',
+      }))
     },
   })
 
@@ -127,6 +132,8 @@ export default function SlackForm({ isOpen, onClose }: SlackFormProps) {
       }
     >
       <form onSubmit={handleSubmit} className={styles.form}>
+        {errors.form && <div className={styles.formError}>{errors.form}</div>}
+
         <div className={styles.field}>
           <label htmlFor="name" className={styles.label}>
             Name *

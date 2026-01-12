@@ -1,7 +1,8 @@
 // Source type constants
+// These must match the GraphQL enum SourceType values
 export const SOURCE_TYPE = {
   NOTION_DB: 'NOTION_DB',
-  SLACK: 'SLACK',
+  SLACK: 'Slack',
 } as const
 
 export type SourceType = (typeof SOURCE_TYPE)[keyof typeof SOURCE_TYPE]

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useQuery } from '@apollo/client'
 import { ChevronDown, X, Search, Loader2, Hash } from 'lucide-react'
 import { GET_SLACK_JOINED_CHANNELS } from '../../graphql/source'
@@ -57,21 +57,27 @@ export default function ChannelSelector({
     }
   }, [isOpen])
 
-  const handleToggle = () => {
+  const handleToggle = useCallback(() => {
     if (!disabled) {
-      setIsOpen(!isOpen)
+      setIsOpen((prev) => !prev)
       setSearchQuery('')
     }
-  }
+  }, [disabled])
 
-  const handleSelectChannel = (channel: Channel) => {
-    onChange([...selectedChannels, channel])
-    setSearchQuery('')
-  }
+  const handleSelectChannel = useCallback(
+    (channel: Channel) => {
+      onChange([...selectedChannels, channel])
+      setSearchQuery('')
+    },
+    [onChange, selectedChannels]
+  )
 
-  const handleRemoveChannel = (channelId: string) => {
-    onChange(selectedChannels.filter((c) => c.id !== channelId))
-  }
+  const handleRemoveChannel = useCallback(
+    (channelId: string) => {
+      onChange(selectedChannels.filter((c) => c.id !== channelId))
+    },
+    [onChange, selectedChannels]
+  )
 
   return (
     <div className={styles.container} ref={containerRef}>
