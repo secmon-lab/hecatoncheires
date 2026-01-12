@@ -10,7 +10,6 @@ interface User {
   sub: string;
   email: string;
   name: string;
-  is_anonymous: boolean;
 }
 
 interface AuthContextType {
@@ -37,13 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (response.ok) {
         const userData = await response.json();
         setUser(userData);
-
-        // Log authentication mode
-        if (userData.is_anonymous) {
-          console.info('Running in anonymous mode');
-        } else {
-          console.info('Authenticated as:', userData.name);
-        }
+        console.info('Authenticated as:', userData.name);
       } else {
         setUser(null);
       }

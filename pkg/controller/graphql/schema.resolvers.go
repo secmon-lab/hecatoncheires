@@ -360,11 +360,12 @@ func (r *queryResolver) RiskConfiguration(ctx context.Context) (*graphql1.RiskCo
 
 // SlackUsers is the resolver for the slackUsers field.
 func (r *queryResolver) SlackUsers(ctx context.Context) ([]*graphql1.SlackUser, error) {
-	if r.uc.Auth == nil {
+	slackSvc := r.uc.SlackService()
+	if slackSvc == nil {
 		return []*graphql1.SlackUser{}, nil
 	}
 
-	users, err := r.uc.Auth.GetSlackUsers(ctx)
+	users, err := slackSvc.ListUsers(ctx)
 	if err != nil {
 		errutil.Handle(ctx, err, "failed to get Slack users")
 		return nil, err
@@ -372,11 +373,15 @@ func (r *queryResolver) SlackUsers(ctx context.Context) ([]*graphql1.SlackUser, 
 
 	gqlUsers := make([]*graphql1.SlackUser, len(users))
 	for i, user := range users {
+		var imageURL *string
+		if user.ImageURL != "" {
+			imageURL = &user.ImageURL
+		}
 		gqlUsers[i] = &graphql1.SlackUser{
 			ID:       user.ID,
 			Name:     user.Name,
 			RealName: user.RealName,
-			ImageURL: user.ImageURL,
+			ImageURL: imageURL,
 		}
 	}
 

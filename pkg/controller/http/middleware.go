@@ -10,11 +10,21 @@ import (
 func authMiddleware(authUC AuthUseCase) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// For NoAuthn mode or when authUC is not configured, always use anonymous user
-			if authUC == nil || authUC.IsNoAuthn() {
-				token := auth.NewAnonymousUser()
+			// For NoAuthn mode, get user from ValidateToken (which returns the configured user)
+			if authUC != nil && authUC.IsNoAuthn() {
+				token, err := authUC.ValidateToken(r.Context(), "", "")
+				if err != nil {
+					http.Error(w, `{"errors": [{"message": "Authentication failed"}]}`, http.StatusInternalServerError)
+					return
+				}
 				ctx := auth.ContextWithToken(r.Context(), token)
 				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+
+			// authUC is nil - this shouldn't happen in production
+			if authUC == nil {
+				http.Error(w, `{"errors": [{"message": "Authentication not configured"}]}`, http.StatusInternalServerError)
 				return
 			}
 

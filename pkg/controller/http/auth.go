@@ -9,11 +9,13 @@ import (
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
+	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
 type AuthUseCase = usecase.AuthUseCaseInterface
+type slackService = slack.Service
 
 type userInfoResponse struct {
 	ID      string        `json:"id"`
@@ -26,10 +28,9 @@ type profileImages struct {
 }
 
 type userMeResponse struct {
-	Sub         string `json:"sub"`
-	Email       string `json:"email"`
-	Name        string `json:"name"`
-	IsAnonymous bool   `json:"is_anonymous"`
+	Sub   string `json:"sub"`
+	Email string `json:"email"`
+	Name  string `json:"name"`
 }
 
 type errorResponse struct {
@@ -204,7 +205,7 @@ func writeJSON(ctx context.Context, w http.ResponseWriter, statusCode int, data 
 }
 
 // authUserInfoHandler returns Slack user information including avatar
-func authUserInfoHandler(authUC AuthUseCase) http.HandlerFunc {
+func authUserInfoHandler(slackSvc slackService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := r.URL.Query().Get("user")
 		if userID == "" {
@@ -212,13 +213,11 @@ func authUserInfoHandler(authUC AuthUseCase) http.HandlerFunc {
 			return
 		}
 
-		// Type assertion to get *AuthUseCase
-		concreteAuth, ok := authUC.(*usecase.AuthUseCase)
-		if !ok {
-			// NoAuthn mode - return placeholder
+		// If Slack service is not configured, return placeholder
+		if slackSvc == nil {
 			writeJSON(r.Context(), w, http.StatusOK, userInfoResponse{
-				ID:   "anonymous",
-				Name: "Anonymous",
+				ID:   userID,
+				Name: "Unknown",
 				Profile: profileImages{
 					Image48: "",
 				},
@@ -226,7 +225,7 @@ func authUserInfoHandler(authUC AuthUseCase) http.HandlerFunc {
 			return
 		}
 
-		userInfo, err := concreteAuth.GetSlackUserInfo(r.Context(), userID)
+		userInfo, err := slackSvc.GetUserInfo(r.Context(), userID)
 		if err != nil {
 			errutil.HandleHTTP(r.Context(), w, err, http.StatusInternalServerError)
 			return
@@ -236,7 +235,7 @@ func authUserInfoHandler(authUC AuthUseCase) http.HandlerFunc {
 			ID:   userInfo.ID,
 			Name: userInfo.RealName,
 			Profile: profileImages{
-				Image48: userInfo.Profile.Image48,
+				Image48: userInfo.ImageURL,
 			},
 		})
 	}
@@ -245,14 +244,17 @@ func authUserInfoHandler(authUC AuthUseCase) http.HandlerFunc {
 // authMeHandler returns current user information
 func authMeHandler(authUC AuthUseCase) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// For NoAuthn mode, always return anonymous user
+		// For NoAuthn mode, get user info from ValidateToken (which returns the configured user)
 		if authUC.IsNoAuthn() {
-			token := auth.NewAnonymousUser()
+			token, err := authUC.ValidateToken(r.Context(), "", "")
+			if err != nil {
+				errutil.HandleHTTP(r.Context(), w, err, http.StatusInternalServerError)
+				return
+			}
 			writeJSON(r.Context(), w, http.StatusOK, userMeResponse{
-				Sub:         token.Sub,
-				Email:       token.Email,
-				Name:        token.Name,
-				IsAnonymous: true,
+				Sub:   token.Sub,
+				Email: token.Email,
+				Name:  token.Name,
 			})
 			return
 		}
@@ -279,12 +281,11 @@ func authMeHandler(authUC AuthUseCase) http.HandlerFunc {
 			return
 		}
 
-		// Return user info with is_anonymous flag
+		// Return user info
 		writeJSON(r.Context(), w, http.StatusOK, userMeResponse{
-			Sub:         token.Sub,
-			Email:       token.Email,
-			Name:        token.Name,
-			IsAnonymous: token.IsAnonymous(),
+			Sub:   token.Sub,
+			Email: token.Email,
+			Name:  token.Name,
 		})
 	}
 }

@@ -145,3 +145,45 @@ func (c *client) GetChannelNames(ctx context.Context, ids []string) (map[string]
 
 	return result, nil
 }
+
+// GetUserInfo retrieves user information for the given user ID
+func (c *client) GetUserInfo(ctx context.Context, userID string) (*User, error) {
+	user, err := c.api.GetUserInfoContext(ctx, userID)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to get user info", goerr.V("user_id", userID))
+	}
+
+	return &User{
+		ID:       user.ID,
+		Name:     user.Name,
+		RealName: user.RealName,
+		Email:    user.Profile.Email,
+		ImageURL: user.Profile.Image48,
+	}, nil
+}
+
+// ListUsers retrieves all non-deleted, non-bot users in the workspace
+func (c *client) ListUsers(ctx context.Context) ([]*User, error) {
+	users, err := c.api.GetUsersContext(ctx)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to list users")
+	}
+
+	result := make([]*User, 0, len(users))
+	for _, u := range users {
+		// Skip deleted users and bots
+		if u.Deleted || u.IsBot {
+			continue
+		}
+
+		result = append(result, &User{
+			ID:       u.ID,
+			Name:     u.Name,
+			RealName: u.RealName,
+			Email:    u.Profile.Email,
+			ImageURL: u.Profile.Image48,
+		})
+	}
+
+	return result, nil
+}

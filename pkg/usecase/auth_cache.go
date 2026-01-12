@@ -10,8 +10,7 @@ import (
 )
 
 const (
-	authCacheTTL  = 5 * time.Minute
-	usersCacheTTL = 10 * time.Minute
+	authCacheTTL = 5 * time.Minute
 )
 
 type cachedToken struct {
@@ -19,15 +18,8 @@ type cachedToken struct {
 	expiresAt time.Time
 }
 
-type cachedUsers struct {
-	users     []*SlackUser
-	expiresAt time.Time
-}
-
 type authCache struct {
-	cache   sync.Map
-	users   *cachedUsers
-	usersMu sync.RWMutex
+	cache sync.Map
 }
 
 func newAuthCache() *authCache {
@@ -99,29 +91,4 @@ func (uc *AuthUseCase) validateTokenWithCache(ctx context.Context, tokenID auth.
 	uc.cache.set(token)
 
 	return token, nil
-}
-
-func (c *authCache) getUsers() []*SlackUser {
-	c.usersMu.RLock()
-	defer c.usersMu.RUnlock()
-
-	if c.users == nil {
-		return nil
-	}
-
-	if time.Now().After(c.users.expiresAt) {
-		return nil
-	}
-
-	return c.users.users
-}
-
-func (c *authCache) setUsers(users []*SlackUser) {
-	c.usersMu.Lock()
-	defer c.usersMu.Unlock()
-
-	c.users = &cachedUsers{
-		users:     users,
-		expiresAt: time.Now().Add(usersCacheTTL),
-	}
 }

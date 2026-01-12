@@ -5,7 +5,7 @@ Hecatoncheires supports authentication via Slack OAuth using OpenID Connect (OID
 The system can operate in two modes:
 
 1. **Authenticated Mode**: Production authentication using Slack workspace
-2. **Anonymous Mode**: Development mode with no authentication (default when Slack is not configured)
+2. **No-Auth Mode**: Development mode that skips OAuth flow but still requires a valid Slack user ID
 
 ## Quick Start
 
@@ -72,18 +72,7 @@ Response for authenticated users:
 {
   "sub": "U-xxxxxxxxx",
   "email": "user@example.com",
-  "name": "User Name",
-  "is_anonymous": false
-}
-```
-
-Response for anonymous mode:
-```json
-{
-  "sub": "anonymous",
-  "email": "anonymous@localhost",
-  "name": "Anonymous",
-  "is_anonymous": true
+  "name": "User Name"
 }
 ```
 
@@ -102,22 +91,39 @@ The backend:
 
 The frontend then redirects to `/` and shows the login page.
 
-## Anonymous Mode (Development)
+## No-Auth Mode (Development)
 
-When Slack OAuth is not configured (missing `BASE_URL`, `CLIENT_ID`, or `CLIENT_SECRET`), the system runs in anonymous mode:
+For local development and testing, you can use the `--no-auth` flag to skip OAuth flow while still operating as a real Slack user:
 
-- No login required
-- All requests are treated as anonymous user
-- User info:
-  - `sub`: `anonymous`
-  - `email`: `anonymous@localhost`
-  - `name`: `Anonymous`
-  - `is_anonymous`: `true`
+```bash
+# Requires bot token for user validation
+export HECATONCHEIRES_SLACK_BOT_TOKEN="xoxb-your-bot-token"
+export HECATONCHEIRES_NO_AUTH="U1234567890"  # Your Slack user ID
+
+./hecatoncheires serve
+```
+
+Or use CLI flags:
+```bash
+./hecatoncheires serve \
+  --slack-bot-token="xoxb-your-bot-token" \
+  --no-auth="U1234567890"
+```
+
+**Requirements:**
+- `--slack-bot-token` is required for user validation
+- The specified user ID must exist in your Slack workspace
+- `--no-auth` cannot be used with `--slack-client-id` or `--slack-client-secret`
+
+**How it works:**
+- On startup, the server validates the user ID via Slack API (`users.info`)
+- If valid, all requests are automatically authenticated as that user
+- No OAuth flow or cookies are required
 
 This is useful for:
 - Local development
 - Testing
-- Environments where authentication is not needed
+- CI/CD environments
 
 ## Security Considerations
 
@@ -210,7 +216,7 @@ For Slack-specific troubleshooting, see [docs/slack.md](./slack.md#troubleshooti
 - Check system time synchronization (JWT verification is time-sensitive)
 - Verify network access to `https://slack.com/.well-known/openid-configuration`
 
-#### Anonymous mode when it shouldn't be
+#### Authentication not working
 
 - Verify all required environment variables are set:
   - `HECATONCHEIRES_BASE_URL`
@@ -220,6 +226,12 @@ For Slack-specific troubleshooting, see [docs/slack.md](./slack.md#troubleshooti
 - Ensure values are not empty strings
 - Verify `BASE_URL` doesn't have a trailing slash
 
+#### No-auth mode fails to start
+
+- Verify `HECATONCHEIRES_SLACK_BOT_TOKEN` is set
+- Ensure the user ID exists in your Slack workspace
+- Check that `--slack-client-id` and `--slack-client-secret` are not set (they are mutually exclusive with `--no-auth`)
+
 ## Environment Variables Reference
 
 | Variable | Required | Default | Description |
@@ -227,9 +239,12 @@ For Slack-specific troubleshooting, see [docs/slack.md](./slack.md#troubleshooti
 | `HECATONCHEIRES_BASE_URL` | Yes* | - | Base URL of the application (e.g., `https://your-domain.com`). No trailing slash. |
 | `HECATONCHEIRES_SLACK_CLIENT_ID` | Yes* | - | Slack OAuth client ID |
 | `HECATONCHEIRES_SLACK_CLIENT_SECRET` | Yes* | - | Slack OAuth client secret |
-| `HECATONCHEIRES_SLACK_BOT_TOKEN` | No | - | Slack Bot User OAuth Token (for fetching user avatars) |
+| `HECATONCHEIRES_SLACK_BOT_TOKEN` | No** | - | Slack Bot User OAuth Token (for fetching user avatars and no-auth mode) |
+| `HECATONCHEIRES_NO_AUTH` | No | - | Slack user ID for no-auth mode (development only) |
 
-\* If any of `BASE_URL`, `CLIENT_ID`, or `CLIENT_SECRET` are missing, the system runs in anonymous mode. The callback URL is automatically constructed as `${BASE_URL}/api/auth/callback`.
+\* Required for OAuth mode. The callback URL is automatically constructed as `${BASE_URL}/api/auth/callback`.
+
+\** Required when using `HECATONCHEIRES_NO_AUTH`.
 
 ## See Also
 

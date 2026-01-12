@@ -16,7 +16,7 @@ Hecatoncheires integrates with Slack for both authentication and event webhooks.
 Slack OAuth is used for user authentication via OpenID Connect (OIDC). The system can operate in two modes:
 
 1. **Slack OAuth Mode**: Production authentication using Slack workspace
-2. **Anonymous Mode**: Development mode with no authentication (default when Slack is not configured)
+2. **No-Auth Mode**: Development mode that skips OAuth flow but still requires a valid Slack user ID
 
 ### Authentication Setup
 
@@ -289,17 +289,22 @@ This structure allows efficient querying and pagination per channel.
 
 ---
 
-## Anonymous Mode (Development)
+## No-Auth Mode (Development)
 
-When Slack OAuth is not configured (missing `BASE_URL`, `CLIENT_ID`, or `CLIENT_SECRET`), the system runs in anonymous mode:
+For local development and testing, you can use the `--no-auth` flag to skip OAuth flow while still operating as a real Slack user:
 
-- No login required
-- All requests are treated as anonymous user
-- User info:
-  - `sub`: `anonymous`
-  - `email`: `anonymous@localhost`
-  - `name`: `Anonymous`
-  - `is_anonymous`: `true`
+```bash
+# Requires bot token for user validation
+export HECATONCHEIRES_SLACK_BOT_TOKEN="xoxb-your-bot-token"
+export HECATONCHEIRES_NO_AUTH="U1234567890"  # Your Slack user ID
+
+./hecatoncheires serve
+```
+
+**Requirements:**
+- `--slack-bot-token` is required for user validation
+- The specified user ID must exist in your Slack workspace
+- `--no-auth` cannot be used with `--slack-client-id` or `--slack-client-secret`
 
 This is useful for local development and testing.
 
@@ -368,10 +373,15 @@ service cloud.firestore {
 - Check for trailing slashes (BASE_URL should not have trailing slash)
 - Verify you're using HTTPS
 
-#### Anonymous mode when it shouldn't be
+#### Authentication not working
 - Verify all required environment variables are set
 - Check for typos in variable names
 - Ensure values are not empty strings
+
+#### No-auth mode fails to start
+- Verify `HECATONCHEIRES_SLACK_BOT_TOKEN` is set
+- Ensure the user ID exists in your Slack workspace
+- Check that `--slack-client-id` and `--slack-client-secret` are not set (they are mutually exclusive with `--no-auth`)
 
 ### Webhook Issues
 
@@ -431,12 +441,15 @@ All webhook endpoints require valid Slack signature verification.
 | `HECATONCHEIRES_BASE_URL` | Yes* | - | Base URL of the application (e.g., `https://your-domain.com`). No trailing slash. |
 | `HECATONCHEIRES_SLACK_CLIENT_ID` | Yes* | - | Slack OAuth client ID |
 | `HECATONCHEIRES_SLACK_CLIENT_SECRET` | Yes* | - | Slack OAuth client secret |
-| `HECATONCHEIRES_SLACK_BOT_TOKEN` | No | - | Slack Bot User OAuth Token (starts with `xoxb-`) |
+| `HECATONCHEIRES_SLACK_BOT_TOKEN` | No*** | - | Slack Bot User OAuth Token (starts with `xoxb-`) |
 | `HECATONCHEIRES_SLACK_SIGNING_SECRET` | Yes** | - | Slack Events API signing secret |
+| `HECATONCHEIRES_NO_AUTH` | No | - | Slack user ID for no-auth mode (development only) |
 
-\* If any of `BASE_URL`, `CLIENT_ID`, or `CLIENT_SECRET` are missing, authentication runs in anonymous mode.
+\* Required for OAuth mode.
 
 \** Required only if you want to enable Slack webhook integration. Without this, webhook endpoints will not be enabled.
+
+\*** Required when using `HECATONCHEIRES_NO_AUTH`.
 
 ---
 

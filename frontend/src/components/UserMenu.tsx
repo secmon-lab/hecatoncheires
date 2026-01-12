@@ -18,8 +18,8 @@ export function UserMenu() {
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Fetch user info if authenticated and not anonymous
-    if (user && !user.is_anonymous) {
+    // Fetch user info if authenticated
+    if (user) {
       fetch(`/api/auth/user-info?user=${user.sub}`, {
         credentials: 'include',
       })
@@ -70,8 +70,8 @@ export function UserMenu() {
       {isOpen && (
         <div className={styles.dropdown}>
           <div className={styles.userInfo}>
-            <div className={styles.userName}>{user?.name || 'Anonymous'}</div>
-            {user && !user.is_anonymous && (
+            <div className={styles.userName}>{user?.name || 'User'}</div>
+            {user && (
               <div className={styles.userEmail}>{user.email}</div>
             )}
           </div>

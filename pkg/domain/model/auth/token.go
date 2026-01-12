@@ -10,14 +10,6 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 )
 
-// Anonymous user constants
-const (
-	// Slack user IDs always start with "U", so "anonymous" won't conflict
-	AnonymousUserID    = "anonymous"
-	AnonymousUserName  = "Anonymous"
-	AnonymousUserEmail = "anonymous@localhost"
-)
-
 type TokenID string
 
 const TokenExpireDuration = 7 * 24 * time.Hour
@@ -126,23 +118,4 @@ func TokenFromContext(ctx context.Context) (*Token, error) {
 
 func ContextWithToken(ctx context.Context, token *Token) context.Context {
 	return context.WithValue(ctx, ctxTokenKey{}, token)
-}
-
-// NewAnonymousUser creates a new anonymous user token
-func NewAnonymousUser() *Token {
-	now := time.Now()
-	return &Token{
-		ID:        NewTokenID(),
-		Secret:    NewTokenSecret(),
-		Sub:       AnonymousUserID,
-		Email:     AnonymousUserEmail,
-		Name:      AnonymousUserName,
-		ExpiresAt: now.Add(TokenExpireDuration),
-		CreatedAt: now,
-	}
-}
-
-// IsAnonymous returns true if the token represents an anonymous user
-func (x *Token) IsAnonymous() bool {
-	return x.Sub == AnonymousUserID
 }
