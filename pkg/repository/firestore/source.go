@@ -13,15 +13,15 @@ import (
 )
 
 type sourceDocument struct {
-	ID             string          `firestore:"id"`
-	Name           string          `firestore:"name"`
-	SourceType     string          `firestore:"source_type"`
-	Description    string          `firestore:"description"`
-	Enabled        bool            `firestore:"enabled"`
-	NotionDBConfig *notionDBConfig `firestore:"notion_db_config,omitempty"`
+	ID             string             `firestore:"id"`
+	Name           string             `firestore:"name"`
+	SourceType     string             `firestore:"source_type"`
+	Description    string             `firestore:"description"`
+	Enabled        bool               `firestore:"enabled"`
+	NotionDBConfig *notionDBConfig    `firestore:"notion_db_config,omitempty"`
 	SlackConfig    *sourceSlackConfig `firestore:"slack_config,omitempty"`
-	CreatedAt      time.Time       `firestore:"created_at"`
-	UpdatedAt      time.Time       `firestore:"updated_at"`
+	CreatedAt      time.Time          `firestore:"created_at"`
+	UpdatedAt      time.Time          `firestore:"updated_at"`
 }
 
 type notionDBConfig struct {

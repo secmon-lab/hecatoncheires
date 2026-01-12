@@ -115,21 +115,26 @@ func toDomainResponseStatus(status graphql1.ResponseStatus) types.ResponseStatus
 // enrichResponse enriches a Response with responder and risk information
 func enrichResponse(ctx context.Context, uc *usecase.UseCases, response *graphql1.Response) *graphql1.Response {
 	// Enrich responders
-	if uc.Auth != nil && len(response.Responders) > 0 {
+	slackSvc := uc.SlackService()
+	if slackSvc != nil && len(response.Responders) > 0 {
 		responderIDs := make([]string, len(response.Responders))
 		for i, responder := range response.Responders {
 			responderIDs[i] = responder.ID
 		}
 
-		users, err := uc.Auth.GetSlackUsers(ctx)
+		users, err := slackSvc.ListUsers(ctx)
 		if err == nil {
 			userMap := make(map[string]*graphql1.SlackUser)
 			for _, user := range users {
+				var imageURL *string
+				if user.ImageURL != "" {
+					imageURL = &user.ImageURL
+				}
 				userMap[user.ID] = &graphql1.SlackUser{
 					ID:       user.ID,
 					Name:     user.Name,
 					RealName: user.RealName,
-					ImageURL: user.ImageURL,
+					ImageURL: imageURL,
 				}
 			}
 

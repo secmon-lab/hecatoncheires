@@ -147,4 +147,45 @@ func TestIntegration(t *testing.T) {
 			t.Errorf("expected empty map, got %d entries", len(names))
 		}
 	})
+
+	t.Run("ListUsers returns users", func(t *testing.T) {
+		users, err := svc.ListUsers(ctx)
+		if err != nil {
+			t.Fatalf("ListUsers failed: %v", err)
+		}
+
+		// Should have at least one user
+		if len(users) == 0 {
+			t.Error("expected at least one user")
+		}
+
+		for _, u := range users {
+			if u.ID == "" {
+				t.Error("user ID should not be empty")
+			}
+			t.Logf("Found user: %s (%s)", u.RealName, u.ID)
+		}
+	})
+
+	t.Run("GetUserInfo returns user info", func(t *testing.T) {
+		// First get a user to test with
+		users, err := svc.ListUsers(ctx)
+		if err != nil {
+			t.Fatalf("ListUsers failed: %v", err)
+		}
+
+		if len(users) == 0 {
+			t.Skip("No users available to test GetUserInfo")
+		}
+
+		user, err := svc.GetUserInfo(ctx, users[0].ID)
+		if err != nil {
+			t.Fatalf("GetUserInfo failed: %v", err)
+		}
+
+		if user.ID != users[0].ID {
+			t.Errorf("expected user ID %s, got %s", users[0].ID, user.ID)
+		}
+		t.Logf("Got user info: %s (%s)", user.RealName, user.ID)
+	})
 }

@@ -61,3 +61,8 @@ func New(repo interfaces.Repository, opts ...Option) *UseCases {
 
 	return uc
 }
+
+// SlackService returns the Slack service (may be nil if not configured)
+func (uc *UseCases) SlackService() slack.Service {
+	return uc.slackService
+}

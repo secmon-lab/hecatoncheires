@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/frontend"
+	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/safe"
 )
@@ -19,6 +20,7 @@ type Server struct {
 	router              *chi.Mux
 	enableGraphiQL      bool
 	authUC              AuthUseCase
+	slackService        slack.Service
 	slackWebhookHandler *SlackWebhookHandler
 	slackSigningSecret  string
 }
@@ -41,6 +43,12 @@ func WithSlackWebhook(handler *SlackWebhookHandler, signingSecret string) Option
 	return func(s *Server) {
 		s.slackWebhookHandler = handler
 		s.slackSigningSecret = signingSecret
+	}
+}
+
+func WithSlackService(svc slack.Service) Options {
+	return func(s *Server) {
+		s.slackService = svc
 	}
 }
 
@@ -82,7 +90,7 @@ func New(gqlHandler http.Handler, opts ...Options) (*Server, error) {
 			r.Get("/callback", authCallbackHandler(s.authUC))
 			r.Post("/logout", authLogoutHandler(s.authUC))
 			r.Get("/me", authMeHandler(s.authUC))
-			r.Get("/user-info", authUserInfoHandler(s.authUC))
+			r.Get("/user-info", authUserInfoHandler(s.slackService))
 		})
 	}
 

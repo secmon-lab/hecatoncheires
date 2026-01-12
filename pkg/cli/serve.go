@@ -29,6 +29,7 @@ func cmdServe() *cli.Command {
 	var databaseID string
 	var configPath string
 	var notionToken string
+	var noAuthUID string
 	var slackCfg config.Slack
 
 	flags := []cli.Flag{
@@ -79,6 +80,13 @@ func cmdServe() *cli.Command {
 			Sources:     cli.EnvVars("HECATONCHEIRES_NOTION_API_TOKEN"),
 			Destination: &notionToken,
 		},
+		&cli.StringFlag{
+			Name:        "no-auth",
+			Usage:       "Skip authentication and run as specified Slack user ID (development only). Requires --slack-bot-token. Example: --no-auth=U1234567890",
+			Category:    "Authentication",
+			Sources:     cli.EnvVars("HECATONCHEIRES_NO_AUTH"),
+			Destination: &noAuthUID,
+		},
 	}
 
 	// Add Slack flags
@@ -116,16 +124,21 @@ func cmdServe() *cli.Command {
 				}
 			}()
 
+			// Set no-auth UID if provided
+			if noAuthUID != "" {
+				slackCfg.SetNoAuthUID(noAuthUID)
+			}
+
 			// Configure authentication
-			authUC, err := slackCfg.Configure(repo, baseURL)
+			authUC, err := slackCfg.Configure(ctx, repo, baseURL)
 			if err != nil {
 				return goerr.Wrap(err, "failed to configure authentication")
 			}
 
-			if slackCfg.IsConfigured() {
+			if slackCfg.IsNoAuthMode() {
+				logging.Default().Warn("Running in no-auth mode (development only)", "user_id", noAuthUID)
+			} else if slackCfg.IsConfigured() {
 				logging.Default().Info("Slack authentication enabled")
-			} else {
-				logging.Default().Info("No authentication configured, running in anonymous mode")
 			}
 
 			// Initialize use cases with configuration and auth
@@ -148,11 +161,13 @@ func cmdServe() *cli.Command {
 			}
 
 			// Initialize Slack service for Source integration if bot token is provided
+			var slackSvc slack.Service
 			if slackCfg.BotToken() != "" {
-				slackSvc, err := slack.New(slackCfg.BotToken())
+				svc, err := slack.New(slackCfg.BotToken())
 				if err != nil {
 					return goerr.Wrap(err, "failed to initialize slack service")
 				}
+				slackSvc = svc
 				ucOpts = append(ucOpts, usecase.WithSlackService(slackSvc))
 				logging.Default().Info("Slack service enabled for Source integration")
 			} else {
@@ -178,6 +193,11 @@ func cmdServe() *cli.Command {
 			httpOpts := []httpctrl.Options{
 				httpctrl.WithGraphiQL(enableGraphiQL),
 				httpctrl.WithAuth(authUC),
+			}
+
+			// Add Slack service if configured
+			if slackSvc != nil {
+				httpOpts = append(httpOpts, httpctrl.WithSlackService(slackSvc))
 			}
 
 			// Add Slack webhook handler if configured

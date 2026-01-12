@@ -113,32 +113,6 @@ func runAuthRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		}
 	})
 
-	t.Run("Anonymous user token", func(t *testing.T) {
-		repo := newRepo(t)
-		ctx := context.Background()
-
-		token := auth.NewAnonymousUser()
-
-		// Put token
-		if err := repo.PutToken(ctx, token); err != nil {
-			t.Fatalf("PutToken failed for anonymous user: %v", err)
-		}
-
-		// Get token
-		retrieved, err := repo.GetToken(ctx, token.ID)
-		if err != nil {
-			t.Fatalf("GetToken failed for anonymous user: %v", err)
-		}
-
-		// Verify it's anonymous
-		if !retrieved.IsAnonymous() {
-			t.Error("Expected anonymous user token")
-		}
-		if retrieved.Sub != auth.AnonymousUserID {
-			t.Errorf("Sub mismatch: got %v, want %v", retrieved.Sub, auth.AnonymousUserID)
-		}
-	})
-
 	t.Run("Token validation on Put", func(t *testing.T) {
 		repo := newRepo(t)
 		ctx := context.Background()

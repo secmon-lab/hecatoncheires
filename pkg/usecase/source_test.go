@@ -38,6 +38,8 @@ func (m *mockNotionService) GetDatabaseMetadata(ctx context.Context, dbID string
 type mockSlackService struct {
 	listJoinedChannelsFn func(ctx context.Context) ([]slack.Channel, error)
 	getChannelNamesFn    func(ctx context.Context, ids []string) (map[string]string, error)
+	getUserInfoFn        func(ctx context.Context, userID string) (*slack.User, error)
+	listUsersFn          func(ctx context.Context) ([]*slack.User, error)
 }
 
 func (m *mockSlackService) ListJoinedChannels(ctx context.Context) ([]slack.Channel, error) {
@@ -59,6 +61,29 @@ func (m *mockSlackService) GetChannelNames(ctx context.Context, ids []string) (m
 		result[id] = "channel-" + id
 	}
 	return result, nil
+}
+
+func (m *mockSlackService) GetUserInfo(ctx context.Context, userID string) (*slack.User, error) {
+	if m.getUserInfoFn != nil {
+		return m.getUserInfoFn(ctx, userID)
+	}
+	return &slack.User{
+		ID:       userID,
+		Name:     "testuser",
+		RealName: "Test User",
+		Email:    "test@example.com",
+		ImageURL: "https://example.com/image.png",
+	}, nil
+}
+
+func (m *mockSlackService) ListUsers(ctx context.Context) ([]*slack.User, error) {
+	if m.listUsersFn != nil {
+		return m.listUsersFn(ctx)
+	}
+	return []*slack.User{
+		{ID: "U001", Name: "user1", RealName: "User One"},
+		{ID: "U002", Name: "user2", RealName: "User Two"},
+	}, nil
 }
 
 func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
