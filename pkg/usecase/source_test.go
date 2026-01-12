@@ -10,6 +10,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
+	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 )
 
@@ -33,6 +34,33 @@ func (m *mockNotionService) GetDatabaseMetadata(ctx context.Context, dbID string
 	}, nil
 }
 
+// mockSlackService is a mock implementation of slack.Service for testing
+type mockSlackService struct {
+	listJoinedChannelsFn func(ctx context.Context) ([]slack.Channel, error)
+	getChannelNamesFn    func(ctx context.Context, ids []string) (map[string]string, error)
+}
+
+func (m *mockSlackService) ListJoinedChannels(ctx context.Context) ([]slack.Channel, error) {
+	if m.listJoinedChannelsFn != nil {
+		return m.listJoinedChannelsFn(ctx)
+	}
+	return []slack.Channel{
+		{ID: "C001", Name: "general"},
+		{ID: "C002", Name: "random"},
+	}, nil
+}
+
+func (m *mockSlackService) GetChannelNames(ctx context.Context, ids []string) (map[string]string, error) {
+	if m.getChannelNamesFn != nil {
+		return m.getChannelNamesFn(ctx, ids)
+	}
+	result := make(map[string]string)
+	for _, id := range ids {
+		result[id] = "channel-" + id
+	}
+	return result, nil
+}
+
 func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 	t.Run("creates source with valid database ID", func(t *testing.T) {
 		repo := memory.New()
@@ -45,7 +73,7 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 				}, nil
 			},
 		}
-		uc := usecase.NewSourceUseCase(repo, notionSvc)
+		uc := usecase.NewSourceUseCase(repo, notionSvc, nil)
 		ctx := context.Background()
 
 		input := usecase.CreateNotionDBSourceInput{
@@ -83,7 +111,7 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 	t.Run("uses custom name when provided", func(t *testing.T) {
 		repo := memory.New()
 		notionSvc := &mockNotionService{}
-		uc := usecase.NewSourceUseCase(repo, notionSvc)
+		uc := usecase.NewSourceUseCase(repo, notionSvc, nil)
 		ctx := context.Background()
 
 		input := usecase.CreateNotionDBSourceInput{
@@ -104,7 +132,7 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 
 	t.Run("fails with empty database ID", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil)
 		ctx := context.Background()
 
 		input := usecase.CreateNotionDBSourceInput{
@@ -125,7 +153,7 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 				return nil, errors.New("database not found")
 			},
 		}
-		uc := usecase.NewSourceUseCase(repo, notionSvc)
+		uc := usecase.NewSourceUseCase(repo, notionSvc, nil)
 		ctx := context.Background()
 
 		input := usecase.CreateNotionDBSourceInput{
@@ -141,7 +169,7 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 
 	t.Run("creates source without Notion service", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil)
 		ctx := context.Background()
 
 		input := usecase.CreateNotionDBSourceInput{
@@ -164,7 +192,7 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 func TestSourceUseCase_UpdateSource(t *testing.T) {
 	t.Run("updates source fields", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil)
 		ctx := context.Background()
 
 		source := &model.Source{
@@ -205,7 +233,7 @@ func TestSourceUseCase_UpdateSource(t *testing.T) {
 
 	t.Run("partial update only changes specified fields", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil)
 		ctx := context.Background()
 
 		source := &model.Source{
@@ -243,7 +271,7 @@ func TestSourceUseCase_UpdateSource(t *testing.T) {
 
 	t.Run("fails with empty ID", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil)
 		ctx := context.Background()
 
 		input := usecase.UpdateSourceInput{
@@ -258,7 +286,7 @@ func TestSourceUseCase_UpdateSource(t *testing.T) {
 
 	t.Run("fails for non-existent source", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil)
 		ctx := context.Background()
 
 		newName := "New Name"
@@ -277,7 +305,7 @@ func TestSourceUseCase_UpdateSource(t *testing.T) {
 func TestSourceUseCase_DeleteSource(t *testing.T) {
 	t.Run("deletes existing source", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil)
 		ctx := context.Background()
 
 		source := &model.Source{
@@ -303,7 +331,7 @@ func TestSourceUseCase_DeleteSource(t *testing.T) {
 
 	t.Run("fails with empty ID", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil)
 		ctx := context.Background()
 
 		err := uc.DeleteSource(ctx, "")
@@ -314,7 +342,7 @@ func TestSourceUseCase_DeleteSource(t *testing.T) {
 
 	t.Run("fails for non-existent source", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil)
 		ctx := context.Background()
 
 		err := uc.DeleteSource(ctx, "non-existent-id")
@@ -327,7 +355,7 @@ func TestSourceUseCase_DeleteSource(t *testing.T) {
 func TestSourceUseCase_GetSource(t *testing.T) {
 	t.Run("gets existing source", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil)
 		ctx := context.Background()
 
 		source := &model.Source{
@@ -355,7 +383,7 @@ func TestSourceUseCase_GetSource(t *testing.T) {
 
 	t.Run("fails with empty ID", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil)
 		ctx := context.Background()
 
 		_, err := uc.GetSource(ctx, "")
@@ -366,7 +394,7 @@ func TestSourceUseCase_GetSource(t *testing.T) {
 
 	t.Run("fails for non-existent source", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil)
 		ctx := context.Background()
 
 		_, err := uc.GetSource(ctx, "non-existent-id")
@@ -379,7 +407,7 @@ func TestSourceUseCase_GetSource(t *testing.T) {
 func TestSourceUseCase_ListSources(t *testing.T) {
 	t.Run("lists all sources", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil)
 		ctx := context.Background()
 
 		sources, err := uc.ListSources(ctx)
@@ -417,7 +445,7 @@ func TestSourceUseCase_ValidateNotionDB(t *testing.T) {
 				}, nil
 			},
 		}
-		uc := usecase.NewSourceUseCase(repo, notionSvc)
+		uc := usecase.NewSourceUseCase(repo, notionSvc, nil)
 		ctx := context.Background()
 
 		result, err := uc.ValidateNotionDB(ctx, "valid-db-id")
@@ -438,7 +466,7 @@ func TestSourceUseCase_ValidateNotionDB(t *testing.T) {
 
 	t.Run("returns invalid for empty database ID", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil)
 		ctx := context.Background()
 
 		result, err := uc.ValidateNotionDB(ctx, "")
@@ -456,7 +484,7 @@ func TestSourceUseCase_ValidateNotionDB(t *testing.T) {
 
 	t.Run("returns invalid when Notion service is not configured", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil)
 		ctx := context.Background()
 
 		result, err := uc.ValidateNotionDB(ctx, "some-db-id")
@@ -479,7 +507,7 @@ func TestSourceUseCase_ValidateNotionDB(t *testing.T) {
 				return nil, errors.New("database not found")
 			},
 		}
-		uc := usecase.NewSourceUseCase(repo, notionSvc)
+		uc := usecase.NewSourceUseCase(repo, notionSvc, nil)
 		ctx := context.Background()
 
 		result, err := uc.ValidateNotionDB(ctx, "invalid-db-id")
@@ -492,6 +520,290 @@ func TestSourceUseCase_ValidateNotionDB(t *testing.T) {
 		}
 		if result.ErrorMessage == "" {
 			t.Error("expected ErrorMessage to be set")
+		}
+	})
+}
+
+func TestSourceUseCase_CreateSlackSource(t *testing.T) {
+	t.Run("creates source with valid channel IDs", func(t *testing.T) {
+		repo := memory.New()
+		slackSvc := &mockSlackService{
+			getChannelNamesFn: func(ctx context.Context, ids []string) (map[string]string, error) {
+				return map[string]string{
+					"C001": "general",
+					"C002": "random",
+				}, nil
+			},
+		}
+		uc := usecase.NewSourceUseCase(repo, nil, slackSvc)
+		ctx := context.Background()
+
+		input := usecase.CreateSlackSourceInput{
+			Name:        "My Slack Source",
+			Description: "Test slack source",
+			ChannelIDs:  []string{"C001", "C002"},
+			Enabled:     true,
+		}
+
+		source, err := uc.CreateSlackSource(ctx, input)
+		if err != nil {
+			t.Fatalf("CreateSlackSource failed: %v", err)
+		}
+
+		if source.ID == "" {
+			t.Error("expected source ID to be set")
+		}
+		if source.Name != "My Slack Source" {
+			t.Errorf("expected name='My Slack Source', got %s", source.Name)
+		}
+		if source.SourceType != model.SourceTypeSlack {
+			t.Errorf("expected sourceType=slack, got %s", source.SourceType)
+		}
+		if source.SlackConfig == nil {
+			t.Fatal("expected SlackConfig to be set")
+		}
+		if len(source.SlackConfig.Channels) != 2 {
+			t.Errorf("expected 2 channels, got %d", len(source.SlackConfig.Channels))
+		}
+		if source.SlackConfig.Channels[0].ID != "C001" {
+			t.Errorf("expected channel ID='C001', got %s", source.SlackConfig.Channels[0].ID)
+		}
+		if source.SlackConfig.Channels[0].Name != "general" {
+			t.Errorf("expected channel name='general', got %s", source.SlackConfig.Channels[0].Name)
+		}
+	})
+
+	t.Run("uses default name when not provided", func(t *testing.T) {
+		repo := memory.New()
+		slackSvc := &mockSlackService{}
+		uc := usecase.NewSourceUseCase(repo, nil, slackSvc)
+		ctx := context.Background()
+
+		input := usecase.CreateSlackSourceInput{
+			ChannelIDs: []string{"C001"},
+			Enabled:    true,
+		}
+
+		source, err := uc.CreateSlackSource(ctx, input)
+		if err != nil {
+			t.Fatalf("CreateSlackSource failed: %v", err)
+		}
+
+		if source.Name != "Slack Source" {
+			t.Errorf("expected name='Slack Source', got %s", source.Name)
+		}
+	})
+
+	t.Run("fails with empty channel IDs", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		ctx := context.Background()
+
+		input := usecase.CreateSlackSourceInput{
+			Name:       "Empty Channels",
+			ChannelIDs: []string{},
+			Enabled:    true,
+		}
+
+		_, err := uc.CreateSlackSource(ctx, input)
+		if err == nil {
+			t.Error("expected error for empty channel IDs")
+		}
+	})
+
+	t.Run("creates source without Slack service", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		ctx := context.Background()
+
+		input := usecase.CreateSlackSourceInput{
+			Name:       "Manual Source",
+			ChannelIDs: []string{"C001", "C002"},
+			Enabled:    true,
+		}
+
+		source, err := uc.CreateSlackSource(ctx, input)
+		if err != nil {
+			t.Fatalf("CreateSlackSource failed: %v", err)
+		}
+
+		if source.SlackConfig.Channels[0].Name != "C001" {
+			t.Errorf("expected channel name='C001' (fallback to ID), got %s", source.SlackConfig.Channels[0].Name)
+		}
+	})
+}
+
+func TestSourceUseCase_UpdateSlackSource(t *testing.T) {
+	t.Run("updates slack source fields", func(t *testing.T) {
+		repo := memory.New()
+		slackSvc := &mockSlackService{}
+		uc := usecase.NewSourceUseCase(repo, nil, slackSvc)
+		ctx := context.Background()
+
+		source := &model.Source{
+			Name:       "Original",
+			SourceType: model.SourceTypeSlack,
+			Enabled:    true,
+			SlackConfig: &model.SlackConfig{
+				Channels: []model.SlackChannel{{ID: "C001", Name: "general"}},
+			},
+		}
+		created, err := repo.Source().Create(ctx, source)
+		if err != nil {
+			t.Fatalf("failed to create source: %v", err)
+		}
+
+		newName := "Updated"
+		newDesc := "Updated description"
+		newEnabled := false
+		input := usecase.UpdateSlackSourceInput{
+			ID:          created.ID,
+			Name:        &newName,
+			Description: &newDesc,
+			Enabled:     &newEnabled,
+		}
+
+		updated, err := uc.UpdateSlackSource(ctx, input)
+		if err != nil {
+			t.Fatalf("UpdateSlackSource failed: %v", err)
+		}
+
+		if updated.Name != "Updated" {
+			t.Errorf("expected name='Updated', got %s", updated.Name)
+		}
+		if updated.Description != "Updated description" {
+			t.Errorf("expected description='Updated description', got %s", updated.Description)
+		}
+		if updated.Enabled != false {
+			t.Errorf("expected enabled=false, got %v", updated.Enabled)
+		}
+	})
+
+	t.Run("updates channels", func(t *testing.T) {
+		repo := memory.New()
+		slackSvc := &mockSlackService{
+			getChannelNamesFn: func(ctx context.Context, ids []string) (map[string]string, error) {
+				return map[string]string{
+					"C003": "new-channel",
+				}, nil
+			},
+		}
+		uc := usecase.NewSourceUseCase(repo, nil, slackSvc)
+		ctx := context.Background()
+
+		source := &model.Source{
+			Name:       "Original",
+			SourceType: model.SourceTypeSlack,
+			Enabled:    true,
+			SlackConfig: &model.SlackConfig{
+				Channels: []model.SlackChannel{{ID: "C001", Name: "general"}},
+			},
+		}
+		created, err := repo.Source().Create(ctx, source)
+		if err != nil {
+			t.Fatalf("failed to create source: %v", err)
+		}
+
+		input := usecase.UpdateSlackSourceInput{
+			ID:         created.ID,
+			ChannelIDs: []string{"C003"},
+		}
+
+		updated, err := uc.UpdateSlackSource(ctx, input)
+		if err != nil {
+			t.Fatalf("UpdateSlackSource failed: %v", err)
+		}
+
+		if len(updated.SlackConfig.Channels) != 1 {
+			t.Errorf("expected 1 channel, got %d", len(updated.SlackConfig.Channels))
+		}
+		if updated.SlackConfig.Channels[0].ID != "C003" {
+			t.Errorf("expected channel ID='C003', got %s", updated.SlackConfig.Channels[0].ID)
+		}
+	})
+
+	t.Run("fails with empty ID", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		ctx := context.Background()
+
+		input := usecase.UpdateSlackSourceInput{
+			ID: "",
+		}
+
+		_, err := uc.UpdateSlackSource(ctx, input)
+		if err == nil {
+			t.Error("expected error for empty ID")
+		}
+	})
+
+	t.Run("fails for non-slack source", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		ctx := context.Background()
+
+		source := &model.Source{
+			Name:       "Notion Source",
+			SourceType: model.SourceTypeNotionDB,
+			Enabled:    true,
+		}
+		created, err := repo.Source().Create(ctx, source)
+		if err != nil {
+			t.Fatalf("failed to create source: %v", err)
+		}
+
+		newName := "New Name"
+		input := usecase.UpdateSlackSourceInput{
+			ID:   created.ID,
+			Name: &newName,
+		}
+
+		_, err = uc.UpdateSlackSource(ctx, input)
+		if err == nil {
+			t.Error("expected error for non-slack source")
+		}
+	})
+}
+
+func TestSourceUseCase_ListSlackChannels(t *testing.T) {
+	t.Run("lists channels from slack service", func(t *testing.T) {
+		repo := memory.New()
+		slackSvc := &mockSlackService{
+			listJoinedChannelsFn: func(ctx context.Context) ([]slack.Channel, error) {
+				return []slack.Channel{
+					{ID: "C001", Name: "general"},
+					{ID: "C002", Name: "random"},
+					{ID: "C003", Name: "dev"},
+				}, nil
+			},
+		}
+		uc := usecase.NewSourceUseCase(repo, nil, slackSvc)
+		ctx := context.Background()
+
+		channels, err := uc.ListSlackChannels(ctx)
+		if err != nil {
+			t.Fatalf("ListSlackChannels failed: %v", err)
+		}
+
+		if len(channels) != 3 {
+			t.Errorf("expected 3 channels, got %d", len(channels))
+		}
+		if channels[0].ID != "C001" {
+			t.Errorf("expected channel ID='C001', got %s", channels[0].ID)
+		}
+		if channels[0].Name != "general" {
+			t.Errorf("expected channel name='general', got %s", channels[0].Name)
+		}
+	})
+
+	t.Run("fails when slack service is not configured", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		ctx := context.Background()
+
+		_, err := uc.ListSlackChannels(ctx)
+		if err == nil {
+			t.Error("expected error when slack service is not configured")
 		}
 	})
 }

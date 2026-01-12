@@ -207,6 +207,19 @@ func (r *mutationResolver) CreateNotionDBSource(ctx context.Context, input graph
 	return toGraphQLSource(source)
 }
 
+// CreateSlackSource is the resolver for the createSlackSource field.
+func (r *mutationResolver) CreateSlackSource(ctx context.Context, input graphql1.CreateSlackSourceInput) (*graphql1.Source, error) {
+	ucInput := toUseCaseCreateSlackSourceInput(input)
+
+	source, err := r.uc.Source.CreateSlackSource(ctx, ucInput)
+	if err != nil {
+		errutil.Handle(ctx, err, "failed to create Slack source")
+		return nil, err
+	}
+
+	return toGraphQLSource(source)
+}
+
 // UpdateSource is the resolver for the updateSource field.
 func (r *mutationResolver) UpdateSource(ctx context.Context, input graphql1.UpdateSourceInput) (*graphql1.Source, error) {
 	ucInput := toUseCaseUpdateSourceInput(input)
@@ -214,6 +227,19 @@ func (r *mutationResolver) UpdateSource(ctx context.Context, input graphql1.Upda
 	source, err := r.uc.Source.UpdateSource(ctx, ucInput)
 	if err != nil {
 		errutil.Handle(ctx, err, "failed to update source")
+		return nil, err
+	}
+
+	return toGraphQLSource(source)
+}
+
+// UpdateSlackSource is the resolver for the updateSlackSource field.
+func (r *mutationResolver) UpdateSlackSource(ctx context.Context, input graphql1.UpdateSlackSourceInput) (*graphql1.Source, error) {
+	ucInput := toUseCaseUpdateSlackSourceInput(input)
+
+	source, err := r.uc.Source.UpdateSlackSource(ctx, ucInput)
+	if err != nil {
+		errutil.Handle(ctx, err, "failed to update Slack source")
 		return nil, err
 	}
 
@@ -429,6 +455,25 @@ func (r *queryResolver) Source(ctx context.Context, id string) (*graphql1.Source
 	}
 
 	return toGraphQLSource(source)
+}
+
+// SlackJoinedChannels is the resolver for the slackJoinedChannels field.
+func (r *queryResolver) SlackJoinedChannels(ctx context.Context) ([]*graphql1.SlackChannelInfo, error) {
+	channels, err := r.uc.Source.ListSlackChannels(ctx)
+	if err != nil {
+		errutil.Handle(ctx, err, "failed to list Slack channels")
+		return nil, err
+	}
+
+	gqlChannels := make([]*graphql1.SlackChannelInfo, len(channels))
+	for i, ch := range channels {
+		gqlChannels[i] = &graphql1.SlackChannelInfo{
+			ID:   ch.ID,
+			Name: ch.Name,
+		}
+	}
+
+	return gqlChannels, nil
 }
 
 // Responses is the resolver for the responses field on Risk.

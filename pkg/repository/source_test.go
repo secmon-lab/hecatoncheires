@@ -383,6 +383,188 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			t.Error("expected NotionDBConfig to be nil after retrieval")
 		}
 	})
+
+	t.Run("Create Slack source with channels", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		source := &model.Source{
+			Name:        "My Slack Source",
+			SourceType:  model.SourceTypeSlack,
+			Description: "Test slack source",
+			Enabled:     true,
+			SlackConfig: &model.SlackConfig{
+				Channels: []model.SlackChannel{
+					{ID: "C01234567", Name: "general"},
+					{ID: "C89012345", Name: "random"},
+				},
+			},
+		}
+
+		created, err := repo.Source().Create(ctx, source)
+		if err != nil {
+			t.Fatalf("failed to create source: %v", err)
+		}
+
+		if created.ID == "" {
+			t.Error("expected non-empty ID")
+		}
+		if created.Name != source.Name {
+			t.Errorf("expected name=%s, got %s", source.Name, created.Name)
+		}
+		if created.SourceType != model.SourceTypeSlack {
+			t.Errorf("expected sourceType=%s, got %s", model.SourceTypeSlack, created.SourceType)
+		}
+		if created.SlackConfig == nil {
+			t.Fatal("expected SlackConfig to be set")
+		}
+		if len(created.SlackConfig.Channels) != 2 {
+			t.Errorf("expected 2 channels, got %d", len(created.SlackConfig.Channels))
+		}
+		if created.SlackConfig.Channels[0].ID != "C01234567" {
+			t.Errorf("expected channel ID=C01234567, got %s", created.SlackConfig.Channels[0].ID)
+		}
+		if created.SlackConfig.Channels[0].Name != "general" {
+			t.Errorf("expected channel name=general, got %s", created.SlackConfig.Channels[0].Name)
+		}
+		if created.SlackConfig.Channels[1].ID != "C89012345" {
+			t.Errorf("expected channel ID=C89012345, got %s", created.SlackConfig.Channels[1].ID)
+		}
+		if created.SlackConfig.Channels[1].Name != "random" {
+			t.Errorf("expected channel name=random, got %s", created.SlackConfig.Channels[1].Name)
+		}
+	})
+
+	t.Run("Get retrieves Slack source with channels", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		source := &model.Source{
+			Name:        "Slack Source for Get",
+			SourceType:  model.SourceTypeSlack,
+			Description: "For testing Get",
+			Enabled:     true,
+			SlackConfig: &model.SlackConfig{
+				Channels: []model.SlackChannel{
+					{ID: "C11111111", Name: "test-channel"},
+				},
+			},
+		}
+
+		created, err := repo.Source().Create(ctx, source)
+		if err != nil {
+			t.Fatalf("failed to create source: %v", err)
+		}
+
+		retrieved, err := repo.Source().Get(ctx, created.ID)
+		if err != nil {
+			t.Fatalf("failed to get source: %v", err)
+		}
+
+		if retrieved.SlackConfig == nil {
+			t.Fatal("expected SlackConfig to be set")
+		}
+		if len(retrieved.SlackConfig.Channels) != 1 {
+			t.Errorf("expected 1 channel, got %d", len(retrieved.SlackConfig.Channels))
+		}
+		if retrieved.SlackConfig.Channels[0].ID != "C11111111" {
+			t.Errorf("expected channel ID=C11111111, got %s", retrieved.SlackConfig.Channels[0].ID)
+		}
+		if retrieved.SlackConfig.Channels[0].Name != "test-channel" {
+			t.Errorf("expected channel name=test-channel, got %s", retrieved.SlackConfig.Channels[0].Name)
+		}
+	})
+
+	t.Run("Update Slack source channels", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		created, err := repo.Source().Create(ctx, &model.Source{
+			Name:        "Slack Source for Update",
+			SourceType:  model.SourceTypeSlack,
+			Description: "Original",
+			Enabled:     true,
+			SlackConfig: &model.SlackConfig{
+				Channels: []model.SlackChannel{
+					{ID: "C00000001", Name: "original-channel"},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("failed to create source: %v", err)
+		}
+
+		time.Sleep(10 * time.Millisecond)
+
+		updated, err := repo.Source().Update(ctx, &model.Source{
+			ID:          created.ID,
+			Name:        "Updated Slack Source",
+			SourceType:  model.SourceTypeSlack,
+			Description: "Updated",
+			Enabled:     false,
+			SlackConfig: &model.SlackConfig{
+				Channels: []model.SlackChannel{
+					{ID: "C00000002", Name: "updated-channel-1"},
+					{ID: "C00000003", Name: "updated-channel-2"},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("failed to update source: %v", err)
+		}
+
+		if updated.SlackConfig == nil {
+			t.Fatal("expected SlackConfig to be set")
+		}
+		if len(updated.SlackConfig.Channels) != 2 {
+			t.Errorf("expected 2 channels, got %d", len(updated.SlackConfig.Channels))
+		}
+		if updated.SlackConfig.Channels[0].ID != "C00000002" {
+			t.Errorf("expected channel ID=C00000002, got %s", updated.SlackConfig.Channels[0].ID)
+		}
+		if updated.SlackConfig.Channels[1].ID != "C00000003" {
+			t.Errorf("expected channel ID=C00000003, got %s", updated.SlackConfig.Channels[1].ID)
+		}
+	})
+
+	t.Run("Slack source without channels works", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		source := &model.Source{
+			Name:        "Slack Source Without Channels",
+			SourceType:  model.SourceTypeSlack,
+			Description: "No channels",
+			Enabled:     true,
+			SlackConfig: &model.SlackConfig{
+				Channels: []model.SlackChannel{},
+			},
+		}
+
+		created, err := repo.Source().Create(ctx, source)
+		if err != nil {
+			t.Fatalf("failed to create source: %v", err)
+		}
+
+		if created.SlackConfig == nil {
+			t.Fatal("expected SlackConfig to be set")
+		}
+		if len(created.SlackConfig.Channels) != 0 {
+			t.Errorf("expected 0 channels, got %d", len(created.SlackConfig.Channels))
+		}
+
+		retrieved, err := repo.Source().Get(ctx, created.ID)
+		if err != nil {
+			t.Fatalf("failed to get source: %v", err)
+		}
+
+		if retrieved.SlackConfig == nil {
+			t.Fatal("expected SlackConfig to be set after retrieval")
+		}
+		if len(retrieved.SlackConfig.Channels) != 0 {
+			t.Errorf("expected 0 channels after retrieval, got %d", len(retrieved.SlackConfig.Channels))
+		}
+	})
 }
 
 func newFirestoreSourceRepository(t *testing.T) interfaces.Repository {

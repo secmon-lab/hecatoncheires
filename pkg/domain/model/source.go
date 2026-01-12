@@ -11,7 +11,7 @@ type SourceType string
 
 const (
 	SourceTypeNotionDB SourceType = "notion_db"
-	// Future: SourceTypeGitHubIssues, SourceTypeJira, etc.
+	SourceTypeSlack    SourceType = "slack"
 )
 
 // SourceID is a UUID-based identifier for Source
@@ -30,9 +30,9 @@ type Source struct {
 	Description    string
 	Enabled        bool
 	NotionDBConfig *NotionDBConfig
-	// Future: GitHubConfig *GitHubConfig
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	SlackConfig    *SlackConfig
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 // NotionDBConfig holds Notion DB specific configuration
@@ -40,4 +40,15 @@ type NotionDBConfig struct {
 	DatabaseID    string
 	DatabaseTitle string
 	DatabaseURL   string
+}
+
+// SlackConfig holds Slack specific configuration
+type SlackConfig struct {
+	Channels []SlackChannel
+}
+
+// SlackChannel represents a Slack channel configuration
+type SlackChannel struct {
+	ID   string // Slack Channel ID (e.g., C01234567)
+	Name string // Fallback name for display when API is unavailable
 }

@@ -9,9 +9,20 @@ const NOTION_DB_CONFIG_FIELDS = gql`
   }
 `
 
+// Fragment for Slack config
+const SLACK_CONFIG_FIELDS = gql`
+  fragment SlackConfigFields on SlackConfig {
+    channels {
+      id
+      name
+    }
+  }
+`
+
 // Fragment for full source data
 const SOURCE_FIELDS = gql`
   ${NOTION_DB_CONFIG_FIELDS}
+  ${SLACK_CONFIG_FIELDS}
   fragment SourceFields on Source {
     id
     name
@@ -21,6 +32,9 @@ const SOURCE_FIELDS = gql`
     config {
       ... on NotionDBConfig {
         ...NotionDBConfigFields
+      }
+      ... on SlackConfig {
+        ...SlackConfigFields
       }
     }
     createdAt
@@ -77,6 +91,33 @@ export const VALIDATE_NOTION_DB = gql`
       databaseTitle
       databaseURL
       errorMessage
+    }
+  }
+`
+
+export const CREATE_SLACK_SOURCE = gql`
+  ${SOURCE_FIELDS}
+  mutation CreateSlackSource($input: CreateSlackSourceInput!) {
+    createSlackSource(input: $input) {
+      ...SourceFields
+    }
+  }
+`
+
+export const UPDATE_SLACK_SOURCE = gql`
+  ${SOURCE_FIELDS}
+  mutation UpdateSlackSource($input: UpdateSlackSourceInput!) {
+    updateSlackSource(input: $input) {
+      ...SourceFields
+    }
+  }
+`
+
+export const GET_SLACK_JOINED_CHANNELS = gql`
+  query GetSlackJoinedChannels {
+    slackJoinedChannels {
+      id
+      name
     }
   }
 `

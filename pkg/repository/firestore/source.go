@@ -19,6 +19,7 @@ type sourceDocument struct {
 	Description    string          `firestore:"description"`
 	Enabled        bool            `firestore:"enabled"`
 	NotionDBConfig *notionDBConfig `firestore:"notion_db_config,omitempty"`
+	SlackConfig    *sourceSlackConfig `firestore:"slack_config,omitempty"`
 	CreatedAt      time.Time       `firestore:"created_at"`
 	UpdatedAt      time.Time       `firestore:"updated_at"`
 }
@@ -27,6 +28,15 @@ type notionDBConfig struct {
 	DatabaseID    string `firestore:"database_id"`
 	DatabaseTitle string `firestore:"database_title"`
 	DatabaseURL   string `firestore:"database_url"`
+}
+
+type sourceSlackConfig struct {
+	Channels []sourceSlackChannel `firestore:"channels"`
+}
+
+type sourceSlackChannel struct {
+	ID   string `firestore:"id"`
+	Name string `firestore:"name"`
 }
 
 type sourceRepository struct {
@@ -67,6 +77,19 @@ func sourceToDocument(source *model.Source) *sourceDocument {
 		}
 	}
 
+	if source.SlackConfig != nil {
+		channels := make([]sourceSlackChannel, len(source.SlackConfig.Channels))
+		for i, ch := range source.SlackConfig.Channels {
+			channels[i] = sourceSlackChannel{
+				ID:   ch.ID,
+				Name: ch.Name,
+			}
+		}
+		doc.SlackConfig = &sourceSlackConfig{
+			Channels: channels,
+		}
+	}
+
 	return doc
 }
 
@@ -86,6 +109,19 @@ func sourceToModel(doc *sourceDocument) *model.Source {
 			DatabaseID:    doc.NotionDBConfig.DatabaseID,
 			DatabaseTitle: doc.NotionDBConfig.DatabaseTitle,
 			DatabaseURL:   doc.NotionDBConfig.DatabaseURL,
+		}
+	}
+
+	if doc.SlackConfig != nil {
+		channels := make([]model.SlackChannel, len(doc.SlackConfig.Channels))
+		for i, ch := range doc.SlackConfig.Channels {
+			channels[i] = model.SlackChannel{
+				ID:   ch.ID,
+				Name: ch.Name,
+			}
+		}
+		source.SlackConfig = &model.SlackConfig{
+			Channels: channels,
 		}
 	}
 

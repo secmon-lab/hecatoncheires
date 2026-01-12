@@ -123,6 +123,15 @@
   margin-top: calc(-1 * var(--spacing-xs));
 }
 
+.formError {
+  padding: var(--spacing-md);
+  background: var(--color-error-shadow);
+  border: 1px solid var(--color-error);
+  border-radius: var(--radius-md);
+  color: var(--color-error-dark);
+  font-size: 0.875rem;
+}
+
 .hint {
   font-size: 0.75rem;
   color: var(--text-muted);

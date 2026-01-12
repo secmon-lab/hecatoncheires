@@ -48,6 +48,13 @@ type CreateRiskInput struct {
 	DetectionIndicators string   `json:"detectionIndicators"`
 }
 
+type CreateSlackSourceInput struct {
+	Name        *string  `json:"name,omitempty"`
+	Description *string  `json:"description,omitempty"`
+	ChannelIDs  []string `json:"channelIDs"`
+	Enabled     *bool    `json:"enabled,omitempty"`
+}
+
 type ImpactLevel struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -123,6 +130,22 @@ type RiskConfiguration struct {
 	Teams            []*Team            `json:"teams"`
 }
 
+type SlackChannel struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type SlackChannelInfo struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type SlackConfig struct {
+	Channels []*SlackChannel `json:"channels"`
+}
+
+func (SlackConfig) IsSourceConfig() {}
+
 type SlackUser struct {
 	ID       string  `json:"id"`
 	Name     string  `json:"name"`
@@ -167,6 +190,14 @@ type UpdateRiskInput struct {
 	ResponseTeamIDs     []string `json:"responseTeamIDs"`
 	AssigneeIDs         []string `json:"assigneeIDs"`
 	DetectionIndicators string   `json:"detectionIndicators"`
+}
+
+type UpdateSlackSourceInput struct {
+	ID          string   `json:"id"`
+	Name        *string  `json:"name,omitempty"`
+	Description *string  `json:"description,omitempty"`
+	ChannelIDs  []string `json:"channelIDs,omitempty"`
+	Enabled     *bool    `json:"enabled,omitempty"`
 }
 
 type UpdateSourceInput struct {
@@ -243,15 +274,17 @@ type SourceType string
 
 const (
 	SourceTypeNotionDb SourceType = "NOTION_DB"
+	SourceTypeSLACk    SourceType = "SLACK"
 )
 
 var AllSourceType = []SourceType{
 	SourceTypeNotionDb,
+	SourceTypeSLACk,
 }
 
 func (e SourceType) IsValid() bool {
 	switch e {
-	case SourceTypeNotionDb:
+	case SourceTypeNotionDb, SourceTypeSLACk:
 		return true
 	}
 	return false

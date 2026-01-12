@@ -128,6 +128,7 @@ input UpdateResponseInput {
 # Source types
 enum SourceType {
   NOTION_DB
+  SLACK
 }
 
 type Source {
@@ -141,12 +142,21 @@ type Source {
   updatedAt: Time!
 }
 
-union SourceConfig = NotionDBConfig
+union SourceConfig = NotionDBConfig | SlackConfig
 
 type NotionDBConfig {
   databaseID: String!
   databaseTitle: String!
   databaseURL: String!
+}
+
+type SlackConfig {
+  channels: [SlackChannel!]!
+}
+
+type SlackChannel {
+  id: String!
+  name: String!
 }
 
 input CreateNotionDBSourceInput {
@@ -170,6 +180,26 @@ type NotionDBValidationResult {
   errorMessage: String
 }
 
+input CreateSlackSourceInput {
+  name: String
+  description: String
+  channelIDs: [String!]!
+  enabled: Boolean
+}
+
+input UpdateSlackSourceInput {
+  id: String!
+  name: String
+  description: String
+  channelIDs: [String!]
+  enabled: Boolean
+}
+
+type SlackChannelInfo {
+  id: String!
+  name: String!
+}
+
 type Query {
   health: String!
   risks: [Risk!]!
@@ -181,6 +211,7 @@ type Query {
   responsesByRisk(riskID: Int!): [Response!]!
   sources: [Source!]!
   source(id: String!): Source
+  slackJoinedChannels: [SlackChannelInfo!]!
 }
 
 type Mutation {
@@ -194,7 +225,9 @@ type Mutation {
   linkResponseToRisk(responseID: Int!, riskID: Int!): Boolean!
   unlinkResponseFromRisk(responseID: Int!, riskID: Int!): Boolean!
   createNotionDBSource(input: CreateNotionDBSourceInput!): Source!
+  createSlackSource(input: CreateSlackSourceInput!): Source!
   updateSource(input: UpdateSourceInput!): Source!
+  updateSlackSource(input: UpdateSlackSourceInput!): Source!
   deleteSource(id: String!): Boolean!
   validateNotionDB(databaseID: String!): NotionDBValidationResult!
 }
