@@ -76,6 +76,7 @@ type Risk {
   assigneeIDs: [String!]!
   assignees: [SlackUser!]!
   detectionIndicators: String!
+  slackChannelID: String
   responses: [Response!]!
   createdAt: Time!
   updatedAt: Time!

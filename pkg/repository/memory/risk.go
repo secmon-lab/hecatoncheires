@@ -45,6 +45,7 @@ func copyRisk(risk *model.Risk) *model.Risk {
 		ResponseTeamIDs:     teamIDs,
 		AssigneeIDs:         assigneeIDs,
 		DetectionIndicators: risk.DetectionIndicators,
+		SlackChannelID:      risk.SlackChannelID,
 		CreatedAt:           risk.CreatedAt,
 		UpdatedAt:           risk.UpdatedAt,
 	}

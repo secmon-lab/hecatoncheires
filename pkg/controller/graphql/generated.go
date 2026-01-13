@@ -142,6 +142,7 @@ type ComplexityRoot struct {
 		ResponseTeamIDs     func(childComplexity int) int
 		ResponseTeams       func(childComplexity int) int
 		Responses           func(childComplexity int) int
+		SlackChannelID      func(childComplexity int) int
 		SpecificImpact      func(childComplexity int) int
 		UpdatedAt           func(childComplexity int) int
 	}
@@ -756,6 +757,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Risk.Responses(childComplexity), true
+	case "Risk.slackChannelID":
+		if e.complexity.Risk.SlackChannelID == nil {
+			break
+		}
+
+		return e.complexity.Risk.SlackChannelID(childComplexity), true
 	case "Risk.specificImpact":
 		if e.complexity.Risk.SpecificImpact == nil {
 			break
@@ -1105,6 +1112,7 @@ type Risk {
   assigneeIDs: [String!]!
   assignees: [SlackUser!]!
   detectionIndicators: String!
+  slackChannelID: String
   responses: [Response!]!
   createdAt: Time!
   updatedAt: Time!
@@ -1942,6 +1950,8 @@ func (ec *executionContext) fieldContext_Mutation_createRisk(ctx context.Context
 				return ec.fieldContext_Risk_assignees(ctx, field)
 			case "detectionIndicators":
 				return ec.fieldContext_Risk_detectionIndicators(ctx, field)
+			case "slackChannelID":
+				return ec.fieldContext_Risk_slackChannelID(ctx, field)
 			case "responses":
 				return ec.fieldContext_Risk_responses(ctx, field)
 			case "createdAt":
@@ -2021,6 +2031,8 @@ func (ec *executionContext) fieldContext_Mutation_updateRisk(ctx context.Context
 				return ec.fieldContext_Risk_assignees(ctx, field)
 			case "detectionIndicators":
 				return ec.fieldContext_Risk_detectionIndicators(ctx, field)
+			case "slackChannelID":
+				return ec.fieldContext_Risk_slackChannelID(ctx, field)
 			case "responses":
 				return ec.fieldContext_Risk_responses(ctx, field)
 			case "createdAt":
@@ -2945,6 +2957,8 @@ func (ec *executionContext) fieldContext_Query_risks(_ context.Context, field gr
 				return ec.fieldContext_Risk_assignees(ctx, field)
 			case "detectionIndicators":
 				return ec.fieldContext_Risk_detectionIndicators(ctx, field)
+			case "slackChannelID":
+				return ec.fieldContext_Risk_slackChannelID(ctx, field)
 			case "responses":
 				return ec.fieldContext_Risk_responses(ctx, field)
 			case "createdAt":
@@ -3013,6 +3027,8 @@ func (ec *executionContext) fieldContext_Query_risk(ctx context.Context, field g
 				return ec.fieldContext_Risk_assignees(ctx, field)
 			case "detectionIndicators":
 				return ec.fieldContext_Risk_detectionIndicators(ctx, field)
+			case "slackChannelID":
+				return ec.fieldContext_Risk_slackChannelID(ctx, field)
 			case "responses":
 				return ec.fieldContext_Risk_responses(ctx, field)
 			case "createdAt":
@@ -3773,6 +3789,8 @@ func (ec *executionContext) fieldContext_Response_risks(_ context.Context, field
 				return ec.fieldContext_Risk_assignees(ctx, field)
 			case "detectionIndicators":
 				return ec.fieldContext_Risk_detectionIndicators(ctx, field)
+			case "slackChannelID":
+				return ec.fieldContext_Risk_slackChannelID(ctx, field)
 			case "responses":
 				return ec.fieldContext_Risk_responses(ctx, field)
 			case "createdAt":
@@ -4311,6 +4329,35 @@ func (ec *executionContext) _Risk_detectionIndicators(ctx context.Context, field
 }
 
 func (ec *executionContext) fieldContext_Risk_detectionIndicators(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Risk",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Risk_slackChannelID(ctx context.Context, field graphql.CollectedField, obj *graphql1.Risk) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Risk_slackChannelID,
+		func(ctx context.Context) (any, error) {
+			return obj.SlackChannelID, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Risk_slackChannelID(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Risk",
 		Field:      field,
@@ -7955,6 +8002,8 @@ func (ec *executionContext) _Risk(ctx context.Context, sel ast.SelectionSet, obj
 			if out.Values[i] == graphql.Null {
 				atomic.AddUint32(&out.Invalids, 1)
 			}
+		case "slackChannelID":
+			out.Values[i] = ec._Risk_slackChannelID(ctx, field, obj)
 		case "responses":
 			field := field
 

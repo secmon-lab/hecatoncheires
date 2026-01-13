@@ -25,6 +25,7 @@ type riskDocument struct {
 	ResponseTeamIDs     []string  `firestore:"response_team_ids"`
 	AssigneeIDs         []string  `firestore:"assignee_ids"`
 	DetectionIndicators string    `firestore:"detection_indicators"`
+	SlackChannelID      string    `firestore:"slack_channel_id"`
 	CreatedAt           time.Time `firestore:"created_at"`
 	UpdatedAt           time.Time `firestore:"updated_at"`
 }
@@ -82,6 +83,7 @@ func toDocument(risk *model.Risk) *riskDocument {
 		ResponseTeamIDs:     teamIDs,
 		AssigneeIDs:         risk.AssigneeIDs,
 		DetectionIndicators: risk.DetectionIndicators,
+		SlackChannelID:      risk.SlackChannelID,
 		CreatedAt:           risk.CreatedAt,
 		UpdatedAt:           risk.UpdatedAt,
 	}
@@ -110,6 +112,7 @@ func toModel(doc *riskDocument) *model.Risk {
 		ResponseTeamIDs:     teamIDs,
 		AssigneeIDs:         doc.AssigneeIDs,
 		DetectionIndicators: doc.DetectionIndicators,
+		SlackChannelID:      doc.SlackChannelID,
 		CreatedAt:           doc.CreatedAt,
 		UpdatedAt:           doc.UpdatedAt,
 	}
