@@ -274,6 +274,89 @@ func runRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.Repos
 			t.Errorf("expected ErrNotFound, got %v", err)
 		}
 	})
+
+	t.Run("SlackChannelID is persisted and retrieved", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		// Create risk with SlackChannelID
+		created, err := repo.Risk().Create(ctx, &model.Risk{
+			Name:           "Risk with Slack Channel",
+			Description:    "This risk has a Slack channel",
+			SlackChannelID: "C12345ABCDE",
+		})
+		if err != nil {
+			t.Fatalf("failed to create risk: %v", err)
+		}
+
+		if created.SlackChannelID != "C12345ABCDE" {
+			t.Errorf("expected SlackChannelID='C12345ABCDE', got %s", created.SlackChannelID)
+		}
+
+		// Retrieve and verify SlackChannelID
+		retrieved, err := repo.Risk().Get(ctx, created.ID)
+		if err != nil {
+			t.Fatalf("failed to get risk: %v", err)
+		}
+
+		if retrieved.SlackChannelID != "C12345ABCDE" {
+			t.Errorf("expected SlackChannelID='C12345ABCDE' after retrieval, got %s", retrieved.SlackChannelID)
+		}
+
+		// Update SlackChannelID
+		time.Sleep(10 * time.Millisecond)
+		updated, err := repo.Risk().Update(ctx, &model.Risk{
+			ID:             created.ID,
+			Name:           created.Name,
+			Description:    created.Description,
+			SlackChannelID: "C67890FGHIJ",
+		})
+		if err != nil {
+			t.Fatalf("failed to update risk: %v", err)
+		}
+
+		if updated.SlackChannelID != "C67890FGHIJ" {
+			t.Errorf("expected SlackChannelID='C67890FGHIJ' after update, got %s", updated.SlackChannelID)
+		}
+
+		// Verify updated value via Get
+		retrieved2, err := repo.Risk().Get(ctx, created.ID)
+		if err != nil {
+			t.Fatalf("failed to get updated risk: %v", err)
+		}
+
+		if retrieved2.SlackChannelID != "C67890FGHIJ" {
+			t.Errorf("expected SlackChannelID='C67890FGHIJ' after update retrieval, got %s", retrieved2.SlackChannelID)
+		}
+	})
+
+	t.Run("Empty SlackChannelID is handled correctly", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		// Create risk without SlackChannelID
+		created, err := repo.Risk().Create(ctx, &model.Risk{
+			Name:        "Risk without Slack Channel",
+			Description: "This risk has no Slack channel",
+		})
+		if err != nil {
+			t.Fatalf("failed to create risk: %v", err)
+		}
+
+		if created.SlackChannelID != "" {
+			t.Errorf("expected empty SlackChannelID, got %s", created.SlackChannelID)
+		}
+
+		// Retrieve and verify empty SlackChannelID
+		retrieved, err := repo.Risk().Get(ctx, created.ID)
+		if err != nil {
+			t.Fatalf("failed to get risk: %v", err)
+		}
+
+		if retrieved.SlackChannelID != "" {
+			t.Errorf("expected empty SlackChannelID after retrieval, got %s", retrieved.SlackChannelID)
+		}
+	})
 }
 
 func newFirestoreRepository(t *testing.T) interfaces.Repository {

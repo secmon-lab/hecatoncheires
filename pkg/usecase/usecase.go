@@ -54,7 +54,7 @@ func New(repo interfaces.Repository, opts ...Option) *UseCases {
 		opt(uc)
 	}
 
-	uc.Risk = NewRiskUseCase(repo, uc.riskConfig)
+	uc.Risk = NewRiskUseCase(repo, uc.riskConfig, uc.slackService)
 	uc.Response = NewResponseUseCase(repo)
 	uc.Slack = NewSlackUseCases(repo)
 	uc.Source = NewSourceUseCase(repo, uc.notion, uc.slackService)

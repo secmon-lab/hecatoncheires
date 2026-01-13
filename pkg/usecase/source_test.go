@@ -40,6 +40,8 @@ type mockSlackService struct {
 	getChannelNamesFn    func(ctx context.Context, ids []string) (map[string]string, error)
 	getUserInfoFn        func(ctx context.Context, userID string) (*slack.User, error)
 	listUsersFn          func(ctx context.Context) ([]*slack.User, error)
+	createChannelFn      func(ctx context.Context, riskID int64, riskName string) (string, error)
+	renameChannelFn      func(ctx context.Context, channelID string, riskID int64, riskName string) error
 }
 
 func (m *mockSlackService) ListJoinedChannels(ctx context.Context) ([]slack.Channel, error) {
@@ -84,6 +86,20 @@ func (m *mockSlackService) ListUsers(ctx context.Context) ([]*slack.User, error)
 		{ID: "U001", Name: "user1", RealName: "User One"},
 		{ID: "U002", Name: "user2", RealName: "User Two"},
 	}, nil
+}
+
+func (m *mockSlackService) CreateChannel(ctx context.Context, riskID int64, riskName string) (string, error) {
+	if m.createChannelFn != nil {
+		return m.createChannelFn(ctx, riskID, riskName)
+	}
+	return "C" + riskName, nil
+}
+
+func (m *mockSlackService) RenameChannel(ctx context.Context, channelID string, riskID int64, riskName string) error {
+	if m.renameChannelFn != nil {
+		return m.renameChannelFn(ctx, channelID, riskID, riskName)
+	}
+	return nil
 }
 
 func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {

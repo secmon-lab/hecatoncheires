@@ -30,6 +30,7 @@ func cmdServe() *cli.Command {
 	var configPath string
 	var notionToken string
 	var noAuthUID string
+	var slackChannelPrefix string
 	var slackCfg config.Slack
 
 	flags := []cli.Flag{
@@ -86,6 +87,14 @@ func cmdServe() *cli.Command {
 			Category:    "Authentication",
 			Sources:     cli.EnvVars("HECATONCHEIRES_NO_AUTH"),
 			Destination: &noAuthUID,
+		},
+		&cli.StringFlag{
+			Name:        "slack-channel-prefix",
+			Usage:       "Prefix for auto-created Slack channel names for risks (e.g., 'incident' creates #incident-1-risk-name)",
+			Value:       "risk",
+			Category:    "Slack",
+			Sources:     cli.EnvVars("HECATONCHEIRES_SLACK_CHANNEL_PREFIX"),
+			Destination: &slackChannelPrefix,
 		},
 	}
 
@@ -163,7 +172,11 @@ func cmdServe() *cli.Command {
 			// Initialize Slack service for Source integration if bot token is provided
 			var slackSvc slack.Service
 			if slackCfg.BotToken() != "" {
-				svc, err := slack.New(slackCfg.BotToken())
+				opts := []slack.Option{}
+				if slackChannelPrefix != "" {
+					opts = append(opts, slack.WithChannelPrefix(slackChannelPrefix))
+				}
+				svc, err := slack.New(slackCfg.BotToken(), opts...)
 				if err != nil {
 					return goerr.Wrap(err, "failed to initialize slack service")
 				}

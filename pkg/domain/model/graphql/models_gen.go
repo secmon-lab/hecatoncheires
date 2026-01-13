@@ -118,6 +118,7 @@ type Risk struct {
 	AssigneeIDs         []string         `json:"assigneeIDs"`
 	Assignees           []*SlackUser     `json:"assignees"`
 	DetectionIndicators string           `json:"detectionIndicators"`
+	SlackChannelID      *string          `json:"slackChannelID,omitempty"`
 	Responses           []*Response      `json:"responses"`
 	CreatedAt           time.Time        `json:"createdAt"`
 	UpdatedAt           time.Time        `json:"updatedAt"`

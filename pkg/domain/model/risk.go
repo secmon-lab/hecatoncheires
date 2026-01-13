@@ -17,6 +17,7 @@ type Risk struct {
 	ResponseTeamIDs     []types.TeamID
 	AssigneeIDs         []string
 	DetectionIndicators string
+	SlackChannelID      string
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 }

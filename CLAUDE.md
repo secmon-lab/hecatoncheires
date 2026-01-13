@@ -45,6 +45,10 @@ Hecatoncheires is an AI native risk management system built with Go and React. I
 ### Code Visibility
 - Do not expose unnecessary methods, variables and types
 - Use `export_test.go` to expose items needed only for testing
+- **NEVER place default values inside internal/private functions**
+  - Default values should be controlled at the caller's level (e.g., CLI flags, configuration)
+  - Internal functions should receive all necessary parameters from their callers
+  - This ensures configurability and avoids hidden magic values
 
 ## Architecture
 

@@ -8,17 +8,20 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
+	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 )
 
 type RiskUseCase struct {
-	repo       interfaces.Repository
-	riskConfig *config.RiskConfig
+	repo         interfaces.Repository
+	riskConfig   *config.RiskConfig
+	slackService slack.Service
 }
 
-func NewRiskUseCase(repo interfaces.Repository, cfg *config.RiskConfig) *RiskUseCase {
+func NewRiskUseCase(repo interfaces.Repository, cfg *config.RiskConfig, slackService slack.Service) *RiskUseCase {
 	return &RiskUseCase{
-		repo:       repo,
-		riskConfig: cfg,
+		repo:         repo,
+		riskConfig:   cfg,
+		slackService: slackService,
 	}
 }
 
@@ -63,9 +66,30 @@ func (uc *RiskUseCase) CreateRisk(ctx context.Context, name, description string,
 		DetectionIndicators: detectionIndicators,
 	}
 
+	// Create risk first to get ID
 	created, err := uc.repo.Risk().Create(ctx, risk)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to create risk")
+	}
+
+	// Create Slack channel if service is available
+	if uc.slackService != nil {
+		channelID, err := uc.slackService.CreateChannel(ctx, created.ID, created.Name)
+		if err != nil {
+			// Rollback: delete the created risk (best effort)
+			_ = uc.repo.Risk().Delete(ctx, created.ID)
+			return nil, goerr.Wrap(err, "failed to create Slack channel for risk")
+		}
+
+		// Update risk with channel ID
+		created.SlackChannelID = channelID
+		updated, err := uc.repo.Risk().Update(ctx, created)
+		if err != nil {
+			// Note: Channel is created but risk update failed
+			// We don't attempt to delete the channel here
+			return nil, goerr.Wrap(err, "failed to update risk with Slack channel ID")
+		}
+		return updated, nil
 	}
 
 	return created, nil
@@ -74,6 +98,12 @@ func (uc *RiskUseCase) CreateRisk(ctx context.Context, name, description string,
 func (uc *RiskUseCase) UpdateRisk(ctx context.Context, id int64, name, description string, categoryIDs []types.CategoryID, specificImpact string, likelihoodID types.LikelihoodID, impactID types.ImpactID, responseTeamIDs []types.TeamID, assigneeIDs []string, detectionIndicators string) (*model.Risk, error) {
 	if name == "" {
 		return nil, goerr.New("risk name is required")
+	}
+
+	// Get existing risk to check if name changed
+	existingRisk, err := uc.repo.Risk().Get(ctx, id)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to get risk")
 	}
 
 	// Validate category IDs
@@ -100,6 +130,13 @@ func (uc *RiskUseCase) UpdateRisk(ctx context.Context, id int64, name, descripti
 		}
 	}
 
+	// Rename Slack channel if name changed and channel exists
+	if uc.slackService != nil && existingRisk.SlackChannelID != "" && existingRisk.Name != name {
+		if err := uc.slackService.RenameChannel(ctx, existingRisk.SlackChannelID, id, name); err != nil {
+			return nil, goerr.Wrap(err, "failed to rename Slack channel")
+		}
+	}
+
 	risk := &model.Risk{
 		ID:                  id,
 		Name:                name,
@@ -111,6 +148,7 @@ func (uc *RiskUseCase) UpdateRisk(ctx context.Context, id int64, name, descripti
 		ResponseTeamIDs:     responseTeamIDs,
 		AssigneeIDs:         assigneeIDs,
 		DetectionIndicators: detectionIndicators,
+		SlackChannelID:      existingRisk.SlackChannelID, // Preserve channel ID
 	}
 
 	updated, err := uc.repo.Risk().Update(ctx, risk)

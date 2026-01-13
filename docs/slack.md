@@ -6,8 +6,9 @@ Hecatoncheires integrates with Slack for both authentication and event webhooks.
 
 1. [Slack OAuth Authentication](#slack-oauth-authentication)
 2. [Slack Events API (Webhooks)](#slack-events-api-webhooks)
-3. [Complete Setup Guide](#complete-setup-guide)
-4. [Environment Variables Reference](#environment-variables-reference)
+3. [Automatic Risk Channel Creation](#automatic-risk-channel-creation)
+4. [Complete Setup Guide](#complete-setup-guide)
+5. [Environment Variables Reference](#environment-variables-reference)
 
 ---
 
@@ -50,8 +51,10 @@ Slack OAuth is used for user authentication via OpenID Connect (OIDC). The syste
      - `profile` (to get user's name and basic info)
      - `email` (to get user's email address)
 
-   - **Bot Token Scopes** (optional, for displaying user avatars):
+   - **Bot Token Scopes**:
      - `users:read` (to fetch user profile information including avatar images)
+     - `channels:manage` (to automatically create and rename risk channels)
+     - `channels:read` (to read channel information)
 
    **Important**: User Token Scopes and Bot Token Scopes serve different purposes:
    - User Token Scopes authenticate users via OpenID Connect
@@ -138,6 +141,123 @@ For the bot to receive messages from channels, you need to invite it:
 
 ---
 
+## Automatic Risk Channel Creation
+
+Hecatoncheires can automatically create dedicated Slack channels for each risk when it is registered. This feature helps teams collaborate and discuss specific risks in dedicated channels.
+
+### How It Works
+
+When a new risk is created through the GraphQL API:
+
+1. A Slack channel is automatically created with a standardized name
+2. The channel ID is stored with the risk in the `slackChannelID` field
+3. If channel creation fails, the risk creation is rolled back (transactional)
+
+When a risk is updated and its name changes:
+
+1. The associated Slack channel is automatically renamed to match the new risk name
+2. The channel ID remains the same
+
+### Channel Naming Convention
+
+Channels are named using the format: `{prefix}-{risk-id}-{normalized-risk-name}`
+
+For example:
+- Risk ID: `42`
+- Risk Name: "SQL Injection in User Auth"
+- Default Prefix: `risk`
+- Result: `#risk-42-sql-injection-in-user-auth`
+
+With a custom prefix:
+- Prefix: `incident`
+- Result: `#incident-42-sql-injection-in-user-auth`
+
+Japanese characters are supported:
+- Risk Name: "認証システムの脆弱性"
+- Result: `#risk-42-認証システムの脆弱性`
+
+### Channel Name Normalization
+
+Risk names are automatically normalized to comply with Slack's channel naming rules:
+
+- Uppercase letters → converted to lowercase
+- Spaces → replaced with hyphens
+- Special characters (slashes, periods, commas, etc.) → removed
+- Japanese characters (hiragana, katakana, kanji) → preserved
+- Maximum length: 80 characters (truncated if longer)
+
+### Customizing the Channel Prefix
+
+You can customize the channel name prefix using the `--slack-channel-prefix` flag or environment variable:
+
+```bash
+# Using CLI flag (default: "risk")
+./hecatoncheires serve --slack-channel-prefix="incident"
+
+# Using environment variable
+export HECATONCHEIRES_SLACK_CHANNEL_PREFIX="security"
+./hecatoncheires serve
+```
+
+This allows you to organize channels by different categories (e.g., `incident-*`, `security-*`, `vulnerability-*`).
+
+### Required Bot Permissions
+
+For automatic channel creation to work, the bot token must have the following scopes:
+
+- `channels:manage` - Create and rename public channels
+- `channels:read` - Read channel information
+
+Add these scopes in **OAuth & Permissions** → **Bot Token Scopes** in your Slack app settings.
+
+### Configuration
+
+Enable automatic channel creation by providing a bot token:
+
+```bash
+export HECATONCHEIRES_SLACK_BOT_TOKEN="xoxb-your-bot-token"
+export HECATONCHEIRES_SLACK_CHANNEL_PREFIX="risk"  # Optional, defaults to "risk"
+```
+
+Or using CLI flags:
+
+```bash
+./hecatoncheires serve \
+  --slack-bot-token="xoxb-your-bot-token" \
+  --slack-channel-prefix="incident"
+```
+
+If no bot token is provided, risks will be created without Slack channels (the `slackChannelID` field will be empty).
+
+### Examples
+
+**Example 1: Default configuration**
+```bash
+export HECATONCHEIRES_SLACK_BOT_TOKEN="xoxb-..."
+./hecatoncheires serve
+```
+
+Creating a risk named "XSS Vulnerability in Dashboard" (ID: 5) will create channel: `#risk-5-xss-vulnerability-in-dashboard`
+
+**Example 2: Custom prefix**
+```bash
+export HECATONCHEIRES_SLACK_BOT_TOKEN="xoxb-..."
+export HECATONCHEIRES_SLACK_CHANNEL_PREFIX="sec"
+./hecatoncheires serve
+```
+
+Creating a risk named "Data Leak in API" (ID: 12) will create channel: `#sec-12-data-leak-in-api`
+
+**Example 3: Japanese risk names**
+```bash
+export HECATONCHEIRES_SLACK_BOT_TOKEN="xoxb-..."
+./hecatoncheires serve
+```
+
+Creating a risk named "データベースのSQLインジェクション" (ID: 7) will create channel: `#risk-7-データベースのsqlインジェクション`
+
+---
+
 ## Complete Setup Guide
 
 ### Step-by-Step Configuration
@@ -149,7 +269,7 @@ Follow these steps to set up both authentication and webhooks:
 2. **Configure OAuth** (see [Configure OAuth & Permissions](#2-configure-oauth--permissions))
    - Set redirect URL: `${BASE_URL}/api/auth/callback`
    - Add user scopes: `openid`, `profile`, `email`
-   - Add bot scope: `users:read`
+   - Add bot scopes: `users:read`, `channels:manage`, `channels:read`
 
 3. **Configure Events API** (see [Events API Setup](#events-api-setup))
    - Enable Event Subscriptions
@@ -443,6 +563,7 @@ All webhook endpoints require valid Slack signature verification.
 | `HECATONCHEIRES_SLACK_CLIENT_SECRET` | Yes* | - | Slack OAuth client secret |
 | `HECATONCHEIRES_SLACK_BOT_TOKEN` | No*** | - | Slack Bot User OAuth Token (starts with `xoxb-`) |
 | `HECATONCHEIRES_SLACK_SIGNING_SECRET` | Yes** | - | Slack Events API signing secret |
+| `HECATONCHEIRES_SLACK_CHANNEL_PREFIX` | No | `risk` | Prefix for auto-created Slack channel names for risks (e.g., `incident` creates `#incident-1-risk-name`) |
 | `HECATONCHEIRES_NO_AUTH` | No | - | Slack user ID for no-auth mode (development only) |
 
 \* Required for OAuth mode.
