@@ -40,9 +40,12 @@ func NormalizeChannelName(name string) string {
 
 // isProhibitedSymbol checks if a Unicode character is prohibited in Slack channel names
 func isProhibitedSymbol(r rune) bool {
-	// Japanese punctuation marks that should be removed
+	// Prohibited characters: Japanese punctuation and special symbols
 	prohibitedRunes := []rune{
-		'。', '、', '!', '?', '/', '\\', '.', ',', '!', '?',
+		// Japanese punctuation
+		'。', '、',
+		// ASCII special characters
+		'!', '?', '/', '\\', '.', ',',
 		'@', '#', '$', '%', '^', '&', '*', '(', ')', '[', ']',
 		'{', '}', '<', '>', '|', '~', '`', '\'', '"', ';', ':',
 		'+', '=',
