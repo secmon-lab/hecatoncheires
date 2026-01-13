@@ -76,8 +76,10 @@ func (uc *RiskUseCase) CreateRisk(ctx context.Context, name, description string,
 	if uc.slackService != nil {
 		channelID, err := uc.slackService.CreateChannel(ctx, created.ID, created.Name)
 		if err != nil {
-			// Rollback: delete the created risk (best effort)
-			_ = uc.repo.Risk().Delete(ctx, created.ID)
+			// Rollback: delete the created risk
+			if delErr := uc.repo.Risk().Delete(ctx, created.ID); delErr != nil {
+				return nil, goerr.Wrap(err, "failed to create Slack channel for risk, and also failed to roll back risk creation", goerr.V("rollback_error", delErr))
+			}
 			return nil, goerr.Wrap(err, "failed to create Slack channel for risk")
 		}
 
@@ -85,9 +87,10 @@ func (uc *RiskUseCase) CreateRisk(ctx context.Context, name, description string,
 		created.SlackChannelID = channelID
 		updated, err := uc.repo.Risk().Update(ctx, created)
 		if err != nil {
-			// Note: Channel is created but risk update failed
-			// We don't attempt to delete the channel here
-			return nil, goerr.Wrap(err, "failed to update risk with Slack channel ID")
+			// Note: Channel is created but risk update failed.
+			// We don't attempt to delete the channel here as it might also fail.
+			// The created channel is now orphaned and needs manual cleanup.
+			return nil, goerr.Wrap(err, "failed to update risk with Slack channel ID", goerr.V("orphaned_channel_id", channelID), goerr.V("risk_id", created.ID))
 		}
 		return updated, nil
 	}
