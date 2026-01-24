@@ -42,7 +42,7 @@ func graphqlErrorStatusMiddleware(next http.Handler) http.Handler {
 		if err := json.Unmarshal(rec.body.Bytes(), &gqlResp); err == nil && len(gqlResp.Errors) > 0 {
 			// GraphQL errors found, set status to 500
 			w.WriteHeader(http.StatusInternalServerError)
-		} else if rec.statusCode != 0 {
+		} else {
 			w.WriteHeader(rec.statusCode)
 		}
 
