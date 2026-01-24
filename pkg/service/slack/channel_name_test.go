@@ -2,6 +2,7 @@ package slack_test
 
 import (
 	"testing"
+	"unicode/utf8"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 )
@@ -155,6 +156,20 @@ func TestGenerateRiskChannelName(t *testing.T) {
 			prefix:   "SEC Alert!",
 			want:     "sec-alert-2-security-issue",
 		},
+		{
+			name:     "Japanese only exceeding 80 bytes truncated safely",
+			riskID:   1,
+			riskName: "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほ", // 30 Japanese chars = 90 bytes
+			prefix:   "risk",
+			want:     "risk-1-あいうえおかきくけこさしすせそたちつてとなにぬね", // 7 + 72 = 79 bytes (24 Japanese chars)
+		},
+		{
+			name:     "mixed Japanese and English exceeding 80 bytes",
+			riskID:   1,
+			riskName: "セキュリティインシデント-Critical-Alert-重要な警告メッセージ",
+			prefix:   "incident",
+			want:     "incident-1-セキュリティインシデント-critical-alert-重要な警告", // Truncated at character boundary
+		},
 	}
 
 	for _, tt := range tests {
@@ -164,10 +179,105 @@ func TestGenerateRiskChannelName(t *testing.T) {
 				t.Errorf("GenerateRiskChannelName(%d, %q, %q) = %q (len=%d), want %q (len=%d)",
 					tt.riskID, tt.riskName, tt.prefix, got, len(got), tt.want, len(tt.want))
 			}
-			// Verify length constraint
+			// Verify byte length constraint (80 bytes max for Slack)
 			if len(got) > 80 {
-				t.Errorf("GenerateRiskChannelName(%d, %q, %q) returned a name longer than 80 characters: %q (len=%d)",
+				t.Errorf("GenerateRiskChannelName(%d, %q, %q) returned a name longer than 80 bytes: %q (len=%d bytes)",
 					tt.riskID, tt.riskName, tt.prefix, got, len(got))
+			}
+			// Verify UTF-8 validity (truncation should not corrupt multi-byte characters)
+			if !utf8.ValidString(got) {
+				t.Errorf("GenerateRiskChannelName(%d, %q, %q) returned invalid UTF-8: %q",
+					tt.riskID, tt.riskName, tt.prefix, got)
+			}
+		})
+	}
+}
+
+func TestTruncateToMaxBytes(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		maxBytes int
+		want     string
+	}{
+		{
+			name:     "ASCII string within limit",
+			input:    "hello",
+			maxBytes: 10,
+			want:     "hello",
+		},
+		{
+			name:     "ASCII string at exact limit",
+			input:    "hello",
+			maxBytes: 5,
+			want:     "hello",
+		},
+		{
+			name:     "ASCII string exceeds limit",
+			input:    "hello world",
+			maxBytes: 5,
+			want:     "hello",
+		},
+		{
+			name:     "Japanese string within limit",
+			input:    "あいう", // 9 bytes
+			maxBytes: 10,
+			want:     "あいう",
+		},
+		{
+			name:     "Japanese string at character boundary",
+			input:    "あいう", // 9 bytes (3 bytes each)
+			maxBytes: 9,
+			want:     "あいう",
+		},
+		{
+			name:     "Japanese string truncated at boundary",
+			input:    "あいうえお", // 15 bytes
+			maxBytes: 10,
+			want:     "あいう", // 9 bytes (cannot fit 4th char as it would be 12 bytes)
+		},
+		{
+			name:     "Japanese string truncated mid-character",
+			input:    "あいうえお", // 15 bytes
+			maxBytes: 8,       // 8 bytes cannot fit 3 complete Japanese chars
+			want:     "あい",    // 6 bytes
+		},
+		{
+			name:     "mixed content truncated safely",
+			input:    "abcあいう", // 3 + 9 = 12 bytes
+			maxBytes: 10,
+			want:     "abcあい", // 3 + 6 = 9 bytes
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			maxBytes: 10,
+			want:     "",
+		},
+		{
+			name:     "zero max bytes",
+			input:    "hello",
+			maxBytes: 0,
+			want:     "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := slack.TruncateToMaxBytes(tt.input, tt.maxBytes)
+			if got != tt.want {
+				t.Errorf("TruncateToMaxBytes(%q, %d) = %q (len=%d), want %q (len=%d)",
+					tt.input, tt.maxBytes, got, len(got), tt.want, len(tt.want))
+			}
+			// Always verify the result is valid UTF-8
+			if !utf8.ValidString(got) {
+				t.Errorf("TruncateToMaxBytes(%q, %d) returned invalid UTF-8: %q",
+					tt.input, tt.maxBytes, got)
+			}
+			// Verify byte length constraint
+			if len(got) > tt.maxBytes {
+				t.Errorf("TruncateToMaxBytes(%q, %d) returned string with %d bytes, exceeds limit",
+					tt.input, tt.maxBytes, len(got))
 			}
 		})
 	}
