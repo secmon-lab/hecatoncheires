@@ -4,7 +4,28 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
+
+// truncateToMaxBytes truncates a string to fit within maxBytes while respecting UTF-8 character boundaries.
+// This ensures that multi-byte characters (like Japanese) are not corrupted during truncation.
+func truncateToMaxBytes(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+
+	// Build string by adding runes until we exceed maxBytes
+	var result strings.Builder
+	for _, r := range s {
+		runeLen := utf8.RuneLen(r)
+		if result.Len()+runeLen > maxBytes {
+			break
+		}
+		result.WriteRune(r)
+	}
+
+	return result.String()
+}
 
 // NormalizeChannelName normalizes a string to be a valid Slack channel name
 // Slack allows: lowercase letters, numbers, hyphens, underscores, and Unicode characters (including Japanese)
@@ -72,10 +93,8 @@ func GenerateRiskChannelName(riskID int64, riskName string, prefix string) strin
 	// Generate channel name with prefix
 	channelName := fmt.Sprintf("%s-%d-%s", prefix, riskID, normalizedName)
 
-	// Truncate to 80 characters if needed
-	if len(channelName) > 80 {
-		channelName = channelName[:80]
-	}
+	// Truncate to 80 bytes if needed, respecting UTF-8 character boundaries
+	channelName = truncateToMaxBytes(channelName, 80)
 
 	// Remove trailing hyphens (if truncation resulted in a trailing hyphen)
 	channelName = strings.TrimRight(channelName, "-")

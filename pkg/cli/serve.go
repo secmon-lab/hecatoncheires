@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"os/signal"
@@ -11,7 +13,7 @@ import (
 	"github.com/99designs/gqlgen/graphql/handler"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
-	"github.com/secmon-lab/hecatoncheires/pkg/controller/graphql"
+	gqlctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/graphql"
 	httpctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/http"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/firestore"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
@@ -20,6 +22,50 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/urfave/cli/v3"
 )
+
+// graphqlErrorStatusMiddleware wraps the GraphQL handler to return HTTP 500 when errors occur
+func graphqlErrorStatusMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Capture the response
+		rec := &responseRecorder{
+			ResponseWriter: w,
+			body:           &bytes.Buffer{},
+			statusCode:     http.StatusOK,
+		}
+
+		next.ServeHTTP(rec, r)
+
+		// Check if response contains GraphQL errors
+		var gqlResp struct {
+			Errors []interface{} `json:"errors"`
+		}
+		if err := json.Unmarshal(rec.body.Bytes(), &gqlResp); err == nil && len(gqlResp.Errors) > 0 {
+			// GraphQL errors found, set status to 500
+			w.WriteHeader(http.StatusInternalServerError)
+		} else if rec.statusCode != 0 {
+			w.WriteHeader(rec.statusCode)
+		}
+
+		// Write the captured body to the original writer
+		_, _ = w.Write(rec.body.Bytes())
+	})
+}
+
+// responseRecorder captures HTTP responses for inspection
+type responseRecorder struct {
+	http.ResponseWriter
+	body       *bytes.Buffer
+	statusCode int
+}
+
+func (r *responseRecorder) WriteHeader(code int) {
+	r.statusCode = code
+	// Don't write header yet, we'll do it later after inspecting the body
+}
+
+func (r *responseRecorder) Write(b []byte) (int, error) {
+	return r.body.Write(b)
+}
 
 func cmdServe() *cli.Command {
 	var addr string
@@ -190,17 +236,20 @@ func cmdServe() *cli.Command {
 			uc := usecase.New(repo, ucOpts...)
 
 			// Create GraphQL handler with dataloaders
-			resolver := graphql.NewResolver(repo, uc)
+			resolver := gqlctrl.NewResolver(repo, uc)
 			srv := handler.NewDefaultServer(
-				graphql.NewExecutableSchema(graphql.Config{Resolvers: resolver}),
+				gqlctrl.NewExecutableSchema(gqlctrl.Config{Resolvers: resolver}),
 			)
 
 			// Wrap with dataloader middleware
-			loaders := graphql.NewDataLoaders(repo)
-			gqlHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				ctx := graphql.WithDataLoaders(r.Context(), loaders)
+			loaders := gqlctrl.NewDataLoaders(repo)
+			gqlHandlerBase := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				ctx := gqlctrl.WithDataLoaders(r.Context(), loaders)
 				srv.ServeHTTP(w, r.WithContext(ctx))
 			})
+
+			// Wrap with error status middleware to return HTTP 500 on GraphQL errors
+			gqlHandler := graphqlErrorStatusMiddleware(gqlHandlerBase)
 
 			// Create HTTP server options
 			httpOpts := []httpctrl.Options{
