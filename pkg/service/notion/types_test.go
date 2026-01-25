@@ -1,6 +1,7 @@
 package notion_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/jomei/notionapi"
@@ -443,4 +444,132 @@ func TestBlocks_ToMarkdown_ToggleWithNumberedList(t *testing.T) {
 	if got != want {
 		t.Errorf("ToMarkdown() with toggle and numbered list:\ngot  = %q\nwant = %q", got, want)
 	}
+}
+
+func TestPage_ToMarkdown(t *testing.T) {
+	t.Run("with properties and blocks", func(t *testing.T) {
+		page := &notion.Page{
+			Properties: map[string]interface{}{
+				"Title": notionapi.TitleProperty{
+					Title: []notionapi.RichText{{PlainText: "Test Document"}},
+				},
+				"Status": notionapi.StatusProperty{
+					Status: notionapi.Status{Name: "In Progress"},
+				},
+			},
+			Blocks: notion.Blocks{
+				{
+					Type: "paragraph",
+					Content: map[string]interface{}{
+						"rich_text": []notionapi.RichText{{PlainText: "Content here"}},
+					},
+				},
+			},
+		}
+
+		got := page.ToMarkdown()
+
+		// Check frontmatter exists
+		if !strings.HasPrefix(got, "---\n") {
+			t.Error("expected YAML frontmatter to start with ---")
+		}
+		if !strings.Contains(got, "---\n\n") {
+			t.Error("expected YAML frontmatter to end with ---")
+		}
+
+		// Check properties are included
+		if !strings.Contains(got, "Title: Test Document") {
+			t.Error("expected Title property in frontmatter")
+		}
+		if !strings.Contains(got, "Status: In Progress") {
+			t.Error("expected Status property in frontmatter")
+		}
+
+		// Check content is included after frontmatter
+		if !strings.Contains(got, "Content here") {
+			t.Error("expected block content after frontmatter")
+		}
+	})
+
+	t.Run("without properties", func(t *testing.T) {
+		page := &notion.Page{
+			Properties: map[string]interface{}{},
+			Blocks: notion.Blocks{
+				{
+					Type: "paragraph",
+					Content: map[string]interface{}{
+						"rich_text": []notionapi.RichText{{PlainText: "Just content"}},
+					},
+				},
+			},
+		}
+
+		got := page.ToMarkdown()
+
+		// Should not have frontmatter
+		if strings.HasPrefix(got, "---") {
+			t.Error("expected no frontmatter when properties are empty")
+		}
+
+		// Should have content
+		if got != "Just content\n" {
+			t.Errorf("expected 'Just content\\n', got %q", got)
+		}
+	})
+
+	t.Run("various property types", func(t *testing.T) {
+		page := &notion.Page{
+			Properties: map[string]interface{}{
+				"Name": notionapi.TitleProperty{
+					Title: []notionapi.RichText{{PlainText: "My Page"}},
+				},
+				"Description": notionapi.RichTextProperty{
+					RichText: []notionapi.RichText{{PlainText: "A description"}},
+				},
+				"Tags": notionapi.MultiSelectProperty{
+					MultiSelect: []notionapi.Option{
+						{Name: "tag1"},
+						{Name: "tag2"},
+					},
+				},
+				"Priority": notionapi.SelectProperty{
+					Select: notionapi.Option{Name: "High"},
+				},
+				"Count": notionapi.NumberProperty{
+					Number: 42,
+				},
+				"Done": notionapi.CheckboxProperty{
+					Checkbox: true,
+				},
+				"Link": notionapi.URLProperty{
+					URL: "https://example.com",
+				},
+			},
+			Blocks: notion.Blocks{},
+		}
+
+		got := page.ToMarkdown()
+
+		if !strings.Contains(got, "Name: My Page") {
+			t.Error("expected Name property")
+		}
+		if !strings.Contains(got, "Description: A description") {
+			t.Error("expected Description property")
+		}
+		if !strings.Contains(got, "Tags: tag1, tag2") {
+			t.Error("expected Tags property")
+		}
+		if !strings.Contains(got, "Priority: High") {
+			t.Error("expected Priority property")
+		}
+		if !strings.Contains(got, "Count: 42") {
+			t.Error("expected Count property")
+		}
+		if !strings.Contains(got, "Done: true") {
+			t.Error("expected Done property")
+		}
+		if !strings.Contains(got, "Link: https://example.com") {
+			t.Error("expected Link property")
+		}
+	})
 }

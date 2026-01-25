@@ -1,0 +1,239 @@
+.container {
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.header {
+  margin-bottom: var(--spacing-lg);
+}
+
+.headerContent {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-md);
+}
+
+.headerIcon {
+  color: var(--color-primary);
+  flex-shrink: 0;
+  margin-top: 0.25rem;
+}
+
+.header h1 {
+  margin: 0 0 var(--spacing-xs) 0;
+  font-size: 2rem;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+.header p {
+  margin: 0;
+  font-size: 0.9375rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #ffffff;
+  border: 1px solid var(--border-default);
+  border-radius: var(--card-radius, 12px);
+  overflow: hidden;
+}
+
+.table thead {
+  background: var(--table-header-bg, #F8FAFC);
+  border-bottom: 2px solid var(--table-header-border, #E2E8F0);
+}
+
+.table th {
+  padding: 0.875rem 1rem;
+  text-align: left;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-label);
+}
+
+.table th:last-child {
+  width: 2.5rem;
+}
+
+.row {
+  border-bottom: 1px solid var(--border-light);
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.row:hover {
+  background: var(--table-row-hover, #F8FAFC);
+}
+
+.table td {
+  padding: 0.875rem 1rem;
+  font-size: 0.875rem;
+  color: var(--text-body);
+  vertical-align: top;
+}
+
+.titleCell {
+  font-weight: 600;
+  color: var(--text-heading);
+  max-width: 250px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.riskCell {
+  max-width: 150px;
+}
+
+.riskLink {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-primary);
+  font-size: 0.875rem;
+  cursor: pointer;
+  text-decoration: none;
+  transition: color 0.15s;
+}
+
+.riskLink:hover {
+  color: var(--color-primary-dark);
+  text-decoration: underline;
+}
+
+.noRisk {
+  color: var(--text-muted);
+}
+
+.summaryCell {
+  color: var(--text-muted);
+  max-width: 400px;
+}
+
+.dateCell {
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.linkCell {
+  text-align: center;
+}
+
+.externalLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-xs);
+  color: var(--text-muted);
+  border-radius: 0.25rem;
+  transition: color 0.15s, background-color 0.15s;
+}
+
+.externalLink:hover {
+  color: var(--color-primary);
+  background: var(--bg-highlight);
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-lg);
+  margin-top: var(--spacing-lg);
+  padding: var(--spacing-md);
+}
+
+.paginationButton {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--bg-paper);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md, 8px);
+  color: var(--text-body);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.paginationButton:hover:not(:disabled) {
+  background: var(--bg-subtle);
+  border-color: var(--border-hover);
+}
+
+.paginationButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.paginationInfo {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-xxl);
+  text-align: center;
+}
+
+.emptyIcon {
+  color: var(--text-muted);
+  margin-bottom: var(--spacing-md);
+  opacity: 0.5;
+}
+
+.empty h2 {
+  margin: 0 0 var(--spacing-sm) 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+.empty p {
+  margin: 0;
+  font-size: 0.9375rem;
+  color: var(--text-muted);
+}
+
+.loading,
+.error {
+  padding: var(--spacing-lg);
+  text-align: center;
+}
+
+.error {
+  color: var(--color-error);
+}
+
+@media (max-width: var(--breakpoint-mobile)) {
+  .header h1 {
+    font-size: 1.5rem;
+  }
+
+  .table {
+    display: block;
+    overflow-x: auto;
+  }
+
+  .titleCell {
+    max-width: 150px;
+  }
+
+  .summaryCell {
+    max-width: 200px;
+  }
+}

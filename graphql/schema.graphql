@@ -78,8 +78,28 @@ type Risk {
   detectionIndicators: String!
   slackChannelID: String
   responses: [Response!]!
+  knowledges: [Knowledge!]!
   createdAt: Time!
   updatedAt: Time!
+}
+
+type Knowledge {
+  id: String!
+  riskID: Int!
+  risk: Risk
+  sourceID: String!
+  sourceURL: String!
+  title: String!
+  summary: String!
+  sourcedAt: Time!
+  createdAt: Time!
+  updatedAt: Time!
+}
+
+type KnowledgeConnection {
+  items: [Knowledge!]!
+  totalCount: Int!
+  hasMore: Boolean!
 }
 
 input CreateRiskInput {
@@ -213,6 +233,8 @@ type Query {
   sources: [Source!]!
   source(id: String!): Source
   slackJoinedChannels: [SlackChannelInfo!]!
+  knowledge(id: String!): Knowledge
+  knowledges(limit: Int, offset: Int): KnowledgeConnection!
 }
 
 type Mutation {

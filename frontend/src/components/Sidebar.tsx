@@ -1,4 +1,4 @@
-import { Shield, ListTodo, Database } from 'lucide-react'
+import { Shield, ListTodo, Database, BookOpen } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
 import styles from './Sidebar.module.css'
 
@@ -36,6 +36,16 @@ export default function Sidebar({ isOpen = true, onClose }: SidebarProps) {
         >
           <ListTodo size={20} />
           <span>Responses</span>
+        </NavLink>
+        <NavLink
+          to="/knowledges"
+          className={({ isActive }) =>
+            `${styles.navItem} ${isActive ? styles.active : ''}`
+          }
+          onClick={handleNavClick}
+        >
+          <BookOpen size={20} />
+          <span>Knowledges</span>
         </NavLink>
         <NavLink
           to="/sources"

@@ -43,6 +43,17 @@ export const GET_RISK = gql`
           imageUrl
         }
       }
+      knowledges {
+        id
+        riskID
+        sourceID
+        sourceURL
+        title
+        summary
+        sourcedAt
+        createdAt
+        updatedAt
+      }
     }
   }
 `

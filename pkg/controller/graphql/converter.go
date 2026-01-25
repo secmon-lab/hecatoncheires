@@ -112,6 +112,21 @@ func toDomainResponseStatus(status graphql1.ResponseStatus) types.ResponseStatus
 	}
 }
 
+// toGraphQLKnowledge converts domain Knowledge to GraphQL Knowledge
+func toGraphQLKnowledge(k *model.Knowledge) *graphql1.Knowledge {
+	return &graphql1.Knowledge{
+		ID:        string(k.ID),
+		RiskID:    int(k.RiskID),
+		SourceID:  string(k.SourceID),
+		SourceURL: k.SourceURL,
+		Title:     k.Title,
+		Summary:   k.Summary,
+		SourcedAt: k.SourcedAt,
+		CreatedAt: k.CreatedAt,
+		UpdatedAt: k.UpdatedAt,
+	}
+}
+
 // enrichResponse enriches a Response with responder and risk information
 func enrichResponse(ctx context.Context, uc *usecase.UseCases, response *graphql1.Response) *graphql1.Response {
 	// Enrich responders

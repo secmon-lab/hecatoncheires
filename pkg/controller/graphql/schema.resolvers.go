@@ -14,6 +14,17 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
+// Risk is the resolver for the risk field.
+func (r *knowledgeResolver) Risk(ctx context.Context, obj *graphql1.Knowledge) (*graphql1.Risk, error) {
+	risk, err := r.uc.Risk.GetRisk(ctx, int64(obj.RiskID))
+	if err != nil {
+		errutil.Handle(ctx, err, "failed to get risk for knowledge")
+		return nil, err
+	}
+
+	return toGraphQLRisk(risk), nil
+}
+
 // Noop is the resolver for the noop field.
 func (r *mutationResolver) Noop(ctx context.Context) (*bool, error) {
 	// TODO: Remove this dummy implementation when real mutations are added
@@ -481,6 +492,49 @@ func (r *queryResolver) SlackJoinedChannels(ctx context.Context) ([]*graphql1.Sl
 	return gqlChannels, nil
 }
 
+// Knowledge is the resolver for the knowledge field.
+func (r *queryResolver) Knowledge(ctx context.Context, id string) (*graphql1.Knowledge, error) {
+	knowledge, err := r.repo.Knowledge().Get(ctx, model.KnowledgeID(id))
+	if err != nil {
+		errutil.Handle(ctx, err, "failed to get knowledge")
+		return nil, err
+	}
+
+	return toGraphQLKnowledge(knowledge), nil
+}
+
+// Knowledges is the resolver for the knowledges field.
+func (r *queryResolver) Knowledges(ctx context.Context, limit *int, offset *int) (*graphql1.KnowledgeConnection, error) {
+	// Set defaults
+	l := 20
+	o := 0
+	if limit != nil {
+		l = *limit
+	}
+	if offset != nil {
+		o = *offset
+	}
+
+	knowledges, totalCount, err := r.repo.Knowledge().ListWithPagination(ctx, l, o)
+	if err != nil {
+		errutil.Handle(ctx, err, "failed to list knowledges")
+		return nil, err
+	}
+
+	gqlKnowledges := make([]*graphql1.Knowledge, len(knowledges))
+	for i, k := range knowledges {
+		gqlKnowledges[i] = toGraphQLKnowledge(k)
+	}
+
+	hasMore := o+len(knowledges) < totalCount
+
+	return &graphql1.KnowledgeConnection{
+		Items:      gqlKnowledges,
+		TotalCount: totalCount,
+		HasMore:    hasMore,
+	}, nil
+}
+
 // Responses is the resolver for the responses field on Risk.
 func (r *riskResolver) Responses(ctx context.Context, obj *graphql1.Risk) ([]*graphql1.Response, error) {
 	loaders := GetDataLoaders(ctx)
@@ -513,6 +567,25 @@ func (r *riskResolver) Responses(ctx context.Context, obj *graphql1.Risk) ([]*gr
 	return gqlResponses, nil
 }
 
+// Knowledges is the resolver for the knowledges field.
+func (r *riskResolver) Knowledges(ctx context.Context, obj *graphql1.Risk) ([]*graphql1.Knowledge, error) {
+	knowledges, err := r.repo.Knowledge().ListByRiskID(ctx, int64(obj.ID))
+	if err != nil {
+		errutil.Handle(ctx, err, "failed to get knowledges by risk")
+		return nil, err
+	}
+
+	gqlKnowledges := make([]*graphql1.Knowledge, len(knowledges))
+	for i, k := range knowledges {
+		gqlKnowledges[i] = toGraphQLKnowledge(k)
+	}
+
+	return gqlKnowledges, nil
+}
+
+// Knowledge returns KnowledgeResolver implementation.
+func (r *Resolver) Knowledge() KnowledgeResolver { return &knowledgeResolver{r} }
+
 // Mutation returns MutationResolver implementation.
 func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
 
@@ -522,6 +595,7 @@ func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 // Risk returns RiskResolver implementation.
 func (r *Resolver) Risk() RiskResolver { return &riskResolver{r} }
 
+type knowledgeResolver struct{ *Resolver }
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
 type riskResolver struct{ *Resolver }

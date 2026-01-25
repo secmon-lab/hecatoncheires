@@ -1,0 +1,184 @@
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-lg);
+  gap: var(--spacing-md);
+}
+
+@media (max-width: var(--breakpoint-mobile)) {
+  .header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .content {
+    padding: var(--spacing-md);
+  }
+
+  .titleSection h1 {
+    font-size: 1.5rem;
+  }
+}
+
+.content {
+  background: white;
+  border-radius: var(--card-radius, 12px);
+  padding: 1.75rem 1.5rem;
+  box-shadow: var(--card-shadow, 0 1px 3px rgba(0, 0, 0, 0.05));
+}
+
+.titleSection {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 2rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.icon {
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+
+.titleSection h1 {
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+.sourceLink {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md, 8px);
+  color: var(--text-body);
+  text-decoration: none;
+  font-size: 0.875rem;
+  transition: all 0.15s;
+}
+
+.sourceLink:hover {
+  background: var(--bg-muted);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.section {
+  margin-bottom: 2rem;
+}
+
+.section:last-child {
+  margin-bottom: 0;
+}
+
+.section h2 {
+  margin: 0 0 0.75rem 0;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-label);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.summary {
+  margin: 0;
+  color: var(--text-body);
+  line-height: 1.8;
+  font-size: 0.9375rem;
+  white-space: pre-wrap;
+}
+
+.riskCard {
+  padding: 1.25rem;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-default);
+  border-radius: var(--card-radius, 12px);
+  cursor: pointer;
+  transition: all 0.15s;
+  max-width: 400px;
+}
+
+.riskCard:hover {
+  background: var(--bg-muted);
+  border-color: var(--color-primary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.riskCard h3 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+.riskCard p {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.sourceInfo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.sourceItem {
+  display: flex;
+  gap: var(--spacing-md);
+}
+
+.sourceLabel {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  min-width: 100px;
+}
+
+.sourceValue {
+  font-size: 0.875rem;
+  color: var(--text-body);
+}
+
+.metadata {
+  display: flex;
+  gap: 2.5rem;
+  padding-top: 1.25rem;
+  margin-top: 1.5rem;
+  border-top: 1px solid var(--border-default);
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.loading,
+.error {
+  padding: var(--spacing-lg);
+  text-align: center;
+}
+
+.error {
+  color: var(--color-error);
+  background: var(--color-error-bg, #ffebee);
+  border-radius: var(--radius-md, 8px);
+  margin-bottom: var(--spacing-md);
+}

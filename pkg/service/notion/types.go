@@ -37,6 +37,164 @@ type Page struct {
 	URL            string
 }
 
+// ToMarkdown converts the page to Markdown with YAML frontmatter for properties
+func (p *Page) ToMarkdown() string {
+	var sb strings.Builder
+
+	// Add YAML frontmatter with properties
+	if len(p.Properties) > 0 {
+		sb.WriteString("---\n")
+		for key, prop := range p.Properties {
+			value := extractPropertyValue(prop)
+			if value != "" {
+				sb.WriteString(key)
+				sb.WriteString(": ")
+				sb.WriteString(value)
+				sb.WriteString("\n")
+			}
+		}
+		sb.WriteString("---\n\n")
+	}
+
+	// Add block content
+	sb.WriteString(p.Blocks.ToMarkdown())
+
+	return sb.String()
+}
+
+// extractPropertyValue extracts a string value from a Notion property
+func extractPropertyValue(prop interface{}) string {
+	if prop == nil {
+		return ""
+	}
+
+	switch p := prop.(type) {
+	case notionapi.TitleProperty:
+		return extractTitleProperty(p)
+	case *notionapi.TitleProperty:
+		return extractTitleProperty(*p)
+	case notionapi.RichTextProperty:
+		return extractRichTextProperty(p)
+	case *notionapi.RichTextProperty:
+		return extractRichTextProperty(*p)
+	case notionapi.TextProperty:
+		return extractTextProperty(p)
+	case *notionapi.TextProperty:
+		return extractTextProperty(*p)
+	case notionapi.NumberProperty:
+		return extractNumberProperty(p)
+	case *notionapi.NumberProperty:
+		return extractNumberProperty(*p)
+	case notionapi.SelectProperty:
+		return extractSelectProperty(p)
+	case *notionapi.SelectProperty:
+		return extractSelectProperty(*p)
+	case notionapi.MultiSelectProperty:
+		return extractMultiSelectProperty(p)
+	case *notionapi.MultiSelectProperty:
+		return extractMultiSelectProperty(*p)
+	case notionapi.DateProperty:
+		return extractDateProperty(p)
+	case *notionapi.DateProperty:
+		return extractDateProperty(*p)
+	case notionapi.CheckboxProperty:
+		return extractCheckboxProperty(p)
+	case *notionapi.CheckboxProperty:
+		return extractCheckboxProperty(*p)
+	case notionapi.URLProperty:
+		return extractURLProperty(p)
+	case *notionapi.URLProperty:
+		return extractURLProperty(*p)
+	case notionapi.EmailProperty:
+		return extractEmailProperty(p)
+	case *notionapi.EmailProperty:
+		return extractEmailProperty(*p)
+	case notionapi.PhoneNumberProperty:
+		return extractPhoneProperty(p)
+	case *notionapi.PhoneNumberProperty:
+		return extractPhoneProperty(*p)
+	case notionapi.StatusProperty:
+		return extractStatusProperty(p)
+	case *notionapi.StatusProperty:
+		return extractStatusProperty(*p)
+	default:
+		return ""
+	}
+}
+
+func extractTitleProperty(p notionapi.TitleProperty) string {
+	var texts []string
+	for _, rt := range p.Title {
+		texts = append(texts, rt.PlainText)
+	}
+	return strings.Join(texts, "")
+}
+
+func extractRichTextProperty(p notionapi.RichTextProperty) string {
+	var texts []string
+	for _, rt := range p.RichText {
+		texts = append(texts, rt.PlainText)
+	}
+	return strings.Join(texts, "")
+}
+
+func extractTextProperty(p notionapi.TextProperty) string {
+	var texts []string
+	for _, rt := range p.Text {
+		texts = append(texts, rt.PlainText)
+	}
+	return strings.Join(texts, "")
+}
+
+func extractNumberProperty(p notionapi.NumberProperty) string {
+	if p.Number == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%v", p.Number)
+}
+
+func extractSelectProperty(p notionapi.SelectProperty) string {
+	return p.Select.Name
+}
+
+func extractMultiSelectProperty(p notionapi.MultiSelectProperty) string {
+	var names []string
+	for _, opt := range p.MultiSelect {
+		names = append(names, opt.Name)
+	}
+	return strings.Join(names, ", ")
+}
+
+func extractDateProperty(p notionapi.DateProperty) string {
+	if p.Date == nil || p.Date.Start == nil {
+		return ""
+	}
+	return time.Time(*p.Date.Start).Format("2006-01-02")
+}
+
+func extractCheckboxProperty(p notionapi.CheckboxProperty) string {
+	if p.Checkbox {
+		return "true"
+	}
+	return "false"
+}
+
+func extractURLProperty(p notionapi.URLProperty) string {
+	return p.URL
+}
+
+func extractEmailProperty(p notionapi.EmailProperty) string {
+	return p.Email
+}
+
+func extractPhoneProperty(p notionapi.PhoneNumberProperty) string {
+	return p.PhoneNumber
+}
+
+func extractStatusProperty(p notionapi.StatusProperty) string {
+	return p.Status.Name
+}
+
 // Block represents a Notion block with recursive children
 type Block struct {
 	ID       string

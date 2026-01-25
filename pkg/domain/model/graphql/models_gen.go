@@ -62,6 +62,25 @@ type ImpactLevel struct {
 	Score       int    `json:"score"`
 }
 
+type Knowledge struct {
+	ID        string    `json:"id"`
+	RiskID    int       `json:"riskID"`
+	Risk      *Risk     `json:"risk,omitempty"`
+	SourceID  string    `json:"sourceID"`
+	SourceURL string    `json:"sourceURL"`
+	Title     string    `json:"title"`
+	Summary   string    `json:"summary"`
+	SourcedAt time.Time `json:"sourcedAt"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+type KnowledgeConnection struct {
+	Items      []*Knowledge `json:"items"`
+	TotalCount int          `json:"totalCount"`
+	HasMore    bool         `json:"hasMore"`
+}
+
 type LikelihoodLevel struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -120,6 +139,7 @@ type Risk struct {
 	DetectionIndicators string           `json:"detectionIndicators"`
 	SlackChannelID      *string          `json:"slackChannelID,omitempty"`
 	Responses           []*Response      `json:"responses"`
+	Knowledges          []*Knowledge     `json:"knowledges"`
 	CreatedAt           time.Time        `json:"createdAt"`
 	UpdatedAt           time.Time        `json:"updatedAt"`
 }

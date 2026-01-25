@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@apollo/client'
-import { ArrowLeft, Edit, MoreVertical, Trash2, Plus } from 'lucide-react'
+import { ArrowLeft, Edit, MoreVertical, Trash2, Plus, ExternalLink, BookOpen, ChevronLeft, ChevronRight } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import Button from '../components/Button'
 import Chip from '../components/Chip'
@@ -9,6 +9,18 @@ import RiskDeleteDialog from './RiskDeleteDialog'
 import ResponseForm from './ResponseForm'
 import { GET_RISK, GET_RISK_CONFIGURATION, GET_SLACK_USERS } from '../graphql/risk'
 import styles from './RiskDetail.module.css'
+
+interface Knowledge {
+  id: string
+  riskID: number
+  sourceID: string
+  sourceURL: string
+  title: string
+  summary: string
+  sourcedAt: string
+  createdAt: string
+  updatedAt: string
+}
 
 interface Risk {
   id: number
@@ -27,6 +39,7 @@ interface Risk {
     status: string
     responders: Array<{ id: string; name: string; realName: string; imageUrl?: string }>
   }>
+  knowledges?: Knowledge[]
   createdAt: string
   updatedAt: string
 }
@@ -56,6 +69,8 @@ export default function RiskDetail() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [isResponseFormOpen, setIsResponseFormOpen] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [knowledgePage, setKnowledgePage] = useState(0)
+  const knowledgePageSize = 5
   const menuRef = useRef<HTMLDivElement>(null)
 
   const { data: riskData, loading: riskLoading, error: riskError, refetch } = useQuery(GET_RISK, {
@@ -342,6 +357,84 @@ export default function RiskDetail() {
                 </Button>
               </div>
               <p className={styles.text}>No responses yet.</p>
+            </div>
+          )}
+
+          {risk.knowledges && risk.knowledges.length > 0 && (
+            <div className={styles.section}>
+              <div className={styles.sectionHeader}>
+                <h3 className={styles.sectionTitle}>
+                  <BookOpen size={20} style={{ marginRight: '0.5rem', verticalAlign: 'middle' }} />
+                  Related Knowledge ({risk.knowledges.length})
+                </h3>
+              </div>
+              <table className={styles.knowledgeTable}>
+                <thead>
+                  <tr>
+                    <th>Title</th>
+                    <th>Summary</th>
+                    <th>Date</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {risk.knowledges
+                    .slice(knowledgePage * knowledgePageSize, (knowledgePage + 1) * knowledgePageSize)
+                    .map((knowledge) => (
+                      <tr
+                        key={knowledge.id}
+                        className={styles.knowledgeRow}
+                        onClick={() => navigate(`/knowledges/${knowledge.id}`)}
+                      >
+                        <td className={styles.knowledgeTitleCell}>{knowledge.title}</td>
+                        <td className={styles.knowledgeSummaryCell}>
+                          {knowledge.summary.length > 50
+                            ? knowledge.summary.substring(0, 50) + '...'
+                            : knowledge.summary}
+                        </td>
+                        <td className={styles.knowledgeDateCell}>
+                          {new Date(knowledge.sourcedAt).toLocaleDateString()}
+                        </td>
+                        <td className={styles.knowledgeLinkCell}>
+                          <a
+                            href={knowledge.sourceURL}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={styles.knowledgeExternalLink}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <ExternalLink size={16} />
+                          </a>
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+              {risk.knowledges.length > knowledgePageSize && (
+                <div className={styles.pagination}>
+                  <button
+                    className={styles.paginationButton}
+                    onClick={() => setKnowledgePage((p) => Math.max(0, p - 1))}
+                    disabled={knowledgePage === 0}
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
+                  <span className={styles.paginationInfo}>
+                    {knowledgePage + 1} / {Math.ceil(risk.knowledges.length / knowledgePageSize)}
+                  </span>
+                  <button
+                    className={styles.paginationButton}
+                    onClick={() =>
+                      setKnowledgePage((p) =>
+                        Math.min(Math.ceil(risk.knowledges!.length / knowledgePageSize) - 1, p + 1)
+                      )
+                    }
+                    disabled={knowledgePage >= Math.ceil(risk.knowledges.length / knowledgePageSize) - 1}
+                  >
+                    <ChevronRight size={16} />
+                  </button>
+                </div>
+              )}
             </div>
           )}
 

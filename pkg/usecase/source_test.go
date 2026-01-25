@@ -14,16 +14,16 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 )
 
-// mockNotionService is a mock implementation of notion.Service for testing
-type mockNotionService struct {
+// sourceTestNotionService is a mock implementation of notion.Service for testing
+type sourceTestNotionService struct {
 	getDatabaseMetadataFn func(ctx context.Context, dbID string) (*notion.DatabaseMetadata, error)
 }
 
-func (m *mockNotionService) QueryUpdatedPages(ctx context.Context, dbID string, since time.Time) iter.Seq2[*notion.Page, error] {
+func (m *sourceTestNotionService) QueryUpdatedPages(ctx context.Context, dbID string, since time.Time) iter.Seq2[*notion.Page, error] {
 	return func(yield func(*notion.Page, error) bool) {}
 }
 
-func (m *mockNotionService) GetDatabaseMetadata(ctx context.Context, dbID string) (*notion.DatabaseMetadata, error) {
+func (m *sourceTestNotionService) GetDatabaseMetadata(ctx context.Context, dbID string) (*notion.DatabaseMetadata, error) {
 	if m.getDatabaseMetadataFn != nil {
 		return m.getDatabaseMetadataFn(ctx, dbID)
 	}
@@ -105,7 +105,7 @@ func (m *mockSlackService) RenameChannel(ctx context.Context, channelID string, 
 func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 	t.Run("creates source with valid database ID", func(t *testing.T) {
 		repo := memory.New()
-		notionSvc := &mockNotionService{
+		notionSvc := &sourceTestNotionService{
 			getDatabaseMetadataFn: func(ctx context.Context, dbID string) (*notion.DatabaseMetadata, error) {
 				return &notion.DatabaseMetadata{
 					ID:    dbID,
@@ -151,7 +151,7 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 
 	t.Run("uses custom name when provided", func(t *testing.T) {
 		repo := memory.New()
-		notionSvc := &mockNotionService{}
+		notionSvc := &sourceTestNotionService{}
 		uc := usecase.NewSourceUseCase(repo, notionSvc, nil)
 		ctx := context.Background()
 
@@ -189,7 +189,7 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 
 	t.Run("fails when Notion API returns error", func(t *testing.T) {
 		repo := memory.New()
-		notionSvc := &mockNotionService{
+		notionSvc := &sourceTestNotionService{
 			getDatabaseMetadataFn: func(ctx context.Context, dbID string) (*notion.DatabaseMetadata, error) {
 				return nil, errors.New("database not found")
 			},
@@ -477,7 +477,7 @@ func TestSourceUseCase_ListSources(t *testing.T) {
 func TestSourceUseCase_ValidateNotionDB(t *testing.T) {
 	t.Run("validates existing database", func(t *testing.T) {
 		repo := memory.New()
-		notionSvc := &mockNotionService{
+		notionSvc := &sourceTestNotionService{
 			getDatabaseMetadataFn: func(ctx context.Context, dbID string) (*notion.DatabaseMetadata, error) {
 				return &notion.DatabaseMetadata{
 					ID:    dbID,
@@ -543,7 +543,7 @@ func TestSourceUseCase_ValidateNotionDB(t *testing.T) {
 
 	t.Run("returns invalid when database not found", func(t *testing.T) {
 		repo := memory.New()
-		notionSvc := &mockNotionService{
+		notionSvc := &sourceTestNotionService{
 			getDatabaseMetadataFn: func(ctx context.Context, dbID string) (*notion.DatabaseMetadata, error) {
 				return nil, errors.New("database not found")
 			},
