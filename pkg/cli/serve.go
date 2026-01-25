@@ -111,7 +111,7 @@ func cmdServe() *cli.Command {
 			Name:        "firestore-project-id",
 			Usage:       "Firestore Project ID (required)",
 			Required:    true,
-			Sources:     cli.EnvVars("HECATONCHEIRES_FIRESTORE_PROJECT_ID", "GCP_PROJECT_ID"),
+			Sources:     cli.EnvVars("HECATONCHEIRES_FIRESTORE_PROJECT_ID"),
 			Destination: &projectID,
 		},
 		&cli.StringFlag{

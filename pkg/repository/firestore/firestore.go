@@ -15,6 +15,7 @@ type Firestore struct {
 	riskResponse *riskResponseRepository
 	slack        *slackRepository
 	source       *sourceRepository
+	knowledge    *knowledgeRepository
 }
 
 var _ interfaces.Repository = &Firestore{}
@@ -28,6 +29,7 @@ func WithCollectionPrefix(prefix string) Option {
 		f.riskResponse.collectionPrefix = prefix
 		f.slack.collectionPrefix = prefix
 		f.source.collectionPrefix = prefix
+		f.knowledge.collectionPrefix = prefix
 	}
 }
 
@@ -42,6 +44,7 @@ func New(ctx context.Context, projectID, databaseID string, opts ...Option) (*Fi
 	riskResponseRepo := newRiskResponseRepository(client, responseRepo, riskRepo)
 	slackRepo := newSlackRepository(client)
 	sourceRepo := newSourceRepository(client)
+	knowledgeRepo := newKnowledgeRepository(client)
 
 	f := &Firestore{
 		client:       client,
@@ -50,6 +53,7 @@ func New(ctx context.Context, projectID, databaseID string, opts ...Option) (*Fi
 		riskResponse: riskResponseRepo,
 		slack:        slackRepo,
 		source:       sourceRepo,
+		knowledge:    knowledgeRepo,
 	}
 
 	for _, opt := range opts {
@@ -77,6 +81,10 @@ func (f *Firestore) Slack() interfaces.SlackRepository {
 
 func (f *Firestore) Source() interfaces.SourceRepository {
 	return f.source
+}
+
+func (f *Firestore) Knowledge() interfaces.KnowledgeRepository {
+	return f.knowledge
 }
 
 func (f *Firestore) Close() error {

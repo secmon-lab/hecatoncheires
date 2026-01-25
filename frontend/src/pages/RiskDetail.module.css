@@ -355,3 +355,128 @@
   height: 1.75rem;
   border-radius: 0.375rem;
 }
+
+.knowledgeTable {
+  width: 100%;
+  border-collapse: collapse;
+  background: #ffffff;
+  border: 1px solid var(--border-default);
+  border-radius: var(--card-radius, 12px);
+  overflow: hidden;
+}
+
+.knowledgeTable thead {
+  background: var(--table-header-bg, #F8FAFC);
+  border-bottom: 2px solid var(--table-header-border, #E2E8F0);
+}
+
+.knowledgeTable th {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-label);
+}
+
+.knowledgeTable th:last-child {
+  width: 2.5rem;
+}
+
+.knowledgeRow {
+  border-bottom: 1px solid var(--border-light);
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.knowledgeRow:last-child {
+  border-bottom: none;
+}
+
+.knowledgeRow:hover {
+  background: var(--table-row-hover, #F8FAFC);
+}
+
+.knowledgeTable td {
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  color: var(--text-body);
+  vertical-align: top;
+}
+
+.knowledgeTitleCell {
+  font-weight: 600;
+  color: var(--text-heading);
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.knowledgeSummaryCell {
+  color: var(--text-muted);
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledgeDateCell {
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.knowledgeLinkCell {
+  text-align: center;
+}
+
+.knowledgeExternalLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-xs);
+  color: var(--text-muted);
+  border-radius: 0.25rem;
+  transition: color 0.15s, background-color 0.15s;
+}
+
+.knowledgeExternalLink:hover {
+  color: var(--color-primary);
+  background: var(--bg-highlight);
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-md);
+  margin-top: var(--spacing-md);
+}
+
+.paginationButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--bg-paper);
+  border: 1px solid var(--border-default);
+  border-radius: 0.375rem;
+  color: var(--text-body);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.paginationButton:hover:not(:disabled) {
+  background: var(--bg-subtle);
+  border-color: var(--border-hover);
+}
+
+.paginationButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.paginationInfo {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
