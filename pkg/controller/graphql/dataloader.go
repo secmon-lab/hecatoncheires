@@ -5,19 +5,34 @@ import (
 
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 )
 
 // DataLoaders holds all data loaders for batching queries
 type DataLoaders struct {
-	ResponsesByRiskLoader *ResponsesByRiskLoader
-	RisksByResponseLoader *RisksByResponseLoader
+	ResponsesByRiskLoader  *ResponsesByRiskLoader
+	RisksByResponseLoader  *RisksByResponseLoader
+	KnowledgesByRiskLoader *KnowledgesByRiskLoader
+	SlackUsersLoader       *SlackUsersLoader
+	CategoryLoader         *CategoryLoader
+	LikelihoodLevelLoader  *LikelihoodLevelLoader
+	ImpactLevelLoader      *ImpactLevelLoader
+	TeamLoader             *TeamLoader
 }
 
 // NewDataLoaders creates a new instance of DataLoaders
-func NewDataLoaders(repo interfaces.Repository) *DataLoaders {
+// slackUsersCache is application-scoped and can be nil
+// uc is required for Risk Configuration loaders
+func NewDataLoaders(repo interfaces.Repository, uc *usecase.UseCases, slackUsersCache *SlackUsersCache) *DataLoaders {
 	return &DataLoaders{
-		ResponsesByRiskLoader: NewResponsesByRiskLoader(repo),
-		RisksByResponseLoader: NewRisksByResponseLoader(repo),
+		ResponsesByRiskLoader:  NewResponsesByRiskLoader(repo),
+		RisksByResponseLoader:  NewRisksByResponseLoader(repo),
+		KnowledgesByRiskLoader: NewKnowledgesByRiskLoader(repo),
+		SlackUsersLoader:       NewSlackUsersLoader(slackUsersCache),
+		CategoryLoader:         NewCategoryLoader(uc.Risk),
+		LikelihoodLevelLoader:  NewLikelihoodLevelLoader(uc.Risk),
+		ImpactLevelLoader:      NewImpactLevelLoader(uc.Risk),
+		TeamLoader:             NewTeamLoader(uc.Risk),
 	}
 }
 

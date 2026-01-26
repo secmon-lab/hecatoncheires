@@ -241,9 +241,16 @@ func cmdServe() *cli.Command {
 				gqlctrl.NewExecutableSchema(gqlctrl.Config{Resolvers: resolver}),
 			)
 
-			// Wrap with dataloader middleware
-			loaders := gqlctrl.NewDataLoaders(repo)
+			// Initialize application-scoped SlackUsersCache
+			var slackUsersCache *gqlctrl.SlackUsersCache
+			if slackSvc != nil {
+				slackUsersCache = gqlctrl.NewSlackUsersCache(slackSvc)
+			}
+
+			// Wrap with dataloader middleware (request-scoped)
 			gqlHandlerBase := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Create new DataLoaders for each request
+				loaders := gqlctrl.NewDataLoaders(repo, uc, slackUsersCache)
 				ctx := gqlctrl.WithDataLoaders(r.Context(), loaders)
 				srv.ServeHTTP(w, r.WithContext(ctx))
 			})

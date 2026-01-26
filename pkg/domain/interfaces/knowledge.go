@@ -17,6 +17,10 @@ type KnowledgeRepository interface {
 	// ListByRiskID retrieves all knowledge entries for a specific risk
 	ListByRiskID(ctx context.Context, riskID int64) ([]*model.Knowledge, error)
 
+	// ListByRiskIDs retrieves all knowledge entries for multiple risks
+	// Implementation uses parallel individual queries to avoid requiring new Firestore indexes
+	ListByRiskIDs(ctx context.Context, riskIDs []int64) (map[int64][]*model.Knowledge, error)
+
 	// ListBySourceID retrieves all knowledge entries from a specific source
 	ListBySourceID(ctx context.Context, sourceID model.SourceID) ([]*model.Knowledge, error)
 

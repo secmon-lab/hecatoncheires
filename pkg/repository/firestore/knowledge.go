@@ -148,6 +148,45 @@ func (r *knowledgeRepository) ListByRiskID(ctx context.Context, riskID int64) ([
 	return knowledges, nil
 }
 
+func (r *knowledgeRepository) ListByRiskIDs(ctx context.Context, riskIDs []int64) (map[int64][]*model.Knowledge, error) {
+	if len(riskIDs) == 0 {
+		return make(map[int64][]*model.Knowledge), nil
+	}
+
+	// Use parallel execution to avoid requiring new Firestore indexes
+	// Each query uses existing index: risk_id == X, ORDER BY sourced_at DESC
+	type result struct {
+		riskID     int64
+		knowledges []*model.Knowledge
+		err        error
+	}
+
+	resultCh := make(chan result, len(riskIDs))
+
+	for _, riskID := range riskIDs {
+		go func(id int64) {
+			knowledges, err := r.ListByRiskID(ctx, id)
+			resultCh <- result{
+				riskID:     id,
+				knowledges: knowledges,
+				err:        err,
+			}
+		}(riskID)
+	}
+
+	// Collect results
+	resultMap := make(map[int64][]*model.Knowledge, len(riskIDs))
+	for i := 0; i < len(riskIDs); i++ {
+		res := <-resultCh
+		if res.err != nil {
+			return nil, goerr.Wrap(res.err, "failed to get knowledges for risk", goerr.V("riskID", res.riskID))
+		}
+		resultMap[res.riskID] = res.knowledges
+	}
+
+	return resultMap, nil
+}
+
 func (r *knowledgeRepository) ListBySourceID(ctx context.Context, sourceID model.SourceID) ([]*model.Knowledge, error) {
 	iter := r.client.Collection(r.knowledgesCollection()).
 		Where("source_id", "==", string(sourceID)).

@@ -126,6 +126,16 @@ right: 1.25rem;
 - Repository pattern allows easy switching between backends
 - Interface defined in `pkg/domain/interfaces/`
 
+##### Firestore Index Policy
+- **CRITICAL: Firestore index updates are PROHIBITED in principle**
+- When implementing new queries or batch operations:
+  - Use existing indexes whenever possible
+  - For batch operations, prefer parallel individual queries over complex queries requiring new indexes
+  - If a feature absolutely requires a new index, consult with the team first
+  - Example: Instead of `Where("risk_id", "in", riskIDs).OrderBy(...)` (needs index), use parallel `Where("risk_id", "==", riskID).OrderBy(...)` calls
+- Test queries locally to ensure they work with existing indexes before deployment
+- This policy prevents index management overhead and ensures queries remain simple and maintainable
+
 ### Application Modes
 - `serve` - HTTP server mode with GraphQL API and frontend
 
