@@ -537,38 +537,28 @@ func (r *queryResolver) Knowledges(ctx context.Context, limit *int, offset *int)
 
 // Responders is the resolver for the responders field.
 func (r *responseResolver) Responders(ctx context.Context, obj *graphql1.Response) ([]*graphql1.SlackUser, error) {
-	loaders := GetDataLoaders(ctx)
-	if loaders == nil || loaders.SlackUsersLoader == nil {
-		// Fallback: return minimal user info with ID only
-		users := make([]*graphql1.SlackUser, len(obj.ResponderIDs))
-		for i, id := range obj.ResponderIDs {
-			users[i] = &graphql1.SlackUser{ID: id}
-		}
-		return users, nil
-	}
-
-	users, err := loaders.SlackUsersLoader.LoadMany(ctx, obj.ResponderIDs)
-	if err != nil {
-		errutil.Handle(ctx, err, "failed to load Slack users")
-		return nil, err
-	}
-
-	return users, nil
+	return resolveSlackUsers(ctx, obj.ResponderIDs)
 }
 
 // Assignees is the resolver for the assignees field.
 func (r *riskResolver) Assignees(ctx context.Context, obj *graphql1.Risk) ([]*graphql1.SlackUser, error) {
+	return resolveSlackUsers(ctx, obj.AssigneeIDs)
+}
+
+// resolveSlackUsers is a helper function that resolves Slack users from a list of user IDs.
+// It uses DataLoader when available, otherwise returns minimal user info with ID only.
+func resolveSlackUsers(ctx context.Context, userIDs []string) ([]*graphql1.SlackUser, error) {
 	loaders := GetDataLoaders(ctx)
 	if loaders == nil || loaders.SlackUsersLoader == nil {
 		// Fallback: return minimal user info with ID only
-		users := make([]*graphql1.SlackUser, len(obj.AssigneeIDs))
-		for i, id := range obj.AssigneeIDs {
+		users := make([]*graphql1.SlackUser, len(userIDs))
+		for i, id := range userIDs {
 			users[i] = &graphql1.SlackUser{ID: id}
 		}
 		return users, nil
 	}
 
-	users, err := loaders.SlackUsersLoader.LoadMany(ctx, obj.AssigneeIDs)
+	users, err := loaders.SlackUsersLoader.LoadMany(ctx, userIDs)
 	if err != nil {
 		errutil.Handle(ctx, err, "failed to load Slack users")
 		return nil, err
