@@ -99,7 +99,16 @@ func (c *SlackUsersCache) ensureFresh(ctx context.Context) error {
 }
 
 // refresh fetches fresh user data from Slack API
+// Uses double-check locking to prevent thundering herd problem
 func (c *SlackUsersCache) refresh(ctx context.Context) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Double-check: another goroutine might have refreshed while waiting for lock
+	if time.Since(c.cachedAt) <= c.ttl {
+		return nil
+	}
+
 	users, err := c.slackService.ListUsers(ctx)
 	if err != nil {
 		return goerr.Wrap(err, "failed to list Slack users")
@@ -119,10 +128,8 @@ func (c *SlackUsersCache) refresh(ctx context.Context) error {
 		}
 	}
 
-	c.mu.Lock()
 	c.cache = newCache
 	c.cachedAt = time.Now()
-	c.mu.Unlock()
 
 	return nil
 }

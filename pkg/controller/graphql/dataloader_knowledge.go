@@ -8,6 +8,12 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 )
 
+// batchResult holds the result of a batch query including any error
+type batchResult struct {
+	data map[int64][]*model.Knowledge
+	err  error
+}
+
 // KnowledgesByRiskLoader batches and caches knowledge retrieval by risk IDs within a single request
 type KnowledgesByRiskLoader struct {
 	repo interfaces.Repository
@@ -19,7 +25,7 @@ type KnowledgesByRiskLoader struct {
 	// Batching support
 	batchMu sync.Mutex
 	batch   []int64
-	waiting []chan map[int64][]*model.Knowledge
+	waiting []chan batchResult
 }
 
 // NewKnowledgesByRiskLoader creates a new KnowledgesByRiskLoader
@@ -42,7 +48,7 @@ func (l *KnowledgesByRiskLoader) Load(ctx context.Context, riskID int64) ([]*mod
 	l.mu.RUnlock()
 
 	// Not in cache, add to batch
-	resultCh := make(chan map[int64][]*model.Knowledge, 1)
+	resultCh := make(chan batchResult, 1)
 
 	l.batchMu.Lock()
 	l.batch = append(l.batch, riskID)
@@ -63,31 +69,41 @@ func (l *KnowledgesByRiskLoader) Load(ctx context.Context, riskID int64) ([]*mod
 
 	// Wait for batch result
 	result := <-resultCh
-	return result[riskID], nil
+	if result.err != nil {
+		return nil, result.err
+	}
+	return result.data[riskID], nil
 }
 
 // executeBatch executes a batch of risk IDs
-func (l *KnowledgesByRiskLoader) executeBatch(ctx context.Context, riskIDs []int64, waiting []chan map[int64][]*model.Knowledge) {
+func (l *KnowledgesByRiskLoader) executeBatch(ctx context.Context, riskIDs []int64, waiting []chan batchResult) {
 	// Execute batch query
 	results, err := l.repo.Knowledge().ListByRiskIDs(ctx, riskIDs)
-	if err != nil {
-		// On error, return empty results
-		results = make(map[int64][]*model.Knowledge, len(riskIDs))
-		for _, id := range riskIDs {
-			results[id] = []*model.Knowledge{}
-		}
-	}
 
-	// Update cache
-	l.mu.Lock()
-	for riskID, knowledges := range results {
-		l.cache[riskID] = knowledges
+	var result batchResult
+	if err != nil {
+		// Propagate error to all waiting callers
+		result = batchResult{
+			data: nil,
+			err:  err,
+		}
+	} else {
+		result = batchResult{
+			data: results,
+			err:  nil,
+		}
+
+		// Update cache only on success
+		l.mu.Lock()
+		for riskID, knowledges := range results {
+			l.cache[riskID] = knowledges
+		}
+		l.mu.Unlock()
 	}
-	l.mu.Unlock()
 
 	// Notify all waiting channels
 	for _, ch := range waiting {
-		ch <- results
+		ch <- result
 		close(ch)
 	}
 }

@@ -25,7 +25,10 @@ func NewCategoryLoader(riskUC *usecase.RiskUseCase) *CategoryLoader {
 // Load retrieves a single category by ID
 func (l *CategoryLoader) Load(ctx context.Context, categoryID types.CategoryID) (*graphql1.Category, error) {
 	cfg, err := l.riskUC.GetRiskConfiguration()
-	if err != nil || cfg == nil {
+	if err != nil {
+		return nil, err
+	}
+	if cfg == nil {
 		return nil, nil
 	}
 
@@ -45,7 +48,10 @@ func (l *CategoryLoader) Load(ctx context.Context, categoryID types.CategoryID) 
 // LoadMany retrieves multiple categories by IDs
 func (l *CategoryLoader) LoadMany(ctx context.Context, categoryIDs []types.CategoryID) ([]*graphql1.Category, error) {
 	cfg, err := l.riskUC.GetRiskConfiguration()
-	if err != nil || cfg == nil {
+	if err != nil {
+		return nil, err
+	}
+	if cfg == nil {
 		return make([]*graphql1.Category, 0), nil
 	}
 
@@ -85,7 +91,10 @@ func NewLikelihoodLevelLoader(riskUC *usecase.RiskUseCase) *LikelihoodLevelLoade
 // Load retrieves a single likelihood level by ID
 func (l *LikelihoodLevelLoader) Load(ctx context.Context, levelID types.LikelihoodID) (*graphql1.LikelihoodLevel, error) {
 	cfg, err := l.riskUC.GetRiskConfiguration()
-	if err != nil || cfg == nil {
+	if err != nil {
+		return nil, err
+	}
+	if cfg == nil {
 		return nil, nil
 	}
 
@@ -118,7 +127,10 @@ func NewImpactLevelLoader(riskUC *usecase.RiskUseCase) *ImpactLevelLoader {
 // Load retrieves a single impact level by ID
 func (l *ImpactLevelLoader) Load(ctx context.Context, levelID types.ImpactID) (*graphql1.ImpactLevel, error) {
 	cfg, err := l.riskUC.GetRiskConfiguration()
-	if err != nil || cfg == nil {
+	if err != nil {
+		return nil, err
+	}
+	if cfg == nil {
 		return nil, nil
 	}
 
@@ -151,7 +163,10 @@ func NewTeamLoader(riskUC *usecase.RiskUseCase) *TeamLoader {
 // Load retrieves a single team by ID
 func (l *TeamLoader) Load(ctx context.Context, teamID types.TeamID) (*graphql1.Team, error) {
 	cfg, err := l.riskUC.GetRiskConfiguration()
-	if err != nil || cfg == nil {
+	if err != nil {
+		return nil, err
+	}
+	if cfg == nil {
 		return nil, nil
 	}
 
@@ -170,7 +185,10 @@ func (l *TeamLoader) Load(ctx context.Context, teamID types.TeamID) (*graphql1.T
 // LoadMany retrieves multiple teams by IDs
 func (l *TeamLoader) LoadMany(ctx context.Context, teamIDs []types.TeamID) ([]*graphql1.Team, error) {
 	cfg, err := l.riskUC.GetRiskConfiguration()
-	if err != nil || cfg == nil {
+	if err != nil {
+		return nil, err
+	}
+	if cfg == nil {
 		return make([]*graphql1.Team, 0), nil
 	}
 
