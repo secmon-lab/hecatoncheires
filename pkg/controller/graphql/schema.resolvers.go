@@ -409,7 +409,7 @@ func (r *queryResolver) Responses(ctx context.Context) ([]*graphql1.Response, er
 
 	gqlResponses := make([]*graphql1.Response, len(responses))
 	for i, response := range responses {
-		gqlResponses[i] = enrichResponse(ctx, r.uc, toGraphQLResponse(response))
+		gqlResponses[i] = toGraphQLResponse(response)
 	}
 
 	return gqlResponses, nil
@@ -423,7 +423,7 @@ func (r *queryResolver) Response(ctx context.Context, id int) (*graphql1.Respons
 		return nil, err
 	}
 
-	return enrichResponse(ctx, r.uc, toGraphQLResponse(response)), nil
+	return toGraphQLResponse(response), nil
 }
 
 // ResponsesByRisk is the resolver for the responsesByRisk field.
@@ -436,7 +436,7 @@ func (r *queryResolver) ResponsesByRisk(ctx context.Context, riskID int) ([]*gra
 
 	gqlResponses := make([]*graphql1.Response, len(responses))
 	for i, response := range responses {
-		gqlResponses[i] = enrichResponse(ctx, r.uc, toGraphQLResponse(response))
+		gqlResponses[i] = toGraphQLResponse(response)
 	}
 
 	return gqlResponses, nil
@@ -548,7 +548,7 @@ func (r *riskResolver) Responses(ctx context.Context, obj *graphql1.Risk) ([]*gr
 
 		gqlResponses := make([]*graphql1.Response, len(responses))
 		for i, response := range responses {
-			gqlResponses[i] = enrichResponse(ctx, r.uc, toGraphQLResponse(response))
+			gqlResponses[i] = toGraphQLResponse(response)
 		}
 		return gqlResponses, nil
 	}
@@ -561,7 +561,7 @@ func (r *riskResolver) Responses(ctx context.Context, obj *graphql1.Risk) ([]*gr
 
 	gqlResponses := make([]*graphql1.Response, len(responses))
 	for i, response := range responses {
-		gqlResponses[i] = enrichResponse(ctx, r.uc, toGraphQLResponse(response))
+		gqlResponses[i] = toGraphQLResponse(response)
 	}
 
 	return gqlResponses, nil
@@ -569,9 +569,25 @@ func (r *riskResolver) Responses(ctx context.Context, obj *graphql1.Risk) ([]*gr
 
 // Knowledges is the resolver for the knowledges field.
 func (r *riskResolver) Knowledges(ctx context.Context, obj *graphql1.Risk) ([]*graphql1.Knowledge, error) {
-	knowledges, err := r.repo.Knowledge().ListByRiskID(ctx, int64(obj.ID))
+	loaders := GetDataLoaders(ctx)
+	if loaders == nil || loaders.KnowledgesByRiskLoader == nil {
+		// Fallback to direct query if DataLoader is not available
+		knowledges, err := r.repo.Knowledge().ListByRiskID(ctx, int64(obj.ID))
+		if err != nil {
+			errutil.Handle(ctx, err, "failed to get knowledges by risk")
+			return nil, err
+		}
+
+		gqlKnowledges := make([]*graphql1.Knowledge, len(knowledges))
+		for i, k := range knowledges {
+			gqlKnowledges[i] = toGraphQLKnowledge(k)
+		}
+		return gqlKnowledges, nil
+	}
+
+	knowledges, err := loaders.KnowledgesByRiskLoader.Load(ctx, int64(obj.ID))
 	if err != nil {
-		errutil.Handle(ctx, err, "failed to get knowledges by risk")
+		errutil.Handle(ctx, err, "failed to load knowledges by risk")
 		return nil, err
 	}
 

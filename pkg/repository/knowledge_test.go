@@ -249,6 +249,164 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		}
 	})
 
+	t.Run("ListByRiskIDs returns knowledge for multiple risks", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		now := time.Now().UnixNano()
+		riskID1 := now
+		riskID2 := now + 1
+		riskID3 := now + 2
+		sourceID := model.SourceID(fmt.Sprintf("source-%d", now))
+
+		// Create knowledge entries for risk1
+		k1, err := repo.Knowledge().Create(ctx, &model.Knowledge{
+			RiskID:    riskID1,
+			SourceID:  sourceID,
+			SourceURL: "https://example.com/1",
+			Title:     "Knowledge 1 for Risk 1",
+			Summary:   "First knowledge for risk 1",
+			SourcedAt: time.Now().UTC(),
+		})
+		if err != nil {
+			t.Fatalf("failed to create knowledge 1: %v", err)
+		}
+
+		k2, err := repo.Knowledge().Create(ctx, &model.Knowledge{
+			RiskID:    riskID1,
+			SourceID:  sourceID,
+			SourceURL: "https://example.com/2",
+			Title:     "Knowledge 2 for Risk 1",
+			Summary:   "Second knowledge for risk 1",
+			SourcedAt: time.Now().UTC(),
+		})
+		if err != nil {
+			t.Fatalf("failed to create knowledge 2: %v", err)
+		}
+
+		// Create knowledge entries for risk2
+		k3, err := repo.Knowledge().Create(ctx, &model.Knowledge{
+			RiskID:    riskID2,
+			SourceID:  sourceID,
+			SourceURL: "https://example.com/3",
+			Title:     "Knowledge 1 for Risk 2",
+			Summary:   "First knowledge for risk 2",
+			SourcedAt: time.Now().UTC(),
+		})
+		if err != nil {
+			t.Fatalf("failed to create knowledge 3: %v", err)
+		}
+
+		// Create knowledge for risk3 (not requested)
+		_, err = repo.Knowledge().Create(ctx, &model.Knowledge{
+			RiskID:    riskID3,
+			SourceID:  sourceID,
+			SourceURL: "https://example.com/4",
+			Title:     "Knowledge for Risk 3",
+			Summary:   "Not requested",
+			SourcedAt: time.Now().UTC(),
+		})
+		if err != nil {
+			t.Fatalf("failed to create knowledge 4: %v", err)
+		}
+
+		// Request knowledges for risk1 and risk2
+		result, err := repo.Knowledge().ListByRiskIDs(ctx, []int64{riskID1, riskID2})
+		if err != nil {
+			t.Fatalf("failed to list by risk IDs: %v", err)
+		}
+
+		if len(result) != 2 {
+			t.Errorf("expected 2 keys in result map, got %d", len(result))
+		}
+
+		risk1Knowledges, ok := result[riskID1]
+		if !ok {
+			t.Fatalf("risk1 not found in result map")
+		}
+		if len(risk1Knowledges) != 2 {
+			t.Errorf("expected 2 knowledges for risk1, got %d", len(risk1Knowledges))
+		}
+
+		risk2Knowledges, ok := result[riskID2]
+		if !ok {
+			t.Fatalf("risk2 not found in result map")
+		}
+		if len(risk2Knowledges) != 1 {
+			t.Errorf("expected 1 knowledge for risk2, got %d", len(risk2Knowledges))
+		}
+
+		// Verify specific knowledge IDs
+		foundK1, foundK2, foundK3 := false, false, false
+		for _, k := range risk1Knowledges {
+			if k.ID == k1.ID {
+				foundK1 = true
+			}
+			if k.ID == k2.ID {
+				foundK2 = true
+			}
+		}
+		for _, k := range risk2Knowledges {
+			if k.ID == k3.ID {
+				foundK3 = true
+			}
+		}
+
+		if !foundK1 {
+			t.Error("knowledge 1 not found in risk1 list")
+		}
+		if !foundK2 {
+			t.Error("knowledge 2 not found in risk1 list")
+		}
+		if !foundK3 {
+			t.Error("knowledge 3 not found in risk2 list")
+		}
+	})
+
+	t.Run("ListByRiskIDs returns empty map for empty input", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		result, err := repo.Knowledge().ListByRiskIDs(ctx, []int64{})
+		if err != nil {
+			t.Fatalf("failed to list by risk IDs: %v", err)
+		}
+
+		if len(result) != 0 {
+			t.Errorf("expected empty map, got %d keys", len(result))
+		}
+	})
+
+	t.Run("ListByRiskIDs returns empty slices for non-existent risks", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		now := time.Now().UnixNano()
+		nonExistentID1 := now + 9999
+		nonExistentID2 := now + 99999
+
+		result, err := repo.Knowledge().ListByRiskIDs(ctx, []int64{nonExistentID1, nonExistentID2})
+		if err != nil {
+			t.Fatalf("failed to list by risk IDs: %v", err)
+		}
+
+		if len(result) != 2 {
+			t.Errorf("expected 2 keys in result map, got %d", len(result))
+		}
+
+		if knowledges, ok := result[nonExistentID1]; !ok {
+			t.Error("non-existent risk1 not found in result map")
+		} else if len(knowledges) != 0 {
+			t.Errorf("expected 0 knowledges for non-existent risk1, got %d", len(knowledges))
+		}
+
+		if knowledges, ok := result[nonExistentID2]; !ok {
+			t.Error("non-existent risk2 not found in result map")
+		} else if len(knowledges) != 0 {
+			t.Errorf("expected 0 knowledges for non-existent risk2, got %d", len(knowledges))
+		}
+	})
+
 	t.Run("ListBySourceID returns knowledge for specific source", func(t *testing.T) {
 		repo := newRepo(t)
 		ctx := context.Background()

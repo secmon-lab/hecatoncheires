@@ -84,6 +84,34 @@ func (r *knowledgeRepository) ListByRiskID(ctx context.Context, riskID int64) ([
 	return result, nil
 }
 
+func (r *knowledgeRepository) ListByRiskIDs(ctx context.Context, riskIDs []int64) (map[int64][]*model.Knowledge, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	// Create a map of risk IDs for fast lookup
+	riskIDSet := make(map[int64]bool, len(riskIDs))
+	for _, id := range riskIDs {
+		riskIDSet[id] = true
+	}
+
+	// Group knowledges by risk ID
+	result := make(map[int64][]*model.Knowledge, len(riskIDs))
+	for _, k := range r.knowledge {
+		if riskIDSet[k.RiskID] {
+			result[k.RiskID] = append(result[k.RiskID], copyKnowledge(k))
+		}
+	}
+
+	// Ensure all requested IDs are in the result map (even if empty)
+	for _, riskID := range riskIDs {
+		if _, exists := result[riskID]; !exists {
+			result[riskID] = []*model.Knowledge{}
+		}
+	}
+
+	return result, nil
+}
+
 func (r *knowledgeRepository) ListBySourceID(ctx context.Context, sourceID model.SourceID) ([]*model.Knowledge, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
