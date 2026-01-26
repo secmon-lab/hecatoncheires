@@ -110,15 +110,16 @@ type Query struct {
 }
 
 type Response struct {
-	ID          int            `json:"id"`
-	Title       string         `json:"title"`
-	Description string         `json:"description"`
-	Responders  []*SlackUser   `json:"responders"`
-	URL         *string        `json:"url,omitempty"`
-	Status      ResponseStatus `json:"status"`
-	Risks       []*Risk        `json:"risks"`
-	CreatedAt   time.Time      `json:"createdAt"`
-	UpdatedAt   time.Time      `json:"updatedAt"`
+	ID           int            `json:"id"`
+	Title        string         `json:"title"`
+	Description  string         `json:"description"`
+	ResponderIDs []string       `json:"responderIDs"`
+	Responders   []*SlackUser   `json:"responders"`
+	URL          *string        `json:"url,omitempty"`
+	Status       ResponseStatus `json:"status"`
+	Risks        []*Risk        `json:"risks"`
+	CreatedAt    time.Time      `json:"createdAt"`
+	UpdatedAt    time.Time      `json:"updatedAt"`
 }
 
 type Risk struct {

@@ -535,6 +535,48 @@ func (r *queryResolver) Knowledges(ctx context.Context, limit *int, offset *int)
 	}, nil
 }
 
+// Responders is the resolver for the responders field.
+func (r *responseResolver) Responders(ctx context.Context, obj *graphql1.Response) ([]*graphql1.SlackUser, error) {
+	loaders := GetDataLoaders(ctx)
+	if loaders == nil || loaders.SlackUsersLoader == nil {
+		// Fallback: return minimal user info with ID only
+		users := make([]*graphql1.SlackUser, len(obj.ResponderIDs))
+		for i, id := range obj.ResponderIDs {
+			users[i] = &graphql1.SlackUser{ID: id}
+		}
+		return users, nil
+	}
+
+	users, err := loaders.SlackUsersLoader.LoadMany(ctx, obj.ResponderIDs)
+	if err != nil {
+		errutil.Handle(ctx, err, "failed to load Slack users")
+		return nil, err
+	}
+
+	return users, nil
+}
+
+// Assignees is the resolver for the assignees field.
+func (r *riskResolver) Assignees(ctx context.Context, obj *graphql1.Risk) ([]*graphql1.SlackUser, error) {
+	loaders := GetDataLoaders(ctx)
+	if loaders == nil || loaders.SlackUsersLoader == nil {
+		// Fallback: return minimal user info with ID only
+		users := make([]*graphql1.SlackUser, len(obj.AssigneeIDs))
+		for i, id := range obj.AssigneeIDs {
+			users[i] = &graphql1.SlackUser{ID: id}
+		}
+		return users, nil
+	}
+
+	users, err := loaders.SlackUsersLoader.LoadMany(ctx, obj.AssigneeIDs)
+	if err != nil {
+		errutil.Handle(ctx, err, "failed to load Slack users")
+		return nil, err
+	}
+
+	return users, nil
+}
+
 // Responses is the resolver for the responses field on Risk.
 func (r *riskResolver) Responses(ctx context.Context, obj *graphql1.Risk) ([]*graphql1.Response, error) {
 	loaders := GetDataLoaders(ctx)
@@ -608,10 +650,14 @@ func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
 // Query returns QueryResolver implementation.
 func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 
+// Response returns ResponseResolver implementation.
+func (r *Resolver) Response() ResponseResolver { return &responseResolver{r} }
+
 // Risk returns RiskResolver implementation.
 func (r *Resolver) Risk() RiskResolver { return &riskResolver{r} }
 
 type knowledgeResolver struct{ *Resolver }
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
+type responseResolver struct{ *Resolver }
 type riskResolver struct{ *Resolver }

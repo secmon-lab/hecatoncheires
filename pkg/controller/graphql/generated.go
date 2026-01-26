@@ -42,6 +42,7 @@ type ResolverRoot interface {
 	Knowledge() KnowledgeResolver
 	Mutation() MutationResolver
 	Query() QueryResolver
+	Response() ResponseResolver
 	Risk() RiskResolver
 }
 
@@ -136,15 +137,16 @@ type ComplexityRoot struct {
 	}
 
 	Response struct {
-		CreatedAt   func(childComplexity int) int
-		Description func(childComplexity int) int
-		ID          func(childComplexity int) int
-		Responders  func(childComplexity int) int
-		Risks       func(childComplexity int) int
-		Status      func(childComplexity int) int
-		Title       func(childComplexity int) int
-		URL         func(childComplexity int) int
-		UpdatedAt   func(childComplexity int) int
+		CreatedAt    func(childComplexity int) int
+		Description  func(childComplexity int) int
+		ID           func(childComplexity int) int
+		ResponderIDs func(childComplexity int) int
+		Responders   func(childComplexity int) int
+		Risks        func(childComplexity int) int
+		Status       func(childComplexity int) int
+		Title        func(childComplexity int) int
+		URL          func(childComplexity int) int
+		UpdatedAt    func(childComplexity int) int
 	}
 
 	Risk struct {
@@ -250,7 +252,12 @@ type QueryResolver interface {
 	Knowledge(ctx context.Context, id string) (*graphql1.Knowledge, error)
 	Knowledges(ctx context.Context, limit *int, offset *int) (*graphql1.KnowledgeConnection, error)
 }
+type ResponseResolver interface {
+	Responders(ctx context.Context, obj *graphql1.Response) ([]*graphql1.SlackUser, error)
+}
 type RiskResolver interface {
+	Assignees(ctx context.Context, obj *graphql1.Risk) ([]*graphql1.SlackUser, error)
+
 	Responses(ctx context.Context, obj *graphql1.Risk) ([]*graphql1.Response, error)
 	Knowledges(ctx context.Context, obj *graphql1.Risk) ([]*graphql1.Knowledge, error)
 }
@@ -755,6 +762,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Response.ID(childComplexity), true
+	case "Response.responderIDs":
+		if e.complexity.Response.ResponderIDs == nil {
+			break
+		}
+
+		return e.complexity.Response.ResponderIDs(childComplexity), true
 	case "Response.responders":
 		if e.complexity.Response.Responders == nil {
 			break
@@ -1225,6 +1238,7 @@ type Response {
   id: Int!
   title: String!
   description: String!
+  responderIDs: [String!]!
   responders: [SlackUser!]!
   url: String
   status: ResponseStatus!
@@ -2760,6 +2774,8 @@ func (ec *executionContext) fieldContext_Mutation_createResponse(ctx context.Con
 				return ec.fieldContext_Response_title(ctx, field)
 			case "description":
 				return ec.fieldContext_Response_description(ctx, field)
+			case "responderIDs":
+				return ec.fieldContext_Response_responderIDs(ctx, field)
 			case "responders":
 				return ec.fieldContext_Response_responders(ctx, field)
 			case "url":
@@ -2821,6 +2837,8 @@ func (ec *executionContext) fieldContext_Mutation_updateResponse(ctx context.Con
 				return ec.fieldContext_Response_title(ctx, field)
 			case "description":
 				return ec.fieldContext_Response_description(ctx, field)
+			case "responderIDs":
+				return ec.fieldContext_Response_responderIDs(ctx, field)
 			case "responders":
 				return ec.fieldContext_Response_responders(ctx, field)
 			case "url":
@@ -3796,6 +3814,8 @@ func (ec *executionContext) fieldContext_Query_responses(_ context.Context, fiel
 				return ec.fieldContext_Response_title(ctx, field)
 			case "description":
 				return ec.fieldContext_Response_description(ctx, field)
+			case "responderIDs":
+				return ec.fieldContext_Response_responderIDs(ctx, field)
 			case "responders":
 				return ec.fieldContext_Response_responders(ctx, field)
 			case "url":
@@ -3846,6 +3866,8 @@ func (ec *executionContext) fieldContext_Query_response(ctx context.Context, fie
 				return ec.fieldContext_Response_title(ctx, field)
 			case "description":
 				return ec.fieldContext_Response_description(ctx, field)
+			case "responderIDs":
+				return ec.fieldContext_Response_responderIDs(ctx, field)
 			case "responders":
 				return ec.fieldContext_Response_responders(ctx, field)
 			case "url":
@@ -3907,6 +3929,8 @@ func (ec *executionContext) fieldContext_Query_responsesByRisk(ctx context.Conte
 				return ec.fieldContext_Response_title(ctx, field)
 			case "description":
 				return ec.fieldContext_Response_description(ctx, field)
+			case "responderIDs":
+				return ec.fieldContext_Response_responderIDs(ctx, field)
 			case "responders":
 				return ec.fieldContext_Response_responders(ctx, field)
 			case "url":
@@ -4385,6 +4409,35 @@ func (ec *executionContext) fieldContext_Response_description(_ context.Context,
 	return fc, nil
 }
 
+func (ec *executionContext) _Response_responderIDs(ctx context.Context, field graphql.CollectedField, obj *graphql1.Response) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Response_responderIDs,
+		func(ctx context.Context) (any, error) {
+			return obj.ResponderIDs, nil
+		},
+		nil,
+		ec.marshalNString2ᚕstringᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Response_responderIDs(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Response",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Response_responders(ctx context.Context, field graphql.CollectedField, obj *graphql1.Response) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -4392,7 +4445,7 @@ func (ec *executionContext) _Response_responders(ctx context.Context, field grap
 		field,
 		ec.fieldContext_Response_responders,
 		func(ctx context.Context) (any, error) {
-			return obj.Responders, nil
+			return ec.resolvers.Response().Responders(ctx, obj)
 		},
 		nil,
 		ec.marshalNSlackUser2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackUserᚄ,
@@ -4405,8 +4458,8 @@ func (ec *executionContext) fieldContext_Response_responders(_ context.Context, 
 	fc = &graphql.FieldContext{
 		Object:     "Response",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
 			case "id":
@@ -5029,7 +5082,7 @@ func (ec *executionContext) _Risk_assignees(ctx context.Context, field graphql.C
 		field,
 		ec.fieldContext_Risk_assignees,
 		func(ctx context.Context) (any, error) {
-			return obj.Assignees, nil
+			return ec.resolvers.Risk().Assignees(ctx, obj)
 		},
 		nil,
 		ec.marshalNSlackUser2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackUserᚄ,
@@ -5042,8 +5095,8 @@ func (ec *executionContext) fieldContext_Risk_assignees(_ context.Context, field
 	fc = &graphql.FieldContext{
 		Object:     "Risk",
 		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
+		IsMethod:   true,
+		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
 			case "id":
@@ -5149,6 +5202,8 @@ func (ec *executionContext) fieldContext_Risk_responses(_ context.Context, field
 				return ec.fieldContext_Response_title(ctx, field)
 			case "description":
 				return ec.fieldContext_Response_description(ctx, field)
+			case "responderIDs":
+				return ec.fieldContext_Response_responderIDs(ctx, field)
 			case "responders":
 				return ec.fieldContext_Response_responders(ctx, field)
 			case "url":
@@ -8862,44 +8917,80 @@ func (ec *executionContext) _Response(ctx context.Context, sel ast.SelectionSet,
 		case "id":
 			out.Values[i] = ec._Response_id(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "title":
 			out.Values[i] = ec._Response_title(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "description":
 			out.Values[i] = ec._Response_description(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "responderIDs":
+			out.Values[i] = ec._Response_responderIDs(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "responders":
-			out.Values[i] = ec._Response_responders(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				out.Invalids++
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Response_responders(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
 			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "url":
 			out.Values[i] = ec._Response_url(ctx, field, obj)
 		case "status":
 			out.Values[i] = ec._Response_status(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "risks":
 			out.Values[i] = ec._Response_risks(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "createdAt":
 			out.Values[i] = ec._Response_createdAt(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "updatedAt":
 			out.Values[i] = ec._Response_updatedAt(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
@@ -8995,10 +9086,41 @@ func (ec *executionContext) _Risk(ctx context.Context, sel ast.SelectionSet, obj
 				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "assignees":
-			out.Values[i] = ec._Risk_assignees(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				atomic.AddUint32(&out.Invalids, 1)
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Risk_assignees(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
 			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "detectionIndicators":
 			out.Values[i] = ec._Risk_detectionIndicators(ctx, field, obj)
 			if out.Values[i] == graphql.Null {

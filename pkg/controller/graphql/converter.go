@@ -50,22 +50,17 @@ func toGraphQLRisk(risk *model.Risk) *graphql1.Risk {
 
 // toGraphQLResponse converts domain Response to GraphQL Response
 func toGraphQLResponse(response *model.Response) *graphql1.Response {
-	// Store ResponderIDs temporarily in Responders for field resolver
-	responders := make([]*graphql1.SlackUser, len(response.ResponderIDs))
-	for i, id := range response.ResponderIDs {
-		responders[i] = &graphql1.SlackUser{ID: id}
-	}
-
 	return &graphql1.Response{
-		ID:          int(response.ID),
-		Title:       response.Title,
-		Description: response.Description,
-		Responders:  responders, // Will be enriched by field resolver
-		URL:         &response.URL,
-		Status:      toGraphQLResponseStatus(response.Status),
-		Risks:       []*graphql1.Risk{}, // Resolved by field resolver
-		CreatedAt:   response.CreatedAt,
-		UpdatedAt:   response.UpdatedAt,
+		ID:           int(response.ID),
+		Title:        response.Title,
+		Description:  response.Description,
+		ResponderIDs: response.ResponderIDs,
+		Responders:   []*graphql1.SlackUser{}, // Resolved by field resolver
+		URL:          &response.URL,
+		Status:       toGraphQLResponseStatus(response.Status),
+		Risks:        []*graphql1.Risk{}, // Resolved by field resolver
+		CreatedAt:    response.CreatedAt,
+		UpdatedAt:    response.UpdatedAt,
 	}
 }
 
@@ -123,4 +118,3 @@ func toGraphQLKnowledge(k *model.Knowledge) *graphql1.Knowledge {
 		UpdatedAt: k.UpdatedAt,
 	}
 }
-
