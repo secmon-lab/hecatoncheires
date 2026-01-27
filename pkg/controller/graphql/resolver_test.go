@@ -683,3 +683,216 @@ func TestRiskResponsesFieldResolverHTTP(t *testing.T) {
 		}
 	})
 }
+
+func TestSlackUserFieldResolversHTTP(t *testing.T) {
+	t.Run("Response.responders field returns Slack user info via HTTP", func(t *testing.T) {
+		testServer, _, uc := setupTestServer(t)
+		defer testServer.Close()
+
+		ctx := context.Background()
+
+		// Create response with responders
+		resp, err := uc.Response.CreateResponse(ctx, "Test Response", "Description", []string{"U001", "U002"}, "", types.ResponseStatusTodo, []int64{})
+		if err != nil {
+			t.Fatalf("failed to create response: %v", err)
+		}
+
+		query := `
+			query GetResponse($id: Int!) {
+				response(id: $id) {
+					id
+					responderIDs
+					responders {
+						id
+					}
+				}
+			}
+		`
+
+		variables := map[string]interface{}{
+			"id": int(resp.ID),
+		}
+
+		gqlResp := executeGraphQL(t, testServer.URL, query, variables)
+
+		if len(gqlResp.Errors) > 0 {
+			t.Fatalf("GraphQL errors: %v", gqlResp.Errors)
+		}
+
+		var data struct {
+			Response struct {
+				ID           int      `json:"id"`
+				ResponderIDs []string `json:"responderIDs"`
+				Responders   []struct {
+					ID string `json:"id"`
+				} `json:"responders"`
+			} `json:"response"`
+		}
+
+		if err := json.Unmarshal(gqlResp.Data, &data); err != nil {
+			t.Fatalf("failed to unmarshal data: %v", err)
+		}
+
+		// Verify responderIDs
+		if len(data.Response.ResponderIDs) != 2 {
+			t.Errorf("expected 2 responderIDs, got %d", len(data.Response.ResponderIDs))
+		}
+
+		// Verify responders field resolver works
+		if len(data.Response.Responders) != 2 {
+			t.Errorf("expected 2 responders, got %d", len(data.Response.Responders))
+		}
+
+		// Verify IDs match
+		expectedIDs := map[string]bool{"U001": true, "U002": true}
+		for _, responder := range data.Response.Responders {
+			if !expectedIDs[responder.ID] {
+				t.Errorf("unexpected responder ID: %s", responder.ID)
+			}
+		}
+	})
+
+	t.Run("Risk.assignees field returns Slack user info via HTTP", func(t *testing.T) {
+		testServer, _, uc := setupTestServer(t)
+		defer testServer.Close()
+
+		ctx := context.Background()
+
+		// Create risk with assignees
+		risk, err := uc.Risk.CreateRisk(ctx, "Test Risk", "Description", []types.CategoryID{"cat-1"}, "Impact", types.LikelihoodID("likelihood-1"), types.ImpactID("impact-1"), []types.TeamID{"team-1"}, []string{"U101", "U102", "U103"}, "Indicators")
+		if err != nil {
+			t.Fatalf("failed to create risk: %v", err)
+		}
+
+		query := `
+			query GetRisk($id: Int!) {
+				risk(id: $id) {
+					id
+					assigneeIDs
+					assignees {
+						id
+					}
+				}
+			}
+		`
+
+		variables := map[string]interface{}{
+			"id": int(risk.ID),
+		}
+
+		gqlResp := executeGraphQL(t, testServer.URL, query, variables)
+
+		if len(gqlResp.Errors) > 0 {
+			t.Fatalf("GraphQL errors: %v", gqlResp.Errors)
+		}
+
+		var data struct {
+			Risk struct {
+				ID          int      `json:"id"`
+				AssigneeIDs []string `json:"assigneeIDs"`
+				Assignees   []struct {
+					ID string `json:"id"`
+				} `json:"assignees"`
+			} `json:"risk"`
+		}
+
+		if err := json.Unmarshal(gqlResp.Data, &data); err != nil {
+			t.Fatalf("failed to unmarshal data: %v", err)
+		}
+
+		// Verify assigneeIDs
+		if len(data.Risk.AssigneeIDs) != 3 {
+			t.Errorf("expected 3 assigneeIDs, got %d", len(data.Risk.AssigneeIDs))
+		}
+
+		// Verify assignees field resolver works
+		if len(data.Risk.Assignees) != 3 {
+			t.Errorf("expected 3 assignees, got %d", len(data.Risk.Assignees))
+		}
+
+		// Verify IDs match
+		expectedIDs := map[string]bool{"U101": true, "U102": true, "U103": true}
+		for _, assignee := range data.Risk.Assignees {
+			if !expectedIDs[assignee.ID] {
+				t.Errorf("unexpected assignee ID: %s", assignee.ID)
+			}
+		}
+	})
+
+	t.Run("Responders and Assignees return empty arrays when no users specified via HTTP", func(t *testing.T) {
+		testServer, _, uc := setupTestServer(t)
+		defer testServer.Close()
+
+		ctx := context.Background()
+
+		// Create response with no responders
+		resp, err := uc.Response.CreateResponse(ctx, "No Responders", "Description", []string{}, "", types.ResponseStatusTodo, []int64{})
+		if err != nil {
+			t.Fatalf("failed to create response: %v", err)
+		}
+
+		// Create risk with no assignees
+		risk, err := uc.Risk.CreateRisk(ctx, "No Assignees", "Description", []types.CategoryID{"cat-1"}, "Impact", types.LikelihoodID("likelihood-1"), types.ImpactID("impact-1"), []types.TeamID{"team-1"}, []string{}, "Indicators")
+		if err != nil {
+			t.Fatalf("failed to create risk: %v", err)
+		}
+
+		query := `
+			query GetData($responseID: Int!, $riskID: Int!) {
+				response(id: $responseID) {
+					responders {
+						id
+					}
+				}
+				risk(id: $riskID) {
+					assignees {
+						id
+					}
+				}
+			}
+		`
+
+		variables := map[string]interface{}{
+			"responseID": int(resp.ID),
+			"riskID":     int(risk.ID),
+		}
+
+		gqlResp := executeGraphQL(t, testServer.URL, query, variables)
+
+		if len(gqlResp.Errors) > 0 {
+			t.Fatalf("GraphQL errors: %v", gqlResp.Errors)
+		}
+
+		var data struct {
+			Response struct {
+				Responders []struct {
+					ID string `json:"id"`
+				} `json:"responders"`
+			} `json:"response"`
+			Risk struct {
+				Assignees []struct {
+					ID string `json:"id"`
+				} `json:"assignees"`
+			} `json:"risk"`
+		}
+
+		if err := json.Unmarshal(gqlResp.Data, &data); err != nil {
+			t.Fatalf("failed to unmarshal data: %v", err)
+		}
+
+		// Verify empty arrays
+		if data.Response.Responders == nil {
+			t.Error("expected empty array for responders, got nil")
+		}
+		if len(data.Response.Responders) != 0 {
+			t.Errorf("expected 0 responders, got %d", len(data.Response.Responders))
+		}
+
+		if data.Risk.Assignees == nil {
+			t.Error("expected empty array for assignees, got nil")
+		}
+		if len(data.Risk.Assignees) != 0 {
+			t.Errorf("expected 0 assignees, got %d", len(data.Risk.Assignees))
+		}
+	})
+}

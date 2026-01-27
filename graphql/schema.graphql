@@ -52,6 +52,7 @@ type Response {
   id: Int!
   title: String!
   description: String!
+  responderIDs: [String!]!
   responders: [SlackUser!]!
   url: String
   status: ResponseStatus!

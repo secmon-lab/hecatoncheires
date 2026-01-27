@@ -44,6 +44,12 @@ models:
         resolver: true
       knowledges:
         resolver: true
+      assignees:
+        resolver: true
+  Response:
+    fields:
+      responders:
+        resolver: true
   Knowledge:
     fields:
       risk:
