@@ -28,60 +28,60 @@ All risk-specific terminology is replaced with generic equivalents. The table be
 
 | Current | New | Rationale |
 |---------|-----|-----------|
-| `Risk` | `Ticket` | Generic unit of work / case / issue |
-| `Response` | `Action` | Task or action item linked to a ticket |
-| `RiskResponse` | `TicketAction` | Many-to-many join between Ticket and Action |
+| `Risk` | `Case` | Generic unit of work / case |
+| `Response` | `Action` | Task or action item linked to a case |
+| `RiskResponse` | `CaseAction` | Many-to-many join between Case and Action |
 | `RiskConfig` | `FieldSchema` | Configuration describing available custom fields |
-| `RiskUseCase` | `TicketUseCase` | Use case layer |
+| `RiskUseCase` | `CaseUseCase` | Use case layer |
 | `ResponseUseCase` | `ActionUseCase` | Use case layer |
-| `RiskRepository` | `TicketRepository` | Repository interface |
+| `RiskRepository` | `CaseRepository` | Repository interface |
 | `ResponseRepository` | `ActionRepository` | Repository interface |
-| `RiskResponseRepository` | `TicketActionRepository` | Repository interface |
+| `RiskResponseRepository` | `CaseActionRepository` | Repository interface |
 | `ResponseStatus` | `ActionStatus` | Status enum type |
 
 ### 2.2 GraphQL Naming
 
 | Current | New |
 |---------|-----|
-| `type Risk` | `type Ticket` |
+| `type Risk` | `type Case` |
 | `type Response` | `type Action` |
 | `type RiskConfiguration` | `type FieldConfiguration` |
 | `enum ResponseStatus` | `enum ActionStatus` |
-| `input CreateRiskInput` | `input CreateTicketInput` |
-| `input UpdateRiskInput` | `input UpdateTicketInput` |
+| `input CreateRiskInput` | `input CreateCaseInput` |
+| `input UpdateRiskInput` | `input UpdateCaseInput` |
 | `input CreateResponseInput` | `input CreateActionInput` |
 | `input UpdateResponseInput` | `input UpdateActionInput` |
-| Query `risks` | Query `tickets` |
-| Query `risk(id)` | Query `ticket(id)` |
+| Query `risks` | Query `cases` |
+| Query `risk(id)` | Query `case(id)` |
 | Query `riskConfiguration` | Query `fieldConfiguration` |
 | Query `responses` | Query `actions` |
 | Query `response(id)` | Query `action(id)` |
-| Query `responsesByRisk(riskID)` | Query `actionsByTicket(ticketID)` |
-| Mutation `createRisk` | Mutation `createTicket` |
-| Mutation `updateRisk` | Mutation `updateTicket` |
-| Mutation `deleteRisk` | Mutation `deleteTicket` |
+| Query `responsesByRisk(riskID)` | Query `actionsByCase(caseID)` |
+| Mutation `createRisk` | Mutation `createCase` |
+| Mutation `updateRisk` | Mutation `updateCase` |
+| Mutation `deleteRisk` | Mutation `deleteCase` |
 | Mutation `createResponse` | Mutation `createAction` |
 | Mutation `updateResponse` | Mutation `updateAction` |
 | Mutation `deleteResponse` | Mutation `deleteAction` |
-| Mutation `linkResponseToRisk` | Mutation `linkActionToTicket` |
-| Mutation `unlinkResponseFromRisk` | Mutation `unlinkActionFromTicket` |
+| Mutation `linkResponseToRisk` | Mutation `linkActionToCase` |
+| Mutation `unlinkResponseFromRisk` | Mutation `unlinkActionFromCase` |
 
 ### 2.3 Frontend Naming
 
 | Current | New |
 |---------|-----|
-| `RiskList.tsx` | `TicketList.tsx` |
-| `RiskDetail.tsx` | `TicketDetail.tsx` |
-| `RiskForm.tsx` | `TicketForm.tsx` |
-| `RiskDeleteDialog.tsx` | `TicketDeleteDialog.tsx` |
+| `RiskList.tsx` | `CaseList.tsx` |
+| `RiskDetail.tsx` | `CaseDetail.tsx` |
+| `RiskForm.tsx` | `CaseForm.tsx` |
+| `RiskDeleteDialog.tsx` | `CaseDeleteDialog.tsx` |
 | `ResponseList.tsx` | `ActionList.tsx` |
 | `ResponseDetail.tsx` | `ActionDetail.tsx` |
 | `ResponseForm.tsx` | `ActionForm.tsx` |
 | `ResponseDeleteDialog.tsx` | `ActionDeleteDialog.tsx` |
-| `graphql/risk.ts` | `graphql/ticket.ts` |
+| `graphql/risk.ts` | `graphql/case.ts` |
 | `graphql/response.ts` | `graphql/action.ts` |
-| URL `/risks` | URL `/tickets` |
-| URL `/risks/:id` | URL `/tickets/:id` |
+| URL `/risks` | URL `/cases` |
+| URL `/risks/:id` | URL `/cases/:id` |
 | URL `/responses` | URL `/actions` |
 | URL `/responses/:id` | URL `/actions/:id` |
 
@@ -89,15 +89,17 @@ All risk-specific terminology is replaced with generic equivalents. The table be
 
 | Current | New |
 |---------|-----|
-| `risks` | `tickets` |
+| `risks` | `cases` |
 | `responses` | `actions` |
-| `risk_responses` | `ticket_actions` |
+| `risk_responses` | `case_actions` |
+| *(risk fields embedded in document)* | `case_field_values` (new collection) |
+| *(N/A)* | `action_field_values` (new collection) |
 
 ### 2.5 CLI Flag and Environment Variable Naming
 
 | Current | New |
 |---------|-----|
-| `--slack-channel-prefix` (default: `"risk"`) | `--slack-channel-prefix` (default: `"ticket"`) |
+| `--slack-channel-prefix` (default: `"risk"`) | `--slack-channel-prefix` (default: `"case"`) |
 
 ---
 
@@ -138,20 +140,20 @@ Each custom field is associated with a target entity:
 
 | Target | Description |
 |--------|-------------|
-| `ticket` | Field appears on Ticket entities |
+| `case` | Field appears on Case entities |
 | `action` | Field appears on Action entities |
 
 ### 3.4 Built-in Fields (Not Customizable)
 
 The following fields remain hardcoded and are NOT configurable via custom fields:
 
-**Ticket built-in fields:**
+**Case built-in fields:**
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | `int64` | Auto-generated unique identifier |
-| `title` | `string` | Ticket title (renamed from `name`) |
-| `description` | `string` | Ticket description |
+| `title` | `string` | Case title (renamed from `name`) |
+| `description` | `string` | Case description |
 | `assigneeIDs` | `[]string` | Slack user IDs of assignees |
 | `slackChannelID` | `string` | Associated Slack channel |
 | `createdAt` | `time.Time` | Creation timestamp |
@@ -176,12 +178,12 @@ The following table shows how each current risk-specific field maps to a custom 
 
 | Current Field | Custom Field ID | Custom Field Type | Target |
 |---------------|----------------|-------------------|--------|
-| `categoryIDs` | `category` | `multi-select` | `ticket` |
-| `specificImpact` | `specific-impact` | `text` | `ticket` |
-| `likelihoodID` | `likelihood` | `scored-select` | `ticket` |
-| `impactID` | `impact` | `scored-select` | `ticket` |
-| `responseTeamIDs` | `response-team` | `multi-select` | `ticket` |
-| `detectionIndicators` | `detection-indicators` | `text` | `ticket` |
+| `categoryIDs` | `category` | `multi-select` | `case` |
+| `specificImpact` | `specific-impact` | `text` | `case` |
+| `likelihoodID` | `likelihood` | `scored-select` | `case` |
+| `impactID` | `impact` | `scored-select` | `case` |
+| `responseTeamIDs` | `response-team` | `multi-select` | `case` |
+| `detectionIndicators` | `detection-indicators` | `text` | `case` |
 
 ---
 
@@ -195,10 +197,10 @@ The configuration file (`config.toml`) defines custom fields and their options.
 # =============================================================================
 # Entity Display Labels (optional)
 # Customize how entities are displayed in the UI.
-# These do NOT affect internal naming (code always uses "ticket" / "action").
+# These do NOT affect internal naming (code always uses "case" / "action").
 # =============================================================================
 [labels]
-ticket = "Risk"       # Default: "Ticket"
+case = "Risk"         # Default: "Case"
 action = "Response"   # Default: "Action"
 
 # =============================================================================
@@ -212,8 +214,8 @@ id = "category"
 name = "Category"
 type = "multi-select"
 required = true
-target = "ticket"
-description = "Classification of the ticket"
+target = "case"
+description = "Classification of the case"
 
   [[fields.options]]
   id = "data-breach"
@@ -239,7 +241,7 @@ id = "likelihood"
 name = "Likelihood"
 type = "scored-select"
 required = true
-target = "ticket"
+target = "case"
 description = "Probability of occurrence"
 
   [[fields.options]]
@@ -278,7 +280,7 @@ id = "impact"
 name = "Impact"
 type = "scored-select"
 required = true
-target = "ticket"
+target = "case"
 description = "Severity of potential harm"
 
   [[fields.options]]
@@ -305,7 +307,7 @@ id = "response-team"
 name = "Response Team"
 type = "multi-select"
 required = false
-target = "ticket"
+target = "case"
 
   [[fields.options]]
   id = "security-team"
@@ -321,8 +323,8 @@ id = "specific-impact"
 name = "Specific Impact"
 type = "text"
 required = false
-target = "ticket"
-description = "Detailed description of impact for this specific ticket"
+target = "case"
+description = "Detailed description of impact for this specific case"
 
 # --- Example: Text field (replaces detectionIndicators) ---
 [[fields]]
@@ -330,7 +332,7 @@ id = "detection-indicators"
 name = "Detection Indicators"
 type = "text"
 required = false
-target = "ticket"
+target = "case"
 description = "Triggers and indicators for detection"
 
 # --- Example: Custom field on Action ---
@@ -368,7 +370,7 @@ The configuration loader MUST enforce the following rules at startup:
 3. **ID format**: All `id` values must match `^[a-z0-9]+(-[a-z0-9]+)*$`.
 4. **Required name**: `name` is required for all fields and options.
 5. **Type validity**: `type` must be one of the defined field types.
-6. **Target validity**: `target` must be `"ticket"` or `"action"`.
+6. **Target validity**: `target` must be `"case"` or `"action"`.
 7. **Score requirement**: `scored-select` options MUST have a `score` value. Other types MUST NOT.
 8. **Options requirement**: `select`, `multi-select`, and `scored-select` types MUST have at least one option. `text`, `number`, `user`, `multi-user`, `date`, `url` types MUST NOT have options.
 
@@ -399,7 +401,7 @@ const (
 type FieldTarget string
 
 const (
-    FieldTargetTicket FieldTarget = "ticket"
+    FieldTargetCase FieldTarget = "case"
     FieldTargetAction FieldTarget = "action"
 )
 ```
@@ -421,20 +423,21 @@ const (
 
 ### 5.2 New Domain Models
 
-#### `pkg/domain/model/ticket.go` (replaces `risk.go`)
+#### `pkg/domain/model/case.go` (replaces `risk.go`)
 
 ```go
-type Ticket struct {
+type Case struct {
     ID             int64
     Title          string              // renamed from Name
     Description    string
     AssigneeIDs    []string
     SlackChannelID string
-    Fields         map[string]any      // custom field values keyed by FieldID
     CreatedAt      time.Time
     UpdatedAt      time.Time
 }
 ```
+
+Note: Custom field values are NOT stored on the Case struct. They are stored in a dedicated collection and loaded separately (see Section 5.3).
 
 #### `pkg/domain/model/action.go` (replaces `response.go`)
 
@@ -446,19 +449,33 @@ type Action struct {
     AssigneeIDs []string             // renamed from ResponderIDs
     URL         string
     Status      types.ActionStatus   // renamed from ResponseStatus
-    Fields      map[string]any       // custom field values keyed by FieldID
     CreatedAt   time.Time
     UpdatedAt   time.Time
 }
 ```
 
-#### `pkg/domain/model/ticket_action.go` (replaces `risk_response.go`)
+Note: Same as Case -- custom field values are stored in a dedicated collection.
+
+#### `pkg/domain/model/case_action.go` (replaces `risk_response.go`)
 
 ```go
-type TicketAction struct {
-    TicketID  int64
+type CaseAction struct {
+    CaseID  int64
     ActionID  int64
     CreatedAt time.Time
+}
+```
+
+#### `pkg/domain/model/field_value.go` (new)
+
+```go
+// FieldValue represents a single custom field value attached to an entity.
+// Stored in a dedicated Firestore collection, not embedded in the parent document.
+type FieldValue struct {
+    EntityID  int64          // CaseID or Action ID
+    FieldID   string         // References FieldDefinition.ID from configuration
+    Value     any            // Actual value; Go type depends on field type (see Section 5.3)
+    UpdatedAt time.Time
 }
 ```
 
@@ -489,26 +506,39 @@ type FieldSchema struct {
 }
 
 type EntityLabels struct {
-    Ticket string // display name for Ticket (default: "Ticket")
+    Case   string // display name for Case (default: "Case")
     Action string // display name for Action (default: "Action")
 }
 ```
 
 ### 5.3 Custom Field Value Storage
 
-Custom field values are stored as `map[string]any` on the `Ticket` and `Action` structs. The value type depends on the field type:
+Custom field values are stored in **dedicated Firestore collections** (`case_field_values` and `action_field_values`), not embedded in the parent Case/Action documents. Each `FieldValue` document represents a single field's value for a single entity.
 
-| Field Type | Go Value Type | Example |
-|------------|--------------|---------|
-| `text` | `string` | `"Some text"` |
-| `number` | `float64` | `42.5` |
-| `select` | `string` | `"option-id"` |
-| `multi-select` | `[]string` | `["opt-a", "opt-b"]` |
-| `user` | `string` | `"U12345"` |
-| `multi-user` | `[]string` | `["U12345", "U67890"]` |
-| `date` | `string` (RFC 3339) | `"2025-01-15T00:00:00Z"` |
-| `url` | `string` | `"https://example.com"` |
-| `scored-select` | `string` | `"option-id"` |
+#### Value Type Mapping
+
+The `Value` field in `FieldValue` holds a Go `any` whose concrete type depends on the field type:
+
+| Field Type | Go Value Type | Firestore Type | Example |
+|------------|--------------|----------------|---------|
+| `text` | `string` | `string` | `"Some text"` |
+| `number` | `float64` | `number` | `42.5` |
+| `select` | `string` | `string` | `"option-id"` |
+| `multi-select` | `[]string` | `array<string>` | `["opt-a", "opt-b"]` |
+| `user` | `string` | `string` | `"U12345"` |
+| `multi-user` | `[]string` | `array<string>` | `["U12345", "U67890"]` |
+| `date` | `string` (RFC 3339) | `string` | `"2025-01-15T00:00:00Z"` |
+| `url` | `string` | `string` | `"https://example.com"` |
+| `scored-select` | `string` | `string` | `"option-id"` |
+
+#### Design Rationale
+
+Storing field values in a dedicated collection rather than a map inside the parent document provides:
+
+1. **Independent lifecycle** -- Field values can be created, updated, and deleted without touching the parent Case/Action document.
+2. **Consistent query pattern** -- Follows the same pattern as `case_actions` (join table). Simple equality queries (`Where("entity_id", "==", id)`) require no composite indexes.
+3. **Batch operations** -- Parallel per-entity queries for batch loading, consistent with the existing Firestore index policy.
+4. **Schema evolution** -- Adding or removing custom fields from configuration does not require modifying existing parent documents. Orphaned field values (whose field definition has been removed from config) are simply ignored at read time.
 
 ### 5.4 Custom Field Validation
 
@@ -519,19 +549,20 @@ type FieldValidator struct {
     schema *config.FieldSchema
 }
 
-func (v *FieldValidator) ValidateTicketFields(fields map[string]any) error
-func (v *FieldValidator) ValidateActionFields(fields map[string]any) error
+func (v *FieldValidator) ValidateCaseFields(fields []*model.FieldValue) error
+func (v *FieldValidator) ValidateActionFields(fields []*model.FieldValue) error
 ```
 
 Validation rules:
 1. Required fields must be present and non-empty.
-2. Field IDs in the value map must exist in the schema for the corresponding target.
+2. `FieldID` of each `FieldValue` must exist in the schema for the corresponding target.
 3. Unknown field IDs are rejected.
 4. Value types must match the expected Go type for the field type.
 5. For `select` / `scored-select` / `multi-select`, values must be valid option IDs.
 6. For `user` / `multi-user`, values must be non-empty strings.
 7. For `date`, values must be valid RFC 3339 strings.
 8. For `url`, values must be valid URL strings.
+9. Duplicate field IDs within a single request are rejected.
 
 ---
 
@@ -543,9 +574,11 @@ Validation rules:
 
 ```go
 type Repository interface {
-    Ticket()       TicketRepository       // was Risk()
+    Case()       CaseRepository       // was Risk()
     Action()       ActionRepository       // was Response()
-    TicketAction() TicketActionRepository // was RiskResponse()
+    CaseAction() CaseActionRepository // was RiskResponse()
+    CaseField()  FieldValueRepository   // new: custom field values for cases
+    ActionField()  FieldValueRepository   // new: custom field values for actions
     Slack()        SlackRepository        // unchanged
     SlackUser()    SlackUserRepository    // unchanged
     Source()       SourceRepository       // unchanged
@@ -557,14 +590,14 @@ type Repository interface {
 }
 ```
 
-#### `pkg/domain/interfaces/ticket.go` (replaces `risk.go`)
+#### `pkg/domain/interfaces/case.go` (replaces `risk.go`)
 
 ```go
-type TicketRepository interface {
-    Create(ctx context.Context, ticket *model.Ticket) (*model.Ticket, error)
-    Get(ctx context.Context, id int64) (*model.Ticket, error)
-    List(ctx context.Context) ([]*model.Ticket, error)
-    Update(ctx context.Context, ticket *model.Ticket) (*model.Ticket, error)
+type CaseRepository interface {
+    Create(ctx context.Context, c *model.Case) (*model.Case, error)
+    Get(ctx context.Context, id int64) (*model.Case, error)
+    List(ctx context.Context) ([]*model.Case, error)
+    Update(ctx context.Context, c *model.Case) (*model.Case, error)
     Delete(ctx context.Context, id int64) error
 }
 ```
@@ -581,27 +614,56 @@ type ActionRepository interface {
 }
 ```
 
-#### `pkg/domain/interfaces/ticket_action.go` (replaces `risk_response.go`)
+#### `pkg/domain/interfaces/case_action.go` (replaces `risk_response.go`)
 
 ```go
-type TicketActionRepository interface {
-    Link(ctx, ticketID, actionID int64) error
-    Unlink(ctx, ticketID, actionID int64) error
-    GetActionsByTicket(ctx, ticketID int64) ([]int64, error)
-    GetActionsByTickets(ctx, ticketIDs []int64) (map[int64][]int64, error)
-    GetTicketsByAction(ctx, actionID int64) ([]int64, error)
-    GetTicketsByActions(ctx, actionIDs []int64) (map[int64][]int64, error)
+type CaseActionRepository interface {
+    Link(ctx, caseID, actionID int64) error
+    Unlink(ctx, caseID, actionID int64) error
+    GetActionsByCase(ctx, caseID int64) ([]int64, error)
+    GetActionsByCases(ctx, caseIDs []int64) (map[int64][]int64, error)
+    GetCasesByAction(ctx, actionID int64) ([]int64, error)
+    GetCasesByActions(ctx, actionIDs []int64) (map[int64][]int64, error)
     DeleteByAction(ctx, actionID int64) error
-    DeleteByTicket(ctx, ticketID int64) error
+    DeleteByCase(ctx, caseID int64) error
+}
+```
+
+#### `pkg/domain/interfaces/field_value.go` (new)
+
+A single generic interface used for both `CaseField()` and `ActionField()`. The underlying Firestore collection differs, but the interface is identical.
+
+```go
+// FieldValueRepository manages custom field values for an entity type.
+// Two instances exist: one backed by "case_field_values" collection,
+// another by "action_field_values" collection.
+type FieldValueRepository interface {
+    // GetByEntityID returns all field values for a single entity.
+    // Query: Where("entity_id", "==", entityID)
+    GetByEntityID(ctx context.Context, entityID int64) ([]*model.FieldValue, error)
+
+    // GetByEntityIDs returns field values for multiple entities.
+    // Implemented as parallel per-entity queries to avoid composite indexes.
+    GetByEntityIDs(ctx context.Context, entityIDs []int64) (map[int64][]*model.FieldValue, error)
+
+    // Save persists field values for an entity.
+    // This is a full replacement: existing field values for the entity are
+    // deleted, then the provided values are written.
+    // Uses deterministic document IDs ("{entityID}_{fieldID}") for upsert semantics.
+    Save(ctx context.Context, entityID int64, fields []*model.FieldValue) error
+
+    // DeleteByEntityID deletes all field values for an entity.
+    // Called when the parent Case or Action is deleted.
+    DeleteByEntityID(ctx context.Context, entityID int64) error
 }
 ```
 
 ### 6.2 Firestore Storage
 
-#### Ticket Document Structure
+#### Case Document Structure
 
 ```
-Collection: "tickets"
+Collection: "cases"
 Document ID: auto-generated int64
 
 {
@@ -609,18 +671,12 @@ Document ID: auto-generated int64
   "description": "...",
   "assignee_ids": ["U12345", "U67890"],
   "slack_channel_id": "C123456",
-  "fields": {
-    "category": ["data-breach", "compliance"],
-    "likelihood": "high",
-    "impact": "critical",
-    "response-team": ["security-team"],
-    "specific-impact": "Customer PII exposed via...",
-    "detection-indicators": "Abnormal API access patterns..."
-  },
   "created_at": "2025-01-15T10:00:00Z",
   "updated_at": "2025-01-15T10:00:00Z"
 }
 ```
+
+Note: No `fields` map in the document. Custom field values are in the `case_field_values` collection.
 
 #### Action Document Structure
 
@@ -634,17 +690,73 @@ Document ID: auto-generated int64
   "assignee_ids": ["U12345"],
   "url": "https://github.com/...",
   "status": "in-progress",
-  "fields": {
-    "priority": "high"
-  },
   "created_at": "2025-01-15T10:00:00Z",
   "updated_at": "2025-01-15T10:00:00Z"
 }
 ```
 
+Note: No `fields` map. Custom field values are in the `action_field_values` collection.
+
+#### Case Field Value Document Structure
+
+```
+Collection: "case_field_values"
+Document ID: "{caseID}_{fieldID}"  (deterministic, enables upsert)
+
+Example document ID: "42_category"
+{
+  "entity_id": 42,
+  "field_id": "category",
+  "value": ["data-breach", "compliance"],
+  "updated_at": "2025-01-15T10:00:00Z"
+}
+
+Example document ID: "42_likelihood"
+{
+  "entity_id": 42,
+  "field_id": "likelihood",
+  "value": "high",
+  "updated_at": "2025-01-15T10:00:00Z"
+}
+
+Example document ID: "42_specific-impact"
+{
+  "entity_id": 42,
+  "field_id": "specific-impact",
+  "value": "Customer PII exposed via unprotected API endpoint",
+  "updated_at": "2025-01-15T10:00:00Z"
+}
+```
+
+#### Action Field Value Document Structure
+
+```
+Collection: "action_field_values"
+Document ID: "{actionID}_{fieldID}"
+
+Example document ID: "7_priority"
+{
+  "entity_id": 7,
+  "field_id": "priority",
+  "value": "high",
+  "updated_at": "2025-01-15T10:00:00Z"
+}
+```
+
+#### Query Patterns
+
+| Operation | Query | Index Required |
+|-----------|-------|---------------|
+| Get all fields for a case | `case_field_values.Where("entity_id", "==", 42)` | No (single equality) |
+| Get all fields for multiple cases | Parallel queries per case ID | No |
+| Save fields for a case | Batch write with deterministic doc IDs | No |
+| Delete all fields for a case | Query by entity_id + batch delete | No |
+
+All queries use single-field equality filters, consistent with the Firestore index policy.
+
 ### 6.3 Memory Repository
 
-The memory repository implementation follows the same structure as Firestore, storing `map[string]any` for custom fields.
+The memory repository stores field values in a `map[int64][]*model.FieldValue` (keyed by entity ID). The `FieldValueRepository` interface is implemented identically for case and action field values, differing only in the backing map instance.
 
 ---
 
@@ -690,7 +802,7 @@ type FieldDefinition {
 }
 
 type EntityLabels {
-  ticket: String!
+  case: String!
   action: String!
 }
 
@@ -703,7 +815,7 @@ type FieldConfiguration {
 ### 7.2 Custom Field Value Representation
 
 ```graphql
-# A single custom field value on a ticket or action
+# A single custom field value on a case or action
 type FieldValue {
   fieldId: String!
   # Value encoded as JSON. Clients parse based on field type from FieldConfiguration.
@@ -732,14 +844,14 @@ scalar Any
 ### 7.3 Updated Entity Types
 
 ```graphql
-type Ticket {
+type Case {
   id: Int!
   title: String!
   description: String!
   assigneeIDs: [String!]!
   assignees: [SlackUser!]!
   slackChannelID: String
-  fields: [FieldValue!]!
+  fields: [FieldValue!]!       # Resolved via DataLoader from case_field_values collection
   actions: [Action!]!
   knowledges: [Knowledge!]!
   createdAt: Time!
@@ -754,8 +866,8 @@ type Action {
   assignees: [SlackUser!]!
   url: String
   status: ActionStatus!
-  fields: [FieldValue!]!
-  tickets: [Ticket!]!
+  fields: [FieldValue!]!       # Resolved via DataLoader from action_field_values collection
+  cases: [Case!]!
   createdAt: Time!
   updatedAt: Time!
 }
@@ -770,17 +882,19 @@ enum ActionStatus {
 }
 ```
 
+The `fields` on both `Case` and `Action` are **not** stored in the parent document. They are resolved by the GraphQL resolver via DataLoader, which batch-loads field values from the dedicated collection using `FieldValueRepository.GetByEntityIDs()`.
+
 ### 7.4 Updated Inputs
 
 ```graphql
-input CreateTicketInput {
+input CreateCaseInput {
   title: String!
   description: String!
   assigneeIDs: [String!]
   fields: [FieldValueInput!]
 }
 
-input UpdateTicketInput {
+input UpdateCaseInput {
   id: Int!
   title: String!
   description: String!
@@ -794,7 +908,7 @@ input CreateActionInput {
   assigneeIDs: [String!]
   url: String
   status: ActionStatus
-  ticketIDs: [Int!]
+  caseIDs: [Int!]
   fields: [FieldValueInput!]
 }
 
@@ -805,7 +919,7 @@ input UpdateActionInput {
   assigneeIDs: [String!]
   url: String
   status: ActionStatus
-  ticketIDs: [Int!]
+  caseIDs: [Int!]
   fields: [FieldValueInput!]
 }
 ```
@@ -816,14 +930,14 @@ input UpdateActionInput {
 type Query {
   health: String!
 
-  # Tickets (was risks)
-  tickets: [Ticket!]!
-  ticket(id: Int!): Ticket
+  # Cases (was risks)
+  cases: [Case!]!
+  case(id: Int!): Case
 
   # Actions (was responses)
   actions: [Action!]!
   action(id: Int!): Action
-  actionsByTicket(ticketID: Int!): [Action!]!
+  actionsByCase(caseID: Int!): [Action!]!
 
   # Configuration
   fieldConfiguration: FieldConfiguration!
@@ -840,19 +954,19 @@ type Query {
 type Mutation {
   noop: Boolean
 
-  # Tickets (was risks)
-  createTicket(input: CreateTicketInput!): Ticket!
-  updateTicket(input: UpdateTicketInput!): Ticket!
-  deleteTicket(id: Int!): Boolean!
+  # Cases (was risks)
+  createCase(input: CreateCaseInput!): Case!
+  updateCase(input: UpdateCaseInput!): Case!
+  deleteCase(id: Int!): Boolean!
 
   # Actions (was responses)
   createAction(input: CreateActionInput!): Action!
   updateAction(input: UpdateActionInput!): Action!
   deleteAction(id: Int!): Boolean!
 
-  # Ticket-Action linking (was risk-response)
-  linkActionToTicket(actionID: Int!, ticketID: Int!): Boolean!
-  unlinkActionFromTicket(actionID: Int!, ticketID: Int!): Boolean!
+  # Case-Action linking (was risk-response)
+  linkActionToCase(actionID: Int!, caseID: Int!): Boolean!
+  unlinkActionFromCase(actionID: Int!, caseID: Int!): Boolean!
 
   # Sources (unchanged)
   createNotionDBSource(input: CreateNotionDBSourceInput!): Source!
@@ -868,27 +982,34 @@ type Mutation {
 
 ## 8. Use Case Layer Changes
 
-### 8.1 TicketUseCase (replaces RiskUseCase)
+### 8.1 CaseUseCase (replaces RiskUseCase)
 
 ```go
-type TicketUseCase struct {
+type CaseUseCase struct {
     repo           interfaces.Repository
     fieldSchema    *config.FieldSchema
     fieldValidator *FieldValidator
     slackService   slack.Service
 }
 
-func (uc *TicketUseCase) CreateTicket(ctx, title, description string, assigneeIDs []string, fields map[string]any) (*model.Ticket, error)
-func (uc *TicketUseCase) UpdateTicket(ctx, id int64, title, description string, assigneeIDs []string, fields map[string]any) (*model.Ticket, error)
-func (uc *TicketUseCase) DeleteTicket(ctx, id int64) error
-func (uc *TicketUseCase) GetTicket(ctx, id int64) (*model.Ticket, error)
-func (uc *TicketUseCase) ListTickets(ctx) ([]*model.Ticket, error)
-func (uc *TicketUseCase) GetFieldConfiguration() *config.FieldSchema
+func (uc *CaseUseCase) CreateCase(ctx, title, description string, assigneeIDs []string, fields []*model.FieldValue) (*model.Case, error)
+func (uc *CaseUseCase) UpdateCase(ctx, id int64, title, description string, assigneeIDs []string, fields []*model.FieldValue) (*model.Case, error)
+func (uc *CaseUseCase) DeleteCase(ctx, id int64) error
+func (uc *CaseUseCase) GetCase(ctx, id int64) (*model.Case, error)
+func (uc *CaseUseCase) GetCaseFieldValues(ctx, caseID int64) ([]*model.FieldValue, error)
+func (uc *CaseUseCase) ListCases(ctx) ([]*model.Case, error)
+func (uc *CaseUseCase) GetFieldConfiguration() *config.FieldSchema
 ```
 
 Key changes:
 - No more individual `ValidateCategoryID`, `ValidateLikelihoodID`, etc. methods. A single `FieldValidator` handles all validation.
-- `CreateTicket` validates custom fields via `FieldValidator.ValidateTicketFields(fields)` before persisting.
+- `CreateCase` validates custom fields via `FieldValidator.ValidateCaseFields(fields)`, then persists the case and its field values in two separate repository calls:
+  1. `repo.Case().Create(ctx, c)` -- creates the case document.
+  2. `repo.CaseField().Save(ctx, c.ID, fields)` -- saves field values to the dedicated collection.
+- `DeleteCase` deletes both the case document and all associated field values:
+  1. `repo.CaseField().DeleteByEntityID(ctx, id)` -- deletes field values.
+  2. `repo.CaseAction().DeleteByCase(ctx, id)` -- deletes case-action links.
+  3. `repo.Case().Delete(ctx, id)` -- deletes the case document.
 - Slack channel creation logic remains, using `title` instead of `name`.
 
 ### 8.2 ActionUseCase (replaces ResponseUseCase)
@@ -900,16 +1021,19 @@ type ActionUseCase struct {
     fieldValidator *FieldValidator
 }
 
-func (uc *ActionUseCase) CreateAction(ctx, title, description string, assigneeIDs []string, url string, status types.ActionStatus, ticketIDs []int64, fields map[string]any) (*model.Action, error)
-func (uc *ActionUseCase) UpdateAction(ctx, id int64, ..., fields map[string]any) (*model.Action, error)
+func (uc *ActionUseCase) CreateAction(ctx, title, description string, assigneeIDs []string, url string, status types.ActionStatus, caseIDs []int64, fields []*model.FieldValue) (*model.Action, error)
+func (uc *ActionUseCase) UpdateAction(ctx, id int64, ..., fields []*model.FieldValue) (*model.Action, error)
 func (uc *ActionUseCase) DeleteAction(ctx, id int64) error
 func (uc *ActionUseCase) GetAction(ctx, id int64) (*model.Action, error)
+func (uc *ActionUseCase) GetActionFieldValues(ctx, actionID int64) ([]*model.FieldValue, error)
 func (uc *ActionUseCase) ListActions(ctx) ([]*model.Action, error)
-func (uc *ActionUseCase) LinkActionToTicket(ctx, actionID, ticketID int64) error
-func (uc *ActionUseCase) UnlinkActionFromTicket(ctx, actionID, ticketID int64) error
-func (uc *ActionUseCase) GetActionsByTicket(ctx, ticketID int64) ([]*model.Action, error)
-func (uc *ActionUseCase) GetTicketsByAction(ctx, actionID int64) ([]*model.Ticket, error)
+func (uc *ActionUseCase) LinkActionToCase(ctx, actionID, caseID int64) error
+func (uc *ActionUseCase) UnlinkActionFromCase(ctx, actionID, caseID int64) error
+func (uc *ActionUseCase) GetActionsByCase(ctx, caseID int64) ([]*model.Action, error)
+func (uc *ActionUseCase) GetCasesByAction(ctx, actionID int64) ([]*model.Case, error)
 ```
+
+Same pattern as CaseUseCase: create/update/delete operations handle both the entity document and field values via separate repository calls.
 
 ### 8.3 UseCases Struct
 
@@ -918,7 +1042,7 @@ type UseCases struct {
     repo             interfaces.Repository
     fieldSchema      *config.FieldSchema
     // ... services ...
-    Ticket           *TicketUseCase   // was Risk
+    Case          *CaseUseCase   // was Risk
     Action           *ActionUseCase   // was Response
     Auth             AuthUseCaseInterface
     Slack            *SlackUseCases
@@ -935,7 +1059,7 @@ func WithFieldSchema(schema *config.FieldSchema) Option  // was WithRiskConfig
 
 ### 9.1 Dynamic Form Rendering
 
-The current `RiskForm.tsx` has hardcoded form fields for risk-specific attributes. The new `TicketForm.tsx` must render fields dynamically based on the `FieldConfiguration` query.
+The current `RiskForm.tsx` has hardcoded form fields for risk-specific attributes. The new `CaseForm.tsx` must render fields dynamically based on the `FieldConfiguration` query.
 
 #### Field Rendering Strategy
 
@@ -956,7 +1080,7 @@ Each field type maps to a specific form input component:
 #### Component Architecture
 
 ```
-TicketForm
+CaseForm
   ├── Built-in fields (title, description, assignees)
   ├── CustomFieldRenderer (iterates fieldConfiguration.fields where target=TICKET)
   │   ├── TextField
@@ -973,16 +1097,16 @@ TicketForm
 
 ### 9.2 Dynamic Detail View
 
-`TicketDetail.tsx` renders custom field values dynamically:
+`CaseDetail.tsx` renders custom field values dynamically:
 
-- Iterate over `ticket.fields` and resolve display names and option labels from `fieldConfiguration`.
+- Iterate over `case.fields` and resolve display names and option labels from `fieldConfiguration`.
 - For `select` / `scored-select`, display the option `name` (and optionally score).
 - For `multi-select`, display chips for each selected option.
 - For `user` / `multi-user`, display resolved Slack user names and avatars.
 
 ### 9.3 Dynamic List View
 
-`TicketList.tsx` renders a table with configurable columns:
+`CaseList.tsx` renders a table with configurable columns:
 
 - Built-in columns: ID, Title, Assignees, Created At.
 - Custom field columns are rendered based on field configuration.
@@ -995,7 +1119,7 @@ The frontend fetches `fieldConfiguration.labels` to display the correct entity n
 ```typescript
 // Instead of hardcoded "Risk" / "Response"
 const { data } = useQuery(GET_FIELD_CONFIGURATION);
-const ticketLabel = data?.fieldConfiguration.labels.ticket ?? "Ticket";
+const caseLabel = data?.fieldConfiguration.labels.case ?? "Case";
 const actionLabel = data?.fieldConfiguration.labels.action ?? "Action";
 ```
 
@@ -1010,7 +1134,7 @@ All UI text (page titles, button labels, breadcrumbs, empty states) uses these d
 ```go
 type Knowledge struct {
     ID        KnowledgeID
-    TicketID  int64        // was RiskID
+    CaseID  int64        // was RiskID
     SourceID  SourceID
     SourceURL string
     Title     string
@@ -1028,8 +1152,8 @@ type Knowledge struct {
 type KnowledgeRepository interface {
     Create(ctx, knowledge) error
     Get(ctx, id) (*model.Knowledge, error)
-    ListByTicketID(ctx, ticketID int64) ([]*model.Knowledge, error)      // was ListByRiskID
-    ListByTicketIDs(ctx, ticketIDs []int64) (map[int64][]*model.Knowledge, error)  // was ListByRiskIDs
+    ListByCaseID(ctx, caseID int64) ([]*model.Knowledge, error)      // was ListByRiskID
+    ListByCaseIDs(ctx, caseIDs []int64) (map[int64][]*model.Knowledge, error)  // was ListByRiskIDs
     ListBySourceID(ctx, sourceID) ([]*model.Knowledge, error)
     ListWithPagination(ctx, limit, offset int) ([]*model.Knowledge, int, error)
     Delete(ctx, id) error
@@ -1041,8 +1165,8 @@ type KnowledgeRepository interface {
 ```graphql
 type Knowledge {
   id: String!
-  ticketID: Int!    # was riskID
-  ticket: Ticket    # was risk
+  caseID: Int!    # was riskID
+  case: Case     # was risk
   sourceID: String!
   sourceURL: String!
   title: String!
@@ -1079,16 +1203,17 @@ The following domain-specific types are no longer needed as standalone types, si
 
 A migration command (`hecatoncheires migrate generic`) is needed to transform existing data:
 
-1. **Rename collections**: Copy documents from `risks` to `tickets`, `responses` to `actions`, `risk_responses` to `ticket_actions`.
-2. **Transform Ticket documents**: Move risk-specific fields into the `fields` map.
-3. **Transform Action documents**: Rename `responder_ids` to `assignee_ids`, add empty `fields` map.
-4. **Update Knowledge references**: Rename `risk_id` field to `ticket_id`.
-5. **Clean up**: After verification, delete old collections.
+1. **Copy and transform `risks` → `cases`**: Copy documents, rename `name` → `title`, remove risk-specific fields from the document.
+2. **Extract field values → `case_field_values`**: For each risk document, extract the risk-specific fields (`category_ids`, `likelihood_id`, `impact_id`, `response_team_ids`, `specific_impact`, `detection_indicators`) and create individual `FieldValue` documents in `case_field_values`.
+3. **Copy and transform `responses` → `actions`**: Copy documents, rename `responder_ids` → `assignee_ids`.
+4. **Copy `risk_responses` → `case_actions`**: Rename `risk_id` → `case_id`, `response_id` → `action_id`.
+5. **Update Knowledge references**: Rename `risk_id` field to `case_id` in knowledge documents.
+6. **Clean up**: After verification, delete old collections.
 
-### 12.2 Migration Transformation (Ticket)
+### 12.2 Migration Transformation (Case)
 
 ```
-Before (Risk document):
+Before (Risk document in "risks" collection, doc ID: "42"):
 {
   "name": "API Data Breach",
   "description": "...",
@@ -1104,23 +1229,41 @@ Before (Risk document):
   "updated_at": "..."
 }
 
-After (Ticket document):
+After -- Case document in "cases" collection (doc ID: "42"):
 {
   "title": "API Data Breach",
   "description": "...",
   "assignee_ids": ["U12345"],
   "slack_channel_id": "C123",
-  "fields": {
-    "category": ["data-breach"],
-    "specific-impact": "Customer PII exposed",
-    "likelihood": "high",
-    "impact": "critical",
-    "response-team": ["security-team"],
-    "detection-indicators": "Abnormal access patterns"
-  },
   "created_at": "...",
   "updated_at": "..."
 }
+
+After -- Field value documents in "case_field_values" collection:
+
+  Document "42_category":
+  { "entity_id": 42, "field_id": "category",
+    "value": ["data-breach"], "updated_at": "..." }
+
+  Document "42_specific-impact":
+  { "entity_id": 42, "field_id": "specific-impact",
+    "value": "Customer PII exposed", "updated_at": "..." }
+
+  Document "42_likelihood":
+  { "entity_id": 42, "field_id": "likelihood",
+    "value": "high", "updated_at": "..." }
+
+  Document "42_impact":
+  { "entity_id": 42, "field_id": "impact",
+    "value": "critical", "updated_at": "..." }
+
+  Document "42_response-team":
+  { "entity_id": 42, "field_id": "response-team",
+    "value": ["security-team"], "updated_at": "..." }
+
+  Document "42_detection-indicators":
+  { "entity_id": 42, "field_id": "detection-indicators",
+    "value": "Abnormal access patterns", "updated_at": "..." }
 ```
 
 ### 12.3 CLI Command
@@ -1139,19 +1282,19 @@ hecatoncheires migrate generic \
 ### Phase 1: Core Abstraction (Backend)
 
 1. Introduce new domain types (`FieldID`, `FieldType`, `FieldTarget`, `ActionStatus`).
-2. Create `FieldSchema` and `FieldDefinition` domain config models.
+2. Create `FieldSchema`, `FieldDefinition`, and `FieldValue` domain models.
 3. Update configuration loader to parse custom fields from TOML.
 4. Implement `FieldValidator`.
-5. Create `Ticket` and `Action` domain models with `Fields map[string]any`.
-6. Create `TicketAction` join model.
-7. Update repository interfaces (`TicketRepository`, `ActionRepository`, `TicketActionRepository`).
-8. Implement memory repository for new interfaces.
-9. Implement firestore repository for new interfaces.
+5. Create `Case` and `Action` domain models (without embedded fields).
+6. Create `CaseAction` join model.
+7. Update repository interfaces (`CaseRepository`, `ActionRepository`, `CaseActionRepository`, `FieldValueRepository`).
+8. Implement memory repository for all new interfaces including `FieldValueRepository`.
+9. Implement firestore repository for all new interfaces including `FieldValueRepository` (backed by `case_field_values` and `action_field_values` collections).
 10. Write tests for all new code.
 
 ### Phase 2: Use Case and GraphQL (Backend)
 
-1. Create `TicketUseCase` and `ActionUseCase`.
+1. Create `CaseUseCase` and `ActionUseCase`.
 2. Update `UseCases` struct and options.
 3. Update GraphQL schema (`schema.graphql`).
 4. Regenerate GraphQL code (`task graphql`).
@@ -1162,8 +1305,8 @@ hecatoncheires migrate generic \
 ### Phase 3: Frontend
 
 1. Create reusable custom field rendering components.
-2. Create `TicketForm.tsx` with dynamic field rendering.
-3. Create `TicketList.tsx` and `TicketDetail.tsx`.
+2. Create `CaseForm.tsx` with dynamic field rendering.
+3. Create `CaseList.tsx` and `CaseDetail.tsx`.
 4. Create `ActionForm.tsx`, `ActionList.tsx`, `ActionDetail.tsx`.
 5. Update GraphQL queries and mutations.
 6. Update routing and navigation.
@@ -1195,33 +1338,37 @@ hecatoncheires migrate generic \
 ### New Files
 - `pkg/domain/types/field.go`
 - `pkg/domain/types/action_status.go`
-- `pkg/domain/model/ticket.go`
+- `pkg/domain/model/case.go`
 - `pkg/domain/model/action.go`
-- `pkg/domain/model/ticket_action.go`
+- `pkg/domain/model/case_action.go`
+- `pkg/domain/model/field_value.go`
 - `pkg/domain/model/config/field.go`
-- `pkg/domain/interfaces/ticket.go`
+- `pkg/domain/interfaces/case.go`
 - `pkg/domain/interfaces/action.go`
-- `pkg/domain/interfaces/ticket_action.go`
-- `pkg/usecase/ticket.go`
+- `pkg/domain/interfaces/case_action.go`
+- `pkg/domain/interfaces/field_value.go`
+- `pkg/usecase/case.go`
 - `pkg/usecase/action.go`
 - `pkg/usecase/field_validator.go`
-- `pkg/repository/firestore/ticket.go`
+- `pkg/repository/firestore/case.go`
 - `pkg/repository/firestore/action.go`
-- `pkg/repository/firestore/ticket_action.go`
-- `pkg/repository/memory/ticket.go`
+- `pkg/repository/firestore/case_action.go`
+- `pkg/repository/firestore/field_value.go`
+- `pkg/repository/memory/case.go`
 - `pkg/repository/memory/action.go`
-- `pkg/repository/memory/ticket_action.go`
+- `pkg/repository/memory/case_action.go`
+- `pkg/repository/memory/field_value.go`
 - `pkg/cli/migrate_generic.go`
-- `frontend/src/pages/TicketList.tsx`
-- `frontend/src/pages/TicketDetail.tsx`
-- `frontend/src/pages/TicketForm.tsx`
-- `frontend/src/pages/TicketDeleteDialog.tsx`
+- `frontend/src/pages/CaseList.tsx`
+- `frontend/src/pages/CaseDetail.tsx`
+- `frontend/src/pages/CaseForm.tsx`
+- `frontend/src/pages/CaseDeleteDialog.tsx`
 - `frontend/src/pages/ActionList.tsx`
 - `frontend/src/pages/ActionDetail.tsx`
 - `frontend/src/pages/ActionForm.tsx`
 - `frontend/src/pages/ActionDeleteDialog.tsx`
 - `frontend/src/components/fields/` (custom field rendering components)
-- `frontend/src/graphql/ticket.ts`
+- `frontend/src/graphql/case.ts`
 - `frontend/src/graphql/action.ts`
 
 ### Files to Delete (after migration)
@@ -1258,15 +1405,17 @@ hecatoncheires migrate generic \
 
 ### Files to Modify
 - `graphql/schema.graphql` (complete rewrite of risk/response types)
-- `pkg/domain/interfaces/repository.go` (update method names)
+- `pkg/domain/interfaces/repository.go` (update method names, add FieldValueRepository accessors)
 - `pkg/usecase/usecase.go` (update struct and options)
 - `pkg/usecase/compile.go` (update Knowledge references)
 - `pkg/cli/serve.go` (update configuration loading)
 - `pkg/cli/config/config.go` (new TOML schema)
 - `pkg/controller/graphql/resolver.go` (update resolver)
-- `pkg/controller/graphql/dataloaders.go` (update loaders)
+- `pkg/controller/graphql/dataloaders.go` (update loaders, add FieldValue DataLoader)
 - `frontend/src/App.tsx` (update routes)
 - `frontend/src/components/Layout.tsx` (update navigation)
 - `frontend/src/components/Sidebar.tsx` (update navigation labels)
 - `examples/config.toml` (new format)
 - `CLAUDE.md` (update terminology and documentation)
+
+
