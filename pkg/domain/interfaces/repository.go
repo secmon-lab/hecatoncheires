@@ -12,6 +12,7 @@ type Repository interface {
 	Response() ResponseRepository
 	RiskResponse() RiskResponseRepository
 	Slack() SlackRepository
+	SlackUser() SlackUserRepository
 	Source() SourceRepository
 	Knowledge() KnowledgeRepository
 

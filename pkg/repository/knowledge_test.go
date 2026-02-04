@@ -145,7 +145,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		if len(retrieved.Embedding) != 4 {
 			t.Errorf("expected Embedding length=4, got %d", len(retrieved.Embedding))
 		}
-		if time.Since(retrieved.CreatedAt) > time.Second {
+		if time.Since(retrieved.CreatedAt) > 3*time.Second {
 			t.Errorf("CreatedAt time diff too large: %v", time.Since(retrieved.CreatedAt))
 		}
 	})

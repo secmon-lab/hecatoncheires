@@ -76,7 +76,9 @@ func (c *client) ListJoinedChannels(ctx context.Context) ([]Channel, error) {
 
 	for {
 		params := &slack.GetConversationsParameters{
-			Types:           []string{"public_channel", "private_channel"},
+			// TODO: Add "private_channel" support after resolving scope configuration
+			// Requires: groups:read scope in addition to channels:read
+			Types:           []string{"public_channel"},
 			ExcludeArchived: true,
 			Limit:           100,
 			Cursor:          cursor,

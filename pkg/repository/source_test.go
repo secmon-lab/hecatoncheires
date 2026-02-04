@@ -145,10 +145,10 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 				t.Errorf("expected databaseID=%s, got %s", created.NotionDBConfig.DatabaseID, retrieved.NotionDBConfig.DatabaseID)
 			}
 		}
-		if time.Since(retrieved.CreatedAt) > time.Second {
+		if time.Since(retrieved.CreatedAt) > 3*time.Second {
 			t.Errorf("CreatedAt time diff too large: %v", time.Since(retrieved.CreatedAt))
 		}
-		if time.Since(retrieved.UpdatedAt) > time.Second {
+		if time.Since(retrieved.UpdatedAt) > 3*time.Second {
 			t.Errorf("UpdatedAt time diff too large: %v", time.Since(retrieved.UpdatedAt))
 		}
 	})

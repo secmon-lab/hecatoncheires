@@ -37,12 +37,16 @@ export default function ResponseForm({ response, initialRiskID, onClose }: Respo
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [responderIDs, setResponderIDs] = useState<string[]>([])
+  const [selectedResponders, setSelectedResponders] = useState<Array<{ value: string; label: string; image?: string }>>([])
   const [url, setUrl] = useState('')
   const [status, setStatus] = useState('BACKLOG')
   const [riskIDs, setRiskIDs] = useState<number[]>([])
   const [errors, setErrors] = useState<FormErrors>({})
+  const [isRespondersOpen, setIsRespondersOpen] = useState(false)
 
-  const { data: usersData, loading: usersLoading } = useQuery(GET_SLACK_USERS)
+  const { data: usersData, loading: usersLoading } = useQuery(GET_SLACK_USERS, {
+    skip: !isRespondersOpen,
+  })
   const { data: risksData, loading: risksLoading } = useQuery(GET_RISKS)
 
   const [createResponse, { loading: creating }] = useMutation(CREATE_RESPONSE, {
@@ -96,6 +100,13 @@ export default function ResponseForm({ response, initialRiskID, onClose }: Respo
       setTitle(response.title)
       setDescription(response.description)
       setResponderIDs(response.responders.map((r) => r.id))
+      setSelectedResponders(
+        response.responders.map((r) => ({
+          value: r.id,
+          label: r.realName,
+          image: r.imageUrl,
+        }))
+      )
       setUrl(response.url || '')
       setStatus(response.status)
       setRiskIDs(response.risks.map((r) => r.id))
@@ -111,6 +122,7 @@ export default function ResponseForm({ response, initialRiskID, onClose }: Respo
     setTitle('')
     setDescription('')
     setResponderIDs([])
+    setSelectedResponders([])
     setUrl('')
     setStatus('BACKLOG')
     setRiskIDs([])
@@ -248,17 +260,11 @@ export default function ResponseForm({ response, initialRiskID, onClose }: Respo
           <Select
             inputId="responderIDs"
             isMulti
-            value={(usersData?.slackUsers || [])
-              .filter((user: { id: string; realName: string; imageUrl?: string }) =>
-                responderIDs.includes(user.id)
-              )
-              .map((user: { id: string; realName: string; imageUrl?: string }) => ({
-                value: user.id,
-                label: user.realName,
-                image: user.imageUrl,
-              }))}
+            value={selectedResponders}
             onChange={(selected) => {
-              setResponderIDs(selected ? selected.map((s) => s.value) : [])
+              const selectedOptions = [...(selected || [])]
+              setSelectedResponders(selectedOptions)
+              setResponderIDs(selectedOptions.map((s) => s.value))
             }}
             options={(usersData?.slackUsers || []).map(
               (user: { id: string; realName: string; imageUrl?: string }) => ({
@@ -268,9 +274,13 @@ export default function ResponseForm({ response, initialRiskID, onClose }: Respo
               })
             )}
             isDisabled={loading}
+            isLoading={usersLoading}
+            loadingMessage={() => 'Loading users...'}
             placeholder="Select responders..."
             menuPortalTarget={document.body}
             styles={{ menuPortal: (base) => ({ ...base, zIndex: 10000 }) }}
+            onMenuOpen={() => setIsRespondersOpen(true)}
+            onMenuClose={() => setIsRespondersOpen(false)}
             formatOptionLabel={(option: { value: string; label: string; image?: string }) => (
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 {option.image && (

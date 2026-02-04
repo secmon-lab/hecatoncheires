@@ -7,44 +7,44 @@ import (
 )
 
 // SlackUsersLoader provides DataLoader interface for Slack users
-// This is request-scoped but uses application-scoped SlackUsersCache
+// This is request-scoped but uses application-scoped SlackUserProvider
 type SlackUsersLoader struct {
-	cache *SlackUsersCache // Application-scoped cache
+	provider *SlackUserProvider // Application-scoped provider (DB-backed)
 }
 
 // NewSlackUsersLoader creates a new SlackUsersLoader
-func NewSlackUsersLoader(cache *SlackUsersCache) *SlackUsersLoader {
+func NewSlackUsersLoader(provider *SlackUserProvider) *SlackUsersLoader {
 	return &SlackUsersLoader{
-		cache: cache,
+		provider: provider,
 	}
 }
 
 // Load retrieves a single user by ID
 func (l *SlackUsersLoader) Load(ctx context.Context, userID string) (*graphql1.SlackUser, error) {
-	if l.cache == nil {
-		// If cache is not available, return minimal user info
+	if l.provider == nil {
+		// If provider is not available, return minimal user info
 		return &graphql1.SlackUser{ID: userID}, nil
 	}
-	return l.cache.Get(ctx, userID)
+	return l.provider.Get(ctx, userID)
 }
 
 // LoadMany retrieves multiple users by IDs
 func (l *SlackUsersLoader) LoadMany(ctx context.Context, userIDs []string) ([]*graphql1.SlackUser, error) {
-	if l.cache == nil {
-		// If cache is not available, return minimal user info
+	if l.provider == nil {
+		// If provider is not available, return minimal user info
 		users := make([]*graphql1.SlackUser, len(userIDs))
 		for i, userID := range userIDs {
 			users[i] = &graphql1.SlackUser{ID: userID}
 		}
 		return users, nil
 	}
-	return l.cache.GetMany(ctx, userIDs)
+	return l.provider.GetMany(ctx, userIDs)
 }
 
 // LoadAll retrieves all users
 func (l *SlackUsersLoader) LoadAll(ctx context.Context) (map[string]*graphql1.SlackUser, error) {
-	if l.cache == nil {
+	if l.provider == nil {
 		return make(map[string]*graphql1.SlackUser), nil
 	}
-	return l.cache.GetAll(ctx)
+	return l.provider.GetAll(ctx)
 }

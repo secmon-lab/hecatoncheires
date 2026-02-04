@@ -12,6 +12,12 @@ const RISK_FIELDS = gql`
     impactID
     responseTeamIDs
     assigneeIDs
+    assignees {
+      id
+      name
+      realName
+      imageUrl
+    }
     detectionIndicators
     createdAt
     updatedAt

@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/99designs/gqlgen/graphql/handler"
 	gqlctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/graphql"
 	httpctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/http"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
@@ -893,6 +895,225 @@ func TestSlackUserFieldResolversHTTP(t *testing.T) {
 		}
 		if len(data.Risk.Assignees) != 0 {
 			t.Errorf("expected 0 assignees, got %d", len(data.Risk.Assignees))
+		}
+	})
+}
+
+func TestSlackUsersQuery(t *testing.T) {
+	t.Run("slackUsers query returns users from database", func(t *testing.T) {
+		testServer, repo, uc := setupTestServer(t)
+		defer testServer.Close()
+
+		ctx := context.Background()
+
+		// Add users to database
+		now := time.Now()
+		users := []*model.SlackUser{
+			{
+				ID:        "U001",
+				Name:      "alice",
+				RealName:  "Alice Smith",
+				Email:     "alice@example.com",
+				ImageURL:  "https://example.com/alice.jpg",
+				UpdatedAt: now,
+			},
+			{
+				ID:        "U002",
+				Name:      "bob",
+				RealName:  "Bob Johnson",
+				Email:     "bob@example.com",
+				ImageURL:  "",
+				UpdatedAt: now,
+			},
+		}
+
+		if err := repo.SlackUser().SaveMany(ctx, users); err != nil {
+			t.Fatalf("failed to save users: %v", err)
+		}
+
+		// Setup DataLoaders with SlackUserProvider
+		slackUserProvider := gqlctrl.NewSlackUserProvider(repo)
+		loaders := gqlctrl.NewDataLoaders(repo, uc, slackUserProvider)
+		ctx = gqlctrl.WithDataLoaders(ctx, loaders)
+
+		// Execute GraphQL query
+		query := `
+			query {
+				slackUsers {
+					id
+					name
+					realName
+					imageUrl
+				}
+			}
+		`
+
+		// We need to create a custom handler that includes the dataloaders
+		resolver := gqlctrl.NewResolver(repo, uc)
+		schema := gqlctrl.NewExecutableSchema(gqlctrl.Config{Resolvers: resolver})
+		gqlHandler := handler.NewDefaultServer(schema)
+
+		// Create a test request with dataloaders
+		reqBody := GraphQLRequest{Query: query}
+		body, err := json.Marshal(reqBody)
+		if err != nil {
+			t.Fatalf("failed to marshal request: %v", err)
+		}
+
+		req := httptest.NewRequest("POST", "/graphql", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req = req.WithContext(ctx)
+
+		rec := httptest.NewRecorder()
+		gqlHandler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("unexpected status code: %d, body: %s", rec.Code, rec.Body.String())
+		}
+
+		var gqlResp GraphQLResponse
+		if err := json.NewDecoder(rec.Body).Decode(&gqlResp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if len(gqlResp.Errors) > 0 {
+			t.Fatalf("GraphQL errors: %v", gqlResp.Errors)
+		}
+
+		var data struct {
+			SlackUsers []struct {
+				ID       string  `json:"id"`
+				Name     string  `json:"name"`
+				RealName string  `json:"realName"`
+				ImageURL *string `json:"imageUrl"`
+			} `json:"slackUsers"`
+		}
+
+		if err := json.Unmarshal(gqlResp.Data, &data); err != nil {
+			t.Fatalf("failed to unmarshal data: %v", err)
+		}
+
+		if len(data.SlackUsers) != 2 {
+			t.Fatalf("expected 2 users, got %d", len(data.SlackUsers))
+		}
+
+		// Find and verify alice
+		var alice *struct {
+			ID       string  `json:"id"`
+			Name     string  `json:"name"`
+			RealName string  `json:"realName"`
+			ImageURL *string `json:"imageUrl"`
+		}
+		for i := range data.SlackUsers {
+			if data.SlackUsers[i].ID == "U001" {
+				alice = &data.SlackUsers[i]
+				break
+			}
+		}
+		if alice == nil {
+			t.Fatal("alice not found in results")
+		}
+		if alice.Name != "alice" {
+			t.Errorf("alice.name: expected %q, got %q", "alice", alice.Name)
+		}
+		if alice.RealName != "Alice Smith" {
+			t.Errorf("alice.realName: expected %q, got %q", "Alice Smith", alice.RealName)
+		}
+		if alice.ImageURL == nil || *alice.ImageURL != "https://example.com/alice.jpg" {
+			t.Errorf("alice.imageUrl: expected %q, got %v", "https://example.com/alice.jpg", alice.ImageURL)
+		}
+
+		// Find and verify bob
+		var bob *struct {
+			ID       string  `json:"id"`
+			Name     string  `json:"name"`
+			RealName string  `json:"realName"`
+			ImageURL *string `json:"imageUrl"`
+		}
+		for i := range data.SlackUsers {
+			if data.SlackUsers[i].ID == "U002" {
+				bob = &data.SlackUsers[i]
+				break
+			}
+		}
+		if bob == nil {
+			t.Fatal("bob not found in results")
+		}
+		if bob.Name != "bob" {
+			t.Errorf("bob.name: expected %q, got %q", "bob", bob.Name)
+		}
+		if bob.RealName != "Bob Johnson" {
+			t.Errorf("bob.realName: expected %q, got %q", "Bob Johnson", bob.RealName)
+		}
+		if bob.ImageURL != nil {
+			t.Errorf("bob.imageUrl: expected nil, got %v", bob.ImageURL)
+		}
+	})
+
+	t.Run("slackUsers query returns empty when database is empty", func(t *testing.T) {
+		testServer, repo, uc := setupTestServer(t)
+		defer testServer.Close()
+
+		ctx := context.Background()
+
+		// Setup DataLoaders with SlackUserProvider
+		slackUserProvider := gqlctrl.NewSlackUserProvider(repo)
+		loaders := gqlctrl.NewDataLoaders(repo, uc, slackUserProvider)
+		ctx = gqlctrl.WithDataLoaders(ctx, loaders)
+
+		// Execute GraphQL query
+		query := `
+			query {
+				slackUsers {
+					id
+					name
+				}
+			}
+		`
+
+		resolver := gqlctrl.NewResolver(repo, uc)
+		schema := gqlctrl.NewExecutableSchema(gqlctrl.Config{Resolvers: resolver})
+		gqlHandler := handler.NewDefaultServer(schema)
+
+		reqBody := GraphQLRequest{Query: query}
+		body, err := json.Marshal(reqBody)
+		if err != nil {
+			t.Fatalf("failed to marshal request: %v", err)
+		}
+
+		req := httptest.NewRequest("POST", "/graphql", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req = req.WithContext(ctx)
+
+		rec := httptest.NewRecorder()
+		gqlHandler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("unexpected status code: %d, body: %s", rec.Code, rec.Body.String())
+		}
+
+		var gqlResp GraphQLResponse
+		if err := json.NewDecoder(rec.Body).Decode(&gqlResp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+
+		if len(gqlResp.Errors) > 0 {
+			t.Fatalf("GraphQL errors: %v", gqlResp.Errors)
+		}
+
+		var data struct {
+			SlackUsers []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"slackUsers"`
+		}
+
+		if err := json.Unmarshal(gqlResp.Data, &data); err != nil {
+			t.Fatalf("failed to unmarshal data: %v", err)
+		}
+
+		if len(data.SlackUsers) != 0 {
+			t.Errorf("expected 0 users, got %d", len(data.SlackUsers))
 		}
 	})
 }
