@@ -32,6 +32,7 @@ interface Risk {
   impactID: string
   responseTeamIDs: string[]
   assigneeIDs: string[]
+  assignees: Array<{ id: string; name: string; realName: string; imageUrl?: string }>
   detectionIndicators: string
   responses?: Array<{
     id: number

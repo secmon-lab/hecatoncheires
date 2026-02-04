@@ -16,6 +16,7 @@ interface Risk {
   impactID: string
   responseTeamIDs: string[]
   assigneeIDs: string[]
+  assignees: Array<{ id: string; name: string; realName: string; imageUrl?: string }>
   detectionIndicators: string
 }
 
@@ -103,6 +104,13 @@ export default function RiskForm({ isOpen, onClose, risk }: RiskFormProps) {
       setImpactID(risk.impactID || '')
       setResponseTeamIDs(risk.responseTeamIDs || [])
       setAssigneeIDs(risk.assigneeIDs || [])
+      setSelectedAssignees(
+        (risk.assignees || []).map((a) => ({
+          value: a.id,
+          label: a.realName,
+          image: a.imageUrl,
+        }))
+      )
       setDetectionIndicators(risk.detectionIndicators || '')
     } else {
       resetForm()
