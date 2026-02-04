@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 )
@@ -163,7 +164,36 @@ func TestIntegration(t *testing.T) {
 			if u.ID == "" {
 				t.Error("user ID should not be empty")
 			}
-			t.Logf("Found user: %s (%s)", u.RealName, u.ID)
+		}
+
+		t.Logf("Total users retrieved: %d", len(users))
+	})
+
+	t.Run("ListUsers performance measurement", func(t *testing.T) {
+		start := time.Now()
+		users, err := svc.ListUsers(ctx)
+		elapsed := time.Since(start)
+
+		if err != nil {
+			t.Fatalf("ListUsers failed: %v", err)
+		}
+
+		t.Logf("ListUsers completed in %v", elapsed)
+		t.Logf("Total users retrieved: %d", len(users))
+		t.Logf("Average time per user: %v", elapsed/time.Duration(len(users)))
+
+		// Log a warning if it takes more than 10 seconds
+		if elapsed > 10*time.Second {
+			t.Logf("WARNING: ListUsers took %v, which is longer than expected (>10s)", elapsed)
+			t.Logf("This may indicate network issues or a very large workspace")
+		}
+
+		// Log detailed timing information
+		if elapsed > 1*time.Second {
+			t.Logf("PERFORMANCE NOTE: ListUsers execution time breakdown:")
+			t.Logf("  - Total time: %v", elapsed)
+			t.Logf("  - Users count: %d", len(users))
+			t.Logf("  - Estimated rate: %.2f users/sec", float64(len(users))/elapsed.Seconds())
 		}
 	})
 

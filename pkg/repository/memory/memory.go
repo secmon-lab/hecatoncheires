@@ -13,6 +13,7 @@ type Memory struct {
 	riskResponse *riskResponseRepository
 	tokens       *tokenStore
 	slack        *slackRepository
+	slackUser    *slackUserRepository
 	source       *sourceRepository
 	knowledge    *knowledgeRepository
 }
@@ -24,6 +25,7 @@ func New() *Memory {
 	responseRepo := newResponseRepository()
 	riskResponseRepo := newRiskResponseRepository(responseRepo, riskRepo)
 	slackRepo := newSlackRepository()
+	slackUserRepo := newSlackUserRepository()
 	sourceRepo := newSourceRepository()
 	knowledgeRepo := newKnowledgeRepository()
 
@@ -33,6 +35,7 @@ func New() *Memory {
 		riskResponse: riskResponseRepo,
 		tokens:       newTokenStore(),
 		slack:        slackRepo,
+		slackUser:    slackUserRepo,
 		source:       sourceRepo,
 		knowledge:    knowledgeRepo,
 	}
@@ -52,6 +55,10 @@ func (m *Memory) RiskResponse() interfaces.RiskResponseRepository {
 
 func (m *Memory) Slack() interfaces.SlackRepository {
 	return m.slack
+}
+
+func (m *Memory) SlackUser() interfaces.SlackUserRepository {
+	return m.slackUser
 }
 
 func (m *Memory) Source() interfaces.SourceRepository {

@@ -41,11 +41,15 @@ export default function RiskForm({ isOpen, onClose, risk }: RiskFormProps) {
   const [impactID, setImpactID] = useState('')
   const [responseTeamIDs, setResponseTeamIDs] = useState<string[]>([])
   const [assigneeIDs, setAssigneeIDs] = useState<string[]>([])
+  const [selectedAssignees, setSelectedAssignees] = useState<Array<{ value: string; label: string; image?: string }>>([])
   const [detectionIndicators, setDetectionIndicators] = useState('')
   const [errors, setErrors] = useState<FormErrors>({})
+  const [isAssigneesOpen, setIsAssigneesOpen] = useState(false)
 
   const { data: configData, loading: configLoading } = useQuery(GET_RISK_CONFIGURATION)
-  const { data: usersData, loading: usersLoading } = useQuery(GET_SLACK_USERS)
+  const { data: usersData, loading: usersLoading } = useQuery(GET_SLACK_USERS, {
+    skip: !isAssigneesOpen,
+  })
 
   const [createRisk, { loading: creating }] = useMutation(CREATE_RISK, {
     update(cache, { data }) {
@@ -348,15 +352,11 @@ export default function RiskForm({ isOpen, onClose, risk }: RiskFormProps) {
           <Select
             inputId="assigneeIDs"
             isMulti
-            value={(usersData?.slackUsers || [])
-              .filter((user: { id: string; realName: string; imageUrl?: string }) => assigneeIDs.includes(user.id))
-              .map((user: { id: string; realName: string; imageUrl?: string }) => ({
-                value: user.id,
-                label: user.realName,
-                image: user.imageUrl,
-              }))}
+            value={selectedAssignees}
             onChange={(selected) => {
-              setAssigneeIDs(selected ? selected.map(s => s.value) : [])
+              const selectedOptions = selected || []
+              setSelectedAssignees(selectedOptions)
+              setAssigneeIDs(selectedOptions.map(s => s.value))
             }}
             options={(usersData?.slackUsers || []).map((user: { id: string; realName: string; imageUrl?: string }) => ({
               value: user.id,
@@ -364,9 +364,13 @@ export default function RiskForm({ isOpen, onClose, risk }: RiskFormProps) {
               image: user.imageUrl,
             }))}
             isDisabled={loading}
+            isLoading={usersLoading}
+            loadingMessage={() => 'Loading users...'}
             placeholder="Select assignees..."
             menuPortalTarget={document.body}
             styles={{ menuPortal: (base) => ({ ...base, zIndex: 10000 }) }}
+            onMenuOpen={() => setIsAssigneesOpen(true)}
+            onMenuClose={() => setIsAssigneesOpen(false)}
             formatOptionLabel={(option: { value: string; label: string; image?: string }) => (
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 {option.image && (

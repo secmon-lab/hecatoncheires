@@ -18,6 +18,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/firestore"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/service/worker"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/urfave/cli/v3"
@@ -235,22 +236,35 @@ func cmdServe() *cli.Command {
 
 			uc := usecase.New(repo, ucOpts...)
 
+			// Start Slack user refresh worker if Slack service is available
+			// N+1 Prevention Policy: Worker uses DeleteAll → SaveMany (Replace strategy)
+			// to avoid individual DB operations in loops
+			var slackUserWorker *worker.SlackUserRefreshWorker
+			if slackSvc != nil {
+				slackUserWorker = worker.NewSlackUserRefreshWorker(repo, slackSvc, 10*time.Minute)
+				if err := slackUserWorker.Start(ctx); err != nil {
+					// Log error but continue server startup
+					logging.Default().Error("Failed to start Slack user refresh worker", "error", err.Error())
+				}
+			}
+
 			// Create GraphQL handler with dataloaders
 			resolver := gqlctrl.NewResolver(repo, uc)
 			srv := handler.NewDefaultServer(
 				gqlctrl.NewExecutableSchema(gqlctrl.Config{Resolvers: resolver}),
 			)
 
-			// Initialize application-scoped SlackUsersCache
-			var slackUsersCache *gqlctrl.SlackUsersCache
+			// Initialize application-scoped SlackUserProvider (DB-backed)
+			// No TTL or caching - data is refreshed by background worker
+			var slackUserProvider *gqlctrl.SlackUserProvider
 			if slackSvc != nil {
-				slackUsersCache = gqlctrl.NewSlackUsersCache(slackSvc)
+				slackUserProvider = gqlctrl.NewSlackUserProvider(repo)
 			}
 
 			// Wrap with dataloader middleware (request-scoped)
 			gqlHandlerBase := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				// Create new DataLoaders for each request
-				loaders := gqlctrl.NewDataLoaders(repo, uc, slackUsersCache)
+				loaders := gqlctrl.NewDataLoaders(repo, uc, slackUserProvider)
 				ctx := gqlctrl.WithDataLoaders(r.Context(), loaders)
 				srv.ServeHTTP(w, r.WithContext(ctx))
 			})
@@ -306,6 +320,11 @@ func cmdServe() *cli.Command {
 				return err
 			case sig := <-sigCh:
 				logging.Default().Info("Received shutdown signal", "signal", sig)
+
+				// Stop Slack user refresh worker first
+				if slackUserWorker != nil {
+					slackUserWorker.Stop()
+				}
 
 				// Create shutdown context with timeout
 				shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

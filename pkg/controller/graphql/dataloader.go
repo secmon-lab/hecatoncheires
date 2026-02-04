@@ -21,14 +21,14 @@ type DataLoaders struct {
 }
 
 // NewDataLoaders creates a new instance of DataLoaders
-// slackUsersCache is application-scoped and can be nil
+// slackUserProvider is application-scoped and provides DB-backed user data
 // uc is required for Risk Configuration loaders
-func NewDataLoaders(repo interfaces.Repository, uc *usecase.UseCases, slackUsersCache *SlackUsersCache) *DataLoaders {
+func NewDataLoaders(repo interfaces.Repository, uc *usecase.UseCases, slackUserProvider *SlackUserProvider) *DataLoaders {
 	return &DataLoaders{
 		ResponsesByRiskLoader:  NewResponsesByRiskLoader(repo),
 		RisksByResponseLoader:  NewRisksByResponseLoader(repo),
 		KnowledgesByRiskLoader: NewKnowledgesByRiskLoader(repo),
-		SlackUsersLoader:       NewSlackUsersLoader(slackUsersCache),
+		SlackUsersLoader:       NewSlackUsersLoader(slackUserProvider),
 		CategoryLoader:         NewCategoryLoader(uc.Risk),
 		LikelihoodLevelLoader:  NewLikelihoodLevelLoader(uc.Risk),
 		ImpactLevelLoader:      NewImpactLevelLoader(uc.Risk),
