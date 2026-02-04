@@ -19,7 +19,8 @@ const (
 	refreshStatusDocument = "refresh_status"
 
 	// Firestore batch operation limits
-	firestoreGetAllLimit = 10 // Maximum document references per GetAll
+	// Reference: https://cloud.google.com/firestore/docs/query-data/get-data#go
+	firestoreGetAllLimit = 30 // Maximum document references per GetAll
 )
 
 type slackUserRepository struct {
