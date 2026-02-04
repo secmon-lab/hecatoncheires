@@ -262,7 +262,7 @@ export default function ResponseForm({ response, initialRiskID, onClose }: Respo
             isMulti
             value={selectedResponders}
             onChange={(selected) => {
-              const selectedOptions = selected || []
+              const selectedOptions = [...(selected || [])]
               setSelectedResponders(selectedOptions)
               setResponderIDs(selectedOptions.map((s) => s.value))
             }}

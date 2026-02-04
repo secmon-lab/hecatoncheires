@@ -355,7 +355,7 @@ export default function RiskForm({ isOpen, onClose, risk }: RiskFormProps) {
             isMulti
             value={selectedAssignees}
             onChange={(selected) => {
-              const selectedOptions = selected || []
+              const selectedOptions = [...(selected || [])]
               setSelectedAssignees(selectedOptions)
               setAssigneeIDs(selectedOptions.map(s => s.value))
             }}
