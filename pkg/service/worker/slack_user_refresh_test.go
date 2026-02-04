@@ -38,12 +38,6 @@ func (m *mockSlackService) setListUsersError(err error) {
 	m.listUsersError = err
 }
 
-func (m *mockSlackService) getListUsersCalled() int {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.listUsersCalled
-}
-
 func (m *mockSlackService) ListUsers(ctx context.Context) ([]*slack.User, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

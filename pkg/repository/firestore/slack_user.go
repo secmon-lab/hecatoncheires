@@ -16,11 +16,10 @@ import (
 const (
 	slackUsersCollection   = "slack_users"
 	slackMetadataCollection = "slack_metadata"
-	refreshStatusDocument   = "refresh_status"
+	refreshStatusDocument = "refresh_status"
 
 	// Firestore batch operation limits
-	firestoreBatchWriteLimit = 500 // Maximum documents per batch write
-	firestoreGetAllLimit     = 10  // Maximum document references per GetAll
+	firestoreGetAllLimit = 10 // Maximum document references per GetAll
 )
 
 type slackUserRepository struct {
@@ -203,26 +202,19 @@ func (r *slackUserRepository) SaveMany(ctx context.Context, users []*model.Slack
 		return nil
 	}
 
-	// Split into batches of firestoreBatchWriteLimit (500 documents)
-	for i := 0; i < len(users); i += firestoreBatchWriteLimit {
-		end := i + firestoreBatchWriteLimit
-		if end > len(users) {
-			end = len(users)
-		}
-		batch := users[i:end]
+	// Use BulkWriter which automatically handles batching
+	bulkWriter := r.client.BulkWriter(ctx)
+	defer bulkWriter.End()
 
-		// Create a batch write
-		batchWriter := r.client.Batch()
-		for _, user := range batch {
-			docRef := r.collection().Doc(string(user.ID))
-			batchWriter.Set(docRef, r.toDoc(user))
-		}
-
-		// Commit the batch
-		if _, err := batchWriter.Commit(ctx); err != nil {
-			return goerr.Wrap(err, "failed to batch write Slack users", goerr.V("count", len(batch)))
+	for _, user := range users {
+		docRef := r.collection().Doc(string(user.ID))
+		if _, err := bulkWriter.Set(docRef, r.toDoc(user)); err != nil {
+			return goerr.Wrap(err, "failed to add Set operation to bulk writer", goerr.V("user_id", user.ID))
 		}
 	}
+
+	// Flush and wait for all operations to complete
+	bulkWriter.Flush()
 
 	return nil
 }
@@ -250,25 +242,18 @@ func (r *slackUserRepository) DeleteAll(ctx context.Context) error {
 		return nil
 	}
 
-	// Split into batches of firestoreBatchWriteLimit (500 documents)
-	for i := 0; i < len(refs); i += firestoreBatchWriteLimit {
-		end := i + firestoreBatchWriteLimit
-		if end > len(refs) {
-			end = len(refs)
-		}
-		batch := refs[i:end]
+	// Use BulkWriter which automatically handles batching
+	bulkWriter := r.client.BulkWriter(ctx)
+	defer bulkWriter.End()
 
-		// Create a batch delete
-		batchWriter := r.client.Batch()
-		for _, ref := range batch {
-			batchWriter.Delete(ref)
-		}
-
-		// Commit the batch
-		if _, err := batchWriter.Commit(ctx); err != nil {
-			return goerr.Wrap(err, "failed to batch delete Slack users", goerr.V("count", len(batch)))
+	for _, ref := range refs {
+		if _, err := bulkWriter.Delete(ref); err != nil {
+			return goerr.Wrap(err, "failed to add Delete operation to bulk writer")
 		}
 	}
+
+	// Flush and wait for all operations to complete
+	bulkWriter.Flush()
 
 	return nil
 }
