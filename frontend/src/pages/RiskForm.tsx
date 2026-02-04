@@ -118,6 +118,7 @@ export default function RiskForm({ isOpen, onClose, risk }: RiskFormProps) {
     setImpactID('')
     setResponseTeamIDs([])
     setAssigneeIDs([])
+    setSelectedAssignees([])
     setDetectionIndicators('')
     setErrors({})
   }

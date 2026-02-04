@@ -100,6 +100,13 @@ export default function ResponseForm({ response, initialRiskID, onClose }: Respo
       setTitle(response.title)
       setDescription(response.description)
       setResponderIDs(response.responders.map((r) => r.id))
+      setSelectedResponders(
+        response.responders.map((r) => ({
+          value: r.id,
+          label: r.realName,
+          image: r.imageUrl,
+        }))
+      )
       setUrl(response.url || '')
       setStatus(response.status)
       setRiskIDs(response.risks.map((r) => r.id))
@@ -115,6 +122,7 @@ export default function ResponseForm({ response, initialRiskID, onClose }: Respo
     setTitle('')
     setDescription('')
     setResponderIDs([])
+    setSelectedResponders([])
     setUrl('')
     setStatus('BACKLOG')
     setRiskIDs([])
