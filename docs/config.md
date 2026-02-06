@@ -217,18 +217,11 @@ id = "priority"
 name = "Priority"
 type = "select"
 required = true
-
-[[fields.options]]
-id = "high"
-name = "High"
-
-[[fields.options]]
-id = "medium"
-name = "Medium"
-
-[[fields.options]]
-id = "low"
-name = "Low"
+options = [
+  { id = "high", name = "High" },
+  { id = "medium", name = "Medium" },
+  { id = "low", name = "Low" },
+]
 ```
 
 ### `multi-select`
@@ -240,14 +233,10 @@ Multiple selections from a predefined list of options. Requires at least one opt
 id = "tags"
 name = "Tags"
 type = "multi-select"
-
-[[fields.options]]
-id = "urgent"
-name = "Urgent"
-
-[[fields.options]]
-id = "review-needed"
-name = "Review Needed"
+options = [
+  { id = "urgent", name = "Urgent" },
+  { id = "review-needed", name = "Review Needed" },
+]
 ```
 
 ### `user`
@@ -311,7 +300,7 @@ type = "url"
 
 ## Options (for select / multi-select)
 
-Fields of type `select` or `multi-select` must define at least one option using `[[fields.options]]`.
+Fields of type `select` or `multi-select` must define at least one option using the `options` property.
 
 ### Option Properties
 
@@ -327,18 +316,17 @@ Option IDs must be unique within their parent field and follow the same format a
 
 ### Metadata
 
-The `[fields.options.metadata]` section allows attaching arbitrary key-value data to an option. Values can be strings, numbers, or booleans.
+The `metadata` property allows attaching arbitrary key-value data to an option. Values can be strings, numbers, or booleans.
 
 ```toml
-[[fields.options]]
-id = "critical"
-name = "Critical"
-
-  [fields.options.metadata]
-  description = "Requires immediate executive attention"
-  color = "red"
-  score = 5
-  escalation_required = true
+[[fields]]
+id = "severity"
+name = "Severity"
+type = "select"
+options = [
+  { id = "critical", name = "Critical", metadata = { description = "Requires immediate executive attention", color = "red", score = 5, escalation_required = true } },
+  { id = "low", name = "Low", metadata = { description = "Minimal impact", score = 1 } },
+]
 ```
 
 Use cases for metadata:
