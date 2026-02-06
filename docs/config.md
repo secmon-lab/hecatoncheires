@@ -371,22 +371,10 @@ id = "category"
 name = "Category"
 type = "multi-select"
 required = true
-
-[[fields.options]]
-id = "data-breach"
-name = "Data Breach"
-
-  [fields.options.metadata]
-  description = "Risk of personal or confidential information leakage"
-  color = "red"
-
-[[fields.options]]
-id = "system-failure"
-name = "System Failure"
-
-  [fields.options.metadata]
-  description = "Risk of system or service downtime and failures"
-  color = "orange"
+options = [
+  { id = "data-breach", name = "Data Breach", metadata = { description = "Risk of personal or confidential information leakage", color = "red" } },
+  { id = "system-failure", name = "System Failure", metadata = { description = "Risk of system or service downtime and failures", color = "orange" } },
+]
 
 # Likelihood field: select with scoring
 [[fields]]
@@ -394,22 +382,10 @@ id = "likelihood"
 name = "Likelihood"
 type = "select"
 required = true
-
-[[fields.options]]
-id = "low"
-name = "Low"
-
-  [fields.options.metadata]
-  description = "Unlikely to occur (a few times per year)"
-  score = 2
-
-[[fields.options]]
-id = "high"
-name = "High"
-
-  [fields.options.metadata]
-  description = "Likely to occur (about once per week)"
-  score = 4
+options = [
+  { id = "low", name = "Low", metadata = { description = "Unlikely to occur (a few times per year)", score = 2 } },
+  { id = "high", name = "High", metadata = { description = "Likely to occur (about once per week)", score = 4 } },
+]
 
 # Simple fields without options
 [[fields]]

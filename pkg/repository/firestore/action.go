@@ -132,7 +132,7 @@ func (r *actionRepository) List(ctx context.Context) ([]*model.Action, error) {
 	iter := r.client.Collection(r.actionsCollection()).Documents(ctx)
 	defer iter.Stop()
 
-	var actions []*model.Action
+	actions := make([]*model.Action, 0)
 	for {
 		docSnap, err := iter.Next()
 		if err == iterator.Done {
@@ -214,7 +214,7 @@ func (r *actionRepository) GetByCase(ctx context.Context, caseID int64) ([]*mode
 		Documents(ctx)
 	defer iter.Stop()
 
-	var actions []*model.Action
+	actions := make([]*model.Action, 0)
 	for {
 		docSnap, err := iter.Next()
 		if err == iterator.Done {

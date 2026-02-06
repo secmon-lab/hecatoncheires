@@ -73,7 +73,7 @@ func (r *knowledgeRepository) ListByCaseID(ctx context.Context, caseID int64) ([
 		Documents(ctx)
 	defer iter.Stop()
 
-	var knowledges []*model.Knowledge
+	knowledges := make([]*model.Knowledge, 0)
 	for {
 		doc, err := iter.Next()
 		if err == iterator.Done {
@@ -141,7 +141,7 @@ func (r *knowledgeRepository) ListBySourceID(ctx context.Context, sourceID model
 		Documents(ctx)
 	defer iter.Stop()
 
-	var knowledges []*model.Knowledge
+	knowledges := make([]*model.Knowledge, 0)
 	for {
 		doc, err := iter.Next()
 		if err == iterator.Done {
@@ -179,7 +179,7 @@ func (r *knowledgeRepository) ListWithPagination(ctx context.Context, limit, off
 	iter := query.Documents(ctx)
 	defer iter.Stop()
 
-	var knowledges []*model.Knowledge
+	knowledges := make([]*model.Knowledge, 0)
 	for {
 		doc, err := iter.Next()
 		if err == iterator.Done {
