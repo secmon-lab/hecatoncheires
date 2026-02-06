@@ -277,7 +277,7 @@ export default function CaseForm({ isOpen, onClose, caseItem }: CaseFormProps) {
             placeholder="Select assignees..."
             filterOption={(option, inputValue) => {
               const search = inputValue.toLowerCase()
-              const data = option.data as { label: string; name: string; realName: string }
+              const data = option.data as unknown as { label: string; name: string; realName: string }
               return (
                 data.label.toLowerCase().includes(search) ||
                 data.name.toLowerCase().includes(search) ||
