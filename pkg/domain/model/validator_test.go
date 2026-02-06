@@ -74,157 +74,157 @@ func TestFieldValidator_ValidateCaseFields(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		fieldValues []model.FieldValue
+		fieldValues map[string]model.FieldValue
 		wantErr     error
 	}{
 		{
 			name: "valid all field types",
-			fieldValues: []model.FieldValue{
-				{FieldID: "category", Value: []string{"data-breach", "system-failure"}},
-				{FieldID: "likelihood", Value: "high"},
-				{FieldID: "description", Value: "Test description"},
-				{FieldID: "score", Value: float64(85)},
-				{FieldID: "assignee", Value: "U123456"},
-				{FieldID: "responders", Value: []string{"U123456", "U789012"}},
-				{FieldID: "due-date", Value: "2025-12-31T23:59:59Z"},
-				{FieldID: "reference-url", Value: "https://example.com"},
+			fieldValues: map[string]model.FieldValue{
+				"category":      {FieldID: "category", Value: []string{"data-breach", "system-failure"}},
+				"likelihood":    {FieldID: "likelihood", Value: "high"},
+				"description":   {FieldID: "description", Value: "Test description"},
+				"score":         {FieldID: "score", Value: float64(85)},
+				"assignee":      {FieldID: "assignee", Value: "U123456"},
+				"responders":    {FieldID: "responders", Value: []string{"U123456", "U789012"}},
+				"due-date":      {FieldID: "due-date", Value: "2025-12-31T23:59:59Z"},
+				"reference-url": {FieldID: "reference-url", Value: "https://example.com"},
 			},
 			wantErr: nil,
 		},
 		{
 			name: "valid required fields only",
-			fieldValues: []model.FieldValue{
-				{FieldID: "category", Value: []string{"data-breach"}},
-				{FieldID: "likelihood", Value: "low"},
+			fieldValues: map[string]model.FieldValue{
+				"category":   {FieldID: "category", Value: []string{"data-breach"}},
+				"likelihood": {FieldID: "likelihood", Value: "low"},
 			},
 			wantErr: nil,
 		},
 		{
 			name: "valid with interface slice for multi-select",
-			fieldValues: []model.FieldValue{
-				{FieldID: "category", Value: []interface{}{"data-breach"}},
-				{FieldID: "likelihood", Value: "low"},
+			fieldValues: map[string]model.FieldValue{
+				"category":   {FieldID: "category", Value: []interface{}{"data-breach"}},
+				"likelihood": {FieldID: "likelihood", Value: "low"},
 			},
 			wantErr: nil,
 		},
 		{
 			name: "valid with interface slice for multi-user",
-			fieldValues: []model.FieldValue{
-				{FieldID: "category", Value: []string{"data-breach"}},
-				{FieldID: "likelihood", Value: "low"},
-				{FieldID: "responders", Value: []interface{}{"U123456"}},
+			fieldValues: map[string]model.FieldValue{
+				"category":   {FieldID: "category", Value: []string{"data-breach"}},
+				"likelihood": {FieldID: "likelihood", Value: "low"},
+				"responders": {FieldID: "responders", Value: []interface{}{"U123456"}},
 			},
 			wantErr: nil,
 		},
 		{
 			name: "valid with time.Time for date",
-			fieldValues: []model.FieldValue{
-				{FieldID: "category", Value: []string{"data-breach"}},
-				{FieldID: "likelihood", Value: "low"},
-				{FieldID: "due-date", Value: time.Now()},
+			fieldValues: map[string]model.FieldValue{
+				"category":   {FieldID: "category", Value: []string{"data-breach"}},
+				"likelihood": {FieldID: "likelihood", Value: "low"},
+				"due-date":   {FieldID: "due-date", Value: time.Now()},
 			},
 			wantErr: nil,
 		},
 		{
 			name: "missing required field",
-			fieldValues: []model.FieldValue{
-				{FieldID: "category", Value: []string{"data-breach"}},
+			fieldValues: map[string]model.FieldValue{
+				"category": {FieldID: "category", Value: []string{"data-breach"}},
 				// Missing "likelihood"
 			},
 			wantErr: model.ErrMissingRequired,
 		},
 		{
 			name: "invalid select option",
-			fieldValues: []model.FieldValue{
-				{FieldID: "category", Value: []string{"data-breach"}},
-				{FieldID: "likelihood", Value: "invalid-option"},
+			fieldValues: map[string]model.FieldValue{
+				"category":   {FieldID: "category", Value: []string{"data-breach"}},
+				"likelihood": {FieldID: "likelihood", Value: "invalid-option"},
 			},
 			wantErr: model.ErrInvalidOptionID,
 		},
 		{
 			name: "invalid multi-select option",
-			fieldValues: []model.FieldValue{
-				{FieldID: "category", Value: []string{"data-breach", "invalid-option"}},
-				{FieldID: "likelihood", Value: "low"},
+			fieldValues: map[string]model.FieldValue{
+				"category":   {FieldID: "category", Value: []string{"data-breach", "invalid-option"}},
+				"likelihood": {FieldID: "likelihood", Value: "low"},
 			},
 			wantErr: model.ErrInvalidOptionID,
 		},
 		{
 			name: "invalid text type (number instead of string)",
-			fieldValues: []model.FieldValue{
-				{FieldID: "category", Value: []string{"data-breach"}},
-				{FieldID: "likelihood", Value: "low"},
-				{FieldID: "description", Value: 123},
+			fieldValues: map[string]model.FieldValue{
+				"category":    {FieldID: "category", Value: []string{"data-breach"}},
+				"likelihood":  {FieldID: "likelihood", Value: "low"},
+				"description": {FieldID: "description", Value: 123},
 			},
 			wantErr: model.ErrInvalidFieldType,
 		},
 		{
 			name: "invalid number type (string instead of number)",
-			fieldValues: []model.FieldValue{
-				{FieldID: "category", Value: []string{"data-breach"}},
-				{FieldID: "likelihood", Value: "low"},
-				{FieldID: "score", Value: "not a number"},
+			fieldValues: map[string]model.FieldValue{
+				"category":   {FieldID: "category", Value: []string{"data-breach"}},
+				"likelihood": {FieldID: "likelihood", Value: "low"},
+				"score":      {FieldID: "score", Value: "not a number"},
 			},
 			wantErr: model.ErrInvalidFieldType,
 		},
 		{
 			name: "invalid select type (array instead of string)",
-			fieldValues: []model.FieldValue{
-				{FieldID: "category", Value: []string{"data-breach"}},
-				{FieldID: "likelihood", Value: []string{"low"}},
+			fieldValues: map[string]model.FieldValue{
+				"category":   {FieldID: "category", Value: []string{"data-breach"}},
+				"likelihood": {FieldID: "likelihood", Value: []string{"low"}},
 			},
 			wantErr: model.ErrInvalidFieldType,
 		},
 		{
 			name: "invalid multi-select type (string instead of array)",
-			fieldValues: []model.FieldValue{
-				{FieldID: "category", Value: "data-breach"},
-				{FieldID: "likelihood", Value: "low"},
+			fieldValues: map[string]model.FieldValue{
+				"category":   {FieldID: "category", Value: "data-breach"},
+				"likelihood": {FieldID: "likelihood", Value: "low"},
 			},
 			wantErr: model.ErrInvalidFieldType,
 		},
 		{
 			name: "invalid user type (number instead of string)",
-			fieldValues: []model.FieldValue{
-				{FieldID: "category", Value: []string{"data-breach"}},
-				{FieldID: "likelihood", Value: "low"},
-				{FieldID: "assignee", Value: 123},
+			fieldValues: map[string]model.FieldValue{
+				"category":   {FieldID: "category", Value: []string{"data-breach"}},
+				"likelihood": {FieldID: "likelihood", Value: "low"},
+				"assignee":   {FieldID: "assignee", Value: 123},
 			},
 			wantErr: model.ErrInvalidFieldType,
 		},
 		{
 			name: "invalid multi-user type (string instead of array)",
-			fieldValues: []model.FieldValue{
-				{FieldID: "category", Value: []string{"data-breach"}},
-				{FieldID: "likelihood", Value: "low"},
-				{FieldID: "responders", Value: "U123456"},
+			fieldValues: map[string]model.FieldValue{
+				"category":   {FieldID: "category", Value: []string{"data-breach"}},
+				"likelihood": {FieldID: "likelihood", Value: "low"},
+				"responders": {FieldID: "responders", Value: "U123456"},
 			},
 			wantErr: model.ErrInvalidFieldType,
 		},
 		{
 			name: "invalid date format",
-			fieldValues: []model.FieldValue{
-				{FieldID: "category", Value: []string{"data-breach"}},
-				{FieldID: "likelihood", Value: "low"},
-				{FieldID: "due-date", Value: "invalid date"},
+			fieldValues: map[string]model.FieldValue{
+				"category":   {FieldID: "category", Value: []string{"data-breach"}},
+				"likelihood": {FieldID: "likelihood", Value: "low"},
+				"due-date":   {FieldID: "due-date", Value: "invalid date"},
 			},
 			wantErr: model.ErrInvalidFieldType,
 		},
 		{
 			name: "invalid url type (number instead of string)",
-			fieldValues: []model.FieldValue{
-				{FieldID: "category", Value: []string{"data-breach"}},
-				{FieldID: "likelihood", Value: "low"},
-				{FieldID: "reference-url", Value: 123},
+			fieldValues: map[string]model.FieldValue{
+				"category":      {FieldID: "category", Value: []string{"data-breach"}},
+				"likelihood":    {FieldID: "likelihood", Value: "low"},
+				"reference-url": {FieldID: "reference-url", Value: 123},
 			},
 			wantErr: model.ErrInvalidFieldType,
 		},
 		{
 			name: "unknown field (should be ignored for forward compatibility)",
-			fieldValues: []model.FieldValue{
-				{FieldID: "category", Value: []string{"data-breach"}},
-				{FieldID: "likelihood", Value: "low"},
-				{FieldID: "unknown-field", Value: "some value"},
+			fieldValues: map[string]model.FieldValue{
+				"category":      {FieldID: "category", Value: []string{"data-breach"}},
+				"likelihood":    {FieldID: "likelihood", Value: "low"},
+				"unknown-field": {FieldID: "unknown-field", Value: "some value"},
 			},
 			wantErr: nil,
 		},
@@ -293,8 +293,8 @@ func TestFieldValidator_ValidateNumber_MultipleTypes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			validator := model.NewFieldValidator(schema)
-			fieldValues := []model.FieldValue{
-				{FieldID: "score", Value: tt.value},
+			fieldValues := map[string]model.FieldValue{
+				"score": {FieldID: "score", Value: tt.value},
 			}
 
 			err := validator.ValidateCaseFields(fieldValues)

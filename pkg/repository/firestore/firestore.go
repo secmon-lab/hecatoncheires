@@ -12,7 +12,6 @@ type Firestore struct {
 	client    *firestore.Client
 	caseRepo  *caseRepository
 	action    *actionRepository
-	caseField *fieldValueRepository
 	slack     *slackRepository
 	slackUser *slackUserRepository
 	source    *sourceRepository
@@ -27,7 +26,6 @@ func WithCollectionPrefix(prefix string) Option {
 	return func(f *Firestore) {
 		f.caseRepo.collectionPrefix = prefix
 		f.action.collectionPrefix = prefix
-		f.caseField.collectionPrefix = prefix
 		f.slack.collectionPrefix = prefix
 		f.slackUser.collectionPrefix = prefix
 		f.source.collectionPrefix = prefix
@@ -43,7 +41,6 @@ func New(ctx context.Context, projectID string, opts ...Option) (*Firestore, err
 
 	caseRepo := newCaseRepository(client)
 	actionRepo := newActionRepository(client)
-	fieldValueRepo := newFieldValueRepository(client)
 	slackRepo := newSlackRepository(client)
 	slackUserRepo := newSlackUserRepository(client)
 	sourceRepo := newSourceRepository(client)
@@ -53,7 +50,6 @@ func New(ctx context.Context, projectID string, opts ...Option) (*Firestore, err
 		client:    client,
 		caseRepo:  caseRepo,
 		action:    actionRepo,
-		caseField: fieldValueRepo,
 		slack:     slackRepo,
 		slackUser: slackUserRepo,
 		source:    sourceRepo,
@@ -73,10 +69,6 @@ func (f *Firestore) Case() interfaces.CaseRepository {
 
 func (f *Firestore) Action() interfaces.ActionRepository {
 	return f.action
-}
-
-func (f *Firestore) CaseField() interfaces.FieldValueRepository {
-	return f.caseField
 }
 
 func (f *Firestore) Slack() interfaces.SlackRepository {

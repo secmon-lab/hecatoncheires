@@ -47,22 +47,11 @@ func (r *caseResolver) Assignees(ctx context.Context, obj *graphql1.Case) ([]*gr
 
 // Fields is the resolver for the fields field.
 func (r *caseResolver) Fields(ctx context.Context, obj *graphql1.Case) ([]*graphql1.FieldValue, error) {
-	loaders := GetDataLoaders(ctx)
-	fieldsMap, err := loaders.CaseFieldValueLoader.Load(ctx, []int64{int64(obj.ID)})
-	if err != nil {
-		return nil, err
-	}
-	fields, ok := fieldsMap[int64(obj.ID)]
-	if !ok {
+	// Field values are embedded in the Case and pre-populated by toGraphQLCase
+	if obj.Fields == nil {
 		return []*graphql1.FieldValue{}, nil
 	}
-
-	// Convert domain FieldValue to GraphQL FieldValue
-	result := make([]*graphql1.FieldValue, len(fields))
-	for i, f := range fields {
-		result[i] = toGraphQLFieldValue(&f)
-	}
-	return result, nil
+	return obj.Fields, nil
 }
 
 // Actions is the resolver for the actions field.
@@ -131,14 +120,9 @@ func (r *mutationResolver) CreateCase(ctx context.Context, input graphql1.Create
 		assigneeIDs = []string{}
 	}
 
-	fields := make([]model.FieldValue, 0)
-	if input.Fields != nil {
-		for _, f := range input.Fields {
-			fields = append(fields, toDomainFieldValue(*f))
-		}
-	}
+	fieldValues := toDomainFieldValues(input.Fields)
 
-	created, err := r.UseCases.Case.CreateCase(ctx, input.Title, input.Description, assigneeIDs, fields)
+	created, err := r.UseCases.Case.CreateCase(ctx, input.Title, input.Description, assigneeIDs, fieldValues)
 	if err != nil {
 		return nil, err
 	}
@@ -153,14 +137,9 @@ func (r *mutationResolver) UpdateCase(ctx context.Context, input graphql1.Update
 		assigneeIDs = []string{}
 	}
 
-	fields := make([]model.FieldValue, 0)
-	if input.Fields != nil {
-		for _, f := range input.Fields {
-			fields = append(fields, toDomainFieldValue(*f))
-		}
-	}
+	fieldValues := toDomainFieldValues(input.Fields)
 
-	updated, err := r.UseCases.Case.UpdateCase(ctx, int64(input.ID), input.Title, input.Description, assigneeIDs, fields)
+	updated, err := r.UseCases.Case.UpdateCase(ctx, int64(input.ID), input.Title, input.Description, assigneeIDs, fieldValues)
 	if err != nil {
 		return nil, err
 	}

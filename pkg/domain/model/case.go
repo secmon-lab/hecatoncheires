@@ -9,6 +9,7 @@ type Case struct {
 	Description    string
 	AssigneeIDs    []string // Slack User IDs
 	SlackChannelID string
+	FieldValues    map[string]FieldValue // key = FieldID
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }

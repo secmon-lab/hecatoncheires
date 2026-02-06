@@ -33,23 +33,24 @@ func NewCaseUseCase(repo interfaces.Repository, fieldSchema *config.FieldSchema,
 	}
 }
 
-func (uc *CaseUseCase) CreateCase(ctx context.Context, title, description string, assigneeIDs []string, fields []model.FieldValue) (*model.Case, error) {
+func (uc *CaseUseCase) CreateCase(ctx context.Context, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue) (*model.Case, error) {
 	if title == "" {
 		return nil, goerr.New("case title is required")
 	}
 
-	// Validate custom fields
+	// Validate custom fields (also injects Type from config)
 	if uc.fieldValidator != nil {
-		if err := uc.fieldValidator.ValidateCaseFields(fields); err != nil {
+		if err := uc.fieldValidator.ValidateCaseFields(fieldValues); err != nil {
 			return nil, goerr.Wrap(err, "field validation failed")
 		}
 	}
 
-	// Create case
+	// Create case with embedded field values
 	caseModel := &model.Case{
 		Title:       title,
 		Description: description,
 		AssigneeIDs: assigneeIDs,
+		FieldValues: fieldValues,
 	}
 
 	created, err := uc.repo.Case().Create(ctx, caseModel)
@@ -57,26 +58,11 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, title, description string
 		return nil, goerr.Wrap(err, "failed to create case")
 	}
 
-	// Save custom field values
-	for i := range fields {
-		fields[i].CaseID = created.ID
-		if err := uc.repo.CaseField().Save(ctx, &fields[i]); err != nil {
-			// Rollback: delete the created case
-			if delErr := uc.repo.Case().Delete(ctx, created.ID); delErr != nil {
-				return nil, goerr.Wrap(err, "failed to save field values, and also failed to roll back case creation",
-					goerr.V("rollback_error", delErr),
-					goerr.V(CaseIDKey, created.ID))
-			}
-			return nil, goerr.Wrap(err, "failed to save field values", goerr.V(CaseIDKey, created.ID))
-		}
-	}
-
 	// Create Slack channel if service is available
 	if uc.slackService != nil {
 		channelID, err := uc.slackService.CreateChannel(ctx, created.ID, created.Title)
 		if err != nil {
-			// Rollback: delete field values and case
-			_ = uc.repo.CaseField().DeleteByCaseID(ctx, created.ID)
+			// Rollback: delete case
 			if delErr := uc.repo.Case().Delete(ctx, created.ID); delErr != nil {
 				return nil, goerr.Wrap(err, "failed to create Slack channel for case, and also failed to roll back case creation",
 					goerr.V("rollback_error", delErr),
@@ -103,9 +89,6 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, title, description string
 		created.SlackChannelID = channelID
 		updated, err := uc.repo.Case().Update(ctx, created)
 		if err != nil {
-			// Note: Channel is created but case update failed.
-			// We don't attempt to delete the channel here as it might also fail.
-			// The created channel is now orphaned and needs manual cleanup.
 			return nil, goerr.Wrap(err, "failed to update case with Slack channel ID",
 				goerr.V("orphaned_channel_id", channelID),
 				goerr.V(CaseIDKey, created.ID))
@@ -116,7 +99,7 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, title, description string
 	return created, nil
 }
 
-func (uc *CaseUseCase) UpdateCase(ctx context.Context, id int64, title, description string, assigneeIDs []string, fields []model.FieldValue) (*model.Case, error) {
+func (uc *CaseUseCase) UpdateCase(ctx context.Context, id int64, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue) (*model.Case, error) {
 	if title == "" {
 		return nil, goerr.New("case title is required")
 	}
@@ -127,9 +110,9 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, id int64, title, descript
 		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
 	}
 
-	// Validate custom fields
+	// Validate custom fields (also injects Type from config)
 	if uc.fieldValidator != nil {
-		if err := uc.fieldValidator.ValidateCaseFields(fields); err != nil {
+		if err := uc.fieldValidator.ValidateCaseFields(fieldValues); err != nil {
 			return nil, goerr.Wrap(err, "field validation failed", goerr.V(CaseIDKey, id))
 		}
 	}
@@ -143,14 +126,15 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, id int64, title, descript
 		}
 	}
 
-	// Update case
+	// Update case with embedded field values
 	caseModel := &model.Case{
 		ID:             id,
 		Title:          title,
 		Description:    description,
 		AssigneeIDs:    assigneeIDs,
 		SlackChannelID: existingCase.SlackChannelID, // Preserve channel ID
-		CreatedAt:      existingCase.CreatedAt,      // Preserve creation time
+		FieldValues:    fieldValues,
+		CreatedAt:      existingCase.CreatedAt, // Preserve creation time
 	}
 
 	updated, err := uc.repo.Case().Update(ctx, caseModel)
@@ -158,27 +142,10 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, id int64, title, descript
 		return nil, goerr.Wrap(err, "failed to update case", goerr.V(CaseIDKey, id))
 	}
 
-	// Delete existing field values and save new ones
-	if err := uc.repo.CaseField().DeleteByCaseID(ctx, id); err != nil {
-		return nil, goerr.Wrap(err, "failed to delete existing field values", goerr.V(CaseIDKey, id))
-	}
-
-	for i := range fields {
-		fields[i].CaseID = id
-		if err := uc.repo.CaseField().Save(ctx, &fields[i]); err != nil {
-			return nil, goerr.Wrap(err, "failed to save field values", goerr.V(CaseIDKey, id))
-		}
-	}
-
 	return updated, nil
 }
 
 func (uc *CaseUseCase) DeleteCase(ctx context.Context, id int64) error {
-	// Delete field values first
-	if err := uc.repo.CaseField().DeleteByCaseID(ctx, id); err != nil {
-		return goerr.Wrap(err, "failed to delete case field values", goerr.V(CaseIDKey, id))
-	}
-
 	// Delete actions associated with this case
 	actions, err := uc.repo.Action().GetByCase(ctx, id)
 	if err != nil {
@@ -193,7 +160,7 @@ func (uc *CaseUseCase) DeleteCase(ctx context.Context, id int64) error {
 		}
 	}
 
-	// Delete case
+	// Delete case (field values are embedded, so they are deleted with the case)
 	if err := uc.repo.Case().Delete(ctx, id); err != nil {
 		return goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
 	}
@@ -208,15 +175,6 @@ func (uc *CaseUseCase) GetCase(ctx context.Context, id int64) (*model.Case, erro
 	}
 
 	return caseModel, nil
-}
-
-func (uc *CaseUseCase) GetCaseFieldValues(ctx context.Context, caseID int64) ([]model.FieldValue, error) {
-	fieldValues, err := uc.repo.CaseField().GetByCaseID(ctx, caseID)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to get case field values", goerr.V(CaseIDKey, caseID))
-	}
-
-	return fieldValues, nil
 }
 
 func (uc *CaseUseCase) ListCases(ctx context.Context) ([]*model.Case, error) {

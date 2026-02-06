@@ -21,42 +21,42 @@ func NewFieldValidator(schema *config.FieldSchema) *FieldValidator {
 	}
 }
 
-// ValidateCaseFields validates field values for a Case
-// Returns an error if any field value is invalid
-func (v *FieldValidator) ValidateCaseFields(fieldValues []FieldValue) error {
+// ValidateCaseFields validates field values for a Case and injects Type from config.
+// The fieldValues map is modified in place to set Type on each FieldValue.
+func (v *FieldValidator) ValidateCaseFields(fieldValues map[string]FieldValue) error {
 	// Build a map of field definitions by ID for quick lookup
 	fieldDefMap := make(map[string]config.FieldDefinition)
 	for _, fd := range v.schema.Fields {
 		fieldDefMap[fd.ID] = fd
 	}
 
-	// Track which fields have been provided
-	providedFields := make(map[string]bool)
-
-	// Validate each field value
-	for _, fv := range fieldValues {
+	// Validate each field value and inject Type
+	for fieldID, fv := range fieldValues {
 		// Check if field ID is defined in schema
-		fieldDef, ok := fieldDefMap[fv.FieldID]
+		fieldDef, ok := fieldDefMap[fieldID]
 		if !ok {
 			// Skip unknown fields (for forward compatibility when field is removed from schema)
 			continue
 		}
 
-		// Mark field as provided
-		providedFields[fv.FieldID] = true
+		// Inject Type from config
+		fv.Type = fieldDef.Type
+		fieldValues[fieldID] = fv
 
 		// Validate field value type and constraints
 		if err := v.validateFieldValue(fieldDef, fv); err != nil {
 			return goerr.Wrap(err, "field validation failed",
-				goerr.V(FieldIDKey, fv.FieldID))
+				goerr.V(FieldIDKey, fieldID))
 		}
 	}
 
 	// Check for missing required fields
 	for _, fieldDef := range v.schema.Fields {
-		if fieldDef.Required && !providedFields[fieldDef.ID] {
-			return goerr.Wrap(ErrMissingRequired, "required field not provided",
-				goerr.V(FieldIDKey, fieldDef.ID))
+		if fieldDef.Required {
+			if _, ok := fieldValues[fieldDef.ID]; !ok {
+				return goerr.Wrap(ErrMissingRequired, "required field not provided",
+					goerr.V(FieldIDKey, fieldDef.ID))
+			}
 		}
 	}
 

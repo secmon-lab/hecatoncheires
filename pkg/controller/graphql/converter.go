@@ -20,6 +20,7 @@ func toGraphQLCase(c *model.Case) *graphql1.Case {
 		Description:    c.Description,
 		AssigneeIDs:    assigneeIDs,
 		SlackChannelID: &c.SlackChannelID,
+		Fields:         toGraphQLFieldValues(c.FieldValues),
 		CreatedAt:      c.CreatedAt,
 		UpdatedAt:      c.UpdatedAt,
 	}
@@ -66,20 +67,34 @@ func toGraphQLKnowledge(k *model.Knowledge) *graphql1.Knowledge {
 	}
 }
 
-// toGraphQLFieldValue converts a domain FieldValue to GraphQL FieldValue
-func toGraphQLFieldValue(fv *model.FieldValue) *graphql1.FieldValue {
-	return &graphql1.FieldValue{
-		FieldID: fv.FieldID,
-		Value:   fv.Value,
+// toGraphQLFieldValues converts domain FieldValues map to GraphQL FieldValue slice
+func toGraphQLFieldValues(fieldValues map[string]model.FieldValue) []*graphql1.FieldValue {
+	if fieldValues == nil {
+		return []*graphql1.FieldValue{}
 	}
+	result := make([]*graphql1.FieldValue, 0, len(fieldValues))
+	for _, fv := range fieldValues {
+		result = append(result, &graphql1.FieldValue{
+			FieldID: string(fv.FieldID),
+			Value:   fv.Value,
+		})
+	}
+	return result
 }
 
-// toDomainFieldValue converts a GraphQL FieldValueInput to domain FieldValue
-func toDomainFieldValue(input graphql1.FieldValueInput) model.FieldValue {
-	return model.FieldValue{
-		FieldID: input.FieldID,
-		Value:   input.Value,
+// toDomainFieldValues converts GraphQL FieldValueInput slice to domain FieldValues map
+func toDomainFieldValues(inputs []*graphql1.FieldValueInput) map[string]model.FieldValue {
+	if inputs == nil {
+		return nil
 	}
+	result := make(map[string]model.FieldValue, len(inputs))
+	for _, input := range inputs {
+		result[input.FieldID] = model.FieldValue{
+			FieldID: types.FieldID(input.FieldID),
+			Value:   input.Value,
+		}
+	}
+	return result
 }
 
 // toGraphQLFieldType converts a domain FieldType to GraphQL FieldType

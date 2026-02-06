@@ -9,6 +9,7 @@ import (
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/firestore"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 )
@@ -116,6 +117,164 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.NoError(t, err).Required()
 
 		// Verify it's deleted
+		_, err = repo.Case().Get(ctx, created.ID)
+		gt.Value(t, err).NotNil()
+	})
+
+	t.Run("Create and Get with FieldValues", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		fieldValues := map[string]model.FieldValue{
+			"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "critical"},
+			"score":    {FieldID: "score", Type: types.FieldTypeNumber, Value: 4.5},
+			"tags":     {FieldID: "tags", Type: types.FieldTypeMultiSelect, Value: []string{"data-breach", "compliance"}},
+			"url":      {FieldID: "url", Type: types.FieldTypeURL, Value: "https://example.com"},
+		}
+
+		created, err := repo.Case().Create(ctx, &model.Case{
+			Title:       "Case with fields",
+			Description: "Testing field values",
+			FieldValues: fieldValues,
+		})
+		gt.NoError(t, err).Required()
+
+		retrieved, err := repo.Case().Get(ctx, created.ID)
+		gt.NoError(t, err).Required()
+
+		gt.Number(t, len(retrieved.FieldValues)).Equal(4)
+
+		gt.Value(t, retrieved.FieldValues["severity"].FieldID).Equal("severity")
+		gt.Value(t, retrieved.FieldValues["severity"].Type).Equal(types.FieldTypeSelect)
+		gt.Value(t, retrieved.FieldValues["severity"].Value).Equal("critical")
+
+		gt.Value(t, retrieved.FieldValues["score"].FieldID).Equal("score")
+		gt.Value(t, retrieved.FieldValues["score"].Type).Equal(types.FieldTypeNumber)
+		gt.Value(t, retrieved.FieldValues["score"].Value).Equal(4.5)
+
+		gt.Value(t, retrieved.FieldValues["tags"].FieldID).Equal("tags")
+		gt.Value(t, retrieved.FieldValues["tags"].Type).Equal(types.FieldTypeMultiSelect)
+
+		gt.Value(t, retrieved.FieldValues["url"].FieldID).Equal("url")
+		gt.Value(t, retrieved.FieldValues["url"].Type).Equal(types.FieldTypeURL)
+		gt.Value(t, retrieved.FieldValues["url"].Value).Equal("https://example.com")
+	})
+
+	t.Run("Create with nil FieldValues", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		created, err := repo.Case().Create(ctx, &model.Case{
+			Title:       "Case without fields",
+			FieldValues: nil,
+		})
+		gt.NoError(t, err).Required()
+
+		retrieved, err := repo.Case().Get(ctx, created.ID)
+		gt.NoError(t, err).Required()
+
+		// nil or empty map is acceptable
+		gt.Number(t, len(retrieved.FieldValues)).Equal(0)
+	})
+
+	t.Run("Create with empty FieldValues", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		created, err := repo.Case().Create(ctx, &model.Case{
+			Title:       "Case with empty fields",
+			FieldValues: map[string]model.FieldValue{},
+		})
+		gt.NoError(t, err).Required()
+
+		retrieved, err := repo.Case().Get(ctx, created.ID)
+		gt.NoError(t, err).Required()
+
+		gt.Number(t, len(retrieved.FieldValues)).Equal(0)
+	})
+
+	t.Run("Update preserves and modifies FieldValues", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		created, err := repo.Case().Create(ctx, &model.Case{
+			Title: "Case to update fields",
+			FieldValues: map[string]model.FieldValue{
+				"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "low"},
+			},
+		})
+		gt.NoError(t, err).Required()
+
+		// Update with new field values
+		created.FieldValues = map[string]model.FieldValue{
+			"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "high"},
+			"notes":    {FieldID: "notes", Type: types.FieldTypeText, Value: "urgent"},
+		}
+
+		updated, err := repo.Case().Update(ctx, created)
+		gt.NoError(t, err).Required()
+
+		gt.Number(t, len(updated.FieldValues)).Equal(2)
+		gt.Value(t, updated.FieldValues["severity"].Value).Equal("high")
+		gt.Value(t, updated.FieldValues["notes"].Value).Equal("urgent")
+
+		// Verify via Get as well
+		retrieved, err := repo.Case().Get(ctx, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Number(t, len(retrieved.FieldValues)).Equal(2)
+		gt.Value(t, retrieved.FieldValues["severity"].Value).Equal("high")
+	})
+
+	t.Run("FieldValues deep copy isolation", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		tags := []string{"tag1", "tag2"}
+		created, err := repo.Case().Create(ctx, &model.Case{
+			Title: "Deep copy test",
+			FieldValues: map[string]model.FieldValue{
+				"tags": {FieldID: "tags", Type: types.FieldTypeMultiSelect, Value: tags},
+			},
+		})
+		gt.NoError(t, err).Required()
+
+		// Mutate the original slice
+		tags[0] = "mutated"
+
+		// Retrieve and verify the stored value is not affected
+		retrieved, err := repo.Case().Get(ctx, created.ID)
+		gt.NoError(t, err).Required()
+
+		storedTags, ok := retrieved.FieldValues["tags"].Value.([]string)
+		gt.Bool(t, ok).True()
+		gt.Value(t, storedTags[0]).Equal("tag1")
+
+		// Also verify that mutating the retrieved value doesn't affect the store
+		storedTags[0] = "also-mutated"
+
+		retrieved2, err := repo.Case().Get(ctx, created.ID)
+		gt.NoError(t, err).Required()
+
+		storedTags2, ok := retrieved2.FieldValues["tags"].Value.([]string)
+		gt.Bool(t, ok).True()
+		gt.Value(t, storedTags2[0]).Equal("tag1")
+	})
+
+	t.Run("Delete removes case with FieldValues", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		created, err := repo.Case().Create(ctx, &model.Case{
+			Title: "Case to delete",
+			FieldValues: map[string]model.FieldValue{
+				"priority": {FieldID: "priority", Type: types.FieldTypeSelect, Value: "high"},
+			},
+		})
+		gt.NoError(t, err).Required()
+
+		err = repo.Case().Delete(ctx, created.ID)
+		gt.NoError(t, err).Required()
+
 		_, err = repo.Case().Get(ctx, created.ID)
 		gt.Value(t, err).NotNil()
 	})
