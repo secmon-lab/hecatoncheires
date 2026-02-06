@@ -35,7 +35,6 @@ func Run(ctx context.Context, args []string, version string) error {
 		},
 		Commands: []*cli.Command{
 			cmdServe(),
-			cmdCompile(),
 			cmdMigrate(),
 		},
 	}

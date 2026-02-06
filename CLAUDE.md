@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Hecatoncheires is an AI native risk management system built with Go and React. It provides a GraphQL API for managing security risks and incidents with support for AI-powered analysis and automation.
+Hecatoncheires is an AI-native project/case management platform built with Go and React. It provides a customizable GraphQL API with support for AI-powered analysis and automation. The system allows defining custom fields via TOML configuration files, making it adaptable to various use cases including security risk management, task management, and incident tracking.
 
 ## Common Development Commands
 
@@ -132,7 +132,7 @@ right: 1.25rem;
   - Use existing indexes whenever possible
   - For batch operations, prefer parallel individual queries over complex queries requiring new indexes
   - If a feature absolutely requires a new index, consult with the team first
-  - Example: Instead of `Where("risk_id", "in", riskIDs).OrderBy(...)` (needs index), use parallel `Where("risk_id", "==", riskID).OrderBy(...)` calls
+  - Example: Instead of `Where("case_id", "in", caseIDs).OrderBy(...)` (needs index), use parallel `Where("case_id", "==", caseID).OrderBy(...)` calls
 - Test queries locally to ensure they work with existing indexes before deployment
 - This policy prevents index management overhead and ensures queries remain simple and maintainable
 
@@ -141,13 +141,13 @@ right: 1.25rem;
 
 ### Future Features (Planned)
 The following features are planned but not yet implemented:
-- Risk data models and management
-- AI-powered risk analysis and assessment
-- Authentication and authorization
-- Integration with security tools and platforms
-- Search and query capabilities
+- Enhanced AI-powered case analysis and assessment
+- Advanced search and query capabilities with full-text search
 - Dashboard analytics and visualizations
-- Export and integration features
+- Export and integration features (CSV, JSON, webhooks)
+- Additional source integrations (GitHub, Jira, etc.)
+- Real-time collaboration features
+- Advanced workflow automation
 
 ## Configuration
 

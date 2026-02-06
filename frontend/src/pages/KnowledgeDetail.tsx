@@ -7,7 +7,7 @@ import styles from './KnowledgeDetail.module.css'
 
 interface Knowledge {
   id: string
-  riskID: number
+  caseID: number
   sourceID: string
   sourceURL: string
   title: string
@@ -15,9 +15,9 @@ interface Knowledge {
   sourcedAt: string
   createdAt: string
   updatedAt: string
-  risk?: {
+  case?: {
     id: number
-    name: string
+    title: string
     description: string
   }
 }
@@ -37,9 +37,9 @@ export default function KnowledgeDetail() {
     navigate('/knowledges')
   }
 
-  const handleRiskClick = () => {
-    if (knowledge?.risk) {
-      navigate(`/risks/${knowledge.risk.id}`)
+  const handleCaseClick = () => {
+    if (knowledge?.case) {
+      navigate(`/cases/${knowledge.case.id}`)
     }
   }
 
@@ -94,12 +94,12 @@ export default function KnowledgeDetail() {
           <p className={styles.summary}>{knowledge.summary}</p>
         </div>
 
-        {knowledge.risk && (
+        {knowledge.case && (
           <div className={styles.section}>
-            <h2>Related Risk</h2>
-            <div className={styles.riskCard} onClick={handleRiskClick}>
-              <h3>{knowledge.risk.name}</h3>
-              <p>{knowledge.risk.description}</p>
+            <h2>Related Case</h2>
+            <div className={styles.riskCard} onClick={handleCaseClick}>
+              <h3>{knowledge.case.title}</h3>
+              <p>{knowledge.case.description}</p>
             </div>
           </div>
         )}

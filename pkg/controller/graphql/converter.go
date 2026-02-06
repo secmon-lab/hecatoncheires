@@ -6,109 +6,56 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 )
 
-// stringPtrToString converts *string to string
-func stringPtrToString(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
-
-// toGraphQLRisk converts domain Risk to GraphQL Risk
-func toGraphQLRisk(risk *model.Risk) *graphql1.Risk {
-	categoryIDs := make([]string, len(risk.CategoryIDs))
-	for i, id := range risk.CategoryIDs {
-		categoryIDs[i] = string(id)
+// toGraphQLCase converts a domain Case to GraphQL Case
+func toGraphQLCase(c *model.Case) *graphql1.Case {
+	// Ensure non-null list fields are never nil (schema: [String!]!)
+	assigneeIDs := c.AssigneeIDs
+	if assigneeIDs == nil {
+		assigneeIDs = []string{}
 	}
 
-	teamIDs := make([]string, len(risk.ResponseTeamIDs))
-	for i, id := range risk.ResponseTeamIDs {
-		teamIDs[i] = string(id)
-	}
-
-	return &graphql1.Risk{
-		ID:                  int(risk.ID),
-		Name:                risk.Name,
-		Description:         risk.Description,
-		CategoryIDs:         categoryIDs,
-		Categories:          []*graphql1.Category{}, // Resolved by field resolver
-		SpecificImpact:      risk.SpecificImpact,
-		LikelihoodID:        string(risk.LikelihoodID),
-		LikelihoodLevel:     nil, // Resolved by field resolver
-		ImpactID:            string(risk.ImpactID),
-		ImpactLevel:         nil, // Resolved by field resolver
-		ResponseTeamIDs:     teamIDs,
-		ResponseTeams:       []*graphql1.Team{}, // Resolved by field resolver
-		AssigneeIDs:         risk.AssigneeIDs,
-		Assignees:           []*graphql1.SlackUser{}, // Resolved by field resolver
-		DetectionIndicators: risk.DetectionIndicators,
-		Responses:           []*graphql1.Response{}, // Resolved by field resolver
-		CreatedAt:           risk.CreatedAt,
-		UpdatedAt:           risk.UpdatedAt,
+	return &graphql1.Case{
+		ID:             int(c.ID),
+		Title:          c.Title,
+		Description:    c.Description,
+		AssigneeIDs:    assigneeIDs,
+		SlackChannelID: &c.SlackChannelID,
+		CreatedAt:      c.CreatedAt,
+		UpdatedAt:      c.UpdatedAt,
 	}
 }
 
-// toGraphQLResponse converts domain Response to GraphQL Response
-func toGraphQLResponse(response *model.Response) *graphql1.Response {
-	return &graphql1.Response{
-		ID:           int(response.ID),
-		Title:        response.Title,
-		Description:  response.Description,
-		ResponderIDs: response.ResponderIDs,
-		Responders:   []*graphql1.SlackUser{}, // Resolved by field resolver
-		URL:          &response.URL,
-		Status:       toGraphQLResponseStatus(response.Status),
-		Risks:        []*graphql1.Risk{}, // Resolved by field resolver
-		CreatedAt:    response.CreatedAt,
-		UpdatedAt:    response.UpdatedAt,
+// toGraphQLAction converts a domain Action to GraphQL Action
+func toGraphQLAction(a *model.Action) *graphql1.Action {
+	slackMessageTS := ""
+	if a.SlackMessageTS != "" {
+		slackMessageTS = a.SlackMessageTS
+	}
+
+	// Ensure non-null list fields are never nil (schema: [String!]!)
+	assigneeIDs := a.AssigneeIDs
+	if assigneeIDs == nil {
+		assigneeIDs = []string{}
+	}
+
+	return &graphql1.Action{
+		ID:             int(a.ID),
+		CaseID:         int(a.CaseID),
+		Title:          a.Title,
+		Description:    a.Description,
+		AssigneeIDs:    assigneeIDs,
+		SlackMessageTs: &slackMessageTS,
+		Status:         a.Status,
+		CreatedAt:      a.CreatedAt,
+		UpdatedAt:      a.UpdatedAt,
 	}
 }
 
-// toGraphQLResponseStatus converts domain ResponseStatus to GraphQL ResponseStatus
-func toGraphQLResponseStatus(status types.ResponseStatus) graphql1.ResponseStatus {
-	switch status {
-	case types.ResponseStatusBacklog:
-		return graphql1.ResponseStatusBacklog
-	case types.ResponseStatusTodo:
-		return graphql1.ResponseStatusTodo
-	case types.ResponseStatusInProgress:
-		return graphql1.ResponseStatusInProgress
-	case types.ResponseStatusBlocked:
-		return graphql1.ResponseStatusBlocked
-	case types.ResponseStatusCompleted:
-		return graphql1.ResponseStatusCompleted
-	case types.ResponseStatusAbandoned:
-		return graphql1.ResponseStatusAbandoned
-	default:
-		return graphql1.ResponseStatusBacklog
-	}
-}
-
-// toDomainResponseStatus converts GraphQL ResponseStatus to domain ResponseStatus
-func toDomainResponseStatus(status graphql1.ResponseStatus) types.ResponseStatus {
-	switch status {
-	case graphql1.ResponseStatusBacklog:
-		return types.ResponseStatusBacklog
-	case graphql1.ResponseStatusTodo:
-		return types.ResponseStatusTodo
-	case graphql1.ResponseStatusInProgress:
-		return types.ResponseStatusInProgress
-	case graphql1.ResponseStatusBlocked:
-		return types.ResponseStatusBlocked
-	case graphql1.ResponseStatusCompleted:
-		return types.ResponseStatusCompleted
-	case graphql1.ResponseStatusAbandoned:
-		return types.ResponseStatusAbandoned
-	default:
-		return types.ResponseStatusBacklog
-	}
-}
-
-// toGraphQLKnowledge converts domain Knowledge to GraphQL Knowledge
+// toGraphQLKnowledge converts a domain Knowledge to GraphQL Knowledge
 func toGraphQLKnowledge(k *model.Knowledge) *graphql1.Knowledge {
 	return &graphql1.Knowledge{
 		ID:        string(k.ID),
-		RiskID:    int(k.RiskID),
+		CaseID:    int(k.CaseID),
 		SourceID:  string(k.SourceID),
 		SourceURL: k.SourceURL,
 		Title:     k.Title,
@@ -116,5 +63,45 @@ func toGraphQLKnowledge(k *model.Knowledge) *graphql1.Knowledge {
 		SourcedAt: k.SourcedAt,
 		CreatedAt: k.CreatedAt,
 		UpdatedAt: k.UpdatedAt,
+	}
+}
+
+// toGraphQLFieldValue converts a domain FieldValue to GraphQL FieldValue
+func toGraphQLFieldValue(fv *model.FieldValue) *graphql1.FieldValue {
+	return &graphql1.FieldValue{
+		FieldID: fv.FieldID,
+		Value:   fv.Value,
+	}
+}
+
+// toDomainFieldValue converts a GraphQL FieldValueInput to domain FieldValue
+func toDomainFieldValue(input graphql1.FieldValueInput) model.FieldValue {
+	return model.FieldValue{
+		FieldID: input.FieldID,
+		Value:   input.Value,
+	}
+}
+
+// toGraphQLFieldType converts a domain FieldType to GraphQL FieldType
+func toGraphQLFieldType(ft types.FieldType) graphql1.FieldType {
+	switch ft {
+	case types.FieldTypeText:
+		return graphql1.FieldTypeText
+	case types.FieldTypeNumber:
+		return graphql1.FieldTypeNumber
+	case types.FieldTypeSelect:
+		return graphql1.FieldTypeSelect
+	case types.FieldTypeMultiSelect:
+		return graphql1.FieldTypeMultiSelect
+	case types.FieldTypeUser:
+		return graphql1.FieldTypeUser
+	case types.FieldTypeMultiUser:
+		return graphql1.FieldTypeMultiUser
+	case types.FieldTypeDate:
+		return graphql1.FieldTypeDate
+	case types.FieldTypeURL:
+		return graphql1.FieldTypeURL
+	default:
+		return graphql1.FieldTypeText
 	}
 }

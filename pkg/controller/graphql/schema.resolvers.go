@@ -7,489 +7,499 @@ package graphql
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	graphql1 "github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
-	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
-// Risk is the resolver for the risk field.
-func (r *knowledgeResolver) Risk(ctx context.Context, obj *graphql1.Knowledge) (*graphql1.Risk, error) {
-	risk, err := r.uc.Risk.GetRisk(ctx, int64(obj.RiskID))
+// Case is the resolver for the case field.
+func (r *actionResolver) Case(ctx context.Context, obj *graphql1.Action) (*graphql1.Case, error) {
+	loaders := GetDataLoaders(ctx)
+	cases, err := loaders.CaseLoader.Load(ctx, []int64{int64(obj.CaseID)})
 	if err != nil {
-		errutil.Handle(ctx, err, "failed to get risk for knowledge")
 		return nil, err
 	}
+	if len(cases) == 0 {
+		return nil, nil
+	}
+	return toGraphQLCase(cases[0]), nil
+}
 
-	return toGraphQLRisk(risk), nil
+// Assignees is the resolver for the assignees field.
+func (r *actionResolver) Assignees(ctx context.Context, obj *graphql1.Action) ([]*graphql1.SlackUser, error) {
+	if len(obj.AssigneeIDs) == 0 {
+		return []*graphql1.SlackUser{}, nil
+	}
+	loaders := GetDataLoaders(ctx)
+	return loaders.SlackUserLoader.Load(ctx, obj.AssigneeIDs)
+}
+
+// Assignees is the resolver for the assignees field.
+func (r *caseResolver) Assignees(ctx context.Context, obj *graphql1.Case) ([]*graphql1.SlackUser, error) {
+	if len(obj.AssigneeIDs) == 0 {
+		return []*graphql1.SlackUser{}, nil
+	}
+	loaders := GetDataLoaders(ctx)
+	return loaders.SlackUserLoader.Load(ctx, obj.AssigneeIDs)
+}
+
+// Fields is the resolver for the fields field.
+func (r *caseResolver) Fields(ctx context.Context, obj *graphql1.Case) ([]*graphql1.FieldValue, error) {
+	loaders := GetDataLoaders(ctx)
+	fieldsMap, err := loaders.CaseFieldValueLoader.Load(ctx, []int64{int64(obj.ID)})
+	if err != nil {
+		return nil, err
+	}
+	fields, ok := fieldsMap[int64(obj.ID)]
+	if !ok {
+		return []*graphql1.FieldValue{}, nil
+	}
+
+	// Convert domain FieldValue to GraphQL FieldValue
+	result := make([]*graphql1.FieldValue, len(fields))
+	for i, f := range fields {
+		result[i] = toGraphQLFieldValue(&f)
+	}
+	return result, nil
+}
+
+// Actions is the resolver for the actions field.
+func (r *caseResolver) Actions(ctx context.Context, obj *graphql1.Case) ([]*graphql1.Action, error) {
+	loaders := GetDataLoaders(ctx)
+	actionsMap, err := loaders.ActionsByCaseLoader.Load(ctx, []int64{int64(obj.ID)})
+	if err != nil {
+		return nil, err
+	}
+	actions, ok := actionsMap[int64(obj.ID)]
+	if !ok {
+		return []*graphql1.Action{}, nil
+	}
+
+	// Convert domain Actions to GraphQL Actions
+	result := make([]*graphql1.Action, len(actions))
+	for i, a := range actions {
+		result[i] = toGraphQLAction(a)
+	}
+	return result, nil
+}
+
+// Knowledges is the resolver for the knowledges field.
+func (r *caseResolver) Knowledges(ctx context.Context, obj *graphql1.Case) ([]*graphql1.Knowledge, error) {
+	loaders := GetDataLoaders(ctx)
+	knowledgesMap, err := loaders.KnowledgesByCaseLoader.Load(ctx, []int64{int64(obj.ID)})
+	if err != nil {
+		return nil, err
+	}
+	knowledges, ok := knowledgesMap[int64(obj.ID)]
+	if !ok {
+		return []*graphql1.Knowledge{}, nil
+	}
+
+	// Convert domain Knowledge to GraphQL Knowledge
+	result := make([]*graphql1.Knowledge, len(knowledges))
+	for i, k := range knowledges {
+		result[i] = toGraphQLKnowledge(k)
+	}
+	return result, nil
+}
+
+// Case is the resolver for the case field.
+func (r *knowledgeResolver) Case(ctx context.Context, obj *graphql1.Knowledge) (*graphql1.Case, error) {
+	loaders := GetDataLoaders(ctx)
+	cases, err := loaders.CaseLoader.Load(ctx, []int64{int64(obj.CaseID)})
+	if err != nil {
+		return nil, err
+	}
+	if len(cases) == 0 {
+		return nil, nil
+	}
+	return toGraphQLCase(cases[0]), nil
 }
 
 // Noop is the resolver for the noop field.
 func (r *mutationResolver) Noop(ctx context.Context) (*bool, error) {
-	// TODO: Remove this dummy implementation when real mutations are added
 	result := true
 	return &result, nil
 }
 
-// CreateRisk is the resolver for the createRisk field.
-func (r *mutationResolver) CreateRisk(ctx context.Context, input graphql1.CreateRiskInput) (*graphql1.Risk, error) {
-	categoryIDs := make([]types.CategoryID, len(input.CategoryIDs))
-	for i, id := range input.CategoryIDs {
-		categoryIDs[i] = types.CategoryID(id)
+// CreateCase is the resolver for the createCase field.
+func (r *mutationResolver) CreateCase(ctx context.Context, input graphql1.CreateCaseInput) (*graphql1.Case, error) {
+	assigneeIDs := input.AssigneeIDs
+	if assigneeIDs == nil {
+		assigneeIDs = []string{}
 	}
 
-	teamIDs := make([]types.TeamID, len(input.ResponseTeamIDs))
-	for i, id := range input.ResponseTeamIDs {
-		teamIDs[i] = types.TeamID(id)
-	}
-
-	risk, err := r.uc.Risk.CreateRisk(
-		ctx,
-		input.Name,
-		input.Description,
-		categoryIDs,
-		input.SpecificImpact,
-		types.LikelihoodID(input.LikelihoodID),
-		types.ImpactID(input.ImpactID),
-		teamIDs,
-		input.AssigneeIDs,
-		input.DetectionIndicators,
-	)
-	if err != nil {
-		errutil.Handle(ctx, err, "failed to create risk")
-		return nil, err
-	}
-
-	return toGraphQLRisk(risk), nil
-}
-
-// UpdateRisk is the resolver for the updateRisk field.
-func (r *mutationResolver) UpdateRisk(ctx context.Context, input graphql1.UpdateRiskInput) (*graphql1.Risk, error) {
-	categoryIDs := make([]types.CategoryID, len(input.CategoryIDs))
-	for i, id := range input.CategoryIDs {
-		categoryIDs[i] = types.CategoryID(id)
-	}
-
-	teamIDs := make([]types.TeamID, len(input.ResponseTeamIDs))
-	for i, id := range input.ResponseTeamIDs {
-		teamIDs[i] = types.TeamID(id)
-	}
-
-	risk, err := r.uc.Risk.UpdateRisk(
-		ctx,
-		int64(input.ID),
-		input.Name,
-		input.Description,
-		categoryIDs,
-		input.SpecificImpact,
-		types.LikelihoodID(input.LikelihoodID),
-		types.ImpactID(input.ImpactID),
-		teamIDs,
-		input.AssigneeIDs,
-		input.DetectionIndicators,
-	)
-	if err != nil {
-		errutil.Handle(ctx, err, "failed to update risk")
-		return nil, err
-	}
-
-	return toGraphQLRisk(risk), nil
-}
-
-// DeleteRisk is the resolver for the deleteRisk field.
-func (r *mutationResolver) DeleteRisk(ctx context.Context, id int) (bool, error) {
-	if err := r.uc.Risk.DeleteRisk(ctx, int64(id)); err != nil {
-		errutil.Handle(ctx, err, "failed to delete risk")
-		return false, err
-	}
-
-	return true, nil
-}
-
-// CreateResponse is the resolver for the createResponse field.
-func (r *mutationResolver) CreateResponse(ctx context.Context, input graphql1.CreateResponseInput) (*graphql1.Response, error) {
-	var status types.ResponseStatus
-	if input.Status != nil {
-		status = toDomainResponseStatus(*input.Status)
-	} else {
-		status = types.ResponseStatusBacklog
-	}
-
-	var riskIDs []int64
-	if input.RiskIDs != nil {
-		riskIDs = make([]int64, len(input.RiskIDs))
-		for i, id := range input.RiskIDs {
-			riskIDs[i] = int64(id)
+	fields := make([]model.FieldValue, 0)
+	if input.Fields != nil {
+		for _, f := range input.Fields {
+			fields = append(fields, toDomainFieldValue(*f))
 		}
 	}
 
-	response, err := r.uc.Response.CreateResponse(
-		ctx,
-		input.Title,
-		input.Description,
-		input.ResponderIDs,
-		stringPtrToString(input.URL),
-		status,
-		riskIDs,
-	)
+	created, err := r.UseCases.Case.CreateCase(ctx, input.Title, input.Description, assigneeIDs, fields)
 	if err != nil {
-		errutil.Handle(ctx, err, "failed to create response")
 		return nil, err
 	}
 
-	return toGraphQLResponse(response), nil
+	return toGraphQLCase(created), nil
 }
 
-// UpdateResponse is the resolver for the updateResponse field.
-func (r *mutationResolver) UpdateResponse(ctx context.Context, input graphql1.UpdateResponseInput) (*graphql1.Response, error) {
-	var status *types.ResponseStatus
-	if input.Status != nil {
-		s := toDomainResponseStatus(*input.Status)
-		status = &s
+// UpdateCase is the resolver for the updateCase field.
+func (r *mutationResolver) UpdateCase(ctx context.Context, input graphql1.UpdateCaseInput) (*graphql1.Case, error) {
+	assigneeIDs := input.AssigneeIDs
+	if assigneeIDs == nil {
+		assigneeIDs = []string{}
 	}
 
-	var riskIDs []int64
-	if input.RiskIDs != nil {
-		riskIDs = make([]int64, len(input.RiskIDs))
-		for i, id := range input.RiskIDs {
-			riskIDs[i] = int64(id)
+	fields := make([]model.FieldValue, 0)
+	if input.Fields != nil {
+		for _, f := range input.Fields {
+			fields = append(fields, toDomainFieldValue(*f))
 		}
 	}
 
-	response, err := r.uc.Response.UpdateResponse(
-		ctx,
-		int64(input.ID),
-		input.Title,
-		input.Description,
-		input.ResponderIDs,
-		input.URL,
-		status,
-		riskIDs,
-	)
+	updated, err := r.UseCases.Case.UpdateCase(ctx, int64(input.ID), input.Title, input.Description, assigneeIDs, fields)
 	if err != nil {
-		errutil.Handle(ctx, err, "failed to update response")
 		return nil, err
 	}
 
-	return toGraphQLResponse(response), nil
+	return toGraphQLCase(updated), nil
 }
 
-// DeleteResponse is the resolver for the deleteResponse field.
-func (r *mutationResolver) DeleteResponse(ctx context.Context, id int) (bool, error) {
-	if err := r.uc.Response.DeleteResponse(ctx, int64(id)); err != nil {
-		errutil.Handle(ctx, err, "failed to delete response")
+// DeleteCase is the resolver for the deleteCase field.
+func (r *mutationResolver) DeleteCase(ctx context.Context, id int) (bool, error) {
+	if err := r.UseCases.Case.DeleteCase(ctx, int64(id)); err != nil {
 		return false, err
 	}
-
 	return true, nil
 }
 
-// LinkResponseToRisk is the resolver for the linkResponseToRisk field.
-func (r *mutationResolver) LinkResponseToRisk(ctx context.Context, responseID int, riskID int) (bool, error) {
-	if err := r.uc.Response.LinkResponseToRisk(ctx, int64(responseID), int64(riskID)); err != nil {
-		errutil.Handle(ctx, err, "failed to link response to risk")
-		return false, err
+// CreateAction is the resolver for the createAction field.
+func (r *mutationResolver) CreateAction(ctx context.Context, input graphql1.CreateActionInput) (*graphql1.Action, error) {
+	assigneeIDs := input.AssigneeIDs
+	if assigneeIDs == nil {
+		assigneeIDs = []string{}
 	}
 
-	return true, nil
+	slackMessageTS := ""
+	if input.SlackMessageTs != nil {
+		slackMessageTS = *input.SlackMessageTs
+	}
+
+	status := types.ActionStatusTodo
+	if input.Status != nil {
+		status = *input.Status
+	}
+
+	created, err := r.UseCases.Action.CreateAction(ctx, int64(input.CaseID), input.Title, input.Description, assigneeIDs, slackMessageTS, status)
+	if err != nil {
+		return nil, err
+	}
+
+	return toGraphQLAction(created), nil
 }
 
-// UnlinkResponseFromRisk is the resolver for the unlinkResponseFromRisk field.
-func (r *mutationResolver) UnlinkResponseFromRisk(ctx context.Context, responseID int, riskID int) (bool, error) {
-	if err := r.uc.Response.UnlinkResponseFromRisk(ctx, int64(responseID), int64(riskID)); err != nil {
-		errutil.Handle(ctx, err, "failed to unlink response from risk")
-		return false, err
+// UpdateAction is the resolver for the updateAction field.
+func (r *mutationResolver) UpdateAction(ctx context.Context, input graphql1.UpdateActionInput) (*graphql1.Action, error) {
+	var caseID *int64
+	if input.CaseID != nil {
+		id := int64(*input.CaseID)
+		caseID = &id
 	}
 
+	var slackMessageTS *string
+	if input.SlackMessageTs != nil {
+		slackMessageTS = input.SlackMessageTs
+	}
+
+	var status *types.ActionStatus
+	if input.Status != nil {
+		status = input.Status
+	}
+
+	updated, err := r.UseCases.Action.UpdateAction(ctx, int64(input.ID), caseID, input.Title, input.Description, input.AssigneeIDs, slackMessageTS, status)
+	if err != nil {
+		return nil, err
+	}
+
+	return toGraphQLAction(updated), nil
+}
+
+// DeleteAction is the resolver for the deleteAction field.
+func (r *mutationResolver) DeleteAction(ctx context.Context, id int) (bool, error) {
+	if err := r.UseCases.Action.DeleteAction(ctx, int64(id)); err != nil {
+		return false, err
+	}
 	return true, nil
 }
 
 // CreateNotionDBSource is the resolver for the createNotionDBSource field.
 func (r *mutationResolver) CreateNotionDBSource(ctx context.Context, input graphql1.CreateNotionDBSourceInput) (*graphql1.Source, error) {
-	ucInput := toUseCaseCreateNotionDBSourceInput(input)
-
-	source, err := r.uc.Source.CreateNotionDBSource(ctx, ucInput)
+	created, err := r.UseCases.Source.CreateNotionDBSource(ctx, toUseCaseCreateNotionDBSourceInput(input))
 	if err != nil {
-		errutil.Handle(ctx, err, "failed to create Notion DB source")
 		return nil, err
 	}
 
-	return toGraphQLSource(source)
+	return toGraphQLSource(created)
 }
 
 // CreateSlackSource is the resolver for the createSlackSource field.
 func (r *mutationResolver) CreateSlackSource(ctx context.Context, input graphql1.CreateSlackSourceInput) (*graphql1.Source, error) {
-	ucInput := toUseCaseCreateSlackSourceInput(input)
-
-	source, err := r.uc.Source.CreateSlackSource(ctx, ucInput)
+	created, err := r.UseCases.Source.CreateSlackSource(ctx, toUseCaseCreateSlackSourceInput(input))
 	if err != nil {
-		errutil.Handle(ctx, err, "failed to create Slack source")
 		return nil, err
 	}
 
-	return toGraphQLSource(source)
+	return toGraphQLSource(created)
 }
 
 // UpdateSource is the resolver for the updateSource field.
 func (r *mutationResolver) UpdateSource(ctx context.Context, input graphql1.UpdateSourceInput) (*graphql1.Source, error) {
-	ucInput := toUseCaseUpdateSourceInput(input)
-
-	source, err := r.uc.Source.UpdateSource(ctx, ucInput)
+	updated, err := r.UseCases.Source.UpdateSource(ctx, toUseCaseUpdateSourceInput(input))
 	if err != nil {
-		errutil.Handle(ctx, err, "failed to update source")
 		return nil, err
 	}
 
-	return toGraphQLSource(source)
+	return toGraphQLSource(updated)
 }
 
 // UpdateSlackSource is the resolver for the updateSlackSource field.
 func (r *mutationResolver) UpdateSlackSource(ctx context.Context, input graphql1.UpdateSlackSourceInput) (*graphql1.Source, error) {
-	ucInput := toUseCaseUpdateSlackSourceInput(input)
-
-	source, err := r.uc.Source.UpdateSlackSource(ctx, ucInput)
+	updated, err := r.UseCases.Source.UpdateSlackSource(ctx, toUseCaseUpdateSlackSourceInput(input))
 	if err != nil {
-		errutil.Handle(ctx, err, "failed to update Slack source")
 		return nil, err
 	}
 
-	return toGraphQLSource(source)
+	return toGraphQLSource(updated)
 }
 
 // DeleteSource is the resolver for the deleteSource field.
 func (r *mutationResolver) DeleteSource(ctx context.Context, id string) (bool, error) {
-	if err := r.uc.Source.DeleteSource(ctx, model.SourceID(id)); err != nil {
-		errutil.Handle(ctx, err, "failed to delete source")
+	if err := r.UseCases.Source.DeleteSource(ctx, model.SourceID(id)); err != nil {
 		return false, err
 	}
-
 	return true, nil
 }
 
 // ValidateNotionDb is the resolver for the validateNotionDB field.
 func (r *mutationResolver) ValidateNotionDb(ctx context.Context, databaseID string) (*graphql1.NotionDBValidationResult, error) {
-	result, err := r.uc.Source.ValidateNotionDB(ctx, databaseID)
+	result, err := r.UseCases.Source.ValidateNotionDB(ctx, databaseID)
 	if err != nil {
-		errutil.Handle(ctx, err, "failed to validate Notion DB")
 		return nil, err
 	}
 
-	return &graphql1.NotionDBValidationResult{
-		Valid:         result.Valid,
-		DatabaseTitle: &result.DatabaseTitle,
-		DatabaseURL:   &result.DatabaseURL,
-		ErrorMessage:  &result.ErrorMessage,
-	}, nil
+	gql := &graphql1.NotionDBValidationResult{
+		Valid: result.Valid,
+	}
+	if result.DatabaseTitle != "" {
+		gql.DatabaseTitle = &result.DatabaseTitle
+	}
+	if result.DatabaseURL != "" {
+		gql.DatabaseURL = &result.DatabaseURL
+	}
+	if result.ErrorMessage != "" {
+		gql.ErrorMessage = &result.ErrorMessage
+	}
+
+	return gql, nil
 }
 
 // Health is the resolver for the health field.
 func (r *queryResolver) Health(ctx context.Context) (string, error) {
-	// TODO: Remove this dummy implementation when real health check is added
-	return "OK", nil
+	return "ok", nil
 }
 
-// Risks is the resolver for the risks field.
-func (r *queryResolver) Risks(ctx context.Context) ([]*graphql1.Risk, error) {
-	risks, err := r.uc.Risk.ListRisks(ctx)
+// Cases is the resolver for the cases field.
+func (r *queryResolver) Cases(ctx context.Context) ([]*graphql1.Case, error) {
+	cases, err := r.UseCases.Case.ListCases(ctx)
 	if err != nil {
-		errutil.Handle(ctx, err, "failed to list risks")
 		return nil, err
 	}
 
-	gqlRisks := make([]*graphql1.Risk, len(risks))
-	for i, risk := range risks {
-		gqlRisks[i] = toGraphQLRisk(risk)
+	result := make([]*graphql1.Case, len(cases))
+	for i, c := range cases {
+		result[i] = toGraphQLCase(c)
 	}
 
-	return gqlRisks, nil
+	return result, nil
 }
 
-// Risk is the resolver for the risk field.
-func (r *queryResolver) Risk(ctx context.Context, id int) (*graphql1.Risk, error) {
-	risk, err := r.uc.Risk.GetRisk(ctx, int64(id))
+// Case is the resolver for the case field.
+func (r *queryResolver) Case(ctx context.Context, id int) (*graphql1.Case, error) {
+	c, err := r.UseCases.Case.GetCase(ctx, int64(id))
 	if err != nil {
-		errutil.Handle(ctx, err, "failed to get risk")
 		return nil, err
 	}
 
-	return toGraphQLRisk(risk), nil
+	return toGraphQLCase(c), nil
 }
 
-// RiskConfiguration is the resolver for the riskConfiguration field.
-func (r *queryResolver) RiskConfiguration(ctx context.Context) (*graphql1.RiskConfiguration, error) {
-	config, err := r.uc.Risk.GetRiskConfiguration()
+// Actions is the resolver for the actions field.
+func (r *queryResolver) Actions(ctx context.Context) ([]*graphql1.Action, error) {
+	actions, err := r.UseCases.Action.ListActions(ctx)
 	if err != nil {
-		errutil.Handle(ctx, err, "failed to get risk configuration")
 		return nil, err
 	}
 
-	categories := make([]*graphql1.Category, len(config.Categories))
-	for i, cat := range config.Categories {
-		categories[i] = &graphql1.Category{
-			ID:          cat.ID,
-			Name:        cat.Name,
-			Description: cat.Description,
+	result := make([]*graphql1.Action, len(actions))
+	for i, a := range actions {
+		result[i] = toGraphQLAction(a)
+	}
+
+	return result, nil
+}
+
+// Action is the resolver for the action field.
+func (r *queryResolver) Action(ctx context.Context, id int) (*graphql1.Action, error) {
+	a, err := r.UseCases.Action.GetAction(ctx, int64(id))
+	if err != nil {
+		return nil, err
+	}
+
+	return toGraphQLAction(a), nil
+}
+
+// ActionsByCase is the resolver for the actionsByCase field.
+func (r *queryResolver) ActionsByCase(ctx context.Context, caseID int) ([]*graphql1.Action, error) {
+	actions, err := r.UseCases.Action.GetActionsByCase(ctx, int64(caseID))
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]*graphql1.Action, len(actions))
+	for i, a := range actions {
+		result[i] = toGraphQLAction(a)
+	}
+
+	return result, nil
+}
+
+// FieldConfiguration is the resolver for the fieldConfiguration field.
+func (r *queryResolver) FieldConfiguration(ctx context.Context) (*graphql1.FieldConfiguration, error) {
+	schema := r.UseCases.Case.GetFieldConfiguration()
+
+	fields := make([]*graphql1.FieldDefinition, len(schema.Fields))
+	for i, field := range schema.Fields {
+		options := make([]*graphql1.FieldOption, len(field.Options))
+		for j, opt := range field.Options {
+			color := ""
+			if opt.Color != "" {
+				color = opt.Color
+			}
+			metadata := opt.Metadata
+			if metadata == nil {
+				metadata = make(map[string]any)
+			}
+			metadataJSON, _ := json.Marshal(metadata)
+			metadataStr := string(metadataJSON)
+
+			options[j] = &graphql1.FieldOption{
+				ID:          opt.ID,
+				Name:        opt.Name,
+				Description: &opt.Description,
+				Color:       &color,
+				Metadata:    &metadataStr,
+			}
+		}
+
+		fieldType := toGraphQLFieldType(field.Type)
+
+		fields[i] = &graphql1.FieldDefinition{
+			ID:          field.ID,
+			Name:        field.Name,
+			Type:        fieldType,
+			Required:    field.Required,
+			Description: &field.Description,
+			Options:     options,
 		}
 	}
 
-	likelihoodLevels := make([]*graphql1.LikelihoodLevel, len(config.Likelihood))
-	for i, level := range config.Likelihood {
-		likelihoodLevels[i] = &graphql1.LikelihoodLevel{
-			ID:          level.ID,
-			Name:        level.Name,
-			Description: level.Description,
-			Score:       level.Score,
-		}
-	}
-
-	impactLevels := make([]*graphql1.ImpactLevel, len(config.Impact))
-	for i, level := range config.Impact {
-		impactLevels[i] = &graphql1.ImpactLevel{
-			ID:          level.ID,
-			Name:        level.Name,
-			Description: level.Description,
-			Score:       level.Score,
-		}
-	}
-
-	teams := make([]*graphql1.Team, len(config.Teams))
-	for i, team := range config.Teams {
-		teams[i] = &graphql1.Team{
-			ID:   team.ID,
-			Name: team.Name,
-		}
-	}
-
-	return &graphql1.RiskConfiguration{
-		Categories:       categories,
-		LikelihoodLevels: likelihoodLevels,
-		ImpactLevels:     impactLevels,
-		Teams:            teams,
+	return &graphql1.FieldConfiguration{
+		Fields: fields,
+		Labels: &graphql1.EntityLabels{
+			Case: schema.Labels.Case,
+		},
 	}, nil
 }
 
 // SlackUsers is the resolver for the slackUsers field.
 func (r *queryResolver) SlackUsers(ctx context.Context) ([]*graphql1.SlackUser, error) {
-	loaders := GetDataLoaders(ctx)
-	if loaders == nil || loaders.SlackUsersLoader == nil {
-		return []*graphql1.SlackUser{}, nil
-	}
-
-	// Get all users from database via DataLoader
-	usersMap, err := loaders.SlackUsersLoader.LoadAll(ctx)
+	users, err := r.repo.SlackUser().GetAll(ctx)
 	if err != nil {
-		errutil.Handle(ctx, err, "failed to get Slack users")
 		return nil, err
 	}
 
-	// Convert map to slice
-	gqlUsers := make([]*graphql1.SlackUser, 0, len(usersMap))
-	for _, user := range usersMap {
-		gqlUsers = append(gqlUsers, user)
-	}
-
-	return gqlUsers, nil
-}
-
-// Responses is the resolver for the responses field.
-func (r *queryResolver) Responses(ctx context.Context) ([]*graphql1.Response, error) {
-	responses, err := r.uc.Response.ListResponses(ctx)
-	if err != nil {
-		errutil.Handle(ctx, err, "failed to list responses")
-		return nil, err
-	}
-
-	gqlResponses := make([]*graphql1.Response, len(responses))
-	for i, response := range responses {
-		gqlResponses[i] = toGraphQLResponse(response)
-	}
-
-	return gqlResponses, nil
-}
-
-// Response is the resolver for the response field.
-func (r *queryResolver) Response(ctx context.Context, id int) (*graphql1.Response, error) {
-	response, err := r.uc.Response.GetResponse(ctx, int64(id))
-	if err != nil {
-		errutil.Handle(ctx, err, "failed to get response")
-		return nil, err
-	}
-
-	return toGraphQLResponse(response), nil
-}
-
-// ResponsesByRisk is the resolver for the responsesByRisk field.
-func (r *queryResolver) ResponsesByRisk(ctx context.Context, riskID int) ([]*graphql1.Response, error) {
-	responses, err := r.uc.Response.GetResponsesByRisk(ctx, int64(riskID))
-	if err != nil {
-		errutil.Handle(ctx, err, "failed to get responses by risk")
-		return nil, err
-	}
-
-	gqlResponses := make([]*graphql1.Response, len(responses))
-	for i, response := range responses {
-		gqlResponses[i] = toGraphQLResponse(response)
-	}
-
-	return gqlResponses, nil
-}
-
-// Sources is the resolver for the sources field.
-func (r *queryResolver) Sources(ctx context.Context) ([]*graphql1.Source, error) {
-	sources, err := r.uc.Source.ListSources(ctx)
-	if err != nil {
-		errutil.Handle(ctx, err, "failed to list sources")
-		return nil, err
-	}
-
-	gqlSources := make([]*graphql1.Source, len(sources))
-	for i, source := range sources {
-		gqlSource, err := toGraphQLSource(source)
-		if err != nil {
-			return nil, err
+	result := make([]*graphql1.SlackUser, len(users))
+	for i, u := range users {
+		var imageURL *string
+		if u.ImageURL != "" {
+			url := u.ImageURL
+			imageURL = &url
 		}
-		gqlSources[i] = gqlSource
+		result[i] = &graphql1.SlackUser{
+			ID:       string(u.ID),
+			Name:     u.Name,
+			RealName: u.RealName,
+			ImageURL: imageURL,
+		}
 	}
 
-	return gqlSources, nil
-}
-
-// Source is the resolver for the source field.
-func (r *queryResolver) Source(ctx context.Context, id string) (*graphql1.Source, error) {
-	source, err := r.uc.Source.GetSource(ctx, model.SourceID(id))
-	if err != nil {
-		errutil.Handle(ctx, err, "failed to get source")
-		return nil, err
-	}
-
-	return toGraphQLSource(source)
+	return result, nil
 }
 
 // SlackJoinedChannels is the resolver for the slackJoinedChannels field.
 func (r *queryResolver) SlackJoinedChannels(ctx context.Context) ([]*graphql1.SlackChannelInfo, error) {
-	channels, err := r.uc.Source.ListSlackChannels(ctx)
+	channels, err := r.UseCases.Source.ListSlackChannels(ctx)
 	if err != nil {
-		errutil.Handle(ctx, err, "failed to list Slack channels")
 		return nil, err
 	}
 
-	gqlChannels := make([]*graphql1.SlackChannelInfo, len(channels))
+	result := make([]*graphql1.SlackChannelInfo, len(channels))
 	for i, ch := range channels {
-		gqlChannels[i] = &graphql1.SlackChannelInfo{
+		result[i] = &graphql1.SlackChannelInfo{
 			ID:   ch.ID,
 			Name: ch.Name,
 		}
 	}
 
-	return gqlChannels, nil
+	return result, nil
+}
+
+// Sources is the resolver for the sources field.
+func (r *queryResolver) Sources(ctx context.Context) ([]*graphql1.Source, error) {
+	sources, err := r.UseCases.Source.ListSources(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]*graphql1.Source, 0, len(sources))
+	for _, s := range sources {
+		gql, err := toGraphQLSource(s)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, gql)
+	}
+
+	return result, nil
+}
+
+// Source is the resolver for the source field.
+func (r *queryResolver) Source(ctx context.Context, id string) (*graphql1.Source, error) {
+	source, err := r.UseCases.Source.GetSource(ctx, model.SourceID(id))
+	if err != nil {
+		return nil, err
+	}
+
+	return toGraphQLSource(source)
 }
 
 // Knowledge is the resolver for the knowledge field.
 func (r *queryResolver) Knowledge(ctx context.Context, id string) (*graphql1.Knowledge, error) {
 	knowledge, err := r.repo.Knowledge().Get(ctx, model.KnowledgeID(id))
 	if err != nil {
-		errutil.Handle(ctx, err, "failed to get knowledge")
 		return nil, err
 	}
 
@@ -498,131 +508,42 @@ func (r *queryResolver) Knowledge(ctx context.Context, id string) (*graphql1.Kno
 
 // Knowledges is the resolver for the knowledges field.
 func (r *queryResolver) Knowledges(ctx context.Context, limit *int, offset *int) (*graphql1.KnowledgeConnection, error) {
-	// Set defaults
-	l := 20
-	o := 0
-	if limit != nil {
-		l = *limit
-	}
-	if offset != nil {
-		o = *offset
+	// Set defaults if not provided
+	limitVal := 100
+	if limit != nil && *limit > 0 {
+		limitVal = *limit
 	}
 
-	knowledges, totalCount, err := r.repo.Knowledge().ListWithPagination(ctx, l, o)
+	offsetVal := 0
+	if offset != nil && *offset > 0 {
+		offsetVal = *offset
+	}
+
+	knowledges, totalCount, err := r.repo.Knowledge().ListWithPagination(ctx, limitVal, offsetVal)
 	if err != nil {
-		errutil.Handle(ctx, err, "failed to list knowledges")
 		return nil, err
 	}
 
-	gqlKnowledges := make([]*graphql1.Knowledge, len(knowledges))
+	// Convert domain Knowledge to GraphQL Knowledge
+	items := make([]*graphql1.Knowledge, len(knowledges))
 	for i, k := range knowledges {
-		gqlKnowledges[i] = toGraphQLKnowledge(k)
+		items[i] = toGraphQLKnowledge(k)
 	}
 
-	hasMore := o+len(knowledges) < totalCount
+	hasMore := (offsetVal + len(knowledges)) < totalCount
 
 	return &graphql1.KnowledgeConnection{
-		Items:      gqlKnowledges,
+		Items:      items,
 		TotalCount: totalCount,
 		HasMore:    hasMore,
 	}, nil
 }
 
-// Responders is the resolver for the responders field.
-func (r *responseResolver) Responders(ctx context.Context, obj *graphql1.Response) ([]*graphql1.SlackUser, error) {
-	return resolveSlackUsers(ctx, obj.ResponderIDs)
-}
+// Action returns ActionResolver implementation.
+func (r *Resolver) Action() ActionResolver { return &actionResolver{r} }
 
-// Assignees is the resolver for the assignees field.
-func (r *riskResolver) Assignees(ctx context.Context, obj *graphql1.Risk) ([]*graphql1.SlackUser, error) {
-	return resolveSlackUsers(ctx, obj.AssigneeIDs)
-}
-
-// resolveSlackUsers is a helper function that resolves Slack users from a list of user IDs.
-// It uses DataLoader when available, otherwise returns minimal user info with ID only.
-func resolveSlackUsers(ctx context.Context, userIDs []string) ([]*graphql1.SlackUser, error) {
-	loaders := GetDataLoaders(ctx)
-	if loaders == nil || loaders.SlackUsersLoader == nil {
-		// Fallback: return minimal user info with ID only
-		users := make([]*graphql1.SlackUser, len(userIDs))
-		for i, id := range userIDs {
-			users[i] = &graphql1.SlackUser{ID: id}
-		}
-		return users, nil
-	}
-
-	users, err := loaders.SlackUsersLoader.LoadMany(ctx, userIDs)
-	if err != nil {
-		errutil.Handle(ctx, err, "failed to load Slack users")
-		return nil, err
-	}
-
-	return users, nil
-}
-
-// Responses is the resolver for the responses field on Risk.
-func (r *riskResolver) Responses(ctx context.Context, obj *graphql1.Risk) ([]*graphql1.Response, error) {
-	loaders := GetDataLoaders(ctx)
-	if loaders == nil || loaders.ResponsesByRiskLoader == nil {
-		// Fallback to direct query if DataLoader is not available
-		responses, err := r.uc.Response.GetResponsesByRisk(ctx, int64(obj.ID))
-		if err != nil {
-			errutil.Handle(ctx, err, "failed to get responses by risk")
-			return nil, err
-		}
-
-		gqlResponses := make([]*graphql1.Response, len(responses))
-		for i, response := range responses {
-			gqlResponses[i] = toGraphQLResponse(response)
-		}
-		return gqlResponses, nil
-	}
-
-	responses, err := loaders.ResponsesByRiskLoader.Load(ctx, int64(obj.ID))
-	if err != nil {
-		errutil.Handle(ctx, err, "failed to load responses by risk")
-		return nil, err
-	}
-
-	gqlResponses := make([]*graphql1.Response, len(responses))
-	for i, response := range responses {
-		gqlResponses[i] = toGraphQLResponse(response)
-	}
-
-	return gqlResponses, nil
-}
-
-// Knowledges is the resolver for the knowledges field.
-func (r *riskResolver) Knowledges(ctx context.Context, obj *graphql1.Risk) ([]*graphql1.Knowledge, error) {
-	loaders := GetDataLoaders(ctx)
-	if loaders == nil || loaders.KnowledgesByRiskLoader == nil {
-		// Fallback to direct query if DataLoader is not available
-		knowledges, err := r.repo.Knowledge().ListByRiskID(ctx, int64(obj.ID))
-		if err != nil {
-			errutil.Handle(ctx, err, "failed to get knowledges by risk")
-			return nil, err
-		}
-
-		gqlKnowledges := make([]*graphql1.Knowledge, len(knowledges))
-		for i, k := range knowledges {
-			gqlKnowledges[i] = toGraphQLKnowledge(k)
-		}
-		return gqlKnowledges, nil
-	}
-
-	knowledges, err := loaders.KnowledgesByRiskLoader.Load(ctx, int64(obj.ID))
-	if err != nil {
-		errutil.Handle(ctx, err, "failed to load knowledges by risk")
-		return nil, err
-	}
-
-	gqlKnowledges := make([]*graphql1.Knowledge, len(knowledges))
-	for i, k := range knowledges {
-		gqlKnowledges[i] = toGraphQLKnowledge(k)
-	}
-
-	return gqlKnowledges, nil
-}
+// Case returns CaseResolver implementation.
+func (r *Resolver) Case() CaseResolver { return &caseResolver{r} }
 
 // Knowledge returns KnowledgeResolver implementation.
 func (r *Resolver) Knowledge() KnowledgeResolver { return &knowledgeResolver{r} }
@@ -633,14 +554,8 @@ func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
 // Query returns QueryResolver implementation.
 func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 
-// Response returns ResponseResolver implementation.
-func (r *Resolver) Response() ResponseResolver { return &responseResolver{r} }
-
-// Risk returns RiskResolver implementation.
-func (r *Resolver) Risk() RiskResolver { return &riskResolver{r} }
-
+type actionResolver struct{ *Resolver }
+type caseResolver struct{ *Resolver }
 type knowledgeResolver struct{ *Resolver }
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
-type responseResolver struct{ *Resolver }
-type riskResolver struct{ *Resolver }

@@ -1,113 +1,85 @@
-# Hecatoncheires Configuration Example
-# This file shows example configuration for the risk management system
+# Hecatoncheires Configuration
+# This example demonstrates a security risk management system setup
 
-# Category definitions
-# Categories are used to classify risks
-[[category]]
-id = "data-breach"
-name = "Data Breach"
-description = "Risk of personal or confidential information leakage"
+# Entity Labels: Customize the display names in the UI
+[labels]
+case = "Risk"      # Display "Risk" instead of "Case" in the UI
 
-[[category]]
-id = "system-failure"
-name = "System Failure"
-description = "Risk of system or service downtime and failures"
+# Custom Field Definitions for Cases
+# All fields defined here will be available in case forms and details
 
-[[category]]
-id = "compliance"
-name = "Compliance"
-description = "Risk of regulatory or internal policy violations"
+[[fields]]
+id = "category"
+name = "Category"
+type = "multi-select"
+required = true
+options = [
+  { id = "data-breach", name = "Data Breach", metadata = { description = "Risk of personal or confidential information leakage", color = "red" } },
+  { id = "system-failure", name = "System Failure", metadata = { description = "Risk of system or service downtime and failures", color = "orange" } },
+  { id = "compliance", name = "Compliance", metadata = { description = "Risk of regulatory or internal policy violations", color = "yellow" } },
+  { id = "supply-chain", name = "Supply Chain", metadata = { description = "Risks related to external vendors and third-party services", color = "blue" } },
+  { id = "insider-threat", name = "Insider Threat", metadata = { description = "Intentional or unintentional threats from employees", color = "purple" } },
+]
 
-[[category]]
-id = "supply-chain"
-name = "Supply Chain"
-description = "Risks related to external vendors and third-party services"
+[[fields]]
+id = "likelihood"
+name = "Likelihood"
+type = "select"
+required = true
+options = [
+  { id = "very-low", name = "Very Low", metadata = { description = "Extremely unlikely to occur (less than once per year)", score = 1 } },
+  { id = "low", name = "Low", metadata = { description = "Unlikely to occur (a few times per year)", score = 2 } },
+  { id = "medium", name = "Medium", metadata = { description = "Moderately likely to occur (about once per month)", score = 3 } },
+  { id = "high", name = "High", metadata = { description = "Likely to occur (about once per week)", score = 4 } },
+  { id = "very-high", name = "Very High", metadata = { description = "Very likely to occur (almost daily)", score = 5 } },
+]
 
-[[category]]
-id = "insider-threat"
-name = "Insider Threat"
-description = "Intentional or unintentional threats from employees and related parties"
+[[fields]]
+id = "impact"
+name = "Impact"
+type = "select"
+required = true
+options = [
+  { id = "negligible", name = "Negligible", metadata = { description = "Little to no impact on business operations", score = 1 } },
+  { id = "minor", name = "Minor", metadata = { description = "Limited impact with no disruption to business continuity", score = 2 } },
+  { id = "moderate", name = "Moderate", metadata = { description = "Some business impact requiring response", score = 3 } },
+  { id = "major", name = "Major", metadata = { description = "Significant impact requiring urgent response", score = 4 } },
+  { id = "critical", name = "Critical", metadata = { description = "Critical impact on business continuity", score = 5 } },
+]
 
-# Likelihood levels (score: 1-5, higher is more likely)
-[[likelihood]]
-id = "very-low"
-name = "Very Low"
-description = "Extremely unlikely to occur (less than once per year)"
-score = 1
+[[fields]]
+id = "response-team"
+name = "Response Team"
+type = "multi-select"
+required = false
+options = [
+  { id = "security-team", name = "Security Team" },
+  { id = "infrastructure-team", name = "Infrastructure Team" },
+  { id = "development-team", name = "Development Team" },
+  { id = "compliance-team", name = "Compliance Team" },
+  { id = "business-team", name = "Business Team" },
+]
 
-[[likelihood]]
-id = "low"
-name = "Low"
-description = "Unlikely to occur (a few times per year)"
-score = 2
+[[fields]]
+id = "specific-impact"
+name = "Specific Impact"
+type = "text"
+required = false
 
-[[likelihood]]
-id = "medium"
-name = "Medium"
-description = "Moderately likely to occur (about once per month)"
-score = 3
+[[fields]]
+id = "detection-indicators"
+name = "Detection Indicators"
+type = "text"
+required = false
 
-[[likelihood]]
-id = "high"
-name = "High"
-description = "Likely to occur (about once per week)"
-score = 4
+[[fields]]
+id = "deadline"
+name = "Deadline"
+type = "date"
+required = false
 
-[[likelihood]]
-id = "very-high"
-name = "Very High"
-description = "Very likely to occur (almost daily)"
-score = 5
-
-# Impact levels (score: 1-5, higher is more severe)
-[[impact]]
-id = "negligible"
-name = "Negligible"
-description = "Little to no impact on business operations"
-score = 1
-
-[[impact]]
-id = "minor"
-name = "Minor"
-description = "Limited impact with no disruption to business continuity"
-score = 2
-
-[[impact]]
-id = "moderate"
-name = "Moderate"
-description = "Some business impact requiring response"
-score = 3
-
-[[impact]]
-id = "major"
-name = "Major"
-description = "Significant impact requiring urgent response"
-score = 4
-
-[[impact]]
-id = "critical"
-name = "Critical"
-description = "Critical impact on business continuity requiring highest priority response"
-score = 5
-
-# Team definitions
-# Teams represent organizations responsible for handling risks
-[[team]]
-id = "security-team"
-name = "Security Team"
-
-[[team]]
-id = "infrastructure-team"
-name = "Infrastructure Team"
-
-[[team]]
-id = "development-team"
-name = "Development Team"
-
-[[team]]
-id = "compliance-team"
-name = "Compliance Team"
-
-[[team]]
-id = "business-team"
-name = "Business Team"
+[[fields]]
+id = "reference-url"
+name = "Reference URL"
+type = "url"
+required = false

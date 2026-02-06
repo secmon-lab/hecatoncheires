@@ -7,7 +7,7 @@ import styles from './KnowledgeList.module.css'
 
 interface Knowledge {
   id: string
-  riskID: number
+  caseID: number
   sourceID: string
   sourceURL: string
   title: string
@@ -15,9 +15,9 @@ interface Knowledge {
   sourcedAt: string
   createdAt: string
   updatedAt: string
-  risk?: {
+  case?: {
     id: number
-    name: string
+    title: string
   }
 }
 
@@ -41,9 +41,9 @@ export default function KnowledgeList() {
     navigate(`/knowledges/${knowledge.id}`)
   }
 
-  const handleRiskClick = (e: React.MouseEvent, riskId: number) => {
+  const handleCaseClick = (e: React.MouseEvent, caseId: number) => {
     e.stopPropagation()
-    navigate(`/risks/${riskId}`)
+    navigate(`/cases/${caseId}`)
   }
 
   if (loading) return <div className={styles.loading}>Loading...</div>
@@ -76,7 +76,7 @@ export default function KnowledgeList() {
             <thead>
               <tr>
                 <th>Title</th>
-                <th>Related Risk</th>
+                <th>Related Case</th>
                 <th>Summary</th>
                 <th>Date</th>
                 <th></th>
@@ -91,12 +91,12 @@ export default function KnowledgeList() {
                 >
                   <td className={styles.titleCell}>{knowledge.title}</td>
                   <td className={styles.riskCell}>
-                    {knowledge.risk ? (
+                    {knowledge.case ? (
                       <button
                         className={styles.riskLink}
-                        onClick={(e) => handleRiskClick(e, knowledge.risk!.id)}
+                        onClick={(e) => handleCaseClick(e, knowledge.case!.id)}
                       >
-                        {knowledge.risk.name}
+                        {knowledge.case.title}
                       </button>
                     ) : (
                       <span className={styles.noRisk}>-</span>

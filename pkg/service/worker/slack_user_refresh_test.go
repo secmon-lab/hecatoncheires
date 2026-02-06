@@ -78,6 +78,10 @@ func (m *mockSlackService) RenameChannel(ctx context.Context, channelID string, 
 	return nil
 }
 
+func (m *mockSlackService) InviteUsersToChannel(ctx context.Context, channelID string, userIDs []string) error {
+	return nil
+}
+
 func TestSlackUserRefreshWorker_ImmediateInitialSync(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.New()
@@ -106,11 +110,14 @@ func TestSlackUserRefreshWorker_ImmediateInitialSync(t *testing.T) {
 	// Create worker with short interval (not used in this test)
 	worker := worker.NewSlackUserRefreshWorker(repo, mockSvc, 10*time.Minute)
 
-	// Start worker (should perform immediate sync)
+	// Start worker (initial sync runs in background goroutine)
 	if err := worker.Start(ctx); err != nil {
 		t.Fatalf("failed to start worker: %v", err)
 	}
 	defer worker.Stop()
+
+	// Wait for background initial sync to complete
+	time.Sleep(50 * time.Millisecond)
 
 	// Verify users are in database
 	users, err := repo.SlackUser().GetAll(ctx)

@@ -10,23 +10,22 @@ import (
 
 type UseCases struct {
 	repo             interfaces.Repository
-	riskConfig       *config.RiskConfig
+	fieldSchema      *config.FieldSchema
 	notion           notion.Service
 	slackService     slack.Service
 	knowledgeService knowledge.Service
-	Risk             *RiskUseCase
-	Response         *ResponseUseCase
+	Case             *CaseUseCase
+	Action           *ActionUseCase
 	Auth             AuthUseCaseInterface
 	Slack            *SlackUseCases
 	Source           *SourceUseCase
-	Compile          *CompileUseCase
 }
 
 type Option func(*UseCases)
 
-func WithRiskConfig(cfg *config.RiskConfig) Option {
+func WithFieldSchema(schema *config.FieldSchema) Option {
 	return func(uc *UseCases) {
-		uc.riskConfig = cfg
+		uc.fieldSchema = schema
 	}
 }
 
@@ -63,11 +62,10 @@ func New(repo interfaces.Repository, opts ...Option) *UseCases {
 		opt(uc)
 	}
 
-	uc.Risk = NewRiskUseCase(repo, uc.riskConfig, uc.slackService)
-	uc.Response = NewResponseUseCase(repo)
+	uc.Case = NewCaseUseCase(repo, uc.fieldSchema, uc.slackService)
+	uc.Action = NewActionUseCase(repo)
 	uc.Slack = NewSlackUseCases(repo)
 	uc.Source = NewSourceUseCase(repo, uc.notion, uc.slackService)
-	uc.Compile = NewCompileUseCase(repo, uc.notion, uc.knowledgeService)
 
 	return uc
 }

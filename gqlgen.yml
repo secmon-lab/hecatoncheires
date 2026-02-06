@@ -38,19 +38,26 @@ models:
       - github.com/99designs/gqlgen/graphql.Int
       - github.com/99designs/gqlgen/graphql.Int64
       - github.com/99designs/gqlgen/graphql.Int32
-  Risk:
+  ActionStatus:
+    model:
+      - github.com/secmon-lab/hecatoncheires/pkg/domain/types.ActionStatus
+  Case:
     fields:
-      responses:
+      fields:
+        resolver: true
+      actions:
         resolver: true
       knowledges:
         resolver: true
       assignees:
         resolver: true
-  Response:
+  Action:
     fields:
-      responders:
+      case:
+        resolver: true
+      assignees:
         resolver: true
   Knowledge:
     fields:
-      risk:
+      case:
         resolver: true

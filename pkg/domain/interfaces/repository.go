@@ -8,9 +8,9 @@ import (
 
 // Repository defines the interface for data persistence
 type Repository interface {
-	Risk() RiskRepository
-	Response() ResponseRepository
-	RiskResponse() RiskResponseRepository
+	Case() CaseRepository
+	Action() ActionRepository
+	CaseField() FieldValueRepository
 	Slack() SlackRepository
 	SlackUser() SlackUserRepository
 	Source() SourceRepository

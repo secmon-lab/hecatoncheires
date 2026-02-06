@@ -18,10 +18,10 @@ func NewKnowledgeID() KnowledgeID {
 	return KnowledgeID(uuid.New().String())
 }
 
-// Knowledge represents extracted knowledge from source data related to a risk
+// Knowledge represents extracted knowledge from source data related to a case
 type Knowledge struct {
 	ID        KnowledgeID
-	RiskID    int64    // Related Risk ID (if one source relates to multiple risks, create separate Knowledge for each)
+	CaseID    int64    // Related Case ID (if one source relates to multiple cases, create separate Knowledge for each)
 	SourceID  SourceID // Source ID where data was retrieved
 	SourceURL string   // Direct URL to the source (e.g., Notion page)
 	Title     string   // Title of the extracted insight

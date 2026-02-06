@@ -3,11 +3,14 @@ package repository_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
+	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/repository/firestore"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 )
 
@@ -62,17 +65,9 @@ func runSlackRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.
 		)
 
 		// Put messages
-		if err := repo.Slack().PutMessage(ctx, msg1); err != nil {
-			t.Fatalf("failed to put message1: %v", err)
-		}
-
-		if err := repo.Slack().PutMessage(ctx, msg2); err != nil {
-			t.Fatalf("failed to put message2: %v", err)
-		}
-
-		if err := repo.Slack().PutMessage(ctx, msg3); err != nil {
-			t.Fatalf("failed to put message3: %v", err)
-		}
+		gt.NoError(t, repo.Slack().PutMessage(ctx, msg1)).Required()
+		gt.NoError(t, repo.Slack().PutMessage(ctx, msg2)).Required()
+		gt.NoError(t, repo.Slack().PutMessage(ctx, msg3)).Required()
 
 		// List all messages
 		messages, nextCursor, err := repo.Slack().ListMessages(
@@ -83,44 +78,22 @@ func runSlackRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.
 			10,
 			"",
 		)
-		if err != nil {
-			t.Fatalf("failed to list messages: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if len(messages) != 3 {
-			t.Errorf("expected 3 messages, got %d", len(messages))
-		}
+		gt.Array(t, messages).Length(3)
 
 		// Messages should be in descending order (newest first)
-		if len(messages) >= 3 {
-			if messages[0].ID() != msg3.ID() {
-				t.Errorf("expected first message ID to be %q, got %q", msg3.ID(), messages[0].ID())
-			}
-			if messages[1].ID() != msg2.ID() {
-				t.Errorf("expected second message ID to be %q, got %q", msg2.ID(), messages[1].ID())
-			}
-			if messages[2].ID() != msg1.ID() {
-				t.Errorf("expected third message ID to be %q, got %q", msg1.ID(), messages[2].ID())
-			}
+		gt.Value(t, messages[0].ID()).Equal(msg3.ID())
+		gt.Value(t, messages[1].ID()).Equal(msg2.ID())
+		gt.Value(t, messages[2].ID()).Equal(msg1.ID())
 
-			// Verify all fields
-			if messages[0].ChannelID() != channelID {
-				t.Errorf("expected ChannelID to be %q, got %q", channelID, messages[0].ChannelID())
-			}
-			if messages[0].TeamID() != teamID {
-				t.Errorf("expected TeamID to be %q, got %q", teamID, messages[0].TeamID())
-			}
-			if messages[0].UserID() != userID {
-				t.Errorf("expected UserID to be %q, got %q", userID, messages[0].UserID())
-			}
-			if messages[0].Text() != "Third message" {
-				t.Errorf("expected Text to be %q, got %q", "Third message", messages[0].Text())
-			}
-		}
+		// Verify all fields
+		gt.Value(t, messages[0].ChannelID()).Equal(channelID)
+		gt.Value(t, messages[0].TeamID()).Equal(teamID)
+		gt.Value(t, messages[0].UserID()).Equal(userID)
+		gt.Value(t, messages[0].Text()).Equal("Third message")
 
-		if nextCursor != "" {
-			t.Errorf("expected no next cursor, got %q", nextCursor)
-		}
+		gt.Value(t, nextCursor).Equal("")
 	})
 
 	t.Run("PutMessage performs upsert", func(t *testing.T) {
@@ -144,9 +117,7 @@ func runSlackRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.
 			now,
 		)
 
-		if err := repo.Slack().PutMessage(ctx, msg1); err != nil {
-			t.Fatalf("failed to put initial message: %v", err)
-		}
+		gt.NoError(t, repo.Slack().PutMessage(ctx, msg1)).Required()
 
 		// Update with same ID
 		msg2 := slack.NewMessageFromData(
@@ -161,9 +132,7 @@ func runSlackRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.
 			now.Add(time.Minute),
 		)
 
-		if err := repo.Slack().PutMessage(ctx, msg2); err != nil {
-			t.Fatalf("failed to update message: %v", err)
-		}
+		gt.NoError(t, repo.Slack().PutMessage(ctx, msg2)).Required()
 
 		// List messages - should only have one
 		messages, _, err := repo.Slack().ListMessages(
@@ -174,19 +143,11 @@ func runSlackRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.
 			10,
 			"",
 		)
-		if err != nil {
-			t.Fatalf("failed to list messages: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if len(messages) != 1 {
-			t.Errorf("expected 1 message after upsert, got %d", len(messages))
-		}
+		gt.Array(t, messages).Length(1).Required()
 
-		if len(messages) == 1 {
-			if messages[0].Text() != "Updated text" {
-				t.Errorf("expected text to be updated to %q, got %q", "Updated text", messages[0].Text())
-			}
-		}
+		gt.Value(t, messages[0].Text()).Equal("Updated text")
 	})
 
 	t.Run("ListMessages supports pagination", func(t *testing.T) {
@@ -211,9 +172,7 @@ func runSlackRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.
 				fmt.Sprintf("%d.%06d", now.Unix(), i),
 				now.Add(time.Duration(i)*time.Minute),
 			)
-			if err := repo.Slack().PutMessage(ctx, msg); err != nil {
-				t.Fatalf("failed to put message %d: %v", i, err)
-			}
+			gt.NoError(t, repo.Slack().PutMessage(ctx, msg)).Required()
 		}
 
 		// List with limit=2
@@ -225,17 +184,11 @@ func runSlackRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.
 			2,
 			"",
 		)
-		if err != nil {
-			t.Fatalf("failed to list first page: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if len(messages) != 2 {
-			t.Errorf("expected 2 messages in first page, got %d", len(messages))
-		}
+		gt.Array(t, messages).Length(2)
 
-		if nextCursor == "" {
-			t.Error("expected next cursor, got empty string")
-		}
+		gt.String(t, nextCursor).NotEqual("")
 
 		// Get next page
 		messages2, nextCursor2, err := repo.Slack().ListMessages(
@@ -246,24 +199,16 @@ func runSlackRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.
 			2,
 			nextCursor,
 		)
-		if err != nil {
-			t.Fatalf("failed to list second page: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if len(messages2) != 2 {
-			t.Errorf("expected 2 messages in second page, got %d", len(messages2))
-		}
+		gt.Array(t, messages2).Length(2)
 
 		// Still one more message remaining (5 total, 2 per page, 1 left after page 2)
-		if nextCursor2 == "" {
-			t.Error("expected next cursor for second page, got empty string")
-		}
+		gt.String(t, nextCursor2).NotEqual("")
 
 		// Verify no duplicate messages
 		if len(messages) > 0 && len(messages2) > 0 {
-			if messages[len(messages)-1].ID() == messages2[0].ID() {
-				t.Error("found duplicate message between pages")
-			}
+			gt.Value(t, messages[len(messages)-1].ID()).NotEqual(messages2[0].ID())
 		}
 	})
 
@@ -301,23 +246,14 @@ func runSlackRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.
 			now,
 		)
 
-		if err := repo.Slack().PutMessage(ctx, oldMsg); err != nil {
-			t.Fatalf("failed to put old message: %v", err)
-		}
-
-		if err := repo.Slack().PutMessage(ctx, newMsg); err != nil {
-			t.Fatalf("failed to put new message: %v", err)
-		}
+		gt.NoError(t, repo.Slack().PutMessage(ctx, oldMsg)).Required()
+		gt.NoError(t, repo.Slack().PutMessage(ctx, newMsg)).Required()
 
 		// Prune messages older than 1 hour ago
 		deleted, err := repo.Slack().PruneMessages(ctx, channelID, now.Add(-1*time.Hour))
-		if err != nil {
-			t.Fatalf("failed to prune messages: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if deleted != 1 {
-			t.Errorf("expected 1 message to be deleted, got %d", deleted)
-		}
+		gt.Value(t, deleted).Equal(1)
 
 		// Verify only new message remains
 		messages, _, err := repo.Slack().ListMessages(
@@ -328,16 +264,12 @@ func runSlackRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.
 			10,
 			"",
 		)
-		if err != nil {
-			t.Fatalf("failed to list messages: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if len(messages) != 1 {
-			t.Errorf("expected 1 message to remain, got %d", len(messages))
-		}
+		gt.Array(t, messages).Length(1)
 
-		if len(messages) == 1 && messages[0].ID() != newMsg.ID() {
-			t.Errorf("expected remaining message ID to be %q, got %q", newMsg.ID(), messages[0].ID())
+		if len(messages) == 1 {
+			gt.Value(t, messages[0].ID()).Equal(newMsg.ID())
 		}
 	})
 
@@ -359,17 +291,11 @@ func runSlackRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.
 		)
 
 		// Should not error, just return empty list
-		if err != nil {
-			t.Fatalf("expected no error for empty channel, got: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if len(messages) != 0 {
-			t.Errorf("expected 0 messages for empty channel, got %d", len(messages))
-		}
+		gt.Array(t, messages).Length(0)
 
-		if nextCursor != "" {
-			t.Errorf("expected no cursor for empty channel, got %q", nextCursor)
-		}
+		gt.Value(t, nextCursor).Equal("")
 	})
 }
 
@@ -379,6 +305,31 @@ func TestMemorySlackRepository(t *testing.T) {
 	})
 }
 
+func newFirestoreSlackRepository(t *testing.T) interfaces.Repository {
+	t.Helper()
+
+	projectID := os.Getenv("TEST_FIRESTORE_PROJECT_ID")
+	if projectID == "" {
+		t.Skip("TEST_FIRESTORE_PROJECT_ID not set")
+	}
+
+	databaseID := os.Getenv("TEST_FIRESTORE_DATABASE_ID")
+	if databaseID == "" {
+		t.Skip("TEST_FIRESTORE_DATABASE_ID not set")
+	}
+
+	// Use unique collection prefix per test to ensure test isolation
+	uniquePrefix := fmt.Sprintf("%s_slack_%d", databaseID, time.Now().UnixNano())
+
+	ctx := context.Background()
+	repo, err := firestore.New(ctx, projectID, firestore.WithCollectionPrefix(uniquePrefix))
+	gt.NoError(t, err).Required()
+	t.Cleanup(func() {
+		gt.NoError(t, repo.Close())
+	})
+	return repo
+}
+
 func TestFirestoreSlackRepository(t *testing.T) {
-	runSlackRepositoryTest(t, newFirestoreRepository)
+	runSlackRepositoryTest(t, newFirestoreSlackRepository)
 }

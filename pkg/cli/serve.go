@@ -10,8 +10,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/handler"
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/vektah/gqlparser/v2/gqlerror"
+
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
 	gqlctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/graphql"
 	httpctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/http"
@@ -154,23 +157,13 @@ func cmdServe() *cli.Command {
 		Usage:   "Start HTTP server",
 		Flags:   flags,
 		Action: func(ctx context.Context, c *cli.Command) error {
-			// Load application configuration
-			var appConfig *config.AppConfig
-			if _, err := os.Stat(configPath); err == nil {
-				appConfig, err = config.LoadAppConfiguration(configPath)
-				if err != nil {
-					return goerr.Wrap(err, "failed to load configuration file", goerr.V("path", configPath))
-				}
-				logging.Default().Info("Configuration loaded", "path", configPath)
-			} else if !os.IsNotExist(err) {
-				return goerr.Wrap(err, "failed to check configuration file", goerr.V("path", configPath))
-			} else {
-				logging.Default().Warn("Configuration file not found, using empty configuration", "path", configPath)
-				appConfig = &config.AppConfig{}
+			fieldSchema, err := config.LoadFieldSchema(configPath)
+			if err != nil {
+				return goerr.Wrap(err, "failed to load field schema configuration")
 			}
 
 			// Initialize Firestore repository
-			repo, err := firestore.New(ctx, projectID, databaseID)
+			repo, err := firestore.New(ctx, projectID, firestore.WithCollectionPrefix(databaseID))
 			if err != nil {
 				return goerr.Wrap(err, "failed to initialize firestore repository")
 			}
@@ -198,9 +191,8 @@ func cmdServe() *cli.Command {
 			}
 
 			// Initialize use cases with configuration and auth
-			riskConfig := appConfig.ToDomainRiskConfig()
 			ucOpts := []usecase.Option{
-				usecase.WithRiskConfig(riskConfig),
+				usecase.WithFieldSchema(fieldSchema),
 				usecase.WithAuth(authUC),
 			}
 
@@ -254,17 +246,42 @@ func cmdServe() *cli.Command {
 				gqlctrl.NewExecutableSchema(gqlctrl.Config{Resolvers: resolver}),
 			)
 
-			// Initialize application-scoped SlackUserProvider (DB-backed)
-			// No TTL or caching - data is refreshed by background worker
-			var slackUserProvider *gqlctrl.SlackUserProvider
-			if slackSvc != nil {
-				slackUserProvider = gqlctrl.NewSlackUserProvider(repo)
-			}
+			// Configure error presenter with stack traces
+			srv.SetErrorPresenter(func(ctx context.Context, err error) *gqlerror.Error {
+				// Convert to GraphQL error first
+				gqlErr := graphql.DefaultErrorPresenter(ctx, err)
+
+				// Wrap error with goerr and log with stack trace
+				wrappedErr := goerr.Wrap(err, "GraphQL error")
+				logging.Default().Error("GraphQL error occurred", "error", wrappedErr)
+
+				return gqlErr
+			})
+
+			// Configure panic handler
+			srv.SetRecoverFunc(func(ctx context.Context, panicValue interface{}) error {
+				// Create error from panic value
+				var panicErr error
+				switch e := panicValue.(type) {
+				case error:
+					panicErr = e
+				case string:
+					panicErr = goerr.New(e)
+				default:
+					panicErr = goerr.New("panic occurred", goerr.V("panic", panicValue))
+				}
+
+				// Wrap and log with stack trace
+				wrappedErr := goerr.Wrap(panicErr, "GraphQL panic")
+				logging.Default().Error("GraphQL panic occurred", "error", wrappedErr)
+
+				return wrappedErr
+			})
 
 			// Wrap with dataloader middleware (request-scoped)
 			gqlHandlerBase := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				// Create new DataLoaders for each request
-				loaders := gqlctrl.NewDataLoaders(repo, uc, slackUserProvider)
+				loaders := gqlctrl.NewDataLoaders(repo)
 				ctx := gqlctrl.WithDataLoaders(r.Context(), loaders)
 				srv.ServeHTTP(w, r.WithContext(ctx))
 			})

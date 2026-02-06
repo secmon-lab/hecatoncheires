@@ -24,7 +24,7 @@ func newKnowledgeRepository() *knowledgeRepository {
 func copyKnowledge(k *model.Knowledge) *model.Knowledge {
 	copied := &model.Knowledge{
 		ID:        k.ID,
-		RiskID:    k.RiskID,
+		CaseID:    k.CaseID,
 		SourceID:  k.SourceID,
 		SourceURL: k.SourceURL,
 		Title:     k.Title,
@@ -70,13 +70,13 @@ func (r *knowledgeRepository) Get(ctx context.Context, id model.KnowledgeID) (*m
 	return copyKnowledge(knowledge), nil
 }
 
-func (r *knowledgeRepository) ListByRiskID(ctx context.Context, riskID int64) ([]*model.Knowledge, error) {
+func (r *knowledgeRepository) ListByCaseID(ctx context.Context, caseID int64) ([]*model.Knowledge, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	var result []*model.Knowledge
 	for _, k := range r.knowledge {
-		if k.RiskID == riskID {
+		if k.CaseID == caseID {
 			result = append(result, copyKnowledge(k))
 		}
 	}
@@ -84,28 +84,28 @@ func (r *knowledgeRepository) ListByRiskID(ctx context.Context, riskID int64) ([
 	return result, nil
 }
 
-func (r *knowledgeRepository) ListByRiskIDs(ctx context.Context, riskIDs []int64) (map[int64][]*model.Knowledge, error) {
+func (r *knowledgeRepository) ListByCaseIDs(ctx context.Context, caseIDs []int64) (map[int64][]*model.Knowledge, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	// Create a map of risk IDs for fast lookup
-	riskIDSet := make(map[int64]bool, len(riskIDs))
-	for _, id := range riskIDs {
-		riskIDSet[id] = true
+	// Create a map of case IDs for fast lookup
+	caseIDSet := make(map[int64]bool, len(caseIDs))
+	for _, id := range caseIDs {
+		caseIDSet[id] = true
 	}
 
-	// Group knowledges by risk ID
-	result := make(map[int64][]*model.Knowledge, len(riskIDs))
+	// Group knowledges by case ID
+	result := make(map[int64][]*model.Knowledge, len(caseIDs))
 	for _, k := range r.knowledge {
-		if riskIDSet[k.RiskID] {
-			result[k.RiskID] = append(result[k.RiskID], copyKnowledge(k))
+		if caseIDSet[k.CaseID] {
+			result[k.CaseID] = append(result[k.CaseID], copyKnowledge(k))
 		}
 	}
 
 	// Ensure all requested IDs are in the result map (even if empty)
-	for _, riskID := range riskIDs {
-		if _, exists := result[riskID]; !exists {
-			result[riskID] = []*model.Knowledge{}
+	for _, caseID := range caseIDs {
+		if _, exists := result[caseID]; !exists {
+			result[caseID] = []*model.Knowledge{}
 		}
 	}
 

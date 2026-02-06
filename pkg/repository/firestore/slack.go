@@ -33,21 +33,21 @@ func newSlackRepository(client *firestore.Client) *slackRepository {
 
 // slackMessage is the Firestore persistence model
 type slackMessage struct {
-	ID        string    `firestore:"id"`
-	ThreadTS  string    `firestore:"thread_ts"`
-	UserID    string    `firestore:"user_id"`
-	UserName  string    `firestore:"user_name"`
-	Text      string    `firestore:"text"`
-	EventTS   string    `firestore:"event_ts"`
-	CreatedAt time.Time `firestore:"created_at"`
+	ID        string
+	ThreadTS  string
+	UserID    string
+	UserName  string
+	Text      string
+	EventTS   string
+	CreatedAt time.Time
 }
 
 // slackChannel is the parent document for channel metadata
 type slackChannel struct {
-	ChannelID     string    `firestore:"channel_id"`
-	TeamID        string    `firestore:"team_id"`
-	LastMessageAt time.Time `firestore:"last_message_at"`
-	MessageCount  int64     `firestore:"message_count"`
+	ChannelID     string
+	TeamID        string
+	LastMessageAt time.Time
+	MessageCount  int64
 }
 
 func (r *slackRepository) channelsCollection() *firestore.CollectionRef {
@@ -92,8 +92,8 @@ func (r *slackRepository) PutMessage(ctx context.Context, msg *slack.Message) er
 
 		// Channel exists, update metadata
 		return tx.Update(channelRef, []firestore.Update{
-			{Path: "last_message_at", Value: msg.CreatedAt()},
-			{Path: "message_count", Value: firestore.Increment(1)},
+			{Path: "LastMessageAt", Value: msg.CreatedAt()},
+			{Path: "MessageCount", Value: firestore.Increment(1)},
 		})
 	}); err != nil {
 		return goerr.Wrap(err, "failed to update channel metadata", goerr.V("channelID", channelID))
@@ -143,9 +143,9 @@ func (r *slackRepository) ListMessages(ctx context.Context, channelID string, st
 	}
 
 	query := r.messagesCollection(channelID).
-		Where("created_at", ">=", start).
-		Where("created_at", "<", end).
-		OrderBy("created_at", firestore.Desc).
+		Where("CreatedAt", ">=", start).
+		Where("CreatedAt", "<", end).
+		OrderBy("CreatedAt", firestore.Desc).
 		Limit(limit + 1)
 
 	// Apply cursor if provided
@@ -225,7 +225,7 @@ func (r *slackRepository) pruneChannel(ctx context.Context, channelID string, be
 	for {
 		// Query messages to delete
 		query := r.messagesCollection(channelID).
-			Where("created_at", "<", before).
+			Where("CreatedAt", "<", before).
 			Limit(batchSize)
 
 		iter := query.Documents(ctx)

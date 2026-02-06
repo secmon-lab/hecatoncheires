@@ -4,7 +4,7 @@ import { gql } from '@apollo/client'
 const KNOWLEDGE_FIELDS = gql`
   fragment KnowledgeFields on Knowledge {
     id
-    riskID
+    caseID
     sourceID
     sourceURL
     title
@@ -20,9 +20,9 @@ export const GET_KNOWLEDGE = gql`
   query GetKnowledge($id: String!) {
     knowledge(id: $id) {
       ...KnowledgeFields
-      risk {
+      case {
         id
-        name
+        title
         description
       }
     }
@@ -35,9 +35,9 @@ export const GET_KNOWLEDGES = gql`
     knowledges(limit: $limit, offset: $offset) {
       items {
         ...KnowledgeFields
-        risk {
+        case {
           id
-          name
+          title
         }
       }
       totalCount

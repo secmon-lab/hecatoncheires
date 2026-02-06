@@ -10,13 +10,13 @@ import (
 // It serves as dependency injection for your app, add any dependencies you require here.
 
 type Resolver struct {
-	repo interfaces.Repository
-	uc   *usecase.UseCases
+	repo     interfaces.Repository
+	UseCases *usecase.UseCases
 }
 
 func NewResolver(repo interfaces.Repository, uc *usecase.UseCases) *Resolver {
 	return &Resolver{
-		repo: repo,
-		uc:   uc,
+		repo:     repo,
+		UseCases: uc,
 	}
 }

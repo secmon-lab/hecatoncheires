@@ -36,24 +36,14 @@ func NewSlackUserRefreshWorker(repo interfaces.Repository, slackSvc slack.Servic
 }
 
 // Start begins the background refresh loop
-// - Performs immediate initial sync on startup
-// - Continues periodic refresh every interval
-// - Returns error only if initial sync fails (server startup continues anyway)
+// - Initial sync and periodic refresh both run in a background goroutine
+// - Does not block server startup
 func (w *SlackUserRefreshWorker) Start(ctx context.Context) error {
-	logging.Default().Info("Slack user refresh worker starting")
+	logging.Default().Info("Slack user refresh worker starting",
+		"interval", w.interval.String())
 
-	// Immediate initial sync
-	if err := w.refresh(ctx); err != nil {
-		// Log error but do not fail server startup
-		logging.Default().Error("Initial Slack user refresh failed (server startup continues)",
-			"error", err.Error())
-	}
-
-	// Start background goroutine
 	go w.run(ctx)
 
-	logging.Default().Info("Slack user refresh worker started",
-		"interval", w.interval.String())
 	return nil
 }
 
@@ -68,6 +58,12 @@ func (w *SlackUserRefreshWorker) Stop() {
 // run is the main worker loop (runs in goroutine)
 func (w *SlackUserRefreshWorker) run(ctx context.Context) {
 	defer close(w.doneCh)
+
+	// Initial sync (runs in goroutine, does not block server startup)
+	if err := w.refresh(ctx); err != nil {
+		logging.Default().Error("Initial Slack user refresh failed (will retry next interval)",
+			"error", err.Error())
+	}
 
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()

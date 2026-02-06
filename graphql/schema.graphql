@@ -1,45 +1,73 @@
 scalar Time
+scalar JSON
+scalar Any
 
-type Category {
+# Field type definitions
+enum FieldType {
+  TEXT
+  NUMBER
+  SELECT
+  MULTI_SELECT
+  USER
+  MULTI_USER
+  DATE
+  URL
+}
+
+type FieldOption {
   id: String!
   name: String!
+  description: String
+  color: String
+  metadata: JSON  # Arbitrary metadata (e.g., {"score": 4})
+}
+
+type FieldDefinition {
+  id: String!
+  name: String!
+  type: FieldType!
+  required: Boolean!
+  description: String
+  options: [FieldOption!]
+}
+
+type EntityLabels {
+  case: String!
+}
+
+type FieldConfiguration {
+  fields: [FieldDefinition!]!
+  labels: EntityLabels!
+}
+
+# Custom field value
+type FieldValue {
+  fieldId: String!
+  # Value encoded as JSON. Clients parse based on field type from FieldConfiguration.
+  value: Any!
+}
+
+input FieldValueInput {
+  fieldId: String!
+  value: Any!
+}
+
+# Entity types
+type Case {
+  id: Int!
+  title: String!
   description: String!
+  assigneeIDs: [String!]!
+  assignees: [SlackUser!]!
+  slackChannelID: String
+  fields: [FieldValue!]!       # Resolved from case_field_values via DataLoader
+  actions: [Action!]!
+  knowledges: [Knowledge!]!
+  createdAt: Time!
+  updatedAt: Time!
 }
 
-type LikelihoodLevel {
-  id: String!
-  name: String!
-  description: String!
-  score: Int!
-}
-
-type ImpactLevel {
-  id: String!
-  name: String!
-  description: String!
-  score: Int!
-}
-
-type Team {
-  id: String!
-  name: String!
-}
-
-type SlackUser {
-  id: String!
-  name: String!
-  realName: String!
-  imageUrl: String
-}
-
-type RiskConfiguration {
-  categories: [Category!]!
-  likelihoodLevels: [LikelihoodLevel!]!
-  impactLevels: [ImpactLevel!]!
-  teams: [Team!]!
-}
-
-enum ResponseStatus {
+enum ActionStatus {
   BACKLOG
   TODO
   IN_PROGRESS
@@ -48,46 +76,68 @@ enum ResponseStatus {
   ABANDONED
 }
 
-type Response {
+type Action {
+  id: Int!
+  caseID: Int!
+  case: Case
+  title: String!
+  description: String!
+  assigneeIDs: [String!]!
+  assignees: [SlackUser!]!
+  slackMessageTS: String
+  status: ActionStatus!
+  createdAt: Time!
+  updatedAt: Time!
+}
+
+# Inputs
+input CreateCaseInput {
+  title: String!
+  description: String!
+  assigneeIDs: [String!]
+  fields: [FieldValueInput!]
+}
+
+input UpdateCaseInput {
   id: Int!
   title: String!
   description: String!
-  responderIDs: [String!]!
-  responders: [SlackUser!]!
-  url: String
-  status: ResponseStatus!
-  risks: [Risk!]!
-  createdAt: Time!
-  updatedAt: Time!
+  assigneeIDs: [String!]
+  fields: [FieldValueInput!]
 }
 
-type Risk {
-  id: Int!
-  name: String!
+input CreateActionInput {
+  caseID: Int!
+  title: String!
   description: String!
-  categoryIDs: [String!]!
-  categories: [Category!]!
-  specificImpact: String!
-  likelihoodID: String!
-  likelihoodLevel: LikelihoodLevel
-  impactID: String!
-  impactLevel: ImpactLevel
-  responseTeamIDs: [String!]!
-  responseTeams: [Team!]!
-  assigneeIDs: [String!]!
-  assignees: [SlackUser!]!
-  detectionIndicators: String!
-  slackChannelID: String
-  responses: [Response!]!
-  knowledges: [Knowledge!]!
-  createdAt: Time!
-  updatedAt: Time!
+  assigneeIDs: [String!]
+  slackMessageTS: String
+  status: ActionStatus
 }
 
+input UpdateActionInput {
+  id: Int!
+  caseID: Int
+  title: String
+  description: String
+  assigneeIDs: [String!]
+  slackMessageTS: String
+  status: ActionStatus
+}
+
+# Slack User
+type SlackUser {
+  id: String!
+  name: String!
+  realName: String!
+  imageUrl: String
+}
+
+# Knowledge
 type Knowledge {
   id: String!
-  riskID: Int!
-  risk: Risk
+  caseID: Int!
+  case: Case
   sourceID: String!
   sourceURL: String!
   title: String!
@@ -101,50 +151,6 @@ type KnowledgeConnection {
   items: [Knowledge!]!
   totalCount: Int!
   hasMore: Boolean!
-}
-
-input CreateRiskInput {
-  name: String!
-  description: String!
-  categoryIDs: [String!]!
-  specificImpact: String!
-  likelihoodID: String!
-  impactID: String!
-  responseTeamIDs: [String!]!
-  assigneeIDs: [String!]!
-  detectionIndicators: String!
-}
-
-input UpdateRiskInput {
-  id: Int!
-  name: String!
-  description: String!
-  categoryIDs: [String!]!
-  specificImpact: String!
-  likelihoodID: String!
-  impactID: String!
-  responseTeamIDs: [String!]!
-  assigneeIDs: [String!]!
-  detectionIndicators: String!
-}
-
-input CreateResponseInput {
-  title: String!
-  description: String!
-  responderIDs: [String!]!
-  url: String
-  status: ResponseStatus
-  riskIDs: [Int!]
-}
-
-input UpdateResponseInput {
-  id: Int!
-  title: String
-  description: String
-  responderIDs: [String!]
-  url: String
-  status: ResponseStatus
-  riskIDs: [Int!]
 }
 
 # Source types
@@ -224,30 +230,46 @@ type SlackChannelInfo {
 
 type Query {
   health: String!
-  risks: [Risk!]!
-  risk(id: Int!): Risk
-  riskConfiguration: RiskConfiguration!
+
+  # Cases
+  cases: [Case!]!
+  case(id: Int!): Case
+
+  # Actions
+  actions: [Action!]!
+  action(id: Int!): Action
+  actionsByCase(caseID: Int!): [Action!]!
+
+  # Configuration
+  fieldConfiguration: FieldConfiguration!
+
+  # Slack
   slackUsers: [SlackUser!]!
-  responses: [Response!]!
-  response(id: Int!): Response
-  responsesByRisk(riskID: Int!): [Response!]!
+  slackJoinedChannels: [SlackChannelInfo!]!
+
+  # Sources
   sources: [Source!]!
   source(id: String!): Source
-  slackJoinedChannels: [SlackChannelInfo!]!
+
+  # Knowledge
   knowledge(id: String!): Knowledge
   knowledges(limit: Int, offset: Int): KnowledgeConnection!
 }
 
 type Mutation {
   noop: Boolean
-  createRisk(input: CreateRiskInput!): Risk!
-  updateRisk(input: UpdateRiskInput!): Risk!
-  deleteRisk(id: Int!): Boolean!
-  createResponse(input: CreateResponseInput!): Response!
-  updateResponse(input: UpdateResponseInput!): Response!
-  deleteResponse(id: Int!): Boolean!
-  linkResponseToRisk(responseID: Int!, riskID: Int!): Boolean!
-  unlinkResponseFromRisk(responseID: Int!, riskID: Int!): Boolean!
+
+  # Cases
+  createCase(input: CreateCaseInput!): Case!
+  updateCase(input: UpdateCaseInput!): Case!
+  deleteCase(id: Int!): Boolean!
+
+  # Actions
+  createAction(input: CreateActionInput!): Action!
+  updateAction(input: UpdateActionInput!): Action!
+  deleteAction(id: Int!): Boolean!
+
+  # Sources
   createNotionDBSource(input: CreateNotionDBSourceInput!): Source!
   createSlackSource(input: CreateSlackSourceInput!): Source!
   updateSource(input: UpdateSourceInput!): Source!

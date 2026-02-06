@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
@@ -36,12 +37,15 @@ func (m *sourceTestNotionService) GetDatabaseMetadata(ctx context.Context, dbID 
 
 // mockSlackService is a mock implementation of slack.Service for testing
 type mockSlackService struct {
-	listJoinedChannelsFn func(ctx context.Context) ([]slack.Channel, error)
-	getChannelNamesFn    func(ctx context.Context, ids []string) (map[string]string, error)
-	getUserInfoFn        func(ctx context.Context, userID string) (*slack.User, error)
-	listUsersFn          func(ctx context.Context) ([]*slack.User, error)
-	createChannelFn      func(ctx context.Context, riskID int64, riskName string) (string, error)
-	renameChannelFn      func(ctx context.Context, channelID string, riskID int64, riskName string) error
+	listJoinedChannelsFn   func(ctx context.Context) ([]slack.Channel, error)
+	getChannelNamesFn      func(ctx context.Context, ids []string) (map[string]string, error)
+	getUserInfoFn          func(ctx context.Context, userID string) (*slack.User, error)
+	listUsersFn            func(ctx context.Context) ([]*slack.User, error)
+	createChannelFn        func(ctx context.Context, riskID int64, riskName string) (string, error)
+	renameChannelFn        func(ctx context.Context, channelID string, riskID int64, riskName string) error
+	inviteUsersToChannelFn func(ctx context.Context, channelID string, userIDs []string) error
+	invitedChannelID       string
+	invitedUserIDs         []string
 }
 
 func (m *mockSlackService) ListJoinedChannels(ctx context.Context) ([]slack.Channel, error) {
@@ -102,6 +106,15 @@ func (m *mockSlackService) RenameChannel(ctx context.Context, channelID string, 
 	return nil
 }
 
+func (m *mockSlackService) InviteUsersToChannel(ctx context.Context, channelID string, userIDs []string) error {
+	m.invitedChannelID = channelID
+	m.invitedUserIDs = userIDs
+	if m.inviteUsersToChannelFn != nil {
+		return m.inviteUsersToChannelFn(ctx, channelID, userIDs)
+	}
+	return nil
+}
+
 func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 	t.Run("creates source with valid database ID", func(t *testing.T) {
 		repo := memory.New()
@@ -124,28 +137,15 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 		}
 
 		source, err := uc.CreateNotionDBSource(ctx, input)
-		if err != nil {
-			t.Fatalf("CreateNotionDBSource failed: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if source.ID == "" {
-			t.Error("expected source ID to be set")
-		}
-		if source.Name != "My Database" {
-			t.Errorf("expected name='My Database', got %s", source.Name)
-		}
-		if source.SourceType != model.SourceTypeNotionDB {
-			t.Errorf("expected sourceType=notion_db, got %s", source.SourceType)
-		}
-		if source.NotionDBConfig == nil {
-			t.Error("expected NotionDBConfig to be set")
-		} else {
-			if source.NotionDBConfig.DatabaseID != "test-db-id" {
-				t.Errorf("expected databaseID='test-db-id', got %s", source.NotionDBConfig.DatabaseID)
-			}
-			if source.NotionDBConfig.DatabaseTitle != "My Database" {
-				t.Errorf("expected databaseTitle='My Database', got %s", source.NotionDBConfig.DatabaseTitle)
-			}
+		gt.Value(t, source.ID).NotEqual(model.SourceID(""))
+		gt.Value(t, source.Name).Equal("My Database")
+		gt.Value(t, source.SourceType).Equal(model.SourceTypeNotionDB)
+		gt.Value(t, source.NotionDBConfig).NotNil()
+		if source.NotionDBConfig != nil {
+			gt.Value(t, source.NotionDBConfig.DatabaseID).Equal("test-db-id")
+			gt.Value(t, source.NotionDBConfig.DatabaseTitle).Equal("My Database")
 		}
 	})
 
@@ -162,13 +162,9 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 		}
 
 		source, err := uc.CreateNotionDBSource(ctx, input)
-		if err != nil {
-			t.Fatalf("CreateNotionDBSource failed: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if source.Name != "Custom Name" {
-			t.Errorf("expected name='Custom Name', got %s", source.Name)
-		}
+		gt.Value(t, source.Name).Equal("Custom Name")
 	})
 
 	t.Run("fails with empty database ID", func(t *testing.T) {
@@ -182,9 +178,7 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 		}
 
 		_, err := uc.CreateNotionDBSource(ctx, input)
-		if err == nil {
-			t.Error("expected error for empty database ID")
-		}
+		gt.Value(t, err).NotNil()
 	})
 
 	t.Run("fails when Notion API returns error", func(t *testing.T) {
@@ -203,9 +197,7 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 		}
 
 		_, err := uc.CreateNotionDBSource(ctx, input)
-		if err == nil {
-			t.Error("expected error when Notion API fails")
-		}
+		gt.Value(t, err).NotNil()
 	})
 
 	t.Run("creates source without Notion service", func(t *testing.T) {
@@ -220,13 +212,9 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 		}
 
 		source, err := uc.CreateNotionDBSource(ctx, input)
-		if err != nil {
-			t.Fatalf("CreateNotionDBSource failed: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if source.Name != "Manual Source" {
-			t.Errorf("expected name='Manual Source', got %s", source.Name)
-		}
+		gt.Value(t, source.Name).Equal("Manual Source")
 	})
 }
 
@@ -242,9 +230,7 @@ func TestSourceUseCase_UpdateSource(t *testing.T) {
 			Enabled:    true,
 		}
 		created, err := repo.Source().Create(ctx, source)
-		if err != nil {
-			t.Fatalf("failed to create source: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
 		newName := "Updated"
 		newDesc := "Updated description"
@@ -257,19 +243,11 @@ func TestSourceUseCase_UpdateSource(t *testing.T) {
 		}
 
 		updated, err := uc.UpdateSource(ctx, input)
-		if err != nil {
-			t.Fatalf("UpdateSource failed: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if updated.Name != "Updated" {
-			t.Errorf("expected name='Updated', got %s", updated.Name)
-		}
-		if updated.Description != "Updated description" {
-			t.Errorf("expected description='Updated description', got %s", updated.Description)
-		}
-		if updated.Enabled != false {
-			t.Errorf("expected enabled=false, got %v", updated.Enabled)
-		}
+		gt.Value(t, updated.Name).Equal("Updated")
+		gt.Value(t, updated.Description).Equal("Updated description")
+		gt.Value(t, updated.Enabled).Equal(false)
 	})
 
 	t.Run("partial update only changes specified fields", func(t *testing.T) {
@@ -284,9 +262,7 @@ func TestSourceUseCase_UpdateSource(t *testing.T) {
 			Enabled:     true,
 		}
 		created, err := repo.Source().Create(ctx, source)
-		if err != nil {
-			t.Fatalf("failed to create source: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
 		newName := "New Name"
 		input := usecase.UpdateSourceInput{
@@ -295,19 +271,11 @@ func TestSourceUseCase_UpdateSource(t *testing.T) {
 		}
 
 		updated, err := uc.UpdateSource(ctx, input)
-		if err != nil {
-			t.Fatalf("UpdateSource failed: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if updated.Name != "New Name" {
-			t.Errorf("expected name='New Name', got %s", updated.Name)
-		}
-		if updated.Description != "Original Description" {
-			t.Errorf("expected description='Original Description', got %s", updated.Description)
-		}
-		if updated.Enabled != true {
-			t.Errorf("expected enabled=true, got %v", updated.Enabled)
-		}
+		gt.Value(t, updated.Name).Equal("New Name")
+		gt.Value(t, updated.Description).Equal("Original Description")
+		gt.Value(t, updated.Enabled).Equal(true)
 	})
 
 	t.Run("fails with empty ID", func(t *testing.T) {
@@ -320,9 +288,7 @@ func TestSourceUseCase_UpdateSource(t *testing.T) {
 		}
 
 		_, err := uc.UpdateSource(ctx, input)
-		if err == nil {
-			t.Error("expected error for empty ID")
-		}
+		gt.Value(t, err).NotNil()
 	})
 
 	t.Run("fails for non-existent source", func(t *testing.T) {
@@ -337,9 +303,7 @@ func TestSourceUseCase_UpdateSource(t *testing.T) {
 		}
 
 		_, err := uc.UpdateSource(ctx, input)
-		if err == nil {
-			t.Error("expected error for non-existent source")
-		}
+		gt.Value(t, err).NotNil()
 	})
 }
 
@@ -355,19 +319,12 @@ func TestSourceUseCase_DeleteSource(t *testing.T) {
 			Enabled:    true,
 		}
 		created, err := repo.Source().Create(ctx, source)
-		if err != nil {
-			t.Fatalf("failed to create source: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		err = uc.DeleteSource(ctx, created.ID)
-		if err != nil {
-			t.Fatalf("DeleteSource failed: %v", err)
-		}
+		gt.NoError(t, uc.DeleteSource(ctx, created.ID)).Required()
 
 		_, err = repo.Source().Get(ctx, created.ID)
-		if err == nil {
-			t.Error("expected error when getting deleted source")
-		}
+		gt.Value(t, err).NotNil()
 	})
 
 	t.Run("fails with empty ID", func(t *testing.T) {
@@ -376,9 +333,7 @@ func TestSourceUseCase_DeleteSource(t *testing.T) {
 		ctx := context.Background()
 
 		err := uc.DeleteSource(ctx, "")
-		if err == nil {
-			t.Error("expected error for empty ID")
-		}
+		gt.Value(t, err).NotNil()
 	})
 
 	t.Run("fails for non-existent source", func(t *testing.T) {
@@ -387,9 +342,7 @@ func TestSourceUseCase_DeleteSource(t *testing.T) {
 		ctx := context.Background()
 
 		err := uc.DeleteSource(ctx, "non-existent-id")
-		if err == nil {
-			t.Error("expected error for non-existent source")
-		}
+		gt.Value(t, err).NotNil()
 	})
 }
 
@@ -405,21 +358,13 @@ func TestSourceUseCase_GetSource(t *testing.T) {
 			Enabled:    true,
 		}
 		created, err := repo.Source().Create(ctx, source)
-		if err != nil {
-			t.Fatalf("failed to create source: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
 		retrieved, err := uc.GetSource(ctx, created.ID)
-		if err != nil {
-			t.Fatalf("GetSource failed: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if retrieved.ID != created.ID {
-			t.Errorf("expected ID=%s, got %s", created.ID, retrieved.ID)
-		}
-		if retrieved.Name != "Test Source" {
-			t.Errorf("expected name='Test Source', got %s", retrieved.Name)
-		}
+		gt.Value(t, retrieved.ID).Equal(created.ID)
+		gt.Value(t, retrieved.Name).Equal("Test Source")
 	})
 
 	t.Run("fails with empty ID", func(t *testing.T) {
@@ -428,9 +373,7 @@ func TestSourceUseCase_GetSource(t *testing.T) {
 		ctx := context.Background()
 
 		_, err := uc.GetSource(ctx, "")
-		if err == nil {
-			t.Error("expected error for empty ID")
-		}
+		gt.Value(t, err).NotNil()
 	})
 
 	t.Run("fails for non-existent source", func(t *testing.T) {
@@ -439,9 +382,7 @@ func TestSourceUseCase_GetSource(t *testing.T) {
 		ctx := context.Background()
 
 		_, err := uc.GetSource(ctx, "non-existent-id")
-		if err == nil {
-			t.Error("expected error for non-existent source")
-		}
+		gt.Value(t, err).NotNil()
 	})
 }
 
@@ -452,12 +393,8 @@ func TestSourceUseCase_ListSources(t *testing.T) {
 		ctx := context.Background()
 
 		sources, err := uc.ListSources(ctx)
-		if err != nil {
-			t.Fatalf("ListSources failed: %v", err)
-		}
-		if len(sources) != 0 {
-			t.Errorf("expected 0 sources, got %d", len(sources))
-		}
+		gt.NoError(t, err).Required()
+		gt.Array(t, sources).Length(0)
 
 		source1 := &model.Source{Name: "Source 1", SourceType: model.SourceTypeNotionDB, Enabled: true}
 		source2 := &model.Source{Name: "Source 2", SourceType: model.SourceTypeNotionDB, Enabled: false}
@@ -465,12 +402,8 @@ func TestSourceUseCase_ListSources(t *testing.T) {
 		_, _ = repo.Source().Create(ctx, source2)
 
 		sources, err = uc.ListSources(ctx)
-		if err != nil {
-			t.Fatalf("ListSources failed: %v", err)
-		}
-		if len(sources) != 2 {
-			t.Errorf("expected 2 sources, got %d", len(sources))
-		}
+		gt.NoError(t, err).Required()
+		gt.Array(t, sources).Length(2)
 	})
 }
 
@@ -490,19 +423,11 @@ func TestSourceUseCase_ValidateNotionDB(t *testing.T) {
 		ctx := context.Background()
 
 		result, err := uc.ValidateNotionDB(ctx, "valid-db-id")
-		if err != nil {
-			t.Fatalf("ValidateNotionDB failed: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if !result.Valid {
-			t.Error("expected Valid=true")
-		}
-		if result.DatabaseTitle != "Valid Database" {
-			t.Errorf("expected databaseTitle='Valid Database', got %s", result.DatabaseTitle)
-		}
-		if result.DatabaseURL != "https://notion.so/valid-db" {
-			t.Errorf("expected databaseURL='https://notion.so/valid-db', got %s", result.DatabaseURL)
-		}
+		gt.Bool(t, result.Valid).True()
+		gt.Value(t, result.DatabaseTitle).Equal("Valid Database")
+		gt.Value(t, result.DatabaseURL).Equal("https://notion.so/valid-db")
 	})
 
 	t.Run("returns invalid for empty database ID", func(t *testing.T) {
@@ -511,16 +436,10 @@ func TestSourceUseCase_ValidateNotionDB(t *testing.T) {
 		ctx := context.Background()
 
 		result, err := uc.ValidateNotionDB(ctx, "")
-		if err != nil {
-			t.Fatalf("ValidateNotionDB failed: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if result.Valid {
-			t.Error("expected Valid=false")
-		}
-		if result.ErrorMessage == "" {
-			t.Error("expected ErrorMessage to be set")
-		}
+		gt.Bool(t, result.Valid).False()
+		gt.String(t, result.ErrorMessage).NotEqual("")
 	})
 
 	t.Run("returns invalid when Notion service is not configured", func(t *testing.T) {
@@ -529,16 +448,10 @@ func TestSourceUseCase_ValidateNotionDB(t *testing.T) {
 		ctx := context.Background()
 
 		result, err := uc.ValidateNotionDB(ctx, "some-db-id")
-		if err != nil {
-			t.Fatalf("ValidateNotionDB failed: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if result.Valid {
-			t.Error("expected Valid=false")
-		}
-		if result.ErrorMessage == "" {
-			t.Error("expected ErrorMessage to be set")
-		}
+		gt.Bool(t, result.Valid).False()
+		gt.String(t, result.ErrorMessage).NotEqual("")
 	})
 
 	t.Run("returns invalid when database not found", func(t *testing.T) {
@@ -552,16 +465,10 @@ func TestSourceUseCase_ValidateNotionDB(t *testing.T) {
 		ctx := context.Background()
 
 		result, err := uc.ValidateNotionDB(ctx, "invalid-db-id")
-		if err != nil {
-			t.Fatalf("ValidateNotionDB failed: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if result.Valid {
-			t.Error("expected Valid=false")
-		}
-		if result.ErrorMessage == "" {
-			t.Error("expected ErrorMessage to be set")
-		}
+		gt.Bool(t, result.Valid).False()
+		gt.String(t, result.ErrorMessage).NotEqual("")
 	})
 }
 
@@ -587,31 +494,15 @@ func TestSourceUseCase_CreateSlackSource(t *testing.T) {
 		}
 
 		source, err := uc.CreateSlackSource(ctx, input)
-		if err != nil {
-			t.Fatalf("CreateSlackSource failed: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if source.ID == "" {
-			t.Error("expected source ID to be set")
-		}
-		if source.Name != "My Slack Source" {
-			t.Errorf("expected name='My Slack Source', got %s", source.Name)
-		}
-		if source.SourceType != model.SourceTypeSlack {
-			t.Errorf("expected sourceType=slack, got %s", source.SourceType)
-		}
-		if source.SlackConfig == nil {
-			t.Fatal("expected SlackConfig to be set")
-		}
-		if len(source.SlackConfig.Channels) != 2 {
-			t.Errorf("expected 2 channels, got %d", len(source.SlackConfig.Channels))
-		}
-		if source.SlackConfig.Channels[0].ID != "C001" {
-			t.Errorf("expected channel ID='C001', got %s", source.SlackConfig.Channels[0].ID)
-		}
-		if source.SlackConfig.Channels[0].Name != "general" {
-			t.Errorf("expected channel name='general', got %s", source.SlackConfig.Channels[0].Name)
-		}
+		gt.Value(t, source.ID).NotEqual(model.SourceID(""))
+		gt.Value(t, source.Name).Equal("My Slack Source")
+		gt.Value(t, source.SourceType).Equal(model.SourceTypeSlack)
+		gt.Value(t, source.SlackConfig).NotNil().Required()
+		gt.Array(t, source.SlackConfig.Channels).Length(2)
+		gt.Value(t, source.SlackConfig.Channels[0].ID).Equal("C001")
+		gt.Value(t, source.SlackConfig.Channels[0].Name).Equal("general")
 	})
 
 	t.Run("uses default name when not provided", func(t *testing.T) {
@@ -626,13 +517,9 @@ func TestSourceUseCase_CreateSlackSource(t *testing.T) {
 		}
 
 		source, err := uc.CreateSlackSource(ctx, input)
-		if err != nil {
-			t.Fatalf("CreateSlackSource failed: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if source.Name != "Slack Source" {
-			t.Errorf("expected name='Slack Source', got %s", source.Name)
-		}
+		gt.Value(t, source.Name).Equal("Slack Source")
 	})
 
 	t.Run("fails with empty channel IDs", func(t *testing.T) {
@@ -647,9 +534,7 @@ func TestSourceUseCase_CreateSlackSource(t *testing.T) {
 		}
 
 		_, err := uc.CreateSlackSource(ctx, input)
-		if err == nil {
-			t.Error("expected error for empty channel IDs")
-		}
+		gt.Value(t, err).NotNil()
 	})
 
 	t.Run("creates source without Slack service", func(t *testing.T) {
@@ -664,13 +549,9 @@ func TestSourceUseCase_CreateSlackSource(t *testing.T) {
 		}
 
 		source, err := uc.CreateSlackSource(ctx, input)
-		if err != nil {
-			t.Fatalf("CreateSlackSource failed: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if source.SlackConfig.Channels[0].Name != "C001" {
-			t.Errorf("expected channel name='C001' (fallback to ID), got %s", source.SlackConfig.Channels[0].Name)
-		}
+		gt.Value(t, source.SlackConfig.Channels[0].Name).Equal("C001")
 	})
 }
 
@@ -690,9 +571,7 @@ func TestSourceUseCase_UpdateSlackSource(t *testing.T) {
 			},
 		}
 		created, err := repo.Source().Create(ctx, source)
-		if err != nil {
-			t.Fatalf("failed to create source: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
 		newName := "Updated"
 		newDesc := "Updated description"
@@ -705,19 +584,11 @@ func TestSourceUseCase_UpdateSlackSource(t *testing.T) {
 		}
 
 		updated, err := uc.UpdateSlackSource(ctx, input)
-		if err != nil {
-			t.Fatalf("UpdateSlackSource failed: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if updated.Name != "Updated" {
-			t.Errorf("expected name='Updated', got %s", updated.Name)
-		}
-		if updated.Description != "Updated description" {
-			t.Errorf("expected description='Updated description', got %s", updated.Description)
-		}
-		if updated.Enabled != false {
-			t.Errorf("expected enabled=false, got %v", updated.Enabled)
-		}
+		gt.Value(t, updated.Name).Equal("Updated")
+		gt.Value(t, updated.Description).Equal("Updated description")
+		gt.Value(t, updated.Enabled).Equal(false)
 	})
 
 	t.Run("updates channels", func(t *testing.T) {
@@ -741,9 +612,7 @@ func TestSourceUseCase_UpdateSlackSource(t *testing.T) {
 			},
 		}
 		created, err := repo.Source().Create(ctx, source)
-		if err != nil {
-			t.Fatalf("failed to create source: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
 		input := usecase.UpdateSlackSourceInput{
 			ID:         created.ID,
@@ -751,16 +620,10 @@ func TestSourceUseCase_UpdateSlackSource(t *testing.T) {
 		}
 
 		updated, err := uc.UpdateSlackSource(ctx, input)
-		if err != nil {
-			t.Fatalf("UpdateSlackSource failed: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if len(updated.SlackConfig.Channels) != 1 {
-			t.Errorf("expected 1 channel, got %d", len(updated.SlackConfig.Channels))
-		}
-		if updated.SlackConfig.Channels[0].ID != "C003" {
-			t.Errorf("expected channel ID='C003', got %s", updated.SlackConfig.Channels[0].ID)
-		}
+		gt.Array(t, updated.SlackConfig.Channels).Length(1)
+		gt.Value(t, updated.SlackConfig.Channels[0].ID).Equal("C003")
 	})
 
 	t.Run("fails with empty ID", func(t *testing.T) {
@@ -773,9 +636,7 @@ func TestSourceUseCase_UpdateSlackSource(t *testing.T) {
 		}
 
 		_, err := uc.UpdateSlackSource(ctx, input)
-		if err == nil {
-			t.Error("expected error for empty ID")
-		}
+		gt.Value(t, err).NotNil()
 	})
 
 	t.Run("fails for non-slack source", func(t *testing.T) {
@@ -789,9 +650,7 @@ func TestSourceUseCase_UpdateSlackSource(t *testing.T) {
 			Enabled:    true,
 		}
 		created, err := repo.Source().Create(ctx, source)
-		if err != nil {
-			t.Fatalf("failed to create source: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
 		newName := "New Name"
 		input := usecase.UpdateSlackSourceInput{
@@ -800,9 +659,7 @@ func TestSourceUseCase_UpdateSlackSource(t *testing.T) {
 		}
 
 		_, err = uc.UpdateSlackSource(ctx, input)
-		if err == nil {
-			t.Error("expected error for non-slack source")
-		}
+		gt.Value(t, err).NotNil()
 	})
 }
 
@@ -822,19 +679,11 @@ func TestSourceUseCase_ListSlackChannels(t *testing.T) {
 		ctx := context.Background()
 
 		channels, err := uc.ListSlackChannels(ctx)
-		if err != nil {
-			t.Fatalf("ListSlackChannels failed: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if len(channels) != 3 {
-			t.Errorf("expected 3 channels, got %d", len(channels))
-		}
-		if channels[0].ID != "C001" {
-			t.Errorf("expected channel ID='C001', got %s", channels[0].ID)
-		}
-		if channels[0].Name != "general" {
-			t.Errorf("expected channel name='general', got %s", channels[0].Name)
-		}
+		gt.Array(t, channels).Length(3)
+		gt.Value(t, channels[0].ID).Equal("C001")
+		gt.Value(t, channels[0].Name).Equal("general")
 	})
 
 	t.Run("fails when slack service is not configured", func(t *testing.T) {
@@ -843,8 +692,6 @@ func TestSourceUseCase_ListSlackChannels(t *testing.T) {
 		ctx := context.Background()
 
 		_, err := uc.ListSlackChannels(ctx)
-		if err == nil {
-			t.Error("expected error when slack service is not configured")
-		}
+		gt.Value(t, err).NotNil()
 	})
 }
