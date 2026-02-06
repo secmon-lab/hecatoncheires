@@ -4,27 +4,21 @@ import (
 	"context"
 	"os"
 	"testing"
-	"time"
 
+	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 )
 
 func TestNew(t *testing.T) {
 	t.Run("returns error when token is empty", func(t *testing.T) {
 		_, err := slack.New("")
-		if err == nil {
-			t.Fatal("expected error, got nil")
-		}
+		gt.Value(t, err).NotNil()
 	})
 
 	t.Run("creates service when token is provided", func(t *testing.T) {
 		svc, err := slack.New("test-token")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if svc == nil {
-			t.Fatal("expected service, got nil")
-		}
+		gt.NoError(t, err).Required()
+		gt.Value(t, svc).NotNil()
 	})
 }
 
@@ -37,101 +31,63 @@ func TestIntegration(t *testing.T) {
 	ctx := context.Background()
 
 	svc, err := slack.New(token)
-	if err != nil {
-		t.Fatalf("failed to create slack service: %v", err)
-	}
+	gt.NoError(t, err).Required()
+
+	// Fetch channels and users once to avoid repeated API calls and rate limiting
+	channels, err := svc.ListJoinedChannels(ctx)
+	gt.NoError(t, err).Required()
+
+	users, err := svc.ListUsers(ctx)
+	gt.NoError(t, err).Required()
 
 	t.Run("ListJoinedChannels returns channels", func(t *testing.T) {
-		channels, err := svc.ListJoinedChannels(ctx)
-		if err != nil {
-			t.Fatalf("ListJoinedChannels failed: %v", err)
-		}
-
-		// Bot should be in at least one channel
 		if len(channels) == 0 {
 			t.Log("Warning: bot is not joined to any channels")
 		}
 
 		for _, ch := range channels {
-			if ch.ID == "" {
-				t.Error("channel ID should not be empty")
-			}
-			if ch.Name == "" {
-				t.Error("channel Name should not be empty")
-			}
+			gt.String(t, ch.ID).NotEqual("")
+			gt.String(t, ch.Name).NotEqual("")
 			t.Logf("Found channel: %s (%s)", ch.Name, ch.ID)
 		}
 	})
 
 	t.Run("GetChannelNames resolves channel names", func(t *testing.T) {
-		// First, get some channels to test with
-		channels, err := svc.ListJoinedChannels(ctx)
-		if err != nil {
-			t.Fatalf("ListJoinedChannels failed: %v", err)
-		}
-
 		if len(channels) == 0 {
 			t.Skip("No channels available to test GetChannelNames")
 		}
 
-		// Test with the first channel
 		channelIDs := []string{channels[0].ID}
 		names, err := svc.GetChannelNames(ctx, channelIDs)
-		if err != nil {
-			t.Fatalf("GetChannelNames failed: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if len(names) != 1 {
-			t.Errorf("expected 1 name, got %d", len(names))
-		}
+		gt.Map(t, names).HasKey(channels[0].ID)
 
-		name, ok := names[channels[0].ID]
-		if !ok {
-			t.Errorf("channel ID %s not found in result", channels[0].ID)
-		}
-		if name == "" {
-			t.Error("channel name should not be empty")
-		}
-		if name != channels[0].Name {
-			t.Errorf("expected name %s, got %s", channels[0].Name, name)
-		}
+		name := names[channels[0].ID]
+		gt.String(t, name).NotEqual("")
+		gt.Value(t, name).Equal(channels[0].Name)
 
 		t.Logf("Resolved channel name: %s -> %s", channels[0].ID, name)
 	})
 
 	t.Run("GetChannelNames handles multiple channels", func(t *testing.T) {
-		channels, err := svc.ListJoinedChannels(ctx)
-		if err != nil {
-			t.Fatalf("ListJoinedChannels failed: %v", err)
-		}
-
 		if len(channels) < 2 {
 			t.Skip("Need at least 2 channels to test multiple channel resolution")
 		}
 
 		channelIDs := []string{channels[0].ID, channels[1].ID}
 		names, err := svc.GetChannelNames(ctx, channelIDs)
-		if err != nil {
-			t.Fatalf("GetChannelNames failed: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if len(names) != 2 {
-			t.Errorf("expected 2 names, got %d", len(names))
-		}
+		gt.Number(t, len(names)).Equal(2)
 
 		for _, ch := range channels[:2] {
-			name, ok := names[ch.ID]
-			if !ok {
-				t.Errorf("channel ID %s not found in result", ch.ID)
-			}
-			if name != ch.Name {
-				t.Errorf("expected name %s for %s, got %s", ch.Name, ch.ID, name)
-			}
+			gt.Map(t, names).HasKey(ch.ID)
+			gt.Value(t, names[ch.ID]).Equal(ch.Name)
 		}
 	})
 
 	t.Run("GetChannelNames handles non-existent channel gracefully", func(t *testing.T) {
-		// Use a fake channel ID that doesn't exist
 		channelIDs := []string{"C00000FAKE"}
 		names, err := svc.GetChannelNames(ctx, channelIDs)
 		// This may or may not error depending on API behavior
@@ -141,81 +97,29 @@ func TestIntegration(t *testing.T) {
 
 	t.Run("GetChannelNames with empty slice returns empty map", func(t *testing.T) {
 		names, err := svc.GetChannelNames(ctx, []string{})
-		if err != nil {
-			t.Fatalf("GetChannelNames failed: %v", err)
-		}
-		if len(names) != 0 {
-			t.Errorf("expected empty map, got %d entries", len(names))
-		}
+		gt.NoError(t, err).Required()
+		gt.Number(t, len(names)).Equal(0)
 	})
 
 	t.Run("ListUsers returns users", func(t *testing.T) {
-		users, err := svc.ListUsers(ctx)
-		if err != nil {
-			t.Fatalf("ListUsers failed: %v", err)
-		}
-
-		// Should have at least one user
-		if len(users) == 0 {
-			t.Error("expected at least one user")
-		}
+		gt.Number(t, len(users)).GreaterOrEqual(1)
 
 		for _, u := range users {
-			if u.ID == "" {
-				t.Error("user ID should not be empty")
-			}
+			gt.String(t, u.ID).NotEqual("")
 		}
 
 		t.Logf("Total users retrieved: %d", len(users))
-	})
-
-	t.Run("ListUsers performance measurement", func(t *testing.T) {
-		start := time.Now()
-		users, err := svc.ListUsers(ctx)
-		elapsed := time.Since(start)
-
-		if err != nil {
-			t.Fatalf("ListUsers failed: %v", err)
-		}
-
-		t.Logf("ListUsers completed in %v", elapsed)
-		t.Logf("Total users retrieved: %d", len(users))
-		t.Logf("Average time per user: %v", elapsed/time.Duration(len(users)))
-
-		// Log a warning if it takes more than 10 seconds
-		if elapsed > 10*time.Second {
-			t.Logf("WARNING: ListUsers took %v, which is longer than expected (>10s)", elapsed)
-			t.Logf("This may indicate network issues or a very large workspace")
-		}
-
-		// Log detailed timing information
-		if elapsed > 1*time.Second {
-			t.Logf("PERFORMANCE NOTE: ListUsers execution time breakdown:")
-			t.Logf("  - Total time: %v", elapsed)
-			t.Logf("  - Users count: %d", len(users))
-			t.Logf("  - Estimated rate: %.2f users/sec", float64(len(users))/elapsed.Seconds())
-		}
 	})
 
 	t.Run("GetUserInfo returns user info", func(t *testing.T) {
-		// First get a user to test with
-		users, err := svc.ListUsers(ctx)
-		if err != nil {
-			t.Fatalf("ListUsers failed: %v", err)
-		}
-
 		if len(users) == 0 {
 			t.Skip("No users available to test GetUserInfo")
 		}
 
 		user, err := svc.GetUserInfo(ctx, users[0].ID)
-		if err != nil {
-			t.Fatalf("GetUserInfo failed: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if user.ID != users[0].ID {
-			t.Errorf("expected user ID %s, got %s", users[0].ID, user.ID)
-		}
+		gt.Value(t, user.ID).Equal(users[0].ID)
 		t.Logf("Got user info: %s (%s)", user.RealName, user.ID)
 	})
 }

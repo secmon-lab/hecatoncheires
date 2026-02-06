@@ -8,49 +8,49 @@ import (
 type Repository = Memory
 
 type Memory struct {
-	risk         *riskRepository
-	response     *responseRepository
-	riskResponse *riskResponseRepository
-	tokens       *tokenStore
-	slack        *slackRepository
-	slackUser    *slackUserRepository
-	source       *sourceRepository
-	knowledge    *knowledgeRepository
+	caseRepo  *caseRepository
+	action    *actionRepository
+	caseField *fieldValueRepository
+	tokens    *tokenStore
+	slack     *slackRepository
+	slackUser *slackUserRepository
+	source    *sourceRepository
+	knowledge *knowledgeRepository
 }
 
 var _ interfaces.Repository = &Memory{}
 
 func New() *Memory {
-	riskRepo := newRiskRepository()
-	responseRepo := newResponseRepository()
-	riskResponseRepo := newRiskResponseRepository(responseRepo, riskRepo)
+	caseRepo := newCaseRepository()
+	actionRepo := newActionRepository()
+	fieldValueRepo := newFieldValueRepository()
 	slackRepo := newSlackRepository()
 	slackUserRepo := newSlackUserRepository()
 	sourceRepo := newSourceRepository()
 	knowledgeRepo := newKnowledgeRepository()
 
 	return &Memory{
-		risk:         riskRepo,
-		response:     responseRepo,
-		riskResponse: riskResponseRepo,
-		tokens:       newTokenStore(),
-		slack:        slackRepo,
-		slackUser:    slackUserRepo,
-		source:       sourceRepo,
-		knowledge:    knowledgeRepo,
+		caseRepo:  caseRepo,
+		action:    actionRepo,
+		caseField: fieldValueRepo,
+		tokens:    newTokenStore(),
+		slack:     slackRepo,
+		slackUser: slackUserRepo,
+		source:    sourceRepo,
+		knowledge: knowledgeRepo,
 	}
 }
 
-func (m *Memory) Risk() interfaces.RiskRepository {
-	return m.risk
+func (m *Memory) Case() interfaces.CaseRepository {
+	return m.caseRepo
 }
 
-func (m *Memory) Response() interfaces.ResponseRepository {
-	return m.response
+func (m *Memory) Action() interfaces.ActionRepository {
+	return m.action
 }
 
-func (m *Memory) RiskResponse() interfaces.RiskResponseRepository {
-	return m.riskResponse
+func (m *Memory) CaseField() interfaces.FieldValueRepository {
+	return m.caseField
 }
 
 func (m *Memory) Slack() interfaces.SlackRepository {

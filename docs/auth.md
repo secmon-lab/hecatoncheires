@@ -248,5 +248,6 @@ For Slack-specific troubleshooting, see [docs/slack.md](./slack.md#troubleshooti
 
 ## See Also
 
+- [Configuration Guide](./config.md) - TOML config file, CLI flags, and field definitions
 - [Slack Integration Guide](./slack.md) - Complete Slack setup including OAuth and Webhooks
 - [Slack Events API Configuration](./slack.md#slack-events-api-webhooks) - Setting up event webhooks

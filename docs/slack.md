@@ -612,3 +612,10 @@ slack_channels/{channelID}
 - Threaded conversation display
 - User mention notifications
 - Message reactions support
+
+---
+
+## See Also
+
+- [Configuration Guide](./config.md) - TOML config file, CLI flags, and field definitions
+- [Authentication Guide](./auth.md) - Slack OAuth and no-auth mode setup

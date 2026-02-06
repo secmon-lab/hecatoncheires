@@ -12,19 +12,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-type knowledgeDocument struct {
-	ID        string             `firestore:"id"`
-	RiskID    int64              `firestore:"risk_id"`
-	SourceID  string             `firestore:"source_id"`
-	SourceURL string             `firestore:"source_url"`
-	Title     string             `firestore:"title"`
-	Summary   string             `firestore:"summary"`
-	Embedding firestore.Vector32 `firestore:"embedding"`
-	SourcedAt time.Time          `firestore:"sourced_at"`
-	CreatedAt time.Time          `firestore:"created_at"`
-	UpdatedAt time.Time          `firestore:"updated_at"`
-}
-
 type knowledgeRepository struct {
 	client           *firestore.Client
 	collectionPrefix string
@@ -44,46 +31,6 @@ func (r *knowledgeRepository) knowledgesCollection() string {
 	return "knowledges"
 }
 
-func knowledgeToDocument(k *model.Knowledge) *knowledgeDocument {
-	doc := &knowledgeDocument{
-		ID:        string(k.ID),
-		RiskID:    k.RiskID,
-		SourceID:  string(k.SourceID),
-		SourceURL: k.SourceURL,
-		Title:     k.Title,
-		Summary:   k.Summary,
-		SourcedAt: k.SourcedAt,
-		CreatedAt: k.CreatedAt,
-		UpdatedAt: k.UpdatedAt,
-	}
-
-	if k.Embedding != nil {
-		doc.Embedding = firestore.Vector32(k.Embedding)
-	}
-
-	return doc
-}
-
-func knowledgeToModel(doc *knowledgeDocument) *model.Knowledge {
-	k := &model.Knowledge{
-		ID:        model.KnowledgeID(doc.ID),
-		RiskID:    doc.RiskID,
-		SourceID:  model.SourceID(doc.SourceID),
-		SourceURL: doc.SourceURL,
-		Title:     doc.Title,
-		Summary:   doc.Summary,
-		SourcedAt: doc.SourcedAt,
-		CreatedAt: doc.CreatedAt,
-		UpdatedAt: doc.UpdatedAt,
-	}
-
-	if doc.Embedding != nil {
-		k.Embedding = []float32(doc.Embedding)
-	}
-
-	return k
-}
-
 func (r *knowledgeRepository) Create(ctx context.Context, knowledge *model.Knowledge) (*model.Knowledge, error) {
 	now := time.Now().UTC()
 	if knowledge.ID == "" {
@@ -92,14 +39,12 @@ func (r *knowledgeRepository) Create(ctx context.Context, knowledge *model.Knowl
 	knowledge.CreatedAt = now
 	knowledge.UpdatedAt = now
 
-	doc := knowledgeToDocument(knowledge)
-
 	docRef := r.client.Collection(r.knowledgesCollection()).Doc(string(knowledge.ID))
-	if _, err := docRef.Set(ctx, doc); err != nil {
+	if _, err := docRef.Set(ctx, knowledge); err != nil {
 		return nil, goerr.Wrap(err, "failed to create knowledge")
 	}
 
-	return knowledgeToModel(doc), nil
+	return knowledge, nil
 }
 
 func (r *knowledgeRepository) Get(ctx context.Context, id model.KnowledgeID) (*model.Knowledge, error) {
@@ -112,18 +57,19 @@ func (r *knowledgeRepository) Get(ctx context.Context, id model.KnowledgeID) (*m
 		return nil, goerr.Wrap(err, "failed to get knowledge", goerr.V("id", id))
 	}
 
-	var kDoc knowledgeDocument
-	if err := doc.DataTo(&kDoc); err != nil {
+	var k model.Knowledge
+	if err := doc.DataTo(&k); err != nil {
 		return nil, goerr.Wrap(err, "failed to unmarshal knowledge", goerr.V("id", id))
 	}
 
-	return knowledgeToModel(&kDoc), nil
+	return &k, nil
 }
 
-func (r *knowledgeRepository) ListByRiskID(ctx context.Context, riskID int64) ([]*model.Knowledge, error) {
+func (r *knowledgeRepository) ListByCaseID(ctx context.Context, caseID int64) ([]*model.Knowledge, error) {
+	// Note: Removed OrderBy("SourcedAt") to comply with Firestore index policy
+	// Results are unordered, but avoid requiring new composite index
 	iter := r.client.Collection(r.knowledgesCollection()).
-		Where("risk_id", "==", riskID).
-		OrderBy("sourced_at", firestore.Desc).
+		Where("CaseID", "==", caseID).
 		Documents(ctx)
 	defer iter.Stop()
 
@@ -134,63 +80,64 @@ func (r *knowledgeRepository) ListByRiskID(ctx context.Context, riskID int64) ([
 			break
 		}
 		if err != nil {
-			return nil, goerr.Wrap(err, "failed to iterate knowledges", goerr.V("riskID", riskID))
+			return nil, goerr.Wrap(err, "failed to iterate knowledges", goerr.V("caseID", caseID))
 		}
 
-		var kDoc knowledgeDocument
-		if err := doc.DataTo(&kDoc); err != nil {
+		var k model.Knowledge
+		if err := doc.DataTo(&k); err != nil {
 			return nil, goerr.Wrap(err, "failed to unmarshal knowledge")
 		}
 
-		knowledges = append(knowledges, knowledgeToModel(&kDoc))
+		knowledges = append(knowledges, &k)
 	}
 
 	return knowledges, nil
 }
 
-func (r *knowledgeRepository) ListByRiskIDs(ctx context.Context, riskIDs []int64) (map[int64][]*model.Knowledge, error) {
-	if len(riskIDs) == 0 {
+func (r *knowledgeRepository) ListByCaseIDs(ctx context.Context, caseIDs []int64) (map[int64][]*model.Knowledge, error) {
+	if len(caseIDs) == 0 {
 		return make(map[int64][]*model.Knowledge), nil
 	}
 
 	// Use parallel execution to avoid requiring new Firestore indexes
-	// Each query uses existing index: risk_id == X, ORDER BY sourced_at DESC
+	// Each query uses existing index: case_id == X, ORDER BY sourced_at DESC
 	type result struct {
-		riskID     int64
+		caseID     int64
 		knowledges []*model.Knowledge
 		err        error
 	}
 
-	resultCh := make(chan result, len(riskIDs))
+	resultCh := make(chan result, len(caseIDs))
 
-	for _, riskID := range riskIDs {
+	for _, caseID := range caseIDs {
 		go func(id int64) {
-			knowledges, err := r.ListByRiskID(ctx, id)
+			knowledges, err := r.ListByCaseID(ctx, id)
 			resultCh <- result{
-				riskID:     id,
+				caseID:     id,
 				knowledges: knowledges,
 				err:        err,
 			}
-		}(riskID)
+		}(caseID)
 	}
 
 	// Collect results
-	resultMap := make(map[int64][]*model.Knowledge, len(riskIDs))
-	for i := 0; i < len(riskIDs); i++ {
+	resultMap := make(map[int64][]*model.Knowledge, len(caseIDs))
+	for i := 0; i < len(caseIDs); i++ {
 		res := <-resultCh
 		if res.err != nil {
-			return nil, goerr.Wrap(res.err, "failed to get knowledges for risk", goerr.V("riskID", res.riskID))
+			return nil, goerr.Wrap(res.err, "failed to get knowledges for case", goerr.V("caseID", res.caseID))
 		}
-		resultMap[res.riskID] = res.knowledges
+		resultMap[res.caseID] = res.knowledges
 	}
 
 	return resultMap, nil
 }
 
 func (r *knowledgeRepository) ListBySourceID(ctx context.Context, sourceID model.SourceID) ([]*model.Knowledge, error) {
+	// Note: Removed OrderBy("SourcedAt") to comply with Firestore index policy
+	// Results are unordered, but avoid requiring new composite index
 	iter := r.client.Collection(r.knowledgesCollection()).
-		Where("source_id", "==", string(sourceID)).
-		OrderBy("sourced_at", firestore.Desc).
+		Where("SourceID", "==", string(sourceID)).
 		Documents(ctx)
 	defer iter.Stop()
 
@@ -204,12 +151,12 @@ func (r *knowledgeRepository) ListBySourceID(ctx context.Context, sourceID model
 			return nil, goerr.Wrap(err, "failed to iterate knowledges", goerr.V("sourceID", sourceID))
 		}
 
-		var kDoc knowledgeDocument
-		if err := doc.DataTo(&kDoc); err != nil {
+		var k model.Knowledge
+		if err := doc.DataTo(&k); err != nil {
 			return nil, goerr.Wrap(err, "failed to unmarshal knowledge")
 		}
 
-		knowledges = append(knowledges, knowledgeToModel(&kDoc))
+		knowledges = append(knowledges, &k)
 	}
 
 	return knowledges, nil
@@ -225,7 +172,7 @@ func (r *knowledgeRepository) ListWithPagination(ctx context.Context, limit, off
 
 	// Get paginated results
 	query := r.client.Collection(r.knowledgesCollection()).
-		OrderBy("created_at", firestore.Desc).
+		OrderBy("CreatedAt", firestore.Desc).
 		Offset(offset).
 		Limit(limit)
 
@@ -242,12 +189,12 @@ func (r *knowledgeRepository) ListWithPagination(ctx context.Context, limit, off
 			return nil, 0, goerr.Wrap(err, "failed to iterate knowledges")
 		}
 
-		var kDoc knowledgeDocument
-		if err := doc.DataTo(&kDoc); err != nil {
+		var k model.Knowledge
+		if err := doc.DataTo(&k); err != nil {
 			return nil, 0, goerr.Wrap(err, "failed to unmarshal knowledge")
 		}
 
-		knowledges = append(knowledges, knowledgeToModel(&kDoc))
+		knowledges = append(knowledges, &k)
 	}
 
 	return knowledges, totalCount, nil

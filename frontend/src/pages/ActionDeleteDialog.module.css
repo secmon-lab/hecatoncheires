@@ -1,0 +1,24 @@
+.content {
+  text-align: center;
+  padding: 1rem 0;
+}
+
+.iconContainer {
+  margin-bottom: 1rem;
+}
+
+.icon {
+  color: var(--color-warning);
+}
+
+.message {
+  font-size: 1rem;
+  color: var(--text-heading);
+  margin: 0 0 0.5rem 0;
+}
+
+.warning {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  margin: 0;
+}

@@ -12,33 +12,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-type sourceDocument struct {
-	ID             string             `firestore:"id"`
-	Name           string             `firestore:"name"`
-	SourceType     string             `firestore:"source_type"`
-	Description    string             `firestore:"description"`
-	Enabled        bool               `firestore:"enabled"`
-	NotionDBConfig *notionDBConfig    `firestore:"notion_db_config,omitempty"`
-	SlackConfig    *sourceSlackConfig `firestore:"slack_config,omitempty"`
-	CreatedAt      time.Time          `firestore:"created_at"`
-	UpdatedAt      time.Time          `firestore:"updated_at"`
-}
-
-type notionDBConfig struct {
-	DatabaseID    string `firestore:"database_id"`
-	DatabaseTitle string `firestore:"database_title"`
-	DatabaseURL   string `firestore:"database_url"`
-}
-
-type sourceSlackConfig struct {
-	Channels []sourceSlackChannel `firestore:"channels"`
-}
-
-type sourceSlackChannel struct {
-	ID   string `firestore:"id"`
-	Name string `firestore:"name"`
-}
-
 type sourceRepository struct {
 	client           *firestore.Client
 	collectionPrefix string
@@ -58,76 +31,6 @@ func (r *sourceRepository) sourcesCollection() string {
 	return "sources"
 }
 
-func sourceToDocument(source *model.Source) *sourceDocument {
-	doc := &sourceDocument{
-		ID:          string(source.ID),
-		Name:        source.Name,
-		SourceType:  string(source.SourceType),
-		Description: source.Description,
-		Enabled:     source.Enabled,
-		CreatedAt:   source.CreatedAt,
-		UpdatedAt:   source.UpdatedAt,
-	}
-
-	if source.NotionDBConfig != nil {
-		doc.NotionDBConfig = &notionDBConfig{
-			DatabaseID:    source.NotionDBConfig.DatabaseID,
-			DatabaseTitle: source.NotionDBConfig.DatabaseTitle,
-			DatabaseURL:   source.NotionDBConfig.DatabaseURL,
-		}
-	}
-
-	if source.SlackConfig != nil {
-		channels := make([]sourceSlackChannel, len(source.SlackConfig.Channels))
-		for i, ch := range source.SlackConfig.Channels {
-			channels[i] = sourceSlackChannel{
-				ID:   ch.ID,
-				Name: ch.Name,
-			}
-		}
-		doc.SlackConfig = &sourceSlackConfig{
-			Channels: channels,
-		}
-	}
-
-	return doc
-}
-
-func sourceToModel(doc *sourceDocument) *model.Source {
-	source := &model.Source{
-		ID:          model.SourceID(doc.ID),
-		Name:        doc.Name,
-		SourceType:  model.SourceType(doc.SourceType),
-		Description: doc.Description,
-		Enabled:     doc.Enabled,
-		CreatedAt:   doc.CreatedAt,
-		UpdatedAt:   doc.UpdatedAt,
-	}
-
-	if doc.NotionDBConfig != nil {
-		source.NotionDBConfig = &model.NotionDBConfig{
-			DatabaseID:    doc.NotionDBConfig.DatabaseID,
-			DatabaseTitle: doc.NotionDBConfig.DatabaseTitle,
-			DatabaseURL:   doc.NotionDBConfig.DatabaseURL,
-		}
-	}
-
-	if doc.SlackConfig != nil {
-		channels := make([]model.SlackChannel, len(doc.SlackConfig.Channels))
-		for i, ch := range doc.SlackConfig.Channels {
-			channels[i] = model.SlackChannel{
-				ID:   ch.ID,
-				Name: ch.Name,
-			}
-		}
-		source.SlackConfig = &model.SlackConfig{
-			Channels: channels,
-		}
-	}
-
-	return source
-}
-
 func (r *sourceRepository) Create(ctx context.Context, source *model.Source) (*model.Source, error) {
 	now := time.Now().UTC()
 	if source.ID == "" {
@@ -136,14 +39,12 @@ func (r *sourceRepository) Create(ctx context.Context, source *model.Source) (*m
 	source.CreatedAt = now
 	source.UpdatedAt = now
 
-	doc := sourceToDocument(source)
-
 	docRef := r.client.Collection(r.sourcesCollection()).Doc(string(source.ID))
-	if _, err := docRef.Set(ctx, doc); err != nil {
+	if _, err := docRef.Set(ctx, source); err != nil {
 		return nil, goerr.Wrap(err, "failed to create source")
 	}
 
-	return sourceToModel(doc), nil
+	return source, nil
 }
 
 func (r *sourceRepository) Get(ctx context.Context, id model.SourceID) (*model.Source, error) {
@@ -156,12 +57,12 @@ func (r *sourceRepository) Get(ctx context.Context, id model.SourceID) (*model.S
 		return nil, goerr.Wrap(err, "failed to get source", goerr.V("id", id))
 	}
 
-	var srcDoc sourceDocument
-	if err := doc.DataTo(&srcDoc); err != nil {
+	var source model.Source
+	if err := doc.DataTo(&source); err != nil {
 		return nil, goerr.Wrap(err, "failed to unmarshal source", goerr.V("id", id))
 	}
 
-	return sourceToModel(&srcDoc), nil
+	return &source, nil
 }
 
 func (r *sourceRepository) List(ctx context.Context) ([]*model.Source, error) {
@@ -178,12 +79,12 @@ func (r *sourceRepository) List(ctx context.Context) ([]*model.Source, error) {
 			return nil, goerr.Wrap(err, "failed to iterate sources")
 		}
 
-		var srcDoc sourceDocument
-		if err := doc.DataTo(&srcDoc); err != nil {
+		var source model.Source
+		if err := doc.DataTo(&source); err != nil {
 			return nil, goerr.Wrap(err, "failed to unmarshal source")
 		}
 
-		sources = append(sources, sourceToModel(&srcDoc))
+		sources = append(sources, &source)
 	}
 
 	return sources, nil
@@ -203,19 +104,18 @@ func (r *sourceRepository) Update(ctx context.Context, source *model.Source) (*m
 			return goerr.Wrap(err, "failed to get source in transaction", goerr.V("id", source.ID))
 		}
 
-		var existing sourceDocument
+		var existing model.Source
 		if err := doc.DataTo(&existing); err != nil {
 			return goerr.Wrap(err, "failed to unmarshal source in transaction", goerr.V("id", source.ID))
 		}
 
 		source.CreatedAt = existing.CreatedAt
 		source.UpdatedAt = now
-		updatedDoc := sourceToDocument(source)
 
-		if err := tx.Set(docRef, updatedDoc); err != nil {
+		if err := tx.Set(docRef, source); err != nil {
 			return goerr.Wrap(err, "failed to update source in transaction", goerr.V("id", source.ID))
 		}
-		updatedSource = sourceToModel(updatedDoc)
+		updatedSource = source
 		return nil
 	})
 

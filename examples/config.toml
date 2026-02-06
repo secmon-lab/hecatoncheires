@@ -1,113 +1,197 @@
-# Hecatoncheires Configuration Example
-# This file shows example configuration for the risk management system
+# Hecatoncheires Configuration
+# This example demonstrates a security risk management system setup
 
-# Category definitions
-# Categories are used to classify risks
-[[category]]
+# Entity Labels: Customize the display names in the UI
+[labels]
+case = "Risk"      # Display "Risk" instead of "Case" in the UI
+
+# Custom Field Definitions for Cases
+# All fields defined here will be available in case forms and details
+
+[[fields]]
+id = "category"
+name = "Category"
+type = "multi-select"
+required = true
+
+[[fields.options]]
 id = "data-breach"
 name = "Data Breach"
-description = "Risk of personal or confidential information leakage"
 
-[[category]]
+  [fields.options.metadata]
+  description = "Risk of personal or confidential information leakage"
+  color = "red"
+
+[[fields.options]]
 id = "system-failure"
 name = "System Failure"
-description = "Risk of system or service downtime and failures"
 
-[[category]]
+  [fields.options.metadata]
+  description = "Risk of system or service downtime and failures"
+  color = "orange"
+
+[[fields.options]]
 id = "compliance"
 name = "Compliance"
-description = "Risk of regulatory or internal policy violations"
 
-[[category]]
+  [fields.options.metadata]
+  description = "Risk of regulatory or internal policy violations"
+  color = "yellow"
+
+[[fields.options]]
 id = "supply-chain"
 name = "Supply Chain"
-description = "Risks related to external vendors and third-party services"
 
-[[category]]
+  [fields.options.metadata]
+  description = "Risks related to external vendors and third-party services"
+  color = "blue"
+
+[[fields.options]]
 id = "insider-threat"
 name = "Insider Threat"
-description = "Intentional or unintentional threats from employees and related parties"
 
-# Likelihood levels (score: 1-5, higher is more likely)
-[[likelihood]]
+  [fields.options.metadata]
+  description = "Intentional or unintentional threats from employees"
+  color = "purple"
+
+[[fields]]
+id = "likelihood"
+name = "Likelihood"
+type = "select"
+required = true
+
+[[fields.options]]
 id = "very-low"
 name = "Very Low"
-description = "Extremely unlikely to occur (less than once per year)"
-score = 1
 
-[[likelihood]]
+  [fields.options.metadata]
+  description = "Extremely unlikely to occur (less than once per year)"
+  score = 1
+
+[[fields.options]]
 id = "low"
 name = "Low"
-description = "Unlikely to occur (a few times per year)"
-score = 2
 
-[[likelihood]]
+  [fields.options.metadata]
+  description = "Unlikely to occur (a few times per year)"
+  score = 2
+
+[[fields.options]]
 id = "medium"
 name = "Medium"
-description = "Moderately likely to occur (about once per month)"
-score = 3
 
-[[likelihood]]
+  [fields.options.metadata]
+  description = "Moderately likely to occur (about once per month)"
+  score = 3
+
+[[fields.options]]
 id = "high"
 name = "High"
-description = "Likely to occur (about once per week)"
-score = 4
 
-[[likelihood]]
+  [fields.options.metadata]
+  description = "Likely to occur (about once per week)"
+  score = 4
+
+[[fields.options]]
 id = "very-high"
 name = "Very High"
-description = "Very likely to occur (almost daily)"
-score = 5
 
-# Impact levels (score: 1-5, higher is more severe)
-[[impact]]
+  [fields.options.metadata]
+  description = "Very likely to occur (almost daily)"
+  score = 5
+
+[[fields]]
+id = "impact"
+name = "Impact"
+type = "select"
+required = true
+
+[[fields.options]]
 id = "negligible"
 name = "Negligible"
-description = "Little to no impact on business operations"
-score = 1
 
-[[impact]]
+  [fields.options.metadata]
+  description = "Little to no impact on business operations"
+  score = 1
+
+[[fields.options]]
 id = "minor"
 name = "Minor"
-description = "Limited impact with no disruption to business continuity"
-score = 2
 
-[[impact]]
+  [fields.options.metadata]
+  description = "Limited impact with no disruption to business continuity"
+  score = 2
+
+[[fields.options]]
 id = "moderate"
 name = "Moderate"
-description = "Some business impact requiring response"
-score = 3
 
-[[impact]]
+  [fields.options.metadata]
+  description = "Some business impact requiring response"
+  score = 3
+
+[[fields.options]]
 id = "major"
 name = "Major"
-description = "Significant impact requiring urgent response"
-score = 4
 
-[[impact]]
+  [fields.options.metadata]
+  description = "Significant impact requiring urgent response"
+  score = 4
+
+[[fields.options]]
 id = "critical"
 name = "Critical"
-description = "Critical impact on business continuity requiring highest priority response"
-score = 5
 
-# Team definitions
-# Teams represent organizations responsible for handling risks
-[[team]]
+  [fields.options.metadata]
+  description = "Critical impact on business continuity"
+  score = 5
+
+[[fields]]
+id = "response-team"
+name = "Response Team"
+type = "multi-select"
+required = false
+
+[[fields.options]]
 id = "security-team"
 name = "Security Team"
 
-[[team]]
+[[fields.options]]
 id = "infrastructure-team"
 name = "Infrastructure Team"
 
-[[team]]
+[[fields.options]]
 id = "development-team"
 name = "Development Team"
 
-[[team]]
+[[fields.options]]
 id = "compliance-team"
 name = "Compliance Team"
 
-[[team]]
+[[fields.options]]
 id = "business-team"
 name = "Business Team"
+
+[[fields]]
+id = "specific-impact"
+name = "Specific Impact"
+type = "text"
+required = false
+
+[[fields]]
+id = "detection-indicators"
+name = "Detection Indicators"
+type = "text"
+required = false
+
+[[fields]]
+id = "deadline"
+name = "Deadline"
+type = "date"
+required = false
+
+[[fields]]
+id = "reference-url"
+name = "Reference URL"
+type = "url"
+required = false

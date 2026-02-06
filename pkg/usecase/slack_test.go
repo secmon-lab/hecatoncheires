@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
@@ -33,9 +34,7 @@ func TestSlackUseCases_HandleSlackEvent(t *testing.T) {
 			TeamID: "T123",
 		}
 
-		if err := uc.Slack.HandleSlackEvent(ctx, event); err != nil {
-			t.Fatalf("failed to handle slack event: %v", err)
-		}
+		gt.NoError(t, uc.Slack.HandleSlackEvent(ctx, event)).Required()
 
 		// Verify message was stored
 		messages, _, err := repo.Slack().ListMessages(
@@ -46,22 +45,14 @@ func TestSlackUseCases_HandleSlackEvent(t *testing.T) {
 			10,
 			"",
 		)
-		if err != nil {
-			t.Fatalf("failed to list messages: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if len(messages) != 1 {
-			t.Errorf("expected 1 message, got %d", len(messages))
-		}
+		gt.Array(t, messages).Length(1)
 
 		if len(messages) > 0 {
 			msg := messages[0]
-			if msg.UserID() != "U123" {
-				t.Errorf("expected user ID U123, got %s", msg.UserID())
-			}
-			if msg.Text() != "Hello, world!" {
-				t.Errorf("expected text 'Hello, world!', got %s", msg.Text())
-			}
+			gt.Value(t, msg.UserID()).Equal("U123")
+			gt.Value(t, msg.Text()).Equal("Hello, world!")
 		}
 	})
 
@@ -82,9 +73,7 @@ func TestSlackUseCases_HandleSlackEvent(t *testing.T) {
 			TeamID: "T456",
 		}
 
-		if err := uc.Slack.HandleSlackEvent(ctx, event); err != nil {
-			t.Fatalf("failed to handle slack event: %v", err)
-		}
+		gt.NoError(t, uc.Slack.HandleSlackEvent(ctx, event)).Required()
 
 		// Verify message was stored
 		messages, _, err := repo.Slack().ListMessages(
@@ -95,13 +84,9 @@ func TestSlackUseCases_HandleSlackEvent(t *testing.T) {
 			10,
 			"",
 		)
-		if err != nil {
-			t.Fatalf("failed to list messages: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if len(messages) != 1 {
-			t.Errorf("expected 1 message, got %d", len(messages))
-		}
+		gt.Array(t, messages).Length(1)
 	})
 
 	t.Run("ignores unsupported event types", func(t *testing.T) {
@@ -117,9 +102,7 @@ func TestSlackUseCases_HandleSlackEvent(t *testing.T) {
 		}
 
 		// Should not error, just skip
-		if err := uc.Slack.HandleSlackEvent(ctx, event); err != nil {
-			t.Fatalf("failed to handle unsupported event: %v", err)
-		}
+		gt.NoError(t, uc.Slack.HandleSlackEvent(ctx, event)).Required()
 	})
 }
 
@@ -141,9 +124,7 @@ func TestSlackUseCases_HandleSlackMessage(t *testing.T) {
 			time.Now(),
 		)
 
-		if err := uc.Slack.HandleSlackMessage(ctx, msg); err != nil {
-			t.Fatalf("failed to handle slack message: %v", err)
-		}
+		gt.NoError(t, uc.Slack.HandleSlackMessage(ctx, msg)).Required()
 
 		// Verify message was stored
 		messages, _, err := repo.Slack().ListMessages(
@@ -154,23 +135,16 @@ func TestSlackUseCases_HandleSlackMessage(t *testing.T) {
 			10,
 			"",
 		)
-		if err != nil {
-			t.Fatalf("failed to list messages: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if len(messages) != 1 {
-			t.Fatalf("expected 1 message, got %d", len(messages))
-		}
+		gt.Array(t, messages).Length(1).Required()
 
-		if messages[0].ID() != "1234567890.123456" {
-			t.Errorf("expected message ID 1234567890.123456, got %s", messages[0].ID())
-		}
+		gt.Value(t, messages[0].ID()).Equal("1234567890.123456")
 	})
 
 	t.Run("returns error for nil message", func(t *testing.T) {
-		if err := uc.Slack.HandleSlackMessage(ctx, nil); err == nil {
-			t.Error("expected error for nil message, got nil")
-		}
+		err := uc.Slack.HandleSlackMessage(ctx, nil)
+		gt.Value(t, err).NotNil()
 	})
 }
 
@@ -208,18 +182,12 @@ func TestSlackUseCases_CleanupOldMessages(t *testing.T) {
 		newTime,
 	)
 
-	if err := repo.Slack().PutMessage(ctx, oldMsg); err != nil {
-		t.Fatalf("failed to put old message: %v", err)
-	}
-	if err := repo.Slack().PutMessage(ctx, newMsg); err != nil {
-		t.Fatalf("failed to put new message: %v", err)
-	}
+	gt.NoError(t, repo.Slack().PutMessage(ctx, oldMsg)).Required()
+	gt.NoError(t, repo.Slack().PutMessage(ctx, newMsg)).Required()
 
 	// Cleanup messages older than 24 hours
 	cutoffTime := now.Add(-24 * time.Hour)
-	if err := uc.Slack.CleanupOldMessages(ctx, cutoffTime); err != nil {
-		t.Fatalf("failed to cleanup old messages: %v", err)
-	}
+	gt.NoError(t, uc.Slack.CleanupOldMessages(ctx, cutoffTime)).Required()
 
 	// Verify only new message remains
 	messages, _, err := repo.Slack().ListMessages(
@@ -230,15 +198,9 @@ func TestSlackUseCases_CleanupOldMessages(t *testing.T) {
 		10,
 		"",
 	)
-	if err != nil {
-		t.Fatalf("failed to list messages: %v", err)
-	}
+	gt.NoError(t, err).Required()
 
-	if len(messages) != 1 {
-		t.Fatalf("expected 1 message after cleanup, got %d", len(messages))
-	}
+	gt.Array(t, messages).Length(1).Required()
 
-	if messages[0].ID() != "new.123456" {
-		t.Errorf("expected new message to remain, got %s", messages[0].ID())
-	}
+	gt.Value(t, messages[0].ID()).Equal("new.123456")
 }

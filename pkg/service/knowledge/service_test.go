@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/m-mizutani/gollem/llm/gemini"
+	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/knowledge"
 )
@@ -26,29 +27,23 @@ func TestExtract_WithRealGemini(t *testing.T) {
 
 	// Create Gemini client
 	llmClient, err := gemini.New(ctx, projectID, location)
-	if err != nil {
-		t.Fatalf("failed to create Gemini client: %v", err)
-	}
+	gt.NoError(t, err).Required()
 
 	// Create knowledge service
 	svc, err := knowledge.New(llmClient)
-	if err != nil {
-		t.Fatalf("failed to create knowledge service: %v", err)
-	}
+	gt.NoError(t, err).Required()
 
 	t.Run("Extract returns related knowledge", func(t *testing.T) {
-		risks := []*model.Risk{
+		cases := []*model.Case{
 			{
-				ID:                  1,
-				Name:                "Security Vulnerability",
-				Description:         "Risks related to security vulnerabilities in software",
-				DetectionIndicators: "CVE mentions, security patches, vulnerability reports",
+				ID:          1,
+				Title:       "Security Vulnerability",
+				Description: "Cases related to security vulnerabilities in software. Detection indicators: CVE mentions, security patches, vulnerability reports",
 			},
 			{
-				ID:                  2,
-				Name:                "Data Privacy",
-				Description:         "Risks related to data privacy and GDPR compliance",
-				DetectionIndicators: "Personal data handling, consent management, data breaches",
+				ID:          2,
+				Title:       "Data Privacy",
+				Description: "Cases related to data privacy and GDPR compliance. Detection indicators: Personal data handling, consent management, data breaches",
 			},
 		}
 
@@ -76,48 +71,35 @@ Please update to v2.3.6 or later immediately.
 		}
 
 		input := knowledge.Input{
-			Risks:      risks,
+			Cases:      cases,
 			SourceData: sourceData,
 		}
 
 		results, err := svc.Extract(ctx, input)
-		if err != nil {
-			t.Fatalf("failed to extract knowledge: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if len(results) == 0 {
-			t.Error("expected at least one result for security-related content")
-		}
+		gt.Number(t, len(results)).GreaterOrEqual(1)
 
-		// The security vulnerability risk should be identified
-		foundSecurityRisk := false
+		// The security vulnerability case should be identified
+		foundSecurityCase := false
 		for _, result := range results {
-			if result.RiskID == 1 {
-				foundSecurityRisk = true
-				if result.Title == "" {
-					t.Error("expected non-empty title")
-				}
-				if result.Summary == "" {
-					t.Error("expected non-empty summary")
-				}
-				if len(result.Embedding) != model.EmbeddingDimension {
-					t.Errorf("expected embedding dimension %d, got %d", model.EmbeddingDimension, len(result.Embedding))
-				}
+			if result.CaseID == 1 {
+				foundSecurityCase = true
+				gt.String(t, result.Title).NotEqual("")
+				gt.String(t, result.Summary).NotEqual("")
+				gt.Value(t, len(result.Embedding)).Equal(model.EmbeddingDimension)
 			}
 		}
 
-		if !foundSecurityRisk {
-			t.Error("expected security vulnerability risk to be identified")
-		}
+		gt.Bool(t, foundSecurityCase).True()
 	})
 
 	t.Run("Extract returns empty for unrelated content", func(t *testing.T) {
-		risks := []*model.Risk{
+		cases := []*model.Case{
 			{
-				ID:                  1,
-				Name:                "Security Vulnerability",
-				Description:         "Risks related to security vulnerabilities",
-				DetectionIndicators: "CVE mentions, security patches",
+				ID:          1,
+				Title:       "Security Vulnerability",
+				Description: "Cases related to security vulnerabilities. Detection indicators: CVE mentions, security patches",
 			},
 		}
 
@@ -139,21 +121,17 @@ Please update to v2.3.6 or later immediately.
 		}
 
 		input := knowledge.Input{
-			Risks:      risks,
+			Cases:      cases,
 			SourceData: sourceData,
 		}
 
 		results, err := svc.Extract(ctx, input)
-		if err != nil {
-			t.Fatalf("failed to extract knowledge: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if len(results) > 0 {
-			t.Errorf("expected no results for unrelated content, got %d", len(results))
-		}
+		gt.Array(t, results).Length(0)
 	})
 
-	t.Run("Extract with empty risks returns nil", func(t *testing.T) {
+	t.Run("Extract with empty cases returns nil", func(t *testing.T) {
 		sourceData := knowledge.SourceData{
 			SourceID:  model.NewSourceID(),
 			SourceURL: "https://example.com/page",
@@ -162,24 +140,18 @@ Please update to v2.3.6 or later immediately.
 		}
 
 		input := knowledge.Input{
-			Risks:      []*model.Risk{},
+			Cases:      []*model.Case{},
 			SourceData: sourceData,
 		}
 
 		results, err := svc.Extract(ctx, input)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if results != nil {
-			t.Errorf("expected nil results for empty risks, got %v", results)
-		}
+		gt.Value(t, results).Nil()
 	})
 }
 
 func TestNew_RequiresLLMClient(t *testing.T) {
 	_, err := knowledge.New(nil)
-	if err == nil {
-		t.Error("expected error when LLM client is nil")
-	}
+	gt.Value(t, err).NotNil()
 }

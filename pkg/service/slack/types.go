@@ -28,6 +28,10 @@ type Service interface {
 	// RenameChannel renames an existing Slack channel for a risk
 	// The channel name is automatically generated from riskID and riskName with the configured prefix
 	RenameChannel(ctx context.Context, channelID string, riskID int64, riskName string) error
+
+	// InviteUsersToChannel invites users to a Slack channel
+	// Silently skips if userIDs is empty
+	InviteUsersToChannel(ctx context.Context, channelID string, userIDs []string) error
 }
 
 // Channel represents a Slack channel

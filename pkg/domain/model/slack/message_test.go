@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
 	"github.com/slack-go/slack/slackevents"
 )
@@ -31,41 +32,23 @@ func TestNewMessage_MessageEvent(t *testing.T) {
 
 	msg := slack.NewMessage(ctx, event)
 
-	if msg == nil {
-		t.Fatal("expected message to be created, got nil")
-	}
+	gt.Value(t, msg).NotNil().Required()
 
-	if msg.ID() != "1234567890.123456" {
-		t.Errorf("expected ID to be %q, got %q", "1234567890.123456", msg.ID())
-	}
+	gt.Value(t, msg.ID()).Equal("1234567890.123456")
 
-	if msg.ChannelID() != "C123456" {
-		t.Errorf("expected ChannelID to be %q, got %q", "C123456", msg.ChannelID())
-	}
+	gt.Value(t, msg.ChannelID()).Equal("C123456")
 
-	if msg.TeamID() != "T123456" {
-		t.Errorf("expected TeamID to be %q, got %q", "T123456", msg.TeamID())
-	}
+	gt.Value(t, msg.TeamID()).Equal("T123456")
 
-	if msg.UserID() != "U123456" {
-		t.Errorf("expected UserID to be %q, got %q", "U123456", msg.UserID())
-	}
+	gt.Value(t, msg.UserID()).Equal("U123456")
 
-	if msg.UserName() != "U123456" {
-		t.Errorf("expected UserName to be %q (default to UserID), got %q", "U123456", msg.UserName())
-	}
+	gt.Value(t, msg.UserName()).Equal("U123456")
 
-	if msg.Text() != "Hello, world!" {
-		t.Errorf("expected Text to be %q, got %q", "Hello, world!", msg.Text())
-	}
+	gt.Value(t, msg.Text()).Equal("Hello, world!")
 
-	if msg.EventTS() != "1234567890.123456" {
-		t.Errorf("expected EventTS to be %q, got %q", "1234567890.123456", msg.EventTS())
-	}
+	gt.Value(t, msg.EventTS()).Equal("1234567890.123456")
 
-	if msg.ThreadTS() != "" {
-		t.Errorf("expected ThreadTS to be empty for root message, got %q", msg.ThreadTS())
-	}
+	gt.Value(t, msg.ThreadTS()).Equal("")
 
 	// Check that CreatedAt is recent (within 1 second)
 	if time.Since(msg.CreatedAt()) > time.Second {
@@ -98,13 +81,9 @@ func TestNewMessage_ThreadMessage(t *testing.T) {
 
 	msg := slack.NewMessage(ctx, event)
 
-	if msg == nil {
-		t.Fatal("expected message to be created, got nil")
-	}
+	gt.Value(t, msg).NotNil().Required()
 
-	if msg.ThreadTS() != "1234567890.123456" {
-		t.Errorf("expected ThreadTS to be %q, got %q", "1234567890.123456", msg.ThreadTS())
-	}
+	gt.Value(t, msg.ThreadTS()).Equal("1234567890.123456")
 }
 
 func TestNewMessage_AppMentionEvent(t *testing.T) {
@@ -128,13 +107,9 @@ func TestNewMessage_AppMentionEvent(t *testing.T) {
 
 	msg := slack.NewMessage(ctx, event)
 
-	if msg == nil {
-		t.Fatal("expected message to be created, got nil")
-	}
+	gt.Value(t, msg).NotNil().Required()
 
-	if msg.Text() != "<@UBOT123> help" {
-		t.Errorf("expected Text to be %q, got %q", "<@UBOT123> help", msg.Text())
-	}
+	gt.Value(t, msg.Text()).Equal("<@UBOT123> help")
 }
 
 func TestNewMessage_UnsupportedEvent(t *testing.T) {
@@ -146,9 +121,7 @@ func TestNewMessage_UnsupportedEvent(t *testing.T) {
 
 	msg := slack.NewMessage(ctx, event)
 
-	if msg != nil {
-		t.Errorf("expected nil for unsupported event type, got %+v", msg)
-	}
+	gt.Value(t, msg).Nil()
 }
 
 func TestNewMessageFromData(t *testing.T) {
@@ -166,43 +139,23 @@ func TestNewMessageFromData(t *testing.T) {
 		createdAt,
 	)
 
-	if msg == nil {
-		t.Fatal("expected message to be created, got nil")
-	}
+	gt.Value(t, msg).NotNil().Required()
 
-	if msg.ID() != "1234567890.123456" {
-		t.Errorf("expected ID to be %q, got %q", "1234567890.123456", msg.ID())
-	}
+	gt.Value(t, msg.ID()).Equal("1234567890.123456")
 
-	if msg.ChannelID() != "C123456" {
-		t.Errorf("expected ChannelID to be %q, got %q", "C123456", msg.ChannelID())
-	}
+	gt.Value(t, msg.ChannelID()).Equal("C123456")
 
-	if msg.ThreadTS() != "1234567890.123455" {
-		t.Errorf("expected ThreadTS to be %q, got %q", "1234567890.123455", msg.ThreadTS())
-	}
+	gt.Value(t, msg.ThreadTS()).Equal("1234567890.123455")
 
-	if msg.TeamID() != "T123456" {
-		t.Errorf("expected TeamID to be %q, got %q", "T123456", msg.TeamID())
-	}
+	gt.Value(t, msg.TeamID()).Equal("T123456")
 
-	if msg.UserID() != "U123456" {
-		t.Errorf("expected UserID to be %q, got %q", "U123456", msg.UserID())
-	}
+	gt.Value(t, msg.UserID()).Equal("U123456")
 
-	if msg.UserName() != "john_doe" {
-		t.Errorf("expected UserName to be %q, got %q", "john_doe", msg.UserName())
-	}
+	gt.Value(t, msg.UserName()).Equal("john_doe")
 
-	if msg.Text() != "Test message" {
-		t.Errorf("expected Text to be %q, got %q", "Test message", msg.Text())
-	}
+	gt.Value(t, msg.Text()).Equal("Test message")
 
-	if msg.EventTS() != "1234567890.123456" {
-		t.Errorf("expected EventTS to be %q, got %q", "1234567890.123456", msg.EventTS())
-	}
+	gt.Value(t, msg.EventTS()).Equal("1234567890.123456")
 
-	if !msg.CreatedAt().Equal(createdAt) {
-		t.Errorf("expected CreatedAt to be %v, got %v", createdAt, msg.CreatedAt())
-	}
+	gt.Value(t, msg.CreatedAt()).Equal(createdAt)
 }

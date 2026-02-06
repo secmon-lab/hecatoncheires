@@ -4,6 +4,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 )
 
@@ -78,9 +79,7 @@ func TestNormalizeChannelName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := slack.NormalizeChannelName(tt.input)
-			if got != tt.want {
-				t.Errorf("NormalizeChannelName(%q) = %q, want %q", tt.input, got, tt.want)
-			}
+			gt.Value(t, got).Equal(tt.want)
 		})
 	}
 }
@@ -175,20 +174,11 @@ func TestGenerateRiskChannelName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := slack.GenerateRiskChannelName(tt.riskID, tt.riskName, tt.prefix)
-			if got != tt.want {
-				t.Errorf("GenerateRiskChannelName(%d, %q, %q) = %q (len=%d), want %q (len=%d)",
-					tt.riskID, tt.riskName, tt.prefix, got, len(got), tt.want, len(tt.want))
-			}
+			gt.Value(t, got).Equal(tt.want)
 			// Verify byte length constraint (80 bytes max for Slack)
-			if len(got) > 80 {
-				t.Errorf("GenerateRiskChannelName(%d, %q, %q) returned a name longer than 80 bytes: %q (len=%d bytes)",
-					tt.riskID, tt.riskName, tt.prefix, got, len(got))
-			}
+			gt.Number(t, len(got)).LessOrEqual(80)
 			// Verify UTF-8 validity (truncation should not corrupt multi-byte characters)
-			if !utf8.ValidString(got) {
-				t.Errorf("GenerateRiskChannelName(%d, %q, %q) returned invalid UTF-8: %q",
-					tt.riskID, tt.riskName, tt.prefix, got)
-			}
+			gt.Bool(t, utf8.ValidString(got)).True()
 		})
 	}
 }
@@ -265,20 +255,11 @@ func TestTruncateToMaxBytes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := slack.TruncateToMaxBytes(tt.input, tt.maxBytes)
-			if got != tt.want {
-				t.Errorf("TruncateToMaxBytes(%q, %d) = %q (len=%d), want %q (len=%d)",
-					tt.input, tt.maxBytes, got, len(got), tt.want, len(tt.want))
-			}
+			gt.Value(t, got).Equal(tt.want)
 			// Always verify the result is valid UTF-8
-			if !utf8.ValidString(got) {
-				t.Errorf("TruncateToMaxBytes(%q, %d) returned invalid UTF-8: %q",
-					tt.input, tt.maxBytes, got)
-			}
+			gt.Bool(t, utf8.ValidString(got)).True()
 			// Verify byte length constraint
-			if len(got) > tt.maxBytes {
-				t.Errorf("TruncateToMaxBytes(%q, %d) returned string with %d bytes, exceeds limit",
-					tt.input, tt.maxBytes, len(got))
-			}
+			gt.Number(t, len(got)).LessOrEqual(tt.maxBytes)
 		})
 	}
 }

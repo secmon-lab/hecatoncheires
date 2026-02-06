@@ -1,0 +1,461 @@
+.container {
+  max-width: 75rem;
+  margin: 0 auto;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  gap: var(--spacing-md);
+}
+
+.actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
+
+@media (max-width: 767px) {
+  .header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--spacing-md);
+  }
+
+  .actions {
+    justify-content: flex-end;
+  }
+}
+
+.content {
+  background: var(--bg-paper);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.titleSection {
+  padding: 1.75rem 1.5rem;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.title {
+  margin: 0 0 0.5rem 0;
+  font-size: 2rem;
+  font-weight: 600;
+  color: var(--text-heading);
+  line-height: 1.2;
+}
+
+.description {
+  margin: 0;
+  font-size: 0.9375rem;
+  color: var(--text-body);
+  line-height: 1.6;
+}
+
+.sections {
+  padding: 1.75rem 1.5rem;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2rem;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.sectionTitle {
+  margin: 0 0 0.25rem 0;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-label);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.text {
+  margin: 0;
+  font-size: 0.9375rem;
+  color: var(--text-body);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.customFields {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+}
+
+.customField {
+  display: flex;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--bg-subtle);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-light);
+}
+
+.customFieldLabel {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-label);
+  min-width: 120px;
+}
+
+.customFieldValue {
+  font-size: 0.9375rem;
+  color: var(--text-body);
+  word-break: break-word;
+}
+
+.link {
+  color: var(--color-primary);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+.link:hover {
+  color: var(--color-primary-dark);
+  text-decoration: underline;
+}
+
+.metadata {
+  display: flex;
+  gap: 2.5rem;
+  padding: 1.25rem 0 0 0;
+  margin-top: 1.5rem;
+  border-top: 1px solid var(--border-default);
+}
+
+@media (max-width: 767px) {
+  .metadata {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .titleSection {
+    padding: 1rem;
+  }
+
+  .title {
+    font-size: 1.5rem;
+  }
+
+  .sections {
+    padding: 1rem;
+  }
+
+  .actionTable {
+    display: block;
+    overflow-x: auto;
+  }
+
+  .titleCell {
+    max-width: 12.5rem;
+  }
+
+  .customField {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .customFieldLabel {
+    min-width: 0;
+  }
+}
+
+.metadataItem {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.metadataLabel {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-label);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.metadataValue {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-body);
+}
+
+.loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 25rem;
+  font-size: 1.125rem;
+  color: var(--text-muted);
+}
+
+.error {
+  padding: 2rem;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--color-error);
+  margin-bottom: 1rem;
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  min-width: 10rem;
+  background: var(--bg-paper);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+  z-index: 1000;
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: transparent;
+  border: none;
+  font-size: 0.875rem;
+  color: var(--text-body);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.menuItem:hover {
+  background: var(--bg-hover);
+}
+
+.menuItem:active {
+  background: var(--bg-subtle);
+}
+
+.sectionHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.actionTable {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--bg-paper);
+  border: 1px solid var(--border-default);
+  border-radius: var(--card-radius);
+  overflow: hidden;
+}
+
+.actionTable thead {
+  background: var(--table-header-bg);
+  border-bottom: 2px solid var(--table-header-border);
+}
+
+.actionTable th {
+  padding: 0.875rem 1rem;
+  text-align: left;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-label);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.actionRow {
+  border-bottom: 1px solid var(--table-row-border);
+  cursor: pointer;
+  transition: background-color 0.15s;
+  height: 3.5rem;
+}
+
+.actionRow:last-child {
+  border-bottom: none;
+}
+
+.actionRow:hover {
+  background: var(--table-row-hover);
+}
+
+.actionTable td {
+  padding: 0.875rem 1rem;
+  font-size: 0.9375rem;
+  color: var(--text-body);
+}
+
+.titleCell {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 18.75rem;
+}
+
+.statusCell {
+  width: 9.375rem;
+}
+
+.dateCell {
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.assignees {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.assignee {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-muted);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+}
+
+.avatar {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.375rem;
+}
+
+.knowledgeTable {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--bg-paper);
+  border: 1px solid var(--border-default);
+  border-radius: var(--card-radius);
+  overflow: hidden;
+}
+
+.knowledgeTable thead {
+  background: var(--table-header-bg);
+  border-bottom: 2px solid var(--table-header-border);
+}
+
+.knowledgeTable th {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-label);
+}
+
+.knowledgeTable th:last-child {
+  width: 2.5rem;
+}
+
+.knowledgeRow {
+  border-bottom: 1px solid var(--border-light);
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.knowledgeRow:last-child {
+  border-bottom: none;
+}
+
+.knowledgeRow:hover {
+  background: var(--table-row-hover);
+}
+
+.knowledgeTable td {
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  color: var(--text-body);
+  vertical-align: top;
+}
+
+.knowledgeTitleCell {
+  font-weight: 600;
+  color: var(--text-heading);
+  max-width: 12.5rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.knowledgeSummaryCell {
+  color: var(--text-muted);
+  max-width: 18.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledgeDateCell {
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.knowledgeLinkCell {
+  text-align: center;
+}
+
+.knowledgeExternalLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-xs);
+  color: var(--text-muted);
+  border-radius: 0.25rem;
+  transition: color 0.15s, background-color 0.15s;
+}
+
+.knowledgeExternalLink:hover {
+  color: var(--color-primary);
+  background: var(--bg-highlight);
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-md);
+  margin-top: var(--spacing-md);
+}
+
+.paginationButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--bg-paper);
+  border: 1px solid var(--border-default);
+  border-radius: 0.375rem;
+  color: var(--text-body);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.paginationButton:hover:not(:disabled) {
+  background: var(--bg-subtle);
+  border-color: var(--border-hover);
+}
+
+.paginationButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.paginationInfo {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}

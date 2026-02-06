@@ -86,6 +86,16 @@ func (c *client) ListJoinedChannels(ctx context.Context) ([]Channel, error) {
 
 		convs, nextCursor, err := c.api.GetConversationsContext(ctx, params)
 		if err != nil {
+			// Handle rate limiting by waiting and retrying,
+			// matching the pattern used by GetUsersContext in slack-go/slack.
+			if rateLimitErr, ok := err.(*slack.RateLimitedError); ok {
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(rateLimitErr.RetryAfter):
+					continue
+				}
+			}
 			return nil, goerr.Wrap(err, "failed to get conversations")
 		}
 
@@ -213,6 +223,20 @@ func (c *client) CreateChannel(ctx context.Context, riskID int64, riskName strin
 		return "", goerr.Wrap(err, "failed to create Slack channel", goerr.V("channelName", channelName), goerr.V("riskID", riskID), goerr.V("riskName", riskName))
 	}
 	return channel.ID, nil
+}
+
+// InviteUsersToChannel invites users to a Slack channel
+func (c *client) InviteUsersToChannel(ctx context.Context, channelID string, userIDs []string) error {
+	if len(userIDs) == 0 {
+		return nil
+	}
+	_, err := c.api.InviteUsersToConversationContext(ctx, channelID, userIDs...)
+	if err != nil {
+		return goerr.Wrap(err, "failed to invite users to Slack channel",
+			goerr.V("channel_id", channelID),
+			goerr.V("user_ids", userIDs))
+	}
+	return nil
 }
 
 // RenameChannel renames an existing Slack channel for a risk

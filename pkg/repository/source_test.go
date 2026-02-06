@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/firestore"
@@ -34,44 +35,19 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		}
 
 		created, err := repo.Source().Create(ctx, source)
-		if err != nil {
-			t.Fatalf("failed to create source: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if created.ID == "" {
-			t.Error("expected non-empty ID")
-		}
-		if created.Name != source.Name {
-			t.Errorf("expected name=%s, got %s", source.Name, created.Name)
-		}
-		if created.SourceType != source.SourceType {
-			t.Errorf("expected sourceType=%s, got %s", source.SourceType, created.SourceType)
-		}
-		if created.Description != source.Description {
-			t.Errorf("expected description=%s, got %s", source.Description, created.Description)
-		}
-		if created.Enabled != source.Enabled {
-			t.Errorf("expected enabled=%v, got %v", source.Enabled, created.Enabled)
-		}
-		if created.NotionDBConfig == nil {
-			t.Error("expected NotionDBConfig to be set")
-		} else {
-			if created.NotionDBConfig.DatabaseID != source.NotionDBConfig.DatabaseID {
-				t.Errorf("expected databaseID=%s, got %s", source.NotionDBConfig.DatabaseID, created.NotionDBConfig.DatabaseID)
-			}
-			if created.NotionDBConfig.DatabaseTitle != source.NotionDBConfig.DatabaseTitle {
-				t.Errorf("expected databaseTitle=%s, got %s", source.NotionDBConfig.DatabaseTitle, created.NotionDBConfig.DatabaseTitle)
-			}
-			if created.NotionDBConfig.DatabaseURL != source.NotionDBConfig.DatabaseURL {
-				t.Errorf("expected databaseURL=%s, got %s", source.NotionDBConfig.DatabaseURL, created.NotionDBConfig.DatabaseURL)
-			}
-		}
-		if created.CreatedAt.IsZero() {
-			t.Error("expected non-zero CreatedAt")
-		}
-		if created.UpdatedAt.IsZero() {
-			t.Error("expected non-zero UpdatedAt")
-		}
+		gt.String(t, string(created.ID)).NotEqual("")
+		gt.Value(t, created.Name).Equal(source.Name)
+		gt.Value(t, created.SourceType).Equal(source.SourceType)
+		gt.Value(t, created.Description).Equal(source.Description)
+		gt.Value(t, created.Enabled).Equal(source.Enabled)
+		gt.Value(t, created.NotionDBConfig).NotNil()
+		gt.Value(t, created.NotionDBConfig.DatabaseID).Equal(source.NotionDBConfig.DatabaseID)
+		gt.Value(t, created.NotionDBConfig.DatabaseTitle).Equal(source.NotionDBConfig.DatabaseTitle)
+		gt.Value(t, created.NotionDBConfig.DatabaseURL).Equal(source.NotionDBConfig.DatabaseURL)
+		gt.Bool(t, created.CreatedAt.IsZero()).False()
+		gt.Bool(t, created.UpdatedAt.IsZero()).False()
 	})
 
 	t.Run("Create with provided ID preserves it", func(t *testing.T) {
@@ -88,13 +64,9 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		}
 
 		created, err := repo.Source().Create(ctx, source)
-		if err != nil {
-			t.Fatalf("failed to create source: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if created.ID != customID {
-			t.Errorf("expected ID=%s, got %s", customID, created.ID)
-		}
+		gt.Value(t, created.ID).Equal(customID)
 	})
 
 	t.Run("Get retrieves existing source", func(t *testing.T) {
@@ -114,43 +86,20 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		}
 
 		created, err := repo.Source().Create(ctx, source)
-		if err != nil {
-			t.Fatalf("failed to create source: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
 		retrieved, err := repo.Source().Get(ctx, created.ID)
-		if err != nil {
-			t.Fatalf("failed to get source: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if retrieved.ID != created.ID {
-			t.Errorf("expected ID=%s, got %s", created.ID, retrieved.ID)
-		}
-		if retrieved.Name != created.Name {
-			t.Errorf("expected name=%s, got %s", created.Name, retrieved.Name)
-		}
-		if retrieved.SourceType != created.SourceType {
-			t.Errorf("expected sourceType=%s, got %s", created.SourceType, retrieved.SourceType)
-		}
-		if retrieved.Description != created.Description {
-			t.Errorf("expected description=%s, got %s", created.Description, retrieved.Description)
-		}
-		if retrieved.Enabled != created.Enabled {
-			t.Errorf("expected enabled=%v, got %v", created.Enabled, retrieved.Enabled)
-		}
-		if retrieved.NotionDBConfig == nil {
-			t.Error("expected NotionDBConfig to be set")
-		} else {
-			if retrieved.NotionDBConfig.DatabaseID != created.NotionDBConfig.DatabaseID {
-				t.Errorf("expected databaseID=%s, got %s", created.NotionDBConfig.DatabaseID, retrieved.NotionDBConfig.DatabaseID)
-			}
-		}
-		if time.Since(retrieved.CreatedAt) > 3*time.Second {
-			t.Errorf("CreatedAt time diff too large: %v", time.Since(retrieved.CreatedAt))
-		}
-		if time.Since(retrieved.UpdatedAt) > 3*time.Second {
-			t.Errorf("UpdatedAt time diff too large: %v", time.Since(retrieved.UpdatedAt))
-		}
+		gt.Value(t, retrieved.ID).Equal(created.ID)
+		gt.Value(t, retrieved.Name).Equal(created.Name)
+		gt.Value(t, retrieved.SourceType).Equal(created.SourceType)
+		gt.Value(t, retrieved.Description).Equal(created.Description)
+		gt.Value(t, retrieved.Enabled).Equal(created.Enabled)
+		gt.Value(t, retrieved.NotionDBConfig).NotNil()
+		gt.Value(t, retrieved.NotionDBConfig.DatabaseID).Equal(created.NotionDBConfig.DatabaseID)
+		gt.Bool(t, time.Since(retrieved.CreatedAt) <= 3*time.Second).True()
+		gt.Bool(t, time.Since(retrieved.UpdatedAt) <= 3*time.Second).True()
 	})
 
 	t.Run("Get returns error for non-existent source", func(t *testing.T) {
@@ -158,12 +107,8 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		ctx := context.Background()
 
 		_, err := repo.Source().Get(ctx, "non-existent-id")
-		if err == nil {
-			t.Error("expected error for non-existent source")
-		}
-		if !errors.Is(err, memory.ErrNotFound) && !errors.Is(err, firestore.ErrNotFound) {
-			t.Errorf("expected ErrNotFound, got %v", err)
-		}
+		gt.Value(t, err).NotNil()
+		gt.Bool(t, errors.Is(err, memory.ErrNotFound) || errors.Is(err, firestore.ErrNotFound)).True()
 	})
 
 	t.Run("List returns all sources", func(t *testing.T) {
@@ -171,38 +116,26 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		ctx := context.Background()
 
 		sources, err := repo.Source().List(ctx)
-		if err != nil {
-			t.Fatalf("failed to list sources: %v", err)
-		}
-		if len(sources) != 0 {
-			t.Errorf("expected 0 sources, got %d", len(sources))
-		}
+		gt.NoError(t, err).Required()
+		gt.Array(t, sources).Length(0)
 
 		source1, err := repo.Source().Create(ctx, &model.Source{
 			Name:       "Source 1",
 			SourceType: model.SourceTypeNotionDB,
 			Enabled:    true,
 		})
-		if err != nil {
-			t.Fatalf("failed to create source1: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
 		source2, err := repo.Source().Create(ctx, &model.Source{
 			Name:       "Source 2",
 			SourceType: model.SourceTypeNotionDB,
 			Enabled:    false,
 		})
-		if err != nil {
-			t.Fatalf("failed to create source2: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
 		sources, err = repo.Source().List(ctx)
-		if err != nil {
-			t.Fatalf("failed to list sources: %v", err)
-		}
-		if len(sources) != 2 {
-			t.Errorf("expected 2 sources, got %d", len(sources))
-		}
+		gt.NoError(t, err).Required()
+		gt.Array(t, sources).Length(2)
 
 		foundSource1 := false
 		foundSource2 := false
@@ -214,12 +147,8 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 				foundSource2 = true
 			}
 		}
-		if !foundSource1 {
-			t.Error("source1 not found in list")
-		}
-		if !foundSource2 {
-			t.Error("source2 not found in list")
-		}
+		gt.Bool(t, foundSource1).True()
+		gt.Bool(t, foundSource2).True()
 	})
 
 	t.Run("Update modifies existing source", func(t *testing.T) {
@@ -237,9 +166,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 				DatabaseURL:   "https://notion.so/original",
 			},
 		})
-		if err != nil {
-			t.Fatalf("failed to create source: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
 		time.Sleep(10 * time.Millisecond)
 
@@ -255,43 +182,20 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 				DatabaseURL:   "https://notion.so/updated",
 			},
 		})
-		if err != nil {
-			t.Fatalf("failed to update source: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if updated.ID != created.ID {
-			t.Errorf("ID should not change, got %s", updated.ID)
-		}
-		if updated.Name != "Updated Name" {
-			t.Errorf("expected name='Updated Name', got %s", updated.Name)
-		}
-		if updated.Description != "Updated Description" {
-			t.Errorf("expected description='Updated Description', got %s", updated.Description)
-		}
-		if updated.Enabled != false {
-			t.Errorf("expected enabled=false, got %v", updated.Enabled)
-		}
-		if updated.NotionDBConfig == nil {
-			t.Error("expected NotionDBConfig to be set")
-		} else {
-			if updated.NotionDBConfig.DatabaseID != "updated-db-id" {
-				t.Errorf("expected databaseID='updated-db-id', got %s", updated.NotionDBConfig.DatabaseID)
-			}
-		}
-		if time.Since(updated.CreatedAt) > time.Since(created.CreatedAt)+time.Second {
-			t.Errorf("CreatedAt should not change significantly")
-		}
-		if !updated.UpdatedAt.After(created.UpdatedAt) {
-			t.Errorf("UpdatedAt should be after original, got %v", updated.UpdatedAt)
-		}
+		gt.Value(t, updated.ID).Equal(created.ID)
+		gt.Value(t, updated.Name).Equal("Updated Name")
+		gt.Value(t, updated.Description).Equal("Updated Description")
+		gt.Value(t, updated.Enabled).Equal(false)
+		gt.Value(t, updated.NotionDBConfig).NotNil()
+		gt.Value(t, updated.NotionDBConfig.DatabaseID).Equal("updated-db-id")
+		gt.Bool(t, time.Since(updated.CreatedAt) <= time.Since(created.CreatedAt)+time.Second).True()
+		gt.Bool(t, updated.UpdatedAt.After(created.UpdatedAt)).True()
 
 		retrieved, err := repo.Source().Get(ctx, created.ID)
-		if err != nil {
-			t.Fatalf("failed to get updated source: %v", err)
-		}
-		if retrieved.Name != "Updated Name" {
-			t.Errorf("expected name='Updated Name' after retrieval, got %s", retrieved.Name)
-		}
+		gt.NoError(t, err).Required()
+		gt.Value(t, retrieved.Name).Equal("Updated Name")
 	})
 
 	t.Run("Update returns error for non-existent source", func(t *testing.T) {
@@ -305,12 +209,8 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			Description: "Should fail",
 			Enabled:     true,
 		})
-		if err == nil {
-			t.Error("expected error for non-existent source")
-		}
-		if !errors.Is(err, memory.ErrNotFound) && !errors.Is(err, firestore.ErrNotFound) {
-			t.Errorf("expected ErrNotFound, got %v", err)
-		}
+		gt.Value(t, err).NotNil()
+		gt.Bool(t, errors.Is(err, memory.ErrNotFound) || errors.Is(err, firestore.ErrNotFound)).True()
 	})
 
 	t.Run("Delete removes existing source", func(t *testing.T) {
@@ -322,22 +222,14 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			SourceType: model.SourceTypeNotionDB,
 			Enabled:    true,
 		})
-		if err != nil {
-			t.Fatalf("failed to create source: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
 		err = repo.Source().Delete(ctx, created.ID)
-		if err != nil {
-			t.Fatalf("failed to delete source: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
 		_, err = repo.Source().Get(ctx, created.ID)
-		if err == nil {
-			t.Error("expected error when getting deleted source")
-		}
-		if !errors.Is(err, memory.ErrNotFound) && !errors.Is(err, firestore.ErrNotFound) {
-			t.Errorf("expected ErrNotFound, got %v", err)
-		}
+		gt.Value(t, err).NotNil()
+		gt.Bool(t, errors.Is(err, memory.ErrNotFound) || errors.Is(err, firestore.ErrNotFound)).True()
 	})
 
 	t.Run("Delete returns error for non-existent source", func(t *testing.T) {
@@ -345,12 +237,8 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		ctx := context.Background()
 
 		err := repo.Source().Delete(ctx, "non-existent-id")
-		if err == nil {
-			t.Error("expected error for non-existent source")
-		}
-		if !errors.Is(err, memory.ErrNotFound) && !errors.Is(err, firestore.ErrNotFound) {
-			t.Errorf("expected ErrNotFound, got %v", err)
-		}
+		gt.Value(t, err).NotNil()
+		gt.Bool(t, errors.Is(err, memory.ErrNotFound) || errors.Is(err, firestore.ErrNotFound)).True()
 	})
 
 	t.Run("Source without NotionDBConfig works", func(t *testing.T) {
@@ -366,22 +254,14 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		}
 
 		created, err := repo.Source().Create(ctx, source)
-		if err != nil {
-			t.Fatalf("failed to create source: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if created.NotionDBConfig != nil {
-			t.Error("expected NotionDBConfig to be nil")
-		}
+		gt.Value(t, created.NotionDBConfig).Nil()
 
 		retrieved, err := repo.Source().Get(ctx, created.ID)
-		if err != nil {
-			t.Fatalf("failed to get source: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if retrieved.NotionDBConfig != nil {
-			t.Error("expected NotionDBConfig to be nil after retrieval")
-		}
+		gt.Value(t, retrieved.NotionDBConfig).Nil()
 	})
 
 	t.Run("Create Slack source with channels", func(t *testing.T) {
@@ -402,37 +282,17 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		}
 
 		created, err := repo.Source().Create(ctx, source)
-		if err != nil {
-			t.Fatalf("failed to create source: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if created.ID == "" {
-			t.Error("expected non-empty ID")
-		}
-		if created.Name != source.Name {
-			t.Errorf("expected name=%s, got %s", source.Name, created.Name)
-		}
-		if created.SourceType != model.SourceTypeSlack {
-			t.Errorf("expected sourceType=%s, got %s", model.SourceTypeSlack, created.SourceType)
-		}
-		if created.SlackConfig == nil {
-			t.Fatal("expected SlackConfig to be set")
-		}
-		if len(created.SlackConfig.Channels) != 2 {
-			t.Errorf("expected 2 channels, got %d", len(created.SlackConfig.Channels))
-		}
-		if created.SlackConfig.Channels[0].ID != "C01234567" {
-			t.Errorf("expected channel ID=C01234567, got %s", created.SlackConfig.Channels[0].ID)
-		}
-		if created.SlackConfig.Channels[0].Name != "general" {
-			t.Errorf("expected channel name=general, got %s", created.SlackConfig.Channels[0].Name)
-		}
-		if created.SlackConfig.Channels[1].ID != "C89012345" {
-			t.Errorf("expected channel ID=C89012345, got %s", created.SlackConfig.Channels[1].ID)
-		}
-		if created.SlackConfig.Channels[1].Name != "random" {
-			t.Errorf("expected channel name=random, got %s", created.SlackConfig.Channels[1].Name)
-		}
+		gt.String(t, string(created.ID)).NotEqual("")
+		gt.Value(t, created.Name).Equal(source.Name)
+		gt.Value(t, created.SourceType).Equal(model.SourceTypeSlack)
+		gt.Value(t, created.SlackConfig).NotNil().Required()
+		gt.Array(t, created.SlackConfig.Channels).Length(2)
+		gt.Value(t, created.SlackConfig.Channels[0].ID).Equal("C01234567")
+		gt.Value(t, created.SlackConfig.Channels[0].Name).Equal("general")
+		gt.Value(t, created.SlackConfig.Channels[1].ID).Equal("C89012345")
+		gt.Value(t, created.SlackConfig.Channels[1].Name).Equal("random")
 	})
 
 	t.Run("Get retrieves Slack source with channels", func(t *testing.T) {
@@ -452,27 +312,15 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		}
 
 		created, err := repo.Source().Create(ctx, source)
-		if err != nil {
-			t.Fatalf("failed to create source: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
 		retrieved, err := repo.Source().Get(ctx, created.ID)
-		if err != nil {
-			t.Fatalf("failed to get source: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if retrieved.SlackConfig == nil {
-			t.Fatal("expected SlackConfig to be set")
-		}
-		if len(retrieved.SlackConfig.Channels) != 1 {
-			t.Errorf("expected 1 channel, got %d", len(retrieved.SlackConfig.Channels))
-		}
-		if retrieved.SlackConfig.Channels[0].ID != "C11111111" {
-			t.Errorf("expected channel ID=C11111111, got %s", retrieved.SlackConfig.Channels[0].ID)
-		}
-		if retrieved.SlackConfig.Channels[0].Name != "test-channel" {
-			t.Errorf("expected channel name=test-channel, got %s", retrieved.SlackConfig.Channels[0].Name)
-		}
+		gt.Value(t, retrieved.SlackConfig).NotNil().Required()
+		gt.Array(t, retrieved.SlackConfig.Channels).Length(1)
+		gt.Value(t, retrieved.SlackConfig.Channels[0].ID).Equal("C11111111")
+		gt.Value(t, retrieved.SlackConfig.Channels[0].Name).Equal("test-channel")
 	})
 
 	t.Run("Update Slack source channels", func(t *testing.T) {
@@ -490,9 +338,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 				},
 			},
 		})
-		if err != nil {
-			t.Fatalf("failed to create source: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
 		time.Sleep(10 * time.Millisecond)
 
@@ -509,22 +355,12 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 				},
 			},
 		})
-		if err != nil {
-			t.Fatalf("failed to update source: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if updated.SlackConfig == nil {
-			t.Fatal("expected SlackConfig to be set")
-		}
-		if len(updated.SlackConfig.Channels) != 2 {
-			t.Errorf("expected 2 channels, got %d", len(updated.SlackConfig.Channels))
-		}
-		if updated.SlackConfig.Channels[0].ID != "C00000002" {
-			t.Errorf("expected channel ID=C00000002, got %s", updated.SlackConfig.Channels[0].ID)
-		}
-		if updated.SlackConfig.Channels[1].ID != "C00000003" {
-			t.Errorf("expected channel ID=C00000003, got %s", updated.SlackConfig.Channels[1].ID)
-		}
+		gt.Value(t, updated.SlackConfig).NotNil().Required()
+		gt.Array(t, updated.SlackConfig.Channels).Length(2)
+		gt.Value(t, updated.SlackConfig.Channels[0].ID).Equal("C00000002")
+		gt.Value(t, updated.SlackConfig.Channels[1].ID).Equal("C00000003")
 	})
 
 	t.Run("Slack source without channels works", func(t *testing.T) {
@@ -542,28 +378,16 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		}
 
 		created, err := repo.Source().Create(ctx, source)
-		if err != nil {
-			t.Fatalf("failed to create source: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if created.SlackConfig == nil {
-			t.Fatal("expected SlackConfig to be set")
-		}
-		if len(created.SlackConfig.Channels) != 0 {
-			t.Errorf("expected 0 channels, got %d", len(created.SlackConfig.Channels))
-		}
+		gt.Value(t, created.SlackConfig).NotNil().Required()
+		gt.Array(t, created.SlackConfig.Channels).Length(0)
 
 		retrieved, err := repo.Source().Get(ctx, created.ID)
-		if err != nil {
-			t.Fatalf("failed to get source: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if retrieved.SlackConfig == nil {
-			t.Fatal("expected SlackConfig to be set after retrieval")
-		}
-		if len(retrieved.SlackConfig.Channels) != 0 {
-			t.Errorf("expected 0 channels after retrieval, got %d", len(retrieved.SlackConfig.Channels))
-		}
+		gt.Value(t, retrieved.SlackConfig).NotNil().Required()
+		gt.Array(t, retrieved.SlackConfig.Channels).Length(0)
 	})
 }
 
@@ -582,14 +406,10 @@ func newFirestoreSourceRepository(t *testing.T) interfaces.Repository {
 
 	ctx := context.Background()
 	prefix := fmt.Sprintf("test_%d", time.Now().UnixNano())
-	repo, err := firestore.New(ctx, projectID, databaseID, firestore.WithCollectionPrefix(prefix))
-	if err != nil {
-		t.Fatalf("failed to create firestore repository: %v", err)
-	}
+	repo, err := firestore.New(ctx, projectID, firestore.WithCollectionPrefix(prefix))
+	gt.NoError(t, err).Required()
 	t.Cleanup(func() {
-		if err := repo.Close(); err != nil {
-			t.Errorf("failed to close firestore repository: %v", err)
-		}
+		gt.NoError(t, repo.Close())
 	})
 	return repo
 }

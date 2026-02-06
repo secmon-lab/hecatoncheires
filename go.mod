@@ -14,6 +14,7 @@ require (
 	github.com/m-mizutani/fireconf v0.1.1
 	github.com/m-mizutani/goerr/v2 v2.0.0
 	github.com/m-mizutani/gollem v0.17.5
+	github.com/m-mizutani/gt v0.2.1
 	github.com/m-mizutani/masq v0.2.0
 	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/slack-go/slack v0.17.3
@@ -102,7 +103,6 @@ require (
 	github.com/lestrrat-go/iter v1.0.2 // indirect
 	github.com/lestrrat-go/option v1.0.1 // indirect
 	github.com/m-mizutani/ctxlog v0.2.0 // indirect
-	github.com/m-mizutani/gt v0.2.1 // indirect
 	github.com/matryer/moq v0.5.2 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect

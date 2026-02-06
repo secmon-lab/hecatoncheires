@@ -14,9 +14,9 @@ import (
 )
 
 const (
-	slackUsersCollection   = "slack_users"
+	slackUsersCollection    = "slack_users"
 	slackMetadataCollection = "slack_metadata"
-	refreshStatusDocument = "refresh_status"
+	refreshStatusDocument   = "refresh_status"
 
 	// Firestore batch operation limits
 	// Reference: https://cloud.google.com/firestore/docs/query-data/get-data#go
@@ -36,23 +36,6 @@ func newSlackUserRepository(client *firestore.Client) *slackUserRepository {
 	}
 }
 
-// slackUserDoc is the Firestore persistence model
-type slackUserDoc struct {
-	ID        string    `firestore:"id"`
-	Name      string    `firestore:"name"`
-	RealName  string    `firestore:"real_name"`
-	Email     string    `firestore:"email"`
-	ImageURL  string    `firestore:"image_url"`
-	UpdatedAt time.Time `firestore:"updated_at"`
-}
-
-// slackUserMetadataDoc is the Firestore persistence model for metadata
-type slackUserMetadataDoc struct {
-	LastRefreshSuccess time.Time `firestore:"last_refresh_success"`
-	LastRefreshAttempt time.Time `firestore:"last_refresh_attempt"`
-	UserCount          int       `firestore:"user_count"`
-}
-
 func (r *slackUserRepository) collection() *firestore.CollectionRef {
 	if r.collectionPrefix != "" {
 		return r.client.Collection(r.collectionPrefix + "_" + slackUsersCollection)
@@ -65,44 +48,6 @@ func (r *slackUserRepository) metadataCollection() *firestore.CollectionRef {
 		return r.client.Collection(r.collectionPrefix + "_" + slackMetadataCollection)
 	}
 	return r.client.Collection(slackMetadataCollection)
-}
-
-func (r *slackUserRepository) toDoc(user *model.SlackUser) *slackUserDoc {
-	return &slackUserDoc{
-		ID:        string(user.ID),
-		Name:      user.Name,
-		RealName:  user.RealName,
-		Email:     user.Email,
-		ImageURL:  user.ImageURL,
-		UpdatedAt: user.UpdatedAt,
-	}
-}
-
-func (r *slackUserRepository) fromDoc(doc *slackUserDoc) *model.SlackUser {
-	return &model.SlackUser{
-		ID:        model.SlackUserID(doc.ID),
-		Name:      doc.Name,
-		RealName:  doc.RealName,
-		Email:     doc.Email,
-		ImageURL:  doc.ImageURL,
-		UpdatedAt: doc.UpdatedAt,
-	}
-}
-
-func (r *slackUserRepository) toMetadataDoc(metadata *model.SlackUserMetadata) *slackUserMetadataDoc {
-	return &slackUserMetadataDoc{
-		LastRefreshSuccess: metadata.LastRefreshSuccess,
-		LastRefreshAttempt: metadata.LastRefreshAttempt,
-		UserCount:          metadata.UserCount,
-	}
-}
-
-func (r *slackUserRepository) fromMetadataDoc(doc *slackUserMetadataDoc) *model.SlackUserMetadata {
-	return &model.SlackUserMetadata{
-		LastRefreshSuccess: doc.LastRefreshSuccess,
-		LastRefreshAttempt: doc.LastRefreshAttempt,
-		UserCount:          doc.UserCount,
-	}
 }
 
 // GetAll retrieves all Slack users from Firestore
@@ -120,12 +65,12 @@ func (r *slackUserRepository) GetAll(ctx context.Context) ([]*model.SlackUser, e
 			return nil, goerr.Wrap(err, "failed to iterate Slack users")
 		}
 
-		var userDoc slackUserDoc
-		if err := doc.DataTo(&userDoc); err != nil {
+		var user model.SlackUser
+		if err := doc.DataTo(&user); err != nil {
 			return nil, goerr.Wrap(err, "failed to unmarshal Slack user", goerr.V("docID", doc.Ref.ID))
 		}
 
-		users = append(users, r.fromDoc(&userDoc))
+		users = append(users, &user)
 	}
 
 	return users, nil
@@ -141,12 +86,12 @@ func (r *slackUserRepository) GetByID(ctx context.Context, id model.SlackUserID)
 		return nil, goerr.Wrap(err, "failed to get Slack user", goerr.V("id", id))
 	}
 
-	var userDoc slackUserDoc
-	if err := doc.DataTo(&userDoc); err != nil {
+	var user model.SlackUser
+	if err := doc.DataTo(&user); err != nil {
 		return nil, goerr.Wrap(err, "failed to unmarshal Slack user", goerr.V("id", id))
 	}
 
-	return r.fromDoc(&userDoc), nil
+	return &user, nil
 }
 
 // GetByIDs retrieves multiple Slack users by IDs (for DataLoader batching)
@@ -184,12 +129,12 @@ func (r *slackUserRepository) GetByIDs(ctx context.Context, ids []model.SlackUse
 				continue
 			}
 
-			var userDoc slackUserDoc
-			if err := doc.DataTo(&userDoc); err != nil {
+			var user model.SlackUser
+			if err := doc.DataTo(&user); err != nil {
 				return nil, goerr.Wrap(err, "failed to unmarshal Slack user", goerr.V("id", batch[idx]))
 			}
 
-			result[batch[idx]] = r.fromDoc(&userDoc)
+			result[batch[idx]] = &user
 		}
 	}
 
@@ -209,7 +154,7 @@ func (r *slackUserRepository) SaveMany(ctx context.Context, users []*model.Slack
 
 	for _, user := range users {
 		docRef := r.collection().Doc(string(user.ID))
-		if _, err := bulkWriter.Set(docRef, r.toDoc(user)); err != nil {
+		if _, err := bulkWriter.Set(docRef, user); err != nil {
 			return goerr.Wrap(err, "failed to add Set operation to bulk writer", goerr.V("user_id", user.ID))
 		}
 	}
@@ -274,17 +219,17 @@ func (r *slackUserRepository) GetMetadata(ctx context.Context) (*model.SlackUser
 		return nil, goerr.Wrap(err, "failed to get Slack user metadata")
 	}
 
-	var metadataDoc slackUserMetadataDoc
-	if err := doc.DataTo(&metadataDoc); err != nil {
+	var metadata model.SlackUserMetadata
+	if err := doc.DataTo(&metadata); err != nil {
 		return nil, goerr.Wrap(err, "failed to unmarshal Slack user metadata")
 	}
 
-	return r.fromMetadataDoc(&metadataDoc), nil
+	return &metadata, nil
 }
 
 // SaveMetadata saves refresh metadata
 func (r *slackUserRepository) SaveMetadata(ctx context.Context, metadata *model.SlackUserMetadata) error {
-	_, err := r.metadataCollection().Doc(refreshStatusDocument).Set(ctx, r.toMetadataDoc(metadata))
+	_, err := r.metadataCollection().Doc(refreshStatusDocument).Set(ctx, metadata)
 	if err != nil {
 		return goerr.Wrap(err, "failed to save Slack user metadata")
 	}

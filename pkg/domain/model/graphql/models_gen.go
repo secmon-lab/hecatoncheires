@@ -8,16 +8,56 @@ import (
 	"io"
 	"strconv"
 	"time"
+
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 )
 
 type SourceConfig interface {
 	IsSourceConfig()
 }
 
-type Category struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
+type Action struct {
+	ID             int                `json:"id"`
+	CaseID         int                `json:"caseID"`
+	Case           *Case              `json:"case,omitempty"`
+	Title          string             `json:"title"`
+	Description    string             `json:"description"`
+	AssigneeIDs    []string           `json:"assigneeIDs"`
+	Assignees      []*SlackUser       `json:"assignees"`
+	SlackMessageTs *string            `json:"slackMessageTS,omitempty"`
+	Status         types.ActionStatus `json:"status"`
+	CreatedAt      time.Time          `json:"createdAt"`
+	UpdatedAt      time.Time          `json:"updatedAt"`
+}
+
+type Case struct {
+	ID             int           `json:"id"`
+	Title          string        `json:"title"`
+	Description    string        `json:"description"`
+	AssigneeIDs    []string      `json:"assigneeIDs"`
+	Assignees      []*SlackUser  `json:"assignees"`
+	SlackChannelID *string       `json:"slackChannelID,omitempty"`
+	Fields         []*FieldValue `json:"fields"`
+	Actions        []*Action     `json:"actions"`
+	Knowledges     []*Knowledge  `json:"knowledges"`
+	CreatedAt      time.Time     `json:"createdAt"`
+	UpdatedAt      time.Time     `json:"updatedAt"`
+}
+
+type CreateActionInput struct {
+	CaseID         int                 `json:"caseID"`
+	Title          string              `json:"title"`
+	Description    string              `json:"description"`
+	AssigneeIDs    []string            `json:"assigneeIDs,omitempty"`
+	SlackMessageTs *string             `json:"slackMessageTS,omitempty"`
+	Status         *types.ActionStatus `json:"status,omitempty"`
+}
+
+type CreateCaseInput struct {
+	Title       string             `json:"title"`
+	Description string             `json:"description"`
+	AssigneeIDs []string           `json:"assigneeIDs,omitempty"`
+	Fields      []*FieldValueInput `json:"fields,omitempty"`
 }
 
 type CreateNotionDBSourceInput struct {
@@ -27,27 +67,6 @@ type CreateNotionDBSourceInput struct {
 	Enabled     *bool   `json:"enabled,omitempty"`
 }
 
-type CreateResponseInput struct {
-	Title        string          `json:"title"`
-	Description  string          `json:"description"`
-	ResponderIDs []string        `json:"responderIDs"`
-	URL          *string         `json:"url,omitempty"`
-	Status       *ResponseStatus `json:"status,omitempty"`
-	RiskIDs      []int           `json:"riskIDs,omitempty"`
-}
-
-type CreateRiskInput struct {
-	Name                string   `json:"name"`
-	Description         string   `json:"description"`
-	CategoryIDs         []string `json:"categoryIDs"`
-	SpecificImpact      string   `json:"specificImpact"`
-	LikelihoodID        string   `json:"likelihoodID"`
-	ImpactID            string   `json:"impactID"`
-	ResponseTeamIDs     []string `json:"responseTeamIDs"`
-	AssigneeIDs         []string `json:"assigneeIDs"`
-	DetectionIndicators string   `json:"detectionIndicators"`
-}
-
 type CreateSlackSourceInput struct {
 	Name        *string  `json:"name,omitempty"`
 	Description *string  `json:"description,omitempty"`
@@ -55,17 +74,46 @@ type CreateSlackSourceInput struct {
 	Enabled     *bool    `json:"enabled,omitempty"`
 }
 
-type ImpactLevel struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Score       int    `json:"score"`
+type EntityLabels struct {
+	Case string `json:"case"`
+}
+
+type FieldConfiguration struct {
+	Fields []*FieldDefinition `json:"fields"`
+	Labels *EntityLabels      `json:"labels"`
+}
+
+type FieldDefinition struct {
+	ID          string         `json:"id"`
+	Name        string         `json:"name"`
+	Type        FieldType      `json:"type"`
+	Required    bool           `json:"required"`
+	Description *string        `json:"description,omitempty"`
+	Options     []*FieldOption `json:"options,omitempty"`
+}
+
+type FieldOption struct {
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Description *string `json:"description,omitempty"`
+	Color       *string `json:"color,omitempty"`
+	Metadata    *string `json:"metadata,omitempty"`
+}
+
+type FieldValue struct {
+	FieldID string `json:"fieldId"`
+	Value   any    `json:"value"`
+}
+
+type FieldValueInput struct {
+	FieldID string `json:"fieldId"`
+	Value   any    `json:"value"`
 }
 
 type Knowledge struct {
 	ID        string    `json:"id"`
-	RiskID    int       `json:"riskID"`
-	Risk      *Risk     `json:"risk,omitempty"`
+	CaseID    int       `json:"caseID"`
+	Case      *Case     `json:"case,omitempty"`
 	SourceID  string    `json:"sourceID"`
 	SourceURL string    `json:"sourceURL"`
 	Title     string    `json:"title"`
@@ -79,13 +127,6 @@ type KnowledgeConnection struct {
 	Items      []*Knowledge `json:"items"`
 	TotalCount int          `json:"totalCount"`
 	HasMore    bool         `json:"hasMore"`
-}
-
-type LikelihoodLevel struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Score       int    `json:"score"`
 }
 
 type Mutation struct {
@@ -107,49 +148,6 @@ type NotionDBValidationResult struct {
 }
 
 type Query struct {
-}
-
-type Response struct {
-	ID           int            `json:"id"`
-	Title        string         `json:"title"`
-	Description  string         `json:"description"`
-	ResponderIDs []string       `json:"responderIDs"`
-	Responders   []*SlackUser   `json:"responders"`
-	URL          *string        `json:"url,omitempty"`
-	Status       ResponseStatus `json:"status"`
-	Risks        []*Risk        `json:"risks"`
-	CreatedAt    time.Time      `json:"createdAt"`
-	UpdatedAt    time.Time      `json:"updatedAt"`
-}
-
-type Risk struct {
-	ID                  int              `json:"id"`
-	Name                string           `json:"name"`
-	Description         string           `json:"description"`
-	CategoryIDs         []string         `json:"categoryIDs"`
-	Categories          []*Category      `json:"categories"`
-	SpecificImpact      string           `json:"specificImpact"`
-	LikelihoodID        string           `json:"likelihoodID"`
-	LikelihoodLevel     *LikelihoodLevel `json:"likelihoodLevel,omitempty"`
-	ImpactID            string           `json:"impactID"`
-	ImpactLevel         *ImpactLevel     `json:"impactLevel,omitempty"`
-	ResponseTeamIDs     []string         `json:"responseTeamIDs"`
-	ResponseTeams       []*Team          `json:"responseTeams"`
-	AssigneeIDs         []string         `json:"assigneeIDs"`
-	Assignees           []*SlackUser     `json:"assignees"`
-	DetectionIndicators string           `json:"detectionIndicators"`
-	SlackChannelID      *string          `json:"slackChannelID,omitempty"`
-	Responses           []*Response      `json:"responses"`
-	Knowledges          []*Knowledge     `json:"knowledges"`
-	CreatedAt           time.Time        `json:"createdAt"`
-	UpdatedAt           time.Time        `json:"updatedAt"`
-}
-
-type RiskConfiguration struct {
-	Categories       []*Category        `json:"categories"`
-	LikelihoodLevels []*LikelihoodLevel `json:"likelihoodLevels"`
-	ImpactLevels     []*ImpactLevel     `json:"impactLevels"`
-	Teams            []*Team            `json:"teams"`
 }
 
 type SlackChannel struct {
@@ -186,32 +184,22 @@ type Source struct {
 	UpdatedAt   time.Time    `json:"updatedAt"`
 }
 
-type Team struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+type UpdateActionInput struct {
+	ID             int                 `json:"id"`
+	CaseID         *int                `json:"caseID,omitempty"`
+	Title          *string             `json:"title,omitempty"`
+	Description    *string             `json:"description,omitempty"`
+	AssigneeIDs    []string            `json:"assigneeIDs,omitempty"`
+	SlackMessageTs *string             `json:"slackMessageTS,omitempty"`
+	Status         *types.ActionStatus `json:"status,omitempty"`
 }
 
-type UpdateResponseInput struct {
-	ID           int             `json:"id"`
-	Title        *string         `json:"title,omitempty"`
-	Description  *string         `json:"description,omitempty"`
-	ResponderIDs []string        `json:"responderIDs,omitempty"`
-	URL          *string         `json:"url,omitempty"`
-	Status       *ResponseStatus `json:"status,omitempty"`
-	RiskIDs      []int           `json:"riskIDs,omitempty"`
-}
-
-type UpdateRiskInput struct {
-	ID                  int      `json:"id"`
-	Name                string   `json:"name"`
-	Description         string   `json:"description"`
-	CategoryIDs         []string `json:"categoryIDs"`
-	SpecificImpact      string   `json:"specificImpact"`
-	LikelihoodID        string   `json:"likelihoodID"`
-	ImpactID            string   `json:"impactID"`
-	ResponseTeamIDs     []string `json:"responseTeamIDs"`
-	AssigneeIDs         []string `json:"assigneeIDs"`
-	DetectionIndicators string   `json:"detectionIndicators"`
+type UpdateCaseInput struct {
+	ID          int                `json:"id"`
+	Title       string             `json:"title"`
+	Description string             `json:"description"`
+	AssigneeIDs []string           `json:"assigneeIDs,omitempty"`
+	Fields      []*FieldValueInput `json:"fields,omitempty"`
 }
 
 type UpdateSlackSourceInput struct {
@@ -229,56 +217,60 @@ type UpdateSourceInput struct {
 	Enabled     *bool   `json:"enabled,omitempty"`
 }
 
-type ResponseStatus string
+type FieldType string
 
 const (
-	ResponseStatusBacklog    ResponseStatus = "BACKLOG"
-	ResponseStatusTodo       ResponseStatus = "TODO"
-	ResponseStatusInProgress ResponseStatus = "IN_PROGRESS"
-	ResponseStatusBlocked    ResponseStatus = "BLOCKED"
-	ResponseStatusCompleted  ResponseStatus = "COMPLETED"
-	ResponseStatusAbandoned  ResponseStatus = "ABANDONED"
+	FieldTypeText        FieldType = "TEXT"
+	FieldTypeNumber      FieldType = "NUMBER"
+	FieldTypeSelect      FieldType = "SELECT"
+	FieldTypeMultiSelect FieldType = "MULTI_SELECT"
+	FieldTypeUser        FieldType = "USER"
+	FieldTypeMultiUser   FieldType = "MULTI_USER"
+	FieldTypeDate        FieldType = "DATE"
+	FieldTypeURL         FieldType = "URL"
 )
 
-var AllResponseStatus = []ResponseStatus{
-	ResponseStatusBacklog,
-	ResponseStatusTodo,
-	ResponseStatusInProgress,
-	ResponseStatusBlocked,
-	ResponseStatusCompleted,
-	ResponseStatusAbandoned,
+var AllFieldType = []FieldType{
+	FieldTypeText,
+	FieldTypeNumber,
+	FieldTypeSelect,
+	FieldTypeMultiSelect,
+	FieldTypeUser,
+	FieldTypeMultiUser,
+	FieldTypeDate,
+	FieldTypeURL,
 }
 
-func (e ResponseStatus) IsValid() bool {
+func (e FieldType) IsValid() bool {
 	switch e {
-	case ResponseStatusBacklog, ResponseStatusTodo, ResponseStatusInProgress, ResponseStatusBlocked, ResponseStatusCompleted, ResponseStatusAbandoned:
+	case FieldTypeText, FieldTypeNumber, FieldTypeSelect, FieldTypeMultiSelect, FieldTypeUser, FieldTypeMultiUser, FieldTypeDate, FieldTypeURL:
 		return true
 	}
 	return false
 }
 
-func (e ResponseStatus) String() string {
+func (e FieldType) String() string {
 	return string(e)
 }
 
-func (e *ResponseStatus) UnmarshalGQL(v any) error {
+func (e *FieldType) UnmarshalGQL(v any) error {
 	str, ok := v.(string)
 	if !ok {
 		return fmt.Errorf("enums must be strings")
 	}
 
-	*e = ResponseStatus(str)
+	*e = FieldType(str)
 	if !e.IsValid() {
-		return fmt.Errorf("%s is not a valid ResponseStatus", str)
+		return fmt.Errorf("%s is not a valid FieldType", str)
 	}
 	return nil
 }
 
-func (e ResponseStatus) MarshalGQL(w io.Writer) {
+func (e FieldType) MarshalGQL(w io.Writer) {
 	fmt.Fprint(w, strconv.Quote(e.String()))
 }
 
-func (e *ResponseStatus) UnmarshalJSON(b []byte) error {
+func (e *FieldType) UnmarshalJSON(b []byte) error {
 	s, err := strconv.Unquote(string(b))
 	if err != nil {
 		return err
@@ -286,7 +278,7 @@ func (e *ResponseStatus) UnmarshalJSON(b []byte) error {
 	return e.UnmarshalGQL(s)
 }
 
-func (e ResponseStatus) MarshalJSON() ([]byte, error) {
+func (e FieldType) MarshalJSON() ([]byte, error) {
 	var buf bytes.Buffer
 	e.MarshalGQL(&buf)
 	return buf.Bytes(), nil

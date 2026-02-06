@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 )
@@ -19,58 +20,36 @@ func TestNoAuthnUseCase(t *testing.T) {
 	t.Run("ValidateToken returns specified user token", func(t *testing.T) {
 		ctx := context.Background()
 		token, err := uc.ValidateToken(ctx, "", "")
-		if err != nil {
-			t.Fatalf("ValidateToken failed: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if token.Sub != sub {
-			t.Errorf("Sub mismatch: got %v, want %v", token.Sub, sub)
-		}
-		if token.Email != email {
-			t.Errorf("Email mismatch: got %v, want %v", token.Email, email)
-		}
-		if token.Name != name {
-			t.Errorf("Name mismatch: got %v, want %v", token.Name, name)
-		}
+		gt.Value(t, token.Sub).Equal(sub)
+		gt.Value(t, token.Email).Equal(email)
+		gt.Value(t, token.Name).Equal(name)
 	})
 
 	t.Run("HandleCallback returns specified user token", func(t *testing.T) {
 		ctx := context.Background()
 		token, err := uc.HandleCallback(ctx, "dummy-code")
-		if err != nil {
-			t.Fatalf("HandleCallback failed: %v", err)
-		}
+		gt.NoError(t, err).Required()
 
-		if token.Sub != sub {
-			t.Errorf("Sub mismatch: got %v, want %v", token.Sub, sub)
-		}
-		if token.Email != email {
-			t.Errorf("Email mismatch: got %v, want %v", token.Email, email)
-		}
-		if token.Name != name {
-			t.Errorf("Name mismatch: got %v, want %v", token.Name, name)
-		}
+		gt.Value(t, token.Sub).Equal(sub)
+		gt.Value(t, token.Email).Equal(email)
+		gt.Value(t, token.Name).Equal(name)
 	})
 
 	t.Run("IsNoAuthn returns true", func(t *testing.T) {
-		if !uc.IsNoAuthn() {
-			t.Error("IsNoAuthn should return true")
-		}
+		gt.Bool(t, uc.IsNoAuthn()).True()
 	})
 
 	t.Run("GetAuthURL returns root path", func(t *testing.T) {
 		url := uc.GetAuthURL("state")
-		if url != "/" {
-			t.Errorf("GetAuthURL should return /, got %v", url)
-		}
+		gt.Value(t, url).Equal("/")
 	})
 
 	t.Run("Logout does nothing", func(t *testing.T) {
 		ctx := context.Background()
 		err := uc.Logout(ctx, "token-id")
-		if err != nil {
-			t.Fatalf("Logout should not return error: %v", err)
-		}
+		gt.NoError(t, err).Required()
 	})
 }
 

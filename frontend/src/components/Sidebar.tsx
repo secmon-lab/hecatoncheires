@@ -18,24 +18,24 @@ export default function Sidebar({ isOpen = true, onClose }: SidebarProps) {
     <aside className={`${styles.sidebar} ${isOpen ? styles.open : ''}`}>
       <nav className={styles.nav}>
         <NavLink
-          to="/risks"
+          to="/cases"
           className={({ isActive }) =>
             `${styles.navItem} ${isActive ? styles.active : ''}`
           }
           onClick={handleNavClick}
         >
           <Shield size={20} />
-          <span>Risks</span>
+          <span>Cases</span>
         </NavLink>
         <NavLink
-          to="/responses"
+          to="/actions"
           className={({ isActive }) =>
             `${styles.navItem} ${isActive ? styles.active : ''}`
           }
           onClick={handleNavClick}
         >
           <ListTodo size={20} />
-          <span>Responses</span>
+          <span>Actions</span>
         </NavLink>
         <NavLink
           to="/knowledges"
