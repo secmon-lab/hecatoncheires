@@ -38,11 +38,13 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, title, description string
 		return nil, goerr.New("case title is required")
 	}
 
-	// Validate custom fields (also injects Type from config)
+	// Validate and enrich custom fields with Type from config
 	if uc.fieldValidator != nil {
-		if err := uc.fieldValidator.ValidateCaseFields(fieldValues); err != nil {
+		enriched, err := uc.fieldValidator.ValidateCaseFields(fieldValues)
+		if err != nil {
 			return nil, goerr.Wrap(err, "field validation failed")
 		}
+		fieldValues = enriched
 	}
 
 	// Create case with embedded field values
@@ -110,11 +112,13 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, id int64, title, descript
 		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
 	}
 
-	// Validate custom fields (also injects Type from config)
+	// Validate and enrich custom fields with Type from config
 	if uc.fieldValidator != nil {
-		if err := uc.fieldValidator.ValidateCaseFields(fieldValues); err != nil {
+		enriched, err := uc.fieldValidator.ValidateCaseFields(fieldValues)
+		if err != nil {
 			return nil, goerr.Wrap(err, "field validation failed", goerr.V(CaseIDKey, id))
 		}
+		fieldValues = enriched
 	}
 
 	// Rename Slack channel if title changed and channel exists

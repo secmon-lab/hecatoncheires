@@ -1,6 +1,8 @@
 package graphql
 
 import (
+	"sort"
+
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	graphql1 "github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
@@ -72,8 +74,15 @@ func toGraphQLFieldValues(fieldValues map[string]model.FieldValue) []*graphql1.F
 	if fieldValues == nil {
 		return []*graphql1.FieldValue{}
 	}
+	keys := make([]string, 0, len(fieldValues))
+	for k := range fieldValues {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
 	result := make([]*graphql1.FieldValue, 0, len(fieldValues))
-	for _, fv := range fieldValues {
+	for _, k := range keys {
+		fv := fieldValues[k]
 		result = append(result, &graphql1.FieldValue{
 			FieldID: string(fv.FieldID),
 			Value:   fv.Value,

@@ -233,7 +233,7 @@ func TestFieldValidator_ValidateCaseFields(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			validator := model.NewFieldValidator(schema)
-			err := validator.ValidateCaseFields(tt.fieldValues)
+			_, err := validator.ValidateCaseFields(tt.fieldValues)
 
 			if tt.wantErr != nil {
 				gt.Value(t, err).NotNil()
@@ -297,7 +297,7 @@ func TestFieldValidator_ValidateNumber_MultipleTypes(t *testing.T) {
 				"score": {FieldID: "score", Value: tt.value},
 			}
 
-			err := validator.ValidateCaseFields(fieldValues)
+			_, err := validator.ValidateCaseFields(fieldValues)
 			if tt.wantErr {
 				gt.Value(t, err).NotNil()
 			} else {
