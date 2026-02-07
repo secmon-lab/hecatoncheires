@@ -136,6 +136,15 @@ right: 1.25rem;
 - Test queries locally to ensure they work with existing indexes before deployment
 - This policy prevents index management overhead and ensures queries remain simple and maintainable
 
+##### Firestore Naming Policy
+- **NEVER use underscore-joined (`_`) naming to encode multiple semantics into a single document/collection name**
+  - Bad: `risk_case_counter`, `tenant1_cases`, `prefix_collectionName`
+  - This pattern is fragile (ambiguous parsing if IDs contain underscores) and hard to maintain
+- **Use Firestore subcollections to represent hierarchical relationships**
+  - Good: `tenants/{tenantID}/counters/case` instead of `counters/risk_case_counter`
+  - Subcollections naturally express parent-child relationships and are the idiomatic Firestore pattern
+- The existing `collectionPrefix` mechanism is a legacy pattern; for new features, prefer subcollections
+
 ### Application Modes
 - `serve` - HTTP server mode with GraphQL API and frontend
 

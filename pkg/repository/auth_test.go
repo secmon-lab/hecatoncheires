@@ -121,7 +121,7 @@ func TestFirestoreRepository(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		repo, err := firestore.New(ctx, projectID, firestore.WithCollectionPrefix(databaseID))
+		repo, err := firestore.New(ctx, projectID, databaseID)
 		gt.NoError(t, err).Required()
 
 		t.Cleanup(func() {

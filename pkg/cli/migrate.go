@@ -30,7 +30,6 @@ func cmdMigrate() *cli.Command {
 			&cli.StringFlag{
 				Name:        "firestore-database-id",
 				Usage:       "Firestore Database ID",
-				Value:       "(default)",
 				Sources:     cli.EnvVars("HECATONCHEIRES_FIRESTORE_DATABASE_ID"),
 				Destination: &databaseID,
 			},

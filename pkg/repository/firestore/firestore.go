@@ -33,10 +33,19 @@ func WithCollectionPrefix(prefix string) Option {
 	}
 }
 
-func New(ctx context.Context, projectID string, opts ...Option) (*Firestore, error) {
-	client, err := firestore.NewClient(ctx, projectID)
+func New(ctx context.Context, projectID, databaseID string, opts ...Option) (*Firestore, error) {
+	var client *firestore.Client
+	var err error
+	if databaseID != "" {
+		client, err = firestore.NewClientWithDatabase(ctx, projectID, databaseID)
+	} else {
+		client, err = firestore.NewClient(ctx, projectID)
+	}
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to create firestore client", goerr.V("projectID", projectID))
+		return nil, goerr.Wrap(err, "failed to create firestore client",
+			goerr.V("projectID", projectID),
+			goerr.V("databaseID", databaseID),
+		)
 	}
 
 	caseRepo := newCaseRepository(client)

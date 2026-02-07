@@ -406,7 +406,7 @@ func newFirestoreSourceRepository(t *testing.T) interfaces.Repository {
 
 	ctx := context.Background()
 	prefix := fmt.Sprintf("test_%d", time.Now().UnixNano())
-	repo, err := firestore.New(ctx, projectID, firestore.WithCollectionPrefix(prefix))
+	repo, err := firestore.New(ctx, projectID, databaseID, firestore.WithCollectionPrefix(prefix))
 	gt.NoError(t, err).Required()
 	t.Cleanup(func() {
 		gt.NoError(t, repo.Close())

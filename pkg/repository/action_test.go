@@ -204,7 +204,7 @@ func TestActionRepository_Firestore(t *testing.T) {
 	}
 
 	runActionRepositoryTest(t, func(t *testing.T) interfaces.Repository {
-		repo, err := firestore.New(context.Background(), projectID)
+		repo, err := firestore.New(context.Background(), projectID, "")
 		gt.NoError(t, err).Required()
 		return repo
 	})

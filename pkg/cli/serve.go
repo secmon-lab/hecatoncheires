@@ -121,7 +121,6 @@ func cmdServe() *cli.Command {
 		&cli.StringFlag{
 			Name:        "firestore-database-id",
 			Usage:       "Firestore Database ID",
-			Value:       "(default)",
 			Sources:     cli.EnvVars("HECATONCHEIRES_FIRESTORE_DATABASE_ID"),
 			Destination: &databaseID,
 		},
@@ -163,7 +162,7 @@ func cmdServe() *cli.Command {
 			}
 
 			// Initialize Firestore repository
-			repo, err := firestore.New(ctx, projectID, firestore.WithCollectionPrefix(databaseID))
+			repo, err := firestore.New(ctx, projectID, databaseID)
 			if err != nil {
 				return goerr.Wrap(err, "failed to initialize firestore repository")
 			}

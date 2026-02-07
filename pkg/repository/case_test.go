@@ -312,7 +312,7 @@ func TestCaseRepository_Firestore(t *testing.T) {
 	}
 
 	runCaseRepositoryTest(t, func(t *testing.T) interfaces.Repository {
-		repo, err := firestore.New(context.Background(), projectID)
+		repo, err := firestore.New(context.Background(), projectID, "")
 		gt.NoError(t, err).Required()
 		return repo
 	})
