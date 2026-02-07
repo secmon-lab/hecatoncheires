@@ -10,7 +10,6 @@ import (
 type Repository interface {
 	Case() CaseRepository
 	Action() ActionRepository
-	CaseField() FieldValueRepository
 	Slack() SlackRepository
 	SlackUser() SlackUserRepository
 	Source() SourceRepository

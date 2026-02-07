@@ -10,7 +10,6 @@ type Repository = Memory
 type Memory struct {
 	caseRepo  *caseRepository
 	action    *actionRepository
-	caseField *fieldValueRepository
 	tokens    *tokenStore
 	slack     *slackRepository
 	slackUser *slackUserRepository
@@ -23,7 +22,6 @@ var _ interfaces.Repository = &Memory{}
 func New() *Memory {
 	caseRepo := newCaseRepository()
 	actionRepo := newActionRepository()
-	fieldValueRepo := newFieldValueRepository()
 	slackRepo := newSlackRepository()
 	slackUserRepo := newSlackUserRepository()
 	sourceRepo := newSourceRepository()
@@ -32,7 +30,6 @@ func New() *Memory {
 	return &Memory{
 		caseRepo:  caseRepo,
 		action:    actionRepo,
-		caseField: fieldValueRepo,
 		tokens:    newTokenStore(),
 		slack:     slackRepo,
 		slackUser: slackUserRepo,
@@ -47,10 +44,6 @@ func (m *Memory) Case() interfaces.CaseRepository {
 
 func (m *Memory) Action() interfaces.ActionRepository {
 	return m.action
-}
-
-func (m *Memory) CaseField() interfaces.FieldValueRepository {
-	return m.caseField
 }
 
 func (m *Memory) Slack() interfaces.SlackRepository {

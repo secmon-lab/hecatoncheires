@@ -94,6 +94,7 @@ func (r *caseRepository) Create(ctx context.Context, c *model.Case) (*model.Case
 		Description:    c.Description,
 		AssigneeIDs:    c.AssigneeIDs,
 		SlackChannelID: c.SlackChannelID,
+		FieldValues:    c.FieldValues,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
@@ -171,6 +172,7 @@ func (r *caseRepository) Update(ctx context.Context, c *model.Case) (*model.Case
 		Description:    c.Description,
 		AssigneeIDs:    c.AssigneeIDs,
 		SlackChannelID: c.SlackChannelID,
+		FieldValues:    c.FieldValues,
 		CreatedAt:      c.CreatedAt,
 		UpdatedAt:      time.Now().UTC(),
 	}

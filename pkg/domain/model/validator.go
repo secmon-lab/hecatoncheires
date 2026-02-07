@@ -21,46 +21,49 @@ func NewFieldValidator(schema *config.FieldSchema) *FieldValidator {
 	}
 }
 
-// ValidateCaseFields validates field values for a Case
-// Returns an error if any field value is invalid
-func (v *FieldValidator) ValidateCaseFields(fieldValues []FieldValue) error {
+// ValidateCaseFields validates field values for a Case and returns enriched values with Type injected from config.
+// The input map is not modified; a new map is returned with Type set on each FieldValue.
+func (v *FieldValidator) ValidateCaseFields(fieldValues map[string]FieldValue) (map[string]FieldValue, error) {
 	// Build a map of field definitions by ID for quick lookup
 	fieldDefMap := make(map[string]config.FieldDefinition)
 	for _, fd := range v.schema.Fields {
 		fieldDefMap[fd.ID] = fd
 	}
 
-	// Track which fields have been provided
-	providedFields := make(map[string]bool)
+	result := make(map[string]FieldValue, len(fieldValues))
 
-	// Validate each field value
-	for _, fv := range fieldValues {
+	// Validate each field value and inject Type into result
+	for fieldID, fv := range fieldValues {
 		// Check if field ID is defined in schema
-		fieldDef, ok := fieldDefMap[fv.FieldID]
+		fieldDef, ok := fieldDefMap[fieldID]
 		if !ok {
-			// Skip unknown fields (for forward compatibility when field is removed from schema)
+			// Preserve unknown fields (for forward compatibility when field is removed from schema)
+			result[fieldID] = fv
 			continue
 		}
 
-		// Mark field as provided
-		providedFields[fv.FieldID] = true
+		// Inject Type from config into new value
+		fv.Type = fieldDef.Type
+		result[fieldID] = fv
 
 		// Validate field value type and constraints
 		if err := v.validateFieldValue(fieldDef, fv); err != nil {
-			return goerr.Wrap(err, "field validation failed",
-				goerr.V(FieldIDKey, fv.FieldID))
+			return nil, goerr.Wrap(err, "field validation failed",
+				goerr.V(FieldIDKey, fieldID))
 		}
 	}
 
 	// Check for missing required fields
 	for _, fieldDef := range v.schema.Fields {
-		if fieldDef.Required && !providedFields[fieldDef.ID] {
-			return goerr.Wrap(ErrMissingRequired, "required field not provided",
-				goerr.V(FieldIDKey, fieldDef.ID))
+		if fieldDef.Required {
+			if _, ok := result[fieldDef.ID]; !ok {
+				return nil, goerr.Wrap(ErrMissingRequired, "required field not provided",
+					goerr.V(FieldIDKey, fieldDef.ID))
+			}
 		}
 	}
 
-	return nil
+	return result, nil
 }
 
 // validateFieldValue validates a single field value against its definition

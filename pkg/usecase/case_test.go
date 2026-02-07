@@ -39,24 +39,23 @@ func TestCaseUseCase_CreateCase(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, fieldSchema, nil)
 		ctx := context.Background()
 
-		fields := []model.FieldValue{
-			{
-				FieldID: "priority",
-				Value:   "high",
-			},
+		fieldValues := map[string]model.FieldValue{
+			"priority": {FieldID: "priority", Value: "high"},
 		}
 
-		created, err := uc.CreateCase(ctx, "Test Case", "Description", []string{"U001"}, fields)
+		created, err := uc.CreateCase(ctx, "Test Case", "Description", []string{"U001"}, fieldValues)
 		gt.NoError(t, err).Required()
 
 		gt.Number(t, created.ID).NotEqual(0)
 		gt.Value(t, created.Title).Equal("Test Case")
 		gt.Value(t, created.Description).Equal("Description")
 
-		// Verify field values were saved
-		savedFields, err := uc.GetCaseFieldValues(ctx, created.ID)
+		// Verify field values are embedded in the case
+		retrieved, err := uc.GetCase(ctx, created.ID)
 		gt.NoError(t, err).Required()
-		gt.Array(t, savedFields).Length(1)
+		gt.Number(t, len(retrieved.FieldValues)).Equal(1)
+		gt.Value(t, retrieved.FieldValues["priority"].Value).Equal("high")
+		gt.Value(t, retrieved.FieldValues["priority"].Type).Equal(types.FieldTypeSelect)
 	})
 
 	t.Run("create case without title fails", func(t *testing.T) {
@@ -87,14 +86,11 @@ func TestCaseUseCase_CreateCase(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, fieldSchema, nil)
 		ctx := context.Background()
 
-		fields := []model.FieldValue{
-			{
-				FieldID: "priority",
-				Value:   "invalid",
-			},
+		fieldValues := map[string]model.FieldValue{
+			"priority": {FieldID: "priority", Value: "invalid"},
 		}
 
-		_, err := uc.CreateCase(ctx, "Test Case", "Description", []string{}, fields)
+		_, err := uc.CreateCase(ctx, "Test Case", "Description", []string{}, fieldValues)
 		gt.Value(t, err).NotNil()
 		gt.Error(t, err).Is(model.ErrInvalidOptionID)
 	})
@@ -143,27 +139,27 @@ func TestCaseUseCase_UpdateCase(t *testing.T) {
 		ctx := context.Background()
 
 		// Create case first
-		fields := []model.FieldValue{
-			{FieldID: "priority", Value: "high"},
+		fieldValues := map[string]model.FieldValue{
+			"priority": {FieldID: "priority", Value: "high"},
 		}
-		created, err := uc.CreateCase(ctx, "Original Title", "Original Description", []string{"U001"}, fields)
+		created, err := uc.CreateCase(ctx, "Original Title", "Original Description", []string{"U001"}, fieldValues)
 		gt.NoError(t, err).Required()
 
 		// Update case
-		updatedFields := []model.FieldValue{
-			{FieldID: "priority", Value: "low"},
+		updatedFieldValues := map[string]model.FieldValue{
+			"priority": {FieldID: "priority", Value: "low"},
 		}
-		updated, err := uc.UpdateCase(ctx, created.ID, "Updated Title", "Updated Description", []string{"U002"}, updatedFields)
+		updated, err := uc.UpdateCase(ctx, created.ID, "Updated Title", "Updated Description", []string{"U002"}, updatedFieldValues)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, updated.Title).Equal("Updated Title")
 		gt.Value(t, updated.Description).Equal("Updated Description")
 
 		// Verify field values were updated
-		savedFields, err := uc.GetCaseFieldValues(ctx, updated.ID)
+		retrieved, err := uc.GetCase(ctx, updated.ID)
 		gt.NoError(t, err).Required()
-		gt.Array(t, savedFields).Length(1)
-		gt.Value(t, savedFields[0].Value).Equal("low")
+		gt.Number(t, len(retrieved.FieldValues)).Equal(1)
+		gt.Value(t, retrieved.FieldValues["priority"].Value).Equal("low")
 	})
 
 	t.Run("update non-existent case fails", func(t *testing.T) {

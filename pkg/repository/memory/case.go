@@ -22,10 +22,39 @@ func newCaseRepository() *caseRepository {
 	}
 }
 
+// copyFieldValue creates a deep copy of a field value
+func copyFieldValue(fv model.FieldValue) model.FieldValue {
+	copied := model.FieldValue{
+		FieldID: fv.FieldID,
+		Type:    fv.Type,
+	}
+	switch v := fv.Value.(type) {
+	case []string:
+		s := make([]string, len(v))
+		copy(s, v)
+		copied.Value = s
+	case []interface{}:
+		s := make([]interface{}, len(v))
+		copy(s, v)
+		copied.Value = s
+	default:
+		copied.Value = fv.Value
+	}
+	return copied
+}
+
 // copyCase creates a deep copy of a case
 func copyCase(c *model.Case) *model.Case {
 	assigneeIDs := make([]string, len(c.AssigneeIDs))
 	copy(assigneeIDs, c.AssigneeIDs)
+
+	var fieldValues map[string]model.FieldValue
+	if c.FieldValues != nil {
+		fieldValues = make(map[string]model.FieldValue, len(c.FieldValues))
+		for k, v := range c.FieldValues {
+			fieldValues[k] = copyFieldValue(v)
+		}
+	}
 
 	return &model.Case{
 		ID:             c.ID,
@@ -33,6 +62,7 @@ func copyCase(c *model.Case) *model.Case {
 		Description:    c.Description,
 		AssigneeIDs:    assigneeIDs,
 		SlackChannelID: c.SlackChannelID,
+		FieldValues:    fieldValues,
 		CreatedAt:      c.CreatedAt,
 		UpdatedAt:      c.UpdatedAt,
 	}

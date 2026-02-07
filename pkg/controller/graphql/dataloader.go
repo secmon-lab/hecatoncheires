@@ -13,7 +13,6 @@ import (
 type DataLoaders struct {
 	repo                   interfaces.Repository
 	SlackUserLoader        *SlackUserLoader
-	CaseFieldValueLoader   *CaseFieldValueLoader
 	ActionLoader           *ActionLoader
 	ActionsByCaseLoader    *ActionsByCaseLoader
 	CaseLoader             *CaseLoader
@@ -26,7 +25,6 @@ func NewDataLoaders(repo interfaces.Repository) *DataLoaders {
 	return &DataLoaders{
 		repo:                   repo,
 		SlackUserLoader:        NewSlackUserLoader(repo),
-		CaseFieldValueLoader:   NewCaseFieldValueLoader(repo),
 		ActionLoader:           NewActionLoader(repo),
 		ActionsByCaseLoader:    NewActionsByCaseLoader(repo),
 		CaseLoader:             NewCaseLoader(repo),
@@ -100,24 +98,6 @@ func (l *SlackUserLoader) Load(ctx context.Context, ids []string) ([]*graphql1.S
 	}
 
 	return result, nil
-}
-
-// CaseFieldValueLoader loads field values by case ID
-type CaseFieldValueLoader struct {
-	repo interfaces.Repository
-}
-
-func NewCaseFieldValueLoader(repo interfaces.Repository) *CaseFieldValueLoader {
-	return &CaseFieldValueLoader{repo: repo}
-}
-
-func (l *CaseFieldValueLoader) Load(ctx context.Context, caseIDs []int64) (map[int64][]model.FieldValue, error) {
-	fieldValues, err := l.repo.CaseField().GetByCaseIDs(ctx, caseIDs)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load case field values: %w", err)
-	}
-
-	return fieldValues, nil
 }
 
 // ActionLoader loads actions by ID
