@@ -137,7 +137,7 @@ export default function ActionList() {
     <div className={styles.container}>
       <div className={styles.header}>
         <div>
-          <h2 className={styles.title}>Action Management</h2>
+          <h2 className={styles.title}>{currentWorkspace?.name} Actions</h2>
           <p className={styles.subtitle}>Manage and track actions</p>
         </div>
         <Button
