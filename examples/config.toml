@@ -1,5 +1,13 @@
 # Hecatoncheires Configuration
 # This example demonstrates a security risk management system setup
+#
+# Single-file configuration with workspace section.
+# When using a single config file, the [workspace] section is optional.
+# If omitted, workspace ID and name are derived from the filename.
+
+[workspace]
+id = "risk"
+name = "Risk Management"
 
 # Entity Labels: Customize the display names in the UI
 [labels]

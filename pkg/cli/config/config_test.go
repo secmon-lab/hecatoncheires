@@ -331,6 +331,273 @@ required = true
 	}
 }
 
+func TestLoadWorkspaceConfigs_SingleFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "risk.toml")
+	content := `
+[workspace]
+id = "risk"
+name = "Risk Management"
+
+[labels]
+case = "Risk"
+
+[[fields]]
+id = "category"
+name = "Category"
+type = "text"
+`
+	err := os.WriteFile(configPath, []byte(content), 0644)
+	gt.NoError(t, err).Required()
+
+	configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+	gt.NoError(t, err).Required()
+	gt.Array(t, configs).Length(1)
+	gt.Value(t, configs[0].ID).Equal("risk")
+	gt.Value(t, configs[0].Name).Equal("Risk Management")
+	gt.Value(t, configs[0].FieldSchema).NotNil()
+	gt.Value(t, configs[0].FieldSchema.Labels.Case).Equal("Risk")
+	gt.Array(t, configs[0].FieldSchema.Fields).Length(1)
+}
+
+func TestLoadWorkspaceConfigs_Directory(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	risk := `
+[workspace]
+id = "risk"
+name = "Risk Management"
+
+[[fields]]
+id = "status"
+name = "Status"
+type = "text"
+`
+	recruit := `
+[workspace]
+id = "recruit"
+name = "Recruitment"
+
+[[fields]]
+id = "role"
+name = "Role"
+type = "text"
+`
+	err := os.WriteFile(filepath.Join(tmpDir, "risk.toml"), []byte(risk), 0644)
+	gt.NoError(t, err).Required()
+	err = os.WriteFile(filepath.Join(tmpDir, "recruit.toml"), []byte(recruit), 0644)
+	gt.NoError(t, err).Required()
+
+	configs, err := config.LoadWorkspaceConfigs([]string{tmpDir})
+	gt.NoError(t, err).Required()
+	gt.Array(t, configs).Length(2)
+
+	// Collect IDs (order depends on filesystem walk order)
+	ids := map[string]bool{}
+	for _, c := range configs {
+		ids[c.ID] = true
+	}
+	gt.Bool(t, ids["risk"]).True()
+	gt.Bool(t, ids["recruit"]).True()
+}
+
+func TestLoadWorkspaceConfigs_MissingWorkspaceID(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "onboarding.toml")
+	content := `
+[[fields]]
+id = "task"
+name = "Task"
+type = "text"
+`
+	err := os.WriteFile(configPath, []byte(content), 0644)
+	gt.NoError(t, err).Required()
+
+	_, err = config.LoadWorkspaceConfigs([]string{configPath})
+	gt.Value(t, err).NotNil()
+	gt.Error(t, err).Is(config.ErrMissingWorkspaceID)
+}
+
+func TestLoadWorkspaceConfigs_DuplicateID(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	content1 := `
+[workspace]
+id = "risk"
+name = "Risk One"
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`
+	content2 := `
+[workspace]
+id = "risk"
+name = "Risk Two"
+
+[[fields]]
+id = "b"
+name = "B"
+type = "text"
+`
+	err := os.WriteFile(filepath.Join(tmpDir, "risk1.toml"), []byte(content1), 0644)
+	gt.NoError(t, err).Required()
+	err = os.WriteFile(filepath.Join(tmpDir, "risk2.toml"), []byte(content2), 0644)
+	gt.NoError(t, err).Required()
+
+	_, err = config.LoadWorkspaceConfigs([]string{tmpDir})
+	gt.Value(t, err).NotNil()
+	gt.Error(t, err).Is(config.ErrDuplicateWorkspaceID)
+}
+
+func TestLoadWorkspaceConfigs_InvalidWorkspaceID(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+	content := `
+[workspace]
+id = "INVALID_ID"
+name = "Bad ID"
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`
+	err := os.WriteFile(configPath, []byte(content), 0644)
+	gt.NoError(t, err).Required()
+
+	_, err = config.LoadWorkspaceConfigs([]string{configPath})
+	gt.Value(t, err).NotNil()
+	gt.Error(t, err).Is(config.ErrInvalidWorkspaceID)
+}
+
+func TestLoadWorkspaceConfigs_EmptyDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	_, err := config.LoadWorkspaceConfigs([]string{tmpDir})
+	gt.Value(t, err).NotNil()
+	gt.Error(t, err).Is(config.ErrNoConfigFiles)
+}
+
+func TestLoadWorkspaceConfigs_MixedFileAndDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	subDir := filepath.Join(tmpDir, "workspaces")
+	err := os.Mkdir(subDir, 0755)
+	gt.NoError(t, err).Required()
+
+	// File directly
+	file1 := filepath.Join(tmpDir, "base.toml")
+	err = os.WriteFile(file1, []byte(`
+[workspace]
+id = "base"
+name = "Base"
+
+[[fields]]
+id = "x"
+name = "X"
+type = "text"
+`), 0644)
+	gt.NoError(t, err).Required()
+
+	// File in subdirectory
+	err = os.WriteFile(filepath.Join(subDir, "extra.toml"), []byte(`
+[workspace]
+id = "extra"
+name = "Extra"
+
+[[fields]]
+id = "y"
+name = "Y"
+type = "text"
+`), 0644)
+	gt.NoError(t, err).Required()
+
+	configs, err := config.LoadWorkspaceConfigs([]string{file1, subDir})
+	gt.NoError(t, err).Required()
+	gt.Array(t, configs).Length(2)
+
+	ids := map[string]bool{}
+	for _, c := range configs {
+		ids[c.ID] = true
+	}
+	gt.Bool(t, ids["base"]).True()
+	gt.Bool(t, ids["extra"]).True()
+}
+
+func TestLoadWorkspaceConfigs_WorkspaceIDTooLong(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+
+	// ID with 64 characters (exceeds 63 limit)
+	longID := "abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz01"
+	content := `
+[workspace]
+id = "` + longID + `"
+name = "Too Long"
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`
+	err := os.WriteFile(configPath, []byte(content), 0644)
+	gt.NoError(t, err).Required()
+
+	_, err = config.LoadWorkspaceConfigs([]string{configPath})
+	gt.Value(t, err).NotNil()
+	gt.Error(t, err).Is(config.ErrInvalidWorkspaceID)
+}
+
+func TestLoadWorkspaceConfigs_SlackChannelPrefix(t *testing.T) {
+	t.Run("explicit prefix", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		content := `
+[workspace]
+id = "risk"
+name = "Risk Management"
+
+[slack]
+channel_prefix = "incident"
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`
+		err := os.WriteFile(configPath, []byte(content), 0644)
+		gt.NoError(t, err).Required()
+
+		configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1)
+		gt.Value(t, configs[0].SlackChannelPrefix).Equal("incident")
+	})
+
+	t.Run("fallback to workspace ID when omitted", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		content := `
+[workspace]
+id = "risk"
+name = "Risk Management"
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`
+		err := os.WriteFile(configPath, []byte(content), 0644)
+		gt.NoError(t, err).Required()
+
+		configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1)
+		gt.Value(t, configs[0].SlackChannelPrefix).Equal("risk")
+	})
+}
+
 func TestLoadFieldSchema_DefaultLabels(t *testing.T) {
 	content := `
 [[fields]]

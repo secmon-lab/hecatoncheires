@@ -2,32 +2,26 @@ package usecase
 
 import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
-	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/knowledge"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 )
 
 type UseCases struct {
-	repo             interfaces.Repository
-	fieldSchema      *config.FieldSchema
-	notion           notion.Service
-	slackService     slack.Service
-	knowledgeService knowledge.Service
-	Case             *CaseUseCase
-	Action           *ActionUseCase
-	Auth             AuthUseCaseInterface
-	Slack            *SlackUseCases
-	Source           *SourceUseCase
+	repo              interfaces.Repository
+	workspaceRegistry *model.WorkspaceRegistry
+	notion            notion.Service
+	slackService      slack.Service
+	knowledgeService  knowledge.Service
+	Case              *CaseUseCase
+	Action            *ActionUseCase
+	Auth              AuthUseCaseInterface
+	Slack             *SlackUseCases
+	Source            *SourceUseCase
 }
 
 type Option func(*UseCases)
-
-func WithFieldSchema(schema *config.FieldSchema) Option {
-	return func(uc *UseCases) {
-		uc.fieldSchema = schema
-	}
-}
 
 func WithAuth(auth AuthUseCaseInterface) Option {
 	return func(uc *UseCases) {
@@ -53,21 +47,27 @@ func WithKnowledgeService(svc knowledge.Service) Option {
 	}
 }
 
-func New(repo interfaces.Repository, opts ...Option) *UseCases {
+func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...Option) *UseCases {
 	uc := &UseCases{
-		repo: repo,
+		repo:              repo,
+		workspaceRegistry: registry,
 	}
 
 	for _, opt := range opts {
 		opt(uc)
 	}
 
-	uc.Case = NewCaseUseCase(repo, uc.fieldSchema, uc.slackService)
+	uc.Case = NewCaseUseCase(repo, registry, uc.slackService)
 	uc.Action = NewActionUseCase(repo)
 	uc.Slack = NewSlackUseCases(repo)
 	uc.Source = NewSourceUseCase(repo, uc.notion, uc.slackService)
 
 	return uc
+}
+
+// WorkspaceRegistry returns the workspace registry
+func (uc *UseCases) WorkspaceRegistry() *model.WorkspaceRegistry {
+	return uc.workspaceRegistry
 }
 
 // SlackService returns the Slack service (may be nil if not configured)

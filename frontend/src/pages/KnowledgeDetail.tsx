@@ -3,6 +3,7 @@ import { useQuery } from '@apollo/client'
 import { ArrowLeft, ExternalLink, BookOpen } from 'lucide-react'
 import Button from '../components/Button'
 import { GET_KNOWLEDGE } from '../graphql/knowledge'
+import { useWorkspace } from '../contexts/workspace-context'
 import styles from './KnowledgeDetail.module.css'
 
 interface Knowledge {
@@ -25,21 +26,22 @@ interface Knowledge {
 export default function KnowledgeDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { currentWorkspace } = useWorkspace()
 
   const { data, loading, error } = useQuery(GET_KNOWLEDGE, {
-    variables: { id: id || '' },
-    skip: !id,
+    variables: { workspaceId: currentWorkspace!.id, id: id || '' },
+    skip: !id || !currentWorkspace,
   })
 
   const knowledge: Knowledge | undefined = data?.knowledge
 
   const handleBack = () => {
-    navigate('/knowledges')
+    navigate(`/ws/${currentWorkspace!.id}/knowledges`)
   }
 
   const handleCaseClick = () => {
     if (knowledge?.case) {
-      navigate(`/cases/${knowledge.case.id}`)
+      navigate(`/ws/${currentWorkspace!.id}/cases/${knowledge.case.id}`)
     }
   }
 

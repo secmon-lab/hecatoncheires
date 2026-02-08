@@ -35,7 +35,7 @@ type CreateNotionDBSourceInput struct {
 }
 
 // CreateNotionDBSource creates a new Notion DB source with validation
-func (uc *SourceUseCase) CreateNotionDBSource(ctx context.Context, input CreateNotionDBSourceInput) (*model.Source, error) {
+func (uc *SourceUseCase) CreateNotionDBSource(ctx context.Context, workspaceID string, input CreateNotionDBSourceInput) (*model.Source, error) {
 	if input.DatabaseID == "" {
 		return nil, goerr.New("database ID is required")
 	}
@@ -70,7 +70,7 @@ func (uc *SourceUseCase) CreateNotionDBSource(ctx context.Context, input CreateN
 		},
 	}
 
-	created, err := uc.repo.Source().Create(ctx, source)
+	created, err := uc.repo.Source().Create(ctx, workspaceID, source)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to create source")
 	}
@@ -87,12 +87,12 @@ type UpdateSourceInput struct {
 }
 
 // UpdateSource updates source common fields
-func (uc *SourceUseCase) UpdateSource(ctx context.Context, input UpdateSourceInput) (*model.Source, error) {
+func (uc *SourceUseCase) UpdateSource(ctx context.Context, workspaceID string, input UpdateSourceInput) (*model.Source, error) {
 	if input.ID == "" {
 		return nil, goerr.New("source ID is required")
 	}
 
-	existing, err := uc.repo.Source().Get(ctx, input.ID)
+	existing, err := uc.repo.Source().Get(ctx, workspaceID, input.ID)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to get source")
 	}
@@ -107,7 +107,7 @@ func (uc *SourceUseCase) UpdateSource(ctx context.Context, input UpdateSourceInp
 		existing.Enabled = *input.Enabled
 	}
 
-	updated, err := uc.repo.Source().Update(ctx, existing)
+	updated, err := uc.repo.Source().Update(ctx, workspaceID, existing)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to update source")
 	}
@@ -116,12 +116,12 @@ func (uc *SourceUseCase) UpdateSource(ctx context.Context, input UpdateSourceInp
 }
 
 // DeleteSource removes a source
-func (uc *SourceUseCase) DeleteSource(ctx context.Context, id model.SourceID) error {
+func (uc *SourceUseCase) DeleteSource(ctx context.Context, workspaceID string, id model.SourceID) error {
 	if id == "" {
 		return goerr.New("source ID is required")
 	}
 
-	if err := uc.repo.Source().Delete(ctx, id); err != nil {
+	if err := uc.repo.Source().Delete(ctx, workspaceID, id); err != nil {
 		return goerr.Wrap(err, "failed to delete source")
 	}
 
@@ -129,12 +129,12 @@ func (uc *SourceUseCase) DeleteSource(ctx context.Context, id model.SourceID) er
 }
 
 // GetSource retrieves a source by ID
-func (uc *SourceUseCase) GetSource(ctx context.Context, id model.SourceID) (*model.Source, error) {
+func (uc *SourceUseCase) GetSource(ctx context.Context, workspaceID string, id model.SourceID) (*model.Source, error) {
 	if id == "" {
 		return nil, goerr.New("source ID is required")
 	}
 
-	source, err := uc.repo.Source().Get(ctx, id)
+	source, err := uc.repo.Source().Get(ctx, workspaceID, id)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to get source")
 	}
@@ -143,8 +143,8 @@ func (uc *SourceUseCase) GetSource(ctx context.Context, id model.SourceID) (*mod
 }
 
 // ListSources retrieves all sources
-func (uc *SourceUseCase) ListSources(ctx context.Context) ([]*model.Source, error) {
-	sources, err := uc.repo.Source().List(ctx)
+func (uc *SourceUseCase) ListSources(ctx context.Context, workspaceID string) ([]*model.Source, error) {
+	sources, err := uc.repo.Source().List(ctx, workspaceID)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to list sources")
 	}
@@ -206,7 +206,7 @@ type SlackChannelInfo struct {
 }
 
 // CreateSlackSource creates a new Slack source
-func (uc *SourceUseCase) CreateSlackSource(ctx context.Context, input CreateSlackSourceInput) (*model.Source, error) {
+func (uc *SourceUseCase) CreateSlackSource(ctx context.Context, workspaceID string, input CreateSlackSourceInput) (*model.Source, error) {
 	if len(input.ChannelIDs) == 0 {
 		return nil, goerr.New("at least one channel ID is required")
 	}
@@ -254,7 +254,7 @@ func (uc *SourceUseCase) CreateSlackSource(ctx context.Context, input CreateSlac
 		},
 	}
 
-	created, err := uc.repo.Source().Create(ctx, source)
+	created, err := uc.repo.Source().Create(ctx, workspaceID, source)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to create source")
 	}
@@ -272,12 +272,12 @@ type UpdateSlackSourceInput struct {
 }
 
 // UpdateSlackSource updates a Slack source
-func (uc *SourceUseCase) UpdateSlackSource(ctx context.Context, input UpdateSlackSourceInput) (*model.Source, error) {
+func (uc *SourceUseCase) UpdateSlackSource(ctx context.Context, workspaceID string, input UpdateSlackSourceInput) (*model.Source, error) {
 	if input.ID == "" {
 		return nil, goerr.New("source ID is required")
 	}
 
-	existing, err := uc.repo.Source().Get(ctx, input.ID)
+	existing, err := uc.repo.Source().Get(ctx, workspaceID, input.ID)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to get source")
 	}
@@ -328,7 +328,7 @@ func (uc *SourceUseCase) UpdateSlackSource(ctx context.Context, input UpdateSlac
 		}
 	}
 
-	updated, err := uc.repo.Source().Update(ctx, existing)
+	updated, err := uc.repo.Source().Update(ctx, workspaceID, existing)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to update source")
 	}

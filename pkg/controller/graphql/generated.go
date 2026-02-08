@@ -130,19 +130,19 @@ type ComplexityRoot struct {
 	}
 
 	Mutation struct {
-		CreateAction         func(childComplexity int, input graphql1.CreateActionInput) int
-		CreateCase           func(childComplexity int, input graphql1.CreateCaseInput) int
-		CreateNotionDBSource func(childComplexity int, input graphql1.CreateNotionDBSourceInput) int
-		CreateSlackSource    func(childComplexity int, input graphql1.CreateSlackSourceInput) int
-		DeleteAction         func(childComplexity int, id int) int
-		DeleteCase           func(childComplexity int, id int) int
-		DeleteSource         func(childComplexity int, id string) int
+		CreateAction         func(childComplexity int, workspaceID string, input graphql1.CreateActionInput) int
+		CreateCase           func(childComplexity int, workspaceID string, input graphql1.CreateCaseInput) int
+		CreateNotionDBSource func(childComplexity int, workspaceID string, input graphql1.CreateNotionDBSourceInput) int
+		CreateSlackSource    func(childComplexity int, workspaceID string, input graphql1.CreateSlackSourceInput) int
+		DeleteAction         func(childComplexity int, workspaceID string, id int) int
+		DeleteCase           func(childComplexity int, workspaceID string, id int) int
+		DeleteSource         func(childComplexity int, workspaceID string, id string) int
 		Noop                 func(childComplexity int) int
-		UpdateAction         func(childComplexity int, input graphql1.UpdateActionInput) int
-		UpdateCase           func(childComplexity int, input graphql1.UpdateCaseInput) int
-		UpdateSlackSource    func(childComplexity int, input graphql1.UpdateSlackSourceInput) int
-		UpdateSource         func(childComplexity int, input graphql1.UpdateSourceInput) int
-		ValidateNotionDb     func(childComplexity int, databaseID string) int
+		UpdateAction         func(childComplexity int, workspaceID string, input graphql1.UpdateActionInput) int
+		UpdateCase           func(childComplexity int, workspaceID string, input graphql1.UpdateCaseInput) int
+		UpdateSlackSource    func(childComplexity int, workspaceID string, input graphql1.UpdateSlackSourceInput) int
+		UpdateSource         func(childComplexity int, workspaceID string, input graphql1.UpdateSourceInput) int
+		ValidateNotionDb     func(childComplexity int, workspaceID string, databaseID string) int
 	}
 
 	NotionDBConfig struct {
@@ -159,19 +159,21 @@ type ComplexityRoot struct {
 	}
 
 	Query struct {
-		Action              func(childComplexity int, id int) int
-		Actions             func(childComplexity int) int
-		ActionsByCase       func(childComplexity int, caseID int) int
-		Case                func(childComplexity int, id int) int
-		Cases               func(childComplexity int) int
-		FieldConfiguration  func(childComplexity int) int
+		Action              func(childComplexity int, workspaceID string, id int) int
+		Actions             func(childComplexity int, workspaceID string) int
+		ActionsByCase       func(childComplexity int, workspaceID string, caseID int) int
+		Case                func(childComplexity int, workspaceID string, id int) int
+		Cases               func(childComplexity int, workspaceID string) int
+		FieldConfiguration  func(childComplexity int, workspaceID string) int
 		Health              func(childComplexity int) int
-		Knowledge           func(childComplexity int, id string) int
-		Knowledges          func(childComplexity int, limit *int, offset *int) int
+		Knowledge           func(childComplexity int, workspaceID string, id string) int
+		Knowledges          func(childComplexity int, workspaceID string, limit *int, offset *int) int
 		SlackJoinedChannels func(childComplexity int) int
 		SlackUsers          func(childComplexity int) int
-		Source              func(childComplexity int, id string) int
-		Sources             func(childComplexity int) int
+		Source              func(childComplexity int, workspaceID string, id string) int
+		Sources             func(childComplexity int, workspaceID string) int
+		Workspace           func(childComplexity int, workspaceID string) int
+		Workspaces          func(childComplexity int) int
 	}
 
 	SlackChannel struct {
@@ -205,6 +207,11 @@ type ComplexityRoot struct {
 		SourceType  func(childComplexity int) int
 		UpdatedAt   func(childComplexity int) int
 	}
+
+	Workspace struct {
+		ID   func(childComplexity int) int
+		Name func(childComplexity int) int
+	}
 }
 
 type ActionResolver interface {
@@ -224,33 +231,35 @@ type KnowledgeResolver interface {
 }
 type MutationResolver interface {
 	Noop(ctx context.Context) (*bool, error)
-	CreateCase(ctx context.Context, input graphql1.CreateCaseInput) (*graphql1.Case, error)
-	UpdateCase(ctx context.Context, input graphql1.UpdateCaseInput) (*graphql1.Case, error)
-	DeleteCase(ctx context.Context, id int) (bool, error)
-	CreateAction(ctx context.Context, input graphql1.CreateActionInput) (*graphql1.Action, error)
-	UpdateAction(ctx context.Context, input graphql1.UpdateActionInput) (*graphql1.Action, error)
-	DeleteAction(ctx context.Context, id int) (bool, error)
-	CreateNotionDBSource(ctx context.Context, input graphql1.CreateNotionDBSourceInput) (*graphql1.Source, error)
-	CreateSlackSource(ctx context.Context, input graphql1.CreateSlackSourceInput) (*graphql1.Source, error)
-	UpdateSource(ctx context.Context, input graphql1.UpdateSourceInput) (*graphql1.Source, error)
-	UpdateSlackSource(ctx context.Context, input graphql1.UpdateSlackSourceInput) (*graphql1.Source, error)
-	DeleteSource(ctx context.Context, id string) (bool, error)
-	ValidateNotionDb(ctx context.Context, databaseID string) (*graphql1.NotionDBValidationResult, error)
+	CreateCase(ctx context.Context, workspaceID string, input graphql1.CreateCaseInput) (*graphql1.Case, error)
+	UpdateCase(ctx context.Context, workspaceID string, input graphql1.UpdateCaseInput) (*graphql1.Case, error)
+	DeleteCase(ctx context.Context, workspaceID string, id int) (bool, error)
+	CreateAction(ctx context.Context, workspaceID string, input graphql1.CreateActionInput) (*graphql1.Action, error)
+	UpdateAction(ctx context.Context, workspaceID string, input graphql1.UpdateActionInput) (*graphql1.Action, error)
+	DeleteAction(ctx context.Context, workspaceID string, id int) (bool, error)
+	CreateNotionDBSource(ctx context.Context, workspaceID string, input graphql1.CreateNotionDBSourceInput) (*graphql1.Source, error)
+	CreateSlackSource(ctx context.Context, workspaceID string, input graphql1.CreateSlackSourceInput) (*graphql1.Source, error)
+	UpdateSource(ctx context.Context, workspaceID string, input graphql1.UpdateSourceInput) (*graphql1.Source, error)
+	UpdateSlackSource(ctx context.Context, workspaceID string, input graphql1.UpdateSlackSourceInput) (*graphql1.Source, error)
+	DeleteSource(ctx context.Context, workspaceID string, id string) (bool, error)
+	ValidateNotionDb(ctx context.Context, workspaceID string, databaseID string) (*graphql1.NotionDBValidationResult, error)
 }
 type QueryResolver interface {
 	Health(ctx context.Context) (string, error)
-	Cases(ctx context.Context) ([]*graphql1.Case, error)
-	Case(ctx context.Context, id int) (*graphql1.Case, error)
-	Actions(ctx context.Context) ([]*graphql1.Action, error)
-	Action(ctx context.Context, id int) (*graphql1.Action, error)
-	ActionsByCase(ctx context.Context, caseID int) ([]*graphql1.Action, error)
-	FieldConfiguration(ctx context.Context) (*graphql1.FieldConfiguration, error)
+	Workspace(ctx context.Context, workspaceID string) (*graphql1.Workspace, error)
+	Workspaces(ctx context.Context) ([]*graphql1.Workspace, error)
+	Cases(ctx context.Context, workspaceID string) ([]*graphql1.Case, error)
+	Case(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error)
+	Actions(ctx context.Context, workspaceID string) ([]*graphql1.Action, error)
+	Action(ctx context.Context, workspaceID string, id int) (*graphql1.Action, error)
+	ActionsByCase(ctx context.Context, workspaceID string, caseID int) ([]*graphql1.Action, error)
+	FieldConfiguration(ctx context.Context, workspaceID string) (*graphql1.FieldConfiguration, error)
 	SlackUsers(ctx context.Context) ([]*graphql1.SlackUser, error)
 	SlackJoinedChannels(ctx context.Context) ([]*graphql1.SlackChannelInfo, error)
-	Sources(ctx context.Context) ([]*graphql1.Source, error)
-	Source(ctx context.Context, id string) (*graphql1.Source, error)
-	Knowledge(ctx context.Context, id string) (*graphql1.Knowledge, error)
-	Knowledges(ctx context.Context, limit *int, offset *int) (*graphql1.KnowledgeConnection, error)
+	Sources(ctx context.Context, workspaceID string) ([]*graphql1.Source, error)
+	Source(ctx context.Context, workspaceID string, id string) (*graphql1.Source, error)
+	Knowledge(ctx context.Context, workspaceID string, id string) (*graphql1.Knowledge, error)
+	Knowledges(ctx context.Context, workspaceID string, limit *int, offset *int) (*graphql1.KnowledgeConnection, error)
 }
 
 type executableSchema struct {
@@ -597,7 +606,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Mutation.CreateAction(childComplexity, args["input"].(graphql1.CreateActionInput)), true
+		return e.complexity.Mutation.CreateAction(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.CreateActionInput)), true
 	case "Mutation.createCase":
 		if e.complexity.Mutation.CreateCase == nil {
 			break
@@ -608,7 +617,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Mutation.CreateCase(childComplexity, args["input"].(graphql1.CreateCaseInput)), true
+		return e.complexity.Mutation.CreateCase(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.CreateCaseInput)), true
 	case "Mutation.createNotionDBSource":
 		if e.complexity.Mutation.CreateNotionDBSource == nil {
 			break
@@ -619,7 +628,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Mutation.CreateNotionDBSource(childComplexity, args["input"].(graphql1.CreateNotionDBSourceInput)), true
+		return e.complexity.Mutation.CreateNotionDBSource(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.CreateNotionDBSourceInput)), true
 	case "Mutation.createSlackSource":
 		if e.complexity.Mutation.CreateSlackSource == nil {
 			break
@@ -630,7 +639,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Mutation.CreateSlackSource(childComplexity, args["input"].(graphql1.CreateSlackSourceInput)), true
+		return e.complexity.Mutation.CreateSlackSource(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.CreateSlackSourceInput)), true
 	case "Mutation.deleteAction":
 		if e.complexity.Mutation.DeleteAction == nil {
 			break
@@ -641,7 +650,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Mutation.DeleteAction(childComplexity, args["id"].(int)), true
+		return e.complexity.Mutation.DeleteAction(childComplexity, args["workspaceId"].(string), args["id"].(int)), true
 	case "Mutation.deleteCase":
 		if e.complexity.Mutation.DeleteCase == nil {
 			break
@@ -652,7 +661,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Mutation.DeleteCase(childComplexity, args["id"].(int)), true
+		return e.complexity.Mutation.DeleteCase(childComplexity, args["workspaceId"].(string), args["id"].(int)), true
 	case "Mutation.deleteSource":
 		if e.complexity.Mutation.DeleteSource == nil {
 			break
@@ -663,7 +672,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Mutation.DeleteSource(childComplexity, args["id"].(string)), true
+		return e.complexity.Mutation.DeleteSource(childComplexity, args["workspaceId"].(string), args["id"].(string)), true
 	case "Mutation.noop":
 		if e.complexity.Mutation.Noop == nil {
 			break
@@ -680,7 +689,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Mutation.UpdateAction(childComplexity, args["input"].(graphql1.UpdateActionInput)), true
+		return e.complexity.Mutation.UpdateAction(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.UpdateActionInput)), true
 	case "Mutation.updateCase":
 		if e.complexity.Mutation.UpdateCase == nil {
 			break
@@ -691,7 +700,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Mutation.UpdateCase(childComplexity, args["input"].(graphql1.UpdateCaseInput)), true
+		return e.complexity.Mutation.UpdateCase(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.UpdateCaseInput)), true
 	case "Mutation.updateSlackSource":
 		if e.complexity.Mutation.UpdateSlackSource == nil {
 			break
@@ -702,7 +711,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Mutation.UpdateSlackSource(childComplexity, args["input"].(graphql1.UpdateSlackSourceInput)), true
+		return e.complexity.Mutation.UpdateSlackSource(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.UpdateSlackSourceInput)), true
 	case "Mutation.updateSource":
 		if e.complexity.Mutation.UpdateSource == nil {
 			break
@@ -713,7 +722,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Mutation.UpdateSource(childComplexity, args["input"].(graphql1.UpdateSourceInput)), true
+		return e.complexity.Mutation.UpdateSource(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.UpdateSourceInput)), true
 	case "Mutation.validateNotionDB":
 		if e.complexity.Mutation.ValidateNotionDb == nil {
 			break
@@ -724,7 +733,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Mutation.ValidateNotionDb(childComplexity, args["databaseID"].(string)), true
+		return e.complexity.Mutation.ValidateNotionDb(childComplexity, args["workspaceId"].(string), args["databaseID"].(string)), true
 
 	case "NotionDBConfig.databaseID":
 		if e.complexity.NotionDBConfig.DatabaseID == nil {
@@ -780,13 +789,18 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Query.Action(childComplexity, args["id"].(int)), true
+		return e.complexity.Query.Action(childComplexity, args["workspaceId"].(string), args["id"].(int)), true
 	case "Query.actions":
 		if e.complexity.Query.Actions == nil {
 			break
 		}
 
-		return e.complexity.Query.Actions(childComplexity), true
+		args, err := ec.field_Query_actions_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Query.Actions(childComplexity, args["workspaceId"].(string)), true
 	case "Query.actionsByCase":
 		if e.complexity.Query.ActionsByCase == nil {
 			break
@@ -797,7 +811,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Query.ActionsByCase(childComplexity, args["caseID"].(int)), true
+		return e.complexity.Query.ActionsByCase(childComplexity, args["workspaceId"].(string), args["caseID"].(int)), true
 	case "Query.case":
 		if e.complexity.Query.Case == nil {
 			break
@@ -808,19 +822,29 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Query.Case(childComplexity, args["id"].(int)), true
+		return e.complexity.Query.Case(childComplexity, args["workspaceId"].(string), args["id"].(int)), true
 	case "Query.cases":
 		if e.complexity.Query.Cases == nil {
 			break
 		}
 
-		return e.complexity.Query.Cases(childComplexity), true
+		args, err := ec.field_Query_cases_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Query.Cases(childComplexity, args["workspaceId"].(string)), true
 	case "Query.fieldConfiguration":
 		if e.complexity.Query.FieldConfiguration == nil {
 			break
 		}
 
-		return e.complexity.Query.FieldConfiguration(childComplexity), true
+		args, err := ec.field_Query_fieldConfiguration_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Query.FieldConfiguration(childComplexity, args["workspaceId"].(string)), true
 	case "Query.health":
 		if e.complexity.Query.Health == nil {
 			break
@@ -837,7 +861,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Query.Knowledge(childComplexity, args["id"].(string)), true
+		return e.complexity.Query.Knowledge(childComplexity, args["workspaceId"].(string), args["id"].(string)), true
 	case "Query.knowledges":
 		if e.complexity.Query.Knowledges == nil {
 			break
@@ -848,7 +872,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Query.Knowledges(childComplexity, args["limit"].(*int), args["offset"].(*int)), true
+		return e.complexity.Query.Knowledges(childComplexity, args["workspaceId"].(string), args["limit"].(*int), args["offset"].(*int)), true
 	case "Query.slackJoinedChannels":
 		if e.complexity.Query.SlackJoinedChannels == nil {
 			break
@@ -871,13 +895,35 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Query.Source(childComplexity, args["id"].(string)), true
+		return e.complexity.Query.Source(childComplexity, args["workspaceId"].(string), args["id"].(string)), true
 	case "Query.sources":
 		if e.complexity.Query.Sources == nil {
 			break
 		}
 
-		return e.complexity.Query.Sources(childComplexity), true
+		args, err := ec.field_Query_sources_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Query.Sources(childComplexity, args["workspaceId"].(string)), true
+	case "Query.workspace":
+		if e.complexity.Query.Workspace == nil {
+			break
+		}
+
+		args, err := ec.field_Query_workspace_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Query.Workspace(childComplexity, args["workspaceId"].(string)), true
+	case "Query.workspaces":
+		if e.complexity.Query.Workspaces == nil {
+			break
+		}
+
+		return e.complexity.Query.Workspaces(childComplexity), true
 
 	case "SlackChannel.id":
 		if e.complexity.SlackChannel.ID == nil {
@@ -985,6 +1031,19 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Source.UpdatedAt(childComplexity), true
+
+	case "Workspace.id":
+		if e.complexity.Workspace.ID == nil {
+			break
+		}
+
+		return e.complexity.Workspace.ID(childComplexity), true
+	case "Workspace.name":
+		if e.complexity.Workspace.Name == nil {
+			break
+		}
+
+		return e.complexity.Workspace.Name(childComplexity), true
 
 	}
 	return 0, false
@@ -1103,6 +1162,12 @@ var sources = []*ast.Source{
 	{Name: "../../../graphql/schema.graphql", Input: `scalar Time
 scalar JSON
 scalar Any
+
+# Workspace
+type Workspace {
+  id: String!
+  name: String!
+}
 
 # Field type definitions
 enum FieldType {
@@ -1333,51 +1398,55 @@ type SlackChannelInfo {
 type Query {
   health: String!
 
+  # Workspaces
+  workspace(workspaceId: String!): Workspace!
+  workspaces: [Workspace!]!
+
   # Cases
-  cases: [Case!]!
-  case(id: Int!): Case
+  cases(workspaceId: String!): [Case!]!
+  case(workspaceId: String!, id: Int!): Case
 
   # Actions
-  actions: [Action!]!
-  action(id: Int!): Action
-  actionsByCase(caseID: Int!): [Action!]!
+  actions(workspaceId: String!): [Action!]!
+  action(workspaceId: String!, id: Int!): Action
+  actionsByCase(workspaceId: String!, caseID: Int!): [Action!]!
 
   # Configuration
-  fieldConfiguration: FieldConfiguration!
+  fieldConfiguration(workspaceId: String!): FieldConfiguration!
 
-  # Slack
+  # Slack (not workspace-scoped)
   slackUsers: [SlackUser!]!
   slackJoinedChannels: [SlackChannelInfo!]!
 
   # Sources
-  sources: [Source!]!
-  source(id: String!): Source
+  sources(workspaceId: String!): [Source!]!
+  source(workspaceId: String!, id: String!): Source
 
   # Knowledge
-  knowledge(id: String!): Knowledge
-  knowledges(limit: Int, offset: Int): KnowledgeConnection!
+  knowledge(workspaceId: String!, id: String!): Knowledge
+  knowledges(workspaceId: String!, limit: Int, offset: Int): KnowledgeConnection!
 }
 
 type Mutation {
   noop: Boolean
 
   # Cases
-  createCase(input: CreateCaseInput!): Case!
-  updateCase(input: UpdateCaseInput!): Case!
-  deleteCase(id: Int!): Boolean!
+  createCase(workspaceId: String!, input: CreateCaseInput!): Case!
+  updateCase(workspaceId: String!, input: UpdateCaseInput!): Case!
+  deleteCase(workspaceId: String!, id: Int!): Boolean!
 
   # Actions
-  createAction(input: CreateActionInput!): Action!
-  updateAction(input: UpdateActionInput!): Action!
-  deleteAction(id: Int!): Boolean!
+  createAction(workspaceId: String!, input: CreateActionInput!): Action!
+  updateAction(workspaceId: String!, input: UpdateActionInput!): Action!
+  deleteAction(workspaceId: String!, id: Int!): Boolean!
 
   # Sources
-  createNotionDBSource(input: CreateNotionDBSourceInput!): Source!
-  createSlackSource(input: CreateSlackSourceInput!): Source!
-  updateSource(input: UpdateSourceInput!): Source!
-  updateSlackSource(input: UpdateSlackSourceInput!): Source!
-  deleteSource(id: String!): Boolean!
-  validateNotionDB(databaseID: String!): NotionDBValidationResult!
+  createNotionDBSource(workspaceId: String!, input: CreateNotionDBSourceInput!): Source!
+  createSlackSource(workspaceId: String!, input: CreateSlackSourceInput!): Source!
+  updateSource(workspaceId: String!, input: UpdateSourceInput!): Source!
+  updateSlackSource(workspaceId: String!, input: UpdateSlackSourceInput!): Source!
+  deleteSource(workspaceId: String!, id: String!): Boolean!
+  validateNotionDB(workspaceId: String!, databaseID: String!): NotionDBValidationResult!
 }
 `, BuiltIn: false},
 }
@@ -1390,132 +1459,192 @@ var parsedSchema = gqlparser.MustLoadSchema(sources...)
 func (ec *executionContext) field_Mutation_createAction_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
-	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNCreateActionInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateActionInput)
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
 	if err != nil {
 		return nil, err
 	}
-	args["input"] = arg0
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNCreateActionInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateActionInput)
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg1
 	return args, nil
 }
 
 func (ec *executionContext) field_Mutation_createCase_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
-	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNCreateCaseInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateCaseInput)
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
 	if err != nil {
 		return nil, err
 	}
-	args["input"] = arg0
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNCreateCaseInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateCaseInput)
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg1
 	return args, nil
 }
 
 func (ec *executionContext) field_Mutation_createNotionDBSource_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
-	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNCreateNotionDBSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateNotionDBSourceInput)
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
 	if err != nil {
 		return nil, err
 	}
-	args["input"] = arg0
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNCreateNotionDBSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateNotionDBSourceInput)
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg1
 	return args, nil
 }
 
 func (ec *executionContext) field_Mutation_createSlackSource_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
-	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNCreateSlackSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateSlackSourceInput)
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
 	if err != nil {
 		return nil, err
 	}
-	args["input"] = arg0
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNCreateSlackSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateSlackSourceInput)
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg1
 	return args, nil
 }
 
 func (ec *executionContext) field_Mutation_deleteAction_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
-	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNInt2int)
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
 	if err != nil {
 		return nil, err
 	}
-	args["id"] = arg0
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg1
 	return args, nil
 }
 
 func (ec *executionContext) field_Mutation_deleteCase_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
-	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNInt2int)
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
 	if err != nil {
 		return nil, err
 	}
-	args["id"] = arg0
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg1
 	return args, nil
 }
 
 func (ec *executionContext) field_Mutation_deleteSource_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
-	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNString2string)
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
 	if err != nil {
 		return nil, err
 	}
-	args["id"] = arg0
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg1
 	return args, nil
 }
 
 func (ec *executionContext) field_Mutation_updateAction_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
-	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNUpdateActionInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateActionInput)
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
 	if err != nil {
 		return nil, err
 	}
-	args["input"] = arg0
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNUpdateActionInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateActionInput)
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg1
 	return args, nil
 }
 
 func (ec *executionContext) field_Mutation_updateCase_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
-	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNUpdateCaseInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateCaseInput)
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
 	if err != nil {
 		return nil, err
 	}
-	args["input"] = arg0
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNUpdateCaseInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateCaseInput)
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg1
 	return args, nil
 }
 
 func (ec *executionContext) field_Mutation_updateSlackSource_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
-	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNUpdateSlackSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateSlackSourceInput)
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
 	if err != nil {
 		return nil, err
 	}
-	args["input"] = arg0
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNUpdateSlackSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateSlackSourceInput)
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg1
 	return args, nil
 }
 
 func (ec *executionContext) field_Mutation_updateSource_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
-	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNUpdateSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateSourceInput)
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
 	if err != nil {
 		return nil, err
 	}
-	args["input"] = arg0
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNUpdateSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateSourceInput)
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg1
 	return args, nil
 }
 
 func (ec *executionContext) field_Mutation_validateNotionDB_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
-	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "databaseID", ec.unmarshalNString2string)
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
 	if err != nil {
 		return nil, err
 	}
-	args["databaseID"] = arg0
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "databaseID", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["databaseID"] = arg1
 	return args, nil
 }
 
@@ -1533,71 +1662,156 @@ func (ec *executionContext) field_Query___type_args(ctx context.Context, rawArgs
 func (ec *executionContext) field_Query_action_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
-	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNInt2int)
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
 	if err != nil {
 		return nil, err
 	}
-	args["id"] = arg0
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg1
 	return args, nil
 }
 
 func (ec *executionContext) field_Query_actionsByCase_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
-	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "caseID", ec.unmarshalNInt2int)
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
 	if err != nil {
 		return nil, err
 	}
-	args["caseID"] = arg0
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "caseID", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["caseID"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Query_actions_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
 	return args, nil
 }
 
 func (ec *executionContext) field_Query_case_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
-	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNInt2int)
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
 	if err != nil {
 		return nil, err
 	}
-	args["id"] = arg0
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Query_cases_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_Query_fieldConfiguration_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
 	return args, nil
 }
 
 func (ec *executionContext) field_Query_knowledge_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
-	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNString2string)
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
 	if err != nil {
 		return nil, err
 	}
-	args["id"] = arg0
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg1
 	return args, nil
 }
 
 func (ec *executionContext) field_Query_knowledges_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
-	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "limit", ec.unmarshalOInt2ᚖint)
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
 	if err != nil {
 		return nil, err
 	}
-	args["limit"] = arg0
-	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "offset", ec.unmarshalOInt2ᚖint)
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "limit", ec.unmarshalOInt2ᚖint)
 	if err != nil {
 		return nil, err
 	}
-	args["offset"] = arg1
+	args["limit"] = arg1
+	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "offset", ec.unmarshalOInt2ᚖint)
+	if err != nil {
+		return nil, err
+	}
+	args["offset"] = arg2
 	return args, nil
 }
 
 func (ec *executionContext) field_Query_source_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
-	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNString2string)
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
 	if err != nil {
 		return nil, err
 	}
-	args["id"] = arg0
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Query_sources_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_Query_workspace_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
 	return args, nil
 }
 
@@ -3341,7 +3555,7 @@ func (ec *executionContext) _Mutation_createCase(ctx context.Context, field grap
 		ec.fieldContext_Mutation_createCase,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Mutation().CreateCase(ctx, fc.Args["input"].(graphql1.CreateCaseInput))
+			return ec.resolvers.Mutation().CreateCase(ctx, fc.Args["workspaceId"].(string), fc.Args["input"].(graphql1.CreateCaseInput))
 		},
 		nil,
 		ec.marshalNCase2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCase,
@@ -3406,7 +3620,7 @@ func (ec *executionContext) _Mutation_updateCase(ctx context.Context, field grap
 		ec.fieldContext_Mutation_updateCase,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Mutation().UpdateCase(ctx, fc.Args["input"].(graphql1.UpdateCaseInput))
+			return ec.resolvers.Mutation().UpdateCase(ctx, fc.Args["workspaceId"].(string), fc.Args["input"].(graphql1.UpdateCaseInput))
 		},
 		nil,
 		ec.marshalNCase2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCase,
@@ -3471,7 +3685,7 @@ func (ec *executionContext) _Mutation_deleteCase(ctx context.Context, field grap
 		ec.fieldContext_Mutation_deleteCase,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Mutation().DeleteCase(ctx, fc.Args["id"].(int))
+			return ec.resolvers.Mutation().DeleteCase(ctx, fc.Args["workspaceId"].(string), fc.Args["id"].(int))
 		},
 		nil,
 		ec.marshalNBoolean2bool,
@@ -3512,7 +3726,7 @@ func (ec *executionContext) _Mutation_createAction(ctx context.Context, field gr
 		ec.fieldContext_Mutation_createAction,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Mutation().CreateAction(ctx, fc.Args["input"].(graphql1.CreateActionInput))
+			return ec.resolvers.Mutation().CreateAction(ctx, fc.Args["workspaceId"].(string), fc.Args["input"].(graphql1.CreateActionInput))
 		},
 		nil,
 		ec.marshalNAction2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐAction,
@@ -3577,7 +3791,7 @@ func (ec *executionContext) _Mutation_updateAction(ctx context.Context, field gr
 		ec.fieldContext_Mutation_updateAction,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Mutation().UpdateAction(ctx, fc.Args["input"].(graphql1.UpdateActionInput))
+			return ec.resolvers.Mutation().UpdateAction(ctx, fc.Args["workspaceId"].(string), fc.Args["input"].(graphql1.UpdateActionInput))
 		},
 		nil,
 		ec.marshalNAction2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐAction,
@@ -3642,7 +3856,7 @@ func (ec *executionContext) _Mutation_deleteAction(ctx context.Context, field gr
 		ec.fieldContext_Mutation_deleteAction,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Mutation().DeleteAction(ctx, fc.Args["id"].(int))
+			return ec.resolvers.Mutation().DeleteAction(ctx, fc.Args["workspaceId"].(string), fc.Args["id"].(int))
 		},
 		nil,
 		ec.marshalNBoolean2bool,
@@ -3683,7 +3897,7 @@ func (ec *executionContext) _Mutation_createNotionDBSource(ctx context.Context, 
 		ec.fieldContext_Mutation_createNotionDBSource,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Mutation().CreateNotionDBSource(ctx, fc.Args["input"].(graphql1.CreateNotionDBSourceInput))
+			return ec.resolvers.Mutation().CreateNotionDBSource(ctx, fc.Args["workspaceId"].(string), fc.Args["input"].(graphql1.CreateNotionDBSourceInput))
 		},
 		nil,
 		ec.marshalNSource2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSource,
@@ -3742,7 +3956,7 @@ func (ec *executionContext) _Mutation_createSlackSource(ctx context.Context, fie
 		ec.fieldContext_Mutation_createSlackSource,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Mutation().CreateSlackSource(ctx, fc.Args["input"].(graphql1.CreateSlackSourceInput))
+			return ec.resolvers.Mutation().CreateSlackSource(ctx, fc.Args["workspaceId"].(string), fc.Args["input"].(graphql1.CreateSlackSourceInput))
 		},
 		nil,
 		ec.marshalNSource2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSource,
@@ -3801,7 +4015,7 @@ func (ec *executionContext) _Mutation_updateSource(ctx context.Context, field gr
 		ec.fieldContext_Mutation_updateSource,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Mutation().UpdateSource(ctx, fc.Args["input"].(graphql1.UpdateSourceInput))
+			return ec.resolvers.Mutation().UpdateSource(ctx, fc.Args["workspaceId"].(string), fc.Args["input"].(graphql1.UpdateSourceInput))
 		},
 		nil,
 		ec.marshalNSource2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSource,
@@ -3860,7 +4074,7 @@ func (ec *executionContext) _Mutation_updateSlackSource(ctx context.Context, fie
 		ec.fieldContext_Mutation_updateSlackSource,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Mutation().UpdateSlackSource(ctx, fc.Args["input"].(graphql1.UpdateSlackSourceInput))
+			return ec.resolvers.Mutation().UpdateSlackSource(ctx, fc.Args["workspaceId"].(string), fc.Args["input"].(graphql1.UpdateSlackSourceInput))
 		},
 		nil,
 		ec.marshalNSource2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSource,
@@ -3919,7 +4133,7 @@ func (ec *executionContext) _Mutation_deleteSource(ctx context.Context, field gr
 		ec.fieldContext_Mutation_deleteSource,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Mutation().DeleteSource(ctx, fc.Args["id"].(string))
+			return ec.resolvers.Mutation().DeleteSource(ctx, fc.Args["workspaceId"].(string), fc.Args["id"].(string))
 		},
 		nil,
 		ec.marshalNBoolean2bool,
@@ -3960,7 +4174,7 @@ func (ec *executionContext) _Mutation_validateNotionDB(ctx context.Context, fiel
 		ec.fieldContext_Mutation_validateNotionDB,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Mutation().ValidateNotionDb(ctx, fc.Args["databaseID"].(string))
+			return ec.resolvers.Mutation().ValidateNotionDb(ctx, fc.Args["workspaceId"].(string), fc.Args["databaseID"].(string))
 		},
 		nil,
 		ec.marshalNNotionDBValidationResult2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐNotionDBValidationResult,
@@ -4235,6 +4449,88 @@ func (ec *executionContext) fieldContext_Query_health(_ context.Context, field g
 	return fc, nil
 }
 
+func (ec *executionContext) _Query_workspace(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Query_workspace,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Query().Workspace(ctx, fc.Args["workspaceId"].(string))
+		},
+		nil,
+		ec.marshalNWorkspace2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐWorkspace,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Query_workspace(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Workspace_id(ctx, field)
+			case "name":
+				return ec.fieldContext_Workspace_name(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Workspace", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_workspace_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_workspaces(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Query_workspaces,
+		func(ctx context.Context) (any, error) {
+			return ec.resolvers.Query().Workspaces(ctx)
+		},
+		nil,
+		ec.marshalNWorkspace2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐWorkspaceᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Query_workspaces(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Workspace_id(ctx, field)
+			case "name":
+				return ec.fieldContext_Workspace_name(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Workspace", field.Name)
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Query_cases(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -4242,7 +4538,8 @@ func (ec *executionContext) _Query_cases(ctx context.Context, field graphql.Coll
 		field,
 		ec.fieldContext_Query_cases,
 		func(ctx context.Context) (any, error) {
-			return ec.resolvers.Query().Cases(ctx)
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Query().Cases(ctx, fc.Args["workspaceId"].(string))
 		},
 		nil,
 		ec.marshalNCase2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCaseᚄ,
@@ -4251,7 +4548,7 @@ func (ec *executionContext) _Query_cases(ctx context.Context, field graphql.Coll
 	)
 }
 
-func (ec *executionContext) fieldContext_Query_cases(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Query_cases(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Query",
 		Field:      field,
@@ -4285,6 +4582,17 @@ func (ec *executionContext) fieldContext_Query_cases(_ context.Context, field gr
 			return nil, fmt.Errorf("no field named %q was found under type Case", field.Name)
 		},
 	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_cases_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
 	return fc, nil
 }
 
@@ -4296,7 +4604,7 @@ func (ec *executionContext) _Query_case(ctx context.Context, field graphql.Colle
 		ec.fieldContext_Query_case,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Query().Case(ctx, fc.Args["id"].(int))
+			return ec.resolvers.Query().Case(ctx, fc.Args["workspaceId"].(string), fc.Args["id"].(int))
 		},
 		nil,
 		ec.marshalOCase2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCase,
@@ -4360,7 +4668,8 @@ func (ec *executionContext) _Query_actions(ctx context.Context, field graphql.Co
 		field,
 		ec.fieldContext_Query_actions,
 		func(ctx context.Context) (any, error) {
-			return ec.resolvers.Query().Actions(ctx)
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Query().Actions(ctx, fc.Args["workspaceId"].(string))
 		},
 		nil,
 		ec.marshalNAction2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionᚄ,
@@ -4369,7 +4678,7 @@ func (ec *executionContext) _Query_actions(ctx context.Context, field graphql.Co
 	)
 }
 
-func (ec *executionContext) fieldContext_Query_actions(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Query_actions(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Query",
 		Field:      field,
@@ -4403,6 +4712,17 @@ func (ec *executionContext) fieldContext_Query_actions(_ context.Context, field 
 			return nil, fmt.Errorf("no field named %q was found under type Action", field.Name)
 		},
 	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_actions_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
 	return fc, nil
 }
 
@@ -4414,7 +4734,7 @@ func (ec *executionContext) _Query_action(ctx context.Context, field graphql.Col
 		ec.fieldContext_Query_action,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Query().Action(ctx, fc.Args["id"].(int))
+			return ec.resolvers.Query().Action(ctx, fc.Args["workspaceId"].(string), fc.Args["id"].(int))
 		},
 		nil,
 		ec.marshalOAction2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐAction,
@@ -4479,7 +4799,7 @@ func (ec *executionContext) _Query_actionsByCase(ctx context.Context, field grap
 		ec.fieldContext_Query_actionsByCase,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Query().ActionsByCase(ctx, fc.Args["caseID"].(int))
+			return ec.resolvers.Query().ActionsByCase(ctx, fc.Args["workspaceId"].(string), fc.Args["caseID"].(int))
 		},
 		nil,
 		ec.marshalNAction2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionᚄ,
@@ -4543,7 +4863,8 @@ func (ec *executionContext) _Query_fieldConfiguration(ctx context.Context, field
 		field,
 		ec.fieldContext_Query_fieldConfiguration,
 		func(ctx context.Context) (any, error) {
-			return ec.resolvers.Query().FieldConfiguration(ctx)
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Query().FieldConfiguration(ctx, fc.Args["workspaceId"].(string))
 		},
 		nil,
 		ec.marshalNFieldConfiguration2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐFieldConfiguration,
@@ -4552,7 +4873,7 @@ func (ec *executionContext) _Query_fieldConfiguration(ctx context.Context, field
 	)
 }
 
-func (ec *executionContext) fieldContext_Query_fieldConfiguration(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Query_fieldConfiguration(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Query",
 		Field:      field,
@@ -4567,6 +4888,17 @@ func (ec *executionContext) fieldContext_Query_fieldConfiguration(_ context.Cont
 			}
 			return nil, fmt.Errorf("no field named %q was found under type FieldConfiguration", field.Name)
 		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_fieldConfiguration_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
 	}
 	return fc, nil
 }
@@ -4652,7 +4984,8 @@ func (ec *executionContext) _Query_sources(ctx context.Context, field graphql.Co
 		field,
 		ec.fieldContext_Query_sources,
 		func(ctx context.Context) (any, error) {
-			return ec.resolvers.Query().Sources(ctx)
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Query().Sources(ctx, fc.Args["workspaceId"].(string))
 		},
 		nil,
 		ec.marshalNSource2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSourceᚄ,
@@ -4661,7 +4994,7 @@ func (ec *executionContext) _Query_sources(ctx context.Context, field graphql.Co
 	)
 }
 
-func (ec *executionContext) fieldContext_Query_sources(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Query_sources(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Query",
 		Field:      field,
@@ -4689,6 +5022,17 @@ func (ec *executionContext) fieldContext_Query_sources(_ context.Context, field 
 			return nil, fmt.Errorf("no field named %q was found under type Source", field.Name)
 		},
 	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_sources_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
 	return fc, nil
 }
 
@@ -4700,7 +5044,7 @@ func (ec *executionContext) _Query_source(ctx context.Context, field graphql.Col
 		ec.fieldContext_Query_source,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Query().Source(ctx, fc.Args["id"].(string))
+			return ec.resolvers.Query().Source(ctx, fc.Args["workspaceId"].(string), fc.Args["id"].(string))
 		},
 		nil,
 		ec.marshalOSource2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSource,
@@ -4759,7 +5103,7 @@ func (ec *executionContext) _Query_knowledge(ctx context.Context, field graphql.
 		ec.fieldContext_Query_knowledge,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Query().Knowledge(ctx, fc.Args["id"].(string))
+			return ec.resolvers.Query().Knowledge(ctx, fc.Args["workspaceId"].(string), fc.Args["id"].(string))
 		},
 		nil,
 		ec.marshalOKnowledge2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐKnowledge,
@@ -4822,7 +5166,7 @@ func (ec *executionContext) _Query_knowledges(ctx context.Context, field graphql
 		ec.fieldContext_Query_knowledges,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Query().Knowledges(ctx, fc.Args["limit"].(*int), fc.Args["offset"].(*int))
+			return ec.resolvers.Query().Knowledges(ctx, fc.Args["workspaceId"].(string), fc.Args["limit"].(*int), fc.Args["offset"].(*int))
 		},
 		nil,
 		ec.marshalNKnowledgeConnection2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐKnowledgeConnection,
@@ -5465,6 +5809,64 @@ func (ec *executionContext) fieldContext_Source_updatedAt(_ context.Context, fie
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Workspace_id(ctx context.Context, field graphql.CollectedField, obj *graphql1.Workspace) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Workspace_id,
+		func(ctx context.Context) (any, error) {
+			return obj.ID, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Workspace_id(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Workspace",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Workspace_name(ctx context.Context, field graphql.CollectedField, obj *graphql1.Workspace) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Workspace_name,
+		func(ctx context.Context) (any, error) {
+			return obj.Name, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Workspace_name(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Workspace",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
 		},
 	}
 	return fc, nil
@@ -8434,6 +8836,50 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 			}
 
 			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "workspace":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_workspace(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "workspaces":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_workspaces(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
 		case "cases":
 			field := field
 
@@ -8943,6 +9389,50 @@ func (ec *executionContext) _Source(ctx context.Context, sel ast.SelectionSet, o
 			}
 		case "updatedAt":
 			out.Values[i] = ec._Source_updatedAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var workspaceImplementors = []string{"Workspace"}
+
+func (ec *executionContext) _Workspace(ctx context.Context, sel ast.SelectionSet, obj *graphql1.Workspace) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, workspaceImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("Workspace")
+		case "id":
+			out.Values[i] = ec._Workspace_id(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "name":
+			out.Values[i] = ec._Workspace_name(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
@@ -10070,6 +10560,64 @@ func (ec *executionContext) unmarshalNUpdateSlackSourceInput2githubᚗcomᚋsecm
 func (ec *executionContext) unmarshalNUpdateSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateSourceInput(ctx context.Context, v any) (graphql1.UpdateSourceInput, error) {
 	res, err := ec.unmarshalInputUpdateSourceInput(ctx, v)
 	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNWorkspace2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐWorkspace(ctx context.Context, sel ast.SelectionSet, v graphql1.Workspace) graphql.Marshaler {
+	return ec._Workspace(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNWorkspace2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐWorkspaceᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.Workspace) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNWorkspace2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐWorkspace(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNWorkspace2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐWorkspace(ctx context.Context, sel ast.SelectionSet, v *graphql1.Workspace) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._Workspace(ctx, sel, v)
 }
 
 func (ec *executionContext) marshalN__Directive2githubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐDirective(ctx context.Context, sel ast.SelectionSet, v introspection.Directive) graphql.Marshaler {

@@ -241,7 +241,7 @@ func TestSlackSignatureMiddleware(t *testing.T) {
 func TestSlackWebhookHandler_URLVerification(t *testing.T) {
 	signingSecret := "test-signing-secret"
 	repo := memory.New()
-	uc := usecase.New(repo)
+	uc := usecase.New(repo, nil)
 	handler := httpctrl.NewSlackWebhookHandler(uc.Slack)
 
 	challenge := "test-challenge-token"
@@ -283,7 +283,7 @@ func TestSlackWebhookHandler_URLVerification(t *testing.T) {
 func TestSlackWebhookHandler_MessageEvent(t *testing.T) {
 	signingSecret := "test-signing-secret"
 	repo := memory.New()
-	uc := usecase.New(repo)
+	uc := usecase.New(repo, nil)
 	handler := httpctrl.NewSlackWebhookHandler(uc.Slack)
 
 	// Use raw JSON matching Slack's actual format
@@ -350,7 +350,7 @@ func TestSlackWebhookHandler_MessageEvent(t *testing.T) {
 func TestSlackWebhookHandler_InvalidSignature(t *testing.T) {
 	signingSecret := "test-signing-secret"
 	repo := memory.New()
-	uc := usecase.New(repo)
+	uc := usecase.New(repo, nil)
 	handler := httpctrl.NewSlackWebhookHandler(uc.Slack)
 
 	reqBody := map[string]string{
@@ -383,7 +383,7 @@ func TestSlackWebhookHandler_InvalidSignature(t *testing.T) {
 func TestSlackWebhookHandler_TimestampTooOld(t *testing.T) {
 	signingSecret := "test-signing-secret"
 	repo := memory.New()
-	uc := usecase.New(repo)
+	uc := usecase.New(repo, nil)
 	handler := httpctrl.NewSlackWebhookHandler(uc.Slack)
 
 	reqBody := map[string]string{
@@ -418,7 +418,7 @@ func TestSlackWebhookHandler_TimestampTooOld(t *testing.T) {
 func TestSlackWebhookHandler_MissingHeaders(t *testing.T) {
 	signingSecret := "test-signing-secret"
 	repo := memory.New()
-	uc := usecase.New(repo)
+	uc := usecase.New(repo, nil)
 	handler := httpctrl.NewSlackWebhookHandler(uc.Slack)
 
 	reqBody := map[string]string{

@@ -41,8 +41,8 @@ type mockSlackService struct {
 	getChannelNamesFn      func(ctx context.Context, ids []string) (map[string]string, error)
 	getUserInfoFn          func(ctx context.Context, userID string) (*slack.User, error)
 	listUsersFn            func(ctx context.Context) ([]*slack.User, error)
-	createChannelFn        func(ctx context.Context, riskID int64, riskName string) (string, error)
-	renameChannelFn        func(ctx context.Context, channelID string, riskID int64, riskName string) error
+	createChannelFn        func(ctx context.Context, caseID int64, caseName string, prefix string) (string, error)
+	renameChannelFn        func(ctx context.Context, channelID string, caseID int64, caseName string, prefix string) error
 	inviteUsersToChannelFn func(ctx context.Context, channelID string, userIDs []string) error
 	invitedChannelID       string
 	invitedUserIDs         []string
@@ -92,16 +92,16 @@ func (m *mockSlackService) ListUsers(ctx context.Context) ([]*slack.User, error)
 	}, nil
 }
 
-func (m *mockSlackService) CreateChannel(ctx context.Context, riskID int64, riskName string) (string, error) {
+func (m *mockSlackService) CreateChannel(ctx context.Context, caseID int64, caseName string, prefix string) (string, error) {
 	if m.createChannelFn != nil {
-		return m.createChannelFn(ctx, riskID, riskName)
+		return m.createChannelFn(ctx, caseID, caseName, prefix)
 	}
-	return "C" + riskName, nil
+	return "C" + caseName, nil
 }
 
-func (m *mockSlackService) RenameChannel(ctx context.Context, channelID string, riskID int64, riskName string) error {
+func (m *mockSlackService) RenameChannel(ctx context.Context, channelID string, caseID int64, caseName string, prefix string) error {
 	if m.renameChannelFn != nil {
-		return m.renameChannelFn(ctx, channelID, riskID, riskName)
+		return m.renameChannelFn(ctx, channelID, caseID, caseName, prefix)
 	}
 	return nil
 }
@@ -136,7 +136,7 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 			Enabled:     true,
 		}
 
-		source, err := uc.CreateNotionDBSource(ctx, input)
+		source, err := uc.CreateNotionDBSource(ctx, testWorkspaceID, input)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, source.ID).NotEqual(model.SourceID(""))
@@ -161,7 +161,7 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 			Enabled:    true,
 		}
 
-		source, err := uc.CreateNotionDBSource(ctx, input)
+		source, err := uc.CreateNotionDBSource(ctx, testWorkspaceID, input)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, source.Name).Equal("Custom Name")
@@ -177,7 +177,7 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 			Enabled:    true,
 		}
 
-		_, err := uc.CreateNotionDBSource(ctx, input)
+		_, err := uc.CreateNotionDBSource(ctx, testWorkspaceID, input)
 		gt.Value(t, err).NotNil()
 	})
 
@@ -196,7 +196,7 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 			Enabled:    true,
 		}
 
-		_, err := uc.CreateNotionDBSource(ctx, input)
+		_, err := uc.CreateNotionDBSource(ctx, testWorkspaceID, input)
 		gt.Value(t, err).NotNil()
 	})
 
@@ -211,7 +211,7 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 			Enabled:    true,
 		}
 
-		source, err := uc.CreateNotionDBSource(ctx, input)
+		source, err := uc.CreateNotionDBSource(ctx, testWorkspaceID, input)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, source.Name).Equal("Manual Source")
@@ -229,7 +229,7 @@ func TestSourceUseCase_UpdateSource(t *testing.T) {
 			SourceType: model.SourceTypeNotionDB,
 			Enabled:    true,
 		}
-		created, err := repo.Source().Create(ctx, source)
+		created, err := repo.Source().Create(ctx, testWorkspaceID, source)
 		gt.NoError(t, err).Required()
 
 		newName := "Updated"
@@ -242,7 +242,7 @@ func TestSourceUseCase_UpdateSource(t *testing.T) {
 			Enabled:     &newEnabled,
 		}
 
-		updated, err := uc.UpdateSource(ctx, input)
+		updated, err := uc.UpdateSource(ctx, testWorkspaceID, input)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, updated.Name).Equal("Updated")
@@ -261,7 +261,7 @@ func TestSourceUseCase_UpdateSource(t *testing.T) {
 			SourceType:  model.SourceTypeNotionDB,
 			Enabled:     true,
 		}
-		created, err := repo.Source().Create(ctx, source)
+		created, err := repo.Source().Create(ctx, testWorkspaceID, source)
 		gt.NoError(t, err).Required()
 
 		newName := "New Name"
@@ -270,7 +270,7 @@ func TestSourceUseCase_UpdateSource(t *testing.T) {
 			Name: &newName,
 		}
 
-		updated, err := uc.UpdateSource(ctx, input)
+		updated, err := uc.UpdateSource(ctx, testWorkspaceID, input)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, updated.Name).Equal("New Name")
@@ -287,7 +287,7 @@ func TestSourceUseCase_UpdateSource(t *testing.T) {
 			ID: "",
 		}
 
-		_, err := uc.UpdateSource(ctx, input)
+		_, err := uc.UpdateSource(ctx, testWorkspaceID, input)
 		gt.Value(t, err).NotNil()
 	})
 
@@ -302,7 +302,7 @@ func TestSourceUseCase_UpdateSource(t *testing.T) {
 			Name: &newName,
 		}
 
-		_, err := uc.UpdateSource(ctx, input)
+		_, err := uc.UpdateSource(ctx, testWorkspaceID, input)
 		gt.Value(t, err).NotNil()
 	})
 }
@@ -318,12 +318,12 @@ func TestSourceUseCase_DeleteSource(t *testing.T) {
 			SourceType: model.SourceTypeNotionDB,
 			Enabled:    true,
 		}
-		created, err := repo.Source().Create(ctx, source)
+		created, err := repo.Source().Create(ctx, testWorkspaceID, source)
 		gt.NoError(t, err).Required()
 
-		gt.NoError(t, uc.DeleteSource(ctx, created.ID)).Required()
+		gt.NoError(t, uc.DeleteSource(ctx, testWorkspaceID, created.ID)).Required()
 
-		_, err = repo.Source().Get(ctx, created.ID)
+		_, err = repo.Source().Get(ctx, testWorkspaceID, created.ID)
 		gt.Value(t, err).NotNil()
 	})
 
@@ -332,7 +332,7 @@ func TestSourceUseCase_DeleteSource(t *testing.T) {
 		uc := usecase.NewSourceUseCase(repo, nil, nil)
 		ctx := context.Background()
 
-		err := uc.DeleteSource(ctx, "")
+		err := uc.DeleteSource(ctx, testWorkspaceID, "")
 		gt.Value(t, err).NotNil()
 	})
 
@@ -341,7 +341,7 @@ func TestSourceUseCase_DeleteSource(t *testing.T) {
 		uc := usecase.NewSourceUseCase(repo, nil, nil)
 		ctx := context.Background()
 
-		err := uc.DeleteSource(ctx, "non-existent-id")
+		err := uc.DeleteSource(ctx, testWorkspaceID, "non-existent-id")
 		gt.Value(t, err).NotNil()
 	})
 }
@@ -357,10 +357,10 @@ func TestSourceUseCase_GetSource(t *testing.T) {
 			SourceType: model.SourceTypeNotionDB,
 			Enabled:    true,
 		}
-		created, err := repo.Source().Create(ctx, source)
+		created, err := repo.Source().Create(ctx, testWorkspaceID, source)
 		gt.NoError(t, err).Required()
 
-		retrieved, err := uc.GetSource(ctx, created.ID)
+		retrieved, err := uc.GetSource(ctx, testWorkspaceID, created.ID)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, retrieved.ID).Equal(created.ID)
@@ -372,7 +372,7 @@ func TestSourceUseCase_GetSource(t *testing.T) {
 		uc := usecase.NewSourceUseCase(repo, nil, nil)
 		ctx := context.Background()
 
-		_, err := uc.GetSource(ctx, "")
+		_, err := uc.GetSource(ctx, testWorkspaceID, "")
 		gt.Value(t, err).NotNil()
 	})
 
@@ -381,7 +381,7 @@ func TestSourceUseCase_GetSource(t *testing.T) {
 		uc := usecase.NewSourceUseCase(repo, nil, nil)
 		ctx := context.Background()
 
-		_, err := uc.GetSource(ctx, "non-existent-id")
+		_, err := uc.GetSource(ctx, testWorkspaceID, "non-existent-id")
 		gt.Value(t, err).NotNil()
 	})
 }
@@ -392,16 +392,16 @@ func TestSourceUseCase_ListSources(t *testing.T) {
 		uc := usecase.NewSourceUseCase(repo, nil, nil)
 		ctx := context.Background()
 
-		sources, err := uc.ListSources(ctx)
+		sources, err := uc.ListSources(ctx, testWorkspaceID)
 		gt.NoError(t, err).Required()
 		gt.Array(t, sources).Length(0)
 
 		source1 := &model.Source{Name: "Source 1", SourceType: model.SourceTypeNotionDB, Enabled: true}
 		source2 := &model.Source{Name: "Source 2", SourceType: model.SourceTypeNotionDB, Enabled: false}
-		_, _ = repo.Source().Create(ctx, source1)
-		_, _ = repo.Source().Create(ctx, source2)
+		_, _ = repo.Source().Create(ctx, testWorkspaceID, source1)
+		_, _ = repo.Source().Create(ctx, testWorkspaceID, source2)
 
-		sources, err = uc.ListSources(ctx)
+		sources, err = uc.ListSources(ctx, testWorkspaceID)
 		gt.NoError(t, err).Required()
 		gt.Array(t, sources).Length(2)
 	})
@@ -493,7 +493,7 @@ func TestSourceUseCase_CreateSlackSource(t *testing.T) {
 			Enabled:     true,
 		}
 
-		source, err := uc.CreateSlackSource(ctx, input)
+		source, err := uc.CreateSlackSource(ctx, testWorkspaceID, input)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, source.ID).NotEqual(model.SourceID(""))
@@ -516,7 +516,7 @@ func TestSourceUseCase_CreateSlackSource(t *testing.T) {
 			Enabled:    true,
 		}
 
-		source, err := uc.CreateSlackSource(ctx, input)
+		source, err := uc.CreateSlackSource(ctx, testWorkspaceID, input)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, source.Name).Equal("Slack Source")
@@ -533,7 +533,7 @@ func TestSourceUseCase_CreateSlackSource(t *testing.T) {
 			Enabled:    true,
 		}
 
-		_, err := uc.CreateSlackSource(ctx, input)
+		_, err := uc.CreateSlackSource(ctx, testWorkspaceID, input)
 		gt.Value(t, err).NotNil()
 	})
 
@@ -548,7 +548,7 @@ func TestSourceUseCase_CreateSlackSource(t *testing.T) {
 			Enabled:    true,
 		}
 
-		source, err := uc.CreateSlackSource(ctx, input)
+		source, err := uc.CreateSlackSource(ctx, testWorkspaceID, input)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, source.SlackConfig.Channels[0].Name).Equal("C001")
@@ -570,7 +570,7 @@ func TestSourceUseCase_UpdateSlackSource(t *testing.T) {
 				Channels: []model.SlackChannel{{ID: "C001", Name: "general"}},
 			},
 		}
-		created, err := repo.Source().Create(ctx, source)
+		created, err := repo.Source().Create(ctx, testWorkspaceID, source)
 		gt.NoError(t, err).Required()
 
 		newName := "Updated"
@@ -583,7 +583,7 @@ func TestSourceUseCase_UpdateSlackSource(t *testing.T) {
 			Enabled:     &newEnabled,
 		}
 
-		updated, err := uc.UpdateSlackSource(ctx, input)
+		updated, err := uc.UpdateSlackSource(ctx, testWorkspaceID, input)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, updated.Name).Equal("Updated")
@@ -611,7 +611,7 @@ func TestSourceUseCase_UpdateSlackSource(t *testing.T) {
 				Channels: []model.SlackChannel{{ID: "C001", Name: "general"}},
 			},
 		}
-		created, err := repo.Source().Create(ctx, source)
+		created, err := repo.Source().Create(ctx, testWorkspaceID, source)
 		gt.NoError(t, err).Required()
 
 		input := usecase.UpdateSlackSourceInput{
@@ -619,7 +619,7 @@ func TestSourceUseCase_UpdateSlackSource(t *testing.T) {
 			ChannelIDs: []string{"C003"},
 		}
 
-		updated, err := uc.UpdateSlackSource(ctx, input)
+		updated, err := uc.UpdateSlackSource(ctx, testWorkspaceID, input)
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, updated.SlackConfig.Channels).Length(1)
@@ -635,7 +635,7 @@ func TestSourceUseCase_UpdateSlackSource(t *testing.T) {
 			ID: "",
 		}
 
-		_, err := uc.UpdateSlackSource(ctx, input)
+		_, err := uc.UpdateSlackSource(ctx, testWorkspaceID, input)
 		gt.Value(t, err).NotNil()
 	})
 
@@ -649,7 +649,7 @@ func TestSourceUseCase_UpdateSlackSource(t *testing.T) {
 			SourceType: model.SourceTypeNotionDB,
 			Enabled:    true,
 		}
-		created, err := repo.Source().Create(ctx, source)
+		created, err := repo.Source().Create(ctx, testWorkspaceID, source)
 		gt.NoError(t, err).Required()
 
 		newName := "New Name"
@@ -658,7 +658,7 @@ func TestSourceUseCase_UpdateSlackSource(t *testing.T) {
 			Name: &newName,
 		}
 
-		_, err = uc.UpdateSlackSource(ctx, input)
+		_, err = uc.UpdateSlackSource(ctx, testWorkspaceID, input)
 		gt.Value(t, err).NotNil()
 	})
 }

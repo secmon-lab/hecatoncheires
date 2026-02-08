@@ -14,37 +14,25 @@ import (
 )
 
 type caseRepository struct {
-	client           *firestore.Client
-	collectionPrefix string
+	client *firestore.Client
 }
 
 func newCaseRepository(client *firestore.Client) *caseRepository {
 	return &caseRepository{
-		client:           client,
-		collectionPrefix: "",
+		client: client,
 	}
 }
 
-func (r *caseRepository) casesCollection() string {
-	if r.collectionPrefix != "" {
-		return r.collectionPrefix + "_cases"
-	}
-	return "cases"
+func (r *caseRepository) casesCollection(workspaceID string) *firestore.CollectionRef {
+	return r.client.Collection("workspaces").Doc(workspaceID).Collection("cases")
 }
 
-func (r *caseRepository) counterCollection() string {
-	if r.collectionPrefix != "" {
-		return r.collectionPrefix + "_counters"
-	}
-	return "counters"
+func (r *caseRepository) caseCounterRef(workspaceID string) *firestore.DocumentRef {
+	return r.client.Collection("counters").Doc("case").Collection("workspaces").Doc(workspaceID)
 }
 
-func (r *caseRepository) caseCounterDoc() string {
-	return "case_counter"
-}
-
-func (r *caseRepository) getNextID(ctx context.Context) (int64, error) {
-	counterRef := r.client.Collection(r.counterCollection()).Doc(r.caseCounterDoc())
+func (r *caseRepository) getNextID(ctx context.Context, workspaceID string) (int64, error) {
+	counterRef := r.caseCounterRef(workspaceID)
 
 	var nextID int64
 	err := r.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
@@ -81,8 +69,8 @@ func (r *caseRepository) getNextID(ctx context.Context) (int64, error) {
 	return nextID, nil
 }
 
-func (r *caseRepository) Create(ctx context.Context, c *model.Case) (*model.Case, error) {
-	nextID, err := r.getNextID(ctx)
+func (r *caseRepository) Create(ctx context.Context, workspaceID string, c *model.Case) (*model.Case, error) {
+	nextID, err := r.getNextID(ctx, workspaceID)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to get next ID")
 	}
@@ -101,7 +89,7 @@ func (r *caseRepository) Create(ctx context.Context, c *model.Case) (*model.Case
 
 	docID := fmt.Sprintf("%d", created.ID)
 
-	_, err = r.client.Collection(r.casesCollection()).Doc(docID).Set(ctx, created)
+	_, err = r.casesCollection(workspaceID).Doc(docID).Set(ctx, created)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to create case", goerr.V("id", created.ID))
 	}
@@ -109,9 +97,9 @@ func (r *caseRepository) Create(ctx context.Context, c *model.Case) (*model.Case
 	return created, nil
 }
 
-func (r *caseRepository) Get(ctx context.Context, id int64) (*model.Case, error) {
+func (r *caseRepository) Get(ctx context.Context, workspaceID string, id int64) (*model.Case, error) {
 	docID := fmt.Sprintf("%d", id)
-	docSnap, err := r.client.Collection(r.casesCollection()).Doc(docID).Get(ctx)
+	docSnap, err := r.casesCollection(workspaceID).Doc(docID).Get(ctx)
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
 			return nil, goerr.Wrap(ErrNotFound, "case not found", goerr.V("id", id))
@@ -127,8 +115,8 @@ func (r *caseRepository) Get(ctx context.Context, id int64) (*model.Case, error)
 	return &c, nil
 }
 
-func (r *caseRepository) List(ctx context.Context) ([]*model.Case, error) {
-	iter := r.client.Collection(r.casesCollection()).Documents(ctx)
+func (r *caseRepository) List(ctx context.Context, workspaceID string) ([]*model.Case, error) {
+	iter := r.casesCollection(workspaceID).Documents(ctx)
 	defer iter.Stop()
 
 	var cases []*model.Case
@@ -152,9 +140,9 @@ func (r *caseRepository) List(ctx context.Context) ([]*model.Case, error) {
 	return cases, nil
 }
 
-func (r *caseRepository) Update(ctx context.Context, c *model.Case) (*model.Case, error) {
+func (r *caseRepository) Update(ctx context.Context, workspaceID string, c *model.Case) (*model.Case, error) {
 	docID := fmt.Sprintf("%d", c.ID)
-	docRef := r.client.Collection(r.casesCollection()).Doc(docID)
+	docRef := r.casesCollection(workspaceID).Doc(docID)
 
 	// Check if document exists
 	_, err := docRef.Get(ctx)
@@ -185,9 +173,9 @@ func (r *caseRepository) Update(ctx context.Context, c *model.Case) (*model.Case
 	return updated, nil
 }
 
-func (r *caseRepository) Delete(ctx context.Context, id int64) error {
+func (r *caseRepository) Delete(ctx context.Context, workspaceID string, id int64) error {
 	docID := fmt.Sprintf("%d", id)
-	docRef := r.client.Collection(r.casesCollection()).Doc(docID)
+	docRef := r.casesCollection(workspaceID).Doc(docID)
 
 	// Check if document exists
 	_, err := docRef.Get(ctx)

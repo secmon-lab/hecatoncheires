@@ -1,5 +1,6 @@
 import { useMutation } from '@apollo/client'
 import { AlertTriangle } from 'lucide-react'
+import { useWorkspace } from '../../contexts/workspace-context'
 import Modal from '../Modal'
 import Button from '../Button'
 import { DELETE_SOURCE, GET_SOURCES } from '../../graphql/source'
@@ -20,12 +21,14 @@ export default function SourceDeleteDialog({
   sourceId,
   sourceName,
 }: SourceDeleteDialogProps) {
+  const { currentWorkspace } = useWorkspace()
   const [deleteSource, { loading }] = useMutation(DELETE_SOURCE, {
     update(cache) {
-      const existingData = cache.readQuery<{ sources: { id: string }[] }>({ query: GET_SOURCES })
+      const existingData = cache.readQuery<{ sources: { id: string }[] }>({ query: GET_SOURCES, variables: { workspaceId: currentWorkspace!.id } })
       if (existingData) {
         cache.writeQuery({
           query: GET_SOURCES,
+          variables: { workspaceId: currentWorkspace!.id },
           data: {
             sources: existingData.sources.filter((s) => s.id !== sourceId),
           },
@@ -42,7 +45,7 @@ export default function SourceDeleteDialog({
 
   const handleDelete = async () => {
     await deleteSource({
-      variables: { id: sourceId },
+      variables: { workspaceId: currentWorkspace!.id, id: sourceId },
     })
   }
 

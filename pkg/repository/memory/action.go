@@ -11,14 +11,23 @@ import (
 
 type actionRepository struct {
 	mu      sync.RWMutex
-	actions map[int64]*model.Action
-	nextID  int64
+	actions map[string]map[int64]*model.Action
+	nextID  map[string]int64
 }
 
 func newActionRepository() *actionRepository {
 	return &actionRepository{
-		actions: make(map[int64]*model.Action),
-		nextID:  1,
+		actions: make(map[string]map[int64]*model.Action),
+		nextID:  make(map[string]int64),
+	}
+}
+
+func (r *actionRepository) ensureWorkspace(workspaceID string) {
+	if _, exists := r.actions[workspaceID]; !exists {
+		r.actions[workspaceID] = make(map[int64]*model.Action)
+	}
+	if _, exists := r.nextID[workspaceID]; !exists {
+		r.nextID[workspaceID] = 1
 	}
 }
 
@@ -40,26 +49,33 @@ func copyAction(a *model.Action) *model.Action {
 	}
 }
 
-func (r *actionRepository) Create(ctx context.Context, action *model.Action) (*model.Action, error) {
+func (r *actionRepository) Create(ctx context.Context, workspaceID string, action *model.Action) (*model.Action, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	r.ensureWorkspace(workspaceID)
+
 	now := time.Now().UTC()
 	created := copyAction(action)
-	created.ID = r.nextID
+	created.ID = r.nextID[workspaceID]
 	created.CreatedAt = now
 	created.UpdatedAt = now
-	r.nextID++
+	r.nextID[workspaceID]++
 
-	r.actions[created.ID] = created
+	r.actions[workspaceID][created.ID] = created
 	return copyAction(created), nil
 }
 
-func (r *actionRepository) Get(ctx context.Context, id int64) (*model.Action, error) {
+func (r *actionRepository) Get(ctx context.Context, workspaceID string, id int64) (*model.Action, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	action, exists := r.actions[id]
+	ws, exists := r.actions[workspaceID]
+	if !exists {
+		return nil, goerr.Wrap(ErrNotFound, "action not found", goerr.V("id", id))
+	}
+
+	action, exists := ws[id]
 	if !exists {
 		return nil, goerr.Wrap(ErrNotFound, "action not found", goerr.V("id", id))
 	}
@@ -67,23 +83,33 @@ func (r *actionRepository) Get(ctx context.Context, id int64) (*model.Action, er
 	return copyAction(action), nil
 }
 
-func (r *actionRepository) List(ctx context.Context) ([]*model.Action, error) {
+func (r *actionRepository) List(ctx context.Context, workspaceID string) ([]*model.Action, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	actions := make([]*model.Action, 0, len(r.actions))
-	for _, action := range r.actions {
+	ws, exists := r.actions[workspaceID]
+	if !exists {
+		return []*model.Action{}, nil
+	}
+
+	actions := make([]*model.Action, 0, len(ws))
+	for _, action := range ws {
 		actions = append(actions, copyAction(action))
 	}
 
 	return actions, nil
 }
 
-func (r *actionRepository) Update(ctx context.Context, action *model.Action) (*model.Action, error) {
+func (r *actionRepository) Update(ctx context.Context, workspaceID string, action *model.Action) (*model.Action, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	existing, exists := r.actions[action.ID]
+	ws, exists := r.actions[workspaceID]
+	if !exists {
+		return nil, goerr.Wrap(ErrNotFound, "action not found", goerr.V("id", action.ID))
+	}
+
+	existing, exists := ws[action.ID]
 	if !exists {
 		return nil, goerr.Wrap(ErrNotFound, "action not found", goerr.V("id", action.ID))
 	}
@@ -92,28 +118,38 @@ func (r *actionRepository) Update(ctx context.Context, action *model.Action) (*m
 	updated.CreatedAt = existing.CreatedAt
 	updated.UpdatedAt = time.Now().UTC()
 
-	r.actions[updated.ID] = updated
+	r.actions[workspaceID][updated.ID] = updated
 	return copyAction(updated), nil
 }
 
-func (r *actionRepository) Delete(ctx context.Context, id int64) error {
+func (r *actionRepository) Delete(ctx context.Context, workspaceID string, id int64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, exists := r.actions[id]; !exists {
+	ws, exists := r.actions[workspaceID]
+	if !exists {
 		return goerr.Wrap(ErrNotFound, "action not found", goerr.V("id", id))
 	}
 
-	delete(r.actions, id)
+	if _, exists := ws[id]; !exists {
+		return goerr.Wrap(ErrNotFound, "action not found", goerr.V("id", id))
+	}
+
+	delete(r.actions[workspaceID], id)
 	return nil
 }
 
-func (r *actionRepository) GetByCase(ctx context.Context, caseID int64) ([]*model.Action, error) {
+func (r *actionRepository) GetByCase(ctx context.Context, workspaceID string, caseID int64) ([]*model.Action, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	ws, exists := r.actions[workspaceID]
+	if !exists {
+		return []*model.Action{}, nil
+	}
+
 	actions := make([]*model.Action, 0)
-	for _, action := range r.actions {
+	for _, action := range ws {
 		if action.CaseID == caseID {
 			actions = append(actions, copyAction(action))
 		}
@@ -122,7 +158,7 @@ func (r *actionRepository) GetByCase(ctx context.Context, caseID int64) ([]*mode
 	return actions, nil
 }
 
-func (r *actionRepository) GetByCases(ctx context.Context, caseIDs []int64) (map[int64][]*model.Action, error) {
+func (r *actionRepository) GetByCases(ctx context.Context, workspaceID string, caseIDs []int64) (map[int64][]*model.Action, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -138,8 +174,13 @@ func (r *actionRepository) GetByCases(ctx context.Context, caseIDs []int64) (map
 		result[caseID] = make([]*model.Action, 0)
 	}
 
+	ws, exists := r.actions[workspaceID]
+	if !exists {
+		return result, nil
+	}
+
 	// Collect actions for each case
-	for _, action := range r.actions {
+	for _, action := range ws {
 		if caseIDMap[action.CaseID] {
 			result[action.CaseID] = append(result[action.CaseID], copyAction(action))
 		}

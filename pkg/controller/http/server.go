@@ -1,6 +1,7 @@
 package http
 
 import (
+	"encoding/json"
 	"io/fs"
 	"net/http"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/frontend"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/safe"
@@ -23,9 +25,16 @@ type Server struct {
 	slackService        slack.Service
 	slackWebhookHandler *SlackWebhookHandler
 	slackSigningSecret  string
+	workspaceRegistry   *model.WorkspaceRegistry
 }
 
 type Options func(*Server)
+
+func WithWorkspaceRegistry(registry *model.WorkspaceRegistry) Options {
+	return func(s *Server) {
+		s.workspaceRegistry = registry
+	}
+}
 
 func WithGraphiQL(enabled bool) Options {
 	return func(s *Server) {
@@ -94,6 +103,11 @@ func New(gqlHandler http.Handler, opts ...Options) (*Server, error) {
 		})
 	}
 
+	// Workspace list endpoint
+	if s.workspaceRegistry != nil {
+		r.Get("/api/workspaces", workspacesHandler(s.workspaceRegistry))
+	}
+
 	// Slack webhook endpoint (if configured) - No auth required, uses signature verification
 	if s.slackWebhookHandler != nil {
 		r.Route("/hooks/slack", func(r chi.Router) {
@@ -140,6 +154,35 @@ func accessLogger(next http.Handler) http.Handler {
 
 		next.ServeHTTP(ww, r)
 	})
+}
+
+// workspacesHandler returns a handler that serves the workspace list as JSON
+func workspacesHandler(registry *model.WorkspaceRegistry) http.HandlerFunc {
+	type workspaceResponse struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	type response struct {
+		Workspaces []workspaceResponse `json:"workspaces"`
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		workspaces := registry.Workspaces()
+		resp := response{
+			Workspaces: make([]workspaceResponse, len(workspaces)),
+		}
+		for i, ws := range workspaces {
+			resp.Workspaces[i] = workspaceResponse{
+				ID:   ws.ID,
+				Name: ws.Name,
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			logging.Default().Error("failed to encode workspaces response", "error", err.Error())
+		}
+	}
 }
 
 // spaHandler handles SPA routing by serving static files and falling back to index.html

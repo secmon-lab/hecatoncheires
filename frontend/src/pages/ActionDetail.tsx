@@ -7,6 +7,7 @@ import Chip from '../components/Chip'
 import ActionForm from './ActionForm'
 import ActionDeleteDialog from './ActionDeleteDialog'
 import { GET_ACTION } from '../graphql/action'
+import { useWorkspace } from '../contexts/workspace-context'
 import styles from './ActionDetail.module.css'
 
 interface Action {
@@ -47,20 +48,21 @@ const STATUS_COLORS: Record<string, number> = {
 export default function ActionDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { currentWorkspace } = useWorkspace()
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
   const { data: actionData, loading: actionLoading, error: actionError } = useQuery(GET_ACTION, {
-    variables: { id: parseInt(id || '0') },
-    skip: !id,
+    variables: { workspaceId: currentWorkspace!.id, id: parseInt(id || '0') },
+    skip: !id || !currentWorkspace,
   })
 
   const action: Action | undefined = actionData?.action
 
   const handleBack = () => {
-    navigate('/actions')
+    navigate(`/ws/${currentWorkspace!.id}/actions`)
   }
 
   const handleEdit = () => {
@@ -73,12 +75,12 @@ export default function ActionDetail() {
 
   const handleDeleteConfirm = () => {
     setIsDeleteDialogOpen(false)
-    navigate('/actions')
+    navigate(`/ws/${currentWorkspace!.id}/actions`)
   }
 
   const handleCaseClick = () => {
     if (action?.case) {
-      navigate(`/cases/${action.case.id}`)
+      navigate(`/ws/${currentWorkspace!.id}/cases/${action.case.id}`)
     }
   }
 

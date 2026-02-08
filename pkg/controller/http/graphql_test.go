@@ -24,9 +24,11 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
 
+const testWorkspaceID = "test-ws"
+
 // setupGraphQLServer creates a test GraphQL server with HTTP handler
 func setupGraphQLServer(repo interfaces.Repository) (http.Handler, error) {
-	uc := usecase.New(repo)
+	uc := usecase.New(repo, nil)
 	resolver := gqlctrl.NewResolver(repo, uc)
 	srv := handler.NewDefaultServer(
 		gqlctrl.NewExecutableSchema(gqlctrl.Config{Resolvers: resolver}),
@@ -121,8 +123,8 @@ func TestGraphQLHandler_CasesQuery(t *testing.T) {
 
 	t.Run("empty cases list", func(t *testing.T) {
 		query := `
-			query {
-				cases {
+			query($workspaceId: String!) {
+				cases(workspaceId: $workspaceId) {
 					id
 					title
 					description
@@ -131,7 +133,11 @@ func TestGraphQLHandler_CasesQuery(t *testing.T) {
 			}
 		`
 
-		rec := executeGraphQLRequest(t, handler, query, nil)
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+		}
+
+		rec := executeGraphQLRequest(t, handler, query, variables)
 
 		gt.Value(t, rec.Code).Equal(http.StatusOK)
 
@@ -158,15 +164,15 @@ func TestGraphQLHandler_CasesQuery(t *testing.T) {
 			AssigneeIDs: []string{"U003"},
 		}
 
-		createdCase1, err := repo.Case().Create(ctx, case1)
+		createdCase1, err := repo.Case().Create(ctx, testWorkspaceID, case1)
 		gt.NoError(t, err).Required()
 
-		createdCase2, err := repo.Case().Create(ctx, case2)
+		createdCase2, err := repo.Case().Create(ctx, testWorkspaceID, case2)
 		gt.NoError(t, err).Required()
 
 		query := `
-			query {
-				cases {
+			query($workspaceId: String!) {
+				cases(workspaceId: $workspaceId) {
 					id
 					title
 					description
@@ -175,7 +181,11 @@ func TestGraphQLHandler_CasesQuery(t *testing.T) {
 			}
 		`
 
-		rec := executeGraphQLRequest(t, handler, query, nil)
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+		}
+
+		rec := executeGraphQLRequest(t, handler, query, variables)
 
 		gt.Value(t, rec.Code).Equal(http.StatusOK)
 
@@ -233,13 +243,13 @@ func TestGraphQLHandler_CaseQuery(t *testing.T) {
 		AssigneeIDs: []string{"U123"},
 	}
 
-	createdCase, err := repo.Case().Create(ctx, testCase)
+	createdCase, err := repo.Case().Create(ctx, testWorkspaceID, testCase)
 	gt.NoError(t, err).Required()
 
 	t.Run("query case by ID", func(t *testing.T) {
 		query := `
-			query($id: Int!) {
-				case(id: $id) {
+			query($workspaceId: String!, $id: Int!) {
+				case(workspaceId: $workspaceId, id: $id) {
 					id
 					title
 					description
@@ -249,7 +259,8 @@ func TestGraphQLHandler_CaseQuery(t *testing.T) {
 		`
 
 		variables := map[string]interface{}{
-			"id": int(createdCase.ID),
+			"workspaceId": testWorkspaceID,
+			"id":          int(createdCase.ID),
 		}
 
 		rec := executeGraphQLRequest(t, handler, query, variables)
@@ -283,8 +294,8 @@ func TestGraphQLHandler_CaseQuery(t *testing.T) {
 
 	t.Run("query non-existent case", func(t *testing.T) {
 		query := `
-			query($id: Int!) {
-				case(id: $id) {
+			query($workspaceId: String!, $id: Int!) {
+				case(workspaceId: $workspaceId, id: $id) {
 					id
 					title
 				}
@@ -292,7 +303,8 @@ func TestGraphQLHandler_CaseQuery(t *testing.T) {
 		`
 
 		variables := map[string]interface{}{
-			"id": 999999999,
+			"workspaceId": testWorkspaceID,
+			"id":          999999999,
 		}
 
 		rec := executeGraphQLRequest(t, handler, query, variables)
@@ -310,8 +322,8 @@ func TestGraphQLHandler_CreateCaseMutation(t *testing.T) {
 
 	t.Run("create new case", func(t *testing.T) {
 		mutation := `
-			mutation($input: CreateCaseInput!) {
-				createCase(input: $input) {
+			mutation($workspaceId: String!, $input: CreateCaseInput!) {
+				createCase(workspaceId: $workspaceId, input: $input) {
 					id
 					title
 					description
@@ -321,6 +333,7 @@ func TestGraphQLHandler_CreateCaseMutation(t *testing.T) {
 		`
 
 		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
 			"input": map[string]interface{}{
 				"title":       "New Case from Mutation",
 				"description": "Case created via GraphQL mutation",
@@ -357,7 +370,7 @@ func TestGraphQLHandler_CreateCaseMutation(t *testing.T) {
 
 		// Verify the case was actually saved to repository
 		ctx := context.Background()
-		savedCase, err := repo.Case().Get(ctx, int64(result.CreateCase.ID))
+		savedCase, err := repo.Case().Get(ctx, testWorkspaceID, int64(result.CreateCase.ID))
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, savedCase.Title).Equal("New Case from Mutation")
@@ -367,8 +380,8 @@ func TestGraphQLHandler_CreateCaseMutation(t *testing.T) {
 
 	t.Run("create case with missing required fields", func(t *testing.T) {
 		mutation := `
-			mutation($input: CreateCaseInput!) {
-				createCase(input: $input) {
+			mutation($workspaceId: String!, $input: CreateCaseInput!) {
+				createCase(workspaceId: $workspaceId, input: $input) {
 					id
 					title
 				}
@@ -376,6 +389,7 @@ func TestGraphQLHandler_CreateCaseMutation(t *testing.T) {
 		`
 
 		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
 			"input": map[string]interface{}{
 				"title": "", // Empty title should fail validation
 			},
@@ -402,13 +416,13 @@ func TestGraphQLHandler_UpdateCaseMutation(t *testing.T) {
 		Description: "Original Description",
 		AssigneeIDs: []string{"U001"},
 	}
-	createdCase, err := repo.Case().Create(ctx, caseToUpdate)
+	createdCase, err := repo.Case().Create(ctx, testWorkspaceID, caseToUpdate)
 	gt.NoError(t, err).Required()
 
 	t.Run("update existing case", func(t *testing.T) {
 		mutation := `
-			mutation($input: UpdateCaseInput!) {
-				updateCase(input: $input) {
+			mutation($workspaceId: String!, $input: UpdateCaseInput!) {
+				updateCase(workspaceId: $workspaceId, input: $input) {
 					id
 					title
 					description
@@ -418,6 +432,7 @@ func TestGraphQLHandler_UpdateCaseMutation(t *testing.T) {
 		`
 
 		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
 			"input": map[string]interface{}{
 				"id":          createdCase.ID,
 				"title":       "Updated Title",
@@ -454,7 +469,7 @@ func TestGraphQLHandler_UpdateCaseMutation(t *testing.T) {
 		gt.Array(t, result.UpdateCase.AssigneeIDs).Length(3)
 
 		// Verify the case was actually updated in repository
-		updatedCase, err := repo.Case().Get(ctx, createdCase.ID)
+		updatedCase, err := repo.Case().Get(ctx, testWorkspaceID, createdCase.ID)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, updatedCase.Title).Equal("Updated Title")
@@ -464,8 +479,8 @@ func TestGraphQLHandler_UpdateCaseMutation(t *testing.T) {
 
 	t.Run("update non-existent case", func(t *testing.T) {
 		mutation := `
-			mutation($input: UpdateCaseInput!) {
-				updateCase(input: $input) {
+			mutation($workspaceId: String!, $input: UpdateCaseInput!) {
+				updateCase(workspaceId: $workspaceId, input: $input) {
 					id
 					title
 				}
@@ -473,6 +488,7 @@ func TestGraphQLHandler_UpdateCaseMutation(t *testing.T) {
 		`
 
 		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
 			"input": map[string]interface{}{
 				"id":          99999,
 				"title":       "Should Fail",
@@ -501,17 +517,18 @@ func TestGraphQLHandler_DeleteCaseMutation(t *testing.T) {
 			Title:       "Case to Delete",
 			Description: "This case will be deleted",
 		}
-		createdCase, err := repo.Case().Create(ctx, caseToDelete)
+		createdCase, err := repo.Case().Create(ctx, testWorkspaceID, caseToDelete)
 		gt.NoError(t, err).Required()
 
 		mutation := `
-			mutation($id: Int!) {
-				deleteCase(id: $id)
+			mutation($workspaceId: String!, $id: Int!) {
+				deleteCase(workspaceId: $workspaceId, id: $id)
 			}
 		`
 
 		variables := map[string]interface{}{
-			"id": createdCase.ID,
+			"workspaceId": testWorkspaceID,
+			"id":          createdCase.ID,
 		}
 
 		rec := executeGraphQLRequest(t, handler, mutation, variables)
@@ -533,19 +550,20 @@ func TestGraphQLHandler_DeleteCaseMutation(t *testing.T) {
 		gt.Bool(t, result.DeleteCase).True()
 
 		// Verify the case was actually deleted from repository
-		_, err = repo.Case().Get(ctx, createdCase.ID)
+		_, err = repo.Case().Get(ctx, testWorkspaceID, createdCase.ID)
 		gt.Value(t, err).NotNil()
 	})
 
 	t.Run("delete non-existent case", func(t *testing.T) {
 		mutation := `
-			mutation($id: Int!) {
-				deleteCase(id: $id)
+			mutation($workspaceId: String!, $id: Int!) {
+				deleteCase(workspaceId: $workspaceId, id: $id)
 			}
 		`
 
 		variables := map[string]interface{}{
-			"id": 99999,
+			"workspaceId": testWorkspaceID,
+			"id":          99999,
 		}
 
 		rec := executeGraphQLRequest(t, handler, mutation, variables)
@@ -561,7 +579,7 @@ func TestGraphQLHandler_DeleteCaseMutation(t *testing.T) {
 			Title:       "Case with Actions",
 			Description: "This case has actions",
 		}
-		createdCase, err := repo.Case().Create(ctx, caseWithActions)
+		createdCase, err := repo.Case().Create(ctx, testWorkspaceID, caseWithActions)
 		gt.NoError(t, err).Required()
 
 		// Create actions associated with this case
@@ -576,20 +594,21 @@ func TestGraphQLHandler_DeleteCaseMutation(t *testing.T) {
 			Description: "Second action",
 		}
 
-		_, err = repo.Action().Create(ctx, action1)
+		_, err = repo.Action().Create(ctx, testWorkspaceID, action1)
 		gt.NoError(t, err).Required()
 
-		_, err = repo.Action().Create(ctx, action2)
+		_, err = repo.Action().Create(ctx, testWorkspaceID, action2)
 		gt.NoError(t, err).Required()
 
 		mutation := `
-			mutation($id: Int!) {
-				deleteCase(id: $id)
+			mutation($workspaceId: String!, $id: Int!) {
+				deleteCase(workspaceId: $workspaceId, id: $id)
 			}
 		`
 
 		variables := map[string]interface{}{
-			"id": createdCase.ID,
+			"workspaceId": testWorkspaceID,
+			"id":          createdCase.ID,
 		}
 
 		rec := executeGraphQLRequest(t, handler, mutation, variables)
@@ -601,7 +620,7 @@ func TestGraphQLHandler_DeleteCaseMutation(t *testing.T) {
 		gt.Array(t, resp.Errors).Length(0)
 
 		// Verify associated actions were also deleted
-		actions, err := repo.Action().GetByCase(ctx, createdCase.ID)
+		actions, err := repo.Action().GetByCase(ctx, testWorkspaceID, createdCase.ID)
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, actions).Length(0)
@@ -623,15 +642,15 @@ func TestGraphQLHandler_FrontendCasesQuery(t *testing.T) {
 		SlackChannelID: "C12345",
 	}
 
-	createdCase, err := repo.Case().Create(ctx, testCase)
+	createdCase, err := repo.Case().Create(ctx, testWorkspaceID, testCase)
 	gt.NoError(t, err).Required()
 
 	t.Run("frontend GET_CASES query format", func(t *testing.T) {
 		// This mimics the query structure used by the frontend
 		// Note: assignees field is omitted in this test as it requires SlackUser data
 		query := `
-			query GetCases {
-				cases {
+			query GetCases($workspaceId: String!) {
+				cases(workspaceId: $workspaceId) {
 					id
 					title
 					description
@@ -647,7 +666,11 @@ func TestGraphQLHandler_FrontendCasesQuery(t *testing.T) {
 			}
 		`
 
-		rec := executeGraphQLRequest(t, handler, query, nil)
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+		}
+
+		rec := executeGraphQLRequest(t, handler, query, variables)
 
 		gt.Value(t, rec.Code).Equal(http.StatusOK)
 
@@ -686,8 +709,8 @@ func TestGraphQLHandler_FrontendCasesQuery(t *testing.T) {
 		// This mimics the query structure used by the frontend for single case
 		// Note: assignees, actions, knowledges fields are omitted in this test
 		query := `
-			query GetCase($id: Int!) {
-				case(id: $id) {
+			query GetCase($workspaceId: String!, $id: Int!) {
+				case(workspaceId: $workspaceId, id: $id) {
 					id
 					title
 					description
@@ -704,7 +727,8 @@ func TestGraphQLHandler_FrontendCasesQuery(t *testing.T) {
 		`
 
 		variables := map[string]interface{}{
-			"id": int(createdCase.ID),
+			"workspaceId": testWorkspaceID,
+			"id":          int(createdCase.ID),
 		}
 
 		rec := executeGraphQLRequest(t, handler, query, variables)
@@ -721,15 +745,19 @@ func TestGraphQLHandler_FrontendCasesQuery(t *testing.T) {
 	t.Run("verify slackChannelName field does not exist", func(t *testing.T) {
 		// This should fail because slackChannelName is not a valid field
 		query := `
-			query {
-				cases {
+			query($workspaceId: String!) {
+				cases(workspaceId: $workspaceId) {
 					id
 					slackChannelName
 				}
 			}
 		`
 
-		rec := executeGraphQLRequest(t, handler, query, nil)
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+		}
+
+		rec := executeGraphQLRequest(t, handler, query, variables)
 
 		resp := parseGraphQLResponse(t, rec)
 
@@ -744,8 +772,8 @@ func TestGraphQLHandler_FrontendCasesQuery(t *testing.T) {
 	t.Run("verify fieldID is case-sensitive (fieldId is correct)", func(t *testing.T) {
 		// This should fail because fieldID (capital D) is incorrect
 		query := `
-			query {
-				cases {
+			query($workspaceId: String!) {
+				cases(workspaceId: $workspaceId) {
 					id
 					fields {
 						fieldID
@@ -755,7 +783,11 @@ func TestGraphQLHandler_FrontendCasesQuery(t *testing.T) {
 			}
 		`
 
-		rec := executeGraphQLRequest(t, handler, query, nil)
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+		}
+
+		rec := executeGraphQLRequest(t, handler, query, variables)
 
 		resp := parseGraphQLResponse(t, rec)
 
@@ -782,7 +814,7 @@ func TestGraphQLHandler_FrontendKnowledgesQuery(t *testing.T) {
 		AssigneeIDs: []string{"U001"},
 	}
 
-	createdCase, err := repo.Case().Create(ctx, testCase)
+	createdCase, err := repo.Case().Create(ctx, testWorkspaceID, testCase)
 	gt.NoError(t, err).Required()
 
 	// Create test knowledge linked to the case
@@ -799,14 +831,14 @@ func TestGraphQLHandler_FrontendKnowledgesQuery(t *testing.T) {
 		UpdatedAt: now,
 	}
 
-	createdKnowledge, err := repo.Knowledge().Create(ctx, testKnowledge)
+	createdKnowledge, err := repo.Knowledge().Create(ctx, testWorkspaceID, testKnowledge)
 	gt.NoError(t, err).Required()
 
 	t.Run("frontend GET_KNOWLEDGES query format", func(t *testing.T) {
 		// This mimics the query structure used by the frontend
 		query := `
-			query GetKnowledges {
-				knowledges(limit: 100, offset: 0) {
+			query GetKnowledges($workspaceId: String!) {
+				knowledges(workspaceId: $workspaceId, limit: 100, offset: 0) {
 					items {
 						id
 						caseID
@@ -829,7 +861,11 @@ func TestGraphQLHandler_FrontendKnowledgesQuery(t *testing.T) {
 			}
 		`
 
-		rec := executeGraphQLRequest(t, handler, query, nil)
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+		}
+
+		rec := executeGraphQLRequest(t, handler, query, variables)
 
 		gt.Value(t, rec.Code).Equal(http.StatusOK)
 
@@ -877,8 +913,8 @@ func TestGraphQLHandler_FrontendKnowledgesQuery(t *testing.T) {
 	t.Run("frontend GET_KNOWLEDGE query format", func(t *testing.T) {
 		// This mimics the query structure used by the frontend for single knowledge
 		query := `
-			query GetKnowledge($id: String!) {
-				knowledge(id: $id) {
+			query GetKnowledge($workspaceId: String!, $id: String!) {
+				knowledge(workspaceId: $workspaceId, id: $id) {
 					id
 					caseID
 					case {
@@ -898,7 +934,8 @@ func TestGraphQLHandler_FrontendKnowledgesQuery(t *testing.T) {
 		`
 
 		variables := map[string]interface{}{
-			"id": string(createdKnowledge.ID),
+			"workspaceId": testWorkspaceID,
+			"id":          string(createdKnowledge.ID),
 		}
 
 		rec := executeGraphQLRequest(t, handler, query, variables)
@@ -936,8 +973,8 @@ func TestGraphQLHandler_FrontendKnowledgesQuery(t *testing.T) {
 	t.Run("verify riskID field does not exist", func(t *testing.T) {
 		// This should fail because riskID is not a valid field
 		query := `
-			query {
-				knowledges(limit: 10, offset: 0) {
+			query($workspaceId: String!) {
+				knowledges(workspaceId: $workspaceId, limit: 10, offset: 0) {
 					items {
 						id
 						riskID
@@ -946,7 +983,11 @@ func TestGraphQLHandler_FrontendKnowledgesQuery(t *testing.T) {
 			}
 		`
 
-		rec := executeGraphQLRequest(t, handler, query, nil)
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+		}
+
+		rec := executeGraphQLRequest(t, handler, query, variables)
 
 		resp := parseGraphQLResponse(t, rec)
 
@@ -966,14 +1007,18 @@ func TestGraphQLHandler_ErrorHandling(t *testing.T) {
 
 	t.Run("invalid GraphQL syntax", func(t *testing.T) {
 		query := `
-			query {
-				cases {
+			query($workspaceId: String!) {
+				cases(workspaceId: $workspaceId) {
 					invalid syntax here
 				}
 			}
 		`
 
-		rec := executeGraphQLRequest(t, handler, query, nil)
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+		}
+
+		rec := executeGraphQLRequest(t, handler, query, variables)
 
 		resp := parseGraphQLResponse(t, rec)
 
@@ -982,15 +1027,19 @@ func TestGraphQLHandler_ErrorHandling(t *testing.T) {
 
 	t.Run("unknown field", func(t *testing.T) {
 		query := `
-			query {
-				cases {
+			query($workspaceId: String!) {
+				cases(workspaceId: $workspaceId) {
 					id
 					nonExistentField
 				}
 			}
 		`
 
-		rec := executeGraphQLRequest(t, handler, query, nil)
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+		}
+
+		rec := executeGraphQLRequest(t, handler, query, variables)
 
 		resp := parseGraphQLResponse(t, rec)
 
@@ -999,8 +1048,8 @@ func TestGraphQLHandler_ErrorHandling(t *testing.T) {
 
 	t.Run("missing required variable", func(t *testing.T) {
 		query := `
-			query($id: Int!) {
-				case(id: $id) {
+			query($workspaceId: String!, $id: Int!) {
+				case(workspaceId: $workspaceId, id: $id) {
 					id
 				}
 			}
@@ -1027,13 +1076,13 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 		Title:       "Test Case for Actions",
 		Description: "Case for action tests",
 	}
-	createdCase, err := repo.Case().Create(ctx, testCase)
+	createdCase, err := repo.Case().Create(ctx, testWorkspaceID, testCase)
 	gt.NoError(t, err).Required()
 
 	t.Run("create new action", func(t *testing.T) {
 		mutation := `
-			mutation($input: CreateActionInput!) {
-				createAction(input: $input) {
+			mutation($workspaceId: String!, $input: CreateActionInput!) {
+				createAction(workspaceId: $workspaceId, input: $input) {
 					id
 					caseID
 					title
@@ -1044,6 +1093,7 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 		`
 
 		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
 			"input": map[string]interface{}{
 				"caseID":      createdCase.ID,
 				"title":       "New Action",
@@ -1079,7 +1129,7 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 		gt.Value(t, result.CreateAction.CaseID).Equal(int(createdCase.ID))
 
 		// Verify the action was actually saved to repository
-		savedAction, err := repo.Action().Get(ctx, int64(result.CreateAction.ID))
+		savedAction, err := repo.Action().Get(ctx, testWorkspaceID, int64(result.CreateAction.ID))
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, savedAction.Title).Equal("New Action")
@@ -1089,8 +1139,8 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 
 	t.Run("create action without caseID fails", func(t *testing.T) {
 		mutation := `
-			mutation($input: CreateActionInput!) {
-				createAction(input: $input) {
+			mutation($workspaceId: String!, $input: CreateActionInput!) {
+				createAction(workspaceId: $workspaceId, input: $input) {
 					id
 					title
 				}
@@ -1098,6 +1148,7 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 		`
 
 		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
 			"input": map[string]interface{}{
 				"title":       "Action without Case",
 				"description": "Should fail",
@@ -1119,12 +1170,12 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 			Description: "Original Description",
 			Status:      "TODO",
 		}
-		createdAction, err := repo.Action().Create(ctx, actionToUpdate)
+		createdAction, err := repo.Action().Create(ctx, testWorkspaceID, actionToUpdate)
 		gt.NoError(t, err).Required()
 
 		mutation := `
-			mutation($input: UpdateActionInput!) {
-				updateAction(input: $input) {
+			mutation($workspaceId: String!, $input: UpdateActionInput!) {
+				updateAction(workspaceId: $workspaceId, input: $input) {
 					id
 					caseID
 					title
@@ -1135,6 +1186,7 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 		`
 
 		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
 			"input": map[string]interface{}{
 				"id":          createdAction.ID,
 				"title":       "Updated Action Title",
@@ -1169,7 +1221,7 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 		gt.Value(t, result.UpdateAction.Status).Equal("IN_PROGRESS")
 
 		// Verify the action was actually updated in repository
-		updatedAction, err := repo.Action().Get(ctx, createdAction.ID)
+		updatedAction, err := repo.Action().Get(ctx, testWorkspaceID, createdAction.ID)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, updatedAction.Title).Equal("Updated Action Title")
@@ -1182,17 +1234,18 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 			Title:       "Action to Delete",
 			Description: "This action will be deleted",
 		}
-		createdAction, err := repo.Action().Create(ctx, actionToDelete)
+		createdAction, err := repo.Action().Create(ctx, testWorkspaceID, actionToDelete)
 		gt.NoError(t, err).Required()
 
 		mutation := `
-			mutation($id: Int!) {
-				deleteAction(id: $id)
+			mutation($workspaceId: String!, $id: Int!) {
+				deleteAction(workspaceId: $workspaceId, id: $id)
 			}
 		`
 
 		variables := map[string]interface{}{
-			"id": createdAction.ID,
+			"workspaceId": testWorkspaceID,
+			"id":          createdAction.ID,
 		}
 
 		rec := executeGraphQLRequest(t, handler, mutation, variables)
@@ -1214,7 +1267,7 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 		gt.Bool(t, result.DeleteAction).True()
 
 		// Verify the action was actually deleted from repository
-		_, err = repo.Action().Get(ctx, createdAction.ID)
+		_, err = repo.Action().Get(ctx, testWorkspaceID, createdAction.ID)
 		gt.Value(t, err).NotNil()
 	})
 }
@@ -1378,8 +1431,8 @@ func TestGraphQLHandler_SourceQueries(t *testing.T) {
 
 	t.Run("empty sources list", func(t *testing.T) {
 		query := `
-			query {
-				sources {
+			query($workspaceId: String!) {
+				sources(workspaceId: $workspaceId) {
 					id
 					name
 					sourceType
@@ -1389,7 +1442,11 @@ func TestGraphQLHandler_SourceQueries(t *testing.T) {
 			}
 		`
 
-		rec := executeGraphQLRequest(t, handler, query, nil)
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+		}
+
+		rec := executeGraphQLRequest(t, handler, query, variables)
 
 		gt.Value(t, rec.Code).Equal(http.StatusOK)
 
@@ -1424,13 +1481,13 @@ func TestGraphQLHandler_SourceQueries(t *testing.T) {
 			},
 		}
 
-		createdSource, err := repo.Source().Create(ctx, source)
+		createdSource, err := repo.Source().Create(ctx, testWorkspaceID, source)
 		gt.NoError(t, err).Required()
 
 		// Test sources list query
 		query := `
-			query {
-				sources {
+			query($workspaceId: String!) {
+				sources(workspaceId: $workspaceId) {
 					id
 					name
 					sourceType
@@ -1440,7 +1497,11 @@ func TestGraphQLHandler_SourceQueries(t *testing.T) {
 			}
 		`
 
-		rec := executeGraphQLRequest(t, handler, query, nil)
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+		}
+
+		rec := executeGraphQLRequest(t, handler, query, variables)
 
 		gt.Value(t, rec.Code).Equal(http.StatusOK)
 
@@ -1475,8 +1536,8 @@ func TestGraphQLHandler_SourceQueries(t *testing.T) {
 
 		// Test single source query
 		singleQuery := `
-			query($id: String!) {
-				source(id: $id) {
+			query($workspaceId: String!, $id: String!) {
+				source(workspaceId: $workspaceId, id: $id) {
 					id
 					name
 					sourceType
@@ -1486,11 +1547,12 @@ func TestGraphQLHandler_SourceQueries(t *testing.T) {
 			}
 		`
 
-		variables := map[string]interface{}{
-			"id": string(createdSource.ID),
+		singleVariables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          string(createdSource.ID),
 		}
 
-		rec = executeGraphQLRequest(t, handler, singleQuery, variables)
+		rec = executeGraphQLRequest(t, handler, singleQuery, singleVariables)
 
 		gt.Value(t, rec.Code).Equal(http.StatusOK)
 
@@ -1524,8 +1586,8 @@ func TestGraphQLHandler_SourceMutations(t *testing.T) {
 
 	t.Run("create notion source", func(t *testing.T) {
 		mutation := `
-			mutation($input: CreateNotionDBSourceInput!) {
-				createNotionDBSource(input: $input) {
+			mutation($workspaceId: String!, $input: CreateNotionDBSourceInput!) {
+				createNotionDBSource(workspaceId: $workspaceId, input: $input) {
 					id
 					name
 					sourceType
@@ -1536,6 +1598,7 @@ func TestGraphQLHandler_SourceMutations(t *testing.T) {
 		`
 
 		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
 			"input": map[string]interface{}{
 				"name":        "My Notion DB",
 				"description": "A test notion source",
@@ -1573,8 +1636,8 @@ func TestGraphQLHandler_SourceMutations(t *testing.T) {
 
 	t.Run("create slack source", func(t *testing.T) {
 		mutation := `
-			mutation($input: CreateSlackSourceInput!) {
-				createSlackSource(input: $input) {
+			mutation($workspaceId: String!, $input: CreateSlackSourceInput!) {
+				createSlackSource(workspaceId: $workspaceId, input: $input) {
 					id
 					name
 					sourceType
@@ -1585,6 +1648,7 @@ func TestGraphQLHandler_SourceMutations(t *testing.T) {
 		`
 
 		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
 			"input": map[string]interface{}{
 				"name":        "My Slack Source",
 				"description": "A test slack source",
@@ -1632,12 +1696,12 @@ func TestGraphQLHandler_SourceMutations(t *testing.T) {
 				DatabaseURL:   "https://notion.so/db-update",
 			},
 		}
-		createdSource, err := repo.Source().Create(ctx, source)
+		createdSource, err := repo.Source().Create(ctx, testWorkspaceID, source)
 		gt.NoError(t, err).Required()
 
 		mutation := `
-			mutation($input: UpdateSourceInput!) {
-				updateSource(input: $input) {
+			mutation($workspaceId: String!, $input: UpdateSourceInput!) {
+				updateSource(workspaceId: $workspaceId, input: $input) {
 					id
 					name
 					description
@@ -1647,6 +1711,7 @@ func TestGraphQLHandler_SourceMutations(t *testing.T) {
 		`
 
 		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
 			"input": map[string]interface{}{
 				"id":          string(createdSource.ID),
 				"name":        "Updated Source Name",
@@ -1691,12 +1756,12 @@ func TestGraphQLHandler_SourceMutations(t *testing.T) {
 				},
 			},
 		}
-		createdSource, err := repo.Source().Create(ctx, source)
+		createdSource, err := repo.Source().Create(ctx, testWorkspaceID, source)
 		gt.NoError(t, err).Required()
 
 		mutation := `
-			mutation($input: UpdateSlackSourceInput!) {
-				updateSlackSource(input: $input) {
+			mutation($workspaceId: String!, $input: UpdateSlackSourceInput!) {
+				updateSlackSource(workspaceId: $workspaceId, input: $input) {
 					id
 					name
 					description
@@ -1706,6 +1771,7 @@ func TestGraphQLHandler_SourceMutations(t *testing.T) {
 		`
 
 		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
 			"input": map[string]interface{}{
 				"id":         string(createdSource.ID),
 				"name":       "Updated Slack Source",
@@ -1735,7 +1801,7 @@ func TestGraphQLHandler_SourceMutations(t *testing.T) {
 		gt.Value(t, result.UpdateSlackSource.Name).Equal("Updated Slack Source")
 
 		// Verify the channels were updated in repository
-		updatedSource, err := repo.Source().Get(ctx, createdSource.ID)
+		updatedSource, err := repo.Source().Get(ctx, testWorkspaceID, createdSource.ID)
 		gt.NoError(t, err).Required()
 		gt.Value(t, updatedSource.SlackConfig).NotNil()
 		gt.Array(t, updatedSource.SlackConfig.Channels).Length(2)
@@ -1753,17 +1819,18 @@ func TestGraphQLHandler_SourceMutations(t *testing.T) {
 				DatabaseURL:   "https://notion.so/db-delete",
 			},
 		}
-		createdSource, err := repo.Source().Create(ctx, source)
+		createdSource, err := repo.Source().Create(ctx, testWorkspaceID, source)
 		gt.NoError(t, err).Required()
 
 		mutation := `
-			mutation($id: String!) {
-				deleteSource(id: $id)
+			mutation($workspaceId: String!, $id: String!) {
+				deleteSource(workspaceId: $workspaceId, id: $id)
 			}
 		`
 
 		variables := map[string]interface{}{
-			"id": string(createdSource.ID),
+			"workspaceId": testWorkspaceID,
+			"id":          string(createdSource.ID),
 		}
 
 		rec := executeGraphQLRequest(t, handler, mutation, variables)
@@ -1783,14 +1850,14 @@ func TestGraphQLHandler_SourceMutations(t *testing.T) {
 		gt.Bool(t, result.DeleteSource).True()
 
 		// Verify the source was actually deleted
-		_, err = repo.Source().Get(ctx, createdSource.ID)
+		_, err = repo.Source().Get(ctx, testWorkspaceID, createdSource.ID)
 		gt.Value(t, err).NotNil()
 	})
 
 	t.Run("validate notion DB without service", func(t *testing.T) {
 		mutation := `
-			mutation($databaseID: String!) {
-				validateNotionDB(databaseID: $databaseID) {
+			mutation($workspaceId: String!, $databaseID: String!) {
+				validateNotionDB(workspaceId: $workspaceId, databaseID: $databaseID) {
 					valid
 					errorMessage
 				}
@@ -1798,7 +1865,8 @@ func TestGraphQLHandler_SourceMutations(t *testing.T) {
 		`
 
 		variables := map[string]interface{}{
-			"databaseID": "test-db-id",
+			"workspaceId": testWorkspaceID,
+			"databaseID":  "test-db-id",
 		}
 
 		rec := executeGraphQLRequest(t, handler, mutation, variables)
@@ -1825,8 +1893,8 @@ func TestGraphQLHandler_SourceMutations(t *testing.T) {
 
 	t.Run("validate notion DB with empty ID", func(t *testing.T) {
 		mutation := `
-			mutation($databaseID: String!) {
-				validateNotionDB(databaseID: $databaseID) {
+			mutation($workspaceId: String!, $databaseID: String!) {
+				validateNotionDB(workspaceId: $workspaceId, databaseID: $databaseID) {
 					valid
 					errorMessage
 				}
@@ -1834,7 +1902,8 @@ func TestGraphQLHandler_SourceMutations(t *testing.T) {
 		`
 
 		variables := map[string]interface{}{
-			"databaseID": "",
+			"workspaceId": testWorkspaceID,
+			"databaseID":  "",
 		}
 
 		rec := executeGraphQLRequest(t, handler, mutation, variables)
@@ -1870,7 +1939,7 @@ func TestGraphQLHandler_ActionsByCaseQuery(t *testing.T) {
 		Title:       "Case with Multiple Actions",
 		Description: "Testing actions query",
 	}
-	createdCase, err := repo.Case().Create(ctx, testCase)
+	createdCase, err := repo.Case().Create(ctx, testWorkspaceID, testCase)
 	gt.NoError(t, err).Required()
 
 	// Create multiple actions for this case
@@ -1893,17 +1962,17 @@ func TestGraphQLHandler_ActionsByCaseQuery(t *testing.T) {
 		Status:      "COMPLETED",
 	}
 
-	_, err = repo.Action().Create(ctx, action1)
+	_, err = repo.Action().Create(ctx, testWorkspaceID, action1)
 	gt.NoError(t, err).Required()
-	_, err = repo.Action().Create(ctx, action2)
+	_, err = repo.Action().Create(ctx, testWorkspaceID, action2)
 	gt.NoError(t, err).Required()
-	_, err = repo.Action().Create(ctx, action3)
+	_, err = repo.Action().Create(ctx, testWorkspaceID, action3)
 	gt.NoError(t, err).Required()
 
 	t.Run("query actions by case ID", func(t *testing.T) {
 		query := `
-			query($caseID: Int!) {
-				actionsByCase(caseID: $caseID) {
+			query($workspaceId: String!, $caseID: Int!) {
+				actionsByCase(workspaceId: $workspaceId, caseID: $caseID) {
 					id
 					caseID
 					title
@@ -1914,7 +1983,8 @@ func TestGraphQLHandler_ActionsByCaseQuery(t *testing.T) {
 		`
 
 		variables := map[string]interface{}{
-			"caseID": createdCase.ID,
+			"workspaceId": testWorkspaceID,
+			"caseID":      createdCase.ID,
 		}
 
 		rec := executeGraphQLRequest(t, handler, query, variables)
@@ -1949,8 +2019,8 @@ func TestGraphQLHandler_ActionsByCaseQuery(t *testing.T) {
 
 	t.Run("query actions for non-existent case returns empty list", func(t *testing.T) {
 		query := `
-			query($caseID: Int!) {
-				actionsByCase(caseID: $caseID) {
+			query($workspaceId: String!, $caseID: Int!) {
+				actionsByCase(workspaceId: $workspaceId, caseID: $caseID) {
 					id
 					title
 				}
@@ -1958,7 +2028,8 @@ func TestGraphQLHandler_ActionsByCaseQuery(t *testing.T) {
 		`
 
 		variables := map[string]interface{}{
-			"caseID": 99999,
+			"workspaceId": testWorkspaceID,
+			"caseID":      99999,
 		}
 
 		rec := executeGraphQLRequest(t, handler, query, variables)

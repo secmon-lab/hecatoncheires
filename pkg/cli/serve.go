@@ -18,6 +18,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
 	gqlctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/graphql"
 	httpctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/http"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/firestore"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
@@ -77,10 +78,8 @@ func cmdServe() *cli.Command {
 	var enableGraphiQL bool
 	var projectID string
 	var databaseID string
-	var configPath string
 	var notionToken string
 	var noAuthUID string
-	var slackChannelPrefix string
 	var slackCfg config.Slack
 
 	flags := []cli.Flag{
@@ -104,12 +103,11 @@ func cmdServe() *cli.Command {
 			Sources:     cli.EnvVars("HECATONCHEIRES_GRAPHIQL"),
 			Destination: &enableGraphiQL,
 		},
-		&cli.StringFlag{
-			Name:        "config",
-			Usage:       "Path to configuration file (TOML)",
-			Value:       "./config.toml",
-			Sources:     cli.EnvVars("HECATONCHEIRES_CONFIG"),
-			Destination: &configPath,
+		&cli.StringSliceFlag{
+			Name:    "config",
+			Usage:   "Paths to configuration files or directories (TOML). Can be specified multiple times.",
+			Value:   []string{"./config.toml"},
+			Sources: cli.EnvVars("HECATONCHEIRES_CONFIG"),
 		},
 		&cli.StringFlag{
 			Name:        "firestore-project-id",
@@ -121,7 +119,6 @@ func cmdServe() *cli.Command {
 		&cli.StringFlag{
 			Name:        "firestore-database-id",
 			Usage:       "Firestore Database ID",
-			Value:       "(default)",
 			Sources:     cli.EnvVars("HECATONCHEIRES_FIRESTORE_DATABASE_ID"),
 			Destination: &databaseID,
 		},
@@ -138,14 +135,6 @@ func cmdServe() *cli.Command {
 			Sources:     cli.EnvVars("HECATONCHEIRES_NO_AUTH"),
 			Destination: &noAuthUID,
 		},
-		&cli.StringFlag{
-			Name:        "slack-channel-prefix",
-			Usage:       "Prefix for auto-created Slack channel names for risks (e.g., 'incident' creates #incident-1-risk-name)",
-			Value:       "risk",
-			Category:    "Slack",
-			Sources:     cli.EnvVars("HECATONCHEIRES_SLACK_CHANNEL_PREFIX"),
-			Destination: &slackChannelPrefix,
-		},
 	}
 
 	// Add Slack flags
@@ -157,13 +146,29 @@ func cmdServe() *cli.Command {
 		Usage:   "Start HTTP server",
 		Flags:   flags,
 		Action: func(ctx context.Context, c *cli.Command) error {
-			fieldSchema, err := config.LoadFieldSchema(configPath)
+			// Load workspace configurations from config paths
+			configPaths := c.StringSlice("config")
+			workspaceConfigs, err := config.LoadWorkspaceConfigs(configPaths)
 			if err != nil {
-				return goerr.Wrap(err, "failed to load field schema configuration")
+				return goerr.Wrap(err, "failed to load workspace configurations")
+			}
+
+			// Build WorkspaceRegistry
+			registry := model.NewWorkspaceRegistry()
+			for _, wc := range workspaceConfigs {
+				registry.Register(&model.WorkspaceEntry{
+					Workspace: model.Workspace{
+						ID:   wc.ID,
+						Name: wc.Name,
+					},
+					FieldSchema:        wc.FieldSchema,
+					SlackChannelPrefix: wc.SlackChannelPrefix,
+				})
+				logging.Default().Info("Registered workspace", "id", wc.ID, "name", wc.Name)
 			}
 
 			// Initialize Firestore repository
-			repo, err := firestore.New(ctx, projectID, firestore.WithCollectionPrefix(databaseID))
+			repo, err := firestore.New(ctx, projectID, databaseID)
 			if err != nil {
 				return goerr.Wrap(err, "failed to initialize firestore repository")
 			}
@@ -192,7 +197,6 @@ func cmdServe() *cli.Command {
 
 			// Initialize use cases with configuration and auth
 			ucOpts := []usecase.Option{
-				usecase.WithFieldSchema(fieldSchema),
 				usecase.WithAuth(authUC),
 			}
 
@@ -211,11 +215,7 @@ func cmdServe() *cli.Command {
 			// Initialize Slack service for Source integration if bot token is provided
 			var slackSvc slack.Service
 			if slackCfg.BotToken() != "" {
-				opts := []slack.Option{}
-				if slackChannelPrefix != "" {
-					opts = append(opts, slack.WithChannelPrefix(slackChannelPrefix))
-				}
-				svc, err := slack.New(slackCfg.BotToken(), opts...)
+				svc, err := slack.New(slackCfg.BotToken())
 				if err != nil {
 					return goerr.Wrap(err, "failed to initialize slack service")
 				}
@@ -226,7 +226,7 @@ func cmdServe() *cli.Command {
 				logging.Default().Info("Slack Bot Token not configured, Slack Source features will be limited")
 			}
 
-			uc := usecase.New(repo, ucOpts...)
+			uc := usecase.New(repo, registry, ucOpts...)
 
 			// Start Slack user refresh worker if Slack service is available
 			// N+1 Prevention Policy: Worker uses DeleteAll → SaveMany (Replace strategy)
@@ -293,6 +293,7 @@ func cmdServe() *cli.Command {
 			httpOpts := []httpctrl.Options{
 				httpctrl.WithGraphiQL(enableGraphiQL),
 				httpctrl.WithAuth(authUC),
+				httpctrl.WithWorkspaceRegistry(registry),
 			}
 
 			// Add Slack service if configured

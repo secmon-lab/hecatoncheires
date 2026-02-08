@@ -1,8 +1,8 @@
 import { gql } from '@apollo/client'
 
 export const GET_ACTIONS = gql`
-  query GetActions {
-    actions {
+  query GetActions($workspaceId: String!) {
+    actions(workspaceId: $workspaceId) {
       id
       caseID
       title
@@ -23,8 +23,8 @@ export const GET_ACTIONS = gql`
 `
 
 export const GET_ACTION = gql`
-  query GetAction($id: Int!) {
-    action(id: $id) {
+  query GetAction($workspaceId: String!, $id: Int!) {
+    action(workspaceId: $workspaceId, id: $id) {
       id
       caseID
       case {
@@ -49,8 +49,8 @@ export const GET_ACTION = gql`
 `
 
 export const CREATE_ACTION = gql`
-  mutation CreateAction($input: CreateActionInput!) {
-    createAction(input: $input) {
+  mutation CreateAction($workspaceId: String!, $input: CreateActionInput!) {
+    createAction(workspaceId: $workspaceId, input: $input) {
       id
       caseID
       title
@@ -71,8 +71,8 @@ export const CREATE_ACTION = gql`
 `
 
 export const UPDATE_ACTION = gql`
-  mutation UpdateAction($input: UpdateActionInput!) {
-    updateAction(input: $input) {
+  mutation UpdateAction($workspaceId: String!, $input: UpdateActionInput!) {
+    updateAction(workspaceId: $workspaceId, input: $input) {
       id
       caseID
       title
@@ -93,7 +93,7 @@ export const UPDATE_ACTION = gql`
 `
 
 export const DELETE_ACTION = gql`
-  mutation DeleteAction($id: Int!) {
-    deleteAction(id: $id)
+  mutation DeleteAction($workspaceId: String!, $id: Int!) {
+    deleteAction(workspaceId: $workspaceId, id: $id)
   }
 `

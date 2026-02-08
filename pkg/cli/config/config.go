@@ -2,7 +2,9 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/pelletier/go-toml/v2"
@@ -12,10 +14,31 @@ import (
 
 var fieldIDPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
+// WorkspaceBaseConfig represents the [workspace] section in a TOML config
+type WorkspaceBaseConfig struct {
+	ID   string `toml:"id"`
+	Name string `toml:"name"`
+}
+
+// SlackSection represents the [slack] section in a TOML config
+type SlackSection struct {
+	ChannelPrefix string `toml:"channel_prefix"`
+}
+
 // AppConfig represents the application configuration
 type AppConfig struct {
-	Labels Labels            `toml:"labels"`
-	Fields []FieldDefinition `toml:"fields"`
+	Workspace WorkspaceBaseConfig `toml:"workspace"`
+	Labels    Labels              `toml:"labels"`
+	Fields    []FieldDefinition   `toml:"fields"`
+	Slack     SlackSection        `toml:"slack"`
+}
+
+// WorkspaceConfig represents a fully resolved workspace configuration
+type WorkspaceConfig struct {
+	ID                 string
+	Name               string
+	SlackChannelPrefix string
+	FieldSchema        *domainConfig.FieldSchema
 }
 
 // Labels represents entity display labels
@@ -154,6 +177,112 @@ func LoadFieldSchema(path string) (*domainConfig.FieldSchema, error) {
 	}
 
 	return config.ToDomainFieldSchema(), nil
+}
+
+// LoadWorkspaceConfigs loads workspace configurations from multiple paths.
+// Each path can be a file or directory. Directories are walked recursively for .toml files.
+func LoadWorkspaceConfigs(paths []string) ([]*WorkspaceConfig, error) {
+	var tomlFiles []string
+	for _, p := range paths {
+		info, err := os.Stat(p)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to stat config path", goerr.V(ConfigPathKey, p))
+		}
+
+		if info.IsDir() {
+			err := filepath.WalkDir(p, func(path string, d os.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				if !d.IsDir() && strings.HasSuffix(d.Name(), ".toml") {
+					tomlFiles = append(tomlFiles, path)
+				}
+				return nil
+			})
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to walk config directory", goerr.V(ConfigPathKey, p))
+			}
+		} else {
+			tomlFiles = append(tomlFiles, p)
+		}
+	}
+
+	if len(tomlFiles) == 0 {
+		return nil, goerr.Wrap(ErrNoConfigFiles, "no .toml files found in specified paths")
+	}
+
+	var configs []*WorkspaceConfig
+	seenIDs := make(map[string]string) // workspaceID → file path
+	for _, f := range tomlFiles {
+		wc, err := loadSingleWorkspaceConfig(f)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to load workspace config", goerr.V(ConfigPathKey, f))
+		}
+
+		if existing, ok := seenIDs[wc.ID]; ok {
+			return nil, goerr.Wrap(ErrDuplicateWorkspaceID, "duplicate workspace ID",
+				goerr.V(WorkspaceIDKey, wc.ID),
+				goerr.V("first_file", existing),
+				goerr.V("second_file", f),
+			)
+		}
+		seenIDs[wc.ID] = f
+		configs = append(configs, wc)
+	}
+
+	return configs, nil
+}
+
+func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
+	// #nosec G304 - path is expected to be provided by CLI argument
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to read config file", goerr.V(ConfigPathKey, path))
+	}
+
+	var appCfg AppConfig
+	if err := toml.Unmarshal(data, &appCfg); err != nil {
+		return nil, goerr.Wrap(err, "failed to parse TOML config", goerr.V(ConfigPathKey, path))
+	}
+
+	if err := appCfg.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "config validation failed", goerr.V(ConfigPathKey, path))
+	}
+
+	// Resolve workspace ID and name from [workspace] section
+	wsID := appCfg.Workspace.ID
+	if wsID == "" {
+		return nil, goerr.Wrap(ErrMissingWorkspaceID,
+			"[workspace] id is required in config file",
+			goerr.V(ConfigPathKey, path),
+		)
+	}
+	wsName := appCfg.Workspace.Name
+	if wsName == "" {
+		wsName = wsID
+	}
+
+	// Validate workspace ID
+	if !fieldIDPattern.MatchString(wsID) || len(wsID) > 63 {
+		return nil, goerr.Wrap(ErrInvalidWorkspaceID,
+			"workspace ID must match ^[a-z0-9]+(-[a-z0-9]+)*$ and be at most 63 characters",
+			goerr.V(WorkspaceIDKey, wsID),
+			goerr.V(ConfigPathKey, path),
+		)
+	}
+
+	// Use workspace ID as default Slack channel prefix if not specified
+	slackPrefix := appCfg.Slack.ChannelPrefix
+	if slackPrefix == "" {
+		slackPrefix = wsID
+	}
+
+	return &WorkspaceConfig{
+		ID:                 wsID,
+		Name:               wsName,
+		SlackChannelPrefix: slackPrefix,
+		FieldSchema:        appCfg.ToDomainFieldSchema(),
+	}, nil
 }
 
 // ToDomainFieldSchema converts AppConfig to domain FieldSchema

@@ -2,6 +2,8 @@ package memory
 
 import (
 	"context"
+	"math"
+	"sort"
 	"sync"
 	"time"
 
@@ -11,12 +13,18 @@ import (
 
 type knowledgeRepository struct {
 	mu        sync.RWMutex
-	knowledge map[model.KnowledgeID]*model.Knowledge
+	knowledge map[string]map[model.KnowledgeID]*model.Knowledge
 }
 
 func newKnowledgeRepository() *knowledgeRepository {
 	return &knowledgeRepository{
-		knowledge: make(map[model.KnowledgeID]*model.Knowledge),
+		knowledge: make(map[string]map[model.KnowledgeID]*model.Knowledge),
+	}
+}
+
+func (r *knowledgeRepository) ensureWorkspace(workspaceID string) {
+	if _, exists := r.knowledge[workspaceID]; !exists {
+		r.knowledge[workspaceID] = make(map[model.KnowledgeID]*model.Knowledge)
 	}
 }
 
@@ -42,9 +50,11 @@ func copyKnowledge(k *model.Knowledge) *model.Knowledge {
 	return copied
 }
 
-func (r *knowledgeRepository) Create(ctx context.Context, knowledge *model.Knowledge) (*model.Knowledge, error) {
+func (r *knowledgeRepository) Create(ctx context.Context, workspaceID string, knowledge *model.Knowledge) (*model.Knowledge, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	r.ensureWorkspace(workspaceID)
 
 	now := time.Now().UTC()
 	created := copyKnowledge(knowledge)
@@ -54,15 +64,20 @@ func (r *knowledgeRepository) Create(ctx context.Context, knowledge *model.Knowl
 	created.CreatedAt = now
 	created.UpdatedAt = now
 
-	r.knowledge[created.ID] = created
+	r.knowledge[workspaceID][created.ID] = created
 	return copyKnowledge(created), nil
 }
 
-func (r *knowledgeRepository) Get(ctx context.Context, id model.KnowledgeID) (*model.Knowledge, error) {
+func (r *knowledgeRepository) Get(ctx context.Context, workspaceID string, id model.KnowledgeID) (*model.Knowledge, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	knowledge, exists := r.knowledge[id]
+	ws, exists := r.knowledge[workspaceID]
+	if !exists {
+		return nil, goerr.Wrap(ErrNotFound, "knowledge not found", goerr.V("id", id))
+	}
+
+	knowledge, exists := ws[id]
 	if !exists {
 		return nil, goerr.Wrap(ErrNotFound, "knowledge not found", goerr.V("id", id))
 	}
@@ -70,12 +85,17 @@ func (r *knowledgeRepository) Get(ctx context.Context, id model.KnowledgeID) (*m
 	return copyKnowledge(knowledge), nil
 }
 
-func (r *knowledgeRepository) ListByCaseID(ctx context.Context, caseID int64) ([]*model.Knowledge, error) {
+func (r *knowledgeRepository) ListByCaseID(ctx context.Context, workspaceID string, caseID int64) ([]*model.Knowledge, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	ws, exists := r.knowledge[workspaceID]
+	if !exists {
+		return []*model.Knowledge{}, nil
+	}
+
 	var result []*model.Knowledge
-	for _, k := range r.knowledge {
+	for _, k := range ws {
 		if k.CaseID == caseID {
 			result = append(result, copyKnowledge(k))
 		}
@@ -84,7 +104,7 @@ func (r *knowledgeRepository) ListByCaseID(ctx context.Context, caseID int64) ([
 	return result, nil
 }
 
-func (r *knowledgeRepository) ListByCaseIDs(ctx context.Context, caseIDs []int64) (map[int64][]*model.Knowledge, error) {
+func (r *knowledgeRepository) ListByCaseIDs(ctx context.Context, workspaceID string, caseIDs []int64) (map[int64][]*model.Knowledge, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -96,9 +116,13 @@ func (r *knowledgeRepository) ListByCaseIDs(ctx context.Context, caseIDs []int64
 
 	// Group knowledges by case ID
 	result := make(map[int64][]*model.Knowledge, len(caseIDs))
-	for _, k := range r.knowledge {
-		if caseIDSet[k.CaseID] {
-			result[k.CaseID] = append(result[k.CaseID], copyKnowledge(k))
+
+	ws, exists := r.knowledge[workspaceID]
+	if exists {
+		for _, k := range ws {
+			if caseIDSet[k.CaseID] {
+				result[k.CaseID] = append(result[k.CaseID], copyKnowledge(k))
+			}
 		}
 	}
 
@@ -112,12 +136,17 @@ func (r *knowledgeRepository) ListByCaseIDs(ctx context.Context, caseIDs []int64
 	return result, nil
 }
 
-func (r *knowledgeRepository) ListBySourceID(ctx context.Context, sourceID model.SourceID) ([]*model.Knowledge, error) {
+func (r *knowledgeRepository) ListBySourceID(ctx context.Context, workspaceID string, sourceID model.SourceID) ([]*model.Knowledge, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	ws, exists := r.knowledge[workspaceID]
+	if !exists {
+		return []*model.Knowledge{}, nil
+	}
+
 	var result []*model.Knowledge
-	for _, k := range r.knowledge {
+	for _, k := range ws {
 		if k.SourceID == sourceID {
 			result = append(result, copyKnowledge(k))
 		}
@@ -126,13 +155,18 @@ func (r *knowledgeRepository) ListBySourceID(ctx context.Context, sourceID model
 	return result, nil
 }
 
-func (r *knowledgeRepository) ListWithPagination(ctx context.Context, limit, offset int) ([]*model.Knowledge, int, error) {
+func (r *knowledgeRepository) ListWithPagination(ctx context.Context, workspaceID string, limit, offset int) ([]*model.Knowledge, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	ws, exists := r.knowledge[workspaceID]
+	if !exists {
+		return []*model.Knowledge{}, 0, nil
+	}
+
 	// Collect all knowledge entries and sort by CreatedAt descending
-	all := make([]*model.Knowledge, 0, len(r.knowledge))
-	for _, k := range r.knowledge {
+	all := make([]*model.Knowledge, 0, len(ws))
+	for _, k := range ws {
 		all = append(all, copyKnowledge(k))
 	}
 
@@ -160,14 +194,78 @@ func (r *knowledgeRepository) ListWithPagination(ctx context.Context, limit, off
 	return all[offset:end], totalCount, nil
 }
 
-func (r *knowledgeRepository) Delete(ctx context.Context, id model.KnowledgeID) error {
+func (r *knowledgeRepository) Delete(ctx context.Context, workspaceID string, id model.KnowledgeID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, exists := r.knowledge[id]; !exists {
+	ws, exists := r.knowledge[workspaceID]
+	if !exists {
 		return goerr.Wrap(ErrNotFound, "knowledge not found", goerr.V("id", id))
 	}
 
-	delete(r.knowledge, id)
+	if _, exists := ws[id]; !exists {
+		return goerr.Wrap(ErrNotFound, "knowledge not found", goerr.V("id", id))
+	}
+
+	delete(r.knowledge[workspaceID], id)
 	return nil
+}
+
+func (r *knowledgeRepository) FindByEmbedding(ctx context.Context, workspaceID string, embedding []float32, limit int) ([]*model.Knowledge, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ws, exists := r.knowledge[workspaceID]
+	if !exists {
+		return []*model.Knowledge{}, nil
+	}
+
+	type scored struct {
+		knowledge *model.Knowledge
+		score     float64
+	}
+
+	var candidates []scored
+	for _, k := range ws {
+		if len(k.Embedding) == 0 {
+			continue
+		}
+		s := cosineSimilarity(embedding, k.Embedding)
+		candidates = append(candidates, scored{knowledge: copyKnowledge(k), score: s})
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].score > candidates[j].score
+	})
+
+	if limit > len(candidates) {
+		limit = len(candidates)
+	}
+
+	result := make([]*model.Knowledge, limit)
+	for i := 0; i < limit; i++ {
+		result[i] = candidates[i].knowledge
+	}
+
+	return result, nil
+}
+
+func cosineSimilarity(a, b []float32) float64 {
+	if len(a) != len(b) {
+		return 0
+	}
+
+	var dot, normA, normB float64
+	for i := range a {
+		dot += float64(a[i]) * float64(b[i])
+		normA += float64(a[i]) * float64(a[i])
+		normB += float64(b[i]) * float64(b[i])
+	}
+
+	denom := math.Sqrt(normA) * math.Sqrt(normB)
+	if denom == 0 {
+		return 0
+	}
+
+	return dot / denom
 }

@@ -1,0 +1,67 @@
+# Risk Management Workspace
+# This configuration demonstrates a security risk management use case.
+# Use with: hecatoncheires serve --config ./examples/workspaces/
+
+[workspace]
+id = "risk"
+name = "Risk Management"
+
+[labels]
+case = "Risk"
+
+[[fields]]
+id = "category"
+name = "Category"
+type = "multi-select"
+required = true
+options = [
+  { id = "data-breach", name = "Data Breach", metadata = { description = "Risk of personal or confidential information leakage", color = "red" } },
+  { id = "system-failure", name = "System Failure", metadata = { description = "Risk of system or service downtime and failures", color = "orange" } },
+  { id = "compliance", name = "Compliance", metadata = { description = "Risk of regulatory or internal policy violations", color = "yellow" } },
+  { id = "supply-chain", name = "Supply Chain", metadata = { description = "Risks related to external vendors and third-party services", color = "blue" } },
+  { id = "insider-threat", name = "Insider Threat", metadata = { description = "Intentional or unintentional threats from employees", color = "purple" } },
+]
+
+[[fields]]
+id = "likelihood"
+name = "Likelihood"
+type = "select"
+required = true
+options = [
+  { id = "very-low", name = "Very Low", metadata = { description = "Extremely unlikely to occur", score = 1 } },
+  { id = "low", name = "Low", metadata = { description = "Unlikely to occur", score = 2 } },
+  { id = "medium", name = "Medium", metadata = { description = "Moderately likely to occur", score = 3 } },
+  { id = "high", name = "High", metadata = { description = "Likely to occur", score = 4 } },
+  { id = "very-high", name = "Very High", metadata = { description = "Very likely to occur", score = 5 } },
+]
+
+[[fields]]
+id = "impact"
+name = "Impact"
+type = "select"
+required = true
+options = [
+  { id = "negligible", name = "Negligible", metadata = { description = "Little to no impact", score = 1 } },
+  { id = "minor", name = "Minor", metadata = { description = "Limited impact", score = 2 } },
+  { id = "moderate", name = "Moderate", metadata = { description = "Some business impact", score = 3 } },
+  { id = "major", name = "Major", metadata = { description = "Significant impact", score = 4 } },
+  { id = "critical", name = "Critical", metadata = { description = "Critical impact", score = 5 } },
+]
+
+[[fields]]
+id = "response-team"
+name = "Response Team"
+type = "multi-select"
+required = false
+options = [
+  { id = "security-team", name = "Security Team" },
+  { id = "infrastructure-team", name = "Infrastructure Team" },
+  { id = "development-team", name = "Development Team" },
+  { id = "compliance-team", name = "Compliance Team" },
+]
+
+[[fields]]
+id = "deadline"
+name = "Deadline"
+type = "date"
+required = false

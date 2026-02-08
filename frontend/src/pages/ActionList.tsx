@@ -7,6 +7,7 @@ import Button from '../components/Button'
 import Chip from '../components/Chip'
 import ActionForm from './ActionForm'
 import { GET_ACTIONS } from '../graphql/action'
+import { useWorkspace } from '../contexts/workspace-context'
 import styles from './ActionList.module.css'
 import type { ReactElement } from 'react'
 
@@ -43,15 +44,19 @@ const STATUS_COLORS: Record<string, number> = {
 
 export default function ActionList() {
   const navigate = useNavigate()
+  const { currentWorkspace } = useWorkspace()
   const [isFormOpen, setIsFormOpen] = useState(false)
 
-  const { data, loading, error } = useQuery(GET_ACTIONS)
+  const { data, loading, error } = useQuery(GET_ACTIONS, {
+    variables: { workspaceId: currentWorkspace!.id },
+    skip: !currentWorkspace,
+  })
   const handleFormClose = () => {
     setIsFormOpen(false)
   }
 
   const handleRowClick = (action: Action) => {
-    navigate(`/actions/${action.id}`)
+    navigate(`/ws/${currentWorkspace!.id}/actions/${action.id}`)
   }
 
   const renderAssignees = (assignees: Array<{ id: string; realName: string; imageUrl?: string }>) => {

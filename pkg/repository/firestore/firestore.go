@@ -20,23 +20,19 @@ type Firestore struct {
 
 var _ interfaces.Repository = &Firestore{}
 
-type Option func(*Firestore)
-
-func WithCollectionPrefix(prefix string) Option {
-	return func(f *Firestore) {
-		f.caseRepo.collectionPrefix = prefix
-		f.action.collectionPrefix = prefix
-		f.slack.collectionPrefix = prefix
-		f.slackUser.collectionPrefix = prefix
-		f.source.collectionPrefix = prefix
-		f.knowledge.collectionPrefix = prefix
+func New(ctx context.Context, projectID, databaseID string) (*Firestore, error) {
+	var client *firestore.Client
+	var err error
+	if databaseID != "" {
+		client, err = firestore.NewClientWithDatabase(ctx, projectID, databaseID)
+	} else {
+		client, err = firestore.NewClient(ctx, projectID)
 	}
-}
-
-func New(ctx context.Context, projectID string, opts ...Option) (*Firestore, error) {
-	client, err := firestore.NewClient(ctx, projectID)
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to create firestore client", goerr.V("projectID", projectID))
+		return nil, goerr.Wrap(err, "failed to create firestore client",
+			goerr.V("projectID", projectID),
+			goerr.V("databaseID", databaseID),
+		)
 	}
 
 	caseRepo := newCaseRepository(client)
@@ -54,10 +50,6 @@ func New(ctx context.Context, projectID string, opts ...Option) (*Firestore, err
 		slackUser: slackUserRepo,
 		source:    sourceRepo,
 		knowledge: knowledgeRepo,
-	}
-
-	for _, opt := range opts {
-		opt(f)
 	}
 
 	return f, nil

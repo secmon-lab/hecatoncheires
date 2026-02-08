@@ -2,6 +2,12 @@ scalar Time
 scalar JSON
 scalar Any
 
+# Workspace
+type Workspace {
+  id: String!
+  name: String!
+}
+
 # Field type definitions
 enum FieldType {
   TEXT
@@ -231,49 +237,53 @@ type SlackChannelInfo {
 type Query {
   health: String!
 
+  # Workspaces
+  workspace(workspaceId: String!): Workspace!
+  workspaces: [Workspace!]!
+
   # Cases
-  cases: [Case!]!
-  case(id: Int!): Case
+  cases(workspaceId: String!): [Case!]!
+  case(workspaceId: String!, id: Int!): Case
 
   # Actions
-  actions: [Action!]!
-  action(id: Int!): Action
-  actionsByCase(caseID: Int!): [Action!]!
+  actions(workspaceId: String!): [Action!]!
+  action(workspaceId: String!, id: Int!): Action
+  actionsByCase(workspaceId: String!, caseID: Int!): [Action!]!
 
   # Configuration
-  fieldConfiguration: FieldConfiguration!
+  fieldConfiguration(workspaceId: String!): FieldConfiguration!
 
-  # Slack
+  # Slack (not workspace-scoped)
   slackUsers: [SlackUser!]!
   slackJoinedChannels: [SlackChannelInfo!]!
 
   # Sources
-  sources: [Source!]!
-  source(id: String!): Source
+  sources(workspaceId: String!): [Source!]!
+  source(workspaceId: String!, id: String!): Source
 
   # Knowledge
-  knowledge(id: String!): Knowledge
-  knowledges(limit: Int, offset: Int): KnowledgeConnection!
+  knowledge(workspaceId: String!, id: String!): Knowledge
+  knowledges(workspaceId: String!, limit: Int, offset: Int): KnowledgeConnection!
 }
 
 type Mutation {
   noop: Boolean
 
   # Cases
-  createCase(input: CreateCaseInput!): Case!
-  updateCase(input: UpdateCaseInput!): Case!
-  deleteCase(id: Int!): Boolean!
+  createCase(workspaceId: String!, input: CreateCaseInput!): Case!
+  updateCase(workspaceId: String!, input: UpdateCaseInput!): Case!
+  deleteCase(workspaceId: String!, id: Int!): Boolean!
 
   # Actions
-  createAction(input: CreateActionInput!): Action!
-  updateAction(input: UpdateActionInput!): Action!
-  deleteAction(id: Int!): Boolean!
+  createAction(workspaceId: String!, input: CreateActionInput!): Action!
+  updateAction(workspaceId: String!, input: UpdateActionInput!): Action!
+  deleteAction(workspaceId: String!, id: Int!): Boolean!
 
   # Sources
-  createNotionDBSource(input: CreateNotionDBSourceInput!): Source!
-  createSlackSource(input: CreateSlackSourceInput!): Source!
-  updateSource(input: UpdateSourceInput!): Source!
-  updateSlackSource(input: UpdateSlackSourceInput!): Source!
-  deleteSource(id: String!): Boolean!
-  validateNotionDB(databaseID: String!): NotionDBValidationResult!
+  createNotionDBSource(workspaceId: String!, input: CreateNotionDBSourceInput!): Source!
+  createSlackSource(workspaceId: String!, input: CreateSlackSourceInput!): Source!
+  updateSource(workspaceId: String!, input: UpdateSourceInput!): Source!
+  updateSlackSource(workspaceId: String!, input: UpdateSlackSourceInput!): Source!
+  deleteSource(workspaceId: String!, id: String!): Boolean!
+  validateNotionDB(workspaceId: String!, databaseID: String!): NotionDBValidationResult!
 }

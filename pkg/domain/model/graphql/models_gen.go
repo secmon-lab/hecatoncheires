@@ -16,34 +16,6 @@ type SourceConfig interface {
 	IsSourceConfig()
 }
 
-type Action struct {
-	ID             int                `json:"id"`
-	CaseID         int                `json:"caseID"`
-	Case           *Case              `json:"case,omitempty"`
-	Title          string             `json:"title"`
-	Description    string             `json:"description"`
-	AssigneeIDs    []string           `json:"assigneeIDs"`
-	Assignees      []*SlackUser       `json:"assignees"`
-	SlackMessageTs *string            `json:"slackMessageTS,omitempty"`
-	Status         types.ActionStatus `json:"status"`
-	CreatedAt      time.Time          `json:"createdAt"`
-	UpdatedAt      time.Time          `json:"updatedAt"`
-}
-
-type Case struct {
-	ID             int           `json:"id"`
-	Title          string        `json:"title"`
-	Description    string        `json:"description"`
-	AssigneeIDs    []string      `json:"assigneeIDs"`
-	Assignees      []*SlackUser  `json:"assignees"`
-	SlackChannelID *string       `json:"slackChannelID,omitempty"`
-	Fields         []*FieldValue `json:"fields"`
-	Actions        []*Action     `json:"actions"`
-	Knowledges     []*Knowledge  `json:"knowledges"`
-	CreatedAt      time.Time     `json:"createdAt"`
-	UpdatedAt      time.Time     `json:"updatedAt"`
-}
-
 type CreateActionInput struct {
 	CaseID         int                 `json:"caseID"`
 	Title          string              `json:"title"`
@@ -108,19 +80,6 @@ type FieldValue struct {
 type FieldValueInput struct {
 	FieldID string `json:"fieldId"`
 	Value   any    `json:"value"`
-}
-
-type Knowledge struct {
-	ID        string    `json:"id"`
-	CaseID    int       `json:"caseID"`
-	Case      *Case     `json:"case,omitempty"`
-	SourceID  string    `json:"sourceID"`
-	SourceURL string    `json:"sourceURL"`
-	Title     string    `json:"title"`
-	Summary   string    `json:"summary"`
-	SourcedAt time.Time `json:"sourcedAt"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 type KnowledgeConnection struct {
@@ -215,6 +174,11 @@ type UpdateSourceInput struct {
 	Name        *string `json:"name,omitempty"`
 	Description *string `json:"description,omitempty"`
 	Enabled     *bool   `json:"enabled,omitempty"`
+}
+
+type Workspace struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type FieldType string

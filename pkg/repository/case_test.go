@@ -17,6 +17,8 @@ import (
 func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.Repository) {
 	t.Helper()
 
+	const wsID = "test-ws"
+
 	t.Run("Create creates case with auto-increment ID", func(t *testing.T) {
 		repo := newRepo(t)
 		ctx := context.Background()
@@ -27,7 +29,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 			AssigneeIDs: []string{"U123", "U456"},
 		}
 
-		created1, err := repo.Case().Create(ctx, case1)
+		created1, err := repo.Case().Create(ctx, wsID, case1)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, created1.ID).NotEqual(int64(0))
@@ -43,7 +45,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 			Description: "Cross-site scripting vulnerability",
 		}
 
-		created2, err := repo.Case().Create(ctx, case2)
+		created2, err := repo.Case().Create(ctx, wsID, case2)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, created2.ID).NotEqual(created1.ID)
@@ -53,14 +55,14 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		created, err := repo.Case().Create(ctx, &model.Case{
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
 			Title:       "CSRF Risk",
 			Description: "Cross-site request forgery",
 			AssigneeIDs: []string{"U789"},
 		})
 		gt.NoError(t, err).Required()
 
-		retrieved, err := repo.Case().Get(ctx, created.ID)
+		retrieved, err := repo.Case().Get(ctx, wsID, created.ID)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, retrieved.ID).Equal(created.ID)
@@ -75,7 +77,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		_, err := repo.Case().Get(ctx, time.Now().UnixNano())
+		_, err := repo.Case().Get(ctx, wsID, time.Now().UnixNano())
 		gt.Value(t, err).NotNil()
 	})
 
@@ -83,7 +85,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		created, err := repo.Case().Create(ctx, &model.Case{
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
 			Title:       "Original Title",
 			Description: "Original Description",
 		})
@@ -94,7 +96,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		created.Description = "Updated Description"
 		created.AssigneeIDs = []string{"U111", "U222"}
 
-		updated, err := repo.Case().Update(ctx, created)
+		updated, err := repo.Case().Update(ctx, wsID, created)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, updated.ID).Equal(created.ID)
@@ -108,16 +110,16 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		created, err := repo.Case().Create(ctx, &model.Case{
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
 			Title: "To be deleted",
 		})
 		gt.NoError(t, err).Required()
 
-		err = repo.Case().Delete(ctx, created.ID)
+		err = repo.Case().Delete(ctx, wsID, created.ID)
 		gt.NoError(t, err).Required()
 
 		// Verify it's deleted
-		_, err = repo.Case().Get(ctx, created.ID)
+		_, err = repo.Case().Get(ctx, wsID, created.ID)
 		gt.Value(t, err).NotNil()
 	})
 
@@ -132,14 +134,14 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 			"url":      {FieldID: "url", Type: types.FieldTypeURL, Value: "https://example.com"},
 		}
 
-		created, err := repo.Case().Create(ctx, &model.Case{
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
 			Title:       "Case with fields",
 			Description: "Testing field values",
 			FieldValues: fieldValues,
 		})
 		gt.NoError(t, err).Required()
 
-		retrieved, err := repo.Case().Get(ctx, created.ID)
+		retrieved, err := repo.Case().Get(ctx, wsID, created.ID)
 		gt.NoError(t, err).Required()
 
 		gt.Number(t, len(retrieved.FieldValues)).Equal(4)
@@ -164,13 +166,13 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		created, err := repo.Case().Create(ctx, &model.Case{
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
 			Title:       "Case without fields",
 			FieldValues: nil,
 		})
 		gt.NoError(t, err).Required()
 
-		retrieved, err := repo.Case().Get(ctx, created.ID)
+		retrieved, err := repo.Case().Get(ctx, wsID, created.ID)
 		gt.NoError(t, err).Required()
 
 		// nil or empty map is acceptable
@@ -181,13 +183,13 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		created, err := repo.Case().Create(ctx, &model.Case{
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
 			Title:       "Case with empty fields",
 			FieldValues: map[string]model.FieldValue{},
 		})
 		gt.NoError(t, err).Required()
 
-		retrieved, err := repo.Case().Get(ctx, created.ID)
+		retrieved, err := repo.Case().Get(ctx, wsID, created.ID)
 		gt.NoError(t, err).Required()
 
 		gt.Number(t, len(retrieved.FieldValues)).Equal(0)
@@ -197,7 +199,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		created, err := repo.Case().Create(ctx, &model.Case{
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
 			Title: "Case to update fields",
 			FieldValues: map[string]model.FieldValue{
 				"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "low"},
@@ -211,7 +213,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 			"notes":    {FieldID: "notes", Type: types.FieldTypeText, Value: "urgent"},
 		}
 
-		updated, err := repo.Case().Update(ctx, created)
+		updated, err := repo.Case().Update(ctx, wsID, created)
 		gt.NoError(t, err).Required()
 
 		gt.Number(t, len(updated.FieldValues)).Equal(2)
@@ -219,7 +221,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.Value(t, updated.FieldValues["notes"].Value).Equal("urgent")
 
 		// Verify via Get as well
-		retrieved, err := repo.Case().Get(ctx, created.ID)
+		retrieved, err := repo.Case().Get(ctx, wsID, created.ID)
 		gt.NoError(t, err).Required()
 		gt.Number(t, len(retrieved.FieldValues)).Equal(2)
 		gt.Value(t, retrieved.FieldValues["severity"].Value).Equal("high")
@@ -230,7 +232,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		ctx := context.Background()
 
 		tags := []string{"tag1", "tag2"}
-		created, err := repo.Case().Create(ctx, &model.Case{
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
 			Title: "Deep copy test",
 			FieldValues: map[string]model.FieldValue{
 				"tags": {FieldID: "tags", Type: types.FieldTypeMultiSelect, Value: tags},
@@ -242,7 +244,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		tags[0] = "mutated"
 
 		// Retrieve and verify the stored value is not affected
-		retrieved, err := repo.Case().Get(ctx, created.ID)
+		retrieved, err := repo.Case().Get(ctx, wsID, created.ID)
 		gt.NoError(t, err).Required()
 
 		storedTags, ok := retrieved.FieldValues["tags"].Value.([]string)
@@ -252,7 +254,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		// Also verify that mutating the retrieved value doesn't affect the store
 		storedTags[0] = "also-mutated"
 
-		retrieved2, err := repo.Case().Get(ctx, created.ID)
+		retrieved2, err := repo.Case().Get(ctx, wsID, created.ID)
 		gt.NoError(t, err).Required()
 
 		storedTags2, ok := retrieved2.FieldValues["tags"].Value.([]string)
@@ -264,7 +266,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		created, err := repo.Case().Create(ctx, &model.Case{
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
 			Title: "Case to delete",
 			FieldValues: map[string]model.FieldValue{
 				"priority": {FieldID: "priority", Type: types.FieldTypeSelect, Value: "high"},
@@ -272,10 +274,10 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		})
 		gt.NoError(t, err).Required()
 
-		err = repo.Case().Delete(ctx, created.ID)
+		err = repo.Case().Delete(ctx, wsID, created.ID)
 		gt.NoError(t, err).Required()
 
-		_, err = repo.Case().Get(ctx, created.ID)
+		_, err = repo.Case().Get(ctx, wsID, created.ID)
 		gt.Value(t, err).NotNil()
 	})
 
@@ -285,14 +287,14 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 		// Create multiple cases
 		for i := 0; i < 3; i++ {
-			_, err := repo.Case().Create(ctx, &model.Case{
+			_, err := repo.Case().Create(ctx, wsID, &model.Case{
 				Title:       "Case " + string(rune('A'+i)),
 				Description: "Description " + string(rune('A'+i)),
 			})
 			gt.NoError(t, err).Required()
 		}
 
-		cases, err := repo.Case().List(ctx)
+		cases, err := repo.Case().List(ctx, wsID)
 		gt.NoError(t, err).Required()
 
 		gt.Number(t, len(cases)).GreaterOrEqual(3)
@@ -312,7 +314,7 @@ func TestCaseRepository_Firestore(t *testing.T) {
 	}
 
 	runCaseRepositoryTest(t, func(t *testing.T) interfaces.Repository {
-		repo, err := firestore.New(context.Background(), projectID)
+		repo, err := firestore.New(context.Background(), projectID, "")
 		gt.NoError(t, err).Required()
 		return repo
 	})

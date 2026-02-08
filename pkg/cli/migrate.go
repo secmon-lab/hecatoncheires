@@ -30,7 +30,6 @@ func cmdMigrate() *cli.Command {
 			&cli.StringFlag{
 				Name:        "firestore-database-id",
 				Usage:       "Firestore Database ID",
-				Value:       "(default)",
 				Sources:     cli.EnvVars("HECATONCHEIRES_FIRESTORE_DATABASE_ID"),
 				Destination: &databaseID,
 			},
@@ -94,32 +93,23 @@ func cmdMigrate() *cli.Command {
 	}
 }
 
-// getIndexConfig returns the Firestore index configuration
+// getIndexConfig returns the Firestore index configuration.
+// Knowledges are stored in subcollections (workspaces/{workspaceID}/knowledges/),
+// so indexes use QueryScopeCollectionGroup to apply across all workspace subcollections.
 func getIndexConfig() *fireconf.Config {
 	return &fireconf.Config{
 		Collections: []fireconf.Collection{
 			{
 				Name: "knowledges",
 				Indexes: []fireconf.Index{
-					// ListByRiskID: risk_id ASC, sourced_at DESC
+					// Vector search index for embedding similarity search.
+					// Field name matches the Go struct field Knowledge.Embedding
+					// stored as firestore.Vector32.
 					{
-						Fields: []fireconf.IndexField{
-							{Path: "risk_id", Order: fireconf.OrderAscending},
-							{Path: "sourced_at", Order: fireconf.OrderDescending},
-						},
-					},
-					// ListBySourceID: source_id ASC, sourced_at DESC
-					{
-						Fields: []fireconf.IndexField{
-							{Path: "source_id", Order: fireconf.OrderAscending},
-							{Path: "sourced_at", Order: fireconf.OrderDescending},
-						},
-					},
-					// Vector search index
-					{
+						QueryScope: fireconf.QueryScopeCollectionGroup,
 						Fields: []fireconf.IndexField{
 							{
-								Path: "embedding",
+								Path: "Embedding",
 								Vector: &fireconf.VectorConfig{
 									Dimension: model.EmbeddingDimension,
 								},

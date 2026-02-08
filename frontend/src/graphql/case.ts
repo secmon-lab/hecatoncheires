@@ -1,8 +1,8 @@
 import { gql } from '@apollo/client'
 
 export const GET_CASES = gql`
-  query GetCases {
-    cases {
+  query GetCases($workspaceId: String!) {
+    cases(workspaceId: $workspaceId) {
       id
       title
       description
@@ -25,8 +25,8 @@ export const GET_CASES = gql`
 `
 
 export const GET_CASE = gql`
-  query GetCase($id: Int!) {
-    case(id: $id) {
+  query GetCase($workspaceId: String!, $id: Int!) {
+    case(workspaceId: $workspaceId, id: $id) {
       id
       title
       description
@@ -61,8 +61,8 @@ export const GET_CASE = gql`
 `
 
 export const CREATE_CASE = gql`
-  mutation CreateCase($input: CreateCaseInput!) {
-    createCase(input: $input) {
+  mutation CreateCase($workspaceId: String!, $input: CreateCaseInput!) {
+    createCase(workspaceId: $workspaceId, input: $input) {
       id
       title
       description
@@ -85,8 +85,8 @@ export const CREATE_CASE = gql`
 `
 
 export const UPDATE_CASE = gql`
-  mutation UpdateCase($input: UpdateCaseInput!) {
-    updateCase(input: $input) {
+  mutation UpdateCase($workspaceId: String!, $input: UpdateCaseInput!) {
+    updateCase(workspaceId: $workspaceId, input: $input) {
       id
       title
       description
@@ -109,7 +109,7 @@ export const UPDATE_CASE = gql`
 `
 
 export const DELETE_CASE = gql`
-  mutation DeleteCase($id: Int!) {
-    deleteCase(id: $id)
+  mutation DeleteCase($workspaceId: String!, $id: Int!) {
+    deleteCase(workspaceId: $workspaceId, id: $id)
   }
 `

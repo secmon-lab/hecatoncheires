@@ -20,14 +20,14 @@ type Service interface {
 	// ListUsers retrieves all non-deleted, non-bot users in the workspace
 	ListUsers(ctx context.Context) ([]*User, error)
 
-	// CreateChannel creates a new public Slack channel for a risk
-	// The channel name is automatically generated from riskID and riskName with the configured prefix
+	// CreateChannel creates a new public Slack channel for a case
+	// The channel name is automatically generated from caseID, caseName, and the given prefix
 	// Returns the channel ID on success
-	CreateChannel(ctx context.Context, riskID int64, riskName string) (string, error)
+	CreateChannel(ctx context.Context, caseID int64, caseName string, prefix string) (string, error)
 
-	// RenameChannel renames an existing Slack channel for a risk
-	// The channel name is automatically generated from riskID and riskName with the configured prefix
-	RenameChannel(ctx context.Context, channelID string, riskID int64, riskName string) error
+	// RenameChannel renames an existing Slack channel for a case
+	// The channel name is automatically generated from caseID, caseName, and the given prefix
+	RenameChannel(ctx context.Context, channelID string, caseID int64, caseName string, prefix string) error
 
 	// InviteUsersToChannel invites users to a Slack channel
 	// Silently skips if userIDs is empty

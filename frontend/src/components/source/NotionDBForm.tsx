@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useMutation } from '@apollo/client'
 import { useNavigate } from 'react-router-dom'
+import { useWorkspace } from '../../contexts/workspace-context'
 import { CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
 import Modal from '../Modal'
 import Button from '../Button'
@@ -26,6 +27,7 @@ interface ValidationResult {
 
 export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
   const navigate = useNavigate()
+  const { currentWorkspace } = useWorkspace()
   const [databaseID, setDatabaseID] = useState('')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -39,10 +41,11 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
   const [createSource, { loading: creating }] = useMutation(CREATE_NOTION_DB_SOURCE, {
     update(cache, { data }) {
       if (!data?.createNotionDBSource) return
-      const existingData = cache.readQuery<{ sources: unknown[] }>({ query: GET_SOURCES })
+      const existingData = cache.readQuery<{ sources: unknown[] }>({ query: GET_SOURCES, variables: { workspaceId: currentWorkspace!.id } })
       if (existingData) {
         cache.writeQuery({
           query: GET_SOURCES,
+          variables: { workspaceId: currentWorkspace!.id },
           data: { sources: [...existingData.sources, data.createNotionDBSource] },
         })
       }
@@ -50,7 +53,7 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
     onCompleted: (data) => {
       onClose()
       resetForm()
-      navigate(`/sources/${data.createNotionDBSource.id}`)
+      navigate(`/ws/${currentWorkspace!.id}/sources/${data.createNotionDBSource.id}`)
     },
     onError: (error) => {
       console.error('Create source error:', error)
@@ -89,7 +92,7 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
 
     try {
       const result = await validateNotionDB({
-        variables: { databaseID: databaseID.trim() },
+        variables: { workspaceId: currentWorkspace!.id, databaseID: databaseID.trim() },
       })
 
       const validation: ValidationResult | null = result.data?.validateNotionDB ?? null
@@ -139,6 +142,7 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
 
     await createSource({
       variables: {
+        workspaceId: currentWorkspace!.id,
         input: {
           databaseID: databaseID.trim(),
           name: name.trim(),

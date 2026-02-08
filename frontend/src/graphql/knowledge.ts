@@ -17,8 +17,8 @@ const KNOWLEDGE_FIELDS = gql`
 
 export const GET_KNOWLEDGE = gql`
   ${KNOWLEDGE_FIELDS}
-  query GetKnowledge($id: String!) {
-    knowledge(id: $id) {
+  query GetKnowledge($workspaceId: String!, $id: String!) {
+    knowledge(workspaceId: $workspaceId, id: $id) {
       ...KnowledgeFields
       case {
         id
@@ -31,8 +31,8 @@ export const GET_KNOWLEDGE = gql`
 
 export const GET_KNOWLEDGES = gql`
   ${KNOWLEDGE_FIELDS}
-  query GetKnowledges($limit: Int, $offset: Int) {
-    knowledges(limit: $limit, offset: $offset) {
+  query GetKnowledges($workspaceId: String!, $limit: Int, $offset: Int) {
+    knowledges(workspaceId: $workspaceId, limit: $limit, offset: $offset) {
       items {
         ...KnowledgeFields
         case {

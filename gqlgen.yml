@@ -42,6 +42,8 @@ models:
     model:
       - github.com/secmon-lab/hecatoncheires/pkg/domain/types.ActionStatus
   Case:
+    model:
+      - github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql.Case
     fields:
       fields:
         resolver: true
@@ -52,12 +54,16 @@ models:
       assignees:
         resolver: true
   Action:
+    model:
+      - github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql.Action
     fields:
       case:
         resolver: true
       assignees:
         resolver: true
   Knowledge:
+    model:
+      - github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql.Knowledge
     fields:
       case:
         resolver: true

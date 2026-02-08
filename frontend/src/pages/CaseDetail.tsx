@@ -9,6 +9,7 @@ import CaseDeleteDialog from './CaseDeleteDialog'
 import ActionForm from './ActionForm'
 import { GET_CASE } from '../graphql/case'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
+import { useWorkspace } from '../contexts/workspace-context'
 import styles from './CaseDetail.module.css'
 
 interface Knowledge {
@@ -64,6 +65,7 @@ const STATUS_COLORS: Record<string, number> = {
 export default function CaseDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { currentWorkspace } = useWorkspace()
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [isActionFormOpen, setIsActionFormOpen] = useState(false)
@@ -73,18 +75,21 @@ export default function CaseDetail() {
   const menuRef = useRef<HTMLDivElement>(null)
 
   const { data: caseData, loading: caseLoading, error: caseError, refetch } = useQuery(GET_CASE, {
-    variables: { id: parseInt(id || '0') },
-    skip: !id,
+    variables: { workspaceId: currentWorkspace!.id, id: parseInt(id || '0') },
+    skip: !id || !currentWorkspace,
   })
 
-  const { data: configData } = useQuery(GET_FIELD_CONFIGURATION)
+  const { data: configData } = useQuery(GET_FIELD_CONFIGURATION, {
+    variables: { workspaceId: currentWorkspace!.id },
+    skip: !currentWorkspace,
+  })
 
   const caseItem: Case | undefined = caseData?.case
   const fieldDefs = configData?.fieldConfiguration?.fields || []
   const caseLabel = configData?.fieldConfiguration?.labels?.case || 'Case'
 
   const handleBack = () => {
-    navigate('/cases')
+    navigate(`/ws/${currentWorkspace!.id}/cases`)
   }
 
   const handleEdit = () => {
@@ -97,11 +102,11 @@ export default function CaseDetail() {
 
   const handleDeleteConfirm = () => {
     setIsDeleteDialogOpen(false)
-    navigate('/cases')
+    navigate(`/ws/${currentWorkspace!.id}/cases`)
   }
 
   const handleActionClick = (actionId: number) => {
-    navigate(`/actions/${actionId}`)
+    navigate(`/ws/${currentWorkspace!.id}/actions/${actionId}`)
   }
 
   useEffect(() => {
@@ -339,7 +344,7 @@ export default function CaseDetail() {
                       <tr
                         key={knowledge.id}
                         className={styles.knowledgeRow}
-                        onClick={() => navigate(`/knowledges/${knowledge.id}`)}
+                        onClick={() => navigate(`/ws/${currentWorkspace!.id}/knowledges/${knowledge.id}`)}
                       >
                         <td className={styles.knowledgeTitleCell}>{knowledge.title}</td>
                         <td className={styles.knowledgeSummaryCell}>

@@ -11,14 +11,23 @@ import (
 
 type caseRepository struct {
 	mu     sync.RWMutex
-	cases  map[int64]*model.Case
-	nextID int64
+	cases  map[string]map[int64]*model.Case
+	nextID map[string]int64
 }
 
 func newCaseRepository() *caseRepository {
 	return &caseRepository{
-		cases:  make(map[int64]*model.Case),
-		nextID: 1,
+		cases:  make(map[string]map[int64]*model.Case),
+		nextID: make(map[string]int64),
+	}
+}
+
+func (r *caseRepository) ensureWorkspace(workspaceID string) {
+	if _, exists := r.cases[workspaceID]; !exists {
+		r.cases[workspaceID] = make(map[int64]*model.Case)
+	}
+	if _, exists := r.nextID[workspaceID]; !exists {
+		r.nextID[workspaceID] = 1
 	}
 }
 
@@ -68,26 +77,33 @@ func copyCase(c *model.Case) *model.Case {
 	}
 }
 
-func (r *caseRepository) Create(ctx context.Context, c *model.Case) (*model.Case, error) {
+func (r *caseRepository) Create(ctx context.Context, workspaceID string, c *model.Case) (*model.Case, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	r.ensureWorkspace(workspaceID)
+
 	now := time.Now().UTC()
 	created := copyCase(c)
-	created.ID = r.nextID
+	created.ID = r.nextID[workspaceID]
 	created.CreatedAt = now
 	created.UpdatedAt = now
-	r.nextID++
+	r.nextID[workspaceID]++
 
-	r.cases[created.ID] = created
+	r.cases[workspaceID][created.ID] = created
 	return copyCase(created), nil
 }
 
-func (r *caseRepository) Get(ctx context.Context, id int64) (*model.Case, error) {
+func (r *caseRepository) Get(ctx context.Context, workspaceID string, id int64) (*model.Case, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	c, exists := r.cases[id]
+	ws, exists := r.cases[workspaceID]
+	if !exists {
+		return nil, goerr.Wrap(ErrNotFound, "case not found", goerr.V("id", id))
+	}
+
+	c, exists := ws[id]
 	if !exists {
 		return nil, goerr.Wrap(ErrNotFound, "case not found", goerr.V("id", id))
 	}
@@ -95,23 +111,33 @@ func (r *caseRepository) Get(ctx context.Context, id int64) (*model.Case, error)
 	return copyCase(c), nil
 }
 
-func (r *caseRepository) List(ctx context.Context) ([]*model.Case, error) {
+func (r *caseRepository) List(ctx context.Context, workspaceID string) ([]*model.Case, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	cases := make([]*model.Case, 0, len(r.cases))
-	for _, c := range r.cases {
+	ws, exists := r.cases[workspaceID]
+	if !exists {
+		return []*model.Case{}, nil
+	}
+
+	cases := make([]*model.Case, 0, len(ws))
+	for _, c := range ws {
 		cases = append(cases, copyCase(c))
 	}
 
 	return cases, nil
 }
 
-func (r *caseRepository) Update(ctx context.Context, c *model.Case) (*model.Case, error) {
+func (r *caseRepository) Update(ctx context.Context, workspaceID string, c *model.Case) (*model.Case, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	existing, exists := r.cases[c.ID]
+	ws, exists := r.cases[workspaceID]
+	if !exists {
+		return nil, goerr.Wrap(ErrNotFound, "case not found", goerr.V("id", c.ID))
+	}
+
+	existing, exists := ws[c.ID]
 	if !exists {
 		return nil, goerr.Wrap(ErrNotFound, "case not found", goerr.V("id", c.ID))
 	}
@@ -120,18 +146,23 @@ func (r *caseRepository) Update(ctx context.Context, c *model.Case) (*model.Case
 	updated.CreatedAt = existing.CreatedAt
 	updated.UpdatedAt = time.Now().UTC()
 
-	r.cases[updated.ID] = updated
+	r.cases[workspaceID][updated.ID] = updated
 	return copyCase(updated), nil
 }
 
-func (r *caseRepository) Delete(ctx context.Context, id int64) error {
+func (r *caseRepository) Delete(ctx context.Context, workspaceID string, id int64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, exists := r.cases[id]; !exists {
+	ws, exists := r.cases[workspaceID]
+	if !exists {
 		return goerr.Wrap(ErrNotFound, "case not found", goerr.V("id", id))
 	}
 
-	delete(r.cases, id)
+	if _, exists := ws[id]; !exists {
+		return goerr.Wrap(ErrNotFound, "case not found", goerr.V("id", id))
+	}
+
+	delete(r.cases[workspaceID], id)
 	return nil
 }

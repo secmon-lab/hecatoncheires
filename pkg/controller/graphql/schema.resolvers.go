@@ -17,14 +17,14 @@ import (
 // Case is the resolver for the case field.
 func (r *actionResolver) Case(ctx context.Context, obj *graphql1.Action) (*graphql1.Case, error) {
 	loaders := GetDataLoaders(ctx)
-	cases, err := loaders.CaseLoader.Load(ctx, []int64{int64(obj.CaseID)})
+	cases, err := loaders.CaseLoader.Load(ctx, obj.WorkspaceID, []int64{int64(obj.CaseID)})
 	if err != nil {
 		return nil, err
 	}
 	if len(cases) == 0 {
 		return nil, nil
 	}
-	return toGraphQLCase(cases[0]), nil
+	return toGraphQLCase(cases[0], obj.WorkspaceID), nil
 }
 
 // Assignees is the resolver for the assignees field.
@@ -57,7 +57,7 @@ func (r *caseResolver) Fields(ctx context.Context, obj *graphql1.Case) ([]*graph
 // Actions is the resolver for the actions field.
 func (r *caseResolver) Actions(ctx context.Context, obj *graphql1.Case) ([]*graphql1.Action, error) {
 	loaders := GetDataLoaders(ctx)
-	actionsMap, err := loaders.ActionsByCaseLoader.Load(ctx, []int64{int64(obj.ID)})
+	actionsMap, err := loaders.ActionsByCaseLoader.Load(ctx, obj.WorkspaceID, []int64{int64(obj.ID)})
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +69,7 @@ func (r *caseResolver) Actions(ctx context.Context, obj *graphql1.Case) ([]*grap
 	// Convert domain Actions to GraphQL Actions
 	result := make([]*graphql1.Action, len(actions))
 	for i, a := range actions {
-		result[i] = toGraphQLAction(a)
+		result[i] = toGraphQLAction(a, obj.WorkspaceID)
 	}
 	return result, nil
 }
@@ -77,7 +77,7 @@ func (r *caseResolver) Actions(ctx context.Context, obj *graphql1.Case) ([]*grap
 // Knowledges is the resolver for the knowledges field.
 func (r *caseResolver) Knowledges(ctx context.Context, obj *graphql1.Case) ([]*graphql1.Knowledge, error) {
 	loaders := GetDataLoaders(ctx)
-	knowledgesMap, err := loaders.KnowledgesByCaseLoader.Load(ctx, []int64{int64(obj.ID)})
+	knowledgesMap, err := loaders.KnowledgesByCaseLoader.Load(ctx, obj.WorkspaceID, []int64{int64(obj.ID)})
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +89,7 @@ func (r *caseResolver) Knowledges(ctx context.Context, obj *graphql1.Case) ([]*g
 	// Convert domain Knowledge to GraphQL Knowledge
 	result := make([]*graphql1.Knowledge, len(knowledges))
 	for i, k := range knowledges {
-		result[i] = toGraphQLKnowledge(k)
+		result[i] = toGraphQLKnowledge(k, obj.WorkspaceID)
 	}
 	return result, nil
 }
@@ -97,14 +97,14 @@ func (r *caseResolver) Knowledges(ctx context.Context, obj *graphql1.Case) ([]*g
 // Case is the resolver for the case field.
 func (r *knowledgeResolver) Case(ctx context.Context, obj *graphql1.Knowledge) (*graphql1.Case, error) {
 	loaders := GetDataLoaders(ctx)
-	cases, err := loaders.CaseLoader.Load(ctx, []int64{int64(obj.CaseID)})
+	cases, err := loaders.CaseLoader.Load(ctx, obj.WorkspaceID, []int64{int64(obj.CaseID)})
 	if err != nil {
 		return nil, err
 	}
 	if len(cases) == 0 {
 		return nil, nil
 	}
-	return toGraphQLCase(cases[0]), nil
+	return toGraphQLCase(cases[0], obj.WorkspaceID), nil
 }
 
 // Noop is the resolver for the noop field.
@@ -114,7 +114,7 @@ func (r *mutationResolver) Noop(ctx context.Context) (*bool, error) {
 }
 
 // CreateCase is the resolver for the createCase field.
-func (r *mutationResolver) CreateCase(ctx context.Context, input graphql1.CreateCaseInput) (*graphql1.Case, error) {
+func (r *mutationResolver) CreateCase(ctx context.Context, workspaceID string, input graphql1.CreateCaseInput) (*graphql1.Case, error) {
 	assigneeIDs := input.AssigneeIDs
 	if assigneeIDs == nil {
 		assigneeIDs = []string{}
@@ -122,16 +122,16 @@ func (r *mutationResolver) CreateCase(ctx context.Context, input graphql1.Create
 
 	fieldValues := toDomainFieldValues(input.Fields)
 
-	created, err := r.UseCases.Case.CreateCase(ctx, input.Title, input.Description, assigneeIDs, fieldValues)
+	created, err := r.UseCases.Case.CreateCase(ctx, workspaceID, input.Title, input.Description, assigneeIDs, fieldValues)
 	if err != nil {
 		return nil, err
 	}
 
-	return toGraphQLCase(created), nil
+	return toGraphQLCase(created, workspaceID), nil
 }
 
 // UpdateCase is the resolver for the updateCase field.
-func (r *mutationResolver) UpdateCase(ctx context.Context, input graphql1.UpdateCaseInput) (*graphql1.Case, error) {
+func (r *mutationResolver) UpdateCase(ctx context.Context, workspaceID string, input graphql1.UpdateCaseInput) (*graphql1.Case, error) {
 	assigneeIDs := input.AssigneeIDs
 	if assigneeIDs == nil {
 		assigneeIDs = []string{}
@@ -139,24 +139,24 @@ func (r *mutationResolver) UpdateCase(ctx context.Context, input graphql1.Update
 
 	fieldValues := toDomainFieldValues(input.Fields)
 
-	updated, err := r.UseCases.Case.UpdateCase(ctx, int64(input.ID), input.Title, input.Description, assigneeIDs, fieldValues)
+	updated, err := r.UseCases.Case.UpdateCase(ctx, workspaceID, int64(input.ID), input.Title, input.Description, assigneeIDs, fieldValues)
 	if err != nil {
 		return nil, err
 	}
 
-	return toGraphQLCase(updated), nil
+	return toGraphQLCase(updated, workspaceID), nil
 }
 
 // DeleteCase is the resolver for the deleteCase field.
-func (r *mutationResolver) DeleteCase(ctx context.Context, id int) (bool, error) {
-	if err := r.UseCases.Case.DeleteCase(ctx, int64(id)); err != nil {
+func (r *mutationResolver) DeleteCase(ctx context.Context, workspaceID string, id int) (bool, error) {
+	if err := r.UseCases.Case.DeleteCase(ctx, workspaceID, int64(id)); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
 // CreateAction is the resolver for the createAction field.
-func (r *mutationResolver) CreateAction(ctx context.Context, input graphql1.CreateActionInput) (*graphql1.Action, error) {
+func (r *mutationResolver) CreateAction(ctx context.Context, workspaceID string, input graphql1.CreateActionInput) (*graphql1.Action, error) {
 	assigneeIDs := input.AssigneeIDs
 	if assigneeIDs == nil {
 		assigneeIDs = []string{}
@@ -172,16 +172,16 @@ func (r *mutationResolver) CreateAction(ctx context.Context, input graphql1.Crea
 		status = *input.Status
 	}
 
-	created, err := r.UseCases.Action.CreateAction(ctx, int64(input.CaseID), input.Title, input.Description, assigneeIDs, slackMessageTS, status)
+	created, err := r.UseCases.Action.CreateAction(ctx, workspaceID, int64(input.CaseID), input.Title, input.Description, assigneeIDs, slackMessageTS, status)
 	if err != nil {
 		return nil, err
 	}
 
-	return toGraphQLAction(created), nil
+	return toGraphQLAction(created, workspaceID), nil
 }
 
 // UpdateAction is the resolver for the updateAction field.
-func (r *mutationResolver) UpdateAction(ctx context.Context, input graphql1.UpdateActionInput) (*graphql1.Action, error) {
+func (r *mutationResolver) UpdateAction(ctx context.Context, workspaceID string, input graphql1.UpdateActionInput) (*graphql1.Action, error) {
 	var caseID *int64
 	if input.CaseID != nil {
 		id := int64(*input.CaseID)
@@ -198,25 +198,25 @@ func (r *mutationResolver) UpdateAction(ctx context.Context, input graphql1.Upda
 		status = input.Status
 	}
 
-	updated, err := r.UseCases.Action.UpdateAction(ctx, int64(input.ID), caseID, input.Title, input.Description, input.AssigneeIDs, slackMessageTS, status)
+	updated, err := r.UseCases.Action.UpdateAction(ctx, workspaceID, int64(input.ID), caseID, input.Title, input.Description, input.AssigneeIDs, slackMessageTS, status)
 	if err != nil {
 		return nil, err
 	}
 
-	return toGraphQLAction(updated), nil
+	return toGraphQLAction(updated, workspaceID), nil
 }
 
 // DeleteAction is the resolver for the deleteAction field.
-func (r *mutationResolver) DeleteAction(ctx context.Context, id int) (bool, error) {
-	if err := r.UseCases.Action.DeleteAction(ctx, int64(id)); err != nil {
+func (r *mutationResolver) DeleteAction(ctx context.Context, workspaceID string, id int) (bool, error) {
+	if err := r.UseCases.Action.DeleteAction(ctx, workspaceID, int64(id)); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
 // CreateNotionDBSource is the resolver for the createNotionDBSource field.
-func (r *mutationResolver) CreateNotionDBSource(ctx context.Context, input graphql1.CreateNotionDBSourceInput) (*graphql1.Source, error) {
-	created, err := r.UseCases.Source.CreateNotionDBSource(ctx, toUseCaseCreateNotionDBSourceInput(input))
+func (r *mutationResolver) CreateNotionDBSource(ctx context.Context, workspaceID string, input graphql1.CreateNotionDBSourceInput) (*graphql1.Source, error) {
+	created, err := r.UseCases.Source.CreateNotionDBSource(ctx, workspaceID, toUseCaseCreateNotionDBSourceInput(input))
 	if err != nil {
 		return nil, err
 	}
@@ -225,8 +225,8 @@ func (r *mutationResolver) CreateNotionDBSource(ctx context.Context, input graph
 }
 
 // CreateSlackSource is the resolver for the createSlackSource field.
-func (r *mutationResolver) CreateSlackSource(ctx context.Context, input graphql1.CreateSlackSourceInput) (*graphql1.Source, error) {
-	created, err := r.UseCases.Source.CreateSlackSource(ctx, toUseCaseCreateSlackSourceInput(input))
+func (r *mutationResolver) CreateSlackSource(ctx context.Context, workspaceID string, input graphql1.CreateSlackSourceInput) (*graphql1.Source, error) {
+	created, err := r.UseCases.Source.CreateSlackSource(ctx, workspaceID, toUseCaseCreateSlackSourceInput(input))
 	if err != nil {
 		return nil, err
 	}
@@ -235,8 +235,8 @@ func (r *mutationResolver) CreateSlackSource(ctx context.Context, input graphql1
 }
 
 // UpdateSource is the resolver for the updateSource field.
-func (r *mutationResolver) UpdateSource(ctx context.Context, input graphql1.UpdateSourceInput) (*graphql1.Source, error) {
-	updated, err := r.UseCases.Source.UpdateSource(ctx, toUseCaseUpdateSourceInput(input))
+func (r *mutationResolver) UpdateSource(ctx context.Context, workspaceID string, input graphql1.UpdateSourceInput) (*graphql1.Source, error) {
+	updated, err := r.UseCases.Source.UpdateSource(ctx, workspaceID, toUseCaseUpdateSourceInput(input))
 	if err != nil {
 		return nil, err
 	}
@@ -245,8 +245,8 @@ func (r *mutationResolver) UpdateSource(ctx context.Context, input graphql1.Upda
 }
 
 // UpdateSlackSource is the resolver for the updateSlackSource field.
-func (r *mutationResolver) UpdateSlackSource(ctx context.Context, input graphql1.UpdateSlackSourceInput) (*graphql1.Source, error) {
-	updated, err := r.UseCases.Source.UpdateSlackSource(ctx, toUseCaseUpdateSlackSourceInput(input))
+func (r *mutationResolver) UpdateSlackSource(ctx context.Context, workspaceID string, input graphql1.UpdateSlackSourceInput) (*graphql1.Source, error) {
+	updated, err := r.UseCases.Source.UpdateSlackSource(ctx, workspaceID, toUseCaseUpdateSlackSourceInput(input))
 	if err != nil {
 		return nil, err
 	}
@@ -255,15 +255,15 @@ func (r *mutationResolver) UpdateSlackSource(ctx context.Context, input graphql1
 }
 
 // DeleteSource is the resolver for the deleteSource field.
-func (r *mutationResolver) DeleteSource(ctx context.Context, id string) (bool, error) {
-	if err := r.UseCases.Source.DeleteSource(ctx, model.SourceID(id)); err != nil {
+func (r *mutationResolver) DeleteSource(ctx context.Context, workspaceID string, id string) (bool, error) {
+	if err := r.UseCases.Source.DeleteSource(ctx, workspaceID, model.SourceID(id)); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
 // ValidateNotionDb is the resolver for the validateNotionDB field.
-func (r *mutationResolver) ValidateNotionDb(ctx context.Context, databaseID string) (*graphql1.NotionDBValidationResult, error) {
+func (r *mutationResolver) ValidateNotionDb(ctx context.Context, workspaceID string, databaseID string) (*graphql1.NotionDBValidationResult, error) {
 	result, err := r.UseCases.Source.ValidateNotionDB(ctx, databaseID)
 	if err != nil {
 		return nil, err
@@ -290,74 +290,99 @@ func (r *queryResolver) Health(ctx context.Context) (string, error) {
 	return "ok", nil
 }
 
+// Workspace is the resolver for the workspace field.
+func (r *queryResolver) Workspace(ctx context.Context, workspaceID string) (*graphql1.Workspace, error) {
+	entry, err := r.UseCases.WorkspaceRegistry().Get(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return &graphql1.Workspace{
+		ID:   entry.Workspace.ID,
+		Name: entry.Workspace.Name,
+	}, nil
+}
+
+// Workspaces is the resolver for the workspaces field.
+func (r *queryResolver) Workspaces(ctx context.Context) ([]*graphql1.Workspace, error) {
+	entries := r.UseCases.WorkspaceRegistry().List()
+	result := make([]*graphql1.Workspace, len(entries))
+	for i, entry := range entries {
+		result[i] = &graphql1.Workspace{
+			ID:   entry.Workspace.ID,
+			Name: entry.Workspace.Name,
+		}
+	}
+	return result, nil
+}
+
 // Cases is the resolver for the cases field.
-func (r *queryResolver) Cases(ctx context.Context) ([]*graphql1.Case, error) {
-	cases, err := r.UseCases.Case.ListCases(ctx)
+func (r *queryResolver) Cases(ctx context.Context, workspaceID string) ([]*graphql1.Case, error) {
+	cases, err := r.UseCases.Case.ListCases(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
 
 	result := make([]*graphql1.Case, len(cases))
 	for i, c := range cases {
-		result[i] = toGraphQLCase(c)
+		result[i] = toGraphQLCase(c, workspaceID)
 	}
 
 	return result, nil
 }
 
 // Case is the resolver for the case field.
-func (r *queryResolver) Case(ctx context.Context, id int) (*graphql1.Case, error) {
-	c, err := r.UseCases.Case.GetCase(ctx, int64(id))
+func (r *queryResolver) Case(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error) {
+	c, err := r.UseCases.Case.GetCase(ctx, workspaceID, int64(id))
 	if err != nil {
 		return nil, err
 	}
 
-	return toGraphQLCase(c), nil
+	return toGraphQLCase(c, workspaceID), nil
 }
 
 // Actions is the resolver for the actions field.
-func (r *queryResolver) Actions(ctx context.Context) ([]*graphql1.Action, error) {
-	actions, err := r.UseCases.Action.ListActions(ctx)
+func (r *queryResolver) Actions(ctx context.Context, workspaceID string) ([]*graphql1.Action, error) {
+	actions, err := r.UseCases.Action.ListActions(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
 
 	result := make([]*graphql1.Action, len(actions))
 	for i, a := range actions {
-		result[i] = toGraphQLAction(a)
+		result[i] = toGraphQLAction(a, workspaceID)
 	}
 
 	return result, nil
 }
 
 // Action is the resolver for the action field.
-func (r *queryResolver) Action(ctx context.Context, id int) (*graphql1.Action, error) {
-	a, err := r.UseCases.Action.GetAction(ctx, int64(id))
+func (r *queryResolver) Action(ctx context.Context, workspaceID string, id int) (*graphql1.Action, error) {
+	a, err := r.UseCases.Action.GetAction(ctx, workspaceID, int64(id))
 	if err != nil {
 		return nil, err
 	}
 
-	return toGraphQLAction(a), nil
+	return toGraphQLAction(a, workspaceID), nil
 }
 
 // ActionsByCase is the resolver for the actionsByCase field.
-func (r *queryResolver) ActionsByCase(ctx context.Context, caseID int) ([]*graphql1.Action, error) {
-	actions, err := r.UseCases.Action.GetActionsByCase(ctx, int64(caseID))
+func (r *queryResolver) ActionsByCase(ctx context.Context, workspaceID string, caseID int) ([]*graphql1.Action, error) {
+	actions, err := r.UseCases.Action.GetActionsByCase(ctx, workspaceID, int64(caseID))
 	if err != nil {
 		return nil, err
 	}
 
 	result := make([]*graphql1.Action, len(actions))
 	for i, a := range actions {
-		result[i] = toGraphQLAction(a)
+		result[i] = toGraphQLAction(a, workspaceID)
 	}
 
 	return result, nil
 }
 
 // FieldConfiguration is the resolver for the fieldConfiguration field.
-func (r *queryResolver) FieldConfiguration(ctx context.Context) (*graphql1.FieldConfiguration, error) {
-	schema := r.UseCases.Case.GetFieldConfiguration()
+func (r *queryResolver) FieldConfiguration(ctx context.Context, workspaceID string) (*graphql1.FieldConfiguration, error) {
+	schema := r.UseCases.Case.GetFieldConfiguration(workspaceID)
 
 	fields := make([]*graphql1.FieldDefinition, len(schema.Fields))
 	for i, field := range schema.Fields {
@@ -447,8 +472,8 @@ func (r *queryResolver) SlackJoinedChannels(ctx context.Context) ([]*graphql1.Sl
 }
 
 // Sources is the resolver for the sources field.
-func (r *queryResolver) Sources(ctx context.Context) ([]*graphql1.Source, error) {
-	sources, err := r.UseCases.Source.ListSources(ctx)
+func (r *queryResolver) Sources(ctx context.Context, workspaceID string) ([]*graphql1.Source, error) {
+	sources, err := r.UseCases.Source.ListSources(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -466,8 +491,8 @@ func (r *queryResolver) Sources(ctx context.Context) ([]*graphql1.Source, error)
 }
 
 // Source is the resolver for the source field.
-func (r *queryResolver) Source(ctx context.Context, id string) (*graphql1.Source, error) {
-	source, err := r.UseCases.Source.GetSource(ctx, model.SourceID(id))
+func (r *queryResolver) Source(ctx context.Context, workspaceID string, id string) (*graphql1.Source, error) {
+	source, err := r.UseCases.Source.GetSource(ctx, workspaceID, model.SourceID(id))
 	if err != nil {
 		return nil, err
 	}
@@ -476,17 +501,17 @@ func (r *queryResolver) Source(ctx context.Context, id string) (*graphql1.Source
 }
 
 // Knowledge is the resolver for the knowledge field.
-func (r *queryResolver) Knowledge(ctx context.Context, id string) (*graphql1.Knowledge, error) {
-	knowledge, err := r.repo.Knowledge().Get(ctx, model.KnowledgeID(id))
+func (r *queryResolver) Knowledge(ctx context.Context, workspaceID string, id string) (*graphql1.Knowledge, error) {
+	knowledge, err := r.repo.Knowledge().Get(ctx, workspaceID, model.KnowledgeID(id))
 	if err != nil {
 		return nil, err
 	}
 
-	return toGraphQLKnowledge(knowledge), nil
+	return toGraphQLKnowledge(knowledge, workspaceID), nil
 }
 
 // Knowledges is the resolver for the knowledges field.
-func (r *queryResolver) Knowledges(ctx context.Context, limit *int, offset *int) (*graphql1.KnowledgeConnection, error) {
+func (r *queryResolver) Knowledges(ctx context.Context, workspaceID string, limit *int, offset *int) (*graphql1.KnowledgeConnection, error) {
 	// Set defaults if not provided
 	limitVal := 100
 	if limit != nil && *limit > 0 {
@@ -498,7 +523,7 @@ func (r *queryResolver) Knowledges(ctx context.Context, limit *int, offset *int)
 		offsetVal = *offset
 	}
 
-	knowledges, totalCount, err := r.repo.Knowledge().ListWithPagination(ctx, limitVal, offsetVal)
+	knowledges, totalCount, err := r.repo.Knowledge().ListWithPagination(ctx, workspaceID, limitVal, offsetVal)
 	if err != nil {
 		return nil, err
 	}
@@ -506,7 +531,7 @@ func (r *queryResolver) Knowledges(ctx context.Context, limit *int, offset *int)
 	// Convert domain Knowledge to GraphQL Knowledge
 	items := make([]*graphql1.Knowledge, len(knowledges))
 	for i, k := range knowledges {
-		items[i] = toGraphQLKnowledge(k)
+		items[i] = toGraphQLKnowledge(k, workspaceID)
 	}
 
 	hasMore := (offsetVal + len(knowledges)) < totalCount

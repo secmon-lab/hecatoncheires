@@ -6,6 +6,7 @@ import Button from '../components/Button'
 import { CREATE_ACTION, UPDATE_ACTION, GET_ACTIONS } from '../graphql/action'
 import { GET_CASES } from '../graphql/case'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
+import { useWorkspace } from '../contexts/workspace-context'
 import styles from './ActionForm.module.css'
 
 interface Action {
@@ -33,6 +34,7 @@ interface FormErrors {
 }
 
 export default function ActionForm({ isOpen, onClose, action, initialCaseID }: ActionFormProps) {
+  const { currentWorkspace } = useWorkspace()
   const [caseID, setCaseID] = useState<number | null>(null)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -42,15 +44,22 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
   const [status, setStatus] = useState('TODO')
   const [errors, setErrors] = useState<FormErrors>({})
 
-  const { data: casesData } = useQuery(GET_CASES)
+  const { data: casesData } = useQuery(GET_CASES, {
+    variables: { workspaceId: currentWorkspace!.id },
+    skip: !currentWorkspace,
+  })
   const { data: usersData } = useQuery(GET_SLACK_USERS)
   const [createAction, { loading: creating }] = useMutation(CREATE_ACTION, {
     update(cache, { data }) {
       if (!data?.createAction) return
-      const existingActions = cache.readQuery<{ actions: Action[] }>({ query: GET_ACTIONS })
+      const existingActions = cache.readQuery<{ actions: Action[] }>({
+        query: GET_ACTIONS,
+        variables: { workspaceId: currentWorkspace!.id },
+      })
       if (existingActions) {
         cache.writeQuery({
           query: GET_ACTIONS,
+          variables: { workspaceId: currentWorkspace!.id },
           data: { actions: [...existingActions.actions, data.createAction] },
         })
       }
@@ -151,6 +160,7 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
     if (action) {
       await updateAction({
         variables: {
+          workspaceId: currentWorkspace!.id,
           input: {
             id: action.id,
             caseID: caseID!,
@@ -165,6 +175,7 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
     } else {
       await createAction({
         variables: {
+          workspaceId: currentWorkspace!.id,
           input: {
             caseID: caseID!,
             title: title.trim(),

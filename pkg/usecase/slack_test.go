@@ -14,7 +14,7 @@ import (
 
 func TestSlackUseCases_HandleSlackEvent(t *testing.T) {
 	repo := memory.New()
-	uc := usecase.New(repo)
+	uc := usecase.New(repo, nil)
 	ctx := context.Background()
 
 	t.Run("handles message event", func(t *testing.T) {
@@ -108,7 +108,7 @@ func TestSlackUseCases_HandleSlackEvent(t *testing.T) {
 
 func TestSlackUseCases_HandleSlackMessage(t *testing.T) {
 	repo := memory.New()
-	uc := usecase.New(repo)
+	uc := usecase.New(repo, nil)
 	ctx := context.Background()
 
 	t.Run("stores message successfully", func(t *testing.T) {
@@ -150,7 +150,7 @@ func TestSlackUseCases_HandleSlackMessage(t *testing.T) {
 
 func TestSlackUseCases_CleanupOldMessages(t *testing.T) {
 	repo := memory.New()
-	uc := usecase.New(repo)
+	uc := usecase.New(repo, nil)
 	ctx := context.Background()
 
 	now := time.Now()

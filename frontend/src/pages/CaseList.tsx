@@ -7,6 +7,7 @@ import Button from '../components/Button'
 import CaseForm from './CaseForm'
 import { GET_CASES } from '../graphql/case'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
+import { useWorkspace } from '../contexts/workspace-context'
 import styles from './CaseList.module.css'
 import type { ReactElement } from 'react'
 
@@ -25,17 +26,24 @@ interface Case {
 
 export default function CaseList() {
   const navigate = useNavigate()
+  const { currentWorkspace } = useWorkspace()
   const [isFormOpen, setIsFormOpen] = useState(false)
 
-  const { data, loading, error } = useQuery(GET_CASES)
-  const { data: configData } = useQuery(GET_FIELD_CONFIGURATION)
+  const { data, loading, error } = useQuery(GET_CASES, {
+    variables: { workspaceId: currentWorkspace!.id },
+    skip: !currentWorkspace,
+  })
+  const { data: configData } = useQuery(GET_FIELD_CONFIGURATION, {
+    variables: { workspaceId: currentWorkspace!.id },
+    skip: !currentWorkspace,
+  })
 
   const handleFormClose = () => {
     setIsFormOpen(false)
   }
 
   const handleRowClick = (caseItem: Case) => {
-    navigate(`/cases/${caseItem.id}`)
+    navigate(`/ws/${currentWorkspace!.id}/cases/${caseItem.id}`)
   }
 
   const renderAssignees = (assignees: Array<{ id: string; realName: string; imageUrl?: string }>) => {
