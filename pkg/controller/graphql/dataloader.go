@@ -109,12 +109,10 @@ func NewActionLoader(repo interfaces.Repository) *ActionLoader {
 	return &ActionLoader{repo: repo}
 }
 
-func (l *ActionLoader) Load(ctx context.Context, ids []int64) ([]*model.Action, error) {
-	// For now, load individually
-	// Could be optimized with a batch Get method in the repository
+func (l *ActionLoader) Load(ctx context.Context, workspaceID string, ids []int64) ([]*model.Action, error) {
 	actions := make([]*model.Action, len(ids))
 	for i, id := range ids {
-		action, err := l.repo.Action().Get(ctx, id)
+		action, err := l.repo.Action().Get(ctx, workspaceID, id)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load action %d: %w", id, err)
 		}
@@ -133,8 +131,8 @@ func NewActionsByCaseLoader(repo interfaces.Repository) *ActionsByCaseLoader {
 	return &ActionsByCaseLoader{repo: repo}
 }
 
-func (l *ActionsByCaseLoader) Load(ctx context.Context, caseIDs []int64) (map[int64][]*model.Action, error) {
-	actions, err := l.repo.Action().GetByCases(ctx, caseIDs)
+func (l *ActionsByCaseLoader) Load(ctx context.Context, workspaceID string, caseIDs []int64) (map[int64][]*model.Action, error) {
+	actions, err := l.repo.Action().GetByCases(ctx, workspaceID, caseIDs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load actions by case: %w", err)
 	}
@@ -151,12 +149,10 @@ func NewCaseLoader(repo interfaces.Repository) *CaseLoader {
 	return &CaseLoader{repo: repo}
 }
 
-func (l *CaseLoader) Load(ctx context.Context, ids []int64) ([]*model.Case, error) {
-	// For now, load individually
-	// Could be optimized with a batch Get method in the repository
+func (l *CaseLoader) Load(ctx context.Context, workspaceID string, ids []int64) ([]*model.Case, error) {
 	cases := make([]*model.Case, len(ids))
 	for i, id := range ids {
-		c, err := l.repo.Case().Get(ctx, id)
+		c, err := l.repo.Case().Get(ctx, workspaceID, id)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load case %d: %w", id, err)
 		}
@@ -175,12 +171,10 @@ func NewKnowledgeLoader(repo interfaces.Repository) *KnowledgeLoader {
 	return &KnowledgeLoader{repo: repo}
 }
 
-func (l *KnowledgeLoader) Load(ctx context.Context, ids []model.KnowledgeID) ([]*model.Knowledge, error) {
-	// For now, load individually
-	// Could be optimized with a batch Get method in the repository
+func (l *KnowledgeLoader) Load(ctx context.Context, workspaceID string, ids []model.KnowledgeID) ([]*model.Knowledge, error) {
 	knowledges := make([]*model.Knowledge, len(ids))
 	for i, id := range ids {
-		k, err := l.repo.Knowledge().Get(ctx, id)
+		k, err := l.repo.Knowledge().Get(ctx, workspaceID, id)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load knowledge %s: %w", id, err)
 		}
@@ -199,8 +193,8 @@ func NewKnowledgesByCaseLoader(repo interfaces.Repository) *KnowledgesByCaseLoad
 	return &KnowledgesByCaseLoader{repo: repo}
 }
 
-func (l *KnowledgesByCaseLoader) Load(ctx context.Context, caseIDs []int64) (map[int64][]*model.Knowledge, error) {
-	knowledges, err := l.repo.Knowledge().ListByCaseIDs(ctx, caseIDs)
+func (l *KnowledgesByCaseLoader) Load(ctx context.Context, workspaceID string, caseIDs []int64) (map[int64][]*model.Knowledge, error) {
+	knowledges, err := l.repo.Knowledge().ListByCaseIDs(ctx, workspaceID, caseIDs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load knowledges by case: %w", err)
 	}

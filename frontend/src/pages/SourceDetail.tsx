@@ -1,5 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation } from '@apollo/client'
+import { useWorkspace } from '../contexts/workspace-context'
 import { ArrowLeft, Edit, MoreVertical, Trash2, Database, MessageSquare, CheckCircle, XCircle, ExternalLink, Hash } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import Button from '../components/Button'
@@ -47,6 +48,7 @@ interface FormErrors {
 export default function SourceDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { currentWorkspace } = useWorkspace()
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
@@ -59,14 +61,14 @@ export default function SourceDetail() {
   const [formErrors, setFormErrors] = useState<FormErrors>({})
 
   const { data, loading, error } = useQuery(GET_SOURCE, {
-    variables: { id },
-    skip: !id,
+    variables: { workspaceId: currentWorkspace!.id, id },
+    skip: !id || !currentWorkspace,
   })
 
   const [updateSource, { loading: updating }] = useMutation(UPDATE_SOURCE, {
     refetchQueries: [
-      { query: GET_SOURCES },
-      { query: GET_SOURCE, variables: { id } },
+      { query: GET_SOURCES, variables: { workspaceId: currentWorkspace!.id } },
+      { query: GET_SOURCE, variables: { workspaceId: currentWorkspace!.id, id } },
     ],
     onCompleted: () => {
       setIsEditModalOpen(false)
@@ -103,7 +105,7 @@ export default function SourceDetail() {
   }, [isMenuOpen])
 
   const handleBack = () => {
-    navigate('/sources')
+    navigate(`/ws/${currentWorkspace!.id}/sources`)
   }
 
   const handleEdit = () => {
@@ -122,7 +124,7 @@ export default function SourceDetail() {
 
   const handleDeleteConfirm = () => {
     setIsDeleteDialogOpen(false)
-    navigate('/sources')
+    navigate(`/ws/${currentWorkspace!.id}/sources`)
   }
 
   const validateEditForm = () => {
@@ -143,6 +145,7 @@ export default function SourceDetail() {
 
     await updateSource({
       variables: {
+        workspaceId: currentWorkspace!.id,
         input: {
           id: source.id,
           name: editName.trim(),

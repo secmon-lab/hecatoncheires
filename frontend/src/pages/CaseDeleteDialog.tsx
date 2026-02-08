@@ -3,6 +3,7 @@ import Modal from '../components/Modal'
 import Button from '../components/Button'
 import { AlertTriangle } from 'lucide-react'
 import { DELETE_CASE, GET_CASES } from '../graphql/case'
+import { useWorkspace } from '../contexts/workspace-context'
 import styles from './CaseDeleteDialog.module.css'
 
 interface CaseDeleteDialogProps {
@@ -20,13 +21,18 @@ export default function CaseDeleteDialog({
   caseTitle,
   caseId,
 }: CaseDeleteDialogProps) {
+  const { currentWorkspace } = useWorkspace()
   const [deleteCase, { loading }] = useMutation(DELETE_CASE, {
     update(cache) {
       if (!caseId) return
-      const existingCases = cache.readQuery<{ cases: any[] }>({ query: GET_CASES })
+      const existingCases = cache.readQuery<{ cases: any[] }>({
+        query: GET_CASES,
+        variables: { workspaceId: currentWorkspace!.id },
+      })
       if (existingCases) {
         cache.writeQuery({
           query: GET_CASES,
+          variables: { workspaceId: currentWorkspace!.id },
           data: {
             cases: existingCases.cases.filter((c) => c.id !== caseId),
           },
@@ -44,7 +50,7 @@ export default function CaseDeleteDialog({
   const handleDelete = async () => {
     if (caseId) {
       await deleteCase({
-        variables: { id: caseId },
+        variables: { workspaceId: currentWorkspace!.id, id: caseId },
       })
     } else {
       onConfirm()

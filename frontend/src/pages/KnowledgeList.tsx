@@ -3,6 +3,7 @@ import { useQuery } from '@apollo/client'
 import { useNavigate } from 'react-router-dom'
 import { BookOpen, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react'
 import { GET_KNOWLEDGES } from '../graphql/knowledge'
+import { useWorkspace } from '../contexts/workspace-context'
 import styles from './KnowledgeList.module.css'
 
 interface Knowledge {
@@ -31,19 +32,21 @@ const PAGE_SIZE = 20
 
 export default function KnowledgeList() {
   const navigate = useNavigate()
+  const { currentWorkspace } = useWorkspace()
   const [page, setPage] = useState(0)
 
   const { data, loading, error } = useQuery(GET_KNOWLEDGES, {
-    variables: { limit: PAGE_SIZE, offset: page * PAGE_SIZE },
+    variables: { workspaceId: currentWorkspace!.id, limit: PAGE_SIZE, offset: page * PAGE_SIZE },
+    skip: !currentWorkspace,
   })
 
   const handleRowClick = (knowledge: Knowledge) => {
-    navigate(`/knowledges/${knowledge.id}`)
+    navigate(`/ws/${currentWorkspace!.id}/knowledges/${knowledge.id}`)
   }
 
   const handleCaseClick = (e: React.MouseEvent, caseId: number) => {
     e.stopPropagation()
-    navigate(`/cases/${caseId}`)
+    navigate(`/ws/${currentWorkspace!.id}/cases/${caseId}`)
   }
 
   if (loading) return <div className={styles.loading}>Loading...</div>

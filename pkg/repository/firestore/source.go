@@ -13,25 +13,20 @@ import (
 )
 
 type sourceRepository struct {
-	client           *firestore.Client
-	collectionPrefix string
+	client *firestore.Client
 }
 
 func newSourceRepository(client *firestore.Client) *sourceRepository {
 	return &sourceRepository{
-		client:           client,
-		collectionPrefix: "",
+		client: client,
 	}
 }
 
-func (r *sourceRepository) sourcesCollection() string {
-	if r.collectionPrefix != "" {
-		return r.collectionPrefix + "_sources"
-	}
-	return "sources"
+func (r *sourceRepository) sourcesCollection(workspaceID string) *firestore.CollectionRef {
+	return r.client.Collection("workspaces").Doc(workspaceID).Collection("sources")
 }
 
-func (r *sourceRepository) Create(ctx context.Context, source *model.Source) (*model.Source, error) {
+func (r *sourceRepository) Create(ctx context.Context, workspaceID string, source *model.Source) (*model.Source, error) {
 	now := time.Now().UTC()
 	if source.ID == "" {
 		source.ID = model.NewSourceID()
@@ -39,7 +34,7 @@ func (r *sourceRepository) Create(ctx context.Context, source *model.Source) (*m
 	source.CreatedAt = now
 	source.UpdatedAt = now
 
-	docRef := r.client.Collection(r.sourcesCollection()).Doc(string(source.ID))
+	docRef := r.sourcesCollection(workspaceID).Doc(string(source.ID))
 	if _, err := docRef.Set(ctx, source); err != nil {
 		return nil, goerr.Wrap(err, "failed to create source")
 	}
@@ -47,8 +42,8 @@ func (r *sourceRepository) Create(ctx context.Context, source *model.Source) (*m
 	return source, nil
 }
 
-func (r *sourceRepository) Get(ctx context.Context, id model.SourceID) (*model.Source, error) {
-	docRef := r.client.Collection(r.sourcesCollection()).Doc(string(id))
+func (r *sourceRepository) Get(ctx context.Context, workspaceID string, id model.SourceID) (*model.Source, error) {
+	docRef := r.sourcesCollection(workspaceID).Doc(string(id))
 	doc, err := docRef.Get(ctx)
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
@@ -65,8 +60,8 @@ func (r *sourceRepository) Get(ctx context.Context, id model.SourceID) (*model.S
 	return &source, nil
 }
 
-func (r *sourceRepository) List(ctx context.Context) ([]*model.Source, error) {
-	iter := r.client.Collection(r.sourcesCollection()).Documents(ctx)
+func (r *sourceRepository) List(ctx context.Context, workspaceID string) ([]*model.Source, error) {
+	iter := r.sourcesCollection(workspaceID).Documents(ctx)
 	defer iter.Stop()
 
 	var sources []*model.Source
@@ -90,8 +85,8 @@ func (r *sourceRepository) List(ctx context.Context) ([]*model.Source, error) {
 	return sources, nil
 }
 
-func (r *sourceRepository) Update(ctx context.Context, source *model.Source) (*model.Source, error) {
-	docRef := r.client.Collection(r.sourcesCollection()).Doc(string(source.ID))
+func (r *sourceRepository) Update(ctx context.Context, workspaceID string, source *model.Source) (*model.Source, error) {
+	docRef := r.sourcesCollection(workspaceID).Doc(string(source.ID))
 	now := time.Now().UTC()
 
 	var updatedSource *model.Source
@@ -126,8 +121,8 @@ func (r *sourceRepository) Update(ctx context.Context, source *model.Source) (*m
 	return updatedSource, nil
 }
 
-func (r *sourceRepository) Delete(ctx context.Context, id model.SourceID) error {
-	docRef := r.client.Collection(r.sourcesCollection()).Doc(string(id))
+func (r *sourceRepository) Delete(ctx context.Context, workspaceID string, id model.SourceID) error {
+	docRef := r.sourcesCollection(workspaceID).Doc(string(id))
 
 	_, err := docRef.Get(ctx)
 	if err != nil {

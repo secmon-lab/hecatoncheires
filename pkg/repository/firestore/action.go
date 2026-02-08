@@ -14,37 +14,25 @@ import (
 )
 
 type actionRepository struct {
-	client           *firestore.Client
-	collectionPrefix string
+	client *firestore.Client
 }
 
 func newActionRepository(client *firestore.Client) *actionRepository {
 	return &actionRepository{
-		client:           client,
-		collectionPrefix: "",
+		client: client,
 	}
 }
 
-func (r *actionRepository) actionsCollection() string {
-	if r.collectionPrefix != "" {
-		return r.collectionPrefix + "_actions"
-	}
-	return "actions"
+func (r *actionRepository) actionsCollection(workspaceID string) *firestore.CollectionRef {
+	return r.client.Collection("workspaces").Doc(workspaceID).Collection("actions")
 }
 
-func (r *actionRepository) counterCollection() string {
-	if r.collectionPrefix != "" {
-		return r.collectionPrefix + "_counters"
-	}
-	return "counters"
+func (r *actionRepository) actionCounterRef(workspaceID string) *firestore.DocumentRef {
+	return r.client.Collection("counters").Doc("action").Collection("workspaces").Doc(workspaceID)
 }
 
-func (r *actionRepository) actionCounterDoc() string {
-	return "action_counter"
-}
-
-func (r *actionRepository) getNextID(ctx context.Context) (int64, error) {
-	counterRef := r.client.Collection(r.counterCollection()).Doc(r.actionCounterDoc())
+func (r *actionRepository) getNextID(ctx context.Context, workspaceID string) (int64, error) {
+	counterRef := r.actionCounterRef(workspaceID)
 
 	var nextID int64
 	err := r.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
@@ -81,8 +69,8 @@ func (r *actionRepository) getNextID(ctx context.Context) (int64, error) {
 	return nextID, nil
 }
 
-func (r *actionRepository) Create(ctx context.Context, action *model.Action) (*model.Action, error) {
-	nextID, err := r.getNextID(ctx)
+func (r *actionRepository) Create(ctx context.Context, workspaceID string, action *model.Action) (*model.Action, error) {
+	nextID, err := r.getNextID(ctx, workspaceID)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to get next ID")
 	}
@@ -102,7 +90,7 @@ func (r *actionRepository) Create(ctx context.Context, action *model.Action) (*m
 
 	docID := fmt.Sprintf("%d", created.ID)
 
-	_, err = r.client.Collection(r.actionsCollection()).Doc(docID).Set(ctx, created)
+	_, err = r.actionsCollection(workspaceID).Doc(docID).Set(ctx, created)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to create action", goerr.V("id", created.ID))
 	}
@@ -110,9 +98,9 @@ func (r *actionRepository) Create(ctx context.Context, action *model.Action) (*m
 	return created, nil
 }
 
-func (r *actionRepository) Get(ctx context.Context, id int64) (*model.Action, error) {
+func (r *actionRepository) Get(ctx context.Context, workspaceID string, id int64) (*model.Action, error) {
 	docID := fmt.Sprintf("%d", id)
-	docSnap, err := r.client.Collection(r.actionsCollection()).Doc(docID).Get(ctx)
+	docSnap, err := r.actionsCollection(workspaceID).Doc(docID).Get(ctx)
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
 			return nil, goerr.Wrap(ErrNotFound, "action not found", goerr.V("id", id))
@@ -128,8 +116,8 @@ func (r *actionRepository) Get(ctx context.Context, id int64) (*model.Action, er
 	return &a, nil
 }
 
-func (r *actionRepository) List(ctx context.Context) ([]*model.Action, error) {
-	iter := r.client.Collection(r.actionsCollection()).Documents(ctx)
+func (r *actionRepository) List(ctx context.Context, workspaceID string) ([]*model.Action, error) {
+	iter := r.actionsCollection(workspaceID).Documents(ctx)
 	defer iter.Stop()
 
 	actions := make([]*model.Action, 0)
@@ -153,9 +141,9 @@ func (r *actionRepository) List(ctx context.Context) ([]*model.Action, error) {
 	return actions, nil
 }
 
-func (r *actionRepository) Update(ctx context.Context, action *model.Action) (*model.Action, error) {
+func (r *actionRepository) Update(ctx context.Context, workspaceID string, action *model.Action) (*model.Action, error) {
 	docID := fmt.Sprintf("%d", action.ID)
-	docRef := r.client.Collection(r.actionsCollection()).Doc(docID)
+	docRef := r.actionsCollection(workspaceID).Doc(docID)
 
 	// Check if document exists
 	_, err := docRef.Get(ctx)
@@ -187,9 +175,9 @@ func (r *actionRepository) Update(ctx context.Context, action *model.Action) (*m
 	return updated, nil
 }
 
-func (r *actionRepository) Delete(ctx context.Context, id int64) error {
+func (r *actionRepository) Delete(ctx context.Context, workspaceID string, id int64) error {
 	docID := fmt.Sprintf("%d", id)
-	docRef := r.client.Collection(r.actionsCollection()).Doc(docID)
+	docRef := r.actionsCollection(workspaceID).Doc(docID)
 
 	// Check if document exists
 	_, err := docRef.Get(ctx)
@@ -208,8 +196,8 @@ func (r *actionRepository) Delete(ctx context.Context, id int64) error {
 	return nil
 }
 
-func (r *actionRepository) GetByCase(ctx context.Context, caseID int64) ([]*model.Action, error) {
-	iter := r.client.Collection(r.actionsCollection()).
+func (r *actionRepository) GetByCase(ctx context.Context, workspaceID string, caseID int64) ([]*model.Action, error) {
+	iter := r.actionsCollection(workspaceID).
 		Where("CaseID", "==", caseID).
 		Documents(ctx)
 	defer iter.Stop()
@@ -235,7 +223,7 @@ func (r *actionRepository) GetByCase(ctx context.Context, caseID int64) ([]*mode
 	return actions, nil
 }
 
-func (r *actionRepository) GetByCases(ctx context.Context, caseIDs []int64) (map[int64][]*model.Action, error) {
+func (r *actionRepository) GetByCases(ctx context.Context, workspaceID string, caseIDs []int64) (map[int64][]*model.Action, error) {
 	// Initialize result map
 	result := make(map[int64][]*model.Action)
 	for _, caseID := range caseIDs {
@@ -245,7 +233,7 @@ func (r *actionRepository) GetByCases(ctx context.Context, caseIDs []int64) (map
 	// Execute parallel queries for each case ID
 	// (avoids creating new composite index)
 	for _, caseID := range caseIDs {
-		actions, err := r.GetByCase(ctx, caseID)
+		actions, err := r.GetByCase(ctx, workspaceID, caseID)
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to get actions by case", goerr.V("case_id", caseID))
 		}

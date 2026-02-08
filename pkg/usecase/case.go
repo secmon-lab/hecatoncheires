@@ -13,34 +13,52 @@ import (
 )
 
 type CaseUseCase struct {
-	repo           interfaces.Repository
-	fieldSchema    *config.FieldSchema
-	fieldValidator *model.FieldValidator
-	slackService   slack.Service
+	repo              interfaces.Repository
+	workspaceRegistry *model.WorkspaceRegistry
+	slackService      slack.Service
 }
 
-func NewCaseUseCase(repo interfaces.Repository, fieldSchema *config.FieldSchema, slackService slack.Service) *CaseUseCase {
-	var validator *model.FieldValidator
-	if fieldSchema != nil {
-		validator = model.NewFieldValidator(fieldSchema)
-	}
-
+func NewCaseUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service) *CaseUseCase {
 	return &CaseUseCase{
-		repo:           repo,
-		fieldSchema:    fieldSchema,
-		fieldValidator: validator,
-		slackService:   slackService,
+		repo:              repo,
+		workspaceRegistry: registry,
+		slackService:      slackService,
 	}
 }
 
-func (uc *CaseUseCase) CreateCase(ctx context.Context, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue) (*model.Case, error) {
+func (uc *CaseUseCase) fieldValidatorForWorkspace(workspaceID string) *model.FieldValidator {
+	if uc.workspaceRegistry == nil {
+		return nil
+	}
+	entry, err := uc.workspaceRegistry.Get(workspaceID)
+	if err != nil || entry.FieldSchema == nil {
+		return nil
+	}
+	return model.NewFieldValidator(entry.FieldSchema)
+}
+
+func (uc *CaseUseCase) slackChannelPrefixForWorkspace(workspaceID string) string {
+	if uc.workspaceRegistry == nil {
+		return workspaceID
+	}
+	entry, err := uc.workspaceRegistry.Get(workspaceID)
+	if err != nil {
+		return workspaceID
+	}
+	if entry.SlackChannelPrefix == "" {
+		return workspaceID
+	}
+	return entry.SlackChannelPrefix
+}
+
+func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue) (*model.Case, error) {
 	if title == "" {
 		return nil, goerr.New("case title is required")
 	}
 
 	// Validate and enrich custom fields with Type from config
-	if uc.fieldValidator != nil {
-		enriched, err := uc.fieldValidator.ValidateCaseFields(fieldValues)
+	if validator := uc.fieldValidatorForWorkspace(workspaceID); validator != nil {
+		enriched, err := validator.ValidateCaseFields(fieldValues)
 		if err != nil {
 			return nil, goerr.Wrap(err, "field validation failed")
 		}
@@ -55,17 +73,18 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, title, description string
 		FieldValues: fieldValues,
 	}
 
-	created, err := uc.repo.Case().Create(ctx, caseModel)
+	created, err := uc.repo.Case().Create(ctx, workspaceID, caseModel)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to create case")
 	}
 
 	// Create Slack channel if service is available
 	if uc.slackService != nil {
-		channelID, err := uc.slackService.CreateChannel(ctx, created.ID, created.Title)
+		prefix := uc.slackChannelPrefixForWorkspace(workspaceID)
+		channelID, err := uc.slackService.CreateChannel(ctx, created.ID, created.Title, prefix)
 		if err != nil {
 			// Rollback: delete case
-			if delErr := uc.repo.Case().Delete(ctx, created.ID); delErr != nil {
+			if delErr := uc.repo.Case().Delete(ctx, workspaceID, created.ID); delErr != nil {
 				return nil, goerr.Wrap(err, "failed to create Slack channel for case, and also failed to roll back case creation",
 					goerr.V("rollback_error", delErr),
 					goerr.V(CaseIDKey, created.ID))
@@ -89,7 +108,7 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, title, description string
 
 		// Update case with channel ID
 		created.SlackChannelID = channelID
-		updated, err := uc.repo.Case().Update(ctx, created)
+		updated, err := uc.repo.Case().Update(ctx, workspaceID, created)
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to update case with Slack channel ID",
 				goerr.V("orphaned_channel_id", channelID),
@@ -101,20 +120,20 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, title, description string
 	return created, nil
 }
 
-func (uc *CaseUseCase) UpdateCase(ctx context.Context, id int64, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue) (*model.Case, error) {
+func (uc *CaseUseCase) UpdateCase(ctx context.Context, workspaceID string, id int64, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue) (*model.Case, error) {
 	if title == "" {
 		return nil, goerr.New("case title is required")
 	}
 
 	// Get existing case to check if title changed
-	existingCase, err := uc.repo.Case().Get(ctx, id)
+	existingCase, err := uc.repo.Case().Get(ctx, workspaceID, id)
 	if err != nil {
 		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
 	}
 
 	// Validate and enrich custom fields with Type from config
-	if uc.fieldValidator != nil {
-		enriched, err := uc.fieldValidator.ValidateCaseFields(fieldValues)
+	if validator := uc.fieldValidatorForWorkspace(workspaceID); validator != nil {
+		enriched, err := validator.ValidateCaseFields(fieldValues)
 		if err != nil {
 			return nil, goerr.Wrap(err, "field validation failed", goerr.V(CaseIDKey, id))
 		}
@@ -123,7 +142,8 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, id int64, title, descript
 
 	// Rename Slack channel if title changed and channel exists
 	if uc.slackService != nil && existingCase.SlackChannelID != "" && existingCase.Title != title {
-		if err := uc.slackService.RenameChannel(ctx, existingCase.SlackChannelID, id, title); err != nil {
+		prefix := uc.slackChannelPrefixForWorkspace(workspaceID)
+		if err := uc.slackService.RenameChannel(ctx, existingCase.SlackChannelID, id, title, prefix); err != nil {
 			return nil, goerr.Wrap(err, "failed to rename Slack channel",
 				goerr.V(CaseIDKey, id),
 				goerr.V("channel_id", existingCase.SlackChannelID))
@@ -141,7 +161,7 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, id int64, title, descript
 		CreatedAt:      existingCase.CreatedAt, // Preserve creation time
 	}
 
-	updated, err := uc.repo.Case().Update(ctx, caseModel)
+	updated, err := uc.repo.Case().Update(ctx, workspaceID, caseModel)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to update case", goerr.V(CaseIDKey, id))
 	}
@@ -149,15 +169,15 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, id int64, title, descript
 	return updated, nil
 }
 
-func (uc *CaseUseCase) DeleteCase(ctx context.Context, id int64) error {
+func (uc *CaseUseCase) DeleteCase(ctx context.Context, workspaceID string, id int64) error {
 	// Delete actions associated with this case
-	actions, err := uc.repo.Action().GetByCase(ctx, id)
+	actions, err := uc.repo.Action().GetByCase(ctx, workspaceID, id)
 	if err != nil {
 		return goerr.Wrap(err, "failed to get actions for case", goerr.V(CaseIDKey, id))
 	}
 
 	for _, action := range actions {
-		if err := uc.repo.Action().Delete(ctx, action.ID); err != nil {
+		if err := uc.repo.Action().Delete(ctx, workspaceID, action.ID); err != nil {
 			return goerr.Wrap(err, "failed to delete action",
 				goerr.V(CaseIDKey, id),
 				goerr.V(ActionIDKey, action.ID))
@@ -165,15 +185,15 @@ func (uc *CaseUseCase) DeleteCase(ctx context.Context, id int64) error {
 	}
 
 	// Delete case (field values are embedded, so they are deleted with the case)
-	if err := uc.repo.Case().Delete(ctx, id); err != nil {
+	if err := uc.repo.Case().Delete(ctx, workspaceID, id); err != nil {
 		return goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
 	}
 
 	return nil
 }
 
-func (uc *CaseUseCase) GetCase(ctx context.Context, id int64) (*model.Case, error) {
-	caseModel, err := uc.repo.Case().Get(ctx, id)
+func (uc *CaseUseCase) GetCase(ctx context.Context, workspaceID string, id int64) (*model.Case, error) {
+	caseModel, err := uc.repo.Case().Get(ctx, workspaceID, id)
 	if err != nil {
 		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
 	}
@@ -181,8 +201,8 @@ func (uc *CaseUseCase) GetCase(ctx context.Context, id int64) (*model.Case, erro
 	return caseModel, nil
 }
 
-func (uc *CaseUseCase) ListCases(ctx context.Context) ([]*model.Case, error) {
-	cases, err := uc.repo.Case().List(ctx)
+func (uc *CaseUseCase) ListCases(ctx context.Context, workspaceID string) ([]*model.Case, error) {
+	cases, err := uc.repo.Case().List(ctx, workspaceID)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to list cases")
 	}
@@ -203,14 +223,17 @@ func uniqueStrings(s []string) []string {
 	return result
 }
 
-func (uc *CaseUseCase) GetFieldConfiguration() *config.FieldSchema {
-	if uc.fieldSchema == nil {
-		return &config.FieldSchema{
-			Fields: []config.FieldDefinition{},
-			Labels: config.EntityLabels{
-				Case: "Case",
-			},
+func (uc *CaseUseCase) GetFieldConfiguration(workspaceID string) *config.FieldSchema {
+	if uc.workspaceRegistry != nil {
+		entry, err := uc.workspaceRegistry.Get(workspaceID)
+		if err == nil && entry.FieldSchema != nil {
+			return entry.FieldSchema
 		}
 	}
-	return uc.fieldSchema
+	return &config.FieldSchema{
+		Fields: []config.FieldDefinition{},
+		Labels: config.EntityLabels{
+			Case: "Case",
+		},
+	}
 }

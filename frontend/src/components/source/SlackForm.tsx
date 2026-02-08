@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useMutation } from '@apollo/client'
 import { useNavigate } from 'react-router-dom'
+import { useWorkspace } from '../../contexts/workspace-context'
 import Modal from '../Modal'
 import Button from '../Button'
 import ChannelSelector from './ChannelSelector'
@@ -25,6 +26,7 @@ interface FormErrors {
 
 export default function SlackForm({ isOpen, onClose }: SlackFormProps) {
   const navigate = useNavigate()
+  const { currentWorkspace } = useWorkspace()
   const [selectedChannels, setSelectedChannels] = useState<Channel[]>([])
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -34,10 +36,11 @@ export default function SlackForm({ isOpen, onClose }: SlackFormProps) {
   const [createSource, { loading: creating }] = useMutation(CREATE_SLACK_SOURCE, {
     update(cache, { data }) {
       if (!data?.createSlackSource) return
-      const existingData = cache.readQuery<{ sources: unknown[] }>({ query: GET_SOURCES })
+      const existingData = cache.readQuery<{ sources: unknown[] }>({ query: GET_SOURCES, variables: { workspaceId: currentWorkspace!.id } })
       if (existingData) {
         cache.writeQuery({
           query: GET_SOURCES,
+          variables: { workspaceId: currentWorkspace!.id },
           data: { sources: [...existingData.sources, data.createSlackSource] },
         })
       }
@@ -45,7 +48,7 @@ export default function SlackForm({ isOpen, onClose }: SlackFormProps) {
     onCompleted: (data) => {
       onClose()
       resetForm()
-      navigate(`/sources/${data.createSlackSource.id}`)
+      navigate(`/ws/${currentWorkspace!.id}/sources/${data.createSlackSource.id}`)
     },
     onError: (error) => {
       console.error('Create source error:', error)
@@ -94,6 +97,7 @@ export default function SlackForm({ isOpen, onClose }: SlackFormProps) {
 
     await createSource({
       variables: {
+        workspaceId: currentWorkspace!.id,
         input: {
           channelIDs: selectedChannels.map((c) => c.id),
           name: name.trim(),

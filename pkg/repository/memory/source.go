@@ -11,12 +11,18 @@ import (
 
 type sourceRepository struct {
 	mu      sync.RWMutex
-	sources map[model.SourceID]*model.Source
+	sources map[string]map[model.SourceID]*model.Source
 }
 
 func newSourceRepository() *sourceRepository {
 	return &sourceRepository{
-		sources: make(map[model.SourceID]*model.Source),
+		sources: make(map[string]map[model.SourceID]*model.Source),
+	}
+}
+
+func (r *sourceRepository) ensureWorkspace(workspaceID string) {
+	if _, exists := r.sources[workspaceID]; !exists {
+		r.sources[workspaceID] = make(map[model.SourceID]*model.Source)
 	}
 }
 
@@ -56,9 +62,11 @@ func copySource(source *model.Source) *model.Source {
 	return copied
 }
 
-func (r *sourceRepository) Create(ctx context.Context, source *model.Source) (*model.Source, error) {
+func (r *sourceRepository) Create(ctx context.Context, workspaceID string, source *model.Source) (*model.Source, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	r.ensureWorkspace(workspaceID)
 
 	now := time.Now().UTC()
 	created := copySource(source)
@@ -68,15 +76,20 @@ func (r *sourceRepository) Create(ctx context.Context, source *model.Source) (*m
 	created.CreatedAt = now
 	created.UpdatedAt = now
 
-	r.sources[created.ID] = created
+	r.sources[workspaceID][created.ID] = created
 	return copySource(created), nil
 }
 
-func (r *sourceRepository) Get(ctx context.Context, id model.SourceID) (*model.Source, error) {
+func (r *sourceRepository) Get(ctx context.Context, workspaceID string, id model.SourceID) (*model.Source, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	source, exists := r.sources[id]
+	ws, exists := r.sources[workspaceID]
+	if !exists {
+		return nil, goerr.Wrap(ErrNotFound, "source not found", goerr.V("id", id))
+	}
+
+	source, exists := ws[id]
 	if !exists {
 		return nil, goerr.Wrap(ErrNotFound, "source not found", goerr.V("id", id))
 	}
@@ -84,23 +97,33 @@ func (r *sourceRepository) Get(ctx context.Context, id model.SourceID) (*model.S
 	return copySource(source), nil
 }
 
-func (r *sourceRepository) List(ctx context.Context) ([]*model.Source, error) {
+func (r *sourceRepository) List(ctx context.Context, workspaceID string) ([]*model.Source, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	sources := make([]*model.Source, 0, len(r.sources))
-	for _, source := range r.sources {
+	ws, exists := r.sources[workspaceID]
+	if !exists {
+		return []*model.Source{}, nil
+	}
+
+	sources := make([]*model.Source, 0, len(ws))
+	for _, source := range ws {
 		sources = append(sources, copySource(source))
 	}
 
 	return sources, nil
 }
 
-func (r *sourceRepository) Update(ctx context.Context, source *model.Source) (*model.Source, error) {
+func (r *sourceRepository) Update(ctx context.Context, workspaceID string, source *model.Source) (*model.Source, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	existing, exists := r.sources[source.ID]
+	ws, exists := r.sources[workspaceID]
+	if !exists {
+		return nil, goerr.Wrap(ErrNotFound, "source not found", goerr.V("id", source.ID))
+	}
+
+	existing, exists := ws[source.ID]
 	if !exists {
 		return nil, goerr.Wrap(ErrNotFound, "source not found", goerr.V("id", source.ID))
 	}
@@ -109,18 +132,23 @@ func (r *sourceRepository) Update(ctx context.Context, source *model.Source) (*m
 	updated.CreatedAt = existing.CreatedAt
 	updated.UpdatedAt = time.Now().UTC()
 
-	r.sources[updated.ID] = updated
+	r.sources[workspaceID][updated.ID] = updated
 	return copySource(updated), nil
 }
 
-func (r *sourceRepository) Delete(ctx context.Context, id model.SourceID) error {
+func (r *sourceRepository) Delete(ctx context.Context, workspaceID string, id model.SourceID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, exists := r.sources[id]; !exists {
+	ws, exists := r.sources[workspaceID]
+	if !exists {
 		return goerr.Wrap(ErrNotFound, "source not found", goerr.V("id", id))
 	}
 
-	delete(r.sources, id)
+	if _, exists := ws[id]; !exists {
+		return goerr.Wrap(ErrNotFound, "source not found", goerr.V("id", id))
+	}
+
+	delete(r.sources[workspaceID], id)
 	return nil
 }

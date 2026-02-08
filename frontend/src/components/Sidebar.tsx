@@ -1,5 +1,6 @@
 import { Shield, ListTodo, Database, BookOpen } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
+import { useWorkspace } from '../contexts/workspace-context'
 import styles from './Sidebar.module.css'
 
 interface SidebarProps {
@@ -8,6 +9,9 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ isOpen = true, onClose }: SidebarProps) {
+  const { currentWorkspace } = useWorkspace()
+  const wsPrefix = currentWorkspace ? `/ws/${currentWorkspace.id}` : ''
+
   const handleNavClick = () => {
     if (onClose) {
       onClose()
@@ -18,7 +22,7 @@ export default function Sidebar({ isOpen = true, onClose }: SidebarProps) {
     <aside className={`${styles.sidebar} ${isOpen ? styles.open : ''}`}>
       <nav className={styles.nav}>
         <NavLink
-          to="/cases"
+          to={`${wsPrefix}/cases`}
           className={({ isActive }) =>
             `${styles.navItem} ${isActive ? styles.active : ''}`
           }
@@ -28,7 +32,7 @@ export default function Sidebar({ isOpen = true, onClose }: SidebarProps) {
           <span>Cases</span>
         </NavLink>
         <NavLink
-          to="/actions"
+          to={`${wsPrefix}/actions`}
           className={({ isActive }) =>
             `${styles.navItem} ${isActive ? styles.active : ''}`
           }
@@ -38,7 +42,7 @@ export default function Sidebar({ isOpen = true, onClose }: SidebarProps) {
           <span>Actions</span>
         </NavLink>
         <NavLink
-          to="/knowledges"
+          to={`${wsPrefix}/knowledges`}
           className={({ isActive }) =>
             `${styles.navItem} ${isActive ? styles.active : ''}`
           }
@@ -48,7 +52,7 @@ export default function Sidebar({ isOpen = true, onClose }: SidebarProps) {
           <span>Knowledges</span>
         </NavLink>
         <NavLink
-          to="/sources"
+          to={`${wsPrefix}/sources`}
           className={({ isActive }) =>
             `${styles.navItem} ${isActive ? styles.active : ''}`
           }

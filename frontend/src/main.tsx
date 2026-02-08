@@ -1,8 +1,10 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { BrowserRouter } from 'react-router-dom'
 import { ApolloClient, InMemoryCache, ApolloProvider } from '@apollo/client'
 import App from './App.tsx'
 import { AuthProvider } from './contexts/auth-context.tsx'
+import { WorkspaceProvider } from './contexts/workspace-context.tsx'
 import './styles/global.css'
 
 const client = new ApolloClient({
@@ -20,7 +22,11 @@ createRoot(rootElement).render(
   <StrictMode>
     <AuthProvider>
       <ApolloProvider client={client}>
-        <App />
+        <BrowserRouter>
+          <WorkspaceProvider>
+            <App />
+          </WorkspaceProvider>
+        </BrowserRouter>
       </ApolloProvider>
     </AuthProvider>
   </StrictMode>,

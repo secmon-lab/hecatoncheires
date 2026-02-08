@@ -12,8 +12,6 @@ import (
 const (
 	// DefaultCacheTTL is the default TTL for channel name cache
 	DefaultCacheTTL = 45 * time.Second
-	// DefaultChannelPrefix is the default prefix for risk channels
-	DefaultChannelPrefix = "risk"
 )
 
 // cacheEntry holds a cached channel name with expiration
@@ -24,9 +22,8 @@ type cacheEntry struct {
 
 // client implements Service interface
 type client struct {
-	api           *slack.Client
-	cacheTTL      time.Duration
-	channelPrefix string
+	api      *slack.Client
+	cacheTTL time.Duration
 
 	mu    sync.RWMutex
 	cache map[string]cacheEntry
@@ -42,13 +39,6 @@ func WithCacheTTL(ttl time.Duration) Option {
 	}
 }
 
-// WithChannelPrefix sets the prefix for risk channels
-func WithChannelPrefix(prefix string) Option {
-	return func(c *client) {
-		c.channelPrefix = prefix
-	}
-}
-
 // New creates a new Slack service with the provided bot token
 func New(token string, opts ...Option) (Service, error) {
 	if token == "" {
@@ -56,10 +46,9 @@ func New(token string, opts ...Option) (Service, error) {
 	}
 
 	c := &client{
-		api:           slack.New(token),
-		cacheTTL:      DefaultCacheTTL,
-		channelPrefix: DefaultChannelPrefix,
-		cache:         make(map[string]cacheEntry),
+		api:      slack.New(token),
+		cacheTTL: DefaultCacheTTL,
+		cache:    make(map[string]cacheEntry),
 	}
 
 	for _, opt := range opts {
@@ -211,16 +200,16 @@ func (c *client) ListUsers(ctx context.Context) ([]*User, error) {
 	return result, nil
 }
 
-// CreateChannel creates a new public Slack channel for a risk
-// The channel name is automatically generated from riskID and riskName with the configured prefix
-func (c *client) CreateChannel(ctx context.Context, riskID int64, riskName string) (string, error) {
-	channelName := GenerateRiskChannelName(riskID, riskName, c.channelPrefix)
+// CreateChannel creates a new public Slack channel for a case
+// The channel name is automatically generated from caseID, caseName, and the given prefix
+func (c *client) CreateChannel(ctx context.Context, caseID int64, caseName string, prefix string) (string, error) {
+	channelName := GenerateRiskChannelName(caseID, caseName, prefix)
 	channel, err := c.api.CreateConversationContext(ctx, slack.CreateConversationParams{
 		ChannelName: channelName,
 		IsPrivate:   false,
 	})
 	if err != nil {
-		return "", goerr.Wrap(err, "failed to create Slack channel", goerr.V("channelName", channelName), goerr.V("riskID", riskID), goerr.V("riskName", riskName))
+		return "", goerr.Wrap(err, "failed to create Slack channel", goerr.V("channelName", channelName), goerr.V("caseID", caseID), goerr.V("caseName", caseName))
 	}
 	return channel.ID, nil
 }
@@ -239,13 +228,13 @@ func (c *client) InviteUsersToChannel(ctx context.Context, channelID string, use
 	return nil
 }
 
-// RenameChannel renames an existing Slack channel for a risk
-// The channel name is automatically generated from riskID and riskName with the configured prefix
-func (c *client) RenameChannel(ctx context.Context, channelID string, riskID int64, riskName string) error {
-	channelName := GenerateRiskChannelName(riskID, riskName, c.channelPrefix)
+// RenameChannel renames an existing Slack channel for a case
+// The channel name is automatically generated from caseID, caseName, and the given prefix
+func (c *client) RenameChannel(ctx context.Context, channelID string, caseID int64, caseName string, prefix string) error {
+	channelName := GenerateRiskChannelName(caseID, caseName, prefix)
 	_, err := c.api.RenameConversationContext(ctx, channelID, channelName)
 	if err != nil {
-		return goerr.Wrap(err, "failed to rename Slack channel", goerr.V("channelID", channelID), goerr.V("channelName", channelName), goerr.V("riskID", riskID), goerr.V("riskName", riskName))
+		return goerr.Wrap(err, "failed to rename Slack channel", goerr.V("channelID", channelID), goerr.V("channelName", channelName), goerr.V("caseID", caseID), goerr.V("caseName", caseName))
 	}
 	return nil
 }

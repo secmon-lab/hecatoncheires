@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@apollo/client'
 import { useNavigate } from 'react-router-dom'
+import { useWorkspace } from '../contexts/workspace-context'
 import { Plus, Database, MessageSquare, CheckCircle, XCircle } from 'lucide-react'
 import Table from '../components/Table'
 import Button from '../components/Button'
@@ -45,9 +46,13 @@ interface Source {
 
 export default function SourceList() {
   const navigate = useNavigate()
+  const { currentWorkspace } = useWorkspace()
   const [formStep, setFormStep] = useState<FormStep>(FORM_STEP.CLOSED)
 
-  const { data, loading, error } = useQuery(GET_SOURCES)
+  const { data, loading, error } = useQuery(GET_SOURCES, {
+    variables: { workspaceId: currentWorkspace!.id },
+    skip: !currentWorkspace,
+  })
 
   const handleOpenForm = () => {
     setFormStep(FORM_STEP.SELECT_TYPE)
@@ -66,7 +71,7 @@ export default function SourceList() {
   }
 
   const handleRowClick = (source: Source) => {
-    navigate(`/sources/${source.id}`)
+    navigate(`/ws/${currentWorkspace!.id}/sources/${source.id}`)
   }
 
   const renderSourceType = (sourceType: string): ReactElement => {

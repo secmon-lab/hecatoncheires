@@ -18,6 +18,8 @@ import (
 func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.Repository) {
 	t.Helper()
 
+	const wsID = "test-ws"
+
 	t.Run("Create creates knowledge with UUID", func(t *testing.T) {
 		repo := newRepo(t)
 		ctx := context.Background()
@@ -35,7 +37,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 			SourcedAt: sourcedAt,
 		}
 
-		created, err := repo.Knowledge().Create(ctx, knowledge)
+		created, err := repo.Knowledge().Create(ctx, wsID, knowledge)
 		gt.NoError(t, err).Required()
 
 		gt.String(t, string(created.ID)).NotEqual("")
@@ -68,7 +70,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 			Summary:   "Knowledge with custom ID",
 		}
 
-		created, err := repo.Knowledge().Create(ctx, knowledge)
+		created, err := repo.Knowledge().Create(ctx, wsID, knowledge)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, created.ID).Equal(customID)
@@ -91,10 +93,10 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 			SourcedAt: sourcedAt,
 		}
 
-		created, err := repo.Knowledge().Create(ctx, knowledge)
+		created, err := repo.Knowledge().Create(ctx, wsID, knowledge)
 		gt.NoError(t, err).Required()
 
-		retrieved, err := repo.Knowledge().Get(ctx, created.ID)
+		retrieved, err := repo.Knowledge().Get(ctx, wsID, created.ID)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, retrieved.ID).Equal(created.ID)
@@ -111,7 +113,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		_, err := repo.Knowledge().Get(ctx, "non-existent-id")
+		_, err := repo.Knowledge().Get(ctx, wsID, "non-existent-id")
 		gt.Value(t, err).NotNil()
 		gt.Bool(t, errors.Is(err, memory.ErrNotFound) || errors.Is(err, firestore.ErrNotFound)).True()
 	})
@@ -124,7 +126,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		sourceID := model.SourceID(fmt.Sprintf("source-%d", time.Now().UnixNano()))
 
 		// Create knowledge entries for the same risk
-		k1, err := repo.Knowledge().Create(ctx, &model.Knowledge{
+		k1, err := repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
 			CaseID:    riskID,
 			SourceID:  sourceID,
 			SourceURL: "https://www.notion.so/page/1",
@@ -134,7 +136,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		})
 		gt.NoError(t, err).Required()
 
-		k2, err := repo.Knowledge().Create(ctx, &model.Knowledge{
+		k2, err := repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
 			CaseID:    riskID,
 			SourceID:  sourceID,
 			SourceURL: "https://www.notion.so/page/2",
@@ -145,7 +147,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		gt.NoError(t, err).Required()
 
 		// Create knowledge for a different risk
-		_, err = repo.Knowledge().Create(ctx, &model.Knowledge{
+		_, err = repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
 			CaseID:    riskID + 1,
 			SourceID:  sourceID,
 			SourceURL: "https://www.notion.so/page/3",
@@ -155,7 +157,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		})
 		gt.NoError(t, err).Required()
 
-		knowledges, err := repo.Knowledge().ListByCaseID(ctx, riskID)
+		knowledges, err := repo.Knowledge().ListByCaseID(ctx, wsID, riskID)
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, knowledges).Length(2)
@@ -178,7 +180,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		knowledges, err := repo.Knowledge().ListByCaseID(ctx, 999999999)
+		knowledges, err := repo.Knowledge().ListByCaseID(ctx, wsID, 999999999)
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, knowledges).Length(0)
@@ -195,7 +197,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		sourceID := model.SourceID(fmt.Sprintf("source-%d", now))
 
 		// Create knowledge entries for risk1
-		k1, err := repo.Knowledge().Create(ctx, &model.Knowledge{
+		k1, err := repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
 			CaseID:    riskID1,
 			SourceID:  sourceID,
 			SourceURL: "https://example.com/1",
@@ -205,7 +207,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		})
 		gt.NoError(t, err).Required()
 
-		k2, err := repo.Knowledge().Create(ctx, &model.Knowledge{
+		k2, err := repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
 			CaseID:    riskID1,
 			SourceID:  sourceID,
 			SourceURL: "https://example.com/2",
@@ -216,7 +218,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		gt.NoError(t, err).Required()
 
 		// Create knowledge entries for risk2
-		k3, err := repo.Knowledge().Create(ctx, &model.Knowledge{
+		k3, err := repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
 			CaseID:    riskID2,
 			SourceID:  sourceID,
 			SourceURL: "https://example.com/3",
@@ -227,7 +229,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		gt.NoError(t, err).Required()
 
 		// Create knowledge for risk3 (not requested)
-		_, err = repo.Knowledge().Create(ctx, &model.Knowledge{
+		_, err = repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
 			CaseID:    riskID3,
 			SourceID:  sourceID,
 			SourceURL: "https://example.com/4",
@@ -238,7 +240,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		gt.NoError(t, err).Required()
 
 		// Request knowledges for risk1 and risk2
-		result, err := repo.Knowledge().ListByCaseIDs(ctx, []int64{riskID1, riskID2})
+		result, err := repo.Knowledge().ListByCaseIDs(ctx, wsID, []int64{riskID1, riskID2})
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, len(result)).Equal(2)
@@ -276,7 +278,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		result, err := repo.Knowledge().ListByCaseIDs(ctx, []int64{})
+		result, err := repo.Knowledge().ListByCaseIDs(ctx, wsID, []int64{})
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, len(result)).Equal(0)
@@ -290,7 +292,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		nonExistentID1 := now + 9999
 		nonExistentID2 := now + 99999
 
-		result, err := repo.Knowledge().ListByCaseIDs(ctx, []int64{nonExistentID1, nonExistentID2})
+		result, err := repo.Knowledge().ListByCaseIDs(ctx, wsID, []int64{nonExistentID1, nonExistentID2})
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, len(result)).Equal(2)
@@ -317,7 +319,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		riskID := time.Now().UnixNano()
 
 		// Create knowledge entries for the same source
-		k1, err := repo.Knowledge().Create(ctx, &model.Knowledge{
+		k1, err := repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
 			CaseID:    riskID,
 			SourceID:  sourceID,
 			SourceURL: "https://www.notion.so/page/a",
@@ -327,7 +329,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		})
 		gt.NoError(t, err).Required()
 
-		k2, err := repo.Knowledge().Create(ctx, &model.Knowledge{
+		k2, err := repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
 			CaseID:    riskID + 1,
 			SourceID:  sourceID,
 			SourceURL: "https://www.notion.so/page/b",
@@ -338,7 +340,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		gt.NoError(t, err).Required()
 
 		// Create knowledge for a different source
-		_, err = repo.Knowledge().Create(ctx, &model.Knowledge{
+		_, err = repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
 			CaseID:    riskID,
 			SourceID:  otherSourceID,
 			SourceURL: "https://www.notion.so/page/c",
@@ -348,7 +350,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		})
 		gt.NoError(t, err).Required()
 
-		knowledges, err := repo.Knowledge().ListBySourceID(ctx, sourceID)
+		knowledges, err := repo.Knowledge().ListBySourceID(ctx, wsID, sourceID)
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, knowledges).Length(2)
@@ -371,7 +373,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		knowledges, err := repo.Knowledge().ListBySourceID(ctx, "non-existent-source")
+		knowledges, err := repo.Knowledge().ListBySourceID(ctx, wsID, "non-existent-source")
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, knowledges).Length(0)
@@ -383,7 +385,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 
 		sourceID := model.SourceID(fmt.Sprintf("source-%d", time.Now().UnixNano()))
 
-		created, err := repo.Knowledge().Create(ctx, &model.Knowledge{
+		created, err := repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
 			CaseID:    111,
 			SourceID:  sourceID,
 			SourceURL: "https://www.notion.so/page/delete",
@@ -392,10 +394,10 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		})
 		gt.NoError(t, err).Required()
 
-		err = repo.Knowledge().Delete(ctx, created.ID)
+		err = repo.Knowledge().Delete(ctx, wsID, created.ID)
 		gt.NoError(t, err).Required()
 
-		_, err = repo.Knowledge().Get(ctx, created.ID)
+		_, err = repo.Knowledge().Get(ctx, wsID, created.ID)
 		gt.Value(t, err).NotNil()
 		gt.Bool(t, errors.Is(err, memory.ErrNotFound) || errors.Is(err, firestore.ErrNotFound)).True()
 	})
@@ -404,7 +406,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		err := repo.Knowledge().Delete(ctx, "non-existent-id")
+		err := repo.Knowledge().Delete(ctx, wsID, "non-existent-id")
 		gt.Value(t, err).NotNil()
 		gt.Bool(t, errors.Is(err, memory.ErrNotFound) || errors.Is(err, firestore.ErrNotFound)).True()
 	})
@@ -424,15 +426,126 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 			Embedding: nil,
 		}
 
-		created, err := repo.Knowledge().Create(ctx, knowledge)
+		created, err := repo.Knowledge().Create(ctx, wsID, knowledge)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, len(created.Embedding)).Equal(0)
 
-		retrieved, err := repo.Knowledge().Get(ctx, created.ID)
+		retrieved, err := repo.Knowledge().Get(ctx, wsID, created.ID)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, len(retrieved.Embedding)).Equal(0)
+	})
+
+	t.Run("FindByEmbedding returns similar knowledge entries", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		sourceID := model.SourceID(fmt.Sprintf("source-%d", time.Now().UnixNano()))
+
+		// Create knowledge with embedding close to [1, 0, 0]
+		_, err := repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
+			CaseID:    time.Now().UnixNano(),
+			SourceID:  sourceID,
+			SourceURL: "https://example.com/similar",
+			Title:     "Similar Knowledge",
+			Summary:   "This is similar",
+			Embedding: []float32{0.9, 0.1, 0.0},
+			SourcedAt: time.Now().UTC(),
+		})
+		gt.NoError(t, err).Required()
+
+		// Create knowledge with embedding close to [0, 1, 0] (dissimilar)
+		_, err = repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
+			CaseID:    time.Now().UnixNano(),
+			SourceID:  sourceID,
+			SourceURL: "https://example.com/dissimilar",
+			Title:     "Dissimilar Knowledge",
+			Summary:   "This is dissimilar",
+			Embedding: []float32{0.0, 0.9, 0.1},
+			SourcedAt: time.Now().UTC(),
+		})
+		gt.NoError(t, err).Required()
+
+		// Create knowledge with embedding very close to [1, 0, 0]
+		_, err = repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
+			CaseID:    time.Now().UnixNano(),
+			SourceID:  sourceID,
+			SourceURL: "https://example.com/most-similar",
+			Title:     "Most Similar Knowledge",
+			Summary:   "This is the most similar",
+			Embedding: []float32{1.0, 0.0, 0.0},
+			SourcedAt: time.Now().UTC(),
+		})
+		gt.NoError(t, err).Required()
+
+		// Search for [1, 0, 0] with limit 2
+		results, err := repo.Knowledge().FindByEmbedding(ctx, wsID, []float32{1.0, 0.0, 0.0}, 2)
+		gt.NoError(t, err).Required()
+
+		gt.Array(t, results).Length(2)
+		// Most similar should be first
+		gt.Value(t, results[0].Title).Equal("Most Similar Knowledge")
+		gt.Value(t, results[1].Title).Equal("Similar Knowledge")
+	})
+
+	t.Run("FindByEmbedding returns empty for no embeddings", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		sourceID := model.SourceID(fmt.Sprintf("source-%d", time.Now().UnixNano()))
+
+		// Create knowledge without embedding
+		_, err := repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
+			CaseID:    time.Now().UnixNano(),
+			SourceID:  sourceID,
+			SourceURL: "https://example.com/no-embed",
+			Title:     "No Embedding",
+			Summary:   "No embedding here",
+			SourcedAt: time.Now().UTC(),
+		})
+		gt.NoError(t, err).Required()
+
+		results, err := repo.Knowledge().FindByEmbedding(ctx, wsID, []float32{1.0, 0.0, 0.0}, 5)
+		gt.NoError(t, err).Required()
+
+		gt.Array(t, results).Length(0)
+	})
+
+	t.Run("FindByEmbedding respects limit", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		sourceID := model.SourceID(fmt.Sprintf("source-%d", time.Now().UnixNano()))
+
+		// Create 5 knowledge entries with embeddings
+		for i := 0; i < 5; i++ {
+			_, err := repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
+				CaseID:    time.Now().UnixNano() + int64(i),
+				SourceID:  sourceID,
+				SourceURL: fmt.Sprintf("https://example.com/embed-%d", i),
+				Title:     fmt.Sprintf("Knowledge %d", i),
+				Summary:   fmt.Sprintf("Knowledge entry %d", i),
+				Embedding: []float32{float32(i) * 0.1, 0.5, 0.5},
+				SourcedAt: time.Now().UTC(),
+			})
+			gt.NoError(t, err).Required()
+		}
+
+		results, err := repo.Knowledge().FindByEmbedding(ctx, wsID, []float32{0.4, 0.5, 0.5}, 3)
+		gt.NoError(t, err).Required()
+
+		gt.Array(t, results).Length(3)
+	})
+
+	t.Run("FindByEmbedding returns empty for empty workspace", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		results, err := repo.Knowledge().FindByEmbedding(ctx, "non-existent-ws", []float32{1.0, 0.0, 0.0}, 5)
+		gt.NoError(t, err).Required()
+
+		gt.Array(t, results).Length(0)
 	})
 
 	t.Run("Large Embedding vector is preserved", func(t *testing.T) {
@@ -456,12 +569,12 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 			Embedding: embedding,
 		}
 
-		created, err := repo.Knowledge().Create(ctx, knowledge)
+		created, err := repo.Knowledge().Create(ctx, wsID, knowledge)
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, created.Embedding).Length(model.EmbeddingDimension)
 
-		retrieved, err := repo.Knowledge().Get(ctx, created.ID)
+		retrieved, err := repo.Knowledge().Get(ctx, wsID, created.ID)
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, retrieved.Embedding).Length(model.EmbeddingDimension)
@@ -486,11 +599,8 @@ func newFirestoreKnowledgeRepository(t *testing.T) interfaces.Repository {
 		t.Skip("TEST_FIRESTORE_DATABASE_ID not set")
 	}
 
-	// Use unique collection prefix per test to ensure test isolation
-	uniquePrefix := fmt.Sprintf("%s_knowledge_%d", databaseID, time.Now().UnixNano())
-
 	ctx := context.Background()
-	repo, err := firestore.New(ctx, projectID, databaseID, firestore.WithCollectionPrefix(uniquePrefix))
+	repo, err := firestore.New(ctx, projectID, databaseID)
 	gt.NoError(t, err).Required()
 	t.Cleanup(func() {
 		gt.NoError(t, repo.Close())

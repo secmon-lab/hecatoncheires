@@ -7,6 +7,7 @@ import CustomFieldRenderer from '../components/fields/CustomFieldRenderer'
 import { CREATE_CASE, UPDATE_CASE, GET_CASES } from '../graphql/case'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
+import { useWorkspace } from '../contexts/workspace-context'
 import styles from './CaseForm.module.css'
 
 interface Case {
@@ -31,6 +32,7 @@ interface FormErrors {
 }
 
 export default function CaseForm({ isOpen, onClose, caseItem }: CaseFormProps) {
+  const { currentWorkspace } = useWorkspace()
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [assigneeIDs, setAssigneeIDs] = useState<string[]>([])
@@ -38,16 +40,23 @@ export default function CaseForm({ isOpen, onClose, caseItem }: CaseFormProps) {
   const [fieldValues, setFieldValues] = useState<Record<string, any>>({})
   const [errors, setErrors] = useState<FormErrors>({})
 
-  const { data: configData, loading: configLoading } = useQuery(GET_FIELD_CONFIGURATION)
+  const { data: configData, loading: configLoading } = useQuery(GET_FIELD_CONFIGURATION, {
+    variables: { workspaceId: currentWorkspace!.id },
+    skip: !currentWorkspace,
+  })
   const { data: usersData } = useQuery(GET_SLACK_USERS)
 
   const [createCase, { loading: creating }] = useMutation(CREATE_CASE, {
     update(cache, { data }) {
       if (!data?.createCase) return
-      const existingCases = cache.readQuery<{ cases: Case[] }>({ query: GET_CASES })
+      const existingCases = cache.readQuery<{ cases: Case[] }>({
+        query: GET_CASES,
+        variables: { workspaceId: currentWorkspace!.id },
+      })
       if (existingCases) {
         cache.writeQuery({
           query: GET_CASES,
+          variables: { workspaceId: currentWorkspace!.id },
           data: { cases: [...existingCases.cases, data.createCase] },
         })
       }
@@ -171,6 +180,7 @@ export default function CaseForm({ isOpen, onClose, caseItem }: CaseFormProps) {
     if (caseItem) {
       await updateCase({
         variables: {
+          workspaceId: currentWorkspace!.id,
           input: {
             id: caseItem.id,
             title: title.trim(),
@@ -183,6 +193,7 @@ export default function CaseForm({ isOpen, onClose, caseItem }: CaseFormProps) {
     } else {
       await createCase({
         variables: {
+          workspaceId: currentWorkspace!.id,
           input: {
             title: title.trim(),
             description: description.trim(),

@@ -20,20 +20,7 @@ type Firestore struct {
 
 var _ interfaces.Repository = &Firestore{}
 
-type Option func(*Firestore)
-
-func WithCollectionPrefix(prefix string) Option {
-	return func(f *Firestore) {
-		f.caseRepo.collectionPrefix = prefix
-		f.action.collectionPrefix = prefix
-		f.slack.collectionPrefix = prefix
-		f.slackUser.collectionPrefix = prefix
-		f.source.collectionPrefix = prefix
-		f.knowledge.collectionPrefix = prefix
-	}
-}
-
-func New(ctx context.Context, projectID, databaseID string, opts ...Option) (*Firestore, error) {
+func New(ctx context.Context, projectID, databaseID string) (*Firestore, error) {
 	var client *firestore.Client
 	var err error
 	if databaseID != "" {
@@ -63,10 +50,6 @@ func New(ctx context.Context, projectID, databaseID string, opts ...Option) (*Fi
 		slackUser: slackUserRepo,
 		source:    sourceRepo,
 		knowledge: knowledgeRepo,
-	}
-
-	for _, opt := range opts {
-		opt(f)
 	}
 
 	return f, nil

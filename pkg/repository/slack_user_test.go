@@ -521,11 +521,8 @@ func newFirestoreSlackUserRepository(t *testing.T) interfaces.Repository {
 		t.Skip("TEST_FIRESTORE_DATABASE_ID not set")
 	}
 
-	// Use unique collection prefix per test to ensure test isolation
-	uniquePrefix := fmt.Sprintf("%s_slack_user_%d", databaseID, time.Now().UnixNano())
-
 	ctx := context.Background()
-	repo, err := firestore.New(ctx, projectID, databaseID, firestore.WithCollectionPrefix(uniquePrefix))
+	repo, err := firestore.New(ctx, projectID, databaseID)
 	gt.NoError(t, err).Required()
 	t.Cleanup(func() {
 		gt.NoError(t, repo.Close())

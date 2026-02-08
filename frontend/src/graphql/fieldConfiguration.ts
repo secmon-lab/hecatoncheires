@@ -1,8 +1,8 @@
 import { gql } from '@apollo/client'
 
 export const GET_FIELD_CONFIGURATION = gql`
-  query GetFieldConfiguration {
-    fieldConfiguration {
+  query GetFieldConfiguration($workspaceId: String!) {
+    fieldConfiguration(workspaceId: $workspaceId) {
       fields {
         id
         name

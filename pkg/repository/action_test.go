@@ -16,12 +16,14 @@ import (
 func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.Repository) {
 	t.Helper()
 
+	const wsID = "test-ws"
+
 	t.Run("Create creates action with auto-increment ID", func(t *testing.T) {
 		repo := newRepo(t)
 		ctx := context.Background()
 
 		// Create a case first
-		c, err := repo.Case().Create(ctx, &model.Case{
+		c, err := repo.Case().Create(ctx, wsID, &model.Case{
 			Title: "Test Case",
 		})
 		gt.NoError(t, err).Required()
@@ -34,7 +36,7 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			Status:      types.ActionStatusTodo,
 		}
 
-		created1, err := repo.Action().Create(ctx, action1)
+		created1, err := repo.Action().Create(ctx, wsID, action1)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, created1.ID).NotEqual(int64(0))
@@ -49,14 +51,14 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		ctx := context.Background()
 
 		// Create a case
-		c, err := repo.Case().Create(ctx, &model.Case{
+		c, err := repo.Case().Create(ctx, wsID, &model.Case{
 			Title: "Test Case for GetByCase",
 		})
 		gt.NoError(t, err).Required()
 
 		// Create multiple actions for the case
 		for i := 0; i < 3; i++ {
-			_, err := repo.Action().Create(ctx, &model.Action{
+			_, err := repo.Action().Create(ctx, wsID, &model.Action{
 				CaseID:      c.ID,
 				Title:       "Action " + string(rune('A'+i)),
 				Description: "Description " + string(rune('A'+i)),
@@ -66,7 +68,7 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		}
 
 		// Retrieve actions for the case
-		actions, err := repo.Action().GetByCase(ctx, c.ID)
+		actions, err := repo.Action().GetByCase(ctx, wsID, c.ID)
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, actions).Length(3)
@@ -82,12 +84,12 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		ctx := context.Background()
 
 		// Create a case without actions
-		c, err := repo.Case().Create(ctx, &model.Case{
+		c, err := repo.Case().Create(ctx, wsID, &model.Case{
 			Title: "Empty Case",
 		})
 		gt.NoError(t, err).Required()
 
-		actions, err := repo.Action().GetByCase(ctx, c.ID)
+		actions, err := repo.Action().GetByCase(ctx, wsID, c.ID)
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, actions).Length(0)
@@ -98,19 +100,19 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		ctx := context.Background()
 
 		// Create cases
-		case1, err := repo.Case().Create(ctx, &model.Case{
+		case1, err := repo.Case().Create(ctx, wsID, &model.Case{
 			Title: "Case 1",
 		})
 		gt.NoError(t, err).Required()
 
-		case2, err := repo.Case().Create(ctx, &model.Case{
+		case2, err := repo.Case().Create(ctx, wsID, &model.Case{
 			Title: "Case 2",
 		})
 		gt.NoError(t, err).Required()
 
 		// Create actions for case1
 		for i := 0; i < 2; i++ {
-			_, err := repo.Action().Create(ctx, &model.Action{
+			_, err := repo.Action().Create(ctx, wsID, &model.Action{
 				CaseID: case1.ID,
 				Title:  "Case1 Action " + string(rune('A'+i)),
 				Status: types.ActionStatusTodo,
@@ -120,7 +122,7 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 
 		// Create actions for case2
 		for i := 0; i < 3; i++ {
-			_, err := repo.Action().Create(ctx, &model.Action{
+			_, err := repo.Action().Create(ctx, wsID, &model.Action{
 				CaseID: case2.ID,
 				Title:  "Case2 Action " + string(rune('A'+i)),
 				Status: types.ActionStatusTodo,
@@ -129,7 +131,7 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		}
 
 		// Retrieve actions for both cases
-		actionsMap, err := repo.Action().GetByCases(ctx, []int64{case1.ID, case2.ID})
+		actionsMap, err := repo.Action().GetByCases(ctx, wsID, []int64{case1.ID, case2.ID})
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, actionsMap[case1.ID]).Length(2)
@@ -141,12 +143,12 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		ctx := context.Background()
 
 		// Create a case
-		c, err := repo.Case().Create(ctx, &model.Case{
+		c, err := repo.Case().Create(ctx, wsID, &model.Case{
 			Title: "Test Case",
 		})
 		gt.NoError(t, err).Required()
 
-		created, err := repo.Action().Create(ctx, &model.Action{
+		created, err := repo.Action().Create(ctx, wsID, &model.Action{
 			CaseID:      c.ID,
 			Title:       "Original Title",
 			Description: "Original Description",
@@ -158,7 +160,7 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		created.Title = "Updated Title"
 		created.Status = types.ActionStatusInProgress
 
-		updated, err := repo.Action().Update(ctx, created)
+		updated, err := repo.Action().Update(ctx, wsID, created)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, updated.Title).Equal("Updated Title")
@@ -170,23 +172,23 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		ctx := context.Background()
 
 		// Create a case
-		c, err := repo.Case().Create(ctx, &model.Case{
+		c, err := repo.Case().Create(ctx, wsID, &model.Case{
 			Title: "Test Case",
 		})
 		gt.NoError(t, err).Required()
 
-		created, err := repo.Action().Create(ctx, &model.Action{
+		created, err := repo.Action().Create(ctx, wsID, &model.Action{
 			CaseID: c.ID,
 			Title:  "To be deleted",
 			Status: types.ActionStatusTodo,
 		})
 		gt.NoError(t, err).Required()
 
-		err = repo.Action().Delete(ctx, created.ID)
+		err = repo.Action().Delete(ctx, wsID, created.ID)
 		gt.NoError(t, err).Required()
 
 		// Verify it's deleted
-		_, err = repo.Action().Get(ctx, created.ID)
+		_, err = repo.Action().Get(ctx, wsID, created.ID)
 		gt.Value(t, err).NotNil()
 	})
 }

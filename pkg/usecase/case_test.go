@@ -15,6 +15,8 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 )
 
+const testWorkspaceID = "test-ws"
+
 func TestCaseUseCase_CreateCase(t *testing.T) {
 	t.Run("create case with valid fields", func(t *testing.T) {
 		repo := memory.New()
@@ -36,14 +38,19 @@ func TestCaseUseCase_CreateCase(t *testing.T) {
 			},
 		}
 
-		uc := usecase.NewCaseUseCase(repo, fieldSchema, nil)
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace:   model.Workspace{ID: testWorkspaceID, Name: "Test Workspace"},
+			FieldSchema: fieldSchema,
+		})
+		uc := usecase.NewCaseUseCase(repo, registry, nil)
 		ctx := context.Background()
 
 		fieldValues := map[string]model.FieldValue{
 			"priority": {FieldID: "priority", Value: "high"},
 		}
 
-		created, err := uc.CreateCase(ctx, "Test Case", "Description", []string{"U001"}, fieldValues)
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{"U001"}, fieldValues)
 		gt.NoError(t, err).Required()
 
 		gt.Number(t, created.ID).NotEqual(0)
@@ -51,7 +58,7 @@ func TestCaseUseCase_CreateCase(t *testing.T) {
 		gt.Value(t, created.Description).Equal("Description")
 
 		// Verify field values are embedded in the case
-		retrieved, err := uc.GetCase(ctx, created.ID)
+		retrieved, err := uc.GetCase(ctx, testWorkspaceID, created.ID)
 		gt.NoError(t, err).Required()
 		gt.Number(t, len(retrieved.FieldValues)).Equal(1)
 		gt.Value(t, retrieved.FieldValues["priority"].Value).Equal("high")
@@ -63,7 +70,7 @@ func TestCaseUseCase_CreateCase(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil)
 		ctx := context.Background()
 
-		_, err := uc.CreateCase(ctx, "", "Description", []string{}, nil)
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "", "Description", []string{}, nil)
 		gt.Value(t, err).NotNil()
 	})
 
@@ -83,14 +90,19 @@ func TestCaseUseCase_CreateCase(t *testing.T) {
 			},
 		}
 
-		uc := usecase.NewCaseUseCase(repo, fieldSchema, nil)
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace:   model.Workspace{ID: testWorkspaceID, Name: "Test Workspace"},
+			FieldSchema: fieldSchema,
+		})
+		uc := usecase.NewCaseUseCase(repo, registry, nil)
 		ctx := context.Background()
 
 		fieldValues := map[string]model.FieldValue{
 			"priority": {FieldID: "priority", Value: "invalid"},
 		}
 
-		_, err := uc.CreateCase(ctx, "Test Case", "Description", []string{}, fieldValues)
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, fieldValues)
 		gt.Value(t, err).NotNil()
 		gt.Error(t, err).Is(model.ErrInvalidOptionID)
 	})
@@ -108,10 +120,15 @@ func TestCaseUseCase_CreateCase(t *testing.T) {
 			},
 		}
 
-		uc := usecase.NewCaseUseCase(repo, fieldSchema, nil)
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace:   model.Workspace{ID: testWorkspaceID, Name: "Test Workspace"},
+			FieldSchema: fieldSchema,
+		})
+		uc := usecase.NewCaseUseCase(repo, registry, nil)
 		ctx := context.Background()
 
-		_, err := uc.CreateCase(ctx, "Test Case", "Description", []string{}, nil)
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil)
 		gt.Value(t, err).NotNil()
 		gt.Error(t, err).Is(model.ErrMissingRequired)
 	})
@@ -135,28 +152,33 @@ func TestCaseUseCase_UpdateCase(t *testing.T) {
 			},
 		}
 
-		uc := usecase.NewCaseUseCase(repo, fieldSchema, nil)
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace:   model.Workspace{ID: testWorkspaceID, Name: "Test Workspace"},
+			FieldSchema: fieldSchema,
+		})
+		uc := usecase.NewCaseUseCase(repo, registry, nil)
 		ctx := context.Background()
 
 		// Create case first
 		fieldValues := map[string]model.FieldValue{
 			"priority": {FieldID: "priority", Value: "high"},
 		}
-		created, err := uc.CreateCase(ctx, "Original Title", "Original Description", []string{"U001"}, fieldValues)
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Original Title", "Original Description", []string{"U001"}, fieldValues)
 		gt.NoError(t, err).Required()
 
 		// Update case
 		updatedFieldValues := map[string]model.FieldValue{
 			"priority": {FieldID: "priority", Value: "low"},
 		}
-		updated, err := uc.UpdateCase(ctx, created.ID, "Updated Title", "Updated Description", []string{"U002"}, updatedFieldValues)
+		updated, err := uc.UpdateCase(ctx, testWorkspaceID, created.ID, "Updated Title", "Updated Description", []string{"U002"}, updatedFieldValues)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, updated.Title).Equal("Updated Title")
 		gt.Value(t, updated.Description).Equal("Updated Description")
 
 		// Verify field values were updated
-		retrieved, err := uc.GetCase(ctx, updated.ID)
+		retrieved, err := uc.GetCase(ctx, testWorkspaceID, updated.ID)
 		gt.NoError(t, err).Required()
 		gt.Number(t, len(retrieved.FieldValues)).Equal(1)
 		gt.Value(t, retrieved.FieldValues["priority"].Value).Equal("low")
@@ -167,7 +189,7 @@ func TestCaseUseCase_UpdateCase(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil)
 		ctx := context.Background()
 
-		_, err := uc.UpdateCase(ctx, 999, "Title", "Description", []string{}, nil)
+		_, err := uc.UpdateCase(ctx, testWorkspaceID, 999, "Title", "Description", []string{}, nil)
 		gt.Value(t, err).NotNil()
 		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
 	})
@@ -181,22 +203,22 @@ func TestCaseUseCase_DeleteCase(t *testing.T) {
 		ctx := context.Background()
 
 		// Create case
-		created, err := uc.CreateCase(ctx, "Test Case", "Description", []string{}, nil)
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil)
 		gt.NoError(t, err).Required()
 
 		// Create action for the case
-		_, err = actionUC.CreateAction(ctx, created.ID, "Test Action", "Action Description", []string{}, "", types.ActionStatusTodo)
+		_, err = actionUC.CreateAction(ctx, testWorkspaceID, created.ID, "Test Action", "Action Description", []string{}, "", types.ActionStatusTodo)
 		gt.NoError(t, err).Required()
 
 		// Delete case
-		gt.NoError(t, uc.DeleteCase(ctx, created.ID)).Required()
+		gt.NoError(t, uc.DeleteCase(ctx, testWorkspaceID, created.ID)).Required()
 
 		// Verify case is deleted
-		_, err = uc.GetCase(ctx, created.ID)
+		_, err = uc.GetCase(ctx, testWorkspaceID, created.ID)
 		gt.Value(t, err).NotNil()
 
 		// Verify actions are deleted
-		actions, err := actionUC.GetActionsByCase(ctx, created.ID)
+		actions, err := actionUC.GetActionsByCase(ctx, testWorkspaceID, created.ID)
 		gt.NoError(t, err).Required()
 		gt.Array(t, actions).Length(0)
 	})
@@ -206,7 +228,7 @@ func TestCaseUseCase_DeleteCase(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil)
 		ctx := context.Background()
 
-		err := uc.DeleteCase(ctx, 999)
+		err := uc.DeleteCase(ctx, testWorkspaceID, 999)
 		gt.Value(t, err).NotNil()
 		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
 	})
@@ -218,10 +240,10 @@ func TestCaseUseCase_GetCase(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil)
 		ctx := context.Background()
 
-		created, err := uc.CreateCase(ctx, "Test Case", "Description", []string{}, nil)
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil)
 		gt.NoError(t, err).Required()
 
-		retrieved, err := uc.GetCase(ctx, created.ID)
+		retrieved, err := uc.GetCase(ctx, testWorkspaceID, created.ID)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, retrieved.ID).Equal(created.ID)
@@ -233,7 +255,7 @@ func TestCaseUseCase_GetCase(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil)
 		ctx := context.Background()
 
-		_, err := uc.GetCase(ctx, 999)
+		_, err := uc.GetCase(ctx, testWorkspaceID, 999)
 		gt.Value(t, err).NotNil()
 		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
 	})
@@ -246,13 +268,13 @@ func TestCaseUseCase_ListCases(t *testing.T) {
 		ctx := context.Background()
 
 		// Create multiple cases
-		_, err := uc.CreateCase(ctx, "Case 1", "Description 1", []string{}, nil)
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Case 1", "Description 1", []string{}, nil)
 		gt.NoError(t, err).Required()
 
-		_, err = uc.CreateCase(ctx, "Case 2", "Description 2", []string{}, nil)
+		_, err = uc.CreateCase(ctx, testWorkspaceID, "Case 2", "Description 2", []string{}, nil)
 		gt.NoError(t, err).Required()
 
-		cases, err := uc.ListCases(ctx)
+		cases, err := uc.ListCases(ctx, testWorkspaceID)
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, cases).Length(2)
@@ -271,9 +293,14 @@ func TestCaseUseCase_GetFieldConfiguration(t *testing.T) {
 			},
 		}
 
-		uc := usecase.NewCaseUseCase(repo, fieldSchema, nil)
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace:   model.Workspace{ID: testWorkspaceID, Name: "Test Workspace"},
+			FieldSchema: fieldSchema,
+		})
+		uc := usecase.NewCaseUseCase(repo, registry, nil)
 
-		cfg := uc.GetFieldConfiguration()
+		cfg := uc.GetFieldConfiguration(testWorkspaceID)
 		gt.Array(t, cfg.Fields).Length(1)
 		gt.Value(t, cfg.Fields[0].ID).Equal("priority")
 	})
@@ -282,7 +309,7 @@ func TestCaseUseCase_GetFieldConfiguration(t *testing.T) {
 		repo := memory.New()
 		uc := usecase.NewCaseUseCase(repo, nil, nil)
 
-		cfg := uc.GetFieldConfiguration()
+		cfg := uc.GetFieldConfiguration(testWorkspaceID)
 		gt.Array(t, cfg.Fields).Length(0)
 		gt.Value(t, cfg.Labels.Case).Equal("Case")
 	})
@@ -292,8 +319,8 @@ func TestCaseUseCase_CreateCase_SlackInvite(t *testing.T) {
 	t.Run("invites creator and assignees to channel", func(t *testing.T) {
 		repo := memory.New()
 		mock := &mockSlackService{
-			createChannelFn: func(_ context.Context, riskID int64, _ string) (string, error) {
-				return fmt.Sprintf("C%d", riskID), nil
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
 			},
 		}
 		uc := usecase.NewCaseUseCase(repo, nil, mock)
@@ -301,7 +328,7 @@ func TestCaseUseCase_CreateCase_SlackInvite(t *testing.T) {
 		token := auth.NewToken("UCREATOR", "creator@example.com", "Creator")
 		ctx := auth.ContextWithToken(context.Background(), token)
 
-		created, err := uc.CreateCase(ctx, "Test Case", "Description", []string{"UASSIGNEE1", "UASSIGNEE2"}, nil)
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{"UASSIGNEE1", "UASSIGNEE2"}, nil)
 		gt.NoError(t, err).Required()
 		gt.Value(t, created.SlackChannelID).NotEqual("")
 
@@ -316,8 +343,8 @@ func TestCaseUseCase_CreateCase_SlackInvite(t *testing.T) {
 	t.Run("deduplicates creator in assignees", func(t *testing.T) {
 		repo := memory.New()
 		mock := &mockSlackService{
-			createChannelFn: func(_ context.Context, riskID int64, _ string) (string, error) {
-				return fmt.Sprintf("C%d", riskID), nil
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
 			},
 		}
 		uc := usecase.NewCaseUseCase(repo, nil, mock)
@@ -325,7 +352,7 @@ func TestCaseUseCase_CreateCase_SlackInvite(t *testing.T) {
 		token := auth.NewToken("UCREATOR", "creator@example.com", "Creator")
 		ctx := auth.ContextWithToken(context.Background(), token)
 
-		_, err := uc.CreateCase(ctx, "Test Case", "Description", []string{"UCREATOR", "UOTHER"}, nil)
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{"UCREATOR", "UOTHER"}, nil)
 		gt.NoError(t, err).Required()
 
 		// UCREATOR should appear only once
@@ -337,8 +364,8 @@ func TestCaseUseCase_CreateCase_SlackInvite(t *testing.T) {
 	t.Run("invite failure does not fail case creation", func(t *testing.T) {
 		repo := memory.New()
 		mock := &mockSlackService{
-			createChannelFn: func(_ context.Context, riskID int64, _ string) (string, error) {
-				return fmt.Sprintf("C%d", riskID), nil
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
 			},
 			inviteUsersToChannelFn: func(_ context.Context, _ string, _ []string) error {
 				return errors.New("slack invite error")
@@ -349,7 +376,7 @@ func TestCaseUseCase_CreateCase_SlackInvite(t *testing.T) {
 		token := auth.NewToken("UCREATOR", "creator@example.com", "Creator")
 		ctx := auth.ContextWithToken(context.Background(), token)
 
-		created, err := uc.CreateCase(ctx, "Test Case", "Description", []string{"UASSIGNEE"}, nil)
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{"UASSIGNEE"}, nil)
 		gt.NoError(t, err).Required()
 		gt.Value(t, created.SlackChannelID).NotEqual("")
 	})
@@ -357,8 +384,8 @@ func TestCaseUseCase_CreateCase_SlackInvite(t *testing.T) {
 	t.Run("invites assignees without auth token", func(t *testing.T) {
 		repo := memory.New()
 		mock := &mockSlackService{
-			createChannelFn: func(_ context.Context, riskID int64, _ string) (string, error) {
-				return fmt.Sprintf("C%d", riskID), nil
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
 			},
 		}
 		uc := usecase.NewCaseUseCase(repo, nil, mock)
@@ -366,7 +393,7 @@ func TestCaseUseCase_CreateCase_SlackInvite(t *testing.T) {
 		// No auth token in context
 		ctx := context.Background()
 
-		_, err := uc.CreateCase(ctx, "Test Case", "Description", []string{"UASSIGNEE"}, nil)
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{"UASSIGNEE"}, nil)
 		gt.NoError(t, err).Required()
 
 		// Only assignees should be invited (no creator)
@@ -377,8 +404,8 @@ func TestCaseUseCase_CreateCase_SlackInvite(t *testing.T) {
 	t.Run("no invite when no users", func(t *testing.T) {
 		repo := memory.New()
 		mock := &mockSlackService{
-			createChannelFn: func(_ context.Context, riskID int64, _ string) (string, error) {
-				return fmt.Sprintf("C%d", riskID), nil
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
 			},
 		}
 		uc := usecase.NewCaseUseCase(repo, nil, mock)
@@ -386,7 +413,7 @@ func TestCaseUseCase_CreateCase_SlackInvite(t *testing.T) {
 		// No auth token, no assignees
 		ctx := context.Background()
 
-		_, err := uc.CreateCase(ctx, "Test Case", "Description", []string{}, nil)
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil)
 		gt.NoError(t, err).Required()
 
 		// No invite should have been called

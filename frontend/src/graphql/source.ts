@@ -44,8 +44,8 @@ const SOURCE_FIELDS = gql`
 
 export const GET_SOURCES = gql`
   ${SOURCE_FIELDS}
-  query GetSources {
-    sources {
+  query GetSources($workspaceId: String!) {
+    sources(workspaceId: $workspaceId) {
       ...SourceFields
     }
   }
@@ -53,8 +53,8 @@ export const GET_SOURCES = gql`
 
 export const GET_SOURCE = gql`
   ${SOURCE_FIELDS}
-  query GetSource($id: String!) {
-    source(id: $id) {
+  query GetSource($workspaceId: String!, $id: String!) {
+    source(workspaceId: $workspaceId, id: $id) {
       ...SourceFields
     }
   }
@@ -62,8 +62,8 @@ export const GET_SOURCE = gql`
 
 export const CREATE_NOTION_DB_SOURCE = gql`
   ${SOURCE_FIELDS}
-  mutation CreateNotionDBSource($input: CreateNotionDBSourceInput!) {
-    createNotionDBSource(input: $input) {
+  mutation CreateNotionDBSource($workspaceId: String!, $input: CreateNotionDBSourceInput!) {
+    createNotionDBSource(workspaceId: $workspaceId, input: $input) {
       ...SourceFields
     }
   }
@@ -71,22 +71,22 @@ export const CREATE_NOTION_DB_SOURCE = gql`
 
 export const UPDATE_SOURCE = gql`
   ${SOURCE_FIELDS}
-  mutation UpdateSource($input: UpdateSourceInput!) {
-    updateSource(input: $input) {
+  mutation UpdateSource($workspaceId: String!, $input: UpdateSourceInput!) {
+    updateSource(workspaceId: $workspaceId, input: $input) {
       ...SourceFields
     }
   }
 `
 
 export const DELETE_SOURCE = gql`
-  mutation DeleteSource($id: String!) {
-    deleteSource(id: $id)
+  mutation DeleteSource($workspaceId: String!, $id: String!) {
+    deleteSource(workspaceId: $workspaceId, id: $id)
   }
 `
 
 export const VALIDATE_NOTION_DB = gql`
-  mutation ValidateNotionDB($databaseID: String!) {
-    validateNotionDB(databaseID: $databaseID) {
+  mutation ValidateNotionDB($workspaceId: String!, $databaseID: String!) {
+    validateNotionDB(workspaceId: $workspaceId, databaseID: $databaseID) {
       valid
       databaseTitle
       databaseURL
@@ -97,8 +97,8 @@ export const VALIDATE_NOTION_DB = gql`
 
 export const CREATE_SLACK_SOURCE = gql`
   ${SOURCE_FIELDS}
-  mutation CreateSlackSource($input: CreateSlackSourceInput!) {
-    createSlackSource(input: $input) {
+  mutation CreateSlackSource($workspaceId: String!, $input: CreateSlackSourceInput!) {
+    createSlackSource(workspaceId: $workspaceId, input: $input) {
       ...SourceFields
     }
   }
@@ -106,8 +106,8 @@ export const CREATE_SLACK_SOURCE = gql`
 
 export const UPDATE_SLACK_SOURCE = gql`
   ${SOURCE_FIELDS}
-  mutation UpdateSlackSource($input: UpdateSlackSourceInput!) {
-    updateSlackSource(input: $input) {
+  mutation UpdateSlackSource($workspaceId: String!, $input: UpdateSlackSourceInput!) {
+    updateSlackSource(workspaceId: $workspaceId, input: $input) {
       ...SourceFields
     }
   }

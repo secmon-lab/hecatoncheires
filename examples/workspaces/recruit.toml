@@ -1,0 +1,67 @@
+# Recruitment Workspace
+# This configuration demonstrates a recruitment tracking use case.
+# Use with: hecatoncheires serve --config ./examples/workspaces/
+
+[workspace]
+id = "recruit"
+name = "Recruitment"
+
+[labels]
+case = "Candidate"
+
+[[fields]]
+id = "position"
+name = "Position"
+type = "select"
+required = true
+options = [
+  { id = "backend-engineer", name = "Backend Engineer" },
+  { id = "frontend-engineer", name = "Frontend Engineer" },
+  { id = "sre", name = "SRE" },
+  { id = "product-manager", name = "Product Manager" },
+  { id = "designer", name = "Designer" },
+]
+
+[[fields]]
+id = "stage"
+name = "Stage"
+type = "select"
+required = true
+options = [
+  { id = "screening", name = "Screening", metadata = { color = "blue" } },
+  { id = "first-interview", name = "First Interview", metadata = { color = "cyan" } },
+  { id = "technical-interview", name = "Technical Interview", metadata = { color = "yellow" } },
+  { id = "final-interview", name = "Final Interview", metadata = { color = "orange" } },
+  { id = "offer", name = "Offer", metadata = { color = "green" } },
+  { id = "rejected", name = "Rejected", metadata = { color = "red" } },
+]
+
+[[fields]]
+id = "source"
+name = "Source"
+type = "select"
+required = false
+options = [
+  { id = "referral", name = "Referral" },
+  { id = "direct-apply", name = "Direct Application" },
+  { id = "agency", name = "Recruitment Agency" },
+  { id = "linkedin", name = "LinkedIn" },
+]
+
+[[fields]]
+id = "interview-date"
+name = "Interview Date"
+type = "date"
+required = false
+
+[[fields]]
+id = "resume-url"
+name = "Resume URL"
+type = "url"
+required = false
+
+[[fields]]
+id = "notes"
+name = "Notes"
+type = "text"
+required = false

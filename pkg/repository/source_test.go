@@ -18,6 +18,8 @@ import (
 func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.Repository) {
 	t.Helper()
 
+	const wsID = "test-ws"
+
 	t.Run("Create creates source with UUID", func(t *testing.T) {
 		repo := newRepo(t)
 		ctx := context.Background()
@@ -34,7 +36,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			},
 		}
 
-		created, err := repo.Source().Create(ctx, source)
+		created, err := repo.Source().Create(ctx, wsID, source)
 		gt.NoError(t, err).Required()
 
 		gt.String(t, string(created.ID)).NotEqual("")
@@ -63,7 +65,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			Enabled:     true,
 		}
 
-		created, err := repo.Source().Create(ctx, source)
+		created, err := repo.Source().Create(ctx, wsID, source)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, created.ID).Equal(customID)
@@ -85,10 +87,10 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			},
 		}
 
-		created, err := repo.Source().Create(ctx, source)
+		created, err := repo.Source().Create(ctx, wsID, source)
 		gt.NoError(t, err).Required()
 
-		retrieved, err := repo.Source().Get(ctx, created.ID)
+		retrieved, err := repo.Source().Get(ctx, wsID, created.ID)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, retrieved.ID).Equal(created.ID)
@@ -106,7 +108,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		_, err := repo.Source().Get(ctx, "non-existent-id")
+		_, err := repo.Source().Get(ctx, wsID, "non-existent-id")
 		gt.Value(t, err).NotNil()
 		gt.Bool(t, errors.Is(err, memory.ErrNotFound) || errors.Is(err, firestore.ErrNotFound)).True()
 	})
@@ -115,25 +117,25 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		sources, err := repo.Source().List(ctx)
+		sources, err := repo.Source().List(ctx, wsID)
 		gt.NoError(t, err).Required()
 		gt.Array(t, sources).Length(0)
 
-		source1, err := repo.Source().Create(ctx, &model.Source{
+		source1, err := repo.Source().Create(ctx, wsID, &model.Source{
 			Name:       "Source 1",
 			SourceType: model.SourceTypeNotionDB,
 			Enabled:    true,
 		})
 		gt.NoError(t, err).Required()
 
-		source2, err := repo.Source().Create(ctx, &model.Source{
+		source2, err := repo.Source().Create(ctx, wsID, &model.Source{
 			Name:       "Source 2",
 			SourceType: model.SourceTypeNotionDB,
 			Enabled:    false,
 		})
 		gt.NoError(t, err).Required()
 
-		sources, err = repo.Source().List(ctx)
+		sources, err = repo.Source().List(ctx, wsID)
 		gt.NoError(t, err).Required()
 		gt.Array(t, sources).Length(2)
 
@@ -155,7 +157,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		created, err := repo.Source().Create(ctx, &model.Source{
+		created, err := repo.Source().Create(ctx, wsID, &model.Source{
 			Name:        "Original Name",
 			SourceType:  model.SourceTypeNotionDB,
 			Description: "Original Description",
@@ -170,7 +172,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 
 		time.Sleep(10 * time.Millisecond)
 
-		updated, err := repo.Source().Update(ctx, &model.Source{
+		updated, err := repo.Source().Update(ctx, wsID, &model.Source{
 			ID:          created.ID,
 			Name:        "Updated Name",
 			SourceType:  model.SourceTypeNotionDB,
@@ -193,7 +195,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		gt.Bool(t, time.Since(updated.CreatedAt) <= time.Since(created.CreatedAt)+time.Second).True()
 		gt.Bool(t, updated.UpdatedAt.After(created.UpdatedAt)).True()
 
-		retrieved, err := repo.Source().Get(ctx, created.ID)
+		retrieved, err := repo.Source().Get(ctx, wsID, created.ID)
 		gt.NoError(t, err).Required()
 		gt.Value(t, retrieved.Name).Equal("Updated Name")
 	})
@@ -202,7 +204,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		_, err := repo.Source().Update(ctx, &model.Source{
+		_, err := repo.Source().Update(ctx, wsID, &model.Source{
 			ID:          "non-existent-id",
 			Name:        "Non-existent",
 			SourceType:  model.SourceTypeNotionDB,
@@ -217,17 +219,17 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		created, err := repo.Source().Create(ctx, &model.Source{
+		created, err := repo.Source().Create(ctx, wsID, &model.Source{
 			Name:       "To Be Deleted",
 			SourceType: model.SourceTypeNotionDB,
 			Enabled:    true,
 		})
 		gt.NoError(t, err).Required()
 
-		err = repo.Source().Delete(ctx, created.ID)
+		err = repo.Source().Delete(ctx, wsID, created.ID)
 		gt.NoError(t, err).Required()
 
-		_, err = repo.Source().Get(ctx, created.ID)
+		_, err = repo.Source().Get(ctx, wsID, created.ID)
 		gt.Value(t, err).NotNil()
 		gt.Bool(t, errors.Is(err, memory.ErrNotFound) || errors.Is(err, firestore.ErrNotFound)).True()
 	})
@@ -236,7 +238,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		err := repo.Source().Delete(ctx, "non-existent-id")
+		err := repo.Source().Delete(ctx, wsID, "non-existent-id")
 		gt.Value(t, err).NotNil()
 		gt.Bool(t, errors.Is(err, memory.ErrNotFound) || errors.Is(err, firestore.ErrNotFound)).True()
 	})
@@ -253,12 +255,12 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			NotionDBConfig: nil,
 		}
 
-		created, err := repo.Source().Create(ctx, source)
+		created, err := repo.Source().Create(ctx, wsID, source)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, created.NotionDBConfig).Nil()
 
-		retrieved, err := repo.Source().Get(ctx, created.ID)
+		retrieved, err := repo.Source().Get(ctx, wsID, created.ID)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, retrieved.NotionDBConfig).Nil()
@@ -281,7 +283,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			},
 		}
 
-		created, err := repo.Source().Create(ctx, source)
+		created, err := repo.Source().Create(ctx, wsID, source)
 		gt.NoError(t, err).Required()
 
 		gt.String(t, string(created.ID)).NotEqual("")
@@ -311,10 +313,10 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			},
 		}
 
-		created, err := repo.Source().Create(ctx, source)
+		created, err := repo.Source().Create(ctx, wsID, source)
 		gt.NoError(t, err).Required()
 
-		retrieved, err := repo.Source().Get(ctx, created.ID)
+		retrieved, err := repo.Source().Get(ctx, wsID, created.ID)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, retrieved.SlackConfig).NotNil().Required()
@@ -327,7 +329,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		created, err := repo.Source().Create(ctx, &model.Source{
+		created, err := repo.Source().Create(ctx, wsID, &model.Source{
 			Name:        "Slack Source for Update",
 			SourceType:  model.SourceTypeSlack,
 			Description: "Original",
@@ -342,7 +344,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 
 		time.Sleep(10 * time.Millisecond)
 
-		updated, err := repo.Source().Update(ctx, &model.Source{
+		updated, err := repo.Source().Update(ctx, wsID, &model.Source{
 			ID:          created.ID,
 			Name:        "Updated Slack Source",
 			SourceType:  model.SourceTypeSlack,
@@ -377,13 +379,13 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			},
 		}
 
-		created, err := repo.Source().Create(ctx, source)
+		created, err := repo.Source().Create(ctx, wsID, source)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, created.SlackConfig).NotNil().Required()
 		gt.Array(t, created.SlackConfig.Channels).Length(0)
 
-		retrieved, err := repo.Source().Get(ctx, created.ID)
+		retrieved, err := repo.Source().Get(ctx, wsID, created.ID)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, retrieved.SlackConfig).NotNil().Required()
@@ -405,8 +407,7 @@ func newFirestoreSourceRepository(t *testing.T) interfaces.Repository {
 	}
 
 	ctx := context.Background()
-	prefix := fmt.Sprintf("test_%d", time.Now().UnixNano())
-	repo, err := firestore.New(ctx, projectID, databaseID, firestore.WithCollectionPrefix(prefix))
+	repo, err := firestore.New(ctx, projectID, databaseID)
 	gt.NoError(t, err).Required()
 	t.Cleanup(func() {
 		gt.NoError(t, repo.Close())

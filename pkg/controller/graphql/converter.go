@@ -9,7 +9,7 @@ import (
 )
 
 // toGraphQLCase converts a domain Case to GraphQL Case
-func toGraphQLCase(c *model.Case) *graphql1.Case {
+func toGraphQLCase(c *model.Case, workspaceID string) *graphql1.Case {
 	// Ensure non-null list fields are never nil (schema: [String!]!)
 	assigneeIDs := c.AssigneeIDs
 	if assigneeIDs == nil {
@@ -18,6 +18,7 @@ func toGraphQLCase(c *model.Case) *graphql1.Case {
 
 	return &graphql1.Case{
 		ID:             int(c.ID),
+		WorkspaceID:    workspaceID,
 		Title:          c.Title,
 		Description:    c.Description,
 		AssigneeIDs:    assigneeIDs,
@@ -29,7 +30,7 @@ func toGraphQLCase(c *model.Case) *graphql1.Case {
 }
 
 // toGraphQLAction converts a domain Action to GraphQL Action
-func toGraphQLAction(a *model.Action) *graphql1.Action {
+func toGraphQLAction(a *model.Action, workspaceID string) *graphql1.Action {
 	slackMessageTS := ""
 	if a.SlackMessageTS != "" {
 		slackMessageTS = a.SlackMessageTS
@@ -43,6 +44,7 @@ func toGraphQLAction(a *model.Action) *graphql1.Action {
 
 	return &graphql1.Action{
 		ID:             int(a.ID),
+		WorkspaceID:    workspaceID,
 		CaseID:         int(a.CaseID),
 		Title:          a.Title,
 		Description:    a.Description,
@@ -55,17 +57,18 @@ func toGraphQLAction(a *model.Action) *graphql1.Action {
 }
 
 // toGraphQLKnowledge converts a domain Knowledge to GraphQL Knowledge
-func toGraphQLKnowledge(k *model.Knowledge) *graphql1.Knowledge {
+func toGraphQLKnowledge(k *model.Knowledge, workspaceID string) *graphql1.Knowledge {
 	return &graphql1.Knowledge{
-		ID:        string(k.ID),
-		CaseID:    int(k.CaseID),
-		SourceID:  string(k.SourceID),
-		SourceURL: k.SourceURL,
-		Title:     k.Title,
-		Summary:   k.Summary,
-		SourcedAt: k.SourcedAt,
-		CreatedAt: k.CreatedAt,
-		UpdatedAt: k.UpdatedAt,
+		ID:          string(k.ID),
+		WorkspaceID: workspaceID,
+		CaseID:      int(k.CaseID),
+		SourceID:    string(k.SourceID),
+		SourceURL:   k.SourceURL,
+		Title:       k.Title,
+		Summary:     k.Summary,
+		SourcedAt:   k.SourcedAt,
+		CreatedAt:   k.CreatedAt,
+		UpdatedAt:   k.UpdatedAt,
 	}
 }
 

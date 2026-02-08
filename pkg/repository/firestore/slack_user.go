@@ -24,8 +24,7 @@ const (
 )
 
 type slackUserRepository struct {
-	client           *firestore.Client
-	collectionPrefix string
+	client *firestore.Client
 }
 
 var _ interfaces.SlackUserRepository = &slackUserRepository{}
@@ -37,16 +36,10 @@ func newSlackUserRepository(client *firestore.Client) *slackUserRepository {
 }
 
 func (r *slackUserRepository) collection() *firestore.CollectionRef {
-	if r.collectionPrefix != "" {
-		return r.client.Collection(r.collectionPrefix + "_" + slackUsersCollection)
-	}
 	return r.client.Collection(slackUsersCollection)
 }
 
 func (r *slackUserRepository) metadataCollection() *firestore.CollectionRef {
-	if r.collectionPrefix != "" {
-		return r.client.Collection(r.collectionPrefix + "_" + slackMetadataCollection)
-	}
 	return r.client.Collection(slackMetadataCollection)
 }
 

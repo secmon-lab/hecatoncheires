@@ -19,8 +19,7 @@ const (
 )
 
 type slackRepository struct {
-	client           *firestore.Client
-	collectionPrefix string
+	client *firestore.Client
 }
 
 var _ interfaces.SlackRepository = &slackRepository{}
@@ -51,11 +50,7 @@ type slackChannel struct {
 }
 
 func (r *slackRepository) channelsCollection() *firestore.CollectionRef {
-	name := slackChannelsCollection
-	if r.collectionPrefix != "" {
-		name = r.collectionPrefix + name
-	}
-	return r.client.Collection(name)
+	return r.client.Collection(slackChannelsCollection)
 }
 
 func (r *slackRepository) messagesCollection(channelID string) *firestore.CollectionRef {

@@ -3,6 +3,7 @@ import Modal from '../components/Modal'
 import Button from '../components/Button'
 import { AlertTriangle } from 'lucide-react'
 import { DELETE_ACTION, GET_ACTIONS } from '../graphql/action'
+import { useWorkspace } from '../contexts/workspace-context'
 import styles from './ActionDeleteDialog.module.css'
 
 interface ActionDeleteDialogProps {
@@ -20,13 +21,18 @@ export default function ActionDeleteDialog({
   actionTitle,
   actionId,
 }: ActionDeleteDialogProps) {
+  const { currentWorkspace } = useWorkspace()
   const [deleteAction, { loading }] = useMutation(DELETE_ACTION, {
     update(cache) {
       if (!actionId) return
-      const existingActions = cache.readQuery<{ actions: any[] }>({ query: GET_ACTIONS })
+      const existingActions = cache.readQuery<{ actions: any[] }>({
+        query: GET_ACTIONS,
+        variables: { workspaceId: currentWorkspace!.id },
+      })
       if (existingActions) {
         cache.writeQuery({
           query: GET_ACTIONS,
+          variables: { workspaceId: currentWorkspace!.id },
           data: {
             actions: existingActions.actions.filter((a) => a.id !== actionId),
           },
@@ -44,7 +50,7 @@ export default function ActionDeleteDialog({
   const handleDelete = async () => {
     if (actionId) {
       await deleteAction({
-        variables: { id: actionId },
+        variables: { workspaceId: currentWorkspace!.id, id: actionId },
       })
     } else {
       onConfirm()
