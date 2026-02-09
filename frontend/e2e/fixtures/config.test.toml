@@ -1,0 +1,39 @@
+# Hecatoncheires E2E Test Configuration
+# Minimal configuration for Playwright E2E testing
+
+[workspace]
+id = "test"
+name = "E2E Test Workspace"
+
+# Entity Labels
+[labels]
+case = "Case"
+
+# Minimal field definitions for testing
+[[fields]]
+id = "category"
+name = "Category"
+type = "select"
+required = true
+options = [
+  { id = "bug", name = "Bug" },
+  { id = "feature", name = "Feature" },
+  { id = "task", name = "Task" },
+]
+
+[[fields]]
+id = "priority"
+name = "Priority"
+type = "select"
+required = false
+options = [
+  { id = "low", name = "Low" },
+  { id = "medium", name = "Medium" },
+  { id = "high", name = "High" },
+]
+
+[[fields]]
+id = "description"
+name = "Description"
+type = "text"
+required = false

@@ -7,6 +7,7 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/slack-go/slack"
 	"github.com/urfave/cli/v3"
 )
@@ -80,35 +81,40 @@ func (x *Slack) NoAuthUID() string {
 func (x *Slack) Configure(ctx context.Context, repo interfaces.Repository, baseURL string) (usecase.AuthUseCaseInterface, error) {
 	// If no-auth mode is enabled, validate and use the specified user
 	if x.noAuthUID != "" {
-		// no-auth requires bot token for user validation
-		if x.botToken == "" {
-			return nil, goerr.New("--no-auth requires --slack-bot-token for user validation")
+		// If bot token is available, validate user exists in Slack
+		if x.botToken != "" {
+			// Warn if OAuth credentials are also configured (no-auth takes precedence)
+			if x.clientID != "" || x.clientSecret != "" {
+				logging.Default().Warn("--no-auth is set, ignoring --slack-client-id/--slack-client-secret")
+			}
+
+			userInfo, err := x.GetSlackUserInfo(ctx, x.noAuthUID)
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to validate Slack user", goerr.V("uid", x.noAuthUID))
+			}
+
+			return usecase.NewNoAuthnUseCase(repo, userInfo.ID, userInfo.Email, userInfo.Name), nil
 		}
 
-		// Warn if OAuth credentials are also configured (no-auth takes precedence)
-		if x.clientID != "" || x.clientSecret != "" {
-			slog.Warn("--no-auth is set, ignoring --slack-client-id/--slack-client-secret")
-		}
-
-		// Validate user exists in Slack
-		userInfo, err := x.GetSlackUserInfo(ctx, x.noAuthUID)
-		if err != nil {
-			return nil, goerr.Wrap(err, "failed to validate Slack user", goerr.V("uid", x.noAuthUID))
-		}
-
-		return usecase.NewNoAuthnUseCase(repo, userInfo.ID, userInfo.Email, userInfo.Name), nil
+		// If bot token is not available, use a default user for testing
+		logging.Default().Warn("Running in no-auth mode without Slack bot token - using default test user", "user_id", x.noAuthUID)
+		return usecase.NewNoAuthnUseCase(repo, x.noAuthUID, "test@example.com", "Test User"), nil
 	}
 
-	// If any Slack config is missing or baseURL is not set, return error
-	// (no more fallback to anonymous mode)
-	if x.clientID == "" || x.clientSecret == "" || baseURL == "" {
-		return nil, goerr.New("Slack OAuth configuration is required: set --slack-client-id, --slack-client-secret, and --base-url, or use --no-auth with --slack-bot-token")
+	// If Slack OAuth configuration is complete, use Slack authentication
+	if x.clientID != "" && x.clientSecret != "" && baseURL != "" {
+		// Build callback URL from base URL
+		callbackURL := baseURL + "/api/auth/callback"
+		return usecase.NewAuthUseCase(repo, x.clientID, x.clientSecret, callbackURL, usecase.WithBotToken(x.botToken)), nil
 	}
 
-	// Build callback URL from base URL
-	callbackURL := baseURL + "/api/auth/callback"
+	// If Slack configuration is incomplete, warn and fall back to simple no-auth mode
+	logging.Default().Warn("Slack configuration is incomplete - running without authentication (development mode only)")
+	logging.Default().Warn("Set --slack-client-id, --slack-client-secret, and --base-url for Slack OAuth, or use --no-auth with --slack-bot-token")
 
-	return usecase.NewAuthUseCase(repo, x.clientID, x.clientSecret, callbackURL, usecase.WithBotToken(x.botToken)), nil
+	// Use a default test user
+	defaultUserID := "U_DEFAULT_TEST"
+	return usecase.NewNoAuthnUseCase(repo, defaultUserID, "test@example.com", "Test User"), nil
 }
 
 // GetSlackUserInfo retrieves user information from Slack API

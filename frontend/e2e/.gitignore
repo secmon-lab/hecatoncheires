@@ -1,0 +1,8 @@
+# Test artifacts
+*.jpg
+*.png
+*.webm
+*.zip
+
+# Downloaded browser binaries
+.cache/

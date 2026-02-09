@@ -52,13 +52,15 @@ Slack OAuth is used for user authentication via OpenID Connect (OIDC). The syste
      - `email` (to get user's email address)
 
    - **Bot Token Scopes**:
+     - `channels:history` (to receive message events from public channels via Events API)
+     - `channels:manage` (to create, rename, and invite users to risk channels)
+     - `channels:read` (to list and read channel information)
      - `users:read` (to fetch user profile information including avatar images)
-     - `channels:manage` (to automatically create and rename risk channels)
-     - `channels:read` (to read channel information)
+     - `users:read.email` (to access user email addresses from profiles)
 
    **Important**: User Token Scopes and Bot Token Scopes serve different purposes:
    - User Token Scopes authenticate users via OpenID Connect
-   - Bot Token Scopes allow the application to fetch additional user information using the Bot Token
+   - Bot Token Scopes allow the application to manage channels, receive events, and fetch user information using the Bot Token
 
 4. Click "Save Changes"
 
@@ -104,11 +106,20 @@ https://your-domain.com/hooks/slack/event
 
 Under **Subscribe to bot events**, add the events you want to receive:
 
-- `message.channels` - Messages posted to public channels the app is in
-- `message.groups` - Messages posted to private channels the app is in
-- `message.im` - Messages posted in direct message channels with the app
-- `message.mpim` - Messages posted in multi-person direct messages the app is in
-- `app_mention` - When someone mentions your app with @app_name
+| Event | Description | Required Bot Scope |
+|-------|-------------|-------------------|
+| `message.channels` | Messages posted to public channels the app is in | `channels:history` |
+| `app_mention` | When someone mentions your app with @app_name | (no additional scope) |
+
+**Optional events** (if you need private channel or DM support):
+
+| Event | Description | Required Bot Scope |
+|-------|-------------|-------------------|
+| `message.groups` | Messages posted to private channels the app is in | `groups:history` |
+| `message.im` | Messages posted in direct message channels with the app | `im:history` |
+| `message.mpim` | Messages posted in multi-person direct messages the app is in | `mpim:history` |
+
+**Note**: Subscribing to optional events requires adding the corresponding scopes to **Bot Token Scopes** in OAuth & Permissions.
 
 Click **Save Changes**
 
@@ -203,10 +214,13 @@ This allows you to organize channels by different categories (e.g., `incident-*`
 
 ### Required Bot Permissions
 
-For automatic channel creation to work, the bot token must have the following scopes:
+For automatic channel creation and full Slack integration, the bot token must have the following scopes:
 
-- `channels:manage` - Create and rename public channels
-- `channels:read` - Read channel information
+- `channels:history` - Receive message events from public channels via Events API
+- `channels:manage` - Create, rename, and invite users to public channels
+- `channels:read` - List and read channel information
+- `users:read` - Fetch user profile information (name, avatar)
+- `users:read.email` - Access user email addresses from profiles
 
 Add these scopes in **OAuth & Permissions** → **Bot Token Scopes** in your Slack app settings.
 
@@ -269,7 +283,7 @@ Follow these steps to set up both authentication and webhooks:
 2. **Configure OAuth** (see [Configure OAuth & Permissions](#2-configure-oauth--permissions))
    - Set redirect URL: `${BASE_URL}/api/auth/callback`
    - Add user scopes: `openid`, `profile`, `email`
-   - Add bot scopes: `users:read`, `channels:manage`, `channels:read`
+   - Add bot scopes: `channels:history`, `channels:manage`, `channels:read`, `users:read`, `users:read.email`
 
 3. **Configure Events API** (see [Events API Setup](#events-api-setup))
    - Enable Event Subscriptions
@@ -612,6 +626,58 @@ slack_channels/{channelID}
 - Threaded conversation display
 - User mention notifications
 - Message reactions support
+
+---
+
+## Permissions Reference
+
+### Bot Token Scopes
+
+These scopes are required for the Bot User OAuth Token (`xoxb-...`):
+
+| Scope | Slack API Method | Purpose | Code Location |
+|-------|-----------------|---------|---------------|
+| `channels:history` | Events API | Receive `message.channels` events from public channels | Webhook handler |
+| `channels:manage` | `conversations.create` | Create new Slack channels for risks | `pkg/service/slack/client.go` |
+| `channels:manage` | `conversations.rename` | Rename Slack channels when risk name changes | `pkg/service/slack/client.go` |
+| `channels:manage` | `conversations.invite` | Invite users to risk channels | `pkg/service/slack/client.go` |
+| `channels:read` | `conversations.list` | List public channels the bot has joined | `pkg/service/slack/client.go` |
+| `channels:read` | `conversations.info` | Get channel name and info (with caching) | `pkg/service/slack/client.go` |
+| `users:read` | `users.info` | Fetch user profile (name, avatar) | `pkg/service/slack/client.go` |
+| `users:read` | `users.list` | List all non-deleted, non-bot users in workspace | `pkg/service/slack/client.go` |
+| `users:read.email` | `users.info`, `users.list` | Access user email addresses from profiles | `pkg/service/slack/client.go` |
+
+### User Token Scopes
+
+These scopes are required for user authentication via OpenID Connect:
+
+| Scope | Purpose | Code Location |
+|-------|---------|---------------|
+| `openid` | OpenID Connect authentication flow | `pkg/usecase/auth.go` |
+| `profile` | Access user's name | `pkg/usecase/auth.go` |
+| `email` | Access user's email address | `pkg/usecase/auth.go` |
+
+### Event Subscriptions
+
+These bot events must be subscribed to in the Slack app settings:
+
+| Event | Required Bot Scope | Currently Handled |
+|-------|-------------------|-------------------|
+| `message.channels` | `channels:history` | Yes |
+| `app_mention` | (none) | Yes |
+| `message.groups` | `groups:history` | Optional |
+| `message.im` | `im:history` | Optional |
+| `message.mpim` | `mpim:history` | Optional |
+
+### Other Requirements
+
+| Requirement | Purpose |
+|------------|---------|
+| Signing Secret | HMAC-SHA256 verification of webhook requests |
+| OAuth Client ID | OpenID Connect authentication |
+| OAuth Client Secret | OpenID Connect token exchange |
+| Redirect URL | OAuth callback (`${BASE_URL}/api/auth/callback`) |
+| Request URL | Events API webhook endpoint (`${BASE_URL}/hooks/slack/event`) |
 
 ---
 
