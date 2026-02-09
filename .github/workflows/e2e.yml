@@ -40,47 +40,14 @@ jobs:
         with:
           version: 8
 
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: pnpm install
-
       - name: Install Playwright browsers
         working-directory: frontend
-        run: npx playwright install --with-deps
-
-      - name: Build frontend
-        working-directory: frontend
-        run: pnpm run build
-
-      - name: Build backend
-        run: go build -o hecatoncheires .
-
-      - name: Start backend server
         run: |
-          ./hecatoncheires serve \
-            --repository-backend=memory \
-            --config=frontend/e2e/fixtures/config.test.toml \
-            --no-auth=U000000000 \
-            --addr=:8080 \
-            --graphiql=false &
-          echo $! > backend.pid
-
-          # Wait for server to be ready
-          timeout 30 sh -c 'until curl -s http://localhost:8080 > /dev/null; do sleep 1; done'
+          pnpm install
+          npx playwright install --with-deps
 
       - name: Run E2E tests
-        working-directory: frontend
-        env:
-          BASE_URL: http://localhost:8080
-        run: pnpm run test:e2e
-
-      - name: Stop backend server
-        if: always()
-        run: |
-          if [ -f backend.pid ]; then
-            kill $(cat backend.pid) || true
-            rm backend.pid
-          fi
+        run: ./frontend/scripts/e2e.sh
 
       - name: Upload test results
         if: always()
