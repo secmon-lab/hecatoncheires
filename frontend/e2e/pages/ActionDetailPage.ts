@@ -14,8 +14,10 @@ export class ActionDetailPage extends BasePage {
 
   constructor(page: Page) {
     super(page);
-    this.actionTitle = page.locator('h1, h2').first();
-    this.actionDescription = page.locator('[data-testid="action-description"], .description, p').first();
+    // Action title is the h1 element inside main content area (not the page title)
+    this.actionTitle = page.locator('main h1').first();
+    // Description is the paragraph immediately after the title
+    this.actionDescription = page.locator('main h1 + p').first();
     this.deleteButton = page.locator('button').filter({ hasText: /Delete/ }).first();
     this.backButton = page.locator('button, a').filter({ hasText: /Back/ }).first();
     this.loadingIndicator = page.locator('text=Loading...');

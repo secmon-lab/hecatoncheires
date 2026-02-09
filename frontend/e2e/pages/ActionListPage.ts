@@ -37,7 +37,7 @@ export class ActionListPage extends BasePage {
    * Get an action row by title
    */
   getActionRowByTitle(title: string): Locator {
-    return this.page.locator('tr').filter({ hasText: title });
+    return this.page.locator('tr').filter({ hasText: title }).first();
   }
 
   /**
