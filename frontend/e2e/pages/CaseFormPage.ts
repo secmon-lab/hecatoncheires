@@ -6,7 +6,6 @@ import { BasePage } from './BasePage';
  */
 export class CaseFormPage extends BasePage {
   // Locators
-  private readonly modal: Locator;
   private readonly titleInput: Locator;
   private readonly descriptionInput: Locator;
   private readonly submitButton: Locator;
@@ -15,8 +14,6 @@ export class CaseFormPage extends BasePage {
 
   constructor(page: Page) {
     super(page);
-    // Find modal by heading text (New Case, Edit Case, etc.)
-    this.modal = page.locator('h2').filter({ hasText: /Case/ }).locator('..').locator('..').locator('..');
     this.titleInput = page.locator('input[placeholder*="title"]').first();
     this.descriptionInput = page.locator('textarea[placeholder*="description"]').first();
     this.submitButton = page.locator('button').filter({ hasText: /Save/ }).first();
