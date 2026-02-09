@@ -21,35 +21,6 @@ tasks:
       - echo "Mock generation will be added when interfaces are defined"
 
   test:e2e:
-    desc: "Run E2E tests with Playwright"
-    dir: frontend
+    desc: "Run E2E tests with Playwright (includes backend startup and teardown)"
     cmds:
-      - pnpm install
-      - pnpm run test:e2e
-
-  test:e2e:ui:
-    desc: "Run E2E tests with Playwright UI"
-    dir: frontend
-    cmds:
-      - pnpm install
-      - pnpm run test:e2e:ui
-
-  test:e2e:headed:
-    desc: "Run E2E tests in headed mode"
-    dir: frontend
-    cmds:
-      - pnpm install
-      - pnpm run test:e2e:headed
-
-  test:e2e:debug:
-    desc: "Run E2E tests in debug mode"
-    dir: frontend
-    cmds:
-      - pnpm install
-      - pnpm run test:e2e:debug
-
-  test:e2e:report:
-    desc: "Show E2E test report"
-    dir: frontend
-    cmds:
-      - pnpm run test:e2e:report
+      - ./frontend/scripts/e2e.sh
