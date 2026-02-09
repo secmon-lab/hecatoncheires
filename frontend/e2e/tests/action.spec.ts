@@ -23,11 +23,10 @@ test.describe('Action Management', () => {
       },
     });
 
-    await page.waitForTimeout(1000);
-
     // Navigate to action list page
     const actionListPage = new ActionListPage(page);
     await actionListPage.navigate(TEST_WORKSPACE_ID);
+    await actionListPage.waitForTableLoad();
   });
 
   test('should display action list page', async ({ page }) => {
@@ -52,9 +51,6 @@ test.describe('Action Management', () => {
       caseTitle: 'Parent Case for Actions',
     });
 
-    // Wait for the form to close
-    await page.waitForTimeout(1000);
-
     // Verify the action appears in the list
     const exists = await actionListPage.actionExists('E2E Test Action');
     expect(exists).toBeTruthy();
@@ -73,7 +69,8 @@ test.describe('Action Management', () => {
       caseTitle: 'Parent Case for Actions',
     });
 
-    await page.waitForTimeout(1000);
+    // Wait for table to update
+    await actionListPage.waitForTableLoad();
 
     // Click on the action to view details
     await actionListPage.clickActionByTitle('Action for Detail View');
@@ -100,7 +97,6 @@ test.describe('Action Management', () => {
         description: `Description for action ${i}`,
         caseTitle: 'Parent Case for Actions',
       });
-      await page.waitForTimeout(500);
     }
 
     // Reload to get fresh data
