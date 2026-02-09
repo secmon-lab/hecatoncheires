@@ -48,6 +48,10 @@ jobs:
         working-directory: frontend
         run: npx playwright install --with-deps
 
+      - name: Build frontend
+        working-directory: frontend
+        run: pnpm run build
+
       - name: Build backend
         run: go build -o hecatoncheires .
 
