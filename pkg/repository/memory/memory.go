@@ -61,3 +61,8 @@ func (m *Memory) Source() interfaces.SourceRepository {
 func (m *Memory) Knowledge() interfaces.KnowledgeRepository {
 	return m.knowledge
 }
+
+func (m *Memory) Close() error {
+	// No resources to clean up for in-memory repository
+	return nil
+}

@@ -18,8 +18,10 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
 	gqlctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/graphql"
 	httpctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/http"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/firestore"
+	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/worker"
@@ -76,6 +78,7 @@ func cmdServe() *cli.Command {
 	var addr string
 	var baseURL string
 	var enableGraphiQL bool
+	var repositoryBackend string
 	var projectID string
 	var databaseID string
 	var notionToken string
@@ -110,9 +113,16 @@ func cmdServe() *cli.Command {
 			Sources: cli.EnvVars("HECATONCHEIRES_CONFIG"),
 		},
 		&cli.StringFlag{
+			Name:        "repository-backend",
+			Usage:       "Repository backend type (firestore or memory)",
+			Value:       "firestore",
+			Sources:     cli.EnvVars("HECATONCHEIRES_REPOSITORY_BACKEND"),
+			Destination: &repositoryBackend,
+		},
+		&cli.StringFlag{
 			Name:        "firestore-project-id",
-			Usage:       "Firestore Project ID (required)",
-			Required:    true,
+			Usage:       "Firestore Project ID (required when using firestore backend)",
+			Required:    false,
 			Sources:     cli.EnvVars("HECATONCHEIRES_FIRESTORE_PROJECT_ID"),
 			Destination: &projectID,
 		},
@@ -167,14 +177,28 @@ func cmdServe() *cli.Command {
 				logging.Default().Info("Registered workspace", "id", wc.ID, "name", wc.Name)
 			}
 
-			// Initialize Firestore repository
-			repo, err := firestore.New(ctx, projectID, databaseID)
-			if err != nil {
-				return goerr.Wrap(err, "failed to initialize firestore repository")
+			// Initialize repository based on backend type
+			var repo interfaces.Repository
+			switch repositoryBackend {
+			case "firestore":
+				if projectID == "" {
+					return goerr.New("firestore-project-id is required when using firestore backend")
+				}
+				fsRepo, err := firestore.New(ctx, projectID, databaseID)
+				if err != nil {
+					return goerr.Wrap(err, "failed to initialize firestore repository")
+				}
+				repo = fsRepo
+				logging.Default().Info("Using Firestore repository", "project_id", projectID, "database_id", databaseID)
+			case "memory":
+				repo = memory.New()
+				logging.Default().Info("Using in-memory repository (development mode)")
+			default:
+				return goerr.New("invalid repository backend", goerr.V("backend", repositoryBackend))
 			}
 			defer func() {
 				if err := repo.Close(); err != nil {
-					logging.Default().Error("failed to close firestore repository", "error", err.Error())
+					logging.Default().Error("failed to close repository", "error", err.Error())
 				}
 			}()
 

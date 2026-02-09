@@ -50,6 +50,68 @@ task dev:frontend    # Run frontend development server
 
 ### Testing
 
+#### Unit Tests
+
+Run Go unit tests:
 ```bash
 go test ./...
 ```
+
+#### E2E Tests
+
+Hecatoncheires includes end-to-end tests using Playwright to verify the complete application workflow.
+
+**Prerequisites:**
+- Node.js 18+ and pnpm
+- The backend server must be running with `--repository-backend=memory` for testing
+
+**Run E2E tests:**
+
+```bash
+# Install dependencies and run tests
+cd frontend
+pnpm install
+pnpm run test:e2e
+
+# Or use the task command from the project root
+task test:e2e
+```
+
+**Other E2E test commands:**
+
+```bash
+# Run tests with UI mode (interactive)
+task test:e2e:ui
+
+# Run tests in headed mode (show browser)
+task test:e2e:headed
+
+# Run tests in debug mode
+task test:e2e:debug
+
+# Show test report
+task test:e2e:report
+```
+
+**Manual E2E test setup:**
+
+If you want to run tests manually with a running server:
+
+1. Start the backend server in memory mode:
+   ```bash
+   go run . serve \
+     --repository-backend=memory \
+     --config=frontend/e2e/fixtures/config.test.toml \
+     --no-auth=U000000000 \
+     --addr=:8080
+   ```
+
+2. In another terminal, run the E2E tests:
+   ```bash
+   cd frontend
+   BASE_URL=http://localhost:8080 pnpm run test:e2e
+   ```
+
+**CI/CD Integration:**
+
+E2E tests run automatically on pull requests via GitHub Actions. Test results and screenshots are uploaded as artifacts when tests fail.
