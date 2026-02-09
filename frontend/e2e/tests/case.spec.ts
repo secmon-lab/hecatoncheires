@@ -36,9 +36,6 @@ test.describe('Case Management', () => {
       },
     });
 
-    // Wait for the form to close and reload
-    await page.waitForTimeout(1000);
-
     // Verify the case appears in the list
     const exists = await caseListPage.caseExists('E2E Test Case');
     expect(exists).toBeTruthy();
@@ -59,7 +56,8 @@ test.describe('Case Management', () => {
       },
     });
 
-    await page.waitForTimeout(1000);
+    // Wait for table to update
+    await caseListPage.waitForTableLoad();
 
     // Click on the case to view details
     await caseListPage.clickCaseByTitle('Case for Detail View');
@@ -88,7 +86,8 @@ test.describe('Case Management', () => {
       },
     });
 
-    await page.waitForTimeout(1000);
+    // Wait for table to update
+    await caseListPage.waitForTableLoad();
 
     // Open the case detail
     await caseListPage.clickCaseByTitle('Case to Edit');
@@ -99,8 +98,6 @@ test.describe('Case Management', () => {
     // Update the case
     await caseFormPage.fillDescription('Updated description');
     await caseFormPage.submit();
-
-    await page.waitForTimeout(1000);
 
     // Verify the description was updated
     const description = await caseDetailPage.getDescription();
@@ -122,7 +119,6 @@ test.describe('Case Management', () => {
           category: 'task',
         },
       });
-      await page.waitForTimeout(500);
     }
 
     // Reload to get fresh data

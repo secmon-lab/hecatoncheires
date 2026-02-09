@@ -25,8 +25,8 @@ export class ActionFormPage extends BasePage {
   async waitForFormVisible(): Promise<void> {
     // Wait for the modal title to appear
     await this.page.locator('h2').filter({ hasText: /New Action|Edit Action/ }).waitFor({ state: 'visible', timeout: 5000 });
-    // Small delay to ensure form is ready
-    await this.page.waitForTimeout(300);
+    // Wait for the form to be ready by waiting for the submit button
+    await this.submitButton.waitFor({ state: 'visible' });
   }
 
   /**
@@ -53,11 +53,10 @@ export class ActionFormPage extends BasePage {
     // Click to open the dropdown
     await caseSelect.click();
 
-    // Wait for the listbox to appear
-    await this.page.waitForTimeout(300);
-
-    // Select by option with partial text match (case title appears in option like "Title (ID: X)")
-    await this.page.getByRole('option', { name: new RegExp(caseTitle, 'i') }).first().click();
+    // Wait for the listbox to appear and select the option
+    const option = this.page.getByRole('option', { name: new RegExp(caseTitle, 'i') }).first();
+    await option.waitFor({ state: 'visible' });
+    await option.click();
   }
 
   /**
