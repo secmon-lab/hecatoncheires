@@ -43,10 +43,13 @@ func TestSlackConfigureNoAuthWithoutBotToken(t *testing.T) {
 	repo := memory.New()
 	slack := config.NewSlackForTest("", "", "", "", "U1234567890")
 
-	// Should fail without bot token
-	_, err := slack.Configure(ctx, repo, "")
-	if err == nil {
-		t.Error("Configure should fail without bot token in no-auth mode")
+	// Should succeed without bot token, falling back to default test user
+	usecase, err := slack.Configure(ctx, repo, "")
+	if err != nil {
+		t.Errorf("Configure should not fail without bot token in no-auth mode: %v", err)
+	}
+	if usecase == nil {
+		t.Error("Configure should return a valid usecase")
 	}
 }
 
@@ -61,10 +64,13 @@ func TestSlackConfigureMissingConfiguration(t *testing.T) {
 	repo := memory.New()
 	slack := config.NewSlackForTest("", "", "", "", "")
 
-	// Should fail when no configuration is provided
-	_, err := slack.Configure(ctx, repo, "")
-	if err == nil {
-		t.Error("Configure should fail when no authentication is configured")
+	// Should succeed with fallback to default test user when no configuration is provided
+	usecase, err := slack.Configure(ctx, repo, "")
+	if err != nil {
+		t.Errorf("Configure should not fail when no configuration is provided: %v", err)
+	}
+	if usecase == nil {
+		t.Error("Configure should return a valid usecase")
 	}
 }
 
