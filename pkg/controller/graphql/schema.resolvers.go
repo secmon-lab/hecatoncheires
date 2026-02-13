@@ -57,7 +57,8 @@ func (r *caseResolver) SlackChannelName(ctx context.Context, obj *graphql1.Case)
 	}
 	names, err := slackSvc.GetChannelNames(ctx, []string{*obj.SlackChannelID})
 	if err != nil {
-		return nil, nil
+		return nil, goerr.Wrap(err, "failed to get Slack channel name",
+			goerr.V("channel_id", *obj.SlackChannelID))
 	}
 	if name, ok := names[*obj.SlackChannelID]; ok {
 		return &name, nil
@@ -76,7 +77,7 @@ func (r *caseResolver) SlackChannelURL(ctx context.Context, obj *graphql1.Case) 
 	}
 	teamURL, err := slackSvc.GetTeamURL(ctx)
 	if err != nil {
-		return nil, nil
+		return nil, goerr.Wrap(err, "failed to get Slack team URL")
 	}
 	url := teamURL + "/archives/" + *obj.SlackChannelID
 	return &url, nil
