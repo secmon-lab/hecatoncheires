@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
@@ -16,13 +17,15 @@ type CaseUseCase struct {
 	repo              interfaces.Repository
 	workspaceRegistry *model.WorkspaceRegistry
 	slackService      slack.Service
+	baseURL           string
 }
 
-func NewCaseUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service) *CaseUseCase {
+func NewCaseUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, baseURL string) *CaseUseCase {
 	return &CaseUseCase{
 		repo:              repo,
 		workspaceRegistry: registry,
 		slackService:      slackService,
+		baseURL:           baseURL,
 	}
 }
 
@@ -103,6 +106,14 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 		if len(usersToInvite) > 0 {
 			if inviteErr := uc.slackService.InviteUsersToChannel(ctx, channelID, usersToInvite); inviteErr != nil {
 				errutil.Handle(ctx, inviteErr, "failed to invite users to Slack channel")
+			}
+		}
+
+		// Add bookmark to the Slack channel linking to the case WebUI
+		if uc.baseURL != "" {
+			caseURL := fmt.Sprintf("%s/ws/%s/cases/%d", uc.baseURL, workspaceID, created.ID)
+			if bookmarkErr := uc.slackService.AddBookmark(ctx, channelID, "Open Case", caseURL); bookmarkErr != nil {
+				errutil.Handle(ctx, bookmarkErr, "failed to add bookmark to Slack channel")
 			}
 		}
 

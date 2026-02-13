@@ -14,6 +14,7 @@ type Repository interface {
 	SlackUser() SlackUserRepository
 	Source() SourceRepository
 	Knowledge() KnowledgeRepository
+	CaseMessage() CaseMessageRepository
 
 	// Auth methods
 	PutToken(ctx context.Context, token *auth.Token) error

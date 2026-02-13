@@ -9,13 +9,14 @@ import (
 )
 
 type Firestore struct {
-	client    *firestore.Client
-	caseRepo  *caseRepository
-	action    *actionRepository
-	slack     *slackRepository
-	slackUser *slackUserRepository
-	source    *sourceRepository
-	knowledge *knowledgeRepository
+	client      *firestore.Client
+	caseRepo    *caseRepository
+	action      *actionRepository
+	slack       *slackRepository
+	slackUser   *slackUserRepository
+	source      *sourceRepository
+	knowledge   *knowledgeRepository
+	caseMessage *caseMessageRepository
 }
 
 var _ interfaces.Repository = &Firestore{}
@@ -35,21 +36,15 @@ func New(ctx context.Context, projectID, databaseID string) (*Firestore, error) 
 		)
 	}
 
-	caseRepo := newCaseRepository(client)
-	actionRepo := newActionRepository(client)
-	slackRepo := newSlackRepository(client)
-	slackUserRepo := newSlackUserRepository(client)
-	sourceRepo := newSourceRepository(client)
-	knowledgeRepo := newKnowledgeRepository(client)
-
 	f := &Firestore{
-		client:    client,
-		caseRepo:  caseRepo,
-		action:    actionRepo,
-		slack:     slackRepo,
-		slackUser: slackUserRepo,
-		source:    sourceRepo,
-		knowledge: knowledgeRepo,
+		client:      client,
+		caseRepo:    newCaseRepository(client),
+		action:      newActionRepository(client),
+		slack:       newSlackRepository(client),
+		slackUser:   newSlackUserRepository(client),
+		source:      newSourceRepository(client),
+		knowledge:   newKnowledgeRepository(client),
+		caseMessage: newCaseMessageRepository(client),
 	}
 
 	return f, nil
@@ -77,6 +72,10 @@ func (f *Firestore) Source() interfaces.SourceRepository {
 
 func (f *Firestore) Knowledge() interfaces.KnowledgeRepository {
 	return f.knowledge
+}
+
+func (f *Firestore) CaseMessage() interfaces.CaseMessageRepository {
+	return f.caseMessage
 }
 
 func (f *Firestore) Close() error {

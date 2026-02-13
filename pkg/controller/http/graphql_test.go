@@ -742,8 +742,7 @@ func TestGraphQLHandler_FrontendCasesQuery(t *testing.T) {
 		gt.Value(t, resp.Data).NotNil().Required()
 	})
 
-	t.Run("verify slackChannelName field does not exist", func(t *testing.T) {
-		// This should fail because slackChannelName is not a valid field
+	t.Run("verify slackChannelName field exists", func(t *testing.T) {
 		query := `
 			query($workspaceId: String!) {
 				cases(workspaceId: $workspaceId) {
@@ -761,12 +760,8 @@ func TestGraphQLHandler_FrontendCasesQuery(t *testing.T) {
 
 		resp := parseGraphQLResponse(t, rec)
 
-		gt.Number(t, len(resp.Errors)).GreaterOrEqual(1)
-
-		// Check that the error message mentions the invalid field
-		if len(resp.Errors) > 0 {
-			gt.Value(t, resp.Errors[0].Message).Equal(`Cannot query field "slackChannelName" on type "Case". Did you mean "slackChannelID"?`)
-		}
+		gt.Array(t, resp.Errors).Length(0)
+		gt.Value(t, resp.Data).NotNil()
 	})
 
 	t.Run("verify fieldID is case-sensitive (fieldId is correct)", func(t *testing.T) {

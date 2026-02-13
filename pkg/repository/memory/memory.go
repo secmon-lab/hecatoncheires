@@ -8,33 +8,28 @@ import (
 type Repository = Memory
 
 type Memory struct {
-	caseRepo  *caseRepository
-	action    *actionRepository
-	tokens    *tokenStore
-	slack     *slackRepository
-	slackUser *slackUserRepository
-	source    *sourceRepository
-	knowledge *knowledgeRepository
+	caseRepo    *caseRepository
+	action      *actionRepository
+	tokens      *tokenStore
+	slack       *slackRepository
+	slackUser   *slackUserRepository
+	source      *sourceRepository
+	knowledge   *knowledgeRepository
+	caseMessage *caseMessageRepository
 }
 
 var _ interfaces.Repository = &Memory{}
 
 func New() *Memory {
-	caseRepo := newCaseRepository()
-	actionRepo := newActionRepository()
-	slackRepo := newSlackRepository()
-	slackUserRepo := newSlackUserRepository()
-	sourceRepo := newSourceRepository()
-	knowledgeRepo := newKnowledgeRepository()
-
 	return &Memory{
-		caseRepo:  caseRepo,
-		action:    actionRepo,
-		tokens:    newTokenStore(),
-		slack:     slackRepo,
-		slackUser: slackUserRepo,
-		source:    sourceRepo,
-		knowledge: knowledgeRepo,
+		caseRepo:    newCaseRepository(),
+		action:      newActionRepository(),
+		tokens:      newTokenStore(),
+		slack:       newSlackRepository(),
+		slackUser:   newSlackUserRepository(),
+		source:      newSourceRepository(),
+		knowledge:   newKnowledgeRepository(),
+		caseMessage: newCaseMessageRepository(),
 	}
 }
 
@@ -60,6 +55,10 @@ func (m *Memory) Source() interfaces.SourceRepository {
 
 func (m *Memory) Knowledge() interfaces.KnowledgeRepository {
 	return m.knowledge
+}
+
+func (m *Memory) CaseMessage() interfaces.CaseMessageRepository {
+	return m.caseMessage
 }
 
 func (m *Memory) Close() error {

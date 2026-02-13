@@ -6,6 +6,7 @@ import (
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/slack-go/slack/slackevents"
@@ -13,13 +14,15 @@ import (
 
 // SlackUseCases handles Slack-related business logic
 type SlackUseCases struct {
-	repo interfaces.Repository
+	repo     interfaces.Repository
+	registry *model.WorkspaceRegistry
 }
 
 // NewSlackUseCases creates a new SlackUseCases instance
-func NewSlackUseCases(repo interfaces.Repository) *SlackUseCases {
+func NewSlackUseCases(repo interfaces.Repository, registry *model.WorkspaceRegistry) *SlackUseCases {
 	return &SlackUseCases{
-		repo: repo,
+		repo:     repo,
+		registry: registry,
 	}
 }
 
@@ -51,11 +54,36 @@ func (uc *SlackUseCases) HandleSlackMessage(ctx context.Context, msg *slack.Mess
 
 	logger := logging.From(ctx)
 
-	// Business rules could be applied here (e.g., filtering bot messages)
-	// For now, just save the message
-
+	// Save to channel-level collection (backward compatible)
 	if err := uc.repo.Slack().PutMessage(ctx, msg); err != nil {
 		return goerr.Wrap(err, "failed to save slack message", goerr.V("messageID", msg.ID()), goerr.V("channelID", msg.ChannelID()))
+	}
+
+	// Also save to case sub-collection if channel belongs to a case
+	if uc.registry == nil {
+		return nil
+	}
+	for _, entry := range uc.registry.List() {
+		c, err := uc.repo.Case().GetBySlackChannelID(ctx, entry.Workspace.ID, msg.ChannelID())
+		if err != nil {
+			logger.Warn("failed to look up case by slack channel ID",
+				"channelID", msg.ChannelID(),
+				"workspaceID", entry.Workspace.ID,
+				"error", err,
+			)
+			continue
+		}
+		if c != nil {
+			if putErr := uc.repo.CaseMessage().Put(ctx, entry.Workspace.ID, c.ID, msg); putErr != nil {
+				logger.Warn("failed to save message to case sub-collection",
+					"channelID", msg.ChannelID(),
+					"workspaceID", entry.Workspace.ID,
+					"caseID", c.ID,
+					"error", putErr,
+				)
+			}
+			break
+		}
 	}
 
 	logger.Info("slack message saved",

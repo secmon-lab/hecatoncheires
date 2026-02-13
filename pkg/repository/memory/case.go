@@ -166,3 +166,21 @@ func (r *caseRepository) Delete(ctx context.Context, workspaceID string, id int6
 	delete(r.cases[workspaceID], id)
 	return nil
 }
+
+func (r *caseRepository) GetBySlackChannelID(ctx context.Context, workspaceID string, channelID string) (*model.Case, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ws, exists := r.cases[workspaceID]
+	if !exists {
+		return nil, nil
+	}
+
+	for _, c := range ws {
+		if c.SlackChannelID == channelID {
+			return copyCase(c), nil
+		}
+	}
+
+	return nil, nil
+}

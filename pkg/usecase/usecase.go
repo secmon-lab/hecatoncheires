@@ -14,6 +14,7 @@ type UseCases struct {
 	notion            notion.Service
 	slackService      slack.Service
 	knowledgeService  knowledge.Service
+	baseURL           string
 	Case              *CaseUseCase
 	Action            *ActionUseCase
 	Auth              AuthUseCaseInterface
@@ -47,6 +48,12 @@ func WithKnowledgeService(svc knowledge.Service) Option {
 	}
 }
 
+func WithBaseURL(url string) Option {
+	return func(uc *UseCases) {
+		uc.baseURL = url
+	}
+}
+
 func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...Option) *UseCases {
 	uc := &UseCases{
 		repo:              repo,
@@ -57,9 +64,9 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 		opt(uc)
 	}
 
-	uc.Case = NewCaseUseCase(repo, registry, uc.slackService)
+	uc.Case = NewCaseUseCase(repo, registry, uc.slackService, uc.baseURL)
 	uc.Action = NewActionUseCase(repo)
-	uc.Slack = NewSlackUseCases(repo)
+	uc.Slack = NewSlackUseCases(repo, registry)
 	uc.Source = NewSourceUseCase(repo, uc.notion, uc.slackService)
 
 	return uc

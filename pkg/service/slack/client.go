@@ -2,6 +2,7 @@ package slack
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +28,10 @@ type client struct {
 
 	mu    sync.RWMutex
 	cache map[string]cacheEntry
+
+	teamURLOnce sync.Once
+	teamURL     string
+	teamURLErr  error
 }
 
 // Option is a functional option for client configuration
@@ -237,4 +242,34 @@ func (c *client) RenameChannel(ctx context.Context, channelID string, caseID int
 		return goerr.Wrap(err, "failed to rename Slack channel", goerr.V("channelID", channelID), goerr.V("channelName", channelName), goerr.V("caseID", caseID), goerr.V("caseName", caseName))
 	}
 	return nil
+}
+
+// AddBookmark adds a link bookmark to a Slack channel
+func (c *client) AddBookmark(ctx context.Context, channelID, title, link string) error {
+	_, err := c.api.AddBookmarkContext(ctx, channelID, slack.AddBookmarkParameters{
+		Title: title,
+		Type:  "link",
+		Link:  link,
+	})
+	if err != nil {
+		return goerr.Wrap(err, "failed to add bookmark to Slack channel",
+			goerr.V("channel_id", channelID),
+			goerr.V("title", title),
+			goerr.V("link", link))
+	}
+	return nil
+}
+
+// GetTeamURL retrieves the Slack workspace URL using auth.test API.
+// The result is cached permanently (sync.Once) since the team URL does not change.
+func (c *client) GetTeamURL(ctx context.Context) (string, error) {
+	c.teamURLOnce.Do(func() {
+		resp, err := c.api.AuthTestContext(ctx)
+		if err != nil {
+			c.teamURLErr = goerr.Wrap(err, "failed to call auth.test")
+			return
+		}
+		c.teamURL = strings.TrimRight(resp.URL, "/")
+	})
+	return c.teamURL, c.teamURLErr
 }

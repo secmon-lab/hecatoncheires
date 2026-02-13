@@ -281,6 +281,47 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.Value(t, err).NotNil()
 	})
 
+	t.Run("GetBySlackChannelID returns matching case", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			Title:          "Case with channel",
+			SlackChannelID: "C-TEST-CHANNEL",
+		})
+		gt.NoError(t, err).Required()
+
+		// Update to set SlackChannelID (Create may not persist it directly)
+		created.SlackChannelID = "C-TEST-CHANNEL"
+		_, err = repo.Case().Update(ctx, wsID, created)
+		gt.NoError(t, err).Required()
+
+		found, err := repo.Case().GetBySlackChannelID(ctx, wsID, "C-TEST-CHANNEL")
+		gt.NoError(t, err).Required()
+		gt.Value(t, found).NotNil()
+		gt.Value(t, found.ID).Equal(created.ID)
+		gt.Value(t, found.Title).Equal("Case with channel")
+		gt.Value(t, found.SlackChannelID).Equal("C-TEST-CHANNEL")
+	})
+
+	t.Run("GetBySlackChannelID returns nil for non-existent channel", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		found, err := repo.Case().GetBySlackChannelID(ctx, wsID, "C-NONEXISTENT")
+		gt.NoError(t, err)
+		gt.Value(t, found).Nil()
+	})
+
+	t.Run("GetBySlackChannelID returns nil for non-existent workspace", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		found, err := repo.Case().GetBySlackChannelID(ctx, "nonexistent-ws", "C-WHATEVER")
+		gt.NoError(t, err)
+		gt.Value(t, found).Nil()
+	})
+
 	t.Run("List retrieves all cases", func(t *testing.T) {
 		repo := newRepo(t)
 		ctx := context.Background()

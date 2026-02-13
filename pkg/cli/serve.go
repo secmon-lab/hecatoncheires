@@ -222,6 +222,7 @@ func cmdServe() *cli.Command {
 			// Initialize use cases with configuration and auth
 			ucOpts := []usecase.Option{
 				usecase.WithAuth(authUC),
+				usecase.WithBaseURL(baseURL),
 			}
 
 			// Initialize Notion service if token is provided

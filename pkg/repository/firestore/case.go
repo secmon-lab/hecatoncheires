@@ -193,3 +193,28 @@ func (r *caseRepository) Delete(ctx context.Context, workspaceID string, id int6
 
 	return nil
 }
+
+func (r *caseRepository) GetBySlackChannelID(ctx context.Context, workspaceID string, channelID string) (*model.Case, error) {
+	iter := r.casesCollection(workspaceID).
+		Where("SlackChannelID", "==", channelID).
+		Limit(1).
+		Documents(ctx)
+	defer iter.Stop()
+
+	docSnap, err := iter.Next()
+	if err == iterator.Done {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to query case by slack channel ID",
+			goerr.V("channel_id", channelID))
+	}
+
+	var c model.Case
+	if err := docSnap.DataTo(&c); err != nil {
+		return nil, goerr.Wrap(err, "failed to decode case",
+			goerr.V("channel_id", channelID))
+	}
+
+	return &c, nil
+}

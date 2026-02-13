@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/m-mizutani/gt"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
@@ -107,11 +108,11 @@ func TestSlackUseCases_HandleSlackEvent(t *testing.T) {
 }
 
 func TestSlackUseCases_HandleSlackMessage(t *testing.T) {
-	repo := memory.New()
-	uc := usecase.New(repo, nil)
-	ctx := context.Background()
-
 	t.Run("stores message successfully", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.New(repo, nil)
+		ctx := context.Background()
+
 		msg := slack.NewMessageFromData(
 			"1234567890.123456",
 			"C123",
@@ -143,8 +144,96 @@ func TestSlackUseCases_HandleSlackMessage(t *testing.T) {
 	})
 
 	t.Run("returns error for nil message", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.New(repo, nil)
+		ctx := context.Background()
+
 		err := uc.Slack.HandleSlackMessage(ctx, nil)
 		gt.Value(t, err).NotNil()
+	})
+
+	t.Run("saves to case sub-collection when channel is mapped", func(t *testing.T) {
+		repo := memory.New()
+		ctx := context.Background()
+
+		// Create a case with SlackChannelID
+		created, err := repo.Case().Create(ctx, "ws-test", &model.Case{
+			Title:          "Test Case",
+			SlackChannelID: "C-MAPPED",
+		})
+		gt.NoError(t, err).Required()
+
+		// Set up registry with the workspace
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "ws-test", Name: "Test"},
+		})
+
+		uc := usecase.New(repo, registry)
+
+		msg := slack.NewMessageFromData(
+			"mapped-msg-001",
+			"C-MAPPED",
+			"",
+			"T123",
+			"U123",
+			"alice",
+			"Hello from mapped channel",
+			"ev1",
+			time.Now(),
+		)
+
+		gt.NoError(t, uc.Slack.HandleSlackMessage(ctx, msg)).Required()
+
+		// Verify message was saved to channel-level collection
+		channelMsgs, _, err := repo.Slack().ListMessages(
+			ctx,
+			"C-MAPPED",
+			time.Now().Add(-1*time.Hour),
+			time.Now().Add(1*time.Hour),
+			10,
+			"",
+		)
+		gt.NoError(t, err).Required()
+		gt.Array(t, channelMsgs).Length(1)
+
+		// Verify message was also saved to case sub-collection
+		caseMsgs, _, err := repo.CaseMessage().List(ctx, "ws-test", created.ID, 10, "")
+		gt.NoError(t, err).Required()
+		gt.Array(t, caseMsgs).Length(1)
+		gt.Value(t, caseMsgs[0].Text()).Equal("Hello from mapped channel")
+	})
+
+	t.Run("does not save to case sub-collection when channel is not mapped", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.New(repo, nil)
+		ctx := context.Background()
+
+		msg := slack.NewMessageFromData(
+			"unmapped-msg-001",
+			"C-UNMAPPED",
+			"",
+			"T123",
+			"U123",
+			"bob",
+			"Hello from unmapped channel",
+			"ev1",
+			time.Now(),
+		)
+
+		gt.NoError(t, uc.Slack.HandleSlackMessage(ctx, msg)).Required()
+
+		// Verify message was saved to channel-level collection
+		channelMsgs, _, err := repo.Slack().ListMessages(
+			ctx,
+			"C-UNMAPPED",
+			time.Now().Add(-1*time.Hour),
+			time.Now().Add(1*time.Hour),
+			10,
+			"",
+		)
+		gt.NoError(t, err).Required()
+		gt.Array(t, channelMsgs).Length(1)
 	})
 }
 

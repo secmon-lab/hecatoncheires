@@ -53,6 +53,12 @@ models:
         resolver: true
       assignees:
         resolver: true
+      slackChannelName:
+        resolver: true
+      slackChannelURL:
+        resolver: true
+      slackMessages:
+        resolver: true
   Action:
     model:
       - github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql.Action

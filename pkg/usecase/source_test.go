@@ -44,8 +44,12 @@ type mockSlackService struct {
 	createChannelFn        func(ctx context.Context, caseID int64, caseName string, prefix string) (string, error)
 	renameChannelFn        func(ctx context.Context, channelID string, caseID int64, caseName string, prefix string) error
 	inviteUsersToChannelFn func(ctx context.Context, channelID string, userIDs []string) error
+	addBookmarkFn          func(ctx context.Context, channelID, title, link string) error
 	invitedChannelID       string
 	invitedUserIDs         []string
+	bookmarkChannelID      string
+	bookmarkTitle          string
+	bookmarkLink           string
 }
 
 func (m *mockSlackService) ListJoinedChannels(ctx context.Context) ([]slack.Channel, error) {
@@ -113,6 +117,20 @@ func (m *mockSlackService) InviteUsersToChannel(ctx context.Context, channelID s
 		return m.inviteUsersToChannelFn(ctx, channelID, userIDs)
 	}
 	return nil
+}
+
+func (m *mockSlackService) AddBookmark(ctx context.Context, channelID, title, link string) error {
+	m.bookmarkChannelID = channelID
+	m.bookmarkTitle = title
+	m.bookmarkLink = link
+	if m.addBookmarkFn != nil {
+		return m.addBookmarkFn(ctx, channelID, title, link)
+	}
+	return nil
+}
+
+func (m *mockSlackService) GetTeamURL(ctx context.Context) (string, error) {
+	return "https://test-team.slack.com", nil
 }
 
 func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {

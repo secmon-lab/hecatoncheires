@@ -66,17 +66,20 @@ type ComplexityRoot struct {
 	}
 
 	Case struct {
-		Actions        func(childComplexity int) int
-		AssigneeIDs    func(childComplexity int) int
-		Assignees      func(childComplexity int) int
-		CreatedAt      func(childComplexity int) int
-		Description    func(childComplexity int) int
-		Fields         func(childComplexity int) int
-		ID             func(childComplexity int) int
-		Knowledges     func(childComplexity int) int
-		SlackChannelID func(childComplexity int) int
-		Title          func(childComplexity int) int
-		UpdatedAt      func(childComplexity int) int
+		Actions          func(childComplexity int) int
+		AssigneeIDs      func(childComplexity int) int
+		Assignees        func(childComplexity int) int
+		CreatedAt        func(childComplexity int) int
+		Description      func(childComplexity int) int
+		Fields           func(childComplexity int) int
+		ID               func(childComplexity int) int
+		Knowledges       func(childComplexity int) int
+		SlackChannelID   func(childComplexity int) int
+		SlackChannelName func(childComplexity int) int
+		SlackChannelURL  func(childComplexity int) int
+		SlackMessages    func(childComplexity int, limit *int, cursor *string) int
+		Title            func(childComplexity int) int
+		UpdatedAt        func(childComplexity int) int
 	}
 
 	EntityLabels struct {
@@ -190,6 +193,22 @@ type ComplexityRoot struct {
 		Channels func(childComplexity int) int
 	}
 
+	SlackMessage struct {
+		ChannelID func(childComplexity int) int
+		CreatedAt func(childComplexity int) int
+		ID        func(childComplexity int) int
+		TeamID    func(childComplexity int) int
+		Text      func(childComplexity int) int
+		ThreadTs  func(childComplexity int) int
+		UserID    func(childComplexity int) int
+		UserName  func(childComplexity int) int
+	}
+
+	SlackMessageConnection struct {
+		Items      func(childComplexity int) int
+		NextCursor func(childComplexity int) int
+	}
+
 	SlackUser struct {
 		ID       func(childComplexity int) int
 		ImageURL func(childComplexity int) int
@@ -222,9 +241,12 @@ type ActionResolver interface {
 type CaseResolver interface {
 	Assignees(ctx context.Context, obj *graphql1.Case) ([]*graphql1.SlackUser, error)
 
+	SlackChannelName(ctx context.Context, obj *graphql1.Case) (*string, error)
+	SlackChannelURL(ctx context.Context, obj *graphql1.Case) (*string, error)
 	Fields(ctx context.Context, obj *graphql1.Case) ([]*graphql1.FieldValue, error)
 	Actions(ctx context.Context, obj *graphql1.Case) ([]*graphql1.Action, error)
 	Knowledges(ctx context.Context, obj *graphql1.Case) ([]*graphql1.Knowledge, error)
+	SlackMessages(ctx context.Context, obj *graphql1.Case, limit *int, cursor *string) (*graphql1.SlackMessageConnection, error)
 }
 type KnowledgeResolver interface {
 	Case(ctx context.Context, obj *graphql1.Knowledge) (*graphql1.Case, error)
@@ -402,6 +424,29 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Case.SlackChannelID(childComplexity), true
+	case "Case.slackChannelName":
+		if e.complexity.Case.SlackChannelName == nil {
+			break
+		}
+
+		return e.complexity.Case.SlackChannelName(childComplexity), true
+	case "Case.slackChannelURL":
+		if e.complexity.Case.SlackChannelURL == nil {
+			break
+		}
+
+		return e.complexity.Case.SlackChannelURL(childComplexity), true
+	case "Case.slackMessages":
+		if e.complexity.Case.SlackMessages == nil {
+			break
+		}
+
+		args, err := ec.field_Case_slackMessages_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Case.SlackMessages(childComplexity, args["limit"].(*int), args["cursor"].(*string)), true
 	case "Case.title":
 		if e.complexity.Case.Title == nil {
 			break
@@ -958,6 +1003,68 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.SlackConfig.Channels(childComplexity), true
 
+	case "SlackMessage.channelID":
+		if e.complexity.SlackMessage.ChannelID == nil {
+			break
+		}
+
+		return e.complexity.SlackMessage.ChannelID(childComplexity), true
+	case "SlackMessage.createdAt":
+		if e.complexity.SlackMessage.CreatedAt == nil {
+			break
+		}
+
+		return e.complexity.SlackMessage.CreatedAt(childComplexity), true
+	case "SlackMessage.id":
+		if e.complexity.SlackMessage.ID == nil {
+			break
+		}
+
+		return e.complexity.SlackMessage.ID(childComplexity), true
+	case "SlackMessage.teamID":
+		if e.complexity.SlackMessage.TeamID == nil {
+			break
+		}
+
+		return e.complexity.SlackMessage.TeamID(childComplexity), true
+	case "SlackMessage.text":
+		if e.complexity.SlackMessage.Text == nil {
+			break
+		}
+
+		return e.complexity.SlackMessage.Text(childComplexity), true
+	case "SlackMessage.threadTS":
+		if e.complexity.SlackMessage.ThreadTs == nil {
+			break
+		}
+
+		return e.complexity.SlackMessage.ThreadTs(childComplexity), true
+	case "SlackMessage.userID":
+		if e.complexity.SlackMessage.UserID == nil {
+			break
+		}
+
+		return e.complexity.SlackMessage.UserID(childComplexity), true
+	case "SlackMessage.userName":
+		if e.complexity.SlackMessage.UserName == nil {
+			break
+		}
+
+		return e.complexity.SlackMessage.UserName(childComplexity), true
+
+	case "SlackMessageConnection.items":
+		if e.complexity.SlackMessageConnection.Items == nil {
+			break
+		}
+
+		return e.complexity.SlackMessageConnection.Items(childComplexity), true
+	case "SlackMessageConnection.nextCursor":
+		if e.complexity.SlackMessageConnection.NextCursor == nil {
+			break
+		}
+
+		return e.complexity.SlackMessageConnection.NextCursor(childComplexity), true
+
 	case "SlackUser.id":
 		if e.complexity.SlackUser.ID == nil {
 			break
@@ -1219,6 +1326,23 @@ input FieldValueInput {
   value: Any!
 }
 
+# Slack Message (stored in case sub-collection)
+type SlackMessage {
+  id: String!
+  channelID: String!
+  threadTS: String
+  teamID: String!
+  userID: String!
+  userName: String!
+  text: String!
+  createdAt: Time!
+}
+
+type SlackMessageConnection {
+  items: [SlackMessage!]!
+  nextCursor: String!
+}
+
 # Entity types
 type Case {
   id: Int!
@@ -1227,9 +1351,12 @@ type Case {
   assigneeIDs: [String!]!
   assignees: [SlackUser!]!
   slackChannelID: String
+  slackChannelName: String
+  slackChannelURL: String
   fields: [FieldValue!]!       # Resolved from case_field_values via DataLoader
   actions: [Action!]!
   knowledges: [Knowledge!]!
+  slackMessages(limit: Int, cursor: String): SlackMessageConnection!
   createdAt: Time!
   updatedAt: Time!
 }
@@ -1455,6 +1582,22 @@ var parsedSchema = gqlparser.MustLoadSchema(sources...)
 // endregion ************************** generated!.gotpl **************************
 
 // region    ***************************** args.gotpl *****************************
+
+func (ec *executionContext) field_Case_slackMessages_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "limit", ec.unmarshalOInt2ᚖint)
+	if err != nil {
+		return nil, err
+	}
+	args["limit"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "cursor", ec.unmarshalOString2ᚖstring)
+	if err != nil {
+		return nil, err
+	}
+	args["cursor"] = arg1
+	return args, nil
+}
 
 func (ec *executionContext) field_Mutation_createAction_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
@@ -1961,12 +2104,18 @@ func (ec *executionContext) fieldContext_Action_case(_ context.Context, field gr
 				return ec.fieldContext_Case_assignees(ctx, field)
 			case "slackChannelID":
 				return ec.fieldContext_Case_slackChannelID(ctx, field)
+			case "slackChannelName":
+				return ec.fieldContext_Case_slackChannelName(ctx, field)
+			case "slackChannelURL":
+				return ec.fieldContext_Case_slackChannelURL(ctx, field)
 			case "fields":
 				return ec.fieldContext_Case_fields(ctx, field)
 			case "actions":
 				return ec.fieldContext_Case_actions(ctx, field)
 			case "knowledges":
 				return ec.fieldContext_Case_knowledges(ctx, field)
+			case "slackMessages":
+				return ec.fieldContext_Case_slackMessages(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Case_createdAt(ctx, field)
 			case "updatedAt":
@@ -2404,6 +2553,64 @@ func (ec *executionContext) fieldContext_Case_slackChannelID(_ context.Context, 
 	return fc, nil
 }
 
+func (ec *executionContext) _Case_slackChannelName(ctx context.Context, field graphql.CollectedField, obj *graphql1.Case) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Case_slackChannelName,
+		func(ctx context.Context) (any, error) {
+			return ec.resolvers.Case().SlackChannelName(ctx, obj)
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Case_slackChannelName(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Case",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Case_slackChannelURL(ctx context.Context, field graphql.CollectedField, obj *graphql1.Case) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Case_slackChannelURL,
+		func(ctx context.Context) (any, error) {
+			return ec.resolvers.Case().SlackChannelURL(ctx, obj)
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Case_slackChannelURL(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Case",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Case_fields(ctx context.Context, field graphql.CollectedField, obj *graphql1.Case) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -2539,6 +2746,53 @@ func (ec *executionContext) fieldContext_Case_knowledges(_ context.Context, fiel
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Knowledge", field.Name)
 		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Case_slackMessages(ctx context.Context, field graphql.CollectedField, obj *graphql1.Case) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Case_slackMessages,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Case().SlackMessages(ctx, obj, fc.Args["limit"].(*int), fc.Args["cursor"].(*string))
+		},
+		nil,
+		ec.marshalNSlackMessageConnection2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackMessageConnection,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Case_slackMessages(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Case",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "items":
+				return ec.fieldContext_SlackMessageConnection_items(ctx, field)
+			case "nextCursor":
+				return ec.fieldContext_SlackMessageConnection_nextCursor(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type SlackMessageConnection", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Case_slackMessages_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
 	}
 	return fc, nil
 }
@@ -3189,12 +3443,18 @@ func (ec *executionContext) fieldContext_Knowledge_case(_ context.Context, field
 				return ec.fieldContext_Case_assignees(ctx, field)
 			case "slackChannelID":
 				return ec.fieldContext_Case_slackChannelID(ctx, field)
+			case "slackChannelName":
+				return ec.fieldContext_Case_slackChannelName(ctx, field)
+			case "slackChannelURL":
+				return ec.fieldContext_Case_slackChannelURL(ctx, field)
 			case "fields":
 				return ec.fieldContext_Case_fields(ctx, field)
 			case "actions":
 				return ec.fieldContext_Case_actions(ctx, field)
 			case "knowledges":
 				return ec.fieldContext_Case_knowledges(ctx, field)
+			case "slackMessages":
+				return ec.fieldContext_Case_slackMessages(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Case_createdAt(ctx, field)
 			case "updatedAt":
@@ -3584,12 +3844,18 @@ func (ec *executionContext) fieldContext_Mutation_createCase(ctx context.Context
 				return ec.fieldContext_Case_assignees(ctx, field)
 			case "slackChannelID":
 				return ec.fieldContext_Case_slackChannelID(ctx, field)
+			case "slackChannelName":
+				return ec.fieldContext_Case_slackChannelName(ctx, field)
+			case "slackChannelURL":
+				return ec.fieldContext_Case_slackChannelURL(ctx, field)
 			case "fields":
 				return ec.fieldContext_Case_fields(ctx, field)
 			case "actions":
 				return ec.fieldContext_Case_actions(ctx, field)
 			case "knowledges":
 				return ec.fieldContext_Case_knowledges(ctx, field)
+			case "slackMessages":
+				return ec.fieldContext_Case_slackMessages(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Case_createdAt(ctx, field)
 			case "updatedAt":
@@ -3649,12 +3915,18 @@ func (ec *executionContext) fieldContext_Mutation_updateCase(ctx context.Context
 				return ec.fieldContext_Case_assignees(ctx, field)
 			case "slackChannelID":
 				return ec.fieldContext_Case_slackChannelID(ctx, field)
+			case "slackChannelName":
+				return ec.fieldContext_Case_slackChannelName(ctx, field)
+			case "slackChannelURL":
+				return ec.fieldContext_Case_slackChannelURL(ctx, field)
 			case "fields":
 				return ec.fieldContext_Case_fields(ctx, field)
 			case "actions":
 				return ec.fieldContext_Case_actions(ctx, field)
 			case "knowledges":
 				return ec.fieldContext_Case_knowledges(ctx, field)
+			case "slackMessages":
+				return ec.fieldContext_Case_slackMessages(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Case_createdAt(ctx, field)
 			case "updatedAt":
@@ -4568,12 +4840,18 @@ func (ec *executionContext) fieldContext_Query_cases(ctx context.Context, field 
 				return ec.fieldContext_Case_assignees(ctx, field)
 			case "slackChannelID":
 				return ec.fieldContext_Case_slackChannelID(ctx, field)
+			case "slackChannelName":
+				return ec.fieldContext_Case_slackChannelName(ctx, field)
+			case "slackChannelURL":
+				return ec.fieldContext_Case_slackChannelURL(ctx, field)
 			case "fields":
 				return ec.fieldContext_Case_fields(ctx, field)
 			case "actions":
 				return ec.fieldContext_Case_actions(ctx, field)
 			case "knowledges":
 				return ec.fieldContext_Case_knowledges(ctx, field)
+			case "slackMessages":
+				return ec.fieldContext_Case_slackMessages(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Case_createdAt(ctx, field)
 			case "updatedAt":
@@ -4633,12 +4911,18 @@ func (ec *executionContext) fieldContext_Query_case(ctx context.Context, field g
 				return ec.fieldContext_Case_assignees(ctx, field)
 			case "slackChannelID":
 				return ec.fieldContext_Case_slackChannelID(ctx, field)
+			case "slackChannelName":
+				return ec.fieldContext_Case_slackChannelName(ctx, field)
+			case "slackChannelURL":
+				return ec.fieldContext_Case_slackChannelURL(ctx, field)
 			case "fields":
 				return ec.fieldContext_Case_fields(ctx, field)
 			case "actions":
 				return ec.fieldContext_Case_actions(ctx, field)
 			case "knowledges":
 				return ec.fieldContext_Case_knowledges(ctx, field)
+			case "slackMessages":
+				return ec.fieldContext_Case_slackMessages(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Case_createdAt(ctx, field)
 			case "updatedAt":
@@ -5461,6 +5745,314 @@ func (ec *executionContext) fieldContext_SlackConfig_channels(_ context.Context,
 				return ec.fieldContext_SlackChannel_name(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type SlackChannel", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _SlackMessage_id(ctx context.Context, field graphql.CollectedField, obj *graphql1.SlackMessage) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_SlackMessage_id,
+		func(ctx context.Context) (any, error) {
+			return obj.ID, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_SlackMessage_id(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "SlackMessage",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _SlackMessage_channelID(ctx context.Context, field graphql.CollectedField, obj *graphql1.SlackMessage) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_SlackMessage_channelID,
+		func(ctx context.Context) (any, error) {
+			return obj.ChannelID, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_SlackMessage_channelID(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "SlackMessage",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _SlackMessage_threadTS(ctx context.Context, field graphql.CollectedField, obj *graphql1.SlackMessage) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_SlackMessage_threadTS,
+		func(ctx context.Context) (any, error) {
+			return obj.ThreadTs, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_SlackMessage_threadTS(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "SlackMessage",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _SlackMessage_teamID(ctx context.Context, field graphql.CollectedField, obj *graphql1.SlackMessage) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_SlackMessage_teamID,
+		func(ctx context.Context) (any, error) {
+			return obj.TeamID, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_SlackMessage_teamID(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "SlackMessage",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _SlackMessage_userID(ctx context.Context, field graphql.CollectedField, obj *graphql1.SlackMessage) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_SlackMessage_userID,
+		func(ctx context.Context) (any, error) {
+			return obj.UserID, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_SlackMessage_userID(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "SlackMessage",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _SlackMessage_userName(ctx context.Context, field graphql.CollectedField, obj *graphql1.SlackMessage) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_SlackMessage_userName,
+		func(ctx context.Context) (any, error) {
+			return obj.UserName, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_SlackMessage_userName(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "SlackMessage",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _SlackMessage_text(ctx context.Context, field graphql.CollectedField, obj *graphql1.SlackMessage) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_SlackMessage_text,
+		func(ctx context.Context) (any, error) {
+			return obj.Text, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_SlackMessage_text(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "SlackMessage",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _SlackMessage_createdAt(ctx context.Context, field graphql.CollectedField, obj *graphql1.SlackMessage) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_SlackMessage_createdAt,
+		func(ctx context.Context) (any, error) {
+			return obj.CreatedAt, nil
+		},
+		nil,
+		ec.marshalNTime2timeᚐTime,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_SlackMessage_createdAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "SlackMessage",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _SlackMessageConnection_items(ctx context.Context, field graphql.CollectedField, obj *graphql1.SlackMessageConnection) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_SlackMessageConnection_items,
+		func(ctx context.Context) (any, error) {
+			return obj.Items, nil
+		},
+		nil,
+		ec.marshalNSlackMessage2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackMessageᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_SlackMessageConnection_items(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "SlackMessageConnection",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_SlackMessage_id(ctx, field)
+			case "channelID":
+				return ec.fieldContext_SlackMessage_channelID(ctx, field)
+			case "threadTS":
+				return ec.fieldContext_SlackMessage_threadTS(ctx, field)
+			case "teamID":
+				return ec.fieldContext_SlackMessage_teamID(ctx, field)
+			case "userID":
+				return ec.fieldContext_SlackMessage_userID(ctx, field)
+			case "userName":
+				return ec.fieldContext_SlackMessage_userName(ctx, field)
+			case "text":
+				return ec.fieldContext_SlackMessage_text(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_SlackMessage_createdAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type SlackMessage", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _SlackMessageConnection_nextCursor(ctx context.Context, field graphql.CollectedField, obj *graphql1.SlackMessageConnection) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_SlackMessageConnection_nextCursor,
+		func(ctx context.Context) (any, error) {
+			return obj.NextCursor, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_SlackMessageConnection_nextCursor(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "SlackMessageConnection",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
 		},
 	}
 	return fc, nil
@@ -8034,6 +8626,72 @@ func (ec *executionContext) _Case(ctx context.Context, sel ast.SelectionSet, obj
 			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "slackChannelID":
 			out.Values[i] = ec._Case_slackChannelID(ctx, field, obj)
+		case "slackChannelName":
+			field := field
+
+			innerFunc := func(ctx context.Context, _ *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Case_slackChannelName(ctx, field, obj)
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "slackChannelURL":
+			field := field
+
+			innerFunc := func(ctx context.Context, _ *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Case_slackChannelURL(ctx, field, obj)
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "fields":
 			field := field
 
@@ -8116,6 +8774,42 @@ func (ec *executionContext) _Case(ctx context.Context, sel ast.SelectionSet, obj
 					}
 				}()
 				res = ec._Case_knowledges(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "slackMessages":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Case_slackMessages(ctx, field, obj)
 				if res == graphql.Null {
 					atomic.AddUint32(&fs.Invalids, 1)
 				}
@@ -9290,6 +9984,121 @@ func (ec *executionContext) _SlackConfig(ctx context.Context, sel ast.SelectionS
 	return out
 }
 
+var slackMessageImplementors = []string{"SlackMessage"}
+
+func (ec *executionContext) _SlackMessage(ctx context.Context, sel ast.SelectionSet, obj *graphql1.SlackMessage) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, slackMessageImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("SlackMessage")
+		case "id":
+			out.Values[i] = ec._SlackMessage_id(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "channelID":
+			out.Values[i] = ec._SlackMessage_channelID(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "threadTS":
+			out.Values[i] = ec._SlackMessage_threadTS(ctx, field, obj)
+		case "teamID":
+			out.Values[i] = ec._SlackMessage_teamID(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "userID":
+			out.Values[i] = ec._SlackMessage_userID(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "userName":
+			out.Values[i] = ec._SlackMessage_userName(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "text":
+			out.Values[i] = ec._SlackMessage_text(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "createdAt":
+			out.Values[i] = ec._SlackMessage_createdAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var slackMessageConnectionImplementors = []string{"SlackMessageConnection"}
+
+func (ec *executionContext) _SlackMessageConnection(ctx context.Context, sel ast.SelectionSet, obj *graphql1.SlackMessageConnection) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, slackMessageConnectionImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("SlackMessageConnection")
+		case "items":
+			out.Values[i] = ec._SlackMessageConnection_items(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "nextCursor":
+			out.Values[i] = ec._SlackMessageConnection_nextCursor(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
 var slackUserImplementors = []string{"SlackUser"}
 
 func (ec *executionContext) _SlackUser(ctx context.Context, sel ast.SelectionSet, obj *graphql1.SlackUser) graphql.Marshaler {
@@ -10346,6 +11155,74 @@ func (ec *executionContext) marshalNSlackChannelInfo2ᚖgithubᚗcomᚋsecmonᚑ
 		return graphql.Null
 	}
 	return ec._SlackChannelInfo(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNSlackMessage2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackMessageᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.SlackMessage) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNSlackMessage2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackMessage(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNSlackMessage2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackMessage(ctx context.Context, sel ast.SelectionSet, v *graphql1.SlackMessage) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._SlackMessage(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNSlackMessageConnection2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackMessageConnection(ctx context.Context, sel ast.SelectionSet, v graphql1.SlackMessageConnection) graphql.Marshaler {
+	return ec._SlackMessageConnection(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNSlackMessageConnection2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackMessageConnection(ctx context.Context, sel ast.SelectionSet, v *graphql1.SlackMessageConnection) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._SlackMessageConnection(ctx, sel, v)
 }
 
 func (ec *executionContext) marshalNSlackUser2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackUserᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.SlackUser) graphql.Marshaler {

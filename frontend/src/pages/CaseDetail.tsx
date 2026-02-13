@@ -32,6 +32,7 @@ interface Case {
   assignees: Array<{ id: string; name: string; realName: string; imageUrl?: string }>
   slackChannelID: string
   slackChannelName: string
+  slackChannelURL: string
   fields: Array<{ fieldId: string; value: any }>
   actions?: Array<{
     id: number
@@ -237,6 +238,23 @@ export default function CaseDetail() {
                     <span>{user.realName || user.name}</span>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {caseItem.slackChannelID && (
+            <div className={styles.section}>
+              <h3 className={styles.sectionTitle}>Slack Channel</h3>
+              <div>
+                <a
+                  href={caseItem.slackChannelURL || `https://slack.com/app_redirect?channel=${caseItem.slackChannelID}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={styles.slackChannelLink}
+                >
+                  <ExternalLink size={14} />
+                  <span>#{caseItem.slackChannelName || caseItem.slackChannelID}</span>
+                </a>
               </div>
             </div>
           )}
