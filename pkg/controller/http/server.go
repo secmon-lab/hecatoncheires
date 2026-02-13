@@ -14,6 +14,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/frontend"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/safe"
 )
@@ -178,10 +179,13 @@ func workspacesHandler(registry *model.WorkspaceRegistry) http.HandlerFunc {
 			}
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			logging.Default().Error("failed to encode workspaces response", "error", err.Error())
+		data, err := json.Marshal(resp)
+		if err != nil {
+			errutil.HandleHTTP(r.Context(), w, goerr.Wrap(err, "failed to marshal workspaces response"), http.StatusInternalServerError)
+			return
 		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(data) //nolint:errcheck // header already committed
 	}
 }
 

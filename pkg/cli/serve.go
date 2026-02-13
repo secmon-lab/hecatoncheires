@@ -260,8 +260,7 @@ func cmdServe() *cli.Command {
 			if slackSvc != nil {
 				slackUserWorker = worker.NewSlackUserRefreshWorker(repo, slackSvc, 10*time.Minute)
 				if err := slackUserWorker.Start(ctx); err != nil {
-					// Log error but continue server startup
-					logging.Default().Error("Failed to start Slack user refresh worker", "error", err.Error())
+					return goerr.Wrap(err, "failed to start Slack user refresh worker")
 				}
 			}
 
