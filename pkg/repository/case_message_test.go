@@ -53,6 +53,12 @@ func runCaseMessageRepositoryTest(t *testing.T, newRepo func(t *testing.T) inter
 		gt.Value(t, messages[0].Text()).Equal("reply")
 		gt.Value(t, messages[1].Text()).Equal("world")
 		gt.Value(t, messages[2].Text()).Equal("hello")
+
+		// Verify ChannelID and TeamID are correctly round-tripped
+		for _, m := range messages {
+			gt.Value(t, m.ChannelID()).Equal("C123")
+			gt.Value(t, m.TeamID()).Equal("T123")
+		}
 	})
 
 	t.Run("List with pagination", func(t *testing.T) {

@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	graphql1 "github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
@@ -143,10 +144,7 @@ func (r *caseResolver) SlackMessages(ctx context.Context, obj *graphql1.Case, li
 
 	messages, nextCursor, err := r.repo.CaseMessage().List(ctx, obj.WorkspaceID, int64(obj.ID), limitVal, cursorVal)
 	if err != nil {
-		return &graphql1.SlackMessageConnection{
-			Items:      []*graphql1.SlackMessage{},
-			NextCursor: "",
-		}, nil
+		return nil, goerr.Wrap(err, "failed to list case messages from repository")
 	}
 
 	items := make([]*graphql1.SlackMessage, len(messages))

@@ -38,7 +38,9 @@ func (r *caseMessageRepository) Put(ctx context.Context, workspaceID string, cas
 
 	msgData := &slackMessage{
 		ID:        msg.ID(),
+		ChannelID: msg.ChannelID(),
 		ThreadTS:  msg.ThreadTS(),
+		TeamID:    msg.TeamID(),
 		UserID:    msg.UserID(),
 		UserName:  msg.UserName(),
 		Text:      msg.Text(),
@@ -103,9 +105,9 @@ func (r *caseMessageRepository) List(ctx context.Context, workspaceID string, ca
 
 		msg := slack.NewMessageFromData(
 			msgData.ID,
-			"", // channelID not stored per-message in case subcollection
+			msgData.ChannelID,
 			msgData.ThreadTS,
-			"", // teamID not stored per-message in case subcollection
+			msgData.TeamID,
 			msgData.UserID,
 			msgData.UserName,
 			msgData.Text,

@@ -33,7 +33,9 @@ func newSlackRepository(client *firestore.Client) *slackRepository {
 // slackMessage is the Firestore persistence model
 type slackMessage struct {
 	ID        string
+	ChannelID string
 	ThreadTS  string
+	TeamID    string
 	UserID    string
 	UserName  string
 	Text      string
