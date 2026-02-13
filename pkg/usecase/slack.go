@@ -66,20 +66,17 @@ func (uc *SlackUseCases) HandleSlackMessage(ctx context.Context, msg *slack.Mess
 	for _, entry := range uc.registry.List() {
 		c, err := uc.repo.Case().GetBySlackChannelID(ctx, entry.Workspace.ID, msg.ChannelID())
 		if err != nil {
-			logger.Warn("failed to look up case by slack channel ID",
-				"channelID", msg.ChannelID(),
-				"workspaceID", entry.Workspace.ID,
-				"error", err,
+			return goerr.Wrap(err, "failed to look up case by slack channel ID",
+				goerr.V("channelID", msg.ChannelID()),
+				goerr.V("workspaceID", entry.Workspace.ID),
 			)
-			continue
 		}
 		if c != nil {
-			if putErr := uc.repo.CaseMessage().Put(ctx, entry.Workspace.ID, c.ID, msg); putErr != nil {
-				logger.Warn("failed to save message to case sub-collection",
-					"channelID", msg.ChannelID(),
-					"workspaceID", entry.Workspace.ID,
-					"caseID", c.ID,
-					"error", putErr,
+			if err := uc.repo.CaseMessage().Put(ctx, entry.Workspace.ID, c.ID, msg); err != nil {
+				return goerr.Wrap(err, "failed to save message to case sub-collection",
+					goerr.V("channelID", msg.ChannelID()),
+					goerr.V("workspaceID", entry.Workspace.ID),
+					goerr.V("caseID", c.ID),
 				)
 			}
 			break
