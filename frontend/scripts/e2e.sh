@@ -7,7 +7,7 @@ cd frontend && pnpm install && pnpm run build && cd ..
 
 # Start backend server with go run
 echo "Starting backend server..."
-go run . serve --repository-backend=memory --config=frontend/e2e/fixtures/config.test.toml --no-auth=U000000000 --addr=127.0.0.1:18080 --graphiql=false &
+go run . serve --log-level error --repository-backend=memory --config=frontend/e2e/fixtures/config.test.toml --no-auth=U000000000 --addr=127.0.0.1:18080 --graphiql=false &
 BACKEND_PID=$!
 
 # Function to cleanup on exit
