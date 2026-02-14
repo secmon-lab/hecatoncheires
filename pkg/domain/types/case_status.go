@@ -29,6 +29,14 @@ func (s CaseStatus) IsValid() bool {
 	}
 }
 
+// Normalize returns the status, treating empty as CaseStatusOpen for backward compatibility.
+func (s CaseStatus) Normalize() CaseStatus {
+	if s == "" {
+		return CaseStatusOpen
+	}
+	return s
+}
+
 // String returns the string representation of the case status
 func (s CaseStatus) String() string {
 	return string(s)

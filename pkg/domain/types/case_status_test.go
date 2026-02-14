@@ -111,6 +111,12 @@ func TestAllCaseStatuses(t *testing.T) {
 	gt.B(t, statusMap[types.CaseStatusClosed]).True()
 }
 
+func TestCaseStatus_Normalize(t *testing.T) {
+	gt.V(t, types.CaseStatus("").Normalize()).Equal(types.CaseStatusOpen)
+	gt.V(t, types.CaseStatusOpen.Normalize()).Equal(types.CaseStatusOpen)
+	gt.V(t, types.CaseStatusClosed.Normalize()).Equal(types.CaseStatusClosed)
+}
+
 func TestCaseStatus_String(t *testing.T) {
 	gt.S(t, types.CaseStatusOpen.String()).Equal("OPEN")
 	gt.S(t, types.CaseStatusClosed.String()).Equal("CLOSED")

@@ -127,13 +127,9 @@ func (r *caseRepository) List(ctx context.Context, workspaceID string, opts ...i
 
 	cases := make([]*model.Case, 0, len(ws))
 	for _, c := range ws {
-		// Apply status filter. Treat empty status as OPEN for backward compatibility.
+		// Apply status filter
 		if statusFilter := cfg.Status(); statusFilter != nil {
-			status := c.Status
-			if status == "" {
-				status = types.CaseStatusOpen
-			}
-			if status != *statusFilter {
+			if c.Status.Normalize() != *statusFilter {
 				continue
 			}
 		}

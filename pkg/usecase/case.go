@@ -235,11 +235,7 @@ func (uc *CaseUseCase) CloseCase(ctx context.Context, workspaceID string, id int
 		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
 	}
 
-	// Treat empty status as OPEN for backward compatibility
-	status := existing.Status
-	if status == "" {
-		status = types.CaseStatusOpen
-	}
+	status := existing.Status.Normalize()
 	if status == types.CaseStatusClosed {
 		return nil, goerr.Wrap(ErrCaseAlreadyClosed, "case is already closed", goerr.V(CaseIDKey, id))
 	}
@@ -259,11 +255,7 @@ func (uc *CaseUseCase) ReopenCase(ctx context.Context, workspaceID string, id in
 		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
 	}
 
-	// Treat empty status as OPEN for backward compatibility
-	status := existing.Status
-	if status == "" {
-		status = types.CaseStatusOpen
-	}
+	status := existing.Status.Normalize()
 	if status == types.CaseStatusOpen {
 		return nil, goerr.Wrap(ErrCaseAlreadyOpen, "case is already open", goerr.V(CaseIDKey, id))
 	}
