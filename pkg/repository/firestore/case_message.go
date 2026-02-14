@@ -36,6 +36,19 @@ func (r *caseMessageRepository) Put(ctx context.Context, workspaceID string, cas
 		return goerr.New("message is nil")
 	}
 
+	var files []slackFile
+	for _, f := range msg.Files() {
+		files = append(files, slackFile{
+			ID:         f.ID(),
+			Name:       f.Name(),
+			Mimetype:   f.Mimetype(),
+			Filetype:   f.Filetype(),
+			Size:       f.Size(),
+			URLPrivate: f.URLPrivate(),
+			Permalink:  f.Permalink(),
+			ThumbURL:   f.ThumbURL(),
+		})
+	}
 	msgData := &slackMessage{
 		ID:        msg.ID(),
 		ChannelID: msg.ChannelID(),
@@ -45,6 +58,7 @@ func (r *caseMessageRepository) Put(ctx context.Context, workspaceID string, cas
 		UserName:  msg.UserName(),
 		Text:      msg.Text(),
 		EventTS:   msg.EventTS(),
+		Files:     files,
 		CreatedAt: msg.CreatedAt(),
 	}
 
@@ -103,6 +117,13 @@ func (r *caseMessageRepository) List(ctx context.Context, workspaceID string, ca
 				goerr.V("doc_id", doc.Ref.ID))
 		}
 
+		var files []slack.File
+		for _, f := range msgData.Files {
+			files = append(files, slack.NewFileFromData(
+				f.ID, f.Name, f.Mimetype, f.Filetype,
+				f.Size, f.URLPrivate, f.Permalink, f.ThumbURL,
+			))
+		}
 		msg := slack.NewMessageFromData(
 			msgData.ID,
 			msgData.ChannelID,
@@ -113,6 +134,7 @@ func (r *caseMessageRepository) List(ctx context.Context, workspaceID string, ca
 			msgData.Text,
 			msgData.EventTS,
 			msgData.CreatedAt,
+			files,
 		)
 		messages = append(messages, msg)
 	}

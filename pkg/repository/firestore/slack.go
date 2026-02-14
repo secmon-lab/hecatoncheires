@@ -40,7 +40,20 @@ type slackMessage struct {
 	UserName  string
 	Text      string
 	EventTS   string
+	Files     []slackFile
 	CreatedAt time.Time
+}
+
+// slackFile is the Firestore persistence model for file attachments
+type slackFile struct {
+	ID         string
+	Name       string
+	Mimetype   string
+	Filetype   string
+	Size       int
+	URLPrivate string
+	Permalink  string
+	ThumbURL   string
 }
 
 // slackChannel is the parent document for channel metadata
@@ -97,6 +110,19 @@ func (r *slackRepository) PutMessage(ctx context.Context, msg *slack.Message) er
 	}
 
 	// Save message to subcollection
+	var files []slackFile
+	for _, f := range msg.Files() {
+		files = append(files, slackFile{
+			ID:         f.ID(),
+			Name:       f.Name(),
+			Mimetype:   f.Mimetype(),
+			Filetype:   f.Filetype(),
+			Size:       f.Size(),
+			URLPrivate: f.URLPrivate(),
+			Permalink:  f.Permalink(),
+			ThumbURL:   f.ThumbURL(),
+		})
+	}
 	msgData := &slackMessage{
 		ID:        msg.ID(),
 		ThreadTS:  msg.ThreadTS(),
@@ -104,6 +130,7 @@ func (r *slackRepository) PutMessage(ctx context.Context, msg *slack.Message) er
 		UserName:  msg.UserName(),
 		Text:      msg.Text(),
 		EventTS:   msg.EventTS(),
+		Files:     files,
 		CreatedAt: msg.CreatedAt(),
 	}
 
@@ -183,6 +210,13 @@ func (r *slackRepository) ListMessages(ctx context.Context, channelID string, st
 		}
 
 		// Convert to domain model using the exported constructor
+		var files []slack.File
+		for _, f := range msgData.Files {
+			files = append(files, slack.NewFileFromData(
+				f.ID, f.Name, f.Mimetype, f.Filetype,
+				f.Size, f.URLPrivate, f.Permalink, f.ThumbURL,
+			))
+		}
 		msg := slack.NewMessageFromData(
 			msgData.ID,
 			channelID,
@@ -193,6 +227,7 @@ func (r *slackRepository) ListMessages(ctx context.Context, channelID string, st
 			msgData.Text,
 			msgData.EventTS,
 			msgData.CreatedAt,
+			files,
 		)
 		messages = append(messages, msg)
 	}

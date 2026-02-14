@@ -17,6 +17,7 @@ type Message struct {
 	userName  string
 	text      string
 	eventTS   string
+	files     []File
 	createdAt time.Time
 }
 
@@ -47,6 +48,12 @@ func NewMessage(ctx context.Context, ev *slackevents.EventsAPIEvent) *Message {
 		if evt.ThreadTimeStamp != "" && evt.ThreadTimeStamp != evt.TimeStamp {
 			threadTS = evt.ThreadTimeStamp
 		}
+		var files []File
+		if evt.Message != nil {
+			for _, f := range evt.Message.Files {
+				files = append(files, NewFileFromSlack(f))
+			}
+		}
 		return &Message{
 			id:        evt.TimeStamp,
 			channelID: evt.Channel,
@@ -56,6 +63,7 @@ func NewMessage(ctx context.Context, ev *slackevents.EventsAPIEvent) *Message {
 			userName:  evt.User, // Default to user ID
 			text:      evt.Text,
 			eventTS:   evt.EventTimeStamp,
+			files:     files,
 			createdAt: now,
 		}
 	default:
@@ -96,12 +104,16 @@ func (m *Message) EventTS() string {
 	return m.eventTS
 }
 
+func (m *Message) Files() []File {
+	return m.files
+}
+
 func (m *Message) CreatedAt() time.Time {
 	return m.createdAt
 }
 
 // NewMessageFromData creates a Message from raw data (for repository reconstruction)
-func NewMessageFromData(id, channelID, threadTS, teamID, userID, userName, text, eventTS string, createdAt time.Time) *Message {
+func NewMessageFromData(id, channelID, threadTS, teamID, userID, userName, text, eventTS string, createdAt time.Time, files []File) *Message {
 	return &Message{
 		id:        id,
 		channelID: channelID,
@@ -111,6 +123,7 @@ func NewMessageFromData(id, channelID, threadTS, teamID, userID, userName, text,
 		userName:  userName,
 		text:      text,
 		eventTS:   eventTS,
+		files:     files,
 		createdAt: createdAt,
 	}
 }

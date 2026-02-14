@@ -28,16 +28,19 @@ func runCaseMessageRepositoryTest(t *testing.T, newRepo func(t *testing.T) inter
 			fmt.Sprintf("msg-%d-1", time.Now().UnixNano()),
 			"C123", "", "T123", "U001", "alice", "hello", "ev1",
 			now.Add(-2*time.Second),
+			nil,
 		)
 		msg2 := slack.NewMessageFromData(
 			fmt.Sprintf("msg-%d-2", time.Now().UnixNano()),
 			"C123", "", "T123", "U002", "bob", "world", "ev2",
 			now.Add(-1*time.Second),
+			nil,
 		)
 		msg3 := slack.NewMessageFromData(
 			fmt.Sprintf("msg-%d-3", time.Now().UnixNano()),
 			"C123", "thread-ts", "T123", "U001", "alice", "reply", "ev3",
 			now,
+			nil,
 		)
 
 		gt.NoError(t, repo.CaseMessage().Put(ctx, wsID, caseID, msg1)).Required()
@@ -73,6 +76,7 @@ func runCaseMessageRepositoryTest(t *testing.T, newRepo func(t *testing.T) inter
 				"C123", "", "T123", "U001", "alice",
 				fmt.Sprintf("message %d", i), "ev",
 				now.Add(time.Duration(i)*time.Second),
+				nil,
 			)
 			gt.NoError(t, repo.CaseMessage().Put(ctx, wsID, caseID, msg)).Required()
 		}
@@ -114,11 +118,13 @@ func runCaseMessageRepositoryTest(t *testing.T, newRepo func(t *testing.T) inter
 			fmt.Sprintf("msg-old-%d", time.Now().UnixNano()),
 			"C123", "", "T123", "U001", "alice", "old message", "ev",
 			now.Add(-10*time.Minute),
+			nil,
 		)
 		newMsg := slack.NewMessageFromData(
 			fmt.Sprintf("msg-new-%d", time.Now().UnixNano()),
 			"C123", "", "T123", "U002", "bob", "new message", "ev",
 			now,
+			nil,
 		)
 
 		gt.NoError(t, repo.CaseMessage().Put(ctx, wsID, caseID, oldMsg)).Required()
@@ -134,6 +140,65 @@ func runCaseMessageRepositoryTest(t *testing.T, newRepo func(t *testing.T) inter
 		gt.Value(t, messages[0].Text()).Equal("new message")
 	})
 
+	t.Run("Put and List with file attachments", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		caseID := time.Now().UnixNano()
+
+		now := time.Now().UTC().Truncate(time.Millisecond)
+		files := []slack.File{
+			slack.NewFileFromData(
+				"F001", "image.png", "image/png", "png", 51200,
+				"https://files.slack.com/private/image.png",
+				"https://workspace.slack.com/files/U123/F001/image.png",
+				"https://files.slack.com/thumb_360.png",
+			),
+		}
+
+		msg := slack.NewMessageFromData(
+			fmt.Sprintf("msg-%d", time.Now().UnixNano()),
+			"C123", "", "T123", "U001", "alice", "file attached", "ev1",
+			now,
+			files,
+		)
+
+		gt.NoError(t, repo.CaseMessage().Put(ctx, wsID, caseID, msg)).Required()
+
+		messages, _, err := repo.CaseMessage().List(ctx, wsID, caseID, 10, "")
+		gt.NoError(t, err).Required()
+		gt.Array(t, messages).Length(1).Required()
+
+		resultFiles := messages[0].Files()
+		gt.Array(t, resultFiles).Length(1)
+		gt.Value(t, resultFiles[0].ID()).Equal("F001")
+		gt.Value(t, resultFiles[0].Name()).Equal("image.png")
+		gt.Value(t, resultFiles[0].Mimetype()).Equal("image/png")
+		gt.Value(t, resultFiles[0].Size()).Equal(51200)
+		gt.Value(t, resultFiles[0].Permalink()).Equal("https://workspace.slack.com/files/U123/F001/image.png")
+		gt.Value(t, resultFiles[0].ThumbURL()).Equal("https://files.slack.com/thumb_360.png")
+	})
+
+	t.Run("Put and List without files (backward compatibility)", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		caseID := time.Now().UnixNano()
+
+		now := time.Now().UTC().Truncate(time.Millisecond)
+		msg := slack.NewMessageFromData(
+			fmt.Sprintf("msg-%d", time.Now().UnixNano()),
+			"C123", "", "T123", "U001", "alice", "no files", "ev1",
+			now,
+			nil,
+		)
+
+		gt.NoError(t, repo.CaseMessage().Put(ctx, wsID, caseID, msg)).Required()
+
+		messages, _, err := repo.CaseMessage().List(ctx, wsID, caseID, 10, "")
+		gt.NoError(t, err).Required()
+		gt.Array(t, messages).Length(1).Required()
+		gt.Array(t, messages[0].Files()).Length(0)
+	})
+
 	t.Run("Put upserts existing message", func(t *testing.T) {
 		repo := newRepo(t)
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
@@ -145,12 +210,14 @@ func runCaseMessageRepositoryTest(t *testing.T, newRepo func(t *testing.T) inter
 		msg1 := slack.NewMessageFromData(
 			msgID, "C123", "", "T123", "U001", "alice", "original", "ev",
 			now,
+			nil,
 		)
 		gt.NoError(t, repo.CaseMessage().Put(ctx, wsID, caseID, msg1)).Required()
 
 		msg2 := slack.NewMessageFromData(
 			msgID, "C123", "", "T123", "U001", "alice", "updated", "ev",
 			now,
+			nil,
 		)
 		gt.NoError(t, repo.CaseMessage().Put(ctx, wsID, caseID, msg2)).Required()
 

@@ -55,6 +55,7 @@ Slack OAuth is used for user authentication via OpenID Connect (OIDC). The syste
      - `channels:history` (to receive message events from public channels via Events API)
      - `channels:manage` (to create, rename, and invite users to risk channels)
      - `channels:read` (to list and read channel information)
+     - `files:read` (to access file metadata and download files via `url_private`)
      - `users:read` (to fetch user profile information including avatar images)
      - `users:read.email` (to access user email addresses from profiles)
 
@@ -219,6 +220,7 @@ For automatic channel creation and full Slack integration, the bot token must ha
 - `channels:history` - Receive message events from public channels via Events API
 - `channels:manage` - Create, rename, and invite users to public channels
 - `channels:read` - List and read channel information
+- `files:read` - Access file metadata and download files attached to messages
 - `users:read` - Fetch user profile information (name, avatar)
 - `users:read.email` - Access user email addresses from profiles
 
@@ -283,7 +285,7 @@ Follow these steps to set up both authentication and webhooks:
 2. **Configure OAuth** (see [Configure OAuth & Permissions](#2-configure-oauth--permissions))
    - Set redirect URL: `${BASE_URL}/api/auth/callback`
    - Add user scopes: `openid`, `profile`, `email`
-   - Add bot scopes: `channels:history`, `channels:manage`, `channels:read`, `users:read`, `users:read.email`
+   - Add bot scopes: `channels:history`, `channels:manage`, `channels:read`, `files:read`, `users:read`, `users:read.email`
 
 3. **Configure Events API** (see [Events API Setup](#events-api-setup))
    - Enable Event Subscriptions
@@ -407,6 +409,7 @@ Messages are stored with:
 - Message text
 - Timestamp
 - Thread information (if it's a threaded message)
+- File attachment metadata (if files are attached to the message)
 
 ### Message Storage
 
@@ -608,6 +611,15 @@ slack_channels/{channelID}
     - user_name: string
     - text: string
     - event_ts: string
+    - files: array (file attachment metadata, may be empty)
+      - id: string (Slack file ID)
+      - name: string (file name)
+      - mimetype: string (MIME type)
+      - filetype: string (Slack file type code)
+      - size: int (file size in bytes)
+      - url_private: string (Slack authenticated access URL)
+      - permalink: string (Slack file permalink)
+      - thumb_url: string (thumbnail URL, if available)
     - created_at: timestamp
 ```
 
@@ -643,6 +655,7 @@ These scopes are required for the Bot User OAuth Token (`xoxb-...`):
 | `channels:manage` | `conversations.invite` | Invite users to risk channels | `pkg/service/slack/client.go` |
 | `channels:read` | `conversations.list` | List public channels the bot has joined | `pkg/service/slack/client.go` |
 | `channels:read` | `conversations.info` | Get channel name and info (with caching) | `pkg/service/slack/client.go` |
+| `files:read` | Events API | Access file metadata attached to messages via `url_private` | Webhook handler |
 | `users:read` | `users.info` | Fetch user profile (name, avatar) | `pkg/service/slack/client.go` |
 | `users:read` | `users.list` | List all non-deleted, non-bot users in workspace | `pkg/service/slack/client.go` |
 | `users:read.email` | `users.info`, `users.list` | Access user email addresses from profiles | `pkg/service/slack/client.go` |

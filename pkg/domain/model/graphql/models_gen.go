@@ -125,15 +125,27 @@ type SlackConfig struct {
 
 func (SlackConfig) IsSourceConfig() {}
 
+type SlackFile struct {
+	ID         string  `json:"id"`
+	Name       string  `json:"name"`
+	Mimetype   string  `json:"mimetype"`
+	Filetype   string  `json:"filetype"`
+	Size       int     `json:"size"`
+	URLPrivate string  `json:"urlPrivate"`
+	Permalink  string  `json:"permalink"`
+	ThumbURL   *string `json:"thumbURL,omitempty"`
+}
+
 type SlackMessage struct {
-	ID        string    `json:"id"`
-	ChannelID string    `json:"channelID"`
-	ThreadTs  *string   `json:"threadTS,omitempty"`
-	TeamID    string    `json:"teamID"`
-	UserID    string    `json:"userID"`
-	UserName  string    `json:"userName"`
-	Text      string    `json:"text"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID        string       `json:"id"`
+	ChannelID string       `json:"channelID"`
+	ThreadTs  *string      `json:"threadTS,omitempty"`
+	TeamID    string       `json:"teamID"`
+	UserID    string       `json:"userID"`
+	UserName  string       `json:"userName"`
+	Text      string       `json:"text"`
+	Files     []*SlackFile `json:"files"`
+	CreatedAt time.Time    `json:"createdAt"`
 }
 
 type SlackMessageConnection struct {

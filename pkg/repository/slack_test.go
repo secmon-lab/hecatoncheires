@@ -38,6 +38,7 @@ func runSlackRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.
 			"First message",
 			fmt.Sprintf("%d.000001", now.Unix()),
 			now.Add(-2*time.Hour),
+			nil,
 		)
 
 		msg2 := slack.NewMessageFromData(
@@ -50,6 +51,7 @@ func runSlackRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.
 			"Second message",
 			fmt.Sprintf("%d.000002", now.Unix()),
 			now.Add(-1*time.Hour),
+			nil,
 		)
 
 		msg3 := slack.NewMessageFromData(
@@ -62,6 +64,7 @@ func runSlackRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.
 			"Third message",
 			fmt.Sprintf("%d.000003", now.Unix()),
 			now,
+			nil,
 		)
 
 		// Put messages
@@ -115,6 +118,7 @@ func runSlackRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.
 			"Original text",
 			messageID,
 			now,
+			nil,
 		)
 
 		gt.NoError(t, repo.Slack().PutMessage(ctx, msg1)).Required()
@@ -130,6 +134,7 @@ func runSlackRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.
 			"Updated text",
 			messageID,
 			now.Add(time.Minute),
+			nil,
 		)
 
 		gt.NoError(t, repo.Slack().PutMessage(ctx, msg2)).Required()
@@ -171,6 +176,7 @@ func runSlackRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.
 				fmt.Sprintf("Message %d", i),
 				fmt.Sprintf("%d.%06d", now.Unix(), i),
 				now.Add(time.Duration(i)*time.Minute),
+				nil,
 			)
 			gt.NoError(t, repo.Slack().PutMessage(ctx, msg)).Required()
 		}
@@ -232,6 +238,7 @@ func runSlackRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.
 			"Old message",
 			fmt.Sprintf("%d.000001", now.Unix()),
 			now.Add(-2*time.Hour),
+			nil,
 		)
 
 		newMsg := slack.NewMessageFromData(
@@ -244,6 +251,7 @@ func runSlackRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.
 			"New message",
 			fmt.Sprintf("%d.000002", now.Unix()),
 			now,
+			nil,
 		)
 
 		gt.NoError(t, repo.Slack().PutMessage(ctx, oldMsg)).Required()
@@ -271,6 +279,109 @@ func runSlackRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.
 		if len(messages) == 1 {
 			gt.Value(t, messages[0].ID()).Equal(newMsg.ID())
 		}
+	})
+
+	t.Run("PutMessage and ListMessages with file attachments", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+		now := time.Now()
+
+		channelID := fmt.Sprintf("C%d", now.UnixNano())
+		teamID := fmt.Sprintf("T%d", now.UnixNano())
+		userID := fmt.Sprintf("U%d", now.UnixNano())
+
+		files := []slack.File{
+			slack.NewFileFromData(
+				"F001", "screenshot.png", "image/png", "png", 102400,
+				"https://files.slack.com/files-pri/T123-F001/screenshot.png",
+				"https://workspace.slack.com/files/U123/F001/screenshot.png",
+				"https://files.slack.com/thumb_480.png",
+			),
+			slack.NewFileFromData(
+				"F002", "document.pdf", "application/pdf", "pdf", 204800,
+				"https://files.slack.com/files-pri/T123-F002/document.pdf",
+				"https://workspace.slack.com/files/U123/F002/document.pdf",
+				"",
+			),
+		}
+
+		msg := slack.NewMessageFromData(
+			fmt.Sprintf("%d.000001", now.Unix()),
+			channelID,
+			"",
+			teamID,
+			userID,
+			"user1",
+			"Message with files",
+			fmt.Sprintf("%d.000001", now.Unix()),
+			now,
+			files,
+		)
+
+		gt.NoError(t, repo.Slack().PutMessage(ctx, msg)).Required()
+
+		messages, _, err := repo.Slack().ListMessages(
+			ctx,
+			channelID,
+			now.Add(-1*time.Hour),
+			now.Add(1*time.Hour),
+			10,
+			"",
+		)
+		gt.NoError(t, err).Required()
+		gt.Array(t, messages).Length(1).Required()
+
+		resultFiles := messages[0].Files()
+		gt.Array(t, resultFiles).Length(2)
+
+		gt.Value(t, resultFiles[0].ID()).Equal("F001")
+		gt.Value(t, resultFiles[0].Name()).Equal("screenshot.png")
+		gt.Value(t, resultFiles[0].Mimetype()).Equal("image/png")
+		gt.Value(t, resultFiles[0].Filetype()).Equal("png")
+		gt.Value(t, resultFiles[0].Size()).Equal(102400)
+		gt.Value(t, resultFiles[0].URLPrivate()).Equal("https://files.slack.com/files-pri/T123-F001/screenshot.png")
+		gt.Value(t, resultFiles[0].Permalink()).Equal("https://workspace.slack.com/files/U123/F001/screenshot.png")
+		gt.Value(t, resultFiles[0].ThumbURL()).Equal("https://files.slack.com/thumb_480.png")
+
+		gt.Value(t, resultFiles[1].ID()).Equal("F002")
+		gt.Value(t, resultFiles[1].Name()).Equal("document.pdf")
+		gt.Value(t, resultFiles[1].ThumbURL()).Equal("")
+	})
+
+	t.Run("PutMessage and ListMessages without files (backward compatibility)", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+		now := time.Now()
+
+		channelID := fmt.Sprintf("C%d", now.UnixNano())
+
+		msg := slack.NewMessageFromData(
+			fmt.Sprintf("%d.000001", now.Unix()),
+			channelID,
+			"",
+			fmt.Sprintf("T%d", now.UnixNano()),
+			fmt.Sprintf("U%d", now.UnixNano()),
+			"user1",
+			"Message without files",
+			fmt.Sprintf("%d.000001", now.Unix()),
+			now,
+			nil,
+		)
+
+		gt.NoError(t, repo.Slack().PutMessage(ctx, msg)).Required()
+
+		messages, _, err := repo.Slack().ListMessages(
+			ctx,
+			channelID,
+			now.Add(-1*time.Hour),
+			now.Add(1*time.Hour),
+			10,
+			"",
+		)
+		gt.NoError(t, err).Required()
+		gt.Array(t, messages).Length(1).Required()
+
+		gt.Array(t, messages[0].Files()).Length(0)
 	})
 
 	t.Run("ListMessages returns empty for non-existent channel", func(t *testing.T) {
