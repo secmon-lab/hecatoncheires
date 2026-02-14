@@ -25,18 +25,20 @@ export default function CaseDeleteDialog({
   const [deleteCase, { loading }] = useMutation(DELETE_CASE, {
     update(cache) {
       if (!caseId) return
-      const existingCases = cache.readQuery<{ cases: any[] }>({
-        query: GET_CASES,
-        variables: { workspaceId: currentWorkspace!.id },
-      })
-      if (existingCases) {
-        cache.writeQuery({
+      for (const status of ['OPEN', 'CLOSED']) {
+        const existingCases = cache.readQuery<{ cases: any[] }>({
           query: GET_CASES,
-          variables: { workspaceId: currentWorkspace!.id },
-          data: {
-            cases: existingCases.cases.filter((c) => c.id !== caseId),
-          },
+          variables: { workspaceId: currentWorkspace!.id, status },
         })
+        if (existingCases) {
+          cache.writeQuery({
+            query: GET_CASES,
+            variables: { workspaceId: currentWorkspace!.id, status },
+            data: {
+              cases: existingCases.cases.filter((c) => c.id !== caseId),
+            },
+          })
+        }
       }
     },
     onCompleted: () => {

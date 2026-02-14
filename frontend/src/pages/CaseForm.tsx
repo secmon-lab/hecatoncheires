@@ -51,12 +51,12 @@ export default function CaseForm({ isOpen, onClose, caseItem }: CaseFormProps) {
       if (!data?.createCase) return
       const existingCases = cache.readQuery<{ cases: Case[] }>({
         query: GET_CASES,
-        variables: { workspaceId: currentWorkspace!.id },
+        variables: { workspaceId: currentWorkspace!.id, status: 'OPEN' },
       })
       if (existingCases) {
         cache.writeQuery({
           query: GET_CASES,
-          variables: { workspaceId: currentWorkspace!.id },
+          variables: { workspaceId: currentWorkspace!.id, status: 'OPEN' },
           data: { cases: [...existingCases.cases, data.createCase] },
         })
       }
