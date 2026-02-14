@@ -104,6 +104,86 @@ test.describe('Case Management', () => {
     expect(description).toContain('Updated description');
   });
 
+  test('should not display Slack channel button when slackChannelID is empty', async ({ page }) => {
+    const caseListPage = new CaseListPage(page);
+    const caseFormPage = new CaseFormPage(page);
+    const caseDetailPage = new CaseDetailPage(page);
+
+    // Create a case (without Slack configured, slackChannelID will be empty)
+    await caseListPage.clickNewCaseButton();
+    await caseFormPage.createCase({
+      title: 'Case Without Slack',
+      description: 'No Slack channel linked',
+      customFields: {
+        category: 'bug',
+      },
+    });
+
+    await caseListPage.waitForTableLoad();
+    await caseListPage.clickCaseByTitle('Case Without Slack');
+    await caseDetailPage.waitForPageLoad();
+
+    // Slack channel button should not be visible
+    const isVisible = await caseDetailPage.isSlackChannelButtonVisible();
+    expect(isVisible).toBeFalsy();
+  });
+
+  test('should display Slack channel button when slackChannelID is present', async ({ page }) => {
+    const caseListPage = new CaseListPage(page);
+    const caseFormPage = new CaseFormPage(page);
+    const caseDetailPage = new CaseDetailPage(page);
+
+    // Create a case first
+    await caseListPage.clickNewCaseButton();
+    await caseFormPage.createCase({
+      title: 'Case With Slack',
+      description: 'Has Slack channel linked',
+      customFields: {
+        category: 'bug',
+      },
+    });
+
+    await caseListPage.waitForTableLoad();
+
+    // Intercept GraphQL response to inject Slack channel data
+    await page.route('**/graphql', async (route) => {
+      const request = route.request();
+      const postData = request.postDataJSON();
+
+      // Only intercept GetCase query
+      if (postData?.operationName === 'GetCase') {
+        const response = await route.fetch();
+        const json = await response.json();
+
+        // Inject Slack channel data into the response
+        if (json.data?.case) {
+          json.data.case.slackChannelID = 'C1234567890';
+          json.data.case.slackChannelName = 'test-channel';
+          json.data.case.slackChannelURL = 'https://test-workspace.slack.com/archives/C1234567890';
+        }
+
+        await route.fulfill({ response, json });
+      } else {
+        await route.continue();
+      }
+    });
+
+    await caseListPage.clickCaseByTitle('Case With Slack');
+    await caseDetailPage.waitForPageLoad();
+
+    // Slack channel button should be visible
+    const isVisible = await caseDetailPage.isSlackChannelButtonVisible();
+    expect(isVisible).toBeTruthy();
+
+    // Verify button text contains channel name
+    const buttonText = await caseDetailPage.getSlackChannelButtonText();
+    expect(buttonText).toContain('#test-channel');
+
+    // Verify button href points to Slack
+    const href = await caseDetailPage.getSlackChannelButtonHref();
+    expect(href).toBe('https://test-workspace.slack.com/archives/C1234567890');
+  });
+
   test('should list multiple cases', async ({ page }) => {
     const caseListPage = new CaseListPage(page);
     const caseFormPage = new CaseFormPage(page);

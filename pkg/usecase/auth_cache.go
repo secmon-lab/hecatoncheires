@@ -82,8 +82,9 @@ func (uc *AuthUseCase) validateTokenWithCache(ctx context.Context, tokenID auth.
 
 	// Check if token is expired
 	if token.IsExpired() {
-		// Delete expired token (ignore error)
-		_ = uc.repo.DeleteToken(ctx, tokenID)
+		if err := uc.repo.DeleteToken(ctx, tokenID); err != nil {
+			return nil, goerr.Wrap(err, "failed to delete expired token", goerr.V("tokenID", tokenID))
+		}
 		return nil, goerr.New("token expired")
 	}
 

@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	graphql1 "github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
@@ -43,6 +44,43 @@ func (r *caseResolver) Assignees(ctx context.Context, obj *graphql1.Case) ([]*gr
 	}
 	loaders := GetDataLoaders(ctx)
 	return loaders.SlackUserLoader.Load(ctx, obj.AssigneeIDs)
+}
+
+// SlackChannelName is the resolver for the slackChannelName field.
+func (r *caseResolver) SlackChannelName(ctx context.Context, obj *graphql1.Case) (*string, error) {
+	if obj.SlackChannelID == nil || *obj.SlackChannelID == "" {
+		return nil, nil
+	}
+	slackSvc := r.UseCases.SlackService()
+	if slackSvc == nil {
+		return nil, nil
+	}
+	names, err := slackSvc.GetChannelNames(ctx, []string{*obj.SlackChannelID})
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to get Slack channel name",
+			goerr.V("channel_id", *obj.SlackChannelID))
+	}
+	if name, ok := names[*obj.SlackChannelID]; ok {
+		return &name, nil
+	}
+	return nil, nil
+}
+
+// SlackChannelURL is the resolver for the slackChannelURL field.
+func (r *caseResolver) SlackChannelURL(ctx context.Context, obj *graphql1.Case) (*string, error) {
+	if obj.SlackChannelID == nil || *obj.SlackChannelID == "" {
+		return nil, nil
+	}
+	slackSvc := r.UseCases.SlackService()
+	if slackSvc == nil {
+		return nil, nil
+	}
+	teamURL, err := slackSvc.GetTeamURL(ctx)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to get Slack team URL")
+	}
+	url := teamURL + "/archives/" + *obj.SlackChannelID
+	return &url, nil
 }
 
 // Fields is the resolver for the fields field.
@@ -92,6 +130,47 @@ func (r *caseResolver) Knowledges(ctx context.Context, obj *graphql1.Case) ([]*g
 		result[i] = toGraphQLKnowledge(k, obj.WorkspaceID)
 	}
 	return result, nil
+}
+
+// SlackMessages is the resolver for the slackMessages field.
+func (r *caseResolver) SlackMessages(ctx context.Context, obj *graphql1.Case, limit *int, cursor *string) (*graphql1.SlackMessageConnection, error) {
+	limitVal := 20
+	if limit != nil && *limit > 0 {
+		limitVal = *limit
+	}
+	cursorVal := ""
+	if cursor != nil {
+		cursorVal = *cursor
+	}
+
+	messages, nextCursor, err := r.repo.CaseMessage().List(ctx, obj.WorkspaceID, int64(obj.ID), limitVal, cursorVal)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to list case messages from repository")
+	}
+
+	items := make([]*graphql1.SlackMessage, len(messages))
+	for i, m := range messages {
+		threadTS := m.ThreadTS()
+		var threadTSPtr *string
+		if threadTS != "" {
+			threadTSPtr = &threadTS
+		}
+		items[i] = &graphql1.SlackMessage{
+			ID:        m.ID(),
+			ChannelID: m.ChannelID(),
+			ThreadTs:  threadTSPtr,
+			TeamID:    m.TeamID(),
+			UserID:    m.UserID(),
+			UserName:  m.UserName(),
+			Text:      m.Text(),
+			CreatedAt: m.CreatedAt(),
+		}
+	}
+
+	return &graphql1.SlackMessageConnection{
+		Items:      items,
+		NextCursor: nextCursor,
+	}, nil
 }
 
 // Case is the resolver for the case field.

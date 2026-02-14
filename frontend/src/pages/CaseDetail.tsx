@@ -32,6 +32,7 @@ interface Case {
   assignees: Array<{ id: string; name: string; realName: string; imageUrl?: string }>
   slackChannelID: string
   slackChannelName: string
+  slackChannelURL: string
   fields: Array<{ fieldId: string; value: any }>
   actions?: Array<{
     id: number
@@ -191,6 +192,17 @@ export default function CaseDetail() {
           Back
         </Button>
         <div className={styles.actions}>
+          {caseItem.slackChannelID && (
+            <a
+              href={caseItem.slackChannelURL || `https://slack.com/app_redirect?channel=${caseItem.slackChannelID}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={styles.slackChannelButton}
+            >
+              <ExternalLink size={16} />
+              <span>#{caseItem.slackChannelName || caseItem.slackChannelID}</span>
+            </a>
+          )}
           <Button variant="outline" icon={<Edit size={20} />} onClick={handleEdit}>
             Edit
           </Button>

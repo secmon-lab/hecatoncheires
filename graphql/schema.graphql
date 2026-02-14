@@ -58,6 +58,23 @@ input FieldValueInput {
   value: Any!
 }
 
+# Slack Message (stored in case sub-collection)
+type SlackMessage {
+  id: String!
+  channelID: String!
+  threadTS: String
+  teamID: String!
+  userID: String!
+  userName: String!
+  text: String!
+  createdAt: Time!
+}
+
+type SlackMessageConnection {
+  items: [SlackMessage!]!
+  nextCursor: String!
+}
+
 # Entity types
 type Case {
   id: Int!
@@ -66,9 +83,12 @@ type Case {
   assigneeIDs: [String!]!
   assignees: [SlackUser!]!
   slackChannelID: String
+  slackChannelName: String
+  slackChannelURL: String
   fields: [FieldValue!]!       # Resolved from case_field_values via DataLoader
   actions: [Action!]!
   knowledges: [Knowledge!]!
+  slackMessages(limit: Int, cursor: String): SlackMessageConnection!
   createdAt: Time!
   updatedAt: Time!
 }

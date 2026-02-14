@@ -43,7 +43,7 @@ func TestCaseUseCase_CreateCase(t *testing.T) {
 			Workspace:   model.Workspace{ID: testWorkspaceID, Name: "Test Workspace"},
 			FieldSchema: fieldSchema,
 		})
-		uc := usecase.NewCaseUseCase(repo, registry, nil)
+		uc := usecase.NewCaseUseCase(repo, registry, nil, "")
 		ctx := context.Background()
 
 		fieldValues := map[string]model.FieldValue{
@@ -67,7 +67,7 @@ func TestCaseUseCase_CreateCase(t *testing.T) {
 
 	t.Run("create case without title fails", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewCaseUseCase(repo, nil, nil)
+		uc := usecase.NewCaseUseCase(repo, nil, nil, "")
 		ctx := context.Background()
 
 		_, err := uc.CreateCase(ctx, testWorkspaceID, "", "Description", []string{}, nil)
@@ -95,7 +95,7 @@ func TestCaseUseCase_CreateCase(t *testing.T) {
 			Workspace:   model.Workspace{ID: testWorkspaceID, Name: "Test Workspace"},
 			FieldSchema: fieldSchema,
 		})
-		uc := usecase.NewCaseUseCase(repo, registry, nil)
+		uc := usecase.NewCaseUseCase(repo, registry, nil, "")
 		ctx := context.Background()
 
 		fieldValues := map[string]model.FieldValue{
@@ -125,7 +125,7 @@ func TestCaseUseCase_CreateCase(t *testing.T) {
 			Workspace:   model.Workspace{ID: testWorkspaceID, Name: "Test Workspace"},
 			FieldSchema: fieldSchema,
 		})
-		uc := usecase.NewCaseUseCase(repo, registry, nil)
+		uc := usecase.NewCaseUseCase(repo, registry, nil, "")
 		ctx := context.Background()
 
 		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil)
@@ -157,7 +157,7 @@ func TestCaseUseCase_UpdateCase(t *testing.T) {
 			Workspace:   model.Workspace{ID: testWorkspaceID, Name: "Test Workspace"},
 			FieldSchema: fieldSchema,
 		})
-		uc := usecase.NewCaseUseCase(repo, registry, nil)
+		uc := usecase.NewCaseUseCase(repo, registry, nil, "")
 		ctx := context.Background()
 
 		// Create case first
@@ -186,7 +186,7 @@ func TestCaseUseCase_UpdateCase(t *testing.T) {
 
 	t.Run("update non-existent case fails", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewCaseUseCase(repo, nil, nil)
+		uc := usecase.NewCaseUseCase(repo, nil, nil, "")
 		ctx := context.Background()
 
 		_, err := uc.UpdateCase(ctx, testWorkspaceID, 999, "Title", "Description", []string{}, nil)
@@ -198,7 +198,7 @@ func TestCaseUseCase_UpdateCase(t *testing.T) {
 func TestCaseUseCase_DeleteCase(t *testing.T) {
 	t.Run("delete case with actions", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewCaseUseCase(repo, nil, nil)
+		uc := usecase.NewCaseUseCase(repo, nil, nil, "")
 		actionUC := usecase.NewActionUseCase(repo)
 		ctx := context.Background()
 
@@ -225,7 +225,7 @@ func TestCaseUseCase_DeleteCase(t *testing.T) {
 
 	t.Run("delete non-existent case fails", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewCaseUseCase(repo, nil, nil)
+		uc := usecase.NewCaseUseCase(repo, nil, nil, "")
 		ctx := context.Background()
 
 		err := uc.DeleteCase(ctx, testWorkspaceID, 999)
@@ -237,7 +237,7 @@ func TestCaseUseCase_DeleteCase(t *testing.T) {
 func TestCaseUseCase_GetCase(t *testing.T) {
 	t.Run("get existing case", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewCaseUseCase(repo, nil, nil)
+		uc := usecase.NewCaseUseCase(repo, nil, nil, "")
 		ctx := context.Background()
 
 		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil)
@@ -252,7 +252,7 @@ func TestCaseUseCase_GetCase(t *testing.T) {
 
 	t.Run("get non-existent case fails", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewCaseUseCase(repo, nil, nil)
+		uc := usecase.NewCaseUseCase(repo, nil, nil, "")
 		ctx := context.Background()
 
 		_, err := uc.GetCase(ctx, testWorkspaceID, 999)
@@ -264,7 +264,7 @@ func TestCaseUseCase_GetCase(t *testing.T) {
 func TestCaseUseCase_ListCases(t *testing.T) {
 	t.Run("list cases", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewCaseUseCase(repo, nil, nil)
+		uc := usecase.NewCaseUseCase(repo, nil, nil, "")
 		ctx := context.Background()
 
 		// Create multiple cases
@@ -298,7 +298,7 @@ func TestCaseUseCase_GetFieldConfiguration(t *testing.T) {
 			Workspace:   model.Workspace{ID: testWorkspaceID, Name: "Test Workspace"},
 			FieldSchema: fieldSchema,
 		})
-		uc := usecase.NewCaseUseCase(repo, registry, nil)
+		uc := usecase.NewCaseUseCase(repo, registry, nil, "")
 
 		cfg := uc.GetFieldConfiguration(testWorkspaceID)
 		gt.Array(t, cfg.Fields).Length(1)
@@ -307,7 +307,7 @@ func TestCaseUseCase_GetFieldConfiguration(t *testing.T) {
 
 	t.Run("get field configuration without schema", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewCaseUseCase(repo, nil, nil)
+		uc := usecase.NewCaseUseCase(repo, nil, nil, "")
 
 		cfg := uc.GetFieldConfiguration(testWorkspaceID)
 		gt.Array(t, cfg.Fields).Length(0)
@@ -323,7 +323,7 @@ func TestCaseUseCase_CreateCase_SlackInvite(t *testing.T) {
 				return fmt.Sprintf("C%d", caseID), nil
 			},
 		}
-		uc := usecase.NewCaseUseCase(repo, nil, mock)
+		uc := usecase.NewCaseUseCase(repo, nil, mock, "")
 
 		token := auth.NewToken("UCREATOR", "creator@example.com", "Creator")
 		ctx := auth.ContextWithToken(context.Background(), token)
@@ -347,7 +347,7 @@ func TestCaseUseCase_CreateCase_SlackInvite(t *testing.T) {
 				return fmt.Sprintf("C%d", caseID), nil
 			},
 		}
-		uc := usecase.NewCaseUseCase(repo, nil, mock)
+		uc := usecase.NewCaseUseCase(repo, nil, mock, "")
 
 		token := auth.NewToken("UCREATOR", "creator@example.com", "Creator")
 		ctx := auth.ContextWithToken(context.Background(), token)
@@ -371,7 +371,7 @@ func TestCaseUseCase_CreateCase_SlackInvite(t *testing.T) {
 				return errors.New("slack invite error")
 			},
 		}
-		uc := usecase.NewCaseUseCase(repo, nil, mock)
+		uc := usecase.NewCaseUseCase(repo, nil, mock, "")
 
 		token := auth.NewToken("UCREATOR", "creator@example.com", "Creator")
 		ctx := auth.ContextWithToken(context.Background(), token)
@@ -388,7 +388,7 @@ func TestCaseUseCase_CreateCase_SlackInvite(t *testing.T) {
 				return fmt.Sprintf("C%d", caseID), nil
 			},
 		}
-		uc := usecase.NewCaseUseCase(repo, nil, mock)
+		uc := usecase.NewCaseUseCase(repo, nil, mock, "")
 
 		// No auth token in context
 		ctx := context.Background()
@@ -408,7 +408,7 @@ func TestCaseUseCase_CreateCase_SlackInvite(t *testing.T) {
 				return fmt.Sprintf("C%d", caseID), nil
 			},
 		}
-		uc := usecase.NewCaseUseCase(repo, nil, mock)
+		uc := usecase.NewCaseUseCase(repo, nil, mock, "")
 
 		// No auth token, no assignees
 		ctx := context.Background()
@@ -419,4 +419,62 @@ func TestCaseUseCase_CreateCase_SlackInvite(t *testing.T) {
 		// No invite should have been called
 		gt.Array(t, mock.invitedUserIDs).Length(0)
 	})
+}
+
+func TestCaseUseCase_CreateCase_BookmarkAndMapping(t *testing.T) {
+	t.Run("adds bookmark and saves mapping when baseURL is set", func(t *testing.T) {
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+		}
+		uc := usecase.NewCaseUseCase(repo, nil, mock, "https://example.com")
+		ctx := context.Background()
+
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil)
+		gt.NoError(t, err).Required()
+
+		// Verify bookmark was added
+		gt.Value(t, mock.bookmarkChannelID).Equal(created.SlackChannelID)
+		gt.Value(t, mock.bookmarkTitle).Equal("Open Case")
+		expectedURL := fmt.Sprintf("https://example.com/ws/%s/cases/%d", testWorkspaceID, created.ID)
+		gt.Value(t, mock.bookmarkLink).Equal(expectedURL)
+	})
+
+	t.Run("skips bookmark when baseURL is empty", func(t *testing.T) {
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+		}
+		uc := usecase.NewCaseUseCase(repo, nil, mock, "")
+		ctx := context.Background()
+
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil)
+		gt.NoError(t, err).Required()
+
+		// Bookmark should not have been added
+		gt.Value(t, mock.bookmarkChannelID).Equal("")
+	})
+
+	t.Run("bookmark failure does not fail case creation", func(t *testing.T) {
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+			addBookmarkFn: func(_ context.Context, _, _, _ string) error {
+				return errors.New("bookmark error")
+			},
+		}
+		uc := usecase.NewCaseUseCase(repo, nil, mock, "https://example.com")
+		ctx := context.Background()
+
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil)
+		gt.NoError(t, err).Required()
+		gt.Value(t, created.SlackChannelID).NotEqual("")
+	})
+
 }

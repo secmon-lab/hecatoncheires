@@ -29,6 +29,7 @@ Hecatoncheires is an AI-native project/case management platform built with Go an
 - Use `github.com/m-mizutani/goerr/v2` for error handling
 - Must wrap errors with `goerr.Wrap` to maintain error context
 - Add helpful variables with `goerr.V` for debugging
+- **NEVER silently swallow errors** — returning a default/empty value while discarding the error (e.g., `return emptyResult, nil` in an `if err != nil` block) is strictly prohibited. Errors MUST always be propagated to the caller via `goerr.Wrap` or returned directly. This applies to ALL contexts including GraphQL resolvers — do not justify swallowing errors with "graceful degradation" or "it's just auxiliary data". If an operation fails, the caller must know about it
 - **NEVER check error messages using `strings.Contains(err.Error(), ...)`**
 - **ALWAYS use `errors.Is(err, targetErr)` or `errors.As(err, &target)` for error type checking**
 - Error discrimination must be done by error types, not by parsing error messages

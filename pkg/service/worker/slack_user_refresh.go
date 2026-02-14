@@ -96,10 +96,7 @@ func (w *SlackUserRefreshWorker) refresh(ctx context.Context) error {
 	// Get existing metadata to preserve values on failure
 	existingMetadata, err := w.repo.SlackUser().GetMetadata(ctx)
 	if err != nil {
-		logging.Default().Error("Failed to get existing metadata",
-			"error", err.Error())
-		// Use zero metadata if retrieval fails
-		existingMetadata = &model.SlackUserMetadata{}
+		return goerr.Wrap(err, "failed to get existing metadata")
 	}
 
 	// Update metadata: attempt started
@@ -109,9 +106,7 @@ func (w *SlackUserRefreshWorker) refresh(ctx context.Context) error {
 		UserCount:          existingMetadata.UserCount,
 	}
 	if err := w.repo.SlackUser().SaveMetadata(ctx, attemptMetadata); err != nil {
-		logging.Default().Error("Failed to save refresh attempt metadata",
-			"error", err.Error())
-		// Continue despite metadata error
+		return goerr.Wrap(err, "failed to save refresh attempt metadata")
 	}
 
 	// Fetch all users from Slack API
@@ -151,9 +146,7 @@ func (w *SlackUserRefreshWorker) refresh(ctx context.Context) error {
 		UserCount:          len(users),
 	}
 	if err := w.repo.SlackUser().SaveMetadata(ctx, successMetadata); err != nil {
-		logging.Default().Error("Failed to save refresh success metadata",
-			"error", err.Error())
-		// Continue despite metadata error
+		return goerr.Wrap(err, "failed to save refresh success metadata")
 	}
 
 	duration := time.Since(startTime)

@@ -32,6 +32,13 @@ type Service interface {
 	// InviteUsersToChannel invites users to a Slack channel
 	// Silently skips if userIDs is empty
 	InviteUsersToChannel(ctx context.Context, channelID string, userIDs []string) error
+
+	// AddBookmark adds a link bookmark to a Slack channel
+	AddBookmark(ctx context.Context, channelID, title, link string) error
+
+	// GetTeamURL retrieves the Slack workspace URL (e.g., "https://ubie.enterprise.slack.com/")
+	// The result is cached for the lifetime of the service instance.
+	GetTeamURL(ctx context.Context) (string, error)
 }
 
 // Channel represents a Slack channel

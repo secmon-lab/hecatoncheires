@@ -163,7 +163,8 @@ func authLogoutHandler(authUC AuthUseCase) http.HandlerFunc {
 		if err == nil {
 			tokenID := auth.TokenID(tokenIDCookie.Value)
 			if err := authUC.Logout(r.Context(), tokenID); err != nil {
-				errutil.Handle(r.Context(), err, "failed to logout")
+				errutil.HandleHTTP(r.Context(), w, goerr.Wrap(err, "failed to logout"), http.StatusInternalServerError)
+				return
 			}
 		}
 

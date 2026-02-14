@@ -82,6 +82,14 @@ func (m *mockSlackService) InviteUsersToChannel(ctx context.Context, channelID s
 	return nil
 }
 
+func (m *mockSlackService) AddBookmark(ctx context.Context, channelID, title, link string) error {
+	return nil
+}
+
+func (m *mockSlackService) GetTeamURL(ctx context.Context) (string, error) {
+	return "https://test-team.slack.com", nil
+}
+
 func TestSlackUserRefreshWorker_ImmediateInitialSync(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.New()

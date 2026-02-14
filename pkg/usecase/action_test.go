@@ -13,7 +13,7 @@ import (
 func TestActionUseCase_CreateAction(t *testing.T) {
 	t.Run("create action with valid case", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil)
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
 		actionUC := usecase.NewActionUseCase(repo)
 		ctx := context.Background()
 
@@ -34,7 +34,7 @@ func TestActionUseCase_CreateAction(t *testing.T) {
 
 	t.Run("create action without title fails", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil)
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
 		actionUC := usecase.NewActionUseCase(repo)
 		ctx := context.Background()
 
@@ -57,7 +57,7 @@ func TestActionUseCase_CreateAction(t *testing.T) {
 
 	t.Run("create action with invalid status fails", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil)
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
 		actionUC := usecase.NewActionUseCase(repo)
 		ctx := context.Background()
 
@@ -70,7 +70,7 @@ func TestActionUseCase_CreateAction(t *testing.T) {
 
 	t.Run("create action with default status", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil)
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
 		actionUC := usecase.NewActionUseCase(repo)
 		ctx := context.Background()
 
@@ -87,7 +87,7 @@ func TestActionUseCase_CreateAction(t *testing.T) {
 func TestActionUseCase_UpdateAction(t *testing.T) {
 	t.Run("update action title and status", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil)
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
 		actionUC := usecase.NewActionUseCase(repo)
 		ctx := context.Background()
 
@@ -109,7 +109,7 @@ func TestActionUseCase_UpdateAction(t *testing.T) {
 
 	t.Run("update action caseID", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil)
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
 		actionUC := usecase.NewActionUseCase(repo)
 		ctx := context.Background()
 
@@ -130,7 +130,7 @@ func TestActionUseCase_UpdateAction(t *testing.T) {
 
 	t.Run("update action with non-existent case fails", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil)
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
 		actionUC := usecase.NewActionUseCase(repo)
 		ctx := context.Background()
 
@@ -160,7 +160,7 @@ func TestActionUseCase_UpdateAction(t *testing.T) {
 func TestActionUseCase_DeleteAction(t *testing.T) {
 	t.Run("delete action", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil)
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
 		actionUC := usecase.NewActionUseCase(repo)
 		ctx := context.Background()
 
@@ -190,7 +190,7 @@ func TestActionUseCase_DeleteAction(t *testing.T) {
 func TestActionUseCase_GetAction(t *testing.T) {
 	t.Run("get existing action", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil)
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
 		actionUC := usecase.NewActionUseCase(repo)
 		ctx := context.Background()
 
@@ -221,7 +221,7 @@ func TestActionUseCase_GetAction(t *testing.T) {
 func TestActionUseCase_ListActions(t *testing.T) {
 	t.Run("list actions", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil)
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
 		actionUC := usecase.NewActionUseCase(repo)
 		ctx := context.Background()
 
@@ -244,7 +244,7 @@ func TestActionUseCase_ListActions(t *testing.T) {
 func TestActionUseCase_GetActionsByCase(t *testing.T) {
 	t.Run("get actions by case", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil)
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
 		actionUC := usecase.NewActionUseCase(repo)
 		ctx := context.Background()
 

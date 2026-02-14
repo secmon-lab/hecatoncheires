@@ -12,6 +12,7 @@ export class CaseDetailPage extends BasePage {
   private readonly deleteButton: Locator;
   private readonly backButton: Locator;
   private readonly loadingIndicator: Locator;
+  private readonly slackChannelButton: Locator;
 
   constructor(page: Page) {
     super(page);
@@ -23,6 +24,7 @@ export class CaseDetailPage extends BasePage {
     this.deleteButton = page.locator('button').filter({ hasText: /Delete/ }).first();
     this.backButton = page.locator('button, a').filter({ hasText: /Back/ }).first();
     this.loadingIndicator = page.locator('text=Loading...');
+    this.slackChannelButton = page.locator('a').filter({ hasText: /^#/ }).first();
   }
 
   /**
@@ -94,5 +96,26 @@ export class CaseDetailPage extends BasePage {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Check if the Slack channel button is visible
+   */
+  async isSlackChannelButtonVisible(): Promise<boolean> {
+    return await this.slackChannelButton.isVisible();
+  }
+
+  /**
+   * Get the Slack channel button text
+   */
+  async getSlackChannelButtonText(): Promise<string> {
+    return await this.slackChannelButton.textContent() || '';
+  }
+
+  /**
+   * Get the Slack channel button href
+   */
+  async getSlackChannelButtonHref(): Promise<string> {
+    return await this.slackChannelButton.getAttribute('href') || '';
   }
 }

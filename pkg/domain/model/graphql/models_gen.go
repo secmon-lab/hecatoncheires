@@ -125,6 +125,22 @@ type SlackConfig struct {
 
 func (SlackConfig) IsSourceConfig() {}
 
+type SlackMessage struct {
+	ID        string    `json:"id"`
+	ChannelID string    `json:"channelID"`
+	ThreadTs  *string   `json:"threadTS,omitempty"`
+	TeamID    string    `json:"teamID"`
+	UserID    string    `json:"userID"`
+	UserName  string    `json:"userName"`
+	Text      string    `json:"text"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type SlackMessageConnection struct {
+	Items      []*SlackMessage `json:"items"`
+	NextCursor string          `json:"nextCursor"`
+}
+
 type SlackUser struct {
 	ID       string  `json:"id"`
 	Name     string  `json:"name"`

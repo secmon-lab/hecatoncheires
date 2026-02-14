@@ -59,3 +59,33 @@ gt.Map(t, m).HasKey("key")
   gt.Value(t, source.ID).NotEqual(model.SourceID(""))  // custom string type
   ```
 - For `time.Time` equality, use `gt.Bool(t, t1.Equal(t2)).True()` to handle monotonic clock differences
+
+## Test File Naming Convention
+
+**STRICT: Test files MUST follow the `xyz.go` → `xyz_test.go` naming pattern. No exceptions.**
+
+- Every test file must correspond to exactly one source file
+- Test file name must match the source file name with `_test.go` suffix
+- **NEVER create test files with other naming patterns** (e.g., `xyz_e2e_test.go`, `xyz_integration_test.go`, `xyz_unit_test.go`)
+- All tests for a source file must be in ONE test file
+- Test package must be `package {name}_test` (external test package)
+
+### Examples
+
+```
+# CORRECT
+client.go       → client_test.go
+usecase.go      → usecase_test.go
+case.go         → case_test.go
+
+# WRONG - DO NOT DO THIS
+client.go       → client_unit_test.go      ❌
+client.go       → client_e2e_test.go       ❌
+client.go       → client_integration_test.go ❌
+(no source)     → helpers_test.go          ❌
+```
+
+### Repository Tests Location
+
+- **NEVER** create test files in `pkg/repository/firestore/` or `pkg/repository/memory/` subdirectories
+- ALL repository tests MUST be placed directly in `pkg/repository/*_test.go`
