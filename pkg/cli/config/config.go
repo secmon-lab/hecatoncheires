@@ -8,8 +8,11 @@ import (
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/pelletier/go-toml/v2"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	domainConfig "github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
+	"github.com/urfave/cli/v3"
 )
 
 var fieldIDPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
@@ -25,7 +28,8 @@ type SlackSection struct {
 	ChannelPrefix string `toml:"channel_prefix"`
 }
 
-// AppConfig represents the application configuration
+// AppConfig represents the application configuration.
+// It holds TOML-parsed fields and provides CLI Flags()/Configure() methods.
 type AppConfig struct {
 	Workspace WorkspaceBaseConfig `toml:"workspace"`
 	Labels    Labels              `toml:"labels"`
@@ -283,6 +287,44 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 		SlackChannelPrefix: slackPrefix,
 		FieldSchema:        appCfg.ToDomainFieldSchema(),
 	}, nil
+}
+
+// Flags returns CLI flags for workspace configuration.
+func (a *AppConfig) Flags() []cli.Flag {
+	return []cli.Flag{
+		&cli.StringSliceFlag{
+			Name:    "config",
+			Usage:   "Paths to configuration files or directories (TOML). Can be specified multiple times.",
+			Value:   []string{"./config.toml"},
+			Sources: cli.EnvVars("HECATONCHEIRES_CONFIG"),
+		},
+	}
+}
+
+// Configure loads workspace configs from CLI-provided paths and builds a WorkspaceRegistry.
+// It reads "config" from the cli.Command since StringSliceFlag does not support Destination.
+func (a *AppConfig) Configure(c *cli.Command) ([]*WorkspaceConfig, *model.WorkspaceRegistry, error) {
+	paths := c.StringSlice("config")
+
+	workspaceConfigs, err := LoadWorkspaceConfigs(paths)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	registry := model.NewWorkspaceRegistry()
+	for _, wc := range workspaceConfigs {
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{
+				ID:   wc.ID,
+				Name: wc.Name,
+			},
+			FieldSchema:        wc.FieldSchema,
+			SlackChannelPrefix: wc.SlackChannelPrefix,
+		})
+		logging.Default().Info("Registered workspace", "id", wc.ID, "name", wc.Name)
+	}
+
+	return workspaceConfigs, registry, nil
 }
 
 // ToDomainFieldSchema converts AppConfig to domain FieldSchema

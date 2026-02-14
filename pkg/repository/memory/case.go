@@ -7,6 +7,7 @@ import (
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 )
 
 type caseRepository struct {
@@ -183,4 +184,93 @@ func (r *caseRepository) GetBySlackChannelID(ctx context.Context, workspaceID st
 	}
 
 	return nil, nil
+}
+
+func (r *caseRepository) CountFieldValues(_ context.Context, workspaceID string, fieldID string, fieldType types.FieldType, validValues []string) (int64, int64, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ws := r.cases[workspaceID]
+	validSet := make(map[string]bool, len(validValues))
+	for _, v := range validValues {
+		validSet[v] = true
+	}
+
+	var total, valid int64
+	for _, c := range ws {
+		fv, ok := c.FieldValues[fieldID]
+		if !ok || fv.Type != fieldType {
+			continue
+		}
+		total++
+		if isFieldValueValid(fv, fieldType, validSet) {
+			valid++
+		}
+	}
+
+	return total, valid, nil
+}
+
+func (r *caseRepository) FindCaseWithInvalidFieldValue(_ context.Context, workspaceID string, fieldID string, fieldType types.FieldType, validValues []string) (*model.Case, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ws := r.cases[workspaceID]
+	validSet := make(map[string]bool, len(validValues))
+	for _, v := range validValues {
+		validSet[v] = true
+	}
+
+	for _, c := range ws {
+		fv, ok := c.FieldValues[fieldID]
+		if !ok || fv.Type != fieldType {
+			continue
+		}
+		if !isFieldValueValid(fv, fieldType, validSet) {
+			return copyCase(c), nil
+		}
+	}
+
+	return nil, nil
+}
+
+// isFieldValueValid checks whether a field value is in the valid set.
+// For select: Value is a string, check membership.
+// For multi-select: Value is []string or []interface{}, check all elements.
+func isFieldValueValid(fv model.FieldValue, fieldType types.FieldType, validSet map[string]bool) bool {
+	switch fieldType {
+	case types.FieldTypeSelect:
+		s, ok := fv.Value.(string)
+		if !ok {
+			return false
+		}
+		return validSet[s]
+
+	case types.FieldTypeMultiSelect:
+		switch v := fv.Value.(type) {
+		case []string:
+			for _, s := range v {
+				if !validSet[s] {
+					return false
+				}
+			}
+			return true
+		case []interface{}:
+			for _, elem := range v {
+				s, ok := elem.(string)
+				if !ok {
+					return false
+				}
+				if !validSet[s] {
+					return false
+				}
+			}
+			return true
+		default:
+			return false
+		}
+
+	default:
+		return true
+	}
 }
