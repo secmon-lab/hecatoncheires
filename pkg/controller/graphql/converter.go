@@ -16,11 +16,18 @@ func toGraphQLCase(c *model.Case, workspaceID string) *graphql1.Case {
 		assigneeIDs = []string{}
 	}
 
+	// Treat empty status as OPEN for backward compatibility
+	status := c.Status
+	if status == "" {
+		status = types.CaseStatusOpen
+	}
+
 	return &graphql1.Case{
 		ID:             int(c.ID),
 		WorkspaceID:    workspaceID,
 		Title:          c.Title,
 		Description:    c.Description,
+		Status:         status,
 		AssigneeIDs:    assigneeIDs,
 		SlackChannelID: &c.SlackChannelID,
 		Fields:         toGraphQLFieldValues(c.FieldValues),

@@ -253,6 +253,24 @@ func (r *mutationResolver) DeleteCase(ctx context.Context, workspaceID string, i
 	return true, nil
 }
 
+// CloseCase is the resolver for the closeCase field.
+func (r *mutationResolver) CloseCase(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error) {
+	closed, err := r.UseCases.Case.CloseCase(ctx, workspaceID, int64(id))
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLCase(closed, workspaceID), nil
+}
+
+// ReopenCase is the resolver for the reopenCase field.
+func (r *mutationResolver) ReopenCase(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error) {
+	reopened, err := r.UseCases.Case.ReopenCase(ctx, workspaceID, int64(id))
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLCase(reopened, workspaceID), nil
+}
+
 // CreateAction is the resolver for the createAction field.
 func (r *mutationResolver) CreateAction(ctx context.Context, workspaceID string, input graphql1.CreateActionInput) (*graphql1.Action, error) {
 	assigneeIDs := input.AssigneeIDs
@@ -414,8 +432,8 @@ func (r *queryResolver) Workspaces(ctx context.Context) ([]*graphql1.Workspace, 
 }
 
 // Cases is the resolver for the cases field.
-func (r *queryResolver) Cases(ctx context.Context, workspaceID string) ([]*graphql1.Case, error) {
-	cases, err := r.UseCases.Case.ListCases(ctx, workspaceID)
+func (r *queryResolver) Cases(ctx context.Context, workspaceID string, status *types.CaseStatus) ([]*graphql1.Case, error) {
+	cases, err := r.UseCases.Case.ListCases(ctx, workspaceID, status)
 	if err != nil {
 		return nil, err
 	}

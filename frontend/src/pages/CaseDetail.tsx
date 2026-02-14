@@ -1,13 +1,13 @@
 import { useParams, useNavigate } from 'react-router-dom'
-import { useQuery } from '@apollo/client'
-import { ArrowLeft, Edit, MoreVertical, Trash2, Plus, ExternalLink, BookOpen, ChevronLeft, ChevronRight } from 'lucide-react'
+import { useQuery, useMutation } from '@apollo/client'
+import { ArrowLeft, Edit, MoreVertical, Trash2, Plus, ExternalLink, BookOpen, ChevronLeft, ChevronRight, XCircle, RotateCcw } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import Button from '../components/Button'
 import Chip from '../components/Chip'
 import CaseForm from './CaseForm'
 import CaseDeleteDialog from './CaseDeleteDialog'
 import ActionForm from './ActionForm'
-import { GET_CASE } from '../graphql/case'
+import { GET_CASE, CLOSE_CASE, REOPEN_CASE } from '../graphql/case'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { useWorkspace } from '../contexts/workspace-context'
 import styles from './CaseDetail.module.css'
@@ -28,6 +28,7 @@ interface Case {
   id: number
   title: string
   description: string
+  status: 'OPEN' | 'CLOSED'
   assigneeIDs: string[]
   assignees: Array<{ id: string; name: string; realName: string; imageUrl?: string }>
   slackChannelID: string
@@ -85,6 +86,9 @@ export default function CaseDetail() {
     skip: !currentWorkspace,
   })
 
+  const [closeCase] = useMutation(CLOSE_CASE)
+  const [reopenCase] = useMutation(REOPEN_CASE)
+
   const caseItem: Case | undefined = caseData?.case
   const fieldDefs = configData?.fieldConfiguration?.fields || []
   const caseLabel = configData?.fieldConfiguration?.labels?.case || 'Case'
@@ -104,6 +108,22 @@ export default function CaseDetail() {
   const handleDeleteConfirm = () => {
     setIsDeleteDialogOpen(false)
     navigate(`/ws/${currentWorkspace!.id}/cases`)
+  }
+
+  const handleCloseCase = async () => {
+    if (!caseItem) return
+    await closeCase({
+      variables: { workspaceId: currentWorkspace!.id, id: caseItem.id },
+    })
+    refetch()
+  }
+
+  const handleReopenCase = async () => {
+    if (!caseItem) return
+    await reopenCase({
+      variables: { workspaceId: currentWorkspace!.id, id: caseItem.id },
+    })
+    refetch()
   }
 
   const handleActionClick = (actionId: number) => {
@@ -203,6 +223,15 @@ export default function CaseDetail() {
               <span>#{caseItem.slackChannelName || caseItem.slackChannelID}</span>
             </a>
           )}
+          {caseItem.status === 'OPEN' ? (
+            <Button variant="outline" icon={<XCircle size={20} />} onClick={handleCloseCase} className={styles.closeButton}>
+              Close
+            </Button>
+          ) : (
+            <Button variant="outline" icon={<RotateCcw size={20} />} onClick={handleReopenCase} className={styles.reopenButton}>
+              Reopen
+            </Button>
+          )}
           <Button variant="outline" icon={<Edit size={20} />} onClick={handleEdit}>
             Edit
           </Button>
@@ -232,7 +261,12 @@ export default function CaseDetail() {
 
       <div className={styles.content}>
         <div className={styles.titleSection}>
-          <h1 className={styles.title}>{caseItem.title}</h1>
+          <div className={styles.titleRow}>
+            <h1 className={styles.title}>{caseItem.title}</h1>
+            <Chip variant="status" colorIndex={caseItem.status === 'OPEN' ? 2 : 5}>
+              {caseItem.status === 'OPEN' ? 'Open' : 'Closed'}
+            </Chip>
+          </div>
           <p className={styles.description}>{caseItem.description}</p>
         </div>
 

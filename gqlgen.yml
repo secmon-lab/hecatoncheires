@@ -38,6 +38,9 @@ models:
       - github.com/99designs/gqlgen/graphql.Int
       - github.com/99designs/gqlgen/graphql.Int64
       - github.com/99designs/gqlgen/graphql.Int32
+  CaseStatus:
+    model:
+      - github.com/secmon-lab/hecatoncheires/pkg/domain/types.CaseStatus
   ActionStatus:
     model:
       - github.com/secmon-lab/hecatoncheires/pkg/domain/types.ActionStatus

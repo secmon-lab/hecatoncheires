@@ -8,6 +8,7 @@ import (
 	"cloud.google.com/go/firestore"
 	pb "cloud.google.com/go/firestore/apiv1/firestorepb"
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"google.golang.org/api/iterator"
@@ -82,6 +83,7 @@ func (r *caseRepository) Create(ctx context.Context, workspaceID string, c *mode
 		ID:             nextID,
 		Title:          c.Title,
 		Description:    c.Description,
+		Status:         c.Status,
 		AssigneeIDs:    c.AssigneeIDs,
 		SlackChannelID: c.SlackChannelID,
 		FieldValues:    c.FieldValues,
@@ -117,8 +119,15 @@ func (r *caseRepository) Get(ctx context.Context, workspaceID string, id int64) 
 	return &c, nil
 }
 
-func (r *caseRepository) List(ctx context.Context, workspaceID string) ([]*model.Case, error) {
-	iter := r.casesCollection(workspaceID).Documents(ctx)
+func (r *caseRepository) List(ctx context.Context, workspaceID string, opts ...interfaces.ListCaseOption) ([]*model.Case, error) {
+	cfg := interfaces.BuildListCaseConfig(opts...)
+
+	query := r.casesCollection(workspaceID).Query
+	if statusFilter := cfg.Status(); statusFilter != nil {
+		query = query.Where("Status", "==", string(*statusFilter))
+	}
+
+	iter := query.Documents(ctx)
 	defer iter.Stop()
 
 	var cases []*model.Case
@@ -160,6 +169,7 @@ func (r *caseRepository) Update(ctx context.Context, workspaceID string, c *mode
 		ID:             c.ID,
 		Title:          c.Title,
 		Description:    c.Description,
+		Status:         c.Status,
 		AssigneeIDs:    c.AssigneeIDs,
 		SlackChannelID: c.SlackChannelID,
 		FieldValues:    c.FieldValues,

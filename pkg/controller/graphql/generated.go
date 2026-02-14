@@ -78,6 +78,7 @@ type ComplexityRoot struct {
 		SlackChannelName func(childComplexity int) int
 		SlackChannelURL  func(childComplexity int) int
 		SlackMessages    func(childComplexity int, limit *int, cursor *string) int
+		Status           func(childComplexity int) int
 		Title            func(childComplexity int) int
 		UpdatedAt        func(childComplexity int) int
 	}
@@ -133,6 +134,7 @@ type ComplexityRoot struct {
 	}
 
 	Mutation struct {
+		CloseCase            func(childComplexity int, workspaceID string, id int) int
 		CreateAction         func(childComplexity int, workspaceID string, input graphql1.CreateActionInput) int
 		CreateCase           func(childComplexity int, workspaceID string, input graphql1.CreateCaseInput) int
 		CreateNotionDBSource func(childComplexity int, workspaceID string, input graphql1.CreateNotionDBSourceInput) int
@@ -141,6 +143,7 @@ type ComplexityRoot struct {
 		DeleteCase           func(childComplexity int, workspaceID string, id int) int
 		DeleteSource         func(childComplexity int, workspaceID string, id string) int
 		Noop                 func(childComplexity int) int
+		ReopenCase           func(childComplexity int, workspaceID string, id int) int
 		UpdateAction         func(childComplexity int, workspaceID string, input graphql1.UpdateActionInput) int
 		UpdateCase           func(childComplexity int, workspaceID string, input graphql1.UpdateCaseInput) int
 		UpdateSlackSource    func(childComplexity int, workspaceID string, input graphql1.UpdateSlackSourceInput) int
@@ -166,7 +169,7 @@ type ComplexityRoot struct {
 		Actions             func(childComplexity int, workspaceID string) int
 		ActionsByCase       func(childComplexity int, workspaceID string, caseID int) int
 		Case                func(childComplexity int, workspaceID string, id int) int
-		Cases               func(childComplexity int, workspaceID string) int
+		Cases               func(childComplexity int, workspaceID string, status *types.CaseStatus) int
 		FieldConfiguration  func(childComplexity int, workspaceID string) int
 		Health              func(childComplexity int) int
 		Knowledge           func(childComplexity int, workspaceID string, id string) int
@@ -268,6 +271,8 @@ type MutationResolver interface {
 	CreateCase(ctx context.Context, workspaceID string, input graphql1.CreateCaseInput) (*graphql1.Case, error)
 	UpdateCase(ctx context.Context, workspaceID string, input graphql1.UpdateCaseInput) (*graphql1.Case, error)
 	DeleteCase(ctx context.Context, workspaceID string, id int) (bool, error)
+	CloseCase(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error)
+	ReopenCase(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error)
 	CreateAction(ctx context.Context, workspaceID string, input graphql1.CreateActionInput) (*graphql1.Action, error)
 	UpdateAction(ctx context.Context, workspaceID string, input graphql1.UpdateActionInput) (*graphql1.Action, error)
 	DeleteAction(ctx context.Context, workspaceID string, id int) (bool, error)
@@ -282,7 +287,7 @@ type QueryResolver interface {
 	Health(ctx context.Context) (string, error)
 	Workspace(ctx context.Context, workspaceID string) (*graphql1.Workspace, error)
 	Workspaces(ctx context.Context) ([]*graphql1.Workspace, error)
-	Cases(ctx context.Context, workspaceID string) ([]*graphql1.Case, error)
+	Cases(ctx context.Context, workspaceID string, status *types.CaseStatus) ([]*graphql1.Case, error)
 	Case(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error)
 	Actions(ctx context.Context, workspaceID string) ([]*graphql1.Action, error)
 	Action(ctx context.Context, workspaceID string, id int) (*graphql1.Action, error)
@@ -459,6 +464,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Case.SlackMessages(childComplexity, args["limit"].(*int), args["cursor"].(*string)), true
+	case "Case.status":
+		if e.complexity.Case.Status == nil {
+			break
+		}
+
+		return e.complexity.Case.Status(childComplexity), true
 	case "Case.title":
 		if e.complexity.Case.Title == nil {
 			break
@@ -653,6 +664,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.KnowledgeConnection.TotalCount(childComplexity), true
 
+	case "Mutation.closeCase":
+		if e.complexity.Mutation.CloseCase == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_closeCase_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.CloseCase(childComplexity, args["workspaceId"].(string), args["id"].(int)), true
 	case "Mutation.createAction":
 		if e.complexity.Mutation.CreateAction == nil {
 			break
@@ -736,6 +758,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.Noop(childComplexity), true
+	case "Mutation.reopenCase":
+		if e.complexity.Mutation.ReopenCase == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_reopenCase_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.ReopenCase(childComplexity, args["workspaceId"].(string), args["id"].(int)), true
 	case "Mutation.updateAction":
 		if e.complexity.Mutation.UpdateAction == nil {
 			break
@@ -890,7 +923,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Query.Cases(childComplexity, args["workspaceId"].(string)), true
+		return e.complexity.Query.Cases(childComplexity, args["workspaceId"].(string), args["status"].(*types.CaseStatus)), true
 	case "Query.fieldConfiguration":
 		if e.complexity.Query.FieldConfiguration == nil {
 			break
@@ -1423,11 +1456,17 @@ type SlackMessageConnection {
   nextCursor: String!
 }
 
+enum CaseStatus {
+  OPEN
+  CLOSED
+}
+
 # Entity types
 type Case {
   id: Int!
   title: String!
   description: String!
+  status: CaseStatus!
   assigneeIDs: [String!]!
   assignees: [SlackUser!]!
   slackChannelID: String
@@ -1610,7 +1649,7 @@ type Query {
   workspaces: [Workspace!]!
 
   # Cases
-  cases(workspaceId: String!): [Case!]!
+  cases(workspaceId: String!, status: CaseStatus): [Case!]!
   case(workspaceId: String!, id: Int!): Case
 
   # Actions
@@ -1641,6 +1680,8 @@ type Mutation {
   createCase(workspaceId: String!, input: CreateCaseInput!): Case!
   updateCase(workspaceId: String!, input: UpdateCaseInput!): Case!
   deleteCase(workspaceId: String!, id: Int!): Boolean!
+  closeCase(workspaceId: String!, id: Int!): Case!
+  reopenCase(workspaceId: String!, id: Int!): Case!
 
   # Actions
   createAction(workspaceId: String!, input: CreateActionInput!): Action!
@@ -1676,6 +1717,22 @@ func (ec *executionContext) field_Case_slackMessages_args(ctx context.Context, r
 		return nil, err
 	}
 	args["cursor"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_closeCase_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg1
 	return args, nil
 }
 
@@ -1784,6 +1841,22 @@ func (ec *executionContext) field_Mutation_deleteSource_args(ctx context.Context
 	}
 	args["workspaceId"] = arg0
 	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_reopenCase_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNInt2int)
 	if err != nil {
 		return nil, err
 	}
@@ -1949,6 +2022,11 @@ func (ec *executionContext) field_Query_cases_args(ctx context.Context, rawArgs 
 		return nil, err
 	}
 	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "status", ec.unmarshalOCaseStatus2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋtypesᚐCaseStatus)
+	if err != nil {
+		return nil, err
+	}
+	args["status"] = arg1
 	return args, nil
 }
 
@@ -2178,6 +2256,8 @@ func (ec *executionContext) fieldContext_Action_case(_ context.Context, field gr
 				return ec.fieldContext_Case_title(ctx, field)
 			case "description":
 				return ec.fieldContext_Case_description(ctx, field)
+			case "status":
+				return ec.fieldContext_Case_status(ctx, field)
 			case "assigneeIDs":
 				return ec.fieldContext_Case_assigneeIDs(ctx, field)
 			case "assignees":
@@ -2531,6 +2611,35 @@ func (ec *executionContext) fieldContext_Case_description(_ context.Context, fie
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Case_status(ctx context.Context, field graphql.CollectedField, obj *graphql1.Case) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Case_status,
+		func(ctx context.Context) (any, error) {
+			return obj.Status, nil
+		},
+		nil,
+		ec.marshalNCaseStatus2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋtypesᚐCaseStatus,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Case_status(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Case",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type CaseStatus does not have child fields")
 		},
 	}
 	return fc, nil
@@ -3517,6 +3626,8 @@ func (ec *executionContext) fieldContext_Knowledge_case(_ context.Context, field
 				return ec.fieldContext_Case_title(ctx, field)
 			case "description":
 				return ec.fieldContext_Case_description(ctx, field)
+			case "status":
+				return ec.fieldContext_Case_status(ctx, field)
 			case "assigneeIDs":
 				return ec.fieldContext_Case_assigneeIDs(ctx, field)
 			case "assignees":
@@ -3918,6 +4029,8 @@ func (ec *executionContext) fieldContext_Mutation_createCase(ctx context.Context
 				return ec.fieldContext_Case_title(ctx, field)
 			case "description":
 				return ec.fieldContext_Case_description(ctx, field)
+			case "status":
+				return ec.fieldContext_Case_status(ctx, field)
 			case "assigneeIDs":
 				return ec.fieldContext_Case_assigneeIDs(ctx, field)
 			case "assignees":
@@ -3989,6 +4102,8 @@ func (ec *executionContext) fieldContext_Mutation_updateCase(ctx context.Context
 				return ec.fieldContext_Case_title(ctx, field)
 			case "description":
 				return ec.fieldContext_Case_description(ctx, field)
+			case "status":
+				return ec.fieldContext_Case_status(ctx, field)
 			case "assigneeIDs":
 				return ec.fieldContext_Case_assigneeIDs(ctx, field)
 			case "assignees":
@@ -4064,6 +4179,152 @@ func (ec *executionContext) fieldContext_Mutation_deleteCase(ctx context.Context
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Mutation_deleteCase_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_closeCase(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_closeCase,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().CloseCase(ctx, fc.Args["workspaceId"].(string), fc.Args["id"].(int))
+		},
+		nil,
+		ec.marshalNCase2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCase,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_closeCase(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Case_id(ctx, field)
+			case "title":
+				return ec.fieldContext_Case_title(ctx, field)
+			case "description":
+				return ec.fieldContext_Case_description(ctx, field)
+			case "status":
+				return ec.fieldContext_Case_status(ctx, field)
+			case "assigneeIDs":
+				return ec.fieldContext_Case_assigneeIDs(ctx, field)
+			case "assignees":
+				return ec.fieldContext_Case_assignees(ctx, field)
+			case "slackChannelID":
+				return ec.fieldContext_Case_slackChannelID(ctx, field)
+			case "slackChannelName":
+				return ec.fieldContext_Case_slackChannelName(ctx, field)
+			case "slackChannelURL":
+				return ec.fieldContext_Case_slackChannelURL(ctx, field)
+			case "fields":
+				return ec.fieldContext_Case_fields(ctx, field)
+			case "actions":
+				return ec.fieldContext_Case_actions(ctx, field)
+			case "knowledges":
+				return ec.fieldContext_Case_knowledges(ctx, field)
+			case "slackMessages":
+				return ec.fieldContext_Case_slackMessages(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Case_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Case_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Case", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_closeCase_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_reopenCase(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_reopenCase,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().ReopenCase(ctx, fc.Args["workspaceId"].(string), fc.Args["id"].(int))
+		},
+		nil,
+		ec.marshalNCase2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCase,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_reopenCase(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Case_id(ctx, field)
+			case "title":
+				return ec.fieldContext_Case_title(ctx, field)
+			case "description":
+				return ec.fieldContext_Case_description(ctx, field)
+			case "status":
+				return ec.fieldContext_Case_status(ctx, field)
+			case "assigneeIDs":
+				return ec.fieldContext_Case_assigneeIDs(ctx, field)
+			case "assignees":
+				return ec.fieldContext_Case_assignees(ctx, field)
+			case "slackChannelID":
+				return ec.fieldContext_Case_slackChannelID(ctx, field)
+			case "slackChannelName":
+				return ec.fieldContext_Case_slackChannelName(ctx, field)
+			case "slackChannelURL":
+				return ec.fieldContext_Case_slackChannelURL(ctx, field)
+			case "fields":
+				return ec.fieldContext_Case_fields(ctx, field)
+			case "actions":
+				return ec.fieldContext_Case_actions(ctx, field)
+			case "knowledges":
+				return ec.fieldContext_Case_knowledges(ctx, field)
+			case "slackMessages":
+				return ec.fieldContext_Case_slackMessages(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Case_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Case_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Case", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_reopenCase_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -4891,7 +5152,7 @@ func (ec *executionContext) _Query_cases(ctx context.Context, field graphql.Coll
 		ec.fieldContext_Query_cases,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Query().Cases(ctx, fc.Args["workspaceId"].(string))
+			return ec.resolvers.Query().Cases(ctx, fc.Args["workspaceId"].(string), fc.Args["status"].(*types.CaseStatus))
 		},
 		nil,
 		ec.marshalNCase2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCaseᚄ,
@@ -4914,6 +5175,8 @@ func (ec *executionContext) fieldContext_Query_cases(ctx context.Context, field 
 				return ec.fieldContext_Case_title(ctx, field)
 			case "description":
 				return ec.fieldContext_Case_description(ctx, field)
+			case "status":
+				return ec.fieldContext_Case_status(ctx, field)
 			case "assigneeIDs":
 				return ec.fieldContext_Case_assigneeIDs(ctx, field)
 			case "assignees":
@@ -4985,6 +5248,8 @@ func (ec *executionContext) fieldContext_Query_case(ctx context.Context, field g
 				return ec.fieldContext_Case_title(ctx, field)
 			case "description":
 				return ec.fieldContext_Case_description(ctx, field)
+			case "status":
+				return ec.fieldContext_Case_status(ctx, field)
 			case "assigneeIDs":
 				return ec.fieldContext_Case_assigneeIDs(ctx, field)
 			case "assignees":
@@ -8944,6 +9209,11 @@ func (ec *executionContext) _Case(ctx context.Context, sel ast.SelectionSet, obj
 			if out.Values[i] == graphql.Null {
 				atomic.AddUint32(&out.Invalids, 1)
 			}
+		case "status":
+			out.Values[i] = ec._Case_status(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
 		case "assigneeIDs":
 			out.Values[i] = ec._Case_assigneeIDs(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
@@ -9666,6 +9936,20 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 		case "deleteCase":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_deleteCase(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "closeCase":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_closeCase(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "reopenCase":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_reopenCase(ctx, field)
 			})
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
@@ -11211,6 +11495,23 @@ func (ec *executionContext) marshalNCase2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecato
 	return ec._Case(ctx, sel, v)
 }
 
+func (ec *executionContext) unmarshalNCaseStatus2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋtypesᚐCaseStatus(ctx context.Context, v any) (types.CaseStatus, error) {
+	tmp, err := graphql.UnmarshalString(v)
+	res := types.CaseStatus(tmp)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNCaseStatus2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋtypesᚐCaseStatus(ctx context.Context, sel ast.SelectionSet, v types.CaseStatus) graphql.Marshaler {
+	_ = sel
+	res := graphql.MarshalString(string(v))
+	if res == graphql.Null {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+	}
+	return res
+}
+
 func (ec *executionContext) unmarshalNCreateActionInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateActionInput(ctx context.Context, v any) (graphql1.CreateActionInput, error) {
 	res, err := ec.unmarshalInputCreateActionInput(ctx, v)
 	return res, graphql.ErrorOnPath(ctx, err)
@@ -12302,6 +12603,25 @@ func (ec *executionContext) marshalOCase2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecato
 		return graphql.Null
 	}
 	return ec._Case(ctx, sel, v)
+}
+
+func (ec *executionContext) unmarshalOCaseStatus2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋtypesᚐCaseStatus(ctx context.Context, v any) (*types.CaseStatus, error) {
+	if v == nil {
+		return nil, nil
+	}
+	tmp, err := graphql.UnmarshalString(v)
+	res := types.CaseStatus(tmp)
+	return &res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalOCaseStatus2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋtypesᚐCaseStatus(ctx context.Context, sel ast.SelectionSet, v *types.CaseStatus) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	_ = sel
+	_ = ctx
+	res := graphql.MarshalString(string(*v))
+	return res
 }
 
 func (ec *executionContext) marshalOFieldOption2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐFieldOptionᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.FieldOption) graphql.Marshaler {

@@ -43,7 +43,6 @@ func (r *Repository) Flags() []cli.Flag {
 	}
 }
 
-
 // Backend returns the configured backend type
 func (r *Repository) Backend() string {
 	return r.backend

@@ -506,6 +506,86 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 		gt.Number(t, len(cases)).GreaterOrEqual(3)
 	})
+
+	t.Run("List with status filter returns only matching cases", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		// Create open cases
+		_, err := repo.Case().Create(ctx, wsID, &model.Case{
+			Title:  "Open Case 1",
+			Status: types.CaseStatusOpen,
+		})
+		gt.NoError(t, err).Required()
+
+		_, err = repo.Case().Create(ctx, wsID, &model.Case{
+			Title:  "Open Case 2",
+			Status: types.CaseStatusOpen,
+		})
+		gt.NoError(t, err).Required()
+
+		// Create closed case
+		_, err = repo.Case().Create(ctx, wsID, &model.Case{
+			Title:  "Closed Case 1",
+			Status: types.CaseStatusClosed,
+		})
+		gt.NoError(t, err).Required()
+
+		// Filter by OPEN
+		openCases, err := repo.Case().List(ctx, wsID, interfaces.WithStatus(types.CaseStatusOpen))
+		gt.NoError(t, err).Required()
+		gt.Number(t, len(openCases)).Equal(2)
+		for _, c := range openCases {
+			gt.Value(t, c.Status).Equal(types.CaseStatusOpen)
+		}
+
+		// Filter by CLOSED
+		closedCases, err := repo.Case().List(ctx, wsID, interfaces.WithStatus(types.CaseStatusClosed))
+		gt.NoError(t, err).Required()
+		gt.Number(t, len(closedCases)).Equal(1)
+		gt.Value(t, closedCases[0].Status).Equal(types.CaseStatusClosed)
+		gt.Value(t, closedCases[0].Title).Equal("Closed Case 1")
+
+		// No filter returns all
+		allCases, err := repo.Case().List(ctx, wsID)
+		gt.NoError(t, err).Required()
+		gt.Number(t, len(allCases)).Equal(3)
+	})
+
+	t.Run("Create and Get preserves status", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			Title:  "Status Test",
+			Status: types.CaseStatusClosed,
+		})
+		gt.NoError(t, err).Required()
+
+		retrieved, err := repo.Case().Get(ctx, wsID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, retrieved.Status).Equal(types.CaseStatusClosed)
+	})
+
+	t.Run("Update preserves status change", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			Title:  "Status Update Test",
+			Status: types.CaseStatusOpen,
+		})
+		gt.NoError(t, err).Required()
+
+		created.Status = types.CaseStatusClosed
+		updated, err := repo.Case().Update(ctx, wsID, created)
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.Status).Equal(types.CaseStatusClosed)
+
+		retrieved, err := repo.Case().Get(ctx, wsID, updated.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, retrieved.Status).Equal(types.CaseStatusClosed)
+	})
 }
 
 func TestCaseRepository_Memory(t *testing.T) {

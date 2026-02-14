@@ -9,6 +9,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
@@ -72,6 +73,7 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 	caseModel := &model.Case{
 		Title:       title,
 		Description: description,
+		Status:      types.CaseStatusOpen,
 		AssigneeIDs: assigneeIDs,
 		FieldValues: fieldValues,
 	}
@@ -166,6 +168,7 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, workspaceID string, id in
 		ID:             id,
 		Title:          title,
 		Description:    description,
+		Status:         existingCase.Status, // Preserve status
 		AssigneeIDs:    assigneeIDs,
 		SlackChannelID: existingCase.SlackChannelID, // Preserve channel ID
 		FieldValues:    fieldValues,
@@ -212,13 +215,66 @@ func (uc *CaseUseCase) GetCase(ctx context.Context, workspaceID string, id int64
 	return caseModel, nil
 }
 
-func (uc *CaseUseCase) ListCases(ctx context.Context, workspaceID string) ([]*model.Case, error) {
-	cases, err := uc.repo.Case().List(ctx, workspaceID)
+func (uc *CaseUseCase) ListCases(ctx context.Context, workspaceID string, status *types.CaseStatus) ([]*model.Case, error) {
+	var opts []interfaces.ListCaseOption
+	if status != nil {
+		opts = append(opts, interfaces.WithStatus(*status))
+	}
+
+	cases, err := uc.repo.Case().List(ctx, workspaceID, opts...)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to list cases")
 	}
 
 	return cases, nil
+}
+
+func (uc *CaseUseCase) CloseCase(ctx context.Context, workspaceID string, id int64) (*model.Case, error) {
+	existing, err := uc.repo.Case().Get(ctx, workspaceID, id)
+	if err != nil {
+		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
+	}
+
+	// Treat empty status as OPEN for backward compatibility
+	status := existing.Status
+	if status == "" {
+		status = types.CaseStatusOpen
+	}
+	if status == types.CaseStatusClosed {
+		return nil, goerr.Wrap(ErrCaseAlreadyClosed, "case is already closed", goerr.V(CaseIDKey, id))
+	}
+
+	existing.Status = types.CaseStatusClosed
+	updated, err := uc.repo.Case().Update(ctx, workspaceID, existing)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to close case", goerr.V(CaseIDKey, id))
+	}
+
+	return updated, nil
+}
+
+func (uc *CaseUseCase) ReopenCase(ctx context.Context, workspaceID string, id int64) (*model.Case, error) {
+	existing, err := uc.repo.Case().Get(ctx, workspaceID, id)
+	if err != nil {
+		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
+	}
+
+	// Treat empty status as OPEN for backward compatibility
+	status := existing.Status
+	if status == "" {
+		status = types.CaseStatusOpen
+	}
+	if status == types.CaseStatusOpen {
+		return nil, goerr.Wrap(ErrCaseAlreadyOpen, "case is already open", goerr.V(CaseIDKey, id))
+	}
+
+	existing.Status = types.CaseStatusOpen
+	updated, err := uc.repo.Case().Update(ctx, workspaceID, existing)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to reopen case", goerr.V(CaseIDKey, id))
+	}
+
+	return updated, nil
 }
 
 // uniqueStrings removes duplicate strings while preserving order

@@ -88,11 +88,17 @@ type SlackMessageConnection {
   nextCursor: String!
 }
 
+enum CaseStatus {
+  OPEN
+  CLOSED
+}
+
 # Entity types
 type Case {
   id: Int!
   title: String!
   description: String!
+  status: CaseStatus!
   assigneeIDs: [String!]!
   assignees: [SlackUser!]!
   slackChannelID: String
@@ -275,7 +281,7 @@ type Query {
   workspaces: [Workspace!]!
 
   # Cases
-  cases(workspaceId: String!): [Case!]!
+  cases(workspaceId: String!, status: CaseStatus): [Case!]!
   case(workspaceId: String!, id: Int!): Case
 
   # Actions
@@ -306,6 +312,8 @@ type Mutation {
   createCase(workspaceId: String!, input: CreateCaseInput!): Case!
   updateCase(workspaceId: String!, input: UpdateCaseInput!): Case!
   deleteCase(workspaceId: String!, id: Int!): Boolean!
+  closeCase(workspaceId: String!, id: Int!): Case!
+  reopenCase(workspaceId: String!, id: Int!): Case!
 
   # Actions
   createAction(workspaceId: String!, input: CreateActionInput!): Action!
