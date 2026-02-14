@@ -6,8 +6,10 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
+	pb "cloud.google.com/go/firestore/apiv1/firestorepb"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -217,4 +219,130 @@ func (r *caseRepository) GetBySlackChannelID(ctx context.Context, workspaceID st
 	}
 
 	return &c, nil
+}
+
+func (r *caseRepository) CountFieldValues(ctx context.Context, workspaceID string, fieldID string, fieldType types.FieldType, validValues []string) (int64, int64, error) {
+	col := r.casesCollection(workspaceID)
+	fieldTypePath := fmt.Sprintf("FieldValues.%s.Type", fieldID)
+	fieldValuePath := fmt.Sprintf("FieldValues.%s.Value", fieldID)
+
+	// Count total cases with this field type (aggregation, no document data transfer)
+	totalQuery := col.Where(fieldTypePath, "==", string(fieldType))
+	totalResult, err := totalQuery.NewAggregationQuery().WithCount("total").Get(ctx)
+	if err != nil {
+		return 0, 0, goerr.Wrap(err, "failed to count total field values",
+			goerr.V("field_id", fieldID))
+	}
+	totalVal, ok := totalResult["total"]
+	if !ok {
+		return 0, 0, goerr.New("missing total count in aggregation result",
+			goerr.V("field_id", fieldID))
+	}
+	totalPB, ok := totalVal.(*pb.Value)
+	if !ok {
+		return 0, 0, goerr.New("unexpected total count type",
+			goerr.V("field_id", fieldID), goerr.V("type", fmt.Sprintf("%T", totalVal)))
+	}
+	totalCount := totalPB.GetIntegerValue()
+
+	// Count valid values using chunked "in" queries (max 10 per query)
+	var validCount int64
+	for i := 0; i < len(validValues); i += 10 {
+		end := i + 10
+		if end > len(validValues) {
+			end = len(validValues)
+		}
+		chunk := validValues[i:end]
+
+		chunkIface := make([]interface{}, len(chunk))
+		for j, v := range chunk {
+			chunkIface[j] = v
+		}
+
+		chunkQuery := col.Where(fieldValuePath, "in", chunkIface)
+		chunkResult, err := chunkQuery.NewAggregationQuery().WithCount("c").Get(ctx)
+		if err != nil {
+			return 0, 0, goerr.Wrap(err, "failed to count valid field values",
+				goerr.V("field_id", fieldID))
+		}
+		cv, ok := chunkResult["c"]
+		if !ok {
+			continue
+		}
+		cvPB, ok := cv.(*pb.Value)
+		if !ok {
+			continue
+		}
+		validCount += cvPB.GetIntegerValue()
+	}
+
+	return totalCount, validCount, nil
+}
+
+func (r *caseRepository) FindCaseWithInvalidFieldValue(ctx context.Context, workspaceID string, fieldID string, fieldType types.FieldType, validValues []string) (*model.Case, error) {
+	col := r.casesCollection(workspaceID)
+
+	// For select with <= 10 options: use not-in for exact match
+	if fieldType == types.FieldTypeSelect && len(validValues) <= 10 {
+		fieldValuePath := fmt.Sprintf("FieldValues.%s.Value", fieldID)
+		validIface := make([]interface{}, len(validValues))
+		for i, v := range validValues {
+			validIface[i] = v
+		}
+
+		iter := col.Where(fieldValuePath, "not-in", validIface).Limit(1).Documents(ctx)
+		defer iter.Stop()
+
+		docSnap, err := iter.Next()
+		if err == iterator.Done {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to query invalid field values",
+				goerr.V("field_id", fieldID))
+		}
+
+		var found model.Case
+		if err := docSnap.DataTo(&found); err != nil {
+			return nil, goerr.Wrap(err, "failed to decode case",
+				goerr.V("field_id", fieldID))
+		}
+		return &found, nil
+	}
+
+	// For select > 10 options or multi-select: stream and check
+	fieldTypePath := fmt.Sprintf("FieldValues.%s.Type", fieldID)
+	iter := col.Where(fieldTypePath, "==", string(fieldType)).Documents(ctx)
+	defer iter.Stop()
+
+	validSet := make(map[string]bool, len(validValues))
+	for _, v := range validValues {
+		validSet[v] = true
+	}
+
+	for {
+		docSnap, err := iter.Next()
+		if err == iterator.Done {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to iterate cases for field validation",
+				goerr.V("field_id", fieldID))
+		}
+
+		var found model.Case
+		if err := docSnap.DataTo(&found); err != nil {
+			return nil, goerr.Wrap(err, "failed to decode case",
+				goerr.V("field_id", fieldID))
+		}
+
+		fv, ok := found.FieldValues[fieldID]
+		if !ok {
+			continue
+		}
+
+		if !fv.IsValueInSet(fieldType, validSet) {
+			return &found, nil
+		}
+	}
 }

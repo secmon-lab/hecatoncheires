@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 )
 
 // CaseRepository defines the interface for Case data access
@@ -26,4 +27,15 @@ type CaseRepository interface {
 	// GetBySlackChannelID retrieves a case by its Slack channel ID.
 	// Returns nil, nil if no case is found with the given channel ID.
 	GetBySlackChannelID(ctx context.Context, workspaceID string, channelID string) (*model.Case, error)
+
+	// CountFieldValues counts the total number of cases with the specified field
+	// and how many of those have a value matching one of validValues.
+	// invalidCount = total - valid detects the existence of invalid values
+	// without transferring document data (uses aggregation queries).
+	CountFieldValues(ctx context.Context, workspaceID string, fieldID string, fieldType types.FieldType, validValues []string) (total int64, valid int64, err error)
+
+	// FindCaseWithInvalidFieldValue returns one case where the specified field
+	// has a value not in validValues. Returns nil if all values are valid.
+	// Intended to be called after CountFieldValues confirms invalid values exist.
+	FindCaseWithInvalidFieldValue(ctx context.Context, workspaceID string, fieldID string, fieldType types.FieldType, validValues []string) (*model.Case, error)
 }

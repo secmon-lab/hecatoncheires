@@ -18,10 +18,6 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
 	gqlctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/graphql"
 	httpctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/http"
-	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
-	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
-	"github.com/secmon-lab/hecatoncheires/pkg/repository/firestore"
-	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/worker"
@@ -78,11 +74,10 @@ func cmdServe() *cli.Command {
 	var addr string
 	var baseURL string
 	var enableGraphiQL bool
-	var repositoryBackend string
-	var projectID string
-	var databaseID string
 	var notionToken string
 	var noAuthUID string
+	var appCfg config.AppConfig
+	var repoCfg config.Repository
 	var slackCfg config.Slack
 
 	flags := []cli.Flag{
@@ -106,32 +101,6 @@ func cmdServe() *cli.Command {
 			Sources:     cli.EnvVars("HECATONCHEIRES_GRAPHIQL"),
 			Destination: &enableGraphiQL,
 		},
-		&cli.StringSliceFlag{
-			Name:    "config",
-			Usage:   "Paths to configuration files or directories (TOML). Can be specified multiple times.",
-			Value:   []string{"./config.toml"},
-			Sources: cli.EnvVars("HECATONCHEIRES_CONFIG"),
-		},
-		&cli.StringFlag{
-			Name:        "repository-backend",
-			Usage:       "Repository backend type (firestore or memory)",
-			Value:       "firestore",
-			Sources:     cli.EnvVars("HECATONCHEIRES_REPOSITORY_BACKEND"),
-			Destination: &repositoryBackend,
-		},
-		&cli.StringFlag{
-			Name:        "firestore-project-id",
-			Usage:       "Firestore Project ID (required when using firestore backend)",
-			Required:    false,
-			Sources:     cli.EnvVars("HECATONCHEIRES_FIRESTORE_PROJECT_ID"),
-			Destination: &projectID,
-		},
-		&cli.StringFlag{
-			Name:        "firestore-database-id",
-			Usage:       "Firestore Database ID",
-			Sources:     cli.EnvVars("HECATONCHEIRES_FIRESTORE_DATABASE_ID"),
-			Destination: &databaseID,
-		},
 		&cli.StringFlag{
 			Name:        "notion-api-token",
 			Usage:       "Notion API token for Source integration",
@@ -147,7 +116,9 @@ func cmdServe() *cli.Command {
 		},
 	}
 
-	// Add Slack flags
+	// Add shared config flags
+	flags = append(flags, appCfg.Flags()...)
+	flags = append(flags, repoCfg.Flags()...)
 	flags = append(flags, slackCfg.Flags()...)
 
 	return &cli.Command{
@@ -156,45 +127,16 @@ func cmdServe() *cli.Command {
 		Usage:   "Start HTTP server",
 		Flags:   flags,
 		Action: func(ctx context.Context, c *cli.Command) error {
-			// Load workspace configurations from config paths
-			configPaths := c.StringSlice("config")
-			workspaceConfigs, err := config.LoadWorkspaceConfigs(configPaths)
+			// Load workspace configurations and build registry
+			_, registry, err := appCfg.Configure(c)
 			if err != nil {
 				return goerr.Wrap(err, "failed to load workspace configurations")
 			}
 
-			// Build WorkspaceRegistry
-			registry := model.NewWorkspaceRegistry()
-			for _, wc := range workspaceConfigs {
-				registry.Register(&model.WorkspaceEntry{
-					Workspace: model.Workspace{
-						ID:   wc.ID,
-						Name: wc.Name,
-					},
-					FieldSchema:        wc.FieldSchema,
-					SlackChannelPrefix: wc.SlackChannelPrefix,
-				})
-				logging.Default().Info("Registered workspace", "id", wc.ID, "name", wc.Name)
-			}
-
 			// Initialize repository based on backend type
-			var repo interfaces.Repository
-			switch repositoryBackend {
-			case "firestore":
-				if projectID == "" {
-					return goerr.New("firestore-project-id is required when using firestore backend")
-				}
-				fsRepo, err := firestore.New(ctx, projectID, databaseID)
-				if err != nil {
-					return goerr.Wrap(err, "failed to initialize firestore repository")
-				}
-				repo = fsRepo
-				logging.Default().Info("Using Firestore repository", "project_id", projectID, "database_id", databaseID)
-			case "memory":
-				repo = memory.New()
-				logging.Default().Info("Using in-memory repository (development mode)")
-			default:
-				return goerr.New("invalid repository backend", goerr.V("backend", repositoryBackend))
+			repo, err := repoCfg.Configure(ctx)
+			if err != nil {
+				return goerr.Wrap(err, "failed to initialize repository")
 			}
 			defer func() {
 				if err := repo.Close(); err != nil {

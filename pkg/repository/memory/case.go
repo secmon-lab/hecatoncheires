@@ -7,6 +7,7 @@ import (
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 )
 
 type caseRepository struct {
@@ -178,6 +179,54 @@ func (r *caseRepository) GetBySlackChannelID(ctx context.Context, workspaceID st
 
 	for _, c := range ws {
 		if c.SlackChannelID == channelID {
+			return copyCase(c), nil
+		}
+	}
+
+	return nil, nil
+}
+
+func (r *caseRepository) CountFieldValues(_ context.Context, workspaceID string, fieldID string, fieldType types.FieldType, validValues []string) (int64, int64, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ws := r.cases[workspaceID]
+	validSet := make(map[string]bool, len(validValues))
+	for _, v := range validValues {
+		validSet[v] = true
+	}
+
+	var total, valid int64
+	for _, c := range ws {
+		fv, ok := c.FieldValues[fieldID]
+		if !ok || fv.Type != fieldType {
+			continue
+		}
+		total++
+		if fv.IsValueInSet(fieldType, validSet) {
+			valid++
+		}
+	}
+
+	return total, valid, nil
+}
+
+func (r *caseRepository) FindCaseWithInvalidFieldValue(_ context.Context, workspaceID string, fieldID string, fieldType types.FieldType, validValues []string) (*model.Case, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ws := r.cases[workspaceID]
+	validSet := make(map[string]bool, len(validValues))
+	for _, v := range validValues {
+		validSet[v] = true
+	}
+
+	for _, c := range ws {
+		fv, ok := c.FieldValues[fieldID]
+		if !ok || fv.Type != fieldType {
+			continue
+		}
+		if !fv.IsValueInSet(fieldType, validSet) {
 			return copyCase(c), nil
 		}
 	}

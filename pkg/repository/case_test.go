@@ -322,6 +322,172 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.Value(t, found).Nil()
 	})
 
+	t.Run("CountFieldValues counts total and valid select values", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		// Create 3 cases with select field: 2 valid, 1 invalid
+		for _, severity := range []string{"high", "medium", "invalid-opt"} {
+			_, err := repo.Case().Create(ctx, wsID, &model.Case{
+				Title: "Case " + severity,
+				FieldValues: map[string]model.FieldValue{
+					"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: severity},
+				},
+			})
+			gt.NoError(t, err).Required()
+		}
+
+		total, valid, err := repo.Case().CountFieldValues(
+			ctx, wsID, "severity", types.FieldTypeSelect, []string{"high", "medium", "low"},
+		)
+		gt.NoError(t, err).Required()
+		gt.Value(t, total).Equal(int64(3))
+		gt.Value(t, valid).Equal(int64(2))
+	})
+
+	t.Run("CountFieldValues returns zero for empty workspace", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		total, valid, err := repo.Case().CountFieldValues(
+			ctx, wsID, "severity", types.FieldTypeSelect, []string{"high"},
+		)
+		gt.NoError(t, err).Required()
+		gt.Value(t, total).Equal(int64(0))
+		gt.Value(t, valid).Equal(int64(0))
+	})
+
+	t.Run("CountFieldValues ignores different field types", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		// Create a case with text field (not select)
+		_, err := repo.Case().Create(ctx, wsID, &model.Case{
+			Title: "Text case",
+			FieldValues: map[string]model.FieldValue{
+				"severity": {FieldID: "severity", Type: types.FieldTypeText, Value: "high"},
+			},
+		})
+		gt.NoError(t, err).Required()
+
+		total, valid, err := repo.Case().CountFieldValues(
+			ctx, wsID, "severity", types.FieldTypeSelect, []string{"high"},
+		)
+		gt.NoError(t, err).Required()
+		gt.Value(t, total).Equal(int64(0))
+		gt.Value(t, valid).Equal(int64(0))
+	})
+
+	t.Run("CountFieldValues counts multi-select values", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		_, err := repo.Case().Create(ctx, wsID, &model.Case{
+			Title: "Valid tags",
+			FieldValues: map[string]model.FieldValue{
+				"tags": {FieldID: "tags", Type: types.FieldTypeMultiSelect, Value: []string{"network", "malware"}},
+			},
+		})
+		gt.NoError(t, err).Required()
+
+		_, err = repo.Case().Create(ctx, wsID, &model.Case{
+			Title: "Invalid tags",
+			FieldValues: map[string]model.FieldValue{
+				"tags": {FieldID: "tags", Type: types.FieldTypeMultiSelect, Value: []string{"network", "bogus"}},
+			},
+		})
+		gt.NoError(t, err).Required()
+
+		total, valid, err := repo.Case().CountFieldValues(
+			ctx, wsID, "tags", types.FieldTypeMultiSelect, []string{"network", "malware", "phishing"},
+		)
+		gt.NoError(t, err).Required()
+		gt.Value(t, total).Equal(int64(2))
+		gt.Value(t, valid).Equal(int64(1))
+	})
+
+	t.Run("FindCaseWithInvalidFieldValue returns invalid case", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		_, err := repo.Case().Create(ctx, wsID, &model.Case{
+			Title: "Valid case",
+			FieldValues: map[string]model.FieldValue{
+				"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "high"},
+			},
+		})
+		gt.NoError(t, err).Required()
+
+		_, err = repo.Case().Create(ctx, wsID, &model.Case{
+			Title: "Invalid case",
+			FieldValues: map[string]model.FieldValue{
+				"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "deleted-option"},
+			},
+		})
+		gt.NoError(t, err).Required()
+
+		found, err := repo.Case().FindCaseWithInvalidFieldValue(
+			ctx, wsID, "severity", types.FieldTypeSelect, []string{"high", "medium", "low"},
+		)
+		gt.NoError(t, err).Required()
+		gt.Value(t, found).NotNil()
+		gt.Value(t, found.Title).Equal("Invalid case")
+
+		fv, ok := found.FieldValues["severity"]
+		gt.Bool(t, ok).True()
+		gt.Value(t, fv.Value).Equal("deleted-option")
+	})
+
+	t.Run("FindCaseWithInvalidFieldValue returns nil when all valid", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		_, err := repo.Case().Create(ctx, wsID, &model.Case{
+			Title: "Valid case",
+			FieldValues: map[string]model.FieldValue{
+				"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "high"},
+			},
+		})
+		gt.NoError(t, err).Required()
+
+		found, err := repo.Case().FindCaseWithInvalidFieldValue(
+			ctx, wsID, "severity", types.FieldTypeSelect, []string{"high", "medium", "low"},
+		)
+		gt.NoError(t, err).Required()
+		gt.Value(t, found).Nil()
+	})
+
+	t.Run("FindCaseWithInvalidFieldValue detects invalid multi-select", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		_, err := repo.Case().Create(ctx, wsID, &model.Case{
+			Title: "Bad multi-select",
+			FieldValues: map[string]model.FieldValue{
+				"tags": {FieldID: "tags", Type: types.FieldTypeMultiSelect, Value: []string{"network", "removed-tag"}},
+			},
+		})
+		gt.NoError(t, err).Required()
+
+		found, err := repo.Case().FindCaseWithInvalidFieldValue(
+			ctx, wsID, "tags", types.FieldTypeMultiSelect, []string{"network", "malware", "phishing"},
+		)
+		gt.NoError(t, err).Required()
+		gt.Value(t, found).NotNil()
+		gt.Value(t, found.Title).Equal("Bad multi-select")
+	})
+
+	t.Run("FindCaseWithInvalidFieldValue returns nil for empty workspace", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		found, err := repo.Case().FindCaseWithInvalidFieldValue(
+			ctx, wsID, "severity", types.FieldTypeSelect, []string{"high"},
+		)
+		gt.NoError(t, err).Required()
+		gt.Value(t, found).Nil()
+	})
+
 	t.Run("List retrieves all cases", func(t *testing.T) {
 		repo := newRepo(t)
 		ctx := context.Background()
