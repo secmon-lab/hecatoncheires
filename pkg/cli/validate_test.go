@@ -11,7 +11,6 @@ import (
 )
 
 func TestRun_ValidateCommand_ValidConfig(t *testing.T) {
-	t.Setenv("HECATONCHEIRES_FIRESTORE_PROJECT_ID", "")
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.toml")
 	content := `
@@ -47,7 +46,6 @@ type = "text"
 }
 
 func TestRun_ValidateCommand_InvalidConfig(t *testing.T) {
-	t.Setenv("HECATONCHEIRES_FIRESTORE_PROJECT_ID", "")
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.toml")
 
@@ -70,7 +68,6 @@ type = "text"
 }
 
 func TestRun_ValidateCommand_MissingConfig(t *testing.T) {
-	t.Setenv("HECATONCHEIRES_FIRESTORE_PROJECT_ID", "")
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "nonexistent.toml")
 
@@ -78,8 +75,33 @@ func TestRun_ValidateCommand_MissingConfig(t *testing.T) {
 	gt.Value(t, err).NotNil()
 }
 
+func TestRun_ValidateCommand_DBCheckWithMemory(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+	content := `
+[workspace]
+id = "test-ws"
+name = "Test Workspace"
+
+[[fields]]
+id = "status"
+name = "Status"
+type = "text"
+`
+	err := os.WriteFile(configPath, []byte(content), 0o600)
+	gt.NoError(t, err).Required()
+
+	// Run validate with --check-db and memory backend (empty DB, should pass)
+	err = cli.Run(context.Background(), []string{
+		"hecatoncheires", "validate",
+		"--config", configPath,
+		"--check-db",
+		"--repository-backend", "memory",
+	}, "test")
+	gt.NoError(t, err)
+}
+
 func TestRun_ValidateCommand_ConfigDirectory(t *testing.T) {
-	t.Setenv("HECATONCHEIRES_FIRESTORE_PROJECT_ID", "")
 	tmpDir := t.TempDir()
 
 	// Create multiple config files in a directory
@@ -118,7 +140,6 @@ type = "text"
 }
 
 func TestRun_ValidateCommand_DuplicateWorkspaceID(t *testing.T) {
-	t.Setenv("HECATONCHEIRES_FIRESTORE_PROJECT_ID", "")
 	tmpDir := t.TempDir()
 
 	config1 := `

@@ -6,7 +6,6 @@ import (
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
-	"github.com/secmon-lab/hecatoncheires/pkg/repository/firestore"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/urfave/cli/v3"
@@ -14,22 +13,17 @@ import (
 
 func cmdValidate() *cli.Command {
 	var appCfg config.AppConfig
-	var firestoreProjectID string
-	var firestoreDatabaseID string
+	var repoCfg config.Repository
+	var checkDB bool
 
 	var flags []cli.Flag
 	flags = append(flags, appCfg.Flags()...)
-	flags = append(flags, &cli.StringFlag{
-		Name:        "firestore-project-id",
-		Usage:       "Firestore Project ID (if specified, DB consistency check is performed)",
-		Sources:     cli.EnvVars("HECATONCHEIRES_FIRESTORE_PROJECT_ID"),
-		Destination: &firestoreProjectID,
-	})
-	flags = append(flags, &cli.StringFlag{
-		Name:        "firestore-database-id",
-		Usage:       "Firestore Database ID",
-		Sources:     cli.EnvVars("HECATONCHEIRES_FIRESTORE_DATABASE_ID"),
-		Destination: &firestoreDatabaseID,
+	flags = append(flags, repoCfg.Flags()...)
+	flags = append(flags, &cli.BoolFlag{
+		Name:        "check-db",
+		Usage:       "Perform database consistency check",
+		Sources:     cli.EnvVars("HECATONCHEIRES_CHECK_DB"),
+		Destination: &checkDB,
 	})
 
 	return &cli.Command{
@@ -57,15 +51,15 @@ func cmdValidate() *cli.Command {
 				)
 			}
 
-			// Step 2: If Firestore project ID is specified, run DB consistency check
-			if firestoreProjectID == "" {
-				logger.Info("No Firestore project ID specified, skipping DB consistency check")
+			// Step 2: If --check-db is specified, run DB consistency check
+			if !checkDB {
+				logger.Info("`--check-db` not specified, skipping DB consistency check")
 				return nil
 			}
 
-			repo, err := firestore.New(ctx, firestoreProjectID, firestoreDatabaseID)
+			repo, err := repoCfg.Configure(ctx)
 			if err != nil {
-				return goerr.Wrap(err, "failed to initialize Firestore repository")
+				return goerr.Wrap(err, "failed to initialize repository for DB check")
 			}
 			defer func() {
 				if err := repo.Close(); err != nil {
@@ -73,9 +67,8 @@ func cmdValidate() *cli.Command {
 				}
 			}()
 
-			logger.Info("Using Firestore repository",
-				"project_id", firestoreProjectID,
-				"database_id", firestoreDatabaseID,
+			logger.Info("Using repository for DB check",
+				"backend", repoCfg.Backend(),
 			)
 
 			// Run DB consistency check
