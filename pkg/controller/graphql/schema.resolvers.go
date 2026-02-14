@@ -9,7 +9,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/m-mizutani/goerr/v2"
+	goerr "github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	graphql1 "github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
@@ -155,6 +155,24 @@ func (r *caseResolver) SlackMessages(ctx context.Context, obj *graphql1.Case, li
 		if threadTS != "" {
 			threadTSPtr = &threadTS
 		}
+		files := make([]*graphql1.SlackFile, len(m.Files()))
+		for j, f := range m.Files() {
+			thumbURL := f.ThumbURL()
+			var thumbURLPtr *string
+			if thumbURL != "" {
+				thumbURLPtr = &thumbURL
+			}
+			files[j] = &graphql1.SlackFile{
+				ID:         f.ID(),
+				Name:       f.Name(),
+				Mimetype:   f.Mimetype(),
+				Filetype:   f.Filetype(),
+				Size:       f.Size(),
+				URLPrivate: f.URLPrivate(),
+				Permalink:  f.Permalink(),
+				ThumbURL:   thumbURLPtr,
+			}
+		}
 		items[i] = &graphql1.SlackMessage{
 			ID:        m.ID(),
 			ChannelID: m.ChannelID(),
@@ -163,6 +181,7 @@ func (r *caseResolver) SlackMessages(ctx context.Context, obj *graphql1.Case, li
 			UserID:    m.UserID(),
 			UserName:  m.UserName(),
 			Text:      m.Text(),
+			Files:     files,
 			CreatedAt: m.CreatedAt(),
 		}
 	}

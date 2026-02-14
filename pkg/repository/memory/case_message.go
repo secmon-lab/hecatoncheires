@@ -54,6 +54,7 @@ func (r *caseMessageRepository) Put(_ context.Context, workspaceID string, caseI
 		msg.Text(),
 		msg.EventTS(),
 		msg.CreatedAt(),
+		msg.Files(),
 	)
 	r.messages[key] = append(msgs, copied)
 	return nil
@@ -103,6 +104,7 @@ func (r *caseMessageRepository) List(_ context.Context, workspaceID string, case
 		copied := slack.NewMessageFromData(
 			m.ID(), m.ChannelID(), m.ThreadTS(), m.TeamID(),
 			m.UserID(), m.UserName(), m.Text(), m.EventTS(), m.CreatedAt(),
+			m.Files(),
 		)
 		result = append(result, copied)
 	}

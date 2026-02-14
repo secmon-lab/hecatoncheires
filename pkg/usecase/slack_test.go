@@ -123,6 +123,7 @@ func TestSlackUseCases_HandleSlackMessage(t *testing.T) {
 			"Test message",
 			"1234567890.123456",
 			time.Now(),
+			nil,
 		)
 
 		gt.NoError(t, uc.Slack.HandleSlackMessage(ctx, msg)).Required()
@@ -181,6 +182,7 @@ func TestSlackUseCases_HandleSlackMessage(t *testing.T) {
 			"Hello from mapped channel",
 			"ev1",
 			time.Now(),
+			nil,
 		)
 
 		gt.NoError(t, uc.Slack.HandleSlackMessage(ctx, msg)).Required()
@@ -219,6 +221,7 @@ func TestSlackUseCases_HandleSlackMessage(t *testing.T) {
 			"Hello from unmapped channel",
 			"ev1",
 			time.Now(),
+			nil,
 		)
 
 		gt.NoError(t, uc.Slack.HandleSlackMessage(ctx, msg)).Required()
@@ -257,6 +260,7 @@ func TestSlackUseCases_CleanupOldMessages(t *testing.T) {
 		"Old message",
 		"old.123456",
 		oldTime,
+		nil,
 	)
 
 	newMsg := slack.NewMessageFromData(
@@ -269,6 +273,7 @@ func TestSlackUseCases_CleanupOldMessages(t *testing.T) {
 		"New message",
 		"new.123456",
 		newTime,
+		nil,
 	)
 
 	gt.NoError(t, repo.Slack().PutMessage(ctx, oldMsg)).Required()

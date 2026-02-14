@@ -193,9 +193,21 @@ type ComplexityRoot struct {
 		Channels func(childComplexity int) int
 	}
 
+	SlackFile struct {
+		Filetype   func(childComplexity int) int
+		ID         func(childComplexity int) int
+		Mimetype   func(childComplexity int) int
+		Name       func(childComplexity int) int
+		Permalink  func(childComplexity int) int
+		Size       func(childComplexity int) int
+		ThumbURL   func(childComplexity int) int
+		URLPrivate func(childComplexity int) int
+	}
+
 	SlackMessage struct {
 		ChannelID func(childComplexity int) int
 		CreatedAt func(childComplexity int) int
+		Files     func(childComplexity int) int
 		ID        func(childComplexity int) int
 		TeamID    func(childComplexity int) int
 		Text      func(childComplexity int) int
@@ -1003,6 +1015,55 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.SlackConfig.Channels(childComplexity), true
 
+	case "SlackFile.filetype":
+		if e.complexity.SlackFile.Filetype == nil {
+			break
+		}
+
+		return e.complexity.SlackFile.Filetype(childComplexity), true
+	case "SlackFile.id":
+		if e.complexity.SlackFile.ID == nil {
+			break
+		}
+
+		return e.complexity.SlackFile.ID(childComplexity), true
+	case "SlackFile.mimetype":
+		if e.complexity.SlackFile.Mimetype == nil {
+			break
+		}
+
+		return e.complexity.SlackFile.Mimetype(childComplexity), true
+	case "SlackFile.name":
+		if e.complexity.SlackFile.Name == nil {
+			break
+		}
+
+		return e.complexity.SlackFile.Name(childComplexity), true
+	case "SlackFile.permalink":
+		if e.complexity.SlackFile.Permalink == nil {
+			break
+		}
+
+		return e.complexity.SlackFile.Permalink(childComplexity), true
+	case "SlackFile.size":
+		if e.complexity.SlackFile.Size == nil {
+			break
+		}
+
+		return e.complexity.SlackFile.Size(childComplexity), true
+	case "SlackFile.thumbURL":
+		if e.complexity.SlackFile.ThumbURL == nil {
+			break
+		}
+
+		return e.complexity.SlackFile.ThumbURL(childComplexity), true
+	case "SlackFile.urlPrivate":
+		if e.complexity.SlackFile.URLPrivate == nil {
+			break
+		}
+
+		return e.complexity.SlackFile.URLPrivate(childComplexity), true
+
 	case "SlackMessage.channelID":
 		if e.complexity.SlackMessage.ChannelID == nil {
 			break
@@ -1015,6 +1076,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.SlackMessage.CreatedAt(childComplexity), true
+	case "SlackMessage.files":
+		if e.complexity.SlackMessage.Files == nil {
+			break
+		}
+
+		return e.complexity.SlackMessage.Files(childComplexity), true
 	case "SlackMessage.id":
 		if e.complexity.SlackMessage.ID == nil {
 			break
@@ -1326,6 +1393,18 @@ input FieldValueInput {
   value: Any!
 }
 
+# Slack file attachment metadata
+type SlackFile {
+  id: String!
+  name: String!
+  mimetype: String!
+  filetype: String!
+  size: Int!
+  urlPrivate: String!
+  permalink: String!
+  thumbURL: String
+}
+
 # Slack Message (stored in case sub-collection)
 type SlackMessage {
   id: String!
@@ -1335,6 +1414,7 @@ type SlackMessage {
   userID: String!
   userName: String!
   text: String!
+  files: [SlackFile!]!
   createdAt: Time!
 }
 
@@ -5750,6 +5830,238 @@ func (ec *executionContext) fieldContext_SlackConfig_channels(_ context.Context,
 	return fc, nil
 }
 
+func (ec *executionContext) _SlackFile_id(ctx context.Context, field graphql.CollectedField, obj *graphql1.SlackFile) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_SlackFile_id,
+		func(ctx context.Context) (any, error) {
+			return obj.ID, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_SlackFile_id(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "SlackFile",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _SlackFile_name(ctx context.Context, field graphql.CollectedField, obj *graphql1.SlackFile) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_SlackFile_name,
+		func(ctx context.Context) (any, error) {
+			return obj.Name, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_SlackFile_name(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "SlackFile",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _SlackFile_mimetype(ctx context.Context, field graphql.CollectedField, obj *graphql1.SlackFile) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_SlackFile_mimetype,
+		func(ctx context.Context) (any, error) {
+			return obj.Mimetype, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_SlackFile_mimetype(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "SlackFile",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _SlackFile_filetype(ctx context.Context, field graphql.CollectedField, obj *graphql1.SlackFile) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_SlackFile_filetype,
+		func(ctx context.Context) (any, error) {
+			return obj.Filetype, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_SlackFile_filetype(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "SlackFile",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _SlackFile_size(ctx context.Context, field graphql.CollectedField, obj *graphql1.SlackFile) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_SlackFile_size,
+		func(ctx context.Context) (any, error) {
+			return obj.Size, nil
+		},
+		nil,
+		ec.marshalNInt2int,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_SlackFile_size(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "SlackFile",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _SlackFile_urlPrivate(ctx context.Context, field graphql.CollectedField, obj *graphql1.SlackFile) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_SlackFile_urlPrivate,
+		func(ctx context.Context) (any, error) {
+			return obj.URLPrivate, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_SlackFile_urlPrivate(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "SlackFile",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _SlackFile_permalink(ctx context.Context, field graphql.CollectedField, obj *graphql1.SlackFile) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_SlackFile_permalink,
+		func(ctx context.Context) (any, error) {
+			return obj.Permalink, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_SlackFile_permalink(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "SlackFile",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _SlackFile_thumbURL(ctx context.Context, field graphql.CollectedField, obj *graphql1.SlackFile) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_SlackFile_thumbURL,
+		func(ctx context.Context) (any, error) {
+			return obj.ThumbURL, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_SlackFile_thumbURL(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "SlackFile",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _SlackMessage_id(ctx context.Context, field graphql.CollectedField, obj *graphql1.SlackMessage) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -5953,6 +6265,53 @@ func (ec *executionContext) fieldContext_SlackMessage_text(_ context.Context, fi
 	return fc, nil
 }
 
+func (ec *executionContext) _SlackMessage_files(ctx context.Context, field graphql.CollectedField, obj *graphql1.SlackMessage) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_SlackMessage_files,
+		func(ctx context.Context) (any, error) {
+			return obj.Files, nil
+		},
+		nil,
+		ec.marshalNSlackFile2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackFileᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_SlackMessage_files(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "SlackMessage",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_SlackFile_id(ctx, field)
+			case "name":
+				return ec.fieldContext_SlackFile_name(ctx, field)
+			case "mimetype":
+				return ec.fieldContext_SlackFile_mimetype(ctx, field)
+			case "filetype":
+				return ec.fieldContext_SlackFile_filetype(ctx, field)
+			case "size":
+				return ec.fieldContext_SlackFile_size(ctx, field)
+			case "urlPrivate":
+				return ec.fieldContext_SlackFile_urlPrivate(ctx, field)
+			case "permalink":
+				return ec.fieldContext_SlackFile_permalink(ctx, field)
+			case "thumbURL":
+				return ec.fieldContext_SlackFile_thumbURL(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type SlackFile", field.Name)
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _SlackMessage_createdAt(ctx context.Context, field graphql.CollectedField, obj *graphql1.SlackMessage) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -6020,6 +6379,8 @@ func (ec *executionContext) fieldContext_SlackMessageConnection_items(_ context.
 				return ec.fieldContext_SlackMessage_userName(ctx, field)
 			case "text":
 				return ec.fieldContext_SlackMessage_text(ctx, field)
+			case "files":
+				return ec.fieldContext_SlackMessage_files(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_SlackMessage_createdAt(ctx, field)
 			}
@@ -9984,6 +10345,77 @@ func (ec *executionContext) _SlackConfig(ctx context.Context, sel ast.SelectionS
 	return out
 }
 
+var slackFileImplementors = []string{"SlackFile"}
+
+func (ec *executionContext) _SlackFile(ctx context.Context, sel ast.SelectionSet, obj *graphql1.SlackFile) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, slackFileImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("SlackFile")
+		case "id":
+			out.Values[i] = ec._SlackFile_id(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "name":
+			out.Values[i] = ec._SlackFile_name(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "mimetype":
+			out.Values[i] = ec._SlackFile_mimetype(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "filetype":
+			out.Values[i] = ec._SlackFile_filetype(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "size":
+			out.Values[i] = ec._SlackFile_size(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "urlPrivate":
+			out.Values[i] = ec._SlackFile_urlPrivate(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "permalink":
+			out.Values[i] = ec._SlackFile_permalink(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "thumbURL":
+			out.Values[i] = ec._SlackFile_thumbURL(ctx, field, obj)
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
 var slackMessageImplementors = []string{"SlackMessage"}
 
 func (ec *executionContext) _SlackMessage(ctx context.Context, sel ast.SelectionSet, obj *graphql1.SlackMessage) graphql.Marshaler {
@@ -10024,6 +10456,11 @@ func (ec *executionContext) _SlackMessage(ctx context.Context, sel ast.Selection
 			}
 		case "text":
 			out.Values[i] = ec._SlackMessage_text(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "files":
+			out.Values[i] = ec._SlackMessage_files(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
@@ -11155,6 +11592,60 @@ func (ec *executionContext) marshalNSlackChannelInfo2ᚖgithubᚗcomᚋsecmonᚑ
 		return graphql.Null
 	}
 	return ec._SlackChannelInfo(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNSlackFile2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackFileᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.SlackFile) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNSlackFile2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackFile(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNSlackFile2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackFile(ctx context.Context, sel ast.SelectionSet, v *graphql1.SlackFile) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._SlackFile(ctx, sel, v)
 }
 
 func (ec *executionContext) marshalNSlackMessage2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackMessageᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.SlackMessage) graphql.Marshaler {

@@ -58,6 +58,18 @@ input FieldValueInput {
   value: Any!
 }
 
+# Slack file attachment metadata
+type SlackFile {
+  id: String!
+  name: String!
+  mimetype: String!
+  filetype: String!
+  size: Int!
+  urlPrivate: String!
+  permalink: String!
+  thumbURL: String
+}
+
 # Slack Message (stored in case sub-collection)
 type SlackMessage {
   id: String!
@@ -67,6 +79,7 @@ type SlackMessage {
   userID: String!
   userName: String!
   text: String!
+  files: [SlackFile!]!
   createdAt: Time!
 }
 
