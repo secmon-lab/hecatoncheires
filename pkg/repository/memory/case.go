@@ -203,7 +203,7 @@ func (r *caseRepository) CountFieldValues(_ context.Context, workspaceID string,
 			continue
 		}
 		total++
-		if isFieldValueValid(fv, fieldType, validSet) {
+		if fv.IsValueInSet(fieldType, validSet) {
 			valid++
 		}
 	}
@@ -226,51 +226,10 @@ func (r *caseRepository) FindCaseWithInvalidFieldValue(_ context.Context, worksp
 		if !ok || fv.Type != fieldType {
 			continue
 		}
-		if !isFieldValueValid(fv, fieldType, validSet) {
+		if !fv.IsValueInSet(fieldType, validSet) {
 			return copyCase(c), nil
 		}
 	}
 
 	return nil, nil
-}
-
-// isFieldValueValid checks whether a field value is in the valid set.
-// For select: Value is a string, check membership.
-// For multi-select: Value is []string or []interface{}, check all elements.
-func isFieldValueValid(fv model.FieldValue, fieldType types.FieldType, validSet map[string]bool) bool {
-	switch fieldType {
-	case types.FieldTypeSelect:
-		s, ok := fv.Value.(string)
-		if !ok {
-			return false
-		}
-		return validSet[s]
-
-	case types.FieldTypeMultiSelect:
-		switch v := fv.Value.(type) {
-		case []string:
-			for _, s := range v {
-				if !validSet[s] {
-					return false
-				}
-			}
-			return true
-		case []interface{}:
-			for _, elem := range v {
-				s, ok := elem.(string)
-				if !ok {
-					return false
-				}
-				if !validSet[s] {
-					return false
-				}
-			}
-			return true
-		default:
-			return false
-		}
-
-	default:
-		return true
-	}
 }

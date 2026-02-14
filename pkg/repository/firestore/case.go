@@ -341,46 +341,8 @@ func (r *caseRepository) FindCaseWithInvalidFieldValue(ctx context.Context, work
 			continue
 		}
 
-		if !isFieldValueValidFirestore(fv, fieldType, validSet) {
+		if !fv.IsValueInSet(fieldType, validSet) {
 			return &found, nil
 		}
-	}
-}
-
-func isFieldValueValidFirestore(fv model.FieldValue, fieldType types.FieldType, validSet map[string]bool) bool {
-	switch fieldType {
-	case types.FieldTypeSelect:
-		s, ok := fv.Value.(string)
-		if !ok {
-			return false
-		}
-		return validSet[s]
-
-	case types.FieldTypeMultiSelect:
-		switch v := fv.Value.(type) {
-		case []string:
-			for _, s := range v {
-				if !validSet[s] {
-					return false
-				}
-			}
-			return true
-		case []interface{}:
-			for _, elem := range v {
-				s, ok := elem.(string)
-				if !ok {
-					return false
-				}
-				if !validSet[s] {
-					return false
-				}
-			}
-			return true
-		default:
-			return false
-		}
-
-	default:
-		return true
 	}
 }
