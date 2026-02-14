@@ -125,22 +125,26 @@
   text-decoration: underline;
 }
 
-.slackChannelLink {
+.slackChannelButton {
   display: inline-flex;
   align-items: center;
   gap: var(--spacing-xs);
-  padding: var(--spacing-xs) var(--spacing-sm);
-  color: var(--color-primary);
+  padding: var(--spacing-sm) var(--spacing-md);
+  color: white;
   text-decoration: none;
-  font-size: 0.9375rem;
-  font-weight: 500;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border: none;
   border-radius: var(--radius-md);
-  transition: background-color var(--transition-fast), color var(--transition-fast);
+  background: var(--color-primary);
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background-color var(--transition-fast);
 }
 
-.slackChannelLink:hover {
-  color: var(--color-primary-dark);
-  background: var(--bg-highlight);
+.slackChannelButton:hover {
+  color: white;
+  background: var(--color-primary-dark);
 }
 
 .metadata {
