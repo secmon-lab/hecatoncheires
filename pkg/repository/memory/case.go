@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 )
@@ -70,6 +71,7 @@ func copyCase(c *model.Case) *model.Case {
 		ID:             c.ID,
 		Title:          c.Title,
 		Description:    c.Description,
+		Status:         c.Status,
 		AssigneeIDs:    assigneeIDs,
 		SlackChannelID: c.SlackChannelID,
 		FieldValues:    fieldValues,
@@ -112,7 +114,7 @@ func (r *caseRepository) Get(ctx context.Context, workspaceID string, id int64) 
 	return copyCase(c), nil
 }
 
-func (r *caseRepository) List(ctx context.Context, workspaceID string) ([]*model.Case, error) {
+func (r *caseRepository) List(ctx context.Context, workspaceID string, opts ...interfaces.ListCaseOption) ([]*model.Case, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -121,8 +123,16 @@ func (r *caseRepository) List(ctx context.Context, workspaceID string) ([]*model
 		return []*model.Case{}, nil
 	}
 
+	cfg := interfaces.BuildListCaseConfig(opts...)
+
 	cases := make([]*model.Case, 0, len(ws))
 	for _, c := range ws {
+		// Apply status filter
+		if statusFilter := cfg.Status(); statusFilter != nil {
+			if c.Status.Normalize() != *statusFilter {
+				continue
+			}
+		}
 		cases = append(cases, copyCase(c))
 	}
 

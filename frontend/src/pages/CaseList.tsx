@@ -11,10 +11,13 @@ import { useWorkspace } from '../contexts/workspace-context'
 import styles from './CaseList.module.css'
 import type { ReactElement } from 'react'
 
+type CaseStatus = 'OPEN' | 'CLOSED'
+
 interface Case {
   id: number
   title: string
   description: string
+  status: CaseStatus
   assigneeIDs: string[]
   assignees: Array<{ id: string; realName: string; imageUrl?: string }>
   slackChannelID: string
@@ -28,9 +31,10 @@ export default function CaseList() {
   const navigate = useNavigate()
   const { currentWorkspace } = useWorkspace()
   const [isFormOpen, setIsFormOpen] = useState(false)
+  const [statusFilter, setStatusFilter] = useState<CaseStatus>('OPEN')
 
   const { data, loading, error } = useQuery(GET_CASES, {
-    variables: { workspaceId: currentWorkspace!.id },
+    variables: { workspaceId: currentWorkspace!.id, status: statusFilter },
     skip: !currentWorkspace,
   })
   const { data: configData } = useQuery(GET_FIELD_CONFIGURATION, {
@@ -166,6 +170,21 @@ export default function CaseList() {
         >
           New {caseLabel}
         </Button>
+      </div>
+
+      <div className={styles.tabs}>
+        <button
+          className={`${styles.tab} ${statusFilter === 'OPEN' ? styles.tabActive : ''}`}
+          onClick={() => setStatusFilter('OPEN')}
+        >
+          Open
+        </button>
+        <button
+          className={`${styles.tab} ${statusFilter === 'CLOSED' ? styles.tabActive : ''}`}
+          onClick={() => setStatusFilter('CLOSED')}
+        >
+          Closed
+        </button>
       </div>
 
       <div className={styles.tableWrapper}>

@@ -41,12 +41,39 @@
   border-bottom: 1px solid var(--border-default);
 }
 
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  margin-bottom: 0.5rem;
+}
+
 .title {
-  margin: 0 0 0.5rem 0;
+  margin: 0;
   font-size: 2rem;
   font-weight: 600;
   color: var(--text-heading);
   line-height: 1.2;
+}
+
+.closeButton {
+  color: var(--color-error);
+  border-color: var(--color-error);
+}
+
+.closeButton:hover {
+  background: var(--color-error);
+  color: white;
+}
+
+.reopenButton {
+  color: var(--color-success);
+  border-color: var(--color-success);
+}
+
+.reopenButton:hover {
+  background: var(--color-success);
+  color: white;
 }
 
 .description {

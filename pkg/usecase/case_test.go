@@ -274,10 +274,143 @@ func TestCaseUseCase_ListCases(t *testing.T) {
 		_, err = uc.CreateCase(ctx, testWorkspaceID, "Case 2", "Description 2", []string{}, nil)
 		gt.NoError(t, err).Required()
 
-		cases, err := uc.ListCases(ctx, testWorkspaceID)
+		cases, err := uc.ListCases(ctx, testWorkspaceID, nil)
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, cases).Length(2)
+	})
+
+	t.Run("list cases with status filter", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, "")
+		ctx := context.Background()
+
+		// Create cases (all default to OPEN)
+		case1, err := uc.CreateCase(ctx, testWorkspaceID, "Open Case 1", "desc", []string{}, nil)
+		gt.NoError(t, err).Required()
+
+		_, err = uc.CreateCase(ctx, testWorkspaceID, "Open Case 2", "desc", []string{}, nil)
+		gt.NoError(t, err).Required()
+
+		// Close one case
+		_, err = uc.CloseCase(ctx, testWorkspaceID, case1.ID)
+		gt.NoError(t, err).Required()
+
+		// Filter by OPEN status
+		openStatus := types.CaseStatusOpen
+		openCases, err := uc.ListCases(ctx, testWorkspaceID, &openStatus)
+		gt.NoError(t, err).Required()
+		gt.Array(t, openCases).Length(1)
+		gt.Value(t, openCases[0].Title).Equal("Open Case 2")
+
+		// Filter by CLOSED status
+		closedStatus := types.CaseStatusClosed
+		closedCases, err := uc.ListCases(ctx, testWorkspaceID, &closedStatus)
+		gt.NoError(t, err).Required()
+		gt.Array(t, closedCases).Length(1)
+		gt.Value(t, closedCases[0].Title).Equal("Open Case 1")
+	})
+}
+
+func TestCaseUseCase_CreateCase_DefaultStatus(t *testing.T) {
+	repo := memory.New()
+	uc := usecase.NewCaseUseCase(repo, nil, nil, "")
+	ctx := context.Background()
+
+	created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil)
+	gt.NoError(t, err).Required()
+	gt.Value(t, created.Status).Equal(types.CaseStatusOpen)
+
+	// Verify through GetCase as well
+	retrieved, err := uc.GetCase(ctx, testWorkspaceID, created.ID)
+	gt.NoError(t, err).Required()
+	gt.Value(t, retrieved.Status).Equal(types.CaseStatusOpen)
+}
+
+func TestCaseUseCase_CloseCase(t *testing.T) {
+	t.Run("close an open case", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, "")
+		ctx := context.Background()
+
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil)
+		gt.NoError(t, err).Required()
+		gt.Value(t, created.Status).Equal(types.CaseStatusOpen)
+
+		closed, err := uc.CloseCase(ctx, testWorkspaceID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, closed.Status).Equal(types.CaseStatusClosed)
+		gt.Value(t, closed.ID).Equal(created.ID)
+		gt.Value(t, closed.Title).Equal("Test Case")
+	})
+
+	t.Run("close an already closed case fails", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, "")
+		ctx := context.Background()
+
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil)
+		gt.NoError(t, err).Required()
+
+		_, err = uc.CloseCase(ctx, testWorkspaceID, created.ID)
+		gt.NoError(t, err).Required()
+
+		_, err = uc.CloseCase(ctx, testWorkspaceID, created.ID)
+		gt.Value(t, err).NotNil()
+		gt.Error(t, err).Is(usecase.ErrCaseAlreadyClosed)
+	})
+
+	t.Run("close non-existent case fails", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, "")
+		ctx := context.Background()
+
+		_, err := uc.CloseCase(ctx, testWorkspaceID, 999)
+		gt.Value(t, err).NotNil()
+		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
+	})
+}
+
+func TestCaseUseCase_ReopenCase(t *testing.T) {
+	t.Run("reopen a closed case", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, "")
+		ctx := context.Background()
+
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil)
+		gt.NoError(t, err).Required()
+
+		_, err = uc.CloseCase(ctx, testWorkspaceID, created.ID)
+		gt.NoError(t, err).Required()
+
+		reopened, err := uc.ReopenCase(ctx, testWorkspaceID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, reopened.Status).Equal(types.CaseStatusOpen)
+		gt.Value(t, reopened.ID).Equal(created.ID)
+		gt.Value(t, reopened.Title).Equal("Test Case")
+	})
+
+	t.Run("reopen an already open case fails", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, "")
+		ctx := context.Background()
+
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil)
+		gt.NoError(t, err).Required()
+
+		_, err = uc.ReopenCase(ctx, testWorkspaceID, created.ID)
+		gt.Value(t, err).NotNil()
+		gt.Error(t, err).Is(usecase.ErrCaseAlreadyOpen)
+	})
+
+	t.Run("reopen non-existent case fails", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, "")
+		ctx := context.Background()
+
+		_, err := uc.ReopenCase(ctx, testWorkspaceID, 999)
+		gt.Value(t, err).NotNil()
+		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
 	})
 }
 

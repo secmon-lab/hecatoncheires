@@ -15,8 +15,8 @@ type CaseRepository interface {
 	// Get retrieves a case by ID
 	Get(ctx context.Context, workspaceID string, id int64) (*model.Case, error)
 
-	// List retrieves all cases
-	List(ctx context.Context, workspaceID string) ([]*model.Case, error)
+	// List retrieves cases with optional filtering
+	List(ctx context.Context, workspaceID string, opts ...ListCaseOption) ([]*model.Case, error)
 
 	// Update updates an existing case
 	Update(ctx context.Context, workspaceID string, c *model.Case) (*model.Case, error)

@@ -19,8 +19,12 @@ paths:
 
 ### Test Execution
 
-- Local: `task test:e2e`
-- CI: GitHub Actions automatically runs E2E tests on PRs
+**MANDATORY: After any frontend code change, you MUST run E2E tests locally before considering the task complete.**
+
+- Run `task test:e2e` locally after modifying any file under `frontend/`
+- Do NOT rely solely on CI to catch E2E failures — always verify locally first
+- If E2E tests fail, fix the failures before finishing the task
+- CI: GitHub Actions also runs E2E tests on PRs as an additional check
 
 ### Test File Locations
 

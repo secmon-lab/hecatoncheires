@@ -8,6 +8,10 @@ var (
 	ErrCaseNotFound   = errors.New("case not found")
 	ErrActionNotFound = errors.New("action not found")
 
+	// Status errors
+	ErrCaseAlreadyClosed = errors.New("case is already closed")
+	ErrCaseAlreadyOpen   = errors.New("case is already open")
+
 	// Other errors
 	ErrDuplicateField = errors.New("duplicate field")
 )

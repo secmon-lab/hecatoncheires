@@ -10,18 +10,19 @@ import (
 // WorkspaceID is not exposed in the GraphQL schema; it is used internally
 // to pass workspace context to nested field resolvers (actions, knowledges, assignees).
 type Case struct {
-	ID             int           `json:"id"`
-	WorkspaceID    string        `json:"-"`
-	Title          string        `json:"title"`
-	Description    string        `json:"description"`
-	AssigneeIDs    []string      `json:"assigneeIDs"`
-	Assignees      []*SlackUser  `json:"assignees"`
-	SlackChannelID *string       `json:"slackChannelID,omitempty"`
-	Fields         []*FieldValue `json:"fields"`
-	Actions        []*Action     `json:"actions"`
-	Knowledges     []*Knowledge  `json:"knowledges"`
-	CreatedAt      time.Time     `json:"createdAt"`
-	UpdatedAt      time.Time     `json:"updatedAt"`
+	ID             int              `json:"id"`
+	WorkspaceID    string           `json:"-"`
+	Title          string           `json:"title"`
+	Description    string           `json:"description"`
+	Status         types.CaseStatus `json:"status"`
+	AssigneeIDs    []string         `json:"assigneeIDs"`
+	Assignees      []*SlackUser     `json:"assignees"`
+	SlackChannelID *string          `json:"slackChannelID,omitempty"`
+	Fields         []*FieldValue    `json:"fields"`
+	Actions        []*Action        `json:"actions"`
+	Knowledges     []*Knowledge     `json:"knowledges"`
+	CreatedAt      time.Time        `json:"createdAt"`
+	UpdatedAt      time.Time        `json:"updatedAt"`
 }
 
 // Action is a custom GraphQL model with WorkspaceID for argument-based propagation.

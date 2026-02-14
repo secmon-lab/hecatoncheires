@@ -18,8 +18,8 @@ export class CaseDetailPage extends BasePage {
     super(page);
     // Case title is the h1 element inside main content area (not the page title)
     this.caseTitle = page.locator('main h1').first();
-    // Description is the paragraph immediately after the title
-    this.caseDescription = page.locator('main h1 + p').first();
+    // Description is the paragraph after the title row
+    this.caseDescription = page.locator('main p').first();
     this.editButton = page.locator('button').filter({ hasText: /Edit/ }).first();
     this.deleteButton = page.locator('button').filter({ hasText: /Delete/ }).first();
     this.backButton = page.locator('button, a').filter({ hasText: /Back/ }).first();
