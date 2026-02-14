@@ -112,18 +112,26 @@ export default function CaseDetail() {
 
   const handleCloseCase = async () => {
     if (!caseItem) return
-    await closeCase({
-      variables: { workspaceId: currentWorkspace!.id, id: caseItem.id },
-    })
-    refetch()
+    try {
+      await closeCase({
+        variables: { workspaceId: currentWorkspace!.id, id: caseItem.id },
+      })
+      refetch()
+    } catch (err) {
+      console.error('Failed to close case:', err)
+    }
   }
 
   const handleReopenCase = async () => {
     if (!caseItem) return
-    await reopenCase({
-      variables: { workspaceId: currentWorkspace!.id, id: caseItem.id },
-    })
-    refetch()
+    try {
+      await reopenCase({
+        variables: { workspaceId: currentWorkspace!.id, id: caseItem.id },
+      })
+      refetch()
+    } catch (err) {
+      console.error('Failed to reopen case:', err)
+    }
   }
 
   const handleActionClick = (actionId: number) => {
