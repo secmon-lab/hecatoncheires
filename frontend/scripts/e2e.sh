@@ -7,7 +7,7 @@ cd frontend && pnpm install && pnpm run build && cd ..
 
 # Start backend server with go run
 echo "Starting backend server..."
-go run . serve --repository-backend=memory --config=frontend/e2e/fixtures/config.test.toml --no-auth=U000000000 --addr=127.0.0.1:8080 --graphiql=false &
+go run . serve --repository-backend=memory --config=frontend/e2e/fixtures/config.test.toml --no-auth=U000000000 --addr=127.0.0.1:18080 --graphiql=false &
 BACKEND_PID=$!
 
 # Function to cleanup on exit
@@ -21,7 +21,7 @@ trap cleanup EXIT
 # Wait for server to be ready
 echo "Waiting for server to be ready..."
 for i in {1..30}; do
-  if curl -s http://localhost:8080 > /dev/null 2>&1; then
+  if curl -s http://localhost:18080 > /dev/null 2>&1; then
     echo "Server is ready!"
     break
   fi
@@ -31,7 +31,7 @@ done
 # Run E2E tests
 echo "Running E2E tests..."
 cd frontend
-pnpm exec playwright test || TEST_EXIT_CODE=$?
+BASE_URL=http://localhost:18080 pnpm exec playwright test || TEST_EXIT_CODE=$?
 
 # Show summary
 echo ""
