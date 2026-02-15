@@ -92,9 +92,11 @@ export class ActionDetailPage extends BasePage {
    */
   async changeStatus(newStatus: string): Promise<void> {
     const dropdown = this.page.getByTestId('status-dropdown');
+    const responsePromise = this.page.waitForResponse(
+      (resp) => resp.url().includes('/graphql') && resp.status() === 200
+    );
     await dropdown.selectOption(newStatus);
-    // Wait for the mutation to complete
-    await this.page.waitForTimeout(1000);
+    await responsePromise;
   }
 
   /**

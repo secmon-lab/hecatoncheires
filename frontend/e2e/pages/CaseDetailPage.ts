@@ -199,8 +199,11 @@ export class CaseDetailPage extends BasePage {
     const modal = this.page.locator('[role="dialog"]');
     await modal.waitFor({ state: 'visible', timeout: 5000 });
     const confirmBtn = modal.locator('button').filter({ hasText: /^Close$/ });
+    const responsePromise = this.page.waitForResponse(
+      (resp) => resp.url().includes('/graphql') && resp.status() === 200
+    );
     await confirmBtn.click();
-    await this.page.waitForTimeout(1000);
+    await responsePromise;
   }
 
   /**
@@ -208,8 +211,11 @@ export class CaseDetailPage extends BasePage {
    */
   async clickReopenButton(): Promise<void> {
     const reopenBtn = this.page.locator('button').filter({ hasText: /Reopen/ }).first();
+    const responsePromise = this.page.waitForResponse(
+      (resp) => resp.url().includes('/graphql') && resp.status() === 200
+    );
     await reopenBtn.click();
-    await this.page.waitForTimeout(1000);
+    await responsePromise;
   }
 
   /**
