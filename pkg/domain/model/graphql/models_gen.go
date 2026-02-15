@@ -19,7 +19,7 @@ type SourceConfig interface {
 type CreateActionInput struct {
 	CaseID         int                 `json:"caseID"`
 	Title          string              `json:"title"`
-	Description    string              `json:"description"`
+	Description    *string             `json:"description,omitempty"`
 	AssigneeIDs    []string            `json:"assigneeIDs,omitempty"`
 	SlackMessageTs *string             `json:"slackMessageTS,omitempty"`
 	Status         *types.ActionStatus `json:"status,omitempty"`
@@ -27,7 +27,7 @@ type CreateActionInput struct {
 
 type CreateCaseInput struct {
 	Title       string             `json:"title"`
-	Description string             `json:"description"`
+	Description *string            `json:"description,omitempty"`
 	AssigneeIDs []string           `json:"assigneeIDs,omitempty"`
 	Fields      []*FieldValueInput `json:"fields,omitempty"`
 }
@@ -184,7 +184,7 @@ type UpdateActionInput struct {
 type UpdateCaseInput struct {
 	ID          int                `json:"id"`
 	Title       string             `json:"title"`
-	Description string             `json:"description"`
+	Description *string            `json:"description,omitempty"`
 	AssigneeIDs []string           `json:"assigneeIDs,omitempty"`
 	Fields      []*FieldValueInput `json:"fields,omitempty"`
 }

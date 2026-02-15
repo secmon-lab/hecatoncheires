@@ -14,6 +14,7 @@ import type { ReactElement } from 'react'
 interface Action {
   id: number
   caseID: number
+  case?: { id: number; title: string }
   title: string
   description: string
   assigneeIDs: string[]
@@ -92,9 +93,23 @@ export default function ActionList() {
       width: '200px',
     },
     {
-      header: 'Case ID',
-      accessor: 'caseID' as keyof Action,
-      width: '80px',
+      header: 'Case',
+      accessor: ((action: Action) => (
+        action.case ? (
+          <span
+            className={styles.caseLink}
+            onClick={(e) => {
+              e.stopPropagation()
+              navigate(`/ws/${currentWorkspace!.id}/cases/${action.case!.id}`)
+            }}
+          >
+            {action.case.title}
+          </span>
+        ) : (
+          <span>{action.caseID}</span>
+        )
+      )) as (row: Action) => ReactElement,
+      width: '150px',
     },
     {
       header: 'Status',

@@ -30,7 +30,6 @@ interface ActionFormProps {
 interface FormErrors {
   caseID?: string
   title?: string
-  description?: string
 }
 
 export default function ActionForm({ isOpen, onClose, action, initialCaseID }: ActionFormProps) {
@@ -40,7 +39,6 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
   const [description, setDescription] = useState('')
   const [assigneeIDs, setAssigneeIDs] = useState<string[]>([])
   const [selectedAssignees, setSelectedAssignees] = useState<Array<{ value: string; label: string; image?: string }>>([])
-  const [slackMessageTS, setSlackMessageTS] = useState('')
   const [status, setStatus] = useState('TODO')
   const [errors, setErrors] = useState<FormErrors>({})
 
@@ -108,7 +106,6 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
           image: a.imageUrl,
         }))
       )
-      setSlackMessageTS(action.slackMessageTS || '')
       setStatus(action.status || 'TODO')
     } else if (initialCaseID) {
       setCaseID(initialCaseID)
@@ -126,7 +123,6 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
     setDescription('')
     setAssigneeIDs([])
     setSelectedAssignees([])
-    setSlackMessageTS('')
     setStatus('TODO')
     setErrors({})
   }
@@ -140,10 +136,6 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
 
     if (!title.trim()) {
       newErrors.title = 'Title is required'
-    }
-
-    if (!description.trim()) {
-      newErrors.description = 'Description is required'
     }
 
     setErrors(newErrors)
@@ -167,7 +159,6 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
             title: title.trim(),
             description: description.trim(),
             assigneeIDs,
-            slackMessageTS: slackMessageTS || null,
             status,
           },
         },
@@ -181,7 +172,6 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
             title: title.trim(),
             description: description.trim(),
             assigneeIDs,
-            slackMessageTS: slackMessageTS || null,
             status,
           },
         },
@@ -261,20 +251,17 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
 
         <div className={styles.field}>
           <label htmlFor="description" className={styles.label}>
-            Description *
+            Description
           </label>
           <textarea
             id="description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            className={`${styles.textarea} ${errors.description ? styles.inputError : ''}`}
+            className={styles.textarea}
             placeholder="Enter action description"
             rows={4}
             disabled={loading}
           />
-          {errors.description && (
-            <span className={styles.error}>{errors.description}</span>
-          )}
         </div>
 
         <div className={styles.field}>
@@ -335,20 +322,6 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
           />
         </div>
 
-        <div className={styles.field}>
-          <label htmlFor="slackMessageTS" className={styles.label}>
-            Slack Message TS
-          </label>
-          <input
-            id="slackMessageTS"
-            type="text"
-            value={slackMessageTS}
-            onChange={(e) => setSlackMessageTS(e.target.value)}
-            className={styles.input}
-            placeholder="Enter Slack message timestamp"
-            disabled={loading}
-          />
-        </div>
       </form>
     </Modal>
   )

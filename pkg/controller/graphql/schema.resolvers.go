@@ -220,7 +220,12 @@ func (r *mutationResolver) CreateCase(ctx context.Context, workspaceID string, i
 
 	fieldValues := toDomainFieldValues(input.Fields)
 
-	created, err := r.UseCases.Case.CreateCase(ctx, workspaceID, input.Title, input.Description, assigneeIDs, fieldValues)
+	description := ""
+	if input.Description != nil {
+		description = *input.Description
+	}
+
+	created, err := r.UseCases.Case.CreateCase(ctx, workspaceID, input.Title, description, assigneeIDs, fieldValues)
 	if err != nil {
 		return nil, err
 	}
@@ -237,7 +242,12 @@ func (r *mutationResolver) UpdateCase(ctx context.Context, workspaceID string, i
 
 	fieldValues := toDomainFieldValues(input.Fields)
 
-	updated, err := r.UseCases.Case.UpdateCase(ctx, workspaceID, int64(input.ID), input.Title, input.Description, assigneeIDs, fieldValues)
+	description := ""
+	if input.Description != nil {
+		description = *input.Description
+	}
+
+	updated, err := r.UseCases.Case.UpdateCase(ctx, workspaceID, int64(input.ID), input.Title, description, assigneeIDs, fieldValues)
 	if err != nil {
 		return nil, err
 	}
@@ -288,7 +298,12 @@ func (r *mutationResolver) CreateAction(ctx context.Context, workspaceID string,
 		status = *input.Status
 	}
 
-	created, err := r.UseCases.Action.CreateAction(ctx, workspaceID, int64(input.CaseID), input.Title, input.Description, assigneeIDs, slackMessageTS, status)
+	description := ""
+	if input.Description != nil {
+		description = *input.Description
+	}
+
+	created, err := r.UseCases.Action.CreateAction(ctx, workspaceID, int64(input.CaseID), input.Title, description, assigneeIDs, slackMessageTS, status)
 	if err != nil {
 		return nil, err
 	}

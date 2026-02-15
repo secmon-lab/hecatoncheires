@@ -118,4 +118,82 @@ export class CaseListPage extends BasePage {
       return false;
     }
   }
+
+  /**
+   * Fill the search filter input
+   */
+  async fillSearchFilter(text: string): Promise<void> {
+    await this.page.getByTestId('search-filter').fill(text);
+    await this.page.waitForTimeout(300);
+  }
+
+  /**
+   * Clear the search filter
+   */
+  async clearSearchFilter(): Promise<void> {
+    await this.page.getByTestId('search-filter').clear();
+    await this.page.waitForTimeout(300);
+  }
+
+  /**
+   * Open the column selector popover
+   */
+  async openColumnSelector(): Promise<void> {
+    await this.page.getByTestId('column-selector-button').click();
+    await this.page.getByTestId('column-selector-popover').waitFor({ state: 'visible' });
+  }
+
+  /**
+   * Toggle a column's visibility by its key
+   */
+  async toggleColumn(columnKey: string): Promise<void> {
+    await this.page.getByTestId(`column-toggle-${columnKey}`).click();
+  }
+
+  /**
+   * Check if a column header is visible in the table
+   */
+  async isColumnVisible(columnName: string): Promise<boolean> {
+    const header = this.casesTable.locator('th').filter({ hasText: columnName });
+    return await header.isVisible();
+  }
+
+  /**
+   * Go to a specific page
+   */
+  async goToPage(direction: 'next' | 'prev'): Promise<void> {
+    if (direction === 'next') {
+      await this.page.getByTestId('pagination-next').click();
+    } else {
+      await this.page.getByTestId('pagination-prev').click();
+    }
+    await this.page.waitForTimeout(300);
+  }
+
+  /**
+   * Get the current pagination info text (e.g. "1 / 2")
+   */
+  async getPaginationInfo(): Promise<string> {
+    return await this.page.getByTestId('pagination-info').textContent() || '';
+  }
+
+  /**
+   * Get the number of rows currently displayed
+   */
+  async getRowCount(): Promise<number> {
+    const rows = await this.casesTable.locator('tbody tr').all();
+    return rows.length;
+  }
+
+  /**
+   * Click a status tab
+   */
+  async clickStatusTab(status: 'Open' | 'Closed'): Promise<void> {
+    if (status === 'Open') {
+      await this.page.getByTestId('status-tab-open').click();
+    } else {
+      await this.page.getByTestId('status-tab-closed').click();
+    }
+    await this.waitForTableLoad();
+  }
 }

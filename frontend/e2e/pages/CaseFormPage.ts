@@ -119,12 +119,14 @@ export class CaseFormPage extends BasePage {
    */
   async createCase(data: {
     title: string;
-    description: string;
+    description?: string;
     customFields?: Record<string, string>;
   }): Promise<void> {
     await this.waitForFormVisible();
     await this.fillTitle(data.title);
-    await this.fillDescription(data.description);
+    if (data.description) {
+      await this.fillDescription(data.description);
+    }
 
     // Fill custom fields if provided
     if (data.customFields) {

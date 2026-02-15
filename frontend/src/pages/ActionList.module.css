@@ -76,3 +76,14 @@
 .error {
   color: var(--color-error);
 }
+
+.caseLink {
+  color: var(--color-primary);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.caseLink:hover {
+  text-decoration: underline;
+  color: var(--color-primary-dark);
+}

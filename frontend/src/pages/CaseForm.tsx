@@ -27,7 +27,6 @@ interface CaseFormProps {
 
 interface FormErrors {
   title?: string
-  description?: string
   [key: string]: string | undefined
 }
 
@@ -128,10 +127,6 @@ export default function CaseForm({ isOpen, onClose, caseItem }: CaseFormProps) {
 
     if (!title.trim()) {
       newErrors.title = 'Title is required'
-    }
-
-    if (!description.trim()) {
-      newErrors.description = 'Description is required'
     }
 
     // Validate custom fields
@@ -249,20 +244,17 @@ export default function CaseForm({ isOpen, onClose, caseItem }: CaseFormProps) {
 
         <div className={styles.field}>
           <label htmlFor="description" className={styles.label}>
-            Description *
+            Description
           </label>
           <textarea
             id="description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            className={`${styles.textarea} ${errors.description ? styles.inputError : ''}`}
+            className={styles.textarea}
             placeholder={`Enter ${caseLabel.toLowerCase()} description`}
             rows={4}
             disabled={loading}
           />
-          {errors.description && (
-            <span className={styles.error}>{errors.description}</span>
-          )}
         </div>
 
         <div className={styles.field}>

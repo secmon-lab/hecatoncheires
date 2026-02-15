@@ -1465,7 +1465,7 @@ enum CaseStatus {
 type Case {
   id: Int!
   title: String!
-  description: String!
+  description: String
   status: CaseStatus!
   assigneeIDs: [String!]!
   assignees: [SlackUser!]!
@@ -1494,7 +1494,7 @@ type Action {
   caseID: Int!
   case: Case
   title: String!
-  description: String!
+  description: String
   assigneeIDs: [String!]!
   assignees: [SlackUser!]!
   slackMessageTS: String
@@ -1506,7 +1506,7 @@ type Action {
 # Inputs
 input CreateCaseInput {
   title: String!
-  description: String!
+  description: String
   assigneeIDs: [String!]
   fields: [FieldValueInput!]
 }
@@ -1514,7 +1514,7 @@ input CreateCaseInput {
 input UpdateCaseInput {
   id: Int!
   title: String!
-  description: String!
+  description: String
   assigneeIDs: [String!]
   fields: [FieldValueInput!]
 }
@@ -1522,7 +1522,7 @@ input UpdateCaseInput {
 input CreateActionInput {
   caseID: Int!
   title: String!
-  description: String!
+  description: String
   assigneeIDs: [String!]
   slackMessageTS: String
   status: ActionStatus
@@ -2326,9 +2326,9 @@ func (ec *executionContext) _Action_description(ctx context.Context, field graph
 			return obj.Description, nil
 		},
 		nil,
-		ec.marshalNString2string,
+		ec.marshalOString2string,
 		true,
-		true,
+		false,
 	)
 }
 
@@ -2597,9 +2597,9 @@ func (ec *executionContext) _Case_description(ctx context.Context, field graphql
 			return obj.Description, nil
 		},
 		nil,
-		ec.marshalNString2string,
+		ec.marshalOString2string,
 		true,
-		true,
+		false,
 	)
 }
 
@@ -8566,7 +8566,7 @@ func (ec *executionContext) unmarshalInputCreateActionInput(ctx context.Context,
 			it.Title = data
 		case "description":
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("description"))
-			data, err := ec.unmarshalNString2string(ctx, v)
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
 			if err != nil {
 				return it, err
 			}
@@ -8621,7 +8621,7 @@ func (ec *executionContext) unmarshalInputCreateCaseInput(ctx context.Context, o
 			it.Title = data
 		case "description":
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("description"))
-			data, err := ec.unmarshalNString2string(ctx, v)
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
 			if err != nil {
 				return it, err
 			}
@@ -8875,7 +8875,7 @@ func (ec *executionContext) unmarshalInputUpdateCaseInput(ctx context.Context, o
 			it.Title = data
 		case "description":
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("description"))
-			data, err := ec.unmarshalNString2string(ctx, v)
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
 			if err != nil {
 				return it, err
 			}
@@ -9099,9 +9099,6 @@ func (ec *executionContext) _Action(ctx context.Context, sel ast.SelectionSet, o
 			}
 		case "description":
 			out.Values[i] = ec._Action_description(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				atomic.AddUint32(&out.Invalids, 1)
-			}
 		case "assigneeIDs":
 			out.Values[i] = ec._Action_assigneeIDs(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
@@ -9206,9 +9203,6 @@ func (ec *executionContext) _Case(ctx context.Context, sel ast.SelectionSet, obj
 			}
 		case "description":
 			out.Values[i] = ec._Case_description(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				atomic.AddUint32(&out.Invalids, 1)
-			}
 		case "status":
 			out.Values[i] = ec._Case_status(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
@@ -12737,6 +12731,18 @@ func (ec *executionContext) marshalOSource2ᚖgithubᚗcomᚋsecmonᚑlabᚋheca
 		return graphql.Null
 	}
 	return ec._Source(ctx, sel, v)
+}
+
+func (ec *executionContext) unmarshalOString2string(ctx context.Context, v any) (string, error) {
+	res, err := graphql.UnmarshalString(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalOString2string(ctx context.Context, sel ast.SelectionSet, v string) graphql.Marshaler {
+	_ = sel
+	_ = ctx
+	res := graphql.MarshalString(v)
+	return res
 }
 
 func (ec *executionContext) unmarshalOString2ᚕstringᚄ(ctx context.Context, v any) ([]string, error) {

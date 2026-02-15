@@ -78,4 +78,30 @@ export class ActionDetailPage extends BasePage {
       return false;
     }
   }
+
+  /**
+   * Get the current status value from the dropdown
+   */
+  async getStatus(): Promise<string> {
+    const dropdown = this.page.getByTestId('status-dropdown');
+    return await dropdown.inputValue();
+  }
+
+  /**
+   * Change the action status via the dropdown
+   */
+  async changeStatus(newStatus: string): Promise<void> {
+    const dropdown = this.page.getByTestId('status-dropdown');
+    await dropdown.selectOption(newStatus);
+    // Wait for the mutation to complete
+    await this.page.waitForTimeout(1000);
+  }
+
+  /**
+   * Check if the status dropdown is disabled
+   */
+  async isStatusDropdownDisabled(): Promise<boolean> {
+    const dropdown = this.page.getByTestId('status-dropdown');
+    return await dropdown.isDisabled();
+  }
 }
