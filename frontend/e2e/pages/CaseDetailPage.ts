@@ -191,14 +191,13 @@ export class CaseDetailPage extends BasePage {
    * Click the Close button (opens confirmation modal and confirms)
    */
   async clickCloseButton(): Promise<void> {
-    // Click the Close button in the header to open confirmation modal
-    const closeBtn = this.page.locator('button').filter({ hasText: /^Close$/ }).first();
+    // Click the Close button in the header (scoped by data-testid) to open confirmation modal
+    const closeBtn = this.page.getByTestId('close-case-button');
     await closeBtn.click();
 
-    // Wait for the confirmation modal and click the confirm Close button
-    const modal = this.page.locator('[role="dialog"]');
-    await modal.waitFor({ state: 'visible', timeout: 5000 });
-    const confirmBtn = modal.locator('button').filter({ hasText: /^Close$/ });
+    // Wait for the confirmation modal and click the confirm Close button (scoped by data-testid)
+    const confirmBtn = this.page.getByTestId('confirm-close-button');
+    await confirmBtn.waitFor({ state: 'visible', timeout: 5000 });
     const responsePromise = this.page.waitForResponse(
       (resp) => resp.url().includes('/graphql') && resp.status() === 200
     );
@@ -222,7 +221,7 @@ export class CaseDetailPage extends BasePage {
    * Check if Close button is visible
    */
   async isCloseButtonVisible(): Promise<boolean> {
-    const closeBtn = this.page.locator('button').filter({ hasText: /^Close$/ }).first();
+    const closeBtn = this.page.getByTestId('close-case-button');
     return await closeBtn.isVisible();
   }
 

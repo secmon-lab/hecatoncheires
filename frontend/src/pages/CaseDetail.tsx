@@ -276,7 +276,7 @@ export default function CaseDetail() {
         </Button>
         <div className={styles.actions}>
           {caseItem.status === 'OPEN' ? (
-            <Button variant="outline" icon={<XCircle size={20} />} onClick={() => setIsCloseDialogOpen(true)} className={styles.closeButton}>
+            <Button variant="outline" icon={<XCircle size={20} />} onClick={() => setIsCloseDialogOpen(true)} className={styles.closeButton} data-testid="close-case-button">
               Close
             </Button>
           ) : (
@@ -541,6 +541,7 @@ export default function CaseDetail() {
             </Button>
             <Button
               variant="danger"
+              data-testid="confirm-close-button"
               onClick={async () => {
                 await handleCloseCase()
                 setIsCloseDialogOpen(false)
