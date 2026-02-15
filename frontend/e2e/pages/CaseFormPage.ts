@@ -27,8 +27,8 @@ export class CaseFormPage extends BasePage {
   async waitForFormVisible(): Promise<void> {
     // Wait for the modal title to appear
     await this.page.locator('h2').filter({ hasText: /New Case|Edit Case/ }).waitFor({ state: 'visible', timeout: 5000 });
-    // Small delay to ensure form is ready
-    await this.page.waitForTimeout(300);
+    // Wait for React to finish rendering the form
+    await this.page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
   }
 
   /**

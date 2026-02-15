@@ -16,6 +16,15 @@ if [ -f "$PID_FILE" ]; then
   rm -f "$PID_FILE"
 fi
 
+# Also kill any process occupying the E2E port (handles orphaned child processes from go run)
+E2E_PORT=18080
+PORT_PID=$(lsof -ti:$E2E_PORT 2>/dev/null || true)
+if [ -n "$PORT_PID" ]; then
+  echo "Killing orphaned process on port $E2E_PORT (PID: $PORT_PID)..."
+  kill "$PORT_PID" 2>/dev/null || true
+  sleep 1
+fi
+
 # Build frontend
 echo "Building frontend..."
 cd "$PROJECT_ROOT/frontend" && pnpm install && pnpm run build && cd "$PROJECT_ROOT"

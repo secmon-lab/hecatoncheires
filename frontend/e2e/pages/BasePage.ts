@@ -74,11 +74,4 @@ export class BasePage {
   async goBack(): Promise<void> {
     await this.page.goBack();
   }
-
-  /**
-   * Wait for a specific timeout
-   */
-  async wait(ms: number): Promise<void> {
-    await this.page.waitForTimeout(ms);
-  }
 }

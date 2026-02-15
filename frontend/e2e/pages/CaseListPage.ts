@@ -39,7 +39,7 @@ export class CaseListPage extends BasePage {
    * Get a case row by title
    */
   getCaseRowByTitle(title: string): Locator {
-    return this.page.locator('tr').filter({ hasText: title });
+    return this.page.locator('tr').filter({ hasText: title }).first();
   }
 
   /**

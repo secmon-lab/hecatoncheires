@@ -61,7 +61,8 @@ export class KnowledgeListPage extends BasePage {
       this.knowledgeTable.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {}),
       this.page.locator('text=No data available').waitFor({ state: 'visible', timeout: 10000 }).catch(() => {}),
     ]);
-    await this.page.waitForTimeout(500);
+    // Wait for React to finish rendering
+    await this.page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
   }
 
   /**

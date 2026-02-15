@@ -37,6 +37,7 @@ test.describe('Case Management', () => {
     });
 
     // Verify the case appears in the list
+    await caseListPage.fillSearchFilter('E2E Test Case');
     const exists = await caseListPage.caseExists('E2E Test Case');
     expect(exists).toBeTruthy();
   });
@@ -60,6 +61,7 @@ test.describe('Case Management', () => {
     await caseListPage.waitForTableLoad();
 
     // Click on the case to view details
+    await caseListPage.fillSearchFilter('Case for Detail View');
     await caseListPage.clickCaseByTitle('Case for Detail View');
 
     // Verify detail page is loaded
@@ -90,6 +92,7 @@ test.describe('Case Management', () => {
     await caseListPage.waitForTableLoad();
 
     // Open the case detail
+    await caseListPage.fillSearchFilter('Case to Edit');
     await caseListPage.clickCaseByTitle('Case to Edit');
 
     // Click edit button
@@ -120,6 +123,7 @@ test.describe('Case Management', () => {
     });
 
     await caseListPage.waitForTableLoad();
+    await caseListPage.fillSearchFilter('Case Without Slack');
     await caseListPage.clickCaseByTitle('Case Without Slack');
     await caseDetailPage.waitForPageLoad();
 
@@ -168,6 +172,7 @@ test.describe('Case Management', () => {
       }
     });
 
+    await caseListPage.fillSearchFilter('Case With Slack');
     await caseListPage.clickCaseByTitle('Case With Slack');
     await caseDetailPage.waitForPageLoad();
 
@@ -229,6 +234,7 @@ test.describe('Case Management', () => {
     });
 
     // Verify the case appears in the list
+    await caseListPage.fillSearchFilter('Case Without Description');
     const exists = await caseListPage.caseExists('Case Without Description');
     expect(exists).toBeTruthy();
 
@@ -312,6 +318,9 @@ test.describe('Case Management', () => {
     await page.reload();
     await caseListPage.waitForTableLoad();
 
+    // Filter to only show cases from this test to avoid interference
+    await caseListPage.fillSearchFilter('Paginated Case');
+
     // Verify first page has 20 rows
     const rowCount = await caseListPage.getRowCount();
     expect(rowCount).toBe(20);
@@ -346,6 +355,7 @@ test.describe('Case Management', () => {
     await caseListPage.waitForTableLoad();
 
     // Verify it's in Open tab
+    await caseListPage.fillSearchFilter('Case To Close');
     const existsInOpen = await caseListPage.caseExists('Case To Close');
     expect(existsInOpen).toBeTruthy();
 
@@ -382,6 +392,7 @@ test.describe('Case Management', () => {
     });
 
     await caseListPage.waitForTableLoad();
+    await caseListPage.fillSearchFilter('Case With Timestamps');
     await caseListPage.clickCaseByTitle('Case With Timestamps');
     await caseDetailPage.waitForPageLoad();
 
@@ -412,6 +423,7 @@ test.describe('Case Management', () => {
     });
 
     await caseListPage.waitForTableLoad();
+    await caseListPage.fillSearchFilter('Case With Fields');
     await caseListPage.clickCaseByTitle('Case With Fields');
     await caseDetailPage.waitForPageLoad();
 
@@ -434,6 +446,7 @@ test.describe('Case Management', () => {
     });
 
     await caseListPage.waitForTableLoad();
+    await caseListPage.fillSearchFilter('Case With No Actions');
     await caseListPage.clickCaseByTitle('Case With No Actions');
     await caseDetailPage.waitForPageLoad();
 
@@ -456,6 +469,7 @@ test.describe('Case Management', () => {
     });
 
     await caseListPage.waitForTableLoad();
+    await caseListPage.fillSearchFilter('Case Status Badge');
     await caseListPage.clickCaseByTitle('Case Status Badge');
     await caseDetailPage.waitForPageLoad();
 
