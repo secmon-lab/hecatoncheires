@@ -5,6 +5,10 @@ export const GET_ACTIONS = gql`
     actions(workspaceId: $workspaceId) {
       id
       caseID
+      case {
+        id
+        title
+      }
       title
       description
       assigneeIDs

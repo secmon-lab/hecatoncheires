@@ -109,4 +109,82 @@ test.describe('Action Management', () => {
       expect(exists).toBeTruthy();
     }
   });
+
+  test('should create an action without description', async ({ page }) => {
+    const actionListPage = new ActionListPage(page);
+    const actionFormPage = new ActionFormPage(page);
+
+    // Click "New Action" button
+    await actionListPage.clickNewActionButton();
+
+    // Create action with title only (no description)
+    await actionFormPage.createAction({
+      title: 'Action Without Description',
+      caseTitle: 'Parent Case for Actions',
+    });
+
+    // Verify the action appears in the list
+    const exists = await actionListPage.actionExists('Action Without Description');
+    expect(exists).toBeTruthy();
+  });
+
+  test('should change action status from detail page without edit mode', async ({ page }) => {
+    const actionListPage = new ActionListPage(page);
+    const actionFormPage = new ActionFormPage(page);
+    const actionDetailPage = new ActionDetailPage(page);
+
+    // Create an action
+    await actionListPage.clickNewActionButton();
+    await actionFormPage.createAction({
+      title: 'Action for Status Change',
+      description: 'Testing inline status change',
+      caseTitle: 'Parent Case for Actions',
+    });
+
+    await actionListPage.waitForTableLoad();
+    await actionListPage.clickActionByTitle('Action for Status Change');
+    await actionDetailPage.waitForPageLoad();
+
+    // Verify initial status is TODO
+    const initialStatus = await actionDetailPage.getStatus();
+    expect(initialStatus).toBe('TODO');
+
+    // Change status to IN_PROGRESS
+    await actionDetailPage.changeStatus('IN_PROGRESS');
+
+    // Verify status updated
+    const newStatus = await actionDetailPage.getStatus();
+    expect(newStatus).toBe('IN_PROGRESS');
+
+    // Reload and verify persistence
+    await page.reload();
+    await actionDetailPage.waitForPageLoad();
+    const persistedStatus = await actionDetailPage.getStatus();
+    expect(persistedStatus).toBe('IN_PROGRESS');
+  });
+
+  test('should change action status to completed', async ({ page }) => {
+    const actionListPage = new ActionListPage(page);
+    const actionFormPage = new ActionFormPage(page);
+    const actionDetailPage = new ActionDetailPage(page);
+
+    // Create an action
+    await actionListPage.clickNewActionButton();
+    await actionFormPage.createAction({
+      title: 'Action to Complete',
+      description: 'Testing completion',
+      caseTitle: 'Parent Case for Actions',
+    });
+
+    await actionListPage.waitForTableLoad();
+    await actionListPage.clickActionByTitle('Action to Complete');
+    await actionDetailPage.waitForPageLoad();
+
+    // Change status to COMPLETED
+    await actionDetailPage.changeStatus('COMPLETED');
+
+    // Verify status updated
+    const status = await actionDetailPage.getStatus();
+    expect(status).toBe('COMPLETED');
+  });
 });

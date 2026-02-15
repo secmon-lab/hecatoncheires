@@ -1,13 +1,14 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation } from '@apollo/client'
-import { ArrowLeft, Edit, MoreVertical, Trash2, Plus, ExternalLink, BookOpen, ChevronLeft, ChevronRight, XCircle, RotateCcw } from 'lucide-react'
+import { ArrowLeft, Edit, MoreVertical, Trash2, Plus, ExternalLink, BookOpen, ChevronLeft, ChevronRight, XCircle, RotateCcw, ClipboardList } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import Button from '../components/Button'
 import Chip from '../components/Chip'
+import Modal from '../components/Modal'
 import CaseForm from './CaseForm'
 import CaseDeleteDialog from './CaseDeleteDialog'
 import ActionForm from './ActionForm'
-import { GET_CASE, CLOSE_CASE, REOPEN_CASE } from '../graphql/case'
+import { GET_CASE, GET_CASES, CLOSE_CASE, REOPEN_CASE } from '../graphql/case'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { useWorkspace } from '../contexts/workspace-context'
 import styles from './CaseDetail.module.css'
@@ -70,6 +71,7 @@ export default function CaseDetail() {
   const { currentWorkspace } = useWorkspace()
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
+  const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false)
   const [isActionFormOpen, setIsActionFormOpen] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [knowledgePage, setKnowledgePage] = useState(0)
@@ -115,6 +117,10 @@ export default function CaseDetail() {
     try {
       await closeCase({
         variables: { workspaceId: currentWorkspace!.id, id: caseItem.id },
+        refetchQueries: [
+          { query: GET_CASES, variables: { workspaceId: currentWorkspace!.id, status: 'OPEN' } },
+          { query: GET_CASES, variables: { workspaceId: currentWorkspace!.id, status: 'CLOSED' } },
+        ],
       })
       refetch()
     } catch (err) {
@@ -127,6 +133,10 @@ export default function CaseDetail() {
     try {
       await reopenCase({
         variables: { workspaceId: currentWorkspace!.id, id: caseItem.id },
+        refetchQueries: [
+          { query: GET_CASES, variables: { workspaceId: currentWorkspace!.id, status: 'OPEN' } },
+          { query: GET_CASES, variables: { workspaceId: currentWorkspace!.id, status: 'CLOSED' } },
+        ],
       })
       refetch()
     } catch (err) {
@@ -154,6 +164,15 @@ export default function CaseDetail() {
     }
   }, [isMenuOpen])
 
+  const parseMetadata = (meta: any): Record<string, any> | null => {
+    if (!meta) return null
+    if (typeof meta === 'object') return meta
+    if (typeof meta === 'string') {
+      try { return JSON.parse(meta) } catch { return null }
+    }
+    return null
+  }
+
   const renderFieldValue = (fieldId: string, value: any) => {
     const fieldDef = fieldDefs.find((f: any) => f.id === fieldId)
     if (!fieldDef) return String(value)
@@ -173,15 +192,51 @@ export default function CaseDetail() {
           '-'
         )
 
-      case 'SELECT':
+      case 'SELECT': {
         const option = fieldDef.options?.find((opt: any) => opt.id === value)
-        return option ? option.name : value || '-'
+        if (!option) return value || '-'
+        const meta = parseMetadata(option.metadata)
+        const metaEntries = meta ? Object.entries(meta) : []
+        return (
+          <>
+            <span>{option.name}</span>
+            {metaEntries.length > 0 && (
+              <div className={styles.fieldMetaList}>
+                {metaEntries.map(([k, v]) => (
+                  <span key={k} className={styles.fieldMeta}>{k}: {String(v)}</span>
+                ))}
+              </div>
+            )}
+          </>
+        )
+      }
 
-      case 'MULTI_SELECT':
-        const selectedOptions = (value || [])
-          .map((id: string) => fieldDef.options?.find((opt: any) => opt.id === id)?.name)
+      case 'MULTI_SELECT': {
+        const selected = (value || [])
+          .map((id: string) => fieldDef.options?.find((opt: any) => opt.id === id))
           .filter(Boolean)
-        return selectedOptions.length > 0 ? selectedOptions.join(', ') : '-'
+        if (selected.length === 0) return '-'
+        return (
+          <div className={styles.multiSelectList}>
+            {selected.map((opt: any) => {
+              const meta = parseMetadata(opt.metadata)
+              const metaEntries = meta ? Object.entries(meta) : []
+              return (
+                <div key={opt.id} className={styles.multiSelectItem}>
+                  <span>{opt.name}</span>
+                  {metaEntries.length > 0 && (
+                    <div className={styles.fieldMetaList}>
+                      {metaEntries.map(([k, v]) => (
+                        <span key={k} className={styles.fieldMeta}>{k}: {String(v)}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )
+      }
 
       case 'USER':
       case 'MULTI_USER':
@@ -220,19 +275,8 @@ export default function CaseDetail() {
           Back
         </Button>
         <div className={styles.actions}>
-          {caseItem.slackChannelID && (
-            <a
-              href={caseItem.slackChannelURL || `https://slack.com/app_redirect?channel=${caseItem.slackChannelID}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={styles.slackChannelButton}
-            >
-              <ExternalLink size={16} />
-              <span>#{caseItem.slackChannelName || caseItem.slackChannelID}</span>
-            </a>
-          )}
           {caseItem.status === 'OPEN' ? (
-            <Button variant="outline" icon={<XCircle size={20} />} onClick={handleCloseCase} className={styles.closeButton}>
+            <Button variant="outline" icon={<XCircle size={20} />} onClick={() => setIsCloseDialogOpen(true)} className={styles.closeButton} data-testid="close-case-button">
               Close
             </Button>
           ) : (
@@ -270,55 +314,78 @@ export default function CaseDetail() {
       <div className={styles.content}>
         <div className={styles.titleSection}>
           <div className={styles.titleRow}>
-            <h1 className={styles.title}>{caseItem.title}</h1>
-            <Chip variant="status" colorIndex={caseItem.status === 'OPEN' ? 2 : 5}>
-              {caseItem.status === 'OPEN' ? 'Open' : 'Closed'}
-            </Chip>
+            <div className={styles.titleLeft}>
+              <h1 className={styles.title}>{caseItem.title}</h1>
+              <Chip variant="status" colorIndex={caseItem.status === 'OPEN' ? 2 : 5}>
+                {caseItem.status === 'OPEN' ? 'Open' : 'Closed'}
+              </Chip>
+            </div>
+            {caseItem.slackChannelID && (
+              <a
+                href={caseItem.slackChannelURL || `https://slack.com/app_redirect?channel=${caseItem.slackChannelID}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={styles.slackChannelLink}
+              >
+                #{caseItem.slackChannelName || caseItem.slackChannelID}
+                <ExternalLink size={14} />
+              </a>
+            )}
           </div>
-          <p className={styles.description}>{caseItem.description}</p>
+          {caseItem.description && (
+            <p className={styles.description}>{caseItem.description}</p>
+          )}
+          <div className={styles.timestamps}>
+            <span className={styles.timestampLabel}>Created</span>
+            <span className={styles.timestampValue} data-testid="created-timestamp-value">{new Date(caseItem.createdAt).toLocaleString()}</span>
+            <span className={styles.timestampDivider} />
+            <span className={styles.timestampLabel}>Updated</span>
+            <span className={styles.timestampValue} data-testid="updated-timestamp-value">{new Date(caseItem.updatedAt).toLocaleString()}</span>
+          </div>
         </div>
 
         <div className={styles.sections}>
-          {caseItem.assignees && caseItem.assignees.length > 0 && (
-            <div className={styles.section}>
-              <h3 className={styles.sectionTitle}>Assignees</h3>
-              <div className={styles.assignees}>
-                {caseItem.assignees.map((user: any) => (
-                  <div key={user.id} className={styles.assignee}>
-                    {user.imageUrl && (
-                      <img src={user.imageUrl} alt={user.realName} className={styles.avatar} />
-                    )}
-                    <span>{user.realName || user.name}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {caseItem.fields && caseItem.fields.length > 0 && (
-            <div className={styles.section}>
-              <h3 className={styles.sectionTitle}>Custom Fields</h3>
-              <div className={styles.customFields}>
-                {caseItem.fields.map((fieldValue) => {
-                  const fieldDef = fieldDefs.find((f: any) => f.id === fieldValue.fieldId)
-                  if (!fieldDef) return null
-                  return (
-                    <div key={fieldValue.fieldId} className={styles.customField}>
-                      <div className={styles.customFieldLabel}>{fieldDef.name}:</div>
-                      <div className={styles.customFieldValue}>
-                        {renderFieldValue(fieldValue.fieldId, fieldValue.value)}
-                      </div>
+          {/* Unified Fields section (custom fields + assignees + metadata) */}
+          <div className={styles.section}>
+            <h3 className={styles.sectionTitle}>Fields</h3>
+            <div className={styles.fieldsGrid}>
+              {caseItem.fields.map((fieldValue) => {
+                const fieldDef = fieldDefs.find((f: any) => f.id === fieldValue.fieldId)
+                if (!fieldDef) return null
+                return (
+                  <div key={fieldValue.fieldId} className={styles.fieldItem}>
+                    <div className={styles.fieldLabel}>{fieldDef.name}</div>
+                    <div className={styles.fieldValue}>
+                      {renderFieldValue(fieldValue.fieldId, fieldValue.value)}
                     </div>
-                  )
-                })}
-              </div>
+                  </div>
+                )
+              })}
+              {caseItem.assignees && caseItem.assignees.length > 0 && (
+                <div className={styles.fieldItem}>
+                  <div className={styles.fieldLabel}>Assignees</div>
+                  <div className={styles.fieldValue}>
+                    <div className={styles.assigneesInline}>
+                      {caseItem.assignees.map((user: any) => (
+                        <span key={user.id} className={styles.assigneeTag}>
+                          {user.imageUrl && (
+                            <img src={user.imageUrl} alt={user.realName} className={styles.avatarSmall} />
+                          )}
+                          {user.realName || user.name}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
-          )}
+          </div>
 
-          {caseItem.actions && caseItem.actions.length > 0 && (
-            <div className={styles.section}>
-              <div className={styles.sectionHeader}>
-                <h3 className={styles.sectionTitle}>Related Actions</h3>
+          {/* Related Actions section */}
+          <div className={styles.section}>
+            <div className={styles.sectionHeader}>
+              <h3 className={styles.sectionTitle}>Related Actions</h3>
+              {caseItem.actions && caseItem.actions.length > 0 && (
                 <Button
                   variant="outline"
                   icon={<Plus size={16} />}
@@ -326,7 +393,9 @@ export default function CaseDetail() {
                 >
                   Add Action
                 </Button>
-              </div>
+              )}
+            </div>
+            {caseItem.actions && caseItem.actions.length > 0 ? (
               <table className={styles.actionTable}>
                 <thead>
                   <tr>
@@ -355,13 +424,11 @@ export default function CaseDetail() {
                   ))}
                 </tbody>
               </table>
-            </div>
-          )}
-
-          {(!caseItem.actions || caseItem.actions.length === 0) && (
-            <div className={styles.section}>
-              <div className={styles.sectionHeader}>
-                <h3 className={styles.sectionTitle}>Related Actions</h3>
+            ) : (
+              <div className={styles.emptyState}>
+                <ClipboardList size={40} className={styles.emptyStateIcon} />
+                <p className={styles.emptyStateTitle}>No actions yet</p>
+                <p className={styles.emptyStateDescription}>Create the first action for this case</p>
                 <Button
                   variant="outline"
                   icon={<Plus size={16} />}
@@ -370,9 +437,8 @@ export default function CaseDetail() {
                   Add Action
                 </Button>
               </div>
-              <p className={styles.text}>No actions yet.</p>
-            </div>
-          )}
+            )}
+          </div>
 
           {caseItem.knowledges && caseItem.knowledges.length > 0 && (
             <div className={styles.section}>
@@ -452,20 +518,6 @@ export default function CaseDetail() {
             </div>
           )}
 
-          <div className={styles.metadata}>
-            <div className={styles.metadataItem}>
-              <span className={styles.metadataLabel}>Created:</span>
-              <span className={styles.metadataValue}>
-                {new Date(caseItem.createdAt).toLocaleString()}
-              </span>
-            </div>
-            <div className={styles.metadataItem}>
-              <span className={styles.metadataLabel}>Updated:</span>
-              <span className={styles.metadataValue}>
-                {new Date(caseItem.updatedAt).toLocaleString()}
-              </span>
-            </div>
-          </div>
         </div>
       </div>
 
@@ -477,6 +529,33 @@ export default function CaseDetail() {
         onConfirm={handleDeleteConfirm}
         caseTitle={caseItem.title}
       />
+
+      <Modal
+        isOpen={isCloseDialogOpen}
+        onClose={() => setIsCloseDialogOpen(false)}
+        title={`Close ${caseLabel}`}
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setIsCloseDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              data-testid="confirm-close-button"
+              onClick={async () => {
+                await handleCloseCase()
+                setIsCloseDialogOpen(false)
+              }}
+            >
+              Close
+            </Button>
+          </>
+        }
+      >
+        <p style={{ margin: 0, color: 'var(--text-body)' }}>
+          Are you sure you want to close <strong>{caseItem.title}</strong>?
+        </p>
+      </Modal>
 
       {isActionFormOpen && (
         <ActionForm

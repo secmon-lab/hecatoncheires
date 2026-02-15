@@ -97,7 +97,7 @@ enum CaseStatus {
 type Case {
   id: Int!
   title: String!
-  description: String!
+  description: String
   status: CaseStatus!
   assigneeIDs: [String!]!
   assignees: [SlackUser!]!
@@ -126,7 +126,7 @@ type Action {
   caseID: Int!
   case: Case
   title: String!
-  description: String!
+  description: String
   assigneeIDs: [String!]!
   assignees: [SlackUser!]!
   slackMessageTS: String
@@ -138,7 +138,7 @@ type Action {
 # Inputs
 input CreateCaseInput {
   title: String!
-  description: String!
+  description: String
   assigneeIDs: [String!]
   fields: [FieldValueInput!]
 }
@@ -146,7 +146,7 @@ input CreateCaseInput {
 input UpdateCaseInput {
   id: Int!
   title: String!
-  description: String!
+  description: String
   assigneeIDs: [String!]
   fields: [FieldValueInput!]
 }
@@ -154,7 +154,7 @@ input UpdateCaseInput {
 input CreateActionInput {
   caseID: Int!
   title: String!
-  description: String!
+  description: String
   assigneeIDs: [String!]
   slackMessageTS: String
   status: ActionStatus

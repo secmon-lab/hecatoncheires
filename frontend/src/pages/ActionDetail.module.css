@@ -227,3 +227,30 @@
   height: 1.75rem;
   border-radius: 0.375rem;
 }
+
+.statusDropdownWrapper {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.statusDropdown {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-paper);
+  color: var(--text-body);
+  font-size: 0.875rem;
+  cursor: pointer;
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.statusDropdown:focus {
+  border-color: var(--color-primary);
+}
+
+.statusDropdown:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

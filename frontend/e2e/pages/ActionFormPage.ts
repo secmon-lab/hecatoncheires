@@ -81,7 +81,7 @@ export class ActionFormPage extends BasePage {
    */
   async createAction(data: {
     title: string;
-    description: string;
+    description?: string;
     caseTitle?: string;
   }): Promise<void> {
     await this.waitForFormVisible();
@@ -92,7 +92,9 @@ export class ActionFormPage extends BasePage {
     }
 
     await this.fillTitle(data.title);
-    await this.fillDescription(data.description);
+    if (data.description) {
+      await this.fillDescription(data.description);
+    }
     await this.submit();
   }
 }

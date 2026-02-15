@@ -12,19 +12,26 @@ export class CaseDetailPage extends BasePage {
   private readonly deleteButton: Locator;
   private readonly backButton: Locator;
   private readonly loadingIndicator: Locator;
-  private readonly slackChannelButton: Locator;
+  private readonly slackChannelLink: Locator;
+  private readonly fieldsSection: Locator;
+  private readonly emptyActionState: Locator;
 
   constructor(page: Page) {
     super(page);
-    // Case title is the h1 element inside main content area (not the page title)
+    // Case title is the h1 element inside main content area
     this.caseTitle = page.locator('main h1').first();
-    // Description is the paragraph after the title row
+    // Description is the paragraph with description class
     this.caseDescription = page.locator('main p').first();
     this.editButton = page.locator('button').filter({ hasText: /Edit/ }).first();
     this.deleteButton = page.locator('button').filter({ hasText: /Delete/ }).first();
     this.backButton = page.locator('button, a').filter({ hasText: /Back/ }).first();
     this.loadingIndicator = page.locator('text=Loading...');
-    this.slackChannelButton = page.locator('a').filter({ hasText: /^#/ }).first();
+    // Slack channel link is now in the title row (an <a> tag starting with #)
+    this.slackChannelLink = page.locator('a').filter({ hasText: /^#/ }).first();
+    // Fields section contains the 2-column grid of field items
+    this.fieldsSection = page.locator('h3').filter({ hasText: 'Fields' }).locator('..');
+    // Empty action state
+    this.emptyActionState = page.locator('p').filter({ hasText: 'No actions yet' }).first();
   }
 
   /**
@@ -79,11 +86,25 @@ export class CaseDetailPage extends BasePage {
   }
 
   /**
-   * Get a custom field value by field name
+   * Get a field value from the Fields grid by field label name
    */
-  async getCustomFieldValue(fieldName: string): Promise<string> {
-    const field = this.page.locator(`[data-field-name="${fieldName}"], td, div`).filter({ hasText: fieldName }).first();
-    return await field.textContent() || '';
+  async getFieldValue(fieldName: string): Promise<string> {
+    // Find the field item that contains a label div with the given name,
+    // then get the sibling value div's text
+    const fieldItem = this.page
+      .locator('div')
+      .filter({ has: this.page.locator('div').filter({ hasText: new RegExp(`^${fieldName}$`) }) })
+      .first();
+    const valueDiv = fieldItem.locator('div').nth(1);
+    return await valueDiv.textContent() || '';
+  }
+
+  /**
+   * Check if the Fields section is visible
+   */
+  async isFieldsSectionVisible(): Promise<boolean> {
+    const fieldsHeading = this.page.locator('h3').filter({ hasText: 'Fields' }).first();
+    return await fieldsHeading.isVisible();
   }
 
   /**
@@ -99,23 +120,113 @@ export class CaseDetailPage extends BasePage {
   }
 
   /**
-   * Check if the Slack channel button is visible
+   * Check if the Slack channel link is visible
    */
   async isSlackChannelButtonVisible(): Promise<boolean> {
-    return await this.slackChannelButton.isVisible();
+    return await this.slackChannelLink.isVisible();
   }
 
   /**
-   * Get the Slack channel button text
+   * Get the Slack channel link text
    */
   async getSlackChannelButtonText(): Promise<string> {
-    return await this.slackChannelButton.textContent() || '';
+    return await this.slackChannelLink.textContent() || '';
   }
 
   /**
-   * Get the Slack channel button href
+   * Get the Slack channel link href
    */
   async getSlackChannelButtonHref(): Promise<string> {
-    return await this.slackChannelButton.getAttribute('href') || '';
+    return await this.slackChannelLink.getAttribute('href') || '';
+  }
+
+  /**
+   * Get the current case status (Open/Closed)
+   */
+  async getStatus(): Promise<string> {
+    const chip = this.page.locator('main').locator('span').filter({ hasText: /^(Open|Closed)$/ }).first();
+    return await chip.textContent() || '';
+  }
+
+  /**
+   * Check if timestamps section is visible
+   */
+  async isTimestampsVisible(): Promise<boolean> {
+    return await this.page.getByTestId('created-timestamp-value').isVisible();
+  }
+
+  /**
+   * Get the Created timestamp text
+   */
+  async getCreatedTimestamp(): Promise<string> {
+    return await this.page.getByTestId('created-timestamp-value').textContent() || '';
+  }
+
+  /**
+   * Get the Updated timestamp text
+   */
+  async getUpdatedTimestamp(): Promise<string> {
+    return await this.page.getByTestId('updated-timestamp-value').textContent() || '';
+  }
+
+  /**
+   * Check if the empty action state is visible
+   */
+  async isEmptyActionStateVisible(): Promise<boolean> {
+    return await this.emptyActionState.isVisible();
+  }
+
+  /**
+   * Click the Close button (opens confirmation modal and confirms)
+   */
+  async clickCloseButton(): Promise<void> {
+    // Click the Close button in the header (scoped by data-testid) to open confirmation modal
+    const closeBtn = this.page.getByTestId('close-case-button');
+    await closeBtn.click();
+
+    // Wait for the confirmation modal and click the confirm Close button (scoped by data-testid)
+    const confirmBtn = this.page.getByTestId('confirm-close-button');
+    await confirmBtn.waitFor({ state: 'visible', timeout: 5000 });
+    const responsePromise = this.page.waitForResponse(
+      (resp) => resp.url().includes('/graphql') && resp.status() === 200
+    );
+    await confirmBtn.click();
+    await responsePromise;
+  }
+
+  /**
+   * Click the Reopen button
+   */
+  async clickReopenButton(): Promise<void> {
+    const reopenBtn = this.page.locator('button').filter({ hasText: /Reopen/ }).first();
+    const responsePromise = this.page.waitForResponse(
+      (resp) => resp.url().includes('/graphql') && resp.status() === 200
+    );
+    await reopenBtn.click();
+    await responsePromise;
+  }
+
+  /**
+   * Check if Close button is visible
+   */
+  async isCloseButtonVisible(): Promise<boolean> {
+    const closeBtn = this.page.getByTestId('close-case-button');
+    return await closeBtn.isVisible();
+  }
+
+  /**
+   * Check if Reopen button is visible
+   */
+  async isReopenButtonVisible(): Promise<boolean> {
+    const reopenBtn = this.page.locator('button').filter({ hasText: /Reopen/ }).first();
+    return await reopenBtn.isVisible();
+  }
+
+  /**
+   * Click the Add Action button in the empty state
+   */
+  async clickAddActionInEmptyState(): Promise<void> {
+    const addBtn = this.page.locator('button').filter({ hasText: /Add Action/ }).first();
+    await addBtn.click();
   }
 }

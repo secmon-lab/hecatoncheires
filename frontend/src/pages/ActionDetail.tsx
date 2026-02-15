@@ -1,12 +1,12 @@
 import { useParams, useNavigate } from 'react-router-dom'
-import { useQuery } from '@apollo/client'
+import { useQuery, useMutation } from '@apollo/client'
 import { ArrowLeft, Edit, MoreVertical, Trash2 } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import Button from '../components/Button'
 import Chip from '../components/Chip'
 import ActionForm from './ActionForm'
 import ActionDeleteDialog from './ActionDeleteDialog'
-import { GET_ACTION } from '../graphql/action'
+import { GET_ACTION, UPDATE_ACTION } from '../graphql/action'
 import { useWorkspace } from '../contexts/workspace-context'
 import styles from './ActionDetail.module.css'
 
@@ -54,12 +54,34 @@ export default function ActionDetail() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
-  const { data: actionData, loading: actionLoading, error: actionError } = useQuery(GET_ACTION, {
+  const { data: actionData, loading: actionLoading, error: actionError, refetch } = useQuery(GET_ACTION, {
     variables: { workspaceId: currentWorkspace!.id, id: parseInt(id || '0') },
     skip: !id || !currentWorkspace,
   })
 
+  const [updateAction, { loading: statusUpdating }] = useMutation(UPDATE_ACTION, {
+    onCompleted: () => {
+      refetch()
+    },
+    onError: (error) => {
+      console.error('Failed to update status:', error)
+    },
+  })
+
   const action: Action | undefined = actionData?.action
+
+  const handleStatusChange = async (newStatus: string) => {
+    if (!action || newStatus === action.status) return
+    await updateAction({
+      variables: {
+        workspaceId: currentWorkspace!.id,
+        input: {
+          id: action.id,
+          status: newStatus,
+        },
+      },
+    })
+  }
 
   const handleBack = () => {
     navigate(`/ws/${currentWorkspace!.id}/actions`)
@@ -175,9 +197,22 @@ export default function ActionDetail() {
 
           <div className={styles.section}>
             <h3 className={styles.sectionTitle}>Status</h3>
-            <Chip variant="status" colorIndex={STATUS_COLORS[action.status] || 0}>
-              {STATUS_LABELS[action.status] || action.status}
-            </Chip>
+            <div className={styles.statusDropdownWrapper}>
+              <select
+                value={action.status}
+                onChange={(e) => handleStatusChange(e.target.value)}
+                disabled={statusUpdating}
+                className={styles.statusDropdown}
+                data-testid="status-dropdown"
+              >
+                {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+              <Chip variant="status" colorIndex={STATUS_COLORS[action.status] || 0}>
+                {statusUpdating ? 'Updating...' : (STATUS_LABELS[action.status] || action.status)}
+              </Chip>
+            </div>
           </div>
 
           {action.assignees && action.assignees.length > 0 && (

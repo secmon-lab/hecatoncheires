@@ -27,8 +27,8 @@ export class CaseFormPage extends BasePage {
   async waitForFormVisible(): Promise<void> {
     // Wait for the modal title to appear
     await this.page.locator('h2').filter({ hasText: /New Case|Edit Case/ }).waitFor({ state: 'visible', timeout: 5000 });
-    // Small delay to ensure form is ready
-    await this.page.waitForTimeout(300);
+    // Wait for React to finish rendering the form
+    await this.page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
   }
 
   /**
@@ -119,12 +119,14 @@ export class CaseFormPage extends BasePage {
    */
   async createCase(data: {
     title: string;
-    description: string;
+    description?: string;
     customFields?: Record<string, string>;
   }): Promise<void> {
     await this.waitForFormVisible();
     await this.fillTitle(data.title);
-    await this.fillDescription(data.description);
+    if (data.description) {
+      await this.fillDescription(data.description);
+    }
 
     // Fill custom fields if provided
     if (data.customFields) {

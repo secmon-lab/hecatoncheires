@@ -1,20 +1,49 @@
 #!/bin/bash
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PID_FILE="$PROJECT_ROOT/tmp/server.pid"
+
+# Kill any existing E2E server
+if [ -f "$PID_FILE" ]; then
+  OLD_PID=$(cat "$PID_FILE")
+  if kill -0 "$OLD_PID" 2>/dev/null; then
+    echo "Stopping existing E2E server (PID: $OLD_PID)..."
+    kill "$OLD_PID" 2>/dev/null || true
+    wait "$OLD_PID" 2>/dev/null || true
+  fi
+  rm -f "$PID_FILE"
+fi
+
+# Also kill any process occupying the E2E port (handles orphaned child processes from go run)
+E2E_PORT=18080
+PORT_PID=$(lsof -ti:$E2E_PORT 2>/dev/null || true)
+if [ -n "$PORT_PID" ]; then
+  echo "Killing orphaned process on port $E2E_PORT (PID: $PORT_PID)..."
+  kill "$PORT_PID" 2>/dev/null || true
+  sleep 1
+fi
+
 # Build frontend
 echo "Building frontend..."
-cd frontend && pnpm install && pnpm run build && cd ..
+cd "$PROJECT_ROOT/frontend" && pnpm install && pnpm run build && cd "$PROJECT_ROOT"
+
+# Ensure tmp directory exists
+mkdir -p "$PROJECT_ROOT/tmp"
 
 # Start backend server with go run
 echo "Starting backend server..."
 go run . serve --log-level error --repository-backend=memory --config=frontend/e2e/fixtures/config.test.toml --no-auth=U000000000 --addr=127.0.0.1:18080 --graphiql=false &
 BACKEND_PID=$!
+echo "$BACKEND_PID" > "$PID_FILE"
 
 # Function to cleanup on exit
 cleanup() {
   echo "Stopping backend server (PID: $BACKEND_PID)..."
-  kill $BACKEND_PID 2>/dev/null || true
-  wait $BACKEND_PID 2>/dev/null || true
+  kill "$BACKEND_PID" 2>/dev/null || true
+  wait "$BACKEND_PID" 2>/dev/null || true
+  rm -f "$PID_FILE"
 }
 trap cleanup EXIT
 
@@ -30,8 +59,8 @@ done
 
 # Run E2E tests
 echo "Running E2E tests..."
-cd frontend
-BASE_URL=http://localhost:18080 pnpm exec playwright test || TEST_EXIT_CODE=$?
+cd "$PROJECT_ROOT/frontend"
+BASE_URL=http://localhost:18080 pnpm exec playwright test "$@" || TEST_EXIT_CODE=$?
 
 # Show summary
 echo ""

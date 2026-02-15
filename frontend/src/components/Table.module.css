@@ -12,7 +12,7 @@
 }
 
 .th {
-  padding: 14px 16px;
+  padding: var(--spacing-md-lg) var(--spacing-md);
   text-align: left;
   font-size: 13px;
   font-weight: 500;
@@ -23,11 +23,44 @@
   background-color: var(--table-header-bg, #F8FAFC);
 }
 
+.thResizable {
+  position: relative;
+  overflow: hidden;
+}
+
+.thContent {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.resizeHandle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 1;
+}
+
+.resizeHandle:hover {
+  background: var(--color-primary-light);
+}
+
 .td {
-  padding: 14px 16px;
+  padding: var(--spacing-md-lg) var(--spacing-md);
   font-size: 14px;
   color: var(--text-body, #374151);
   border-bottom: 1px solid var(--table-row-border, #F1F5F9);
+}
+
+.cellContent {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .table tbody tr:last-child .td {

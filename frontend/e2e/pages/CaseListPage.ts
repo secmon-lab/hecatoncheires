@@ -39,7 +39,7 @@ export class CaseListPage extends BasePage {
    * Get a case row by title
    */
   getCaseRowByTitle(title: string): Locator {
-    return this.page.locator('tr').filter({ hasText: title });
+    return this.page.locator('tr').filter({ hasText: title }).first();
   }
 
   /**
@@ -72,8 +72,8 @@ export class CaseListPage extends BasePage {
       this.casesTable.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {}),
       this.page.locator('text=No data available').waitFor({ state: 'visible', timeout: 10000 }).catch(() => {}),
     ]);
-    // Give a small delay for rendering
-    await this.page.waitForTimeout(500);
+    // Wait for React to finish rendering
+    await this.page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
   }
 
   /**
@@ -117,5 +117,94 @@ export class CaseListPage extends BasePage {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Fill the search filter input
+   */
+  async fillSearchFilter(text: string): Promise<void> {
+    await this.page.getByTestId('search-filter').fill(text);
+    // Wait for React to re-render filtered results
+    await this.page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
+  }
+
+  /**
+   * Clear the search filter
+   */
+  async clearSearchFilter(): Promise<void> {
+    await this.page.getByTestId('search-filter').clear();
+    // Wait for React to re-render unfiltered results
+    await this.page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
+  }
+
+  /**
+   * Open the column selector popover
+   */
+  async openColumnSelector(): Promise<void> {
+    await this.page.getByTestId('column-selector-button').click();
+    await this.page.getByTestId('column-selector-popover').waitFor({ state: 'visible' });
+  }
+
+  /**
+   * Toggle a column's visibility by its key
+   */
+  async toggleColumn(columnKey: string): Promise<void> {
+    await this.page.getByTestId(`column-toggle-${columnKey}`).click();
+  }
+
+  /**
+   * Check if a column header is visible in the table
+   */
+  async isColumnVisible(columnName: string): Promise<boolean> {
+    const header = this.casesTable.locator('th').filter({ hasText: columnName });
+    return await header.isVisible();
+  }
+
+  /**
+   * Go to a specific page
+   */
+  async goToPage(direction: 'next' | 'prev'): Promise<void> {
+    const currentInfo = await this.page.getByTestId('pagination-info').textContent() || '';
+    if (direction === 'next') {
+      await this.page.getByTestId('pagination-next').click();
+    } else {
+      await this.page.getByTestId('pagination-prev').click();
+    }
+    // Wait for pagination info to change, indicating the page has updated
+    await this.page.waitForFunction(
+      (prev) => {
+        const el = document.querySelector('[data-testid="pagination-info"]');
+        return el && el.textContent !== prev;
+      },
+      currentInfo,
+      { timeout: 5000 }
+    );
+  }
+
+  /**
+   * Get the current pagination info text (e.g. "1 / 2")
+   */
+  async getPaginationInfo(): Promise<string> {
+    return await this.page.getByTestId('pagination-info').textContent() || '';
+  }
+
+  /**
+   * Get the number of rows currently displayed
+   */
+  async getRowCount(): Promise<number> {
+    const rows = await this.casesTable.locator('tbody tr').all();
+    return rows.length;
+  }
+
+  /**
+   * Click a status tab
+   */
+  async clickStatusTab(status: 'Open' | 'Closed'): Promise<void> {
+    if (status === 'Open') {
+      await this.page.getByTestId('status-tab-open').click();
+    } else {
+      await this.page.getByTestId('status-tab-closed').click();
+    }
+    await this.waitForTableLoad();
   }
 }
