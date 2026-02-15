@@ -337,10 +337,10 @@ export default function CaseDetail() {
           )}
           <div className={styles.timestamps}>
             <span className={styles.timestampLabel}>Created</span>
-            <span className={styles.timestampValue}>{new Date(caseItem.createdAt).toLocaleString()}</span>
+            <span className={styles.timestampValue} data-testid="created-timestamp-value">{new Date(caseItem.createdAt).toLocaleString()}</span>
             <span className={styles.timestampDivider} />
             <span className={styles.timestampLabel}>Updated</span>
-            <span className={styles.timestampValue}>{new Date(caseItem.updatedAt).toLocaleString()}</span>
+            <span className={styles.timestampValue} data-testid="updated-timestamp-value">{new Date(caseItem.updatedAt).toLocaleString()}</span>
           </div>
         </div>
 

@@ -14,7 +14,6 @@ export class CaseDetailPage extends BasePage {
   private readonly loadingIndicator: Locator;
   private readonly slackChannelLink: Locator;
   private readonly fieldsSection: Locator;
-  private readonly timestampsSection: Locator;
   private readonly emptyActionState: Locator;
 
   constructor(page: Page) {
@@ -31,8 +30,6 @@ export class CaseDetailPage extends BasePage {
     this.slackChannelLink = page.locator('a').filter({ hasText: /^#/ }).first();
     // Fields section contains the 2-column grid of field items
     this.fieldsSection = page.locator('h3').filter({ hasText: 'Fields' }).locator('..');
-    // Timestamps row below description (text-transform: uppercase makes visible text "CREATED")
-    this.timestampsSection = page.locator('main').locator('span').filter({ hasText: /^created$/i }).locator('..').first();
     // Empty action state
     this.emptyActionState = page.locator('p').filter({ hasText: 'No actions yet' }).first();
   }
@@ -155,29 +152,21 @@ export class CaseDetailPage extends BasePage {
    * Check if timestamps section is visible
    */
   async isTimestampsVisible(): Promise<boolean> {
-    // text-transform: uppercase makes visible text "CREATED", use case-insensitive match
-    const createdLabel = this.page.locator('main').locator('span').filter({ hasText: /^created$/i }).first();
-    return await createdLabel.isVisible();
+    return await this.page.getByTestId('created-timestamp-value').isVisible();
   }
 
   /**
    * Get the Created timestamp text
    */
   async getCreatedTimestamp(): Promise<string> {
-    const createdLabel = this.page.locator('main').locator('span').filter({ hasText: /^created$/i }).first();
-    const container = createdLabel.locator('..');
-    const valueSpan = container.locator('span').nth(1);
-    return await valueSpan.textContent() || '';
+    return await this.page.getByTestId('created-timestamp-value').textContent() || '';
   }
 
   /**
    * Get the Updated timestamp text
    */
   async getUpdatedTimestamp(): Promise<string> {
-    const updatedLabel = this.page.locator('main').locator('span').filter({ hasText: /^updated$/i }).first();
-    const container = updatedLabel.locator('..');
-    const valueSpan = container.locator('span').nth(3);
-    return await valueSpan.textContent() || '';
+    return await this.page.getByTestId('updated-timestamp-value').textContent() || '';
   }
 
   /**
