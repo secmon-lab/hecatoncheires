@@ -72,8 +72,8 @@ export class CaseListPage extends BasePage {
       this.casesTable.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {}),
       this.page.locator('text=No data available').waitFor({ state: 'visible', timeout: 10000 }).catch(() => {}),
     ]);
-    // Give a small delay for rendering
-    await this.page.waitForTimeout(500);
+    // Wait for React to finish rendering
+    await this.page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
   }
 
   /**
@@ -124,7 +124,8 @@ export class CaseListPage extends BasePage {
    */
   async fillSearchFilter(text: string): Promise<void> {
     await this.page.getByTestId('search-filter').fill(text);
-    await this.page.waitForTimeout(300);
+    // Wait for React to re-render filtered results
+    await this.page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
   }
 
   /**
@@ -132,7 +133,8 @@ export class CaseListPage extends BasePage {
    */
   async clearSearchFilter(): Promise<void> {
     await this.page.getByTestId('search-filter').clear();
-    await this.page.waitForTimeout(300);
+    // Wait for React to re-render unfiltered results
+    await this.page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
   }
 
   /**
@@ -162,12 +164,21 @@ export class CaseListPage extends BasePage {
    * Go to a specific page
    */
   async goToPage(direction: 'next' | 'prev'): Promise<void> {
+    const currentInfo = await this.page.getByTestId('pagination-info').textContent() || '';
     if (direction === 'next') {
       await this.page.getByTestId('pagination-next').click();
     } else {
       await this.page.getByTestId('pagination-prev').click();
     }
-    await this.page.waitForTimeout(300);
+    // Wait for pagination info to change, indicating the page has updated
+    await this.page.waitForFunction(
+      (prev) => {
+        const el = document.querySelector('[data-testid="pagination-info"]');
+        return el && el.textContent !== prev;
+      },
+      currentInfo,
+      { timeout: 5000 }
+    );
   }
 
   /**
