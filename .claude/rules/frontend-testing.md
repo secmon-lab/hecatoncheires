@@ -5,9 +5,32 @@ paths:
 
 # Frontend Testing Requirements
 
-## Playwright E2E Test Updates
+## Vitest Unit Tests
 
-**CRITICAL: When modifying or adding frontend code, you MUST also update or add corresponding Playwright E2E tests.**
+**CRITICAL: When modifying or adding frontend logic (utility functions, hooks, parsers, etc.), you MUST write corresponding Vitest unit tests.**
+
+### Requirements
+
+- **New utility functions**: Create `*.test.ts` file alongside the source file (e.g., `notion.ts` → `notion.test.ts`)
+- **Modified logic**: Update affected unit tests to reflect the changes
+- **Test framework**: Use Vitest with `import { describe, it, expect } from 'vitest'`
+
+### Test Execution
+
+**MANDATORY: After any frontend code change, you MUST run both Vitest unit tests AND E2E tests.**
+
+- Run `pnpm test` in `frontend/` to execute Vitest unit tests
+- Run `task test:e2e` to execute Playwright E2E tests
+- Both MUST pass before considering the task complete
+
+### Test File Locations (Unit Tests)
+
+- Unit test files live alongside their source files: `src/utils/notion.test.ts`, `src/hooks/useXxx.test.ts`, etc.
+- Configuration: `vite.config.ts` (test section)
+
+## Playwright E2E Tests
+
+**CRITICAL: When modifying or adding frontend components/pages, you MUST also update or add corresponding Playwright E2E tests.**
 
 ### Requirements
 
@@ -17,16 +40,7 @@ paths:
 - **Form/interaction changes**: Update test cases to verify the new behavior
 - **Modal/dialog/toast additions**: Include accessibility attributes (`role`, `aria-*`) and update tests
 
-### Test Execution
-
-**MANDATORY: After any frontend code change, you MUST run E2E tests locally before considering the task complete.**
-
-- Run `task test:e2e` locally after modifying any file under `frontend/`
-- Do NOT rely solely on CI to catch E2E failures — always verify locally first
-- If E2E tests fail, fix the failures before finishing the task
-- CI: GitHub Actions also runs E2E tests on PRs as an additional check
-
-### Test File Locations
+### Test File Locations (E2E)
 
 - **Page Objects**: `frontend/e2e/pages/`
 - **Test Cases**: `frontend/e2e/tests/`

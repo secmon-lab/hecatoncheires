@@ -1,10 +1,17 @@
 package model
 
 import (
+	"net/url"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/m-mizutani/goerr/v2"
 )
+
+// ErrInvalidNotionDatabaseID is returned when the input cannot be parsed as a Notion database ID
+var ErrInvalidNotionDatabaseID = goerr.New("invalid Notion database ID")
 
 // SourceType represents the type of source
 type SourceType string
@@ -40,6 +47,88 @@ type NotionDBConfig struct {
 	DatabaseID    string
 	DatabaseTitle string
 	DatabaseURL   string
+}
+
+// hexPattern matches 32 hex characters (a Notion database ID without dashes)
+var hexPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
+
+// ParseNotionDatabaseID extracts a Notion database ID from either a raw ID or a Notion URL.
+// The returned ID is always in UUID format (8-4-4-4-12) as required by the Notion API.
+// Accepted formats:
+//   - Raw ID: "abc123def456789012345678901234567"
+//   - UUID format: "12345678-90ab-cdef-1234-567890abcdef"
+//   - Notion URL: "https://www.notion.so/workspace/abc123def456...?v=..."
+//   - Notion URL: "https://www.notion.so/abc123def456..."
+func ParseNotionDatabaseID(input string) (string, error) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return "", ErrInvalidNotionDatabaseID
+	}
+
+	var hex string
+	var err error
+
+	// If the input looks like a URL, parse it
+	if strings.HasPrefix(input, "http://") || strings.HasPrefix(input, "https://") {
+		hex, err = parseNotionURL(input)
+	} else {
+		// Try as a raw ID (with or without dashes)
+		hex, err = normalizeNotionID(input)
+	}
+
+	if err != nil {
+		return "", err
+	}
+
+	return toUUIDFormat(hex), nil
+}
+
+func parseNotionURL(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", ErrInvalidNotionDatabaseID
+	}
+
+	host := u.Hostname()
+	if host != "www.notion.so" && host != "notion.so" {
+		return "", ErrInvalidNotionDatabaseID
+	}
+
+	// The database ID is the last 32 hex chars in the last path segment
+	// e.g. /workspace/Title-abc123def456789012345678901234567
+	path := strings.TrimRight(u.Path, "/")
+	segments := strings.Split(path, "/")
+	if len(segments) == 0 {
+		return "", ErrInvalidNotionDatabaseID
+	}
+
+	lastSegment := segments[len(segments)-1]
+
+	// The ID may be appended after a title with a hyphen separator.
+	// Extract the last 32 hex characters from the segment.
+	clean := strings.ReplaceAll(lastSegment, "-", "")
+	if len(clean) >= 32 {
+		candidate := clean[len(clean)-32:]
+		if hexPattern.MatchString(candidate) {
+			return candidate, nil
+		}
+	}
+
+	return "", ErrInvalidNotionDatabaseID
+}
+
+func normalizeNotionID(input string) (string, error) {
+	clean := strings.ReplaceAll(input, "-", "")
+	clean = strings.ToLower(clean)
+	if hexPattern.MatchString(clean) {
+		return clean, nil
+	}
+	return "", ErrInvalidNotionDatabaseID
+}
+
+// toUUIDFormat converts a 32-char hex string to UUID format (8-4-4-4-12)
+func toUUIDFormat(hex string) string {
+	return hex[0:8] + "-" + hex[8:12] + "-" + hex[12:16] + "-" + hex[16:20] + "-" + hex[20:32]
 }
 
 // SlackConfig holds Slack specific configuration

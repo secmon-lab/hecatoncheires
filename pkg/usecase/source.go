@@ -36,9 +36,12 @@ type CreateNotionDBSourceInput struct {
 
 // CreateNotionDBSource creates a new Notion DB source with validation
 func (uc *SourceUseCase) CreateNotionDBSource(ctx context.Context, workspaceID string, input CreateNotionDBSourceInput) (*model.Source, error) {
-	if input.DatabaseID == "" {
-		return nil, goerr.New("database ID is required")
+	dbID, err := model.ParseNotionDatabaseID(input.DatabaseID)
+	if err != nil {
+		return nil, goerr.Wrap(err, "invalid database ID or URL",
+			goerr.V("input", input.DatabaseID))
 	}
+	input.DatabaseID = dbID
 
 	var dbTitle, dbURL string
 	if uc.notion != nil {
@@ -160,14 +163,16 @@ type NotionDBValidationResult struct {
 	ErrorMessage  string
 }
 
-// ValidateNotionDB validates a Notion database ID and returns metadata
+// ValidateNotionDB validates a Notion database ID (or URL) and returns metadata
 func (uc *SourceUseCase) ValidateNotionDB(ctx context.Context, databaseID string) (*NotionDBValidationResult, error) {
-	if databaseID == "" {
+	parsedID, err := model.ParseNotionDatabaseID(databaseID)
+	if err != nil {
 		return &NotionDBValidationResult{
 			Valid:        false,
-			ErrorMessage: "database ID is required",
+			ErrorMessage: "invalid database ID or URL",
 		}, nil
 	}
+	databaseID = parsedID
 
 	if uc.notion == nil {
 		return &NotionDBValidationResult{
