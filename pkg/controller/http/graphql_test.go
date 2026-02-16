@@ -918,7 +918,7 @@ func TestGraphQLHandler_FrontendKnowledgesQuery(t *testing.T) {
 						description
 					}
 					sourceID
-					sourceURL
+					sourceURLs
 					title
 					summary
 					sourcedAt
