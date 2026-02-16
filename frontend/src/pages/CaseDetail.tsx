@@ -42,6 +42,8 @@ interface Case {
     id: number
     title: string
     status: string
+    assigneeIDs: string[]
+    assignees: Array<{ id: string; name: string; realName: string; imageUrl?: string }>
     createdAt: string
   }>
   knowledges?: Knowledge[]
@@ -361,7 +363,24 @@ export default function CaseDetail() {
         </div>
 
         <div className={styles.sections}>
-          {/* Unified Fields section (custom fields + assignees + metadata) */}
+          {/* Assignees section */}
+          {caseItem.assignees && caseItem.assignees.length > 0 && (
+            <div className={styles.section}>
+              <h3 className={styles.sectionTitle}>Assignees</h3>
+              <div className={styles.assigneesInline}>
+                {caseItem.assignees.map((user: any) => (
+                  <span key={user.id} className={styles.assigneeTag}>
+                    {user.imageUrl && (
+                      <img src={user.imageUrl} alt={user.realName} className={styles.avatarSmall} />
+                    )}
+                    {user.realName || user.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Fields section (custom fields) */}
           <div className={styles.section}>
             <h3 className={styles.sectionTitle}>Fields</h3>
             <div className={styles.fieldsGrid}>
@@ -377,23 +396,6 @@ export default function CaseDetail() {
                   </div>
                 )
               })}
-              {caseItem.assignees && caseItem.assignees.length > 0 && (
-                <div className={styles.fieldItem}>
-                  <div className={styles.fieldLabel}>Assignees</div>
-                  <div className={styles.fieldValue}>
-                    <div className={styles.assigneesInline}>
-                      {caseItem.assignees.map((user: any) => (
-                        <span key={user.id} className={styles.assigneeTag}>
-                          {user.imageUrl && (
-                            <img src={user.imageUrl} alt={user.realName} className={styles.avatarSmall} />
-                          )}
-                          {user.realName || user.name}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
 
@@ -416,6 +418,7 @@ export default function CaseDetail() {
                 <thead>
                   <tr>
                     <th>Title</th>
+                    <th>Assignees</th>
                     <th>Status</th>
                     <th>Created</th>
                   </tr>
@@ -428,6 +431,22 @@ export default function CaseDetail() {
                       onClick={() => handleActionClick(action.id)}
                     >
                       <td className={styles.titleCell}>{action.title}</td>
+                      <td className={styles.assigneeCell}>
+                        {action.assignees && action.assignees.length > 0 ? (
+                          <div className={styles.actionAssignees}>
+                            {action.assignees.map((user) => (
+                              <span key={user.id} className={styles.actionAssigneeTag}>
+                                {user.imageUrl && (
+                                  <img src={user.imageUrl} alt={user.realName} className={styles.avatarSmall} />
+                                )}
+                                <span>{user.realName || user.name}</span>
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className={styles.noAssignee}>-</span>
+                        )}
+                      </td>
                       <td className={styles.statusCell}>
                         <Chip variant="status" colorIndex={STATUS_COLORS[action.status] || 0}>
                           {STATUS_LABELS[action.status] || action.status}

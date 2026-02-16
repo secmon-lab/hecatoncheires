@@ -505,6 +505,28 @@
   max-width: 18.75rem;
 }
 
+.assigneeCell {
+  white-space: nowrap;
+}
+
+.actionAssignees {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs);
+}
+
+.actionAssigneeTag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: 0.8125rem;
+  color: var(--text-body);
+}
+
+.noAssignee {
+  color: var(--text-muted);
+}
+
 .statusCell {
   width: 9.375rem;
 }

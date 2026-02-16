@@ -52,6 +52,13 @@ export const GET_CASE = gql`
         id
         title
         status
+        assigneeIDs
+        assignees {
+          id
+          name
+          realName
+          imageUrl
+        }
         createdAt
       }
       knowledges {
