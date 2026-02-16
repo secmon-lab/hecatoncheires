@@ -2,7 +2,6 @@ package usecase
 
 import (
 	"context"
-	"sync"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
@@ -22,34 +21,19 @@ func (uc *ActionUseCase) ListOpenCaseActions(ctx context.Context, workspaceID st
 		return []*model.Action{}, nil
 	}
 
-	type result struct {
-		actions []*model.Action
-		err     error
-	}
-
-	results := make([]result, len(cases))
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, 10) // Limit concurrent DB queries
-
+	caseIDs := make([]int64, len(cases))
 	for i, c := range cases {
-		wg.Add(1)
-		go func(idx int, caseID int64) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			actions, err := uc.repo.Action().GetByCase(ctx, workspaceID, caseID)
-			results[idx] = result{actions: actions, err: err}
-		}(i, c.ID)
+		caseIDs[i] = c.ID
 	}
 
-	wg.Wait()
+	actionsByCase, err := uc.repo.Action().GetByCases(ctx, workspaceID, caseIDs)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to get actions for open cases")
+	}
 
 	var allActions []*model.Action
-	for _, r := range results {
-		if r.err != nil {
-			return nil, goerr.Wrap(r.err, "failed to get actions for open case")
-		}
-		allActions = append(allActions, r.actions...)
+	for _, actions := range actionsByCase {
+		allActions = append(allActions, actions...)
 	}
 
 	if allActions == nil {
