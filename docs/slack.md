@@ -6,9 +6,10 @@ Hecatoncheires integrates with Slack for both authentication and event webhooks.
 
 1. [Slack OAuth Authentication](#slack-oauth-authentication)
 2. [Slack Events API (Webhooks)](#slack-events-api-webhooks)
-3. [Automatic Risk Channel Creation](#automatic-risk-channel-creation)
-4. [Complete Setup Guide](#complete-setup-guide)
-5. [Environment Variables Reference](#environment-variables-reference)
+3. [Slack Interactivity (Action Notifications)](#slack-interactivity-action-notifications)
+4. [Automatic Risk Channel Creation](#automatic-risk-channel-creation)
+5. [Complete Setup Guide](#complete-setup-guide)
+6. [Environment Variables Reference](#environment-variables-reference)
 
 ---
 
@@ -55,6 +56,7 @@ Slack OAuth is used for user authentication via OpenID Connect (OIDC). The syste
      - `channels:history` (to receive message events from public channels via Events API)
      - `channels:manage` (to create, rename, and invite users to risk channels)
      - `channels:read` (to list and read channel information)
+     - `chat:write` (to post and update action notification messages in channels)
      - `files:read` (to access file metadata and download files via `url_private`)
      - `users:read` (to fetch user profile information including avatar images)
      - `users:read.email` (to access user email addresses from profiles)
@@ -150,6 +152,78 @@ For the bot to receive messages from channels, you need to invite it:
 1. Go to the Slack channel where you want to receive events
 2. Type `/invite @your-bot-name`
 3. The bot will now receive message events from that channel
+
+---
+
+## Slack Interactivity (Action Notifications)
+
+When an action is created in Hecatoncheires, a notification message is automatically posted to the associated case's Slack channel. This message includes interactive buttons that allow users to update the action status directly from Slack.
+
+### How It Works
+
+1. When an action is created, if the associated case has a Slack channel, a Block Kit message is posted
+2. The message contains the action title, description, a link to the web UI, assignees, and interactive buttons
+3. Users can click buttons to:
+   - **Assign to me**: Add themselves as an assignee
+   - **In Progress**: Change the action status to IN_PROGRESS
+   - **Completed**: Change the action status to COMPLETED
+4. After a button click, the Slack message is updated to reflect the new state
+
+### Interactivity Setup
+
+#### 1. Enable Interactivity
+
+1. In your Slack app settings, go to **Interactivity & Shortcuts**
+2. Toggle **Interactivity** to **On**
+
+#### 2. Set Request URL
+
+Enter your interactivity endpoint URL:
+
+For local development with ngrok:
+```
+https://your-ngrok-id.ngrok.io/hooks/slack/interaction
+```
+
+For production:
+```
+https://your-domain.com/hooks/slack/interaction
+```
+
+**Note**:
+- Slack requires HTTPS
+- The interactivity endpoint uses the same Slack signing secret as the Events API webhook for request verification
+- Your app must be running with the correct signing secret configured
+
+#### 3. Add Required Bot Scopes
+
+The bot token must have the `chat:write` scope to post and update messages:
+
+1. In your app settings, go to **OAuth & Permissions**
+2. Under **Bot Token Scopes**, add:
+   - `chat:write` (required for posting and updating messages in channels)
+3. Click **Save Changes**
+4. **Reinstall the app** to apply the new scope
+
+### Message Format
+
+The notification message includes:
+
+- **Header**: "New Action: {title}"
+- **Description**: Action description (if provided)
+- **Link**: Link to the action detail page
+- **Context**: Assignees (as @mentions) and current status
+- **Buttons**: "Assign to me", "In Progress", "Completed"
+
+The message is automatically updated when the action is modified (title, assignees, status, etc.) from the web UI or Slack buttons.
+
+### Requirements
+
+- The case must have a Slack channel (`slackChannelID` must be set)
+- The bot must be a member of the channel
+- The bot token must have `chat:write` scope
+- The signing secret must be configured for interaction verification
+- Slack message posting is best-effort: if it fails, action creation still succeeds
 
 ---
 
@@ -285,34 +359,40 @@ Follow these steps to set up both authentication and webhooks:
 2. **Configure OAuth** (see [Configure OAuth & Permissions](#2-configure-oauth--permissions))
    - Set redirect URL: `${BASE_URL}/api/auth/callback`
    - Add user scopes: `openid`, `profile`, `email`
-   - Add bot scopes: `channels:history`, `channels:manage`, `channels:read`, `files:read`, `users:read`, `users:read.email`
+   - Add bot scopes: `channels:history`, `channels:manage`, `channels:read`, `chat:write`, `files:read`, `users:read`, `users:read.email`
 
 3. **Configure Events API** (see [Events API Setup](#events-api-setup))
    - Enable Event Subscriptions
    - Set request URL: `${BASE_URL}/hooks/slack/event`
    - Subscribe to bot events: `message.channels`, `app_mention`, etc.
 
-4. **Get Credentials**:
+4. **Configure Interactivity** (see [Interactivity Setup](#interactivity-setup))
+   - Enable Interactivity in **Interactivity & Shortcuts**
+   - Set request URL: `${BASE_URL}/hooks/slack/interaction`
+
+5. **Get Credentials**:
    - Client ID (from Basic Information)
    - Client Secret (from Basic Information)
    - Signing Secret (from Basic Information)
 
-5. **Install App to Workspace**:
+6. **Install App to Workspace**:
    - Install the app
    - Copy Bot User OAuth Token (`xoxb-...`)
 
-6. **Set Environment Variables** (see below)
+7. **Set Environment Variables** (see below)
 
-7. **Start the Server**:
+8. **Start the Server**:
    ```bash
    ./hecatoncheires serve
    ```
 
-8. **Verify Setup**:
+9. **Verify Setup**:
    - Check logs for "Slack authentication enabled"
    - Check logs for "Slack webhook handler enabled"
+   - Check logs for "Slack interaction handler enabled"
    - Test authentication by accessing the web UI
    - Test webhook by posting a message in a channel (after inviting the bot)
+   - Test interactivity by creating an action and clicking buttons in the Slack message
 
 ### Environment Variables
 
@@ -566,6 +646,7 @@ service cloud.firestore {
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/hooks/slack/event` | POST | Receives Slack Events API webhooks |
+| `/hooks/slack/interaction` | POST | Receives Slack interactive component payloads (button clicks) |
 
 All webhook endpoints require valid Slack signature verification.
 
@@ -655,6 +736,8 @@ These scopes are required for the Bot User OAuth Token (`xoxb-...`):
 | `channels:manage` | `conversations.invite` | Invite users to risk channels | `pkg/service/slack/client.go` |
 | `channels:read` | `conversations.list` | List public channels the bot has joined | `pkg/service/slack/client.go` |
 | `channels:read` | `conversations.info` | Get channel name and info (with caching) | `pkg/service/slack/client.go` |
+| `chat:write` | `chat.postMessage` | Post action notification messages to channels | `pkg/service/slack/client.go` |
+| `chat:write` | `chat.update` | Update action notification messages after button clicks | `pkg/service/slack/client.go` |
 | `files:read` | Events API | Access file metadata attached to messages via `url_private` | Webhook handler |
 | `users:read` | `users.info` | Fetch user profile (name, avatar) | `pkg/service/slack/client.go` |
 | `users:read` | `users.list` | List all non-deleted, non-bot users in workspace | `pkg/service/slack/client.go` |
@@ -690,7 +773,8 @@ These bot events must be subscribed to in the Slack app settings:
 | OAuth Client ID | OpenID Connect authentication |
 | OAuth Client Secret | OpenID Connect token exchange |
 | Redirect URL | OAuth callback (`${BASE_URL}/api/auth/callback`) |
-| Request URL | Events API webhook endpoint (`${BASE_URL}/hooks/slack/event`) |
+| Request URL (Events) | Events API webhook endpoint (`${BASE_URL}/hooks/slack/event`) |
+| Request URL (Interactivity) | Interactivity endpoint (`${BASE_URL}/hooks/slack/interaction`) |
 
 ---
 

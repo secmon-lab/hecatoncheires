@@ -65,7 +65,7 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 	}
 
 	uc.Case = NewCaseUseCase(repo, registry, uc.slackService, uc.baseURL)
-	uc.Action = NewActionUseCase(repo)
+	uc.Action = NewActionUseCase(repo, uc.slackService, uc.baseURL)
 	uc.Slack = NewSlackUseCases(repo, registry)
 	uc.Source = NewSourceUseCase(repo, uc.notion, uc.slackService)
 

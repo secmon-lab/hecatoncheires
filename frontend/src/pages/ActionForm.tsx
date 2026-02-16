@@ -39,11 +39,11 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
   const [description, setDescription] = useState('')
   const [assigneeIDs, setAssigneeIDs] = useState<string[]>([])
   const [selectedAssignees, setSelectedAssignees] = useState<Array<{ value: string; label: string; image?: string }>>([])
-  const [status, setStatus] = useState('TODO')
+  const [status, setStatus] = useState('BACKLOG')
   const [errors, setErrors] = useState<FormErrors>({})
 
   const { data: casesData } = useQuery(GET_CASES, {
-    variables: { workspaceId: currentWorkspace!.id },
+    variables: { workspaceId: currentWorkspace!.id, status: 'OPEN' },
     skip: !currentWorkspace,
   })
   const { data: usersData } = useQuery(GET_SLACK_USERS)
@@ -86,7 +86,7 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
           image: a.imageUrl,
         }))
       )
-      setStatus(action.status || 'TODO')
+      setStatus(action.status || 'BACKLOG')
     } else if (initialCaseID) {
       setCaseID(initialCaseID)
       resetForm(false)
@@ -103,7 +103,7 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
     setDescription('')
     setAssigneeIDs([])
     setSelectedAssignees([])
-    setStatus('TODO')
+    setStatus('BACKLOG')
     setErrors({})
   }
 
@@ -295,7 +295,7 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
           <Select
             inputId="status"
             value={statusOptions.find((opt) => opt.value === status)}
-            onChange={(selected) => setStatus(selected?.value || 'TODO')}
+            onChange={(selected) => setStatus(selected?.value || 'BACKLOG')}
             options={statusOptions}
             isDisabled={loading}
           />

@@ -2,6 +2,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation } from '@apollo/client'
 import { ArrowLeft, Edit, MoreVertical, Trash2, Plus, ExternalLink, BookOpen, ChevronLeft, ChevronRight, XCircle, RotateCcw, ClipboardList } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
+import Markdown from 'react-markdown'
 import Button from '../components/Button'
 import Chip from '../components/Chip'
 import Modal from '../components/Modal'
@@ -346,7 +347,9 @@ export default function CaseDetail() {
             )}
           </div>
           {caseItem.description && (
-            <p className={styles.description}>{caseItem.description}</p>
+            <div className={styles.description}>
+              <Markdown>{caseItem.description}</Markdown>
+            </div>
           )}
           <div className={styles.timestamps}>
             <span className={styles.timestampLabel}>Created</span>

@@ -10,6 +10,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/worker"
+	goslack "github.com/slack-go/slack"
 )
 
 // mockSlackService is a mock implementation of slack.Service for testing
@@ -88,6 +89,14 @@ func (m *mockSlackService) AddBookmark(ctx context.Context, channelID, title, li
 
 func (m *mockSlackService) GetTeamURL(ctx context.Context) (string, error) {
 	return "https://test-team.slack.com", nil
+}
+
+func (m *mockSlackService) PostMessage(ctx context.Context, channelID string, blocks []goslack.Block, text string) (string, error) {
+	return "1234567890.123456", nil
+}
+
+func (m *mockSlackService) UpdateMessage(ctx context.Context, channelID string, timestamp string, blocks []goslack.Block, text string) error {
+	return nil
 }
 
 func TestSlackUserRefreshWorker_ImmediateInitialSync(t *testing.T) {

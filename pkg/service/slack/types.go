@@ -2,6 +2,8 @@ package slack
 
 import (
 	"context"
+
+	"github.com/slack-go/slack"
 )
 
 // Service provides interface to Slack API for Source operations
@@ -39,6 +41,13 @@ type Service interface {
 	// GetTeamURL retrieves the Slack workspace URL (e.g., "https://ubie.enterprise.slack.com/")
 	// The result is cached for the lifetime of the service instance.
 	GetTeamURL(ctx context.Context) (string, error)
+
+	// PostMessage posts a Block Kit message to a channel and returns the message timestamp.
+	// The text parameter is used as a fallback for notifications.
+	PostMessage(ctx context.Context, channelID string, blocks []slack.Block, text string) (string, error)
+
+	// UpdateMessage updates an existing Block Kit message identified by channel and timestamp.
+	UpdateMessage(ctx context.Context, channelID string, timestamp string, blocks []slack.Block, text string) error
 }
 
 // Channel represents a Slack channel
