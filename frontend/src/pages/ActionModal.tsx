@@ -405,7 +405,7 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
                       </span>
                     )}
                     <Button
-                      variant="outline"
+                      variant="primary"
                       icon={<Pencil size={14} />}
                       onClick={handleDescriptionEditStart}
                     >
