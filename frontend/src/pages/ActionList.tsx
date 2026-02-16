@@ -1,15 +1,15 @@
-import { useState } from 'react'
-import { useQuery } from '@apollo/client'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect, useMemo } from 'react'
+import { useQuery, useMutation } from '@apollo/client'
+import { useNavigate, useParams } from 'react-router-dom'
 import { Plus } from 'lucide-react'
-import Table from '../components/Table'
 import Button from '../components/Button'
-import Chip from '../components/Chip'
+import KanbanBoard from '../components/KanbanBoard'
+import ActionFilterBar from '../components/ActionFilterBar'
+import ActionModal from './ActionModal'
 import ActionForm from './ActionForm'
-import { GET_ACTIONS } from '../graphql/action'
+import { GET_OPEN_CASE_ACTIONS, UPDATE_ACTION } from '../graphql/action'
 import { useWorkspace } from '../contexts/workspace-context'
 import styles from './ActionList.module.css'
-import type { ReactElement } from 'react'
 
 interface Action {
   id: number
@@ -18,119 +18,103 @@ interface Action {
   title: string
   description: string
   assigneeIDs: string[]
-  assignees: Array<{ id: string; realName: string; imageUrl?: string }>
+  assignees: Array<{ id: string; name: string; realName: string; imageUrl?: string }>
   slackMessageTS: string
   status: string
   createdAt: string
   updatedAt: string
 }
 
-const STATUS_LABELS: Record<string, string> = {
-  BACKLOG: 'Backlog',
-  TODO: 'To Do',
-  IN_PROGRESS: 'In Progress',
-  BLOCKED: 'Blocked',
-  COMPLETED: 'Completed',
-  ABANDONED: 'Abandoned',
-}
-
-const STATUS_COLORS: Record<string, number> = {
-  BACKLOG: 0,
-  TODO: 1,
-  IN_PROGRESS: 2,
-  BLOCKED: 3,
-  COMPLETED: 4,
-  ABANDONED: 5,
-}
-
 export default function ActionList() {
   const navigate = useNavigate()
+  const { actionId } = useParams<{ actionId?: string }>()
   const { currentWorkspace } = useWorkspace()
-  const [isFormOpen, setIsFormOpen] = useState(false)
+  const [isCreateFormOpen, setIsCreateFormOpen] = useState(false)
+  const [selectedActionId, setSelectedActionId] = useState<number | null>(null)
 
-  const { data, loading, error } = useQuery(GET_ACTIONS, {
+  // Filter state
+  const [searchText, setSearchText] = useState('')
+  const [selectedAssigneeIDs, setSelectedAssigneeIDs] = useState<string[]>([])
+
+  // Optimistic status overrides to avoid snap-back on drag
+  const [statusOverrides, setStatusOverrides] = useState<Record<number, string>>({})
+
+  const { data, loading, error } = useQuery(GET_OPEN_CASE_ACTIONS, {
     variables: { workspaceId: currentWorkspace!.id },
     skip: !currentWorkspace,
   })
-  const handleFormClose = () => {
-    setIsFormOpen(false)
+
+  const [updateAction] = useMutation(UPDATE_ACTION, {
+    refetchQueries: [
+      { query: GET_OPEN_CASE_ACTIONS, variables: { workspaceId: currentWorkspace!.id } },
+    ],
+  })
+
+  // Handle permalink: open modal if actionId is in URL
+  useEffect(() => {
+    if (actionId) {
+      setSelectedActionId(parseInt(actionId))
+    }
+  }, [actionId])
+
+  const filteredActions = useMemo(() => {
+    const actions: Action[] = data?.openCaseActions || []
+    return actions
+      .map((action) =>
+        statusOverrides[action.id] ? { ...action, status: statusOverrides[action.id] } : action
+      )
+      .filter((action) => {
+        // Text search
+        if (searchText) {
+          const search = searchText.toLowerCase()
+          const matchesTitle = action.title.toLowerCase().includes(search)
+          const matchesDescription = (action.description || '').toLowerCase().includes(search)
+          const matchesCaseName = (action.case?.title || '').toLowerCase().includes(search)
+          if (!matchesTitle && !matchesDescription && !matchesCaseName) {
+            return false
+          }
+        }
+
+        // Assignee filter
+        if (selectedAssigneeIDs.length > 0) {
+          const hasMatchingAssignee = action.assigneeIDs.some((id) =>
+            selectedAssigneeIDs.includes(id)
+          )
+          if (!hasMatchingAssignee) {
+            return false
+          }
+        }
+
+        return true
+      })
+  }, [data, searchText, selectedAssigneeIDs, statusOverrides])
+
+  const handleStatusChange = async (actionId: number, newStatus: string) => {
+    // Immediately reflect the change locally
+    setStatusOverrides((prev) => ({ ...prev, [actionId]: newStatus }))
+    await updateAction({
+      variables: {
+        workspaceId: currentWorkspace!.id,
+        input: { id: actionId, status: newStatus },
+      },
+    })
+    // Clear override after refetch completes
+    setStatusOverrides((prev) => {
+      const next = { ...prev }
+      delete next[actionId]
+      return next
+    })
   }
 
-  const handleRowClick = (action: Action) => {
-    navigate(`/ws/${currentWorkspace!.id}/actions/${action.id}`)
+  const handleCardClick = (action: Action) => {
+    setSelectedActionId(action.id)
+    navigate(`/ws/${currentWorkspace!.id}/actions/${action.id}`, { replace: true })
   }
 
-  const renderAssignees = (assignees: Array<{ id: string; realName: string; imageUrl?: string }>) => {
-    if (!assignees || assignees.length === 0) return null
-
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-        {assignees.map((user) => (
-          <div key={user.id} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            {user.imageUrl && (
-              <img
-                src={user.imageUrl}
-                alt={user.realName}
-                style={{ width: '24px', height: '24px', borderRadius: '4px' }}
-              />
-            )}
-            <span>{user.realName}</span>
-          </div>
-        ))}
-      </div>
-    )
+  const handleModalClose = () => {
+    setSelectedActionId(null)
+    navigate(`/ws/${currentWorkspace!.id}/actions`, { replace: true })
   }
-
-  const columns = [
-    {
-      header: 'ID',
-      accessor: 'id' as keyof Action,
-      width: '48px',
-    },
-    {
-      header: 'Title',
-      accessor: 'title' as keyof Action,
-      width: '200px',
-    },
-    {
-      header: 'Case',
-      accessor: ((action: Action) => (
-        action.case ? (
-          <span
-            className={styles.caseLink}
-            onClick={(e) => {
-              e.stopPropagation()
-              navigate(`/ws/${currentWorkspace!.id}/cases/${action.case!.id}`)
-            }}
-          >
-            {action.case.title}
-          </span>
-        ) : (
-          <span>{action.caseID}</span>
-        )
-      )) as (row: Action) => ReactElement,
-      width: '150px',
-    },
-    {
-      header: 'Status',
-      accessor: ((action: Action) => (
-        <Chip variant="status" colorIndex={STATUS_COLORS[action.status] || 0}>
-          {STATUS_LABELS[action.status] || action.status}
-        </Chip>
-      )) as (row: Action) => ReactElement,
-      width: '150px',
-    },
-    {
-      header: 'Assignees',
-      accessor: ((action: Action) => renderAssignees(action.assignees)) as (row: Action) => ReactElement | null,
-      width: '200px',
-    },
-    {
-      header: 'Created',
-      accessor: ((action: Action) => new Date(action.createdAt).toLocaleDateString()) as (row: Action) => string,
-      width: '120px',
-    },
-  ]
 
   if (loading) {
     return (
@@ -158,19 +142,34 @@ export default function ActionList() {
         <Button
           variant="primary"
           icon={<Plus size={20} />}
-          onClick={() => setIsFormOpen(true)}
+          onClick={() => setIsCreateFormOpen(true)}
         >
           New Action
         </Button>
       </div>
 
-      <div className={styles.tableWrapper}>
-        <Table columns={columns} data={data?.actions || []} onRowClick={handleRowClick} />
-      </div>
+      <ActionFilterBar
+        searchText={searchText}
+        onSearchTextChange={setSearchText}
+        selectedAssigneeIDs={selectedAssigneeIDs}
+        onAssigneeChange={setSelectedAssigneeIDs}
+      />
+
+      <KanbanBoard
+        actions={filteredActions}
+        onCardClick={handleCardClick}
+        onStatusChange={handleStatusChange}
+      />
+
+      <ActionModal
+        actionId={selectedActionId}
+        isOpen={selectedActionId !== null}
+        onClose={handleModalClose}
+      />
 
       <ActionForm
-        isOpen={isFormOpen}
-        onClose={handleFormClose}
+        isOpen={isCreateFormOpen}
+        onClose={() => setIsCreateFormOpen(false)}
         action={null}
       />
     </div>

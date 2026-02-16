@@ -118,7 +118,6 @@ enum ActionStatus {
   IN_PROGRESS
   BLOCKED
   COMPLETED
-  ABANDONED
 }
 
 type Action {
@@ -288,6 +287,7 @@ type Query {
   actions(workspaceId: String!): [Action!]!
   action(workspaceId: String!, id: Int!): Action
   actionsByCase(workspaceId: String!, caseID: Int!): [Action!]!
+  openCaseActions(workspaceId: String!): [Action!]!
 
   # Configuration
   fieldConfiguration(workspaceId: String!): FieldConfiguration!

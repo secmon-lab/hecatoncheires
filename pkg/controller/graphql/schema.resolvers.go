@@ -511,6 +511,21 @@ func (r *queryResolver) ActionsByCase(ctx context.Context, workspaceID string, c
 	return result, nil
 }
 
+// OpenCaseActions is the resolver for the openCaseActions field.
+func (r *queryResolver) OpenCaseActions(ctx context.Context, workspaceID string) ([]*graphql1.Action, error) {
+	actions, err := r.UseCases.Action.ListOpenCaseActions(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]*graphql1.Action, len(actions))
+	for i, a := range actions {
+		result[i] = toGraphQLAction(a, workspaceID)
+	}
+
+	return result, nil
+}
+
 // FieldConfiguration is the resolver for the fieldConfiguration field.
 func (r *queryResolver) FieldConfiguration(ctx context.Context, workspaceID string) (*graphql1.FieldConfiguration, error) {
 	schema := r.UseCases.Case.GetFieldConfiguration(workspaceID)

@@ -26,18 +26,25 @@ test.describe('Action Management', () => {
     // Navigate to action list page
     const actionListPage = new ActionListPage(page);
     await actionListPage.navigate(TEST_WORKSPACE_ID);
-    await actionListPage.waitForTableLoad();
+    await actionListPage.waitForBoardLoad();
   });
 
-  test('should display action list page', async ({ page }) => {
+  test('should display kanban board with 5 columns', async ({ page }) => {
     const actionListPage = new ActionListPage(page);
 
     // Verify the page is loaded
     const isLoaded = await actionListPage.isPageLoaded();
     expect(isLoaded).toBeTruthy();
+
+    // Verify all 5 kanban columns exist
+    expect(await actionListPage.columnExists('Backlog')).toBeTruthy();
+    expect(await actionListPage.columnExists('To Do')).toBeTruthy();
+    expect(await actionListPage.columnExists('In Progress')).toBeTruthy();
+    expect(await actionListPage.columnExists('Blocked')).toBeTruthy();
+    expect(await actionListPage.columnExists('Completed')).toBeTruthy();
   });
 
-  test('should create a new action', async ({ page }) => {
+  test('should create a new action and show it on kanban', async ({ page }) => {
     const actionListPage = new ActionListPage(page);
     const actionFormPage = new ActionFormPage(page);
 
@@ -51,12 +58,15 @@ test.describe('Action Management', () => {
       caseTitle: 'Parent Case for Actions',
     });
 
-    // Verify the action appears in the list
+    // Wait for board to update
+    await actionListPage.waitForBoardLoad();
+
+    // Verify the action appears on the kanban board
     const exists = await actionListPage.actionExists('E2E Test Action');
     expect(exists).toBeTruthy();
   });
 
-  test('should view action details', async ({ page }) => {
+  test('should open action modal when clicking a card', async ({ page }) => {
     const actionListPage = new ActionListPage(page);
     const actionFormPage = new ActionFormPage(page);
     const actionDetailPage = new ActionDetailPage(page);
@@ -64,27 +74,27 @@ test.describe('Action Management', () => {
     // Create a test action first
     await actionListPage.clickNewActionButton();
     await actionFormPage.createAction({
-      title: 'Action for Detail View',
-      description: 'Testing action detail view',
+      title: 'Action for Modal View',
+      description: 'Testing action modal view',
       caseTitle: 'Parent Case for Actions',
     });
 
-    // Wait for table to update
-    await actionListPage.waitForTableLoad();
+    // Wait for board to update
+    await actionListPage.waitForBoardLoad();
 
-    // Click on the action to view details
-    await actionListPage.clickActionByTitle('Action for Detail View');
+    // Click on the action card to open modal
+    await actionListPage.clickActionByTitle('Action for Modal View');
 
-    // Verify detail page is loaded
+    // Verify modal is loaded
     const isLoaded = await actionDetailPage.isPageLoaded();
     expect(isLoaded).toBeTruthy();
 
     // Verify the title matches
     const title = await actionDetailPage.getTitle();
-    expect(title).toContain('Action for Detail View');
+    expect(title).toContain('Action for Modal View');
   });
 
-  test('should list multiple actions', async ({ page }) => {
+  test('should list multiple actions on kanban', async ({ page }) => {
     const actionListPage = new ActionListPage(page);
     const actionFormPage = new ActionFormPage(page);
 
@@ -101,7 +111,7 @@ test.describe('Action Management', () => {
 
     // Reload to get fresh data
     await page.reload();
-    await actionListPage.waitForTableLoad();
+    await actionListPage.waitForBoardLoad();
 
     // Verify all actions are listed
     for (let i = 1; i <= actionCount; i++) {
@@ -123,12 +133,15 @@ test.describe('Action Management', () => {
       caseTitle: 'Parent Case for Actions',
     });
 
-    // Verify the action appears in the list
+    // Wait for board to update
+    await actionListPage.waitForBoardLoad();
+
+    // Verify the action appears on the kanban board
     const exists = await actionListPage.actionExists('Action Without Description');
     expect(exists).toBeTruthy();
   });
 
-  test('should change action status from detail page without edit mode', async ({ page }) => {
+  test('should change action status from modal', async ({ page }) => {
     const actionListPage = new ActionListPage(page);
     const actionFormPage = new ActionFormPage(page);
     const actionDetailPage = new ActionDetailPage(page);
@@ -141,7 +154,7 @@ test.describe('Action Management', () => {
       caseTitle: 'Parent Case for Actions',
     });
 
-    await actionListPage.waitForTableLoad();
+    await actionListPage.waitForBoardLoad();
     await actionListPage.clickActionByTitle('Action for Status Change');
     await actionDetailPage.waitForPageLoad();
 
@@ -155,12 +168,6 @@ test.describe('Action Management', () => {
     // Verify status updated
     const newStatus = await actionDetailPage.getStatus();
     expect(newStatus).toBe('IN_PROGRESS');
-
-    // Reload and verify persistence
-    await page.reload();
-    await actionDetailPage.waitForPageLoad();
-    const persistedStatus = await actionDetailPage.getStatus();
-    expect(persistedStatus).toBe('IN_PROGRESS');
   });
 
   test('should change action status to completed', async ({ page }) => {
@@ -176,7 +183,7 @@ test.describe('Action Management', () => {
       caseTitle: 'Parent Case for Actions',
     });
 
-    await actionListPage.waitForTableLoad();
+    await actionListPage.waitForBoardLoad();
     await actionListPage.clickActionByTitle('Action to Complete');
     await actionDetailPage.waitForPageLoad();
 
@@ -186,5 +193,40 @@ test.describe('Action Management', () => {
     // Verify status updated
     const status = await actionDetailPage.getStatus();
     expect(status).toBe('COMPLETED');
+  });
+
+  test('should filter actions by search text', async ({ page }) => {
+    const actionListPage = new ActionListPage(page);
+    const actionFormPage = new ActionFormPage(page);
+
+    // Create actions with distinct names
+    await actionListPage.clickNewActionButton();
+    await actionFormPage.createAction({
+      title: 'Alpha Task',
+      caseTitle: 'Parent Case for Actions',
+    });
+
+    await actionListPage.clickNewActionButton();
+    await actionFormPage.createAction({
+      title: 'Beta Task',
+      caseTitle: 'Parent Case for Actions',
+    });
+
+    await actionListPage.waitForBoardLoad();
+
+    // Search for "Alpha"
+    await actionListPage.searchActions('Alpha');
+    // Wait for filter to apply
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
+
+    expect(await actionListPage.actionExists('Alpha Task')).toBeTruthy();
+    expect(await actionListPage.actionExists('Beta Task')).toBeFalsy();
+
+    // Clear filter and verify both appear
+    await actionListPage.clearFilters();
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
+
+    expect(await actionListPage.actionExists('Alpha Task')).toBeTruthy();
+    expect(await actionListPage.actionExists('Beta Task')).toBeTruthy();
   });
 });

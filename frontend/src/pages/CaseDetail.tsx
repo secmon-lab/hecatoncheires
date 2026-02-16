@@ -8,6 +8,7 @@ import Modal from '../components/Modal'
 import CaseForm from './CaseForm'
 import CaseDeleteDialog from './CaseDeleteDialog'
 import ActionForm from './ActionForm'
+import ActionModal from './ActionModal'
 import { GET_CASE, GET_CASES, CLOSE_CASE, REOPEN_CASE } from '../graphql/case'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { useWorkspace } from '../contexts/workspace-context'
@@ -53,7 +54,6 @@ const STATUS_LABELS: Record<string, string> = {
   IN_PROGRESS: 'In Progress',
   BLOCKED: 'Blocked',
   COMPLETED: 'Completed',
-  ABANDONED: 'Abandoned',
 }
 
 const STATUS_COLORS: Record<string, number> = {
@@ -62,11 +62,10 @@ const STATUS_COLORS: Record<string, number> = {
   IN_PROGRESS: 2,
   BLOCKED: 3,
   COMPLETED: 4,
-  ABANDONED: 5,
 }
 
 export default function CaseDetail() {
-  const { id } = useParams<{ id: string }>()
+  const { id, actionId } = useParams<{ id: string; actionId?: string }>()
   const navigate = useNavigate()
   const { currentWorkspace } = useWorkspace()
   const [isFormOpen, setIsFormOpen] = useState(false)
@@ -74,9 +73,17 @@ export default function CaseDetail() {
   const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false)
   const [isActionFormOpen, setIsActionFormOpen] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [selectedActionId, setSelectedActionId] = useState<number | null>(null)
   const [knowledgePage, setKnowledgePage] = useState(0)
   const knowledgePageSize = 5
   const menuRef = useRef<HTMLDivElement>(null)
+
+  // Handle permalink: open action modal if actionId is in URL
+  useEffect(() => {
+    if (actionId) {
+      setSelectedActionId(parseInt(actionId))
+    }
+  }, [actionId])
 
   const { data: caseData, loading: caseLoading, error: caseError, refetch } = useQuery(GET_CASE, {
     variables: { workspaceId: currentWorkspace!.id, id: parseInt(id || '0') },
@@ -144,8 +151,14 @@ export default function CaseDetail() {
     }
   }
 
-  const handleActionClick = (actionId: number) => {
-    navigate(`/ws/${currentWorkspace!.id}/actions/${actionId}`)
+  const handleActionClick = (clickedActionId: number) => {
+    setSelectedActionId(clickedActionId)
+    navigate(`/ws/${currentWorkspace!.id}/cases/${id}/actions/${clickedActionId}`, { replace: true })
+  }
+
+  const handleActionModalClose = () => {
+    setSelectedActionId(null)
+    navigate(`/ws/${currentWorkspace!.id}/cases/${id}`, { replace: true })
   }
 
   useEffect(() => {
@@ -567,6 +580,12 @@ export default function CaseDetail() {
           }}
         />
       )}
+
+      <ActionModal
+        actionId={selectedActionId}
+        isOpen={selectedActionId !== null}
+        onClose={handleActionModalClose}
+      />
     </div>
   )
 }

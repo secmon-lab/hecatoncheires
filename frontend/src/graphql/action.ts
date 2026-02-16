@@ -101,3 +101,29 @@ export const DELETE_ACTION = gql`
     deleteAction(workspaceId: $workspaceId, id: $id)
   }
 `
+
+export const GET_OPEN_CASE_ACTIONS = gql`
+  query GetOpenCaseActions($workspaceId: String!) {
+    openCaseActions(workspaceId: $workspaceId) {
+      id
+      caseID
+      case {
+        id
+        title
+      }
+      title
+      description
+      assigneeIDs
+      assignees {
+        id
+        name
+        realName
+        imageUrl
+      }
+      slackMessageTS
+      status
+      createdAt
+      updatedAt
+    }
+  }
+`

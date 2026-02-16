@@ -198,7 +198,6 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
     { value: 'IN_PROGRESS', label: 'In Progress' },
     { value: 'BLOCKED', label: 'Blocked' },
     { value: 'COMPLETED', label: 'Completed' },
-    { value: 'ABANDONED', label: 'Abandoned' },
   ]
 
   return (

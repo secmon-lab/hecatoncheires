@@ -26,7 +26,7 @@
   background-color: var(--bg-paper);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-xl);
-  max-width: 1200px;
+  max-width: 50rem;
   width: 90%;
   max-height: 90vh;
   display: flex;
@@ -86,10 +86,9 @@
 }
 
 .footer {
-  padding: 16px 24px;
-  border-top: 1px solid var(--divider);
+  padding: var(--spacing-md) var(--spacing-lg);
   display: flex;
-  gap: 12px;
+  gap: var(--spacing-md-sm);
   justify-content: flex-end;
 }
 

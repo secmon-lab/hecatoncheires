@@ -11,7 +11,6 @@ const (
 	ActionStatusInProgress ActionStatus = "IN_PROGRESS"
 	ActionStatusBlocked    ActionStatus = "BLOCKED"
 	ActionStatusCompleted  ActionStatus = "COMPLETED"
-	ActionStatusAbandoned  ActionStatus = "ABANDONED"
 )
 
 // AllActionStatuses returns all valid action statuses
@@ -22,7 +21,6 @@ func AllActionStatuses() []ActionStatus {
 		ActionStatusInProgress,
 		ActionStatusBlocked,
 		ActionStatusCompleted,
-		ActionStatusAbandoned,
 	}
 }
 
@@ -33,8 +31,7 @@ func (s ActionStatus) IsValid() bool {
 		ActionStatusTodo,
 		ActionStatusInProgress,
 		ActionStatusBlocked,
-		ActionStatusCompleted,
-		ActionStatusAbandoned:
+		ActionStatusCompleted:
 		return true
 	default:
 		return false

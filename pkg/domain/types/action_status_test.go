@@ -39,11 +39,6 @@ func TestActionStatus_IsValid(t *testing.T) {
 			want:   true,
 		},
 		{
-			name:   "valid abandoned",
-			status: types.ActionStatusAbandoned,
-			want:   true,
-		},
-		{
 			name:   "invalid status",
 			status: types.ActionStatus("invalid"),
 			want:   false,
@@ -104,10 +99,10 @@ func TestParseActionStatus(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "valid abandoned",
+			name:    "abandoned is now invalid",
 			input:   "ABANDONED",
-			want:    types.ActionStatusAbandoned,
-			wantErr: false,
+			want:    "",
+			wantErr: true,
 		},
 		{
 			name:    "invalid status",
@@ -138,7 +133,7 @@ func TestParseActionStatus(t *testing.T) {
 
 func TestAllActionStatuses(t *testing.T) {
 	statuses := types.AllActionStatuses()
-	expectedCount := 6
+	expectedCount := 5
 
 	gt.A(t, statuses).Length(expectedCount)
 
@@ -156,7 +151,6 @@ func TestAllActionStatuses(t *testing.T) {
 		types.ActionStatusInProgress,
 		types.ActionStatusBlocked,
 		types.ActionStatusCompleted,
-		types.ActionStatusAbandoned,
 	}
 
 	statusMap := make(map[types.ActionStatus]bool)
@@ -201,11 +195,6 @@ func TestActionStatus_String(t *testing.T) {
 			name:   "completed",
 			status: types.ActionStatusCompleted,
 			want:   "COMPLETED",
-		},
-		{
-			name:   "abandoned",
-			status: types.ActionStatusAbandoned,
-			want:   "ABANDONED",
 		},
 	}
 
