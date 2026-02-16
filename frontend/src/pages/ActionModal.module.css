@@ -128,7 +128,125 @@
   letter-spacing: 0.05em;
 }
 
-/* Description */
+/* Description display mode */
+.descriptionDisplay {
+  flex: 1;
+  padding: var(--spacing-sm);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  min-height: 12rem;
+  overflow-y: auto;
+}
+
+.descriptionPlaceholder {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.descriptionMarkdown {
+  font-size: 0.875rem;
+  color: var(--text-body);
+  line-height: 1.6;
+}
+
+.descriptionMarkdown h1,
+.descriptionMarkdown h2,
+.descriptionMarkdown h3,
+.descriptionMarkdown h4,
+.descriptionMarkdown h5,
+.descriptionMarkdown h6 {
+  margin: 0.75em 0 0.375em 0;
+  color: var(--text-heading);
+  line-height: 1.3;
+}
+
+.descriptionMarkdown h1 { font-size: 1.25rem; }
+.descriptionMarkdown h2 { font-size: 1.125rem; }
+.descriptionMarkdown h3 { font-size: 1rem; }
+
+.descriptionMarkdown p {
+  margin: 0.375em 0;
+}
+
+.descriptionMarkdown ul,
+.descriptionMarkdown ol {
+  margin: 0.375em 0;
+  padding-left: 1.5em;
+}
+
+.descriptionMarkdown li {
+  margin: 0.125em 0;
+}
+
+.descriptionMarkdown code {
+  background: var(--bg-muted);
+  padding: 0.125em 0.375em;
+  border-radius: 0.25rem;
+  font-size: 0.8125rem;
+}
+
+.descriptionMarkdown pre {
+  background: var(--bg-muted);
+  padding: var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  margin: 0.5em 0;
+}
+
+.descriptionMarkdown pre code {
+  background: none;
+  padding: 0;
+}
+
+.descriptionMarkdown blockquote {
+  margin: 0.5em 0;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-left: 3px solid var(--border-medium);
+  color: var(--text-muted);
+}
+
+.descriptionMarkdown a {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.descriptionMarkdown a:hover {
+  text-decoration: underline;
+}
+
+.descriptionMarkdown table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  width: 100%;
+}
+
+.descriptionMarkdown th,
+.descriptionMarkdown td {
+  border: 1px solid var(--border-default);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  text-align: left;
+  font-size: 0.8125rem;
+}
+
+.descriptionMarkdown th {
+  background: var(--bg-subtle);
+  font-weight: 600;
+}
+
+.descriptionMarkdown hr {
+  border: none;
+  border-top: 1px solid var(--border-default);
+  margin: 0.75em 0;
+}
+
+.descriptionMarkdown img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Description edit mode */
 .descriptionTextarea {
   flex: 1;
   padding: var(--spacing-sm);

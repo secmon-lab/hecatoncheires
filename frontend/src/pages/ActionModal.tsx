@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useQuery, useMutation } from '@apollo/client'
 import { useNavigate } from 'react-router-dom'
 import Select from 'react-select'
+import Markdown from 'react-markdown'
 import { Trash2, AlertTriangle, Check, Pencil } from 'lucide-react'
 import Modal from '../components/Modal'
 import Button from '../components/Button'
@@ -70,6 +71,7 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
   const titleFeedback = useFeedback()
 
   // Description
+  const [isEditingDescription, setIsEditingDescription] = useState(false)
   const [editDescription, setEditDescription] = useState('')
   const [savingDescription, setSavingDescription] = useState(false)
   const descFeedback = useFeedback()
@@ -122,6 +124,7 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
     if (!isOpen) {
       setIsDeleteConfirm(false)
       setIsEditingTitle(false)
+      setIsEditingDescription(false)
     }
   }, [isOpen])
 
@@ -151,6 +154,12 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
     setIsEditingTitle(false)
   }
 
+  const handleDescriptionEditStart = () => {
+    if (!action) return
+    setEditDescription(action.description || '')
+    setIsEditingDescription(true)
+  }
+
   const handleDescriptionSave = async () => {
     if (!action) return
     setSavingDescription(true)
@@ -161,7 +170,13 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
       },
     })
     setSavingDescription(false)
+    setIsEditingDescription(false)
     descFeedback.show()
+  }
+
+  const handleDescriptionCancel = () => {
+    setIsEditingDescription(false)
+    setEditDescription(action?.description || '')
   }
 
   const handleStatusChange = async (newStatus: string) => {
@@ -203,6 +218,7 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
   const handleClose = () => {
     setIsDeleteConfirm(false)
     setIsEditingTitle(false)
+    setIsEditingDescription(false)
     onClose()
   }
 
@@ -278,8 +294,6 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
     (action.assigneeIDs || []).includes(opt.value)
   )
 
-  const descriptionDirty = editDescription.trim() !== (action.description || '').trim()
-
   // Unified view
   return (
     <Modal
@@ -336,32 +350,71 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
           {/* Main: Description */}
           <div className={styles.mainColumn}>
             <label className={styles.fieldLabel}>Description</label>
-            <textarea
-              value={editDescription}
-              onChange={(e) => setEditDescription(e.target.value)}
-              className={styles.descriptionTextarea}
-              placeholder="Add a description..."
-              rows={10}
-            />
-            <div className={styles.descriptionActions}>
-              <Button variant="outline" icon={<Trash2 size={16} />} onClick={() => setIsDeleteConfirm(true)}>
-                Delete
-              </Button>
-              <div className={styles.descriptionActionsRight}>
-                {descFeedback.visible && (
-                  <span className={styles.feedbackInline}>
-                    <Check size={14} /> Saved
-                  </span>
-                )}
-                <Button
-                  variant="primary"
-                  onClick={handleDescriptionSave}
-                  disabled={savingDescription || !descriptionDirty}
-                >
-                  {savingDescription ? 'Saving...' : 'Save'}
-                </Button>
-              </div>
-            </div>
+            {isEditingDescription ? (
+              <>
+                <textarea
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  className={styles.descriptionTextarea}
+                  placeholder="Add a description..."
+                  rows={10}
+                  autoFocus
+                />
+                <div className={styles.descriptionActions}>
+                  <Button variant="outline" icon={<Trash2 size={16} />} onClick={() => setIsDeleteConfirm(true)}>
+                    Delete
+                  </Button>
+                  <div className={styles.descriptionActionsRight}>
+                    {descFeedback.visible && (
+                      <span className={styles.feedbackInline}>
+                        <Check size={14} /> Saved
+                      </span>
+                    )}
+                    <Button variant="outline" onClick={handleDescriptionCancel} disabled={savingDescription}>
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="primary"
+                      onClick={handleDescriptionSave}
+                      disabled={savingDescription}
+                    >
+                      {savingDescription ? 'Saving...' : 'Save'}
+                    </Button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className={styles.descriptionDisplay}>
+                  {action.description ? (
+                    <div className={styles.descriptionMarkdown}>
+                      <Markdown>{action.description}</Markdown>
+                    </div>
+                  ) : (
+                    <p className={styles.descriptionPlaceholder}>No description</p>
+                  )}
+                </div>
+                <div className={styles.descriptionActions}>
+                  <Button variant="outline" icon={<Trash2 size={16} />} onClick={() => setIsDeleteConfirm(true)}>
+                    Delete
+                  </Button>
+                  <div className={styles.descriptionActionsRight}>
+                    {descFeedback.visible && (
+                      <span className={styles.feedbackInline}>
+                        <Check size={14} /> Saved
+                      </span>
+                    )}
+                    <Button
+                      variant="outline"
+                      icon={<Pencil size={14} />}
+                      onClick={handleDescriptionEditStart}
+                    >
+                      Edit
+                    </Button>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Sidebar: Status, Assignees, Meta */}

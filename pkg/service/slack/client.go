@@ -273,3 +273,30 @@ func (c *client) GetTeamURL(ctx context.Context) (string, error) {
 	})
 	return c.teamURL, c.teamURLErr
 }
+
+// PostMessage posts a Block Kit message to a channel and returns the message timestamp
+func (c *client) PostMessage(ctx context.Context, channelID string, blocks []slack.Block, text string) (string, error) {
+	_, ts, err := c.api.PostMessageContext(ctx, channelID,
+		slack.MsgOptionBlocks(blocks...),
+		slack.MsgOptionText(text, false),
+	)
+	if err != nil {
+		return "", goerr.Wrap(err, "failed to post Slack message",
+			goerr.V("channel_id", channelID))
+	}
+	return ts, nil
+}
+
+// UpdateMessage updates an existing Block Kit message identified by channel and timestamp
+func (c *client) UpdateMessage(ctx context.Context, channelID string, timestamp string, blocks []slack.Block, text string) error {
+	_, _, _, err := c.api.UpdateMessageContext(ctx, channelID, timestamp,
+		slack.MsgOptionBlocks(blocks...),
+		slack.MsgOptionText(text, false),
+	)
+	if err != nil {
+		return goerr.Wrap(err, "failed to update Slack message",
+			goerr.V("channel_id", channelID),
+			goerr.V("timestamp", timestamp))
+	}
+	return nil
+}

@@ -199,7 +199,7 @@ func TestCaseUseCase_DeleteCase(t *testing.T) {
 	t.Run("delete case with actions", func(t *testing.T) {
 		repo := memory.New()
 		uc := usecase.NewCaseUseCase(repo, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo)
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := context.Background()
 
 		// Create case

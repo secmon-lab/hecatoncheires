@@ -43,6 +43,24 @@ func (s ActionStatus) String() string {
 	return string(s)
 }
 
+// Emoji returns the emoji associated with the action status
+func (s ActionStatus) Emoji() string {
+	switch s {
+	case ActionStatusBacklog:
+		return "\U0001F4CB" // 📋
+	case ActionStatusTodo:
+		return "\U0001F4CC" // 📌
+	case ActionStatusInProgress:
+		return "\u25B6\uFE0F" // ▶️
+	case ActionStatusBlocked:
+		return "\U0001F6D1" // 🛑
+	case ActionStatusCompleted:
+		return "\u2705" // ✅
+	default:
+		return "\u2753" // ❓
+	}
+}
+
 // ParseActionStatus parses a string into an ActionStatus
 func ParseActionStatus(s string) (ActionStatus, error) {
 	status := ActionStatus(s)

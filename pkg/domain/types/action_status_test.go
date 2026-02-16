@@ -165,6 +165,27 @@ func TestAllActionStatuses(t *testing.T) {
 	}
 }
 
+func TestActionStatus_Emoji(t *testing.T) {
+	tests := []struct {
+		name   string
+		status types.ActionStatus
+		want   string
+	}{
+		{name: "backlog", status: types.ActionStatusBacklog, want: "\U0001F4CB"},
+		{name: "todo", status: types.ActionStatusTodo, want: "\U0001F4CC"},
+		{name: "in-progress", status: types.ActionStatusInProgress, want: "\u25B6\uFE0F"},
+		{name: "blocked", status: types.ActionStatusBlocked, want: "\U0001F6D1"},
+		{name: "completed", status: types.ActionStatusCompleted, want: "\u2705"},
+		{name: "unknown", status: types.ActionStatus("UNKNOWN"), want: "\u2753"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gt.S(t, tt.status.Emoji()).Equal(tt.want)
+		})
+	}
+}
+
 func TestActionStatus_String(t *testing.T) {
 	tests := []struct {
 		name   string
