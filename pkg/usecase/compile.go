@@ -172,6 +172,12 @@ func (uc *CompileUseCase) processNotionSource(
 		"databaseID", dbID,
 	)
 
+	// Pre-index cases by ID for O(1) lookup in notifySlack
+	caseMap := make(map[int64]*model.Case, len(cases))
+	for _, c := range cases {
+		caseMap[c.ID] = c
+	}
+
 	// Query updated pages from Notion
 	for page, pageErr := range uc.notion.QueryUpdatedPages(ctx, dbID, since) {
 		if pageErr != nil {
@@ -230,7 +236,7 @@ func (uc *CompileUseCase) processNotionSource(
 			knowledgeCreated++
 
 			// Send Slack notification (best-effort)
-			if uc.notifySlack(ctx, wsID, created, cases) {
+			if uc.notifySlack(ctx, wsID, created, caseMap) {
 				notifications++
 			}
 		}
@@ -241,20 +247,12 @@ func (uc *CompileUseCase) processNotionSource(
 
 // notifySlack sends a Slack notification for newly created knowledge.
 // Returns true if notification was sent successfully.
-func (uc *CompileUseCase) notifySlack(ctx context.Context, wsID string, k *model.Knowledge, cases []*model.Case) bool {
+func (uc *CompileUseCase) notifySlack(ctx context.Context, wsID string, k *model.Knowledge, caseMap map[int64]*model.Case) bool {
 	if uc.slackService == nil {
 		return false
 	}
 
-	// Find the case for this knowledge
-	var targetCase *model.Case
-	for _, c := range cases {
-		if c.ID == k.CaseID {
-			targetCase = c
-			break
-		}
-	}
-
+	targetCase := caseMap[k.CaseID]
 	if targetCase == nil || targetCase.SlackChannelID == "" {
 		return false
 	}
