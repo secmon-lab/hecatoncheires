@@ -209,7 +209,7 @@ The bot token must have the `chat:write` scope to post and update messages:
 
 The notification message includes:
 
-- **Header**: "New Action: {title}"
+- **Header**: "Action: {emoji} {title}"
 - **Description**: Action description (if provided)
 - **Link**: Link to the action detail page
 - **Context**: Assignees (as @mentions) and current status
