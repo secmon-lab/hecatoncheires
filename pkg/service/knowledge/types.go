@@ -18,14 +18,15 @@ type Service interface {
 type Input struct {
 	Cases      []*model.Case
 	SourceData SourceData
+	Prompt     string // Custom prompt for LLM analysis (optional, uses default if empty)
 }
 
 // SourceData represents data from a source to be analyzed
 type SourceData struct {
-	SourceID  model.SourceID
-	SourceURL string
-	SourcedAt time.Time
-	Content   string // Markdown formatted text
+	SourceID   model.SourceID
+	SourceURLs []string
+	SourcedAt  time.Time
+	Content    string // Markdown formatted text
 	// Future: ImageData for multimodal support
 }
 

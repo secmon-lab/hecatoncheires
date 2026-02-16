@@ -48,7 +48,7 @@ type Knowledge struct {
 	CaseID      int       `json:"caseID"`
 	Case        *Case     `json:"case,omitempty"`
 	SourceID    string    `json:"sourceID"`
-	SourceURL   string    `json:"sourceURL"`
+	SourceURLs  []string  `json:"sourceURLs"`
 	Title       string    `json:"title"`
 	Summary     string    `json:"summary"`
 	SourcedAt   time.Time `json:"sourcedAt"`

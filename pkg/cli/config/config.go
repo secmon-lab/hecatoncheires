@@ -28,6 +28,11 @@ type SlackSection struct {
 	ChannelPrefix string `toml:"channel_prefix"`
 }
 
+// CompileSection represents the [compile] section in a TOML config
+type CompileSection struct {
+	Prompt string `toml:"prompt"`
+}
+
 // AppConfig represents the application configuration.
 // It holds TOML-parsed fields and provides CLI Flags()/Configure() methods.
 type AppConfig struct {
@@ -35,6 +40,7 @@ type AppConfig struct {
 	Labels    Labels              `toml:"labels"`
 	Fields    []FieldDefinition   `toml:"fields"`
 	Slack     SlackSection        `toml:"slack"`
+	Compile   CompileSection      `toml:"compile"`
 }
 
 // WorkspaceConfig represents a fully resolved workspace configuration
@@ -43,6 +49,7 @@ type WorkspaceConfig struct {
 	Name               string
 	SlackChannelPrefix string
 	FieldSchema        *domainConfig.FieldSchema
+	CompilePrompt      string
 }
 
 // Labels represents entity display labels
@@ -286,6 +293,7 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 		Name:               wsName,
 		SlackChannelPrefix: slackPrefix,
 		FieldSchema:        appCfg.ToDomainFieldSchema(),
+		CompilePrompt:      appCfg.Compile.Prompt,
 	}, nil
 }
 
@@ -320,6 +328,7 @@ func (a *AppConfig) Configure(c *cli.Command) ([]*WorkspaceConfig, *model.Worksp
 			},
 			FieldSchema:        wc.FieldSchema,
 			SlackChannelPrefix: wc.SlackChannelPrefix,
+			CompilePrompt:      wc.CompilePrompt,
 		})
 		logging.Default().Info("Registered workspace", "id", wc.ID, "name", wc.Name)
 	}

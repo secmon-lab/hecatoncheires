@@ -34,12 +34,16 @@ func copyKnowledge(k *model.Knowledge) *model.Knowledge {
 		ID:        k.ID,
 		CaseID:    k.CaseID,
 		SourceID:  k.SourceID,
-		SourceURL: k.SourceURL,
 		Title:     k.Title,
 		Summary:   k.Summary,
 		SourcedAt: k.SourcedAt,
 		CreatedAt: k.CreatedAt,
 		UpdatedAt: k.UpdatedAt,
+	}
+
+	if k.SourceURLs != nil {
+		copied.SourceURLs = make([]string, len(k.SourceURLs))
+		copy(copied.SourceURLs, k.SourceURLs)
 	}
 
 	if k.Embedding != nil {

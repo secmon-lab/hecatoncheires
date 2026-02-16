@@ -10,7 +10,7 @@ interface Knowledge {
   id: string
   caseID: number
   sourceID: string
-  sourceURL: string
+  sourceURLs: string[]
   title: string
   summary: string
   sourcedAt: string
@@ -114,15 +114,17 @@ export default function KnowledgeList() {
                     {new Date(knowledge.sourcedAt).toLocaleDateString()}
                   </td>
                   <td className={styles.linkCell}>
-                    <a
-                      href={knowledge.sourceURL}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className={styles.externalLink}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <ExternalLink size={16} />
-                    </a>
+                    {knowledge.sourceURLs?.length > 0 && (
+                      <a
+                        href={knowledge.sourceURLs[0]}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={styles.externalLink}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <ExternalLink size={16} />
+                      </a>
+                    )}
                   </td>
                 </tr>
               ))}

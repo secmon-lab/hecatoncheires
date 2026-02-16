@@ -115,16 +115,16 @@ type ComplexityRoot struct {
 	}
 
 	Knowledge struct {
-		Case      func(childComplexity int) int
-		CaseID    func(childComplexity int) int
-		CreatedAt func(childComplexity int) int
-		ID        func(childComplexity int) int
-		SourceID  func(childComplexity int) int
-		SourceURL func(childComplexity int) int
-		SourcedAt func(childComplexity int) int
-		Summary   func(childComplexity int) int
-		Title     func(childComplexity int) int
-		UpdatedAt func(childComplexity int) int
+		Case       func(childComplexity int) int
+		CaseID     func(childComplexity int) int
+		CreatedAt  func(childComplexity int) int
+		ID         func(childComplexity int) int
+		SourceID   func(childComplexity int) int
+		SourceURLs func(childComplexity int) int
+		SourcedAt  func(childComplexity int) int
+		Summary    func(childComplexity int) int
+		Title      func(childComplexity int) int
+		UpdatedAt  func(childComplexity int) int
 	}
 
 	KnowledgeConnection struct {
@@ -616,12 +616,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Knowledge.SourceID(childComplexity), true
-	case "Knowledge.sourceURL":
-		if e.complexity.Knowledge.SourceURL == nil {
+	case "Knowledge.sourceURLs":
+		if e.complexity.Knowledge.SourceURLs == nil {
 			break
 		}
 
-		return e.complexity.Knowledge.SourceURL(childComplexity), true
+		return e.complexity.Knowledge.SourceURLs(childComplexity), true
 	case "Knowledge.sourcedAt":
 		if e.complexity.Knowledge.SourcedAt == nil {
 			break
@@ -1564,7 +1564,7 @@ type Knowledge {
   caseID: Int!
   case: Case
   sourceID: String!
-  sourceURL: String!
+  sourceURLs: [String!]!
   title: String!
   summary: String!
   sourcedAt: Time!
@@ -2944,8 +2944,8 @@ func (ec *executionContext) fieldContext_Case_knowledges(_ context.Context, fiel
 				return ec.fieldContext_Knowledge_case(ctx, field)
 			case "sourceID":
 				return ec.fieldContext_Knowledge_sourceID(ctx, field)
-			case "sourceURL":
-				return ec.fieldContext_Knowledge_sourceURL(ctx, field)
+			case "sourceURLs":
+				return ec.fieldContext_Knowledge_sourceURLs(ctx, field)
 			case "title":
 				return ec.fieldContext_Knowledge_title(ctx, field)
 			case "summary":
@@ -3710,23 +3710,23 @@ func (ec *executionContext) fieldContext_Knowledge_sourceID(_ context.Context, f
 	return fc, nil
 }
 
-func (ec *executionContext) _Knowledge_sourceURL(ctx context.Context, field graphql.CollectedField, obj *graphql1.Knowledge) (ret graphql.Marshaler) {
+func (ec *executionContext) _Knowledge_sourceURLs(ctx context.Context, field graphql.CollectedField, obj *graphql1.Knowledge) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
 		ec.OperationContext,
 		field,
-		ec.fieldContext_Knowledge_sourceURL,
+		ec.fieldContext_Knowledge_sourceURLs,
 		func(ctx context.Context) (any, error) {
-			return obj.SourceURL, nil
+			return obj.SourceURLs, nil
 		},
 		nil,
-		ec.marshalNString2string,
+		ec.marshalNString2ᚕstringᚄ,
 		true,
 		true,
 	)
 }
 
-func (ec *executionContext) fieldContext_Knowledge_sourceURL(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Knowledge_sourceURLs(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Knowledge",
 		Field:      field,
@@ -3916,8 +3916,8 @@ func (ec *executionContext) fieldContext_KnowledgeConnection_items(_ context.Con
 				return ec.fieldContext_Knowledge_case(ctx, field)
 			case "sourceID":
 				return ec.fieldContext_Knowledge_sourceID(ctx, field)
-			case "sourceURL":
-				return ec.fieldContext_Knowledge_sourceURL(ctx, field)
+			case "sourceURLs":
+				return ec.fieldContext_Knowledge_sourceURLs(ctx, field)
 			case "title":
 				return ec.fieldContext_Knowledge_title(ctx, field)
 			case "summary":
@@ -5846,8 +5846,8 @@ func (ec *executionContext) fieldContext_Query_knowledge(ctx context.Context, fi
 				return ec.fieldContext_Knowledge_case(ctx, field)
 			case "sourceID":
 				return ec.fieldContext_Knowledge_sourceID(ctx, field)
-			case "sourceURL":
-				return ec.fieldContext_Knowledge_sourceURL(ctx, field)
+			case "sourceURLs":
+				return ec.fieldContext_Knowledge_sourceURLs(ctx, field)
 			case "title":
 				return ec.fieldContext_Knowledge_title(ctx, field)
 			case "summary":
@@ -9877,8 +9877,8 @@ func (ec *executionContext) _Knowledge(ctx context.Context, sel ast.SelectionSet
 			if out.Values[i] == graphql.Null {
 				atomic.AddUint32(&out.Invalids, 1)
 			}
-		case "sourceURL":
-			out.Values[i] = ec._Knowledge_sourceURL(ctx, field, obj)
+		case "sourceURLs":
+			out.Values[i] = ec._Knowledge_sourceURLs(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				atomic.AddUint32(&out.Invalids, 1)
 			}
