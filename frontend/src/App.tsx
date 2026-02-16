@@ -4,7 +4,6 @@ import Top from './pages/Top'
 import CaseList from './pages/CaseList'
 import CaseDetail from './pages/CaseDetail'
 import ActionList from './pages/ActionList'
-import ActionDetail from './pages/ActionDetail'
 import KnowledgeList from './pages/KnowledgeList'
 import KnowledgeDetail from './pages/KnowledgeDetail'
 import SourceList from './pages/SourceList'
@@ -22,8 +21,9 @@ function App() {
           <Route index element={<Top />} />
           <Route path="cases" element={<CaseList />} />
           <Route path="cases/:id" element={<CaseDetail />} />
+          <Route path="cases/:id/actions/:actionId" element={<CaseDetail />} />
           <Route path="actions" element={<ActionList />} />
-          <Route path="actions/:id" element={<ActionDetail />} />
+          <Route path="actions/:actionId" element={<ActionList />} />
           <Route path="knowledges" element={<KnowledgeList />} />
           <Route path="knowledges/:id" element={<KnowledgeDetail />} />
           <Route path="sources" element={<SourceList />} />

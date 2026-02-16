@@ -3,7 +3,7 @@ import { useMutation, useQuery } from '@apollo/client'
 import Select from 'react-select'
 import Modal from '../components/Modal'
 import Button from '../components/Button'
-import { CREATE_ACTION, UPDATE_ACTION, GET_ACTIONS } from '../graphql/action'
+import { CREATE_ACTION, UPDATE_ACTION, GET_OPEN_CASE_ACTIONS } from '../graphql/action'
 import { GET_CASES } from '../graphql/case'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import { useWorkspace } from '../contexts/workspace-context'
@@ -48,20 +48,9 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
   })
   const { data: usersData } = useQuery(GET_SLACK_USERS)
   const [createAction, { loading: creating }] = useMutation(CREATE_ACTION, {
-    update(cache, { data }) {
-      if (!data?.createAction) return
-      const existingActions = cache.readQuery<{ actions: Action[] }>({
-        query: GET_ACTIONS,
-        variables: { workspaceId: currentWorkspace!.id },
-      })
-      if (existingActions) {
-        cache.writeQuery({
-          query: GET_ACTIONS,
-          variables: { workspaceId: currentWorkspace!.id },
-          data: { actions: [...existingActions.actions, data.createAction] },
-        })
-      }
-    },
+    refetchQueries: [
+      { query: GET_OPEN_CASE_ACTIONS, variables: { workspaceId: currentWorkspace!.id } },
+    ],
     onCompleted: () => {
       onClose()
       resetForm()
@@ -72,18 +61,9 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
   })
 
   const [updateAction, { loading: updating }] = useMutation(UPDATE_ACTION, {
-    update(cache, { data }) {
-      if (!data?.updateAction) return
-      cache.modify({
-        fields: {
-          actions(existingActions = []) {
-            return existingActions.map((actionRef: Action) =>
-              actionRef.id === data.updateAction.id ? data.updateAction : actionRef
-            )
-          },
-        },
-      })
-    },
+    refetchQueries: [
+      { query: GET_OPEN_CASE_ACTIONS, variables: { workspaceId: currentWorkspace!.id } },
+    ],
     onCompleted: () => {
       onClose()
       resetForm()
@@ -198,7 +178,6 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
     { value: 'IN_PROGRESS', label: 'In Progress' },
     { value: 'BLOCKED', label: 'Blocked' },
     { value: 'COMPLETED', label: 'Completed' },
-    { value: 'ABANDONED', label: 'Abandoned' },
   ]
 
   return (

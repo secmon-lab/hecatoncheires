@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { defineConfig, devices } from '@playwright/test';
 
 /**
@@ -24,7 +25,7 @@ export default defineConfig({
   reporter: [
     ['html'],
     ['list'],
-    ...(process.env.CI ? [['github' as const]] : []),
+    ...(process.env.CI ? [['github'] as [string]] : []),
   ],
 
   // Shared settings for all the projects below
@@ -49,7 +50,7 @@ export default defineConfig({
   timeout: 30000,
 
   // Global timeout for the whole test run
-  globalTimeout: process.env.CI ? 600000 : undefined, // 10 minutes on CI
+  globalTimeout: process.env.CI ? 600000 : 120000, // 10 minutes on CI, 2 minutes locally
 
   // Expect timeout
   expect: {

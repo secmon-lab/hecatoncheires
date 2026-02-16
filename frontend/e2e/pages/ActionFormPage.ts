@@ -13,8 +13,8 @@ export class ActionFormPage extends BasePage {
 
   constructor(page: Page) {
     super(page);
-    this.titleInput = page.locator('input[placeholder*="title"]').first();
-    this.descriptionInput = page.locator('textarea[placeholder*="description"]').first();
+    this.titleInput = page.locator('#title');
+    this.descriptionInput = page.locator('#description');
     this.submitButton = page.locator('button').filter({ hasText: /Save/ }).first();
     this.cancelButton = page.locator('button').filter({ hasText: /Cancel/ }).first();
   }
@@ -33,7 +33,10 @@ export class ActionFormPage extends BasePage {
    * Fill in the action title
    */
   async fillTitle(title: string): Promise<void> {
+    await this.titleInput.click();
     await this.titleInput.fill(title);
+    // Verify the value was actually set (guards against React re-render race)
+    await this.titleInput.press('Tab');
   }
 
   /**
@@ -57,6 +60,9 @@ export class ActionFormPage extends BasePage {
     const option = this.page.getByRole('option', { name: new RegExp(caseTitle, 'i') }).first();
     await option.waitFor({ state: 'visible' });
     await option.click();
+
+    // Wait for the dropdown to close and React to settle
+    await this.page.getByRole('listbox').waitFor({ state: 'hidden', timeout: 3000 }).catch(() => {});
   }
 
   /**
@@ -64,8 +70,9 @@ export class ActionFormPage extends BasePage {
    */
   async submit(): Promise<void> {
     await this.submitButton.click();
-    // Wait for the modal to close by checking if the title is hidden
+    // Wait for the modal and its backdrop to fully close
     await this.page.locator('h2').filter({ hasText: /New Action|Edit Action/ }).waitFor({ state: 'hidden', timeout: 10000 });
+    await this.page.locator('[class*="backdrop"]').waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
   }
 
   /**
