@@ -17,6 +17,14 @@ interface ActionModalProps {
   onClose: () => void
 }
 
+interface AssigneeOption {
+  value: string
+  label: string
+  name: string
+  realName: string
+  image?: string
+}
+
 const STATUS_COLORS: Record<string, number> = {
   BACKLOG: 0,
   TODO: 1,
@@ -256,7 +264,7 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
   }
 
   // Assignee options for Select
-  const assigneeOptions = (usersData?.slackUsers || []).map(
+  const assigneeOptions: AssigneeOption[] = (usersData?.slackUsers || []).map(
     (user: { id: string; name: string; realName: string; imageUrl?: string }) => ({
       value: user.id,
       label: user.realName || user.name,
@@ -266,7 +274,7 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
     })
   )
 
-  const selectedAssignees = assigneeOptions.filter((opt: { value: string }) =>
+  const selectedAssignees = assigneeOptions.filter((opt) =>
     (action.assigneeIDs || []).includes(opt.value)
   )
 
@@ -403,7 +411,7 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
             {/* Assignees */}
             <div className={styles.sidebarSection}>
               <label className={styles.fieldLabel}>Assignees</label>
-              <Select
+              <Select<AssigneeOption, true>
                 isMulti
                 isClearable={false}
                 value={selectedAssignees}
@@ -422,14 +430,14 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
                 }}
                 filterOption={(option, inputValue) => {
                   const search = inputValue.toLowerCase()
-                  const data = option.data as unknown as { label: string; name: string; realName: string }
+                  const data = option.data
                   return (
                     data.label.toLowerCase().includes(search) ||
                     data.name.toLowerCase().includes(search) ||
                     data.realName.toLowerCase().includes(search)
                   )
                 }}
-                formatOptionLabel={(option: { value: string; label: string; image?: string }) => (
+                formatOptionLabel={(option) => (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
                     {option.image && (
                       <img

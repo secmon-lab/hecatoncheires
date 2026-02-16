@@ -90,12 +90,15 @@ export class ActionListPage extends BasePage {
     }
   }
 
+  private getColumnSlug(columnTitle: string): string {
+    return columnTitle.toLowerCase().replace(/\s+/g, '-');
+  }
+
   /**
    * Get the count displayed for a specific kanban column
    */
   async getColumnCount(columnTitle: string): Promise<number> {
-    const slug = columnTitle.toLowerCase().replace(/\s+/g, '-');
-    const column = this.page.getByTestId(`kanban-column-${slug}`);
+    const column = this.page.getByTestId(`kanban-column-${this.getColumnSlug(columnTitle)}`);
     const countText = await column.locator('[class*="count"]').textContent();
     return parseInt(countText || '0');
   }
@@ -104,9 +107,8 @@ export class ActionListPage extends BasePage {
    * Check if a kanban column exists
    */
   async columnExists(columnTitle: string): Promise<boolean> {
-    const slug = columnTitle.toLowerCase().replace(/\s+/g, '-');
     try {
-      await this.page.getByTestId(`kanban-column-${slug}`).waitFor({ state: 'visible', timeout: 5000 });
+      await this.page.getByTestId(`kanban-column-${this.getColumnSlug(columnTitle)}`).waitFor({ state: 'visible', timeout: 5000 });
       return true;
     } catch {
       return false;

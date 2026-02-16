@@ -230,19 +230,14 @@ test.describe('Action Management', () => {
 
     await actionListPage.waitForBoardLoad();
 
-    // Search for "Alpha"
+    // Search for "Alpha" — wait for Beta to disappear as filter confirmation
     await actionListPage.searchActions('Alpha');
-    // Wait for filter to apply
-    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
-
-    expect(await actionListPage.actionExists('Alpha Task')).toBeTruthy();
-    expect(await actionListPage.actionExists('Beta Task')).toBeFalsy();
+    await expect(actionListPage.getActionCardByTitle('Beta Task')).toBeHidden();
+    await expect(actionListPage.getActionCardByTitle('Alpha Task')).toBeVisible();
 
     // Clear filter and verify both appear
     await actionListPage.clearFilters();
-    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
-
-    expect(await actionListPage.actionExists('Alpha Task')).toBeTruthy();
-    expect(await actionListPage.actionExists('Beta Task')).toBeTruthy();
+    await expect(actionListPage.getActionCardByTitle('Alpha Task')).toBeVisible();
+    await expect(actionListPage.getActionCardByTitle('Beta Task')).toBeVisible();
   });
 });
