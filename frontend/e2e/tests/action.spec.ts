@@ -158,9 +158,9 @@ test.describe('Action Management', () => {
     await actionListPage.clickActionByTitle('Action for Status Change');
     await actionDetailPage.waitForPageLoad();
 
-    // Verify initial status is TODO
+    // Verify initial status is BACKLOG
     const initialStatus = await actionDetailPage.getStatus();
-    expect(initialStatus).toBe('TODO');
+    expect(initialStatus).toBe('BACKLOG');
 
     // Change status to IN_PROGRESS
     await actionDetailPage.changeStatus('IN_PROGRESS');
