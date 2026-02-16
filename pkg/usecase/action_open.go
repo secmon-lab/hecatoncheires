@@ -29,11 +29,14 @@ func (uc *ActionUseCase) ListOpenCaseActions(ctx context.Context, workspaceID st
 
 	results := make([]result, len(cases))
 	var wg sync.WaitGroup
+	sem := make(chan struct{}, 10) // Limit concurrent DB queries
 
 	for i, c := range cases {
 		wg.Add(1)
 		go func(idx int, caseID int64) {
 			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
 			actions, err := uc.repo.Action().GetByCase(ctx, workspaceID, caseID)
 			results[idx] = result{actions: actions, err: err}
 		}(i, c.ID)

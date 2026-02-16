@@ -169,10 +169,8 @@ test.describe('Action Management', () => {
     const newStatus = await actionDetailPage.getStatus();
     expect(newStatus).toBe('IN_PROGRESS');
 
-    // Reload and verify persistence
+    // Reload and verify persistence (URL still has action ID, so modal re-opens)
     await page.reload();
-    await actionListPage.waitForBoardLoad();
-    await actionListPage.clickActionByTitle('Action for Status Change');
     await actionDetailPage.waitForPageLoad();
     const persistedStatus = await actionDetailPage.getStatus();
     expect(persistedStatus).toBe('IN_PROGRESS');
@@ -202,10 +200,8 @@ test.describe('Action Management', () => {
     const status = await actionDetailPage.getStatus();
     expect(status).toBe('COMPLETED');
 
-    // Reload and verify persistence
+    // Reload and verify persistence (URL still has action ID, so modal re-opens)
     await page.reload();
-    await actionListPage.waitForBoardLoad();
-    await actionListPage.clickActionByTitle('Action to Complete');
     await actionDetailPage.waitForPageLoad();
     const persistedStatus = await actionDetailPage.getStatus();
     expect(persistedStatus).toBe('COMPLETED');

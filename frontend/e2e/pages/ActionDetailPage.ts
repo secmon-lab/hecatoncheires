@@ -13,7 +13,7 @@ export class ActionDetailPage extends BasePage {
 
   constructor(page: Page) {
     super(page);
-    this.modalTitle = page.locator('[class*="modalHeader"] h2, [class*="header"] h2');
+    this.modalTitle = page.locator('#modal-title');
     this.editButton = page.locator('button').filter({ hasText: /Edit/ }).first();
     this.deleteButton = page.locator('button').filter({ hasText: /Delete/ }).first();
     this.loadingIndicator = page.locator('text=Loading...');
@@ -27,10 +27,12 @@ export class ActionDetailPage extends BasePage {
   }
 
   /**
-   * Get the modal title (action title)
+   * Get the action title displayed in the modal body
    */
   async getTitle(): Promise<string> {
-    return await this.modalTitle.textContent() || '';
+    const titleText = this.page.locator('[class*="titleText"]');
+    await titleText.waitFor({ state: 'visible', timeout: 5000 });
+    return await titleText.textContent() || '';
   }
 
   /**
@@ -91,17 +93,7 @@ export class ActionDetailPage extends BasePage {
    * Close the modal by clicking the close button
    */
   async closeModal(): Promise<void> {
-    // Click the overlay or the close button
-    const closeButton = this.page.locator('[class*="closeButton"]');
-    if (await closeButton.isVisible()) {
-      await closeButton.click();
-    }
-  }
-
-  /**
-   * Wait for the modal to close
-   */
-  async waitForModalClose(): Promise<void> {
-    await this.modalTitle.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
+    await this.page.getByRole('button', { name: 'Close' }).click();
+    await this.page.locator('[class*="backdrop"]').waitFor({ state: 'hidden', timeout: 5000 }).catch(() => {});
   }
 }

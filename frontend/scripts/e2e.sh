@@ -16,15 +16,6 @@ if [ -f "$PID_FILE" ]; then
   rm -f "$PID_FILE"
 fi
 
-# Also kill any process occupying the E2E port (handles orphaned child processes from go run)
-E2E_PORT=18080
-PORT_PID=$(lsof -ti:$E2E_PORT 2>/dev/null || true)
-if [ -n "$PORT_PID" ]; then
-  echo "Killing orphaned process on port $E2E_PORT (PID: $PORT_PID)..."
-  kill "$PORT_PID" 2>/dev/null || true
-  sleep 1
-fi
-
 # Build frontend
 echo "Building frontend..."
 cd "$PROJECT_ROOT/frontend" && pnpm install && pnpm run build && cd "$PROJECT_ROOT"
@@ -32,35 +23,63 @@ cd "$PROJECT_ROOT/frontend" && pnpm install && pnpm run build && cd "$PROJECT_RO
 # Ensure tmp directory exists
 mkdir -p "$PROJECT_ROOT/tmp"
 
-# Start backend server with go run
-echo "Starting backend server..."
-go run . serve --log-level error --repository-backend=memory --config=frontend/e2e/fixtures/config.test.toml --no-auth=U000000000 --addr=127.0.0.1:18080 --graphiql=false &
-BACKEND_PID=$!
-echo "$BACKEND_PID" > "$PID_FILE"
-
 # Function to cleanup on exit
+BACKEND_PID=""
 cleanup() {
-  echo "Stopping backend server (PID: $BACKEND_PID)..."
-  kill "$BACKEND_PID" 2>/dev/null || true
-  wait "$BACKEND_PID" 2>/dev/null || true
+  if [ -n "$BACKEND_PID" ]; then
+    echo "Stopping backend server (PID: $BACKEND_PID)..."
+    kill "$BACKEND_PID" 2>/dev/null || true
+    wait "$BACKEND_PID" 2>/dev/null || true
+  fi
   rm -f "$PID_FILE"
 }
 trap cleanup EXIT
 
-# Wait for server to be ready
-echo "Waiting for server to be ready..."
-for i in {1..30}; do
-  if curl -s http://localhost:18080 > /dev/null 2>&1; then
-    echo "Server is ready!"
+# Try starting backend server with retries on different ports
+MAX_ATTEMPTS=3
+SERVER_READY=false
+
+for attempt in $(seq 1 $MAX_ATTEMPTS); do
+  E2E_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+  echo "Attempt $attempt/$MAX_ATTEMPTS: starting backend on port $E2E_PORT..."
+
+  go run . serve --log-level error --repository-backend=memory --config=frontend/e2e/fixtures/config.test.toml --no-auth=U000000000 --addr=127.0.0.1:$E2E_PORT --graphiql=false &
+  BACKEND_PID=$!
+  echo "$BACKEND_PID" > "$PID_FILE"
+
+  # Wait for server to be ready (timeout: 30s)
+  for i in {1..30}; do
+    if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+      echo "Backend server exited unexpectedly on port $E2E_PORT"
+      break
+    fi
+    if curl -s http://localhost:$E2E_PORT > /dev/null 2>&1; then
+      echo "Server is ready on port $E2E_PORT!"
+      SERVER_READY=true
+      break
+    fi
+    sleep 1
+  done
+
+  if [ "$SERVER_READY" = "true" ]; then
     break
   fi
-  sleep 1
+
+  # Clean up failed attempt before retrying
+  kill "$BACKEND_PID" 2>/dev/null || true
+  wait "$BACKEND_PID" 2>/dev/null || true
+  BACKEND_PID=""
 done
 
-# Run E2E tests
+if [ "$SERVER_READY" != "true" ]; then
+  echo "ERROR: Server failed to start after $MAX_ATTEMPTS attempts"
+  exit 1
+fi
+
+# Run E2E tests (timeout: 120s)
 echo "Running E2E tests..."
 cd "$PROJECT_ROOT/frontend"
-BASE_URL=http://localhost:18080 pnpm exec playwright test "$@" || TEST_EXIT_CODE=$?
+BASE_URL=http://localhost:$E2E_PORT pnpm exec playwright test "$@" || TEST_EXIT_CODE=$?
 
 # Show summary
 echo ""
