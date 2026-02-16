@@ -45,7 +45,7 @@ function parseNotionURL(raw: string): string | null {
 
   const lastSegment = segments[segments.length - 1]
 
-  const clean = lastSegment.replaceAll('-', '')
+  const clean = lastSegment.replace(/-/g, '')
   if (clean.length >= 32) {
     const candidate = clean.slice(-32)
     if (hexPattern.test(candidate)) {
@@ -57,7 +57,7 @@ function parseNotionURL(raw: string): string | null {
 }
 
 function normalizeNotionID(input: string): string | null {
-  const clean = input.replaceAll('-', '').toLowerCase()
+  const clean = input.replace(/-/g, '').toLowerCase()
   if (hexPattern.test(clean)) {
     return clean
   }
