@@ -158,7 +158,7 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 		ctx := context.Background()
 
 		input := usecase.CreateNotionDBSourceInput{
-			DatabaseID:  "test-db-id",
+			DatabaseID:  "a1b2c3d4-e5f6-a7b8-c9d0-e1f2a3b4c5d6",
 			Description: "Test database",
 			Enabled:     true,
 		}
@@ -171,7 +171,7 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 		gt.Value(t, source.SourceType).Equal(model.SourceTypeNotionDB)
 		gt.Value(t, source.NotionDBConfig).NotNil()
 		if source.NotionDBConfig != nil {
-			gt.Value(t, source.NotionDBConfig.DatabaseID).Equal("test-db-id")
+			gt.Value(t, source.NotionDBConfig.DatabaseID).Equal("a1b2c3d4-e5f6-a7b8-c9d0-e1f2a3b4c5d6")
 			gt.Value(t, source.NotionDBConfig.DatabaseTitle).Equal("My Database")
 		}
 	})
@@ -184,7 +184,7 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 
 		input := usecase.CreateNotionDBSourceInput{
 			Name:       "Custom Name",
-			DatabaseID: "test-db-id",
+			DatabaseID: "a1b2c3d4-e5f6-a7b8-c9d0-e1f2a3b4c5d6",
 			Enabled:    true,
 		}
 
@@ -219,7 +219,7 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 		ctx := context.Background()
 
 		input := usecase.CreateNotionDBSourceInput{
-			DatabaseID: "invalid-db-id",
+			DatabaseID: "b1b2c3d4-e5f6-a7b8-c9d0-e1f2a3b4c5d6",
 			Enabled:    true,
 		}
 
@@ -234,7 +234,7 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 
 		input := usecase.CreateNotionDBSourceInput{
 			Name:       "Manual Source",
-			DatabaseID: "test-db-id",
+			DatabaseID: "a1b2c3d4-e5f6-a7b8-c9d0-e1f2a3b4c5d6",
 			Enabled:    true,
 		}
 
@@ -449,7 +449,7 @@ func TestSourceUseCase_ValidateNotionDB(t *testing.T) {
 		uc := usecase.NewSourceUseCase(repo, notionSvc, nil)
 		ctx := context.Background()
 
-		result, err := uc.ValidateNotionDB(ctx, "valid-db-id")
+		result, err := uc.ValidateNotionDB(ctx, "c1b2c3d4-e5f6-a7b8-c9d0-e1f2a3b4c5d6")
 		gt.NoError(t, err).Required()
 
 		gt.Bool(t, result.Valid).True()
@@ -474,7 +474,7 @@ func TestSourceUseCase_ValidateNotionDB(t *testing.T) {
 		uc := usecase.NewSourceUseCase(repo, nil, nil)
 		ctx := context.Background()
 
-		result, err := uc.ValidateNotionDB(ctx, "some-db-id")
+		result, err := uc.ValidateNotionDB(ctx, "d1b2c3d4-e5f6-a7b8-c9d0-e1f2a3b4c5d6")
 		gt.NoError(t, err).Required()
 
 		gt.Bool(t, result.Valid).False()
@@ -491,7 +491,7 @@ func TestSourceUseCase_ValidateNotionDB(t *testing.T) {
 		uc := usecase.NewSourceUseCase(repo, notionSvc, nil)
 		ctx := context.Background()
 
-		result, err := uc.ValidateNotionDB(ctx, "invalid-db-id")
+		result, err := uc.ValidateNotionDB(ctx, "b1b2c3d4-e5f6-a7b8-c9d0-e1f2a3b4c5d6")
 		gt.NoError(t, err).Required()
 
 		gt.Bool(t, result.Valid).False()

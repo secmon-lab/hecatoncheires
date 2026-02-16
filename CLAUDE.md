@@ -196,6 +196,7 @@ When making changes, before finishing the task, always:
 - Run `golangci-lint run ./...` to check lint error
 - Run `gosec -exclude-generated -quiet ./...` to check security issue
 - Run `zenv go test ./...` to ensure ALL tests pass
+- If frontend files were changed: Run `pnpm test` in `frontend/` to execute Vitest unit tests
 - Verify test coverage for your changes - EVERY new function/method MUST be tested
 
 ### Language

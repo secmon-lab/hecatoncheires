@@ -1597,7 +1597,7 @@ func TestGraphQLHandler_SourceMutations(t *testing.T) {
 			"input": map[string]interface{}{
 				"name":        "My Notion DB",
 				"description": "A test notion source",
-				"databaseID":  "notion-db-001",
+				"databaseID":  "a1b2c3d4-e5f6-a7b8-c9d0-e1f2a3b4c5d6",
 				"enabled":     true,
 			},
 		}
@@ -1861,7 +1861,7 @@ func TestGraphQLHandler_SourceMutations(t *testing.T) {
 
 		variables := map[string]interface{}{
 			"workspaceId": testWorkspaceID,
-			"databaseID":  "test-db-id",
+			"databaseID":  "b1b2c3d4-e5f6-a7b8-c9d0-e1f2a3b4c5d6",
 		}
 
 		rec := executeGraphQLRequest(t, handler, mutation, variables)

@@ -6,6 +6,7 @@ import { CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
 import Modal from '../Modal'
 import Button from '../Button'
 import { CREATE_NOTION_DB_SOURCE, VALIDATE_NOTION_DB, GET_SOURCES } from '../../graphql/source'
+import { parseNotionDatabaseID } from '../../utils/notion'
 import styles from './source.module.css'
 
 interface NotionDBFormProps {
@@ -83,7 +84,13 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
 
   const handleValidate = async () => {
     if (!databaseID.trim()) {
-      setErrors({ databaseID: 'Database ID is required' })
+      setErrors({ databaseID: 'Database ID or URL is required' })
+      return
+    }
+
+    const parsedID = parseNotionDatabaseID(databaseID)
+    if (!parsedID) {
+      setErrors({ databaseID: 'Invalid database ID or URL format' })
       return
     }
 
@@ -92,7 +99,7 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
 
     try {
       const result = await validateNotionDB({
-        variables: { workspaceId: currentWorkspace!.id, databaseID: databaseID.trim() },
+        variables: { workspaceId: currentWorkspace!.id, databaseID: parsedID },
       })
 
       const validation: ValidationResult | null = result.data?.validateNotionDB ?? null
@@ -140,11 +147,12 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
       return
     }
 
+    const parsedID = parseNotionDatabaseID(databaseID)
     await createSource({
       variables: {
         workspaceId: currentWorkspace!.id,
         input: {
-          databaseID: databaseID.trim(),
+          databaseID: parsedID ?? databaseID.trim(),
           name: name.trim(),
           description: description.trim() || undefined,
           enabled,
@@ -183,7 +191,7 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
       <form onSubmit={handleSubmit} className={styles.form}>
         <div className={styles.field}>
           <label htmlFor="databaseID" className={styles.label}>
-            Database ID *
+            Database ID / URL *
           </label>
           <div className={styles.inputWithButton}>
             <input
@@ -192,7 +200,7 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
               value={databaseID}
               onChange={(e) => handleDatabaseIDChange(e.target.value)}
               className={`${styles.input} ${errors.databaseID ? styles.inputError : ''}`}
-              placeholder="Enter Notion database ID"
+              placeholder="Enter Notion database ID or paste URL"
               disabled={loading}
             />
             <Button
@@ -210,7 +218,7 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
           </div>
           {errors.databaseID && <span className={styles.error}>{errors.databaseID}</span>}
           <p className={styles.hint}>
-            You can find the database ID in the Notion URL after the workspace name
+            Paste a Notion database URL or enter the database ID directly
           </p>
         </div>
 
