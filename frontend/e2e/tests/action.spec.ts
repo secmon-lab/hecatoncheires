@@ -168,6 +168,14 @@ test.describe('Action Management', () => {
     // Verify status updated
     const newStatus = await actionDetailPage.getStatus();
     expect(newStatus).toBe('IN_PROGRESS');
+
+    // Reload and verify persistence
+    await page.reload();
+    await actionListPage.waitForBoardLoad();
+    await actionListPage.clickActionByTitle('Action for Status Change');
+    await actionDetailPage.waitForPageLoad();
+    const persistedStatus = await actionDetailPage.getStatus();
+    expect(persistedStatus).toBe('IN_PROGRESS');
   });
 
   test('should change action status to completed', async ({ page }) => {
@@ -193,6 +201,14 @@ test.describe('Action Management', () => {
     // Verify status updated
     const status = await actionDetailPage.getStatus();
     expect(status).toBe('COMPLETED');
+
+    // Reload and verify persistence
+    await page.reload();
+    await actionListPage.waitForBoardLoad();
+    await actionListPage.clickActionByTitle('Action to Complete');
+    await actionDetailPage.waitForPageLoad();
+    const persistedStatus = await actionDetailPage.getStatus();
+    expect(persistedStatus).toBe('COMPLETED');
   });
 
   test('should filter actions by search text', async ({ page }) => {
