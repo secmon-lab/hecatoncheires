@@ -6,7 +6,7 @@ const KNOWLEDGE_FIELDS = gql`
     id
     caseID
     sourceID
-    sourceURL
+    sourceURLs
     title
     summary
     sourcedAt

@@ -10,7 +10,7 @@ interface Knowledge {
   id: string
   caseID: number
   sourceID: string
-  sourceURL: string
+  sourceURLs: string[]
   title: string
   summary: string
   sourcedAt: string
@@ -80,15 +80,17 @@ export default function KnowledgeDetail() {
             <BookOpen size={24} className={styles.icon} />
             <h1>{knowledge.title}</h1>
           </div>
-          <a
-            href={knowledge.sourceURL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={styles.sourceLink}
-          >
-            <ExternalLink size={16} />
-            View Source
-          </a>
+          {knowledge.sourceURLs?.length > 0 && (
+            <a
+              href={knowledge.sourceURLs[0]}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={styles.sourceLink}
+            >
+              <ExternalLink size={16} />
+              View Source
+            </a>
+          )}
         </div>
 
         <div className={styles.section}>

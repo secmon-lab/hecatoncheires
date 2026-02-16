@@ -598,6 +598,55 @@ type = "text"
 	})
 }
 
+func TestLoadWorkspaceConfigs_CompilePrompt(t *testing.T) {
+	t.Run("parses compile prompt from config", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		content := `
+[workspace]
+id = "security"
+name = "Security"
+
+[compile]
+prompt = "Focus on security vulnerabilities and threat intelligence."
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`
+		err := os.WriteFile(configPath, []byte(content), 0644)
+		gt.NoError(t, err).Required()
+
+		configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1)
+		gt.Value(t, configs[0].CompilePrompt).Equal("Focus on security vulnerabilities and threat intelligence.")
+	})
+
+	t.Run("empty compile prompt when section omitted", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		content := `
+[workspace]
+id = "risk"
+name = "Risk Management"
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`
+		err := os.WriteFile(configPath, []byte(content), 0644)
+		gt.NoError(t, err).Required()
+
+		configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1)
+		gt.Value(t, configs[0].CompilePrompt).Equal("")
+	})
+}
+
 func TestLoadFieldSchema_DefaultLabels(t *testing.T) {
 	content := `
 [[fields]]

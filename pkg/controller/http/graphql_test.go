@@ -815,15 +815,15 @@ func TestGraphQLHandler_FrontendKnowledgesQuery(t *testing.T) {
 	// Create test knowledge linked to the case
 	now := time.Now()
 	testKnowledge := &model.Knowledge{
-		ID:        model.NewKnowledgeID(),
-		CaseID:    createdCase.ID,
-		SourceID:  "source-001",
-		SourceURL: "https://example.com/source",
-		Title:     "Test Knowledge Title",
-		Summary:   "Test knowledge summary",
-		SourcedAt: now,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:         model.NewKnowledgeID(),
+		CaseID:     createdCase.ID,
+		SourceID:   "source-001",
+		SourceURLs: []string{"https://example.com/source"},
+		Title:      "Test Knowledge Title",
+		Summary:    "Test knowledge summary",
+		SourcedAt:  now,
+		CreatedAt:  now,
+		UpdatedAt:  now,
 	}
 
 	createdKnowledge, err := repo.Knowledge().Create(ctx, testWorkspaceID, testKnowledge)
@@ -843,7 +843,7 @@ func TestGraphQLHandler_FrontendKnowledgesQuery(t *testing.T) {
 							description
 						}
 						sourceID
-						sourceURL
+						sourceURLs
 						title
 						summary
 						sourcedAt
@@ -880,10 +880,10 @@ func TestGraphQLHandler_FrontendKnowledgesQuery(t *testing.T) {
 						Title       string `json:"title"`
 						Description string `json:"description"`
 					} `json:"case"`
-					SourceID  string `json:"sourceID"`
-					SourceURL string `json:"sourceURL"`
-					Title     string `json:"title"`
-					Summary   string `json:"summary"`
+					SourceID   string   `json:"sourceID"`
+					SourceURLs []string `json:"sourceURLs"`
+					Title      string   `json:"title"`
+					Summary    string   `json:"summary"`
 				} `json:"items"`
 				TotalCount int  `json:"totalCount"`
 				HasMore    bool `json:"hasMore"`

@@ -20,6 +20,7 @@ type UseCases struct {
 	Auth              AuthUseCaseInterface
 	Slack             *SlackUseCases
 	Source            *SourceUseCase
+	Compile           *CompileUseCase
 }
 
 type Option func(*UseCases)
@@ -68,6 +69,7 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 	uc.Action = NewActionUseCase(repo, uc.slackService, uc.baseURL)
 	uc.Slack = NewSlackUseCases(repo, registry)
 	uc.Source = NewSourceUseCase(repo, uc.notion, uc.slackService)
+	uc.Compile = NewCompileUseCase(repo, registry, uc.notion, uc.knowledgeService, uc.slackService, uc.baseURL)
 
 	return uc
 }

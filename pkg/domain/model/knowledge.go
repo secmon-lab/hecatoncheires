@@ -20,14 +20,14 @@ func NewKnowledgeID() KnowledgeID {
 
 // Knowledge represents extracted knowledge from source data related to a case
 type Knowledge struct {
-	ID        KnowledgeID
-	CaseID    int64    // Related Case ID (if one source relates to multiple cases, create separate Knowledge for each)
-	SourceID  SourceID // Source ID where data was retrieved
-	SourceURL string   // Direct URL to the source (e.g., Notion page)
-	Title     string   // Title of the extracted insight
-	Summary   string   // Summarized content
-	Embedding []float32
-	SourcedAt time.Time // Timestamp of the source data
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID         KnowledgeID
+	CaseID     int64    // Related Case ID (if one source relates to multiple cases, create separate Knowledge for each)
+	SourceID   SourceID // Source ID where data was retrieved
+	SourceURLs []string // Direct URLs to the source (e.g., Notion pages)
+	Title      string   // Title of the extracted insight
+	Summary    string   // Summarized content
+	Embedding  []float32
+	SourcedAt  time.Time // Timestamp of the source data
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }

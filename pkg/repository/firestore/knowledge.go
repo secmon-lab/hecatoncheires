@@ -15,29 +15,30 @@ import (
 // knowledgeDoc is the Firestore document representation of model.Knowledge.
 // Embedding is stored as firestore.Vector32 so that FindNearest vector search works.
 type knowledgeDoc struct {
-	ID        model.KnowledgeID  `firestore:"ID"`
-	CaseID    int64              `firestore:"CaseID"`
-	SourceID  model.SourceID     `firestore:"SourceID"`
-	SourceURL string             `firestore:"SourceURL"`
-	Title     string             `firestore:"Title"`
-	Summary   string             `firestore:"Summary"`
-	Embedding firestore.Vector32 `firestore:"Embedding,omitempty"`
-	SourcedAt time.Time          `firestore:"SourcedAt"`
-	CreatedAt time.Time          `firestore:"CreatedAt"`
-	UpdatedAt time.Time          `firestore:"UpdatedAt"`
+	ID         model.KnowledgeID  `firestore:"ID"`
+	CaseID     int64              `firestore:"CaseID"`
+	SourceID   model.SourceID     `firestore:"SourceID"`
+	SourceURLs []string           `firestore:"SourceURLs"`
+	SourceURL  string             `firestore:"SourceURL"` // Legacy field for backward compatibility
+	Title      string             `firestore:"Title"`
+	Summary    string             `firestore:"Summary"`
+	Embedding  firestore.Vector32 `firestore:"Embedding,omitempty"`
+	SourcedAt  time.Time          `firestore:"SourcedAt"`
+	CreatedAt  time.Time          `firestore:"CreatedAt"`
+	UpdatedAt  time.Time          `firestore:"UpdatedAt"`
 }
 
 func toKnowledgeDoc(k *model.Knowledge) *knowledgeDoc {
 	doc := &knowledgeDoc{
-		ID:        k.ID,
-		CaseID:    k.CaseID,
-		SourceID:  k.SourceID,
-		SourceURL: k.SourceURL,
-		Title:     k.Title,
-		Summary:   k.Summary,
-		SourcedAt: k.SourcedAt,
-		CreatedAt: k.CreatedAt,
-		UpdatedAt: k.UpdatedAt,
+		ID:         k.ID,
+		CaseID:     k.CaseID,
+		SourceID:   k.SourceID,
+		SourceURLs: k.SourceURLs,
+		Title:      k.Title,
+		Summary:    k.Summary,
+		SourcedAt:  k.SourcedAt,
+		CreatedAt:  k.CreatedAt,
+		UpdatedAt:  k.UpdatedAt,
 	}
 	if len(k.Embedding) > 0 {
 		doc.Embedding = firestore.Vector32(k.Embedding)
@@ -46,16 +47,22 @@ func toKnowledgeDoc(k *model.Knowledge) *knowledgeDoc {
 }
 
 func fromKnowledgeDoc(d *knowledgeDoc) *model.Knowledge {
+	// Migrate legacy SourceURL field to SourceURLs
+	sourceURLs := d.SourceURLs
+	if len(sourceURLs) == 0 && d.SourceURL != "" {
+		sourceURLs = []string{d.SourceURL}
+	}
+
 	k := &model.Knowledge{
-		ID:        d.ID,
-		CaseID:    d.CaseID,
-		SourceID:  d.SourceID,
-		SourceURL: d.SourceURL,
-		Title:     d.Title,
-		Summary:   d.Summary,
-		SourcedAt: d.SourcedAt,
-		CreatedAt: d.CreatedAt,
-		UpdatedAt: d.UpdatedAt,
+		ID:         d.ID,
+		CaseID:     d.CaseID,
+		SourceID:   d.SourceID,
+		SourceURLs: sourceURLs,
+		Title:      d.Title,
+		Summary:    d.Summary,
+		SourcedAt:  d.SourcedAt,
+		CreatedAt:  d.CreatedAt,
+		UpdatedAt:  d.UpdatedAt,
 	}
 	if len(d.Embedding) > 0 {
 		k.Embedding = []float32(d.Embedding)

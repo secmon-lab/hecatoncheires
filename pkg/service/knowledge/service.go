@@ -42,23 +42,25 @@ func (c *client) Extract(ctx context.Context, input Input) ([]Result, error) {
 		return nil, nil
 	}
 
-	// Build the prompt for LLM
-	prompt := c.buildPrompt(input)
+	// Build prompts for LLM
+	systemPrompt := buildSystemPrompt()
+	userPrompt := buildUserPrompt(input)
 
 	// Build the response schema
 	schema := c.buildResponseSchema()
 
-	// Create session with JSON response type
+	// Create session with JSON response type and system prompt
 	session, err := c.llmClient.NewSession(ctx,
 		gollem.WithSessionContentType(gollem.ContentTypeJSON),
 		gollem.WithSessionResponseSchema(schema),
+		gollem.WithSessionSystemPrompt(systemPrompt),
 	)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to create LLM session")
 	}
 
 	// Generate content
-	resp, err := session.GenerateContent(ctx, gollem.Text(prompt))
+	resp, err := session.GenerateContent(ctx, gollem.Text(userPrompt))
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to generate content from LLM")
 	}
@@ -96,11 +98,38 @@ func (c *client) Extract(ctx context.Context, input Input) ([]Result, error) {
 	return results, nil
 }
 
-// buildPrompt creates the prompt for LLM analysis
-func (c *client) buildPrompt(input Input) string {
+// defaultCompilePrompt is used when no custom prompt is provided
+const defaultCompilePrompt = "Analyze the source content and identify information relevant to each case.\nConsider both direct mentions and indirect relevance."
+
+// buildSystemPrompt creates the fixed system prompt for LLM analysis
+func buildSystemPrompt() string {
 	var sb strings.Builder
 
-	sb.WriteString("Analyze the following source content and determine which cases (if any) are related to it.\n\n")
+	sb.WriteString("You are a knowledge extraction assistant. Your task is to analyze source content and determine which cases are related to it.\n\n")
+	sb.WriteString("## Instructions:\n\n")
+	sb.WriteString("1. Analyze the source content and identify any relevant information for each case.\n")
+	sb.WriteString("2. For each related case, provide:\n")
+	sb.WriteString("   - case_id: The ID of the related case\n")
+	sb.WriteString("   - title: A concise title for the extracted knowledge (in the same language as the source content)\n")
+	sb.WriteString("   - summary: A brief summary of how the source content relates to the case (in the same language as the source content)\n")
+	sb.WriteString("3. Only include cases that have clear relevance to the source content.\n")
+	sb.WriteString("4. If no cases are related, return an empty array.\n")
+
+	return sb.String()
+}
+
+// buildUserPrompt creates the user prompt with custom instructions, case data, and source content
+func buildUserPrompt(input Input) string {
+	var sb strings.Builder
+
+	// Add custom or default prompt
+	prompt := input.Prompt
+	if prompt == "" {
+		prompt = defaultCompilePrompt
+	}
+	sb.WriteString(prompt)
+	sb.WriteString("\n\n")
+
 	sb.WriteString("## Cases to consider:\n\n")
 
 	for _, caseItem := range input.Cases {
@@ -114,16 +143,7 @@ func (c *client) buildPrompt(input Input) string {
 
 	sb.WriteString("## Source Content:\n\n")
 	sb.WriteString(input.SourceData.Content)
-	sb.WriteString("\n\n")
-
-	sb.WriteString("## Instructions:\n\n")
-	sb.WriteString("1. Analyze the source content and identify any relevant information for each case.\n")
-	sb.WriteString("2. For each related case, provide:\n")
-	sb.WriteString("   - case_id: The ID of the related case\n")
-	sb.WriteString("   - title: A concise title for the extracted knowledge (in the same language as the source content)\n")
-	sb.WriteString("   - summary: A brief summary of how the source content relates to the case (in the same language as the source content)\n")
-	sb.WriteString("3. Only include cases that have clear relevance to the source content.\n")
-	sb.WriteString("4. If no cases are related, return an empty array.\n")
+	sb.WriteString("\n")
 
 	return sb.String()
 }

@@ -183,7 +183,7 @@ type Knowledge {
   caseID: Int!
   case: Case
   sourceID: String!
-  sourceURL: String!
+  sourceURLs: [String!]!
   title: String!
   summary: String!
   sourcedAt: Time!

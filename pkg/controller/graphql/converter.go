@@ -59,12 +59,17 @@ func toGraphQLAction(a *model.Action, workspaceID string) *graphql1.Action {
 
 // toGraphQLKnowledge converts a domain Knowledge to GraphQL Knowledge
 func toGraphQLKnowledge(k *model.Knowledge, workspaceID string) *graphql1.Knowledge {
+	sourceURLs := k.SourceURLs
+	if sourceURLs == nil {
+		sourceURLs = []string{}
+	}
+
 	return &graphql1.Knowledge{
 		ID:          string(k.ID),
 		WorkspaceID: workspaceID,
 		CaseID:      int(k.CaseID),
 		SourceID:    string(k.SourceID),
-		SourceURL:   k.SourceURL,
+		SourceURLs:  sourceURLs,
 		Title:       k.Title,
 		Summary:     k.Summary,
 		SourcedAt:   k.SourcedAt,

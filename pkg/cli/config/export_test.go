@@ -10,3 +10,11 @@ func NewSlackForTest(clientID, clientSecret, botToken, signingSecret, noAuthUID 
 		noAuthUID:     noAuthUID,
 	}
 }
+
+// NewGeminiForTest creates a Gemini config for testing purposes
+func NewGeminiForTest(projectID, location string) *Gemini {
+	return &Gemini{
+		projectID: projectID,
+		location:  location,
+	}
+}

@@ -28,13 +28,13 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		sourcedAt := time.Now().Add(-24 * time.Hour).UTC().Truncate(time.Second)
 
 		knowledge := &model.Knowledge{
-			CaseID:    123,
-			SourceID:  sourceID,
-			SourceURL: "https://www.notion.so/page/12345",
-			Title:     "Security patch update",
-			Summary:   "A new security patch was released for CVE-2024-1234",
-			Embedding: []float32{0.1, 0.2, 0.3},
-			SourcedAt: sourcedAt,
+			CaseID:     123,
+			SourceID:   sourceID,
+			SourceURLs: []string{"https://www.notion.so/page/12345"},
+			Title:      "Security patch update",
+			Summary:    "A new security patch was released for CVE-2024-1234",
+			Embedding:  []float32{0.1, 0.2, 0.3},
+			SourcedAt:  sourcedAt,
 		}
 
 		created, err := repo.Knowledge().Create(ctx, wsID, knowledge)
@@ -43,7 +43,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		gt.String(t, string(created.ID)).NotEqual("")
 		gt.Value(t, created.CaseID).Equal(knowledge.CaseID)
 		gt.Value(t, created.SourceID).Equal(knowledge.SourceID)
-		gt.Value(t, created.SourceURL).Equal(knowledge.SourceURL)
+		gt.Array(t, created.SourceURLs).Length(1)
 		gt.Value(t, created.Title).Equal(knowledge.Title)
 		gt.Value(t, created.Summary).Equal(knowledge.Summary)
 		gt.Array(t, created.Embedding).Length(3)
@@ -62,12 +62,12 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		sourceID := model.SourceID(fmt.Sprintf("source-%d", time.Now().UnixNano()))
 
 		knowledge := &model.Knowledge{
-			ID:        customID,
-			CaseID:    456,
-			SourceID:  sourceID,
-			SourceURL: "https://www.notion.so/page/custom",
-			Title:     "Custom ID Knowledge",
-			Summary:   "Knowledge with custom ID",
+			ID:         customID,
+			CaseID:     456,
+			SourceID:   sourceID,
+			SourceURLs: []string{"https://www.notion.so/page/custom"},
+			Title:      "Custom ID Knowledge",
+			Summary:    "Knowledge with custom ID",
 		}
 
 		created, err := repo.Knowledge().Create(ctx, wsID, knowledge)
@@ -84,13 +84,13 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		sourcedAt := time.Now().Add(-24 * time.Hour).UTC().Truncate(time.Second)
 
 		knowledge := &model.Knowledge{
-			CaseID:    789,
-			SourceID:  sourceID,
-			SourceURL: "https://www.notion.so/page/get-test",
-			Title:     "Test Knowledge",
-			Summary:   "For testing Get",
-			Embedding: []float32{0.5, 0.6, 0.7, 0.8},
-			SourcedAt: sourcedAt,
+			CaseID:     789,
+			SourceID:   sourceID,
+			SourceURLs: []string{"https://www.notion.so/page/get-test"},
+			Title:      "Test Knowledge",
+			Summary:    "For testing Get",
+			Embedding:  []float32{0.5, 0.6, 0.7, 0.8},
+			SourcedAt:  sourcedAt,
 		}
 
 		created, err := repo.Knowledge().Create(ctx, wsID, knowledge)
@@ -102,7 +102,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		gt.Value(t, retrieved.ID).Equal(created.ID)
 		gt.Value(t, retrieved.CaseID).Equal(created.CaseID)
 		gt.Value(t, retrieved.SourceID).Equal(created.SourceID)
-		gt.Value(t, retrieved.SourceURL).Equal(created.SourceURL)
+		gt.Array(t, retrieved.SourceURLs).Length(1)
 		gt.Value(t, retrieved.Title).Equal(created.Title)
 		gt.Value(t, retrieved.Summary).Equal(created.Summary)
 		gt.Array(t, retrieved.Embedding).Length(4)
@@ -127,33 +127,33 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 
 		// Create knowledge entries for the same risk
 		k1, err := repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
-			CaseID:    riskID,
-			SourceID:  sourceID,
-			SourceURL: "https://www.notion.so/page/1",
-			Title:     "Knowledge 1",
-			Summary:   "First knowledge",
-			SourcedAt: time.Now().Add(-1 * time.Hour).UTC(),
+			CaseID:     riskID,
+			SourceID:   sourceID,
+			SourceURLs: []string{"https://www.notion.so/page/1"},
+			Title:      "Knowledge 1",
+			Summary:    "First knowledge",
+			SourcedAt:  time.Now().Add(-1 * time.Hour).UTC(),
 		})
 		gt.NoError(t, err).Required()
 
 		k2, err := repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
-			CaseID:    riskID,
-			SourceID:  sourceID,
-			SourceURL: "https://www.notion.so/page/2",
-			Title:     "Knowledge 2",
-			Summary:   "Second knowledge",
-			SourcedAt: time.Now().Add(-2 * time.Hour).UTC(),
+			CaseID:     riskID,
+			SourceID:   sourceID,
+			SourceURLs: []string{"https://www.notion.so/page/2"},
+			Title:      "Knowledge 2",
+			Summary:    "Second knowledge",
+			SourcedAt:  time.Now().Add(-2 * time.Hour).UTC(),
 		})
 		gt.NoError(t, err).Required()
 
 		// Create knowledge for a different risk
 		_, err = repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
-			CaseID:    riskID + 1,
-			SourceID:  sourceID,
-			SourceURL: "https://www.notion.so/page/3",
-			Title:     "Knowledge 3",
-			Summary:   "Different risk knowledge",
-			SourcedAt: time.Now().UTC(),
+			CaseID:     riskID + 1,
+			SourceID:   sourceID,
+			SourceURLs: []string{"https://www.notion.so/page/3"},
+			Title:      "Knowledge 3",
+			Summary:    "Different risk knowledge",
+			SourcedAt:  time.Now().UTC(),
 		})
 		gt.NoError(t, err).Required()
 
@@ -198,44 +198,44 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 
 		// Create knowledge entries for risk1
 		k1, err := repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
-			CaseID:    riskID1,
-			SourceID:  sourceID,
-			SourceURL: "https://example.com/1",
-			Title:     "Knowledge 1 for Risk 1",
-			Summary:   "First knowledge for risk 1",
-			SourcedAt: time.Now().UTC(),
+			CaseID:     riskID1,
+			SourceID:   sourceID,
+			SourceURLs: []string{"https://example.com/1"},
+			Title:      "Knowledge 1 for Risk 1",
+			Summary:    "First knowledge for risk 1",
+			SourcedAt:  time.Now().UTC(),
 		})
 		gt.NoError(t, err).Required()
 
 		k2, err := repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
-			CaseID:    riskID1,
-			SourceID:  sourceID,
-			SourceURL: "https://example.com/2",
-			Title:     "Knowledge 2 for Risk 1",
-			Summary:   "Second knowledge for risk 1",
-			SourcedAt: time.Now().UTC(),
+			CaseID:     riskID1,
+			SourceID:   sourceID,
+			SourceURLs: []string{"https://example.com/2"},
+			Title:      "Knowledge 2 for Risk 1",
+			Summary:    "Second knowledge for risk 1",
+			SourcedAt:  time.Now().UTC(),
 		})
 		gt.NoError(t, err).Required()
 
 		// Create knowledge entries for risk2
 		k3, err := repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
-			CaseID:    riskID2,
-			SourceID:  sourceID,
-			SourceURL: "https://example.com/3",
-			Title:     "Knowledge 1 for Risk 2",
-			Summary:   "First knowledge for risk 2",
-			SourcedAt: time.Now().UTC(),
+			CaseID:     riskID2,
+			SourceID:   sourceID,
+			SourceURLs: []string{"https://example.com/3"},
+			Title:      "Knowledge 1 for Risk 2",
+			Summary:    "First knowledge for risk 2",
+			SourcedAt:  time.Now().UTC(),
 		})
 		gt.NoError(t, err).Required()
 
 		// Create knowledge for risk3 (not requested)
 		_, err = repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
-			CaseID:    riskID3,
-			SourceID:  sourceID,
-			SourceURL: "https://example.com/4",
-			Title:     "Knowledge for Risk 3",
-			Summary:   "Not requested",
-			SourcedAt: time.Now().UTC(),
+			CaseID:     riskID3,
+			SourceID:   sourceID,
+			SourceURLs: []string{"https://example.com/4"},
+			Title:      "Knowledge for Risk 3",
+			Summary:    "Not requested",
+			SourcedAt:  time.Now().UTC(),
 		})
 		gt.NoError(t, err).Required()
 
@@ -320,33 +320,33 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 
 		// Create knowledge entries for the same source
 		k1, err := repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
-			CaseID:    riskID,
-			SourceID:  sourceID,
-			SourceURL: "https://www.notion.so/page/a",
-			Title:     "Knowledge A",
-			Summary:   "First knowledge for source",
-			SourcedAt: time.Now().Add(-1 * time.Hour).UTC(),
+			CaseID:     riskID,
+			SourceID:   sourceID,
+			SourceURLs: []string{"https://www.notion.so/page/a"},
+			Title:      "Knowledge A",
+			Summary:    "First knowledge for source",
+			SourcedAt:  time.Now().Add(-1 * time.Hour).UTC(),
 		})
 		gt.NoError(t, err).Required()
 
 		k2, err := repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
-			CaseID:    riskID + 1,
-			SourceID:  sourceID,
-			SourceURL: "https://www.notion.so/page/b",
-			Title:     "Knowledge B",
-			Summary:   "Second knowledge for source",
-			SourcedAt: time.Now().Add(-2 * time.Hour).UTC(),
+			CaseID:     riskID + 1,
+			SourceID:   sourceID,
+			SourceURLs: []string{"https://www.notion.so/page/b"},
+			Title:      "Knowledge B",
+			Summary:    "Second knowledge for source",
+			SourcedAt:  time.Now().Add(-2 * time.Hour).UTC(),
 		})
 		gt.NoError(t, err).Required()
 
 		// Create knowledge for a different source
 		_, err = repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
-			CaseID:    riskID,
-			SourceID:  otherSourceID,
-			SourceURL: "https://www.notion.so/page/c",
-			Title:     "Knowledge C",
-			Summary:   "Different source knowledge",
-			SourcedAt: time.Now().UTC(),
+			CaseID:     riskID,
+			SourceID:   otherSourceID,
+			SourceURLs: []string{"https://www.notion.so/page/c"},
+			Title:      "Knowledge C",
+			Summary:    "Different source knowledge",
+			SourcedAt:  time.Now().UTC(),
 		})
 		gt.NoError(t, err).Required()
 
@@ -386,11 +386,11 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		sourceID := model.SourceID(fmt.Sprintf("source-%d", time.Now().UnixNano()))
 
 		created, err := repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
-			CaseID:    111,
-			SourceID:  sourceID,
-			SourceURL: "https://www.notion.so/page/delete",
-			Title:     "To Be Deleted",
-			Summary:   "This will be deleted",
+			CaseID:     111,
+			SourceID:   sourceID,
+			SourceURLs: []string{"https://www.notion.so/page/delete"},
+			Title:      "To Be Deleted",
+			Summary:    "This will be deleted",
 		})
 		gt.NoError(t, err).Required()
 
@@ -418,12 +418,12 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		sourceID := model.SourceID(fmt.Sprintf("source-%d", time.Now().UnixNano()))
 
 		knowledge := &model.Knowledge{
-			CaseID:    222,
-			SourceID:  sourceID,
-			SourceURL: "https://www.notion.so/page/no-embedding",
-			Title:     "No Embedding",
-			Summary:   "Knowledge without embedding",
-			Embedding: nil,
+			CaseID:     222,
+			SourceID:   sourceID,
+			SourceURLs: []string{"https://www.notion.so/page/no-embedding"},
+			Title:      "No Embedding",
+			Summary:    "Knowledge without embedding",
+			Embedding:  nil,
 		}
 
 		created, err := repo.Knowledge().Create(ctx, wsID, knowledge)
@@ -445,37 +445,37 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 
 		// Create knowledge with embedding close to [1, 0, 0]
 		_, err := repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
-			CaseID:    time.Now().UnixNano(),
-			SourceID:  sourceID,
-			SourceURL: "https://example.com/similar",
-			Title:     "Similar Knowledge",
-			Summary:   "This is similar",
-			Embedding: []float32{0.9, 0.1, 0.0},
-			SourcedAt: time.Now().UTC(),
+			CaseID:     time.Now().UnixNano(),
+			SourceID:   sourceID,
+			SourceURLs: []string{"https://example.com/similar"},
+			Title:      "Similar Knowledge",
+			Summary:    "This is similar",
+			Embedding:  []float32{0.9, 0.1, 0.0},
+			SourcedAt:  time.Now().UTC(),
 		})
 		gt.NoError(t, err).Required()
 
 		// Create knowledge with embedding close to [0, 1, 0] (dissimilar)
 		_, err = repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
-			CaseID:    time.Now().UnixNano(),
-			SourceID:  sourceID,
-			SourceURL: "https://example.com/dissimilar",
-			Title:     "Dissimilar Knowledge",
-			Summary:   "This is dissimilar",
-			Embedding: []float32{0.0, 0.9, 0.1},
-			SourcedAt: time.Now().UTC(),
+			CaseID:     time.Now().UnixNano(),
+			SourceID:   sourceID,
+			SourceURLs: []string{"https://example.com/dissimilar"},
+			Title:      "Dissimilar Knowledge",
+			Summary:    "This is dissimilar",
+			Embedding:  []float32{0.0, 0.9, 0.1},
+			SourcedAt:  time.Now().UTC(),
 		})
 		gt.NoError(t, err).Required()
 
 		// Create knowledge with embedding very close to [1, 0, 0]
 		_, err = repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
-			CaseID:    time.Now().UnixNano(),
-			SourceID:  sourceID,
-			SourceURL: "https://example.com/most-similar",
-			Title:     "Most Similar Knowledge",
-			Summary:   "This is the most similar",
-			Embedding: []float32{1.0, 0.0, 0.0},
-			SourcedAt: time.Now().UTC(),
+			CaseID:     time.Now().UnixNano(),
+			SourceID:   sourceID,
+			SourceURLs: []string{"https://example.com/most-similar"},
+			Title:      "Most Similar Knowledge",
+			Summary:    "This is the most similar",
+			Embedding:  []float32{1.0, 0.0, 0.0},
+			SourcedAt:  time.Now().UTC(),
 		})
 		gt.NoError(t, err).Required()
 
@@ -497,12 +497,12 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 
 		// Create knowledge without embedding
 		_, err := repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
-			CaseID:    time.Now().UnixNano(),
-			SourceID:  sourceID,
-			SourceURL: "https://example.com/no-embed",
-			Title:     "No Embedding",
-			Summary:   "No embedding here",
-			SourcedAt: time.Now().UTC(),
+			CaseID:     time.Now().UnixNano(),
+			SourceID:   sourceID,
+			SourceURLs: []string{"https://example.com/no-embed"},
+			Title:      "No Embedding",
+			Summary:    "No embedding here",
+			SourcedAt:  time.Now().UTC(),
 		})
 		gt.NoError(t, err).Required()
 
@@ -521,13 +521,13 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		// Create 5 knowledge entries with embeddings
 		for i := 0; i < 5; i++ {
 			_, err := repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
-				CaseID:    time.Now().UnixNano() + int64(i),
-				SourceID:  sourceID,
-				SourceURL: fmt.Sprintf("https://example.com/embed-%d", i),
-				Title:     fmt.Sprintf("Knowledge %d", i),
-				Summary:   fmt.Sprintf("Knowledge entry %d", i),
-				Embedding: []float32{float32(i) * 0.1, 0.5, 0.5},
-				SourcedAt: time.Now().UTC(),
+				CaseID:     time.Now().UnixNano() + int64(i),
+				SourceID:   sourceID,
+				SourceURLs: []string{fmt.Sprintf("https://example.com/embed-%d", i)},
+				Title:      fmt.Sprintf("Knowledge %d", i),
+				Summary:    fmt.Sprintf("Knowledge entry %d", i),
+				Embedding:  []float32{float32(i) * 0.1, 0.5, 0.5},
+				SourcedAt:  time.Now().UTC(),
 			})
 			gt.NoError(t, err).Required()
 		}
@@ -561,12 +561,12 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		}
 
 		knowledge := &model.Knowledge{
-			CaseID:    333,
-			SourceID:  sourceID,
-			SourceURL: "https://www.notion.so/page/large-embedding",
-			Title:     "Large Embedding",
-			Summary:   "Knowledge with 768-dimension embedding",
-			Embedding: embedding,
+			CaseID:     333,
+			SourceID:   sourceID,
+			SourceURLs: []string{"https://www.notion.so/page/large-embedding"},
+			Title:      "Large Embedding",
+			Summary:    "Knowledge with 768-dimension embedding",
+			Embedding:  embedding,
 		}
 
 		created, err := repo.Knowledge().Create(ctx, wsID, knowledge)
