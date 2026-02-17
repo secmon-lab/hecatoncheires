@@ -496,7 +496,7 @@ func buildThreadedMarkdown(messages []*slackmodel.Message, ch model.SlackChannel
 		first = false
 
 		sb.WriteString(fmt.Sprintf("## Message by %s at %s\n%s\n",
-			t.root.UserName(), t.root.CreatedAt().Format(time.RFC3339), t.root.Text()))
+t.root.UserName(), t.root.CreatedAt().Format(time.DateTime), t.root.Text()))
 
 		for _, reply := range t.replies {
 			sb.WriteString(fmt.Sprintf("\n### Reply by %s at %s\n%s\n",
