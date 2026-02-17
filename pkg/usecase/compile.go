@@ -512,7 +512,7 @@ reply.UserName(), reply.CreatedAt().Format(time.DateTime), reply.Text()))
 		first = false
 
 		sb.WriteString(fmt.Sprintf("## Message by %s at %s\n%s\n",
-			msg.UserName(), msg.CreatedAt().Format(time.RFC3339), msg.Text()))
+msg.UserName(), msg.CreatedAt().Format(time.DateTime), msg.Text()))
 	}
 
 	return sb.String()
