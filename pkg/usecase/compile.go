@@ -500,7 +500,7 @@ t.root.UserName(), t.root.CreatedAt().Format(time.DateTime), t.root.Text()))
 
 		for _, reply := range t.replies {
 			sb.WriteString(fmt.Sprintf("\n### Reply by %s at %s\n%s\n",
-				reply.UserName(), reply.CreatedAt().Format(time.RFC3339), reply.Text()))
+reply.UserName(), reply.CreatedAt().Format(time.DateTime), reply.Text()))
 		}
 	}
 
