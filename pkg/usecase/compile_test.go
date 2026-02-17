@@ -921,9 +921,9 @@ func TestBuildThreadedMarkdown(t *testing.T) {
 		md := usecase.BuildThreadedMarkdown(messages, ch)
 
 		gt.Value(t, strings.Contains(md, "# Slack Channel: #general (C001)")).Equal(true)
-		gt.Value(t, strings.Contains(md, "## Message by alice at "+baseTime.Format(time.RFC3339))).Equal(true)
+		gt.Value(t, strings.Contains(md, "## Message by alice at "+baseTime.Format(time.DateTime))).Equal(true)
 		gt.Value(t, strings.Contains(md, "First message")).Equal(true)
-		gt.Value(t, strings.Contains(md, "## Message by bob at "+baseTime.Add(time.Minute).Format(time.RFC3339))).Equal(true)
+		gt.Value(t, strings.Contains(md, "## Message by bob at "+baseTime.Add(time.Minute).Format(time.DateTime))).Equal(true)
 		gt.Value(t, strings.Contains(md, "Second message")).Equal(true)
 		gt.Value(t, strings.Contains(md, "---")).Equal(true)
 	})
