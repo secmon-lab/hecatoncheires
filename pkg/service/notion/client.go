@@ -3,6 +3,7 @@ package notion
 import (
 	"context"
 	"iter"
+	"strings"
 	"time"
 
 	"github.com/jomei/notionapi"
@@ -276,11 +277,7 @@ func extractPageTitle(page *notionapi.Page) string {
 				texts = append(texts, rt.PlainText)
 			}
 			if len(texts) > 0 {
-				result := ""
-				for _, t := range texts {
-					result += t
-				}
-				return result
+				return strings.Join(texts, "")
 			}
 		}
 	}
@@ -302,6 +299,10 @@ func (c *client) walkPage(ctx context.Context, pageID string, since time.Time, r
 		return yield(nil, goerr.Wrap(err, "failed to get page", goerr.V("pageID", pageID)))
 	}
 
+	// childPageIDs is populated either from already-fetched blocks (when page is updated)
+	// or lazily via a separate API call (when page is not updated but recursive traversal is needed).
+	var childPageIDs []string
+
 	lastEdited := time.Time(pageObjPtr.LastEditedTime)
 	if !lastEdited.Before(since) {
 		page, err := c.fetchPageDetails(ctx, *pageObjPtr)
@@ -311,6 +312,8 @@ func (c *client) walkPage(ctx context.Context, pageID string, since time.Time, r
 		if !yield(page, nil) {
 			return false
 		}
+		// Reuse already-fetched blocks to avoid a redundant GetChildren API call.
+		childPageIDs = extractChildPageIDs(page.Blocks)
 	}
 
 	if !recursive {
@@ -322,12 +325,16 @@ func (c *client) walkPage(ctx context.Context, pageID string, since time.Time, r
 		return true
 	}
 
-	// Fetch child blocks to find child_page blocks
-	childPageIDs, err := c.collectChildPageIDs(ctx, pageID)
-	if err != nil {
-		// best-effort: log and continue
-		yield(nil, goerr.Wrap(err, "failed to collect child page IDs", goerr.V("pageID", pageID)))
-		return true
+	// If the page was not fetched above, collect child page IDs now.
+	if childPageIDs == nil {
+		childPageIDs, err = c.collectChildPageIDs(ctx, pageID)
+		if err != nil {
+			// best-effort: log and continue
+			if !yield(nil, goerr.Wrap(err, "failed to collect child page IDs", goerr.V("pageID", pageID))) {
+				return false
+			}
+			return true
+		}
 	}
 
 	for _, childID := range childPageIDs {
@@ -337,6 +344,17 @@ func (c *client) walkPage(ctx context.Context, pageID string, since time.Time, r
 	}
 
 	return true
+}
+
+// extractChildPageIDs returns the IDs of all child_page blocks in the given block list.
+func extractChildPageIDs(blocks Blocks) []string {
+	var ids []string
+	for _, block := range blocks {
+		if block.Type == string(notionapi.BlockTypeChildPage) {
+			ids = append(ids, block.ID)
+		}
+	}
+	return ids
 }
 
 // collectChildPageIDs returns IDs of all child_page blocks under the given block/page
