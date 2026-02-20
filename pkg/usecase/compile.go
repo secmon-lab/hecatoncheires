@@ -577,7 +577,7 @@ func buildThreadedMarkdown(messages []*slackmodel.Message, ch model.SlackChannel
 	})
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("# Slack Channel: #%s (%s)\n\n", ch.Name, ch.ID))
+	fmt.Fprintf(&sb, "# Slack Channel: #%s (%s)\n\n", ch.Name, ch.ID)
 
 	first := true
 	for _, rootID := range rootOrder {
@@ -587,12 +587,12 @@ func buildThreadedMarkdown(messages []*slackmodel.Message, ch model.SlackChannel
 		}
 		first = false
 
-		sb.WriteString(fmt.Sprintf("## Message by %s at %s\n%s\n",
-			t.root.UserName(), t.root.CreatedAt().Format(time.DateTime), t.root.Text()))
+		fmt.Fprintf(&sb, "## Message by %s at %s\n%s\n",
+			t.root.UserName(), t.root.CreatedAt().Format(time.DateTime), t.root.Text())
 
 		for _, reply := range t.replies {
-			sb.WriteString(fmt.Sprintf("\n### Reply by %s at %s\n%s\n",
-				reply.UserName(), reply.CreatedAt().Format(time.DateTime), reply.Text()))
+			fmt.Fprintf(&sb, "\n### Reply by %s at %s\n%s\n",
+				reply.UserName(), reply.CreatedAt().Format(time.DateTime), reply.Text())
 		}
 	}
 
@@ -603,8 +603,8 @@ func buildThreadedMarkdown(messages []*slackmodel.Message, ch model.SlackChannel
 		}
 		first = false
 
-		sb.WriteString(fmt.Sprintf("## Message by %s at %s\n%s\n",
-			msg.UserName(), msg.CreatedAt().Format(time.DateTime), msg.Text()))
+		fmt.Fprintf(&sb, "## Message by %s at %s\n%s\n",
+			msg.UserName(), msg.CreatedAt().Format(time.DateTime), msg.Text())
 	}
 
 	return sb.String()
