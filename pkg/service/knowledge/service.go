@@ -133,10 +133,10 @@ func buildUserPrompt(input Input) string {
 	sb.WriteString("## Cases to consider:\n\n")
 
 	for _, caseItem := range input.Cases {
-		sb.WriteString(fmt.Sprintf("### Case ID: %d\n", caseItem.ID))
-		sb.WriteString(fmt.Sprintf("**Title:** %s\n", caseItem.Title))
+		fmt.Fprintf(&sb, "### Case ID: %d\n", caseItem.ID)
+		fmt.Fprintf(&sb, "**Title:** %s\n", caseItem.Title)
 		if caseItem.Description != "" {
-			sb.WriteString(fmt.Sprintf("**Description:** %s\n", caseItem.Description))
+			fmt.Fprintf(&sb, "**Description:** %s\n", caseItem.Description)
 		}
 		sb.WriteString("\n")
 	}
