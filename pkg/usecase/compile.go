@@ -147,6 +147,13 @@ func (uc *CompileUseCase) compileWorkspace(ctx context.Context, entry *model.Wor
 			wsResult.SourcesProcessed++
 			pagesProcessed, knowledgeCreated, notifications, errors = uc.processNotionSource(ctx, wsID, entry, source, cases, since)
 
+		case model.SourceTypeNotionPage:
+			if source.NotionPageConfig == nil {
+				continue
+			}
+			wsResult.SourcesProcessed++
+			pagesProcessed, knowledgeCreated, notifications, errors = uc.processNotionPageSource(ctx, wsID, entry, source, cases, since)
+
 		case model.SourceTypeSlack:
 			if source.SlackConfig == nil || len(source.SlackConfig.Channels) == 0 {
 				continue
@@ -165,6 +172,91 @@ func (uc *CompileUseCase) compileWorkspace(ctx context.Context, entry *model.Wor
 	}
 
 	return wsResult, nil
+}
+
+func (uc *CompileUseCase) processNotionPageSource(
+	ctx context.Context,
+	wsID string,
+	entry *model.WorkspaceEntry,
+	source *model.Source,
+	cases []*model.Case,
+	since time.Time,
+) (pagesProcessed, knowledgeCreated, notifications, errors int) {
+	cfg := source.NotionPageConfig
+	pageID := cfg.PageID
+
+	logging.Default().Info("Processing Notion Page source",
+		"workspaceID", wsID,
+		"sourceID", source.ID,
+		"sourceName", source.Name,
+		"pageID", pageID,
+		"recursive", cfg.Recursive,
+		"maxDepth", cfg.MaxDepth,
+	)
+
+	caseMap := make(map[int64]*model.Case, len(cases))
+	for _, c := range cases {
+		caseMap[c.ID] = c
+	}
+
+	for page, pageErr := range uc.notion.QueryUpdatedPagesFromPage(ctx, pageID, since, cfg.Recursive, cfg.MaxDepth) {
+		if pageErr != nil {
+			errutil.Handle(ctx, pageErr, "failed to fetch Notion page from page source")
+			errors++
+			break
+		}
+
+		pagesProcessed++
+
+		markdown := page.ToMarkdown()
+
+		sourceData := knowledge.SourceData{
+			SourceID:   source.ID,
+			SourceURLs: []string{page.URL},
+			SourcedAt:  page.LastEditedTime,
+			Content:    markdown,
+		}
+
+		input := knowledge.Input{
+			Cases:      cases,
+			SourceData: sourceData,
+			Prompt:     entry.CompilePrompt,
+		}
+
+		results, extractErr := uc.knowledgeService.Extract(ctx, input)
+		if extractErr != nil {
+			errutil.Handle(ctx, extractErr, "failed to extract knowledge from Notion page")
+			errors++
+			continue
+		}
+
+		for _, result := range results {
+			k := &model.Knowledge{
+				CaseID:     result.CaseID,
+				SourceID:   source.ID,
+				SourceURLs: sourceData.SourceURLs,
+				Title:      result.Title,
+				Summary:    result.Summary,
+				Embedding:  result.Embedding,
+				SourcedAt:  sourceData.SourcedAt,
+			}
+
+			created, createErr := uc.repo.Knowledge().Create(ctx, wsID, k)
+			if createErr != nil {
+				errutil.Handle(ctx, createErr, "failed to save knowledge")
+				errors++
+				continue
+			}
+
+			knowledgeCreated++
+
+			if uc.notifySlack(ctx, wsID, created, caseMap) {
+				notifications++
+			}
+		}
+	}
+
+	return pagesProcessed, knowledgeCreated, notifications, errors
 }
 
 func (uc *CompileUseCase) processNotionSource(
@@ -496,11 +588,11 @@ func buildThreadedMarkdown(messages []*slackmodel.Message, ch model.SlackChannel
 		first = false
 
 		sb.WriteString(fmt.Sprintf("## Message by %s at %s\n%s\n",
-t.root.UserName(), t.root.CreatedAt().Format(time.DateTime), t.root.Text()))
+			t.root.UserName(), t.root.CreatedAt().Format(time.DateTime), t.root.Text()))
 
 		for _, reply := range t.replies {
 			sb.WriteString(fmt.Sprintf("\n### Reply by %s at %s\n%s\n",
-reply.UserName(), reply.CreatedAt().Format(time.DateTime), reply.Text()))
+				reply.UserName(), reply.CreatedAt().Format(time.DateTime), reply.Text()))
 		}
 	}
 
@@ -512,7 +604,7 @@ reply.UserName(), reply.CreatedAt().Format(time.DateTime), reply.Text()))
 		first = false
 
 		sb.WriteString(fmt.Sprintf("## Message by %s at %s\n%s\n",
-msg.UserName(), msg.CreatedAt().Format(time.DateTime), msg.Text()))
+			msg.UserName(), msg.CreatedAt().Format(time.DateTime), msg.Text()))
 	}
 
 	return sb.String()

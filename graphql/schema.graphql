@@ -200,6 +200,7 @@ type KnowledgeConnection {
 # Source types
 enum SourceType {
   NOTION_DB
+  NOTION_PAGE
   SLACK
 }
 
@@ -214,12 +215,20 @@ type Source {
   updatedAt: Time!
 }
 
-union SourceConfig = NotionDBConfig | SlackConfig
+union SourceConfig = NotionDBConfig | NotionPageConfig | SlackConfig
 
 type NotionDBConfig {
   databaseID: String!
   databaseTitle: String!
   databaseURL: String!
+}
+
+type NotionPageConfig {
+  pageID: String!
+  pageTitle: String!
+  pageURL: String!
+  recursive: Boolean!
+  maxDepth: Int!
 }
 
 type SlackConfig {
@@ -238,6 +247,15 @@ input CreateNotionDBSourceInput {
   enabled: Boolean
 }
 
+input CreateNotionPageSourceInput {
+  name: String
+  description: String
+  pageID: String!
+  enabled: Boolean
+  recursive: Boolean
+  maxDepth: Int
+}
+
 input UpdateSourceInput {
   id: String!
   name: String
@@ -249,6 +267,13 @@ type NotionDBValidationResult {
   valid: Boolean!
   databaseTitle: String
   databaseURL: String
+  errorMessage: String
+}
+
+type NotionPageValidationResult {
+  valid: Boolean!
+  pageTitle: String
+  pageURL: String
   errorMessage: String
 }
 
@@ -322,9 +347,11 @@ type Mutation {
 
   # Sources
   createNotionDBSource(workspaceId: String!, input: CreateNotionDBSourceInput!): Source!
+  createNotionPageSource(workspaceId: String!, input: CreateNotionPageSourceInput!): Source!
   createSlackSource(workspaceId: String!, input: CreateSlackSourceInput!): Source!
   updateSource(workspaceId: String!, input: UpdateSourceInput!): Source!
   updateSlackSource(workspaceId: String!, input: UpdateSlackSourceInput!): Source!
   deleteSource(workspaceId: String!, id: String!): Boolean!
   validateNotionDB(workspaceId: String!, databaseID: String!): NotionDBValidationResult!
+  validateNotionPage(workspaceId: String!, pageID: String!): NotionPageValidationResult!
 }

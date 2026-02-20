@@ -134,21 +134,23 @@ type ComplexityRoot struct {
 	}
 
 	Mutation struct {
-		CloseCase            func(childComplexity int, workspaceID string, id int) int
-		CreateAction         func(childComplexity int, workspaceID string, input graphql1.CreateActionInput) int
-		CreateCase           func(childComplexity int, workspaceID string, input graphql1.CreateCaseInput) int
-		CreateNotionDBSource func(childComplexity int, workspaceID string, input graphql1.CreateNotionDBSourceInput) int
-		CreateSlackSource    func(childComplexity int, workspaceID string, input graphql1.CreateSlackSourceInput) int
-		DeleteAction         func(childComplexity int, workspaceID string, id int) int
-		DeleteCase           func(childComplexity int, workspaceID string, id int) int
-		DeleteSource         func(childComplexity int, workspaceID string, id string) int
-		Noop                 func(childComplexity int) int
-		ReopenCase           func(childComplexity int, workspaceID string, id int) int
-		UpdateAction         func(childComplexity int, workspaceID string, input graphql1.UpdateActionInput) int
-		UpdateCase           func(childComplexity int, workspaceID string, input graphql1.UpdateCaseInput) int
-		UpdateSlackSource    func(childComplexity int, workspaceID string, input graphql1.UpdateSlackSourceInput) int
-		UpdateSource         func(childComplexity int, workspaceID string, input graphql1.UpdateSourceInput) int
-		ValidateNotionDb     func(childComplexity int, workspaceID string, databaseID string) int
+		CloseCase              func(childComplexity int, workspaceID string, id int) int
+		CreateAction           func(childComplexity int, workspaceID string, input graphql1.CreateActionInput) int
+		CreateCase             func(childComplexity int, workspaceID string, input graphql1.CreateCaseInput) int
+		CreateNotionDBSource   func(childComplexity int, workspaceID string, input graphql1.CreateNotionDBSourceInput) int
+		CreateNotionPageSource func(childComplexity int, workspaceID string, input graphql1.CreateNotionPageSourceInput) int
+		CreateSlackSource      func(childComplexity int, workspaceID string, input graphql1.CreateSlackSourceInput) int
+		DeleteAction           func(childComplexity int, workspaceID string, id int) int
+		DeleteCase             func(childComplexity int, workspaceID string, id int) int
+		DeleteSource           func(childComplexity int, workspaceID string, id string) int
+		Noop                   func(childComplexity int) int
+		ReopenCase             func(childComplexity int, workspaceID string, id int) int
+		UpdateAction           func(childComplexity int, workspaceID string, input graphql1.UpdateActionInput) int
+		UpdateCase             func(childComplexity int, workspaceID string, input graphql1.UpdateCaseInput) int
+		UpdateSlackSource      func(childComplexity int, workspaceID string, input graphql1.UpdateSlackSourceInput) int
+		UpdateSource           func(childComplexity int, workspaceID string, input graphql1.UpdateSourceInput) int
+		ValidateNotionDb       func(childComplexity int, workspaceID string, databaseID string) int
+		ValidateNotionPage     func(childComplexity int, workspaceID string, pageID string) int
 	}
 
 	NotionDBConfig struct {
@@ -162,6 +164,21 @@ type ComplexityRoot struct {
 		DatabaseURL   func(childComplexity int) int
 		ErrorMessage  func(childComplexity int) int
 		Valid         func(childComplexity int) int
+	}
+
+	NotionPageConfig struct {
+		MaxDepth  func(childComplexity int) int
+		PageID    func(childComplexity int) int
+		PageTitle func(childComplexity int) int
+		PageURL   func(childComplexity int) int
+		Recursive func(childComplexity int) int
+	}
+
+	NotionPageValidationResult struct {
+		ErrorMessage func(childComplexity int) int
+		PageTitle    func(childComplexity int) int
+		PageURL      func(childComplexity int) int
+		Valid        func(childComplexity int) int
 	}
 
 	Query struct {
@@ -278,11 +295,13 @@ type MutationResolver interface {
 	UpdateAction(ctx context.Context, workspaceID string, input graphql1.UpdateActionInput) (*graphql1.Action, error)
 	DeleteAction(ctx context.Context, workspaceID string, id int) (bool, error)
 	CreateNotionDBSource(ctx context.Context, workspaceID string, input graphql1.CreateNotionDBSourceInput) (*graphql1.Source, error)
+	CreateNotionPageSource(ctx context.Context, workspaceID string, input graphql1.CreateNotionPageSourceInput) (*graphql1.Source, error)
 	CreateSlackSource(ctx context.Context, workspaceID string, input graphql1.CreateSlackSourceInput) (*graphql1.Source, error)
 	UpdateSource(ctx context.Context, workspaceID string, input graphql1.UpdateSourceInput) (*graphql1.Source, error)
 	UpdateSlackSource(ctx context.Context, workspaceID string, input graphql1.UpdateSlackSourceInput) (*graphql1.Source, error)
 	DeleteSource(ctx context.Context, workspaceID string, id string) (bool, error)
 	ValidateNotionDb(ctx context.Context, workspaceID string, databaseID string) (*graphql1.NotionDBValidationResult, error)
+	ValidateNotionPage(ctx context.Context, workspaceID string, pageID string) (*graphql1.NotionPageValidationResult, error)
 }
 type QueryResolver interface {
 	Health(ctx context.Context) (string, error)
@@ -710,6 +729,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.CreateNotionDBSource(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.CreateNotionDBSourceInput)), true
+	case "Mutation.createNotionPageSource":
+		if e.complexity.Mutation.CreateNotionPageSource == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_createNotionPageSource_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.CreateNotionPageSource(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.CreateNotionPageSourceInput)), true
 	case "Mutation.createSlackSource":
 		if e.complexity.Mutation.CreateSlackSource == nil {
 			break
@@ -826,6 +856,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.ValidateNotionDb(childComplexity, args["workspaceId"].(string), args["databaseID"].(string)), true
+	case "Mutation.validateNotionPage":
+		if e.complexity.Mutation.ValidateNotionPage == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_validateNotionPage_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.ValidateNotionPage(childComplexity, args["workspaceId"].(string), args["pageID"].(string)), true
 
 	case "NotionDBConfig.databaseID":
 		if e.complexity.NotionDBConfig.DatabaseID == nil {
@@ -870,6 +911,62 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.NotionDBValidationResult.Valid(childComplexity), true
+
+	case "NotionPageConfig.maxDepth":
+		if e.complexity.NotionPageConfig.MaxDepth == nil {
+			break
+		}
+
+		return e.complexity.NotionPageConfig.MaxDepth(childComplexity), true
+	case "NotionPageConfig.pageID":
+		if e.complexity.NotionPageConfig.PageID == nil {
+			break
+		}
+
+		return e.complexity.NotionPageConfig.PageID(childComplexity), true
+	case "NotionPageConfig.pageTitle":
+		if e.complexity.NotionPageConfig.PageTitle == nil {
+			break
+		}
+
+		return e.complexity.NotionPageConfig.PageTitle(childComplexity), true
+	case "NotionPageConfig.pageURL":
+		if e.complexity.NotionPageConfig.PageURL == nil {
+			break
+		}
+
+		return e.complexity.NotionPageConfig.PageURL(childComplexity), true
+	case "NotionPageConfig.recursive":
+		if e.complexity.NotionPageConfig.Recursive == nil {
+			break
+		}
+
+		return e.complexity.NotionPageConfig.Recursive(childComplexity), true
+
+	case "NotionPageValidationResult.errorMessage":
+		if e.complexity.NotionPageValidationResult.ErrorMessage == nil {
+			break
+		}
+
+		return e.complexity.NotionPageValidationResult.ErrorMessage(childComplexity), true
+	case "NotionPageValidationResult.pageTitle":
+		if e.complexity.NotionPageValidationResult.PageTitle == nil {
+			break
+		}
+
+		return e.complexity.NotionPageValidationResult.PageTitle(childComplexity), true
+	case "NotionPageValidationResult.pageURL":
+		if e.complexity.NotionPageValidationResult.PageURL == nil {
+			break
+		}
+
+		return e.complexity.NotionPageValidationResult.PageURL(childComplexity), true
+	case "NotionPageValidationResult.valid":
+		if e.complexity.NotionPageValidationResult.Valid == nil {
+			break
+		}
+
+		return e.complexity.NotionPageValidationResult.Valid(childComplexity), true
 
 	case "Query.action":
 		if e.complexity.Query.Action == nil {
@@ -1276,6 +1373,7 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 		ec.unmarshalInputCreateActionInput,
 		ec.unmarshalInputCreateCaseInput,
 		ec.unmarshalInputCreateNotionDBSourceInput,
+		ec.unmarshalInputCreateNotionPageSourceInput,
 		ec.unmarshalInputCreateSlackSourceInput,
 		ec.unmarshalInputFieldValueInput,
 		ec.unmarshalInputUpdateActionInput,
@@ -1581,6 +1679,7 @@ type KnowledgeConnection {
 # Source types
 enum SourceType {
   NOTION_DB
+  NOTION_PAGE
   SLACK
 }
 
@@ -1595,12 +1694,20 @@ type Source {
   updatedAt: Time!
 }
 
-union SourceConfig = NotionDBConfig | SlackConfig
+union SourceConfig = NotionDBConfig | NotionPageConfig | SlackConfig
 
 type NotionDBConfig {
   databaseID: String!
   databaseTitle: String!
   databaseURL: String!
+}
+
+type NotionPageConfig {
+  pageID: String!
+  pageTitle: String!
+  pageURL: String!
+  recursive: Boolean!
+  maxDepth: Int!
 }
 
 type SlackConfig {
@@ -1619,6 +1726,15 @@ input CreateNotionDBSourceInput {
   enabled: Boolean
 }
 
+input CreateNotionPageSourceInput {
+  name: String
+  description: String
+  pageID: String!
+  enabled: Boolean
+  recursive: Boolean
+  maxDepth: Int
+}
+
 input UpdateSourceInput {
   id: String!
   name: String
@@ -1630,6 +1746,13 @@ type NotionDBValidationResult {
   valid: Boolean!
   databaseTitle: String
   databaseURL: String
+  errorMessage: String
+}
+
+type NotionPageValidationResult {
+  valid: Boolean!
+  pageTitle: String
+  pageURL: String
   errorMessage: String
 }
 
@@ -1703,11 +1826,13 @@ type Mutation {
 
   # Sources
   createNotionDBSource(workspaceId: String!, input: CreateNotionDBSourceInput!): Source!
+  createNotionPageSource(workspaceId: String!, input: CreateNotionPageSourceInput!): Source!
   createSlackSource(workspaceId: String!, input: CreateSlackSourceInput!): Source!
   updateSource(workspaceId: String!, input: UpdateSourceInput!): Source!
   updateSlackSource(workspaceId: String!, input: UpdateSlackSourceInput!): Source!
   deleteSource(workspaceId: String!, id: String!): Boolean!
   validateNotionDB(workspaceId: String!, databaseID: String!): NotionDBValidationResult!
+  validateNotionPage(workspaceId: String!, pageID: String!): NotionPageValidationResult!
 }
 `, BuiltIn: false},
 }
@@ -1790,6 +1915,22 @@ func (ec *executionContext) field_Mutation_createNotionDBSource_args(ctx context
 	}
 	args["workspaceId"] = arg0
 	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNCreateNotionDBSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateNotionDBSourceInput)
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_createNotionPageSource_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNCreateNotionPageSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateNotionPageSourceInput)
 	if err != nil {
 		return nil, err
 	}
@@ -1954,6 +2095,22 @@ func (ec *executionContext) field_Mutation_validateNotionDB_args(ctx context.Con
 		return nil, err
 	}
 	args["databaseID"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_validateNotionPage_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "pageID", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["pageID"] = arg1
 	return args, nil
 }
 
@@ -4585,6 +4742,65 @@ func (ec *executionContext) fieldContext_Mutation_createNotionDBSource(ctx conte
 	return fc, nil
 }
 
+func (ec *executionContext) _Mutation_createNotionPageSource(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_createNotionPageSource,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().CreateNotionPageSource(ctx, fc.Args["workspaceId"].(string), fc.Args["input"].(graphql1.CreateNotionPageSourceInput))
+		},
+		nil,
+		ec.marshalNSource2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSource,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_createNotionPageSource(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Source_id(ctx, field)
+			case "name":
+				return ec.fieldContext_Source_name(ctx, field)
+			case "sourceType":
+				return ec.fieldContext_Source_sourceType(ctx, field)
+			case "description":
+				return ec.fieldContext_Source_description(ctx, field)
+			case "enabled":
+				return ec.fieldContext_Source_enabled(ctx, field)
+			case "config":
+				return ec.fieldContext_Source_config(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Source_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Source_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Source", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_createNotionPageSource_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Mutation_createSlackSource(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -4854,6 +5070,57 @@ func (ec *executionContext) fieldContext_Mutation_validateNotionDB(ctx context.C
 	return fc, nil
 }
 
+func (ec *executionContext) _Mutation_validateNotionPage(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_validateNotionPage,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().ValidateNotionPage(ctx, fc.Args["workspaceId"].(string), fc.Args["pageID"].(string))
+		},
+		nil,
+		ec.marshalNNotionPageValidationResult2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐNotionPageValidationResult,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_validateNotionPage(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "valid":
+				return ec.fieldContext_NotionPageValidationResult_valid(ctx, field)
+			case "pageTitle":
+				return ec.fieldContext_NotionPageValidationResult_pageTitle(ctx, field)
+			case "pageURL":
+				return ec.fieldContext_NotionPageValidationResult_pageURL(ctx, field)
+			case "errorMessage":
+				return ec.fieldContext_NotionPageValidationResult_errorMessage(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type NotionPageValidationResult", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_validateNotionPage_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _NotionDBConfig_databaseID(ctx context.Context, field graphql.CollectedField, obj *graphql1.NotionDBConfig) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -5047,6 +5314,267 @@ func (ec *executionContext) _NotionDBValidationResult_errorMessage(ctx context.C
 func (ec *executionContext) fieldContext_NotionDBValidationResult_errorMessage(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "NotionDBValidationResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _NotionPageConfig_pageID(ctx context.Context, field graphql.CollectedField, obj *graphql1.NotionPageConfig) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_NotionPageConfig_pageID,
+		func(ctx context.Context) (any, error) {
+			return obj.PageID, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_NotionPageConfig_pageID(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "NotionPageConfig",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _NotionPageConfig_pageTitle(ctx context.Context, field graphql.CollectedField, obj *graphql1.NotionPageConfig) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_NotionPageConfig_pageTitle,
+		func(ctx context.Context) (any, error) {
+			return obj.PageTitle, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_NotionPageConfig_pageTitle(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "NotionPageConfig",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _NotionPageConfig_pageURL(ctx context.Context, field graphql.CollectedField, obj *graphql1.NotionPageConfig) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_NotionPageConfig_pageURL,
+		func(ctx context.Context) (any, error) {
+			return obj.PageURL, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_NotionPageConfig_pageURL(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "NotionPageConfig",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _NotionPageConfig_recursive(ctx context.Context, field graphql.CollectedField, obj *graphql1.NotionPageConfig) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_NotionPageConfig_recursive,
+		func(ctx context.Context) (any, error) {
+			return obj.Recursive, nil
+		},
+		nil,
+		ec.marshalNBoolean2bool,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_NotionPageConfig_recursive(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "NotionPageConfig",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _NotionPageConfig_maxDepth(ctx context.Context, field graphql.CollectedField, obj *graphql1.NotionPageConfig) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_NotionPageConfig_maxDepth,
+		func(ctx context.Context) (any, error) {
+			return obj.MaxDepth, nil
+		},
+		nil,
+		ec.marshalNInt2int,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_NotionPageConfig_maxDepth(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "NotionPageConfig",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _NotionPageValidationResult_valid(ctx context.Context, field graphql.CollectedField, obj *graphql1.NotionPageValidationResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_NotionPageValidationResult_valid,
+		func(ctx context.Context) (any, error) {
+			return obj.Valid, nil
+		},
+		nil,
+		ec.marshalNBoolean2bool,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_NotionPageValidationResult_valid(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "NotionPageValidationResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _NotionPageValidationResult_pageTitle(ctx context.Context, field graphql.CollectedField, obj *graphql1.NotionPageValidationResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_NotionPageValidationResult_pageTitle,
+		func(ctx context.Context) (any, error) {
+			return obj.PageTitle, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_NotionPageValidationResult_pageTitle(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "NotionPageValidationResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _NotionPageValidationResult_pageURL(ctx context.Context, field graphql.CollectedField, obj *graphql1.NotionPageValidationResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_NotionPageValidationResult_pageURL,
+		func(ctx context.Context) (any, error) {
+			return obj.PageURL, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_NotionPageValidationResult_pageURL(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "NotionPageValidationResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _NotionPageValidationResult_errorMessage(ctx context.Context, field graphql.CollectedField, obj *graphql1.NotionPageValidationResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_NotionPageValidationResult_errorMessage,
+		func(ctx context.Context) (any, error) {
+			return obj.ErrorMessage, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_NotionPageValidationResult_errorMessage(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "NotionPageValidationResult",
 		Field:      field,
 		IsMethod:   false,
 		IsResolver: false,
@@ -8783,6 +9311,68 @@ func (ec *executionContext) unmarshalInputCreateNotionDBSourceInput(ctx context.
 	return it, nil
 }
 
+func (ec *executionContext) unmarshalInputCreateNotionPageSourceInput(ctx context.Context, obj any) (graphql1.CreateNotionPageSourceInput, error) {
+	var it graphql1.CreateNotionPageSourceInput
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"name", "description", "pageID", "enabled", "recursive", "maxDepth"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "name":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("name"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Name = data
+		case "description":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("description"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Description = data
+		case "pageID":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("pageID"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.PageID = data
+		case "enabled":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("enabled"))
+			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Enabled = data
+		case "recursive":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("recursive"))
+			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Recursive = data
+		case "maxDepth":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("maxDepth"))
+			data, err := ec.unmarshalOInt2ᚖint(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.MaxDepth = data
+		}
+	}
+
+	return it, nil
+}
+
 func (ec *executionContext) unmarshalInputCreateSlackSourceInput(ctx context.Context, obj any) (graphql1.CreateSlackSourceInput, error) {
 	var it graphql1.CreateSlackSourceInput
 	asMap := map[string]any{}
@@ -9107,6 +9697,13 @@ func (ec *executionContext) _SourceConfig(ctx context.Context, sel ast.Selection
 			return graphql.Null
 		}
 		return ec._SlackConfig(ctx, sel, obj)
+	case graphql1.NotionPageConfig:
+		return ec._NotionPageConfig(ctx, sel, &obj)
+	case *graphql1.NotionPageConfig:
+		if obj == nil {
+			return graphql.Null
+		}
+		return ec._NotionPageConfig(ctx, sel, obj)
 	case graphql1.NotionDBConfig:
 		return ec._NotionDBConfig(ctx, sel, &obj)
 	case *graphql1.NotionDBConfig:
@@ -10065,6 +10662,13 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		case "createNotionPageSource":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_createNotionPageSource(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		case "createSlackSource":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_createSlackSource(ctx, field)
@@ -10096,6 +10700,13 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 		case "validateNotionDB":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_validateNotionDB(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "validateNotionPage":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_validateNotionPage(ctx, field)
 			})
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
@@ -10194,6 +10805,110 @@ func (ec *executionContext) _NotionDBValidationResult(ctx context.Context, sel a
 			out.Values[i] = ec._NotionDBValidationResult_databaseURL(ctx, field, obj)
 		case "errorMessage":
 			out.Values[i] = ec._NotionDBValidationResult_errorMessage(ctx, field, obj)
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var notionPageConfigImplementors = []string{"NotionPageConfig", "SourceConfig"}
+
+func (ec *executionContext) _NotionPageConfig(ctx context.Context, sel ast.SelectionSet, obj *graphql1.NotionPageConfig) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, notionPageConfigImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("NotionPageConfig")
+		case "pageID":
+			out.Values[i] = ec._NotionPageConfig_pageID(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "pageTitle":
+			out.Values[i] = ec._NotionPageConfig_pageTitle(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "pageURL":
+			out.Values[i] = ec._NotionPageConfig_pageURL(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "recursive":
+			out.Values[i] = ec._NotionPageConfig_recursive(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "maxDepth":
+			out.Values[i] = ec._NotionPageConfig_maxDepth(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var notionPageValidationResultImplementors = []string{"NotionPageValidationResult"}
+
+func (ec *executionContext) _NotionPageValidationResult(ctx context.Context, sel ast.SelectionSet, obj *graphql1.NotionPageValidationResult) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, notionPageValidationResultImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("NotionPageValidationResult")
+		case "valid":
+			out.Values[i] = ec._NotionPageValidationResult_valid(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "pageTitle":
+			out.Values[i] = ec._NotionPageValidationResult_pageTitle(ctx, field, obj)
+		case "pageURL":
+			out.Values[i] = ec._NotionPageValidationResult_pageURL(ctx, field, obj)
+		case "errorMessage":
+			out.Values[i] = ec._NotionPageValidationResult_errorMessage(ctx, field, obj)
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -11632,6 +12347,11 @@ func (ec *executionContext) unmarshalNCreateNotionDBSourceInput2githubᚗcomᚋs
 	return res, graphql.ErrorOnPath(ctx, err)
 }
 
+func (ec *executionContext) unmarshalNCreateNotionPageSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateNotionPageSourceInput(ctx context.Context, v any) (graphql1.CreateNotionPageSourceInput, error) {
+	res, err := ec.unmarshalInputCreateNotionPageSourceInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
 func (ec *executionContext) unmarshalNCreateSlackSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateSlackSourceInput(ctx context.Context, v any) (graphql1.CreateSlackSourceInput, error) {
 	res, err := ec.unmarshalInputCreateSlackSourceInput(ctx, v)
 	return res, graphql.ErrorOnPath(ctx, err)
@@ -11890,6 +12610,20 @@ func (ec *executionContext) marshalNNotionDBValidationResult2ᚖgithubᚗcomᚋs
 		return graphql.Null
 	}
 	return ec._NotionDBValidationResult(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNNotionPageValidationResult2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐNotionPageValidationResult(ctx context.Context, sel ast.SelectionSet, v graphql1.NotionPageValidationResult) graphql.Marshaler {
+	return ec._NotionPageValidationResult(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNNotionPageValidationResult2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐNotionPageValidationResult(ctx context.Context, sel ast.SelectionSet, v *graphql1.NotionPageValidationResult) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._NotionPageValidationResult(ctx, sel, v)
 }
 
 func (ec *executionContext) marshalNSlackChannel2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackChannelᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.SlackChannel) graphql.Marshaler {

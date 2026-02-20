@@ -23,8 +23,10 @@ import (
 
 // compileTestNotionService is a mock implementation of notion.Service for compile tests
 type compileTestNotionService struct {
-	queryUpdatedPagesFn   func(ctx context.Context, dbID string, since time.Time) iter.Seq2[*notion.Page, error]
-	getDatabaseMetadataFn func(ctx context.Context, dbID string) (*notion.DatabaseMetadata, error)
+	queryUpdatedPagesFn         func(ctx context.Context, dbID string, since time.Time) iter.Seq2[*notion.Page, error]
+	getDatabaseMetadataFn       func(ctx context.Context, dbID string) (*notion.DatabaseMetadata, error)
+	getPageMetadataFn           func(ctx context.Context, pageID string) (*notion.PageMetadata, error)
+	queryUpdatedPagesFromPageFn func(ctx context.Context, pageID string, since time.Time, recursive bool, maxDepth int) iter.Seq2[*notion.Page, error]
 }
 
 func (m *compileTestNotionService) QueryUpdatedPages(ctx context.Context, dbID string, since time.Time) iter.Seq2[*notion.Page, error] {
@@ -39,6 +41,20 @@ func (m *compileTestNotionService) GetDatabaseMetadata(ctx context.Context, dbID
 		return m.getDatabaseMetadataFn(ctx, dbID)
 	}
 	return &notion.DatabaseMetadata{ID: dbID, Title: "Test DB", URL: "https://notion.so/test"}, nil
+}
+
+func (m *compileTestNotionService) GetPageMetadata(ctx context.Context, pageID string) (*notion.PageMetadata, error) {
+	if m.getPageMetadataFn != nil {
+		return m.getPageMetadataFn(ctx, pageID)
+	}
+	return &notion.PageMetadata{ID: pageID, Title: "Test Page", URL: "https://notion.so/test-page"}, nil
+}
+
+func (m *compileTestNotionService) QueryUpdatedPagesFromPage(ctx context.Context, pageID string, since time.Time, recursive bool, maxDepth int) iter.Seq2[*notion.Page, error] {
+	if m.queryUpdatedPagesFromPageFn != nil {
+		return m.queryUpdatedPagesFromPageFn(ctx, pageID, since, recursive, maxDepth)
+	}
+	return func(yield func(*notion.Page, error) bool) {}
 }
 
 // compileTestKnowledgeService is a mock implementation of knowledge.Service for compile tests
@@ -1014,5 +1030,150 @@ func TestBuildSlackSourceURLs(t *testing.T) {
 	t.Run("empty messages returns nil", func(t *testing.T) {
 		urls := usecase.BuildSlackSourceURLs([]*slackmodel.Message{})
 		gt.Value(t, urls == nil).Equal(true)
+	})
+}
+
+// createTestNotionPageSource creates a test Notion Page source in the repository
+func createTestNotionPageSource(t *testing.T, repo interfaces.Repository, wsID string, enabled bool, recursive bool, maxDepth int) *model.Source {
+	t.Helper()
+	ctx := context.Background()
+
+	source := &model.Source{
+		Name:       "Test Notion Page Source",
+		SourceType: model.SourceTypeNotionPage,
+		Enabled:    enabled,
+		NotionPageConfig: &model.NotionPageConfig{
+			PageID:    "a1b2c3d4-e5f6-a7b8-c9d0-e1f2a3b4c5d6",
+			PageTitle: "Test Page",
+			PageURL:   "https://notion.so/test-page",
+			Recursive: recursive,
+			MaxDepth:  maxDepth,
+		},
+	}
+	created, err := repo.Source().Create(ctx, wsID, source)
+	gt.NoError(t, err).Required()
+	return created
+}
+
+func TestCompileUseCase_NotionPage(t *testing.T) {
+	t.Run("processes notion page source and extracts knowledge", func(t *testing.T) {
+		now := time.Now().UTC()
+		notionSvc := &compileTestNotionService{
+			queryUpdatedPagesFromPageFn: func(ctx context.Context, pageID string, since time.Time, recursive bool, maxDepth int) iter.Seq2[*notion.Page, error] {
+				return func(yield func(*notion.Page, error) bool) {
+					page := &notion.Page{
+						ID:             "page-1",
+						URL:            "https://notion.so/page-1",
+						LastEditedTime: now,
+					}
+					yield(page, nil)
+				}
+			},
+		}
+
+		knowledgeSvc := &compileTestKnowledgeService{}
+		slackSvc := &compileTestSlackService{}
+		uc, repo := setupCompileTest(t, notionSvc, knowledgeSvc, slackSvc)
+		ctx := context.Background()
+
+		createTestNotionPageSource(t, repo, testWorkspaceID, true, false, 0)
+		testCase := createTestCase(t, repo, testWorkspaceID, "Security Risk", types.CaseStatusOpen, "C12345")
+
+		knowledgeSvc.extractFn = func(ctx context.Context, input knowledge.Input) ([]knowledge.Result, error) {
+			return []knowledge.Result{
+				{
+					CaseID:  testCase.ID,
+					Title:   "Page Knowledge",
+					Summary: "Summary from page",
+				},
+			}, nil
+		}
+
+		result, err := uc.Compile(ctx, usecase.CompileOption{
+			Since: now.Add(-24 * time.Hour),
+		})
+		gt.NoError(t, err).Required()
+
+		gt.Array(t, result.WorkspaceResults).Length(1)
+		wsResult := result.WorkspaceResults[0]
+		gt.Value(t, wsResult.SourcesProcessed).Equal(1)
+		gt.Value(t, wsResult.PagesProcessed).Equal(1)
+		gt.Value(t, wsResult.KnowledgeCreated).Equal(1)
+		gt.Value(t, wsResult.Errors).Equal(0)
+
+		knowledges, err := repo.Knowledge().ListByCaseID(ctx, testWorkspaceID, testCase.ID)
+		gt.NoError(t, err).Required()
+		gt.Array(t, knowledges).Length(1)
+		gt.Value(t, knowledges[0].Title).Equal("Page Knowledge")
+	})
+
+	t.Run("passes recursive and maxDepth to notion service", func(t *testing.T) {
+		now := time.Now().UTC()
+		var capturedRecursive bool
+		var capturedMaxDepth int
+		notionSvc := &compileTestNotionService{
+			queryUpdatedPagesFromPageFn: func(ctx context.Context, pageID string, since time.Time, recursive bool, maxDepth int) iter.Seq2[*notion.Page, error] {
+				capturedRecursive = recursive
+				capturedMaxDepth = maxDepth
+				return func(yield func(*notion.Page, error) bool) {}
+			},
+		}
+
+		knowledgeSvc := &compileTestKnowledgeService{}
+		slackSvc := &compileTestSlackService{}
+		uc, repo := setupCompileTest(t, notionSvc, knowledgeSvc, slackSvc)
+		ctx := context.Background()
+
+		createTestNotionPageSource(t, repo, testWorkspaceID, true, true, 3)
+		createTestCase(t, repo, testWorkspaceID, "Case", types.CaseStatusOpen, "")
+
+		_, err := uc.Compile(ctx, usecase.CompileOption{Since: now.Add(-time.Hour)})
+		gt.NoError(t, err).Required()
+
+		gt.Value(t, capturedRecursive).Equal(true)
+		gt.Value(t, capturedMaxDepth).Equal(3)
+	})
+
+	t.Run("skips disabled notion page source", func(t *testing.T) {
+		now := time.Now().UTC()
+		notionSvc := &compileTestNotionService{}
+		knowledgeSvc := &compileTestKnowledgeService{}
+		slackSvc := &compileTestSlackService{}
+		uc, repo := setupCompileTest(t, notionSvc, knowledgeSvc, slackSvc)
+		ctx := context.Background()
+
+		createTestNotionPageSource(t, repo, testWorkspaceID, false, false, 0)
+		createTestCase(t, repo, testWorkspaceID, "Case", types.CaseStatusOpen, "")
+
+		result, err := uc.Compile(ctx, usecase.CompileOption{Since: now.Add(-time.Hour)})
+		gt.NoError(t, err).Required()
+
+		gt.Array(t, result.WorkspaceResults).Length(1)
+		gt.Value(t, result.WorkspaceResults[0].SourcesProcessed).Equal(0)
+	})
+
+	t.Run("handles page iterator error", func(t *testing.T) {
+		now := time.Now().UTC()
+		notionSvc := &compileTestNotionService{
+			queryUpdatedPagesFromPageFn: func(ctx context.Context, pageID string, since time.Time, recursive bool, maxDepth int) iter.Seq2[*notion.Page, error] {
+				return func(yield func(*notion.Page, error) bool) {
+					yield(nil, errors.New("api error"))
+				}
+			},
+		}
+
+		knowledgeSvc := &compileTestKnowledgeService{}
+		slackSvc := &compileTestSlackService{}
+		uc, repo := setupCompileTest(t, notionSvc, knowledgeSvc, slackSvc)
+		ctx := context.Background()
+
+		createTestNotionPageSource(t, repo, testWorkspaceID, true, false, 0)
+		createTestCase(t, repo, testWorkspaceID, "Case", types.CaseStatusOpen, "")
+
+		result, err := uc.Compile(ctx, usecase.CompileOption{Since: now.Add(-time.Hour)})
+		gt.NoError(t, err).Required()
+
+		gt.Array(t, result.WorkspaceResults).Length(1)
+		gt.Value(t, result.WorkspaceResults[0].Errors).Equal(1)
 	})
 }

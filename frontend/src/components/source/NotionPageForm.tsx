@@ -5,56 +5,58 @@ import { useWorkspace } from '../../contexts/workspace-context'
 import { CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
 import Modal from '../Modal'
 import Button from '../Button'
-import { CREATE_NOTION_DB_SOURCE, VALIDATE_NOTION_DB, GET_SOURCES } from '../../graphql/source'
+import { CREATE_NOTION_PAGE_SOURCE, VALIDATE_NOTION_PAGE, GET_SOURCES } from '../../graphql/source'
 import { parseNotionID } from '../../utils/notion'
 import styles from './source.module.css'
 
-interface NotionDBFormProps {
+interface NotionPageFormProps {
   isOpen: boolean
   onClose: () => void
 }
 
 interface FormErrors {
-  databaseID?: string
+  pageID?: string
   name?: string
 }
 
 interface ValidationResult {
   valid: boolean
-  databaseTitle: string | null
-  databaseURL: string | null
+  pageTitle: string | null
+  pageURL: string | null
   errorMessage: string | null
 }
 
-export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
+export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps) {
   const navigate = useNavigate()
   const { currentWorkspace } = useWorkspace()
-  const [databaseID, setDatabaseID] = useState('')
+  const [pageID, setPageID] = useState('')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [enabled, setEnabled] = useState(true)
+  const [recursive, setRecursive] = useState(false)
+  const [maxDepth, setMaxDepth] = useState(4)
   const [errors, setErrors] = useState<FormErrors>({})
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null)
   const [isValidating, setIsValidating] = useState(false)
 
-  const [validateNotionDB] = useMutation(VALIDATE_NOTION_DB)
+  const [validateNotionPage] = useMutation(VALIDATE_NOTION_PAGE)
 
-  const [createSource, { loading: creating }] = useMutation(CREATE_NOTION_DB_SOURCE, {
+  const [createSource, { loading: creating }] = useMutation(CREATE_NOTION_PAGE_SOURCE, {
     update(cache, { data }) {
-      if (!data?.createNotionDBSource) return
+      if (!data?.createNotionPageSource) return
       const existingData = cache.readQuery<{ sources: unknown[] }>({ query: GET_SOURCES, variables: { workspaceId: currentWorkspace!.id } })
       if (existingData) {
         cache.writeQuery({
           query: GET_SOURCES,
           variables: { workspaceId: currentWorkspace!.id },
-          data: { sources: [...existingData.sources, data.createNotionDBSource] },
+          data: { sources: [...existingData.sources, data.createNotionPageSource] },
         })
       }
     },
     onCompleted: (data) => {
       onClose()
       resetForm()
-      navigate(`/ws/${currentWorkspace!.id}/sources/${data.createNotionDBSource.id}`)
+      navigate(`/ws/${currentWorkspace!.id}/sources/${data.createNotionPageSource.id}`)
     },
     onError: (error) => {
       console.error('Create source error:', error)
@@ -68,29 +70,31 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
   }, [isOpen])
 
   const resetForm = () => {
-    setDatabaseID('')
+    setPageID('')
     setName('')
     setDescription('')
     setEnabled(true)
+    setRecursive(false)
+    setMaxDepth(0)
     setErrors({})
     setValidationResult(null)
     setIsValidating(false)
   }
 
-  const handleDatabaseIDChange = (value: string) => {
-    setDatabaseID(value)
+  const handlePageIDChange = (value: string) => {
+    setPageID(value)
     setValidationResult(null)
   }
 
   const handleValidate = async () => {
-    if (!databaseID.trim()) {
-      setErrors({ databaseID: 'Database ID or URL is required' })
+    if (!pageID.trim()) {
+      setErrors({ pageID: 'Page ID or URL is required' })
       return
     }
 
-    const parsedID = parseNotionID(databaseID)
+    const parsedID = parseNotionID(pageID)
     if (!parsedID) {
-      setErrors({ databaseID: 'Invalid database ID or URL format' })
+      setErrors({ pageID: 'Invalid page ID or URL format' })
       return
     }
 
@@ -98,23 +102,23 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
     setIsValidating(true)
 
     try {
-      const result = await validateNotionDB({
-        variables: { workspaceId: currentWorkspace!.id, databaseID: parsedID },
+      const result = await validateNotionPage({
+        variables: { workspaceId: currentWorkspace!.id, pageID: parsedID },
       })
 
-      const validation: ValidationResult | null = result.data?.validateNotionDB ?? null
+      const validation: ValidationResult | null = result.data?.validateNotionPage ?? null
       setValidationResult(validation)
 
-      if (validation?.valid && validation.databaseTitle && !name) {
-        setName(validation.databaseTitle)
+      if (validation?.valid && validation.pageTitle && !name) {
+        setName(validation.pageTitle)
       }
     } catch (error) {
       console.error('Validation error:', error)
       setValidationResult({
         valid: false,
-        databaseTitle: null,
-        databaseURL: null,
-        errorMessage: 'Failed to validate database. Please try again.',
+        pageTitle: null,
+        pageURL: null,
+        errorMessage: 'Failed to validate page. Please try again.',
       })
     } finally {
       setIsValidating(false)
@@ -124,8 +128,8 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
   const validate = () => {
     const newErrors: FormErrors = {}
 
-    if (!databaseID.trim()) {
-      newErrors.databaseID = 'Database ID is required'
+    if (!pageID.trim()) {
+      newErrors.pageID = 'Page ID is required'
     }
 
     if (!name.trim()) {
@@ -133,7 +137,7 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
     }
 
     if (!validationResult?.valid) {
-      newErrors.databaseID = 'Please validate the database ID first'
+      newErrors.pageID = 'Please validate the page ID first'
     }
 
     setErrors(newErrors)
@@ -147,15 +151,17 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
       return
     }
 
-    const parsedID = parseNotionID(databaseID)
+    const parsedID = parseNotionID(pageID)
     await createSource({
       variables: {
         workspaceId: currentWorkspace!.id,
         input: {
-          databaseID: parsedID ?? databaseID.trim(),
+          pageID: parsedID ?? pageID.trim(),
           name: name.trim(),
           description: description.trim() || undefined,
           enabled,
+          recursive,
+          maxDepth: recursive ? maxDepth : 0,
         },
       },
     })
@@ -172,7 +178,7 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
-      title="Add Notion Database Source"
+      title="Add Notion Page Source"
       footer={
         <>
           <Button variant="outline" onClick={handleClose} disabled={loading}>
@@ -190,23 +196,23 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
     >
       <form onSubmit={handleSubmit} className={styles.form}>
         <div className={styles.field}>
-          <label htmlFor="databaseID" className={styles.label}>
-            Database ID / URL *
+          <label htmlFor="pageID" className={styles.label}>
+            Page ID / URL *
           </label>
           <div className={styles.inputWithButton}>
             <input
-              id="databaseID"
+              id="pageID"
               type="text"
-              value={databaseID}
-              onChange={(e) => handleDatabaseIDChange(e.target.value)}
-              className={`${styles.input} ${errors.databaseID ? styles.inputError : ''}`}
-              placeholder="Enter Notion database ID or paste URL"
+              value={pageID}
+              onChange={(e) => handlePageIDChange(e.target.value)}
+              className={`${styles.input} ${errors.pageID ? styles.inputError : ''}`}
+              placeholder="Enter Notion page ID or paste URL"
               disabled={loading}
             />
             <Button
               variant="outline"
               onClick={handleValidate}
-              disabled={loading || isValidating || !databaseID.trim()}
+              disabled={loading || isValidating || !pageID.trim()}
               type="button"
             >
               {isValidating ? (
@@ -216,9 +222,9 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
               )}
             </Button>
           </div>
-          {errors.databaseID && <span className={styles.error}>{errors.databaseID}</span>}
+          {errors.pageID && <span className={styles.error}>{errors.pageID}</span>}
           <p className={styles.hint}>
-            Paste a Notion database URL or enter the database ID directly
+            Paste a Notion page URL or enter the page ID directly
           </p>
         </div>
 
@@ -228,11 +234,11 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
               <>
                 <CheckCircle size={20} />
                 <div className={styles.validationContent}>
-                  <span className={styles.validationTitle}>Database found</span>
-                  <span className={styles.validationDetail}>{validationResult.databaseTitle}</span>
-                  {validationResult.databaseURL && (
+                  <span className={styles.validationTitle}>Page found</span>
+                  <span className={styles.validationDetail}>{validationResult.pageTitle}</span>
+                  {validationResult.pageURL && (
                     <a
-                      href={validationResult.databaseURL}
+                      href={validationResult.pageURL}
                       target="_blank"
                       rel="noopener noreferrer"
                       className={styles.validationLink}
@@ -284,6 +290,39 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
             disabled={loading}
           />
         </div>
+
+        <div className={styles.checkboxField}>
+          <label className={styles.checkboxLabel}>
+            <input
+              type="checkbox"
+              checked={recursive}
+              onChange={(e) => setRecursive(e.target.checked)}
+              className={styles.checkbox}
+              disabled={loading}
+            />
+            <span>Include child pages recursively</span>
+          </label>
+        </div>
+
+        {recursive && (
+          <div className={styles.field}>
+            <label htmlFor="maxDepth" className={styles.label}>
+              Max Depth (0 = unlimited)
+            </label>
+            <input
+              id="maxDepth"
+              type="number"
+              min={0}
+              value={maxDepth}
+              onChange={(e) => setMaxDepth(Math.max(0, parseInt(e.target.value, 10) || 0))}
+              className={styles.input}
+              disabled={loading}
+            />
+            <p className={styles.hint}>
+              Set to 0 to traverse all child pages without limit
+            </p>
+          </div>
+        )}
 
         <div className={styles.checkboxField}>
           <label className={styles.checkboxLabel}>

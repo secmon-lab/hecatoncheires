@@ -1,4 +1,4 @@
-import { Database, MessageSquare } from 'lucide-react'
+import { Database, FileText, MessageSquare } from 'lucide-react'
 import Modal from '../Modal'
 import Button from '../Button'
 import { SOURCE_TYPE } from '../../constants/source'
@@ -23,6 +23,12 @@ const sourceTypes: SourceTypeOption[] = [
     name: 'Notion Database',
     description: 'Connect to a Notion database to monitor and track changes',
     icon: <Database size={24} />,
+  },
+  {
+    type: SOURCE_TYPE.NOTION_PAGE,
+    name: 'Notion Page',
+    description: 'Connect to a Notion page (with optional child page traversal)',
+    icon: <FileText size={24} />,
   },
   {
     type: SOURCE_TYPE.SLACK,

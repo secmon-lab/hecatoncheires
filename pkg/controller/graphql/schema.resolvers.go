@@ -355,6 +355,16 @@ func (r *mutationResolver) CreateNotionDBSource(ctx context.Context, workspaceID
 	return toGraphQLSource(created)
 }
 
+// CreateNotionPageSource is the resolver for the createNotionPageSource field.
+func (r *mutationResolver) CreateNotionPageSource(ctx context.Context, workspaceID string, input graphql1.CreateNotionPageSourceInput) (*graphql1.Source, error) {
+	created, err := r.UseCases.Source.CreateNotionPageSource(ctx, workspaceID, toUseCaseCreateNotionPageSourceInput(input))
+	if err != nil {
+		return nil, err
+	}
+
+	return toGraphQLSource(created)
+}
+
 // CreateSlackSource is the resolver for the createSlackSource field.
 func (r *mutationResolver) CreateSlackSource(ctx context.Context, workspaceID string, input graphql1.CreateSlackSourceInput) (*graphql1.Source, error) {
 	created, err := r.UseCases.Source.CreateSlackSource(ctx, workspaceID, toUseCaseCreateSlackSourceInput(input))
@@ -408,6 +418,29 @@ func (r *mutationResolver) ValidateNotionDb(ctx context.Context, workspaceID str
 	}
 	if result.DatabaseURL != "" {
 		gql.DatabaseURL = &result.DatabaseURL
+	}
+	if result.ErrorMessage != "" {
+		gql.ErrorMessage = &result.ErrorMessage
+	}
+
+	return gql, nil
+}
+
+// ValidateNotionPage is the resolver for the validateNotionPage field.
+func (r *mutationResolver) ValidateNotionPage(ctx context.Context, workspaceID string, pageID string) (*graphql1.NotionPageValidationResult, error) {
+	result, err := r.UseCases.Source.ValidateNotionPage(ctx, pageID)
+	if err != nil {
+		return nil, err
+	}
+
+	gql := &graphql1.NotionPageValidationResult{
+		Valid: result.Valid,
+	}
+	if result.PageTitle != "" {
+		gql.PageTitle = &result.PageTitle
+	}
+	if result.PageURL != "" {
+		gql.PageURL = &result.PageURL
 	}
 	if result.ErrorMessage != "" {
 		gql.ErrorMessage = &result.ErrorMessage

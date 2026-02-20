@@ -10,15 +10,16 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 )
 
-// ErrInvalidNotionDatabaseID is returned when the input cannot be parsed as a Notion database ID
-var ErrInvalidNotionDatabaseID = goerr.New("invalid Notion database ID")
+// ErrInvalidNotionID is returned when the input cannot be parsed as a Notion ID
+var ErrInvalidNotionID = goerr.New("invalid Notion ID")
 
 // SourceType represents the type of source
 type SourceType string
 
 const (
-	SourceTypeNotionDB SourceType = "notion_db"
-	SourceTypeSlack    SourceType = "slack"
+	SourceTypeNotionDB   SourceType = "notion_db"
+	SourceTypeNotionPage SourceType = "notion_page"
+	SourceTypeSlack      SourceType = "slack"
 )
 
 // SourceID is a UUID-based identifier for Source
@@ -31,15 +32,16 @@ func NewSourceID() SourceID {
 
 // Source represents an external data source for risk monitoring
 type Source struct {
-	ID             SourceID
-	Name           string
-	SourceType     SourceType
-	Description    string
-	Enabled        bool
-	NotionDBConfig *NotionDBConfig
-	SlackConfig    *SlackConfig
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID               SourceID
+	Name             string
+	SourceType       SourceType
+	Description      string
+	Enabled          bool
+	NotionDBConfig   *NotionDBConfig
+	NotionPageConfig *NotionPageConfig
+	SlackConfig      *SlackConfig
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 // NotionDBConfig holds Notion DB specific configuration
@@ -49,20 +51,29 @@ type NotionDBConfig struct {
 	DatabaseURL   string
 }
 
+// NotionPageConfig holds Notion Page specific configuration
+type NotionPageConfig struct {
+	PageID    string
+	PageTitle string
+	PageURL   string
+	Recursive bool
+	MaxDepth  int
+}
+
 // hexPattern matches 32 hex characters (a Notion database ID without dashes)
 var hexPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
-// ParseNotionDatabaseID extracts a Notion database ID from either a raw ID or a Notion URL.
+// ParseNotionID extracts a Notion ID from either a raw ID or a Notion URL.
 // The returned ID is always in UUID format (8-4-4-4-12) as required by the Notion API.
 // Accepted formats:
 //   - Raw ID: "abc123def456789012345678901234567"
 //   - UUID format: "12345678-90ab-cdef-1234-567890abcdef"
 //   - Notion URL: "https://www.notion.so/workspace/abc123def456...?v=..."
 //   - Notion URL: "https://www.notion.so/abc123def456..."
-func ParseNotionDatabaseID(input string) (string, error) {
+func ParseNotionID(input string) (string, error) {
 	input = strings.TrimSpace(input)
 	if input == "" {
-		return "", ErrInvalidNotionDatabaseID
+		return "", ErrInvalidNotionID
 	}
 
 	var hex string
@@ -86,20 +97,20 @@ func ParseNotionDatabaseID(input string) (string, error) {
 func parseNotionURL(raw string) (string, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
-		return "", ErrInvalidNotionDatabaseID
+		return "", ErrInvalidNotionID
 	}
 
 	host := u.Hostname()
 	if host != "www.notion.so" && host != "notion.so" {
-		return "", ErrInvalidNotionDatabaseID
+		return "", ErrInvalidNotionID
 	}
 
-	// The database ID is the last 32 hex chars in the last path segment
+	// The ID is the last 32 hex chars in the last path segment
 	// e.g. /workspace/Title-abc123def456789012345678901234567
 	path := strings.TrimRight(u.Path, "/")
 	segments := strings.Split(path, "/")
 	if len(segments) == 0 {
-		return "", ErrInvalidNotionDatabaseID
+		return "", ErrInvalidNotionID
 	}
 
 	lastSegment := segments[len(segments)-1]
@@ -114,7 +125,7 @@ func parseNotionURL(raw string) (string, error) {
 		}
 	}
 
-	return "", ErrInvalidNotionDatabaseID
+	return "", ErrInvalidNotionID
 }
 
 func normalizeNotionID(input string) (string, error) {
@@ -123,7 +134,7 @@ func normalizeNotionID(input string) (string, error) {
 	if hexPattern.MatchString(clean) {
 		return clean, nil
 	}
-	return "", ErrInvalidNotionDatabaseID
+	return "", ErrInvalidNotionID
 }
 
 // toUUIDFormat converts a 32-char hex string to UUID format (8-4-4-4-12)

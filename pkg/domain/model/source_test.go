@@ -7,7 +7,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 )
 
-func TestParseNotionDatabaseID(t *testing.T) {
+func TestParseNotionID(t *testing.T) {
 	t.Parallel()
 
 	// UUID format of a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6
@@ -115,22 +115,22 @@ func TestParseNotionDatabaseID(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := model.ParseNotionDatabaseID(tt.input)
+			got, err := model.ParseNotionID(tt.input)
 			if tt.wantErr {
 				if err == nil {
-					t.Errorf("ParseNotionDatabaseID(%q) expected error, got %q", tt.input, got)
+					t.Errorf("ParseNotionID(%q) expected error, got %q", tt.input, got)
 				}
-				if !errors.Is(err, model.ErrInvalidNotionDatabaseID) {
-					t.Errorf("ParseNotionDatabaseID(%q) expected ErrInvalidNotionDatabaseID, got %v", tt.input, err)
+				if !errors.Is(err, model.ErrInvalidNotionID) {
+					t.Errorf("ParseNotionID(%q) expected ErrInvalidNotionID, got %v", tt.input, err)
 				}
 				return
 			}
 			if err != nil {
-				t.Errorf("ParseNotionDatabaseID(%q) unexpected error: %v", tt.input, err)
+				t.Errorf("ParseNotionID(%q) unexpected error: %v", tt.input, err)
 				return
 			}
 			if got != tt.want {
-				t.Errorf("ParseNotionDatabaseID(%q) = %q, want %q", tt.input, got, tt.want)
+				t.Errorf("ParseNotionID(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}
