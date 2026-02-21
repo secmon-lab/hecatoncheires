@@ -325,3 +325,131 @@ func TestGetDatabaseMetadata_InvalidDBID(t *testing.T) {
 		t.Error("GetDatabaseMetadata should fail with invalid database ID")
 	}
 }
+
+func TestGetPageMetadata_Integration(t *testing.T) {
+	token := os.Getenv("TEST_NOTION_API_TOKEN")
+	if token == "" {
+		t.Skip("TEST_NOTION_API_TOKEN environment variable not set")
+	}
+
+	pageID := os.Getenv("TEST_NOTION_PAGE_ID")
+	if pageID == "" {
+		t.Skip("TEST_NOTION_PAGE_ID environment variable not set")
+	}
+
+	svc, err := notion.New(token)
+	if err != nil {
+		t.Fatalf("Failed to create service: %v", err)
+	}
+
+	ctx := context.Background()
+	metadata, err := svc.GetPageMetadata(ctx, pageID)
+	if err != nil {
+		t.Fatalf("GetPageMetadata failed: %v", err)
+	}
+
+	if metadata == nil {
+		t.Fatal("GetPageMetadata returned nil")
+	}
+
+	if metadata.ID == "" {
+		t.Error("Page ID is empty")
+	}
+	if metadata.URL == "" {
+		t.Error("Page URL is empty")
+	}
+
+	t.Logf("Page ID: %s", metadata.ID)
+	t.Logf("Page Title: %s", metadata.Title)
+	t.Logf("Page URL: %s", metadata.URL)
+}
+
+func TestGetPageMetadata_InvalidPageID(t *testing.T) {
+	token := os.Getenv("TEST_NOTION_API_TOKEN")
+	if token == "" {
+		t.Skip("TEST_NOTION_API_TOKEN environment variable not set")
+	}
+
+	svc, err := notion.New(token)
+	if err != nil {
+		t.Fatalf("Failed to create service: %v", err)
+	}
+
+	ctx := context.Background()
+	_, err = svc.GetPageMetadata(ctx, "invalid-page-id-12345")
+	if err == nil {
+		t.Error("GetPageMetadata should fail with invalid page ID")
+	}
+}
+
+func TestQueryUpdatedPagesFromPage_Integration(t *testing.T) {
+	token := os.Getenv("TEST_NOTION_API_TOKEN")
+	if token == "" {
+		t.Skip("TEST_NOTION_API_TOKEN environment variable not set")
+	}
+
+	pageID := os.Getenv("TEST_NOTION_PAGE_ID")
+	if pageID == "" {
+		t.Skip("TEST_NOTION_PAGE_ID environment variable not set")
+	}
+
+	svc, err := notion.New(token)
+	if err != nil {
+		t.Fatalf("Failed to create service: %v", err)
+	}
+
+	ctx := context.Background()
+	since := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	var pages []*notion.Page
+	for page, err := range svc.QueryUpdatedPagesFromPage(ctx, pageID, since, false, 0) {
+		if err != nil {
+			t.Fatalf("Iterator returned error: %v", err)
+		}
+		pages = append(pages, page)
+	}
+
+	t.Logf("Retrieved %d page(s) (recursive=false)", len(pages))
+
+	// Test with recursive=true
+	var recursivePages []*notion.Page
+	for page, err := range svc.QueryUpdatedPagesFromPage(ctx, pageID, since, true, 0) {
+		if err != nil {
+			t.Fatalf("Iterator returned error (recursive): %v", err)
+		}
+		recursivePages = append(recursivePages, page)
+	}
+
+	t.Logf("Retrieved %d page(s) (recursive=true)", len(recursivePages))
+}
+
+func TestQueryUpdatedPagesFromPage_MaxDepth(t *testing.T) {
+	token := os.Getenv("TEST_NOTION_API_TOKEN")
+	if token == "" {
+		t.Skip("TEST_NOTION_API_TOKEN environment variable not set")
+	}
+
+	pageID := os.Getenv("TEST_NOTION_PAGE_ID")
+	if pageID == "" {
+		t.Skip("TEST_NOTION_PAGE_ID environment variable not set")
+	}
+
+	svc, err := notion.New(token)
+	if err != nil {
+		t.Fatalf("Failed to create service: %v", err)
+	}
+
+	ctx := context.Background()
+	since := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	// maxDepth=1 should limit recursion
+	var pagesDepth1 []*notion.Page
+	for page, err := range svc.QueryUpdatedPagesFromPage(ctx, pageID, since, true, 1) {
+		if err != nil {
+			t.Fatalf("Iterator returned error: %v", err)
+		}
+		pagesDepth1 = append(pagesDepth1, page)
+	}
+
+	t.Logf("Retrieved %d page(s) (recursive=true, maxDepth=1)", len(pagesDepth1))
+}

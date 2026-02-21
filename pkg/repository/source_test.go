@@ -391,6 +391,116 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		gt.Value(t, retrieved.SlackConfig).NotNil().Required()
 		gt.Array(t, retrieved.SlackConfig.Channels).Length(0)
 	})
+
+	t.Run("Create Notion Page source with config", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		source := &model.Source{
+			Name:        "My Notion Page",
+			SourceType:  model.SourceTypeNotionPage,
+			Description: "Test notion page source",
+			Enabled:     true,
+			NotionPageConfig: &model.NotionPageConfig{
+				PageID:    "abc123-page-id",
+				PageTitle: "Test Page",
+				PageURL:   "https://notion.so/abc123",
+				Recursive: true,
+				MaxDepth:  3,
+			},
+		}
+
+		created, err := repo.Source().Create(ctx, wsID, source)
+		gt.NoError(t, err).Required()
+
+		gt.String(t, string(created.ID)).NotEqual("")
+		gt.Value(t, created.Name).Equal(source.Name)
+		gt.Value(t, created.SourceType).Equal(model.SourceTypeNotionPage)
+		gt.Value(t, created.NotionPageConfig).NotNil().Required()
+		gt.Value(t, created.NotionPageConfig.PageID).Equal(source.NotionPageConfig.PageID)
+		gt.Value(t, created.NotionPageConfig.PageTitle).Equal(source.NotionPageConfig.PageTitle)
+		gt.Value(t, created.NotionPageConfig.PageURL).Equal(source.NotionPageConfig.PageURL)
+		gt.Value(t, created.NotionPageConfig.Recursive).Equal(source.NotionPageConfig.Recursive)
+		gt.Value(t, created.NotionPageConfig.MaxDepth).Equal(source.NotionPageConfig.MaxDepth)
+	})
+
+	t.Run("Get retrieves Notion Page source with config", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		source := &model.Source{
+			Name:        "Notion Page for Get",
+			SourceType:  model.SourceTypeNotionPage,
+			Description: "For testing Get",
+			Enabled:     true,
+			NotionPageConfig: &model.NotionPageConfig{
+				PageID:    "def456-page-id",
+				PageTitle: "Fetched Page",
+				PageURL:   "https://notion.so/def456",
+				Recursive: false,
+				MaxDepth:  0,
+			},
+		}
+
+		created, err := repo.Source().Create(ctx, wsID, source)
+		gt.NoError(t, err).Required()
+
+		retrieved, err := repo.Source().Get(ctx, wsID, created.ID)
+		gt.NoError(t, err).Required()
+
+		gt.Value(t, retrieved.NotionPageConfig).NotNil().Required()
+		gt.Value(t, retrieved.NotionPageConfig.PageID).Equal(source.NotionPageConfig.PageID)
+		gt.Value(t, retrieved.NotionPageConfig.PageTitle).Equal(source.NotionPageConfig.PageTitle)
+		gt.Value(t, retrieved.NotionPageConfig.PageURL).Equal(source.NotionPageConfig.PageURL)
+		gt.Value(t, retrieved.NotionPageConfig.Recursive).Equal(source.NotionPageConfig.Recursive)
+		gt.Value(t, retrieved.NotionPageConfig.MaxDepth).Equal(source.NotionPageConfig.MaxDepth)
+	})
+
+	t.Run("Update Notion Page source config", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		created, err := repo.Source().Create(ctx, wsID, &model.Source{
+			Name:        "Notion Page for Update",
+			SourceType:  model.SourceTypeNotionPage,
+			Description: "Original",
+			Enabled:     true,
+			NotionPageConfig: &model.NotionPageConfig{
+				PageID:    "orig-page-id",
+				PageTitle: "Original Title",
+				PageURL:   "https://notion.so/orig",
+				Recursive: false,
+				MaxDepth:  0,
+			},
+		})
+		gt.NoError(t, err).Required()
+
+		time.Sleep(10 * time.Millisecond)
+
+		updated, err := repo.Source().Update(ctx, wsID, &model.Source{
+			ID:          created.ID,
+			Name:        "Updated Notion Page",
+			SourceType:  model.SourceTypeNotionPage,
+			Description: "Updated",
+			Enabled:     false,
+			NotionPageConfig: &model.NotionPageConfig{
+				PageID:    "updated-page-id",
+				PageTitle: "Updated Title",
+				PageURL:   "https://notion.so/updated",
+				Recursive: true,
+				MaxDepth:  2,
+			},
+		})
+		gt.NoError(t, err).Required()
+
+		gt.Value(t, updated.NotionPageConfig).NotNil().Required()
+		gt.Value(t, updated.NotionPageConfig.PageID).Equal("updated-page-id")
+		gt.Value(t, updated.NotionPageConfig.PageTitle).Equal("Updated Title")
+		gt.Value(t, updated.NotionPageConfig.PageURL).Equal("https://notion.so/updated")
+		gt.Value(t, updated.NotionPageConfig.Recursive).Equal(true)
+		gt.Value(t, updated.NotionPageConfig.MaxDepth).Equal(2)
+		gt.Bool(t, updated.UpdatedAt.After(created.UpdatedAt)).True()
+	})
 }
 
 func newFirestoreSourceRepository(t *testing.T) interfaces.Repository {

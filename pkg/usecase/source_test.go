@@ -18,7 +18,9 @@ import (
 
 // sourceTestNotionService is a mock implementation of notion.Service for testing
 type sourceTestNotionService struct {
-	getDatabaseMetadataFn func(ctx context.Context, dbID string) (*notion.DatabaseMetadata, error)
+	getDatabaseMetadataFn       func(ctx context.Context, dbID string) (*notion.DatabaseMetadata, error)
+	getPageMetadataFn           func(ctx context.Context, pageID string) (*notion.PageMetadata, error)
+	queryUpdatedPagesFromPageFn func(ctx context.Context, pageID string, since time.Time, recursive bool, maxDepth int) iter.Seq2[*notion.Page, error]
 }
 
 func (m *sourceTestNotionService) QueryUpdatedPages(ctx context.Context, dbID string, since time.Time) iter.Seq2[*notion.Page, error] {
@@ -34,6 +36,24 @@ func (m *sourceTestNotionService) GetDatabaseMetadata(ctx context.Context, dbID 
 		Title: "Test Database",
 		URL:   "https://notion.so/test-db",
 	}, nil
+}
+
+func (m *sourceTestNotionService) GetPageMetadata(ctx context.Context, pageID string) (*notion.PageMetadata, error) {
+	if m.getPageMetadataFn != nil {
+		return m.getPageMetadataFn(ctx, pageID)
+	}
+	return &notion.PageMetadata{
+		ID:    pageID,
+		Title: "Test Page",
+		URL:   "https://notion.so/test-page",
+	}, nil
+}
+
+func (m *sourceTestNotionService) QueryUpdatedPagesFromPage(ctx context.Context, pageID string, since time.Time, recursive bool, maxDepth int) iter.Seq2[*notion.Page, error] {
+	if m.queryUpdatedPagesFromPageFn != nil {
+		return m.queryUpdatedPagesFromPageFn(ctx, pageID, since, recursive, maxDepth)
+	}
+	return func(yield func(*notion.Page, error) bool) {}
 }
 
 // mockSlackService is a mock implementation of slack.Service for testing
@@ -720,5 +740,152 @@ func TestSourceUseCase_ListSlackChannels(t *testing.T) {
 
 		_, err := uc.ListSlackChannels(ctx)
 		gt.Value(t, err).NotNil()
+	})
+}
+
+func TestCreateNotionPageSource(t *testing.T) {
+	const wsID = "test-ws"
+
+	t.Run("creates source with page metadata", func(t *testing.T) {
+		repo := memory.New()
+		notionSvc := &sourceTestNotionService{
+			getPageMetadataFn: func(ctx context.Context, pageID string) (*notion.PageMetadata, error) {
+				return &notion.PageMetadata{
+					ID:    pageID,
+					Title: "My Notion Page",
+					URL:   "https://notion.so/my-page",
+				}, nil
+			},
+		}
+		uc := usecase.NewSourceUseCase(repo, notionSvc, nil)
+		ctx := context.Background()
+
+		input := usecase.CreateNotionPageSourceInput{
+			PageID:    "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+			Enabled:   true,
+			Recursive: true,
+			MaxDepth:  2,
+		}
+
+		created, err := uc.CreateNotionPageSource(ctx, wsID, input)
+		gt.NoError(t, err).Required()
+
+		gt.String(t, string(created.ID)).NotEqual("")
+		gt.Value(t, created.SourceType).Equal(model.SourceTypeNotionPage)
+		gt.Value(t, created.Name).Equal("My Notion Page")
+		gt.Value(t, created.Enabled).Equal(true)
+		gt.Value(t, created.NotionPageConfig).NotNil().Required()
+		gt.Value(t, created.NotionPageConfig.PageTitle).Equal("My Notion Page")
+		gt.Value(t, created.NotionPageConfig.PageURL).Equal("https://notion.so/my-page")
+		gt.Value(t, created.NotionPageConfig.Recursive).Equal(true)
+		gt.Value(t, created.NotionPageConfig.MaxDepth).Equal(2)
+	})
+
+	t.Run("uses custom name when provided", func(t *testing.T) {
+		repo := memory.New()
+		notionSvc := &sourceTestNotionService{}
+		uc := usecase.NewSourceUseCase(repo, notionSvc, nil)
+		ctx := context.Background()
+
+		input := usecase.CreateNotionPageSourceInput{
+			Name:    "Custom Name",
+			PageID:  "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+			Enabled: true,
+		}
+
+		created, err := uc.CreateNotionPageSource(ctx, wsID, input)
+		gt.NoError(t, err).Required()
+		gt.Value(t, created.Name).Equal("Custom Name")
+	})
+
+	t.Run("returns error for invalid page ID", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		ctx := context.Background()
+
+		input := usecase.CreateNotionPageSourceInput{
+			PageID:  "not-a-valid-id",
+			Enabled: true,
+		}
+
+		_, err := uc.CreateNotionPageSource(ctx, wsID, input)
+		gt.Value(t, err).NotNil()
+		gt.Bool(t, errors.Is(err, model.ErrInvalidNotionID)).True()
+	})
+
+	t.Run("creates source without notion service", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		ctx := context.Background()
+
+		input := usecase.CreateNotionPageSourceInput{
+			Name:    "No Service Page",
+			PageID:  "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+			Enabled: true,
+		}
+
+		created, err := uc.CreateNotionPageSource(ctx, wsID, input)
+		gt.NoError(t, err).Required()
+		gt.Value(t, created.Name).Equal("No Service Page")
+		gt.Value(t, created.NotionPageConfig).NotNil().Required()
+		gt.Value(t, created.NotionPageConfig.PageTitle).Equal("")
+	})
+}
+
+func TestValidateNotionPage(t *testing.T) {
+	t.Run("returns valid result for correct page ID", func(t *testing.T) {
+		notionSvc := &sourceTestNotionService{
+			getPageMetadataFn: func(ctx context.Context, pageID string) (*notion.PageMetadata, error) {
+				return &notion.PageMetadata{
+					ID:    pageID,
+					Title: "Validated Page",
+					URL:   "https://notion.so/validated",
+				}, nil
+			},
+		}
+		uc := usecase.NewSourceUseCase(memory.New(), notionSvc, nil)
+		ctx := context.Background()
+
+		result, err := uc.ValidateNotionPage(ctx, "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6")
+		gt.NoError(t, err).Required()
+		gt.Value(t, result.Valid).Equal(true)
+		gt.Value(t, result.PageTitle).Equal("Validated Page")
+		gt.Value(t, result.PageURL).Equal("https://notion.so/validated")
+		gt.Value(t, result.ErrorMessage).Equal("")
+	})
+
+	t.Run("returns invalid result for bad page ID format", func(t *testing.T) {
+		uc := usecase.NewSourceUseCase(memory.New(), nil, nil)
+		ctx := context.Background()
+
+		result, err := uc.ValidateNotionPage(ctx, "not-a-valid-id")
+		gt.NoError(t, err).Required()
+		gt.Value(t, result.Valid).Equal(false)
+		gt.String(t, result.ErrorMessage).NotEqual("")
+	})
+
+	t.Run("returns invalid when notion service is nil", func(t *testing.T) {
+		uc := usecase.NewSourceUseCase(memory.New(), nil, nil)
+		ctx := context.Background()
+
+		result, err := uc.ValidateNotionPage(ctx, "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6")
+		gt.NoError(t, err).Required()
+		gt.Value(t, result.Valid).Equal(false)
+		gt.String(t, result.ErrorMessage).NotEqual("")
+	})
+
+	t.Run("returns invalid when page fetch fails", func(t *testing.T) {
+		notionSvc := &sourceTestNotionService{
+			getPageMetadataFn: func(ctx context.Context, pageID string) (*notion.PageMetadata, error) {
+				return nil, errors.New("page not found")
+			},
+		}
+		uc := usecase.NewSourceUseCase(memory.New(), notionSvc, nil)
+		ctx := context.Background()
+
+		result, err := uc.ValidateNotionPage(ctx, "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6")
+		gt.NoError(t, err).Required()
+		gt.Value(t, result.Valid).Equal(false)
+		gt.String(t, result.ErrorMessage).NotEqual("")
 	})
 }

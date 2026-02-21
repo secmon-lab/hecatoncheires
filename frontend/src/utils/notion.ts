@@ -9,7 +9,7 @@ const hexPattern = /^[0-9a-f]{32}$/
  * - UUID format: "12345678-90ab-cdef-1234-567890abcdef"
  * - Notion URL: "https://www.notion.so/workspace/abc123def456...?v=..."
  */
-export function parseNotionDatabaseID(input: string): string | null {
+export function parseNotionID(input: string): string | null {
   const trimmed = input.trim()
   if (!trimmed) return null
 

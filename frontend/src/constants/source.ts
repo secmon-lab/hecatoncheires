@@ -2,6 +2,7 @@
 // These must match the GraphQL enum SourceType values
 export const SOURCE_TYPE = {
   NOTION_DB: 'NOTION_DB',
+  NOTION_PAGE: 'NOTION_PAGE',
   SLACK: 'Slack',
 } as const
 
@@ -12,6 +13,7 @@ export const FORM_STEP = {
   CLOSED: 'closed',
   SELECT_TYPE: 'select-type',
   NOTION_DB_FORM: 'notion-db-form',
+  NOTION_PAGE_FORM: 'notion-page-form',
   SLACK_FORM: 'slack-form',
 } as const
 

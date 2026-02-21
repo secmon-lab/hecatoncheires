@@ -39,6 +39,15 @@ type CreateNotionDBSourceInput struct {
 	Enabled     *bool   `json:"enabled,omitempty"`
 }
 
+type CreateNotionPageSourceInput struct {
+	Name        *string `json:"name,omitempty"`
+	Description *string `json:"description,omitempty"`
+	PageID      string  `json:"pageID"`
+	Enabled     *bool   `json:"enabled,omitempty"`
+	Recursive   *bool   `json:"recursive,omitempty"`
+	MaxDepth    *int    `json:"maxDepth,omitempty"`
+}
+
 type CreateSlackSourceInput struct {
 	Name        *string  `json:"name,omitempty"`
 	Description *string  `json:"description,omitempty"`
@@ -104,6 +113,23 @@ type NotionDBValidationResult struct {
 	DatabaseTitle *string `json:"databaseTitle,omitempty"`
 	DatabaseURL   *string `json:"databaseURL,omitempty"`
 	ErrorMessage  *string `json:"errorMessage,omitempty"`
+}
+
+type NotionPageConfig struct {
+	PageID    string `json:"pageID"`
+	PageTitle string `json:"pageTitle"`
+	PageURL   string `json:"pageURL"`
+	Recursive bool   `json:"recursive"`
+	MaxDepth  int    `json:"maxDepth"`
+}
+
+func (NotionPageConfig) IsSourceConfig() {}
+
+type NotionPageValidationResult struct {
+	Valid        bool    `json:"valid"`
+	PageTitle    *string `json:"pageTitle,omitempty"`
+	PageURL      *string `json:"pageURL,omitempty"`
+	ErrorMessage *string `json:"errorMessage,omitempty"`
 }
 
 type Query struct {
@@ -279,18 +305,20 @@ func (e FieldType) MarshalJSON() ([]byte, error) {
 type SourceType string
 
 const (
-	SourceTypeNotionDb SourceType = "NOTION_DB"
-	SourceTypeSLACk    SourceType = "SLACK"
+	SourceTypeNotionDb   SourceType = "NOTION_DB"
+	SourceTypeNotionPage SourceType = "NOTION_PAGE"
+	SourceTypeSLACk      SourceType = "SLACK"
 )
 
 var AllSourceType = []SourceType{
 	SourceTypeNotionDb,
+	SourceTypeNotionPage,
 	SourceTypeSLACk,
 }
 
 func (e SourceType) IsValid() bool {
 	switch e {
-	case SourceTypeNotionDb, SourceTypeSLACk:
+	case SourceTypeNotionDb, SourceTypeNotionPage, SourceTypeSLACk:
 		return true
 	}
 	return false

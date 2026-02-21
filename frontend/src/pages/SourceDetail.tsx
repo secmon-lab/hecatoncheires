@@ -1,7 +1,7 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation } from '@apollo/client'
 import { useWorkspace } from '../contexts/workspace-context'
-import { ArrowLeft, Edit, MoreVertical, Trash2, Database, MessageSquare, CheckCircle, XCircle, ExternalLink, Hash } from 'lucide-react'
+import { ArrowLeft, Edit, MoreVertical, Trash2, Database, FileText, MessageSquare, CheckCircle, XCircle, ExternalLink, Hash } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import Button from '../components/Button'
 import Chip from '../components/Chip'
@@ -18,6 +18,15 @@ interface NotionDBConfig {
   databaseURL: string
 }
 
+interface NotionPageConfig {
+  __typename: 'NotionPageConfig'
+  pageID: string
+  pageTitle: string
+  pageURL: string
+  recursive: boolean
+  maxDepth: number
+}
+
 interface SlackChannel {
   id: string
   name: string
@@ -28,7 +37,7 @@ interface SlackConfig {
   channels: SlackChannel[]
 }
 
-type SourceConfig = NotionDBConfig | SlackConfig | null
+type SourceConfig = NotionDBConfig | NotionPageConfig | SlackConfig | null
 
 interface Source {
   id: string
@@ -159,6 +168,7 @@ export default function SourceDetail() {
   const renderSourceType = (sourceType: string) => {
     const typeLabels: Record<string, { label: string; icon: React.ReactNode }> = {
       [SOURCE_TYPE.NOTION_DB]: { label: 'Notion Database', icon: <Database size={20} /> },
+      [SOURCE_TYPE.NOTION_PAGE]: { label: 'Notion Page', icon: <FileText size={20} /> },
       [SOURCE_TYPE.SLACK]: { label: 'Slack', icon: <MessageSquare size={20} /> },
     }
     const typeInfo = typeLabels[sourceType] || { label: sourceType, icon: null }
@@ -279,6 +289,50 @@ export default function SourceDetail() {
                       Open in Notion
                       <ExternalLink size={14} />
                     </a>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {source.sourceType === SOURCE_TYPE.NOTION_PAGE && source.config && source.config.__typename === 'NotionPageConfig' && (
+            <div className={styles.section}>
+              <h3 className={styles.sectionTitle}>Notion Page</h3>
+              <div className={styles.configCard}>
+                <div className={styles.configItem}>
+                  <span className={styles.configLabel}>Page ID</span>
+                  <code className={styles.configValue}>{source.config.pageID}</code>
+                </div>
+                {source.config.pageTitle && (
+                  <div className={styles.configItem}>
+                    <span className={styles.configLabel}>Page Title</span>
+                    <span className={styles.configValue}>{source.config.pageTitle}</span>
+                  </div>
+                )}
+                {source.config.pageURL && (
+                  <div className={styles.configItem}>
+                    <span className={styles.configLabel}>Page URL</span>
+                    <a
+                      href={source.config.pageURL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={styles.configLink}
+                    >
+                      Open in Notion
+                      <ExternalLink size={14} />
+                    </a>
+                  </div>
+                )}
+                <div className={styles.configItem}>
+                  <span className={styles.configLabel}>Recursive</span>
+                  <span className={styles.configValue}>{source.config.recursive ? 'Yes' : 'No'}</span>
+                </div>
+                {source.config.recursive && (
+                  <div className={styles.configItem}>
+                    <span className={styles.configLabel}>Max Depth</span>
+                    <span className={styles.configValue}>
+                      {source.config.maxDepth === 0 ? 'Unlimited' : source.config.maxDepth}
+                    </span>
                   </div>
                 )}
               </div>

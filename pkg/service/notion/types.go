@@ -18,10 +18,24 @@ type Service interface {
 
 	// GetDatabaseMetadata retrieves metadata for a Notion database
 	GetDatabaseMetadata(ctx context.Context, dbID string) (*DatabaseMetadata, error)
+
+	// GetPageMetadata retrieves metadata for a Notion page
+	GetPageMetadata(ctx context.Context, pageID string) (*PageMetadata, error)
+
+	// QueryUpdatedPagesFromPage retrieves pages from a Notion page updated since the specified time.
+	// If recursive is true, child pages are also traversed. maxDepth limits recursion depth (0 = unlimited).
+	QueryUpdatedPagesFromPage(ctx context.Context, pageID string, since time.Time, recursive bool, maxDepth int) iter.Seq2[*Page, error]
 }
 
 // DatabaseMetadata contains metadata about a Notion database
 type DatabaseMetadata struct {
+	ID    string
+	Title string
+	URL   string
+}
+
+// PageMetadata contains metadata about a Notion page
+type PageMetadata struct {
 	ID    string
 	Title string
 	URL   string

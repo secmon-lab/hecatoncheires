@@ -46,6 +46,16 @@ func copySource(source *model.Source) *model.Source {
 		}
 	}
 
+	if source.NotionPageConfig != nil {
+		copied.NotionPageConfig = &model.NotionPageConfig{
+			PageID:    source.NotionPageConfig.PageID,
+			PageTitle: source.NotionPageConfig.PageTitle,
+			PageURL:   source.NotionPageConfig.PageURL,
+			Recursive: source.NotionPageConfig.Recursive,
+			MaxDepth:  source.NotionPageConfig.MaxDepth,
+		}
+	}
+
 	if source.SlackConfig != nil {
 		channels := make([]model.SlackChannel, len(source.SlackConfig.Channels))
 		for i, ch := range source.SlackConfig.Channels {

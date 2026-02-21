@@ -9,6 +9,17 @@ const NOTION_DB_CONFIG_FIELDS = gql`
   }
 `
 
+// Fragment for Notion Page config
+const NOTION_PAGE_CONFIG_FIELDS = gql`
+  fragment NotionPageConfigFields on NotionPageConfig {
+    pageID
+    pageTitle
+    pageURL
+    recursive
+    maxDepth
+  }
+`
+
 // Fragment for Slack config
 const SLACK_CONFIG_FIELDS = gql`
   fragment SlackConfigFields on SlackConfig {
@@ -22,6 +33,7 @@ const SLACK_CONFIG_FIELDS = gql`
 // Fragment for full source data
 const SOURCE_FIELDS = gql`
   ${NOTION_DB_CONFIG_FIELDS}
+  ${NOTION_PAGE_CONFIG_FIELDS}
   ${SLACK_CONFIG_FIELDS}
   fragment SourceFields on Source {
     id
@@ -32,6 +44,9 @@ const SOURCE_FIELDS = gql`
     config {
       ... on NotionDBConfig {
         ...NotionDBConfigFields
+      }
+      ... on NotionPageConfig {
+        ...NotionPageConfigFields
       }
       ... on SlackConfig {
         ...SlackConfigFields
@@ -65,6 +80,26 @@ export const CREATE_NOTION_DB_SOURCE = gql`
   mutation CreateNotionDBSource($workspaceId: String!, $input: CreateNotionDBSourceInput!) {
     createNotionDBSource(workspaceId: $workspaceId, input: $input) {
       ...SourceFields
+    }
+  }
+`
+
+export const CREATE_NOTION_PAGE_SOURCE = gql`
+  ${SOURCE_FIELDS}
+  mutation CreateNotionPageSource($workspaceId: String!, $input: CreateNotionPageSourceInput!) {
+    createNotionPageSource(workspaceId: $workspaceId, input: $input) {
+      ...SourceFields
+    }
+  }
+`
+
+export const VALIDATE_NOTION_PAGE = gql`
+  mutation ValidateNotionPage($workspaceId: String!, $pageID: String!) {
+    validateNotionPage(workspaceId: $workspaceId, pageID: $pageID) {
+      valid
+      pageTitle
+      pageURL
+      errorMessage
     }
   }
 `
