@@ -199,7 +199,8 @@ func workspacesHandler(registry *model.WorkspaceRegistry) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(data) //nolint:errcheck // header already committed
+		// #nosec G104 -- header already committed, write errors are unactionable
+		w.Write(data) //nolint:errcheck
 	}
 }
 

@@ -365,7 +365,7 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 		}
 
 		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, llmClient)
-		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, messages)
+		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, nil, nil, messages)
 
 		gt.Value(t, strings.Contains(prompt, "Important Case")).Equal(true)
 		gt.Value(t, strings.Contains(prompt, "This is very important")).Equal(true)
@@ -374,6 +374,92 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 		gt.Value(t, strings.Contains(prompt, "alice: Hello")).Equal(true)
 		gt.Value(t, strings.Contains(prompt, "Slack's mrkdwn format")).Equal(true)
 		gt.Value(t, strings.Contains(prompt, "Do NOT use Markdown headers")).Equal(true)
+	})
+}
+
+func TestAgentSystemPrompt_ActionsAndKnowledges(t *testing.T) {
+	t.Run("prompt includes actions when present", func(t *testing.T) {
+		repo := memory.New()
+		slackMock := &agentTestSlackService{}
+		llmClient := &mockLLMClient{}
+
+		entry := &model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "ws-test", Name: "Test"},
+		}
+		c := &model.Case{
+			Title:  "Test Case",
+			Status: types.CaseStatusOpen,
+		}
+		actions := []*model.Action{
+			{
+				ID:          1,
+				Title:       "Investigate the issue",
+				Status:      types.ActionStatusInProgress,
+				AssigneeIDs: []string{"U001", "U002"},
+			},
+			{
+				ID:     2,
+				Title:  "Write report",
+				Status: types.ActionStatusTodo,
+			},
+		}
+
+		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, llmClient)
+		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, actions, nil, nil)
+
+		gt.Value(t, strings.Contains(prompt, "## Actions")).Equal(true)
+		gt.Value(t, strings.Contains(prompt, "Investigate the issue")).Equal(true)
+		gt.Value(t, strings.Contains(prompt, "Write report")).Equal(true)
+		gt.Value(t, strings.Contains(prompt, "U001, U002")).Equal(true)
+		gt.Value(t, strings.Contains(prompt, "IN_PROGRESS")).Equal(true)
+		gt.Value(t, strings.Contains(prompt, "TODO")).Equal(true)
+	})
+
+	t.Run("prompt includes knowledge when present", func(t *testing.T) {
+		repo := memory.New()
+		slackMock := &agentTestSlackService{}
+		llmClient := &mockLLMClient{}
+
+		entry := &model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "ws-test", Name: "Test"},
+		}
+		c := &model.Case{
+			Title:  "Test Case",
+			Status: types.CaseStatusOpen,
+		}
+		knowledges := []*model.Knowledge{
+			{
+				ID:    model.KnowledgeID("knowledge-001"),
+				Title: "How to handle this type of incident",
+			},
+		}
+
+		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, llmClient)
+		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, nil, knowledges, nil)
+
+		gt.Value(t, strings.Contains(prompt, "## Knowledge")).Equal(true)
+		gt.Value(t, strings.Contains(prompt, "knowledge-001")).Equal(true)
+		gt.Value(t, strings.Contains(prompt, "How to handle this type of incident")).Equal(true)
+	})
+
+	t.Run("actions and knowledge sections absent when empty", func(t *testing.T) {
+		repo := memory.New()
+		slackMock := &agentTestSlackService{}
+		llmClient := &mockLLMClient{}
+
+		entry := &model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "ws-test", Name: "Test"},
+		}
+		c := &model.Case{
+			Title:  "Test Case",
+			Status: types.CaseStatusOpen,
+		}
+
+		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, llmClient)
+		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, nil, nil, nil)
+
+		gt.Value(t, strings.Contains(prompt, "## Actions")).Equal(false)
+		gt.Value(t, strings.Contains(prompt, "## Knowledge")).Equal(false)
 	})
 }
 
