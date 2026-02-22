@@ -303,7 +303,7 @@ func (r *mutationResolver) CreateAction(ctx context.Context, workspaceID string,
 		description = *input.Description
 	}
 
-	created, err := r.UseCases.Action.CreateAction(ctx, workspaceID, int64(input.CaseID), input.Title, description, assigneeIDs, slackMessageTS, status)
+	created, err := r.UseCases.Action.CreateAction(ctx, workspaceID, int64(input.CaseID), input.Title, description, assigneeIDs, slackMessageTS, status, input.DueDate)
 	if err != nil {
 		return nil, err
 	}
@@ -329,7 +329,12 @@ func (r *mutationResolver) UpdateAction(ctx context.Context, workspaceID string,
 		status = input.Status
 	}
 
-	updated, err := r.UseCases.Action.UpdateAction(ctx, workspaceID, int64(input.ID), caseID, input.Title, input.Description, input.AssigneeIDs, slackMessageTS, status)
+	clearDueDate := false
+	if input.ClearDueDate != nil {
+		clearDueDate = *input.ClearDueDate
+	}
+
+	updated, err := r.UseCases.Action.UpdateAction(ctx, workspaceID, int64(input.ID), caseID, input.Title, input.Description, input.AssigneeIDs, slackMessageTS, status, input.DueDate, clearDueDate)
 	if err != nil {
 		return nil, err
 	}
@@ -716,6 +721,48 @@ func (r *queryResolver) Knowledges(ctx context.Context, workspaceID string, limi
 	hasMore := (offsetVal + len(knowledges)) < totalCount
 
 	return &graphql1.KnowledgeConnection{
+		Items:      items,
+		TotalCount: totalCount,
+		HasMore:    hasMore,
+	}, nil
+}
+
+// AssistLogs is the resolver for the assistLogs field.
+func (r *queryResolver) AssistLogs(ctx context.Context, workspaceID string, caseID int, limit *int, offset *int) (*graphql1.AssistLogConnection, error) {
+	limitVal := 20
+	if limit != nil && *limit > 0 {
+		limitVal = *limit
+	}
+	if limitVal > 50 {
+		limitVal = 50
+	}
+
+	offsetVal := 0
+	if offset != nil && *offset > 0 {
+		offsetVal = *offset
+	}
+
+	logs, totalCount, err := r.repo.AssistLog().List(ctx, workspaceID, int64(caseID), limitVal, offsetVal)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]*graphql1.AssistLog, len(logs))
+	for i, l := range logs {
+		items[i] = &graphql1.AssistLog{
+			ID:        string(l.ID),
+			CaseID:    int(l.CaseID),
+			Summary:   l.Summary,
+			Actions:   l.Actions,
+			Reasoning: l.Reasoning,
+			NextSteps: l.NextSteps,
+			CreatedAt: l.CreatedAt,
+		}
+	}
+
+	hasMore := (offsetVal + len(logs)) < totalCount
+
+	return &graphql1.AssistLogConnection{
 		Items:      items,
 		TotalCount: totalCount,
 		HasMore:    hasMore,

@@ -37,6 +37,7 @@ type Action struct {
 	Assignees      []*SlackUser       `json:"assignees"`
 	SlackMessageTs *string            `json:"slackMessageTS,omitempty"`
 	Status         types.ActionStatus `json:"status"`
+	DueDate        *time.Time         `json:"dueDate,omitempty"`
 	CreatedAt      time.Time          `json:"createdAt"`
 	UpdatedAt      time.Time          `json:"updatedAt"`
 }

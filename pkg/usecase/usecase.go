@@ -24,6 +24,7 @@ type UseCases struct {
 	Slack             *SlackUseCases
 	Source            *SourceUseCase
 	Compile           *CompileUseCase
+	Assist            *AssistUseCase
 }
 
 type Option func(*UseCases)
@@ -79,9 +80,10 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 	uc.Source = NewSourceUseCase(repo, uc.notion, uc.slackService)
 	uc.Compile = NewCompileUseCase(repo, registry, uc.notion, uc.knowledgeService, uc.slackService, uc.baseURL)
 
-	// Create AgentUseCase only if LLM client and Slack service are both available
+	// Create AgentUseCase and AssistUseCase only if LLM client and Slack service are both available
 	if uc.llmClient != nil && uc.slackService != nil {
 		uc.Agent = NewAgentUseCase(repo, registry, uc.slackService, uc.llmClient)
+		uc.Assist = NewAssistUseCase(repo, registry, uc.slackService, uc.llmClient)
 	}
 	uc.Slack = NewSlackUseCases(repo, registry, uc.Agent)
 

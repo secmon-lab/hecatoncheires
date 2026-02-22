@@ -20,6 +20,7 @@ export const GET_ACTIONS = gql`
       }
       slackMessageTS
       status
+      dueDate
       createdAt
       updatedAt
     }
@@ -46,6 +47,7 @@ export const GET_ACTION = gql`
       }
       slackMessageTS
       status
+      dueDate
       createdAt
       updatedAt
     }
@@ -68,6 +70,7 @@ export const CREATE_ACTION = gql`
       }
       slackMessageTS
       status
+      dueDate
       createdAt
       updatedAt
     }
@@ -90,6 +93,7 @@ export const UPDATE_ACTION = gql`
       }
       slackMessageTS
       status
+      dueDate
       createdAt
       updatedAt
     }
@@ -122,6 +126,7 @@ export const GET_OPEN_CASE_ACTIONS = gql`
       }
       slackMessageTS
       status
+      dueDate
       createdAt
       updatedAt
     }

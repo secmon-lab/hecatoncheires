@@ -68,7 +68,15 @@ func cmdMigrate() *cli.Command {
 
 			if dryRun {
 				logger.Info("Dry run mode - previewing changes")
-				diff, err := client.DiffConfigs(indexConfig)
+
+				// Import current Firestore state to compare against desired config.
+				// DiffConfigs expects current (actual) state as argument, not the desired config.
+				currentConfig, err := client.Import(ctx)
+				if err != nil {
+					return goerr.Wrap(err, "failed to import current Firestore config")
+				}
+
+				diff, err := client.DiffConfigs(currentConfig)
 				if err != nil {
 					return goerr.Wrap(err, "failed to calculate diff")
 				}
@@ -99,7 +107,8 @@ func cmdMigrate() *cli.Command {
 }
 
 // getIndexConfig returns the Firestore index configuration.
-// Knowledges are stored in subcollections (workspaces/{workspaceID}/knowledges/).
+// Knowledges and memories are stored in subcollections
+// (workspaces/{workspaceID}/knowledges/, workspaces/{workspaceID}/cases/{caseID}/memories/).
 // Firestore vector indexes require COLLECTION scope for FindNearest queries
 // on specific subcollections. The collection-group name ensures the index
 // applies across all workspace subcollections.
@@ -111,6 +120,25 @@ func getIndexConfig() *fireconf.Config {
 				Indexes: []fireconf.Index{
 					// Vector search index for embedding similarity search.
 					// Field name matches the Go struct field Knowledge.Embedding
+					// stored as firestore.Vector32.
+					{
+						QueryScope: fireconf.QueryScopeCollection,
+						Fields: []fireconf.IndexField{
+							{
+								Path: "Embedding",
+								Vector: &fireconf.VectorConfig{
+									Dimension: model.EmbeddingDimension,
+								},
+							},
+						},
+					},
+				},
+			},
+			{
+				Name: "memories",
+				Indexes: []fireconf.Index{
+					// Vector search index for memory embedding similarity search.
+					// Field name matches the Go struct field Memory.Embedding
 					// stored as firestore.Vector32.
 					{
 						QueryScope: fireconf.QueryScopeCollection,

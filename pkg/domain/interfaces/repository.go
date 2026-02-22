@@ -15,6 +15,8 @@ type Repository interface {
 	Source() SourceRepository
 	Knowledge() KnowledgeRepository
 	CaseMessage() CaseMessageRepository
+	Memory() MemoryRepository
+	AssistLog() AssistLogRepository
 
 	// Auth methods
 	PutToken(ctx context.Context, token *auth.Token) error

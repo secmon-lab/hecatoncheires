@@ -16,6 +16,22 @@ type SourceConfig interface {
 	IsSourceConfig()
 }
 
+type AssistLog struct {
+	ID        string    `json:"id"`
+	CaseID    int       `json:"caseId"`
+	Summary   string    `json:"summary"`
+	Actions   string    `json:"actions"`
+	Reasoning string    `json:"reasoning"`
+	NextSteps string    `json:"nextSteps"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+type AssistLogConnection struct {
+	Items      []*AssistLog `json:"items"`
+	TotalCount int          `json:"totalCount"`
+	HasMore    bool         `json:"hasMore"`
+}
+
 type CreateActionInput struct {
 	CaseID         int                 `json:"caseID"`
 	Title          string              `json:"title"`
@@ -23,6 +39,7 @@ type CreateActionInput struct {
 	AssigneeIDs    []string            `json:"assigneeIDs,omitempty"`
 	SlackMessageTs *string             `json:"slackMessageTS,omitempty"`
 	Status         *types.ActionStatus `json:"status,omitempty"`
+	DueDate        *time.Time          `json:"dueDate,omitempty"`
 }
 
 type CreateCaseInput struct {
@@ -205,6 +222,8 @@ type UpdateActionInput struct {
 	AssigneeIDs    []string            `json:"assigneeIDs,omitempty"`
 	SlackMessageTs *string             `json:"slackMessageTS,omitempty"`
 	Status         *types.ActionStatus `json:"status,omitempty"`
+	DueDate        *time.Time          `json:"dueDate,omitempty"`
+	ClearDueDate   *bool               `json:"clearDueDate,omitempty"`
 }
 
 type UpdateCaseInput struct {

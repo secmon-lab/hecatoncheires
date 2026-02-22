@@ -52,6 +52,7 @@ func toGraphQLAction(a *model.Action, workspaceID string) *graphql1.Action {
 		AssigneeIDs:    assigneeIDs,
 		SlackMessageTs: &slackMessageTS,
 		Status:         a.Status,
+		DueDate:        a.DueDate,
 		CreatedAt:      a.CreatedAt,
 		UpdatedAt:      a.UpdatedAt,
 	}

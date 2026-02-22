@@ -58,11 +58,28 @@ type ComplexityRoot struct {
 		CaseID         func(childComplexity int) int
 		CreatedAt      func(childComplexity int) int
 		Description    func(childComplexity int) int
+		DueDate        func(childComplexity int) int
 		ID             func(childComplexity int) int
 		SlackMessageTs func(childComplexity int) int
 		Status         func(childComplexity int) int
 		Title          func(childComplexity int) int
 		UpdatedAt      func(childComplexity int) int
+	}
+
+	AssistLog struct {
+		Actions   func(childComplexity int) int
+		CaseID    func(childComplexity int) int
+		CreatedAt func(childComplexity int) int
+		ID        func(childComplexity int) int
+		NextSteps func(childComplexity int) int
+		Reasoning func(childComplexity int) int
+		Summary   func(childComplexity int) int
+	}
+
+	AssistLogConnection struct {
+		HasMore    func(childComplexity int) int
+		Items      func(childComplexity int) int
+		TotalCount func(childComplexity int) int
 	}
 
 	Case struct {
@@ -185,6 +202,7 @@ type ComplexityRoot struct {
 		Action              func(childComplexity int, workspaceID string, id int) int
 		Actions             func(childComplexity int, workspaceID string) int
 		ActionsByCase       func(childComplexity int, workspaceID string, caseID int) int
+		AssistLogs          func(childComplexity int, workspaceID string, caseID int, limit *int, offset *int) int
 		Case                func(childComplexity int, workspaceID string, id int) int
 		Cases               func(childComplexity int, workspaceID string, status *types.CaseStatus) int
 		FieldConfiguration  func(childComplexity int, workspaceID string) int
@@ -320,6 +338,7 @@ type QueryResolver interface {
 	Source(ctx context.Context, workspaceID string, id string) (*graphql1.Source, error)
 	Knowledge(ctx context.Context, workspaceID string, id string) (*graphql1.Knowledge, error)
 	Knowledges(ctx context.Context, workspaceID string, limit *int, offset *int) (*graphql1.KnowledgeConnection, error)
+	AssistLogs(ctx context.Context, workspaceID string, caseID int, limit *int, offset *int) (*graphql1.AssistLogConnection, error)
 }
 
 type executableSchema struct {
@@ -377,6 +396,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Action.Description(childComplexity), true
+	case "Action.dueDate":
+		if e.complexity.Action.DueDate == nil {
+			break
+		}
+
+		return e.complexity.Action.DueDate(childComplexity), true
 	case "Action.id":
 		if e.complexity.Action.ID == nil {
 			break
@@ -407,6 +432,68 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Action.UpdatedAt(childComplexity), true
+
+	case "AssistLog.actions":
+		if e.complexity.AssistLog.Actions == nil {
+			break
+		}
+
+		return e.complexity.AssistLog.Actions(childComplexity), true
+	case "AssistLog.caseId":
+		if e.complexity.AssistLog.CaseID == nil {
+			break
+		}
+
+		return e.complexity.AssistLog.CaseID(childComplexity), true
+	case "AssistLog.createdAt":
+		if e.complexity.AssistLog.CreatedAt == nil {
+			break
+		}
+
+		return e.complexity.AssistLog.CreatedAt(childComplexity), true
+	case "AssistLog.id":
+		if e.complexity.AssistLog.ID == nil {
+			break
+		}
+
+		return e.complexity.AssistLog.ID(childComplexity), true
+	case "AssistLog.nextSteps":
+		if e.complexity.AssistLog.NextSteps == nil {
+			break
+		}
+
+		return e.complexity.AssistLog.NextSteps(childComplexity), true
+	case "AssistLog.reasoning":
+		if e.complexity.AssistLog.Reasoning == nil {
+			break
+		}
+
+		return e.complexity.AssistLog.Reasoning(childComplexity), true
+	case "AssistLog.summary":
+		if e.complexity.AssistLog.Summary == nil {
+			break
+		}
+
+		return e.complexity.AssistLog.Summary(childComplexity), true
+
+	case "AssistLogConnection.hasMore":
+		if e.complexity.AssistLogConnection.HasMore == nil {
+			break
+		}
+
+		return e.complexity.AssistLogConnection.HasMore(childComplexity), true
+	case "AssistLogConnection.items":
+		if e.complexity.AssistLogConnection.Items == nil {
+			break
+		}
+
+		return e.complexity.AssistLogConnection.Items(childComplexity), true
+	case "AssistLogConnection.totalCount":
+		if e.complexity.AssistLogConnection.TotalCount == nil {
+			break
+		}
+
+		return e.complexity.AssistLogConnection.TotalCount(childComplexity), true
 
 	case "Case.actions":
 		if e.complexity.Case.Actions == nil {
@@ -1001,6 +1088,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Query.ActionsByCase(childComplexity, args["workspaceId"].(string), args["caseID"].(int)), true
+	case "Query.assistLogs":
+		if e.complexity.Query.AssistLogs == nil {
+			break
+		}
+
+		args, err := ec.field_Query_assistLogs_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Query.AssistLogs(childComplexity, args["workspaceId"].(string), args["caseId"].(int), args["limit"].(*int), args["offset"].(*int)), true
 	case "Query.case":
 		if e.complexity.Query.Case == nil {
 			break
@@ -1609,6 +1707,7 @@ type Action {
   assignees: [SlackUser!]!
   slackMessageTS: String
   status: ActionStatus!
+  dueDate: Time
   createdAt: Time!
   updatedAt: Time!
 }
@@ -1636,6 +1735,7 @@ input CreateActionInput {
   assigneeIDs: [String!]
   slackMessageTS: String
   status: ActionStatus
+  dueDate: Time
 }
 
 input UpdateActionInput {
@@ -1646,6 +1746,8 @@ input UpdateActionInput {
   assigneeIDs: [String!]
   slackMessageTS: String
   status: ActionStatus
+  dueDate: Time
+  clearDueDate: Boolean
 }
 
 # Slack User
@@ -1776,6 +1878,23 @@ type SlackChannelInfo {
   name: String!
 }
 
+# Assist Logs
+type AssistLog {
+  id: ID!
+  caseId: Int!
+  summary: String!
+  actions: String!
+  reasoning: String!
+  nextSteps: String!
+  createdAt: Time!
+}
+
+type AssistLogConnection {
+  items: [AssistLog!]!
+  totalCount: Int!
+  hasMore: Boolean!
+}
+
 type Query {
   health: String!
 
@@ -1807,6 +1926,9 @@ type Query {
   # Knowledge
   knowledge(workspaceId: String!, id: String!): Knowledge
   knowledges(workspaceId: String!, limit: Int, offset: Int): KnowledgeConnection!
+
+  # Assist Logs
+  assistLogs(workspaceId: String!, caseId: Int!, limit: Int, offset: Int): AssistLogConnection!
 }
 
 type Mutation {
@@ -2165,6 +2287,32 @@ func (ec *executionContext) field_Query_actions_args(ctx context.Context, rawArg
 		return nil, err
 	}
 	args["workspaceId"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_Query_assistLogs_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "caseId", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["caseId"] = arg1
+	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "limit", ec.unmarshalOInt2ᚖint)
+	if err != nil {
+		return nil, err
+	}
+	args["limit"] = arg2
+	arg3, err := graphql.ProcessArgField(ctx, rawArgs, "offset", ec.unmarshalOInt2ᚖint)
+	if err != nil {
+		return nil, err
+	}
+	args["offset"] = arg3
 	return args, nil
 }
 
@@ -2652,6 +2800,35 @@ func (ec *executionContext) fieldContext_Action_status(_ context.Context, field 
 	return fc, nil
 }
 
+func (ec *executionContext) _Action_dueDate(ctx context.Context, field graphql.CollectedField, obj *graphql1.Action) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Action_dueDate,
+		func(ctx context.Context) (any, error) {
+			return obj.DueDate, nil
+		},
+		nil,
+		ec.marshalOTime2ᚖtimeᚐTime,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Action_dueDate(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Action",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Action_createdAt(ctx context.Context, field graphql.CollectedField, obj *graphql1.Action) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -2705,6 +2882,312 @@ func (ec *executionContext) fieldContext_Action_updatedAt(_ context.Context, fie
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _AssistLog_id(ctx context.Context, field graphql.CollectedField, obj *graphql1.AssistLog) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_AssistLog_id,
+		func(ctx context.Context) (any, error) {
+			return obj.ID, nil
+		},
+		nil,
+		ec.marshalNID2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_AssistLog_id(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "AssistLog",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type ID does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _AssistLog_caseId(ctx context.Context, field graphql.CollectedField, obj *graphql1.AssistLog) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_AssistLog_caseId,
+		func(ctx context.Context) (any, error) {
+			return obj.CaseID, nil
+		},
+		nil,
+		ec.marshalNInt2int,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_AssistLog_caseId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "AssistLog",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _AssistLog_summary(ctx context.Context, field graphql.CollectedField, obj *graphql1.AssistLog) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_AssistLog_summary,
+		func(ctx context.Context) (any, error) {
+			return obj.Summary, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_AssistLog_summary(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "AssistLog",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _AssistLog_actions(ctx context.Context, field graphql.CollectedField, obj *graphql1.AssistLog) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_AssistLog_actions,
+		func(ctx context.Context) (any, error) {
+			return obj.Actions, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_AssistLog_actions(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "AssistLog",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _AssistLog_reasoning(ctx context.Context, field graphql.CollectedField, obj *graphql1.AssistLog) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_AssistLog_reasoning,
+		func(ctx context.Context) (any, error) {
+			return obj.Reasoning, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_AssistLog_reasoning(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "AssistLog",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _AssistLog_nextSteps(ctx context.Context, field graphql.CollectedField, obj *graphql1.AssistLog) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_AssistLog_nextSteps,
+		func(ctx context.Context) (any, error) {
+			return obj.NextSteps, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_AssistLog_nextSteps(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "AssistLog",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _AssistLog_createdAt(ctx context.Context, field graphql.CollectedField, obj *graphql1.AssistLog) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_AssistLog_createdAt,
+		func(ctx context.Context) (any, error) {
+			return obj.CreatedAt, nil
+		},
+		nil,
+		ec.marshalNTime2timeᚐTime,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_AssistLog_createdAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "AssistLog",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _AssistLogConnection_items(ctx context.Context, field graphql.CollectedField, obj *graphql1.AssistLogConnection) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_AssistLogConnection_items,
+		func(ctx context.Context) (any, error) {
+			return obj.Items, nil
+		},
+		nil,
+		ec.marshalNAssistLog2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐAssistLogᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_AssistLogConnection_items(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "AssistLogConnection",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_AssistLog_id(ctx, field)
+			case "caseId":
+				return ec.fieldContext_AssistLog_caseId(ctx, field)
+			case "summary":
+				return ec.fieldContext_AssistLog_summary(ctx, field)
+			case "actions":
+				return ec.fieldContext_AssistLog_actions(ctx, field)
+			case "reasoning":
+				return ec.fieldContext_AssistLog_reasoning(ctx, field)
+			case "nextSteps":
+				return ec.fieldContext_AssistLog_nextSteps(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_AssistLog_createdAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type AssistLog", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _AssistLogConnection_totalCount(ctx context.Context, field graphql.CollectedField, obj *graphql1.AssistLogConnection) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_AssistLogConnection_totalCount,
+		func(ctx context.Context) (any, error) {
+			return obj.TotalCount, nil
+		},
+		nil,
+		ec.marshalNInt2int,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_AssistLogConnection_totalCount(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "AssistLogConnection",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _AssistLogConnection_hasMore(ctx context.Context, field graphql.CollectedField, obj *graphql1.AssistLogConnection) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_AssistLogConnection_hasMore,
+		func(ctx context.Context) (any, error) {
+			return obj.HasMore, nil
+		},
+		nil,
+		ec.marshalNBoolean2bool,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_AssistLogConnection_hasMore(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "AssistLogConnection",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
 		},
 	}
 	return fc, nil
@@ -3058,6 +3541,8 @@ func (ec *executionContext) fieldContext_Case_actions(_ context.Context, field g
 				return ec.fieldContext_Action_slackMessageTS(ctx, field)
 			case "status":
 				return ec.fieldContext_Action_status(ctx, field)
+			case "dueDate":
+				return ec.fieldContext_Action_dueDate(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Action_createdAt(ctx, field)
 			case "updatedAt":
@@ -4555,6 +5040,8 @@ func (ec *executionContext) fieldContext_Mutation_createAction(ctx context.Conte
 				return ec.fieldContext_Action_slackMessageTS(ctx, field)
 			case "status":
 				return ec.fieldContext_Action_status(ctx, field)
+			case "dueDate":
+				return ec.fieldContext_Action_dueDate(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Action_createdAt(ctx, field)
 			case "updatedAt":
@@ -4620,6 +5107,8 @@ func (ec *executionContext) fieldContext_Mutation_updateAction(ctx context.Conte
 				return ec.fieldContext_Action_slackMessageTS(ctx, field)
 			case "status":
 				return ec.fieldContext_Action_status(ctx, field)
+			case "dueDate":
+				return ec.fieldContext_Action_dueDate(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Action_createdAt(ctx, field)
 			case "updatedAt":
@@ -5885,6 +6374,8 @@ func (ec *executionContext) fieldContext_Query_actions(ctx context.Context, fiel
 				return ec.fieldContext_Action_slackMessageTS(ctx, field)
 			case "status":
 				return ec.fieldContext_Action_status(ctx, field)
+			case "dueDate":
+				return ec.fieldContext_Action_dueDate(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Action_createdAt(ctx, field)
 			case "updatedAt":
@@ -5950,6 +6441,8 @@ func (ec *executionContext) fieldContext_Query_action(ctx context.Context, field
 				return ec.fieldContext_Action_slackMessageTS(ctx, field)
 			case "status":
 				return ec.fieldContext_Action_status(ctx, field)
+			case "dueDate":
+				return ec.fieldContext_Action_dueDate(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Action_createdAt(ctx, field)
 			case "updatedAt":
@@ -6015,6 +6508,8 @@ func (ec *executionContext) fieldContext_Query_actionsByCase(ctx context.Context
 				return ec.fieldContext_Action_slackMessageTS(ctx, field)
 			case "status":
 				return ec.fieldContext_Action_status(ctx, field)
+			case "dueDate":
+				return ec.fieldContext_Action_dueDate(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Action_createdAt(ctx, field)
 			case "updatedAt":
@@ -6080,6 +6575,8 @@ func (ec *executionContext) fieldContext_Query_openCaseActions(ctx context.Conte
 				return ec.fieldContext_Action_slackMessageTS(ctx, field)
 			case "status":
 				return ec.fieldContext_Action_status(ctx, field)
+			case "dueDate":
+				return ec.fieldContext_Action_dueDate(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Action_createdAt(ctx, field)
 			case "updatedAt":
@@ -6447,6 +6944,55 @@ func (ec *executionContext) fieldContext_Query_knowledges(ctx context.Context, f
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Query_knowledges_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_assistLogs(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Query_assistLogs,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Query().AssistLogs(ctx, fc.Args["workspaceId"].(string), fc.Args["caseId"].(int), fc.Args["limit"].(*int), fc.Args["offset"].(*int))
+		},
+		nil,
+		ec.marshalNAssistLogConnection2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐAssistLogConnection,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Query_assistLogs(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "items":
+				return ec.fieldContext_AssistLogConnection_items(ctx, field)
+			case "totalCount":
+				return ec.fieldContext_AssistLogConnection_totalCount(ctx, field)
+			case "hasMore":
+				return ec.fieldContext_AssistLogConnection_hasMore(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type AssistLogConnection", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_assistLogs_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -9160,7 +9706,7 @@ func (ec *executionContext) unmarshalInputCreateActionInput(ctx context.Context,
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"caseID", "title", "description", "assigneeIDs", "slackMessageTS", "status"}
+	fieldsInOrder := [...]string{"caseID", "title", "description", "assigneeIDs", "slackMessageTS", "status", "dueDate"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -9209,6 +9755,13 @@ func (ec *executionContext) unmarshalInputCreateActionInput(ctx context.Context,
 				return it, err
 			}
 			it.Status = data
+		case "dueDate":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("dueDate"))
+			data, err := ec.unmarshalOTime2ᚖtimeᚐTime(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.DueDate = data
 		}
 	}
 
@@ -9462,7 +10015,7 @@ func (ec *executionContext) unmarshalInputUpdateActionInput(ctx context.Context,
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"id", "caseID", "title", "description", "assigneeIDs", "slackMessageTS", "status"}
+	fieldsInOrder := [...]string{"id", "caseID", "title", "description", "assigneeIDs", "slackMessageTS", "status", "dueDate", "clearDueDate"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -9518,6 +10071,20 @@ func (ec *executionContext) unmarshalInputUpdateActionInput(ctx context.Context,
 				return it, err
 			}
 			it.Status = data
+		case "dueDate":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("dueDate"))
+			data, err := ec.unmarshalOTime2ᚖtimeᚐTime(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.DueDate = data
+		case "clearDueDate":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("clearDueDate"))
+			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ClearDueDate = data
 		}
 	}
 
@@ -9833,6 +10400,8 @@ func (ec *executionContext) _Action(ctx context.Context, sel ast.SelectionSet, o
 			if out.Values[i] == graphql.Null {
 				atomic.AddUint32(&out.Invalids, 1)
 			}
+		case "dueDate":
+			out.Values[i] = ec._Action_dueDate(ctx, field, obj)
 		case "createdAt":
 			out.Values[i] = ec._Action_createdAt(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
@@ -9842,6 +10411,124 @@ func (ec *executionContext) _Action(ctx context.Context, sel ast.SelectionSet, o
 			out.Values[i] = ec._Action_updatedAt(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				atomic.AddUint32(&out.Invalids, 1)
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var assistLogImplementors = []string{"AssistLog"}
+
+func (ec *executionContext) _AssistLog(ctx context.Context, sel ast.SelectionSet, obj *graphql1.AssistLog) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, assistLogImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("AssistLog")
+		case "id":
+			out.Values[i] = ec._AssistLog_id(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "caseId":
+			out.Values[i] = ec._AssistLog_caseId(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "summary":
+			out.Values[i] = ec._AssistLog_summary(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "actions":
+			out.Values[i] = ec._AssistLog_actions(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "reasoning":
+			out.Values[i] = ec._AssistLog_reasoning(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "nextSteps":
+			out.Values[i] = ec._AssistLog_nextSteps(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "createdAt":
+			out.Values[i] = ec._AssistLog_createdAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var assistLogConnectionImplementors = []string{"AssistLogConnection"}
+
+func (ec *executionContext) _AssistLogConnection(ctx context.Context, sel ast.SelectionSet, obj *graphql1.AssistLogConnection) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, assistLogConnectionImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("AssistLogConnection")
+		case "items":
+			out.Values[i] = ec._AssistLogConnection_items(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "totalCount":
+			out.Values[i] = ec._AssistLogConnection_totalCount(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "hasMore":
+			out.Values[i] = ec._AssistLogConnection_hasMore(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
 			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
@@ -11291,6 +11978,28 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 			}
 
 			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "assistLogs":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_assistLogs(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
 		case "__type":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Query___type(ctx, field)
@@ -12241,6 +12950,74 @@ func (ec *executionContext) marshalNAny2interface(ctx context.Context, sel ast.S
 	return res
 }
 
+func (ec *executionContext) marshalNAssistLog2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐAssistLogᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.AssistLog) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNAssistLog2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐAssistLog(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNAssistLog2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐAssistLog(ctx context.Context, sel ast.SelectionSet, v *graphql1.AssistLog) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._AssistLog(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNAssistLogConnection2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐAssistLogConnection(ctx context.Context, sel ast.SelectionSet, v graphql1.AssistLogConnection) graphql.Marshaler {
+	return ec._AssistLogConnection(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNAssistLogConnection2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐAssistLogConnection(ctx context.Context, sel ast.SelectionSet, v *graphql1.AssistLogConnection) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._AssistLogConnection(ctx, sel, v)
+}
+
 func (ec *executionContext) unmarshalNBoolean2bool(ctx context.Context, v any) (bool, error) {
 	res, err := graphql.UnmarshalBoolean(v)
 	return res, graphql.ErrorOnPath(ctx, err)
@@ -12512,6 +13289,22 @@ func (ec *executionContext) marshalNFieldValue2ᚖgithubᚗcomᚋsecmonᚑlabᚋ
 func (ec *executionContext) unmarshalNFieldValueInput2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐFieldValueInput(ctx context.Context, v any) (*graphql1.FieldValueInput, error) {
 	res, err := ec.unmarshalInputFieldValueInput(ctx, v)
 	return &res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) unmarshalNID2string(ctx context.Context, v any) (string, error) {
+	res, err := graphql.UnmarshalID(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNID2string(ctx context.Context, sel ast.SelectionSet, v string) graphql.Marshaler {
+	_ = sel
+	res := graphql.MarshalID(v)
+	if res == graphql.Null {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+	}
+	return res
 }
 
 func (ec *executionContext) unmarshalNInt2int(ctx context.Context, v any) (int, error) {
@@ -13641,6 +14434,24 @@ func (ec *executionContext) marshalOString2ᚖstring(ctx context.Context, sel as
 	_ = sel
 	_ = ctx
 	res := graphql.MarshalString(*v)
+	return res
+}
+
+func (ec *executionContext) unmarshalOTime2ᚖtimeᚐTime(ctx context.Context, v any) (*time.Time, error) {
+	if v == nil {
+		return nil, nil
+	}
+	res, err := graphql.UnmarshalTime(v)
+	return &res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalOTime2ᚖtimeᚐTime(ctx context.Context, sel ast.SelectionSet, v *time.Time) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	_ = sel
+	_ = ctx
+	res := graphql.MarshalTime(*v)
 	return res
 }
 

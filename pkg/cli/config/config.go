@@ -33,6 +33,12 @@ type CompileSection struct {
 	Prompt string `toml:"prompt"`
 }
 
+// AssistSection represents the [assist] section in a TOML config
+type AssistSection struct {
+	Prompt   string `toml:"prompt"`
+	Language string `toml:"language"`
+}
+
 // AppConfig represents the application configuration.
 // It holds TOML-parsed fields and provides CLI Flags()/Configure() methods.
 type AppConfig struct {
@@ -41,6 +47,7 @@ type AppConfig struct {
 	Fields    []FieldDefinition   `toml:"fields"`
 	Slack     SlackSection        `toml:"slack"`
 	Compile   CompileSection      `toml:"compile"`
+	Assist    AssistSection       `toml:"assist"`
 }
 
 // WorkspaceConfig represents a fully resolved workspace configuration
@@ -50,6 +57,8 @@ type WorkspaceConfig struct {
 	SlackChannelPrefix string
 	FieldSchema        *domainConfig.FieldSchema
 	CompilePrompt      string
+	AssistPrompt       string
+	AssistLanguage     string
 }
 
 // Labels represents entity display labels
@@ -294,6 +303,8 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 		SlackChannelPrefix: slackPrefix,
 		FieldSchema:        appCfg.ToDomainFieldSchema(),
 		CompilePrompt:      appCfg.Compile.Prompt,
+		AssistPrompt:       appCfg.Assist.Prompt,
+		AssistLanguage:     appCfg.Assist.Language,
 	}, nil
 }
 
@@ -329,6 +340,8 @@ func (a *AppConfig) Configure(c *cli.Command) ([]*WorkspaceConfig, *model.Worksp
 			FieldSchema:        wc.FieldSchema,
 			SlackChannelPrefix: wc.SlackChannelPrefix,
 			CompilePrompt:      wc.CompilePrompt,
+			AssistPrompt:       wc.AssistPrompt,
+			AssistLanguage:     wc.AssistLanguage,
 		})
 		logging.Default().Info("Registered workspace", "id", wc.ID, "name", wc.Name)
 	}

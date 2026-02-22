@@ -203,13 +203,39 @@
   height: auto;
 }
 
+.metaRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--spacing-md-sm);
+  padding-top: var(--spacing-md-sm);
+  border-top: 1px solid var(--border-light);
+}
+
 .timestamps {
   display: flex;
   align-items: center;
   gap: var(--spacing-xs);
-  margin-top: var(--spacing-md-sm);
-  padding-top: var(--spacing-md-sm);
-  border-top: 1px solid var(--border-light);
+}
+
+.assistLogLink {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  background: none;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md, 8px);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.assistLogLink:hover {
+  color: var(--color-primary);
+  border-color: var(--color-primary-light);
+  background: var(--bg-subtle);
 }
 
 .timestampLabel {
@@ -706,3 +732,4 @@
     max-width: 12.5rem;
   }
 }
+

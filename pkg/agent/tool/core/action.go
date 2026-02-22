@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
@@ -14,7 +15,7 @@ import (
 
 // actionToMap converts an Action to a map for tool response
 func actionToMap(a *model.Action) map[string]any {
-	return map[string]any{
+	m := map[string]any{
 		"id":           a.ID,
 		"case_id":      a.CaseID,
 		"title":        a.Title,
@@ -24,6 +25,10 @@ func actionToMap(a *model.Action) map[string]any {
 		"created_at":   a.CreatedAt.String(),
 		"updated_at":   a.UpdatedAt.String(),
 	}
+	if a.DueDate != nil {
+		m["due_date"] = a.DueDate.Format(time.RFC3339)
+	}
+	return m
 }
 
 // listActionsTool retrieves all actions for the current case
@@ -53,12 +58,16 @@ func (t *listActionsTool) Run(ctx context.Context, _ map[string]any) (map[string
 
 	items := make([]map[string]any, len(actions))
 	for i, a := range actions {
-		items[i] = map[string]any{
+		item := map[string]any{
 			"id":           a.ID,
 			"title":        a.Title,
 			"status":       a.Status.String(),
 			"assignee_ids": a.AssigneeIDs,
 		}
+		if a.DueDate != nil {
+			item["due_date"] = a.DueDate.Format(time.RFC3339)
+		}
+		items[i] = item
 	}
 	return map[string]any{"actions": items}, nil
 }
@@ -145,6 +154,11 @@ func (t *createActionTool) Spec() gollem.ToolSpec {
 					types.ActionStatusCompleted.String(),
 				},
 			},
+			"due_date": {
+				Type:        gollem.TypeString,
+				Description: "Optional due date for the action in RFC3339 format (e.g. 2025-03-01T00:00:00Z)",
+				Required:    false,
+			},
 		},
 	}
 }
@@ -177,6 +191,15 @@ func (t *createActionTool) Run(ctx context.Context, args map[string]any) (map[st
 		}
 	}
 
+	var dueDate *time.Time
+	if dueDateStr, ok := args["due_date"].(string); ok && dueDateStr != "" {
+		parsed, err := time.Parse(time.RFC3339, dueDateStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid due_date format %q: expected RFC3339 (e.g. 2025-03-01T00:00:00Z)", dueDateStr)
+		}
+		dueDate = &parsed
+	}
+
 	tool.Update(ctx, fmt.Sprintf("Creating action: %s", title))
 	action := &model.Action{
 		CaseID:      t.caseID,
@@ -184,6 +207,7 @@ func (t *createActionTool) Run(ctx context.Context, args map[string]any) (map[st
 		Description: description,
 		Status:      status,
 		AssigneeIDs: assigneeIDs,
+		DueDate:     dueDate,
 	}
 
 	created, err := t.repo.Action().Create(ctx, t.workspaceID, action)
@@ -230,6 +254,11 @@ func (t *updateActionTool) Spec() gollem.ToolSpec {
 					Type: gollem.TypeString,
 				},
 			},
+			"due_date": {
+				Type:        gollem.TypeString,
+				Description: "New due date in RFC3339 format (e.g. 2025-03-01T00:00:00Z). Set to empty string to clear the due date. Omit to keep current value.",
+				Required:    false,
+			},
 		},
 	}
 }
@@ -268,6 +297,17 @@ func (t *updateActionTool) Run(ctx context.Context, args map[string]any) (map[st
 			assigneeIDs = append(assigneeIDs, s)
 		}
 		a.AssigneeIDs = assigneeIDs
+	}
+	if dueDateStr, ok := args["due_date"].(string); ok {
+		if dueDateStr == "" {
+			a.DueDate = nil
+		} else {
+			parsed, err := time.Parse(time.RFC3339, dueDateStr)
+			if err != nil {
+				return nil, fmt.Errorf("invalid due_date format %q: expected RFC3339 (e.g. 2025-03-01T00:00:00Z)", dueDateStr)
+			}
+			a.DueDate = &parsed
+		}
 	}
 
 	updated, err := t.repo.Action().Update(ctx, t.workspaceID, a)

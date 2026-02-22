@@ -17,6 +17,8 @@ type Firestore struct {
 	source      *sourceRepository
 	knowledge   *knowledgeRepository
 	caseMessage *caseMessageRepository
+	memory      *firestoreMemoryRepository
+	assistLog   *firestoreAssistLogRepository
 }
 
 var _ interfaces.Repository = &Firestore{}
@@ -45,6 +47,8 @@ func New(ctx context.Context, projectID, databaseID string) (*Firestore, error) 
 		source:      newSourceRepository(client),
 		knowledge:   newKnowledgeRepository(client),
 		caseMessage: newCaseMessageRepository(client),
+		memory:      newFirestoreMemoryRepository(client),
+		assistLog:   newFirestoreAssistLogRepository(client),
 	}
 
 	return f, nil
@@ -76,6 +80,14 @@ func (f *Firestore) Knowledge() interfaces.KnowledgeRepository {
 
 func (f *Firestore) CaseMessage() interfaces.CaseMessageRepository {
 	return f.caseMessage
+}
+
+func (f *Firestore) Memory() interfaces.MemoryRepository {
+	return f.memory
+}
+
+func (f *Firestore) AssistLog() interfaces.AssistLogRepository {
+	return f.assistLog
 }
 
 func (f *Firestore) Close() error {

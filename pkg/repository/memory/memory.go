@@ -16,6 +16,8 @@ type Memory struct {
 	source      *sourceRepository
 	knowledge   *knowledgeRepository
 	caseMessage *caseMessageRepository
+	memoryStore *memoryRepository
+	assistLog   *assistLogRepository
 }
 
 var _ interfaces.Repository = &Memory{}
@@ -30,6 +32,8 @@ func New() *Memory {
 		source:      newSourceRepository(),
 		knowledge:   newKnowledgeRepository(),
 		caseMessage: newCaseMessageRepository(),
+		memoryStore: newMemoryRepository(),
+		assistLog:   newAssistLogRepository(),
 	}
 }
 
@@ -59,6 +63,14 @@ func (m *Memory) Knowledge() interfaces.KnowledgeRepository {
 
 func (m *Memory) CaseMessage() interfaces.CaseMessageRepository {
 	return m.caseMessage
+}
+
+func (m *Memory) Memory() interfaces.MemoryRepository {
+	return m.memoryStore
+}
+
+func (m *Memory) AssistLog() interfaces.AssistLogRepository {
+	return m.assistLog
 }
 
 func (m *Memory) Close() error {

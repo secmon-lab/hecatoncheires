@@ -207,7 +207,7 @@ func TestCaseUseCase_DeleteCase(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		// Create action for the case
-		_, err = actionUC.CreateAction(ctx, testWorkspaceID, created.ID, "Test Action", "Action Description", []string{}, "", types.ActionStatusTodo)
+		_, err = actionUC.CreateAction(ctx, testWorkspaceID, created.ID, "Test Action", "Action Description", []string{}, "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
 		// Delete case
