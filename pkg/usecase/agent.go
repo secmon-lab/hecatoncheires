@@ -13,6 +13,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	slackmodel "github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
@@ -81,6 +83,18 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 		logger.Error("failed to post session start", "error", err.Error())
 	}
 
+	// Fetch actions associated with this case
+	actions, err := uc.repo.Action().GetByCase(ctx, entry.Workspace.ID, foundCase.ID)
+	if err != nil {
+		return goerr.Wrap(err, "failed to get actions for case")
+	}
+
+	// Fetch knowledge associated with this case
+	knowledges, err := uc.repo.Knowledge().ListByCaseID(ctx, entry.Workspace.ID, foundCase.ID)
+	if err != nil {
+		return goerr.Wrap(err, "failed to get knowledge for case")
+	}
+
 	// Collect context messages
 	contextMessages, err := uc.collectContextMessages(ctx, msg)
 	if err != nil {
@@ -88,14 +102,23 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 	}
 
 	// Build system prompt
-	systemPrompt := uc.buildSystemPrompt(foundCase, entry, contextMessages)
+	systemPrompt := uc.buildSystemPrompt(foundCase, entry, actions, knowledges, contextMessages)
 
 	// Create trace message for intermediate updates (tool executions only)
 	traceMsg := uc.newTraceMessage(msg.ChannelID(), threadTS)
 
+	// Inject update function so tools can report progress via context
+	ctx = tool.WithUpdate(ctx, func(innerCtx context.Context, message string) {
+		traceMsg.update(innerCtx, message)
+	})
+
+	// Build core tools for this case
+	coreTools := core.New(uc.repo, entry.Workspace.ID, foundCase.ID, uc.llmClient)
+
 	// Create and execute the gollem Agent
 	agent := gollem.New(uc.llmClient,
 		gollem.WithSystemPrompt(systemPrompt),
+		gollem.WithTools(coreTools...),
 		gollem.WithToolMiddleware(
 			func(next gollem.ToolHandler) gollem.ToolHandler {
 				return func(ctx context.Context, req *gollem.ToolExecRequest) (*gollem.ToolExecResponse, error) {
@@ -259,14 +282,31 @@ type promptMessage struct {
 	Text        string
 }
 
-// agentPromptData holds all data for the agent system prompt template
-type agentPromptData struct {
-	Case     *model.Case
-	Fields   []promptField
-	Messages []promptMessage
+// promptAction represents an action for template rendering
+type promptAction struct {
+	ID          int64
+	Title       string
+	Status      string
+	StatusEmoji string
+	Assignees   string
 }
 
-func (uc *AgentUseCase) buildSystemPrompt(c *model.Case, entry *model.WorkspaceEntry, messages []slack.ConversationMessage) string {
+// promptKnowledge represents a knowledge entry for template rendering
+type promptKnowledge struct {
+	ID    string
+	Title string
+}
+
+// agentPromptData holds all data for the agent system prompt template
+type agentPromptData struct {
+	Case       *model.Case
+	Fields     []promptField
+	Actions    []promptAction
+	Knowledges []promptKnowledge
+	Messages   []promptMessage
+}
+
+func (uc *AgentUseCase) buildSystemPrompt(c *model.Case, entry *model.WorkspaceEntry, actions []*model.Action, knowledges []*model.Knowledge, messages []slack.ConversationMessage) string {
 	data := agentPromptData{
 		Case: c,
 	}
@@ -285,6 +325,25 @@ func (uc *AgentUseCase) buildSystemPrompt(c *model.Case, entry *model.WorkspaceE
 			}
 			data.Fields = append(data.Fields, promptField{Name: name, Value: fv.Value})
 		}
+	}
+
+	// Build action list
+	for _, a := range actions {
+		data.Actions = append(data.Actions, promptAction{
+			ID:          a.ID,
+			Title:       a.Title,
+			Status:      a.Status.String(),
+			StatusEmoji: a.Status.Emoji(),
+			Assignees:   strings.Join(a.AssigneeIDs, ", "),
+		})
+	}
+
+	// Build knowledge list
+	for _, k := range knowledges {
+		data.Knowledges = append(data.Knowledges, promptKnowledge{
+			ID:    string(k.ID),
+			Title: k.Title,
+		})
 	}
 
 	// Build conversation messages
@@ -362,21 +421,9 @@ func (tm *traceMessage) update(ctx context.Context, line string) {
 	}
 }
 
-// finalize replaces the trace message content with the final response,
-// or posts a new message if no trace was ever posted
+// finalize posts the final response as a new thread reply,
+// leaving the trace context block intact in Slack
 func (tm *traceMessage) finalize(ctx context.Context, text string) error {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
-
-	if tm.messageTS != "" {
-		// Update existing trace message with final response (plain text, not context block)
-		if err := tm.slackService.UpdateMessage(ctx, tm.channelID, tm.messageTS, nil, text); err != nil {
-			return goerr.Wrap(err, "failed to update trace message with final response")
-		}
-		return nil
-	}
-
-	// No trace message was posted, post new message
 	if _, err := tm.slackService.PostThreadReply(ctx, tm.channelID, tm.threadTS, text); err != nil {
 		return goerr.Wrap(err, "failed to post final response")
 	}

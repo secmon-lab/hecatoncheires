@@ -9,6 +9,14 @@ You are responding in a Slack channel dedicated to the following case.
 
 ## Case Fields
 {{range .Fields}}- {{.Name}}: {{.Value}}
+{{end}}{{end}}{{if .Actions}}
+
+## Actions
+{{range .Actions}}- ID:{{.ID}} | {{.StatusEmoji}} {{.Status}} | {{.Title}} | Assignees: {{.Assignees}}
+{{end}}{{end}}{{if .Knowledges}}
+
+## Knowledge
+{{range .Knowledges}}- ID:{{.ID}} | {{.Title}}
 {{end}}{{end}}{{if .Messages}}
 
 ## Conversation Context
