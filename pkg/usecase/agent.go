@@ -77,8 +77,7 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 
 	// Generate session ID and post session start message
 	sessionID := uuid.Must(uuid.NewV7()).String()
-	sessionMsgTS, err := uc.postSessionStart(ctx, msg.ChannelID(), threadTS, sessionID)
-	if err != nil {
+	if err := uc.postSessionStart(ctx, msg.ChannelID(), threadTS, sessionID); err != nil {
 		logger.Error("failed to post session start", "error", err.Error())
 	}
 
@@ -91,8 +90,8 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 	// Build system prompt
 	systemPrompt := uc.buildSystemPrompt(foundCase, entry, contextMessages)
 
-	// Create trace message reusing the session start message for updates
-	traceMsg := uc.newTraceMessage(msg.ChannelID(), threadTS, sessionMsgTS)
+	// Create trace message for intermediate updates (tool executions only)
+	traceMsg := uc.newTraceMessage(msg.ChannelID(), threadTS)
 
 	// Create and execute the gollem Agent
 	agent := gollem.New(uc.llmClient,
@@ -161,9 +160,8 @@ func ParseAgentActionValue(value string) (action string, data string, err error)
 	return value[:idx], value[idx+1:], nil
 }
 
-// postSessionStart posts a section block message with an overflow menu for agent session actions.
-// Returns the message timestamp so it can be reused by traceMessage for updates.
-func (uc *AgentUseCase) postSessionStart(ctx context.Context, channelID, threadTS, sessionID string) (string, error) {
+// postSessionStart posts a section block message with an overflow menu for agent session actions
+func (uc *AgentUseCase) postSessionStart(ctx context.Context, channelID, threadTS, sessionID string) error {
 	//nolint:gosec // not for security use
 	label := sessionStartMessages[time.Now().UnixNano()%int64(len(sessionStartMessages))]
 
@@ -184,11 +182,11 @@ func (uc *AgentUseCase) postSessionStart(ctx context.Context, channelID, threadT
 			goslack.NewAccessory(overflow),
 		),
 	}
-	ts, err := uc.slackService.PostThreadMessage(ctx, channelID, threadTS, blocks, label)
+	_, err := uc.slackService.PostThreadMessage(ctx, channelID, threadTS, blocks, label)
 	if err != nil {
-		return "", goerr.Wrap(err, "failed to post session start message")
+		return goerr.Wrap(err, "failed to post session start message")
 	}
-	return ts, nil
+	return nil
 }
 
 // HandleSessionInfoRequest opens a modal displaying the session ID
@@ -321,14 +319,12 @@ type traceMessage struct {
 	mu           sync.Mutex
 }
 
-// newTraceMessage creates a new traceMessage for posting agent progress updates.
-// If messageTS is non-empty, updates to that existing message instead of posting new ones.
-func (uc *AgentUseCase) newTraceMessage(channelID, threadTS, messageTS string) *traceMessage {
+// newTraceMessage creates a new traceMessage for posting agent progress updates
+func (uc *AgentUseCase) newTraceMessage(channelID, threadTS string) *traceMessage {
 	return &traceMessage{
 		slackService: uc.slackService,
 		channelID:    channelID,
 		threadTS:     threadTS,
-		messageTS:    messageTS,
 	}
 }
 
