@@ -34,10 +34,11 @@ func (g *Gemini) Flags() []cli.Flag {
 	}
 }
 
-// Configure creates a new Gemini LLM client from the configured flags
+// Configure creates a new Gemini LLM client from the configured flags.
+// Returns nil if projectID is not configured (AI agent features will be disabled).
 func (g *Gemini) Configure(ctx context.Context) (gollem.LLMClient, error) {
 	if g.projectID == "" {
-		return nil, goerr.New("gemini-project-id is required")
+		return nil, nil
 	}
 
 	client, err := gemini.New(ctx, g.projectID, g.location)
