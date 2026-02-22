@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
+	pb "cloud.google.com/go/firestore/apiv1/firestorepb"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"google.golang.org/api/iterator"
@@ -78,12 +79,21 @@ func (r *firestoreAssistLogRepository) Create(ctx context.Context, workspaceID s
 }
 
 func (r *firestoreAssistLogRepository) List(ctx context.Context, workspaceID string, caseID int64, limit, offset int) ([]*model.AssistLog, int, error) {
-	// Get total count first
-	allDocs, err := r.assistsCollection(workspaceID, caseID).Documents(ctx).GetAll()
+	// Get total count using aggregation query for efficiency
+	countResult, err := r.assistsCollection(workspaceID, caseID).NewAggregationQuery().WithCount("count").Get(ctx)
 	if err != nil {
 		return nil, 0, goerr.Wrap(err, "failed to count assist logs")
 	}
-	totalCount := len(allDocs)
+	countVal, ok := countResult["count"]
+	if !ok {
+		return nil, 0, goerr.New("missing count in aggregation result")
+	}
+	countPB, ok := countVal.(*pb.Value)
+	if !ok {
+		return nil, 0, goerr.New("unexpected count type in aggregation result",
+			goerr.V("type", fmt.Sprintf("%T", countVal)))
+	}
+	totalCount := int(countPB.GetIntegerValue())
 
 	// Get paginated results ordered by CreatedAt descending
 	query := r.assistsCollection(workspaceID, caseID).
