@@ -84,6 +84,7 @@ func (r *actionRepository) Create(ctx context.Context, workspaceID string, actio
 		AssigneeIDs:    action.AssigneeIDs,
 		SlackMessageTS: action.SlackMessageTS,
 		Status:         action.Status,
+		DueDate:        action.DueDate,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
@@ -163,6 +164,7 @@ func (r *actionRepository) Update(ctx context.Context, workspaceID string, actio
 		AssigneeIDs:    action.AssigneeIDs,
 		SlackMessageTS: action.SlackMessageTS,
 		Status:         action.Status,
+		DueDate:        action.DueDate,
 		CreatedAt:      action.CreatedAt,
 		UpdatedAt:      time.Now().UTC(),
 	}

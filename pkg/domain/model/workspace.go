@@ -20,6 +20,8 @@ type WorkspaceEntry struct {
 	FieldSchema        *config.FieldSchema
 	SlackChannelPrefix string
 	CompilePrompt      string
+	AssistPrompt       string
+	AssistLanguage     string
 }
 
 // WorkspaceRegistry holds workspace configurations.

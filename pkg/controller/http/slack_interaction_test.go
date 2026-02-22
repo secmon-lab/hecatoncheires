@@ -28,7 +28,7 @@ func TestSlackInteractionHandler(t *testing.T) {
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Desc", []string{}, nil)
 		gt.NoError(t, err).Required()
 
-		action, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Desc", []string{"U001"}, "", types.ActionStatusTodo)
+		action, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Desc", []string{"U001"}, "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
 		handler := httpctrl.NewSlackInteractionHandler(actionUC, nil)

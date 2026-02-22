@@ -18,6 +18,7 @@ interface Action {
   assignees: Array<{ id: string; name: string; realName: string; imageUrl?: string }>
   slackMessageTS: string
   status: string
+  dueDate?: string
 }
 
 interface ActionFormProps {
@@ -40,6 +41,7 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
   const [assigneeIDs, setAssigneeIDs] = useState<string[]>([])
   const [selectedAssignees, setSelectedAssignees] = useState<Array<{ value: string; label: string; image?: string }>>([])
   const [status, setStatus] = useState('BACKLOG')
+  const [dueDate, setDueDate] = useState('')
   const [errors, setErrors] = useState<FormErrors>({})
 
   const { data: casesData } = useQuery(GET_CASES, {
@@ -87,6 +89,7 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
         }))
       )
       setStatus(action.status || 'BACKLOG')
+      setDueDate(action.dueDate ? action.dueDate.split('T')[0] : '')
     } else if (initialCaseID) {
       setCaseID(initialCaseID)
       resetForm(false)
@@ -104,6 +107,7 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
     setAssigneeIDs([])
     setSelectedAssignees([])
     setStatus('BACKLOG')
+    setDueDate('')
     setErrors({})
   }
 
@@ -140,6 +144,8 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
             description: description.trim(),
             assigneeIDs,
             status,
+            dueDate: dueDate ? new Date(dueDate).toISOString() : undefined,
+            clearDueDate: !dueDate && !!action.dueDate,
           },
         },
       })
@@ -153,6 +159,7 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
             description: description.trim(),
             assigneeIDs,
             status,
+            dueDate: dueDate ? new Date(dueDate).toISOString() : undefined,
           },
         },
       })
@@ -298,6 +305,20 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
             onChange={(selected) => setStatus(selected?.value || 'BACKLOG')}
             options={statusOptions}
             isDisabled={loading}
+          />
+        </div>
+
+        <div className={styles.field}>
+          <label htmlFor="dueDate" className={styles.label}>
+            Due Date
+          </label>
+          <input
+            id="dueDate"
+            type="date"
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+            className={styles.input}
+            disabled={loading}
           />
         </div>
 

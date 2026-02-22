@@ -15,6 +15,16 @@ var BuildSlackSourceURLs = buildSlackSourceURLs
 // BuildAgentSystemPrompt is exported for testing
 var BuildAgentSystemPrompt = (*AgentUseCase).buildSystemPrompt
 
+// BuildAssistSystemPrompt is exported for testing
+var BuildAssistSystemPrompt = (*AssistUseCase).buildAssistSystemPrompt
+
+// AssistPromptData is exported for testing template rendering
+type AssistPromptData = assistPromptData
+type AssistPromptAction = assistPromptAction
+type AssistPromptMessage = assistPromptMessage
+type AssistPromptAssistLog = assistPromptAssistLog
+type AssistPromptMemory = assistPromptMemory
+
 // Type aliases for testing
 type SlackMessage = slackmodel.Message
 type SlackChannel = model.SlackChannel

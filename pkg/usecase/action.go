@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
@@ -36,7 +37,7 @@ func NewActionUseCase(repo interfaces.Repository, slackService slack.Service, ba
 	}
 }
 
-func (uc *ActionUseCase) CreateAction(ctx context.Context, workspaceID string, caseID int64, title, description string, assigneeIDs []string, slackMessageTS string, status types.ActionStatus) (*model.Action, error) {
+func (uc *ActionUseCase) CreateAction(ctx context.Context, workspaceID string, caseID int64, title, description string, assigneeIDs []string, slackMessageTS string, status types.ActionStatus, dueDate *time.Time) (*model.Action, error) {
 	if title == "" {
 		return nil, goerr.New("action title is required")
 	}
@@ -69,6 +70,7 @@ func (uc *ActionUseCase) CreateAction(ctx context.Context, workspaceID string, c
 		AssigneeIDs:    assigneeIDs,
 		SlackMessageTS: slackMessageTS,
 		Status:         status,
+		DueDate:        dueDate,
 	}
 
 	created, err := uc.repo.Action().Create(ctx, workspaceID, action)
@@ -104,7 +106,7 @@ func (uc *ActionUseCase) CreateAction(ctx context.Context, workspaceID string, c
 	return created, nil
 }
 
-func (uc *ActionUseCase) UpdateAction(ctx context.Context, workspaceID string, id int64, caseID *int64, title, description *string, assigneeIDs []string, slackMessageTS *string, status *types.ActionStatus) (*model.Action, error) {
+func (uc *ActionUseCase) UpdateAction(ctx context.Context, workspaceID string, id int64, caseID *int64, title, description *string, assigneeIDs []string, slackMessageTS *string, status *types.ActionStatus, dueDate *time.Time, clearDueDate bool) (*model.Action, error) {
 	// Get existing action
 	existing, err := uc.repo.Action().Get(ctx, workspaceID, id)
 	if err != nil {
@@ -129,6 +131,7 @@ func (uc *ActionUseCase) UpdateAction(ctx context.Context, workspaceID string, i
 		AssigneeIDs:    existing.AssigneeIDs,
 		SlackMessageTS: existing.SlackMessageTS,
 		Status:         existing.Status,
+		DueDate:        existing.DueDate,
 		CreatedAt:      existing.CreatedAt,
 	}
 
@@ -163,6 +166,12 @@ func (uc *ActionUseCase) UpdateAction(ctx context.Context, workspaceID string, i
 				goerr.V(ActionIDKey, id))
 		}
 		action.Status = *status
+	}
+
+	if clearDueDate {
+		action.DueDate = nil
+	} else if dueDate != nil {
+		action.DueDate = dueDate
 	}
 
 	updated, err := uc.repo.Action().Update(ctx, workspaceID, action)

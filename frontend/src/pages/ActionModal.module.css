@@ -288,6 +288,21 @@
   gap: var(--spacing-xs);
 }
 
+.dueDateInput {
+  width: 100%;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border: 1px solid var(--border-default);
+  border-radius: 0.25rem;
+  font-size: 0.8125rem;
+  color: var(--text-body);
+  background: var(--bg-paper);
+}
+
+.dueDateInput:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
 .hiddenSelect {
   opacity: 0;
   position: absolute;

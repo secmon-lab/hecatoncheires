@@ -59,6 +59,7 @@ export const GET_CASE = gql`
           realName
           imageUrl
         }
+        dueDate
         createdAt
       }
       knowledges {

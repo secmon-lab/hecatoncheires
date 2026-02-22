@@ -6,6 +6,7 @@ import CaseDetail from './pages/CaseDetail'
 import ActionList from './pages/ActionList'
 import KnowledgeList from './pages/KnowledgeList'
 import KnowledgeDetail from './pages/KnowledgeDetail'
+import AssistLogList from './pages/AssistLogList'
 import SourceList from './pages/SourceList'
 import SourceDetail from './pages/SourceDetail'
 import WorkspaceSelector from './pages/WorkspaceSelector'
@@ -22,6 +23,7 @@ function App() {
           <Route path="cases" element={<CaseList />} />
           <Route path="cases/:id" element={<CaseDetail />} />
           <Route path="cases/:id/actions/:actionId" element={<CaseDetail />} />
+          <Route path="cases/:id/assists" element={<AssistLogList />} />
           <Route path="actions" element={<ActionList />} />
           <Route path="actions/:actionId" element={<ActionList />} />
           <Route path="knowledges" element={<KnowledgeList />} />

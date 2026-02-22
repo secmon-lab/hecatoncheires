@@ -130,6 +130,7 @@ type Action {
   assignees: [SlackUser!]!
   slackMessageTS: String
   status: ActionStatus!
+  dueDate: Time
   createdAt: Time!
   updatedAt: Time!
 }
@@ -157,6 +158,7 @@ input CreateActionInput {
   assigneeIDs: [String!]
   slackMessageTS: String
   status: ActionStatus
+  dueDate: Time
 }
 
 input UpdateActionInput {
@@ -167,6 +169,8 @@ input UpdateActionInput {
   assigneeIDs: [String!]
   slackMessageTS: String
   status: ActionStatus
+  dueDate: Time
+  clearDueDate: Boolean
 }
 
 # Slack User
@@ -297,6 +301,23 @@ type SlackChannelInfo {
   name: String!
 }
 
+# Assist Logs
+type AssistLog {
+  id: ID!
+  caseId: Int!
+  summary: String!
+  actions: String!
+  reasoning: String!
+  nextSteps: String!
+  createdAt: Time!
+}
+
+type AssistLogConnection {
+  items: [AssistLog!]!
+  totalCount: Int!
+  hasMore: Boolean!
+}
+
 type Query {
   health: String!
 
@@ -328,6 +349,9 @@ type Query {
   # Knowledge
   knowledge(workspaceId: String!, id: String!): Knowledge
   knowledges(workspaceId: String!, limit: Int, offset: Int): KnowledgeConnection!
+
+  # Assist Logs
+  assistLogs(workspaceId: String!, caseId: Int!, limit: Int, offset: Int): AssistLogConnection!
 }
 
 type Mutation {

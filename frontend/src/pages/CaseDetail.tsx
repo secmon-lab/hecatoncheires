@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation } from '@apollo/client'
-import { ArrowLeft, Edit, MoreVertical, Trash2, Plus, ExternalLink, BookOpen, ChevronLeft, ChevronRight, XCircle, RotateCcw, ClipboardList } from 'lucide-react'
+import { ArrowLeft, Edit, MoreVertical, Trash2, Plus, ExternalLink, BookOpen, Bot, ChevronLeft, ChevronRight, XCircle, RotateCcw, ClipboardList } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import Markdown from 'react-markdown'
 import Button from '../components/Button'
@@ -11,6 +11,7 @@ import CaseDeleteDialog from './CaseDeleteDialog'
 import ActionForm from './ActionForm'
 import ActionModal from './ActionModal'
 import { GET_CASE, GET_CASES, CLOSE_CASE, REOPEN_CASE } from '../graphql/case'
+import { GET_ASSIST_LOGS } from '../graphql/assistLog'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { useWorkspace } from '../contexts/workspace-context'
 import styles from './CaseDetail.module.css'
@@ -44,6 +45,7 @@ interface Case {
     status: string
     assigneeIDs: string[]
     assignees: Array<{ id: string; name: string; realName: string; imageUrl?: string }>
+    dueDate?: string
     createdAt: string
   }>
   knowledges?: Knowledge[]
@@ -98,12 +100,24 @@ export default function CaseDetail() {
     skip: !currentWorkspace,
   })
 
+  const caseId = id ? parseInt(id, 10) : 0
+  const { data: assistLogData } = useQuery(GET_ASSIST_LOGS, {
+    variables: {
+      workspaceId: currentWorkspace!.id,
+      caseId,
+      limit: 3,
+      offset: 0,
+    },
+    skip: !currentWorkspace || !caseId,
+  })
+
   const [closeCase] = useMutation(CLOSE_CASE)
   const [reopenCase] = useMutation(REOPEN_CASE)
 
   const caseItem: Case | undefined = caseData?.case
   const fieldDefs = configData?.fieldConfiguration?.fields || []
   const caseLabel = configData?.fieldConfiguration?.labels?.case || 'Case'
+  const assistLogTotalCount = assistLogData?.assistLogs?.totalCount || 0
 
   const handleBack = () => {
     navigate(`/ws/${currentWorkspace!.id}/cases`)
@@ -353,12 +367,21 @@ export default function CaseDetail() {
               <Markdown>{caseItem.description}</Markdown>
             </div>
           )}
-          <div className={styles.timestamps}>
-            <span className={styles.timestampLabel}>Created</span>
-            <span className={styles.timestampValue} data-testid="created-timestamp-value">{new Date(caseItem.createdAt).toLocaleString()}</span>
-            <span className={styles.timestampDivider} />
-            <span className={styles.timestampLabel}>Updated</span>
-            <span className={styles.timestampValue} data-testid="updated-timestamp-value">{new Date(caseItem.updatedAt).toLocaleString()}</span>
+          <div className={styles.metaRow}>
+            <div className={styles.timestamps}>
+              <span className={styles.timestampLabel}>Created</span>
+              <span className={styles.timestampValue} data-testid="created-timestamp-value">{new Date(caseItem.createdAt).toLocaleString()}</span>
+              <span className={styles.timestampDivider} />
+              <span className={styles.timestampLabel}>Updated</span>
+              <span className={styles.timestampValue} data-testid="updated-timestamp-value">{new Date(caseItem.updatedAt).toLocaleString()}</span>
+            </div>
+            <button
+              className={styles.assistLogLink}
+              onClick={() => navigate(`/ws/${currentWorkspace!.id}/cases/${caseItem.id}/assists`)}
+            >
+              <Bot size={14} />
+              Assist Logs{assistLogTotalCount > 0 && ` (${assistLogTotalCount})`}
+            </button>
           </div>
         </div>
 
@@ -420,6 +443,7 @@ export default function CaseDetail() {
                     <th>Title</th>
                     <th>Assignees</th>
                     <th>Status</th>
+                    <th>Due Date</th>
                     <th>Created</th>
                   </tr>
                 </thead>
@@ -451,6 +475,9 @@ export default function CaseDetail() {
                         <Chip variant="status" colorIndex={STATUS_COLORS[action.status] || 0}>
                           {STATUS_LABELS[action.status] || action.status}
                         </Chip>
+                      </td>
+                      <td className={styles.dateCell}>
+                        {action.dueDate ? new Date(action.dueDate).toLocaleDateString() : '-'}
                       </td>
                       <td className={styles.dateCell}>
                         {new Date(action.createdAt).toLocaleDateString()}
@@ -554,6 +581,7 @@ export default function CaseDetail() {
               )}
             </div>
           )}
+
 
         </div>
       </div>

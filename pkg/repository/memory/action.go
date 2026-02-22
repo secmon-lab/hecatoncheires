@@ -36,7 +36,7 @@ func copyAction(a *model.Action) *model.Action {
 	assigneeIDs := make([]string, len(a.AssigneeIDs))
 	copy(assigneeIDs, a.AssigneeIDs)
 
-	return &model.Action{
+	copied := &model.Action{
 		ID:             a.ID,
 		CaseID:         a.CaseID,
 		Title:          a.Title,
@@ -47,6 +47,11 @@ func copyAction(a *model.Action) *model.Action {
 		CreatedAt:      a.CreatedAt,
 		UpdatedAt:      a.UpdatedAt,
 	}
+	if a.DueDate != nil {
+		d := *a.DueDate
+		copied.DueDate = &d
+	}
+	return copied
 }
 
 func (r *actionRepository) Create(ctx context.Context, workspaceID string, action *model.Action) (*model.Action, error) {

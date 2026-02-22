@@ -510,6 +510,28 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
               )}
             </div>
 
+            {/* Due Date */}
+            <div className={styles.sidebarSection}>
+              <label className={styles.fieldLabel}>Due Date</label>
+              <input
+                type="date"
+                value={action.dueDate ? new Date(action.dueDate).toISOString().split('T')[0] : ''}
+                onChange={async (e) => {
+                  const val = e.target.value
+                  await updateAction({
+                    variables: {
+                      workspaceId: currentWorkspace!.id,
+                      input: {
+                        id: action.id,
+                        ...(val ? { dueDate: new Date(val).toISOString() } : { clearDueDate: true }),
+                      },
+                    },
+                  })
+                }}
+                className={styles.dueDateInput}
+              />
+            </div>
+
             {/* Metadata */}
             <div className={styles.sidebarMeta}>
               <div className={styles.metaItem}>

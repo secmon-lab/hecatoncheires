@@ -15,6 +15,7 @@ type Action struct {
 	AssigneeIDs    []string // Slack User IDs
 	SlackMessageTS string   // Optional: Slack message ID (timestamp)
 	Status         types.ActionStatus
+	DueDate        *time.Time // Optional: deadline for the action
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }

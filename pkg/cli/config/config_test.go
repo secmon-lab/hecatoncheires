@@ -647,6 +647,108 @@ type = "text"
 	})
 }
 
+func TestLoadWorkspaceConfigs_AssistPrompt(t *testing.T) {
+	t.Run("parses assist prompt from config", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		content := `
+[workspace]
+id = "security"
+name = "Security"
+
+[assist]
+prompt = "Check action deadlines and follow up on pending items."
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`
+		err := os.WriteFile(configPath, []byte(content), 0644)
+		gt.NoError(t, err).Required()
+
+		configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1)
+		gt.Value(t, configs[0].AssistPrompt).Equal("Check action deadlines and follow up on pending items.")
+	})
+
+	t.Run("empty assist prompt when section omitted", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		content := `
+[workspace]
+id = "risk"
+name = "Risk Management"
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`
+		err := os.WriteFile(configPath, []byte(content), 0644)
+		gt.NoError(t, err).Required()
+
+		configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1)
+		gt.Value(t, configs[0].AssistPrompt).Equal("")
+	})
+}
+
+func TestLoadWorkspaceConfigs_AssistLanguage(t *testing.T) {
+	t.Run("parses assist language from config", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		content := `
+[workspace]
+id = "security"
+name = "Security"
+
+[assist]
+prompt = "Check deadlines."
+language = "Japanese"
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`
+		err := os.WriteFile(configPath, []byte(content), 0644)
+		gt.NoError(t, err).Required()
+
+		configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1)
+		gt.Value(t, configs[0].AssistLanguage).Equal("Japanese")
+	})
+
+	t.Run("empty assist language when not specified", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		content := `
+[workspace]
+id = "risk"
+name = "Risk"
+
+[assist]
+prompt = "Check deadlines."
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`
+		err := os.WriteFile(configPath, []byte(content), 0644)
+		gt.NoError(t, err).Required()
+
+		configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1)
+		gt.Value(t, configs[0].AssistLanguage).Equal("")
+	})
+}
+
 func TestLoadFieldSchema_DefaultLabels(t *testing.T) {
 	content := `
 [[fields]]
