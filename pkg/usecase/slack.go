@@ -16,13 +16,15 @@ import (
 type SlackUseCases struct {
 	repo     interfaces.Repository
 	registry *model.WorkspaceRegistry
+	agent    *AgentUseCase
 }
 
 // NewSlackUseCases creates a new SlackUseCases instance
-func NewSlackUseCases(repo interfaces.Repository, registry *model.WorkspaceRegistry) *SlackUseCases {
+func NewSlackUseCases(repo interfaces.Repository, registry *model.WorkspaceRegistry, agent *AgentUseCase) *SlackUseCases {
 	return &SlackUseCases{
 		repo:     repo,
 		registry: registry,
+		agent:    agent,
 	}
 }
 
@@ -41,6 +43,14 @@ func (uc *SlackUseCases) HandleSlackEvent(ctx context.Context, event *slackevent
 	// Save the message
 	if err := uc.HandleSlackMessage(ctx, msg); err != nil {
 		return goerr.Wrap(err, "failed to handle slack message")
+	}
+
+	// Delegate app_mention events to AI agent
+	if _, ok := event.InnerEvent.Data.(*slackevents.AppMentionEvent); ok && uc.agent != nil {
+		if err := uc.agent.HandleAgentMention(ctx, msg); err != nil {
+			logger.Error("failed to handle agent mention", "error", err.Error())
+			// Don't return error; the message was saved successfully
+		}
 	}
 
 	return nil

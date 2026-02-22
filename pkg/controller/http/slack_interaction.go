@@ -14,12 +14,14 @@ import (
 // SlackInteractionHandler handles Slack interactive component payloads (button clicks, etc.)
 type SlackInteractionHandler struct {
 	actionUC *usecase.ActionUseCase
+	agentUC  *usecase.AgentUseCase
 }
 
 // NewSlackInteractionHandler creates a new Slack interaction handler
-func NewSlackInteractionHandler(actionUC *usecase.ActionUseCase) *SlackInteractionHandler {
+func NewSlackInteractionHandler(actionUC *usecase.ActionUseCase, agentUC *usecase.AgentUseCase) *SlackInteractionHandler {
 	return &SlackInteractionHandler{
 		actionUC: actionUC,
+		agentUC:  agentUC,
 	}
 }
 
@@ -73,6 +75,30 @@ func (h *SlackInteractionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 					"action_id_num", actionID,
 					"user_id", userID,
 				)
+			}
+
+		case usecase.SlackAgentSessionActionsID:
+			if h.agentUC == nil || action.SelectedOption.Value == "" {
+				continue
+			}
+			actionType, data, err := usecase.ParseAgentActionValue(action.SelectedOption.Value)
+			if err != nil {
+				logger := logging.From(ctx)
+				logger.Warn("failed to parse agent action value",
+					"error", err,
+					"value", action.SelectedOption.Value,
+				)
+				continue
+			}
+			switch actionType {
+			case usecase.SlackAgentActionShowSessionInfo:
+				if err := h.agentUC.HandleSessionInfoRequest(ctx, callback.TriggerID, data); err != nil {
+					logger := logging.From(ctx)
+					logger.Error("failed to handle session info request",
+						"error", err,
+						"session_id", data,
+					)
+				}
 			}
 
 		default:

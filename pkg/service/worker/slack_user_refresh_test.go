@@ -99,6 +99,30 @@ func (m *mockSlackService) UpdateMessage(ctx context.Context, channelID string, 
 	return nil
 }
 
+func (m *mockSlackService) GetConversationReplies(ctx context.Context, channelID string, threadTS string, limit int) ([]slack.ConversationMessage, error) {
+	return nil, nil
+}
+
+func (m *mockSlackService) GetConversationHistory(ctx context.Context, channelID string, oldest time.Time, limit int) ([]slack.ConversationMessage, error) {
+	return nil, nil
+}
+
+func (m *mockSlackService) PostThreadReply(ctx context.Context, channelID string, threadTS string, text string) (string, error) {
+	return "", nil
+}
+
+func (m *mockSlackService) PostThreadMessage(ctx context.Context, channelID string, threadTS string, blocks []goslack.Block, text string) (string, error) {
+	return "", nil
+}
+
+func (m *mockSlackService) GetBotUserID(ctx context.Context) (string, error) {
+	return "", nil
+}
+
+func (m *mockSlackService) OpenView(ctx context.Context, triggerID string, view goslack.ModalViewRequest) error {
+	return nil
+}
+
 func TestSlackUserRefreshWorker_ImmediateInitialSync(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.New()

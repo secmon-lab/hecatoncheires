@@ -31,7 +31,7 @@ func TestSlackInteractionHandler(t *testing.T) {
 		action, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Desc", []string{"U001"}, "", types.ActionStatusTodo)
 		gt.NoError(t, err).Required()
 
-		handler := httpctrl.NewSlackInteractionHandler(actionUC)
+		handler := httpctrl.NewSlackInteractionHandler(actionUC, nil)
 		return actionUC, handler, action.ID
 	}
 
@@ -201,6 +201,42 @@ func TestSlackInteractionHandler(t *testing.T) {
 		action, err := actionUC.GetAction(t.Context(), testWorkspaceID, actionID)
 		gt.NoError(t, err).Required()
 		gt.Value(t, action.Status).Equal(types.ActionStatusTodo)
+	})
+}
+
+func TestSlackInteractionHandler_AgentSessionActions(t *testing.T) {
+	t.Run("handles show_session_info overflow option", func(t *testing.T) {
+		repo := memory.New()
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
+		// agentUC is nil here; the handler should handle this gracefully
+		handler := httpctrl.NewSlackInteractionHandler(actionUC, nil)
+
+		callback := goslack.InteractionCallback{
+			Type: goslack.InteractionTypeBlockActions,
+			User: goslack.User{ID: "U001"},
+			ActionCallback: goslack.ActionCallbacks{
+				BlockActions: []*goslack.BlockAction{
+					{
+						ActionID: usecase.SlackAgentSessionActionsID,
+						SelectedOption: goslack.OptionBlockObject{
+							Value: usecase.SlackAgentActionShowSessionInfo + ":test-session-uuid",
+						},
+					},
+				},
+			},
+			TriggerID: "trigger-abc",
+		}
+		payloadJSON, err := json.Marshal(callback)
+		gt.NoError(t, err).Required()
+
+		form := url.Values{"payload": {string(payloadJSON)}}
+		req := httptest.NewRequest(http.MethodPost, "/hooks/slack/interaction", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+		// Should return 200 even though agentUC is nil (logged error, not HTTP error)
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
 	})
 }
 

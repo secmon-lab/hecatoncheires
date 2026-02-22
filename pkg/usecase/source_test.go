@@ -162,6 +162,30 @@ func (m *mockSlackService) UpdateMessage(ctx context.Context, channelID string, 
 	return nil
 }
 
+func (m *mockSlackService) GetConversationReplies(ctx context.Context, channelID string, threadTS string, limit int) ([]slack.ConversationMessage, error) {
+	return nil, nil
+}
+
+func (m *mockSlackService) GetConversationHistory(ctx context.Context, channelID string, oldest time.Time, limit int) ([]slack.ConversationMessage, error) {
+	return nil, nil
+}
+
+func (m *mockSlackService) PostThreadReply(ctx context.Context, channelID string, threadTS string, text string) (string, error) {
+	return "1234567890.999999", nil
+}
+
+func (m *mockSlackService) PostThreadMessage(ctx context.Context, channelID string, threadTS string, blocks []goslack.Block, text string) (string, error) {
+	return "1234567890.999999", nil
+}
+
+func (m *mockSlackService) GetBotUserID(ctx context.Context) (string, error) {
+	return "UBOT001", nil
+}
+
+func (m *mockSlackService) OpenView(ctx context.Context, triggerID string, view goslack.ModalViewRequest) error {
+	return nil
+}
+
 func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 	t.Run("creates source with valid database ID", func(t *testing.T) {
 		repo := memory.New()

@@ -158,27 +158,29 @@ func (c *client) buildResponseSchema() *gollem.Parameter {
 			"related_cases": {
 				Type:        gollem.TypeArray,
 				Description: "List of cases that are related to the source content",
+				Required:    true,
 				Items: &gollem.Parameter{
 					Type: gollem.TypeObject,
 					Properties: map[string]*gollem.Parameter{
 						"case_id": {
 							Type:        gollem.TypeInteger,
 							Description: "The ID of the related case",
+							Required:    true,
 						},
 						"title": {
 							Type:        gollem.TypeString,
 							Description: "A concise title for the extracted knowledge",
+							Required:    true,
 						},
 						"summary": {
 							Type:        gollem.TypeString,
 							Description: "A brief summary of how the source content relates to the case",
+							Required:    true,
 						},
 					},
-					Required: []string{"case_id", "title", "summary"},
 				},
 			},
 		},
-		Required: []string{"related_cases"},
 	}
 }
 

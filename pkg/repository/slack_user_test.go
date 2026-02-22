@@ -21,6 +21,9 @@ func runSlackUserRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		repo := newRepo(t)
 		ctx := context.Background()
 
+		// Clean up any stale data from previous test runs
+		gt.NoError(t, repo.SlackUser().DeleteAll(ctx)).Required()
+
 		// Save empty list
 		gt.NoError(t, repo.SlackUser().SaveMany(ctx, []*model.SlackUser{})).Required()
 
@@ -35,6 +38,9 @@ func runSlackUserRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		repo := newRepo(t)
 		ctx := context.Background()
 		now := time.Now()
+
+		// Clean up any stale data from previous test runs
+		gt.NoError(t, repo.SlackUser().DeleteAll(ctx)).Required()
 
 		// Use random ID to avoid conflicts
 		userID := model.SlackUserID(fmt.Sprintf("U%d", now.UnixNano()))
@@ -71,6 +77,9 @@ func runSlackUserRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		repo := newRepo(t)
 		ctx := context.Background()
 		now := time.Now()
+
+		// Clean up any stale data from previous test runs
+		gt.NoError(t, repo.SlackUser().DeleteAll(ctx)).Required()
 
 		// Create multiple users with random IDs
 		users := []*model.SlackUser{
@@ -133,6 +142,9 @@ func runSlackUserRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		repo := newRepo(t)
 		ctx := context.Background()
 		now := time.Now()
+
+		// Clean up any stale data from previous test runs
+		gt.NoError(t, repo.SlackUser().DeleteAll(ctx)).Required()
 
 		// Create 600 users to test Firestore batch limit
 		users := make([]*model.SlackUser, 600)
@@ -356,6 +368,9 @@ func runSlackUserRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		ctx := context.Background()
 		now := time.Now()
 
+		// Clean up any stale data from previous test runs
+		gt.NoError(t, repo.SlackUser().DeleteAll(ctx)).Required()
+
 		// Create and save 3 users
 		users := make([]*model.SlackUser, 3)
 		for i := 0; i < 3; i++ {
@@ -389,6 +404,9 @@ func runSlackUserRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		repo := newRepo(t)
 		ctx := context.Background()
 		now := time.Now()
+
+		// Clean up any stale data from previous test runs
+		gt.NoError(t, repo.SlackUser().DeleteAll(ctx)).Required()
 
 		// Create 600 users to test Firestore batch delete limit
 		users := make([]*model.SlackUser, 600)
@@ -459,6 +477,9 @@ func runSlackUserRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		repo := newRepo(t)
 		ctx := context.Background()
 		now := time.Now()
+
+		// Reset metadata to zero state for a clean test
+		gt.NoError(t, repo.SlackUser().SaveMetadata(ctx, &model.SlackUserMetadata{})).Required()
 
 		// GetMetadata should return zero value when no metadata exists
 		metadata, err := repo.SlackUser().GetMetadata(ctx)
