@@ -50,8 +50,13 @@ func cmdMigrate() *cli.Command {
 			// Get index configuration
 			indexConfig := getIndexConfig()
 
-			// Create fireconf client
-			client, err := fireconf.NewClient(ctx, projectID, databaseID)
+			// Create fireconf client with configuration
+			opts := []fireconf.Option{
+				fireconf.WithLogger(logger),
+				fireconf.WithDryRun(dryRun),
+			}
+
+			client, err := fireconf.New(ctx, projectID, databaseID, indexConfig, opts...)
 			if err != nil {
 				return goerr.Wrap(err, "failed to create fireconf client")
 			}
@@ -63,26 +68,26 @@ func cmdMigrate() *cli.Command {
 
 			if dryRun {
 				logger.Info("Dry run mode - previewing changes")
-				plan, err := client.GetMigrationPlan(ctx, indexConfig)
+				diff, err := client.DiffConfigs(indexConfig)
 				if err != nil {
-					return goerr.Wrap(err, "failed to create migration plan")
+					return goerr.Wrap(err, "failed to calculate diff")
 				}
 
-				if len(plan.Steps) == 0 {
+				if len(diff.Collections) == 0 {
 					logger.Info("No changes required")
 					return nil
 				}
 
-				for _, step := range plan.Steps {
-					logger.Info("Migration step",
-						"collection", step.Collection,
-						"operation", step.Operation,
-						"description", step.Description,
-						"destructive", step.Destructive)
+				for _, col := range diff.Collections {
+					logger.Info("Collection diff",
+						"collection", col.Name,
+						"action", col.Action,
+						"indexes_to_add", len(col.IndexesToAdd),
+						"indexes_to_delete", len(col.IndexesToDelete))
 				}
 			} else {
 				logger.Info("Applying migrations")
-				if err := client.Migrate(ctx, indexConfig); err != nil {
+				if err := client.Migrate(ctx); err != nil {
 					return goerr.Wrap(err, "failed to apply migrations")
 				}
 				logger.Info("Migrations applied successfully")
@@ -94,8 +99,10 @@ func cmdMigrate() *cli.Command {
 }
 
 // getIndexConfig returns the Firestore index configuration.
-// Knowledges are stored in subcollections (workspaces/{workspaceID}/knowledges/),
-// so indexes use QueryScopeCollectionGroup to apply across all workspace subcollections.
+// Knowledges are stored in subcollections (workspaces/{workspaceID}/knowledges/).
+// Firestore vector indexes require COLLECTION scope for FindNearest queries
+// on specific subcollections. The collection-group name ensures the index
+// applies across all workspace subcollections.
 func getIndexConfig() *fireconf.Config {
 	return &fireconf.Config{
 		Collections: []fireconf.Collection{
@@ -106,7 +113,7 @@ func getIndexConfig() *fireconf.Config {
 					// Field name matches the Go struct field Knowledge.Embedding
 					// stored as firestore.Vector32.
 					{
-						QueryScope: fireconf.QueryScopeCollectionGroup,
+						QueryScope: fireconf.QueryScopeCollection,
 						Fields: []fireconf.IndexField{
 							{
 								Path: "Embedding",

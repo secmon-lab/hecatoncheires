@@ -79,6 +79,7 @@ func cmdServe() *cli.Command {
 	var appCfg config.AppConfig
 	var repoCfg config.Repository
 	var slackCfg config.Slack
+	var geminiCfg config.Gemini
 
 	flags := []cli.Flag{
 		&cli.StringFlag{
@@ -120,6 +121,7 @@ func cmdServe() *cli.Command {
 	flags = append(flags, appCfg.Flags()...)
 	flags = append(flags, repoCfg.Flags()...)
 	flags = append(flags, slackCfg.Flags()...)
+	flags = append(flags, geminiCfg.Flags()...)
 
 	return &cli.Command{
 		Name:    "serve",
@@ -191,6 +193,18 @@ func cmdServe() *cli.Command {
 				logging.Default().Info("Slack service enabled for Source integration")
 			} else {
 				logging.Default().Info("Slack Bot Token not configured, Slack Source features will be limited")
+			}
+
+			// Initialize Gemini LLM client if configured (optional for AI agent)
+			llmClient, err := geminiCfg.Configure(ctx)
+			if err != nil {
+				return goerr.Wrap(err, "failed to initialize Gemini LLM client")
+			}
+			if llmClient != nil {
+				ucOpts = append(ucOpts, usecase.WithLLMClient(llmClient))
+				logging.Default().Info("Gemini LLM client enabled for AI agent")
+			} else {
+				logging.Default().Info("Gemini not configured, AI agent features will be disabled")
 			}
 
 			uc := usecase.New(repo, registry, ucOpts...)
@@ -274,7 +288,7 @@ func cmdServe() *cli.Command {
 				logging.Default().Info("Slack webhook handler enabled")
 
 				// Add Slack interaction handler (shares signing secret with webhook)
-				slackInteractionHandler := httpctrl.NewSlackInteractionHandler(uc.Action)
+				slackInteractionHandler := httpctrl.NewSlackInteractionHandler(uc.Action, uc.Agent)
 				httpOpts = append(httpOpts, httpctrl.WithSlackInteraction(slackInteractionHandler))
 				logging.Default().Info("Slack interaction handler enabled")
 			}

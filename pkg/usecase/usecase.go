@@ -1,6 +1,7 @@
 package usecase
 
 import (
+	"github.com/m-mizutani/gollem"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/knowledge"
@@ -14,9 +15,11 @@ type UseCases struct {
 	notion            notion.Service
 	slackService      slack.Service
 	knowledgeService  knowledge.Service
+	llmClient         gollem.LLMClient
 	baseURL           string
 	Case              *CaseUseCase
 	Action            *ActionUseCase
+	Agent             *AgentUseCase
 	Auth              AuthUseCaseInterface
 	Slack             *SlackUseCases
 	Source            *SourceUseCase
@@ -55,6 +58,12 @@ func WithBaseURL(url string) Option {
 	}
 }
 
+func WithLLMClient(client gollem.LLMClient) Option {
+	return func(uc *UseCases) {
+		uc.llmClient = client
+	}
+}
+
 func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...Option) *UseCases {
 	uc := &UseCases{
 		repo:              repo,
@@ -67,9 +76,14 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 
 	uc.Case = NewCaseUseCase(repo, registry, uc.slackService, uc.baseURL)
 	uc.Action = NewActionUseCase(repo, uc.slackService, uc.baseURL)
-	uc.Slack = NewSlackUseCases(repo, registry)
 	uc.Source = NewSourceUseCase(repo, uc.notion, uc.slackService)
 	uc.Compile = NewCompileUseCase(repo, registry, uc.notion, uc.knowledgeService, uc.slackService, uc.baseURL)
+
+	// Create AgentUseCase only if LLM client and Slack service are both available
+	if uc.llmClient != nil && uc.slackService != nil {
+		uc.Agent = NewAgentUseCase(repo, registry, uc.slackService, uc.llmClient)
+	}
+	uc.Slack = NewSlackUseCases(repo, registry, uc.Agent)
 
 	return uc
 }

@@ -2,6 +2,7 @@ package slack
 
 import (
 	"context"
+	"time"
 
 	"github.com/slack-go/slack"
 )
@@ -48,12 +49,40 @@ type Service interface {
 
 	// UpdateMessage updates an existing Block Kit message identified by channel and timestamp.
 	UpdateMessage(ctx context.Context, channelID string, timestamp string, blocks []slack.Block, text string) error
+
+	// GetConversationReplies retrieves messages from a thread.
+	GetConversationReplies(ctx context.Context, channelID string, threadTS string, limit int) ([]ConversationMessage, error)
+
+	// GetConversationHistory retrieves channel messages from the specified time.
+	GetConversationHistory(ctx context.Context, channelID string, oldest time.Time, limit int) ([]ConversationMessage, error)
+
+	// PostThreadReply posts a text message as a thread reply and returns the message timestamp.
+	PostThreadReply(ctx context.Context, channelID string, threadTS string, text string) (string, error)
+
+	// PostThreadMessage posts a Block Kit message as a thread reply and returns the message timestamp.
+	PostThreadMessage(ctx context.Context, channelID string, threadTS string, blocks []slack.Block, text string) (string, error)
+
+	// GetBotUserID retrieves the bot's own user ID via auth.test API.
+	// The result is cached permanently (sync.Once).
+	GetBotUserID(ctx context.Context) (string, error)
+
+	// OpenView opens a modal view in Slack using the provided trigger ID.
+	OpenView(ctx context.Context, triggerID string, view slack.ModalViewRequest) error
 }
 
 // Channel represents a Slack channel
 type Channel struct {
 	ID   string
 	Name string
+}
+
+// ConversationMessage represents a message retrieved from Slack conversation history
+type ConversationMessage struct {
+	UserID    string
+	UserName  string
+	Text      string
+	Timestamp string
+	ThreadTS  string
 }
 
 // User represents a Slack user

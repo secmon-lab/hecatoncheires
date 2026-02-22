@@ -2,6 +2,7 @@ package slack
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +33,10 @@ type client struct {
 	teamURLOnce sync.Once
 	teamURL     string
 	teamURLErr  error
+
+	botUserIDOnce sync.Once
+	botUserID     string
+	botUserIDErr  error
 }
 
 // Option is a functional option for client configuration
@@ -299,4 +304,115 @@ func (c *client) UpdateMessage(ctx context.Context, channelID string, timestamp 
 			goerr.V("timestamp", timestamp))
 	}
 	return nil
+}
+
+// GetConversationReplies retrieves messages from a thread
+func (c *client) GetConversationReplies(ctx context.Context, channelID string, threadTS string, limit int) ([]ConversationMessage, error) {
+	params := &slack.GetConversationRepliesParameters{
+		ChannelID: channelID,
+		Timestamp: threadTS,
+		Limit:     limit,
+	}
+
+	msgs, _, _, err := c.api.GetConversationRepliesContext(ctx, params)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to get conversation replies",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS))
+	}
+
+	result := make([]ConversationMessage, 0, len(msgs))
+	for _, msg := range msgs {
+		result = append(result, ConversationMessage{
+			UserID:    msg.User,
+			UserName:  msg.Username,
+			Text:      msg.Text,
+			Timestamp: msg.Timestamp,
+			ThreadTS:  msg.ThreadTimestamp,
+		})
+	}
+
+	return result, nil
+}
+
+// GetConversationHistory retrieves channel messages from the specified time
+func (c *client) GetConversationHistory(ctx context.Context, channelID string, oldest time.Time, limit int) ([]ConversationMessage, error) {
+	params := &slack.GetConversationHistoryParameters{
+		ChannelID: channelID,
+		Oldest:    fmt.Sprintf("%d.000000", oldest.Unix()),
+		Limit:     limit,
+	}
+
+	resp, err := c.api.GetConversationHistoryContext(ctx, params)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to get conversation history",
+			goerr.V("channel_id", channelID),
+			goerr.V("oldest", oldest))
+	}
+
+	result := make([]ConversationMessage, 0, len(resp.Messages))
+	for _, msg := range resp.Messages {
+		result = append(result, ConversationMessage{
+			UserID:    msg.User,
+			UserName:  msg.Username,
+			Text:      msg.Text,
+			Timestamp: msg.Timestamp,
+			ThreadTS:  msg.ThreadTimestamp,
+		})
+	}
+
+	return result, nil
+}
+
+// PostThreadReply posts a text message as a thread reply and returns the message timestamp
+func (c *client) PostThreadReply(ctx context.Context, channelID string, threadTS string, text string) (string, error) {
+	_, ts, err := c.api.PostMessageContext(ctx, channelID,
+		slack.MsgOptionText(text, false),
+		slack.MsgOptionTS(threadTS),
+	)
+	if err != nil {
+		return "", goerr.Wrap(err, "failed to post thread reply",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS))
+	}
+	return ts, nil
+}
+
+// PostThreadMessage posts a Block Kit message as a thread reply and returns the message timestamp
+func (c *client) PostThreadMessage(ctx context.Context, channelID string, threadTS string, blocks []slack.Block, text string) (string, error) {
+	_, ts, err := c.api.PostMessageContext(ctx, channelID,
+		slack.MsgOptionBlocks(blocks...),
+		slack.MsgOptionText(text, false),
+		slack.MsgOptionTS(threadTS),
+	)
+	if err != nil {
+		return "", goerr.Wrap(err, "failed to post thread message",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS))
+	}
+	return ts, nil
+}
+
+// OpenView opens a modal view in Slack using the provided trigger ID
+func (c *client) OpenView(ctx context.Context, triggerID string, view slack.ModalViewRequest) error {
+	_, err := c.api.OpenViewContext(ctx, triggerID, view)
+	if err != nil {
+		return goerr.Wrap(err, "failed to open Slack modal view",
+			goerr.V("trigger_id", triggerID))
+	}
+	return nil
+}
+
+// GetBotUserID retrieves the bot's own user ID via auth.test API.
+// The result is cached permanently (sync.Once) since the bot user ID does not change.
+func (c *client) GetBotUserID(ctx context.Context) (string, error) {
+	c.botUserIDOnce.Do(func() {
+		resp, err := c.api.AuthTestContext(ctx)
+		if err != nil {
+			c.botUserIDErr = goerr.Wrap(err, "failed to call auth.test for bot user ID")
+			return
+		}
+		c.botUserID = resp.UserID
+	})
+	return c.botUserID, c.botUserIDErr
 }

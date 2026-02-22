@@ -18,7 +18,7 @@ import (
 func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.Repository) {
 	t.Helper()
 
-	const wsID = "test-ws"
+	wsID := fmt.Sprintf("test-ws-%d", time.Now().UnixNano())
 
 	t.Run("Create creates source with UUID", func(t *testing.T) {
 		repo := newRepo(t)
@@ -117,25 +117,28 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		sources, err := repo.Source().List(ctx, wsID)
+		// Use unique wsID to avoid stale data from other subtests
+		listWsID := fmt.Sprintf("test-ws-list-%d", time.Now().UnixNano())
+
+		sources, err := repo.Source().List(ctx, listWsID)
 		gt.NoError(t, err).Required()
 		gt.Array(t, sources).Length(0)
 
-		source1, err := repo.Source().Create(ctx, wsID, &model.Source{
+		source1, err := repo.Source().Create(ctx, listWsID, &model.Source{
 			Name:       "Source 1",
 			SourceType: model.SourceTypeNotionDB,
 			Enabled:    true,
 		})
 		gt.NoError(t, err).Required()
 
-		source2, err := repo.Source().Create(ctx, wsID, &model.Source{
+		source2, err := repo.Source().Create(ctx, listWsID, &model.Source{
 			Name:       "Source 2",
 			SourceType: model.SourceTypeNotionDB,
 			Enabled:    false,
 		})
 		gt.NoError(t, err).Required()
 
-		sources, err = repo.Source().List(ctx, wsID)
+		sources, err = repo.Source().List(ctx, listWsID)
 		gt.NoError(t, err).Required()
 		gt.Array(t, sources).Length(2)
 

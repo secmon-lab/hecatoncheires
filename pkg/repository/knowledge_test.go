@@ -441,46 +441,64 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		repo := newRepo(t)
 		ctx := context.Background()
 
+		// Use unique wsID to isolate from other subtests' embedding data
+		embWsID := fmt.Sprintf("test-ws-emb-similar-%d", time.Now().UnixNano())
 		sourceID := model.SourceID(fmt.Sprintf("source-%d", time.Now().UnixNano()))
 
-		// Create knowledge with embedding close to [1, 0, 0]
-		_, err := repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
+		// Use EmbeddingDimension (768) to match the Firestore vector index
+		dim := model.EmbeddingDimension
+
+		// Create embedding close to [1, 0, 0, ..., 0]
+		similarEmb := make([]float32, dim)
+		similarEmb[0] = 0.9
+		similarEmb[1] = 0.1
+
+		_, err := repo.Knowledge().Create(ctx, embWsID, &model.Knowledge{
 			CaseID:     time.Now().UnixNano(),
 			SourceID:   sourceID,
 			SourceURLs: []string{"https://example.com/similar"},
 			Title:      "Similar Knowledge",
 			Summary:    "This is similar",
-			Embedding:  []float32{0.9, 0.1, 0.0},
+			Embedding:  similarEmb,
 			SourcedAt:  time.Now().UTC(),
 		})
 		gt.NoError(t, err).Required()
 
-		// Create knowledge with embedding close to [0, 1, 0] (dissimilar)
-		_, err = repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
+		// Create embedding close to [0, 1, 0, ..., 0] (dissimilar)
+		dissimilarEmb := make([]float32, dim)
+		dissimilarEmb[1] = 0.9
+		dissimilarEmb[2] = 0.1
+
+		_, err = repo.Knowledge().Create(ctx, embWsID, &model.Knowledge{
 			CaseID:     time.Now().UnixNano(),
 			SourceID:   sourceID,
 			SourceURLs: []string{"https://example.com/dissimilar"},
 			Title:      "Dissimilar Knowledge",
 			Summary:    "This is dissimilar",
-			Embedding:  []float32{0.0, 0.9, 0.1},
+			Embedding:  dissimilarEmb,
 			SourcedAt:  time.Now().UTC(),
 		})
 		gt.NoError(t, err).Required()
 
-		// Create knowledge with embedding very close to [1, 0, 0]
-		_, err = repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
+		// Create embedding very close to [1, 0, 0, ..., 0]
+		mostSimilarEmb := make([]float32, dim)
+		mostSimilarEmb[0] = 1.0
+
+		_, err = repo.Knowledge().Create(ctx, embWsID, &model.Knowledge{
 			CaseID:     time.Now().UnixNano(),
 			SourceID:   sourceID,
 			SourceURLs: []string{"https://example.com/most-similar"},
 			Title:      "Most Similar Knowledge",
 			Summary:    "This is the most similar",
-			Embedding:  []float32{1.0, 0.0, 0.0},
+			Embedding:  mostSimilarEmb,
 			SourcedAt:  time.Now().UTC(),
 		})
 		gt.NoError(t, err).Required()
 
-		// Search for [1, 0, 0] with limit 2
-		results, err := repo.Knowledge().FindByEmbedding(ctx, wsID, []float32{1.0, 0.0, 0.0}, 2)
+		// Search for [1, 0, 0, ..., 0] with limit 2
+		queryEmb := make([]float32, dim)
+		queryEmb[0] = 1.0
+		results, err := repo.Knowledge().FindByEmbedding(ctx, embWsID, queryEmb, 2)
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, results).Length(2)
@@ -493,10 +511,12 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		repo := newRepo(t)
 		ctx := context.Background()
 
+		// Use unique wsID to isolate from other subtests' embedding data
+		embWsID := fmt.Sprintf("test-ws-emb-empty-%d", time.Now().UnixNano())
 		sourceID := model.SourceID(fmt.Sprintf("source-%d", time.Now().UnixNano()))
 
 		// Create knowledge without embedding
-		_, err := repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
+		_, err := repo.Knowledge().Create(ctx, embWsID, &model.Knowledge{
 			CaseID:     time.Now().UnixNano(),
 			SourceID:   sourceID,
 			SourceURLs: []string{"https://example.com/no-embed"},
@@ -506,7 +526,9 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		})
 		gt.NoError(t, err).Required()
 
-		results, err := repo.Knowledge().FindByEmbedding(ctx, wsID, []float32{1.0, 0.0, 0.0}, 5)
+		queryEmb := make([]float32, model.EmbeddingDimension)
+		queryEmb[0] = 1.0
+		results, err := repo.Knowledge().FindByEmbedding(ctx, embWsID, queryEmb, 5)
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, results).Length(0)
@@ -516,23 +538,35 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		repo := newRepo(t)
 		ctx := context.Background()
 
+		// Use unique wsID to isolate from other subtests' embedding data
+		embWsID := fmt.Sprintf("test-ws-emb-limit-%d", time.Now().UnixNano())
+		dim := model.EmbeddingDimension
 		sourceID := model.SourceID(fmt.Sprintf("source-%d", time.Now().UnixNano()))
 
 		// Create 5 knowledge entries with embeddings
 		for i := 0; i < 5; i++ {
-			_, err := repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
+			emb := make([]float32, dim)
+			emb[0] = float32(i) * 0.1
+			emb[1] = 0.5
+			emb[2] = 0.5
+
+			_, err := repo.Knowledge().Create(ctx, embWsID, &model.Knowledge{
 				CaseID:     time.Now().UnixNano() + int64(i),
 				SourceID:   sourceID,
 				SourceURLs: []string{fmt.Sprintf("https://example.com/embed-%d", i)},
 				Title:      fmt.Sprintf("Knowledge %d", i),
 				Summary:    fmt.Sprintf("Knowledge entry %d", i),
-				Embedding:  []float32{float32(i) * 0.1, 0.5, 0.5},
+				Embedding:  emb,
 				SourcedAt:  time.Now().UTC(),
 			})
 			gt.NoError(t, err).Required()
 		}
 
-		results, err := repo.Knowledge().FindByEmbedding(ctx, wsID, []float32{0.4, 0.5, 0.5}, 3)
+		queryEmb := make([]float32, dim)
+		queryEmb[0] = 0.4
+		queryEmb[1] = 0.5
+		queryEmb[2] = 0.5
+		results, err := repo.Knowledge().FindByEmbedding(ctx, embWsID, queryEmb, 3)
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, results).Length(3)
@@ -542,7 +576,9 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		results, err := repo.Knowledge().FindByEmbedding(ctx, "non-existent-ws", []float32{1.0, 0.0, 0.0}, 5)
+		queryEmb := make([]float32, model.EmbeddingDimension)
+		queryEmb[0] = 1.0
+		results, err := repo.Knowledge().FindByEmbedding(ctx, "non-existent-ws", queryEmb, 5)
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, results).Length(0)
