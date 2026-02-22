@@ -193,14 +193,16 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 
 		gt.NoError(t, agentUC.HandleAgentMention(ctx, msg)).Required()
 
-		// Verify session start + final response were posted (2 messages)
-		gt.Array(t, slackMock.postedMessages).Length(2).Required()
-		// First message: session start (via PostThreadMessage)
+		// Verify session start was posted (1 message via PostThreadMessage)
+		gt.Array(t, slackMock.postedMessages).Length(1).Required()
 		gt.Value(t, slackMock.postedMessages[0].ChannelID).Equal("C-AGENT-001")
 		gt.Value(t, slackMock.postedMessages[0].Text).NotEqual("") // session start (random label)
-		// Second message: final response (via PostThreadReply)
-		gt.Value(t, slackMock.postedMessages[1].ChannelID).Equal("C-AGENT-001")
-		gt.Value(t, slackMock.postedMessages[1].Text).Equal("This is a test response from the AI agent.")
+
+		// Verify final response updated the session start message (via UpdateMessage)
+		gt.Array(t, slackMock.updatedMessages).Length(1).Required()
+		gt.Value(t, slackMock.updatedMessages[0].ChannelID).Equal("C-AGENT-001")
+		gt.Value(t, slackMock.updatedMessages[0].Timestamp).Equal("1234567890.session01")
+		gt.Value(t, slackMock.updatedMessages[0].Text).Equal("This is a test response from the AI agent.")
 	})
 
 	t.Run("responds to mention in thread", func(t *testing.T) {
@@ -248,13 +250,14 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 
 		gt.NoError(t, agentUC.HandleAgentMention(ctx, msg)).Required()
 
-		// Verify session start + final response were posted (2 messages)
-		gt.Array(t, slackMock.postedMessages).Length(2).Required()
-		// First message: session start (via PostThreadMessage)
+		// Verify session start was posted (1 message via PostThreadMessage)
+		gt.Array(t, slackMock.postedMessages).Length(1).Required()
 		gt.Value(t, slackMock.postedMessages[0].ThreadTS).Equal("1234567890.000010")
 		gt.Value(t, slackMock.postedMessages[0].Text).NotEqual("") // session start (random label)
-		// Second message: final response (via PostThreadReply)
-		gt.Value(t, slackMock.postedMessages[1].ThreadTS).Equal("1234567890.000010")
+
+		// Verify final response updated the session start message (via UpdateMessage)
+		gt.Array(t, slackMock.updatedMessages).Length(1).Required()
+		gt.Value(t, slackMock.updatedMessages[0].Timestamp).Equal("1234567890.session01")
 	})
 
 	t.Run("skips when no case found for channel", func(t *testing.T) {
