@@ -409,6 +409,17 @@ func TestCreateActionTool(t *testing.T) {
 		})
 		gt.Error(t, err)
 	})
+
+	t.Run("returns error when assignee_ids contains non-string element", func(t *testing.T) {
+		repo := newMockRepo(nil, nil)
+		tools := core.New(repo, testWorkspaceID, testCaseID, &mockLLMClient{})
+
+		_, err := findTool(tools, "core__create_action").Run(ctx, map[string]any{
+			"title":        "Test",
+			"assignee_ids": []any{"U001", 42},
+		})
+		gt.Error(t, err)
+	})
 }
 
 func TestUpdateActionTool(t *testing.T) {
@@ -532,6 +543,23 @@ func TestUpdateActionTool(t *testing.T) {
 		tools := core.New(repo, testWorkspaceID, testCaseID, &mockLLMClient{})
 
 		_, err := findTool(tools, "core__update_action").Run(ctx, map[string]any{"action_id": float64(999)})
+		gt.Error(t, err)
+	})
+
+	t.Run("returns error when assignee_ids contains non-string element", func(t *testing.T) {
+		original := &model.Action{ID: 10, Title: "T", Status: types.ActionStatusTodo}
+		actionRepo := &mockActionRepo{
+			getFn: func(_ context.Context, _ string, _ int64) (*model.Action, error) {
+				return original, nil
+			},
+		}
+		repo := newMockRepo(actionRepo, nil)
+		tools := core.New(repo, testWorkspaceID, testCaseID, &mockLLMClient{})
+
+		_, err := findTool(tools, "core__update_action").Run(ctx, map[string]any{
+			"action_id":    float64(10),
+			"assignee_ids": []any{"U001", 99},
+		})
 		gt.Error(t, err)
 	})
 }

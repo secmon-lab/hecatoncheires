@@ -169,9 +169,11 @@ func (t *createActionTool) Run(ctx context.Context, args map[string]any) (map[st
 	var assigneeIDs []string
 	if rawIDs, ok := args["assignee_ids"].([]any); ok {
 		for _, id := range rawIDs {
-			if s, ok := id.(string); ok {
-				assigneeIDs = append(assigneeIDs, s)
+			s, ok := id.(string)
+			if !ok {
+				return nil, fmt.Errorf("invalid item in assignee_ids: expected string user ID, got %T", id)
 			}
+			assigneeIDs = append(assigneeIDs, s)
 		}
 	}
 
@@ -259,9 +261,11 @@ func (t *updateActionTool) Run(ctx context.Context, args map[string]any) (map[st
 	if rawIDs, ok := args["assignee_ids"].([]any); ok {
 		assigneeIDs := make([]string, 0, len(rawIDs))
 		for _, id := range rawIDs {
-			if s, ok := id.(string); ok {
-				assigneeIDs = append(assigneeIDs, s)
+			s, ok := id.(string)
+			if !ok {
+				return nil, fmt.Errorf("invalid item in assignee_ids: expected string user ID, got %T", id)
 			}
+			assigneeIDs = append(assigneeIDs, s)
 		}
 		a.AssigneeIDs = assigneeIDs
 	}
