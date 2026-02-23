@@ -229,6 +229,41 @@
   accent-color: var(--color-primary);
 }
 
+/* Repository tag styles (GitHub form) */
+.repoTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+}
+
+.repoTag {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--bg-muted);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  font-size: 0.8125rem;
+  color: var(--text-body);
+}
+
+.repoTagRemove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: color var(--transition-fast);
+}
+
+.repoTagRemove:hover {
+  color: var(--color-error);
+}
+
 /* SourceDeleteDialog styles */
 .deleteDialogContent {
   display: flex;

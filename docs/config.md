@@ -72,7 +72,7 @@ The `serve` command (alias: `s`) starts the HTTP server.
 | `--base-url` | `HECATONCHEIRES_BASE_URL` | - | Yes\* | Application base URL (e.g., `https://your-domain.com`). No trailing slash |
 | `--graphiql` | `HECATONCHEIRES_GRAPHIQL` | `true` | No | Enable GraphiQL playground at `/graphiql` |
 | `--config` | `HECATONCHEIRES_CONFIG` | `./config.toml` | No | Path to TOML configuration file |
-| `--firestore-project-id` | `HECATONCHEIRES_FIRESTORE_PROJECT_ID` | - | **Yes** | Google Cloud Firestore project ID |
+| `--firestore-project-id` | `HECATONCHEIRES_FIRESTORE_PROJECT_ID` | - | Yes | Google Cloud Firestore project ID |
 | `--firestore-database-id` | `HECATONCHEIRES_FIRESTORE_DATABASE_ID` | `(default)` | No | Firestore database ID |
 | `--notion-api-token` | `HECATONCHEIRES_NOTION_API_TOKEN` | - | No | Notion API token for Source integration |
 | `--no-auth` | `HECATONCHEIRES_NO_AUTH` | - | No | Slack user ID for no-auth mode (development only) |
@@ -81,6 +81,9 @@ The `serve` command (alias: `s`) starts the HTTP server.
 | `--slack-bot-token` | `HECATONCHEIRES_SLACK_BOT_TOKEN` | - | No\*\* | Slack Bot User OAuth Token (`xoxb-...`) |
 | `--slack-signing-secret` | `HECATONCHEIRES_SLACK_SIGNING_SECRET` | - | No\*\*\* | Slack signing secret for webhook verification |
 | `--slack-channel-prefix` | `HECATONCHEIRES_SLACK_CHANNEL_PREFIX` | `risk` | No | Prefix for auto-created Slack channel names |
+| `--github-app-id` | `HECATONCHEIRES_GITHUB_APP_ID` | - | No | GitHub App ID for GitHub Source integration |
+| `--github-app-installation-id` | `HECATONCHEIRES_GITHUB_APP_INSTALLATION_ID` | - | No | GitHub App Installation ID |
+| `--github-app-private-key` | `HECATONCHEIRES_GITHUB_APP_PRIVATE_KEY` | - | No | GitHub App private key (PEM string or file path) |
 
 \* Required for OAuth mode. Alternatively, use `--no-auth` with `--slack-bot-token` for development.
 
@@ -88,13 +91,28 @@ The `serve` command (alias: `s`) starts the HTTP server.
 
 \*\*\* Required only to enable Slack webhook integration. Without this, webhook endpoints are not registered.
 
+### Compile Command Flags
+
+The `compile` command (alias: `c`) extracts knowledge from external sources using LLM.
+
+| Flag | Env Var | Default | Required | Description |
+|------|---------|---------|----------|-------------|
+| `--notion-api-token` | `HECATONCHEIRES_NOTION_API_TOKEN` | - | Yes | Notion API token for Source integration |
+| `--since` | `HECATONCHEIRES_COMPILE_SINCE` | 24h ago | No | Process pages updated since this time (RFC3339 format) |
+| `--workspace` | `HECATONCHEIRES_COMPILE_WORKSPACE` | - | No | Target workspace ID (if empty, process all workspaces) |
+| `--base-url` | `HECATONCHEIRES_BASE_URL` | - | No | Base URL for the application |
+| `--slack-bot-token` | `HECATONCHEIRES_SLACK_BOT_TOKEN` | - | No | Slack Bot Token for sending notifications |
+| `--github-app-id` | `HECATONCHEIRES_GITHUB_APP_ID` | - | No | GitHub App ID for GitHub Source integration |
+| `--github-app-installation-id` | `HECATONCHEIRES_GITHUB_APP_INSTALLATION_ID` | - | No | GitHub App Installation ID |
+| `--github-app-private-key` | `HECATONCHEIRES_GITHUB_APP_PRIVATE_KEY` | - | No | GitHub App private key (PEM string or file path) |
+
 ### Migrate Command Flags
 
 The `migrate` command (alias: `m`) manages Firestore indexes.
 
 | Flag | Env Var | Default | Required | Description |
 |------|---------|---------|----------|-------------|
-| `--firestore-project-id` | `HECATONCHEIRES_FIRESTORE_PROJECT_ID` | - | **Yes** | Google Cloud Firestore project ID |
+| `--firestore-project-id` | `HECATONCHEIRES_FIRESTORE_PROJECT_ID` | - | Yes | Google Cloud Firestore project ID |
 | `--firestore-database-id` | `HECATONCHEIRES_FIRESTORE_DATABASE_ID` | `(default)` | No | Firestore database ID |
 | `--dry-run` | - | `false` | No | Preview migration changes without applying |
 
@@ -403,6 +421,44 @@ id = "reference-url"
 name = "Reference URL"
 type = "url"
 ```
+
+---
+
+## GitHub Source Integration
+
+Hecatoncheires can fetch Pull Requests, Issues, and comments from GitHub repositories as external data sources for knowledge extraction. This requires a GitHub App with appropriate permissions.
+
+### GitHub App Setup
+
+1. Create a GitHub App at `https://github.com/settings/apps/new`
+2. Grant the following permissions:
+   - **Repository permissions**: Issues (Read), Pull Requests (Read), Contents (Read)
+3. Install the App on the target organization or repositories
+4. Note the App ID, Installation ID, and download the private key
+
+### Configuration
+
+All three flags (`--github-app-id`, `--github-app-installation-id`, `--github-app-private-key`) must be set to enable GitHub Source features. If any flag is missing, GitHub features are gracefully disabled and the application continues to run normally with other source types.
+
+```bash
+hecatoncheires serve \
+  --github-app-id=12345 \
+  --github-app-installation-id=67890 \
+  --github-app-private-key=/path/to/private-key.pem \
+  ...
+```
+
+The `--github-app-private-key` accepts either a file path to a PEM file or the PEM content directly as a string.
+
+### Source Management
+
+GitHub Sources are managed via the GraphQL API:
+
+- `createGitHubSource` - Create a new GitHub source with repository list
+- `updateGitHubSource` - Update an existing GitHub source
+- `validateGitHubRepo` - Validate access to a repository before adding it
+
+Repositories can be specified in `owner/repo` format or as full GitHub URLs (e.g., `https://github.com/owner/repo`).
 
 ---
 

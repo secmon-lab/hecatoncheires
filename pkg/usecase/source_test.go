@@ -3,6 +3,7 @@ package usecase_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"iter"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
+	"github.com/secmon-lab/hecatoncheires/pkg/service/github"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
@@ -198,7 +200,7 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 				}, nil
 			},
 		}
-		uc := usecase.NewSourceUseCase(repo, notionSvc, nil)
+		uc := usecase.NewSourceUseCase(repo, notionSvc, nil, nil)
 		ctx := context.Background()
 
 		input := usecase.CreateNotionDBSourceInput{
@@ -223,7 +225,7 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 	t.Run("uses custom name when provided", func(t *testing.T) {
 		repo := memory.New()
 		notionSvc := &sourceTestNotionService{}
-		uc := usecase.NewSourceUseCase(repo, notionSvc, nil)
+		uc := usecase.NewSourceUseCase(repo, notionSvc, nil, nil)
 		ctx := context.Background()
 
 		input := usecase.CreateNotionDBSourceInput{
@@ -240,7 +242,7 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 
 	t.Run("fails with empty database ID", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil, nil)
 		ctx := context.Background()
 
 		input := usecase.CreateNotionDBSourceInput{
@@ -259,7 +261,7 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 				return nil, errors.New("database not found")
 			},
 		}
-		uc := usecase.NewSourceUseCase(repo, notionSvc, nil)
+		uc := usecase.NewSourceUseCase(repo, notionSvc, nil, nil)
 		ctx := context.Background()
 
 		input := usecase.CreateNotionDBSourceInput{
@@ -273,7 +275,7 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 
 	t.Run("creates source without Notion service", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil, nil)
 		ctx := context.Background()
 
 		input := usecase.CreateNotionDBSourceInput{
@@ -292,7 +294,7 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 func TestSourceUseCase_UpdateSource(t *testing.T) {
 	t.Run("updates source fields", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil, nil)
 		ctx := context.Background()
 
 		source := &model.Source{
@@ -323,7 +325,7 @@ func TestSourceUseCase_UpdateSource(t *testing.T) {
 
 	t.Run("partial update only changes specified fields", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil, nil)
 		ctx := context.Background()
 
 		source := &model.Source{
@@ -351,7 +353,7 @@ func TestSourceUseCase_UpdateSource(t *testing.T) {
 
 	t.Run("fails with empty ID", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil, nil)
 		ctx := context.Background()
 
 		input := usecase.UpdateSourceInput{
@@ -364,7 +366,7 @@ func TestSourceUseCase_UpdateSource(t *testing.T) {
 
 	t.Run("fails for non-existent source", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil, nil)
 		ctx := context.Background()
 
 		newName := "New Name"
@@ -381,7 +383,7 @@ func TestSourceUseCase_UpdateSource(t *testing.T) {
 func TestSourceUseCase_DeleteSource(t *testing.T) {
 	t.Run("deletes existing source", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil, nil)
 		ctx := context.Background()
 
 		source := &model.Source{
@@ -400,7 +402,7 @@ func TestSourceUseCase_DeleteSource(t *testing.T) {
 
 	t.Run("fails with empty ID", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil, nil)
 		ctx := context.Background()
 
 		err := uc.DeleteSource(ctx, testWorkspaceID, "")
@@ -409,7 +411,7 @@ func TestSourceUseCase_DeleteSource(t *testing.T) {
 
 	t.Run("fails for non-existent source", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil, nil)
 		ctx := context.Background()
 
 		err := uc.DeleteSource(ctx, testWorkspaceID, "non-existent-id")
@@ -420,7 +422,7 @@ func TestSourceUseCase_DeleteSource(t *testing.T) {
 func TestSourceUseCase_GetSource(t *testing.T) {
 	t.Run("gets existing source", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil, nil)
 		ctx := context.Background()
 
 		source := &model.Source{
@@ -440,7 +442,7 @@ func TestSourceUseCase_GetSource(t *testing.T) {
 
 	t.Run("fails with empty ID", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil, nil)
 		ctx := context.Background()
 
 		_, err := uc.GetSource(ctx, testWorkspaceID, "")
@@ -449,7 +451,7 @@ func TestSourceUseCase_GetSource(t *testing.T) {
 
 	t.Run("fails for non-existent source", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil, nil)
 		ctx := context.Background()
 
 		_, err := uc.GetSource(ctx, testWorkspaceID, "non-existent-id")
@@ -460,7 +462,7 @@ func TestSourceUseCase_GetSource(t *testing.T) {
 func TestSourceUseCase_ListSources(t *testing.T) {
 	t.Run("lists all sources", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil, nil)
 		ctx := context.Background()
 
 		sources, err := uc.ListSources(ctx, testWorkspaceID)
@@ -490,7 +492,7 @@ func TestSourceUseCase_ValidateNotionDB(t *testing.T) {
 				}, nil
 			},
 		}
-		uc := usecase.NewSourceUseCase(repo, notionSvc, nil)
+		uc := usecase.NewSourceUseCase(repo, notionSvc, nil, nil)
 		ctx := context.Background()
 
 		result, err := uc.ValidateNotionDB(ctx, "c1b2c3d4-e5f6-a7b8-c9d0-e1f2a3b4c5d6")
@@ -503,7 +505,7 @@ func TestSourceUseCase_ValidateNotionDB(t *testing.T) {
 
 	t.Run("returns invalid for empty database ID", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil, nil)
 		ctx := context.Background()
 
 		result, err := uc.ValidateNotionDB(ctx, "")
@@ -515,7 +517,7 @@ func TestSourceUseCase_ValidateNotionDB(t *testing.T) {
 
 	t.Run("returns invalid when Notion service is not configured", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil, nil)
 		ctx := context.Background()
 
 		result, err := uc.ValidateNotionDB(ctx, "d1b2c3d4-e5f6-a7b8-c9d0-e1f2a3b4c5d6")
@@ -532,7 +534,7 @@ func TestSourceUseCase_ValidateNotionDB(t *testing.T) {
 				return nil, errors.New("database not found")
 			},
 		}
-		uc := usecase.NewSourceUseCase(repo, notionSvc, nil)
+		uc := usecase.NewSourceUseCase(repo, notionSvc, nil, nil)
 		ctx := context.Background()
 
 		result, err := uc.ValidateNotionDB(ctx, "b1b2c3d4-e5f6-a7b8-c9d0-e1f2a3b4c5d6")
@@ -554,7 +556,7 @@ func TestSourceUseCase_CreateSlackSource(t *testing.T) {
 				}, nil
 			},
 		}
-		uc := usecase.NewSourceUseCase(repo, nil, slackSvc)
+		uc := usecase.NewSourceUseCase(repo, nil, slackSvc, nil)
 		ctx := context.Background()
 
 		input := usecase.CreateSlackSourceInput{
@@ -579,7 +581,7 @@ func TestSourceUseCase_CreateSlackSource(t *testing.T) {
 	t.Run("uses default name when not provided", func(t *testing.T) {
 		repo := memory.New()
 		slackSvc := &mockSlackService{}
-		uc := usecase.NewSourceUseCase(repo, nil, slackSvc)
+		uc := usecase.NewSourceUseCase(repo, nil, slackSvc, nil)
 		ctx := context.Background()
 
 		input := usecase.CreateSlackSourceInput{
@@ -595,7 +597,7 @@ func TestSourceUseCase_CreateSlackSource(t *testing.T) {
 
 	t.Run("fails with empty channel IDs", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil, nil)
 		ctx := context.Background()
 
 		input := usecase.CreateSlackSourceInput{
@@ -610,7 +612,7 @@ func TestSourceUseCase_CreateSlackSource(t *testing.T) {
 
 	t.Run("creates source without Slack service", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil, nil)
 		ctx := context.Background()
 
 		input := usecase.CreateSlackSourceInput{
@@ -630,7 +632,7 @@ func TestSourceUseCase_UpdateSlackSource(t *testing.T) {
 	t.Run("updates slack source fields", func(t *testing.T) {
 		repo := memory.New()
 		slackSvc := &mockSlackService{}
-		uc := usecase.NewSourceUseCase(repo, nil, slackSvc)
+		uc := usecase.NewSourceUseCase(repo, nil, slackSvc, nil)
 		ctx := context.Background()
 
 		source := &model.Source{
@@ -671,7 +673,7 @@ func TestSourceUseCase_UpdateSlackSource(t *testing.T) {
 				}, nil
 			},
 		}
-		uc := usecase.NewSourceUseCase(repo, nil, slackSvc)
+		uc := usecase.NewSourceUseCase(repo, nil, slackSvc, nil)
 		ctx := context.Background()
 
 		source := &model.Source{
@@ -699,7 +701,7 @@ func TestSourceUseCase_UpdateSlackSource(t *testing.T) {
 
 	t.Run("fails with empty ID", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil, nil)
 		ctx := context.Background()
 
 		input := usecase.UpdateSlackSourceInput{
@@ -712,7 +714,7 @@ func TestSourceUseCase_UpdateSlackSource(t *testing.T) {
 
 	t.Run("fails for non-slack source", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil, nil)
 		ctx := context.Background()
 
 		source := &model.Source{
@@ -746,7 +748,7 @@ func TestSourceUseCase_ListSlackChannels(t *testing.T) {
 				}, nil
 			},
 		}
-		uc := usecase.NewSourceUseCase(repo, nil, slackSvc)
+		uc := usecase.NewSourceUseCase(repo, nil, slackSvc, nil)
 		ctx := context.Background()
 
 		channels, err := uc.ListSlackChannels(ctx)
@@ -759,7 +761,7 @@ func TestSourceUseCase_ListSlackChannels(t *testing.T) {
 
 	t.Run("fails when slack service is not configured", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil, nil)
 		ctx := context.Background()
 
 		_, err := uc.ListSlackChannels(ctx)
@@ -781,7 +783,7 @@ func TestCreateNotionPageSource(t *testing.T) {
 				}, nil
 			},
 		}
-		uc := usecase.NewSourceUseCase(repo, notionSvc, nil)
+		uc := usecase.NewSourceUseCase(repo, notionSvc, nil, nil)
 		ctx := context.Background()
 
 		input := usecase.CreateNotionPageSourceInput{
@@ -808,7 +810,7 @@ func TestCreateNotionPageSource(t *testing.T) {
 	t.Run("uses custom name when provided", func(t *testing.T) {
 		repo := memory.New()
 		notionSvc := &sourceTestNotionService{}
-		uc := usecase.NewSourceUseCase(repo, notionSvc, nil)
+		uc := usecase.NewSourceUseCase(repo, notionSvc, nil, nil)
 		ctx := context.Background()
 
 		input := usecase.CreateNotionPageSourceInput{
@@ -824,7 +826,7 @@ func TestCreateNotionPageSource(t *testing.T) {
 
 	t.Run("returns error for invalid page ID", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil, nil)
 		ctx := context.Background()
 
 		input := usecase.CreateNotionPageSourceInput{
@@ -839,7 +841,7 @@ func TestCreateNotionPageSource(t *testing.T) {
 
 	t.Run("creates source without notion service", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewSourceUseCase(repo, nil, nil)
+		uc := usecase.NewSourceUseCase(repo, nil, nil, nil)
 		ctx := context.Background()
 
 		input := usecase.CreateNotionPageSourceInput{
@@ -867,7 +869,7 @@ func TestValidateNotionPage(t *testing.T) {
 				}, nil
 			},
 		}
-		uc := usecase.NewSourceUseCase(memory.New(), notionSvc, nil)
+		uc := usecase.NewSourceUseCase(memory.New(), notionSvc, nil, nil)
 		ctx := context.Background()
 
 		result, err := uc.ValidateNotionPage(ctx, "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6")
@@ -879,7 +881,7 @@ func TestValidateNotionPage(t *testing.T) {
 	})
 
 	t.Run("returns invalid result for bad page ID format", func(t *testing.T) {
-		uc := usecase.NewSourceUseCase(memory.New(), nil, nil)
+		uc := usecase.NewSourceUseCase(memory.New(), nil, nil, nil)
 		ctx := context.Background()
 
 		result, err := uc.ValidateNotionPage(ctx, "not-a-valid-id")
@@ -889,7 +891,7 @@ func TestValidateNotionPage(t *testing.T) {
 	})
 
 	t.Run("returns invalid when notion service is nil", func(t *testing.T) {
-		uc := usecase.NewSourceUseCase(memory.New(), nil, nil)
+		uc := usecase.NewSourceUseCase(memory.New(), nil, nil, nil)
 		ctx := context.Background()
 
 		result, err := uc.ValidateNotionPage(ctx, "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6")
@@ -904,7 +906,7 @@ func TestValidateNotionPage(t *testing.T) {
 				return nil, errors.New("page not found")
 			},
 		}
-		uc := usecase.NewSourceUseCase(memory.New(), notionSvc, nil)
+		uc := usecase.NewSourceUseCase(memory.New(), notionSvc, nil, nil)
 		ctx := context.Background()
 
 		result, err := uc.ValidateNotionPage(ctx, "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6")
@@ -912,4 +914,230 @@ func TestValidateNotionPage(t *testing.T) {
 		gt.Value(t, result.Valid).Equal(false)
 		gt.String(t, result.ErrorMessage).NotEqual("")
 	})
+}
+
+func TestCreateGitHubSource(t *testing.T) {
+	t.Parallel()
+
+	t.Run("creates GitHub source successfully", func(t *testing.T) {
+		repo := memory.New()
+		ctx := context.Background()
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+
+		// Use a minimal mock GitHub service
+		githubSvc := &sourceTestGitHubService{}
+		uc := usecase.NewSourceUseCase(repo, nil, nil, githubSvc)
+
+		input := usecase.CreateGitHubSourceInput{
+			Name:         "My GitHub Source",
+			Description:  "Test repositories",
+			Repositories: []string{"secmon-lab/hecatoncheires", "https://github.com/secmon-lab/other-repo"},
+			Enabled:      true,
+		}
+
+		created, err := uc.CreateGitHubSource(ctx, wsID, input)
+		gt.NoError(t, err).Required()
+		gt.Value(t, created.Name).Equal("My GitHub Source")
+		gt.Value(t, created.SourceType).Equal(model.SourceTypeGitHub)
+		gt.Value(t, created.Enabled).Equal(true)
+		gt.Value(t, created.GitHubConfig).NotNil()
+		gt.A(t, created.GitHubConfig.Repositories).Length(2).Required()
+		gt.Value(t, created.GitHubConfig.Repositories[0].Owner).Equal("secmon-lab")
+		gt.Value(t, created.GitHubConfig.Repositories[0].Repo).Equal("hecatoncheires")
+		gt.Value(t, created.GitHubConfig.Repositories[1].Owner).Equal("secmon-lab")
+		gt.Value(t, created.GitHubConfig.Repositories[1].Repo).Equal("other-repo")
+	})
+
+	t.Run("uses default name when empty", func(t *testing.T) {
+		repo := memory.New()
+		ctx := context.Background()
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+
+		githubSvc := &sourceTestGitHubService{}
+		uc := usecase.NewSourceUseCase(repo, nil, nil, githubSvc)
+
+		input := usecase.CreateGitHubSourceInput{
+			Repositories: []string{"owner/repo"},
+			Enabled:      true,
+		}
+
+		created, err := uc.CreateGitHubSource(ctx, wsID, input)
+		gt.NoError(t, err).Required()
+		gt.Value(t, created.Name).Equal("GitHub Source")
+	})
+
+	t.Run("returns error when GitHub service not configured", func(t *testing.T) {
+		repo := memory.New()
+		ctx := context.Background()
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+
+		uc := usecase.NewSourceUseCase(repo, nil, nil, nil)
+
+		input := usecase.CreateGitHubSourceInput{
+			Repositories: []string{"owner/repo"},
+			Enabled:      true,
+		}
+
+		_, err := uc.CreateGitHubSource(ctx, wsID, input)
+		gt.Error(t, err)
+		gt.True(t, errors.Is(err, usecase.ErrGitHubNotConfigured))
+	})
+
+	t.Run("returns error for invalid repository format", func(t *testing.T) {
+		repo := memory.New()
+		ctx := context.Background()
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+
+		githubSvc := &sourceTestGitHubService{}
+		uc := usecase.NewSourceUseCase(repo, nil, nil, githubSvc)
+
+		input := usecase.CreateGitHubSourceInput{
+			Repositories: []string{"not-valid"},
+			Enabled:      true,
+		}
+
+		_, err := uc.CreateGitHubSource(ctx, wsID, input)
+		gt.Error(t, err)
+	})
+
+	t.Run("returns error when no repositories provided", func(t *testing.T) {
+		repo := memory.New()
+		ctx := context.Background()
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+
+		githubSvc := &sourceTestGitHubService{}
+		uc := usecase.NewSourceUseCase(repo, nil, nil, githubSvc)
+
+		input := usecase.CreateGitHubSourceInput{
+			Repositories: []string{},
+			Enabled:      true,
+		}
+
+		_, err := uc.CreateGitHubSource(ctx, wsID, input)
+		gt.Error(t, err)
+	})
+}
+
+func TestUpdateGitHubSource(t *testing.T) {
+	t.Parallel()
+
+	t.Run("updates GitHub source fields", func(t *testing.T) {
+		repo := memory.New()
+		ctx := context.Background()
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+
+		githubSvc := &sourceTestGitHubService{}
+		uc := usecase.NewSourceUseCase(repo, nil, nil, githubSvc)
+
+		// Create first
+		created, err := uc.CreateGitHubSource(ctx, wsID, usecase.CreateGitHubSourceInput{
+			Name:         "Original",
+			Repositories: []string{"owner/repo"},
+			Enabled:      true,
+		})
+		gt.NoError(t, err).Required()
+
+		// Update
+		newName := "Updated"
+		updated, err := uc.UpdateGitHubSource(ctx, wsID, usecase.UpdateGitHubSourceInput{
+			ID:           created.ID,
+			Name:         &newName,
+			Repositories: []string{"owner/repo", "owner/repo2"},
+		})
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.Name).Equal("Updated")
+		gt.A(t, updated.GitHubConfig.Repositories).Length(2)
+	})
+
+	t.Run("returns error when GitHub service not configured", func(t *testing.T) {
+		repo := memory.New()
+		ctx := context.Background()
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+
+		uc := usecase.NewSourceUseCase(repo, nil, nil, nil)
+
+		_, err := uc.UpdateGitHubSource(ctx, wsID, usecase.UpdateGitHubSourceInput{
+			ID: "some-id",
+		})
+		gt.Error(t, err)
+		gt.True(t, errors.Is(err, usecase.ErrGitHubNotConfigured))
+	})
+}
+
+func TestValidateGitHubRepo(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns invalid when GitHub service not configured", func(t *testing.T) {
+		uc := usecase.NewSourceUseCase(memory.New(), nil, nil, nil)
+		ctx := context.Background()
+
+		result, err := uc.ValidateGitHubRepo(ctx, "owner/repo")
+		gt.NoError(t, err).Required()
+		gt.Value(t, result.Valid).Equal(false)
+		gt.String(t, result.ErrorMessage).Contains("not configured")
+	})
+
+	t.Run("returns invalid for bad repo format", func(t *testing.T) {
+		githubSvc := &sourceTestGitHubService{}
+		uc := usecase.NewSourceUseCase(memory.New(), nil, nil, githubSvc)
+		ctx := context.Background()
+
+		result, err := uc.ValidateGitHubRepo(ctx, "not-valid")
+		gt.NoError(t, err).Required()
+		gt.Value(t, result.Valid).Equal(false)
+		gt.String(t, result.ErrorMessage).Contains("invalid")
+	})
+
+	t.Run("returns valid result from GitHub service", func(t *testing.T) {
+		githubSvc := &sourceTestGitHubService{
+			validateFn: func(ctx context.Context, owner, repo string) (*github.RepositoryValidation, error) {
+				return &github.RepositoryValidation{
+					Valid:                true,
+					Owner:                owner,
+					Repo:                 repo,
+					FullName:             owner + "/" + repo,
+					Description:          "Test repo",
+					IsPrivate:            false,
+					PullRequestCount:     10,
+					IssueCount:           5,
+					CanFetchPullRequests: true,
+					CanFetchIssues:       true,
+				}, nil
+			},
+		}
+		uc := usecase.NewSourceUseCase(memory.New(), nil, nil, githubSvc)
+		ctx := context.Background()
+
+		result, err := uc.ValidateGitHubRepo(ctx, "secmon-lab/hecatoncheires")
+		gt.NoError(t, err).Required()
+		gt.Value(t, result.Valid).Equal(true)
+		gt.Value(t, result.Owner).Equal("secmon-lab")
+		gt.Value(t, result.Repo).Equal("hecatoncheires")
+		gt.Value(t, result.PullRequestCount).Equal(10)
+		gt.Value(t, result.IssueCount).Equal(5)
+	})
+}
+
+// sourceTestGitHubService is a minimal mock for GitHub service in source tests
+type sourceTestGitHubService struct {
+	validateFn func(ctx context.Context, owner, repo string) (*github.RepositoryValidation, error)
+}
+
+func (s *sourceTestGitHubService) FetchRecentPullRequests(ctx context.Context, owner, repo string, since time.Time) iter.Seq2[*github.PullRequest, error] {
+	return func(yield func(*github.PullRequest, error) bool) {}
+}
+
+func (s *sourceTestGitHubService) FetchRecentIssues(ctx context.Context, owner, repo string, since time.Time) iter.Seq2[*github.Issue, error] {
+	return func(yield func(*github.Issue, error) bool) {}
+}
+
+func (s *sourceTestGitHubService) FetchUpdatedIssueComments(ctx context.Context, owner, repo string, since time.Time, excludeNumbers map[int]struct{}) iter.Seq2[*github.IssueWithComments, error] {
+	return func(yield func(*github.IssueWithComments, error) bool) {}
+}
+
+func (s *sourceTestGitHubService) ValidateRepository(ctx context.Context, owner, repo string) (*github.RepositoryValidation, error) {
+	if s.validateFn != nil {
+		return s.validateFn(ctx, owner, repo)
+	}
+	return &github.RepositoryValidation{Valid: true, Owner: owner, Repo: repo, FullName: owner + "/" + repo}, nil
 }

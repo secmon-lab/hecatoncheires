@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
@@ -31,6 +32,14 @@ func (g *Gemini) Flags() []cli.Flag {
 			Sources:     cli.EnvVars("HECATONCHEIRES_GEMINI_LOCATION"),
 			Destination: &g.location,
 		},
+	}
+}
+
+// LogAttrs returns log attributes for the Gemini configuration
+func (g *Gemini) LogAttrs() []slog.Attr {
+	return []slog.Attr{
+		slog.String("project_id", g.projectID),
+		slog.String("location", g.location),
 	}
 }
 

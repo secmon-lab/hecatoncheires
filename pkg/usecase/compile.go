@@ -12,6 +12,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	slackmodel "github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
+	githubsvc "github.com/secmon-lab/hecatoncheires/pkg/service/github"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/knowledge"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
@@ -27,6 +28,7 @@ type CompileUseCase struct {
 	notion            notion.Service
 	knowledgeService  knowledge.Service
 	slackService      slack.Service
+	githubService     githubsvc.Service
 	baseURL           string
 }
 
@@ -37,6 +39,7 @@ func NewCompileUseCase(
 	notionSvc notion.Service,
 	knowledgeSvc knowledge.Service,
 	slackSvc slack.Service,
+	githubSvc githubsvc.Service,
 	baseURL string,
 ) *CompileUseCase {
 	return &CompileUseCase{
@@ -45,6 +48,7 @@ func NewCompileUseCase(
 		notion:            notionSvc,
 		knowledgeService:  knowledgeSvc,
 		slackService:      slackSvc,
+		githubService:     githubSvc,
 		baseURL:           baseURL,
 	}
 }
@@ -160,6 +164,21 @@ func (uc *CompileUseCase) compileWorkspace(ctx context.Context, entry *model.Wor
 			}
 			wsResult.SourcesProcessed++
 			pagesProcessed, knowledgeCreated, notifications, errors = uc.processSlackSource(ctx, wsID, entry, source, cases, since)
+
+		case model.SourceTypeGitHub:
+			if source.GitHubConfig == nil || len(source.GitHubConfig.Repositories) == 0 {
+				continue
+			}
+			if uc.githubService == nil {
+				logging.Default().Warn("GitHub source found but GitHub App is not configured, skipping",
+					"workspaceID", wsID,
+					"sourceID", source.ID,
+					"sourceName", source.Name,
+				)
+				continue
+			}
+			wsResult.SourcesProcessed++
+			pagesProcessed, knowledgeCreated, notifications, errors = uc.processGitHubSource(ctx, wsID, entry, source, cases, since)
 
 		default:
 			continue
@@ -605,6 +624,314 @@ func buildThreadedMarkdown(messages []*slackmodel.Message, ch model.SlackChannel
 
 		fmt.Fprintf(&sb, "## Message by %s at %s\n%s\n",
 			msg.UserName(), msg.CreatedAt().Format(time.DateTime), msg.Text())
+	}
+
+	return sb.String()
+}
+
+func (uc *CompileUseCase) processGitHubSource(
+	ctx context.Context,
+	wsID string,
+	entry *model.WorkspaceEntry,
+	source *model.Source,
+	cases []*model.Case,
+	since time.Time,
+) (pagesProcessed, knowledgeCreated, notifications, errors int) {
+	logging.Default().Info("Processing GitHub source",
+		"workspaceID", wsID,
+		"sourceID", source.ID,
+		"sourceName", source.Name,
+		"repositories", len(source.GitHubConfig.Repositories),
+	)
+
+	caseMap := make(map[int64]*model.Case, len(cases))
+	for _, c := range cases {
+		caseMap[c.ID] = c
+	}
+
+	for _, repo := range source.GitHubConfig.Repositories {
+		p, k, n, e := uc.processGitHubRepository(ctx, wsID, entry, source, cases, caseMap, repo, since)
+		pagesProcessed += p
+		knowledgeCreated += k
+		notifications += n
+		errors += e
+	}
+
+	return pagesProcessed, knowledgeCreated, notifications, errors
+}
+
+func (uc *CompileUseCase) processGitHubRepository(
+	ctx context.Context,
+	wsID string,
+	entry *model.WorkspaceEntry,
+	source *model.Source,
+	cases []*model.Case,
+	caseMap map[int64]*model.Case,
+	repo model.GitHubRepository,
+	since time.Time,
+) (pagesProcessed, knowledgeCreated, notifications, errors int) {
+	owner := repo.Owner
+	repoName := repo.Repo
+
+	// Track processed numbers to exclude from updated comments query
+	processedNumbers := make(map[int]struct{})
+
+	// Phase 1a: Fetch recently created PRs
+	for pr, fetchErr := range uc.githubService.FetchRecentPullRequests(ctx, owner, repoName, since) {
+		if fetchErr != nil {
+			errutil.Handle(ctx, fetchErr, "failed to fetch GitHub pull requests")
+			errors++
+			break
+		}
+
+		processedNumbers[pr.Number] = struct{}{}
+		pagesProcessed++
+
+		markdown := buildPRMarkdown(pr, owner, repoName)
+		sourceURLs := []string{pr.URL}
+		for _, c := range pr.Comments {
+			sourceURLs = append(sourceURLs, c.URL)
+		}
+
+		p, k, n, e := uc.extractAndSaveKnowledge(ctx, wsID, entry, source, cases, caseMap, markdown, sourceURLs, time.Now())
+		knowledgeCreated += k
+		notifications += n
+		errors += e
+		_ = p
+	}
+
+	// Phase 1b: Fetch recently created Issues
+	for issue, fetchErr := range uc.githubService.FetchRecentIssues(ctx, owner, repoName, since) {
+		if fetchErr != nil {
+			errutil.Handle(ctx, fetchErr, "failed to fetch GitHub issues")
+			errors++
+			break
+		}
+
+		processedNumbers[issue.Number] = struct{}{}
+		pagesProcessed++
+
+		markdown := buildIssueMarkdown(issue, owner, repoName)
+		sourceURLs := []string{issue.URL}
+		for _, c := range issue.Comments {
+			sourceURLs = append(sourceURLs, c.URL)
+		}
+
+		p, k, n, e := uc.extractAndSaveKnowledge(ctx, wsID, entry, source, cases, caseMap, markdown, sourceURLs, time.Now())
+		knowledgeCreated += k
+		notifications += n
+		errors += e
+		_ = p
+	}
+
+	// Phase 2: Fetch issues/PRs with new comments
+	for iwc, fetchErr := range uc.githubService.FetchUpdatedIssueComments(ctx, owner, repoName, since, processedNumbers) {
+		if fetchErr != nil {
+			errutil.Handle(ctx, fetchErr, "failed to fetch updated GitHub comments")
+			errors++
+			break
+		}
+
+		pagesProcessed++
+
+		markdown := buildUpdatedDiscussionMarkdown(iwc, owner, repoName)
+		sourceURLs := []string{iwc.URL}
+		for _, c := range iwc.Comments {
+			sourceURLs = append(sourceURLs, c.URL)
+		}
+
+		p, k, n, e := uc.extractAndSaveKnowledge(ctx, wsID, entry, source, cases, caseMap, markdown, sourceURLs, time.Now())
+		knowledgeCreated += k
+		notifications += n
+		errors += e
+		_ = p
+	}
+
+	return pagesProcessed, knowledgeCreated, notifications, errors
+}
+
+func (uc *CompileUseCase) extractAndSaveKnowledge(
+	ctx context.Context,
+	wsID string,
+	entry *model.WorkspaceEntry,
+	source *model.Source,
+	cases []*model.Case,
+	caseMap map[int64]*model.Case,
+	markdown string,
+	sourceURLs []string,
+	sourcedAt time.Time,
+) (pagesProcessed, knowledgeCreated, notifications, errors int) {
+	sourceData := knowledge.SourceData{
+		SourceID:   source.ID,
+		SourceURLs: sourceURLs,
+		SourcedAt:  sourcedAt,
+		Content:    markdown,
+	}
+
+	input := knowledge.Input{
+		Cases:      cases,
+		SourceData: sourceData,
+		Prompt:     entry.CompilePrompt,
+	}
+
+	results, extractErr := uc.knowledgeService.Extract(ctx, input)
+	if extractErr != nil {
+		errutil.Handle(ctx, extractErr, "failed to extract knowledge from GitHub data")
+		errors++
+		return
+	}
+
+	for _, result := range results {
+		k := &model.Knowledge{
+			CaseID:     result.CaseID,
+			SourceID:   source.ID,
+			SourceURLs: sourceData.SourceURLs,
+			Title:      result.Title,
+			Summary:    result.Summary,
+			Embedding:  result.Embedding,
+			SourcedAt:  sourceData.SourcedAt,
+		}
+
+		created, createErr := uc.repo.Knowledge().Create(ctx, wsID, k)
+		if createErr != nil {
+			errutil.Handle(ctx, createErr, "failed to save knowledge")
+			errors++
+			continue
+		}
+
+		knowledgeCreated++
+
+		if uc.notifySlack(ctx, wsID, created, caseMap) {
+			notifications++
+		}
+	}
+
+	return
+}
+
+// buildPRMarkdown converts a PullRequest to Markdown format
+func buildPRMarkdown(pr *githubsvc.PullRequest, owner, repo string) string {
+	var sb strings.Builder
+
+	fmt.Fprintf(&sb, "# Pull Request: %s\n\n", pr.Title)
+	fmt.Fprintf(&sb, "- **Repository**: %s/%s\n", owner, repo)
+	fmt.Fprintf(&sb, "- **Author**: %s\n", pr.Author)
+	fmt.Fprintf(&sb, "- **State**: %s\n", pr.State)
+	fmt.Fprintf(&sb, "- **Created**: %s\n", pr.CreatedAt.Format(time.DateTime))
+	fmt.Fprintf(&sb, "- **URL**: %s\n", pr.URL)
+	if len(pr.Labels) > 0 {
+		fmt.Fprintf(&sb, "- **Labels**: %s\n", strings.Join(pr.Labels, ", "))
+	}
+
+	sb.WriteString("\n## Description\n\n")
+	if pr.Body != "" {
+		sb.WriteString(pr.Body)
+	} else {
+		sb.WriteString("(no description)")
+	}
+	sb.WriteString("\n")
+
+	if len(pr.Comments) > 0 {
+		fmt.Fprintf(&sb, "\n## Comments (%d comments)\n\n", len(pr.Comments))
+		for i, c := range pr.Comments {
+			if i > 0 {
+				sb.WriteString("\n---\n\n")
+			}
+			fmt.Fprintf(&sb, "### Comment by %s at %s\n%s\n", c.Author, c.CreatedAt.Format(time.DateTime), c.Body)
+		}
+	}
+
+	if len(pr.Reviews) > 0 {
+		fmt.Fprintf(&sb, "\n## Reviews (%d reviews)\n\n", len(pr.Reviews))
+		for i, r := range pr.Reviews {
+			if i > 0 {
+				sb.WriteString("\n---\n\n")
+			}
+			fmt.Fprintf(&sb, "### Review by %s at %s [%s]\n", r.Author, r.CreatedAt.Format(time.DateTime), r.State)
+			if r.Body != "" {
+				sb.WriteString(r.Body)
+				sb.WriteString("\n")
+			}
+		}
+	}
+
+	return sb.String()
+}
+
+// buildIssueMarkdown converts an Issue to Markdown format
+func buildIssueMarkdown(issue *githubsvc.Issue, owner, repo string) string {
+	var sb strings.Builder
+
+	fmt.Fprintf(&sb, "# Issue: %s\n\n", issue.Title)
+	fmt.Fprintf(&sb, "- **Repository**: %s/%s\n", owner, repo)
+	fmt.Fprintf(&sb, "- **Author**: %s\n", issue.Author)
+	fmt.Fprintf(&sb, "- **State**: %s\n", issue.State)
+	fmt.Fprintf(&sb, "- **Created**: %s\n", issue.CreatedAt.Format(time.DateTime))
+	fmt.Fprintf(&sb, "- **URL**: %s\n", issue.URL)
+	if len(issue.Labels) > 0 {
+		fmt.Fprintf(&sb, "- **Labels**: %s\n", strings.Join(issue.Labels, ", "))
+	}
+
+	sb.WriteString("\n## Description\n\n")
+	if issue.Body != "" {
+		sb.WriteString(issue.Body)
+	} else {
+		sb.WriteString("(no description)")
+	}
+	sb.WriteString("\n")
+
+	if len(issue.Comments) > 0 {
+		fmt.Fprintf(&sb, "\n## Comments (%d comments)\n\n", len(issue.Comments))
+		for i, c := range issue.Comments {
+			if i > 0 {
+				sb.WriteString("\n---\n\n")
+			}
+			fmt.Fprintf(&sb, "### Comment by %s at %s\n%s\n", c.Author, c.CreatedAt.Format(time.DateTime), c.Body)
+		}
+	}
+
+	return sb.String()
+}
+
+// buildUpdatedDiscussionMarkdown converts an IssueWithComments to Markdown format
+func buildUpdatedDiscussionMarkdown(iwc *githubsvc.IssueWithComments, owner, repo string) string {
+	var sb strings.Builder
+
+	kind := "Issue"
+	if iwc.IsPR {
+		kind = "PR"
+	}
+
+	fmt.Fprintf(&sb, "# Updated Discussion on %s: %s\n\n", kind, iwc.Title)
+	fmt.Fprintf(&sb, "- **Repository**: %s/%s\n", owner, repo)
+	fmt.Fprintf(&sb, "- **URL**: %s\n", iwc.URL)
+	fmt.Fprintf(&sb, "- **State**: %s\n", iwc.State)
+	fmt.Fprintf(&sb, "- **Originally Created**: %s\n", iwc.CreatedAt.Format(time.DateTime))
+
+	sb.WriteString("\n## Description\n\n")
+	body := iwc.Body
+	if len(body) > 2000 {
+		body = body[:2000] + "\n\n...(truncated)"
+	}
+	if body != "" {
+		sb.WriteString(body)
+	} else {
+		sb.WriteString("(no description)")
+	}
+	sb.WriteString("\n")
+
+	if len(iwc.Comments) > 0 {
+		fmt.Fprintf(&sb, "\n## Full Comment History (%d comments)\n\n", len(iwc.Comments))
+		for i, c := range iwc.Comments {
+			if i > 0 {
+				sb.WriteString("\n---\n\n")
+			}
+			newMarker := ""
+			if !c.CreatedAt.Before(iwc.Since) {
+				newMarker = " [NEW]"
+			}
+			fmt.Fprintf(&sb, "### Comment by %s at %s%s\n%s\n", c.Author, c.CreatedAt.Format(time.DateTime), newMarker, c.Body)
+		}
 	}
 
 	return sb.String()

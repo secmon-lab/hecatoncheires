@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -25,6 +26,15 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/urfave/cli/v3"
 )
+
+// logAttrsToArgs converts slog.Attr slice to slog.Logger compatible args
+func logAttrsToArgs(attrs []slog.Attr) []any {
+	args := make([]any, 0, len(attrs)*2)
+	for _, a := range attrs {
+		args = append(args, a.Key, a.Value.Any())
+	}
+	return args
+}
 
 // graphqlErrorStatusMiddleware wraps the GraphQL handler to return HTTP 500 when errors occur
 func graphqlErrorStatusMiddleware(next http.Handler) http.Handler {
@@ -80,6 +90,7 @@ func cmdServe() *cli.Command {
 	var repoCfg config.Repository
 	var slackCfg config.Slack
 	var geminiCfg config.Gemini
+	var githubCfg config.GitHub
 
 	flags := []cli.Flag{
 		&cli.StringFlag{
@@ -122,6 +133,7 @@ func cmdServe() *cli.Command {
 	flags = append(flags, repoCfg.Flags()...)
 	flags = append(flags, slackCfg.Flags()...)
 	flags = append(flags, geminiCfg.Flags()...)
+	flags = append(flags, githubCfg.Flags()...)
 
 	return &cli.Command{
 		Name:    "serve",
@@ -160,7 +172,7 @@ func cmdServe() *cli.Command {
 			if slackCfg.IsNoAuthMode() {
 				logging.Default().Warn("Running in no-auth mode (development only)", "user_id", noAuthUID)
 			} else if slackCfg.IsConfigured() {
-				logging.Default().Info("Slack authentication enabled")
+				logging.Default().Info("Slack authentication enabled", logAttrsToArgs(slackCfg.LogAttrs())...)
 			}
 
 			// Initialize use cases with configuration and auth
@@ -202,9 +214,21 @@ func cmdServe() *cli.Command {
 			}
 			if llmClient != nil {
 				ucOpts = append(ucOpts, usecase.WithLLMClient(llmClient))
-				logging.Default().Info("Gemini LLM client enabled for AI agent")
+				logging.Default().Info("Gemini LLM client enabled for AI agent", logAttrsToArgs(geminiCfg.LogAttrs())...)
 			} else {
 				logging.Default().Info("Gemini not configured, AI agent features will be disabled")
+			}
+
+			// Initialize GitHub service if configured
+			githubSvc, err := githubCfg.Configure()
+			if err != nil {
+				return goerr.Wrap(err, "failed to initialize GitHub service")
+			}
+			if githubSvc != nil {
+				ucOpts = append(ucOpts, usecase.WithGitHubService(githubSvc))
+				logging.Default().Info("GitHub service enabled", logAttrsToArgs(githubCfg.LogAttrs())...)
+			} else {
+				logging.Default().Info("GitHub App not configured, GitHub Source features will be disabled")
 			}
 
 			uc := usecase.New(repo, registry, ucOpts...)

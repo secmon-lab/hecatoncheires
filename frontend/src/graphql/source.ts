@@ -30,11 +30,22 @@ const SLACK_CONFIG_FIELDS = gql`
   }
 `
 
+// Fragment for GitHub config
+const GITHUB_CONFIG_FIELDS = gql`
+  fragment GitHubConfigFields on GitHubConfig {
+    repositories {
+      owner
+      repo
+    }
+  }
+`
+
 // Fragment for full source data
 const SOURCE_FIELDS = gql`
   ${NOTION_DB_CONFIG_FIELDS}
   ${NOTION_PAGE_CONFIG_FIELDS}
   ${SLACK_CONFIG_FIELDS}
+  ${GITHUB_CONFIG_FIELDS}
   fragment SourceFields on Source {
     id
     name
@@ -50,6 +61,9 @@ const SOURCE_FIELDS = gql`
       }
       ... on SlackConfig {
         ...SlackConfigFields
+      }
+      ... on GitHubConfig {
+        ...GitHubConfigFields
       }
     }
     createdAt
@@ -153,6 +167,35 @@ export const GET_SLACK_JOINED_CHANNELS = gql`
     slackJoinedChannels {
       id
       name
+    }
+  }
+`
+
+export const UPDATE_GITHUB_SOURCE = gql`
+  ${SOURCE_FIELDS}
+  mutation UpdateGitHubSource($workspaceId: String!, $input: UpdateGitHubSourceInput!) {
+    updateGitHubSource(workspaceId: $workspaceId, input: $input) {
+      ...SourceFields
+    }
+  }
+`
+
+export const CREATE_GITHUB_SOURCE = gql`
+  ${SOURCE_FIELDS}
+  mutation CreateGitHubSource($workspaceId: String!, $input: CreateGitHubSourceInput!) {
+    createGitHubSource(workspaceId: $workspaceId, input: $input) {
+      ...SourceFields
+    }
+  }
+`
+
+export const VALIDATE_GITHUB_REPO = gql`
+  query ValidateGitHubRepo($workspaceId: String!, $repository: String!) {
+    validateGitHubRepo(workspaceId: $workspaceId, repository: $repository) {
+      valid
+      owner
+      repo
+      errorMessage
     }
   }
 `

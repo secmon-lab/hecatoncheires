@@ -6,23 +6,29 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/service/github"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 )
 
+// ErrGitHubNotConfigured is returned when GitHub App is not configured
+var ErrGitHubNotConfigured = goerr.New("GitHub App is not configured")
+
 // SourceUseCase handles source-related business logic
 type SourceUseCase struct {
-	repo         interfaces.Repository
-	notion       notion.Service
-	slackService slack.Service
+	repo          interfaces.Repository
+	notion        notion.Service
+	slackService  slack.Service
+	githubService github.Service
 }
 
 // NewSourceUseCase creates a new SourceUseCase instance
-func NewSourceUseCase(repo interfaces.Repository, notionService notion.Service, slackService slack.Service) *SourceUseCase {
+func NewSourceUseCase(repo interfaces.Repository, notionService notion.Service, slackService slack.Service, githubService github.Service) *SourceUseCase {
 	return &SourceUseCase{
-		repo:         repo,
-		notion:       notionService,
-		slackService: slackService,
+		repo:          repo,
+		notion:        notionService,
+		slackService:  slackService,
+		githubService: githubService,
 	}
 }
 
@@ -470,4 +476,179 @@ func (uc *SourceUseCase) GetSlackChannelNames(ctx context.Context, ids []string)
 	}
 
 	return uc.slackService.GetChannelNames(ctx, ids)
+}
+
+// CreateGitHubSourceInput represents input for creating a GitHub source
+type CreateGitHubSourceInput struct {
+	Name         string
+	Description  string
+	Repositories []string // "owner/repo" or GitHub URL format
+	Enabled      bool
+}
+
+// CreateGitHubSource creates a new GitHub source
+func (uc *SourceUseCase) CreateGitHubSource(ctx context.Context, workspaceID string, input CreateGitHubSourceInput) (*model.Source, error) {
+	if uc.githubService == nil {
+		return nil, ErrGitHubNotConfigured
+	}
+
+	if len(input.Repositories) == 0 {
+		return nil, goerr.New("at least one repository is required")
+	}
+
+	repos, err := parseGitHubRepositories(input.Repositories)
+	if err != nil {
+		return nil, err
+	}
+
+	name := input.Name
+	if name == "" {
+		name = "GitHub Source"
+	}
+
+	source := &model.Source{
+		Name:        name,
+		SourceType:  model.SourceTypeGitHub,
+		Description: input.Description,
+		Enabled:     input.Enabled,
+		GitHubConfig: &model.GitHubConfig{
+			Repositories: repos,
+		},
+	}
+
+	created, err := uc.repo.Source().Create(ctx, workspaceID, source)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to create source")
+	}
+
+	return created, nil
+}
+
+// UpdateGitHubSourceInput represents input for updating a GitHub source
+type UpdateGitHubSourceInput struct {
+	ID           model.SourceID
+	Name         *string
+	Description  *string
+	Repositories []string // "owner/repo" or GitHub URL format; nil means no change
+	Enabled      *bool
+}
+
+// UpdateGitHubSource updates a GitHub source
+func (uc *SourceUseCase) UpdateGitHubSource(ctx context.Context, workspaceID string, input UpdateGitHubSourceInput) (*model.Source, error) {
+	if uc.githubService == nil {
+		return nil, ErrGitHubNotConfigured
+	}
+
+	if input.ID == "" {
+		return nil, goerr.New("source ID is required")
+	}
+
+	existing, err := uc.repo.Source().Get(ctx, workspaceID, input.ID)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to get source")
+	}
+
+	if existing.SourceType != model.SourceTypeGitHub {
+		return nil, goerr.New("source is not a GitHub source", goerr.V("sourceType", existing.SourceType))
+	}
+
+	if input.Name != nil {
+		existing.Name = *input.Name
+	}
+	if input.Description != nil {
+		existing.Description = *input.Description
+	}
+	if input.Enabled != nil {
+		existing.Enabled = *input.Enabled
+	}
+
+	if input.Repositories != nil {
+		repos, err := parseGitHubRepositories(input.Repositories)
+		if err != nil {
+			return nil, err
+		}
+		existing.GitHubConfig = &model.GitHubConfig{
+			Repositories: repos,
+		}
+	}
+
+	updated, err := uc.repo.Source().Update(ctx, workspaceID, existing)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to update source")
+	}
+
+	return updated, nil
+}
+
+// GitHubRepoValidationResult represents the result of GitHub repository validation
+type GitHubRepoValidationResult struct {
+	Valid                bool
+	Owner                string
+	Repo                 string
+	FullName             string
+	Description          string
+	IsPrivate            bool
+	PullRequestCount     int
+	IssueCount           int
+	CanFetchPullRequests bool
+	CanFetchIssues       bool
+	ErrorMessage         string
+}
+
+// ValidateGitHubRepo validates a GitHub repository and returns metadata
+func (uc *SourceUseCase) ValidateGitHubRepo(ctx context.Context, repository string) (*GitHubRepoValidationResult, error) {
+	if uc.githubService == nil {
+		return &GitHubRepoValidationResult{
+			Valid:        false,
+			ErrorMessage: "GitHub App is not configured",
+		}, nil
+	}
+
+	owner, repo, err := model.ParseGitHubRepo(repository)
+	if err != nil {
+		return &GitHubRepoValidationResult{
+			Valid:        false,
+			ErrorMessage: "invalid repository format: use 'owner/repo' or GitHub URL",
+		}, nil
+	}
+
+	validation, err := uc.githubService.ValidateRepository(ctx, owner, repo)
+	if err != nil {
+		return &GitHubRepoValidationResult{
+			Valid:        false,
+			Owner:        owner,
+			Repo:         repo,
+			ErrorMessage: err.Error(),
+		}, nil
+	}
+
+	return &GitHubRepoValidationResult{
+		Valid:                validation.Valid,
+		Owner:                validation.Owner,
+		Repo:                 validation.Repo,
+		FullName:             validation.FullName,
+		Description:          validation.Description,
+		IsPrivate:            validation.IsPrivate,
+		PullRequestCount:     validation.PullRequestCount,
+		IssueCount:           validation.IssueCount,
+		CanFetchPullRequests: validation.CanFetchPullRequests,
+		CanFetchIssues:       validation.CanFetchIssues,
+		ErrorMessage:         validation.ErrorMessage,
+	}, nil
+}
+
+func parseGitHubRepositories(inputs []string) ([]model.GitHubRepository, error) {
+	repos := make([]model.GitHubRepository, 0, len(inputs))
+	for _, input := range inputs {
+		owner, repo, err := model.ParseGitHubRepo(input)
+		if err != nil {
+			return nil, goerr.Wrap(err, "invalid repository",
+				goerr.V("input", input))
+		}
+		repos = append(repos, model.GitHubRepository{
+			Owner: owner,
+			Repo:  repo,
+		})
+	}
+	return repos, nil
 }

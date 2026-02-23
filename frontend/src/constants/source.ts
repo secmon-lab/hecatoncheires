@@ -4,6 +4,7 @@ export const SOURCE_TYPE = {
   NOTION_DB: 'NOTION_DB',
   NOTION_PAGE: 'NOTION_PAGE',
   SLACK: 'Slack',
+  GITHUB: 'GITHUB',
 } as const
 
 export type SourceType = (typeof SOURCE_TYPE)[keyof typeof SOURCE_TYPE]
@@ -15,6 +16,7 @@ export const FORM_STEP = {
   NOTION_DB_FORM: 'notion-db-form',
   NOTION_PAGE_FORM: 'notion-page-form',
   SLACK_FORM: 'slack-form',
+  GITHUB_FORM: 'github-form',
 } as const
 
 export type FormStep = (typeof FORM_STEP)[keyof typeof FORM_STEP]

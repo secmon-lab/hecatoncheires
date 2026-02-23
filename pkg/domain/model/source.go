@@ -20,7 +20,11 @@ const (
 	SourceTypeNotionDB   SourceType = "notion_db"
 	SourceTypeNotionPage SourceType = "notion_page"
 	SourceTypeSlack      SourceType = "slack"
+	SourceTypeGitHub     SourceType = "github"
 )
+
+// ErrInvalidGitHubRepo is returned when the input cannot be parsed as a GitHub repository
+var ErrInvalidGitHubRepo = goerr.New("invalid GitHub repository")
 
 // SourceID is a UUID-based identifier for Source
 type SourceID string
@@ -40,6 +44,7 @@ type Source struct {
 	NotionDBConfig   *NotionDBConfig
 	NotionPageConfig *NotionPageConfig
 	SlackConfig      *SlackConfig
+	GitHubConfig     *GitHubConfig
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 }
@@ -151,4 +156,49 @@ type SlackConfig struct {
 type SlackChannel struct {
 	ID   string // Slack Channel ID (e.g., C01234567)
 	Name string // Fallback name for display when API is unavailable
+}
+
+// GitHubConfig holds GitHub specific configuration
+type GitHubConfig struct {
+	Repositories []GitHubRepository
+}
+
+// GitHubRepository represents a GitHub repository reference
+type GitHubRepository struct {
+	Owner string
+	Repo  string
+}
+
+// githubURLPattern matches GitHub repository URLs
+var githubURLPattern = regexp.MustCompile(`^https?://github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$`)
+
+// githubRepoPattern matches owner/repo format
+var githubRepoPattern = regexp.MustCompile(`^([a-zA-Z0-9\-_.]+)/([a-zA-Z0-9\-_.]+)$`)
+
+// ParseGitHubRepo extracts owner and repo from either "owner/repo" or a GitHub URL.
+// Accepted formats:
+//   - "owner/repo"
+//   - "https://github.com/owner/repo"
+//   - "https://github.com/owner/repo.git"
+func ParseGitHubRepo(input string) (owner, repo string, err error) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return "", "", ErrInvalidGitHubRepo
+	}
+
+	// Try URL format first
+	if strings.HasPrefix(input, "http://") || strings.HasPrefix(input, "https://") {
+		matches := githubURLPattern.FindStringSubmatch(input)
+		if matches == nil {
+			return "", "", ErrInvalidGitHubRepo
+		}
+		return matches[1], matches[2], nil
+	}
+
+	// Try owner/repo format
+	matches := githubRepoPattern.FindStringSubmatch(input)
+	if matches == nil {
+		return "", "", ErrInvalidGitHubRepo
+	}
+	return matches[1], matches[2], nil
 }
