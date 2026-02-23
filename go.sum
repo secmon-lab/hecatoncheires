@@ -212,8 +212,8 @@ github.com/lestrrat-go/option v1.0.1 h1:oAzP2fvZGQKWkvHa1/SAcFolBEca1oN+mQ7eooNB
 github.com/lestrrat-go/option v1.0.1/go.mod h1:5ZHFbivi4xwXxhxY9XHDe2FHo6/Z7WWmtT7T5nBBp3I=
 github.com/m-mizutani/clog v0.1.0 h1:VRMFLVYodCbkdwfjBzJFqTmkz5j6kNLoYtXs249cI3A=
 github.com/m-mizutani/clog v0.1.0/go.mod h1:f3mNeMaSkE0SIQG/dR1xDu2hAfbptqdvI5CIRbzG34A=
-github.com/m-mizutani/fireconf v0.2.0 h1:JNyfbJfHyZNRbJdVX/+vAqmYv2gf1TZLoPJH+qwDTPg=
-github.com/m-mizutani/fireconf v0.2.0/go.mod h1:6BC0xnXSSZQNAjLy2PC0QttFWjL7DCTxOHxTFrWS1ew=
+github.com/m-mizutani/fireconf v0.2.1 h1:MTT2y2wnbYsBycYaMFFDs7ZU0o3Qe9uT/7KdDhbZmzc=
+github.com/m-mizutani/fireconf v0.2.1/go.mod h1:6BC0xnXSSZQNAjLy2PC0QttFWjL7DCTxOHxTFrWS1ew=
 github.com/m-mizutani/goerr/v2 v2.0.0 h1:kbsQ1EuVsd/cd/bzmt4C9+Rau/s3ATPW4wjEgx/PAOs=
 github.com/m-mizutani/goerr/v2 v2.0.0/go.mod h1:Ax59zs+j3NmzB/mPLc1w3g4yIutdrwcY7cB6IRO18EU=
 github.com/m-mizutani/gollem v0.21.0 h1:tHTiBarZdcwRiuiWCTrnQKk7BC2JUqWsr3nDYvXLvuc=
