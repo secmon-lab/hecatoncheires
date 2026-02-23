@@ -72,7 +72,7 @@ The `serve` command (alias: `s`) starts the HTTP server.
 | `--base-url` | `HECATONCHEIRES_BASE_URL` | - | Yes\* | Application base URL (e.g., `https://your-domain.com`). No trailing slash |
 | `--graphiql` | `HECATONCHEIRES_GRAPHIQL` | `true` | No | Enable GraphiQL playground at `/graphiql` |
 | `--config` | `HECATONCHEIRES_CONFIG` | `./config.toml` | No | Path to TOML configuration file |
-| `--firestore-project-id` | `HECATONCHEIRES_FIRESTORE_PROJECT_ID` | - | **Yes** | Google Cloud Firestore project ID |
+| `--firestore-project-id` | `HECATONCHEIRES_FIRESTORE_PROJECT_ID` | - | Yes | Google Cloud Firestore project ID |
 | `--firestore-database-id` | `HECATONCHEIRES_FIRESTORE_DATABASE_ID` | `(default)` | No | Firestore database ID |
 | `--notion-api-token` | `HECATONCHEIRES_NOTION_API_TOKEN` | - | No | Notion API token for Source integration |
 | `--no-auth` | `HECATONCHEIRES_NO_AUTH` | - | No | Slack user ID for no-auth mode (development only) |
@@ -97,7 +97,7 @@ The `compile` command (alias: `c`) extracts knowledge from external sources usin
 
 | Flag | Env Var | Default | Required | Description |
 |------|---------|---------|----------|-------------|
-| `--notion-api-token` | `HECATONCHEIRES_NOTION_API_TOKEN` | - | **Yes** | Notion API token for Source integration |
+| `--notion-api-token` | `HECATONCHEIRES_NOTION_API_TOKEN` | - | Yes | Notion API token for Source integration |
 | `--since` | `HECATONCHEIRES_COMPILE_SINCE` | 24h ago | No | Process pages updated since this time (RFC3339 format) |
 | `--workspace` | `HECATONCHEIRES_COMPILE_WORKSPACE` | - | No | Target workspace ID (if empty, process all workspaces) |
 | `--base-url` | `HECATONCHEIRES_BASE_URL` | - | No | Base URL for the application |
@@ -112,7 +112,7 @@ The `migrate` command (alias: `m`) manages Firestore indexes.
 
 | Flag | Env Var | Default | Required | Description |
 |------|---------|---------|----------|-------------|
-| `--firestore-project-id` | `HECATONCHEIRES_FIRESTORE_PROJECT_ID` | - | **Yes** | Google Cloud Firestore project ID |
+| `--firestore-project-id` | `HECATONCHEIRES_FIRESTORE_PROJECT_ID` | - | Yes | Google Cloud Firestore project ID |
 | `--firestore-database-id` | `HECATONCHEIRES_FIRESTORE_DATABASE_ID` | `(default)` | No | Firestore database ID |
 | `--dry-run` | - | `false` | No | Preview migration changes without applying |
 
