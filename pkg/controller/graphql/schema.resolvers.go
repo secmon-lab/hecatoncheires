@@ -380,6 +380,16 @@ func (r *mutationResolver) CreateSlackSource(ctx context.Context, workspaceID st
 	return toGraphQLSource(created)
 }
 
+// CreateGitHubSource is the resolver for the createGitHubSource field.
+func (r *mutationResolver) CreateGitHubSource(ctx context.Context, workspaceID string, input graphql1.CreateGitHubSourceInput) (*graphql1.Source, error) {
+	created, err := r.UseCases.Source.CreateGitHubSource(ctx, workspaceID, toUseCaseCreateGitHubSourceInput(input))
+	if err != nil {
+		return nil, err
+	}
+
+	return toGraphQLSource(created)
+}
+
 // UpdateSource is the resolver for the updateSource field.
 func (r *mutationResolver) UpdateSource(ctx context.Context, workspaceID string, input graphql1.UpdateSourceInput) (*graphql1.Source, error) {
 	updated, err := r.UseCases.Source.UpdateSource(ctx, workspaceID, toUseCaseUpdateSourceInput(input))
@@ -393,6 +403,16 @@ func (r *mutationResolver) UpdateSource(ctx context.Context, workspaceID string,
 // UpdateSlackSource is the resolver for the updateSlackSource field.
 func (r *mutationResolver) UpdateSlackSource(ctx context.Context, workspaceID string, input graphql1.UpdateSlackSourceInput) (*graphql1.Source, error) {
 	updated, err := r.UseCases.Source.UpdateSlackSource(ctx, workspaceID, toUseCaseUpdateSlackSourceInput(input))
+	if err != nil {
+		return nil, err
+	}
+
+	return toGraphQLSource(updated)
+}
+
+// UpdateGitHubSource is the resolver for the updateGitHubSource field.
+func (r *mutationResolver) UpdateGitHubSource(ctx context.Context, workspaceID string, input graphql1.UpdateGitHubSourceInput) (*graphql1.Source, error) {
+	updated, err := r.UseCases.Source.UpdateGitHubSource(ctx, workspaceID, toUseCaseUpdateGitHubSourceInput(input))
 	if err != nil {
 		return nil, err
 	}
@@ -682,6 +702,46 @@ func (r *queryResolver) Source(ctx context.Context, workspaceID string, id strin
 	}
 
 	return toGraphQLSource(source)
+}
+
+// ValidateGitHubRepo is the resolver for the validateGitHubRepo field.
+func (r *queryResolver) ValidateGitHubRepo(ctx context.Context, workspaceID string, repository string) (*graphql1.GitHubRepoValidationResult, error) {
+	result, err := r.UseCases.Source.ValidateGitHubRepo(ctx, repository)
+	if err != nil {
+		return nil, err
+	}
+
+	gql := &graphql1.GitHubRepoValidationResult{
+		Valid:                result.Valid,
+		CanFetchPullRequests: result.CanFetchPullRequests,
+		CanFetchIssues:       result.CanFetchIssues,
+	}
+	if result.Owner != "" {
+		gql.Owner = &result.Owner
+	}
+	if result.Repo != "" {
+		gql.Repo = &result.Repo
+	}
+	if result.FullName != "" {
+		gql.FullName = &result.FullName
+	}
+	if result.Description != "" {
+		gql.Description = &result.Description
+	}
+	if result.IsPrivate {
+		gql.IsPrivate = &result.IsPrivate
+	}
+	if result.PullRequestCount > 0 {
+		gql.PullRequestCount = &result.PullRequestCount
+	}
+	if result.IssueCount > 0 {
+		gql.IssueCount = &result.IssueCount
+	}
+	if result.ErrorMessage != "" {
+		gql.ErrorMessage = &result.ErrorMessage
+	}
+
+	return gql, nil
 }
 
 // Knowledge is the resolver for the knowledge field.

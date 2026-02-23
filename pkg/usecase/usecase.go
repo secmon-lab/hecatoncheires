@@ -4,6 +4,7 @@ import (
 	"github.com/m-mizutani/gollem"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/service/github"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/knowledge"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
@@ -14,6 +15,7 @@ type UseCases struct {
 	workspaceRegistry *model.WorkspaceRegistry
 	notion            notion.Service
 	slackService      slack.Service
+	githubService     github.Service
 	knowledgeService  knowledge.Service
 	llmClient         gollem.LLMClient
 	baseURL           string
@@ -59,6 +61,12 @@ func WithBaseURL(url string) Option {
 	}
 }
 
+func WithGitHubService(svc github.Service) Option {
+	return func(uc *UseCases) {
+		uc.githubService = svc
+	}
+}
+
 func WithLLMClient(client gollem.LLMClient) Option {
 	return func(uc *UseCases) {
 		uc.llmClient = client
@@ -77,8 +85,8 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 
 	uc.Case = NewCaseUseCase(repo, registry, uc.slackService, uc.baseURL)
 	uc.Action = NewActionUseCase(repo, uc.slackService, uc.baseURL)
-	uc.Source = NewSourceUseCase(repo, uc.notion, uc.slackService)
-	uc.Compile = NewCompileUseCase(repo, registry, uc.notion, uc.knowledgeService, uc.slackService, uc.baseURL)
+	uc.Source = NewSourceUseCase(repo, uc.notion, uc.slackService, uc.githubService)
+	uc.Compile = NewCompileUseCase(repo, registry, uc.notion, uc.knowledgeService, uc.slackService, uc.githubService, uc.baseURL)
 
 	// Create AgentUseCase and AssistUseCase only if LLM client and Slack service are both available
 	if uc.llmClient != nil && uc.slackService != nil {

@@ -395,6 +395,108 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		gt.Array(t, retrieved.SlackConfig.Channels).Length(0)
 	})
 
+	t.Run("Create GitHub source with repositories", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		source := &model.Source{
+			Name:        "My GitHub Source",
+			SourceType:  model.SourceTypeGitHub,
+			Description: "Test github source",
+			Enabled:     true,
+			GitHubConfig: &model.GitHubConfig{
+				Repositories: []model.GitHubRepository{
+					{Owner: "secmon-lab", Repo: "hecatoncheires"},
+					{Owner: "octocat", Repo: "hello-world"},
+				},
+			},
+		}
+
+		created, err := repo.Source().Create(ctx, wsID, source)
+		gt.NoError(t, err).Required()
+
+		gt.String(t, string(created.ID)).NotEqual("")
+		gt.Value(t, created.Name).Equal(source.Name)
+		gt.Value(t, created.SourceType).Equal(model.SourceTypeGitHub)
+		gt.Value(t, created.GitHubConfig).NotNil().Required()
+		gt.Array(t, created.GitHubConfig.Repositories).Length(2)
+		gt.Value(t, created.GitHubConfig.Repositories[0].Owner).Equal("secmon-lab")
+		gt.Value(t, created.GitHubConfig.Repositories[0].Repo).Equal("hecatoncheires")
+		gt.Value(t, created.GitHubConfig.Repositories[1].Owner).Equal("octocat")
+		gt.Value(t, created.GitHubConfig.Repositories[1].Repo).Equal("hello-world")
+	})
+
+	t.Run("Get retrieves GitHub source with repositories", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		source := &model.Source{
+			Name:        "GitHub Source for Get",
+			SourceType:  model.SourceTypeGitHub,
+			Description: "For testing Get",
+			Enabled:     true,
+			GitHubConfig: &model.GitHubConfig{
+				Repositories: []model.GitHubRepository{
+					{Owner: "test-org", Repo: "test-repo"},
+				},
+			},
+		}
+
+		created, err := repo.Source().Create(ctx, wsID, source)
+		gt.NoError(t, err).Required()
+
+		retrieved, err := repo.Source().Get(ctx, wsID, created.ID)
+		gt.NoError(t, err).Required()
+
+		gt.Value(t, retrieved.GitHubConfig).NotNil().Required()
+		gt.Array(t, retrieved.GitHubConfig.Repositories).Length(1)
+		gt.Value(t, retrieved.GitHubConfig.Repositories[0].Owner).Equal("test-org")
+		gt.Value(t, retrieved.GitHubConfig.Repositories[0].Repo).Equal("test-repo")
+	})
+
+	t.Run("Update GitHub source repositories", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		created, err := repo.Source().Create(ctx, wsID, &model.Source{
+			Name:        "GitHub Source for Update",
+			SourceType:  model.SourceTypeGitHub,
+			Description: "Original",
+			Enabled:     true,
+			GitHubConfig: &model.GitHubConfig{
+				Repositories: []model.GitHubRepository{
+					{Owner: "original-org", Repo: "original-repo"},
+				},
+			},
+		})
+		gt.NoError(t, err).Required()
+
+		time.Sleep(10 * time.Millisecond)
+
+		updated, err := repo.Source().Update(ctx, wsID, &model.Source{
+			ID:          created.ID,
+			Name:        "Updated GitHub Source",
+			SourceType:  model.SourceTypeGitHub,
+			Description: "Updated",
+			Enabled:     false,
+			GitHubConfig: &model.GitHubConfig{
+				Repositories: []model.GitHubRepository{
+					{Owner: "new-org", Repo: "new-repo-1"},
+					{Owner: "new-org", Repo: "new-repo-2"},
+				},
+			},
+		})
+		gt.NoError(t, err).Required()
+
+		gt.Value(t, updated.GitHubConfig).NotNil().Required()
+		gt.Array(t, updated.GitHubConfig.Repositories).Length(2)
+		gt.Value(t, updated.GitHubConfig.Repositories[0].Owner).Equal("new-org")
+		gt.Value(t, updated.GitHubConfig.Repositories[0].Repo).Equal("new-repo-1")
+		gt.Value(t, updated.GitHubConfig.Repositories[1].Owner).Equal("new-org")
+		gt.Value(t, updated.GitHubConfig.Repositories[1].Repo).Equal("new-repo-2")
+		gt.Bool(t, updated.UpdatedAt.After(created.UpdatedAt)).True()
+	})
+
 	t.Run("Create Notion Page source with config", func(t *testing.T) {
 		repo := newRepo(t)
 		ctx := context.Background()

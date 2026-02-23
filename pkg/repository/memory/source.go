@@ -69,6 +69,19 @@ func copySource(source *model.Source) *model.Source {
 		}
 	}
 
+	if source.GitHubConfig != nil {
+		repos := make([]model.GitHubRepository, len(source.GitHubConfig.Repositories))
+		for i, r := range source.GitHubConfig.Repositories {
+			repos[i] = model.GitHubRepository{
+				Owner: r.Owner,
+				Repo:  r.Repo,
+			}
+		}
+		copied.GitHubConfig = &model.GitHubConfig{
+			Repositories: repos,
+		}
+	}
+
 	return copied
 }
 

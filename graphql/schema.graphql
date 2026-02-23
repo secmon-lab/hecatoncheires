@@ -206,6 +206,7 @@ enum SourceType {
   NOTION_DB
   NOTION_PAGE
   SLACK
+  GITHUB
 }
 
 type Source {
@@ -219,7 +220,7 @@ type Source {
   updatedAt: Time!
 }
 
-union SourceConfig = NotionDBConfig | NotionPageConfig | SlackConfig
+union SourceConfig = NotionDBConfig | NotionPageConfig | SlackConfig | GitHubConfig
 
 type NotionDBConfig {
   databaseID: String!
@@ -242,6 +243,44 @@ type SlackConfig {
 type SlackChannel {
   id: String!
   name: String!
+}
+
+type GitHubConfig {
+  repositories: [GitHubRepository!]!
+}
+
+type GitHubRepository {
+  owner: String!
+  repo: String!
+}
+
+input CreateGitHubSourceInput {
+  name: String
+  description: String
+  repositories: [String!]!
+  enabled: Boolean
+}
+
+input UpdateGitHubSourceInput {
+  id: String!
+  name: String
+  description: String
+  repositories: [String!]
+  enabled: Boolean
+}
+
+type GitHubRepoValidationResult {
+  valid: Boolean!
+  owner: String
+  repo: String
+  fullName: String
+  description: String
+  isPrivate: Boolean
+  pullRequestCount: Int
+  issueCount: Int
+  canFetchPullRequests: Boolean!
+  canFetchIssues: Boolean!
+  errorMessage: String
 }
 
 input CreateNotionDBSourceInput {
@@ -345,6 +384,7 @@ type Query {
   # Sources
   sources(workspaceId: String!): [Source!]!
   source(workspaceId: String!, id: String!): Source
+  validateGitHubRepo(workspaceId: String!, repository: String!): GitHubRepoValidationResult!
 
   # Knowledge
   knowledge(workspaceId: String!, id: String!): Knowledge
@@ -373,8 +413,10 @@ type Mutation {
   createNotionDBSource(workspaceId: String!, input: CreateNotionDBSourceInput!): Source!
   createNotionPageSource(workspaceId: String!, input: CreateNotionPageSourceInput!): Source!
   createSlackSource(workspaceId: String!, input: CreateSlackSourceInput!): Source!
+  createGitHubSource(workspaceId: String!, input: CreateGitHubSourceInput!): Source!
   updateSource(workspaceId: String!, input: UpdateSourceInput!): Source!
   updateSlackSource(workspaceId: String!, input: UpdateSlackSourceInput!): Source!
+  updateGitHubSource(workspaceId: String!, input: UpdateGitHubSourceInput!): Source!
   deleteSource(workspaceId: String!, id: String!): Boolean!
   validateNotionDB(workspaceId: String!, databaseID: String!): NotionDBValidationResult!
   validateNotionPage(workspaceId: String!, pageID: String!): NotionPageValidationResult!

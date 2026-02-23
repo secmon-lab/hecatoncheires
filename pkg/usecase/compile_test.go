@@ -106,6 +106,7 @@ func setupCompileTest(t *testing.T, notionSvc notion.Service, knowledgeSvc knowl
 		notionSvc,
 		knowledgeSvc,
 		slackSvc,
+		nil, // GitHub service
 		"https://example.com",
 	)
 
@@ -322,7 +323,7 @@ func TestCompileUseCase_Compile(t *testing.T) {
 			Workspace: model.Workspace{ID: "ws-2", Name: "Workspace 2"},
 		})
 
-		uc := usecase.NewCompileUseCase(repo, registry, notionSvc, knowledgeSvc, nil, "")
+		uc := usecase.NewCompileUseCase(repo, registry, notionSvc, knowledgeSvc, nil, nil, "")
 		ctx := context.Background()
 
 		result, err := uc.Compile(ctx, usecase.CompileOption{
@@ -1175,5 +1176,142 @@ func TestCompileUseCase_NotionPage(t *testing.T) {
 
 		gt.Array(t, result.WorkspaceResults).Length(1)
 		gt.Value(t, result.WorkspaceResults[0].Errors).Equal(1)
+	})
+}
+
+func TestBuildPRMarkdown(t *testing.T) {
+	t.Parallel()
+
+	t.Run("basic PR with comments and reviews", func(t *testing.T) {
+		pr := &usecase.GitHubPullRequest{
+			Number:    42,
+			Title:     "Add new feature",
+			Body:      "This PR adds a great feature",
+			Author:    "alice",
+			State:     "OPEN",
+			URL:       "https://github.com/owner/repo/pull/42",
+			Labels:    []string{"enhancement", "ready"},
+			CreatedAt: time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC),
+			Comments: []usecase.GitHubComment{
+				{Author: "bob", Body: "Looks good!", CreatedAt: time.Date(2025, 1, 15, 11, 0, 0, 0, time.UTC)},
+			},
+			Reviews: []usecase.GitHubReview{
+				{Author: "carol", Body: "LGTM", State: "APPROVED", CreatedAt: time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)},
+			},
+		}
+
+		md := usecase.BuildPRMarkdown(pr, "owner", "repo")
+
+		gt.Value(t, strings.Contains(md, "# Pull Request: Add new feature")).Equal(true)
+		gt.Value(t, strings.Contains(md, "**Repository**: owner/repo")).Equal(true)
+		gt.Value(t, strings.Contains(md, "**Author**: alice")).Equal(true)
+		gt.Value(t, strings.Contains(md, "**Labels**: enhancement, ready")).Equal(true)
+		gt.Value(t, strings.Contains(md, "This PR adds a great feature")).Equal(true)
+		gt.Value(t, strings.Contains(md, "## Comments (1 comments)")).Equal(true)
+		gt.Value(t, strings.Contains(md, "Comment by bob")).Equal(true)
+		gt.Value(t, strings.Contains(md, "## Reviews (1 reviews)")).Equal(true)
+		gt.Value(t, strings.Contains(md, "Review by carol")).Equal(true)
+		gt.Value(t, strings.Contains(md, "[APPROVED]")).Equal(true)
+	})
+
+	t.Run("PR with no body", func(t *testing.T) {
+		pr := &usecase.GitHubPullRequest{
+			Title:     "Empty PR",
+			Author:    "alice",
+			CreatedAt: time.Now(),
+		}
+
+		md := usecase.BuildPRMarkdown(pr, "owner", "repo")
+		gt.Value(t, strings.Contains(md, "(no description)")).Equal(true)
+	})
+}
+
+func TestBuildIssueMarkdown(t *testing.T) {
+	t.Parallel()
+
+	t.Run("basic issue with comments", func(t *testing.T) {
+		issue := &usecase.GitHubIssue{
+			Number:    10,
+			Title:     "Bug report",
+			Body:      "Something is broken",
+			Author:    "dave",
+			State:     "OPEN",
+			URL:       "https://github.com/owner/repo/issues/10",
+			Labels:    []string{"bug"},
+			CreatedAt: time.Date(2025, 2, 1, 8, 0, 0, 0, time.UTC),
+			Comments: []usecase.GitHubComment{
+				{Author: "eve", Body: "Can reproduce", CreatedAt: time.Date(2025, 2, 1, 9, 0, 0, 0, time.UTC)},
+			},
+		}
+
+		md := usecase.BuildIssueMarkdown(issue, "owner", "repo")
+
+		gt.Value(t, strings.Contains(md, "# Issue: Bug report")).Equal(true)
+		gt.Value(t, strings.Contains(md, "**Author**: dave")).Equal(true)
+		gt.Value(t, strings.Contains(md, "Something is broken")).Equal(true)
+		gt.Value(t, strings.Contains(md, "## Comments (1 comments)")).Equal(true)
+		gt.Value(t, strings.Contains(md, "Comment by eve")).Equal(true)
+	})
+}
+
+func TestBuildUpdatedDiscussionMarkdown(t *testing.T) {
+	t.Parallel()
+
+	since := time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC)
+
+	t.Run("marks new comments with [NEW]", func(t *testing.T) {
+		iwc := &usecase.GitHubIssueWithComments{
+			Number:    5,
+			Title:     "Discussion thread",
+			Body:      "Let's discuss",
+			Author:    "frank",
+			State:     "OPEN",
+			URL:       "https://github.com/owner/repo/issues/5",
+			IsPR:      false,
+			CreatedAt: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+			Since:     since,
+			Comments: []usecase.GitHubComment{
+				{Author: "grace", Body: "Old comment", CreatedAt: time.Date(2025, 2, 15, 0, 0, 0, 0, time.UTC)},
+				{Author: "heidi", Body: "New comment", CreatedAt: time.Date(2025, 3, 5, 0, 0, 0, 0, time.UTC)},
+			},
+		}
+
+		md := usecase.BuildUpdatedDiscussionMarkdown(iwc, "owner", "repo")
+
+		gt.Value(t, strings.Contains(md, "# Updated Discussion on Issue: Discussion thread")).Equal(true)
+		gt.Value(t, strings.Contains(md, "Comment by grace")).Equal(true)
+		gt.Value(t, strings.Contains(md, "[NEW]")).Equal(true)
+		// Old comment should NOT have [NEW]
+		graceIdx := strings.Index(md, "Comment by grace")
+		heidiIdx := strings.Index(md, "Comment by heidi")
+		graceSection := md[graceIdx:heidiIdx]
+		gt.Value(t, strings.Contains(graceSection, "[NEW]")).Equal(false)
+		// New comment should have [NEW]
+		heidiSection := md[heidiIdx:]
+		gt.Value(t, strings.Contains(heidiSection, "[NEW]")).Equal(true)
+	})
+
+	t.Run("PR type shows as PR", func(t *testing.T) {
+		iwc := &usecase.GitHubIssueWithComments{
+			Title: "PR discussion",
+			IsPR:  true,
+			Since: since,
+		}
+
+		md := usecase.BuildUpdatedDiscussionMarkdown(iwc, "owner", "repo")
+		gt.Value(t, strings.Contains(md, "Updated Discussion on PR:")).Equal(true)
+	})
+
+	t.Run("truncates long body", func(t *testing.T) {
+		longBody := strings.Repeat("x", 3000)
+		iwc := &usecase.GitHubIssueWithComments{
+			Title: "Long body",
+			Body:  longBody,
+			Since: since,
+		}
+
+		md := usecase.BuildUpdatedDiscussionMarkdown(iwc, "owner", "repo")
+		gt.Value(t, strings.Contains(md, "...(truncated)")).Equal(true)
+		gt.Value(t, len(md) < 3000).Equal(true)
 	})
 }

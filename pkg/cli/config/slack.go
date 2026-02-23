@@ -67,6 +67,15 @@ func (x Slack) LogValue() slog.Value {
 	)
 }
 
+// LogAttrs returns log attributes for the Slack configuration (secrets hidden)
+func (x *Slack) LogAttrs() []slog.Attr {
+	return []slog.Attr{
+		slog.Bool("oauth_configured", x.clientID != "" && x.clientSecret != ""),
+		slog.Bool("bot_token_set", x.botToken != ""),
+		slog.Bool("signing_secret_set", x.signingSecret != ""),
+	}
+}
+
 // SetNoAuthUID sets the no-auth user ID
 func (x *Slack) SetNoAuthUID(uid string) {
 	x.noAuthUID = uid

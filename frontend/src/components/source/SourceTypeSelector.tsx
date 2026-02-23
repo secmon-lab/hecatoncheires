@@ -1,4 +1,4 @@
-import { Database, FileText, MessageSquare } from 'lucide-react'
+import { Database, FileText, GitBranch, MessageSquare } from 'lucide-react'
 import Modal from '../Modal'
 import Button from '../Button'
 import { SOURCE_TYPE } from '../../constants/source'
@@ -35,6 +35,12 @@ const sourceTypes: SourceTypeOption[] = [
     name: 'Slack Channels',
     description: 'Monitor Slack channels for risk-related discussions and incidents',
     icon: <MessageSquare size={24} />,
+  },
+  {
+    type: SOURCE_TYPE.GITHUB,
+    name: 'GitHub Repositories',
+    description: 'Monitor GitHub repositories for issues, pull requests, and discussions',
+    icon: <GitBranch size={24} />,
   },
 ]
 

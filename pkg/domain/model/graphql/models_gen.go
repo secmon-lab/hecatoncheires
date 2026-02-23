@@ -49,6 +49,13 @@ type CreateCaseInput struct {
 	Fields      []*FieldValueInput `json:"fields,omitempty"`
 }
 
+type CreateGitHubSourceInput struct {
+	Name         *string  `json:"name,omitempty"`
+	Description  *string  `json:"description,omitempty"`
+	Repositories []string `json:"repositories"`
+	Enabled      *bool    `json:"enabled,omitempty"`
+}
+
 type CreateNotionDBSourceInput struct {
 	Name        *string `json:"name,omitempty"`
 	Description *string `json:"description,omitempty"`
@@ -106,6 +113,31 @@ type FieldValue struct {
 type FieldValueInput struct {
 	FieldID string `json:"fieldId"`
 	Value   any    `json:"value"`
+}
+
+type GitHubConfig struct {
+	Repositories []*GitHubRepository `json:"repositories"`
+}
+
+func (GitHubConfig) IsSourceConfig() {}
+
+type GitHubRepoValidationResult struct {
+	Valid                bool    `json:"valid"`
+	Owner                *string `json:"owner,omitempty"`
+	Repo                 *string `json:"repo,omitempty"`
+	FullName             *string `json:"fullName,omitempty"`
+	Description          *string `json:"description,omitempty"`
+	IsPrivate            *bool   `json:"isPrivate,omitempty"`
+	PullRequestCount     *int    `json:"pullRequestCount,omitempty"`
+	IssueCount           *int    `json:"issueCount,omitempty"`
+	CanFetchPullRequests bool    `json:"canFetchPullRequests"`
+	CanFetchIssues       bool    `json:"canFetchIssues"`
+	ErrorMessage         *string `json:"errorMessage,omitempty"`
+}
+
+type GitHubRepository struct {
+	Owner string `json:"owner"`
+	Repo  string `json:"repo"`
 }
 
 type KnowledgeConnection struct {
@@ -234,6 +266,14 @@ type UpdateCaseInput struct {
 	Fields      []*FieldValueInput `json:"fields,omitempty"`
 }
 
+type UpdateGitHubSourceInput struct {
+	ID           string   `json:"id"`
+	Name         *string  `json:"name,omitempty"`
+	Description  *string  `json:"description,omitempty"`
+	Repositories []string `json:"repositories,omitempty"`
+	Enabled      *bool    `json:"enabled,omitempty"`
+}
+
 type UpdateSlackSourceInput struct {
 	ID          string   `json:"id"`
 	Name        *string  `json:"name,omitempty"`
@@ -327,17 +367,19 @@ const (
 	SourceTypeNotionDb   SourceType = "NOTION_DB"
 	SourceTypeNotionPage SourceType = "NOTION_PAGE"
 	SourceTypeSLACk      SourceType = "SLACK"
+	SourceTypeGithub     SourceType = "GITHUB"
 )
 
 var AllSourceType = []SourceType{
 	SourceTypeNotionDb,
 	SourceTypeNotionPage,
 	SourceTypeSLACk,
+	SourceTypeGithub,
 }
 
 func (e SourceType) IsValid() bool {
 	switch e {
-	case SourceTypeNotionDb, SourceTypeNotionPage, SourceTypeSLACk:
+	case SourceTypeNotionDb, SourceTypeNotionPage, SourceTypeSLACk, SourceTypeGithub:
 		return true
 	}
 	return false

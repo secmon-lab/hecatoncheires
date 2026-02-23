@@ -59,6 +59,19 @@ func toGraphQLSource(source *model.Source) (*graphql1.Source, error) {
 		}
 	}
 
+	if source.GitHubConfig != nil {
+		repos := make([]*graphql1.GitHubRepository, len(source.GitHubConfig.Repositories))
+		for i, r := range source.GitHubConfig.Repositories {
+			repos[i] = &graphql1.GitHubRepository{
+				Owner: r.Owner,
+				Repo:  r.Repo,
+			}
+		}
+		gqlSource.Config = &graphql1.GitHubConfig{
+			Repositories: repos,
+		}
+	}
+
 	return gqlSource, nil
 }
 
@@ -74,6 +87,8 @@ func toGraphQLSourceType(st model.SourceType) (graphql1.SourceType, error) {
 		// gqlgen treats consecutive uppercase letters as an acronym and applies
 		// its naming convention, resulting in "SLACk" instead of "SLACK".
 		return graphql1.SourceTypeSLACk, nil
+	case model.SourceTypeGitHub:
+		return graphql1.SourceTypeGithub, nil
 	default:
 		return "", goerr.New("unsupported source type", goerr.V("sourceType", st))
 	}
@@ -160,5 +175,35 @@ func toUseCaseUpdateSlackSourceInput(input graphql1.UpdateSlackSourceInput) usec
 		Description: input.Description,
 		ChannelIDs:  input.ChannelIDs,
 		Enabled:     input.Enabled,
+	}
+}
+
+// toUseCaseCreateGitHubSourceInput converts GraphQL input to UseCase input
+func toUseCaseCreateGitHubSourceInput(input graphql1.CreateGitHubSourceInput) usecase.CreateGitHubSourceInput {
+	ucInput := usecase.CreateGitHubSourceInput{
+		Repositories: input.Repositories,
+	}
+	if input.Name != nil {
+		ucInput.Name = *input.Name
+	}
+	if input.Description != nil {
+		ucInput.Description = *input.Description
+	}
+	if input.Enabled != nil {
+		ucInput.Enabled = *input.Enabled
+	} else {
+		ucInput.Enabled = true
+	}
+	return ucInput
+}
+
+// toUseCaseUpdateGitHubSourceInput converts GraphQL input to UseCase input
+func toUseCaseUpdateGitHubSourceInput(input graphql1.UpdateGitHubSourceInput) usecase.UpdateGitHubSourceInput {
+	return usecase.UpdateGitHubSourceInput{
+		ID:           model.SourceID(input.ID),
+		Name:         input.Name,
+		Description:  input.Description,
+		Repositories: input.Repositories,
+		Enabled:      input.Enabled,
 	}
 }

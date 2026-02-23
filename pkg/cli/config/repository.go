@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
@@ -56,6 +57,20 @@ func (r *Repository) ProjectID() string {
 // DatabaseID returns the Firestore database ID
 func (r *Repository) DatabaseID() string {
 	return r.databaseID
+}
+
+// LogAttrs returns log attributes for the repository configuration
+func (r *Repository) LogAttrs() []slog.Attr {
+	attrs := []slog.Attr{
+		slog.String("backend", r.backend),
+	}
+	if r.backend == "firestore" {
+		attrs = append(attrs,
+			slog.String("project_id", r.projectID),
+			slog.String("database_id", r.databaseID),
+		)
+	}
+	return attrs
 }
 
 // Configure initializes and returns a repository based on the configured backend.

@@ -1,13 +1,13 @@
 import { useParams, useNavigate } from 'react-router-dom'
-import { useQuery, useMutation } from '@apollo/client'
+import { useQuery, useMutation, useLazyQuery } from '@apollo/client'
 import { useWorkspace } from '../contexts/workspace-context'
-import { ArrowLeft, Edit, MoreVertical, Trash2, Database, FileText, MessageSquare, CheckCircle, XCircle, ExternalLink, Hash } from 'lucide-react'
+import { ArrowLeft, Edit, MoreVertical, Trash2, Database, FileText, GitBranch, MessageSquare, CheckCircle, XCircle, ExternalLink, Hash, Loader, X, AlertCircle } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import Button from '../components/Button'
 import Chip from '../components/Chip'
 import Modal from '../components/Modal'
 import SourceDeleteDialog from '../components/source/SourceDeleteDialog'
-import { GET_SOURCE, GET_SOURCES, UPDATE_SOURCE } from '../graphql/source'
+import { GET_SOURCE, GET_SOURCES, UPDATE_SOURCE, UPDATE_GITHUB_SOURCE, VALIDATE_GITHUB_REPO } from '../graphql/source'
 import { SOURCE_TYPE } from '../constants/source'
 import styles from './SourceDetail.module.css'
 
@@ -37,7 +37,17 @@ interface SlackConfig {
   channels: SlackChannel[]
 }
 
-type SourceConfig = NotionDBConfig | NotionPageConfig | SlackConfig | null
+interface GitHubRepository {
+  owner: string
+  repo: string
+}
+
+interface GitHubConfig {
+  __typename: 'GitHubConfig'
+  repositories: GitHubRepository[]
+}
+
+type SourceConfig = NotionDBConfig | NotionPageConfig | SlackConfig | GitHubConfig | null
 
 interface Source {
   id: string
@@ -52,6 +62,7 @@ interface Source {
 
 interface FormErrors {
   name?: string
+  repository?: string
 }
 
 export default function SourceDetail() {
@@ -69,21 +80,59 @@ export default function SourceDetail() {
   const [editEnabled, setEditEnabled] = useState(true)
   const [formErrors, setFormErrors] = useState<FormErrors>({})
 
+  // GitHub edit state
+  const [editRepos, setEditRepos] = useState<{ owner: string; repo: string }[]>([])
+  const [repoInput, setRepoInput] = useState('')
+
   const { data, loading, error } = useQuery(GET_SOURCE, {
     variables: { workspaceId: currentWorkspace!.id, id },
     skip: !id || !currentWorkspace,
   })
 
+  const refetchQueries = [
+    { query: GET_SOURCES, variables: { workspaceId: currentWorkspace!.id } },
+    { query: GET_SOURCE, variables: { workspaceId: currentWorkspace!.id, id } },
+  ]
+
   const [updateSource, { loading: updating }] = useMutation(UPDATE_SOURCE, {
-    refetchQueries: [
-      { query: GET_SOURCES, variables: { workspaceId: currentWorkspace!.id } },
-      { query: GET_SOURCE, variables: { workspaceId: currentWorkspace!.id, id } },
-    ],
+    refetchQueries,
     onCompleted: () => {
       setIsEditModalOpen(false)
     },
     onError: (err) => {
       console.error('Update source error:', err)
+    },
+  })
+
+  const [updateGitHubSource, { loading: updatingGitHub }] = useMutation(UPDATE_GITHUB_SOURCE, {
+    refetchQueries,
+    onCompleted: () => {
+      setIsEditModalOpen(false)
+    },
+    onError: (err) => {
+      console.error('Update GitHub source error:', err)
+    },
+  })
+
+  const [validateRepo, { loading: validatingRepo }] = useLazyQuery(VALIDATE_GITHUB_REPO, {
+    fetchPolicy: 'network-only',
+    onCompleted: (data) => {
+      const result = data.validateGitHubRepo
+      if (result.valid) {
+        const fullName = `${result.owner}/${result.repo}`
+        if (editRepos.some((r) => `${r.owner}/${r.repo}` === fullName)) {
+          setFormErrors((prev) => ({ ...prev, repository: 'This repository is already added' }))
+          return
+        }
+        setEditRepos((prev) => [...prev, { owner: result.owner, repo: result.repo }])
+        setRepoInput('')
+        setFormErrors((prev) => ({ ...prev, repository: undefined }))
+      } else {
+        setFormErrors((prev) => ({ ...prev, repository: result.errorMessage || 'Invalid repository' }))
+      }
+    },
+    onError: (error) => {
+      setFormErrors((prev) => ({ ...prev, repository: error.message || 'Failed to validate repository' }))
     },
   })
 
@@ -94,6 +143,9 @@ export default function SourceDetail() {
       setEditName(source.name)
       setEditDescription(source.description || '')
       setEditEnabled(source.enabled)
+      if (source.sourceType === SOURCE_TYPE.GITHUB && source.config && source.config.__typename === 'GitHubConfig') {
+        setEditRepos(source.config.repositories.map((r) => ({ owner: r.owner, repo: r.repo })))
+      }
     }
   }, [source])
 
@@ -123,6 +175,10 @@ export default function SourceDetail() {
       setEditDescription(source.description || '')
       setEditEnabled(source.enabled)
       setFormErrors({})
+      setRepoInput('')
+      if (source.sourceType === SOURCE_TYPE.GITHUB && source.config && source.config.__typename === 'GitHubConfig') {
+        setEditRepos(source.config.repositories.map((r) => ({ owner: r.owner, repo: r.repo })))
+      }
     }
     setIsEditModalOpen(true)
   }
@@ -147,22 +203,60 @@ export default function SourceDetail() {
     return Object.keys(newErrors).length === 0
   }
 
+  const handleAddRepo = () => {
+    const trimmed = repoInput.trim()
+    if (!trimmed) return
+
+    validateRepo({
+      variables: {
+        workspaceId: currentWorkspace!.id,
+        repository: trimmed,
+      },
+    })
+  }
+
+  const handleRepoKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      handleAddRepo()
+    }
+  }
+
+  const handleRemoveRepo = (owner: string, repo: string) => {
+    setEditRepos((prev) => prev.filter((r) => !(r.owner === owner && r.repo === repo)))
+  }
+
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
     if (!validateEditForm() || !source) return
 
-    await updateSource({
-      variables: {
-        workspaceId: currentWorkspace!.id,
-        input: {
-          id: source.id,
-          name: editName.trim(),
-          description: editDescription.trim() || null,
-          enabled: editEnabled,
+    if (source.sourceType === SOURCE_TYPE.GITHUB) {
+      await updateGitHubSource({
+        variables: {
+          workspaceId: currentWorkspace!.id,
+          input: {
+            id: source.id,
+            name: editName.trim(),
+            description: editDescription.trim() || null,
+            repositories: editRepos.map((r) => `${r.owner}/${r.repo}`),
+            enabled: editEnabled,
+          },
         },
-      },
-    })
+      })
+    } else {
+      await updateSource({
+        variables: {
+          workspaceId: currentWorkspace!.id,
+          input: {
+            id: source.id,
+            name: editName.trim(),
+            description: editDescription.trim() || null,
+            enabled: editEnabled,
+          },
+        },
+      })
+    }
   }
 
   const renderSourceType = (sourceType: string) => {
@@ -170,6 +264,7 @@ export default function SourceDetail() {
       [SOURCE_TYPE.NOTION_DB]: { label: 'Notion Database', icon: <Database size={20} /> },
       [SOURCE_TYPE.NOTION_PAGE]: { label: 'Notion Page', icon: <FileText size={20} /> },
       [SOURCE_TYPE.SLACK]: { label: 'Slack', icon: <MessageSquare size={20} /> },
+      [SOURCE_TYPE.GITHUB]: { label: 'GitHub', icon: <GitBranch size={20} /> },
     }
     const typeInfo = typeLabels[sourceType] || { label: sourceType, icon: null }
 
@@ -362,6 +457,37 @@ export default function SourceDetail() {
             </div>
           )}
 
+          {source.sourceType === SOURCE_TYPE.GITHUB && source.config && source.config.__typename === 'GitHubConfig' && (
+            <div className={styles.section}>
+              <h3 className={styles.sectionTitle}>GitHub Repositories</h3>
+              <div className={styles.configCard}>
+                <div className={styles.configItem}>
+                  <span className={styles.configLabel}>Monitored Repositories</span>
+                  <div className={styles.channelList}>
+                    {source.config.repositories.length > 0 ? (
+                      source.config.repositories.map((repo) => (
+                        <div key={`${repo.owner}/${repo.repo}`} className={styles.channelTag}>
+                          <GitBranch size={14} />
+                          <a
+                            href={`https://github.com/${repo.owner}/${repo.repo}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={styles.configLink}
+                          >
+                            {repo.owner}/{repo.repo}
+                            <ExternalLink size={12} />
+                          </a>
+                        </div>
+                      ))
+                    ) : (
+                      <span className={styles.configValue}>No repositories configured</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className={styles.metadata}>
             <div className={styles.metadataItem}>
               <span className={styles.metadataLabel}>Created</span>
@@ -380,67 +506,128 @@ export default function SourceDetail() {
       </div>
 
       {/* Edit Modal */}
-      <Modal
-        isOpen={isEditModalOpen}
-        onClose={() => setIsEditModalOpen(false)}
-        title="Edit Source"
-        footer={
-          <>
-            <Button variant="outline" onClick={() => setIsEditModalOpen(false)} disabled={updating}>
-              Cancel
-            </Button>
-            <Button variant="primary" onClick={handleEditSubmit} disabled={updating}>
-              {updating ? 'Saving...' : 'Save'}
-            </Button>
-          </>
-        }
-      >
-        <form onSubmit={handleEditSubmit} className={styles.form}>
-          <div className={styles.field}>
-            <label htmlFor="editName" className={styles.label}>
-              Name *
-            </label>
-            <input
-              id="editName"
-              type="text"
-              value={editName}
-              onChange={(e) => setEditName(e.target.value)}
-              className={`${styles.input} ${formErrors.name ? styles.inputError : ''}`}
-              placeholder="Enter source name"
-              disabled={updating}
-            />
-            {formErrors.name && <span className={styles.formError}>{formErrors.name}</span>}
-          </div>
+      {(() => {
+        const isSaving = updating || updatingGitHub
+        const isGitHub = source.sourceType === SOURCE_TYPE.GITHUB
+        return (
+          <Modal
+            isOpen={isEditModalOpen}
+            onClose={() => setIsEditModalOpen(false)}
+            title="Edit Source"
+            footer={
+              <>
+                <Button variant="outline" onClick={() => setIsEditModalOpen(false)} disabled={isSaving}>
+                  Cancel
+                </Button>
+                <Button variant="primary" onClick={handleEditSubmit} disabled={isSaving || (isGitHub && editRepos.length === 0)}>
+                  {isSaving ? 'Saving...' : 'Save'}
+                </Button>
+              </>
+            }
+          >
+            <form onSubmit={handleEditSubmit} className={styles.form}>
+              <div className={styles.field}>
+                <label htmlFor="editName" className={styles.label}>
+                  Name *
+                </label>
+                <input
+                  id="editName"
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className={`${styles.input} ${formErrors.name ? styles.inputError : ''}`}
+                  placeholder="Enter source name"
+                  disabled={isSaving}
+                />
+                {formErrors.name && <span className={styles.formError}>{formErrors.name}</span>}
+              </div>
 
-          <div className={styles.field}>
-            <label htmlFor="editDescription" className={styles.label}>
-              Description
-            </label>
-            <textarea
-              id="editDescription"
-              value={editDescription}
-              onChange={(e) => setEditDescription(e.target.value)}
-              className={styles.textarea}
-              placeholder="Enter source description (optional)"
-              rows={3}
-              disabled={updating}
-            />
-          </div>
+              {isGitHub && (
+                <div className={styles.field}>
+                  <label className={styles.label}>Repositories</label>
+                  <div className={styles.inputWithButton}>
+                    <input
+                      type="text"
+                      value={repoInput}
+                      onChange={(e) => setRepoInput(e.target.value)}
+                      onKeyDown={handleRepoKeyDown}
+                      className={`${styles.input} ${formErrors.repository ? styles.inputError : ''}`}
+                      placeholder="owner/repo (e.g., octocat/Hello-World)"
+                      disabled={isSaving || validatingRepo}
+                    />
+                    <Button
+                      variant="outline"
+                      onClick={handleAddRepo}
+                      disabled={isSaving || validatingRepo || !repoInput.trim()}
+                    >
+                      {validatingRepo ? (
+                        <Loader size={16} className={styles.spinner} />
+                      ) : (
+                        'Add'
+                      )}
+                    </Button>
+                  </div>
+                  {formErrors.repository && (
+                    <div className={styles.validationError}>
+                      <AlertCircle size={14} />
+                      <span>{formErrors.repository}</span>
+                    </div>
+                  )}
+                  {editRepos.length > 0 && (
+                    <div className={styles.repoTags}>
+                      {editRepos.map((r) => (
+                        <div key={`${r.owner}/${r.repo}`} className={styles.repoTag}>
+                          <CheckCircle size={14} />
+                          <span>{r.owner}/{r.repo}</span>
+                          <button
+                            type="button"
+                            className={styles.repoTagRemove}
+                            onClick={() => handleRemoveRepo(r.owner, r.repo)}
+                            disabled={isSaving}
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <p className={styles.hint}>
+                    Enter repository in owner/repo format. Each repository will be validated before adding.
+                  </p>
+                </div>
+              )}
 
-          <div className={styles.checkboxField}>
-            <label className={styles.checkboxLabel}>
-              <input
-                type="checkbox"
-                checked={editEnabled}
-                onChange={(e) => setEditEnabled(e.target.checked)}
-                className={styles.checkbox}
-                disabled={updating}
-              />
-              <span>Enable this source</span>
-            </label>
-          </div>
-        </form>
-      </Modal>
+              <div className={styles.field}>
+                <label htmlFor="editDescription" className={styles.label}>
+                  Description
+                </label>
+                <textarea
+                  id="editDescription"
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  className={styles.textarea}
+                  placeholder="Enter source description (optional)"
+                  rows={3}
+                  disabled={isSaving}
+                />
+              </div>
+
+              <div className={styles.checkboxField}>
+                <label className={styles.checkboxLabel}>
+                  <input
+                    type="checkbox"
+                    checked={editEnabled}
+                    onChange={(e) => setEditEnabled(e.target.checked)}
+                    className={styles.checkbox}
+                    disabled={isSaving}
+                  />
+                  <span>Enable this source</span>
+                </label>
+              </div>
+            </form>
+          </Modal>
+        )
+      })()}
 
       <SourceDeleteDialog
         isOpen={isDeleteDialogOpen}

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@apollo/client'
 import { useNavigate } from 'react-router-dom'
 import { useWorkspace } from '../contexts/workspace-context'
-import { Plus, Database, FileText, MessageSquare, CheckCircle, XCircle } from 'lucide-react'
+import { Plus, Database, FileText, GitBranch, MessageSquare, CheckCircle, XCircle } from 'lucide-react'
 import Table from '../components/Table'
 import Button from '../components/Button'
 import Chip from '../components/Chip'
@@ -10,6 +10,7 @@ import SourceTypeSelector from '../components/source/SourceTypeSelector'
 import NotionDBForm from '../components/source/NotionDBForm'
 import NotionPageForm from '../components/source/NotionPageForm'
 import SlackForm from '../components/source/SlackForm'
+import GitHubForm from '../components/source/GitHubForm'
 import { GET_SOURCES } from '../graphql/source'
 import { SOURCE_TYPE, FORM_STEP, type FormStep } from '../constants/source'
 import styles from './SourceList.module.css'
@@ -41,7 +42,17 @@ interface SlackConfig {
   channels: SlackChannel[]
 }
 
-type SourceConfig = NotionDBConfig | NotionPageConfig | SlackConfig | null
+interface GitHubRepository {
+  owner: string
+  repo: string
+}
+
+interface GitHubConfig {
+  __typename: 'GitHubConfig'
+  repositories: GitHubRepository[]
+}
+
+type SourceConfig = NotionDBConfig | NotionPageConfig | SlackConfig | GitHubConfig | null
 
 interface Source {
   id: string
@@ -79,6 +90,8 @@ export default function SourceList() {
       setFormStep(FORM_STEP.NOTION_PAGE_FORM)
     } else if (type === SOURCE_TYPE.SLACK) {
       setFormStep(FORM_STEP.SLACK_FORM)
+    } else if (type === SOURCE_TYPE.GITHUB) {
+      setFormStep(FORM_STEP.GITHUB_FORM)
     }
   }
 
@@ -91,6 +104,7 @@ export default function SourceList() {
       [SOURCE_TYPE.NOTION_DB]: { label: 'Notion DB', icon: <Database size={14} /> },
       [SOURCE_TYPE.NOTION_PAGE]: { label: 'Notion Page', icon: <FileText size={14} /> },
       [SOURCE_TYPE.SLACK]: { label: 'Slack', icon: <MessageSquare size={14} /> },
+      [SOURCE_TYPE.GITHUB]: { label: 'GitHub', icon: <GitBranch size={14} /> },
     }
     const typeInfo = typeLabels[sourceType] || { label: sourceType, icon: null }
 
@@ -197,6 +211,11 @@ export default function SourceList() {
 
       <SlackForm
         isOpen={formStep === FORM_STEP.SLACK_FORM}
+        onClose={handleFormClose}
+      />
+
+      <GitHubForm
+        isOpen={formStep === FORM_STEP.GITHUB_FORM}
         onClose={handleFormClose}
       />
     </div>

@@ -23,6 +23,7 @@ func cmdCompile() *cli.Command {
 	var appCfg config.AppConfig
 	var repoCfg config.Repository
 	var geminiCfg config.Gemini
+	var githubCfg config.GitHub
 
 	flags := []cli.Flag{
 		&cli.StringFlag{
@@ -61,6 +62,7 @@ func cmdCompile() *cli.Command {
 	flags = append(flags, appCfg.Flags()...)
 	flags = append(flags, repoCfg.Flags()...)
 	flags = append(flags, geminiCfg.Flags()...)
+	flags = append(flags, githubCfg.Flags()...)
 
 	return &cli.Command{
 		Name:    "compile",
@@ -109,6 +111,9 @@ func cmdCompile() *cli.Command {
 			if err != nil {
 				return goerr.Wrap(err, "failed to initialize Gemini client")
 			}
+			if llmClient != nil {
+				logging.Default().Info("Gemini LLM client enabled", logAttrsToArgs(geminiCfg.LogAttrs())...)
+			}
 
 			// Initialize knowledge service
 			knowledgeSvc, err := knowledge.New(llmClient)
@@ -133,6 +138,18 @@ func cmdCompile() *cli.Command {
 				logging.Default().Info("Slack notifications enabled")
 			} else {
 				logging.Default().Info("Slack Bot Token not configured, notifications will be skipped")
+			}
+
+			// Initialize GitHub service if configured
+			githubSvc, err := githubCfg.Configure()
+			if err != nil {
+				return goerr.Wrap(err, "failed to initialize GitHub service")
+			}
+			if githubSvc != nil {
+				ucOpts = append(ucOpts, usecase.WithGitHubService(githubSvc))
+				logging.Default().Info("GitHub service enabled", logAttrsToArgs(githubCfg.LogAttrs())...)
+			} else {
+				logging.Default().Info("GitHub App not configured, GitHub Source features will be disabled")
 			}
 
 			uc := usecase.New(repo, registry, ucOpts...)

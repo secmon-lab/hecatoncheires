@@ -131,6 +131,29 @@ type ComplexityRoot struct {
 		Value   func(childComplexity int) int
 	}
 
+	GitHubConfig struct {
+		Repositories func(childComplexity int) int
+	}
+
+	GitHubRepoValidationResult struct {
+		CanFetchIssues       func(childComplexity int) int
+		CanFetchPullRequests func(childComplexity int) int
+		Description          func(childComplexity int) int
+		ErrorMessage         func(childComplexity int) int
+		FullName             func(childComplexity int) int
+		IsPrivate            func(childComplexity int) int
+		IssueCount           func(childComplexity int) int
+		Owner                func(childComplexity int) int
+		PullRequestCount     func(childComplexity int) int
+		Repo                 func(childComplexity int) int
+		Valid                func(childComplexity int) int
+	}
+
+	GitHubRepository struct {
+		Owner func(childComplexity int) int
+		Repo  func(childComplexity int) int
+	}
+
 	Knowledge struct {
 		Case       func(childComplexity int) int
 		CaseID     func(childComplexity int) int
@@ -154,6 +177,7 @@ type ComplexityRoot struct {
 		CloseCase              func(childComplexity int, workspaceID string, id int) int
 		CreateAction           func(childComplexity int, workspaceID string, input graphql1.CreateActionInput) int
 		CreateCase             func(childComplexity int, workspaceID string, input graphql1.CreateCaseInput) int
+		CreateGitHubSource     func(childComplexity int, workspaceID string, input graphql1.CreateGitHubSourceInput) int
 		CreateNotionDBSource   func(childComplexity int, workspaceID string, input graphql1.CreateNotionDBSourceInput) int
 		CreateNotionPageSource func(childComplexity int, workspaceID string, input graphql1.CreateNotionPageSourceInput) int
 		CreateSlackSource      func(childComplexity int, workspaceID string, input graphql1.CreateSlackSourceInput) int
@@ -164,6 +188,7 @@ type ComplexityRoot struct {
 		ReopenCase             func(childComplexity int, workspaceID string, id int) int
 		UpdateAction           func(childComplexity int, workspaceID string, input graphql1.UpdateActionInput) int
 		UpdateCase             func(childComplexity int, workspaceID string, input graphql1.UpdateCaseInput) int
+		UpdateGitHubSource     func(childComplexity int, workspaceID string, input graphql1.UpdateGitHubSourceInput) int
 		UpdateSlackSource      func(childComplexity int, workspaceID string, input graphql1.UpdateSlackSourceInput) int
 		UpdateSource           func(childComplexity int, workspaceID string, input graphql1.UpdateSourceInput) int
 		ValidateNotionDb       func(childComplexity int, workspaceID string, databaseID string) int
@@ -214,6 +239,7 @@ type ComplexityRoot struct {
 		SlackUsers          func(childComplexity int) int
 		Source              func(childComplexity int, workspaceID string, id string) int
 		Sources             func(childComplexity int, workspaceID string) int
+		ValidateGitHubRepo  func(childComplexity int, workspaceID string, repository string) int
 		Workspace           func(childComplexity int, workspaceID string) int
 		Workspaces          func(childComplexity int) int
 	}
@@ -315,8 +341,10 @@ type MutationResolver interface {
 	CreateNotionDBSource(ctx context.Context, workspaceID string, input graphql1.CreateNotionDBSourceInput) (*graphql1.Source, error)
 	CreateNotionPageSource(ctx context.Context, workspaceID string, input graphql1.CreateNotionPageSourceInput) (*graphql1.Source, error)
 	CreateSlackSource(ctx context.Context, workspaceID string, input graphql1.CreateSlackSourceInput) (*graphql1.Source, error)
+	CreateGitHubSource(ctx context.Context, workspaceID string, input graphql1.CreateGitHubSourceInput) (*graphql1.Source, error)
 	UpdateSource(ctx context.Context, workspaceID string, input graphql1.UpdateSourceInput) (*graphql1.Source, error)
 	UpdateSlackSource(ctx context.Context, workspaceID string, input graphql1.UpdateSlackSourceInput) (*graphql1.Source, error)
+	UpdateGitHubSource(ctx context.Context, workspaceID string, input graphql1.UpdateGitHubSourceInput) (*graphql1.Source, error)
 	DeleteSource(ctx context.Context, workspaceID string, id string) (bool, error)
 	ValidateNotionDb(ctx context.Context, workspaceID string, databaseID string) (*graphql1.NotionDBValidationResult, error)
 	ValidateNotionPage(ctx context.Context, workspaceID string, pageID string) (*graphql1.NotionPageValidationResult, error)
@@ -336,6 +364,7 @@ type QueryResolver interface {
 	SlackJoinedChannels(ctx context.Context) ([]*graphql1.SlackChannelInfo, error)
 	Sources(ctx context.Context, workspaceID string) ([]*graphql1.Source, error)
 	Source(ctx context.Context, workspaceID string, id string) (*graphql1.Source, error)
+	ValidateGitHubRepo(ctx context.Context, workspaceID string, repository string) (*graphql1.GitHubRepoValidationResult, error)
 	Knowledge(ctx context.Context, workspaceID string, id string) (*graphql1.Knowledge, error)
 	Knowledges(ctx context.Context, workspaceID string, limit *int, offset *int) (*graphql1.KnowledgeConnection, error)
 	AssistLogs(ctx context.Context, workspaceID string, caseID int, limit *int, offset *int) (*graphql1.AssistLogConnection, error)
@@ -692,6 +721,93 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.FieldValue.Value(childComplexity), true
 
+	case "GitHubConfig.repositories":
+		if e.complexity.GitHubConfig.Repositories == nil {
+			break
+		}
+
+		return e.complexity.GitHubConfig.Repositories(childComplexity), true
+
+	case "GitHubRepoValidationResult.canFetchIssues":
+		if e.complexity.GitHubRepoValidationResult.CanFetchIssues == nil {
+			break
+		}
+
+		return e.complexity.GitHubRepoValidationResult.CanFetchIssues(childComplexity), true
+	case "GitHubRepoValidationResult.canFetchPullRequests":
+		if e.complexity.GitHubRepoValidationResult.CanFetchPullRequests == nil {
+			break
+		}
+
+		return e.complexity.GitHubRepoValidationResult.CanFetchPullRequests(childComplexity), true
+	case "GitHubRepoValidationResult.description":
+		if e.complexity.GitHubRepoValidationResult.Description == nil {
+			break
+		}
+
+		return e.complexity.GitHubRepoValidationResult.Description(childComplexity), true
+	case "GitHubRepoValidationResult.errorMessage":
+		if e.complexity.GitHubRepoValidationResult.ErrorMessage == nil {
+			break
+		}
+
+		return e.complexity.GitHubRepoValidationResult.ErrorMessage(childComplexity), true
+	case "GitHubRepoValidationResult.fullName":
+		if e.complexity.GitHubRepoValidationResult.FullName == nil {
+			break
+		}
+
+		return e.complexity.GitHubRepoValidationResult.FullName(childComplexity), true
+	case "GitHubRepoValidationResult.isPrivate":
+		if e.complexity.GitHubRepoValidationResult.IsPrivate == nil {
+			break
+		}
+
+		return e.complexity.GitHubRepoValidationResult.IsPrivate(childComplexity), true
+	case "GitHubRepoValidationResult.issueCount":
+		if e.complexity.GitHubRepoValidationResult.IssueCount == nil {
+			break
+		}
+
+		return e.complexity.GitHubRepoValidationResult.IssueCount(childComplexity), true
+	case "GitHubRepoValidationResult.owner":
+		if e.complexity.GitHubRepoValidationResult.Owner == nil {
+			break
+		}
+
+		return e.complexity.GitHubRepoValidationResult.Owner(childComplexity), true
+	case "GitHubRepoValidationResult.pullRequestCount":
+		if e.complexity.GitHubRepoValidationResult.PullRequestCount == nil {
+			break
+		}
+
+		return e.complexity.GitHubRepoValidationResult.PullRequestCount(childComplexity), true
+	case "GitHubRepoValidationResult.repo":
+		if e.complexity.GitHubRepoValidationResult.Repo == nil {
+			break
+		}
+
+		return e.complexity.GitHubRepoValidationResult.Repo(childComplexity), true
+	case "GitHubRepoValidationResult.valid":
+		if e.complexity.GitHubRepoValidationResult.Valid == nil {
+			break
+		}
+
+		return e.complexity.GitHubRepoValidationResult.Valid(childComplexity), true
+
+	case "GitHubRepository.owner":
+		if e.complexity.GitHubRepository.Owner == nil {
+			break
+		}
+
+		return e.complexity.GitHubRepository.Owner(childComplexity), true
+	case "GitHubRepository.repo":
+		if e.complexity.GitHubRepository.Repo == nil {
+			break
+		}
+
+		return e.complexity.GitHubRepository.Repo(childComplexity), true
+
 	case "Knowledge.case":
 		if e.complexity.Knowledge.Case == nil {
 			break
@@ -805,6 +921,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.CreateCase(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.CreateCaseInput)), true
+	case "Mutation.createGitHubSource":
+		if e.complexity.Mutation.CreateGitHubSource == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_createGitHubSource_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.CreateGitHubSource(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.CreateGitHubSourceInput)), true
 	case "Mutation.createNotionDBSource":
 		if e.complexity.Mutation.CreateNotionDBSource == nil {
 			break
@@ -910,6 +1037,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.UpdateCase(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.UpdateCaseInput)), true
+	case "Mutation.updateGitHubSource":
+		if e.complexity.Mutation.UpdateGitHubSource == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_updateGitHubSource_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.UpdateGitHubSource(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.UpdateGitHubSourceInput)), true
 	case "Mutation.updateSlackSource":
 		if e.complexity.Mutation.UpdateSlackSource == nil {
 			break
@@ -1205,6 +1343,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Query.Sources(childComplexity, args["workspaceId"].(string)), true
+	case "Query.validateGitHubRepo":
+		if e.complexity.Query.ValidateGitHubRepo == nil {
+			break
+		}
+
+		args, err := ec.field_Query_validateGitHubRepo_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Query.ValidateGitHubRepo(childComplexity, args["workspaceId"].(string), args["repository"].(string)), true
 	case "Query.workspace":
 		if e.complexity.Query.Workspace == nil {
 			break
@@ -1470,12 +1619,14 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 	inputUnmarshalMap := graphql.BuildUnmarshalerMap(
 		ec.unmarshalInputCreateActionInput,
 		ec.unmarshalInputCreateCaseInput,
+		ec.unmarshalInputCreateGitHubSourceInput,
 		ec.unmarshalInputCreateNotionDBSourceInput,
 		ec.unmarshalInputCreateNotionPageSourceInput,
 		ec.unmarshalInputCreateSlackSourceInput,
 		ec.unmarshalInputFieldValueInput,
 		ec.unmarshalInputUpdateActionInput,
 		ec.unmarshalInputUpdateCaseInput,
+		ec.unmarshalInputUpdateGitHubSourceInput,
 		ec.unmarshalInputUpdateSlackSourceInput,
 		ec.unmarshalInputUpdateSourceInput,
 	)
@@ -1783,6 +1934,7 @@ enum SourceType {
   NOTION_DB
   NOTION_PAGE
   SLACK
+  GITHUB
 }
 
 type Source {
@@ -1796,7 +1948,7 @@ type Source {
   updatedAt: Time!
 }
 
-union SourceConfig = NotionDBConfig | NotionPageConfig | SlackConfig
+union SourceConfig = NotionDBConfig | NotionPageConfig | SlackConfig | GitHubConfig
 
 type NotionDBConfig {
   databaseID: String!
@@ -1819,6 +1971,44 @@ type SlackConfig {
 type SlackChannel {
   id: String!
   name: String!
+}
+
+type GitHubConfig {
+  repositories: [GitHubRepository!]!
+}
+
+type GitHubRepository {
+  owner: String!
+  repo: String!
+}
+
+input CreateGitHubSourceInput {
+  name: String
+  description: String
+  repositories: [String!]!
+  enabled: Boolean
+}
+
+input UpdateGitHubSourceInput {
+  id: String!
+  name: String
+  description: String
+  repositories: [String!]
+  enabled: Boolean
+}
+
+type GitHubRepoValidationResult {
+  valid: Boolean!
+  owner: String
+  repo: String
+  fullName: String
+  description: String
+  isPrivate: Boolean
+  pullRequestCount: Int
+  issueCount: Int
+  canFetchPullRequests: Boolean!
+  canFetchIssues: Boolean!
+  errorMessage: String
 }
 
 input CreateNotionDBSourceInput {
@@ -1922,6 +2112,7 @@ type Query {
   # Sources
   sources(workspaceId: String!): [Source!]!
   source(workspaceId: String!, id: String!): Source
+  validateGitHubRepo(workspaceId: String!, repository: String!): GitHubRepoValidationResult!
 
   # Knowledge
   knowledge(workspaceId: String!, id: String!): Knowledge
@@ -1950,8 +2141,10 @@ type Mutation {
   createNotionDBSource(workspaceId: String!, input: CreateNotionDBSourceInput!): Source!
   createNotionPageSource(workspaceId: String!, input: CreateNotionPageSourceInput!): Source!
   createSlackSource(workspaceId: String!, input: CreateSlackSourceInput!): Source!
+  createGitHubSource(workspaceId: String!, input: CreateGitHubSourceInput!): Source!
   updateSource(workspaceId: String!, input: UpdateSourceInput!): Source!
   updateSlackSource(workspaceId: String!, input: UpdateSlackSourceInput!): Source!
+  updateGitHubSource(workspaceId: String!, input: UpdateGitHubSourceInput!): Source!
   deleteSource(workspaceId: String!, id: String!): Boolean!
   validateNotionDB(workspaceId: String!, databaseID: String!): NotionDBValidationResult!
   validateNotionPage(workspaceId: String!, pageID: String!): NotionPageValidationResult!
@@ -2021,6 +2214,22 @@ func (ec *executionContext) field_Mutation_createCase_args(ctx context.Context, 
 	}
 	args["workspaceId"] = arg0
 	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNCreateCaseInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateCaseInput)
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_createGitHubSource_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNCreateGitHubSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateGitHubSourceInput)
 	if err != nil {
 		return nil, err
 	}
@@ -2165,6 +2374,22 @@ func (ec *executionContext) field_Mutation_updateCase_args(ctx context.Context, 
 	}
 	args["workspaceId"] = arg0
 	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNUpdateCaseInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateCaseInput)
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_updateGitHubSource_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNUpdateGitHubSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateGitHubSourceInput)
 	if err != nil {
 		return nil, err
 	}
@@ -2431,6 +2656,22 @@ func (ec *executionContext) field_Query_sources_args(ctx context.Context, rawArg
 		return nil, err
 	}
 	args["workspaceId"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_Query_validateGitHubRepo_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "repository", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["repository"] = arg1
 	return args, nil
 }
 
@@ -4204,6 +4445,418 @@ func (ec *executionContext) fieldContext_FieldValue_value(_ context.Context, fie
 	return fc, nil
 }
 
+func (ec *executionContext) _GitHubConfig_repositories(ctx context.Context, field graphql.CollectedField, obj *graphql1.GitHubConfig) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_GitHubConfig_repositories,
+		func(ctx context.Context) (any, error) {
+			return obj.Repositories, nil
+		},
+		nil,
+		ec.marshalNGitHubRepository2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐGitHubRepositoryᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_GitHubConfig_repositories(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "GitHubConfig",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "owner":
+				return ec.fieldContext_GitHubRepository_owner(ctx, field)
+			case "repo":
+				return ec.fieldContext_GitHubRepository_repo(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type GitHubRepository", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _GitHubRepoValidationResult_valid(ctx context.Context, field graphql.CollectedField, obj *graphql1.GitHubRepoValidationResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_GitHubRepoValidationResult_valid,
+		func(ctx context.Context) (any, error) {
+			return obj.Valid, nil
+		},
+		nil,
+		ec.marshalNBoolean2bool,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_GitHubRepoValidationResult_valid(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "GitHubRepoValidationResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _GitHubRepoValidationResult_owner(ctx context.Context, field graphql.CollectedField, obj *graphql1.GitHubRepoValidationResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_GitHubRepoValidationResult_owner,
+		func(ctx context.Context) (any, error) {
+			return obj.Owner, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_GitHubRepoValidationResult_owner(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "GitHubRepoValidationResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _GitHubRepoValidationResult_repo(ctx context.Context, field graphql.CollectedField, obj *graphql1.GitHubRepoValidationResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_GitHubRepoValidationResult_repo,
+		func(ctx context.Context) (any, error) {
+			return obj.Repo, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_GitHubRepoValidationResult_repo(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "GitHubRepoValidationResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _GitHubRepoValidationResult_fullName(ctx context.Context, field graphql.CollectedField, obj *graphql1.GitHubRepoValidationResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_GitHubRepoValidationResult_fullName,
+		func(ctx context.Context) (any, error) {
+			return obj.FullName, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_GitHubRepoValidationResult_fullName(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "GitHubRepoValidationResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _GitHubRepoValidationResult_description(ctx context.Context, field graphql.CollectedField, obj *graphql1.GitHubRepoValidationResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_GitHubRepoValidationResult_description,
+		func(ctx context.Context) (any, error) {
+			return obj.Description, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_GitHubRepoValidationResult_description(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "GitHubRepoValidationResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _GitHubRepoValidationResult_isPrivate(ctx context.Context, field graphql.CollectedField, obj *graphql1.GitHubRepoValidationResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_GitHubRepoValidationResult_isPrivate,
+		func(ctx context.Context) (any, error) {
+			return obj.IsPrivate, nil
+		},
+		nil,
+		ec.marshalOBoolean2ᚖbool,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_GitHubRepoValidationResult_isPrivate(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "GitHubRepoValidationResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _GitHubRepoValidationResult_pullRequestCount(ctx context.Context, field graphql.CollectedField, obj *graphql1.GitHubRepoValidationResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_GitHubRepoValidationResult_pullRequestCount,
+		func(ctx context.Context) (any, error) {
+			return obj.PullRequestCount, nil
+		},
+		nil,
+		ec.marshalOInt2ᚖint,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_GitHubRepoValidationResult_pullRequestCount(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "GitHubRepoValidationResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _GitHubRepoValidationResult_issueCount(ctx context.Context, field graphql.CollectedField, obj *graphql1.GitHubRepoValidationResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_GitHubRepoValidationResult_issueCount,
+		func(ctx context.Context) (any, error) {
+			return obj.IssueCount, nil
+		},
+		nil,
+		ec.marshalOInt2ᚖint,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_GitHubRepoValidationResult_issueCount(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "GitHubRepoValidationResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _GitHubRepoValidationResult_canFetchPullRequests(ctx context.Context, field graphql.CollectedField, obj *graphql1.GitHubRepoValidationResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_GitHubRepoValidationResult_canFetchPullRequests,
+		func(ctx context.Context) (any, error) {
+			return obj.CanFetchPullRequests, nil
+		},
+		nil,
+		ec.marshalNBoolean2bool,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_GitHubRepoValidationResult_canFetchPullRequests(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "GitHubRepoValidationResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _GitHubRepoValidationResult_canFetchIssues(ctx context.Context, field graphql.CollectedField, obj *graphql1.GitHubRepoValidationResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_GitHubRepoValidationResult_canFetchIssues,
+		func(ctx context.Context) (any, error) {
+			return obj.CanFetchIssues, nil
+		},
+		nil,
+		ec.marshalNBoolean2bool,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_GitHubRepoValidationResult_canFetchIssues(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "GitHubRepoValidationResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _GitHubRepoValidationResult_errorMessage(ctx context.Context, field graphql.CollectedField, obj *graphql1.GitHubRepoValidationResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_GitHubRepoValidationResult_errorMessage,
+		func(ctx context.Context) (any, error) {
+			return obj.ErrorMessage, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_GitHubRepoValidationResult_errorMessage(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "GitHubRepoValidationResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _GitHubRepository_owner(ctx context.Context, field graphql.CollectedField, obj *graphql1.GitHubRepository) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_GitHubRepository_owner,
+		func(ctx context.Context) (any, error) {
+			return obj.Owner, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_GitHubRepository_owner(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "GitHubRepository",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _GitHubRepository_repo(ctx context.Context, field graphql.CollectedField, obj *graphql1.GitHubRepository) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_GitHubRepository_repo,
+		func(ctx context.Context) (any, error) {
+			return obj.Repo, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_GitHubRepository_repo(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "GitHubRepository",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Knowledge_id(ctx context.Context, field graphql.CollectedField, obj *graphql1.Knowledge) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -5349,6 +6002,65 @@ func (ec *executionContext) fieldContext_Mutation_createSlackSource(ctx context.
 	return fc, nil
 }
 
+func (ec *executionContext) _Mutation_createGitHubSource(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_createGitHubSource,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().CreateGitHubSource(ctx, fc.Args["workspaceId"].(string), fc.Args["input"].(graphql1.CreateGitHubSourceInput))
+		},
+		nil,
+		ec.marshalNSource2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSource,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_createGitHubSource(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Source_id(ctx, field)
+			case "name":
+				return ec.fieldContext_Source_name(ctx, field)
+			case "sourceType":
+				return ec.fieldContext_Source_sourceType(ctx, field)
+			case "description":
+				return ec.fieldContext_Source_description(ctx, field)
+			case "enabled":
+				return ec.fieldContext_Source_enabled(ctx, field)
+			case "config":
+				return ec.fieldContext_Source_config(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Source_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Source_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Source", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_createGitHubSource_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Mutation_updateSource(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -5461,6 +6173,65 @@ func (ec *executionContext) fieldContext_Mutation_updateSlackSource(ctx context.
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Mutation_updateSlackSource_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_updateGitHubSource(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_updateGitHubSource,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().UpdateGitHubSource(ctx, fc.Args["workspaceId"].(string), fc.Args["input"].(graphql1.UpdateGitHubSourceInput))
+		},
+		nil,
+		ec.marshalNSource2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSource,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_updateGitHubSource(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Source_id(ctx, field)
+			case "name":
+				return ec.fieldContext_Source_name(ctx, field)
+			case "sourceType":
+				return ec.fieldContext_Source_sourceType(ctx, field)
+			case "description":
+				return ec.fieldContext_Source_description(ctx, field)
+			case "enabled":
+				return ec.fieldContext_Source_enabled(ctx, field)
+			case "config":
+				return ec.fieldContext_Source_config(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Source_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Source_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Source", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_updateGitHubSource_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -6832,6 +7603,71 @@ func (ec *executionContext) fieldContext_Query_source(ctx context.Context, field
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Query_source_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_validateGitHubRepo(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Query_validateGitHubRepo,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Query().ValidateGitHubRepo(ctx, fc.Args["workspaceId"].(string), fc.Args["repository"].(string))
+		},
+		nil,
+		ec.marshalNGitHubRepoValidationResult2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐGitHubRepoValidationResult,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Query_validateGitHubRepo(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "valid":
+				return ec.fieldContext_GitHubRepoValidationResult_valid(ctx, field)
+			case "owner":
+				return ec.fieldContext_GitHubRepoValidationResult_owner(ctx, field)
+			case "repo":
+				return ec.fieldContext_GitHubRepoValidationResult_repo(ctx, field)
+			case "fullName":
+				return ec.fieldContext_GitHubRepoValidationResult_fullName(ctx, field)
+			case "description":
+				return ec.fieldContext_GitHubRepoValidationResult_description(ctx, field)
+			case "isPrivate":
+				return ec.fieldContext_GitHubRepoValidationResult_isPrivate(ctx, field)
+			case "pullRequestCount":
+				return ec.fieldContext_GitHubRepoValidationResult_pullRequestCount(ctx, field)
+			case "issueCount":
+				return ec.fieldContext_GitHubRepoValidationResult_issueCount(ctx, field)
+			case "canFetchPullRequests":
+				return ec.fieldContext_GitHubRepoValidationResult_canFetchPullRequests(ctx, field)
+			case "canFetchIssues":
+				return ec.fieldContext_GitHubRepoValidationResult_canFetchIssues(ctx, field)
+			case "errorMessage":
+				return ec.fieldContext_GitHubRepoValidationResult_errorMessage(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type GitHubRepoValidationResult", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_validateGitHubRepo_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -9816,6 +10652,54 @@ func (ec *executionContext) unmarshalInputCreateCaseInput(ctx context.Context, o
 	return it, nil
 }
 
+func (ec *executionContext) unmarshalInputCreateGitHubSourceInput(ctx context.Context, obj any) (graphql1.CreateGitHubSourceInput, error) {
+	var it graphql1.CreateGitHubSourceInput
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"name", "description", "repositories", "enabled"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "name":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("name"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Name = data
+		case "description":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("description"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Description = data
+		case "repositories":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("repositories"))
+			data, err := ec.unmarshalNString2ᚕstringᚄ(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Repositories = data
+		case "enabled":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("enabled"))
+			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Enabled = data
+		}
+	}
+
+	return it, nil
+}
+
 func (ec *executionContext) unmarshalInputCreateNotionDBSourceInput(ctx context.Context, obj any) (graphql1.CreateNotionDBSourceInput, error) {
 	var it graphql1.CreateNotionDBSourceInput
 	asMap := map[string]any{}
@@ -10146,6 +11030,61 @@ func (ec *executionContext) unmarshalInputUpdateCaseInput(ctx context.Context, o
 	return it, nil
 }
 
+func (ec *executionContext) unmarshalInputUpdateGitHubSourceInput(ctx context.Context, obj any) (graphql1.UpdateGitHubSourceInput, error) {
+	var it graphql1.UpdateGitHubSourceInput
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"id", "name", "description", "repositories", "enabled"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "id":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("id"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ID = data
+		case "name":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("name"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Name = data
+		case "description":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("description"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Description = data
+		case "repositories":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("repositories"))
+			data, err := ec.unmarshalOString2ᚕstringᚄ(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Repositories = data
+		case "enabled":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("enabled"))
+			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Enabled = data
+		}
+	}
+
+	return it, nil
+}
+
 func (ec *executionContext) unmarshalInputUpdateSlackSourceInput(ctx context.Context, obj any) (graphql1.UpdateSlackSourceInput, error) {
 	var it graphql1.UpdateSlackSourceInput
 	asMap := map[string]any{}
@@ -10278,6 +11217,13 @@ func (ec *executionContext) _SourceConfig(ctx context.Context, sel ast.Selection
 			return graphql.Null
 		}
 		return ec._NotionDBConfig(ctx, sel, obj)
+	case graphql1.GitHubConfig:
+		return ec._GitHubConfig(ctx, sel, &obj)
+	case *graphql1.GitHubConfig:
+		if obj == nil {
+			return graphql.Null
+		}
+		return ec._GitHubConfig(ctx, sel, obj)
 	default:
 		if obj, ok := obj.(graphql.Marshaler); ok {
 			return obj
@@ -11102,6 +12048,154 @@ func (ec *executionContext) _FieldValue(ctx context.Context, sel ast.SelectionSe
 	return out
 }
 
+var gitHubConfigImplementors = []string{"GitHubConfig", "SourceConfig"}
+
+func (ec *executionContext) _GitHubConfig(ctx context.Context, sel ast.SelectionSet, obj *graphql1.GitHubConfig) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, gitHubConfigImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("GitHubConfig")
+		case "repositories":
+			out.Values[i] = ec._GitHubConfig_repositories(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var gitHubRepoValidationResultImplementors = []string{"GitHubRepoValidationResult"}
+
+func (ec *executionContext) _GitHubRepoValidationResult(ctx context.Context, sel ast.SelectionSet, obj *graphql1.GitHubRepoValidationResult) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, gitHubRepoValidationResultImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("GitHubRepoValidationResult")
+		case "valid":
+			out.Values[i] = ec._GitHubRepoValidationResult_valid(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "owner":
+			out.Values[i] = ec._GitHubRepoValidationResult_owner(ctx, field, obj)
+		case "repo":
+			out.Values[i] = ec._GitHubRepoValidationResult_repo(ctx, field, obj)
+		case "fullName":
+			out.Values[i] = ec._GitHubRepoValidationResult_fullName(ctx, field, obj)
+		case "description":
+			out.Values[i] = ec._GitHubRepoValidationResult_description(ctx, field, obj)
+		case "isPrivate":
+			out.Values[i] = ec._GitHubRepoValidationResult_isPrivate(ctx, field, obj)
+		case "pullRequestCount":
+			out.Values[i] = ec._GitHubRepoValidationResult_pullRequestCount(ctx, field, obj)
+		case "issueCount":
+			out.Values[i] = ec._GitHubRepoValidationResult_issueCount(ctx, field, obj)
+		case "canFetchPullRequests":
+			out.Values[i] = ec._GitHubRepoValidationResult_canFetchPullRequests(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "canFetchIssues":
+			out.Values[i] = ec._GitHubRepoValidationResult_canFetchIssues(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "errorMessage":
+			out.Values[i] = ec._GitHubRepoValidationResult_errorMessage(ctx, field, obj)
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var gitHubRepositoryImplementors = []string{"GitHubRepository"}
+
+func (ec *executionContext) _GitHubRepository(ctx context.Context, sel ast.SelectionSet, obj *graphql1.GitHubRepository) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, gitHubRepositoryImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("GitHubRepository")
+		case "owner":
+			out.Values[i] = ec._GitHubRepository_owner(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "repo":
+			out.Values[i] = ec._GitHubRepository_repo(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
 var knowledgeImplementors = []string{"Knowledge"}
 
 func (ec *executionContext) _Knowledge(ctx context.Context, sel ast.SelectionSet, obj *graphql1.Knowledge) graphql.Marshaler {
@@ -11363,6 +12457,13 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		case "createGitHubSource":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_createGitHubSource(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		case "updateSource":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_updateSource(ctx, field)
@@ -11373,6 +12474,13 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 		case "updateSlackSource":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_updateSlackSource(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "updateGitHubSource":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_updateGitHubSource(ctx, field)
 			})
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
@@ -11928,6 +13036,28 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 					}
 				}()
 				res = ec._Query_source(ctx, field)
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "validateGitHubRepo":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_validateGitHubRepo(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
 				return res
 			}
 
@@ -13119,6 +14249,11 @@ func (ec *executionContext) unmarshalNCreateCaseInput2githubᚗcomᚋsecmonᚑla
 	return res, graphql.ErrorOnPath(ctx, err)
 }
 
+func (ec *executionContext) unmarshalNCreateGitHubSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateGitHubSourceInput(ctx context.Context, v any) (graphql1.CreateGitHubSourceInput, error) {
+	res, err := ec.unmarshalInputCreateGitHubSourceInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
 func (ec *executionContext) unmarshalNCreateNotionDBSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateNotionDBSourceInput(ctx context.Context, v any) (graphql1.CreateNotionDBSourceInput, error) {
 	res, err := ec.unmarshalInputCreateNotionDBSourceInput(ctx, v)
 	return res, graphql.ErrorOnPath(ctx, err)
@@ -13289,6 +14424,74 @@ func (ec *executionContext) marshalNFieldValue2ᚖgithubᚗcomᚋsecmonᚑlabᚋ
 func (ec *executionContext) unmarshalNFieldValueInput2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐFieldValueInput(ctx context.Context, v any) (*graphql1.FieldValueInput, error) {
 	res, err := ec.unmarshalInputFieldValueInput(ctx, v)
 	return &res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNGitHubRepoValidationResult2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐGitHubRepoValidationResult(ctx context.Context, sel ast.SelectionSet, v graphql1.GitHubRepoValidationResult) graphql.Marshaler {
+	return ec._GitHubRepoValidationResult(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNGitHubRepoValidationResult2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐGitHubRepoValidationResult(ctx context.Context, sel ast.SelectionSet, v *graphql1.GitHubRepoValidationResult) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._GitHubRepoValidationResult(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNGitHubRepository2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐGitHubRepositoryᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.GitHubRepository) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNGitHubRepository2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐGitHubRepository(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNGitHubRepository2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐGitHubRepository(ctx context.Context, sel ast.SelectionSet, v *graphql1.GitHubRepository) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._GitHubRepository(ctx, sel, v)
 }
 
 func (ec *executionContext) unmarshalNID2string(ctx context.Context, v any) (string, error) {
@@ -13850,6 +15053,11 @@ func (ec *executionContext) unmarshalNUpdateActionInput2githubᚗcomᚋsecmonᚑ
 
 func (ec *executionContext) unmarshalNUpdateCaseInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateCaseInput(ctx context.Context, v any) (graphql1.UpdateCaseInput, error) {
 	res, err := ec.unmarshalInputUpdateCaseInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) unmarshalNUpdateGitHubSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateGitHubSourceInput(ctx context.Context, v any) (graphql1.UpdateGitHubSourceInput, error) {
+	res, err := ec.unmarshalInputUpdateGitHubSourceInput(ctx, v)
 	return res, graphql.ErrorOnPath(ctx, err)
 }
 
