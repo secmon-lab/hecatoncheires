@@ -6,12 +6,16 @@ Hecatoncheires is configured through a combination of a TOML configuration file 
 
 1. [Configuration File (config.toml)](#configuration-file-configtoml)
 2. [CLI Flags & Environment Variables](#cli-flags--environment-variables)
-3. [Labels](#labels)
-4. [Field Definitions](#field-definitions)
-5. [Field Types](#field-types)
-6. [Options (for select / multi-select)](#options-for-select--multi-select)
-7. [Validation Rules](#validation-rules)
-8. [Complete Example](#complete-example)
+3. [Workspace Section](#workspace-section)
+4. [Labels](#labels)
+5. [Field Definitions](#field-definitions)
+6. [Field Types](#field-types)
+7. [Options (for select / multi-select)](#options-for-select--multi-select)
+8. [Slack Section](#slack-section)
+9. [Compile Section](#compile-section)
+10. [Assist Section](#assist-section)
+11. [Validation Rules](#validation-rules)
+12. [Complete Example](#complete-example)
 
 ---
 
@@ -26,6 +30,11 @@ The application requires a TOML configuration file at startup. This file defines
 ### Basic Structure
 
 ```toml
+# Workspace configuration (required)
+[workspace]
+id = "risk"
+name = "Risk Management"
+
 # Entity display labels (optional)
 [labels]
 case = "Risk"
@@ -40,6 +49,19 @@ options = [
   { id = "high", name = "High" },
   { id = "low", name = "Low" },
 ]
+
+# Slack integration (optional)
+[slack]
+channel_prefix = "risk"
+
+# AI compile configuration (optional)
+[compile]
+prompt = "Extract key information from the source material."
+
+# AI assist configuration (optional)
+[assist]
+prompt = "Check action deadlines and follow up on pending items."
+language = "Japanese"
 ```
 
 ---
@@ -139,6 +161,42 @@ hecatoncheires serve \
 ```
 
 `--no-auth` and `--slack-client-id`/`--slack-client-secret` are mutually exclusive. If both are provided, `--no-auth` takes precedence.
+
+---
+
+## Workspace Section
+
+The `[workspace]` section defines the workspace's identity and is **required** in each configuration file.
+
+```toml
+[workspace]
+id = "risk"
+name = "Risk Management"
+```
+
+### Properties
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `id` | string | **Yes** | Unique workspace identifier. Must match `^[a-z0-9]+(-[a-z0-9]+)*$` and be at most 63 characters |
+| `name` | string | No | Display name for the workspace. Defaults to `id` if omitted |
+
+### Workspace ID Format
+
+Workspace IDs must follow the same format as field IDs:
+
+- Pattern: `^[a-z0-9]+(-[a-z0-9]+)*$`
+- Maximum length: 63 characters
+- Must be unique across all workspaces
+
+| Example | Valid | Reason |
+|---------|-------|--------|
+| `risk` | Yes | Simple lowercase |
+| `security-team` | Yes | Hyphen-separated |
+| `workspace-123` | Yes | With numbers |
+| `MyWorkspace` | **No** | Uppercase not allowed |
+| `workspace_1` | **No** | Underscores not allowed |
+| `workspace.name` | **No** | Dots not allowed |
 
 ---
 
@@ -354,6 +412,94 @@ Use cases for metadata:
 
 ---
 
+## Slack Section
+
+The `[slack]` section customizes Slack integration settings. This section is optional.
+
+```toml
+[slack]
+channel_prefix = "risk"
+```
+
+### Properties
+
+| Property | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `channel_prefix` | string | No | workspace ID | Prefix for auto-created Slack channel names |
+
+When a case is created, Hecatoncheires can automatically create a Slack channel with the naming pattern: `{channel_prefix}-{case_number}`.
+
+If `channel_prefix` is not specified, the workspace ID is used as the default prefix.
+
+**Note:** The `--slack-channel-prefix` CLI flag can override this configuration for the entire serve command.
+
+---
+
+## Compile Section
+
+The `[compile]` section configures the AI-powered knowledge compilation feature. This section is optional.
+
+```toml
+[compile]
+prompt = "Extract key information from the source material and summarize it."
+```
+
+### Properties
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `prompt` | string | No | Custom prompt for the LLM when compiling knowledge from external sources |
+
+The `compile` command processes external data sources (Notion pages, GitHub PRs/Issues, etc.) to extract structured knowledge. The `prompt` field allows you to customize how the LLM should interpret and extract information from these sources.
+
+If omitted, the system uses a default prompt optimized for general knowledge extraction.
+
+---
+
+## Assist Section
+
+The `[assist]` section configures the AI-powered case assistance feature. This section is optional.
+
+```toml
+[assist]
+prompt = "Check action deadlines and follow up on pending items."
+language = "Japanese"
+```
+
+### Properties
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `prompt` | string | No | Custom prompt for the AI assistant when analyzing cases |
+| `language` | string | No | Preferred language for AI responses (e.g., "Japanese", "English") |
+
+The `assist` command runs an AI agent that periodically reviews open cases and provides insights, reminders, and suggestions via Slack.
+
+**Important:** If the `prompt` field is empty or the `[assist]` section is omitted, the workspace will be skipped during assist command execution.
+
+### Usage
+
+The assist feature requires:
+- Gemini LLM client configuration (via `--gemini-api-key`)
+- Slack Bot Token (via `--slack-bot-token`)
+
+Run the assist command:
+
+```bash
+hecatoncheires assist \
+  --slack-bot-token=xoxb-YOUR_BOT_TOKEN \
+  --gemini-api-key=YOUR_GEMINI_KEY \
+  --workspace=risk
+```
+
+The AI agent will:
+1. Retrieve recent assist logs and Slack messages for context
+2. Analyze open cases in the specified workspace
+3. Execute the custom prompt to generate insights
+4. Post findings to the case's Slack channel
+
+---
+
 ## Validation Rules
 
 The configuration file is validated at startup. The following rules are enforced:
@@ -379,9 +525,27 @@ If any validation fails, the application exits with a descriptive error message 
 The following example configures Hecatoncheires as a security risk management system. See also [examples/config.toml](../examples/config.toml).
 
 ```toml
+# Workspace configuration (required)
+[workspace]
+id = "risk"
+name = "Risk Management"
+
 # Customize entity labels to match your domain
 [labels]
 case = "Risk"
+
+# Slack integration (optional)
+[slack]
+channel_prefix = "risk"
+
+# AI compile configuration (optional)
+[compile]
+prompt = "Extract security risk information, focusing on likelihood, impact, and mitigation strategies."
+
+# AI assist configuration (optional)
+[assist]
+prompt = "Check action deadlines and follow up on pending items. Remind the team of overdue tasks."
+language = "Japanese"
 
 # Category field: multi-select with metadata
 [[fields]]
