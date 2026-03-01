@@ -260,3 +260,21 @@
 .error {
   color: var(--color-error);
 }
+
+/* Private case title cell */
+.privateTitleCell {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.privateTitleLock {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.accessDenied {
+  color: var(--text-muted);
+  opacity: 0.55;
+  font-style: italic;
+}

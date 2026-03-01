@@ -247,13 +247,25 @@ func (uc *ActionUseCase) ListActions(ctx context.Context, workspaceID string) ([
 	// Access control: filter out actions from inaccessible private cases
 	token, tokenErr := auth.TokenFromContext(ctx)
 	if tokenErr == nil {
-		filtered := make([]*model.Action, 0, len(actions))
+		// Collect unique case IDs to avoid N+1 queries
+		caseIDSet := make(map[int64]struct{})
 		for _, action := range actions {
-			parentCase, caseErr := uc.repo.Case().Get(ctx, workspaceID, action.CaseID)
+			caseIDSet[action.CaseID] = struct{}{}
+		}
+
+		// Fetch each unique case once and build accessibility map
+		accessibleCases := make(map[int64]bool, len(caseIDSet))
+		for caseID := range caseIDSet {
+			parentCase, caseErr := uc.repo.Case().Get(ctx, workspaceID, caseID)
 			if caseErr != nil {
 				continue
 			}
-			if model.IsCaseAccessible(parentCase, token.Sub) {
+			accessibleCases[caseID] = model.IsCaseAccessible(parentCase, token.Sub)
+		}
+
+		filtered := make([]*model.Action, 0, len(actions))
+		for _, action := range actions {
+			if accessibleCases[action.CaseID] {
 				filtered = append(filtered, action)
 			}
 		}

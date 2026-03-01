@@ -12,6 +12,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
 
 type CaseUseCase struct {
@@ -386,7 +387,11 @@ func filterHumanUsers(ctx context.Context, repo interfaces.Repository, userIDs [
 
 	known, err := repo.SlackUser().GetByIDs(ctx, slackUserIDs)
 	if err != nil {
-		// On error, return all IDs (don't lose data)
+		// On error, return all IDs to avoid data loss; log for visibility
+		logging.From(ctx).Warn("failed to get slack users for bot filtering, returning all IDs",
+			"error", err,
+			"userIDs", userIDs,
+		)
 		return userIDs
 	}
 

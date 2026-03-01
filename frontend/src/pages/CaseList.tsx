@@ -181,10 +181,10 @@ export default function CaseList() {
         key: 'title',
         header: 'Title',
         accessor: ((caseItem: Case) => (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            {caseItem.isPrivate && <Lock size={14} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />}
-            <span style={{ opacity: caseItem.accessDenied ? 0.5 : 1 }}>
-              {caseItem.accessDenied ? '(Access Denied)' : caseItem.title}
+          <div className={styles.privateTitleCell}>
+            {caseItem.isPrivate && <Lock size={14} className={styles.privateTitleLock} />}
+            <span className={caseItem.accessDenied ? styles.accessDenied : ''}>
+              {caseItem.accessDenied ? 'Private' : caseItem.title}
             </span>
           </div>
         )) as (row: Case) => ReactElement,

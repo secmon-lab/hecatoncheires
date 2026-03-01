@@ -133,7 +133,7 @@ export default function CaseDetail() {
       id: caseId,
       limit: memberPageSize,
       offset: memberPage * memberPageSize,
-      filter: memberFilterDebounced || undefined,
+      filter: memberFilterDebounced,
     },
     skip: !currentWorkspace || !caseId,
   })

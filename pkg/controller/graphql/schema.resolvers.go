@@ -876,13 +876,25 @@ func (r *queryResolver) Knowledges(ctx context.Context, workspaceID string, limi
 	token, tokenErr := auth.TokenFromContext(ctx)
 	filteredKnowledges := knowledges
 	if tokenErr == nil {
-		filteredKnowledges = make([]*model.Knowledge, 0, len(knowledges))
+		// Collect unique case IDs to avoid N+1 queries
+		caseIDSet := make(map[int64]struct{})
 		for _, k := range knowledges {
-			parentCase, caseErr := r.repo.Case().Get(ctx, workspaceID, k.CaseID)
+			caseIDSet[k.CaseID] = struct{}{}
+		}
+
+		// Fetch each unique case once and build accessibility map
+		accessibleCases := make(map[int64]bool, len(caseIDSet))
+		for caseID := range caseIDSet {
+			parentCase, caseErr := r.repo.Case().Get(ctx, workspaceID, caseID)
 			if caseErr != nil {
 				continue
 			}
-			if model.IsCaseAccessible(parentCase, token.Sub) {
+			accessibleCases[caseID] = model.IsCaseAccessible(parentCase, token.Sub)
+		}
+
+		filteredKnowledges = make([]*model.Knowledge, 0, len(knowledges))
+		for _, k := range knowledges {
+			if accessibleCases[k.CaseID] {
 				filteredKnowledges = append(filteredKnowledges, k)
 			}
 		}
