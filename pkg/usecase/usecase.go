@@ -93,7 +93,7 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 		uc.Agent = NewAgentUseCase(repo, registry, uc.slackService, uc.llmClient)
 		uc.Assist = NewAssistUseCase(repo, registry, uc.slackService, uc.llmClient)
 	}
-	uc.Slack = NewSlackUseCases(repo, registry, uc.Agent)
+	uc.Slack = NewSlackUseCases(repo, registry, uc.Agent, uc.slackService)
 
 	return uc
 }

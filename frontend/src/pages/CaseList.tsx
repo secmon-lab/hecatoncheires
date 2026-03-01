@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useQuery } from '@apollo/client'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Settings, ChevronLeft, ChevronRight, Search } from 'lucide-react'
+import { Plus, Settings, ChevronLeft, ChevronRight, Search, Lock } from 'lucide-react'
 import Table from '../components/Table'
 import Button from '../components/Button'
 import CaseForm from './CaseForm'
@@ -22,6 +22,8 @@ interface Case {
   title: string
   description: string
   status: CaseStatus
+  isPrivate: boolean
+  accessDenied: boolean
   assigneeIDs: string[]
   assignees: Array<{ id: string; realName: string; imageUrl?: string }>
   slackChannelID: string
@@ -94,6 +96,7 @@ export default function CaseList() {
   }
 
   const handleRowClick = (caseItem: Case) => {
+    if (caseItem.accessDenied) return
     navigate(`/ws/${currentWorkspace!.id}/cases/${caseItem.id}`)
   }
 
@@ -177,7 +180,14 @@ export default function CaseList() {
       {
         key: 'title',
         header: 'Title',
-        accessor: 'title' as keyof Case,
+        accessor: ((caseItem: Case) => (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            {caseItem.isPrivate && <Lock size={14} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />}
+            <span style={{ opacity: caseItem.accessDenied ? 0.5 : 1 }}>
+              {caseItem.accessDenied ? '(Access Denied)' : caseItem.title}
+            </span>
+          </div>
+        )) as (row: Case) => ReactElement,
         width: '200px',
       },
       {

@@ -62,6 +62,10 @@ models:
         resolver: true
       slackMessages:
         resolver: true
+      channelUsers:
+        resolver: true
+      channelUserCount:
+        resolver: true
   Action:
     model:
       - github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql.Action

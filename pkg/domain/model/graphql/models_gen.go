@@ -32,6 +32,12 @@ type AssistLogConnection struct {
 	HasMore    bool         `json:"hasMore"`
 }
 
+type ChannelUserConnection struct {
+	Items      []*SlackUser `json:"items"`
+	TotalCount int          `json:"totalCount"`
+	HasMore    bool         `json:"hasMore"`
+}
+
 type CreateActionInput struct {
 	CaseID         int                 `json:"caseID"`
 	Title          string              `json:"title"`
@@ -47,6 +53,7 @@ type CreateCaseInput struct {
 	Description *string            `json:"description,omitempty"`
 	AssigneeIDs []string           `json:"assigneeIDs,omitempty"`
 	Fields      []*FieldValueInput `json:"fields,omitempty"`
+	IsPrivate   *bool              `json:"isPrivate,omitempty"`
 }
 
 type CreateGitHubSourceInput struct {

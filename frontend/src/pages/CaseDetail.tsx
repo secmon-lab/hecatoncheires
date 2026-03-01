@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation } from '@apollo/client'
-import { ArrowLeft, Edit, MoreVertical, Trash2, Plus, ExternalLink, BookOpen, Bot, ChevronLeft, ChevronRight, XCircle, RotateCcw, ClipboardList } from 'lucide-react'
+import { ArrowLeft, Edit, MoreVertical, Trash2, Plus, ExternalLink, BookOpen, Bot, ChevronLeft, ChevronRight, XCircle, RotateCcw, ClipboardList, Lock, Users, RefreshCw, Search } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import Markdown from 'react-markdown'
 import Button from '../components/Button'
@@ -10,7 +10,7 @@ import CaseForm from './CaseForm'
 import CaseDeleteDialog from './CaseDeleteDialog'
 import ActionForm from './ActionForm'
 import ActionModal from './ActionModal'
-import { GET_CASE, GET_CASES, CLOSE_CASE, REOPEN_CASE } from '../graphql/case'
+import { GET_CASE, GET_CASES, CLOSE_CASE, REOPEN_CASE, GET_CASE_MEMBERS, SYNC_CASE_CHANNEL_USERS } from '../graphql/case'
 import { GET_ASSIST_LOGS } from '../graphql/assistLog'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { useWorkspace } from '../contexts/workspace-context'
@@ -33,6 +33,9 @@ interface Case {
   title: string
   description: string
   status: 'OPEN' | 'CLOSED'
+  isPrivate: boolean
+  accessDenied: boolean
+  channelUserCount: number
   assigneeIDs: string[]
   assignees: Array<{ id: string; name: string; realName: string; imageUrl?: string }>
   slackChannelID: string
@@ -81,7 +84,20 @@ export default function CaseDetail() {
   const [selectedActionId, setSelectedActionId] = useState<number | null>(null)
   const [knowledgePage, setKnowledgePage] = useState(0)
   const knowledgePageSize = 5
+  const [memberPage, setMemberPage] = useState(0)
+  const [memberFilter, setMemberFilter] = useState('')
+  const [memberFilterDebounced, setMemberFilterDebounced] = useState('')
+  const memberPageSize = 20
   const menuRef = useRef<HTMLDivElement>(null)
+
+  // Debounce member filter
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setMemberFilterDebounced(memberFilter)
+      setMemberPage(0)
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [memberFilter])
 
   // Handle permalink: open action modal if actionId is in URL
   useEffect(() => {
@@ -109,6 +125,25 @@ export default function CaseDetail() {
       offset: 0,
     },
     skip: !currentWorkspace || !caseId,
+  })
+
+  const { data: memberData, loading: memberLoading, refetch: refetchMembers } = useQuery(GET_CASE_MEMBERS, {
+    variables: {
+      workspaceId: currentWorkspace!.id,
+      id: caseId,
+      limit: memberPageSize,
+      offset: memberPage * memberPageSize,
+      filter: memberFilterDebounced || undefined,
+    },
+    skip: !currentWorkspace || !caseId,
+  })
+
+  const [syncMembers, { loading: syncing }] = useMutation(SYNC_CASE_CHANNEL_USERS, {
+    variables: { workspaceId: currentWorkspace!.id, id: caseId },
+    onCompleted: () => {
+      refetch()
+      refetchMembers()
+    },
   })
 
   const [closeCase] = useMutation(CLOSE_CASE)
@@ -349,6 +384,12 @@ export default function CaseDetail() {
               <Chip variant="status" colorIndex={caseItem.status === 'OPEN' ? 2 : 5}>
                 {caseItem.status === 'OPEN' ? 'Open' : 'Closed'}
               </Chip>
+              {caseItem.isPrivate && (
+                <span className={styles.privateBadge}>
+                  <Lock size={14} />
+                  Private
+                </span>
+              )}
             </div>
             {caseItem.slackChannelID && (
               <a
@@ -429,7 +470,8 @@ export default function CaseDetail() {
               {caseItem.actions && caseItem.actions.length > 0 && (
                 <Button
                   variant="outline"
-                  icon={<Plus size={16} />}
+                  size="sm"
+                  icon={<Plus size={14} />}
                   onClick={() => setIsActionFormOpen(true)}
                 >
                   Add Action
@@ -488,12 +530,13 @@ export default function CaseDetail() {
               </table>
             ) : (
               <div className={styles.emptyState}>
-                <ClipboardList size={40} className={styles.emptyStateIcon} />
+                <ClipboardList size={32} className={styles.emptyStateIcon} />
                 <p className={styles.emptyStateTitle}>No actions yet</p>
                 <p className={styles.emptyStateDescription}>Create the first action for this case</p>
                 <Button
                   variant="outline"
-                  icon={<Plus size={16} />}
+                  size="sm"
+                  icon={<Plus size={14} />}
                   onClick={() => setIsActionFormOpen(true)}
                 >
                   Add Action
@@ -506,7 +549,7 @@ export default function CaseDetail() {
             <div className={styles.section}>
               <div className={styles.sectionHeader}>
                 <h3 className={styles.sectionTitle}>
-                  <BookOpen size={20} style={{ marginRight: '0.5rem', verticalAlign: 'middle' }} />
+                  <BookOpen size={16} />
                   Related Knowledge ({caseItem.knowledges.length})
                 </h3>
               </div>
@@ -582,6 +625,86 @@ export default function CaseDetail() {
             </div>
           )}
 
+          {/* Channel Members section */}
+          {caseItem.channelUserCount > 0 && (
+            <div className={styles.section}>
+              <div className={styles.sectionHeader}>
+                <h3 className={styles.sectionTitle}>
+                  <Users size={16} />
+                  Channel Members ({caseItem.channelUserCount})
+                </h3>
+                <div className={styles.memberActions}>
+                  <div className={styles.memberSearchWrapper}>
+                    <Search size={14} className={styles.memberSearchIcon} />
+                    <input
+                      type="text"
+                      value={memberFilter}
+                      onChange={(e) => setMemberFilter(e.target.value)}
+                      placeholder="Filter by name..."
+                      className={styles.memberSearchInput}
+                    />
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    icon={<RefreshCw size={14} className={syncing ? styles.spinning : ''} />}
+                    onClick={() => syncMembers()}
+                    disabled={syncing}
+                  >
+                    Sync
+                  </Button>
+                </div>
+              </div>
+              {memberLoading ? (
+                <div className={styles.memberLoading}>Loading members...</div>
+              ) : (
+                <>
+                  <div className={styles.memberGrid}>
+                    {(memberData?.case?.channelUsers?.items || []).map((user: { id: string; name: string; realName: string; imageUrl?: string }) => (
+                      <div key={user.id} className={styles.memberItem}>
+                        {user.imageUrl ? (
+                          <img src={user.imageUrl} alt={user.realName} className={styles.memberAvatar} />
+                        ) : (
+                          <div className={styles.memberAvatarPlaceholder}>
+                            {(user.realName || user.name).charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                        <div className={styles.memberInfo}>
+                          <span className={styles.memberName}>{user.realName || user.name}</span>
+                          <span className={styles.memberHandle}>@{user.name}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {(memberData?.case?.channelUsers?.totalCount || 0) > memberPageSize && (
+                    <div className={styles.pagination}>
+                      <button
+                        className={styles.paginationButton}
+                        onClick={() => setMemberPage((p) => Math.max(0, p - 1))}
+                        disabled={memberPage === 0}
+                      >
+                        <ChevronLeft size={16} />
+                      </button>
+                      <span className={styles.paginationInfo}>
+                        {memberPage + 1} / {Math.ceil((memberData?.case?.channelUsers?.totalCount || 0) / memberPageSize)}
+                      </span>
+                      <button
+                        className={styles.paginationButton}
+                        onClick={() =>
+                          setMemberPage((p) =>
+                            Math.min(Math.ceil((memberData?.case?.channelUsers?.totalCount || 0) / memberPageSize) - 1, p + 1)
+                          )
+                        }
+                        disabled={!memberData?.case?.channelUsers?.hasMore}
+                      >
+                        <ChevronRight size={16} />
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
 
         </div>
       </div>

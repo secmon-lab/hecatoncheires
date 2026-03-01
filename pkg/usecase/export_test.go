@@ -35,6 +35,9 @@ var BuildIssueMarkdown = buildIssueMarkdown
 // BuildUpdatedDiscussionMarkdown is exported for testing
 var BuildUpdatedDiscussionMarkdown = buildUpdatedDiscussionMarkdown
 
+// TestErrAccessDenied is exported for testing
+var TestErrAccessDenied = ErrAccessDenied
+
 // Type aliases for testing
 type GitHubPullRequest = githubsvc.PullRequest
 type GitHubIssue = githubsvc.Issue

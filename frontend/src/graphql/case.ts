@@ -7,6 +7,8 @@ export const GET_CASES = gql`
       title
       description
       status
+      isPrivate
+      accessDenied
       assigneeIDs
       assignees {
         id
@@ -32,6 +34,9 @@ export const GET_CASE = gql`
       title
       description
       status
+      isPrivate
+      accessDenied
+      channelUserCount
       assigneeIDs
       assignees {
         id
@@ -72,6 +77,24 @@ export const GET_CASE = gql`
   }
 `
 
+export const GET_CASE_MEMBERS = gql`
+  query GetCaseMembers($workspaceId: String!, $id: Int!, $limit: Int, $offset: Int, $filter: String) {
+    case(workspaceId: $workspaceId, id: $id) {
+      channelUserCount
+      channelUsers(limit: $limit, offset: $offset, filter: $filter) {
+        items {
+          id
+          name
+          realName
+          imageUrl
+        }
+        totalCount
+        hasMore
+      }
+    }
+  }
+`
+
 export const CREATE_CASE = gql`
   mutation CreateCase($workspaceId: String!, $input: CreateCaseInput!) {
     createCase(workspaceId: $workspaceId, input: $input) {
@@ -79,6 +102,7 @@ export const CREATE_CASE = gql`
       title
       description
       status
+      isPrivate
       assigneeIDs
       assignees {
         id
@@ -104,6 +128,7 @@ export const UPDATE_CASE = gql`
       title
       description
       status
+      isPrivate
       assigneeIDs
       assignees {
         id
@@ -135,6 +160,7 @@ export const CLOSE_CASE = gql`
       title
       description
       status
+      isPrivate
       assigneeIDs
       assignees {
         id
@@ -160,6 +186,7 @@ export const REOPEN_CASE = gql`
       title
       description
       status
+      isPrivate
       assigneeIDs
       assignees {
         id
@@ -174,6 +201,15 @@ export const REOPEN_CASE = gql`
         fieldId
         value
       }
+    }
+  }
+`
+
+export const SYNC_CASE_CHANNEL_USERS = gql`
+  mutation SyncCaseChannelUsers($workspaceId: String!, $id: Int!) {
+    syncCaseChannelUsers(workspaceId: $workspaceId, id: $id) {
+      id
+      channelUserCount
     }
   }
 `

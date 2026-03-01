@@ -8,29 +8,39 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
+	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/slack-go/slack/slackevents"
 )
 
 // SlackUseCases handles Slack-related business logic
 type SlackUseCases struct {
-	repo     interfaces.Repository
-	registry *model.WorkspaceRegistry
-	agent    *AgentUseCase
+	repo         interfaces.Repository
+	registry     *model.WorkspaceRegistry
+	agent        *AgentUseCase
+	slackService slacksvc.Service
 }
 
 // NewSlackUseCases creates a new SlackUseCases instance
-func NewSlackUseCases(repo interfaces.Repository, registry *model.WorkspaceRegistry, agent *AgentUseCase) *SlackUseCases {
+func NewSlackUseCases(repo interfaces.Repository, registry *model.WorkspaceRegistry, agent *AgentUseCase, slackService slacksvc.Service) *SlackUseCases {
 	return &SlackUseCases{
-		repo:     repo,
-		registry: registry,
-		agent:    agent,
+		repo:         repo,
+		registry:     registry,
+		agent:        agent,
+		slackService: slackService,
 	}
 }
 
 // HandleSlackEvent processes Slack Events API events
 func (uc *SlackUseCases) HandleSlackEvent(ctx context.Context, event *slackevents.EventsAPIEvent) error {
 	logger := logging.From(ctx)
+
+	// Handle member_joined_channel / member_left_channel events
+	switch event.InnerEvent.Type {
+	case "member_joined_channel", "member_left_channel":
+		return uc.handleMembershipEvent(ctx, event)
+	}
 
 	// Convert event to domain model
 	msg := slack.NewMessage(ctx, event)
@@ -51,6 +61,62 @@ func (uc *SlackUseCases) HandleSlackEvent(ctx context.Context, event *slackevent
 			logger.Error("failed to handle agent mention", "error", err.Error())
 			// Don't return error; the message was saved successfully
 		}
+	}
+
+	return nil
+}
+
+// handleMembershipEvent processes member_joined_channel / member_left_channel events.
+// It syncs the full channel member list from Slack API for the affected case (if any).
+func (uc *SlackUseCases) handleMembershipEvent(ctx context.Context, event *slackevents.EventsAPIEvent) error {
+	logger := logging.From(ctx)
+
+	// Extract channel ID from the event data
+	var channelID string
+	switch data := event.InnerEvent.Data.(type) {
+	case *slackevents.MemberJoinedChannelEvent:
+		channelID = data.Channel
+	case *slackevents.MemberLeftChannelEvent:
+		channelID = data.Channel
+	default:
+		return nil
+	}
+
+	if channelID == "" || uc.registry == nil || uc.slackService == nil {
+		return nil
+	}
+
+	// Search all workspaces for a case with this channel
+	for _, entry := range uc.registry.List() {
+		c, err := uc.repo.Case().GetBySlackChannelID(ctx, entry.Workspace.ID, channelID)
+		if err != nil {
+			errutil.Handle(ctx, err, "failed to look up case by slack channel ID for membership sync")
+			continue
+		}
+		if c == nil {
+			continue
+		}
+
+		// Found the case; sync members from Slack API
+		members, err := uc.slackService.GetConversationMembers(ctx, channelID)
+		if err != nil {
+			errutil.Handle(ctx, err, "failed to get channel members for membership sync")
+			return nil // Don't propagate error; next event or manual sync will fix it
+		}
+
+		c.ChannelUserIDs = filterHumanUsers(ctx, uc.repo, members)
+		if _, err := uc.repo.Case().Update(ctx, entry.Workspace.ID, c); err != nil {
+			errutil.Handle(ctx, err, "failed to update case channel user IDs")
+			return nil
+		}
+
+		logger.Info("synced channel members for case",
+			"channel_id", channelID,
+			"case_id", c.ID,
+			"workspace_id", entry.Workspace.ID,
+			"member_count", len(members),
+		)
+		return nil
 	}
 
 	return nil

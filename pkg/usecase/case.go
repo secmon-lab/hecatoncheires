@@ -55,7 +55,7 @@ func (uc *CaseUseCase) slackChannelPrefixForWorkspace(workspaceID string) string
 	return entry.SlackChannelPrefix
 }
 
-func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue) (*model.Case, error) {
+func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue, isPrivate bool) (*model.Case, error) {
 	if title == "" {
 		return nil, goerr.New("case title is required")
 	}
@@ -75,6 +75,7 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 		Description: description,
 		Status:      types.CaseStatusOpen,
 		AssigneeIDs: assigneeIDs,
+		IsPrivate:   isPrivate,
 		FieldValues: fieldValues,
 	}
 
@@ -86,7 +87,7 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 	// Create Slack channel if service is available
 	if uc.slackService != nil {
 		prefix := uc.slackChannelPrefixForWorkspace(workspaceID)
-		channelID, err := uc.slackService.CreateChannel(ctx, created.ID, created.Title, prefix)
+		channelID, err := uc.slackService.CreateChannel(ctx, created.ID, created.Title, prefix, isPrivate)
 		if err != nil {
 			// Rollback: delete case
 			if delErr := uc.repo.Case().Delete(ctx, workspaceID, created.ID); delErr != nil {
@@ -119,8 +120,18 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 			}
 		}
 
-		// Update case with channel ID
+		// Sync channel members (for both private and public cases)
+		var channelUserIDs []string
+		members, membersErr := uc.slackService.GetConversationMembers(ctx, channelID)
+		if membersErr != nil {
+			errutil.Handle(ctx, membersErr, "failed to get channel members during case creation")
+		} else {
+			channelUserIDs = filterHumanUsers(ctx, uc.repo, members)
+		}
+
+		// Update case with channel ID and members
 		created.SlackChannelID = channelID
+		created.ChannelUserIDs = channelUserIDs
 		updated, err := uc.repo.Case().Update(ctx, workspaceID, created)
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to update case with Slack channel ID",
@@ -142,6 +153,13 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, workspaceID string, id in
 	existingCase, err := uc.repo.Case().Get(ctx, workspaceID, id)
 	if err != nil {
 		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
+	}
+
+	// Access control for private cases
+	token, tokenErr := auth.TokenFromContext(ctx)
+	if tokenErr == nil && !model.IsCaseAccessible(existingCase, token.Sub) {
+		return nil, goerr.Wrap(ErrAccessDenied, "cannot update private case",
+			goerr.V(CaseIDKey, id), goerr.V("user_id", token.Sub))
 	}
 
 	// Validate and enrich custom fields with Type from config
@@ -171,6 +189,8 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, workspaceID string, id in
 		Status:         existingCase.Status, // Preserve status
 		AssigneeIDs:    assigneeIDs,
 		SlackChannelID: existingCase.SlackChannelID, // Preserve channel ID
+		IsPrivate:      existingCase.IsPrivate,      // Preserve private mode
+		ChannelUserIDs: existingCase.ChannelUserIDs, // Preserve channel users
 		FieldValues:    fieldValues,
 		CreatedAt:      existingCase.CreatedAt, // Preserve creation time
 	}
@@ -184,6 +204,19 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, workspaceID string, id in
 }
 
 func (uc *CaseUseCase) DeleteCase(ctx context.Context, workspaceID string, id int64) error {
+	// Get existing case for access control
+	existingCase, err := uc.repo.Case().Get(ctx, workspaceID, id)
+	if err != nil {
+		return goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
+	}
+
+	// Access control for private cases
+	token, tokenErr := auth.TokenFromContext(ctx)
+	if tokenErr == nil && !model.IsCaseAccessible(existingCase, token.Sub) {
+		return goerr.Wrap(ErrAccessDenied, "cannot delete private case",
+			goerr.V(CaseIDKey, id), goerr.V("user_id", token.Sub))
+	}
+
 	// Delete actions associated with this case
 	actions, err := uc.repo.Action().GetByCase(ctx, workspaceID, id)
 	if err != nil {
@@ -212,6 +245,12 @@ func (uc *CaseUseCase) GetCase(ctx context.Context, workspaceID string, id int64
 		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
 	}
 
+	// Access control for private cases
+	token, tokenErr := auth.TokenFromContext(ctx)
+	if tokenErr == nil && !model.IsCaseAccessible(caseModel, token.Sub) {
+		return model.RestrictCase(caseModel), nil
+	}
+
 	return caseModel, nil
 }
 
@@ -226,6 +265,16 @@ func (uc *CaseUseCase) ListCases(ctx context.Context, workspaceID string, status
 		return nil, goerr.Wrap(err, "failed to list cases")
 	}
 
+	// Access control for private cases
+	token, tokenErr := auth.TokenFromContext(ctx)
+	if tokenErr == nil {
+		for i, c := range cases {
+			if !model.IsCaseAccessible(c, token.Sub) {
+				cases[i] = model.RestrictCase(c)
+			}
+		}
+	}
+
 	return cases, nil
 }
 
@@ -233,6 +282,13 @@ func (uc *CaseUseCase) CloseCase(ctx context.Context, workspaceID string, id int
 	existing, err := uc.repo.Case().Get(ctx, workspaceID, id)
 	if err != nil {
 		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
+	}
+
+	// Access control for private cases
+	token, tokenErr := auth.TokenFromContext(ctx)
+	if tokenErr == nil && !model.IsCaseAccessible(existing, token.Sub) {
+		return nil, goerr.Wrap(ErrAccessDenied, "cannot close private case",
+			goerr.V(CaseIDKey, id), goerr.V("user_id", token.Sub))
 	}
 
 	status := existing.Status.Normalize()
@@ -255,6 +311,13 @@ func (uc *CaseUseCase) ReopenCase(ctx context.Context, workspaceID string, id in
 		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
 	}
 
+	// Access control for private cases
+	token, tokenErr := auth.TokenFromContext(ctx)
+	if tokenErr == nil && !model.IsCaseAccessible(existing, token.Sub) {
+		return nil, goerr.Wrap(ErrAccessDenied, "cannot reopen private case",
+			goerr.V(CaseIDKey, id), goerr.V("user_id", token.Sub))
+	}
+
 	status := existing.Status.Normalize()
 	if status == types.CaseStatusOpen {
 		return nil, goerr.Wrap(ErrCaseAlreadyOpen, "case is already open", goerr.V(CaseIDKey, id))
@@ -267,6 +330,73 @@ func (uc *CaseUseCase) ReopenCase(ctx context.Context, workspaceID string, id in
 	}
 
 	return updated, nil
+}
+
+// SyncCaseChannelUsers synchronizes channel members from Slack API to the case
+func (uc *CaseUseCase) SyncCaseChannelUsers(ctx context.Context, workspaceID string, caseID int64) (*model.Case, error) {
+	existing, err := uc.repo.Case().Get(ctx, workspaceID, caseID)
+	if err != nil {
+		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, caseID))
+	}
+
+	// Access control for private cases
+	token, tokenErr := auth.TokenFromContext(ctx)
+	if tokenErr == nil && !model.IsCaseAccessible(existing, token.Sub) {
+		return nil, goerr.Wrap(ErrAccessDenied, "cannot sync private case members",
+			goerr.V(CaseIDKey, caseID), goerr.V("user_id", token.Sub))
+	}
+
+	if existing.SlackChannelID == "" {
+		return nil, goerr.New("case has no Slack channel", goerr.V(CaseIDKey, caseID))
+	}
+
+	if uc.slackService == nil {
+		return nil, goerr.New("Slack service is not available")
+	}
+
+	members, err := uc.slackService.GetConversationMembers(ctx, existing.SlackChannelID)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to get channel members",
+			goerr.V(CaseIDKey, caseID),
+			goerr.V("channel_id", existing.SlackChannelID))
+	}
+
+	existing.ChannelUserIDs = filterHumanUsers(ctx, uc.repo, members)
+	updated, err := uc.repo.Case().Update(ctx, workspaceID, existing)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to update case with channel members",
+			goerr.V(CaseIDKey, caseID))
+	}
+
+	return updated, nil
+}
+
+// filterHumanUsers filters out bot/unknown user IDs by checking against the SlackUser DB cache.
+// Only IDs that exist in the cache (i.e., real human users synced via ListUsers) are returned.
+// This avoids additional Slack API calls since ListUsers already excludes bots.
+func filterHumanUsers(ctx context.Context, repo interfaces.Repository, userIDs []string) []string {
+	if len(userIDs) == 0 {
+		return userIDs
+	}
+
+	slackUserIDs := make([]model.SlackUserID, len(userIDs))
+	for i, id := range userIDs {
+		slackUserIDs[i] = model.SlackUserID(id)
+	}
+
+	known, err := repo.SlackUser().GetByIDs(ctx, slackUserIDs)
+	if err != nil {
+		// On error, return all IDs (don't lose data)
+		return userIDs
+	}
+
+	filtered := make([]string, 0, len(userIDs))
+	for _, id := range userIDs {
+		if _, ok := known[model.SlackUserID(id)]; ok {
+			filtered = append(filtered, id)
+		}
+	}
+	return filtered
 }
 
 // uniqueStrings removes duplicate strings while preserving order

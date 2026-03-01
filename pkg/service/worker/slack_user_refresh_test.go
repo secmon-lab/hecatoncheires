@@ -71,8 +71,12 @@ func (m *mockSlackService) GetUserInfo(ctx context.Context, userID string) (*sla
 	return nil, nil
 }
 
-func (m *mockSlackService) CreateChannel(ctx context.Context, caseID int64, caseName string, prefix string) (string, error) {
+func (m *mockSlackService) CreateChannel(_ context.Context, _ int64, _, _ string, _ bool) (string, error) {
 	return "", nil
+}
+
+func (m *mockSlackService) GetConversationMembers(_ context.Context, _ string) ([]string, error) {
+	return nil, nil
 }
 
 func (m *mockSlackService) RenameChannel(ctx context.Context, channelID string, caseID int64, caseName string, prefix string) error {
