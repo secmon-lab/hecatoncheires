@@ -385,7 +385,7 @@ export default function CaseDetail() {
                 {caseItem.status === 'OPEN' ? 'Open' : 'Closed'}
               </Chip>
               {caseItem.isPrivate && (
-                <span className={styles.privateBadge}>
+                <span className={styles.privateBadge} data-testid="private-badge">
                   <Lock size={14} />
                   Private
                 </span>
@@ -627,7 +627,7 @@ export default function CaseDetail() {
 
           {/* Channel Members section */}
           {caseItem.channelUserCount > 0 && (
-            <div className={styles.section}>
+            <div className={styles.section} data-testid="channel-members-section">
               <div className={styles.sectionHeader}>
                 <h3 className={styles.sectionTitle}>
                   <Users size={16} />
@@ -642,6 +642,7 @@ export default function CaseDetail() {
                       onChange={(e) => setMemberFilter(e.target.value)}
                       placeholder="Filter by name..."
                       className={styles.memberSearchInput}
+                      data-testid="member-search-filter"
                     />
                   </div>
                   <Button
@@ -650,6 +651,7 @@ export default function CaseDetail() {
                     icon={<RefreshCw size={14} className={syncing ? styles.spinning : ''} />}
                     onClick={() => syncMembers()}
                     disabled={syncing}
+                    data-testid="sync-members-button"
                   >
                     Sync
                   </Button>

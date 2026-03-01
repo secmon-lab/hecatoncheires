@@ -182,8 +182,11 @@ export default function CaseList() {
         header: 'Title',
         accessor: ((caseItem: Case) => (
           <div className={styles.privateTitleCell}>
-            {caseItem.isPrivate && <Lock size={14} className={styles.privateTitleLock} />}
-            <span className={caseItem.accessDenied ? styles.accessDenied : ''}>
+            {caseItem.isPrivate && <Lock size={14} className={styles.privateTitleLock} data-testid="private-lock-icon" />}
+            <span
+              className={caseItem.accessDenied ? styles.accessDenied : ''}
+              data-testid={caseItem.accessDenied ? 'access-denied-label' : undefined}
+            >
               {caseItem.accessDenied ? 'Private' : caseItem.title}
             </span>
           </div>

@@ -197,6 +197,32 @@ export class CaseListPage extends BasePage {
   }
 
   /**
+   * Check if a case row shows the "Private" access denied label
+   */
+  async isAccessDenied(title: string): Promise<boolean> {
+    const row = this.getCaseRowByTitle(title);
+    const label = row.getByTestId('access-denied-label');
+    return await label.isVisible();
+  }
+
+  /**
+   * Get the text content of the access denied label in a row
+   */
+  async getAccessDeniedText(): Promise<string> {
+    const label = this.page.getByTestId('access-denied-label').first();
+    return (await label.textContent()) || '';
+  }
+
+  /**
+   * Check if a private lock icon is visible for a case
+   */
+  async isPrivateLockVisible(title: string): Promise<boolean> {
+    const row = this.getCaseRowByTitle(title);
+    const lock = row.getByTestId('private-lock-icon');
+    return await lock.isVisible();
+  }
+
+  /**
    * Click a status tab
    */
   async clickStatusTab(status: 'Open' | 'Closed'): Promise<void> {

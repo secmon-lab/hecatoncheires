@@ -229,4 +229,70 @@ export class CaseDetailPage extends BasePage {
     const addBtn = this.page.locator('button').filter({ hasText: /Add Action/ }).first();
     await addBtn.click();
   }
+
+  /**
+   * Check if the Private badge is visible on case detail
+   */
+  async isPrivateBadgeVisible(): Promise<boolean> {
+    return await this.page.getByTestId('private-badge').isVisible();
+  }
+
+  /**
+   * Get the Private badge text
+   */
+  async getPrivateBadgeText(): Promise<string> {
+    return (await this.page.getByTestId('private-badge').textContent()) || '';
+  }
+
+  /**
+   * Check if the Channel Members section is visible
+   */
+  async isChannelMembersSectionVisible(): Promise<boolean> {
+    return await this.page.getByTestId('channel-members-section').isVisible();
+  }
+
+  /**
+   * Get the channel members section title text (includes count)
+   */
+  async getChannelMembersSectionTitle(): Promise<string> {
+    const section = this.page.getByTestId('channel-members-section');
+    const title = section.locator('h3').first();
+    return (await title.textContent()) || '';
+  }
+
+  /**
+   * Click the Sync button in channel members section
+   */
+  async clickSyncButton(): Promise<void> {
+    const syncBtn = this.page.getByTestId('sync-members-button');
+    const responsePromise = this.page.waitForResponse(
+      (resp) => resp.url().includes('/graphql') && resp.status() === 200
+    );
+    await syncBtn.click();
+    await responsePromise;
+  }
+
+  /**
+   * Check if Sync button is visible
+   */
+  async isSyncButtonVisible(): Promise<boolean> {
+    return await this.page.getByTestId('sync-members-button').isVisible();
+  }
+
+  /**
+   * Filter channel members by name
+   */
+  async filterMembers(text: string): Promise<void> {
+    await this.page.getByTestId('member-search-filter').fill(text);
+    await this.page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
+  }
+
+  /**
+   * Get the number of member items currently displayed
+   */
+  async getMemberCount(): Promise<number> {
+    const section = this.page.getByTestId('channel-members-section');
+    const members = await section.locator('[class*="memberItem"]').all();
+    return members.length;
+  }
 }
