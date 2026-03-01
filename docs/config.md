@@ -433,6 +433,15 @@ If `channel_prefix` is not specified, the workspace ID is used as the default pr
 
 **Note:** The `--slack-channel-prefix` CLI flag can override this configuration for the entire serve command.
 
+### Private Case Channels
+
+When a case is created with the **Private** flag enabled, the associated Slack channel is created as a **private channel** instead of a public one. This ensures that only invited members can view the channel content.
+
+Private cases also track channel membership:
+- Channel member IDs are stored on the case and used for access control — only channel members can view the case details, actions, knowledges, and assist logs associated with a private case.
+- Members can be synced from the Slack channel via the **Sync** button on the case detail page or through the `syncCaseChannelUsers` GraphQL mutation.
+- Bot users are automatically filtered out from the member list.
+
 ---
 
 ## Compile Section
