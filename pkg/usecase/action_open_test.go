@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/m-mizutani/gt"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
@@ -15,13 +16,13 @@ func TestActionUseCase_ListOpenCaseActions(t *testing.T) {
 		repo := memory.New()
 		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
 		actionUC := usecase.NewActionUseCase(repo, nil, "")
-		ctx := context.Background()
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		// Create an open case and a closed case
-		openCase, err := caseUC.CreateCase(ctx, testWorkspaceID, "Open Case", "open", []string{}, nil)
+		openCase, err := caseUC.CreateCase(ctx, testWorkspaceID, "Open Case", "open", []string{}, nil, false)
 		gt.NoError(t, err).Required()
 
-		closedCase, err := caseUC.CreateCase(ctx, testWorkspaceID, "Closed Case", "closed", []string{}, nil)
+		closedCase, err := caseUC.CreateCase(ctx, testWorkspaceID, "Closed Case", "closed", []string{}, nil, false)
 		gt.NoError(t, err).Required()
 		_, err = caseUC.CloseCase(ctx, testWorkspaceID, closedCase.ID)
 		gt.NoError(t, err).Required()
@@ -46,10 +47,10 @@ func TestActionUseCase_ListOpenCaseActions(t *testing.T) {
 		repo := memory.New()
 		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
 		actionUC := usecase.NewActionUseCase(repo, nil, "")
-		ctx := context.Background()
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		// Create only a closed case
-		closedCase, err := caseUC.CreateCase(ctx, testWorkspaceID, "Closed Case", "closed", []string{}, nil)
+		closedCase, err := caseUC.CreateCase(ctx, testWorkspaceID, "Closed Case", "closed", []string{}, nil, false)
 		gt.NoError(t, err).Required()
 		_, err = caseUC.CloseCase(ctx, testWorkspaceID, closedCase.ID)
 		gt.NoError(t, err).Required()
@@ -66,10 +67,10 @@ func TestActionUseCase_ListOpenCaseActions(t *testing.T) {
 		repo := memory.New()
 		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
 		actionUC := usecase.NewActionUseCase(repo, nil, "")
-		ctx := context.Background()
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		// Create an open case with no actions
-		_, err := caseUC.CreateCase(ctx, testWorkspaceID, "Open Case", "open", []string{}, nil)
+		_, err := caseUC.CreateCase(ctx, testWorkspaceID, "Open Case", "open", []string{}, nil, false)
 		gt.NoError(t, err).Required()
 
 		actions, err := actionUC.ListOpenCaseActions(ctx, testWorkspaceID)
@@ -81,13 +82,13 @@ func TestActionUseCase_ListOpenCaseActions(t *testing.T) {
 		repo := memory.New()
 		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
 		actionUC := usecase.NewActionUseCase(repo, nil, "")
-		ctx := context.Background()
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		// Create two open cases
-		case1, err := caseUC.CreateCase(ctx, testWorkspaceID, "Case 1", "desc1", []string{}, nil)
+		case1, err := caseUC.CreateCase(ctx, testWorkspaceID, "Case 1", "desc1", []string{}, nil, false)
 		gt.NoError(t, err).Required()
 
-		case2, err := caseUC.CreateCase(ctx, testWorkspaceID, "Case 2", "desc2", []string{}, nil)
+		case2, err := caseUC.CreateCase(ctx, testWorkspaceID, "Case 2", "desc2", []string{}, nil, false)
 		gt.NoError(t, err).Required()
 
 		// Create actions for each case
@@ -117,7 +118,7 @@ func TestActionUseCase_ListOpenCaseActions(t *testing.T) {
 	t.Run("returns empty list when no cases exist", func(t *testing.T) {
 		repo := memory.New()
 		actionUC := usecase.NewActionUseCase(repo, nil, "")
-		ctx := context.Background()
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		actions, err := actionUC.ListOpenCaseActions(ctx, testWorkspaceID)
 		gt.NoError(t, err).Required()

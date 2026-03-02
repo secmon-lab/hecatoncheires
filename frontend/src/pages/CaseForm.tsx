@@ -37,6 +37,7 @@ export default function CaseForm({ isOpen, onClose, caseItem }: CaseFormProps) {
   const [assigneeIDs, setAssigneeIDs] = useState<string[]>([])
   const [selectedAssignees, setSelectedAssignees] = useState<Array<{ value: string; label: string; image?: string }>>([])
   const [fieldValues, setFieldValues] = useState<Record<string, any>>({})
+  const [isPrivate, setIsPrivate] = useState(false)
   const [errors, setErrors] = useState<FormErrors>({})
 
   const { data: configData, loading: configLoading } = useQuery(GET_FIELD_CONFIGURATION, {
@@ -118,6 +119,7 @@ export default function CaseForm({ isOpen, onClose, caseItem }: CaseFormProps) {
     setDescription('')
     setAssigneeIDs([])
     setSelectedAssignees([])
+    setIsPrivate(false)
     setFieldValues({})
     setErrors({})
   }
@@ -194,6 +196,7 @@ export default function CaseForm({ isOpen, onClose, caseItem }: CaseFormProps) {
             description: description.trim(),
             assigneeIDs,
             fields,
+            isPrivate,
           },
         },
       })
@@ -256,6 +259,24 @@ export default function CaseForm({ isOpen, onClose, caseItem }: CaseFormProps) {
             disabled={loading}
           />
         </div>
+
+        {!caseItem && (
+          <div className={styles.field}>
+            <label className={styles.checkboxLabel}>
+              <input
+                type="checkbox"
+                checked={isPrivate}
+                onChange={(e) => setIsPrivate(e.target.checked)}
+                disabled={loading}
+                className={styles.checkbox}
+              />
+              <span>Private {caseLabel.toLowerCase()}</span>
+            </label>
+            <span className={styles.hint}>
+              Private {caseLabel.toLowerCase()}s are only visible to Slack channel members
+            </span>
+          </div>
+        )}
 
         <div className={styles.field}>
           <label htmlFor="assigneeIDs" className={styles.label}>Assignees</label>

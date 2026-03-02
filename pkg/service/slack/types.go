@@ -23,10 +23,15 @@ type Service interface {
 	// ListUsers retrieves all non-deleted, non-bot users in the workspace
 	ListUsers(ctx context.Context) ([]*User, error)
 
-	// CreateChannel creates a new public Slack channel for a case
+	// CreateChannel creates a new Slack channel for a case
 	// The channel name is automatically generated from caseID, caseName, and the given prefix
+	// If isPrivate is true, the channel is created as a private channel
 	// Returns the channel ID on success
-	CreateChannel(ctx context.Context, caseID int64, caseName string, prefix string) (string, error)
+	CreateChannel(ctx context.Context, caseID int64, caseName string, prefix string, isPrivate bool) (string, error)
+
+	// GetConversationMembers retrieves the list of user IDs in the given channel
+	// Handles Slack API pagination internally
+	GetConversationMembers(ctx context.Context, channelID string) ([]string, error)
 
 	// RenameChannel renames an existing Slack channel for a case
 	// The channel name is automatically generated from caseID, caseName, and the given prefix

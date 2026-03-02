@@ -93,12 +93,23 @@ enum CaseStatus {
   CLOSED
 }
 
+# Channel user connection for paginated member lists
+type ChannelUserConnection {
+  items: [SlackUser!]!
+  totalCount: Int!
+  hasMore: Boolean!
+}
+
 # Entity types
 type Case {
   id: Int!
   title: String!
   description: String
   status: CaseStatus!
+  isPrivate: Boolean!
+  accessDenied: Boolean!
+  channelUserCount: Int!
+  channelUsers(limit: Int, offset: Int, filter: String): ChannelUserConnection!
   assigneeIDs: [String!]!
   assignees: [SlackUser!]!
   slackChannelID: String
@@ -141,6 +152,7 @@ input CreateCaseInput {
   description: String
   assigneeIDs: [String!]
   fields: [FieldValueInput!]
+  isPrivate: Boolean
 }
 
 input UpdateCaseInput {
@@ -403,6 +415,7 @@ type Mutation {
   deleteCase(workspaceId: String!, id: Int!): Boolean!
   closeCase(workspaceId: String!, id: Int!): Case!
   reopenCase(workspaceId: String!, id: Int!): Case!
+  syncCaseChannelUsers(workspaceId: String!, id: Int!): Case!
 
   # Actions
   createAction(workspaceId: String!, input: CreateActionInput!): Action!

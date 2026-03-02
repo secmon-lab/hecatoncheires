@@ -67,6 +67,9 @@ func copyCase(c *model.Case) *model.Case {
 		}
 	}
 
+	channelUserIDs := make([]string, len(c.ChannelUserIDs))
+	copy(channelUserIDs, c.ChannelUserIDs)
+
 	return &model.Case{
 		ID:             c.ID,
 		Title:          c.Title,
@@ -74,6 +77,8 @@ func copyCase(c *model.Case) *model.Case {
 		Status:         c.Status,
 		AssigneeIDs:    assigneeIDs,
 		SlackChannelID: c.SlackChannelID,
+		IsPrivate:      c.IsPrivate,
+		ChannelUserIDs: channelUserIDs,
 		FieldValues:    fieldValues,
 		CreatedAt:      c.CreatedAt,
 		UpdatedAt:      c.UpdatedAt,

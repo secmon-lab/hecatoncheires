@@ -9,6 +9,7 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
@@ -46,6 +47,13 @@ func (uc *ActionUseCase) CreateAction(ctx context.Context, workspaceID string, c
 	caseModel, err := uc.repo.Case().Get(ctx, workspaceID, caseID)
 	if err != nil {
 		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, caseID))
+	}
+
+	// Access control for private cases
+	token, tokenErr := auth.TokenFromContext(ctx)
+	if tokenErr == nil && !model.IsCaseAccessible(caseModel, token.Sub) {
+		return nil, goerr.Wrap(ErrAccessDenied, "cannot create action in private case",
+			goerr.V(CaseIDKey, caseID), goerr.V("user_id", token.Sub))
 	}
 
 	// Default status to todo if not provided
@@ -111,6 +119,17 @@ func (uc *ActionUseCase) UpdateAction(ctx context.Context, workspaceID string, i
 	existing, err := uc.repo.Action().Get(ctx, workspaceID, id)
 	if err != nil {
 		return nil, goerr.Wrap(ErrActionNotFound, "action not found", goerr.V(ActionIDKey, id))
+	}
+
+	// Access control: check parent case
+	parentCase, err := uc.repo.Case().Get(ctx, workspaceID, existing.CaseID)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to get parent case", goerr.V(CaseIDKey, existing.CaseID))
+	}
+	token, tokenErr := auth.TokenFromContext(ctx)
+	if tokenErr == nil && !model.IsCaseAccessible(parentCase, token.Sub) {
+		return nil, goerr.Wrap(ErrAccessDenied, "cannot update action in private case",
+			goerr.V(ActionIDKey, id), goerr.V("user_id", token.Sub))
 	}
 
 	// Verify new case exists if caseID is being updated
@@ -186,6 +205,23 @@ func (uc *ActionUseCase) UpdateAction(ctx context.Context, workspaceID string, i
 }
 
 func (uc *ActionUseCase) DeleteAction(ctx context.Context, workspaceID string, id int64) error {
+	// Get existing action for access control
+	existing, err := uc.repo.Action().Get(ctx, workspaceID, id)
+	if err != nil {
+		return goerr.Wrap(ErrActionNotFound, "action not found", goerr.V(ActionIDKey, id))
+	}
+
+	// Access control: check parent case
+	parentCase, err := uc.repo.Case().Get(ctx, workspaceID, existing.CaseID)
+	if err != nil {
+		return goerr.Wrap(err, "failed to get parent case", goerr.V(CaseIDKey, existing.CaseID))
+	}
+	token, tokenErr := auth.TokenFromContext(ctx)
+	if tokenErr == nil && !model.IsCaseAccessible(parentCase, token.Sub) {
+		return goerr.Wrap(ErrAccessDenied, "cannot delete action in private case",
+			goerr.V(ActionIDKey, id), goerr.V("user_id", token.Sub))
+	}
+
 	if err := uc.repo.Action().Delete(ctx, workspaceID, id); err != nil {
 		return goerr.Wrap(ErrActionNotFound, "action not found", goerr.V(ActionIDKey, id))
 	}
@@ -208,10 +244,49 @@ func (uc *ActionUseCase) ListActions(ctx context.Context, workspaceID string) ([
 		return nil, goerr.Wrap(err, "failed to list actions")
 	}
 
+	// Access control: filter out actions from inaccessible private cases
+	token, tokenErr := auth.TokenFromContext(ctx)
+	if tokenErr == nil {
+		// Collect unique case IDs to avoid N+1 queries
+		caseIDSet := make(map[int64]struct{})
+		for _, action := range actions {
+			caseIDSet[action.CaseID] = struct{}{}
+		}
+
+		// Fetch each unique case once and build accessibility map
+		accessibleCases := make(map[int64]bool, len(caseIDSet))
+		for caseID := range caseIDSet {
+			parentCase, caseErr := uc.repo.Case().Get(ctx, workspaceID, caseID)
+			if caseErr != nil {
+				continue
+			}
+			accessibleCases[caseID] = model.IsCaseAccessible(parentCase, token.Sub)
+		}
+
+		filtered := make([]*model.Action, 0, len(actions))
+		for _, action := range actions {
+			if accessibleCases[action.CaseID] {
+				filtered = append(filtered, action)
+			}
+		}
+		actions = filtered
+	}
+
 	return actions, nil
 }
 
 func (uc *ActionUseCase) GetActionsByCase(ctx context.Context, workspaceID string, caseID int64) ([]*model.Action, error) {
+	// Access control: check parent case
+	parentCase, err := uc.repo.Case().Get(ctx, workspaceID, caseID)
+	if err != nil {
+		// If case not found (deleted or doesn't exist), return empty list
+		return []*model.Action{}, nil
+	}
+	token, tokenErr := auth.TokenFromContext(ctx)
+	if tokenErr == nil && !model.IsCaseAccessible(parentCase, token.Sub) {
+		return []*model.Action{}, nil
+	}
+
 	actions, err := uc.repo.Action().GetByCase(ctx, workspaceID, caseID)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to get actions by case", goerr.V(CaseIDKey, caseID))

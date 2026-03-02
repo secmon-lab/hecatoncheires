@@ -8,9 +8,11 @@ package graphql
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	goerr "github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	graphql1 "github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 )
@@ -35,6 +37,70 @@ func (r *actionResolver) Assignees(ctx context.Context, obj *graphql1.Action) ([
 	}
 	loaders := GetDataLoaders(ctx)
 	return loaders.SlackUserLoader.Load(ctx, obj.AssigneeIDs)
+}
+
+// ChannelUserCount is the resolver for the channelUserCount field.
+func (r *caseResolver) ChannelUserCount(ctx context.Context, obj *graphql1.Case) (int, error) {
+	return len(obj.ChannelUserIDs), nil
+}
+
+// ChannelUsers is the resolver for the channelUsers field.
+func (r *caseResolver) ChannelUsers(ctx context.Context, obj *graphql1.Case, limit *int, offset *int, filter *string) (*graphql1.ChannelUserConnection, error) {
+	if obj.AccessDenied || len(obj.ChannelUserIDs) == 0 {
+		return &graphql1.ChannelUserConnection{
+			Items:      []*graphql1.SlackUser{},
+			TotalCount: 0,
+			HasMore:    false,
+		}, nil
+	}
+
+	// Resolve all channel user IDs to SlackUser via DataLoader (DB cache, no Slack API)
+	loaders := GetDataLoaders(ctx)
+	allUsers, err := loaders.SlackUserLoader.Load(ctx, obj.ChannelUserIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	// Apply name filter if specified
+	if filter != nil && *filter != "" {
+		filterLower := strings.ToLower(*filter)
+		filtered := make([]*graphql1.SlackUser, 0, len(allUsers))
+		for _, u := range allUsers {
+			if strings.Contains(strings.ToLower(u.Name), filterLower) ||
+				strings.Contains(strings.ToLower(u.RealName), filterLower) {
+				filtered = append(filtered, u)
+			}
+		}
+		allUsers = filtered
+	}
+
+	total := len(allUsers)
+
+	// Apply pagination
+	defaultLimit := 50
+	actualLimit := defaultLimit
+	if limit != nil && *limit > 0 {
+		actualLimit = *limit
+	}
+	actualOffset := 0
+	if offset != nil && *offset > 0 {
+		actualOffset = *offset
+	}
+
+	start := actualOffset
+	if start > total {
+		start = total
+	}
+	end := start + actualLimit
+	if end > total {
+		end = total
+	}
+
+	return &graphql1.ChannelUserConnection{
+		Items:      allUsers[start:end],
+		TotalCount: total,
+		HasMore:    end < total,
+	}, nil
 }
 
 // Assignees is the resolver for the assignees field.
@@ -85,6 +151,9 @@ func (r *caseResolver) SlackChannelURL(ctx context.Context, obj *graphql1.Case) 
 
 // Fields is the resolver for the fields field.
 func (r *caseResolver) Fields(ctx context.Context, obj *graphql1.Case) ([]*graphql1.FieldValue, error) {
+	if obj.AccessDenied {
+		return []*graphql1.FieldValue{}, nil
+	}
 	// Field values are embedded in the Case and pre-populated by toGraphQLCase
 	if obj.Fields == nil {
 		return []*graphql1.FieldValue{}, nil
@@ -94,6 +163,9 @@ func (r *caseResolver) Fields(ctx context.Context, obj *graphql1.Case) ([]*graph
 
 // Actions is the resolver for the actions field.
 func (r *caseResolver) Actions(ctx context.Context, obj *graphql1.Case) ([]*graphql1.Action, error) {
+	if obj.AccessDenied {
+		return []*graphql1.Action{}, nil
+	}
 	loaders := GetDataLoaders(ctx)
 	actionsMap, err := loaders.ActionsByCaseLoader.Load(ctx, obj.WorkspaceID, []int64{int64(obj.ID)})
 	if err != nil {
@@ -114,6 +186,9 @@ func (r *caseResolver) Actions(ctx context.Context, obj *graphql1.Case) ([]*grap
 
 // Knowledges is the resolver for the knowledges field.
 func (r *caseResolver) Knowledges(ctx context.Context, obj *graphql1.Case) ([]*graphql1.Knowledge, error) {
+	if obj.AccessDenied {
+		return []*graphql1.Knowledge{}, nil
+	}
 	loaders := GetDataLoaders(ctx)
 	knowledgesMap, err := loaders.KnowledgesByCaseLoader.Load(ctx, obj.WorkspaceID, []int64{int64(obj.ID)})
 	if err != nil {
@@ -134,6 +209,12 @@ func (r *caseResolver) Knowledges(ctx context.Context, obj *graphql1.Case) ([]*g
 
 // SlackMessages is the resolver for the slackMessages field.
 func (r *caseResolver) SlackMessages(ctx context.Context, obj *graphql1.Case, limit *int, cursor *string) (*graphql1.SlackMessageConnection, error) {
+	if obj.AccessDenied {
+		return &graphql1.SlackMessageConnection{
+			Items:      []*graphql1.SlackMessage{},
+			NextCursor: "",
+		}, nil
+	}
 	limitVal := 20
 	if limit != nil && *limit > 0 {
 		limitVal = *limit
@@ -225,7 +306,8 @@ func (r *mutationResolver) CreateCase(ctx context.Context, workspaceID string, i
 		description = *input.Description
 	}
 
-	created, err := r.UseCases.Case.CreateCase(ctx, workspaceID, input.Title, description, assigneeIDs, fieldValues)
+	isPrivate := input.IsPrivate != nil && *input.IsPrivate
+	created, err := r.UseCases.Case.CreateCase(ctx, workspaceID, input.Title, description, assigneeIDs, fieldValues, isPrivate)
 	if err != nil {
 		return nil, err
 	}
@@ -279,6 +361,15 @@ func (r *mutationResolver) ReopenCase(ctx context.Context, workspaceID string, i
 		return nil, err
 	}
 	return toGraphQLCase(reopened, workspaceID), nil
+}
+
+// SyncCaseChannelUsers is the resolver for the syncCaseChannelUsers field.
+func (r *mutationResolver) SyncCaseChannelUsers(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error) {
+	updated, err := r.UseCases.Case.SyncCaseChannelUsers(ctx, workspaceID, int64(id))
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLCase(updated, workspaceID), nil
 }
 
 // CreateAction is the resolver for the createAction field.
@@ -751,6 +842,15 @@ func (r *queryResolver) Knowledge(ctx context.Context, workspaceID string, id st
 		return nil, err
 	}
 
+	// Access control: check parent case
+	parentCase, err := r.repo.Case().Get(ctx, workspaceID, knowledge.CaseID)
+	if err == nil {
+		token, tokenErr := auth.TokenFromContext(ctx)
+		if tokenErr == nil && !model.IsCaseAccessible(parentCase, token.Sub) {
+			return nil, nil
+		}
+	}
+
 	return toGraphQLKnowledge(knowledge, workspaceID), nil
 }
 
@@ -772,13 +872,42 @@ func (r *queryResolver) Knowledges(ctx context.Context, workspaceID string, limi
 		return nil, err
 	}
 
+	// Access control: filter out knowledges from inaccessible private cases
+	token, tokenErr := auth.TokenFromContext(ctx)
+	filteredKnowledges := knowledges
+	if tokenErr == nil {
+		// Collect unique case IDs to avoid N+1 queries
+		caseIDSet := make(map[int64]struct{})
+		for _, k := range knowledges {
+			caseIDSet[k.CaseID] = struct{}{}
+		}
+
+		// Fetch each unique case once and build accessibility map
+		accessibleCases := make(map[int64]bool, len(caseIDSet))
+		for caseID := range caseIDSet {
+			parentCase, caseErr := r.repo.Case().Get(ctx, workspaceID, caseID)
+			if caseErr != nil {
+				continue
+			}
+			accessibleCases[caseID] = model.IsCaseAccessible(parentCase, token.Sub)
+		}
+
+		filteredKnowledges = make([]*model.Knowledge, 0, len(knowledges))
+		for _, k := range knowledges {
+			if accessibleCases[k.CaseID] {
+				filteredKnowledges = append(filteredKnowledges, k)
+			}
+		}
+		totalCount = len(filteredKnowledges)
+	}
+
 	// Convert domain Knowledge to GraphQL Knowledge
-	items := make([]*graphql1.Knowledge, len(knowledges))
-	for i, k := range knowledges {
+	items := make([]*graphql1.Knowledge, len(filteredKnowledges))
+	for i, k := range filteredKnowledges {
 		items[i] = toGraphQLKnowledge(k, workspaceID)
 	}
 
-	hasMore := (offsetVal + len(knowledges)) < totalCount
+	hasMore := (offsetVal + len(filteredKnowledges)) < totalCount
 
 	return &graphql1.KnowledgeConnection{
 		Items:      items,
@@ -789,6 +918,19 @@ func (r *queryResolver) Knowledges(ctx context.Context, workspaceID string, limi
 
 // AssistLogs is the resolver for the assistLogs field.
 func (r *queryResolver) AssistLogs(ctx context.Context, workspaceID string, caseID int, limit *int, offset *int) (*graphql1.AssistLogConnection, error) {
+	// Access control: check parent case
+	parentCase, caseErr := r.repo.Case().Get(ctx, workspaceID, int64(caseID))
+	if caseErr == nil {
+		token, tokenErr := auth.TokenFromContext(ctx)
+		if tokenErr == nil && !model.IsCaseAccessible(parentCase, token.Sub) {
+			return &graphql1.AssistLogConnection{
+				Items:      []*graphql1.AssistLog{},
+				TotalCount: 0,
+				HasMore:    false,
+			}, nil
+		}
+	}
+
 	limitVal := 20
 	if limit != nil && *limit > 0 {
 		limitVal = *limit

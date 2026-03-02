@@ -15,6 +15,9 @@ type Case struct {
 	Title          string           `json:"title"`
 	Description    string           `json:"description"`
 	Status         types.CaseStatus `json:"status"`
+	IsPrivate      bool             `json:"isPrivate"`
+	AccessDenied   bool             `json:"accessDenied"`
+	ChannelUserIDs []string         `json:"-"` // Internal: used by channelUsers resolver
 	AssigneeIDs    []string         `json:"assigneeIDs"`
 	Assignees      []*SlackUser     `json:"assignees"`
 	SlackChannelID *string          `json:"slackChannelID,omitempty"`

@@ -54,10 +54,12 @@ Slack OAuth is used for user authentication via OpenID Connect (OIDC). The syste
 
    - **Bot Token Scopes**:
      - `channels:history` (to receive message events from public channels via Events API)
-     - `channels:manage` (to create, rename, and invite users to risk channels)
-     - `channels:read` (to list and read channel information)
+     - `channels:manage` (to create, rename, and invite users to public channels)
+     - `channels:read` (to list and read channel information, and receive membership events)
      - `chat:write` (to post and update action notification messages in channels)
      - `files:read` (to access file metadata and download files via `url_private`)
+     - `groups:read` (to read private channel information and receive membership events)
+     - `groups:write` (to create private channels for private cases)
      - `users:read` (to fetch user profile information including avatar images)
      - `users:read.email` (to access user email addresses from profiles)
 
@@ -113,6 +115,10 @@ Under **Subscribe to bot events**, add the events you want to receive:
 |-------|-------------|-------------------|
 | `message.channels` | Messages posted to public channels the app is in | `channels:history` |
 | `app_mention` | When someone mentions your app with @app_name | (no additional scope) |
+| `member_joined_channel` | When a user joins a channel | `channels:read` |
+| `member_left_channel` | When a user leaves a channel | `channels:read` |
+
+The `member_joined_channel` and `member_left_channel` events are required for **Private Case** access control. When these events fire, the application automatically syncs the channel member list to the associated case, keeping access permissions up to date.
 
 **Optional events** (if you need private channel or DM support):
 
@@ -233,16 +239,26 @@ Hecatoncheires can automatically create dedicated Slack channels for each risk w
 
 ### How It Works
 
-When a new risk is created through the GraphQL API:
+When a new case is created through the GraphQL API:
 
 1. A Slack channel is automatically created with a standardized name
-2. The channel ID is stored with the risk in the `slackChannelID` field
-3. If channel creation fails, the risk creation is rolled back (transactional)
+2. If the case is marked as **Private**, the channel is created as a **private channel**; otherwise, it is a public channel
+3. The channel ID is stored with the case in the `slackChannelID` field
+4. If channel creation fails, the case creation is rolled back (transactional)
 
-When a risk is updated and its name changes:
+When a case is updated and its name changes:
 
-1. The associated Slack channel is automatically renamed to match the new risk name
+1. The associated Slack channel is automatically renamed to match the new case name
 2. The channel ID remains the same
+
+### Private Case Channel Behavior
+
+For private cases, additional behavior applies:
+
+- The Slack channel is created as a **private channel**, restricting visibility to invited members only
+- Channel member IDs are synced to the case and used for **access control** — only channel members can view the case, its actions, knowledges, and assist logs via the API and UI
+- Member sync happens automatically when `member_joined_channel` or `member_left_channel` events are received, or manually via the **Sync** button on the case detail page
+- Bot users are automatically filtered out from the stored member list
 
 ### Channel Naming Convention
 
@@ -293,8 +309,10 @@ For automatic channel creation and full Slack integration, the bot token must ha
 
 - `channels:history` - Receive message events from public channels via Events API
 - `channels:manage` - Create, rename, and invite users to public channels
-- `channels:read` - List and read channel information
+- `channels:read` - List and read channel information, receive membership events
 - `files:read` - Access file metadata and download files attached to messages
+- `groups:read` - Read private channel information, receive membership events for private channels
+- `groups:write` - Create private channels for private cases
 - `users:read` - Fetch user profile information (name, avatar)
 - `users:read.email` - Access user email addresses from profiles
 
@@ -359,12 +377,12 @@ Follow these steps to set up both authentication and webhooks:
 2. **Configure OAuth** (see [Configure OAuth & Permissions](#2-configure-oauth--permissions))
    - Set redirect URL: `${BASE_URL}/api/auth/callback`
    - Add user scopes: `openid`, `profile`, `email`
-   - Add bot scopes: `channels:history`, `channels:manage`, `channels:read`, `chat:write`, `files:read`, `users:read`, `users:read.email`
+   - Add bot scopes: `channels:history`, `channels:manage`, `channels:read`, `chat:write`, `files:read`, `groups:read`, `groups:write`, `users:read`, `users:read.email`
 
 3. **Configure Events API** (see [Events API Setup](#events-api-setup))
    - Enable Event Subscriptions
    - Set request URL: `${BASE_URL}/hooks/slack/event`
-   - Subscribe to bot events: `message.channels`, `app_mention`, etc.
+   - Subscribe to bot events: `message.channels`, `app_mention`, `member_joined_channel`, `member_left_channel`
 
 4. **Configure Interactivity** (see [Interactivity Setup](#interactivity-setup))
    - Enable Interactivity in **Interactivity & Shortcuts**
@@ -482,6 +500,8 @@ Currently supported event types:
 
 - `message` - Regular channel messages
 - `app_mention` - When someone @mentions your app
+- `member_joined_channel` - When a user joins a channel (triggers channel member sync for private cases)
+- `member_left_channel` - When a user leaves a channel (triggers channel member sync for private cases)
 
 Messages are stored with:
 - Channel ID
@@ -731,14 +751,17 @@ These scopes are required for the Bot User OAuth Token (`xoxb-...`):
 | Scope | Slack API Method | Purpose | Code Location |
 |-------|-----------------|---------|---------------|
 | `channels:history` | Events API | Receive `message.channels` events from public channels | Webhook handler |
-| `channels:manage` | `conversations.create` | Create new Slack channels for risks | `pkg/service/slack/client.go` |
-| `channels:manage` | `conversations.rename` | Rename Slack channels when risk name changes | `pkg/service/slack/client.go` |
-| `channels:manage` | `conversations.invite` | Invite users to risk channels | `pkg/service/slack/client.go` |
+| `channels:manage` | `conversations.create` | Create new public Slack channels for cases | `pkg/service/slack/client.go` |
+| `channels:manage` | `conversations.rename` | Rename Slack channels when case name changes | `pkg/service/slack/client.go` |
+| `channels:manage` | `conversations.invite` | Invite users to case channels | `pkg/service/slack/client.go` |
 | `channels:read` | `conversations.list` | List public channels the bot has joined | `pkg/service/slack/client.go` |
 | `channels:read` | `conversations.info` | Get channel name and info (with caching) | `pkg/service/slack/client.go` |
+| `channels:read` | Events API | Receive `member_joined_channel` / `member_left_channel` events | `pkg/usecase/slack.go` |
 | `chat:write` | `chat.postMessage` | Post action notification messages to channels | `pkg/service/slack/client.go` |
 | `chat:write` | `chat.update` | Update action notification messages after button clicks | `pkg/service/slack/client.go` |
 | `files:read` | Events API | Access file metadata attached to messages via `url_private` | Webhook handler |
+| `groups:read` | `conversations.info` | Read private channel info and receive membership events | `pkg/service/slack/client.go` |
+| `groups:write` | `conversations.create` | Create private Slack channels for private cases | `pkg/service/slack/client.go` |
 | `users:read` | `users.info` | Fetch user profile (name, avatar) | `pkg/service/slack/client.go` |
 | `users:read` | `users.list` | List all non-deleted, non-bot users in workspace | `pkg/service/slack/client.go` |
 | `users:read.email` | `users.info`, `users.list` | Access user email addresses from profiles | `pkg/service/slack/client.go` |
@@ -761,6 +784,8 @@ These bot events must be subscribed to in the Slack app settings:
 |-------|-------------------|-------------------|
 | `message.channels` | `channels:history` | Yes |
 | `app_mention` | (none) | Yes |
+| `member_joined_channel` | `channels:read` (or `groups:read` for private channels) | Yes |
+| `member_left_channel` | `channels:read` (or `groups:read` for private channels) | Yes |
 | `message.groups` | `groups:history` | Optional |
 | `message.im` | `im:history` | Optional |
 | `message.mpim` | `mpim:history` | Optional |

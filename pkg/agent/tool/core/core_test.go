@@ -1177,8 +1177,11 @@ func (m *mockSlackService) ListJoinedChannels(_ context.Context) ([]slackService
 func (m *mockSlackService) GetChannelNames(_ context.Context, _ []string) (map[string]string, error) {
 	return nil, nil
 }
-func (m *mockSlackService) CreateChannel(_ context.Context, _ int64, _, _ string) (string, error) {
+func (m *mockSlackService) CreateChannel(_ context.Context, _ int64, _, _ string, _ bool) (string, error) {
 	return "", nil
+}
+func (m *mockSlackService) GetConversationMembers(_ context.Context, _ string) ([]string, error) {
+	return nil, nil
 }
 func (m *mockSlackService) RenameChannel(_ context.Context, _ string, _ int64, _, _ string) error {
 	return nil

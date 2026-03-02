@@ -210,18 +210,56 @@ func (c *client) ListUsers(ctx context.Context) ([]*User, error) {
 	return result, nil
 }
 
-// CreateChannel creates a new public Slack channel for a case
+// CreateChannel creates a new Slack channel for a case
 // The channel name is automatically generated from caseID, caseName, and the given prefix
-func (c *client) CreateChannel(ctx context.Context, caseID int64, caseName string, prefix string) (string, error) {
+// If isPrivate is true, the channel is created as a private channel
+func (c *client) CreateChannel(ctx context.Context, caseID int64, caseName string, prefix string, isPrivate bool) (string, error) {
 	channelName := GenerateRiskChannelName(caseID, caseName, prefix)
 	channel, err := c.api.CreateConversationContext(ctx, slack.CreateConversationParams{
 		ChannelName: channelName,
-		IsPrivate:   false,
+		IsPrivate:   isPrivate,
 	})
 	if err != nil {
 		return "", goerr.Wrap(err, "failed to create Slack channel", goerr.V("channelName", channelName), goerr.V("caseID", caseID), goerr.V("caseName", caseName))
 	}
 	return channel.ID, nil
+}
+
+// GetConversationMembers retrieves the list of user IDs in the given channel
+func (c *client) GetConversationMembers(ctx context.Context, channelID string) ([]string, error) {
+	var members []string
+	var cursor string
+
+	for {
+		params := &slack.GetUsersInConversationParameters{
+			ChannelID: channelID,
+			Limit:     1000,
+			Cursor:    cursor,
+		}
+
+		userIDs, nextCursor, err := c.api.GetUsersInConversationContext(ctx, params)
+		if err != nil {
+			if rateLimitErr, ok := err.(*slack.RateLimitedError); ok {
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(rateLimitErr.RetryAfter):
+					continue
+				}
+			}
+			return nil, goerr.Wrap(err, "failed to get conversation members",
+				goerr.V("channel_id", channelID))
+		}
+
+		members = append(members, userIDs...)
+
+		if nextCursor == "" {
+			break
+		}
+		cursor = nextCursor
+	}
+
+	return members, nil
 }
 
 // InviteUsersToChannel invites users to a Slack channel

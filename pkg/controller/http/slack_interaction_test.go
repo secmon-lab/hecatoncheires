@@ -11,6 +11,7 @@ import (
 
 	"github.com/m-mizutani/gt"
 	httpctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/http"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
@@ -24,8 +25,8 @@ func TestSlackInteractionHandler(t *testing.T) {
 		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
 		actionUC := usecase.NewActionUseCase(repo, nil, "")
 
-		ctx := t.Context()
-		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Desc", []string{}, nil)
+		ctx := auth.ContextWithToken(t.Context(), &auth.Token{Sub: "UTESTUSER"})
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Desc", []string{}, nil, false)
 		gt.NoError(t, err).Required()
 
 		action, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Desc", []string{"U001"}, "", types.ActionStatusTodo, nil)

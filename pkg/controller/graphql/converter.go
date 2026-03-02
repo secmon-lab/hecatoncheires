@@ -16,12 +16,20 @@ func toGraphQLCase(c *model.Case, workspaceID string) *graphql1.Case {
 		assigneeIDs = []string{}
 	}
 
+	channelUserIDs := c.ChannelUserIDs
+	if channelUserIDs == nil {
+		channelUserIDs = []string{}
+	}
+
 	return &graphql1.Case{
 		ID:             int(c.ID),
 		WorkspaceID:    workspaceID,
 		Title:          c.Title,
 		Description:    c.Description,
 		Status:         c.Status.Normalize(),
+		IsPrivate:      c.IsPrivate,
+		AccessDenied:   c.AccessDenied,
+		ChannelUserIDs: channelUserIDs,
 		AssigneeIDs:    assigneeIDs,
 		SlackChannelID: &c.SlackChannelID,
 		Fields:         toGraphQLFieldValues(c.FieldValues),

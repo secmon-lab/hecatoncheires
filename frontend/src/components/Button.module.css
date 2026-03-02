@@ -105,20 +105,20 @@
 }
 
 .outline {
-  background-color: transparent;
+  background-color: var(--bg-subtle);
   color: var(--text-label, #64748B);
-  border: 1px solid #E2E8F0;
+  border: 1px solid var(--border-default);
   box-shadow: none;
 }
 
 .outline:hover:not(:disabled) {
-  background-color: #F8FAFC;
-  border-color: #CBD5E1;
+  background-color: var(--bg-muted);
+  border-color: var(--border-hover);
   color: var(--text-heading, #1A1A2E);
 }
 
 .outline:active:not(:disabled) {
-  background-color: #F1F5F9;
+  background-color: var(--bg-highlight);
 }
 
 /* Secondary outline for less emphasis */

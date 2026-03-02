@@ -60,19 +60,20 @@ func (m *sourceTestNotionService) QueryUpdatedPagesFromPage(ctx context.Context,
 
 // mockSlackService is a mock implementation of slack.Service for testing
 type mockSlackService struct {
-	listJoinedChannelsFn   func(ctx context.Context) ([]slack.Channel, error)
-	getChannelNamesFn      func(ctx context.Context, ids []string) (map[string]string, error)
-	getUserInfoFn          func(ctx context.Context, userID string) (*slack.User, error)
-	listUsersFn            func(ctx context.Context) ([]*slack.User, error)
-	createChannelFn        func(ctx context.Context, caseID int64, caseName string, prefix string) (string, error)
-	renameChannelFn        func(ctx context.Context, channelID string, caseID int64, caseName string, prefix string) error
-	inviteUsersToChannelFn func(ctx context.Context, channelID string, userIDs []string) error
-	addBookmarkFn          func(ctx context.Context, channelID, title, link string) error
-	invitedChannelID       string
-	invitedUserIDs         []string
-	bookmarkChannelID      string
-	bookmarkTitle          string
-	bookmarkLink           string
+	listJoinedChannelsFn     func(ctx context.Context) ([]slack.Channel, error)
+	getChannelNamesFn        func(ctx context.Context, ids []string) (map[string]string, error)
+	getUserInfoFn            func(ctx context.Context, userID string) (*slack.User, error)
+	listUsersFn              func(ctx context.Context) ([]*slack.User, error)
+	createChannelFn          func(ctx context.Context, caseID int64, caseName string, prefix string) (string, error)
+	renameChannelFn          func(ctx context.Context, channelID string, caseID int64, caseName string, prefix string) error
+	inviteUsersToChannelFn   func(ctx context.Context, channelID string, userIDs []string) error
+	addBookmarkFn            func(ctx context.Context, channelID, title, link string) error
+	getConversationMembersFn func(ctx context.Context, channelID string) ([]string, error)
+	invitedChannelID         string
+	invitedUserIDs           []string
+	bookmarkChannelID        string
+	bookmarkTitle            string
+	bookmarkLink             string
 }
 
 func (m *mockSlackService) ListJoinedChannels(ctx context.Context) ([]slack.Channel, error) {
@@ -119,11 +120,18 @@ func (m *mockSlackService) ListUsers(ctx context.Context) ([]*slack.User, error)
 	}, nil
 }
 
-func (m *mockSlackService) CreateChannel(ctx context.Context, caseID int64, caseName string, prefix string) (string, error) {
+func (m *mockSlackService) CreateChannel(ctx context.Context, caseID int64, caseName string, prefix string, _ bool) (string, error) {
 	if m.createChannelFn != nil {
 		return m.createChannelFn(ctx, caseID, caseName, prefix)
 	}
 	return "C" + caseName, nil
+}
+
+func (m *mockSlackService) GetConversationMembers(ctx context.Context, channelID string) ([]string, error) {
+	if m.getConversationMembersFn != nil {
+		return m.getConversationMembersFn(ctx, channelID)
+	}
+	return nil, nil
 }
 
 func (m *mockSlackService) RenameChannel(ctx context.Context, channelID string, caseID int64, caseName string, prefix string) error {

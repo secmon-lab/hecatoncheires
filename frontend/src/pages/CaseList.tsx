@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useQuery } from '@apollo/client'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Settings, ChevronLeft, ChevronRight, Search } from 'lucide-react'
+import { Plus, Settings, ChevronLeft, ChevronRight, Search, Lock } from 'lucide-react'
 import Table from '../components/Table'
 import Button from '../components/Button'
 import CaseForm from './CaseForm'
@@ -22,6 +22,8 @@ interface Case {
   title: string
   description: string
   status: CaseStatus
+  isPrivate: boolean
+  accessDenied: boolean
   assigneeIDs: string[]
   assignees: Array<{ id: string; realName: string; imageUrl?: string }>
   slackChannelID: string
@@ -94,6 +96,7 @@ export default function CaseList() {
   }
 
   const handleRowClick = (caseItem: Case) => {
+    if (caseItem.accessDenied) return
     navigate(`/ws/${currentWorkspace!.id}/cases/${caseItem.id}`)
   }
 
@@ -167,7 +170,7 @@ export default function CaseList() {
   }
 
   const allColumns = useMemo(() => {
-    const cols: Array<{ key: string; header: string; accessor: any; width: string }> = [
+    const cols: Array<{ key: string; header: string; accessor: any; width: string; searchValue?: (row: Case) => string }> = [
       {
         key: 'id',
         header: 'ID',
@@ -177,8 +180,19 @@ export default function CaseList() {
       {
         key: 'title',
         header: 'Title',
-        accessor: 'title' as keyof Case,
+        accessor: ((caseItem: Case) => (
+          <div className={styles.privateTitleCell}>
+            {caseItem.isPrivate && <Lock size={14} className={styles.privateTitleLock} data-testid="private-lock-icon" />}
+            <span
+              className={caseItem.accessDenied ? styles.accessDenied : ''}
+              data-testid={caseItem.accessDenied ? 'access-denied-label' : undefined}
+            >
+              {caseItem.accessDenied ? 'Private' : caseItem.title}
+            </span>
+          </div>
+        )) as (row: Case) => ReactElement,
         width: '200px',
+        searchValue: (caseItem: Case) => caseItem.accessDenied ? '' : caseItem.title,
       },
       {
         key: 'description',
@@ -219,7 +233,10 @@ export default function CaseList() {
     .map(({ header, accessor, width }) => ({ header, accessor, width }))
 
   // Helper to extract text value from a column for filtering
-  const getColumnTextValue = (caseItem: Case, col: { key: string; accessor: any }): string => {
+  const getColumnTextValue = (caseItem: Case, col: { key: string; accessor: any; searchValue?: (row: Case) => string }): string => {
+    if (col.searchValue) {
+      return col.searchValue(caseItem)
+    }
     if (typeof col.accessor === 'string') {
       const val = caseItem[col.accessor as keyof Case]
       return val != null ? String(val) : ''

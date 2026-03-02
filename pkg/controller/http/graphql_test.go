@@ -19,6 +19,7 @@ import (
 	httpctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/http"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
@@ -99,6 +100,31 @@ func executeGraphQLRequest(t *testing.T, handler http.Handler, query string, var
 
 	req := httptest.NewRequest(http.MethodPost, "/graphql", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	return rec
+}
+
+// executeGraphQLRequestWithAuth sends a GraphQL request with an auth token injected into the context
+func executeGraphQLRequestWithAuth(t *testing.T, handler http.Handler, query string, variables map[string]interface{}, userID string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	reqBody := graphQLRequest{
+		Query:     query,
+		Variables: variables,
+	}
+
+	body, err := json.Marshal(reqBody)
+	gt.NoError(t, err).Required()
+
+	req := httptest.NewRequest(http.MethodPost, "/graphql", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	// Inject auth token into request context
+	ctx := auth.ContextWithToken(req.Context(), &auth.Token{Sub: userID})
+	req = req.WithContext(ctx)
 
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -2045,5 +2071,490 @@ func TestGraphQLHandler_ActionsByCaseQuery(t *testing.T) {
 		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
 
 		gt.Array(t, result.ActionsByCase).Length(0)
+	})
+}
+
+func TestGraphQLHandler_PrivateCaseAccessControl(t *testing.T) {
+	repo := memory.New()
+	handler, err := setupGraphQLServer(repo)
+	gt.NoError(t, err).Required()
+
+	ctx := context.Background()
+
+	// Create a private case with specific channel users
+	privateCase := &model.Case{
+		Title:          "Private Case",
+		Description:    "Secret information",
+		IsPrivate:      true,
+		ChannelUserIDs: []string{"UMEMBER"},
+		AssigneeIDs:    []string{"UMEMBER"},
+	}
+	createdPrivate, err := repo.Case().Create(ctx, testWorkspaceID, privateCase)
+	gt.NoError(t, err).Required()
+
+	// Create a public case for comparison
+	publicCase := &model.Case{
+		Title:       "Public Case",
+		Description: "Public information",
+		AssigneeIDs: []string{},
+	}
+	createdPublic, err := repo.Case().Create(ctx, testWorkspaceID, publicCase)
+	gt.NoError(t, err).Required()
+
+	// Create an action on the private case
+	privateAction := &model.Action{
+		CaseID:      createdPrivate.ID,
+		Title:       "Private Action",
+		Description: "Secret action",
+	}
+	_, err = repo.Action().Create(ctx, testWorkspaceID, privateAction)
+	gt.NoError(t, err).Required()
+
+	// Create an action on the public case
+	publicAction := &model.Action{
+		CaseID:      createdPublic.ID,
+		Title:       "Public Action",
+		Description: "Public action",
+	}
+	_, err = repo.Action().Create(ctx, testWorkspaceID, publicAction)
+	gt.NoError(t, err).Required()
+
+	t.Run("member can see private case details", func(t *testing.T) {
+		query := `
+			query($workspaceId: String!, $id: Int!) {
+				case(workspaceId: $workspaceId, id: $id) {
+					id
+					title
+					description
+					isPrivate
+					accessDenied
+				}
+			}
+		`
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          createdPrivate.ID,
+		}
+
+		rec := executeGraphQLRequestWithAuth(t, handler, query, variables, "UMEMBER")
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var result struct {
+			Case struct {
+				ID           int    `json:"id"`
+				Title        string `json:"title"`
+				Description  string `json:"description"`
+				IsPrivate    bool   `json:"isPrivate"`
+				AccessDenied bool   `json:"accessDenied"`
+			} `json:"case"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+
+		gt.Value(t, result.Case.Title).Equal("Private Case")
+		gt.Value(t, result.Case.Description).Equal("Secret information")
+		gt.Value(t, result.Case.IsPrivate).Equal(true)
+		gt.Value(t, result.Case.AccessDenied).Equal(false)
+	})
+
+	t.Run("non-member sees restricted private case", func(t *testing.T) {
+		query := `
+			query($workspaceId: String!, $id: Int!) {
+				case(workspaceId: $workspaceId, id: $id) {
+					id
+					title
+					description
+					isPrivate
+					accessDenied
+				}
+			}
+		`
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          createdPrivate.ID,
+		}
+
+		rec := executeGraphQLRequestWithAuth(t, handler, query, variables, "UOTHER")
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var result struct {
+			Case struct {
+				ID           int    `json:"id"`
+				Title        string `json:"title"`
+				Description  string `json:"description"`
+				IsPrivate    bool   `json:"isPrivate"`
+				AccessDenied bool   `json:"accessDenied"`
+			} `json:"case"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+
+		// Title and description should be empty (restricted)
+		gt.Value(t, result.Case.Title).Equal("")
+		gt.Value(t, result.Case.Description).Equal("")
+		gt.Value(t, result.Case.IsPrivate).Equal(true)
+		gt.Value(t, result.Case.AccessDenied).Equal(true)
+	})
+
+	t.Run("cases list restricts private cases for non-members", func(t *testing.T) {
+		query := `
+			query($workspaceId: String!) {
+				cases(workspaceId: $workspaceId) {
+					id
+					title
+					isPrivate
+					accessDenied
+				}
+			}
+		`
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+		}
+
+		rec := executeGraphQLRequestWithAuth(t, handler, query, variables, "UOTHER")
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var result struct {
+			Cases []struct {
+				ID           int    `json:"id"`
+				Title        string `json:"title"`
+				IsPrivate    bool   `json:"isPrivate"`
+				AccessDenied bool   `json:"accessDenied"`
+			} `json:"cases"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+
+		gt.Array(t, result.Cases).Length(2)
+
+		for _, c := range result.Cases {
+			if int64(c.ID) == createdPrivate.ID {
+				// Private case should be restricted
+				gt.Value(t, c.Title).Equal("")
+				gt.Value(t, c.AccessDenied).Equal(true)
+				gt.Value(t, c.IsPrivate).Equal(true)
+			} else {
+				// Public case should be fully visible
+				gt.Value(t, c.Title).Equal("Public Case")
+				gt.Value(t, c.AccessDenied).Equal(false)
+			}
+		}
+	})
+
+	t.Run("non-member cannot update private case", func(t *testing.T) {
+		mutation := `
+			mutation($workspaceId: String!, $input: UpdateCaseInput!) {
+				updateCase(workspaceId: $workspaceId, input: $input) {
+					id
+					title
+				}
+			}
+		`
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"input": map[string]interface{}{
+				"id":    createdPrivate.ID,
+				"title": "Hacked Title",
+			},
+		}
+
+		rec := executeGraphQLRequestWithAuth(t, handler, mutation, variables, "UOTHER")
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+
+		resp := parseGraphQLResponse(t, rec)
+		gt.Number(t, len(resp.Errors)).GreaterOrEqual(1)
+	})
+
+	t.Run("non-member cannot delete private case", func(t *testing.T) {
+		mutation := `
+			mutation($workspaceId: String!, $id: Int!) {
+				deleteCase(workspaceId: $workspaceId, id: $id)
+			}
+		`
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          createdPrivate.ID,
+		}
+
+		rec := executeGraphQLRequestWithAuth(t, handler, mutation, variables, "UOTHER")
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+
+		resp := parseGraphQLResponse(t, rec)
+		gt.Number(t, len(resp.Errors)).GreaterOrEqual(1)
+
+		// Verify case still exists
+		c, err := repo.Case().Get(ctx, testWorkspaceID, createdPrivate.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, c.Title).Equal("Private Case")
+	})
+
+	t.Run("actions by private case returns empty for non-member", func(t *testing.T) {
+		query := `
+			query($workspaceId: String!, $caseId: Int!) {
+				actionsByCase(workspaceId: $workspaceId, caseID: $caseId) {
+					id
+					title
+				}
+			}
+		`
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"caseId":      createdPrivate.ID,
+		}
+
+		rec := executeGraphQLRequestWithAuth(t, handler, query, variables, "UOTHER")
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var result struct {
+			ActionsByCase []struct {
+				ID    int    `json:"id"`
+				Title string `json:"title"`
+			} `json:"actionsByCase"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+		gt.Array(t, result.ActionsByCase).Length(0)
+	})
+
+	t.Run("member can see actions by private case", func(t *testing.T) {
+		query := `
+			query($workspaceId: String!, $caseId: Int!) {
+				actionsByCase(workspaceId: $workspaceId, caseID: $caseId) {
+					id
+					title
+				}
+			}
+		`
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"caseId":      createdPrivate.ID,
+		}
+
+		rec := executeGraphQLRequestWithAuth(t, handler, query, variables, "UMEMBER")
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var result struct {
+			ActionsByCase []struct {
+				ID    int    `json:"id"`
+				Title string `json:"title"`
+			} `json:"actionsByCase"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+		gt.Array(t, result.ActionsByCase).Length(1)
+		gt.Value(t, result.ActionsByCase[0].Title).Equal("Private Action")
+	})
+
+	t.Run("private case sub-resolvers return empty for non-member", func(t *testing.T) {
+		query := `
+			query($workspaceId: String!, $id: Int!) {
+				case(workspaceId: $workspaceId, id: $id) {
+					id
+					accessDenied
+					actions {
+						id
+						title
+					}
+					knowledges {
+						id
+					}
+				}
+			}
+		`
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          createdPrivate.ID,
+		}
+
+		rec := executeGraphQLRequestWithAuth(t, handler, query, variables, "UOTHER")
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var result struct {
+			Case struct {
+				ID           int  `json:"id"`
+				AccessDenied bool `json:"accessDenied"`
+				Actions      []struct {
+					ID int `json:"id"`
+				} `json:"actions"`
+				Knowledges []struct {
+					ID int `json:"id"`
+				} `json:"knowledges"`
+			} `json:"case"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+
+		gt.Value(t, result.Case.AccessDenied).Equal(true)
+		gt.Array(t, result.Case.Actions).Length(0)
+		gt.Array(t, result.Case.Knowledges).Length(0)
+	})
+
+	t.Run("without auth token private case is fully visible (backward compat)", func(t *testing.T) {
+		query := `
+			query($workspaceId: String!, $id: Int!) {
+				case(workspaceId: $workspaceId, id: $id) {
+					id
+					title
+					isPrivate
+					accessDenied
+				}
+			}
+		`
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          createdPrivate.ID,
+		}
+
+		// No auth token (system/bot context) — should bypass access control
+		rec := executeGraphQLRequest(t, handler, query, variables)
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var result struct {
+			Case struct {
+				ID           int    `json:"id"`
+				Title        string `json:"title"`
+				IsPrivate    bool   `json:"isPrivate"`
+				AccessDenied bool   `json:"accessDenied"`
+			} `json:"case"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+
+		gt.Value(t, result.Case.Title).Equal("Private Case")
+		gt.Value(t, result.Case.AccessDenied).Equal(false)
+	})
+
+	t.Run("knowledge root query returns nil for non-member of private case", func(t *testing.T) {
+		// Create a knowledge linked to the private case
+		knowledge := &model.Knowledge{
+			CaseID:  createdPrivate.ID,
+			Title:   "Secret Knowledge",
+			Summary: "Secret summary",
+		}
+		createdKnowledge, err := repo.Knowledge().Create(ctx, testWorkspaceID, knowledge)
+		gt.NoError(t, err).Required()
+
+		query := `
+			query($workspaceId: String!, $id: String!) {
+				knowledge(workspaceId: $workspaceId, id: $id) {
+					id
+					title
+				}
+			}
+		`
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          string(createdKnowledge.ID),
+		}
+
+		// Non-member should get null
+		rec := executeGraphQLRequestWithAuth(t, handler, query, variables, "UOTHER")
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var result struct {
+			Knowledge *struct {
+				ID    string `json:"id"`
+				Title string `json:"title"`
+			} `json:"knowledge"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+		gt.Value(t, result.Knowledge == nil).Equal(true)
+
+		// Member should see it
+		rec = executeGraphQLRequestWithAuth(t, handler, query, variables, "UMEMBER")
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp = parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var memberResult struct {
+			Knowledge *struct {
+				ID    string `json:"id"`
+				Title string `json:"title"`
+			} `json:"knowledge"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &memberResult)).Required()
+		gt.Value(t, memberResult.Knowledge != nil).Equal(true)
+		gt.Value(t, memberResult.Knowledge.Title).Equal("Secret Knowledge")
+	})
+
+	t.Run("assistLogs root query returns empty for non-member of private case", func(t *testing.T) {
+		// Create an assist log linked to the private case
+		assistLog := &model.AssistLog{
+			CaseID:  createdPrivate.ID,
+			Summary: "Secret analysis",
+			Actions: "Secret actions",
+		}
+		_, err := repo.AssistLog().Create(ctx, testWorkspaceID, createdPrivate.ID, assistLog)
+		gt.NoError(t, err).Required()
+
+		query := `
+			query($workspaceId: String!, $caseId: Int!) {
+				assistLogs(workspaceId: $workspaceId, caseId: $caseId) {
+					items {
+						id
+						summary
+					}
+					totalCount
+				}
+			}
+		`
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"caseId":      createdPrivate.ID,
+		}
+
+		// Non-member should get empty
+		rec := executeGraphQLRequestWithAuth(t, handler, query, variables, "UOTHER")
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var result struct {
+			AssistLogs struct {
+				Items []struct {
+					ID      string `json:"id"`
+					Summary string `json:"summary"`
+				} `json:"items"`
+				TotalCount int `json:"totalCount"`
+			} `json:"assistLogs"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+		gt.Array(t, result.AssistLogs.Items).Length(0)
+		gt.Value(t, result.AssistLogs.TotalCount).Equal(0)
+
+		// Member should see it
+		rec = executeGraphQLRequestWithAuth(t, handler, query, variables, "UMEMBER")
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp = parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var memberResult struct {
+			AssistLogs struct {
+				Items []struct {
+					ID      string `json:"id"`
+					Summary string `json:"summary"`
+				} `json:"items"`
+				TotalCount int `json:"totalCount"`
+			} `json:"assistLogs"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &memberResult)).Required()
+		gt.Number(t, len(memberResult.AssistLogs.Items)).GreaterOrEqual(1)
+		gt.Value(t, memberResult.AssistLogs.Items[0].Summary).Equal("Secret analysis")
 	})
 }

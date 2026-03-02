@@ -83,13 +83,17 @@ type ComplexityRoot struct {
 	}
 
 	Case struct {
+		AccessDenied     func(childComplexity int) int
 		Actions          func(childComplexity int) int
 		AssigneeIDs      func(childComplexity int) int
 		Assignees        func(childComplexity int) int
+		ChannelUserCount func(childComplexity int) int
+		ChannelUsers     func(childComplexity int, limit *int, offset *int, filter *string) int
 		CreatedAt        func(childComplexity int) int
 		Description      func(childComplexity int) int
 		Fields           func(childComplexity int) int
 		ID               func(childComplexity int) int
+		IsPrivate        func(childComplexity int) int
 		Knowledges       func(childComplexity int) int
 		SlackChannelID   func(childComplexity int) int
 		SlackChannelName func(childComplexity int) int
@@ -98,6 +102,12 @@ type ComplexityRoot struct {
 		Status           func(childComplexity int) int
 		Title            func(childComplexity int) int
 		UpdatedAt        func(childComplexity int) int
+	}
+
+	ChannelUserConnection struct {
+		HasMore    func(childComplexity int) int
+		Items      func(childComplexity int) int
+		TotalCount func(childComplexity int) int
 	}
 
 	EntityLabels struct {
@@ -186,6 +196,7 @@ type ComplexityRoot struct {
 		DeleteSource           func(childComplexity int, workspaceID string, id string) int
 		Noop                   func(childComplexity int) int
 		ReopenCase             func(childComplexity int, workspaceID string, id int) int
+		SyncCaseChannelUsers   func(childComplexity int, workspaceID string, id int) int
 		UpdateAction           func(childComplexity int, workspaceID string, input graphql1.UpdateActionInput) int
 		UpdateCase             func(childComplexity int, workspaceID string, input graphql1.UpdateCaseInput) int
 		UpdateGitHubSource     func(childComplexity int, workspaceID string, input graphql1.UpdateGitHubSourceInput) int
@@ -316,6 +327,9 @@ type ActionResolver interface {
 	Assignees(ctx context.Context, obj *graphql1.Action) ([]*graphql1.SlackUser, error)
 }
 type CaseResolver interface {
+	ChannelUserCount(ctx context.Context, obj *graphql1.Case) (int, error)
+	ChannelUsers(ctx context.Context, obj *graphql1.Case, limit *int, offset *int, filter *string) (*graphql1.ChannelUserConnection, error)
+
 	Assignees(ctx context.Context, obj *graphql1.Case) ([]*graphql1.SlackUser, error)
 
 	SlackChannelName(ctx context.Context, obj *graphql1.Case) (*string, error)
@@ -335,6 +349,7 @@ type MutationResolver interface {
 	DeleteCase(ctx context.Context, workspaceID string, id int) (bool, error)
 	CloseCase(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error)
 	ReopenCase(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error)
+	SyncCaseChannelUsers(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error)
 	CreateAction(ctx context.Context, workspaceID string, input graphql1.CreateActionInput) (*graphql1.Action, error)
 	UpdateAction(ctx context.Context, workspaceID string, input graphql1.UpdateActionInput) (*graphql1.Action, error)
 	DeleteAction(ctx context.Context, workspaceID string, id int) (bool, error)
@@ -524,6 +539,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.AssistLogConnection.TotalCount(childComplexity), true
 
+	case "Case.accessDenied":
+		if e.complexity.Case.AccessDenied == nil {
+			break
+		}
+
+		return e.complexity.Case.AccessDenied(childComplexity), true
 	case "Case.actions":
 		if e.complexity.Case.Actions == nil {
 			break
@@ -542,6 +563,23 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Case.Assignees(childComplexity), true
+	case "Case.channelUserCount":
+		if e.complexity.Case.ChannelUserCount == nil {
+			break
+		}
+
+		return e.complexity.Case.ChannelUserCount(childComplexity), true
+	case "Case.channelUsers":
+		if e.complexity.Case.ChannelUsers == nil {
+			break
+		}
+
+		args, err := ec.field_Case_channelUsers_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Case.ChannelUsers(childComplexity, args["limit"].(*int), args["offset"].(*int), args["filter"].(*string)), true
 	case "Case.createdAt":
 		if e.complexity.Case.CreatedAt == nil {
 			break
@@ -566,6 +604,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Case.ID(childComplexity), true
+	case "Case.isPrivate":
+		if e.complexity.Case.IsPrivate == nil {
+			break
+		}
+
+		return e.complexity.Case.IsPrivate(childComplexity), true
 	case "Case.knowledges":
 		if e.complexity.Case.Knowledges == nil {
 			break
@@ -619,6 +663,25 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Case.UpdatedAt(childComplexity), true
+
+	case "ChannelUserConnection.hasMore":
+		if e.complexity.ChannelUserConnection.HasMore == nil {
+			break
+		}
+
+		return e.complexity.ChannelUserConnection.HasMore(childComplexity), true
+	case "ChannelUserConnection.items":
+		if e.complexity.ChannelUserConnection.Items == nil {
+			break
+		}
+
+		return e.complexity.ChannelUserConnection.Items(childComplexity), true
+	case "ChannelUserConnection.totalCount":
+		if e.complexity.ChannelUserConnection.TotalCount == nil {
+			break
+		}
+
+		return e.complexity.ChannelUserConnection.TotalCount(childComplexity), true
 
 	case "EntityLabels.case":
 		if e.complexity.EntityLabels.Case == nil {
@@ -1015,6 +1078,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.ReopenCase(childComplexity, args["workspaceId"].(string), args["id"].(int)), true
+	case "Mutation.syncCaseChannelUsers":
+		if e.complexity.Mutation.SyncCaseChannelUsers == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_syncCaseChannelUsers_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.SyncCaseChannelUsers(childComplexity, args["workspaceId"].(string), args["id"].(int)), true
 	case "Mutation.updateAction":
 		if e.complexity.Mutation.UpdateAction == nil {
 			break
@@ -1821,12 +1895,23 @@ enum CaseStatus {
   CLOSED
 }
 
+# Channel user connection for paginated member lists
+type ChannelUserConnection {
+  items: [SlackUser!]!
+  totalCount: Int!
+  hasMore: Boolean!
+}
+
 # Entity types
 type Case {
   id: Int!
   title: String!
   description: String
   status: CaseStatus!
+  isPrivate: Boolean!
+  accessDenied: Boolean!
+  channelUserCount: Int!
+  channelUsers(limit: Int, offset: Int, filter: String): ChannelUserConnection!
   assigneeIDs: [String!]!
   assignees: [SlackUser!]!
   slackChannelID: String
@@ -1869,6 +1954,7 @@ input CreateCaseInput {
   description: String
   assigneeIDs: [String!]
   fields: [FieldValueInput!]
+  isPrivate: Boolean
 }
 
 input UpdateCaseInput {
@@ -2131,6 +2217,7 @@ type Mutation {
   deleteCase(workspaceId: String!, id: Int!): Boolean!
   closeCase(workspaceId: String!, id: Int!): Case!
   reopenCase(workspaceId: String!, id: Int!): Case!
+  syncCaseChannelUsers(workspaceId: String!, id: Int!): Case!
 
   # Actions
   createAction(workspaceId: String!, input: CreateActionInput!): Action!
@@ -2156,6 +2243,27 @@ var parsedSchema = gqlparser.MustLoadSchema(sources...)
 // endregion ************************** generated!.gotpl **************************
 
 // region    ***************************** args.gotpl *****************************
+
+func (ec *executionContext) field_Case_channelUsers_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "limit", ec.unmarshalOInt2ᚖint)
+	if err != nil {
+		return nil, err
+	}
+	args["limit"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "offset", ec.unmarshalOInt2ᚖint)
+	if err != nil {
+		return nil, err
+	}
+	args["offset"] = arg1
+	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "filter", ec.unmarshalOString2ᚖstring)
+	if err != nil {
+		return nil, err
+	}
+	args["filter"] = arg2
+	return args, nil
+}
 
 func (ec *executionContext) field_Case_slackMessages_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
@@ -2334,6 +2442,22 @@ func (ec *executionContext) field_Mutation_deleteSource_args(ctx context.Context
 }
 
 func (ec *executionContext) field_Mutation_reopenCase_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_syncCaseChannelUsers_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
 	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
@@ -2828,6 +2952,14 @@ func (ec *executionContext) fieldContext_Action_case(_ context.Context, field gr
 				return ec.fieldContext_Case_description(ctx, field)
 			case "status":
 				return ec.fieldContext_Case_status(ctx, field)
+			case "isPrivate":
+				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "accessDenied":
+				return ec.fieldContext_Case_accessDenied(ctx, field)
+			case "channelUserCount":
+				return ec.fieldContext_Case_channelUserCount(ctx, field)
+			case "channelUsers":
+				return ec.fieldContext_Case_channelUsers(ctx, field)
 			case "assigneeIDs":
 				return ec.fieldContext_Case_assigneeIDs(ctx, field)
 			case "assignees":
@@ -3550,6 +3682,142 @@ func (ec *executionContext) fieldContext_Case_status(_ context.Context, field gr
 	return fc, nil
 }
 
+func (ec *executionContext) _Case_isPrivate(ctx context.Context, field graphql.CollectedField, obj *graphql1.Case) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Case_isPrivate,
+		func(ctx context.Context) (any, error) {
+			return obj.IsPrivate, nil
+		},
+		nil,
+		ec.marshalNBoolean2bool,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Case_isPrivate(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Case",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Case_accessDenied(ctx context.Context, field graphql.CollectedField, obj *graphql1.Case) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Case_accessDenied,
+		func(ctx context.Context) (any, error) {
+			return obj.AccessDenied, nil
+		},
+		nil,
+		ec.marshalNBoolean2bool,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Case_accessDenied(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Case",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Case_channelUserCount(ctx context.Context, field graphql.CollectedField, obj *graphql1.Case) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Case_channelUserCount,
+		func(ctx context.Context) (any, error) {
+			return ec.resolvers.Case().ChannelUserCount(ctx, obj)
+		},
+		nil,
+		ec.marshalNInt2int,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Case_channelUserCount(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Case",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Case_channelUsers(ctx context.Context, field graphql.CollectedField, obj *graphql1.Case) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Case_channelUsers,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Case().ChannelUsers(ctx, obj, fc.Args["limit"].(*int), fc.Args["offset"].(*int), fc.Args["filter"].(*string))
+		},
+		nil,
+		ec.marshalNChannelUserConnection2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐChannelUserConnection,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Case_channelUsers(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Case",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "items":
+				return ec.fieldContext_ChannelUserConnection_items(ctx, field)
+			case "totalCount":
+				return ec.fieldContext_ChannelUserConnection_totalCount(ctx, field)
+			case "hasMore":
+				return ec.fieldContext_ChannelUserConnection_hasMore(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type ChannelUserConnection", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Case_channelUsers_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Case_assigneeIDs(ctx context.Context, field graphql.CollectedField, obj *graphql1.Case) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -3946,6 +4214,103 @@ func (ec *executionContext) fieldContext_Case_updatedAt(_ context.Context, field
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ChannelUserConnection_items(ctx context.Context, field graphql.CollectedField, obj *graphql1.ChannelUserConnection) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ChannelUserConnection_items,
+		func(ctx context.Context) (any, error) {
+			return obj.Items, nil
+		},
+		nil,
+		ec.marshalNSlackUser2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackUserᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ChannelUserConnection_items(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ChannelUserConnection",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_SlackUser_id(ctx, field)
+			case "name":
+				return ec.fieldContext_SlackUser_name(ctx, field)
+			case "realName":
+				return ec.fieldContext_SlackUser_realName(ctx, field)
+			case "imageUrl":
+				return ec.fieldContext_SlackUser_imageUrl(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type SlackUser", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ChannelUserConnection_totalCount(ctx context.Context, field graphql.CollectedField, obj *graphql1.ChannelUserConnection) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ChannelUserConnection_totalCount,
+		func(ctx context.Context) (any, error) {
+			return obj.TotalCount, nil
+		},
+		nil,
+		ec.marshalNInt2int,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ChannelUserConnection_totalCount(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ChannelUserConnection",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ChannelUserConnection_hasMore(ctx context.Context, field graphql.CollectedField, obj *graphql1.ChannelUserConnection) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ChannelUserConnection_hasMore,
+		func(ctx context.Context) (any, error) {
+			return obj.HasMore, nil
+		},
+		nil,
+		ec.marshalNBoolean2bool,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ChannelUserConnection_hasMore(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ChannelUserConnection",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
 		},
 	}
 	return fc, nil
@@ -4947,6 +5312,14 @@ func (ec *executionContext) fieldContext_Knowledge_case(_ context.Context, field
 				return ec.fieldContext_Case_description(ctx, field)
 			case "status":
 				return ec.fieldContext_Case_status(ctx, field)
+			case "isPrivate":
+				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "accessDenied":
+				return ec.fieldContext_Case_accessDenied(ctx, field)
+			case "channelUserCount":
+				return ec.fieldContext_Case_channelUserCount(ctx, field)
+			case "channelUsers":
+				return ec.fieldContext_Case_channelUsers(ctx, field)
 			case "assigneeIDs":
 				return ec.fieldContext_Case_assigneeIDs(ctx, field)
 			case "assignees":
@@ -5350,6 +5723,14 @@ func (ec *executionContext) fieldContext_Mutation_createCase(ctx context.Context
 				return ec.fieldContext_Case_description(ctx, field)
 			case "status":
 				return ec.fieldContext_Case_status(ctx, field)
+			case "isPrivate":
+				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "accessDenied":
+				return ec.fieldContext_Case_accessDenied(ctx, field)
+			case "channelUserCount":
+				return ec.fieldContext_Case_channelUserCount(ctx, field)
+			case "channelUsers":
+				return ec.fieldContext_Case_channelUsers(ctx, field)
 			case "assigneeIDs":
 				return ec.fieldContext_Case_assigneeIDs(ctx, field)
 			case "assignees":
@@ -5423,6 +5804,14 @@ func (ec *executionContext) fieldContext_Mutation_updateCase(ctx context.Context
 				return ec.fieldContext_Case_description(ctx, field)
 			case "status":
 				return ec.fieldContext_Case_status(ctx, field)
+			case "isPrivate":
+				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "accessDenied":
+				return ec.fieldContext_Case_accessDenied(ctx, field)
+			case "channelUserCount":
+				return ec.fieldContext_Case_channelUserCount(ctx, field)
+			case "channelUsers":
+				return ec.fieldContext_Case_channelUsers(ctx, field)
 			case "assigneeIDs":
 				return ec.fieldContext_Case_assigneeIDs(ctx, field)
 			case "assignees":
@@ -5537,6 +5926,14 @@ func (ec *executionContext) fieldContext_Mutation_closeCase(ctx context.Context,
 				return ec.fieldContext_Case_description(ctx, field)
 			case "status":
 				return ec.fieldContext_Case_status(ctx, field)
+			case "isPrivate":
+				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "accessDenied":
+				return ec.fieldContext_Case_accessDenied(ctx, field)
+			case "channelUserCount":
+				return ec.fieldContext_Case_channelUserCount(ctx, field)
+			case "channelUsers":
+				return ec.fieldContext_Case_channelUsers(ctx, field)
 			case "assigneeIDs":
 				return ec.fieldContext_Case_assigneeIDs(ctx, field)
 			case "assignees":
@@ -5610,6 +6007,14 @@ func (ec *executionContext) fieldContext_Mutation_reopenCase(ctx context.Context
 				return ec.fieldContext_Case_description(ctx, field)
 			case "status":
 				return ec.fieldContext_Case_status(ctx, field)
+			case "isPrivate":
+				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "accessDenied":
+				return ec.fieldContext_Case_accessDenied(ctx, field)
+			case "channelUserCount":
+				return ec.fieldContext_Case_channelUserCount(ctx, field)
+			case "channelUsers":
+				return ec.fieldContext_Case_channelUsers(ctx, field)
 			case "assigneeIDs":
 				return ec.fieldContext_Case_assigneeIDs(ctx, field)
 			case "assignees":
@@ -5644,6 +6049,87 @@ func (ec *executionContext) fieldContext_Mutation_reopenCase(ctx context.Context
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Mutation_reopenCase_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_syncCaseChannelUsers(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_syncCaseChannelUsers,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().SyncCaseChannelUsers(ctx, fc.Args["workspaceId"].(string), fc.Args["id"].(int))
+		},
+		nil,
+		ec.marshalNCase2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCase,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_syncCaseChannelUsers(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Case_id(ctx, field)
+			case "title":
+				return ec.fieldContext_Case_title(ctx, field)
+			case "description":
+				return ec.fieldContext_Case_description(ctx, field)
+			case "status":
+				return ec.fieldContext_Case_status(ctx, field)
+			case "isPrivate":
+				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "accessDenied":
+				return ec.fieldContext_Case_accessDenied(ctx, field)
+			case "channelUserCount":
+				return ec.fieldContext_Case_channelUserCount(ctx, field)
+			case "channelUsers":
+				return ec.fieldContext_Case_channelUsers(ctx, field)
+			case "assigneeIDs":
+				return ec.fieldContext_Case_assigneeIDs(ctx, field)
+			case "assignees":
+				return ec.fieldContext_Case_assignees(ctx, field)
+			case "slackChannelID":
+				return ec.fieldContext_Case_slackChannelID(ctx, field)
+			case "slackChannelName":
+				return ec.fieldContext_Case_slackChannelName(ctx, field)
+			case "slackChannelURL":
+				return ec.fieldContext_Case_slackChannelURL(ctx, field)
+			case "fields":
+				return ec.fieldContext_Case_fields(ctx, field)
+			case "actions":
+				return ec.fieldContext_Case_actions(ctx, field)
+			case "knowledges":
+				return ec.fieldContext_Case_knowledges(ctx, field)
+			case "slackMessages":
+				return ec.fieldContext_Case_slackMessages(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Case_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Case_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Case", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_syncCaseChannelUsers_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -6989,6 +7475,14 @@ func (ec *executionContext) fieldContext_Query_cases(ctx context.Context, field 
 				return ec.fieldContext_Case_description(ctx, field)
 			case "status":
 				return ec.fieldContext_Case_status(ctx, field)
+			case "isPrivate":
+				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "accessDenied":
+				return ec.fieldContext_Case_accessDenied(ctx, field)
+			case "channelUserCount":
+				return ec.fieldContext_Case_channelUserCount(ctx, field)
+			case "channelUsers":
+				return ec.fieldContext_Case_channelUsers(ctx, field)
 			case "assigneeIDs":
 				return ec.fieldContext_Case_assigneeIDs(ctx, field)
 			case "assignees":
@@ -7062,6 +7556,14 @@ func (ec *executionContext) fieldContext_Query_case(ctx context.Context, field g
 				return ec.fieldContext_Case_description(ctx, field)
 			case "status":
 				return ec.fieldContext_Case_status(ctx, field)
+			case "isPrivate":
+				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "accessDenied":
+				return ec.fieldContext_Case_accessDenied(ctx, field)
+			case "channelUserCount":
+				return ec.fieldContext_Case_channelUserCount(ctx, field)
+			case "channelUsers":
+				return ec.fieldContext_Case_channelUsers(ctx, field)
 			case "assigneeIDs":
 				return ec.fieldContext_Case_assigneeIDs(ctx, field)
 			case "assignees":
@@ -10611,7 +11113,7 @@ func (ec *executionContext) unmarshalInputCreateCaseInput(ctx context.Context, o
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"title", "description", "assigneeIDs", "fields"}
+	fieldsInOrder := [...]string{"title", "description", "assigneeIDs", "fields", "isPrivate"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -10646,6 +11148,13 @@ func (ec *executionContext) unmarshalInputCreateCaseInput(ctx context.Context, o
 				return it, err
 			}
 			it.Fields = data
+		case "isPrivate":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("isPrivate"))
+			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.IsPrivate = data
 		}
 	}
 
@@ -11527,6 +12036,88 @@ func (ec *executionContext) _Case(ctx context.Context, sel ast.SelectionSet, obj
 			if out.Values[i] == graphql.Null {
 				atomic.AddUint32(&out.Invalids, 1)
 			}
+		case "isPrivate":
+			out.Values[i] = ec._Case_isPrivate(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "accessDenied":
+			out.Values[i] = ec._Case_accessDenied(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "channelUserCount":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Case_channelUserCount(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "channelUsers":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Case_channelUsers(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "assigneeIDs":
 			out.Values[i] = ec._Case_assigneeIDs(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
@@ -11789,6 +12380,55 @@ func (ec *executionContext) _Case(ctx context.Context, sel ast.SelectionSet, obj
 			out.Values[i] = ec._Case_updatedAt(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				atomic.AddUint32(&out.Invalids, 1)
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var channelUserConnectionImplementors = []string{"ChannelUserConnection"}
+
+func (ec *executionContext) _ChannelUserConnection(ctx context.Context, sel ast.SelectionSet, obj *graphql1.ChannelUserConnection) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, channelUserConnectionImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("ChannelUserConnection")
+		case "items":
+			out.Values[i] = ec._ChannelUserConnection_items(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "totalCount":
+			out.Values[i] = ec._ChannelUserConnection_totalCount(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "hasMore":
+			out.Values[i] = ec._ChannelUserConnection_hasMore(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
 			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
@@ -12411,6 +13051,13 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 		case "reopenCase":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_reopenCase(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "syncCaseChannelUsers":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_syncCaseChannelUsers(ctx, field)
 			})
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
@@ -14237,6 +14884,20 @@ func (ec *executionContext) marshalNCaseStatus2githubᚗcomᚋsecmonᚑlabᚋhec
 		}
 	}
 	return res
+}
+
+func (ec *executionContext) marshalNChannelUserConnection2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐChannelUserConnection(ctx context.Context, sel ast.SelectionSet, v graphql1.ChannelUserConnection) graphql.Marshaler {
+	return ec._ChannelUserConnection(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNChannelUserConnection2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐChannelUserConnection(ctx context.Context, sel ast.SelectionSet, v *graphql1.ChannelUserConnection) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._ChannelUserConnection(ctx, sel, v)
 }
 
 func (ec *executionContext) unmarshalNCreateActionInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateActionInput(ctx context.Context, v any) (graphql1.CreateActionInput, error) {

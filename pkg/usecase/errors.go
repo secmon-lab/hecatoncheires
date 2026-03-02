@@ -12,6 +12,9 @@ var (
 	ErrCaseAlreadyClosed = errors.New("case is already closed")
 	ErrCaseAlreadyOpen   = errors.New("case is already open")
 
+	// Access control errors
+	ErrAccessDenied = errors.New("access denied to private case")
+
 	// Other errors
 	ErrDuplicateField = errors.New("duplicate field")
 )
