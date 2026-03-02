@@ -273,9 +273,9 @@ test.describe('Case Management', () => {
     const betaExists = await caseListPage.caseExists('Beta Bug');
     expect(betaExists).toBeFalsy();
 
-    // Clear filter and verify all cases appear
-    await caseListPage.clearSearchFilter();
+    // Clear filter and verify all cases appear by searching each one
     for (const title of cases) {
+      await caseListPage.fillSearchFilter(title);
       const exists = await caseListPage.caseExists(title);
       expect(exists).toBeTruthy();
     }

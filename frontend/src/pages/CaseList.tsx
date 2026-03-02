@@ -170,7 +170,7 @@ export default function CaseList() {
   }
 
   const allColumns = useMemo(() => {
-    const cols: Array<{ key: string; header: string; accessor: any; width: string }> = [
+    const cols: Array<{ key: string; header: string; accessor: any; width: string; searchValue?: (row: Case) => string }> = [
       {
         key: 'id',
         header: 'ID',
@@ -192,6 +192,7 @@ export default function CaseList() {
           </div>
         )) as (row: Case) => ReactElement,
         width: '200px',
+        searchValue: (caseItem: Case) => caseItem.accessDenied ? '' : caseItem.title,
       },
       {
         key: 'description',
@@ -232,7 +233,10 @@ export default function CaseList() {
     .map(({ header, accessor, width }) => ({ header, accessor, width }))
 
   // Helper to extract text value from a column for filtering
-  const getColumnTextValue = (caseItem: Case, col: { key: string; accessor: any }): string => {
+  const getColumnTextValue = (caseItem: Case, col: { key: string; accessor: any; searchValue?: (row: Case) => string }): string => {
+    if (col.searchValue) {
+      return col.searchValue(caseItem)
+    }
     if (typeof col.accessor === 'string') {
       const val = caseItem[col.accessor as keyof Case]
       return val != null ? String(val) : ''

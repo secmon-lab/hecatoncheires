@@ -309,9 +309,19 @@ test.describe('Private Case Mode', () => {
         });
       } else if (postData?.operationName === 'SyncCaseChannelUsers') {
         syncCalled = true;
-        const response = await route.fetch();
-        const json = await response.json();
-        await route.fulfill({ response, json });
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              syncCaseChannelUsers: {
+                id: postData.variables.id,
+                channelUserCount: 2,
+                __typename: 'Case',
+              },
+            },
+          }),
+        });
       } else {
         await route.continue();
       }

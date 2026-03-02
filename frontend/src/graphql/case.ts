@@ -80,6 +80,7 @@ export const GET_CASE = gql`
 export const GET_CASE_MEMBERS = gql`
   query GetCaseMembers($workspaceId: String!, $id: Int!, $limit: Int, $offset: Int, $filter: String) {
     case(workspaceId: $workspaceId, id: $id) {
+      id
       channelUserCount
       channelUsers(limit: $limit, offset: $offset, filter: $filter) {
         items {
@@ -103,6 +104,7 @@ export const CREATE_CASE = gql`
       description
       status
       isPrivate
+      accessDenied
       assigneeIDs
       assignees {
         id
@@ -129,6 +131,7 @@ export const UPDATE_CASE = gql`
       description
       status
       isPrivate
+      accessDenied
       assigneeIDs
       assignees {
         id
@@ -161,6 +164,7 @@ export const CLOSE_CASE = gql`
       description
       status
       isPrivate
+      accessDenied
       assigneeIDs
       assignees {
         id
@@ -187,6 +191,7 @@ export const REOPEN_CASE = gql`
       description
       status
       isPrivate
+      accessDenied
       assigneeIDs
       assignees {
         id
