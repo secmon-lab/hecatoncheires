@@ -313,8 +313,14 @@ func cmdServe() *cli.Command {
 
 				// Add Slack interaction handler (shares signing secret with webhook)
 				slackInteractionHandler := httpctrl.NewSlackInteractionHandler(uc.Action, uc.Agent)
+
+				// Add slash command handler and configure interaction handler for view submissions
+				slackCommandHandler := httpctrl.NewSlackCommandHandler(uc.Slack)
+				slackInteractionHandler.WithSlackCommand(uc.Slack, uc.Case)
 				httpOpts = append(httpOpts, httpctrl.WithSlackInteraction(slackInteractionHandler))
+				httpOpts = append(httpOpts, httpctrl.WithSlackCommand(slackCommandHandler))
 				logging.Default().Info("Slack interaction handler enabled")
+				logging.Default().Info("Slack slash command handler enabled")
 			}
 
 			// Create HTTP server

@@ -26,6 +26,7 @@ type Server struct {
 	slackService            slack.Service
 	slackWebhookHandler     *SlackWebhookHandler
 	slackInteractionHandler *SlackInteractionHandler
+	slackCommandHandler     *SlackCommandHandler
 	slackSigningSecret      string
 	workspaceRegistry       *model.WorkspaceRegistry
 }
@@ -66,6 +67,12 @@ func WithSlackInteraction(handler *SlackInteractionHandler) Options {
 func WithSlackService(svc slack.Service) Options {
 	return func(s *Server) {
 		s.slackService = svc
+	}
+}
+
+func WithSlackCommand(handler *SlackCommandHandler) Options {
+	return func(s *Server) {
+		s.slackCommandHandler = handler
 	}
 }
 
@@ -117,7 +124,7 @@ func New(gqlHandler http.Handler, opts ...Options) (*Server, error) {
 	}
 
 	// Slack webhook endpoint (if configured) - No auth required, uses signature verification
-	if s.slackWebhookHandler != nil || s.slackInteractionHandler != nil {
+	if s.slackWebhookHandler != nil || s.slackInteractionHandler != nil || s.slackCommandHandler != nil {
 		r.Route("/hooks/slack", func(r chi.Router) {
 			// Apply Slack signature verification middleware to all /hooks/slack/* routes
 			r.Use(SlackSignatureMiddleware(s.slackSigningSecret))
@@ -127,9 +134,15 @@ func New(gqlHandler http.Handler, opts ...Options) (*Server, error) {
 				r.Post("/event", s.slackWebhookHandler.ServeHTTP)
 			}
 
-			// Interaction endpoint (button clicks, etc.)
+			// Interaction endpoint (button clicks, modal submissions, etc.)
 			if s.slackInteractionHandler != nil {
 				r.Post("/interaction", s.slackInteractionHandler.ServeHTTP)
+			}
+
+			// Slash command endpoints
+			if s.slackCommandHandler != nil {
+				r.Post("/command", s.slackCommandHandler.ServeHTTP)
+				r.Post("/command/{ws_id}", s.slackCommandHandler.ServeHTTP)
 			}
 		})
 	}
