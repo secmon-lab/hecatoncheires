@@ -76,6 +76,12 @@ func (m *mockSlackServiceForCommand) GetBotUserID(_ context.Context) (string, er
 func (m *mockSlackServiceForCommand) OpenView(_ context.Context, _ string, _ goslack.ModalViewRequest) error {
 	return nil
 }
+func (m *mockSlackServiceForCommand) ListUserGroups(_ context.Context) ([]slacksvc.UserGroup, error) {
+	return nil, nil
+}
+func (m *mockSlackServiceForCommand) GetUserGroupMembers(_ context.Context, _ string) ([]string, error) {
+	return nil, nil
+}
 
 func TestSlackCommandHandler(t *testing.T) {
 	setup := func(t *testing.T, workspaces ...model.Workspace) *httpctrl.SlackCommandHandler {

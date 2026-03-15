@@ -91,3 +91,12 @@ id = "reference-url"
 name = "Reference URL"
 type = "url"
 required = false
+
+# Slack integration (optional)
+[slack]
+channel_prefix = "risk"
+
+# Auto-invite: Automatically invite users and user group members when a case is created
+[slack.invite]
+users = ["U12345678", "U87654321"]              # Slack user IDs to auto-invite
+groups = ["S0614TZR7", "@security-response"]    # User group IDs or @handle names

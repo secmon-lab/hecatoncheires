@@ -344,6 +344,27 @@ For private cases, additional behavior applies:
 - Member sync happens automatically when `member_joined_channel` or `member_left_channel` events are received, or manually via the **Sync** button on the case detail page
 - Bot users are automatically filtered out from the stored member list
 
+### Auto-Invite
+
+Hecatoncheires can automatically invite specified users and user group members to case channels upon creation. This is configured in the `[slack.invite]` section of the TOML configuration file.
+
+```toml
+[slack.invite]
+users = ["U12345678", "U87654321"]
+groups = ["S0614TZR7", "@security-response"]
+```
+
+- **`users`**: A list of Slack user IDs to invite directly
+- **`groups`**: A list of Slack user group IDs or `@`-prefixed handle names. Group members are resolved and invited automatically
+
+When a case is created:
+1. The creator and assignees are invited first
+2. Auto-invite users are added to the invite list
+3. Group identifiers are resolved to member lists (`@`-prefixed handle names are looked up via `usergroups.list`)
+4. All users are deduplicated before the invitation API call
+
+Group resolution failures are logged but do not block case creation. The `usergroups:read` bot scope is required.
+
 ### Channel Naming Convention
 
 Channels are named using the format: `{prefix}-{risk-id}-{normalized-risk-name}`
@@ -397,6 +418,7 @@ For automatic channel creation and full Slack integration, the bot token must ha
 - `files:read` - Access file metadata and download files attached to messages
 - `groups:read` - Read private channel information, receive membership events for private channels
 - `groups:write` - Create private channels for private cases
+- `usergroups:read` - List user groups and their members (for auto-invite feature)
 - `users:read` - Fetch user profile information (name, avatar)
 - `users:read.email` - Access user email addresses from profiles
 
@@ -461,7 +483,7 @@ Follow these steps to set up both authentication and webhooks:
 2. **Configure OAuth** (see [Configure OAuth & Permissions](#2-configure-oauth--permissions))
    - Set redirect URL: `${BASE_URL}/api/auth/callback`
    - Add user scopes: `openid`, `profile`, `email`
-   - Add bot scopes: `channels:history`, `channels:manage`, `channels:read`, `chat:write`, `files:read`, `groups:read`, `groups:write`, `users:read`, `users:read.email`
+   - Add bot scopes: `channels:history`, `channels:manage`, `channels:read`, `chat:write`, `files:read`, `groups:read`, `groups:write`, `usergroups:read`, `users:read`, `users:read.email`
 
 3. **Configure Events API** (see [Events API Setup](#events-api-setup))
    - Enable Event Subscriptions
@@ -854,6 +876,8 @@ These scopes are required for the Bot User OAuth Token (`xoxb-...`):
 | `files:read` | Events API | Access file metadata attached to messages via `url_private` | Webhook handler |
 | `groups:read` | `conversations.info` | Read private channel info and receive membership events | `pkg/service/slack/client.go` |
 | `groups:write` | `conversations.create` | Create private Slack channels for private cases | `pkg/service/slack/client.go` |
+| `usergroups:read` | `usergroups.list` | List user groups for handle name resolution (auto-invite) | `pkg/service/slack/client.go` |
+| `usergroups:read` | `usergroups.users.list` | Get user group members (auto-invite) | `pkg/service/slack/client.go` |
 | `users:read` | `users.info` | Fetch user profile (name, avatar) | `pkg/service/slack/client.go` |
 | `users:read` | `users.list` | List all non-deleted, non-bot users in workspace | `pkg/service/slack/client.go` |
 | `users:read.email` | `users.info`, `users.list` | Access user email addresses from profiles | `pkg/service/slack/client.go` |

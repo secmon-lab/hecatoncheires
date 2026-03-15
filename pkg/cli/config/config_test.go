@@ -749,6 +749,65 @@ type = "text"
 	})
 }
 
+func TestLoadWorkspaceConfigs_SlackInvite(t *testing.T) {
+	t.Run("parses slack invite section", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		content := `
+[workspace]
+id = "risk"
+name = "Risk Management"
+
+[slack]
+channel_prefix = "risk"
+
+[slack.invite]
+users = ["U12345678", "U87654321"]
+groups = ["S0614TZR7", "@security-team"]
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`
+		err := os.WriteFile(configPath, []byte(content), 0644)
+		gt.NoError(t, err).Required()
+
+		configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1)
+		gt.Array(t, configs[0].SlackInviteUsers).Length(2)
+		gt.Value(t, configs[0].SlackInviteUsers[0]).Equal("U12345678")
+		gt.Value(t, configs[0].SlackInviteUsers[1]).Equal("U87654321")
+		gt.Array(t, configs[0].SlackInviteGroups).Length(2)
+		gt.Value(t, configs[0].SlackInviteGroups[0]).Equal("S0614TZR7")
+		gt.Value(t, configs[0].SlackInviteGroups[1]).Equal("@security-team")
+	})
+
+	t.Run("empty invite section defaults to empty slices", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		content := `
+[workspace]
+id = "risk"
+name = "Risk Management"
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`
+		err := os.WriteFile(configPath, []byte(content), 0644)
+		gt.NoError(t, err).Required()
+
+		configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1)
+		gt.Array(t, configs[0].SlackInviteUsers).Length(0)
+		gt.Array(t, configs[0].SlackInviteGroups).Length(0)
+	})
+}
+
 func TestLoadFieldSchema_DefaultLabels(t *testing.T) {
 	content := `
 [[fields]]

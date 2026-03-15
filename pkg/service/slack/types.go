@@ -73,6 +73,20 @@ type Service interface {
 
 	// OpenView opens a modal view in Slack using the provided trigger ID.
 	OpenView(ctx context.Context, triggerID string, view slack.ModalViewRequest) error
+
+	// ListUserGroups retrieves all user groups in the workspace.
+	// Used to resolve group handle names to group IDs.
+	ListUserGroups(ctx context.Context) ([]UserGroup, error)
+
+	// GetUserGroupMembers retrieves the member user IDs of a user group.
+	GetUserGroupMembers(ctx context.Context, groupID string) ([]string, error)
+}
+
+// UserGroup represents a Slack user group
+type UserGroup struct {
+	ID     string
+	Handle string
+	Name   string
 }
 
 // Channel represents a Slack channel

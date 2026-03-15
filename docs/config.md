@@ -433,6 +433,30 @@ If `channel_prefix` is not specified, the workspace ID is used as the default pr
 
 **Note:** The `--slack-channel-prefix` CLI flag can override this configuration for the entire serve command.
 
+### Auto-Invite (`[slack.invite]`)
+
+The `[slack.invite]` subsection configures automatic invitation of users and user group members to Slack channels when a case is created.
+
+```toml
+[slack.invite]
+users = ["U12345678", "U87654321"]
+groups = ["S0614TZR7", "@security-response"]
+```
+
+| Property | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `users` | string[] | No | `[]` | Slack user IDs to automatically invite to case channels |
+| `groups` | string[] | No | `[]` | Slack user group IDs or `@`-prefixed handle names to resolve and invite |
+
+**Group resolution:**
+- If a group identifier starts with `@` (e.g., `@security-response`), it is treated as a handle name and resolved to a group ID via the `usergroups.list` API
+- Otherwise (e.g., `S0614TZR7`), it is treated as a Slack user group ID and used directly
+- Members of each group are fetched via `usergroups.users.list` and added to the invite list
+- Group resolution failures are logged but do not prevent case creation
+- Duplicate users (across direct users, group members, creator, and assignees) are automatically deduplicated
+
+**Required bot scope:** `usergroups:read` (in addition to existing scopes)
+
 ### Private Case Channels
 
 When a case is created with the **Private** flag enabled, the associated Slack channel is created as a **private channel** instead of a public one. This ensures that only invited members can view the channel content.
@@ -546,6 +570,11 @@ case = "Risk"
 # Slack integration (optional)
 [slack]
 channel_prefix = "risk"
+
+# Auto-invite users and groups to case channels (optional)
+[slack.invite]
+users = ["U12345678"]
+groups = ["@security-response"]
 
 # AI compile configuration (optional)
 [compile]

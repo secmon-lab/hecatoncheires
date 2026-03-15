@@ -69,7 +69,9 @@ type mockSlackService struct {
 	inviteUsersToChannelFn   func(ctx context.Context, channelID string, userIDs []string) error
 	addBookmarkFn            func(ctx context.Context, channelID, title, link string) error
 	getConversationMembersFn func(ctx context.Context, channelID string) ([]string, error)
-	invitedChannelID         string
+	listUserGroupsFn      func(ctx context.Context) ([]slack.UserGroup, error)
+	getUserGroupMembersFn func(ctx context.Context, groupID string) ([]string, error)
+	invitedChannelID      string
 	invitedUserIDs           []string
 	bookmarkChannelID        string
 	bookmarkTitle            string
@@ -194,6 +196,20 @@ func (m *mockSlackService) GetBotUserID(ctx context.Context) (string, error) {
 
 func (m *mockSlackService) OpenView(ctx context.Context, triggerID string, view goslack.ModalViewRequest) error {
 	return nil
+}
+
+func (m *mockSlackService) ListUserGroups(ctx context.Context) ([]slack.UserGroup, error) {
+	if m.listUserGroupsFn != nil {
+		return m.listUserGroupsFn(ctx)
+	}
+	return nil, nil
+}
+
+func (m *mockSlackService) GetUserGroupMembers(ctx context.Context, groupID string) ([]string, error) {
+	if m.getUserGroupMembersFn != nil {
+		return m.getUserGroupMembersFn(ctx, groupID)
+	}
+	return nil, nil
 }
 
 func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
