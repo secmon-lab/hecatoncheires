@@ -387,6 +387,7 @@ func (uc *CaseUseCase) resolveAutoInviteUsers(ctx context.Context, workspaceID s
 
 	entry, err := uc.workspaceRegistry.Get(workspaceID)
 	if err != nil {
+		errutil.Handle(ctx, err, "failed to get workspace entry for auto-invite")
 		return nil
 	}
 
@@ -428,7 +429,9 @@ func (uc *CaseUseCase) resolveGroupMembers(ctx context.Context, groups []string)
 		} else {
 			handleToID := make(map[string]string, len(allGroups))
 			for _, g := range allGroups {
-				handleToID[g.Handle] = g.ID
+				if g.Handle != "" {
+					handleToID[g.Handle] = g.ID
+				}
 			}
 			for _, handle := range handleNames {
 				if id, ok := handleToID[handle]; ok {
@@ -441,6 +444,7 @@ func (uc *CaseUseCase) resolveGroupMembers(ctx context.Context, groups []string)
 	}
 
 	// Resolve group IDs to member user IDs
+	groupIDs = uniqueStrings(groupIDs)
 	var members []string
 	for _, gid := range groupIDs {
 		m, err := uc.slackService.GetUserGroupMembers(ctx, gid)
