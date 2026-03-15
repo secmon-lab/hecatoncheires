@@ -7,9 +7,10 @@ Hecatoncheires integrates with Slack for both authentication and event webhooks.
 1. [Slack OAuth Authentication](#slack-oauth-authentication)
 2. [Slack Events API (Webhooks)](#slack-events-api-webhooks)
 3. [Slack Interactivity (Action Notifications)](#slack-interactivity-action-notifications)
-4. [Automatic Risk Channel Creation](#automatic-risk-channel-creation)
-5. [Complete Setup Guide](#complete-setup-guide)
-6. [Environment Variables Reference](#environment-variables-reference)
+4. [Slack Slash Commands (Case Creation)](#slack-slash-commands-case-creation)
+5. [Automatic Risk Channel Creation](#automatic-risk-channel-creation)
+6. [Complete Setup Guide](#complete-setup-guide)
+7. [Environment Variables Reference](#environment-variables-reference)
 
 ---
 
@@ -233,6 +234,89 @@ The message is automatically updated when the action is modified (title, assigne
 
 ---
 
+## Slack Slash Commands (Case Creation)
+
+Slack slash commands allow users to create cases directly from Slack without opening the web UI. When a slash command is invoked, a modal dialog appears where users can fill in the case title, description, and custom fields defined in the workspace configuration.
+
+### How It Works
+
+1. User types a slash command (e.g., `/create-case`) in Slack
+2. Slack sends a request to Hecatoncheires
+3. A Block Kit modal opens with the case creation form
+4. User fills in the form and submits
+5. A new case is created and a confirmation message is posted to the channel
+
+#### Workspace Selection
+
+The behavior depends on how many workspaces are configured and whether a workspace ID is specified in the URL:
+
+- **Workspace ID in URL** (e.g., `/hooks/slack/command/risk`): Opens the case creation modal directly for that workspace
+- **Single workspace configured**: Opens the case creation modal automatically
+- **Multiple workspaces configured**: Shows a workspace selection modal first, then the case creation modal
+
+### Slash Command Setup
+
+#### 1. Create a Slash Command in Slack
+
+1. In your Slack app settings, go to **Slash Commands**
+2. Click **Create New Command**
+3. Configure the command:
+   - **Command**: Enter the command name (e.g., `/create-case`)
+   - **Request URL**: Set to your slash command endpoint:
+     ```
+     https://your-domain.com/hooks/slack/command
+     ```
+     Or to target a specific workspace:
+     ```
+     https://your-domain.com/hooks/slack/command/{workspace_id}
+     ```
+   - **Short Description**: e.g., "Create a new case"
+4. Click **Save**
+
+You can create multiple slash commands targeting different workspaces. For example:
+- `/create-risk` → `https://your-domain.com/hooks/slack/command/risk`
+- `/create-incident` → `https://your-domain.com/hooks/slack/command/incident`
+
+#### 2. Enable Interactivity (Required)
+
+Slash commands use Block Kit modals, which require **Interactivity** to be enabled. If you have already configured [Slack Interactivity](#slack-interactivity-action-notifications), this is already done. Otherwise:
+
+1. Go to **Interactivity & Shortcuts** in your Slack app settings
+2. Toggle **Interactivity** to **On**
+3. Set **Request URL** to:
+   ```
+   https://your-domain.com/hooks/slack/interaction
+   ```
+4. Click **Save Changes**
+
+#### 3. Required Bot Scopes
+
+The bot token must have the `chat:write` scope to post confirmation messages after case creation. Add this scope in **OAuth & Permissions** → **Bot Token Scopes** if not already present.
+
+### Custom Fields in Modal
+
+The case creation modal dynamically includes input fields based on the workspace's field configuration (defined in TOML config). Supported field types:
+
+| Field Type | Modal Input |
+|------------|------------|
+| `text` | Plain text input |
+| `number` | Number input |
+| `select` | Single-select dropdown |
+| `multi_select` | Multi-select dropdown |
+| `user` | Slack user selector |
+| `multi_user` | Multi-user selector |
+| `date` | Date picker |
+| `url` | URL text input |
+
+### Requirements
+
+- Slack signing secret must be configured (for request verification)
+- Bot token must have `chat:write` scope (for posting confirmation messages)
+- Interactivity must be enabled in the Slack app
+- At least one workspace must be configured
+
+---
+
 ## Automatic Risk Channel Creation
 
 Hecatoncheires can automatically create dedicated Slack channels for each risk when it is registered. This feature helps teams collaborate and discuss specific risks in dedicated channels.
@@ -388,29 +472,35 @@ Follow these steps to set up both authentication and webhooks:
    - Enable Interactivity in **Interactivity & Shortcuts**
    - Set request URL: `${BASE_URL}/hooks/slack/interaction`
 
-5. **Get Credentials**:
+5. **Configure Slash Commands** (optional, see [Slash Command Setup](#slash-command-setup))
+   - Create slash command(s) in **Slash Commands**
+   - Set request URL: `${BASE_URL}/hooks/slack/command` or `${BASE_URL}/hooks/slack/command/{workspace_id}`
+
+6. **Get Credentials**:
    - Client ID (from Basic Information)
    - Client Secret (from Basic Information)
    - Signing Secret (from Basic Information)
 
-6. **Install App to Workspace**:
+7. **Install App to Workspace**:
    - Install the app
    - Copy Bot User OAuth Token (`xoxb-...`)
 
-7. **Set Environment Variables** (see below)
+8. **Set Environment Variables** (see below)
 
-8. **Start the Server**:
+9. **Start the Server**:
    ```bash
    ./hecatoncheires serve
    ```
 
-9. **Verify Setup**:
+10. **Verify Setup**:
    - Check logs for "Slack authentication enabled"
    - Check logs for "Slack webhook handler enabled"
    - Check logs for "Slack interaction handler enabled"
+   - Check logs for "Slack slash command handler enabled" (if slash commands are configured)
    - Test authentication by accessing the web UI
    - Test webhook by posting a message in a channel (after inviting the bot)
    - Test interactivity by creating an action and clicking buttons in the Slack message
+   - Test slash command by typing your command in Slack (e.g., `/create-case`)
 
 ### Environment Variables
 
@@ -666,7 +756,9 @@ service cloud.firestore {
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/hooks/slack/event` | POST | Receives Slack Events API webhooks |
-| `/hooks/slack/interaction` | POST | Receives Slack interactive component payloads (button clicks) |
+| `/hooks/slack/interaction` | POST | Receives Slack interactive component payloads (button clicks, modal submissions) |
+| `/hooks/slack/command` | POST | Receives Slack slash command invocations (opens case creation modal) |
+| `/hooks/slack/command/{ws_id}` | POST | Receives Slack slash command invocations for a specific workspace |
 
 All webhook endpoints require valid Slack signature verification.
 
