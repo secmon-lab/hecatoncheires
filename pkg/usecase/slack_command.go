@@ -10,6 +10,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/slack-go/slack"
 )
 
@@ -18,12 +19,12 @@ const (
 	SlackCallbackIDSelectWorkspace = "hc_select_workspace"
 	SlackCallbackIDCreateCase      = "hc_create_case"
 
-	slackBlockIDWorkspaceSelect  = "hc_ws_select_block"
-	slackActionIDWorkspaceRadio  = "hc_ws_radio"
-	slackBlockIDCaseTitle        = "hc_case_title_block"
-	slackActionIDCaseTitle       = "hc_case_title"
-	slackBlockIDCaseDescription  = "hc_case_desc_block"
-	slackActionIDCaseDescription = "hc_case_desc"
+	SlackBlockIDWorkspaceSelect  = "hc_ws_select_block"
+	SlackActionIDWorkspaceRadio  = "hc_ws_radio"
+	SlackBlockIDCaseTitle        = "hc_case_title_block"
+	SlackActionIDCaseTitle       = "hc_case_title"
+	SlackBlockIDCaseDescription  = "hc_case_desc_block"
+	SlackActionIDCaseDescription = "hc_case_desc"
 
 	// Prefix for custom field block/action IDs
 	slackFieldBlockPrefix  = "hc_field_block_"
@@ -75,11 +76,11 @@ func (uc *SlackUseCases) HandleSlashCommand(ctx context.Context, triggerID, user
 func (uc *SlackUseCases) HandleWorkspaceSelectSubmit(callback *slack.InteractionCallback) (*slack.ModalViewRequest, error) {
 	// Extract selected workspace from radio buttons
 	blockValues := callback.View.State.Values
-	radioBlock, ok := blockValues[slackBlockIDWorkspaceSelect]
+	radioBlock, ok := blockValues[SlackBlockIDWorkspaceSelect]
 	if !ok {
 		return nil, goerr.New("workspace selection block not found")
 	}
-	radioAction, ok := radioBlock[slackActionIDWorkspaceRadio]
+	radioAction, ok := radioBlock[SlackActionIDWorkspaceRadio]
 	if !ok {
 		return nil, goerr.New("workspace radio action not found")
 	}
@@ -114,15 +115,15 @@ func (uc *SlackUseCases) HandleCaseCreationSubmit(ctx context.Context, caseUC *C
 	blockValues := callback.View.State.Values
 
 	title := ""
-	if titleBlock, ok := blockValues[slackBlockIDCaseTitle]; ok {
-		if titleAction, ok := titleBlock[slackActionIDCaseTitle]; ok {
+	if titleBlock, ok := blockValues[SlackBlockIDCaseTitle]; ok {
+		if titleAction, ok := titleBlock[SlackActionIDCaseTitle]; ok {
 			title = titleAction.Value
 		}
 	}
 
 	description := ""
-	if descBlock, ok := blockValues[slackBlockIDCaseDescription]; ok {
-		if descAction, ok := descBlock[slackActionIDCaseDescription]; ok {
+	if descBlock, ok := blockValues[SlackBlockIDCaseDescription]; ok {
+		if descAction, ok := descBlock[SlackActionIDCaseDescription]; ok {
 			description = descAction.Value
 		}
 	}
@@ -155,9 +156,10 @@ func (uc *SlackUseCases) HandleCaseCreationSubmit(ctx context.Context, caseUC *C
 
 		if _, err := uc.slackService.PostMessage(ctx, meta.ChannelID, nil, confirmText); err != nil {
 			// Log but don't fail; the case was already created
-			return goerr.Wrap(err, "failed to post confirmation message",
-				goerr.V("channel_id", meta.ChannelID),
-				goerr.V("case_id", created.ID))
+			logging.From(ctx).Error("failed to post confirmation message",
+				"error", err,
+				"channel_id", meta.ChannelID,
+				"case_id", created.ID)
 		}
 	}
 
@@ -192,22 +194,22 @@ func buildCaseCreationModal(workspaceID, channelID string, schema *config.FieldS
 	metaJSON, _ := json.Marshal(meta) //nolint:errcheck
 
 	titleInput := slack.NewInputBlock(
-		slackBlockIDCaseTitle,
+		SlackBlockIDCaseTitle,
 		slack.NewTextBlockObject(slack.PlainTextType, "Title", false, false),
 		nil,
 		slack.NewPlainTextInputBlockElement(
 			slack.NewTextBlockObject(slack.PlainTextType, "Enter case title", false, false),
-			slackActionIDCaseTitle,
+			SlackActionIDCaseTitle,
 		),
 	)
 
 	descInput := slack.NewInputBlock(
-		slackBlockIDCaseDescription,
+		SlackBlockIDCaseDescription,
 		slack.NewTextBlockObject(slack.PlainTextType, "Description", false, false),
 		nil,
 		&slack.PlainTextInputBlockElement{
 			Type:        slack.METPlainTextInput,
-			ActionID:    slackActionIDCaseDescription,
+			ActionID:    SlackActionIDCaseDescription,
 			Multiline:   true,
 			Placeholder: slack.NewTextBlockObject(slack.PlainTextType, "Enter case description (optional)", false, false),
 		},
@@ -454,9 +456,9 @@ func buildWorkspaceSelectModal(channelID string, workspaces []model.Workspace) s
 		)
 	}
 
-	radioGroup := slack.NewRadioButtonsBlockElement(slackActionIDWorkspaceRadio, options...)
+	radioGroup := slack.NewRadioButtonsBlockElement(SlackActionIDWorkspaceRadio, options...)
 	radioInput := slack.NewInputBlock(
-		slackBlockIDWorkspaceSelect,
+		SlackBlockIDWorkspaceSelect,
 		slack.NewTextBlockObject(slack.PlainTextType, "Workspace", false, false),
 		nil,
 		radioGroup,

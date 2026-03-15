@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
@@ -142,7 +143,7 @@ func (h *SlackInteractionHandler) handleViewSubmission(w http.ResponseWriter, r 
 			logger.Error("failed to handle workspace selection",
 				"error", err,
 			)
-			writeViewSubmissionError(w, "Failed to process workspace selection. Please try again.")
+			writeViewSubmissionError(ctx, w, usecase.SlackBlockIDWorkspaceSelect, "Failed to process workspace selection. Please try again.")
 			return
 		}
 
@@ -162,7 +163,7 @@ func (h *SlackInteractionHandler) handleViewSubmission(w http.ResponseWriter, r 
 			logger.Error("failed to handle case creation",
 				"error", err,
 			)
-			writeViewSubmissionError(w, "Failed to create case. Please try again.")
+			writeViewSubmissionError(ctx, w, usecase.SlackBlockIDCaseTitle, "Failed to create case. Please try again.")
 			return
 		}
 
@@ -175,13 +176,15 @@ func (h *SlackInteractionHandler) handleViewSubmission(w http.ResponseWriter, r 
 }
 
 // writeViewSubmissionError writes a view_submission error response that shows errors in the modal
-func writeViewSubmissionError(w http.ResponseWriter, msg string) {
+func writeViewSubmissionError(ctx context.Context, w http.ResponseWriter, blockID string, msg string) {
 	resp := slack.ViewSubmissionResponse{
 		ResponseAction: slack.RAErrors,
 		Errors: map[string]string{
-			"hc_case_title_block": msg,
+			blockID: msg,
 		},
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		logging.From(ctx).Error("failed to encode view submission error response", "error", err)
+	}
 }
