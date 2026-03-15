@@ -23,9 +23,16 @@ type WorkspaceBaseConfig struct {
 	Name string `toml:"name"`
 }
 
+// SlackInviteSection represents the [slack.invite] section in a TOML config
+type SlackInviteSection struct {
+	Users  []string `toml:"users"`
+	Groups []string `toml:"groups"`
+}
+
 // SlackSection represents the [slack] section in a TOML config
 type SlackSection struct {
-	ChannelPrefix string `toml:"channel_prefix"`
+	ChannelPrefix string             `toml:"channel_prefix"`
+	Invite        SlackInviteSection `toml:"invite"`
 }
 
 // CompileSection represents the [compile] section in a TOML config
@@ -55,6 +62,8 @@ type WorkspaceConfig struct {
 	ID                 string
 	Name               string
 	SlackChannelPrefix string
+	SlackInviteUsers   []string
+	SlackInviteGroups  []string
 	FieldSchema        *domainConfig.FieldSchema
 	CompilePrompt      string
 	AssistPrompt       string
@@ -301,6 +310,8 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 		ID:                 wsID,
 		Name:               wsName,
 		SlackChannelPrefix: slackPrefix,
+		SlackInviteUsers:   appCfg.Slack.Invite.Users,
+		SlackInviteGroups:  appCfg.Slack.Invite.Groups,
 		FieldSchema:        appCfg.ToDomainFieldSchema(),
 		CompilePrompt:      appCfg.Compile.Prompt,
 		AssistPrompt:       appCfg.Assist.Prompt,
@@ -339,6 +350,8 @@ func (a *AppConfig) Configure(c *cli.Command) ([]*WorkspaceConfig, *model.Worksp
 			},
 			FieldSchema:        wc.FieldSchema,
 			SlackChannelPrefix: wc.SlackChannelPrefix,
+			SlackInviteUsers:   wc.SlackInviteUsers,
+			SlackInviteGroups:  wc.SlackInviteGroups,
 			CompilePrompt:      wc.CompilePrompt,
 			AssistPrompt:       wc.AssistPrompt,
 			AssistLanguage:     wc.AssistLanguage,

@@ -1200,6 +1200,12 @@ func (m *mockSlackService) UpdateMessage(_ context.Context, _, _ string, _ []gos
 func (m *mockSlackService) OpenView(_ context.Context, _ string, _ goslack.ModalViewRequest) error {
 	return nil
 }
+func (m *mockSlackService) ListUserGroups(_ context.Context) ([]slackService.UserGroup, error) {
+	return nil, nil
+}
+func (m *mockSlackService) GetUserGroupMembers(_ context.Context, _ string) ([]string, error) {
+	return nil, nil
+}
 
 // ----- NewForAssist tests -----
 

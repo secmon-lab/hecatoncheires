@@ -262,8 +262,8 @@ func buildFieldInputBlock(field config.FieldDefinition) slack.Block {
 
 	case types.FieldTypeNumber:
 		element := &slack.NumberInputBlockElement{
-			Type:     slack.METNumber,
-			ActionID: actionID,
+			Type:             slack.METNumber,
+			ActionID:         actionID,
 			IsDecimalAllowed: true,
 		}
 		if field.Description != "" {

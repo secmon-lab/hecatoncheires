@@ -19,6 +19,8 @@ type WorkspaceEntry struct {
 	Workspace          Workspace
 	FieldSchema        *config.FieldSchema
 	SlackChannelPrefix string
+	SlackInviteUsers   []string
+	SlackInviteGroups  []string
 	CompilePrompt      string
 	AssistPrompt       string
 	AssistLanguage     string

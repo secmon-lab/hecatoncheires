@@ -37,6 +37,7 @@ type client struct {
 	botUserIDOnce sync.Once
 	botUserID     string
 	botUserIDErr  error
+
 }
 
 // Option is a functional option for client configuration
@@ -453,4 +454,32 @@ func (c *client) GetBotUserID(ctx context.Context) (string, error) {
 		c.botUserID = resp.UserID
 	})
 	return c.botUserID, c.botUserIDErr
+}
+
+// ListUserGroups retrieves all user groups in the workspace
+func (c *client) ListUserGroups(ctx context.Context) ([]UserGroup, error) {
+	groups, err := c.api.GetUserGroupsContext(ctx)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to list user groups")
+	}
+
+	result := make([]UserGroup, 0, len(groups))
+	for _, g := range groups {
+		result = append(result, UserGroup{
+			ID:     g.ID,
+			Handle: g.Handle,
+			Name:   g.Name,
+		})
+	}
+	return result, nil
+}
+
+// GetUserGroupMembers retrieves the member user IDs of a user group
+func (c *client) GetUserGroupMembers(ctx context.Context, groupID string) ([]string, error) {
+	members, err := c.api.GetUserGroupMembersContext(ctx, groupID)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to get user group members",
+			goerr.V("group_id", groupID))
+	}
+	return members, nil
 }

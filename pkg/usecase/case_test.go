@@ -12,6 +12,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
+	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 )
 
@@ -878,5 +879,210 @@ func TestCaseUseCase_SyncCaseChannelUsers(t *testing.T) {
 
 		_, err := uc.SyncCaseChannelUsers(ctx, testWorkspaceID, 999)
 		gt.Value(t, err).NotNil()
+	})
+}
+
+func TestCaseUseCase_CreateCase_AutoInvite(t *testing.T) {
+	t.Run("auto-invite users from workspace config", func(t *testing.T) {
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+		}
+
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace:        model.Workspace{ID: testWorkspaceID, Name: "Test Workspace"},
+			SlackInviteUsers: []string{"UAUTO1", "UAUTO2"},
+		})
+		uc := usecase.NewCaseUseCase(repo, registry, mock, "")
+
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false)
+		gt.NoError(t, err).Required()
+
+		// Creator + auto-invite users
+		gt.Array(t, mock.invitedUserIDs).Length(3)
+		gt.Value(t, mock.invitedUserIDs[0]).Equal("UCREATOR")
+		gt.Value(t, mock.invitedUserIDs[1]).Equal("UAUTO1")
+		gt.Value(t, mock.invitedUserIDs[2]).Equal("UAUTO2")
+	})
+
+	t.Run("auto-invite deduplicates with creator and assignees", func(t *testing.T) {
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+		}
+
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace:        model.Workspace{ID: testWorkspaceID, Name: "Test Workspace"},
+			SlackInviteUsers: []string{"UCREATOR", "UASSIGNEE", "UAUTO1"},
+		})
+		uc := usecase.NewCaseUseCase(repo, registry, mock, "")
+
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{"UASSIGNEE"}, nil, false)
+		gt.NoError(t, err).Required()
+
+		// UCREATOR and UASSIGNEE should appear only once each
+		gt.Array(t, mock.invitedUserIDs).Length(3)
+		gt.Value(t, mock.invitedUserIDs[0]).Equal("UCREATOR")
+		gt.Value(t, mock.invitedUserIDs[1]).Equal("UASSIGNEE")
+		gt.Value(t, mock.invitedUserIDs[2]).Equal("UAUTO1")
+	})
+
+	t.Run("auto-invite resolves group by ID", func(t *testing.T) {
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+			getUserGroupMembersFn: func(_ context.Context, groupID string) ([]string, error) {
+				if groupID == "S0001" {
+					return []string{"UGROUP1", "UGROUP2"}, nil
+				}
+				return nil, nil
+			},
+		}
+
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace:         model.Workspace{ID: testWorkspaceID, Name: "Test Workspace"},
+			SlackInviteGroups: []string{"S0001"},
+		})
+		uc := usecase.NewCaseUseCase(repo, registry, mock, "")
+
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false)
+		gt.NoError(t, err).Required()
+
+		// Creator + group members
+		gt.Array(t, mock.invitedUserIDs).Length(3)
+		gt.Value(t, mock.invitedUserIDs[0]).Equal("UCREATOR")
+		gt.Value(t, mock.invitedUserIDs[1]).Equal("UGROUP1")
+		gt.Value(t, mock.invitedUserIDs[2]).Equal("UGROUP2")
+	})
+
+	t.Run("auto-invite resolves group by handle name with @ prefix", func(t *testing.T) {
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+			listUserGroupsFn: func(_ context.Context) ([]slack.UserGroup, error) {
+				return []slack.UserGroup{
+					{ID: "S1234", Handle: "security-team", Name: "Security Team"},
+					{ID: "S5678", Handle: "dev-team", Name: "Dev Team"},
+				}, nil
+			},
+			getUserGroupMembersFn: func(_ context.Context, groupID string) ([]string, error) {
+				if groupID == "S1234" {
+					return []string{"USEC1", "USEC2"}, nil
+				}
+				return nil, nil
+			},
+		}
+
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace:         model.Workspace{ID: testWorkspaceID, Name: "Test Workspace"},
+			SlackInviteGroups: []string{"@security-team"},
+		})
+		uc := usecase.NewCaseUseCase(repo, registry, mock, "")
+
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false)
+		gt.NoError(t, err).Required()
+
+		// Creator + resolved group members
+		gt.Array(t, mock.invitedUserIDs).Length(3)
+		gt.Value(t, mock.invitedUserIDs[0]).Equal("UCREATOR")
+		gt.Value(t, mock.invitedUserIDs[1]).Equal("USEC1")
+		gt.Value(t, mock.invitedUserIDs[2]).Equal("USEC2")
+	})
+
+	t.Run("group resolution failure does not block case creation", func(t *testing.T) {
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+			getUserGroupMembersFn: func(_ context.Context, _ string) ([]string, error) {
+				return nil, errors.New("group API error")
+			},
+		}
+
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace:         model.Workspace{ID: testWorkspaceID, Name: "Test Workspace"},
+			SlackInviteGroups: []string{"S0001"},
+		})
+		uc := usecase.NewCaseUseCase(repo, registry, mock, "")
+
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false)
+		gt.NoError(t, err).Required()
+		gt.Value(t, created.SlackChannelID).NotEqual("")
+
+		// Only creator should be invited (group members failed)
+		gt.Array(t, mock.invitedUserIDs).Length(1)
+		gt.Value(t, mock.invitedUserIDs[0]).Equal("UCREATOR")
+	})
+
+	t.Run("group ID without @ prefix does not call ListUserGroups", func(t *testing.T) {
+		repo := memory.New()
+		listUserGroupsCalled := false
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+			listUserGroupsFn: func(_ context.Context) ([]slack.UserGroup, error) {
+				listUserGroupsCalled = true
+				return nil, nil
+			},
+			getUserGroupMembersFn: func(_ context.Context, groupID string) ([]string, error) {
+				return []string{"UMEMBER"}, nil
+			},
+		}
+
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace:         model.Workspace{ID: testWorkspaceID, Name: "Test Workspace"},
+			SlackInviteGroups: []string{"S0001"},
+		})
+		uc := usecase.NewCaseUseCase(repo, registry, mock, "")
+
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false)
+		gt.NoError(t, err).Required()
+
+		gt.Bool(t, listUserGroupsCalled).False()
+	})
+
+	t.Run("empty auto-invite config does not affect behavior", func(t *testing.T) {
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+		}
+
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: testWorkspaceID, Name: "Test Workspace"},
+		})
+		uc := usecase.NewCaseUseCase(repo, registry, mock, "")
+
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{"UASSIGNEE"}, nil, false)
+		gt.NoError(t, err).Required()
+
+		gt.Array(t, mock.invitedUserIDs).Length(2)
+		gt.Value(t, mock.invitedUserIDs[0]).Equal("UCREATOR")
+		gt.Value(t, mock.invitedUserIDs[1]).Equal("UASSIGNEE")
 	})
 }

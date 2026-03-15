@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
@@ -99,12 +100,16 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 			return nil, goerr.Wrap(err, "failed to create Slack channel for case", goerr.V(CaseIDKey, created.ID))
 		}
 
-		// Invite creator and assignees to the channel
+		// Invite creator, assignees, and auto-invite users to the channel
 		usersToInvite := make([]string, 0, len(assigneeIDs)+1)
 		if token, tokenErr := auth.TokenFromContext(ctx); tokenErr == nil {
 			usersToInvite = append(usersToInvite, token.Sub)
 		}
 		usersToInvite = append(usersToInvite, assigneeIDs...)
+
+		// Add auto-invite users from workspace config
+		autoInviteUsers := uc.resolveAutoInviteUsers(ctx, workspaceID)
+		usersToInvite = append(usersToInvite, autoInviteUsers...)
 		usersToInvite = uniqueStrings(usersToInvite)
 
 		if len(usersToInvite) > 0 {
@@ -370,6 +375,87 @@ func (uc *CaseUseCase) SyncCaseChannelUsers(ctx context.Context, workspaceID str
 	}
 
 	return updated, nil
+}
+
+// resolveAutoInviteUsers resolves auto-invite users from workspace config.
+// It collects direct user IDs and resolves user group members.
+// Errors during group resolution are logged but do not stop the process.
+func (uc *CaseUseCase) resolveAutoInviteUsers(ctx context.Context, workspaceID string) []string {
+	if uc.workspaceRegistry == nil || uc.slackService == nil {
+		return nil
+	}
+
+	entry, err := uc.workspaceRegistry.Get(workspaceID)
+	if err != nil {
+		errutil.Handle(ctx, err, "failed to get workspace entry for auto-invite")
+		return nil
+	}
+
+	if len(entry.SlackInviteUsers) == 0 && len(entry.SlackInviteGroups) == 0 {
+		return nil
+	}
+
+	users := make([]string, 0, len(entry.SlackInviteUsers))
+	users = append(users, entry.SlackInviteUsers...)
+
+	// Resolve group members
+	if len(entry.SlackInviteGroups) > 0 {
+		groupMembers := uc.resolveGroupMembers(ctx, entry.SlackInviteGroups)
+		users = append(users, groupMembers...)
+	}
+
+	return users
+}
+
+// resolveGroupMembers resolves user group identifiers (IDs or handle names) to member user IDs.
+// Handle names are prefixed with "@" (e.g., "@security-team"); everything else is treated as a group ID.
+func (uc *CaseUseCase) resolveGroupMembers(ctx context.Context, groups []string) []string {
+	var groupIDs []string
+	var handleNames []string
+
+	for _, g := range groups {
+		if handle, ok := strings.CutPrefix(g, "@"); ok {
+			handleNames = append(handleNames, handle)
+		} else {
+			groupIDs = append(groupIDs, g)
+		}
+	}
+
+	// Resolve handle names to group IDs via full group list
+	if len(handleNames) > 0 {
+		allGroups, err := uc.slackService.ListUserGroups(ctx)
+		if err != nil {
+			errutil.Handle(ctx, err, "failed to list user groups for handle resolution")
+		} else {
+			handleToID := make(map[string]string, len(allGroups))
+			for _, g := range allGroups {
+				if g.Handle != "" {
+					handleToID[g.Handle] = g.ID
+				}
+			}
+			for _, handle := range handleNames {
+				if id, ok := handleToID[handle]; ok {
+					groupIDs = append(groupIDs, id)
+				} else {
+					logging.From(ctx).Warn("user group handle not found", "handle", handle)
+				}
+			}
+		}
+	}
+
+	// Resolve group IDs to member user IDs
+	groupIDs = uniqueStrings(groupIDs)
+	var members []string
+	for _, gid := range groupIDs {
+		m, err := uc.slackService.GetUserGroupMembers(ctx, gid)
+		if err != nil {
+			errutil.Handle(ctx, err, "failed to get user group members")
+			continue
+		}
+		members = append(members, m...)
+	}
+
+	return members
 }
 
 // filterHumanUsers filters out bot/unknown user IDs by checking against the SlackUser DB cache.
