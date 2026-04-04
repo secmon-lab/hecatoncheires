@@ -28,7 +28,7 @@
   },
   "pnpm": {
     "overrides": {
-      "yaml@<2.0.0": ">=2.7.1"
+      "yaml@<2.0.0": ">=2.8.3"
     }
   },
   "devDependencies": {
