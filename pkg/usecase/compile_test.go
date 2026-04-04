@@ -107,6 +107,7 @@ func setupCompileTest(t *testing.T, notionSvc notion.Service, knowledgeSvc knowl
 		knowledgeSvc,
 		slackSvc,
 		nil, // GitHub service
+		nil, // translator
 		"https://example.com",
 	)
 
@@ -323,7 +324,7 @@ func TestCompileUseCase_Compile(t *testing.T) {
 			Workspace: model.Workspace{ID: "ws-2", Name: "Workspace 2"},
 		})
 
-		uc := usecase.NewCompileUseCase(repo, registry, notionSvc, knowledgeSvc, nil, nil, "")
+		uc := usecase.NewCompileUseCase(repo, registry, notionSvc, knowledgeSvc, nil, nil, nil, "")
 		ctx := context.Background()
 
 		result, err := uc.Compile(ctx, usecase.CompileOption{

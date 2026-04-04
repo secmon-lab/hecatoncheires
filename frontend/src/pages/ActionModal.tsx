@@ -10,6 +10,7 @@ import Chip from '../components/Chip'
 import { GET_ACTION, UPDATE_ACTION, DELETE_ACTION, GET_OPEN_CASE_ACTIONS } from '../graphql/action'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import { useWorkspace } from '../contexts/workspace-context'
+import { useTranslation } from '../i18n'
 import styles from './ActionModal.module.css'
 
 interface ActionModalProps {
@@ -34,13 +35,7 @@ const STATUS_COLORS: Record<string, number> = {
   COMPLETED: 4,
 }
 
-const STATUS_OPTIONS = [
-  { value: 'BACKLOG', label: 'Backlog' },
-  { value: 'TODO', label: 'To Do' },
-  { value: 'IN_PROGRESS', label: 'In Progress' },
-  { value: 'BLOCKED', label: 'Blocked' },
-  { value: 'COMPLETED', label: 'Completed' },
-]
+// STATUS_OPTIONS is defined inside the component to support i18n
 
 function useFeedback() {
   const [visible, setVisible] = useState(false)
@@ -62,6 +57,15 @@ function useFeedback() {
 export default function ActionModal({ actionId, isOpen, onClose }: ActionModalProps) {
   const navigate = useNavigate()
   const { currentWorkspace } = useWorkspace()
+  const { t } = useTranslation()
+
+  const STATUS_OPTIONS = [
+    { value: 'BACKLOG', label: t('statusBacklog') },
+    { value: 'TODO', label: t('statusTodo') },
+    { value: 'IN_PROGRESS', label: t('statusInProgress') },
+    { value: 'BLOCKED', label: t('statusBlocked') },
+    { value: 'COMPLETED', label: t('statusCompleted') },
+  ]
   const [isDeleteConfirm, setIsDeleteConfirm] = useState(false)
 
   // Title inline edit
@@ -230,24 +234,22 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
       <Modal
         isOpen={true}
         onClose={() => setIsDeleteConfirm(false)}
-        title="Delete Action"
+        title={t('titleDeleteAction')}
         footer={
           <>
             <Button variant="outline" onClick={() => setIsDeleteConfirm(false)} disabled={deleting}>
-              Cancel
+              {t('btnCancel')}
             </Button>
             <Button variant="danger" onClick={handleDelete} disabled={deleting}>
-              {deleting ? 'Deleting...' : 'Delete'}
+              {deleting ? t('btnDeleting') : t('btnDelete')}
             </Button>
           </>
         }
       >
         <div className={styles.deleteContent}>
           <AlertTriangle size={48} className={styles.deleteIcon} />
-          <p className={styles.deleteMessage}>
-            Are you sure you want to delete <strong>{action?.title}</strong>?
-          </p>
-          <p className={styles.deleteWarning}>This action cannot be undone.</p>
+          <p className={styles.deleteMessage} dangerouslySetInnerHTML={{ __html: t('msgDeleteActionConfirm', { title: action?.title || '' }) }} />
+          <p className={styles.deleteWarning}>{t('warningDeleteActionPermanent')}</p>
         </div>
       </Modal>
     )
@@ -256,8 +258,8 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
   // Loading / Error
   if (loading) {
     return (
-      <Modal isOpen={true} onClose={handleClose} title="Action">
-        <div className={styles.loading}>Loading...</div>
+      <Modal isOpen={true} onClose={handleClose} title={t('titleAction')}>
+        <div className={styles.loading}>{t('loading')}</div>
       </Modal>
     )
   }
@@ -267,13 +269,13 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
       <Modal
         isOpen={true}
         onClose={handleClose}
-        title="Action"
+        title={t('titleAction')}
         footer={
-          <Button variant="outline" onClick={handleClose}>Close</Button>
+          <Button variant="outline" onClick={handleClose}>{t('btnClose')}</Button>
         }
       >
         <div className={styles.error}>
-          {error ? `Error: ${error.message}` : 'Action not found'}
+          {error ? `${t('errorPrefix')} ${error.message}` : t('errorActionNotFound')}
         </div>
       </Modal>
     )
@@ -299,13 +301,13 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
     <Modal
       isOpen={true}
       onClose={handleClose}
-      title="Action"
+      title={t('titleAction')}
     >
       <div className={styles.body}>
         {/* Case link */}
         {action.case && (
           <span className={styles.caseLink} onClick={handleCaseClick}>
-            Case #{action.caseID} · {action.case.title}
+            {t('caseLinkLabel', { id: String(action.caseID), title: action.case.title })}
           </span>
         )}
 
@@ -326,10 +328,10 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
                 disabled={savingTitle}
               />
               <Button variant="primary" onClick={handleTitleSave} disabled={savingTitle || !editTitle.trim()}>
-                {savingTitle ? 'Saving...' : 'Save'}
+                {savingTitle ? t('btnSaving') : t('btnSave')}
               </Button>
               <Button variant="outline" onClick={handleTitleCancel} disabled={savingTitle}>
-                Cancel
+                {t('btnCancel')}
               </Button>
             </div>
           ) : (
@@ -338,7 +340,7 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
               <Pencil size={14} className={styles.titleEditIcon} />
               {titleFeedback.visible && (
                 <span className={styles.feedbackInline}>
-                  <Check size={14} /> Updated
+                  <Check size={14} /> {t('feedbackUpdated')}
                 </span>
               )}
             </div>
@@ -349,36 +351,36 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
         <div className={styles.columns}>
           {/* Main: Description */}
           <div className={styles.mainColumn}>
-            <label className={styles.fieldLabel}>Description</label>
+            <label className={styles.fieldLabel}>{t('labelDescription')}</label>
             {isEditingDescription ? (
               <>
                 <textarea
                   value={editDescription}
                   onChange={(e) => setEditDescription(e.target.value)}
                   className={styles.descriptionTextarea}
-                  placeholder="Add a description..."
+                  placeholder={t('placeholderAddDescription')}
                   rows={10}
                   autoFocus
                 />
                 <div className={styles.descriptionActions}>
                   <Button variant="outline" icon={<Trash2 size={16} />} onClick={() => setIsDeleteConfirm(true)}>
-                    Delete
+                    {t('btnDelete')}
                   </Button>
                   <div className={styles.descriptionActionsRight}>
                     {descFeedback.visible && (
                       <span className={styles.feedbackInline}>
-                        <Check size={14} /> Saved
+                        <Check size={14} /> {t('feedbackSaved')}
                       </span>
                     )}
                     <Button variant="outline" onClick={handleDescriptionCancel} disabled={savingDescription}>
-                      Cancel
+                      {t('btnCancel')}
                     </Button>
                     <Button
                       variant="primary"
                       onClick={handleDescriptionSave}
                       disabled={savingDescription}
                     >
-                      {savingDescription ? 'Saving...' : 'Save'}
+                      {savingDescription ? t('btnSaving') : t('btnSave')}
                     </Button>
                   </div>
                 </div>
@@ -391,17 +393,17 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
                       <Markdown>{action.description}</Markdown>
                     </div>
                   ) : (
-                    <p className={styles.descriptionPlaceholder}>No description</p>
+                    <p className={styles.descriptionPlaceholder}>{t('labelNoDescription')}</p>
                   )}
                 </div>
                 <div className={styles.descriptionActions}>
                   <Button variant="outline" icon={<Trash2 size={16} />} onClick={() => setIsDeleteConfirm(true)}>
-                    Delete
+                    {t('btnDelete')}
                   </Button>
                   <div className={styles.descriptionActionsRight}>
                     {descFeedback.visible && (
                       <span className={styles.feedbackInline}>
-                        <Check size={14} /> Saved
+                        <Check size={14} /> {t('feedbackSaved')}
                       </span>
                     )}
                     <Button
@@ -409,8 +411,7 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
                       icon={<Pencil size={14} />}
                       onClick={handleDescriptionEditStart}
                     >
-                      Edit
-                    </Button>
+                      {t('btnEdit')}
                   </div>
                 </div>
               </>
@@ -421,7 +422,7 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
           <div className={styles.sidebar}>
             {/* Status */}
             <div className={styles.sidebarSection}>
-              <label className={styles.fieldLabel}>Status</label>
+              <label className={styles.fieldLabel}>{t('labelStatus')}</label>
               {/* Hidden native select for E2E testing */}
               <select
                 value={action.status}
@@ -456,14 +457,14 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
               />
               {statusFeedback.visible && (
                 <span className={styles.feedback}>
-                  <Check size={12} /> Updated
+                  <Check size={12} /> {t('feedbackUpdated')}
                 </span>
               )}
             </div>
 
             {/* Assignees */}
             <div className={styles.sidebarSection}>
-              <label className={styles.fieldLabel}>Assignees</label>
+              <label className={styles.fieldLabel}>{t('labelAssignees')}</label>
               <Select<AssigneeOption, true>
                 isMulti
                 isClearable={false}
@@ -473,7 +474,7 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
                   handleAssigneeChange(ids)
                 }}
                 options={assigneeOptions}
-                placeholder="Add assignees..."
+                placeholder={t('placeholderAddAssignees')}
                 classNamePrefix="assignee-select"
                 styles={{
                   control: (base) => ({ ...base, minHeight: '2.25rem', fontSize: '0.8125rem', alignItems: 'center' }),
@@ -505,14 +506,14 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
               />
               {assigneeFeedback.visible && (
                 <span className={styles.feedback}>
-                  <Check size={12} /> Updated
+                  <Check size={12} /> {t('feedbackUpdated')}
                 </span>
               )}
             </div>
 
             {/* Due Date */}
             <div className={styles.sidebarSection}>
-              <label className={styles.fieldLabel}>Due Date</label>
+              <label className={styles.fieldLabel}>{t('labelDueDate')}</label>
               <input
                 type="date"
                 value={action.dueDate ? new Date(action.dueDate).toISOString().split('T')[0] : ''}
@@ -535,13 +536,13 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
             {/* Metadata */}
             <div className={styles.sidebarMeta}>
               <div className={styles.metaItem}>
-                <label className={styles.fieldLabel}>Created</label>
+                <label className={styles.fieldLabel}>{t('labelCreated')}</label>
                 <span className={styles.metaValue}>
                   {new Date(action.createdAt).toLocaleString()}
                 </span>
               </div>
               <div className={styles.metaItem}>
-                <label className={styles.fieldLabel}>Updated</label>
+                <label className={styles.fieldLabel}>{t('labelUpdated')}</label>
                 <span className={styles.metaValue}>
                   {new Date(action.updatedAt).toLocaleString()}
                 </span>

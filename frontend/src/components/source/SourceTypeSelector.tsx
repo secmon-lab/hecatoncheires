@@ -1,6 +1,7 @@
 import { Database, FileText, GitBranch, MessageSquare } from 'lucide-react'
 import Modal from '../Modal'
 import Button from '../Button'
+import { useTranslation } from '../../i18n'
 import { SOURCE_TYPE } from '../../constants/source'
 import styles from './source.module.css'
 
@@ -17,34 +18,36 @@ interface SourceTypeOption {
   icon: React.ReactNode
 }
 
-const sourceTypes: SourceTypeOption[] = [
-  {
-    type: SOURCE_TYPE.NOTION_DB,
-    name: 'Notion Database',
-    description: 'Connect to a Notion database to monitor and track changes',
-    icon: <Database size={24} />,
-  },
-  {
-    type: SOURCE_TYPE.NOTION_PAGE,
-    name: 'Notion Page',
-    description: 'Connect to a Notion page (with optional child page traversal)',
-    icon: <FileText size={24} />,
-  },
-  {
-    type: SOURCE_TYPE.SLACK,
-    name: 'Slack Channels',
-    description: 'Monitor Slack channels for risk-related discussions and incidents',
-    icon: <MessageSquare size={24} />,
-  },
-  {
-    type: SOURCE_TYPE.GITHUB,
-    name: 'GitHub Repositories',
-    description: 'Monitor GitHub repositories for issues, pull requests, and discussions',
-    icon: <GitBranch size={24} />,
-  },
-]
-
 export default function SourceTypeSelector({ isOpen, onClose, onSelect }: SourceTypeSelectorProps) {
+  const { t } = useTranslation()
+
+  const sourceTypes: SourceTypeOption[] = [
+    {
+      type: SOURCE_TYPE.NOTION_DB,
+      name: t('sourceTypeNotionDB'),
+      description: t('descSourceNotionDB'),
+      icon: <Database size={24} />,
+    },
+    {
+      type: SOURCE_TYPE.NOTION_PAGE,
+      name: t('sourceTypeNotionPage'),
+      description: t('descSourceNotionPage'),
+      icon: <FileText size={24} />,
+    },
+    {
+      type: SOURCE_TYPE.SLACK,
+      name: t('sourceTypeSlack'),
+      description: t('descSourceSlack'),
+      icon: <MessageSquare size={24} />,
+    },
+    {
+      type: SOURCE_TYPE.GITHUB,
+      name: t('sourceTypeGitHub'),
+      description: t('descSourceGitHub'),
+      icon: <GitBranch size={24} />,
+    },
+  ]
+
   const handleSelect = (type: string) => {
     onSelect(type)
   }
@@ -53,10 +56,10 @@ export default function SourceTypeSelector({ isOpen, onClose, onSelect }: Source
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Select Source Type"
+      title={t('titleSelectSourceType')}
       footer={
         <Button variant="outline" onClick={onClose}>
-          Cancel
+          {t('btnCancel')}
         </Button>
       }
     >

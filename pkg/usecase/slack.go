@@ -8,6 +8,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
@@ -20,15 +21,17 @@ type SlackUseCases struct {
 	registry     *model.WorkspaceRegistry
 	agent        *AgentUseCase
 	slackService slacksvc.Service
+	translator   *i18n.Translator
 }
 
 // NewSlackUseCases creates a new SlackUseCases instance
-func NewSlackUseCases(repo interfaces.Repository, registry *model.WorkspaceRegistry, agent *AgentUseCase, slackService slacksvc.Service) *SlackUseCases {
+func NewSlackUseCases(repo interfaces.Repository, registry *model.WorkspaceRegistry, agent *AgentUseCase, slackService slacksvc.Service, translator *i18n.Translator) *SlackUseCases {
 	return &SlackUseCases{
 		repo:         repo,
 		registry:     registry,
 		agent:        agent,
 		slackService: slackService,
+		translator:   translator,
 	}
 }
 

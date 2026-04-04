@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useMutation, useLazyQuery } from '@apollo/client'
 import { useNavigate } from 'react-router-dom'
 import { useWorkspace } from '../../contexts/workspace-context'
+import { useTranslation } from '../../i18n'
 import { CheckCircle, AlertCircle, Loader, X } from 'lucide-react'
 import Modal from '../Modal'
 import Button from '../Button'
@@ -29,6 +30,7 @@ interface FormErrors {
 export default function GitHubForm({ isOpen, onClose }: GitHubFormProps) {
   const navigate = useNavigate()
   const { currentWorkspace } = useWorkspace()
+  const { t } = useTranslation()
   const [repoInput, setRepoInput] = useState('')
   const [repositories, setRepositories] = useState<ValidatedRepo[]>([])
   const [name, setName] = useState('')
@@ -43,18 +45,18 @@ export default function GitHubForm({ isOpen, onClose }: GitHubFormProps) {
       if (result.valid) {
         const fullName = `${result.owner}/${result.repo}`
         if (repositories.some((r) => r.fullName === fullName)) {
-          setErrors((prev) => ({ ...prev, repository: 'This repository is already added' }))
+          setErrors((prev) => ({ ...prev, repository: t('errorRepoAlreadyAdded') }))
           return
         }
         setRepositories((prev) => [...prev, { owner: result.owner, repo: result.repo, fullName }])
         setRepoInput('')
         setErrors((prev) => ({ ...prev, repository: undefined }))
       } else {
-        setErrors((prev) => ({ ...prev, repository: result.errorMessage || 'Invalid repository' }))
+        setErrors((prev) => ({ ...prev, repository: result.errorMessage || t('errorInvalidRepo') }))
       }
     },
     onError: (error) => {
-      setErrors((prev) => ({ ...prev, repository: error.message || 'Failed to validate repository' }))
+      setErrors((prev) => ({ ...prev, repository: error.message || t('errorValidateRepo') }))
     },
   })
 
@@ -78,7 +80,7 @@ export default function GitHubForm({ isOpen, onClose }: GitHubFormProps) {
     onError: (error) => {
       setErrors((prev) => ({
         ...prev,
-        form: error.message || 'Failed to create source. Please try again.',
+        form: error.message || t('errorCreateSource'),
       }))
     },
   })
@@ -125,11 +127,11 @@ export default function GitHubForm({ isOpen, onClose }: GitHubFormProps) {
     const newErrors: FormErrors = {}
 
     if (repositories.length === 0) {
-      newErrors.repositories = 'At least one repository is required'
+      newErrors.repositories = t('errorRepositoriesRequired')
     }
 
     if (!name.trim()) {
-      newErrors.name = 'Name is required'
+      newErrors.name = t('errorNameRequired')
     }
 
     setErrors(newErrors)
@@ -165,18 +167,18 @@ export default function GitHubForm({ isOpen, onClose }: GitHubFormProps) {
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
-      title="Add GitHub Source"
+      title={t('titleAddGithubSource')}
       footer={
         <>
           <Button variant="outline" onClick={handleClose} disabled={loading}>
-            Cancel
+            {t('btnCancel')}
           </Button>
           <Button
             variant="primary"
             onClick={handleSubmit}
             disabled={loading || repositories.length === 0}
           >
-            {loading ? 'Creating...' : 'Create Source'}
+            {loading ? t('btnCreating') : t('btnCreateSource')}
           </Button>
         </>
       }
@@ -186,7 +188,7 @@ export default function GitHubForm({ isOpen, onClose }: GitHubFormProps) {
 
         <div className={styles.field}>
           <label htmlFor="name" className={styles.label}>
-            Name *
+            {t('labelNameRequired')}
           </label>
           <input
             id="name"
@@ -194,14 +196,14 @@ export default function GitHubForm({ isOpen, onClose }: GitHubFormProps) {
             value={name}
             onChange={(e) => setName(e.target.value)}
             className={`${styles.input} ${errors.name ? styles.inputError : ''}`}
-            placeholder="Enter source name"
+            placeholder={t('placeholderSourceName')}
             disabled={loading}
           />
           {errors.name && <span className={styles.error}>{errors.name}</span>}
         </div>
 
         <div className={styles.field}>
-          <label className={styles.label}>Repositories *</label>
+          <label className={styles.label}>{t('labelRepositoriesRequired')}</label>
           <div className={styles.inputWithButton}>
             <input
               type="text"
@@ -209,7 +211,7 @@ export default function GitHubForm({ isOpen, onClose }: GitHubFormProps) {
               onChange={(e) => setRepoInput(e.target.value)}
               onKeyDown={handleRepoKeyDown}
               className={`${styles.input} ${errors.repository ? styles.inputError : ''}`}
-              placeholder="owner/repo (e.g., octocat/Hello-World)"
+              placeholder={t('placeholderGitHubRepo')}
               disabled={loading || validating}
             />
             <Button
@@ -220,7 +222,7 @@ export default function GitHubForm({ isOpen, onClose }: GitHubFormProps) {
               {validating ? (
                 <Loader size={16} className={styles.spinner} />
               ) : (
-                'Add'
+                t('btnAdd')
               )}
             </Button>
           </div>
@@ -251,20 +253,20 @@ export default function GitHubForm({ isOpen, onClose }: GitHubFormProps) {
             </div>
           )}
           <p className={styles.hint}>
-            Enter repository in owner/repo format. Each repository will be validated before adding.
+            {t('hintGitHubRepo')}
           </p>
         </div>
 
         <div className={styles.field}>
           <label htmlFor="description" className={styles.label}>
-            Description
+            {t('labelDescription')}
           </label>
           <textarea
             id="description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             className={styles.textarea}
-            placeholder="Enter source description (optional)"
+            placeholder={t('placeholderSourceDescription')}
             rows={3}
             disabled={loading}
           />
@@ -279,7 +281,7 @@ export default function GitHubForm({ isOpen, onClose }: GitHubFormProps) {
               className={styles.checkbox}
               disabled={loading}
             />
-            <span>Enable this source</span>
+            <span>{t('labelEnableSource')}</span>
           </label>
         </div>
       </form>

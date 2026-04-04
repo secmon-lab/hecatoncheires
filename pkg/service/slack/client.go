@@ -37,7 +37,6 @@ type client struct {
 	botUserIDOnce sync.Once
 	botUserID     string
 	botUserIDErr  error
-
 }
 
 // Option is a functional option for client configuration

@@ -1,6 +1,7 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useLazyQuery } from '@apollo/client'
 import { useWorkspace } from '../contexts/workspace-context'
+import { useTranslation } from '../i18n'
 import { ArrowLeft, Edit, MoreVertical, Trash2, Database, FileText, GitBranch, MessageSquare, CheckCircle, XCircle, ExternalLink, Hash, Loader, X, AlertCircle } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import Button from '../components/Button'
@@ -69,6 +70,7 @@ export default function SourceDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { currentWorkspace } = useWorkspace()
+  const { t } = useTranslation()
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
@@ -121,18 +123,18 @@ export default function SourceDetail() {
       if (result.valid) {
         const fullName = `${result.owner}/${result.repo}`
         if (editRepos.some((r) => `${r.owner}/${r.repo}` === fullName)) {
-          setFormErrors((prev) => ({ ...prev, repository: 'This repository is already added' }))
+          setFormErrors((prev) => ({ ...prev, repository: t('errorRepoAlreadyAdded') }))
           return
         }
         setEditRepos((prev) => [...prev, { owner: result.owner, repo: result.repo }])
         setRepoInput('')
         setFormErrors((prev) => ({ ...prev, repository: undefined }))
       } else {
-        setFormErrors((prev) => ({ ...prev, repository: result.errorMessage || 'Invalid repository' }))
+        setFormErrors((prev) => ({ ...prev, repository: result.errorMessage || t('errorInvalidRepo') }))
       }
     },
     onError: (error) => {
-      setFormErrors((prev) => ({ ...prev, repository: error.message || 'Failed to validate repository' }))
+      setFormErrors((prev) => ({ ...prev, repository: error.message || t('errorValidateRepo') }))
     },
   })
 
@@ -196,7 +198,7 @@ export default function SourceDetail() {
     const newErrors: FormErrors = {}
 
     if (!editName.trim()) {
-      newErrors.name = 'Name is required'
+      newErrors.name = t('errorNameRequired')
     }
 
     setFormErrors(newErrors)
@@ -261,10 +263,10 @@ export default function SourceDetail() {
 
   const renderSourceType = (sourceType: string) => {
     const typeLabels: Record<string, { label: string; icon: React.ReactNode }> = {
-      [SOURCE_TYPE.NOTION_DB]: { label: 'Notion Database', icon: <Database size={20} /> },
-      [SOURCE_TYPE.NOTION_PAGE]: { label: 'Notion Page', icon: <FileText size={20} /> },
-      [SOURCE_TYPE.SLACK]: { label: 'Slack', icon: <MessageSquare size={20} /> },
-      [SOURCE_TYPE.GITHUB]: { label: 'GitHub', icon: <GitBranch size={20} /> },
+      [SOURCE_TYPE.NOTION_DB]: { label: t('sourceTypeNotionDB'), icon: <Database size={20} /> },
+      [SOURCE_TYPE.NOTION_PAGE]: { label: t('sourceTypeNotionPage'), icon: <FileText size={20} /> },
+      [SOURCE_TYPE.SLACK]: { label: t('sourceTypeSlack'), icon: <MessageSquare size={20} /> },
+      [SOURCE_TYPE.GITHUB]: { label: t('sourceTypeGitHub'), icon: <GitBranch size={20} /> },
     }
     const typeInfo = typeLabels[sourceType] || { label: sourceType, icon: null }
 
@@ -279,7 +281,7 @@ export default function SourceDetail() {
   if (loading) {
     return (
       <div className={styles.container}>
-        <div className={styles.loading}>Loading...</div>
+        <div className={styles.loading}>{t('loading')}</div>
       </div>
     )
   }
@@ -288,10 +290,10 @@ export default function SourceDetail() {
     return (
       <div className={styles.container}>
         <div className={styles.error}>
-          {error ? `Error: ${error.message}` : 'Source not found'}
+          {error ? `${t('errorPrefix')} ${error.message}` : t('errorSourceNotFound')}
         </div>
         <Button variant="outline" icon={<ArrowLeft size={20} />} onClick={handleBack}>
-          Back to List
+          {t('btnBackToList')}
         </Button>
       </div>
     )
@@ -301,11 +303,11 @@ export default function SourceDetail() {
     <div className={styles.container}>
       <div className={styles.header}>
         <Button variant="outline" icon={<ArrowLeft size={20} />} onClick={handleBack}>
-          Back
+          {t('btnBack')}
         </Button>
         <div className={styles.actions}>
           <Button variant="outline" icon={<Edit size={20} />} onClick={handleEdit}>
-            Edit
+            {t('btnEdit')}
           </Button>
           <div style={{ position: 'relative' }} ref={menuRef}>
             <Button
@@ -323,7 +325,7 @@ export default function SourceDetail() {
                   }}
                 >
                   <Trash2 size={16} />
-                  <span>Delete</span>
+                  <span>{t('btnDelete')}</span>
                 </button>
               </div>
             )}
@@ -338,12 +340,12 @@ export default function SourceDetail() {
             {source.enabled ? (
               <Chip variant="status" colorIndex={0}>
                 <CheckCircle size={12} />
-                <span>Enabled</span>
+                <span>{t('statusEnabled')}</span>
               </Chip>
             ) : (
               <Chip variant="status" colorIndex={4}>
                 <XCircle size={12} />
-                <span>Disabled</span>
+                <span>{t('statusDisabled')}</span>
               </Chip>
             )}
           </div>
@@ -354,34 +356,34 @@ export default function SourceDetail() {
 
         <div className={styles.sections}>
           <div className={styles.section}>
-            <h3 className={styles.sectionTitle}>Source Type</h3>
+            <h3 className={styles.sectionTitle}>{t('sectionSourceType')}</h3>
             {renderSourceType(source.sourceType)}
           </div>
 
           {source.sourceType === SOURCE_TYPE.NOTION_DB && source.config && source.config.__typename === 'NotionDBConfig' && (
             <div className={styles.section}>
-              <h3 className={styles.sectionTitle}>Notion Database</h3>
+              <h3 className={styles.sectionTitle}>{t('sourceTypeNotionDB')}</h3>
               <div className={styles.configCard}>
                 <div className={styles.configItem}>
-                  <span className={styles.configLabel}>Database ID</span>
+                  <span className={styles.configLabel}>{t('labelDatabaseId')}</span>
                   <code className={styles.configValue}>{source.config.databaseID}</code>
                 </div>
                 {source.config.databaseTitle && (
                   <div className={styles.configItem}>
-                    <span className={styles.configLabel}>Database Title</span>
+                    <span className={styles.configLabel}>{t('labelDatabaseTitle')}</span>
                     <span className={styles.configValue}>{source.config.databaseTitle}</span>
                   </div>
                 )}
                 {source.config.databaseURL && (
                   <div className={styles.configItem}>
-                    <span className={styles.configLabel}>Database URL</span>
+                    <span className={styles.configLabel}>{t('labelDatabaseUrl')}</span>
                     <a
                       href={source.config.databaseURL}
                       target="_blank"
                       rel="noopener noreferrer"
                       className={styles.configLink}
                     >
-                      Open in Notion
+                      {t('linkOpenNotion')}
                       <ExternalLink size={14} />
                     </a>
                   </div>
@@ -392,41 +394,41 @@ export default function SourceDetail() {
 
           {source.sourceType === SOURCE_TYPE.NOTION_PAGE && source.config && source.config.__typename === 'NotionPageConfig' && (
             <div className={styles.section}>
-              <h3 className={styles.sectionTitle}>Notion Page</h3>
+              <h3 className={styles.sectionTitle}>{t('sourceTypeNotionPage')}</h3>
               <div className={styles.configCard}>
                 <div className={styles.configItem}>
-                  <span className={styles.configLabel}>Page ID</span>
+                  <span className={styles.configLabel}>{t('labelPageId')}</span>
                   <code className={styles.configValue}>{source.config.pageID}</code>
                 </div>
                 {source.config.pageTitle && (
                   <div className={styles.configItem}>
-                    <span className={styles.configLabel}>Page Title</span>
+                    <span className={styles.configLabel}>{t('labelPageTitle')}</span>
                     <span className={styles.configValue}>{source.config.pageTitle}</span>
                   </div>
                 )}
                 {source.config.pageURL && (
                   <div className={styles.configItem}>
-                    <span className={styles.configLabel}>Page URL</span>
+                    <span className={styles.configLabel}>{t('labelPageUrl')}</span>
                     <a
                       href={source.config.pageURL}
                       target="_blank"
                       rel="noopener noreferrer"
                       className={styles.configLink}
                     >
-                      Open in Notion
+                      {t('linkOpenNotion')}
                       <ExternalLink size={14} />
                     </a>
                   </div>
                 )}
                 <div className={styles.configItem}>
-                  <span className={styles.configLabel}>Recursive</span>
-                  <span className={styles.configValue}>{source.config.recursive ? 'Yes' : 'No'}</span>
+                  <span className={styles.configLabel}>{t('labelRecursive')}</span>
+                  <span className={styles.configValue}>{source.config.recursive ? t('labelYes') : t('labelNo')}</span>
                 </div>
                 {source.config.recursive && (
                   <div className={styles.configItem}>
-                    <span className={styles.configLabel}>Max Depth</span>
+                    <span className={styles.configLabel}>{t('labelMaxDepth')}</span>
                     <span className={styles.configValue}>
-                      {source.config.maxDepth === 0 ? 'Unlimited' : source.config.maxDepth}
+                      {source.config.maxDepth === 0 ? t('labelUnlimited') : source.config.maxDepth}
                     </span>
                   </div>
                 )}
@@ -436,10 +438,10 @@ export default function SourceDetail() {
 
           {source.sourceType === SOURCE_TYPE.SLACK && source.config && source.config.__typename === 'SlackConfig' && (
             <div className={styles.section}>
-              <h3 className={styles.sectionTitle}>Slack Channels</h3>
+              <h3 className={styles.sectionTitle}>{t('sourceTypeSlack')}</h3>
               <div className={styles.configCard}>
                 <div className={styles.configItem}>
-                  <span className={styles.configLabel}>Monitored Channels</span>
+                  <span className={styles.configLabel}>{t('labelMonitoredChannels')}</span>
                   <div className={styles.channelList}>
                     {source.config.channels.length > 0 ? (
                       source.config.channels.map((channel) => (
@@ -449,7 +451,7 @@ export default function SourceDetail() {
                         </div>
                       ))
                     ) : (
-                      <span className={styles.configValue}>No channels configured</span>
+                      <span className={styles.configValue}>{t('emptyNoChannelsConfigured')}</span>
                     )}
                   </div>
                 </div>
@@ -459,10 +461,10 @@ export default function SourceDetail() {
 
           {source.sourceType === SOURCE_TYPE.GITHUB && source.config && source.config.__typename === 'GitHubConfig' && (
             <div className={styles.section}>
-              <h3 className={styles.sectionTitle}>GitHub Repositories</h3>
+              <h3 className={styles.sectionTitle}>{t('sourceTypeGitHub')}</h3>
               <div className={styles.configCard}>
                 <div className={styles.configItem}>
-                  <span className={styles.configLabel}>Monitored Repositories</span>
+                  <span className={styles.configLabel}>{t('labelMonitoredRepositories')}</span>
                   <div className={styles.channelList}>
                     {source.config.repositories.length > 0 ? (
                       source.config.repositories.map((repo) => (
@@ -480,7 +482,7 @@ export default function SourceDetail() {
                         </div>
                       ))
                     ) : (
-                      <span className={styles.configValue}>No repositories configured</span>
+                      <span className={styles.configValue}>{t('emptyNoRepositoriesConfigured')}</span>
                     )}
                   </div>
                 </div>
@@ -490,13 +492,13 @@ export default function SourceDetail() {
 
           <div className={styles.metadata}>
             <div className={styles.metadataItem}>
-              <span className={styles.metadataLabel}>Created</span>
+              <span className={styles.metadataLabel}>{t('labelCreated')}</span>
               <span className={styles.metadataValue}>
                 {new Date(source.createdAt).toLocaleString()}
               </span>
             </div>
             <div className={styles.metadataItem}>
-              <span className={styles.metadataLabel}>Updated</span>
+              <span className={styles.metadataLabel}>{t('labelUpdated')}</span>
               <span className={styles.metadataValue}>
                 {new Date(source.updatedAt).toLocaleString()}
               </span>
@@ -513,14 +515,14 @@ export default function SourceDetail() {
           <Modal
             isOpen={isEditModalOpen}
             onClose={() => setIsEditModalOpen(false)}
-            title="Edit Source"
+            title={t('titleEditSource')}
             footer={
               <>
                 <Button variant="outline" onClick={() => setIsEditModalOpen(false)} disabled={isSaving}>
-                  Cancel
+                  {t('btnCancel')}
                 </Button>
                 <Button variant="primary" onClick={handleEditSubmit} disabled={isSaving || (isGitHub && editRepos.length === 0)}>
-                  {isSaving ? 'Saving...' : 'Save'}
+                  {isSaving ? t('btnSaving') : t('btnSave')}
                 </Button>
               </>
             }
@@ -528,7 +530,7 @@ export default function SourceDetail() {
             <form onSubmit={handleEditSubmit} className={styles.form}>
               <div className={styles.field}>
                 <label htmlFor="editName" className={styles.label}>
-                  Name *
+                  {t('labelNameRequired')}
                 </label>
                 <input
                   id="editName"
@@ -536,7 +538,7 @@ export default function SourceDetail() {
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
                   className={`${styles.input} ${formErrors.name ? styles.inputError : ''}`}
-                  placeholder="Enter source name"
+                  placeholder={t('placeholderSourceName')}
                   disabled={isSaving}
                 />
                 {formErrors.name && <span className={styles.formError}>{formErrors.name}</span>}
@@ -544,7 +546,7 @@ export default function SourceDetail() {
 
               {isGitHub && (
                 <div className={styles.field}>
-                  <label className={styles.label}>Repositories</label>
+                  <label className={styles.label}>{t('labelRepositories')}</label>
                   <div className={styles.inputWithButton}>
                     <input
                       type="text"
@@ -552,7 +554,7 @@ export default function SourceDetail() {
                       onChange={(e) => setRepoInput(e.target.value)}
                       onKeyDown={handleRepoKeyDown}
                       className={`${styles.input} ${formErrors.repository ? styles.inputError : ''}`}
-                      placeholder="owner/repo (e.g., octocat/Hello-World)"
+                      placeholder={t('placeholderGitHubRepo')}
                       disabled={isSaving || validatingRepo}
                     />
                     <Button
@@ -563,7 +565,7 @@ export default function SourceDetail() {
                       {validatingRepo ? (
                         <Loader size={16} className={styles.spinner} />
                       ) : (
-                        'Add'
+                        t('btnAdd')
                       )}
                     </Button>
                   </div>
@@ -592,21 +594,21 @@ export default function SourceDetail() {
                     </div>
                   )}
                   <p className={styles.hint}>
-                    Enter repository in owner/repo format. Each repository will be validated before adding.
+                    {t('hintGitHubRepo')}
                   </p>
                 </div>
               )}
 
               <div className={styles.field}>
                 <label htmlFor="editDescription" className={styles.label}>
-                  Description
+                  {t('labelDescription')}
                 </label>
                 <textarea
                   id="editDescription"
                   value={editDescription}
                   onChange={(e) => setEditDescription(e.target.value)}
                   className={styles.textarea}
-                  placeholder="Enter source description (optional)"
+                  placeholder={t('placeholderSourceDescription')}
                   rows={3}
                   disabled={isSaving}
                 />
@@ -621,7 +623,7 @@ export default function SourceDetail() {
                     className={styles.checkbox}
                     disabled={isSaving}
                   />
-                  <span>Enable this source</span>
+                  <span>{t('labelEnableSource')}</span>
                 </label>
               </div>
             </form>

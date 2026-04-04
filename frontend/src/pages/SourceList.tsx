@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@apollo/client'
 import { useNavigate } from 'react-router-dom'
 import { useWorkspace } from '../contexts/workspace-context'
+import { useTranslation } from '../i18n'
 import { Plus, Database, FileText, GitBranch, MessageSquare, CheckCircle, XCircle } from 'lucide-react'
 import Table from '../components/Table'
 import Button from '../components/Button'
@@ -68,6 +69,7 @@ interface Source {
 export default function SourceList() {
   const navigate = useNavigate()
   const { currentWorkspace } = useWorkspace()
+  const { t } = useTranslation()
   const [formStep, setFormStep] = useState<FormStep>(FORM_STEP.CLOSED)
 
   const { data, loading, error } = useQuery(GET_SOURCES, {
@@ -101,10 +103,10 @@ export default function SourceList() {
 
   const renderSourceType = (sourceType: string): ReactElement => {
     const typeLabels: Record<string, { label: string; icon: ReactElement }> = {
-      [SOURCE_TYPE.NOTION_DB]: { label: 'Notion DB', icon: <Database size={14} /> },
-      [SOURCE_TYPE.NOTION_PAGE]: { label: 'Notion Page', icon: <FileText size={14} /> },
-      [SOURCE_TYPE.SLACK]: { label: 'Slack', icon: <MessageSquare size={14} /> },
-      [SOURCE_TYPE.GITHUB]: { label: 'GitHub', icon: <GitBranch size={14} /> },
+      [SOURCE_TYPE.NOTION_DB]: { label: t('sourceTypeNotionDB'), icon: <Database size={14} /> },
+      [SOURCE_TYPE.NOTION_PAGE]: { label: t('sourceTypeNotionPage'), icon: <FileText size={14} /> },
+      [SOURCE_TYPE.SLACK]: { label: t('sourceTypeSlack'), icon: <MessageSquare size={14} /> },
+      [SOURCE_TYPE.GITHUB]: { label: t('sourceTypeGitHub'), icon: <GitBranch size={14} /> },
     }
     const typeInfo = typeLabels[sourceType] || { label: sourceType, icon: null }
 
@@ -120,38 +122,38 @@ export default function SourceList() {
     return enabled ? (
       <Chip variant="status" colorIndex={0}>
         <CheckCircle size={12} />
-        <span>Enabled</span>
+        <span>{t('statusEnabled')}</span>
       </Chip>
     ) : (
       <Chip variant="status" colorIndex={4}>
         <XCircle size={12} />
-        <span>Disabled</span>
+        <span>{t('statusDisabled')}</span>
       </Chip>
     )
   }
 
   const columns = [
     {
-      header: 'Name',
+      header: t('headerName'),
       accessor: 'name' as keyof Source,
       width: '200px',
     },
     {
-      header: 'Type',
+      header: t('headerType'),
       accessor: ((source: Source) => renderSourceType(source.sourceType)) as (row: Source) => ReactElement,
       width: '120px',
     },
     {
-      header: 'Description',
+      header: t('headerDescription'),
       accessor: 'description' as keyof Source,
     },
     {
-      header: 'Status',
+      header: t('labelStatus'),
       accessor: ((source: Source) => renderEnabled(source.enabled)) as (row: Source) => ReactElement,
       width: '100px',
     },
     {
-      header: 'Created',
+      header: t('labelCreated'),
       accessor: ((source: Source) => new Date(source.createdAt).toLocaleDateString()) as (row: Source) => string,
       width: '120px',
     },
@@ -160,7 +162,7 @@ export default function SourceList() {
   if (loading) {
     return (
       <div className={styles.container}>
-        <div className={styles.loading}>Loading...</div>
+        <div className={styles.loading}>{t('loading')}</div>
       </div>
     )
   }
@@ -168,7 +170,7 @@ export default function SourceList() {
   if (error) {
     return (
       <div className={styles.container}>
-        <div className={styles.error}>Error: {error.message}</div>
+        <div className={styles.error}>{t('errorPrefix')} {error.message}</div>
       </div>
     )
   }
@@ -177,15 +179,15 @@ export default function SourceList() {
     <div className={styles.container}>
       <div className={styles.header}>
         <div>
-          <h2 className={styles.title}>Sources</h2>
-          <p className={styles.subtitle}>Manage external data sources for risk monitoring</p>
+          <h2 className={styles.title}>{t('titleSources')}</h2>
+          <p className={styles.subtitle}>{t('subtitleSources')}</p>
         </div>
         <Button
           variant="primary"
           icon={<Plus size={20} />}
           onClick={handleOpenForm}
         >
-          Add Source
+          {t('btnAddSource')}
         </Button>
       </div>
 

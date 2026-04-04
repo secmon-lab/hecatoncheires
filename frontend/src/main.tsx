@@ -5,6 +5,7 @@ import { ApolloClient, InMemoryCache, ApolloProvider } from '@apollo/client'
 import App from './App.tsx'
 import { AuthProvider } from './contexts/auth-context.tsx'
 import { WorkspaceProvider } from './contexts/workspace-context.tsx'
+import { I18nProvider } from './i18n/index.ts'
 import './styles/global.css'
 
 const client = new ApolloClient({
@@ -20,14 +21,16 @@ if (!rootElement) {
 
 createRoot(rootElement).render(
   <StrictMode>
-    <AuthProvider>
-      <ApolloProvider client={client}>
-        <BrowserRouter>
-          <WorkspaceProvider>
-            <App />
-          </WorkspaceProvider>
-        </BrowserRouter>
-      </ApolloProvider>
-    </AuthProvider>
+    <I18nProvider>
+      <AuthProvider>
+        <ApolloProvider client={client}>
+          <BrowserRouter>
+            <WorkspaceProvider>
+              <App />
+            </WorkspaceProvider>
+          </BrowserRouter>
+        </ApolloProvider>
+      </AuthProvider>
+    </I18nProvider>
   </StrictMode>,
 )

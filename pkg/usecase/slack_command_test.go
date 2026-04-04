@@ -9,6 +9,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	goslack "github.com/slack-go/slack"
@@ -52,7 +53,7 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		})
 
 		slackMock := &commandTestSlackService{}
-		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock, i18n.New(i18n.LangEN))
 
 		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "risk")
 		gt.NoError(t, err).Required()
@@ -81,7 +82,7 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		})
 
 		slackMock := &commandTestSlackService{}
-		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock, i18n.New(i18n.LangEN))
 
 		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "nonexistent")
 		gt.Value(t, err).NotNil()
@@ -93,7 +94,7 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		registry := model.NewWorkspaceRegistry()
 
 		slackMock := &commandTestSlackService{}
-		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock, i18n.New(i18n.LangEN))
 
 		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "")
 		gt.Value(t, err).NotNil()
@@ -108,7 +109,7 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		})
 
 		slackMock := &commandTestSlackService{}
-		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock, i18n.New(i18n.LangEN))
 
 		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "")
 		gt.NoError(t, err).Required()
@@ -144,7 +145,7 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		})
 
 		slackMock := &commandTestSlackService{}
-		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock, i18n.New(i18n.LangEN))
 
 		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "risk")
 		gt.NoError(t, err).Required()
@@ -165,7 +166,7 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		})
 
 		slackMock := &commandTestSlackService{}
-		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock, i18n.New(i18n.LangEN))
 
 		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "")
 		gt.NoError(t, err).Required()
@@ -186,7 +187,7 @@ func TestSlackUseCases_HandleWorkspaceSelectSubmit(t *testing.T) {
 		})
 
 		slackMock := &commandTestSlackService{}
-		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock, i18n.New(i18n.LangEN))
 
 		meta, _ := json.Marshal(map[string]string{"channel_id": "C001"})
 		callback := &goslack.InteractionCallback{
@@ -225,7 +226,7 @@ func TestSlackUseCases_HandleWorkspaceSelectSubmit(t *testing.T) {
 		repo := memory.New()
 		registry := model.NewWorkspaceRegistry()
 		slackMock := &commandTestSlackService{}
-		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock, i18n.New(i18n.LangEN))
 
 		meta, _ := json.Marshal(map[string]string{"channel_id": "C001"})
 		callback := &goslack.InteractionCallback{
@@ -259,8 +260,8 @@ func TestSlackUseCases_HandleCaseCreationSubmit(t *testing.T) {
 		})
 
 		slackMock := &commandTestSlackService{}
-		slackUC := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
-		caseUC := usecase.NewCaseUseCase(repo, registry, nil, "")
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, slackMock, i18n.New(i18n.LangEN))
+		caseUC := usecase.NewCaseUseCase(repo, registry, nil, i18n.New(i18n.LangEN), "")
 
 		meta, _ := json.Marshal(map[string]string{
 			"workspace_id": "risk",
@@ -322,8 +323,8 @@ func TestSlackUseCases_HandleCaseCreationSubmit(t *testing.T) {
 		})
 
 		slackMock := &commandTestSlackService{}
-		slackUC := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
-		caseUC := usecase.NewCaseUseCase(repo, registry, nil, "")
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, slackMock, i18n.New(i18n.LangEN))
+		caseUC := usecase.NewCaseUseCase(repo, registry, nil, i18n.New(i18n.LangEN), "")
 
 		meta, _ := json.Marshal(map[string]string{
 			"workspace_id": "risk",
@@ -382,8 +383,8 @@ func TestSlackUseCases_HandleCaseCreationSubmit(t *testing.T) {
 		})
 
 		slackMock := &commandTestSlackService{}
-		slackUC := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
-		caseUC := usecase.NewCaseUseCase(repo, registry, nil, "")
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, slackMock, i18n.New(i18n.LangEN))
+		caseUC := usecase.NewCaseUseCase(repo, registry, nil, i18n.New(i18n.LangEN), "")
 
 		meta, _ := json.Marshal(map[string]string{
 			"workspace_id": "risk",

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useMutation } from '@apollo/client'
 import { useNavigate } from 'react-router-dom'
 import { useWorkspace } from '../../contexts/workspace-context'
+import { useTranslation } from '../../i18n'
 import { CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
 import Modal from '../Modal'
 import Button from '../Button'
@@ -29,6 +30,7 @@ interface ValidationResult {
 export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps) {
   const navigate = useNavigate()
   const { currentWorkspace } = useWorkspace()
+  const { t } = useTranslation()
   const [pageID, setPageID] = useState('')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -88,13 +90,13 @@ export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps)
 
   const handleValidate = async () => {
     if (!pageID.trim()) {
-      setErrors({ pageID: 'Page ID or URL is required' })
+      setErrors({ pageID: t('errorPageIdRequired') })
       return
     }
 
     const parsedID = parseNotionID(pageID)
     if (!parsedID) {
-      setErrors({ pageID: 'Invalid page ID or URL format' })
+      setErrors({ pageID: t('errorInvalidPageId') })
       return
     }
 
@@ -118,7 +120,7 @@ export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps)
         valid: false,
         pageTitle: null,
         pageURL: null,
-        errorMessage: 'Failed to validate page. Please try again.',
+        errorMessage: t('errorValidatePage'),
       })
     } finally {
       setIsValidating(false)
@@ -129,15 +131,15 @@ export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps)
     const newErrors: FormErrors = {}
 
     if (!pageID.trim()) {
-      newErrors.pageID = 'Page ID is required'
+      newErrors.pageID = t('errorPageIdRequired')
     }
 
     if (!name.trim()) {
-      newErrors.name = 'Name is required'
+      newErrors.name = t('errorNameRequired')
     }
 
     if (!validationResult?.valid) {
-      newErrors.pageID = 'Please validate the page ID first'
+      newErrors.pageID = t('errorValidatePageFirst')
     }
 
     setErrors(newErrors)
@@ -178,18 +180,18 @@ export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps)
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
-      title="Add Notion Page Source"
+      title={t('titleAddNotionPageSource')}
       footer={
         <>
           <Button variant="outline" onClick={handleClose} disabled={loading}>
-            Cancel
+            {t('btnCancel')}
           </Button>
           <Button
             variant="primary"
             onClick={handleSubmit}
             disabled={loading || !validationResult?.valid}
           >
-            {loading ? 'Creating...' : 'Create Source'}
+            {loading ? t('btnCreating') : t('btnCreateSource')}
           </Button>
         </>
       }
@@ -197,7 +199,7 @@ export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps)
       <form onSubmit={handleSubmit} className={styles.form}>
         <div className={styles.field}>
           <label htmlFor="pageID" className={styles.label}>
-            Page ID / URL *
+            {t('labelPageIdRequired')}
           </label>
           <div className={styles.inputWithButton}>
             <input
@@ -206,7 +208,7 @@ export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps)
               value={pageID}
               onChange={(e) => handlePageIDChange(e.target.value)}
               className={`${styles.input} ${errors.pageID ? styles.inputError : ''}`}
-              placeholder="Enter Notion page ID or paste URL"
+              placeholder={t('placeholderNotionPageId')}
               disabled={loading}
             />
             <Button
@@ -218,13 +220,13 @@ export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps)
               {isValidating ? (
                 <Loader2 size={16} className={styles.spinner} />
               ) : (
-                'Validate'
+                t('btnValidate')
               )}
             </Button>
           </div>
           {errors.pageID && <span className={styles.error}>{errors.pageID}</span>}
           <p className={styles.hint}>
-            Paste a Notion page URL or enter the page ID directly
+            {t('hintNotionPageId')}
           </p>
         </div>
 
@@ -234,7 +236,7 @@ export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps)
               <>
                 <CheckCircle size={20} />
                 <div className={styles.validationContent}>
-                  <span className={styles.validationTitle}>Page found</span>
+                  <span className={styles.validationTitle}>{t('validationPageFound')}</span>
                   <span className={styles.validationDetail}>{validationResult.pageTitle}</span>
                   {validationResult.pageURL && (
                     <a
@@ -243,7 +245,7 @@ export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps)
                       rel="noopener noreferrer"
                       className={styles.validationLink}
                     >
-                      Open in Notion
+                      {t('linkOpenNotion')}
                     </a>
                   )}
                 </div>
@@ -252,7 +254,7 @@ export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps)
               <>
                 <AlertCircle size={20} />
                 <div className={styles.validationContent}>
-                  <span className={styles.validationTitle}>Validation failed</span>
+                  <span className={styles.validationTitle}>{t('validationFailed')}</span>
                   <span className={styles.validationDetail}>{validationResult.errorMessage}</span>
                 </div>
               </>
@@ -262,7 +264,7 @@ export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps)
 
         <div className={styles.field}>
           <label htmlFor="name" className={styles.label}>
-            Name *
+            {t('labelNameRequired')}
           </label>
           <input
             id="name"
@@ -270,7 +272,7 @@ export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps)
             value={name}
             onChange={(e) => setName(e.target.value)}
             className={`${styles.input} ${errors.name ? styles.inputError : ''}`}
-            placeholder="Enter source name"
+            placeholder={t('placeholderSourceName')}
             disabled={loading}
           />
           {errors.name && <span className={styles.error}>{errors.name}</span>}
@@ -278,14 +280,14 @@ export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps)
 
         <div className={styles.field}>
           <label htmlFor="description" className={styles.label}>
-            Description
+            {t('labelDescription')}
           </label>
           <textarea
             id="description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             className={styles.textarea}
-            placeholder="Enter source description (optional)"
+            placeholder={t('placeholderSourceDescription')}
             rows={3}
             disabled={loading}
           />
@@ -300,14 +302,14 @@ export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps)
               className={styles.checkbox}
               disabled={loading}
             />
-            <span>Include child pages recursively</span>
+            <span>{t('labelIncludeChildPages')}</span>
           </label>
         </div>
 
         {recursive && (
           <div className={styles.field}>
             <label htmlFor="maxDepth" className={styles.label}>
-              Max Depth (0 = unlimited)
+              {t('labelMaxDepth')}
             </label>
             <input
               id="maxDepth"
@@ -319,7 +321,7 @@ export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps)
               disabled={loading}
             />
             <p className={styles.hint}>
-              Set to 0 to traverse all child pages without limit
+              {t('hintMaxDepth')}
             </p>
           </div>
         )}
@@ -333,7 +335,7 @@ export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps)
               className={styles.checkbox}
               disabled={loading}
             />
-            <span>Enable this source</span>
+            <span>{t('labelEnableSource')}</span>
           </label>
         </div>
       </form>

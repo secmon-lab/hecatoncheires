@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useQuery } from '@apollo/client'
 import { ChevronDown, X, Search, Loader2, Hash } from 'lucide-react'
+import { useTranslation } from '../../i18n'
 import { GET_SLACK_JOINED_CHANNELS } from '../../graphql/source'
 import styles from './ChannelSelector.module.css'
 
@@ -22,6 +23,7 @@ export default function ChannelSelector({
   disabled,
   error,
 }: ChannelSelectorProps) {
+  const { t } = useTranslation()
   const [isOpen, setIsOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const containerRef = useRef<HTMLDivElement>(null)
@@ -87,7 +89,7 @@ export default function ChannelSelector({
       >
         <div className={styles.selectedItems}>
           {selectedChannels.length === 0 ? (
-            <span className={styles.placeholder}>Select channels...</span>
+            <span className={styles.placeholder}>{t('placeholderSelectChannels')}</span>
           ) : (
             selectedChannels.map((channel) => (
               <span key={channel.id} className={styles.tag}>
@@ -119,7 +121,7 @@ export default function ChannelSelector({
               ref={searchInputRef}
               type="text"
               className={styles.searchInput}
-              placeholder="Search channels..."
+              placeholder={t('placeholderSearchChannels')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -129,15 +131,15 @@ export default function ChannelSelector({
             {loading ? (
               <div className={styles.loading}>
                 <Loader2 size={20} className={styles.spinner} />
-                <span>Loading channels...</span>
+                <span>{t('loadingChannels')}</span>
               </div>
             ) : filteredChannels.length === 0 ? (
               <div className={styles.emptyState}>
                 {searchQuery
-                  ? 'No channels match your search'
+                  ? t('emptySearchChannels')
                   : availableChannels.length === 0
-                    ? 'No channels available. Make sure the bot is invited to channels.'
-                    : 'All channels are already selected'}
+                    ? t('emptyNoChannels')
+                    : t('emptyChannelsSelected')}
               </div>
             ) : (
               filteredChannels.map((channel) => (

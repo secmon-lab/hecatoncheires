@@ -11,6 +11,7 @@ import {
 } from '@dnd-kit/core'
 import KanbanColumn from './KanbanColumn'
 import ActionCard from './ActionCard'
+import { useTranslation } from '../i18n'
 import styles from './KanbanBoard.module.css'
 
 interface Action {
@@ -33,16 +34,17 @@ interface KanbanBoardProps {
   onStatusChange?: (actionId: number, newStatus: string) => void
 }
 
-const COLUMNS = [
-  { status: 'BACKLOG', label: 'Backlog' },
-  { status: 'TODO', label: 'To Do' },
-  { status: 'IN_PROGRESS', label: 'In Progress' },
-  { status: 'BLOCKED', label: 'Blocked' },
-  { status: 'COMPLETED', label: 'Completed' },
+const COLUMN_KEYS = [
+  { status: 'BACKLOG', key: 'statusBacklog' as const },
+  { status: 'TODO', key: 'statusTodo' as const },
+  { status: 'IN_PROGRESS', key: 'statusInProgress' as const },
+  { status: 'BLOCKED', key: 'statusBlocked' as const },
+  { status: 'COMPLETED', key: 'statusCompleted' as const },
 ]
 
 export default function KanbanBoard({ actions, onCardClick, onStatusChange }: KanbanBoardProps) {
   const [activeAction, setActiveAction] = useState<Action | null>(null)
+  const { t } = useTranslation()
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -70,8 +72,9 @@ export default function KanbanBoard({ actions, onCardClick, onStatusChange }: Ka
     }
   }
 
-  const grouped = COLUMNS.map((col) => ({
-    ...col,
+  const grouped = COLUMN_KEYS.map((col) => ({
+    status: col.status,
+    label: t(col.key),
     actions: actions.filter((a) => a.status === col.status),
   }))
 

@@ -8,6 +8,7 @@ import { CREATE_CASE, UPDATE_CASE, GET_CASES } from '../graphql/case'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import { useWorkspace } from '../contexts/workspace-context'
+import { useTranslation } from '../i18n'
 import styles from './CaseForm.module.css'
 
 interface Case {
@@ -32,6 +33,7 @@ interface FormErrors {
 
 export default function CaseForm({ isOpen, onClose, caseItem }: CaseFormProps) {
   const { currentWorkspace } = useWorkspace()
+  const { t } = useTranslation()
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [assigneeIDs, setAssigneeIDs] = useState<string[]>([])
@@ -128,7 +130,7 @@ export default function CaseForm({ isOpen, onClose, caseItem }: CaseFormProps) {
     const newErrors: FormErrors = {}
 
     if (!title.trim()) {
-      newErrors.title = 'Title is required'
+      newErrors.title = t('errorTitleRequired')
     }
 
     // Validate custom fields
@@ -137,7 +139,7 @@ export default function CaseForm({ isOpen, onClose, caseItem }: CaseFormProps) {
       if (field.required) {
         const value = fieldValues[field.id]
         if (value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0)) {
-          newErrors[field.id] = `${field.name} is required`
+          newErrors[field.id] = t('errorFieldRequired', { fieldName: field.name })
         }
       }
     })
@@ -216,14 +218,14 @@ export default function CaseForm({ isOpen, onClose, caseItem }: CaseFormProps) {
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
-      title={caseItem ? `Edit ${caseLabel}` : `New ${caseLabel}`}
+      title={caseItem ? t('titleCaseFormEdit', { caseLabel }) : t('titleCaseFormNew', { caseLabel })}
       footer={
         <>
           <Button variant="outline" onClick={handleClose} disabled={loading}>
-            Cancel
+            {t('btnCancel')}
           </Button>
           <Button variant="primary" onClick={handleSubmit} disabled={loading}>
-            {loading ? 'Saving...' : 'Save'}
+            {loading ? t('btnSaving') : t('btnSave')}
           </Button>
         </>
       }
@@ -231,7 +233,7 @@ export default function CaseForm({ isOpen, onClose, caseItem }: CaseFormProps) {
       <form onSubmit={handleSubmit} className={styles.form}>
         <div className={styles.field}>
           <label htmlFor="title" className={styles.label}>
-            Title *
+            {t('labelTitleRequired')}
           </label>
           <input
             id="title"
@@ -239,7 +241,7 @@ export default function CaseForm({ isOpen, onClose, caseItem }: CaseFormProps) {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             className={`${styles.input} ${errors.title ? styles.inputError : ''}`}
-            placeholder={`Enter ${caseLabel.toLowerCase()} title`}
+            placeholder={t('placeholderCaseTitle', { caseLabelLower: caseLabel.toLowerCase() })}
             disabled={loading}
           />
           {errors.title && <span className={styles.error}>{errors.title}</span>}
@@ -247,14 +249,14 @@ export default function CaseForm({ isOpen, onClose, caseItem }: CaseFormProps) {
 
         <div className={styles.field}>
           <label htmlFor="description" className={styles.label}>
-            Description
+            {t('labelDescription')}
           </label>
           <textarea
             id="description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             className={styles.textarea}
-            placeholder={`Enter ${caseLabel.toLowerCase()} description`}
+            placeholder={t('placeholderCaseDescription', { caseLabelLower: caseLabel.toLowerCase() })}
             rows={4}
             disabled={loading}
           />
@@ -270,16 +272,16 @@ export default function CaseForm({ isOpen, onClose, caseItem }: CaseFormProps) {
                 disabled={loading}
                 className={styles.checkbox}
               />
-              <span>Private {caseLabel.toLowerCase()}</span>
+              <span>{t('labelPrivateCase', { caseLabel: caseLabel.toLowerCase() })}</span>
             </label>
             <span className={styles.hint}>
-              Private {caseLabel.toLowerCase()}s are only visible to Slack channel members
+              {t('hintPrivateCase', { caseLabelLower: caseLabel.toLowerCase() })}
             </span>
           </div>
         )}
 
         <div className={styles.field}>
-          <label htmlFor="assigneeIDs" className={styles.label}>Assignees</label>
+          <label htmlFor="assigneeIDs" className={styles.label}>{t('labelAssignees')}</label>
           <Select
             inputId="assigneeIDs"
             isMulti
@@ -298,7 +300,7 @@ export default function CaseForm({ isOpen, onClose, caseItem }: CaseFormProps) {
               image: user.imageUrl,
             }))}
             isDisabled={loading}
-            placeholder="Select assignees..."
+            placeholder={t('placeholderSelectAssignees')}
             filterOption={(option, inputValue) => {
               const search = inputValue.toLowerCase()
               const data = option.data as unknown as { label: string; name: string; realName: string }

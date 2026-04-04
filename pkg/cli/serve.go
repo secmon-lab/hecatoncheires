@@ -19,6 +19,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
 	gqlctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/graphql"
 	httpctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/http"
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/worker"
@@ -86,6 +87,7 @@ func cmdServe() *cli.Command {
 	var enableGraphiQL bool
 	var notionToken string
 	var noAuthUID string
+	var defaultLangStr string
 	var appCfg config.AppConfig
 	var repoCfg config.Repository
 	var slackCfg config.Slack
@@ -125,6 +127,13 @@ func cmdServe() *cli.Command {
 			Category:    "Authentication",
 			Sources:     cli.EnvVars("HECATONCHEIRES_NO_AUTH"),
 			Destination: &noAuthUID,
+		},
+		&cli.StringFlag{
+			Name:        "default-lang",
+			Usage:       "Default language for UI and Slack messages (en, ja)",
+			Value:       "en",
+			Sources:     cli.EnvVars("HECATONCHEIRES_DEFAULT_LANG"),
+			Destination: &defaultLangStr,
 		},
 	}
 
@@ -175,10 +184,19 @@ func cmdServe() *cli.Command {
 				logging.Default().Info("Slack authentication enabled", logAttrsToArgs(slackCfg.LogAttrs())...)
 			}
 
+			// Parse and initialize translator
+			defaultLang, err := i18n.ParseLang(defaultLangStr)
+			if err != nil {
+				return goerr.Wrap(err, "invalid default-lang value")
+			}
+			translator := i18n.New(defaultLang)
+			logging.Default().Info("i18n initialized", "default_lang", string(defaultLang))
+
 			// Initialize use cases with configuration and auth
 			ucOpts := []usecase.Option{
 				usecase.WithAuth(authUC),
 				usecase.WithBaseURL(baseURL),
+				usecase.WithTranslator(translator),
 			}
 
 			// Initialize Notion service if token is provided

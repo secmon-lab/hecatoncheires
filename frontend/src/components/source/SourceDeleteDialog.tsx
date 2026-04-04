@@ -1,6 +1,7 @@
 import { useMutation } from '@apollo/client'
 import { AlertTriangle } from 'lucide-react'
 import { useWorkspace } from '../../contexts/workspace-context'
+import { useTranslation } from '../../i18n'
 import Modal from '../Modal'
 import Button from '../Button'
 import { DELETE_SOURCE, GET_SOURCES } from '../../graphql/source'
@@ -22,6 +23,7 @@ export default function SourceDeleteDialog({
   sourceName,
 }: SourceDeleteDialogProps) {
   const { currentWorkspace } = useWorkspace()
+  const { t } = useTranslation()
   const [deleteSource, { loading }] = useMutation(DELETE_SOURCE, {
     update(cache) {
       const existingData = cache.readQuery<{ sources: { id: string }[] }>({ query: GET_SOURCES, variables: { workspaceId: currentWorkspace!.id } })
@@ -53,14 +55,14 @@ export default function SourceDeleteDialog({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Delete Source"
+      title={t('titleDeleteSource')}
       footer={
         <>
           <Button variant="outline" onClick={onClose} disabled={loading}>
-            Cancel
+            {t('btnCancel')}
           </Button>
           <Button variant="danger" onClick={handleDelete} disabled={loading}>
-            {loading ? 'Deleting...' : 'Delete'}
+            {loading ? t('btnDeleting') : t('btnDelete')}
           </Button>
         </>
       }
@@ -69,11 +71,9 @@ export default function SourceDeleteDialog({
         <div className={styles.deleteDialogWarning}>
           <AlertTriangle size={24} />
           <div>
+            <p className={styles.deleteDialogMessage} dangerouslySetInnerHTML={{ __html: t('msgDeleteSourceConfirm', { name: sourceName }) }} />
             <p className={styles.deleteDialogMessage}>
-              Are you sure you want to delete <strong>{sourceName}</strong>?
-            </p>
-            <p className={styles.deleteDialogMessage}>
-              This action cannot be undone. All data associated with this source will be permanently removed.
+              {t('warningDeleteSourcePermanent')}
             </p>
           </div>
         </div>

@@ -9,6 +9,7 @@ import ActionModal from './ActionModal'
 import ActionForm from './ActionForm'
 import { GET_OPEN_CASE_ACTIONS, UPDATE_ACTION } from '../graphql/action'
 import { useWorkspace } from '../contexts/workspace-context'
+import { useTranslation } from '../i18n'
 import styles from './ActionList.module.css'
 
 interface Action {
@@ -29,6 +30,7 @@ export default function ActionList() {
   const navigate = useNavigate()
   const { actionId } = useParams<{ actionId?: string }>()
   const { currentWorkspace } = useWorkspace()
+  const { t } = useTranslation()
   const [isCreateFormOpen, setIsCreateFormOpen] = useState(false)
   const [selectedActionId, setSelectedActionId] = useState<number | null>(null)
 
@@ -119,7 +121,7 @@ export default function ActionList() {
   if (loading) {
     return (
       <div className={styles.container}>
-        <div className={styles.loading}>Loading...</div>
+        <div className={styles.loading}>{t('loading')}</div>
       </div>
     )
   }
@@ -127,7 +129,7 @@ export default function ActionList() {
   if (error) {
     return (
       <div className={styles.container}>
-        <div className={styles.error}>Error: {error.message}</div>
+        <div className={styles.error}>{t('errorPrefix')} {error.message}</div>
       </div>
     )
   }
@@ -136,15 +138,15 @@ export default function ActionList() {
     <div className={styles.container}>
       <div className={styles.header}>
         <div>
-          <h2 className={styles.title}>{currentWorkspace?.name} Actions</h2>
-          <p className={styles.subtitle}>Manage and track actions</p>
+          <h2 className={styles.title}>{t('titleActions', { workspaceName: currentWorkspace?.name || '' })}</h2>
+          <p className={styles.subtitle}>{t('subtitleActions')}</p>
         </div>
         <Button
           variant="primary"
           icon={<Plus size={20} />}
           onClick={() => setIsCreateFormOpen(true)}
         >
-          New Action
+          {t('btnNewAction')}
         </Button>
       </div>
 

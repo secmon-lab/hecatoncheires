@@ -4,6 +4,7 @@ import (
 	"github.com/m-mizutani/gollem"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/github"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/knowledge"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
@@ -18,6 +19,7 @@ type UseCases struct {
 	githubService     github.Service
 	knowledgeService  knowledge.Service
 	llmClient         gollem.LLMClient
+	translator        *i18n.Translator
 	baseURL           string
 	Case              *CaseUseCase
 	Action            *ActionUseCase
@@ -73,6 +75,12 @@ func WithLLMClient(client gollem.LLMClient) Option {
 	}
 }
 
+func WithTranslator(tr *i18n.Translator) Option {
+	return func(uc *UseCases) {
+		uc.translator = tr
+	}
+}
+
 func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...Option) *UseCases {
 	uc := &UseCases{
 		repo:              repo,
@@ -83,17 +91,17 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 		opt(uc)
 	}
 
-	uc.Case = NewCaseUseCase(repo, registry, uc.slackService, uc.baseURL)
-	uc.Action = NewActionUseCase(repo, uc.slackService, uc.baseURL)
+	uc.Case = NewCaseUseCase(repo, registry, uc.slackService, uc.translator, uc.baseURL)
+	uc.Action = NewActionUseCase(repo, uc.slackService, uc.translator, uc.baseURL)
 	uc.Source = NewSourceUseCase(repo, uc.notion, uc.slackService, uc.githubService)
-	uc.Compile = NewCompileUseCase(repo, registry, uc.notion, uc.knowledgeService, uc.slackService, uc.githubService, uc.baseURL)
+	uc.Compile = NewCompileUseCase(repo, registry, uc.notion, uc.knowledgeService, uc.slackService, uc.githubService, uc.translator, uc.baseURL)
 
 	// Create AgentUseCase and AssistUseCase only if LLM client and Slack service are both available
 	if uc.llmClient != nil && uc.slackService != nil {
-		uc.Agent = NewAgentUseCase(repo, registry, uc.slackService, uc.llmClient)
+		uc.Agent = NewAgentUseCase(repo, registry, uc.slackService, uc.llmClient, uc.translator)
 		uc.Assist = NewAssistUseCase(repo, registry, uc.slackService, uc.llmClient)
 	}
-	uc.Slack = NewSlackUseCases(repo, registry, uc.Agent, uc.slackService)
+	uc.Slack = NewSlackUseCases(repo, registry, uc.Agent, uc.slackService, uc.translator)
 
 	return uc
 }

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useMutation } from '@apollo/client'
 import { useNavigate } from 'react-router-dom'
 import { useWorkspace } from '../../contexts/workspace-context'
+import { useTranslation } from '../../i18n'
 import { CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
 import Modal from '../Modal'
 import Button from '../Button'
@@ -29,6 +30,7 @@ interface ValidationResult {
 export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
   const navigate = useNavigate()
   const { currentWorkspace } = useWorkspace()
+  const { t } = useTranslation()
   const [databaseID, setDatabaseID] = useState('')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -84,13 +86,13 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
 
   const handleValidate = async () => {
     if (!databaseID.trim()) {
-      setErrors({ databaseID: 'Database ID or URL is required' })
+      setErrors({ databaseID: t('errorDatabaseIdRequired') })
       return
     }
 
     const parsedID = parseNotionID(databaseID)
     if (!parsedID) {
-      setErrors({ databaseID: 'Invalid database ID or URL format' })
+      setErrors({ databaseID: t('errorInvalidDatabaseId') })
       return
     }
 
@@ -114,7 +116,7 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
         valid: false,
         databaseTitle: null,
         databaseURL: null,
-        errorMessage: 'Failed to validate database. Please try again.',
+        errorMessage: t('errorValidateDatabase'),
       })
     } finally {
       setIsValidating(false)
@@ -125,15 +127,15 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
     const newErrors: FormErrors = {}
 
     if (!databaseID.trim()) {
-      newErrors.databaseID = 'Database ID is required'
+      newErrors.databaseID = t('errorDatabaseIdRequired')
     }
 
     if (!name.trim()) {
-      newErrors.name = 'Name is required'
+      newErrors.name = t('errorNameRequired')
     }
 
     if (!validationResult?.valid) {
-      newErrors.databaseID = 'Please validate the database ID first'
+      newErrors.databaseID = t('errorValidateDatabaseFirst')
     }
 
     setErrors(newErrors)
@@ -172,18 +174,18 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
-      title="Add Notion Database Source"
+      title={t('titleAddNotionDbSource')}
       footer={
         <>
           <Button variant="outline" onClick={handleClose} disabled={loading}>
-            Cancel
+            {t('btnCancel')}
           </Button>
           <Button
             variant="primary"
             onClick={handleSubmit}
             disabled={loading || !validationResult?.valid}
           >
-            {loading ? 'Creating...' : 'Create Source'}
+            {loading ? t('btnCreating') : t('btnCreateSource')}
           </Button>
         </>
       }
@@ -191,7 +193,7 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
       <form onSubmit={handleSubmit} className={styles.form}>
         <div className={styles.field}>
           <label htmlFor="databaseID" className={styles.label}>
-            Database ID / URL *
+            {t('labelDatabaseIdRequired')}
           </label>
           <div className={styles.inputWithButton}>
             <input
@@ -200,7 +202,7 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
               value={databaseID}
               onChange={(e) => handleDatabaseIDChange(e.target.value)}
               className={`${styles.input} ${errors.databaseID ? styles.inputError : ''}`}
-              placeholder="Enter Notion database ID or paste URL"
+              placeholder={t('placeholderNotionDbId')}
               disabled={loading}
             />
             <Button
@@ -212,13 +214,13 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
               {isValidating ? (
                 <Loader2 size={16} className={styles.spinner} />
               ) : (
-                'Validate'
+                t('btnValidate')
               )}
             </Button>
           </div>
           {errors.databaseID && <span className={styles.error}>{errors.databaseID}</span>}
           <p className={styles.hint}>
-            Paste a Notion database URL or enter the database ID directly
+            {t('hintNotionDbId')}
           </p>
         </div>
 
@@ -228,7 +230,7 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
               <>
                 <CheckCircle size={20} />
                 <div className={styles.validationContent}>
-                  <span className={styles.validationTitle}>Database found</span>
+                  <span className={styles.validationTitle}>{t('validationDatabaseFound')}</span>
                   <span className={styles.validationDetail}>{validationResult.databaseTitle}</span>
                   {validationResult.databaseURL && (
                     <a
@@ -237,7 +239,7 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
                       rel="noopener noreferrer"
                       className={styles.validationLink}
                     >
-                      Open in Notion
+                      {t('linkOpenNotion')}
                     </a>
                   )}
                 </div>
@@ -246,7 +248,7 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
               <>
                 <AlertCircle size={20} />
                 <div className={styles.validationContent}>
-                  <span className={styles.validationTitle}>Validation failed</span>
+                  <span className={styles.validationTitle}>{t('validationFailed')}</span>
                   <span className={styles.validationDetail}>{validationResult.errorMessage}</span>
                 </div>
               </>
@@ -256,7 +258,7 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
 
         <div className={styles.field}>
           <label htmlFor="name" className={styles.label}>
-            Name *
+            {t('labelNameRequired')}
           </label>
           <input
             id="name"
@@ -264,7 +266,7 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
             value={name}
             onChange={(e) => setName(e.target.value)}
             className={`${styles.input} ${errors.name ? styles.inputError : ''}`}
-            placeholder="Enter source name"
+            placeholder={t('placeholderSourceName')}
             disabled={loading}
           />
           {errors.name && <span className={styles.error}>{errors.name}</span>}
@@ -272,14 +274,14 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
 
         <div className={styles.field}>
           <label htmlFor="description" className={styles.label}>
-            Description
+            {t('labelDescription')}
           </label>
           <textarea
             id="description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             className={styles.textarea}
-            placeholder="Enter source description (optional)"
+            placeholder={t('placeholderSourceDescription')}
             rows={3}
             disabled={loading}
           />
@@ -294,7 +296,7 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
               className={styles.checkbox}
               disabled={loading}
             />
-            <span>Enable this source</span>
+            <span>{t('labelEnableSource')}</span>
           </label>
         </div>
       </form>

@@ -4,6 +4,7 @@ import { ArrowLeft, ExternalLink, BookOpen } from 'lucide-react'
 import Button from '../components/Button'
 import { GET_KNOWLEDGE } from '../graphql/knowledge'
 import { useWorkspace } from '../contexts/workspace-context'
+import { useTranslation } from '../i18n'
 import styles from './KnowledgeDetail.module.css'
 
 interface Knowledge {
@@ -27,6 +28,7 @@ export default function KnowledgeDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { currentWorkspace } = useWorkspace()
+  const { t } = useTranslation()
 
   const { data, loading, error } = useQuery(GET_KNOWLEDGE, {
     variables: { workspaceId: currentWorkspace!.id, id: id || '' },
@@ -48,7 +50,7 @@ export default function KnowledgeDetail() {
   if (loading) {
     return (
       <div className={styles.container}>
-        <div className={styles.loading}>Loading...</div>
+        <div className={styles.loading}>{t('loading')}</div>
       </div>
     )
   }
@@ -57,10 +59,10 @@ export default function KnowledgeDetail() {
     return (
       <div className={styles.container}>
         <div className={styles.error}>
-          {error ? `Error: ${error.message}` : 'Knowledge not found'}
+          {error ? `${t('errorPrefix')} ${error.message}` : t('errorKnowledgeNotFound')}
         </div>
         <Button variant="outline" icon={<ArrowLeft size={20} />} onClick={handleBack}>
-          Back to List
+          {t('btnBackToList')}
         </Button>
       </div>
     )
@@ -70,7 +72,7 @@ export default function KnowledgeDetail() {
     <div className={styles.container}>
       <div className={styles.header}>
         <Button variant="ghost" icon={<ArrowLeft size={20} />} onClick={handleBack}>
-          Back
+          {t('btnBack')}
         </Button>
       </div>
 
@@ -88,19 +90,19 @@ export default function KnowledgeDetail() {
               className={styles.sourceLink}
             >
               <ExternalLink size={16} />
-              View Source
+              {t('linkViewSource')}
             </a>
           )}
         </div>
 
         <div className={styles.section}>
-          <h2>Summary</h2>
+          <h2>{t('sectionSummary')}</h2>
           <p className={styles.summary}>{knowledge.summary}</p>
         </div>
 
         {knowledge.case && (
           <div className={styles.section}>
-            <h2>Related Case</h2>
+            <h2>{t('sectionRelatedCase')}</h2>
             <div className={styles.riskCard} onClick={handleCaseClick}>
               <h3>{knowledge.case.title}</h3>
               <p>{knowledge.case.description}</p>
@@ -109,14 +111,14 @@ export default function KnowledgeDetail() {
         )}
 
         <div className={styles.section}>
-          <h2>Source Information</h2>
+          <h2>{t('sectionSourceInfo')}</h2>
           <div className={styles.sourceInfo}>
             <div className={styles.sourceItem}>
-              <span className={styles.sourceLabel}>Source ID:</span>
+              <span className={styles.sourceLabel}>{t('labelSourceId')}</span>
               <span className={styles.sourceValue}>{knowledge.sourceID}</span>
             </div>
             <div className={styles.sourceItem}>
-              <span className={styles.sourceLabel}>Sourced At:</span>
+              <span className={styles.sourceLabel}>{t('labelSourcedAt')}</span>
               <span className={styles.sourceValue}>
                 {new Date(knowledge.sourcedAt).toLocaleString()}
               </span>
@@ -126,10 +128,10 @@ export default function KnowledgeDetail() {
 
         <div className={styles.metadata}>
           <div>
-            <strong>Created:</strong> {new Date(knowledge.createdAt).toLocaleString()}
+            <strong>{t('labelCreatedTimestamp')}</strong> {new Date(knowledge.createdAt).toLocaleString()}
           </div>
           <div>
-            <strong>Updated:</strong> {new Date(knowledge.updatedAt).toLocaleString()}
+            <strong>{t('labelUpdatedTimestamp')}</strong> {new Date(knowledge.updatedAt).toLocaleString()}
           </div>
         </div>
       </div>

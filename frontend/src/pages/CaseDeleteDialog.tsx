@@ -4,6 +4,7 @@ import Button from '../components/Button'
 import { AlertTriangle } from 'lucide-react'
 import { DELETE_CASE, GET_CASES } from '../graphql/case'
 import { useWorkspace } from '../contexts/workspace-context'
+import { useTranslation } from '../i18n'
 import styles from './CaseDeleteDialog.module.css'
 
 interface CaseDeleteDialogProps {
@@ -22,6 +23,7 @@ export default function CaseDeleteDialog({
   caseId,
 }: CaseDeleteDialogProps) {
   const { currentWorkspace } = useWorkspace()
+  const { t } = useTranslation()
   const [deleteCase, { loading }] = useMutation(DELETE_CASE, {
     update(cache) {
       if (!caseId) return
@@ -63,14 +65,14 @@ export default function CaseDeleteDialog({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Delete Case"
+      title={t('titleDeleteCase')}
       footer={
         <>
           <Button variant="outline" onClick={onClose} disabled={loading}>
-            Cancel
+            {t('btnCancel')}
           </Button>
           <Button variant="danger" onClick={handleDelete} disabled={loading}>
-            {loading ? 'Deleting...' : 'Delete'}
+            {loading ? t('btnDeleting') : t('btnDelete')}
           </Button>
         </>
       }
@@ -79,11 +81,12 @@ export default function CaseDeleteDialog({
         <div className={styles.iconContainer}>
           <AlertTriangle size={48} className={styles.icon} />
         </div>
-        <p className={styles.message}>
-          Are you sure you want to delete <strong>{caseTitle}</strong>?
-        </p>
+        <p
+          className={styles.message}
+          dangerouslySetInnerHTML={{ __html: t('msgDeleteCaseConfirm', { title: caseTitle }) }}
+        />
         <p className={styles.warning}>
-          This action cannot be undone. All related actions and data will also be deleted.
+          {t('warningDeleteCasePermanent')}
         </p>
       </div>
     </Modal>

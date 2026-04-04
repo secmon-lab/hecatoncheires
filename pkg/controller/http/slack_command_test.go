@@ -91,7 +91,7 @@ func TestSlackCommandHandler(t *testing.T) {
 		for _, ws := range workspaces {
 			registry.Register(&model.WorkspaceEntry{Workspace: ws})
 		}
-		slackUC := usecase.NewSlackUseCases(repo, registry, nil, &mockSlackServiceForCommand{})
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, &mockSlackServiceForCommand{}, nil)
 		return httpctrl.NewSlackCommandHandler(slackUC)
 	}
 
