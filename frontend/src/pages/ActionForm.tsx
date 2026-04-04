@@ -7,6 +7,7 @@ import { CREATE_ACTION, UPDATE_ACTION, GET_OPEN_CASE_ACTIONS } from '../graphql/
 import { GET_CASES } from '../graphql/case'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import { useWorkspace } from '../contexts/workspace-context'
+import { useTranslation } from '../i18n'
 import styles from './ActionForm.module.css'
 
 interface Action {
@@ -35,6 +36,7 @@ interface FormErrors {
 
 export default function ActionForm({ isOpen, onClose, action, initialCaseID }: ActionFormProps) {
   const { currentWorkspace } = useWorkspace()
+  const { t } = useTranslation()
   const [caseID, setCaseID] = useState<number | null>(null)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -115,11 +117,11 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
     const newErrors: FormErrors = {}
 
     if (!caseID) {
-      newErrors.caseID = 'Case is required'
+      newErrors.caseID = t('errorCaseRequired')
     }
 
     if (!title.trim()) {
-      newErrors.title = 'Title is required'
+      newErrors.title = t('errorTitleRequired')
     }
 
     setErrors(newErrors)
@@ -172,7 +174,6 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
   }
 
   const loading = creating || updating
-  const caseLabel = 'Case'
 
   const caseOptions = (casesData?.cases || []).map((c: any) => ({
     value: c.id,
@@ -180,25 +181,25 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
   }))
 
   const statusOptions = [
-    { value: 'BACKLOG', label: 'Backlog' },
-    { value: 'TODO', label: 'To Do' },
-    { value: 'IN_PROGRESS', label: 'In Progress' },
-    { value: 'BLOCKED', label: 'Blocked' },
-    { value: 'COMPLETED', label: 'Completed' },
+    { value: 'BACKLOG', label: t('statusBacklog') },
+    { value: 'TODO', label: t('statusTodo') },
+    { value: 'IN_PROGRESS', label: t('statusInProgress') },
+    { value: 'BLOCKED', label: t('statusBlocked') },
+    { value: 'COMPLETED', label: t('statusCompleted') },
   ]
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
-      title={action ? 'Edit Action' : 'New Action'}
+      title={action ? t('titleActionFormEdit') : t('titleActionFormNew')}
       footer={
         <>
           <Button variant="outline" onClick={handleClose} disabled={loading}>
-            Cancel
+            {t('btnCancel')}
           </Button>
           <Button variant="primary" onClick={handleSubmit} disabled={loading}>
-            {loading ? 'Saving...' : 'Save'}
+            {loading ? t('btnSaving') : t('btnSave')}
           </Button>
         </>
       }
@@ -206,7 +207,7 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
       <form onSubmit={handleSubmit} className={styles.form}>
         <div className={styles.field}>
           <label htmlFor="caseID" className={styles.label}>
-            {caseLabel} *
+            {t('labelCaseRequired', { caseLabel: t('navCases') })}
           </label>
           <Select
             inputId="caseID"
@@ -214,14 +215,14 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
             onChange={(selected) => setCaseID(selected?.value || null)}
             options={caseOptions}
             isDisabled={loading}
-            placeholder={`Select ${caseLabel.toLowerCase()}...`}
+            placeholder={t('placeholderSelectCase', { caseLabelLower: t('navCases').toLowerCase() })}
           />
           {errors.caseID && <span className={styles.error}>{errors.caseID}</span>}
         </div>
 
         <div className={styles.field}>
           <label htmlFor="title" className={styles.label}>
-            Title *
+            {t('labelTitleRequired')}
           </label>
           <input
             id="title"
@@ -229,7 +230,7 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             className={`${styles.input} ${errors.title ? styles.inputError : ''}`}
-            placeholder="Enter action title"
+            placeholder={t('placeholderActionTitle')}
             disabled={loading}
           />
           {errors.title && <span className={styles.error}>{errors.title}</span>}
@@ -237,21 +238,21 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
 
         <div className={styles.field}>
           <label htmlFor="description" className={styles.label}>
-            Description
+            {t('labelDescription')}
           </label>
           <textarea
             id="description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             className={styles.textarea}
-            placeholder="Enter action description"
+            placeholder={t('placeholderActionDescription')}
             rows={4}
             disabled={loading}
           />
         </div>
 
         <div className={styles.field}>
-          <label htmlFor="assigneeIDs" className={styles.label}>Assignees</label>
+          <label htmlFor="assigneeIDs" className={styles.label}>{t('labelAssignees')}</label>
           <Select
             inputId="assigneeIDs"
             isMulti
@@ -270,7 +271,7 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
               image: user.imageUrl,
             }))}
             isDisabled={loading}
-            placeholder="Select assignees..."
+            placeholder={t('placeholderSelectAssignees')}
             filterOption={(option, inputValue) => {
               const search = inputValue.toLowerCase()
               const data = option.data as unknown as { label: string; name: string; realName: string }
@@ -297,7 +298,7 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
 
         <div className={styles.field}>
           <label htmlFor="status" className={styles.label}>
-            Status *
+            {t('labelStatusRequired')}
           </label>
           <Select
             inputId="status"
@@ -310,7 +311,7 @@ export default function ActionForm({ isOpen, onClose, action, initialCaseID }: A
 
         <div className={styles.field}>
           <label htmlFor="dueDate" className={styles.label}>
-            Due Date
+            {t('labelDueDate')}
           </label>
           <input
             id="dueDate"

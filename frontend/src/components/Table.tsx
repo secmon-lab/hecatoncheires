@@ -1,5 +1,6 @@
 import { ReactNode, useState, useCallback, useRef, useEffect } from 'react'
 import { useIsMobile } from '../hooks/useMediaQuery'
+import { useTranslation } from '../i18n'
 import styles from './Table.module.css'
 
 interface Column<T> {
@@ -22,6 +23,7 @@ export default function Table<T extends { id: number | string }>({
   resizable = false,
 }: TableProps<T>) {
   const isMobile = useIsMobile()
+  const { t } = useTranslation()
 
   // Track column widths for resizing
   const [columnWidths, setColumnWidths] = useState<number[]>([])
@@ -75,7 +77,7 @@ export default function Table<T extends { id: number | string }>({
   if (data.length === 0) {
     return (
       <div className={styles.emptyState}>
-        <p>No data available</p>
+        <p>{t('noDataAvailable')}</p>
       </div>
     )
   }

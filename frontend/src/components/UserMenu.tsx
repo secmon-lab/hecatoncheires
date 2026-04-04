@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { User, LogOut } from 'lucide-react';
+import { User, LogOut, Globe } from 'lucide-react';
 import { useAuth } from '../contexts/auth-context';
+import { useTranslation, type Lang } from '../i18n';
 import styles from './UserMenu.module.css';
 
 interface UserInfo {
@@ -13,6 +14,7 @@ interface UserInfo {
 
 export function UserMenu() {
   const { user, logout } = useAuth();
+  const { t, lang, setLang } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -52,12 +54,12 @@ export function UserMenu() {
       <button
         className={styles.userButton}
         onClick={() => setIsOpen(!isOpen)}
-        aria-label="User menu"
+        aria-label={t('ariaUserMenu')}
       >
         {userInfo?.profile.image_48 ? (
           <img
             src={userInfo.profile.image_48}
-            alt={user?.name || 'User'}
+            alt={user?.name || t('userFallbackName')}
             className={styles.avatar}
           />
         ) : (
@@ -70,15 +72,33 @@ export function UserMenu() {
       {isOpen && (
         <div className={styles.dropdown}>
           <div className={styles.userInfo}>
-            <div className={styles.userName}>{user?.name || 'User'}</div>
+            <div className={styles.userName}>{user?.name || t('userFallbackName')}</div>
             {user && (
               <div className={styles.userEmail}>{user.email}</div>
             )}
           </div>
           <div className={styles.divider} />
+          <div className={styles.langSection}>
+            <div className={styles.langLabel}>
+              <Globe size={16} />
+              <span>{t('labelLanguage')}</span>
+            </div>
+            <div className={styles.langOptions}>
+              {(['en', 'ja'] as Lang[]).map((l) => (
+                <button
+                  key={l}
+                  className={`${styles.langOption} ${lang === l ? styles.langActive : ''}`}
+                  onClick={() => setLang(l)}
+                >
+                  {l === 'en' ? t('langEnglish') : t('langJapanese')}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className={styles.divider} />
           <button className={styles.menuItem} onClick={handleLogout}>
             <LogOut size={16} />
-            <span>Logout</span>
+            <span>{t('btnLogout')}</span>
           </button>
         </div>
       )}

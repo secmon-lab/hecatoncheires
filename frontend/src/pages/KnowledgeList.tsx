@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { BookOpen, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react'
 import { GET_KNOWLEDGES } from '../graphql/knowledge'
 import { useWorkspace } from '../contexts/workspace-context'
+import { useTranslation } from '../i18n'
 import styles from './KnowledgeList.module.css'
 
 interface Knowledge {
@@ -33,6 +34,7 @@ const PAGE_SIZE = 20
 export default function KnowledgeList() {
   const navigate = useNavigate()
   const { currentWorkspace } = useWorkspace()
+  const { t } = useTranslation()
   const [page, setPage] = useState(0)
 
   const { data, loading, error } = useQuery(GET_KNOWLEDGES, {
@@ -49,8 +51,8 @@ export default function KnowledgeList() {
     navigate(`/ws/${currentWorkspace!.id}/cases/${caseId}`)
   }
 
-  if (loading) return <div className={styles.loading}>Loading...</div>
-  if (error) return <div className={styles.error}>Error: {error.message}</div>
+  if (loading) return <div className={styles.loading}>{t('loading')}</div>
+  if (error) return <div className={styles.error}>{t('errorPrefix')} {error.message}</div>
 
   const connection: KnowledgeConnection = data?.knowledges || { items: [], totalCount: 0, hasMore: false }
   const totalPages = Math.ceil(connection.totalCount / PAGE_SIZE)
@@ -61,8 +63,8 @@ export default function KnowledgeList() {
         <div className={styles.headerContent}>
           <BookOpen size={28} className={styles.headerIcon} />
           <div>
-            <h1>Knowledge Base</h1>
-            <p>AI-extracted knowledge from configured sources ({connection.totalCount} items)</p>
+            <h1>{t('titleKnowledgeBase')}</h1>
+            <p>{t('subtitleKnowledgeBase', { count: connection.totalCount })}</p>
           </div>
         </div>
       </div>
@@ -70,18 +72,18 @@ export default function KnowledgeList() {
       {connection.items.length === 0 ? (
         <div className={styles.empty}>
           <BookOpen size={48} className={styles.emptyIcon} />
-          <h2>No knowledge found</h2>
-          <p>Knowledge will appear here once extracted from your configured sources.</p>
+          <h2>{t('emptyKnowledgeTitle')}</h2>
+          <p>{t('emptyKnowledgeDesc')}</p>
         </div>
       ) : (
         <>
           <table className={styles.table}>
             <thead>
               <tr>
-                <th>Title</th>
-                <th>Related Case</th>
-                <th>Summary</th>
-                <th>Date</th>
+                <th>{t('headerTitle')}</th>
+                <th>{t('headerRelatedCase')}</th>
+                <th>{t('headerSummary')}</th>
+                <th>{t('headerDate')}</th>
                 <th></th>
               </tr>
             </thead>
@@ -139,17 +141,17 @@ export default function KnowledgeList() {
                 disabled={page === 0}
               >
                 <ChevronLeft size={16} />
-                Previous
+                {t('btnPrevious')}
               </button>
               <span className={styles.paginationInfo}>
-                Page {page + 1} of {totalPages}
+                {t('paginationPageOf', { current: page + 1, total: totalPages })}
               </span>
               <button
                 className={styles.paginationButton}
                 onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
                 disabled={!connection.hasMore}
               >
-                Next
+                {t('btnNext')}
                 <ChevronRight size={16} />
               </button>
             </div>

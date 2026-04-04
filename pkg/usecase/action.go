@@ -11,6 +11,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	goslack "github.com/slack-go/slack"
@@ -94,8 +95,8 @@ func (uc *ActionUseCase) CreateAction(ctx context.Context, workspaceID string, c
 			actionURL = fmt.Sprintf("%s/ws/%s/cases/%d/actions/%d", uc.baseURL, workspaceID, caseID, created.ID)
 		}
 
-		blocks := buildActionMessageBlocks(created, actionURL, workspaceID)
-		fallbackText := fmt.Sprintf("New action: %s", created.Title)
+		blocks := uc.buildActionMessageBlocks(ctx, created, actionURL, workspaceID)
+		fallbackText := i18n.T(ctx, i18n.MsgActionNew, created.Title)
 		ts, postErr := uc.slackService.PostMessage(ctx, caseModel.SlackChannelID, blocks, fallbackText)
 		if postErr != nil {
 			errutil.Handle(ctx, postErr, "failed to post Slack notification for action")
@@ -359,19 +360,19 @@ func (uc *ActionUseCase) updateSlackMessage(ctx context.Context, workspaceID str
 		actionURL = fmt.Sprintf("%s/ws/%s/cases/%d/actions/%d", uc.baseURL, workspaceID, action.CaseID, action.ID)
 	}
 
-	blocks := buildActionMessageBlocks(action, actionURL, workspaceID)
-	fallbackText := fmt.Sprintf("Action updated: %s", action.Title)
+	blocks := uc.buildActionMessageBlocks(ctx, action, actionURL, workspaceID)
+	fallbackText := i18n.T(ctx, i18n.MsgActionUpdated, action.Title)
 	if updateErr := uc.slackService.UpdateMessage(ctx, caseModel.SlackChannelID, action.SlackMessageTS, blocks, fallbackText); updateErr != nil {
 		errutil.Handle(ctx, updateErr, "failed to update Slack message for action")
 	}
 }
 
 // buildActionMessageBlocks constructs Block Kit blocks for an action notification message.
-func buildActionMessageBlocks(action *model.Action, actionURL string, workspaceID string) []goslack.Block {
+func (uc *ActionUseCase) buildActionMessageBlocks(ctx context.Context, action *model.Action, actionURL string, workspaceID string) []goslack.Block {
 	blocks := []goslack.Block{
 		// Header: "Action: {emoji} {title}"
 		goslack.NewHeaderBlock(
-			goslack.NewTextBlockObject(goslack.PlainTextType, "Action: "+action.Status.Emoji()+" "+action.Title, true, false),
+			goslack.NewTextBlockObject(goslack.PlainTextType, i18n.T(ctx, i18n.MsgActionHeader, action.Status.Emoji(), action.Title), true, false),
 		),
 	}
 
@@ -392,9 +393,9 @@ func buildActionMessageBlocks(action *model.Action, actionURL string, workspaceI
 		}
 		contextParts = append(contextParts, strings.Join(mentions, " "))
 	} else {
-		contextParts = append(contextParts, "No Assign")
+		contextParts = append(contextParts, i18n.T(ctx, i18n.MsgActionNoAssign))
 	}
-	contextParts = append(contextParts, fmt.Sprintf("Status: %s", action.Status))
+	contextParts = append(contextParts, i18n.T(ctx, i18n.MsgActionStatus, action.Status))
 	if actionURL != "" {
 		contextParts = append(contextParts, fmt.Sprintf(":link: <%s|Link>", actionURL))
 	}
@@ -410,19 +411,19 @@ func buildActionMessageBlocks(action *model.Action, actionURL string, workspaceI
 	var buttons []goslack.BlockElement
 	if len(action.AssigneeIDs) == 0 {
 		buttons = append(buttons, goslack.NewButtonBlockElement(SlackActionIDAssign, buttonValue,
-			goslack.NewTextBlockObject(goslack.PlainTextType, "Assign to me", true, false),
+			goslack.NewTextBlockObject(goslack.PlainTextType, i18n.T(ctx, i18n.MsgActionAssignToMe), true, false),
 		))
 	}
 	if action.Status != types.ActionStatusInProgress {
 		btn := goslack.NewButtonBlockElement(SlackActionIDInProgress, buttonValue,
-			goslack.NewTextBlockObject(goslack.PlainTextType, "In Progress", true, false),
+			goslack.NewTextBlockObject(goslack.PlainTextType, i18n.T(ctx, i18n.MsgActionInProgress), true, false),
 		)
 		btn.Style = goslack.StylePrimary
 		buttons = append(buttons, btn)
 	}
 	if action.Status != types.ActionStatusCompleted {
 		btn := goslack.NewButtonBlockElement(SlackActionIDComplete, buttonValue,
-			goslack.NewTextBlockObject(goslack.PlainTextType, "Completed", true, false),
+			goslack.NewTextBlockObject(goslack.PlainTextType, i18n.T(ctx, i18n.MsgActionCompleted), true, false),
 		)
 		btn.Style = goslack.StyleDanger
 		buttons = append(buttons, btn)

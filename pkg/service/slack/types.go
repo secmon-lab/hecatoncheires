@@ -111,4 +111,5 @@ type User struct {
 	RealName string
 	Email    string
 	ImageURL string
+	Locale   string
 }

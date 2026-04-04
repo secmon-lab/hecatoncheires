@@ -1,7 +1,10 @@
 import { SlackIcon } from '../icons/SlackIcon';
+import { useTranslation } from '../../i18n';
 import './login-page.css';
 
 export function LoginPage() {
+  const { t } = useTranslation();
+
   const handleLogin = () => {
     window.location.href = "/api/auth/login";
   };
@@ -10,17 +13,17 @@ export function LoginPage() {
     <div className="login-container">
       <div className="login-card">
         <div className="login-header">
-          <h2 className="login-title">Hecatoncheires</h2>
-          <p className="login-subtitle">AI native risk management system</p>
+          <h2 className="login-title">{t('appName')}</h2>
+          <p className="login-subtitle">{t('appSubtitle')}</p>
         </div>
 
         <button onClick={handleLogin} className="login-button">
           <SlackIcon style={{ marginRight: '8px' }} />
-          Sign in with Slack
+          {t('btnSignInSlack')}
         </button>
 
         <p className="login-description">
-          Authenticate using your Slack workspace
+          {t('loginDescription')}
         </p>
       </div>
     </div>

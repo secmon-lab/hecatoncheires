@@ -18,6 +18,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	slackmodel "github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	goslack "github.com/slack-go/slack" //nolint:depguard
@@ -49,6 +50,9 @@ func NewAgentUseCase(repo interfaces.Repository, registry *model.WorkspaceRegist
 // HandleAgentMention processes an app_mention event and responds with an AI agent
 func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.Message) error {
 	logger := logging.From(ctx)
+
+	// Detect user's language from Slack locale
+	ctx = contextWithSlackUserLang(ctx, uc.slackService, msg.UserID())
 
 	// Skip if bot user ID matches the message sender (prevent infinite loop)
 	botUserID, err := uc.slackService.GetBotUserID(ctx)
@@ -137,7 +141,7 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 	resp, err := agent.Execute(ctx, gollem.Text(msg.Text()))
 	if err != nil {
 		// Post error message to Slack thread
-		errMsg := "⚠️ An error occurred while processing your request. Please try again later."
+		errMsg := "⚠️ " + i18n.T(ctx, i18n.MsgAgentError)
 		if _, postErr := uc.slackService.PostThreadReply(ctx, msg.ChannelID(), threadTS, errMsg); postErr != nil {
 			logger.Error("failed to post error message to Slack", "error", postErr.Error())
 		}
@@ -164,13 +168,13 @@ const (
 	SlackAgentActionShowSessionInfo = "show_session_info"
 )
 
-var sessionStartMessages = []string{
-	"Thinking...",
-	"Analyzing...",
-	"Processing...",
-	"Investigating...",
-	"Looking into it...",
-	"On it...",
+var sessionStartMessageKeys = []i18n.MsgKey{
+	i18n.MsgAgentThinking,
+	i18n.MsgAgentAnalyzing,
+	i18n.MsgAgentProcessing,
+	i18n.MsgAgentInvestigating,
+	i18n.MsgAgentLookingInto,
+	i18n.MsgAgentOnIt,
 }
 
 // ParseAgentActionValue parses an agent action option value into action type and data.
@@ -186,13 +190,14 @@ func ParseAgentActionValue(value string) (action string, data string, err error)
 // postSessionStart posts a section block message with an overflow menu for agent session actions
 func (uc *AgentUseCase) postSessionStart(ctx context.Context, channelID, threadTS, sessionID string) error {
 	//nolint:gosec // not for security use
-	label := sessionStartMessages[time.Now().UnixNano()%int64(len(sessionStartMessages))]
+	key := sessionStartMessageKeys[time.Now().UnixNano()%int64(len(sessionStartMessageKeys))]
+	label := i18n.T(ctx, key)
 
 	overflow := goslack.NewOverflowBlockElement(
 		SlackAgentSessionActionsID,
 		goslack.NewOptionBlockObject(
 			fmt.Sprintf("%s:%s", SlackAgentActionShowSessionInfo, sessionID),
-			goslack.NewTextBlockObject(goslack.PlainTextType, "Session Info", false, false),
+			goslack.NewTextBlockObject(goslack.PlainTextType, i18n.T(ctx, i18n.MsgAgentSessionInfo), false, false),
 			nil,
 		),
 	)
@@ -216,8 +221,8 @@ func (uc *AgentUseCase) postSessionStart(ctx context.Context, channelID, threadT
 func (uc *AgentUseCase) HandleSessionInfoRequest(ctx context.Context, triggerID, sessionID string) error {
 	view := goslack.ModalViewRequest{
 		Type:  goslack.VTModal,
-		Title: goslack.NewTextBlockObject(goslack.PlainTextType, "Session Info", false, false),
-		Close: goslack.NewTextBlockObject(goslack.PlainTextType, "Close", false, false),
+		Title: goslack.NewTextBlockObject(goslack.PlainTextType, i18n.T(ctx, i18n.MsgAgentSessionInfo), false, false),
+		Close: goslack.NewTextBlockObject(goslack.PlainTextType, i18n.T(ctx, i18n.MsgModalCreateCaseCancel), false, false),
 		Blocks: goslack.Blocks{
 			BlockSet: []goslack.Block{
 				goslack.NewSectionBlock(

@@ -8,6 +8,7 @@ import CaseForm from './CaseForm'
 import { GET_CASES } from '../graphql/case'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { useWorkspace } from '../contexts/workspace-context'
+import { useTranslation } from '../i18n'
 import styles from './CaseList.module.css'
 import type { ReactElement } from 'react'
 
@@ -52,6 +53,7 @@ function saveColumnVisibility(visibility: Record<string, boolean>) {
 export default function CaseList() {
   const navigate = useNavigate()
   const { currentWorkspace } = useWorkspace()
+  const { t } = useTranslation()
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [statusFilter, setStatusFilter] = useState<CaseStatus>('OPEN')
   const [searchText, setSearchText] = useState('')
@@ -173,13 +175,13 @@ export default function CaseList() {
     const cols: Array<{ key: string; header: string; accessor: any; width: string; searchValue?: (row: Case) => string }> = [
       {
         key: 'id',
-        header: 'ID',
+        header: t('labelId'),
         accessor: 'id' as keyof Case,
         width: '48px',
       },
       {
         key: 'title',
-        header: 'Title',
+        header: t('headerTitle'),
         accessor: ((caseItem: Case) => (
           <div className={styles.privateTitleCell}>
             {caseItem.isPrivate && <Lock size={14} className={styles.privateTitleLock} data-testid="private-lock-icon" />}
@@ -187,7 +189,7 @@ export default function CaseList() {
               className={caseItem.accessDenied ? styles.accessDenied : ''}
               data-testid={caseItem.accessDenied ? 'access-denied-label' : undefined}
             >
-              {caseItem.accessDenied ? 'Private' : caseItem.title}
+              {caseItem.accessDenied ? t('badgePrivate') : caseItem.title}
             </span>
           </div>
         )) as (row: Case) => ReactElement,
@@ -196,19 +198,19 @@ export default function CaseList() {
       },
       {
         key: 'description',
-        header: 'Description',
+        header: t('labelDescription'),
         accessor: 'description' as keyof Case,
         width: '250px',
       },
       {
         key: 'assignees',
-        header: 'Assignees',
+        header: t('headerAssignees'),
         accessor: ((caseItem: Case) => renderAssignees(caseItem.assignees)) as (row: Case) => ReactElement | null,
         width: '200px',
       },
       {
         key: 'created',
-        header: 'Created',
+        header: t('headerCreated'),
         accessor: ((caseItem: Case) => new Date(caseItem.createdAt).toLocaleDateString()) as (row: Case) => string,
         width: '120px',
       },
@@ -226,7 +228,7 @@ export default function CaseList() {
     }
 
     return cols
-  }, [configData])
+  }, [configData, t])
 
   const visibleColumns = allColumns
     .filter((col) => isColumnVisible(col.key))
@@ -267,7 +269,7 @@ export default function CaseList() {
   if (loading) {
     return (
       <div className={styles.container}>
-        <div className={styles.loading}>Loading...</div>
+        <div className={styles.loading}>{t('loading')}</div>
       </div>
     )
   }
@@ -275,7 +277,7 @@ export default function CaseList() {
   if (error) {
     return (
       <div className={styles.container}>
-        <div className={styles.error}>Error: {error.message}</div>
+        <div className={styles.error}>{`${t('errorPrefix')} ${error.message}`}</div>
       </div>
     )
   }
@@ -284,15 +286,15 @@ export default function CaseList() {
     <div className={styles.container}>
       <div className={styles.header}>
         <div>
-          <h2 className={styles.title}>{caseLabel} Management</h2>
-          <p className={styles.subtitle}>Manage and track {caseLabel.toLowerCase()}s</p>
+          <h2 className={styles.title}>{t('titleCaseManagement', { caseLabel })}</h2>
+          <p className={styles.subtitle}>{t('subtitleCaseManagement', { caseLabelLower: caseLabel.toLowerCase() })}</p>
         </div>
         <Button
           variant="primary"
           icon={<Plus size={20} />}
           onClick={() => setIsFormOpen(true)}
         >
-          New {caseLabel}
+          {t('btnNewCase', { caseLabel })}
         </Button>
       </div>
 
@@ -303,14 +305,14 @@ export default function CaseList() {
             onClick={() => setStatusFilter('OPEN')}
             data-testid="status-tab-open"
           >
-            Open
+            {t('tabOpen')}
           </button>
           <button
             className={`${styles.tab} ${statusFilter === 'CLOSED' ? styles.tabActive : ''}`}
             onClick={() => setStatusFilter('CLOSED')}
             data-testid="status-tab-closed"
           >
-            Closed
+            {t('tabClosed')}
           </button>
         </div>
 
@@ -321,7 +323,7 @@ export default function CaseList() {
               type="text"
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
-              placeholder="Search..."
+              placeholder={t('placeholderSearch')}
               className={styles.searchInput}
               data-testid="search-filter"
             />
@@ -332,13 +334,13 @@ export default function CaseList() {
               className={styles.columnSelectorButton}
               onClick={() => setIsColumnSelectorOpen(!isColumnSelectorOpen)}
               data-testid="column-selector-button"
-              title="Toggle columns"
+              title={t('ariaToggleColumns')}
             >
               <Settings size={16} />
             </button>
             {isColumnSelectorOpen && (
               <div className={styles.columnSelectorPopover} data-testid="column-selector-popover">
-                <div className={styles.columnSelectorTitle}>Columns</div>
+                <div className={styles.columnSelectorTitle}>{t('titleColumnSelector')}</div>
                 {allColumns.map((col) => (
                   <label key={col.key} className={styles.columnSelectorItem}>
                     <input
