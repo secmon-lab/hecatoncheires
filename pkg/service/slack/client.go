@@ -37,7 +37,6 @@ type client struct {
 	botUserIDOnce sync.Once
 	botUserID     string
 	botUserIDErr  error
-
 }
 
 // Option is a functional option for client configuration
@@ -182,6 +181,7 @@ func (c *client) GetUserInfo(ctx context.Context, userID string) (*User, error) 
 		RealName: user.RealName,
 		Email:    user.Profile.Email,
 		ImageURL: user.Profile.Image48,
+		Locale:   user.Locale,
 	}, nil
 }
 

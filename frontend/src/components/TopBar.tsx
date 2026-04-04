@@ -2,6 +2,7 @@ import { Bell, Menu } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useIsMobileOrTablet } from '../hooks/useMediaQuery'
 import { useWorkspace } from '../contexts/workspace-context'
+import { useTranslation } from '../i18n'
 import WorkspaceSwitcher from './WorkspaceSwitcher'
 import styles from './TopBar.module.css'
 import { UserMenu } from './UserMenu'
@@ -13,6 +14,7 @@ interface TopBarProps {
 export default function TopBar({ onToggleSidebar }: TopBarProps) {
   const isMobileOrTablet = useIsMobileOrTablet()
   const { currentWorkspace, workspaces } = useWorkspace()
+  const { t } = useTranslation()
 
   return (
     <header className={styles.topBar}>
@@ -23,8 +25,8 @@ export default function TopBar({ onToggleSidebar }: TopBarProps) {
           </button>
         )}
         <Link to="/" className={styles.logo}>
-          <img src="/logo.png" alt="Hecatoncheires" className={styles.logoIcon} />
-          <span className={styles.logoText}>Hecatoncheires</span>
+          <img src="/logo.png" alt={t('appName')} className={styles.logoIcon} />
+          <span className={styles.logoText}>{t('appName')}</span>
         </Link>
         <WorkspaceSwitcher
           current={currentWorkspace}

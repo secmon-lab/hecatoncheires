@@ -2,6 +2,7 @@ import { Search, X } from 'lucide-react'
 import Select from 'react-select'
 import { useQuery } from '@apollo/client'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
+import { useTranslation } from '../i18n'
 import styles from './ActionFilterBar.module.css'
 
 interface ActionFilterBarProps {
@@ -17,6 +18,7 @@ export default function ActionFilterBar({
   selectedAssigneeIDs,
   onAssigneeChange,
 }: ActionFilterBarProps) {
+  const { t } = useTranslation()
   const { data: usersData } = useQuery(GET_SLACK_USERS)
 
   const assigneeOptions = (usersData?.slackUsers || []).map(
@@ -40,7 +42,7 @@ export default function ActionFilterBar({
         <input
           type="text"
           className={styles.searchInput}
-          placeholder="Search by title, description, or case name..."
+          placeholder={t('placeholderSearchActions')}
           value={searchText}
           onChange={(e) => onSearchTextChange(e.target.value)}
           data-testid="action-search-input"
@@ -55,7 +57,7 @@ export default function ActionFilterBar({
             onAssigneeChange([...(selected || [])].map((s) => s.value))
           }}
           options={assigneeOptions}
-          placeholder="Filter by assignee..."
+          placeholder={t('placeholderFilterAssignee')}
           formatOptionLabel={(option: { value: string; label: string; image?: string }) => (
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               {option.image && (
@@ -82,7 +84,7 @@ export default function ActionFilterBar({
           data-testid="action-filter-clear"
         >
           <X size={14} />
-          Clear
+          {t('btnClear')}
         </button>
       )}
     </div>

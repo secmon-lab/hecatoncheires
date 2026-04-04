@@ -1,6 +1,7 @@
 import { Shield, ListTodo, Database, BookOpen } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
 import { useWorkspace } from '../contexts/workspace-context'
+import { useTranslation } from '../i18n'
 import styles from './Sidebar.module.css'
 
 interface SidebarProps {
@@ -10,6 +11,7 @@ interface SidebarProps {
 
 export default function Sidebar({ isOpen = true, onClose }: SidebarProps) {
   const { currentWorkspace } = useWorkspace()
+  const { t } = useTranslation()
   const wsPrefix = currentWorkspace ? `/ws/${currentWorkspace.id}` : ''
 
   const handleNavClick = () => {
@@ -29,7 +31,7 @@ export default function Sidebar({ isOpen = true, onClose }: SidebarProps) {
           onClick={handleNavClick}
         >
           <Shield size={20} />
-          <span>Cases</span>
+          <span>{t('navCases')}</span>
         </NavLink>
         <NavLink
           to={`${wsPrefix}/actions`}
@@ -39,7 +41,7 @@ export default function Sidebar({ isOpen = true, onClose }: SidebarProps) {
           onClick={handleNavClick}
         >
           <ListTodo size={20} />
-          <span>Actions</span>
+          <span>{t('navActions')}</span>
         </NavLink>
         <NavLink
           to={`${wsPrefix}/knowledges`}
@@ -49,7 +51,7 @@ export default function Sidebar({ isOpen = true, onClose }: SidebarProps) {
           onClick={handleNavClick}
         >
           <BookOpen size={20} />
-          <span>Knowledges</span>
+          <span>{t('navKnowledges')}</span>
         </NavLink>
         <NavLink
           to={`${wsPrefix}/sources`}
@@ -59,7 +61,7 @@ export default function Sidebar({ isOpen = true, onClose }: SidebarProps) {
           onClick={handleNavClick}
         >
           <Database size={20} />
-          <span>Sources</span>
+          <span>{t('navSources')}</span>
         </NavLink>
       </nav>
     </aside>

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useMutation } from '@apollo/client'
 import { useNavigate } from 'react-router-dom'
 import { useWorkspace } from '../../contexts/workspace-context'
+import { useTranslation } from '../../i18n'
 import Modal from '../Modal'
 import Button from '../Button'
 import ChannelSelector from './ChannelSelector'
@@ -27,6 +28,7 @@ interface FormErrors {
 export default function SlackForm({ isOpen, onClose }: SlackFormProps) {
   const navigate = useNavigate()
   const { currentWorkspace } = useWorkspace()
+  const { t } = useTranslation()
   const [selectedChannels, setSelectedChannels] = useState<Channel[]>([])
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -54,7 +56,7 @@ export default function SlackForm({ isOpen, onClose }: SlackFormProps) {
       console.error('Create source error:', error)
       setErrors((prev) => ({
         ...prev,
-        form: error.message || 'Failed to create source. Please try again.',
+        form: error.message || t('errorCreateSource'),
       }))
     },
   })
@@ -77,11 +79,11 @@ export default function SlackForm({ isOpen, onClose }: SlackFormProps) {
     const newErrors: FormErrors = {}
 
     if (selectedChannels.length === 0) {
-      newErrors.channels = 'At least one channel is required'
+      newErrors.channels = t('errorChannelsRequired')
     }
 
     if (!name.trim()) {
-      newErrors.name = 'Name is required'
+      newErrors.name = t('errorNameRequired')
     }
 
     setErrors(newErrors)
@@ -119,18 +121,18 @@ export default function SlackForm({ isOpen, onClose }: SlackFormProps) {
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
-      title="Add Slack Source"
+      title={t('titleAddSlackSource')}
       footer={
         <>
           <Button variant="outline" onClick={handleClose} disabled={loading}>
-            Cancel
+            {t('btnCancel')}
           </Button>
           <Button
             variant="primary"
             onClick={handleSubmit}
             disabled={loading || selectedChannels.length === 0}
           >
-            {loading ? 'Creating...' : 'Create Source'}
+            {loading ? t('btnCreating') : t('btnCreateSource')}
           </Button>
         </>
       }
@@ -140,7 +142,7 @@ export default function SlackForm({ isOpen, onClose }: SlackFormProps) {
 
         <div className={styles.field}>
           <label htmlFor="name" className={styles.label}>
-            Name *
+            {t('labelNameRequired')}
           </label>
           <input
             id="name"
@@ -148,14 +150,14 @@ export default function SlackForm({ isOpen, onClose }: SlackFormProps) {
             value={name}
             onChange={(e) => setName(e.target.value)}
             className={`${styles.input} ${errors.name ? styles.inputError : ''}`}
-            placeholder="Enter source name"
+            placeholder={t('placeholderSourceName')}
             disabled={loading}
           />
           {errors.name && <span className={styles.error}>{errors.name}</span>}
         </div>
 
         <div className={styles.field}>
-          <label className={styles.label}>Channels *</label>
+          <label className={styles.label}>{t('labelChannelsRequired')}</label>
           <ChannelSelector
             selectedChannels={selectedChannels}
             onChange={setSelectedChannels}
@@ -163,20 +165,20 @@ export default function SlackForm({ isOpen, onClose }: SlackFormProps) {
             error={errors.channels}
           />
           <p className={styles.hint}>
-            Select the Slack channels to monitor. The bot must be invited to the channels first.
+            {t('hintSlackChannels')}
           </p>
         </div>
 
         <div className={styles.field}>
           <label htmlFor="description" className={styles.label}>
-            Description
+            {t('labelDescription')}
           </label>
           <textarea
             id="description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             className={styles.textarea}
-            placeholder="Enter source description (optional)"
+            placeholder={t('placeholderSourceDescription')}
             rows={3}
             disabled={loading}
           />
@@ -191,7 +193,7 @@ export default function SlackForm({ isOpen, onClose }: SlackFormProps) {
               className={styles.checkbox}
               disabled={loading}
             />
-            <span>Enable this source</span>
+            <span>{t('labelEnableSource')}</span>
           </label>
         </div>
       </form>

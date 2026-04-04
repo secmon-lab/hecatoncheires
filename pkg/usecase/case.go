@@ -11,6 +11,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
@@ -121,7 +122,7 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 		// Add bookmark to the Slack channel linking to the case WebUI
 		if uc.baseURL != "" {
 			caseURL := fmt.Sprintf("%s/ws/%s/cases/%d", uc.baseURL, workspaceID, created.ID)
-			if bookmarkErr := uc.slackService.AddBookmark(ctx, channelID, "Open Case", caseURL); bookmarkErr != nil {
+			if bookmarkErr := uc.slackService.AddBookmark(ctx, channelID, i18n.T(ctx, i18n.MsgBookmarkOpenCase), caseURL); bookmarkErr != nil {
 				errutil.Handle(ctx, bookmarkErr, "failed to add bookmark to Slack channel")
 			}
 		}

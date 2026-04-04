@@ -1,7 +1,7 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation } from '@apollo/client'
 import { ArrowLeft, Edit, MoreVertical, Trash2, Plus, ExternalLink, BookOpen, Bot, ChevronLeft, ChevronRight, XCircle, RotateCcw, ClipboardList, Lock, Users, RefreshCw, Search } from 'lucide-react'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import Markdown from 'react-markdown'
 import Button from '../components/Button'
 import Chip from '../components/Chip'
@@ -14,6 +14,7 @@ import { GET_CASE, GET_CASES, CLOSE_CASE, REOPEN_CASE, GET_CASE_MEMBERS, SYNC_CA
 import { GET_ASSIST_LOGS } from '../graphql/assistLog'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { useWorkspace } from '../contexts/workspace-context'
+import { useTranslation } from '../i18n'
 import styles from './CaseDetail.module.css'
 
 interface Knowledge {
@@ -56,14 +57,6 @@ interface Case {
   updatedAt: string
 }
 
-const STATUS_LABELS: Record<string, string> = {
-  BACKLOG: 'Backlog',
-  TODO: 'To Do',
-  IN_PROGRESS: 'In Progress',
-  BLOCKED: 'Blocked',
-  COMPLETED: 'Completed',
-}
-
 const STATUS_COLORS: Record<string, number> = {
   BACKLOG: 0,
   TODO: 1,
@@ -76,6 +69,7 @@ export default function CaseDetail() {
   const { id, actionId } = useParams<{ id: string; actionId?: string }>()
   const navigate = useNavigate()
   const { currentWorkspace } = useWorkspace()
+  const { t } = useTranslation()
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false)
@@ -89,6 +83,14 @@ export default function CaseDetail() {
   const [memberFilterDebounced, setMemberFilterDebounced] = useState('')
   const memberPageSize = 20
   const menuRef = useRef<HTMLDivElement>(null)
+
+  const STATUS_LABELS: Record<string, string> = useMemo(() => ({
+    BACKLOG: t('statusBacklog'),
+    TODO: t('statusTodo'),
+    IN_PROGRESS: t('statusInProgress'),
+    BLOCKED: t('statusBlocked'),
+    COMPLETED: t('statusCompleted'),
+  }), [t])
 
   // Debounce member filter
   useEffect(() => {
@@ -315,7 +317,7 @@ export default function CaseDetail() {
   if (caseLoading) {
     return (
       <div className={styles.container}>
-        <div className={styles.loading}>Loading...</div>
+        <div className={styles.loading}>{t('loading')}</div>
       </div>
     )
   }
@@ -324,10 +326,10 @@ export default function CaseDetail() {
     return (
       <div className={styles.container}>
         <div className={styles.error}>
-          {caseError ? `Error: ${caseError.message}` : `${caseLabel} not found`}
+          {caseError ? `${t('errorPrefix')} ${caseError.message}` : t('errorCaseNotFound', { caseLabel })}
         </div>
         <Button variant="outline" icon={<ArrowLeft size={20} />} onClick={handleBack}>
-          Back to List
+          {t('btnBackToList')}
         </Button>
       </div>
     )
@@ -337,20 +339,20 @@ export default function CaseDetail() {
     <div className={styles.container}>
       <div className={styles.header}>
         <Button variant="outline" icon={<ArrowLeft size={20} />} onClick={handleBack}>
-          Back
+          {t('btnBack')}
         </Button>
         <div className={styles.actions}>
           {caseItem.status === 'OPEN' ? (
             <Button variant="outline" icon={<XCircle size={20} />} onClick={() => setIsCloseDialogOpen(true)} className={styles.closeButton} data-testid="close-case-button">
-              Close
+              {t('btnClose')}
             </Button>
           ) : (
             <Button variant="outline" icon={<RotateCcw size={20} />} onClick={handleReopenCase} className={styles.reopenButton}>
-              Reopen
+              {t('btnReopen')}
             </Button>
           )}
           <Button variant="outline" icon={<Edit size={20} />} onClick={handleEdit}>
-            Edit
+            {t('btnEdit')}
           </Button>
           <div style={{ position: 'relative' }} ref={menuRef}>
             <Button
@@ -368,7 +370,7 @@ export default function CaseDetail() {
                   }}
                 >
                   <Trash2 size={16} />
-                  <span>Delete</span>
+                  <span>{t('btnDelete')}</span>
                 </button>
               </div>
             )}
@@ -382,12 +384,12 @@ export default function CaseDetail() {
             <div className={styles.titleLeft}>
               <h1 className={styles.title}>{caseItem.title}</h1>
               <Chip variant="status" colorIndex={caseItem.status === 'OPEN' ? 2 : 5}>
-                {caseItem.status === 'OPEN' ? 'Open' : 'Closed'}
+                {caseItem.status === 'OPEN' ? t('statusOpen') : t('statusClosed')}
               </Chip>
               {caseItem.isPrivate && (
                 <span className={styles.privateBadge} data-testid="private-badge">
                   <Lock size={14} />
-                  Private
+                  {t('badgePrivate')}
                 </span>
               )}
             </div>
@@ -410,10 +412,10 @@ export default function CaseDetail() {
           )}
           <div className={styles.metaRow}>
             <div className={styles.timestamps}>
-              <span className={styles.timestampLabel}>Created</span>
+              <span className={styles.timestampLabel}>{t('labelCreatedTimestamp')}</span>
               <span className={styles.timestampValue} data-testid="created-timestamp-value">{new Date(caseItem.createdAt).toLocaleString()}</span>
               <span className={styles.timestampDivider} />
-              <span className={styles.timestampLabel}>Updated</span>
+              <span className={styles.timestampLabel}>{t('labelUpdatedTimestamp')}</span>
               <span className={styles.timestampValue} data-testid="updated-timestamp-value">{new Date(caseItem.updatedAt).toLocaleString()}</span>
             </div>
             <button
@@ -421,7 +423,7 @@ export default function CaseDetail() {
               onClick={() => navigate(`/ws/${currentWorkspace!.id}/cases/${caseItem.id}/assists`)}
             >
               <Bot size={14} />
-              Assist Logs{assistLogTotalCount > 0 && ` (${assistLogTotalCount})`}
+              {t('linkAssistLogs')}{assistLogTotalCount > 0 && ` (${assistLogTotalCount})`}
             </button>
           </div>
         </div>
@@ -430,7 +432,7 @@ export default function CaseDetail() {
           {/* Assignees section */}
           {caseItem.assignees && caseItem.assignees.length > 0 && (
             <div className={styles.section}>
-              <h3 className={styles.sectionTitle}>Assignees</h3>
+              <h3 className={styles.sectionTitle}>{t('sectionAssignees')}</h3>
               <div className={styles.assigneesInline}>
                 {caseItem.assignees.map((user: any) => (
                   <span key={user.id} className={styles.assigneeTag}>
@@ -446,7 +448,7 @@ export default function CaseDetail() {
 
           {/* Fields section (custom fields) */}
           <div className={styles.section}>
-            <h3 className={styles.sectionTitle}>Fields</h3>
+            <h3 className={styles.sectionTitle}>{t('sectionFields')}</h3>
             <div className={styles.fieldsGrid}>
               {caseItem.fields.map((fieldValue) => {
                 const fieldDef = fieldDefs.find((f: any) => f.id === fieldValue.fieldId)
@@ -466,7 +468,7 @@ export default function CaseDetail() {
           {/* Related Actions section */}
           <div className={styles.section}>
             <div className={styles.sectionHeader}>
-              <h3 className={styles.sectionTitle}>Related Actions</h3>
+              <h3 className={styles.sectionTitle}>{t('sectionRelatedActions')}</h3>
               {caseItem.actions && caseItem.actions.length > 0 && (
                 <Button
                   variant="outline"
@@ -474,7 +476,7 @@ export default function CaseDetail() {
                   icon={<Plus size={14} />}
                   onClick={() => setIsActionFormOpen(true)}
                 >
-                  Add Action
+                  {t('btnAddAction')}
                 </Button>
               )}
             </div>
@@ -482,11 +484,11 @@ export default function CaseDetail() {
               <table className={styles.actionTable}>
                 <thead>
                   <tr>
-                    <th>Title</th>
-                    <th>Assignees</th>
-                    <th>Status</th>
-                    <th>Due Date</th>
-                    <th>Created</th>
+                    <th>{t('headerTitle')}</th>
+                    <th>{t('headerAssignees')}</th>
+                    <th>{t('headerStatus')}</th>
+                    <th>{t('headerDueDate')}</th>
+                    <th>{t('headerCreated')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -531,15 +533,15 @@ export default function CaseDetail() {
             ) : (
               <div className={styles.emptyState}>
                 <ClipboardList size={32} className={styles.emptyStateIcon} />
-                <p className={styles.emptyStateTitle}>No actions yet</p>
-                <p className={styles.emptyStateDescription}>Create the first action for this case</p>
+                <p className={styles.emptyStateTitle}>{t('emptyActionsTitle')}</p>
+                <p className={styles.emptyStateDescription}>{t('emptyActionsDesc')}</p>
                 <Button
                   variant="outline"
                   size="sm"
                   icon={<Plus size={14} />}
                   onClick={() => setIsActionFormOpen(true)}
                 >
-                  Add Action
+                  {t('btnAddAction')}
                 </Button>
               </div>
             )}
@@ -550,15 +552,15 @@ export default function CaseDetail() {
               <div className={styles.sectionHeader}>
                 <h3 className={styles.sectionTitle}>
                   <BookOpen size={16} />
-                  Related Knowledge ({caseItem.knowledges.length})
+                  {t('sectionRelatedKnowledge', { count: caseItem.knowledges.length })}
                 </h3>
               </div>
               <table className={styles.knowledgeTable}>
                 <thead>
                   <tr>
-                    <th>Title</th>
-                    <th>Summary</th>
-                    <th>Date</th>
+                    <th>{t('headerTitle')}</th>
+                    <th>{t('headerSummary')}</th>
+                    <th>{t('headerDate')}</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -631,7 +633,7 @@ export default function CaseDetail() {
               <div className={styles.sectionHeader}>
                 <h3 className={styles.sectionTitle}>
                   <Users size={16} />
-                  Channel Members ({caseItem.channelUserCount})
+                  {t('sectionChannelMembers', { count: caseItem.channelUserCount })}
                 </h3>
                 <div className={styles.memberActions}>
                   <div className={styles.memberSearchWrapper}>
@@ -640,7 +642,7 @@ export default function CaseDetail() {
                       type="text"
                       value={memberFilter}
                       onChange={(e) => setMemberFilter(e.target.value)}
-                      placeholder="Filter by name..."
+                      placeholder={t('placeholderFilterMembers')}
                       className={styles.memberSearchInput}
                       data-testid="member-search-filter"
                     />
@@ -653,12 +655,12 @@ export default function CaseDetail() {
                     disabled={syncing}
                     data-testid="sync-members-button"
                   >
-                    Sync
+                    {t('btnSync')}
                   </Button>
                 </div>
               </div>
               {memberLoading ? (
-                <div className={styles.memberLoading}>Loading members...</div>
+                <div className={styles.memberLoading}>{t('loadingMembers')}</div>
               ) : (
                 <>
                   <div className={styles.memberGrid}>
@@ -723,11 +725,11 @@ export default function CaseDetail() {
       <Modal
         isOpen={isCloseDialogOpen}
         onClose={() => setIsCloseDialogOpen(false)}
-        title={`Close ${caseLabel}`}
+        title={t('titleCloseCase', { caseLabel })}
         footer={
           <>
             <Button variant="outline" onClick={() => setIsCloseDialogOpen(false)}>
-              Cancel
+              {t('btnCancel')}
             </Button>
             <Button
               variant="danger"
@@ -737,14 +739,15 @@ export default function CaseDetail() {
                 setIsCloseDialogOpen(false)
               }}
             >
-              Close
+              {t('btnClose')}
             </Button>
           </>
         }
       >
-        <p style={{ margin: 0, color: 'var(--text-body)' }}>
-          Are you sure you want to close <strong>{caseItem.title}</strong>?
-        </p>
+        <p
+          style={{ margin: 0, color: 'var(--text-body)' }}
+          dangerouslySetInnerHTML={{ __html: t('msgCloseCaseConfirm', { title: caseItem.title }) }}
+        />
       </Modal>
 
       {isActionFormOpen && (

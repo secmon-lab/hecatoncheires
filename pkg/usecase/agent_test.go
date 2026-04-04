@@ -12,6 +12,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	slackmodel "github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
@@ -495,6 +496,7 @@ func TestAgentUseCase_HandleSessionInfoRequest(t *testing.T) {
 		}
 
 		llmClient := &mockLLMClient{}
+		i18n.Init(i18n.LangEN)
 		agentUC := usecase.NewAgentUseCase(repo, nil, mockWithCapture, llmClient)
 
 		err := agentUC.HandleSessionInfoRequest(t.Context(), "trigger-123", "test-session-id")

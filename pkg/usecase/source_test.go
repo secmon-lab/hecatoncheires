@@ -69,9 +69,9 @@ type mockSlackService struct {
 	inviteUsersToChannelFn   func(ctx context.Context, channelID string, userIDs []string) error
 	addBookmarkFn            func(ctx context.Context, channelID, title, link string) error
 	getConversationMembersFn func(ctx context.Context, channelID string) ([]string, error)
-	listUserGroupsFn      func(ctx context.Context) ([]slack.UserGroup, error)
-	getUserGroupMembersFn func(ctx context.Context, groupID string) ([]string, error)
-	invitedChannelID      string
+	listUserGroupsFn         func(ctx context.Context) ([]slack.UserGroup, error)
+	getUserGroupMembersFn    func(ctx context.Context, groupID string) ([]string, error)
+	invitedChannelID         string
 	invitedUserIDs           []string
 	bookmarkChannelID        string
 	bookmarkTitle            string

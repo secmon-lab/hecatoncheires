@@ -9,6 +9,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	goslack "github.com/slack-go/slack"
@@ -44,6 +45,8 @@ func (m *commandTestSlackService) PostMessage(_ context.Context, channelID strin
 }
 
 func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
+	i18n.Init(i18n.LangEN)
+
 	t.Run("workspace specified and valid opens case creation modal", func(t *testing.T) {
 		repo := memory.New()
 		registry := model.NewWorkspaceRegistry()
@@ -178,6 +181,8 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 }
 
 func TestSlackUseCases_HandleWorkspaceSelectSubmit(t *testing.T) {
+	i18n.Init(i18n.LangEN)
+
 	t.Run("returns case creation modal with selected workspace", func(t *testing.T) {
 		repo := memory.New()
 		registry := model.NewWorkspaceRegistry()
@@ -206,7 +211,7 @@ func TestSlackUseCases_HandleWorkspaceSelectSubmit(t *testing.T) {
 			},
 		}
 
-		view, err := uc.HandleWorkspaceSelectSubmit(callback)
+		view, err := uc.HandleWorkspaceSelectSubmit(context.Background(), callback)
 		gt.NoError(t, err).Required()
 		gt.Value(t, view).NotNil()
 		gt.Value(t, view.CallbackID).Equal(usecase.SlackCallbackIDCreateCase)
@@ -245,12 +250,14 @@ func TestSlackUseCases_HandleWorkspaceSelectSubmit(t *testing.T) {
 			},
 		}
 
-		_, err := uc.HandleWorkspaceSelectSubmit(callback)
+		_, err := uc.HandleWorkspaceSelectSubmit(context.Background(), callback)
 		gt.Value(t, err).NotNil()
 	})
 }
 
 func TestSlackUseCases_HandleCaseCreationSubmit(t *testing.T) {
+	i18n.Init(i18n.LangEN)
+
 	t.Run("creates case and posts confirmation message", func(t *testing.T) {
 		repo := memory.New()
 		registry := model.NewWorkspaceRegistry()

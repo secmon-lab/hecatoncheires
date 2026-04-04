@@ -8,6 +8,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
@@ -30,6 +31,30 @@ func NewSlackUseCases(repo interfaces.Repository, registry *model.WorkspaceRegis
 		agent:        agent,
 		slackService: slackService,
 	}
+}
+
+// contextWithUserLang fetches the Slack user's locale and embeds the detected language into the context.
+// If the locale cannot be fetched, the context is returned unchanged (defaultLang will be used).
+func (uc *SlackUseCases) contextWithUserLang(ctx context.Context, userID string) context.Context {
+	return contextWithSlackUserLang(ctx, uc.slackService, userID)
+}
+
+// contextWithSlackUserLang fetches the Slack user's locale and embeds the detected language into the context.
+func contextWithSlackUserLang(ctx context.Context, svc slacksvc.Service, userID string) context.Context {
+	if svc == nil || userID == "" {
+		return ctx
+	}
+	user, err := svc.GetUserInfo(ctx, userID)
+	if err != nil || user == nil {
+		if err != nil {
+			logging.From(ctx).Warn("failed to get user locale for i18n", "error", err, "user_id", userID)
+		}
+		return ctx
+	}
+	if lang := i18n.DetectLang(user.Locale); lang != "" {
+		return i18n.ContextWithLang(ctx, lang)
+	}
+	return ctx
 }
 
 // HandleSlackEvent processes Slack Events API events

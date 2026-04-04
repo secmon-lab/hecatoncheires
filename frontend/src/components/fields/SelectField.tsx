@@ -1,3 +1,4 @@
+import { useTranslation } from '../../i18n'
 import styles from './FieldComponents.module.css'
 
 interface SelectOption {
@@ -33,6 +34,7 @@ export default function SelectField({
   disabled = false,
   showMetadata = false,
 }: SelectFieldProps) {
+  const { t } = useTranslation()
   const selectedOption = options.find((opt) => opt.id === value)
 
   return (
@@ -49,7 +51,7 @@ export default function SelectField({
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
       >
-        <option value="">-- Select --</option>
+        <option value="">{t('placeholderSelect')}</option>
         {options.map((option) => (
           <option key={option.id} value={option.id}>
             {option.name}
