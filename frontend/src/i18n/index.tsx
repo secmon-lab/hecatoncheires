@@ -60,9 +60,9 @@ export function I18nProvider({ defaultLang = 'en', children }: I18nProviderProps
   )
 
   return (
-    <I18nContext value={{ lang, setLang, t }}>
+    <I18nContext.Provider value={{ lang, setLang, t }}>
       {children}
-    </I18nContext>
+    </I18nContext.Provider>
   )
 }
 

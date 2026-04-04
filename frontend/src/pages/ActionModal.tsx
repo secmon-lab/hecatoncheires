@@ -412,6 +412,7 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
                       onClick={handleDescriptionEditStart}
                     >
                       {t('btnEdit')}
+                    </Button>
                   </div>
                 </div>
               </>
