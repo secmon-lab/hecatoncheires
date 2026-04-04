@@ -22,9 +22,24 @@ function loadStoredLang(): Lang | null {
   return null
 }
 
+function escapeHtml(str: string): string {
+  return str.replace(/[&<>"']/g, (m) => {
+    switch (m) {
+      case '&': return '&amp;'
+      case '<': return '&lt;'
+      case '>': return '&gt;'
+      case '"': return '&quot;'
+      case "'": return '&#39;'
+      default: return m
+    }
+  })
+}
+
 function interpolate(template: string, params: Record<string, string | number>): string {
   return template.replace(/\{(\w+)\}/g, (_, key) => {
-    return key in params ? String(params[key]) : `{${key}}`
+    if (!(key in params)) return `{${key}}`
+    const val = String(params[key])
+    return escapeHtml(val)
   })
 }
 

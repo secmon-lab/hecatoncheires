@@ -1,7 +1,7 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation } from '@apollo/client'
 import { ArrowLeft, Edit, MoreVertical, Trash2, Plus, ExternalLink, BookOpen, Bot, ChevronLeft, ChevronRight, XCircle, RotateCcw, ClipboardList, Lock, Users, RefreshCw, Search } from 'lucide-react'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import Markdown from 'react-markdown'
 import Button from '../components/Button'
 import Chip from '../components/Chip'
@@ -84,13 +84,13 @@ export default function CaseDetail() {
   const memberPageSize = 20
   const menuRef = useRef<HTMLDivElement>(null)
 
-  const STATUS_LABELS: Record<string, string> = {
+  const STATUS_LABELS: Record<string, string> = useMemo(() => ({
     BACKLOG: t('statusBacklog'),
     TODO: t('statusTodo'),
     IN_PROGRESS: t('statusInProgress'),
     BLOCKED: t('statusBlocked'),
     COMPLETED: t('statusCompleted'),
-  }
+  }), [t])
 
   // Debounce member filter
   useEffect(() => {

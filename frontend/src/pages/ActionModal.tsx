@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useQuery, useMutation } from '@apollo/client'
 import { useNavigate } from 'react-router-dom'
 import Select from 'react-select'
@@ -59,13 +59,13 @@ export default function ActionModal({ actionId, isOpen, onClose }: ActionModalPr
   const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
 
-  const STATUS_OPTIONS = [
+  const STATUS_OPTIONS = useMemo(() => [
     { value: 'BACKLOG', label: t('statusBacklog') },
     { value: 'TODO', label: t('statusTodo') },
     { value: 'IN_PROGRESS', label: t('statusInProgress') },
     { value: 'BLOCKED', label: t('statusBlocked') },
     { value: 'COMPLETED', label: t('statusCompleted') },
-  ]
+  ], [t])
   const [isDeleteConfirm, setIsDeleteConfirm] = useState(false)
 
   // Title inline edit
