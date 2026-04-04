@@ -8,49 +8,51 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 )
 
-func TestTranslator_T(t *testing.T) {
-	tr := i18n.New(i18n.LangEN)
+func TestT(t *testing.T) {
+	i18n.Init(i18n.LangEN)
 
 	t.Run("returns English translation", func(t *testing.T) {
 		ctx := i18n.ContextWithLang(context.Background(), i18n.LangEN)
-		result := tr.T(ctx, i18n.MsgModalCreateCaseTitle)
+		result := i18n.T(ctx, i18n.MsgModalCreateCaseTitle)
 		gt.Value(t, result).Equal("Create Case")
 	})
 
 	t.Run("returns Japanese translation", func(t *testing.T) {
 		ctx := i18n.ContextWithLang(context.Background(), i18n.LangJA)
-		result := tr.T(ctx, i18n.MsgModalCreateCaseTitle)
+		result := i18n.T(ctx, i18n.MsgModalCreateCaseTitle)
 		gt.Value(t, result).Equal("ケース作成")
 	})
 
 	t.Run("formats with args", func(t *testing.T) {
 		ctx := i18n.ContextWithLang(context.Background(), i18n.LangEN)
-		result := tr.T(ctx, i18n.MsgCaseCreated, 42, "Test Case")
+		result := i18n.T(ctx, i18n.MsgCaseCreated, 42, "Test Case")
 		gt.Value(t, result).Equal("Case #42 *Test Case* has been created.")
 	})
 
 	t.Run("formats Japanese with args", func(t *testing.T) {
 		ctx := i18n.ContextWithLang(context.Background(), i18n.LangJA)
-		result := tr.T(ctx, i18n.MsgCaseCreated, 42, "テストケース")
+		result := i18n.T(ctx, i18n.MsgCaseCreated, 42, "テストケース")
 		gt.Value(t, result).Equal("ケース #42 *テストケース* が作成されました。")
 	})
 
 	t.Run("falls back to default lang for no lang in context", func(t *testing.T) {
-		result := tr.T(context.Background(), i18n.MsgModalCreateCaseTitle)
+		result := i18n.T(context.Background(), i18n.MsgModalCreateCaseTitle)
 		gt.Value(t, result).Equal("Create Case")
 	})
 
 	t.Run("returns default lang with Japanese default", func(t *testing.T) {
-		trJA := i18n.New(i18n.LangJA)
-		result := trJA.T(context.Background(), i18n.MsgModalCreateCaseTitle)
+		i18n.Init(i18n.LangJA)
+		defer i18n.Init(i18n.LangEN) // restore
+		result := i18n.T(context.Background(), i18n.MsgModalCreateCaseTitle)
 		gt.Value(t, result).Equal("ケース作成")
 	})
 }
 
-func TestTranslator_DefaultLang(t *testing.T) {
+func TestDefaultLang(t *testing.T) {
 	t.Run("returns configured default", func(t *testing.T) {
-		tr := i18n.New(i18n.LangJA)
-		gt.Value(t, tr.DefaultLang()).Equal(i18n.LangJA)
+		i18n.Init(i18n.LangJA)
+		defer i18n.Init(i18n.LangEN)
+		gt.Value(t, i18n.DefaultLang()).Equal(i18n.LangJA)
 	})
 }
 

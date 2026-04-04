@@ -21,26 +21,16 @@ type CaseUseCase struct {
 	repo              interfaces.Repository
 	workspaceRegistry *model.WorkspaceRegistry
 	slackService      slack.Service
-	translator        *i18n.Translator
 	baseURL           string
 }
 
-func NewCaseUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, translator *i18n.Translator, baseURL string) *CaseUseCase {
+func NewCaseUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, baseURL string) *CaseUseCase {
 	return &CaseUseCase{
 		repo:              repo,
 		workspaceRegistry: registry,
 		slackService:      slackService,
-		translator:        translator,
 		baseURL:           baseURL,
 	}
-}
-
-// t translates a message key using the translator, or returns a fallback.
-func (uc *CaseUseCase) t(ctx context.Context, key i18n.MsgKey, args ...any) string {
-	if uc.translator == nil {
-		return fmt.Sprintf("[missing:%d]", key)
-	}
-	return uc.translator.T(ctx, key, args...)
 }
 
 func (uc *CaseUseCase) fieldValidatorForWorkspace(workspaceID string) *model.FieldValidator {
@@ -132,7 +122,7 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 		// Add bookmark to the Slack channel linking to the case WebUI
 		if uc.baseURL != "" {
 			caseURL := fmt.Sprintf("%s/ws/%s/cases/%d", uc.baseURL, workspaceID, created.ID)
-			if bookmarkErr := uc.slackService.AddBookmark(ctx, channelID, uc.t(ctx, i18n.MsgBookmarkOpenCase), caseURL); bookmarkErr != nil {
+			if bookmarkErr := uc.slackService.AddBookmark(ctx, channelID, i18n.T(ctx, i18n.MsgBookmarkOpenCase), caseURL); bookmarkErr != nil {
 				errutil.Handle(ctx, bookmarkErr, "failed to add bookmark to Slack channel")
 			}
 		}

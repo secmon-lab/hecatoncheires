@@ -35,26 +35,16 @@ type AgentUseCase struct {
 	registry     *model.WorkspaceRegistry
 	slackService slack.Service
 	llmClient    gollem.LLMClient
-	translator   *i18n.Translator
 }
 
 // NewAgentUseCase creates a new AgentUseCase instance
-func NewAgentUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, llmClient gollem.LLMClient, translator *i18n.Translator) *AgentUseCase {
+func NewAgentUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, llmClient gollem.LLMClient) *AgentUseCase {
 	return &AgentUseCase{
 		repo:         repo,
 		registry:     registry,
 		slackService: slackService,
 		llmClient:    llmClient,
-		translator:   translator,
 	}
-}
-
-// t translates a message key using the translator, or returns a fallback.
-func (uc *AgentUseCase) t(ctx context.Context, key i18n.MsgKey, args ...any) string {
-	if uc.translator == nil {
-		return fmt.Sprintf("[missing:%d]", key)
-	}
-	return uc.translator.T(ctx, key, args...)
 }
 
 // HandleAgentMention processes an app_mention event and responds with an AI agent
@@ -151,7 +141,7 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 	resp, err := agent.Execute(ctx, gollem.Text(msg.Text()))
 	if err != nil {
 		// Post error message to Slack thread
-		errMsg := "⚠️ " + uc.t(ctx, i18n.MsgAgentError)
+		errMsg := "⚠️ " + i18n.T(ctx, i18n.MsgAgentError)
 		if _, postErr := uc.slackService.PostThreadReply(ctx, msg.ChannelID(), threadTS, errMsg); postErr != nil {
 			logger.Error("failed to post error message to Slack", "error", postErr.Error())
 		}
@@ -201,13 +191,13 @@ func ParseAgentActionValue(value string) (action string, data string, err error)
 func (uc *AgentUseCase) postSessionStart(ctx context.Context, channelID, threadTS, sessionID string) error {
 	//nolint:gosec // not for security use
 	key := sessionStartMessageKeys[time.Now().UnixNano()%int64(len(sessionStartMessageKeys))]
-	label := uc.t(ctx, key)
+	label := i18n.T(ctx, key)
 
 	overflow := goslack.NewOverflowBlockElement(
 		SlackAgentSessionActionsID,
 		goslack.NewOptionBlockObject(
 			fmt.Sprintf("%s:%s", SlackAgentActionShowSessionInfo, sessionID),
-			goslack.NewTextBlockObject(goslack.PlainTextType, uc.t(ctx, i18n.MsgAgentSessionInfo), false, false),
+			goslack.NewTextBlockObject(goslack.PlainTextType, i18n.T(ctx, i18n.MsgAgentSessionInfo), false, false),
 			nil,
 		),
 	)
@@ -231,8 +221,8 @@ func (uc *AgentUseCase) postSessionStart(ctx context.Context, channelID, threadT
 func (uc *AgentUseCase) HandleSessionInfoRequest(ctx context.Context, triggerID, sessionID string) error {
 	view := goslack.ModalViewRequest{
 		Type:  goslack.VTModal,
-		Title: goslack.NewTextBlockObject(goslack.PlainTextType, uc.t(ctx, i18n.MsgAgentSessionInfo), false, false),
-		Close: goslack.NewTextBlockObject(goslack.PlainTextType, uc.t(ctx, i18n.MsgModalCreateCaseCancel), false, false),
+		Title: goslack.NewTextBlockObject(goslack.PlainTextType, i18n.T(ctx, i18n.MsgAgentSessionInfo), false, false),
+		Close: goslack.NewTextBlockObject(goslack.PlainTextType, i18n.T(ctx, i18n.MsgModalCreateCaseCancel), false, false),
 		Blocks: goslack.Blocks{
 			BlockSet: []goslack.Block{
 				goslack.NewSectionBlock(

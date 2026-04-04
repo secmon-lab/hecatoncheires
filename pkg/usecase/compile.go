@@ -30,7 +30,6 @@ type CompileUseCase struct {
 	knowledgeService  knowledge.Service
 	slackService      slack.Service
 	githubService     githubsvc.Service
-	translator        *i18n.Translator
 	baseURL           string
 }
 
@@ -42,7 +41,6 @@ func NewCompileUseCase(
 	knowledgeSvc knowledge.Service,
 	slackSvc slack.Service,
 	githubSvc githubsvc.Service,
-	translator *i18n.Translator,
 	baseURL string,
 ) *CompileUseCase {
 	return &CompileUseCase{
@@ -52,17 +50,8 @@ func NewCompileUseCase(
 		knowledgeService:  knowledgeSvc,
 		slackService:      slackSvc,
 		githubService:     githubSvc,
-		translator:        translator,
 		baseURL:           baseURL,
 	}
-}
-
-// t translates a message key using the translator, or returns a fallback.
-func (uc *CompileUseCase) t(ctx context.Context, key i18n.MsgKey, args ...any) string {
-	if uc.translator == nil {
-		return fmt.Sprintf("[missing:%d]", key)
-	}
-	return uc.translator.T(ctx, key, args...)
 }
 
 // CompileOption holds options for the Compile operation
@@ -393,7 +382,7 @@ func (uc *CompileUseCase) notifySlack(ctx context.Context, wsID string, k *model
 	}
 
 	blocks := uc.buildKnowledgeNotificationBlocks(ctx, wsID, k, targetCase)
-	fallbackText := uc.t(ctx, i18n.MsgKnowledgeHeader, k.Title)
+	fallbackText := i18n.T(ctx, i18n.MsgKnowledgeHeader, k.Title)
 
 	_, postErr := uc.slackService.PostMessage(ctx, targetCase.SlackChannelID, blocks, fallbackText)
 	if postErr != nil {
@@ -409,7 +398,7 @@ func (uc *CompileUseCase) buildKnowledgeNotificationBlocks(ctx context.Context, 
 	blocks := []goslack.Block{
 		// Header: "Knowledge: {title}"
 		goslack.NewHeaderBlock(
-			goslack.NewTextBlockObject(goslack.PlainTextType, uc.t(ctx, i18n.MsgKnowledgeHeader, k.Title), true, false),
+			goslack.NewTextBlockObject(goslack.PlainTextType, i18n.T(ctx, i18n.MsgKnowledgeHeader, k.Title), true, false),
 		),
 	}
 
@@ -423,7 +412,7 @@ func (uc *CompileUseCase) buildKnowledgeNotificationBlocks(ctx context.Context, 
 
 	// Context: source URLs
 	if len(k.SourceURLs) > 0 {
-		sourceLabel := uc.t(ctx, i18n.MsgKnowledgeSource)
+		sourceLabel := i18n.T(ctx, i18n.MsgKnowledgeSource)
 		var links []string
 		for _, u := range k.SourceURLs {
 			links = append(links, fmt.Sprintf("<%s|%s>", u, sourceLabel))
@@ -437,7 +426,7 @@ func (uc *CompileUseCase) buildKnowledgeNotificationBlocks(ctx context.Context, 
 	if uc.baseURL != "" {
 		caseURL := fmt.Sprintf("%s/ws/%s/cases/%d", uc.baseURL, wsID, targetCase.ID)
 		linkBtn := goslack.NewButtonBlockElement("", "link_case",
-			goslack.NewTextBlockObject(goslack.PlainTextType, uc.t(ctx, i18n.MsgKnowledgeLink), true, false),
+			goslack.NewTextBlockObject(goslack.PlainTextType, i18n.T(ctx, i18n.MsgKnowledgeLink), true, false),
 		)
 		linkBtn.URL = caseURL
 		blocks = append(blocks, goslack.NewActionBlock("", linkBtn))

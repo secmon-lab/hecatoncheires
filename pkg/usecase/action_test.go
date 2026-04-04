@@ -19,8 +19,8 @@ import (
 func TestActionUseCase_CreateAction(t *testing.T) {
 	t.Run("create action with valid case", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		// Create case first
@@ -40,8 +40,8 @@ func TestActionUseCase_CreateAction(t *testing.T) {
 
 	t.Run("create action without title fails", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false)
@@ -53,7 +53,7 @@ func TestActionUseCase_CreateAction(t *testing.T) {
 
 	t.Run("create action with non-existent case fails", func(t *testing.T) {
 		repo := memory.New()
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		_, err := actionUC.CreateAction(ctx, testWorkspaceID, 999, "Test Action", "Description", []string{}, "", types.ActionStatusTodo, nil)
@@ -63,8 +63,8 @@ func TestActionUseCase_CreateAction(t *testing.T) {
 
 	t.Run("create action with invalid status fails", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false)
@@ -76,8 +76,8 @@ func TestActionUseCase_CreateAction(t *testing.T) {
 
 	t.Run("create action with default status", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false)
@@ -93,8 +93,8 @@ func TestActionUseCase_CreateAction(t *testing.T) {
 func TestActionUseCase_UpdateAction(t *testing.T) {
 	t.Run("update action title and status", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false)
@@ -115,8 +115,8 @@ func TestActionUseCase_UpdateAction(t *testing.T) {
 
 	t.Run("update action caseID", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		c1, err := caseUC.CreateCase(ctx, testWorkspaceID, "Case 1", "Description 1", []string{}, nil, false)
@@ -136,8 +136,8 @@ func TestActionUseCase_UpdateAction(t *testing.T) {
 
 	t.Run("update action with non-existent case fails", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false)
@@ -154,7 +154,7 @@ func TestActionUseCase_UpdateAction(t *testing.T) {
 
 	t.Run("update non-existent action fails", func(t *testing.T) {
 		repo := memory.New()
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		_, err := actionUC.UpdateAction(ctx, testWorkspaceID, 999, nil, nil, nil, nil, nil, nil, nil, false)
@@ -166,8 +166,8 @@ func TestActionUseCase_UpdateAction(t *testing.T) {
 func TestActionUseCase_DeleteAction(t *testing.T) {
 	t.Run("delete action", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false)
@@ -184,7 +184,7 @@ func TestActionUseCase_DeleteAction(t *testing.T) {
 
 	t.Run("delete non-existent action fails", func(t *testing.T) {
 		repo := memory.New()
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		err := actionUC.DeleteAction(ctx, testWorkspaceID, 999)
@@ -196,8 +196,8 @@ func TestActionUseCase_DeleteAction(t *testing.T) {
 func TestActionUseCase_GetAction(t *testing.T) {
 	t.Run("get existing action", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false)
@@ -215,7 +215,7 @@ func TestActionUseCase_GetAction(t *testing.T) {
 
 	t.Run("get non-existent action fails", func(t *testing.T) {
 		repo := memory.New()
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		_, err := actionUC.GetAction(ctx, testWorkspaceID, 999)
@@ -227,8 +227,8 @@ func TestActionUseCase_GetAction(t *testing.T) {
 func TestActionUseCase_ListActions(t *testing.T) {
 	t.Run("list actions", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false)
@@ -250,8 +250,8 @@ func TestActionUseCase_ListActions(t *testing.T) {
 func TestActionUseCase_GetActionsByCase(t *testing.T) {
 	t.Run("get actions by case", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		c1, err := caseUC.CreateCase(ctx, testWorkspaceID, "Case 1", "Description 1", []string{}, nil, false)
@@ -324,8 +324,8 @@ func TestActionUseCase_CreateAction_SlackNotification(t *testing.T) {
 			},
 			postMessageTS: "1234567890.123456",
 		}
-		caseUC := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, mock, nil, "https://example.com")
+		caseUC := usecase.NewCaseUseCase(repo, nil, mock, "")
+		actionUC := usecase.NewActionUseCase(repo, mock, "https://example.com")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		// Create case with Slack channel
@@ -356,8 +356,8 @@ func TestActionUseCase_CreateAction_SlackNotification(t *testing.T) {
 			postMessageTS: "1234567890.123456",
 		}
 		// Create case without Slack service (no channel)
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, mock, nil, "https://example.com")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, mock, "https://example.com")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false)
@@ -373,8 +373,8 @@ func TestActionUseCase_CreateAction_SlackNotification(t *testing.T) {
 
 	t.Run("does not post when slack service is nil", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "https://example.com")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "https://example.com")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false)
@@ -395,8 +395,8 @@ func TestActionUseCase_CreateAction_SlackNotification(t *testing.T) {
 			},
 			postMessageErr: errors.New("slack API error"),
 		}
-		caseUC := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, mock, nil, "https://example.com")
+		caseUC := usecase.NewCaseUseCase(repo, nil, mock, "")
+		actionUC := usecase.NewActionUseCase(repo, mock, "https://example.com")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false)
@@ -422,8 +422,8 @@ func TestActionUseCase_HandleSlackInteraction(t *testing.T) {
 			},
 			postMessageTS: "1234567890.123456",
 		}
-		caseUC := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, mock, nil, "https://example.com")
+		caseUC := usecase.NewCaseUseCase(repo, nil, mock, "")
+		actionUC := usecase.NewActionUseCase(repo, mock, "https://example.com")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false)
@@ -544,8 +544,8 @@ func TestParseSlackActionValue(t *testing.T) {
 func TestActionUseCase_DueDate(t *testing.T) {
 	t.Run("create action with due date", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false)
@@ -569,8 +569,8 @@ func TestActionUseCase_DueDate(t *testing.T) {
 
 	t.Run("create action without due date", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false)
@@ -584,8 +584,8 @@ func TestActionUseCase_DueDate(t *testing.T) {
 
 	t.Run("update action to set due date", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false)
@@ -605,8 +605,8 @@ func TestActionUseCase_DueDate(t *testing.T) {
 
 	t.Run("update action to clear due date", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false)
@@ -626,8 +626,8 @@ func TestActionUseCase_DueDate(t *testing.T) {
 
 	t.Run("update action without changing due date preserves it", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false)
@@ -651,7 +651,7 @@ func TestActionUseCase_DueDate(t *testing.T) {
 func TestActionUseCase_PrivateCaseAccessControl(t *testing.T) {
 	t.Run("create action in private case as non-member returns access denied", func(t *testing.T) {
 		repo := memory.New()
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		memberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMEMBER"})
 		nonMemberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
 
@@ -678,7 +678,7 @@ func TestActionUseCase_PrivateCaseAccessControl(t *testing.T) {
 
 	t.Run("update action in private case as non-member returns access denied", func(t *testing.T) {
 		repo := memory.New()
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		memberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMEMBER"})
 		nonMemberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
 
@@ -704,7 +704,7 @@ func TestActionUseCase_PrivateCaseAccessControl(t *testing.T) {
 
 	t.Run("delete action in private case as non-member returns access denied", func(t *testing.T) {
 		repo := memory.New()
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		memberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMEMBER"})
 		nonMemberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
 
@@ -729,8 +729,8 @@ func TestActionUseCase_PrivateCaseAccessControl(t *testing.T) {
 
 	t.Run("list actions filters out private case actions for non-members", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		memberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMEMBER"})
 		nonMemberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
 
@@ -767,7 +767,7 @@ func TestActionUseCase_PrivateCaseAccessControl(t *testing.T) {
 
 	t.Run("get actions by private case as non-member returns empty", func(t *testing.T) {
 		repo := memory.New()
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		memberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMEMBER"})
 		nonMemberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
 

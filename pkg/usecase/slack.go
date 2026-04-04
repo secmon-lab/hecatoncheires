@@ -21,17 +21,15 @@ type SlackUseCases struct {
 	registry     *model.WorkspaceRegistry
 	agent        *AgentUseCase
 	slackService slacksvc.Service
-	translator   *i18n.Translator
 }
 
 // NewSlackUseCases creates a new SlackUseCases instance
-func NewSlackUseCases(repo interfaces.Repository, registry *model.WorkspaceRegistry, agent *AgentUseCase, slackService slacksvc.Service, translator *i18n.Translator) *SlackUseCases {
+func NewSlackUseCases(repo interfaces.Repository, registry *model.WorkspaceRegistry, agent *AgentUseCase, slackService slacksvc.Service) *SlackUseCases {
 	return &SlackUseCases{
 		repo:         repo,
 		registry:     registry,
 		agent:        agent,
 		slackService: slackService,
-		translator:   translator,
 	}
 }
 
@@ -47,8 +45,10 @@ func contextWithSlackUserLang(ctx context.Context, svc slacksvc.Service, userID 
 		return ctx
 	}
 	user, err := svc.GetUserInfo(ctx, userID)
-	if err != nil {
-		logging.From(ctx).Warn("failed to get user locale for i18n", "error", err, "user_id", userID)
+	if err != nil || user == nil {
+		if err != nil {
+			logging.From(ctx).Warn("failed to get user locale for i18n", "error", err, "user_id", userID)
+		}
 		return ctx
 	}
 	if lang := i18n.DetectLang(user.Locale); lang != "" {

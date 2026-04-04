@@ -3,7 +3,6 @@ package usecase
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/m-mizutani/goerr/v2"
@@ -73,14 +72,6 @@ func (uc *SlackUseCases) HandleSlashCommand(ctx context.Context, triggerID, user
 	default:
 		return uc.openWorkspaceSelectModal(ctx, triggerID, channelID, workspaces)
 	}
-}
-
-// t translates a message key using the translator, or returns a fallback.
-func (uc *SlackUseCases) t(ctx context.Context, key i18n.MsgKey, args ...any) string {
-	if uc.translator == nil {
-		return fmt.Sprintf("[missing:%d]", key)
-	}
-	return uc.translator.T(ctx, key, args...)
 }
 
 // HandleWorkspaceSelectSubmit processes the workspace selection modal submission.
@@ -163,9 +154,9 @@ func (uc *SlackUseCases) HandleCaseCreationSubmit(ctx context.Context, caseUC *C
 	if meta.ChannelID != "" && uc.slackService != nil {
 		var confirmText string
 		if created.SlackChannelID != "" {
-			confirmText = uc.t(ctx, i18n.MsgCaseCreatedWithChannel, created.ID, created.Title, created.SlackChannelID)
+			confirmText = i18n.T(ctx, i18n.MsgCaseCreatedWithChannel, created.ID, created.Title, created.SlackChannelID)
 		} else {
-			confirmText = uc.t(ctx, i18n.MsgCaseCreated, created.ID, created.Title)
+			confirmText = i18n.T(ctx, i18n.MsgCaseCreated, created.ID, created.Title)
 		}
 
 		if _, err := uc.slackService.PostMessage(ctx, meta.ChannelID, nil, confirmText); err != nil {
@@ -209,23 +200,23 @@ func (uc *SlackUseCases) buildCaseCreationModal(ctx context.Context, workspaceID
 
 	titleInput := slack.NewInputBlock(
 		SlackBlockIDCaseTitle,
-		slack.NewTextBlockObject(slack.PlainTextType, uc.t(ctx,i18n.MsgFieldTitle), false, false),
+		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgFieldTitle), false, false),
 		nil,
 		slack.NewPlainTextInputBlockElement(
-			slack.NewTextBlockObject(slack.PlainTextType, uc.t(ctx,i18n.MsgFieldTitlePlaceholder), false, false),
+			slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgFieldTitlePlaceholder), false, false),
 			SlackActionIDCaseTitle,
 		),
 	)
 
 	descInput := slack.NewInputBlock(
 		SlackBlockIDCaseDescription,
-		slack.NewTextBlockObject(slack.PlainTextType, uc.t(ctx,i18n.MsgFieldDescription), false, false),
+		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgFieldDescription), false, false),
 		nil,
 		&slack.PlainTextInputBlockElement{
 			Type:        slack.METPlainTextInput,
 			ActionID:    SlackActionIDCaseDescription,
 			Multiline:   true,
-			Placeholder: slack.NewTextBlockObject(slack.PlainTextType, uc.t(ctx,i18n.MsgFieldDescPlaceholder), false, false),
+			Placeholder: slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgFieldDescPlaceholder), false, false),
 		},
 	)
 	descInput.Optional = true
@@ -247,9 +238,9 @@ func (uc *SlackUseCases) buildCaseCreationModal(ctx context.Context, workspaceID
 	return slack.ModalViewRequest{
 		Type:            slack.VTModal,
 		CallbackID:      SlackCallbackIDCreateCase,
-		Title:           slack.NewTextBlockObject(slack.PlainTextType, uc.t(ctx,i18n.MsgModalCreateCaseTitle), false, false),
-		Submit:          slack.NewTextBlockObject(slack.PlainTextType, uc.t(ctx,i18n.MsgModalCreateCaseSubmit), false, false),
-		Close:           slack.NewTextBlockObject(slack.PlainTextType, uc.t(ctx,i18n.MsgModalCreateCaseCancel), false, false),
+		Title:           slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgModalCreateCaseTitle), false, false),
+		Submit:          slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgModalCreateCaseSubmit), false, false),
+		Close:           slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgModalCreateCaseCancel), false, false),
 		PrivateMetadata: string(metaJSON),
 		Blocks: slack.Blocks{
 			BlockSet: blocks,
@@ -473,7 +464,7 @@ func (uc *SlackUseCases) buildWorkspaceSelectModal(ctx context.Context, channelI
 	radioGroup := slack.NewRadioButtonsBlockElement(SlackActionIDWorkspaceRadio, options...)
 	radioInput := slack.NewInputBlock(
 		SlackBlockIDWorkspaceSelect,
-		slack.NewTextBlockObject(slack.PlainTextType, uc.t(ctx,i18n.MsgFieldWorkspace), false, false),
+		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgFieldWorkspace), false, false),
 		nil,
 		radioGroup,
 	)
@@ -481,9 +472,9 @@ func (uc *SlackUseCases) buildWorkspaceSelectModal(ctx context.Context, channelI
 	return slack.ModalViewRequest{
 		Type:            slack.VTModal,
 		CallbackID:      SlackCallbackIDSelectWorkspace,
-		Title:           slack.NewTextBlockObject(slack.PlainTextType, uc.t(ctx,i18n.MsgModalCreateCaseTitle), false, false),
-		Submit:          slack.NewTextBlockObject(slack.PlainTextType, uc.t(ctx,i18n.MsgModalNextButton), false, false),
-		Close:           slack.NewTextBlockObject(slack.PlainTextType, uc.t(ctx,i18n.MsgModalCreateCaseCancel), false, false),
+		Title:           slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgModalCreateCaseTitle), false, false),
+		Submit:          slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgModalNextButton), false, false),
+		Close:           slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgModalCreateCaseCancel), false, false),
 		PrivateMetadata: string(metaJSON),
 		Blocks: slack.Blocks{
 			BlockSet: []slack.Block{

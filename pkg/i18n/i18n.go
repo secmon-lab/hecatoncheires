@@ -86,31 +86,28 @@ const (
 	msgKeyCount // sentinel for validation
 )
 
-// Translator provides translations for a given language with a default fallback.
-type Translator struct {
+var (
 	messages    map[Lang][msgKeyCount]string
 	defaultLang Lang
-}
+)
 
-// New creates a new Translator with the given default language.
-func New(defaultLang Lang) *Translator {
-	return &Translator{
-		messages: map[Lang][msgKeyCount]string{
-			LangEN: messagesEN,
-			LangJA: messagesJA,
-		},
-		defaultLang: defaultLang,
+// Init initializes the global translator with the given default language.
+// Must be called once at startup before any T() calls.
+func Init(lang Lang) {
+	defaultLang = lang
+	messages = map[Lang][msgKeyCount]string{
+		LangEN: messagesEN,
+		LangJA: messagesJA,
 	}
 }
 
 // T returns the translated string for the language in context.
 // Falls back to defaultLang if no language is set in context.
-// If args are provided, fmt.Sprintf is used to format the result.
-func (tr *Translator) T(ctx context.Context, key MsgKey, args ...any) string {
+func T(ctx context.Context, key MsgKey, args ...any) string {
 	lang := LangFromContext(ctx)
-	msg := tr.messages[lang][key]
+	msg := messages[lang][key]
 	if msg == "" {
-		msg = tr.messages[tr.defaultLang][key]
+		msg = messages[defaultLang][key]
 	}
 	if msg == "" {
 		return fmt.Sprintf("[missing:%d]", key)
@@ -122,8 +119,8 @@ func (tr *Translator) T(ctx context.Context, key MsgKey, args ...any) string {
 }
 
 // DefaultLang returns the configured default language.
-func (tr *Translator) DefaultLang() Lang {
-	return tr.defaultLang
+func DefaultLang() Lang {
+	return defaultLang
 }
 
 // DetectLang returns the Lang for a Slack locale string.

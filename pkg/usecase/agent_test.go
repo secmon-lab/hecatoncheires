@@ -177,7 +177,7 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 
 		llmClient := &mockLLMClient{}
 
-		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, llmClient, nil)
+		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, llmClient)
 
 		msg := slackmodel.NewMessageFromData(
 			"1234567890.000002",
@@ -232,7 +232,7 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 
 		llmClient := &mockLLMClient{}
 
-		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, llmClient, nil)
+		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, llmClient)
 
 		msg := slackmodel.NewMessageFromData(
 			"1234567890.000011",
@@ -270,7 +270,7 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 		slackMock := &agentTestSlackService{}
 		llmClient := &mockLLMClient{}
 
-		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, llmClient, nil)
+		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, llmClient)
 
 		msg := slackmodel.NewMessageFromData(
 			"1234567890.000100",
@@ -313,7 +313,7 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 
 		llmClient := &mockLLMClient{}
 
-		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, llmClient, nil)
+		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, llmClient)
 
 		msg := slackmodel.NewMessageFromData(
 			"1234567890.000200",
@@ -365,7 +365,7 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 			{UserID: "U001", UserName: "alice", Text: "Hello", Timestamp: "1234567890.000001"},
 		}
 
-		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, llmClient, nil)
+		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, llmClient)
 		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, nil, nil, messages)
 
 		gt.Value(t, strings.Contains(prompt, "Important Case")).Equal(true)
@@ -405,7 +405,7 @@ func TestAgentSystemPrompt_ActionsAndKnowledges(t *testing.T) {
 			},
 		}
 
-		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, llmClient, nil)
+		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, llmClient)
 		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, actions, nil, nil)
 
 		gt.Value(t, strings.Contains(prompt, "## Actions")).Equal(true)
@@ -435,7 +435,7 @@ func TestAgentSystemPrompt_ActionsAndKnowledges(t *testing.T) {
 			},
 		}
 
-		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, llmClient, nil)
+		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, llmClient)
 		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, nil, knowledges, nil)
 
 		gt.Value(t, strings.Contains(prompt, "## Knowledge")).Equal(true)
@@ -456,7 +456,7 @@ func TestAgentSystemPrompt_ActionsAndKnowledges(t *testing.T) {
 			Status: types.CaseStatusOpen,
 		}
 
-		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, llmClient, nil)
+		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, llmClient)
 		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, nil, nil, nil)
 
 		gt.Value(t, strings.Contains(prompt, "## Actions")).Equal(false)
@@ -496,8 +496,8 @@ func TestAgentUseCase_HandleSessionInfoRequest(t *testing.T) {
 		}
 
 		llmClient := &mockLLMClient{}
-		tr := i18n.New(i18n.LangEN)
-		agentUC := usecase.NewAgentUseCase(repo, nil, mockWithCapture, llmClient, tr)
+		i18n.Init(i18n.LangEN)
+		agentUC := usecase.NewAgentUseCase(repo, nil, mockWithCapture, llmClient)
 
 		err := agentUC.HandleSessionInfoRequest(t.Context(), "trigger-123", "test-session-id")
 		gt.NoError(t, err)

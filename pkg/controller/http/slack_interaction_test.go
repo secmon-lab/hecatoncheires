@@ -23,8 +23,8 @@ func TestSlackInteractionHandler(t *testing.T) {
 	setup := func(t *testing.T) (*usecase.ActionUseCase, *httpctrl.SlackInteractionHandler, int64) {
 		t.Helper()
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 
 		ctx := auth.ContextWithToken(t.Context(), &auth.Token{Sub: "UTESTUSER"})
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Desc", []string{}, nil, false)
@@ -209,7 +209,7 @@ func TestSlackInteractionHandler(t *testing.T) {
 func TestSlackInteractionHandler_AgentSessionActions(t *testing.T) {
 	t.Run("handles show_session_info overflow option", func(t *testing.T) {
 		repo := memory.New()
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		// agentUC is nil here; the handler should handle this gracefully
 		handler := httpctrl.NewSlackInteractionHandler(actionUC, nil)
 
@@ -249,9 +249,9 @@ func TestSlackInteractionHandler_ViewSubmission(t *testing.T) {
 		registry.Register(&model.WorkspaceEntry{
 			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
 		})
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
-		slackUC := usecase.NewSlackUseCases(repo, registry, nil, &mockSlackServiceForCommand{}, nil)
-		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, &mockSlackServiceForCommand{})
+		caseUC := usecase.NewCaseUseCase(repo, registry, nil, "")
 
 		handler := httpctrl.NewSlackInteractionHandler(actionUC, nil)
 		handler.WithSlackCommand(slackUC, caseUC)
@@ -303,9 +303,9 @@ func TestSlackInteractionHandler_ViewSubmission(t *testing.T) {
 		registry.Register(&model.WorkspaceEntry{
 			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
 		})
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
-		slackUC := usecase.NewSlackUseCases(repo, registry, nil, &mockSlackServiceForCommand{}, nil)
-		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, &mockSlackServiceForCommand{})
+		caseUC := usecase.NewCaseUseCase(repo, registry, nil, "")
 
 		handler := httpctrl.NewSlackInteractionHandler(actionUC, nil)
 		handler.WithSlackCommand(slackUC, caseUC)
@@ -352,7 +352,7 @@ func TestSlackInteractionHandler_ViewSubmission(t *testing.T) {
 
 	t.Run("view_submission with no slackUC configured returns 200", func(t *testing.T) {
 		repo := memory.New()
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		handler := httpctrl.NewSlackInteractionHandler(actionUC, nil)
 		// slackUC not configured
 

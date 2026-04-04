@@ -189,14 +189,13 @@ func cmdServe() *cli.Command {
 			if err != nil {
 				return goerr.Wrap(err, "invalid default-lang value")
 			}
-			translator := i18n.New(defaultLang)
+			i18n.Init(defaultLang)
 			logging.Default().Info("i18n initialized", "default_lang", string(defaultLang))
 
 			// Initialize use cases with configuration and auth
 			ucOpts := []usecase.Option{
 				usecase.WithAuth(authUC),
 				usecase.WithBaseURL(baseURL),
-				usecase.WithTranslator(translator),
 			}
 
 			// Initialize Notion service if token is provided
