@@ -138,7 +138,7 @@ func (h *SlackInteractionHandler) handleViewSubmission(w http.ResponseWriter, r 
 	switch callback.View.CallbackID {
 	case usecase.SlackCallbackIDSelectWorkspace:
 		// Workspace selection → return updated view with case creation modal
-		view, err := h.slackUC.HandleWorkspaceSelectSubmit(callback)
+		view, err := h.slackUC.HandleWorkspaceSelectSubmit(r.Context(), callback)
 		if err != nil {
 			logger.Error("failed to handle workspace selection",
 				"error", err,

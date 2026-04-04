@@ -207,7 +207,7 @@ func TestSlackUseCases_HandleWorkspaceSelectSubmit(t *testing.T) {
 			},
 		}
 
-		view, err := uc.HandleWorkspaceSelectSubmit(callback)
+		view, err := uc.HandleWorkspaceSelectSubmit(context.Background(), callback)
 		gt.NoError(t, err).Required()
 		gt.Value(t, view).NotNil()
 		gt.Value(t, view.CallbackID).Equal(usecase.SlackCallbackIDCreateCase)
@@ -246,7 +246,7 @@ func TestSlackUseCases_HandleWorkspaceSelectSubmit(t *testing.T) {
 			},
 		}
 
-		_, err := uc.HandleWorkspaceSelectSubmit(callback)
+		_, err := uc.HandleWorkspaceSelectSubmit(context.Background(), callback)
 		gt.Value(t, err).NotNil()
 	})
 }

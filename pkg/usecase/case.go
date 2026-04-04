@@ -35,20 +35,12 @@ func NewCaseUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistr
 	}
 }
 
-// defaultLang returns the default language from the translator, or English as fallback.
-func (uc *CaseUseCase) defaultLang() i18n.Lang {
-	if uc.translator != nil {
-		return uc.translator.DefaultLang()
-	}
-	return i18n.LangEN
-}
-
 // t translates a message key using the translator, or returns a fallback.
-func (uc *CaseUseCase) t(lang i18n.Lang, key i18n.MsgKey, args ...any) string {
-	if uc.translator != nil {
-		return uc.translator.T(lang, key, args...)
+func (uc *CaseUseCase) t(ctx context.Context, key i18n.MsgKey, args ...any) string {
+	if uc.translator == nil {
+		return fmt.Sprintf("[missing:%d]", key)
 	}
-	return fmt.Sprintf("[missing:%d]", key)
+	return uc.translator.T(ctx, key, args...)
 }
 
 func (uc *CaseUseCase) fieldValidatorForWorkspace(workspaceID string) *model.FieldValidator {
@@ -139,9 +131,8 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 
 		// Add bookmark to the Slack channel linking to the case WebUI
 		if uc.baseURL != "" {
-			lang := uc.defaultLang()
 			caseURL := fmt.Sprintf("%s/ws/%s/cases/%d", uc.baseURL, workspaceID, created.ID)
-			if bookmarkErr := uc.slackService.AddBookmark(ctx, channelID, uc.t(lang, i18n.MsgBookmarkOpenCase), caseURL); bookmarkErr != nil {
+			if bookmarkErr := uc.slackService.AddBookmark(ctx, channelID, uc.t(ctx, i18n.MsgBookmarkOpenCase), caseURL); bookmarkErr != nil {
 				errutil.Handle(ctx, bookmarkErr, "failed to add bookmark to Slack channel")
 			}
 		}

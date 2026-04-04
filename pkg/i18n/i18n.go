@@ -1,11 +1,27 @@
 package i18n
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"github.com/m-mizutani/goerr/v2"
 )
+
+type ctxKey struct{}
+
+// ContextWithLang returns a new context with the given language.
+func ContextWithLang(ctx context.Context, lang Lang) context.Context {
+	return context.WithValue(ctx, ctxKey{}, lang)
+}
+
+// LangFromContext extracts the language from context, or returns empty string.
+func LangFromContext(ctx context.Context) Lang {
+	if lang, ok := ctx.Value(ctxKey{}).(Lang); ok {
+		return lang
+	}
+	return ""
+}
 
 // Lang represents a supported language.
 type Lang string
@@ -87,10 +103,11 @@ func New(defaultLang Lang) *Translator {
 	}
 }
 
-// T returns the translated string for the given language and key.
+// T returns the translated string for the language in context.
+// Falls back to defaultLang if no language is set in context.
 // If args are provided, fmt.Sprintf is used to format the result.
-// Falls back to defaultLang, then to the key index as string.
-func (tr *Translator) T(lang Lang, key MsgKey, args ...any) string {
+func (tr *Translator) T(ctx context.Context, key MsgKey, args ...any) string {
+	lang := LangFromContext(ctx)
 	msg := tr.messages[lang][key]
 	if msg == "" {
 		msg = tr.messages[tr.defaultLang][key]

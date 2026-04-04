@@ -1,6 +1,7 @@
 package i18n_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/m-mizutani/gt"
@@ -11,33 +12,37 @@ func TestTranslator_T(t *testing.T) {
 	tr := i18n.New(i18n.LangEN)
 
 	t.Run("returns English translation", func(t *testing.T) {
-		result := tr.T(i18n.LangEN, i18n.MsgModalCreateCaseTitle)
+		ctx := i18n.ContextWithLang(context.Background(), i18n.LangEN)
+		result := tr.T(ctx, i18n.MsgModalCreateCaseTitle)
 		gt.Value(t, result).Equal("Create Case")
 	})
 
 	t.Run("returns Japanese translation", func(t *testing.T) {
-		result := tr.T(i18n.LangJA, i18n.MsgModalCreateCaseTitle)
+		ctx := i18n.ContextWithLang(context.Background(), i18n.LangJA)
+		result := tr.T(ctx, i18n.MsgModalCreateCaseTitle)
 		gt.Value(t, result).Equal("ケース作成")
 	})
 
 	t.Run("formats with args", func(t *testing.T) {
-		result := tr.T(i18n.LangEN, i18n.MsgCaseCreated, 42, "Test Case")
+		ctx := i18n.ContextWithLang(context.Background(), i18n.LangEN)
+		result := tr.T(ctx, i18n.MsgCaseCreated, 42, "Test Case")
 		gt.Value(t, result).Equal("Case #42 *Test Case* has been created.")
 	})
 
 	t.Run("formats Japanese with args", func(t *testing.T) {
-		result := tr.T(i18n.LangJA, i18n.MsgCaseCreated, 42, "テストケース")
+		ctx := i18n.ContextWithLang(context.Background(), i18n.LangJA)
+		result := tr.T(ctx, i18n.MsgCaseCreated, 42, "テストケース")
 		gt.Value(t, result).Equal("ケース #42 *テストケース* が作成されました。")
 	})
 
-	t.Run("falls back to default lang for unknown lang", func(t *testing.T) {
-		result := tr.T(i18n.Lang("fr"), i18n.MsgModalCreateCaseTitle)
+	t.Run("falls back to default lang for no lang in context", func(t *testing.T) {
+		result := tr.T(context.Background(), i18n.MsgModalCreateCaseTitle)
 		gt.Value(t, result).Equal("Create Case")
 	})
 
 	t.Run("returns default lang with Japanese default", func(t *testing.T) {
 		trJA := i18n.New(i18n.LangJA)
-		result := trJA.T(i18n.Lang("fr"), i18n.MsgModalCreateCaseTitle)
+		result := trJA.T(context.Background(), i18n.MsgModalCreateCaseTitle)
 		gt.Value(t, result).Equal("ケース作成")
 	})
 }

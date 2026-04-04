@@ -49,7 +49,8 @@ func (uc *SlackUseCases) HandleSlashCommand(ctx context.Context, triggerID, user
 		return goerr.New("workspace registry is not available")
 	}
 
-	lang := uc.defaultLang()
+	// Detect user's language from Slack locale
+	ctx = uc.contextWithUserLang(ctx, userID)
 
 	// If workspace ID is specified, validate and open case creation modal directly
 	if workspaceID != "" {
@@ -58,7 +59,7 @@ func (uc *SlackUseCases) HandleSlashCommand(ctx context.Context, triggerID, user
 			return goerr.Wrap(err, "invalid workspace ID",
 				goerr.V("workspace_id", workspaceID))
 		}
-		return uc.openCaseCreationModal(ctx, triggerID, workspaceID, channelID, entry.FieldSchema, lang)
+		return uc.openCaseCreationModal(ctx, triggerID, workspaceID, channelID, entry.FieldSchema)
 	}
 
 	// No workspace specified; decide based on workspace count
@@ -68,31 +69,23 @@ func (uc *SlackUseCases) HandleSlashCommand(ctx context.Context, triggerID, user
 		return goerr.New("no workspaces configured")
 	case 1:
 		entry, _ := uc.registry.Get(workspaces[0].ID)
-		return uc.openCaseCreationModal(ctx, triggerID, workspaces[0].ID, channelID, entry.FieldSchema, lang)
+		return uc.openCaseCreationModal(ctx, triggerID, workspaces[0].ID, channelID, entry.FieldSchema)
 	default:
-		return uc.openWorkspaceSelectModal(ctx, triggerID, channelID, workspaces, lang)
+		return uc.openWorkspaceSelectModal(ctx, triggerID, channelID, workspaces)
 	}
-}
-
-// defaultLang returns the default language from the translator, or English as fallback.
-func (uc *SlackUseCases) defaultLang() i18n.Lang {
-	if uc.translator != nil {
-		return uc.translator.DefaultLang()
-	}
-	return i18n.LangEN
 }
 
 // t translates a message key using the translator, or returns a fallback.
-func (uc *SlackUseCases) t(lang i18n.Lang, key i18n.MsgKey, args ...any) string {
-	if uc.translator != nil {
-		return uc.translator.T(lang, key, args...)
+func (uc *SlackUseCases) t(ctx context.Context, key i18n.MsgKey, args ...any) string {
+	if uc.translator == nil {
+		return fmt.Sprintf("[missing:%d]", key)
 	}
-	return fmt.Sprintf("[missing:%d]", key)
+	return uc.translator.T(ctx, key, args...)
 }
 
 // HandleWorkspaceSelectSubmit processes the workspace selection modal submission.
 // It returns the case creation modal view to replace the current modal via response_action: update.
-func (uc *SlackUseCases) HandleWorkspaceSelectSubmit(callback *slack.InteractionCallback) (*slack.ModalViewRequest, error) {
+func (uc *SlackUseCases) HandleWorkspaceSelectSubmit(ctx context.Context, callback *slack.InteractionCallback) (*slack.ModalViewRequest, error) {
 	// Extract selected workspace from radio buttons
 	blockValues := callback.View.State.Values
 	radioBlock, ok := blockValues[SlackBlockIDWorkspaceSelect]
@@ -123,8 +116,7 @@ func (uc *SlackUseCases) HandleWorkspaceSelectSubmit(callback *slack.Interaction
 		}
 	}
 
-	lang := uc.defaultLang()
-	view := uc.buildCaseCreationModal(workspaceID, meta.ChannelID, schema, lang)
+	view := uc.buildCaseCreationModal(ctx, workspaceID, meta.ChannelID, schema)
 	return &view, nil
 }
 
@@ -169,12 +161,11 @@ func (uc *SlackUseCases) HandleCaseCreationSubmit(ctx context.Context, caseUC *C
 
 	// Post confirmation message to the channel where the command was invoked
 	if meta.ChannelID != "" && uc.slackService != nil {
-		lang := uc.defaultLang()
 		var confirmText string
 		if created.SlackChannelID != "" {
-			confirmText = uc.t(lang, i18n.MsgCaseCreatedWithChannel, created.ID, created.Title, created.SlackChannelID)
+			confirmText = uc.t(ctx, i18n.MsgCaseCreatedWithChannel, created.ID, created.Title, created.SlackChannelID)
 		} else {
-			confirmText = uc.t(lang, i18n.MsgCaseCreated, created.ID, created.Title)
+			confirmText = uc.t(ctx, i18n.MsgCaseCreated, created.ID, created.Title)
 		}
 
 		if _, err := uc.slackService.PostMessage(ctx, meta.ChannelID, nil, confirmText); err != nil {
@@ -190,8 +181,8 @@ func (uc *SlackUseCases) HandleCaseCreationSubmit(ctx context.Context, caseUC *C
 }
 
 // openCaseCreationModal opens the case creation modal directly
-func (uc *SlackUseCases) openCaseCreationModal(ctx context.Context, triggerID, workspaceID, channelID string, schema *config.FieldSchema, lang i18n.Lang) error {
-	view := uc.buildCaseCreationModal(workspaceID, channelID, schema, lang)
+func (uc *SlackUseCases) openCaseCreationModal(ctx context.Context, triggerID, workspaceID, channelID string, schema *config.FieldSchema) error {
+	view := uc.buildCaseCreationModal(ctx, workspaceID, channelID, schema)
 	if err := uc.slackService.OpenView(ctx, triggerID, view); err != nil {
 		return goerr.Wrap(err, "failed to open case creation modal",
 			goerr.V("workspace_id", workspaceID))
@@ -200,8 +191,8 @@ func (uc *SlackUseCases) openCaseCreationModal(ctx context.Context, triggerID, w
 }
 
 // openWorkspaceSelectModal opens the workspace selection modal
-func (uc *SlackUseCases) openWorkspaceSelectModal(ctx context.Context, triggerID, channelID string, workspaces []model.Workspace, lang i18n.Lang) error {
-	view := uc.buildWorkspaceSelectModal(channelID, workspaces, lang)
+func (uc *SlackUseCases) openWorkspaceSelectModal(ctx context.Context, triggerID, channelID string, workspaces []model.Workspace) error {
+	view := uc.buildWorkspaceSelectModal(ctx, channelID, workspaces)
 	if err := uc.slackService.OpenView(ctx, triggerID, view); err != nil {
 		return goerr.Wrap(err, "failed to open workspace select modal")
 	}
@@ -209,7 +200,7 @@ func (uc *SlackUseCases) openWorkspaceSelectModal(ctx context.Context, triggerID
 }
 
 // buildCaseCreationModal constructs the Block Kit modal for case creation
-func (uc *SlackUseCases) buildCaseCreationModal(workspaceID, channelID string, schema *config.FieldSchema, lang i18n.Lang) slack.ModalViewRequest {
+func (uc *SlackUseCases) buildCaseCreationModal(ctx context.Context, workspaceID, channelID string, schema *config.FieldSchema) slack.ModalViewRequest {
 	meta := commandMetadata{
 		WorkspaceID: workspaceID,
 		ChannelID:   channelID,
@@ -218,23 +209,23 @@ func (uc *SlackUseCases) buildCaseCreationModal(workspaceID, channelID string, s
 
 	titleInput := slack.NewInputBlock(
 		SlackBlockIDCaseTitle,
-		slack.NewTextBlockObject(slack.PlainTextType, uc.t(lang, i18n.MsgFieldTitle), false, false),
+		slack.NewTextBlockObject(slack.PlainTextType, uc.t(ctx,i18n.MsgFieldTitle), false, false),
 		nil,
 		slack.NewPlainTextInputBlockElement(
-			slack.NewTextBlockObject(slack.PlainTextType, uc.t(lang, i18n.MsgFieldTitlePlaceholder), false, false),
+			slack.NewTextBlockObject(slack.PlainTextType, uc.t(ctx,i18n.MsgFieldTitlePlaceholder), false, false),
 			SlackActionIDCaseTitle,
 		),
 	)
 
 	descInput := slack.NewInputBlock(
 		SlackBlockIDCaseDescription,
-		slack.NewTextBlockObject(slack.PlainTextType, uc.t(lang, i18n.MsgFieldDescription), false, false),
+		slack.NewTextBlockObject(slack.PlainTextType, uc.t(ctx,i18n.MsgFieldDescription), false, false),
 		nil,
 		&slack.PlainTextInputBlockElement{
 			Type:        slack.METPlainTextInput,
 			ActionID:    SlackActionIDCaseDescription,
 			Multiline:   true,
-			Placeholder: slack.NewTextBlockObject(slack.PlainTextType, uc.t(lang, i18n.MsgFieldDescPlaceholder), false, false),
+			Placeholder: slack.NewTextBlockObject(slack.PlainTextType, uc.t(ctx,i18n.MsgFieldDescPlaceholder), false, false),
 		},
 	)
 	descInput.Optional = true
@@ -256,9 +247,9 @@ func (uc *SlackUseCases) buildCaseCreationModal(workspaceID, channelID string, s
 	return slack.ModalViewRequest{
 		Type:            slack.VTModal,
 		CallbackID:      SlackCallbackIDCreateCase,
-		Title:           slack.NewTextBlockObject(slack.PlainTextType, uc.t(lang, i18n.MsgModalCreateCaseTitle), false, false),
-		Submit:          slack.NewTextBlockObject(slack.PlainTextType, uc.t(lang, i18n.MsgModalCreateCaseSubmit), false, false),
-		Close:           slack.NewTextBlockObject(slack.PlainTextType, uc.t(lang, i18n.MsgModalCreateCaseCancel), false, false),
+		Title:           slack.NewTextBlockObject(slack.PlainTextType, uc.t(ctx,i18n.MsgModalCreateCaseTitle), false, false),
+		Submit:          slack.NewTextBlockObject(slack.PlainTextType, uc.t(ctx,i18n.MsgModalCreateCaseSubmit), false, false),
+		Close:           slack.NewTextBlockObject(slack.PlainTextType, uc.t(ctx,i18n.MsgModalCreateCaseCancel), false, false),
 		PrivateMetadata: string(metaJSON),
 		Blocks: slack.Blocks{
 			BlockSet: blocks,
@@ -464,7 +455,7 @@ func extractFieldValues(blockValues map[string]map[string]slack.BlockAction) map
 }
 
 // buildWorkspaceSelectModal constructs the Block Kit modal for workspace selection
-func (uc *SlackUseCases) buildWorkspaceSelectModal(channelID string, workspaces []model.Workspace, lang i18n.Lang) slack.ModalViewRequest {
+func (uc *SlackUseCases) buildWorkspaceSelectModal(ctx context.Context, channelID string, workspaces []model.Workspace) slack.ModalViewRequest {
 	meta := commandMetadata{
 		ChannelID: channelID,
 	}
@@ -482,7 +473,7 @@ func (uc *SlackUseCases) buildWorkspaceSelectModal(channelID string, workspaces 
 	radioGroup := slack.NewRadioButtonsBlockElement(SlackActionIDWorkspaceRadio, options...)
 	radioInput := slack.NewInputBlock(
 		SlackBlockIDWorkspaceSelect,
-		slack.NewTextBlockObject(slack.PlainTextType, uc.t(lang, i18n.MsgFieldWorkspace), false, false),
+		slack.NewTextBlockObject(slack.PlainTextType, uc.t(ctx,i18n.MsgFieldWorkspace), false, false),
 		nil,
 		radioGroup,
 	)
@@ -490,9 +481,9 @@ func (uc *SlackUseCases) buildWorkspaceSelectModal(channelID string, workspaces 
 	return slack.ModalViewRequest{
 		Type:            slack.VTModal,
 		CallbackID:      SlackCallbackIDSelectWorkspace,
-		Title:           slack.NewTextBlockObject(slack.PlainTextType, uc.t(lang, i18n.MsgModalCreateCaseTitle), false, false),
-		Submit:          slack.NewTextBlockObject(slack.PlainTextType, uc.t(lang, i18n.MsgModalNextButton), false, false),
-		Close:           slack.NewTextBlockObject(slack.PlainTextType, uc.t(lang, i18n.MsgModalCreateCaseCancel), false, false),
+		Title:           slack.NewTextBlockObject(slack.PlainTextType, uc.t(ctx,i18n.MsgModalCreateCaseTitle), false, false),
+		Submit:          slack.NewTextBlockObject(slack.PlainTextType, uc.t(ctx,i18n.MsgModalNextButton), false, false),
+		Close:           slack.NewTextBlockObject(slack.PlainTextType, uc.t(ctx,i18n.MsgModalCreateCaseCancel), false, false),
 		PrivateMetadata: string(metaJSON),
 		Blocks: slack.Blocks{
 			BlockSet: []slack.Block{
