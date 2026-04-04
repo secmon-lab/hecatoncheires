@@ -121,6 +121,25 @@ padding: var(--spacing-md-lg) var(--spacing-md);
 right: 1.25rem;
 ```
 
+##### Internationalization (i18n) — MANDATORY
+**All user-facing text in both frontend and backend MUST use the i18n system. Hardcoding strings is prohibited.**
+
+**Frontend (React/TypeScript):**
+- Translation keys are defined in `frontend/src/i18n/keys.ts` as an `as const` object
+- Translations: `frontend/src/i18n/en.ts` (English), `frontend/src/i18n/ja.ts` (Japanese)
+- Both files use `Record<MsgKey, string>` — missing keys cause compile errors
+- Use `useTranslation()` hook in components: `const { t } = useTranslation()`
+- Usage: `t('keyName')` or `t('keyName', { param: value })` for interpolation
+- When adding new UI text: add the key to `keys.ts`, then add translations to both `en.ts` and `ja.ts`
+
+**Backend (Go / Slack UI):**
+- Translation keys are iota constants (`MsgKey`) in `pkg/i18n/i18n.go`
+- Translations are Go arrays in `pkg/i18n/messages.go` — `init()` panics on missing entries
+- Call `i18n.T(ctx, i18n.MsgKeyName, args...)` directly (package-level function)
+- Language is detected from Slack user locale and stored in context via `i18n.ContextWithLang(ctx, lang)`
+- Default language is configured via `--default-lang` CLI flag / `HECATONCHEIRES_DEFAULT_LANG` env var
+- When adding new Slack messages: add a `MsgKey` constant, add entries to both `messagesEN` and `messagesJA` arrays
+
 #### Storage Backends
 - **Firestore**: Production-ready persistent storage
 - **Memory**: In-memory storage for testing and development
