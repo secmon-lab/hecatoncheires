@@ -151,7 +151,7 @@ func cmdServe() *cli.Command {
 		Flags:   flags,
 		Action: func(ctx context.Context, c *cli.Command) error {
 			// Load workspace configurations and build registry
-			_, registry, err := appCfg.Configure(c)
+			workspaceConfigs, registry, err := appCfg.Configure(c)
 			if err != nil {
 				return goerr.Wrap(err, "failed to load workspace configurations")
 			}
@@ -220,6 +220,17 @@ func cmdServe() *cli.Command {
 				slackSvc = svc
 				ucOpts = append(ucOpts, usecase.WithSlackService(slackSvc))
 				logging.Default().Info("Slack service enabled for Source integration")
+
+				// Detect org-level app and validate workspace team IDs
+				if err := slackCfg.DetectOrgLevel(ctx); err != nil {
+					return goerr.Wrap(err, "failed to detect Slack app level")
+				}
+				if slackCfg.IsOrgLevel() {
+					logging.Default().Info("Detected org-level Slack app")
+				}
+				if err := slackCfg.ValidateWorkspaceTeamIDs(workspaceConfigs); err != nil {
+					return goerr.Wrap(err, "workspace slack.team_id validation failed")
+				}
 			} else {
 				logging.Default().Info("Slack Bot Token not configured, Slack Source features will be limited")
 			}

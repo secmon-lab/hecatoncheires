@@ -32,6 +32,7 @@ type SlackInviteSection struct {
 // SlackSection represents the [slack] section in a TOML config
 type SlackSection struct {
 	ChannelPrefix string             `toml:"channel_prefix"`
+	TeamID        string             `toml:"team_id"`
 	Invite        SlackInviteSection `toml:"invite"`
 }
 
@@ -62,6 +63,7 @@ type WorkspaceConfig struct {
 	ID                 string
 	Name               string
 	SlackChannelPrefix string
+	SlackTeamID        string
 	SlackInviteUsers   []string
 	SlackInviteGroups  []string
 	FieldSchema        *domainConfig.FieldSchema
@@ -310,6 +312,7 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 		ID:                 wsID,
 		Name:               wsName,
 		SlackChannelPrefix: slackPrefix,
+		SlackTeamID:        appCfg.Slack.TeamID,
 		SlackInviteUsers:   appCfg.Slack.Invite.Users,
 		SlackInviteGroups:  appCfg.Slack.Invite.Groups,
 		FieldSchema:        appCfg.ToDomainFieldSchema(),
@@ -350,6 +353,7 @@ func (a *AppConfig) Configure(c *cli.Command) ([]*WorkspaceConfig, *model.Worksp
 			},
 			FieldSchema:        wc.FieldSchema,
 			SlackChannelPrefix: wc.SlackChannelPrefix,
+			SlackTeamID:        wc.SlackTeamID,
 			SlackInviteUsers:   wc.SlackInviteUsers,
 			SlackInviteGroups:  wc.SlackInviteGroups,
 			CompilePrompt:      wc.CompilePrompt,

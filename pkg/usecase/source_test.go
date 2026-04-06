@@ -78,7 +78,7 @@ type mockSlackService struct {
 	bookmarkLink             string
 }
 
-func (m *mockSlackService) ListJoinedChannels(ctx context.Context) ([]slack.Channel, error) {
+func (m *mockSlackService) ListJoinedChannels(ctx context.Context, teamID string) ([]slack.Channel, error) {
 	if m.listJoinedChannelsFn != nil {
 		return m.listJoinedChannelsFn(ctx)
 	}
@@ -122,7 +122,7 @@ func (m *mockSlackService) ListUsers(ctx context.Context) ([]*slack.User, error)
 	}, nil
 }
 
-func (m *mockSlackService) CreateChannel(ctx context.Context, caseID int64, caseName string, prefix string, _ bool) (string, error) {
+func (m *mockSlackService) CreateChannel(ctx context.Context, caseID int64, caseName string, prefix string, _ bool, _ string) (string, error) {
 	if m.createChannelFn != nil {
 		return m.createChannelFn(ctx, caseID, caseName, prefix)
 	}
@@ -198,7 +198,7 @@ func (m *mockSlackService) OpenView(ctx context.Context, triggerID string, view 
 	return nil
 }
 
-func (m *mockSlackService) ListUserGroups(ctx context.Context) ([]slack.UserGroup, error) {
+func (m *mockSlackService) ListUserGroups(ctx context.Context, teamID string) ([]slack.UserGroup, error) {
 	if m.listUserGroupsFn != nil {
 		return m.listUserGroupsFn(ctx)
 	}

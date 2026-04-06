@@ -9,9 +9,10 @@ import (
 
 // Service provides interface to Slack API for Source operations
 type Service interface {
-	// ListJoinedChannels retrieves the list of channels the bot has joined
-	// Used for channel selection UI
-	ListJoinedChannels(ctx context.Context) ([]Channel, error)
+	// ListJoinedChannels retrieves the list of channels the bot has joined.
+	// If teamID is non-empty, only channels in that workspace are returned (for org-level apps).
+	// If teamID is empty, behaves the same as before (single-workspace mode).
+	ListJoinedChannels(ctx context.Context, teamID string) ([]Channel, error)
 
 	// GetChannelNames retrieves channel names for the given IDs (with caching)
 	// Used for displaying channel names in the UI
@@ -23,11 +24,12 @@ type Service interface {
 	// ListUsers retrieves all non-deleted, non-bot users in the workspace
 	ListUsers(ctx context.Context) ([]*User, error)
 
-	// CreateChannel creates a new Slack channel for a case
-	// The channel name is automatically generated from caseID, caseName, and the given prefix
-	// If isPrivate is true, the channel is created as a private channel
-	// Returns the channel ID on success
-	CreateChannel(ctx context.Context, caseID int64, caseName string, prefix string, isPrivate bool) (string, error)
+	// CreateChannel creates a new Slack channel for a case.
+	// The channel name is automatically generated from caseID, caseName, and the given prefix.
+	// If isPrivate is true, the channel is created as a private channel.
+	// If teamID is non-empty, the channel is created in the specified workspace (for org-level apps).
+	// Returns the channel ID on success.
+	CreateChannel(ctx context.Context, caseID int64, caseName string, prefix string, isPrivate bool, teamID string) (string, error)
 
 	// GetConversationMembers retrieves the list of user IDs in the given channel
 	// Handles Slack API pagination internally
@@ -75,8 +77,9 @@ type Service interface {
 	OpenView(ctx context.Context, triggerID string, view slack.ModalViewRequest) error
 
 	// ListUserGroups retrieves all user groups in the workspace.
-	// Used to resolve group handle names to group IDs.
-	ListUserGroups(ctx context.Context) ([]UserGroup, error)
+	// If teamID is non-empty, only groups in that workspace are returned (for org-level apps).
+	// If teamID is empty, behaves the same as before (single-workspace mode).
+	ListUserGroups(ctx context.Context, teamID string) ([]UserGroup, error)
 
 	// GetUserGroupMembers retrieves the member user IDs of a user group.
 	GetUserGroupMembers(ctx context.Context, groupID string) ([]string, error)

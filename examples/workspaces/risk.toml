@@ -9,6 +9,10 @@ name = "Risk Management"
 [labels]
 case = "Risk"
 
+[slack]
+# channel_prefix = "risk"  # Defaults to workspace ID if not specified
+# team_id = "T0123456789"  # Required for org-level Slack apps; omit for workspace-level apps
+
 [[fields]]
 id = "category"
 name = "Category"

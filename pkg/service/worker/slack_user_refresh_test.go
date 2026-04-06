@@ -59,7 +59,7 @@ func (m *mockSlackService) ListUsers(ctx context.Context) ([]*slack.User, error)
 	return result, nil
 }
 
-func (m *mockSlackService) ListJoinedChannels(ctx context.Context) ([]slack.Channel, error) {
+func (m *mockSlackService) ListJoinedChannels(ctx context.Context, teamID string) ([]slack.Channel, error) {
 	return nil, nil
 }
 
@@ -71,7 +71,7 @@ func (m *mockSlackService) GetUserInfo(ctx context.Context, userID string) (*sla
 	return nil, nil
 }
 
-func (m *mockSlackService) CreateChannel(_ context.Context, _ int64, _, _ string, _ bool) (string, error) {
+func (m *mockSlackService) CreateChannel(_ context.Context, _ int64, _, _ string, _ bool, _ string) (string, error) {
 	return "", nil
 }
 
@@ -127,7 +127,7 @@ func (m *mockSlackService) OpenView(ctx context.Context, triggerID string, view 
 	return nil
 }
 
-func (m *mockSlackService) ListUserGroups(ctx context.Context) ([]slack.UserGroup, error) {
+func (m *mockSlackService) ListUserGroups(ctx context.Context, teamID string) ([]slack.UserGroup, error) {
 	return nil, nil
 }
 

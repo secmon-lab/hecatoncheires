@@ -11,6 +11,12 @@ func NewSlackForTest(clientID, clientSecret, botToken, signingSecret, noAuthUID 
 	}
 }
 
+// SetOrgLevelForTest sets org-level detection results for testing purposes
+func (x *Slack) SetOrgLevelForTest(isOrgLevel bool, authTeamID string) {
+	x.isOrgLevel = isOrgLevel
+	x.authTeamID = authTeamID
+}
+
 // NewGeminiForTest creates a Gemini config for testing purposes
 func NewGeminiForTest(projectID, location string) *Gemini {
 	return &Gemini{

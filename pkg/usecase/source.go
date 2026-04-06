@@ -453,7 +453,7 @@ func (uc *SourceUseCase) ListSlackChannels(ctx context.Context) ([]SlackChannelI
 		return nil, goerr.New("Slack service is not configured")
 	}
 
-	channels, err := uc.slackService.ListJoinedChannels(ctx)
+	channels, err := uc.slackService.ListJoinedChannels(ctx, "")
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to list Slack channels")
 	}

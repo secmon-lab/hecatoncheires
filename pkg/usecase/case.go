@@ -44,6 +44,17 @@ func (uc *CaseUseCase) fieldValidatorForWorkspace(workspaceID string) *model.Fie
 	return model.NewFieldValidator(entry.FieldSchema)
 }
 
+func (uc *CaseUseCase) slackTeamIDForWorkspace(workspaceID string) string {
+	if uc.workspaceRegistry == nil {
+		return ""
+	}
+	entry, err := uc.workspaceRegistry.Get(workspaceID)
+	if err != nil {
+		return ""
+	}
+	return entry.SlackTeamID
+}
+
 func (uc *CaseUseCase) slackChannelPrefixForWorkspace(workspaceID string) string {
 	if uc.workspaceRegistry == nil {
 		return workspaceID
@@ -90,7 +101,8 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 	// Create Slack channel if service is available
 	if uc.slackService != nil {
 		prefix := uc.slackChannelPrefixForWorkspace(workspaceID)
-		channelID, err := uc.slackService.CreateChannel(ctx, created.ID, created.Title, prefix, isPrivate)
+		teamID := uc.slackTeamIDForWorkspace(workspaceID)
+		channelID, err := uc.slackService.CreateChannel(ctx, created.ID, created.Title, prefix, isPrivate, teamID)
 		if err != nil {
 			// Rollback: delete case
 			if delErr := uc.repo.Case().Delete(ctx, workspaceID, created.ID); delErr != nil {
@@ -401,7 +413,7 @@ func (uc *CaseUseCase) resolveAutoInviteUsers(ctx context.Context, workspaceID s
 
 	// Resolve group members
 	if len(entry.SlackInviteGroups) > 0 {
-		groupMembers := uc.resolveGroupMembers(ctx, entry.SlackInviteGroups)
+		groupMembers := uc.resolveGroupMembers(ctx, entry.SlackInviteGroups, entry.SlackTeamID)
 		users = append(users, groupMembers...)
 	}
 
@@ -410,7 +422,8 @@ func (uc *CaseUseCase) resolveAutoInviteUsers(ctx context.Context, workspaceID s
 
 // resolveGroupMembers resolves user group identifiers (IDs or handle names) to member user IDs.
 // Handle names are prefixed with "@" (e.g., "@security-team"); everything else is treated as a group ID.
-func (uc *CaseUseCase) resolveGroupMembers(ctx context.Context, groups []string) []string {
+// teamID is passed to ListUserGroups for org-level app support (empty string for WS-level apps).
+func (uc *CaseUseCase) resolveGroupMembers(ctx context.Context, groups []string, teamID string) []string {
 	var groupIDs []string
 	var handleNames []string
 
@@ -424,7 +437,7 @@ func (uc *CaseUseCase) resolveGroupMembers(ctx context.Context, groups []string)
 
 	// Resolve handle names to group IDs via full group list
 	if len(handleNames) > 0 {
-		allGroups, err := uc.slackService.ListUserGroups(ctx)
+		allGroups, err := uc.slackService.ListUserGroups(ctx, teamID)
 		if err != nil {
 			errutil.Handle(ctx, err, "failed to list user groups for handle resolution")
 		} else {
