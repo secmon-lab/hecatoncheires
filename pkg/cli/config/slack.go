@@ -27,8 +27,9 @@ type Slack struct {
 	noAuthUID     string
 
 	// Populated by DetectOrgLevel
-	isOrgLevel bool
-	authTeamID string
+	isOrgLevel   bool
+	authTeamID   string
+	enterpriseID string
 }
 
 func (x *Slack) Flags() []cli.Flag {
@@ -165,6 +166,7 @@ func (x *Slack) DetectOrgLevel(ctx context.Context) error {
 
 	x.isOrgLevel = resp.EnterpriseID != ""
 	x.authTeamID = resp.TeamID
+	x.enterpriseID = resp.EnterpriseID
 	return nil
 }
 
@@ -205,6 +207,16 @@ func (x *Slack) ValidateWorkspaceTeamIDs(configs []*WorkspaceConfig) error {
 // IsOrgLevel returns whether the Slack app is org-level installed
 func (x *Slack) IsOrgLevel() bool {
 	return x.isOrgLevel
+}
+
+// AuthTeamID returns the team_id from auth.test response
+func (x *Slack) AuthTeamID() string {
+	return x.authTeamID
+}
+
+// EnterpriseID returns the enterprise_id from auth.test response (empty for WS-level apps)
+func (x *Slack) EnterpriseID() string {
+	return x.enterpriseID
 }
 
 // BotToken returns the Slack bot token

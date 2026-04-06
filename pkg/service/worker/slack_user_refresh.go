@@ -20,16 +20,20 @@ type SlackUserRefreshWorker struct {
 	repo         interfaces.Repository
 	slackService slack.Service
 	interval     time.Duration
+	teamIDs      []string // Slack Team IDs for org-level apps; empty slice for WS-level
 	stopCh       chan struct{}
 	doneCh       chan struct{}
 }
 
-// NewSlackUserRefreshWorker creates a new worker for refreshing Slack users
-func NewSlackUserRefreshWorker(repo interfaces.Repository, slackSvc slack.Service, interval time.Duration) *SlackUserRefreshWorker {
+// NewSlackUserRefreshWorker creates a new worker for refreshing Slack users.
+// teamIDs should contain the Slack Team IDs from workspace configs (for org-level apps).
+// For WS-level apps, pass nil or empty slice.
+func NewSlackUserRefreshWorker(repo interfaces.Repository, slackSvc slack.Service, interval time.Duration, teamIDs []string) *SlackUserRefreshWorker {
 	return &SlackUserRefreshWorker{
 		repo:         repo,
 		slackService: slackSvc,
 		interval:     interval,
+		teamIDs:      teamIDs,
 		stopCh:       make(chan struct{}),
 		doneCh:       make(chan struct{}),
 	}
@@ -110,10 +114,30 @@ func (w *SlackUserRefreshWorker) refresh(ctx context.Context) error {
 	}
 
 	// Fetch all users from Slack API
-	slackUsers, err := w.slackService.ListUsers(ctx)
-	if err != nil {
-		// Log error and preserve old database data (Graceful Degradation)
-		return goerr.Wrap(err, "failed to list Slack users from API")
+	var slackUsers []*slack.User
+	if len(w.teamIDs) > 0 {
+		// Org-level app: fetch users per workspace and merge
+		seen := make(map[string]struct{})
+		for _, teamID := range w.teamIDs {
+			users, err := w.slackService.ListUsers(ctx, teamID)
+			if err != nil {
+				return goerr.Wrap(err, "failed to list Slack users from API",
+					goerr.V("team_id", teamID))
+			}
+			for _, u := range users {
+				if _, ok := seen[u.ID]; !ok {
+					seen[u.ID] = struct{}{}
+					slackUsers = append(slackUsers, u)
+				}
+			}
+		}
+	} else {
+		// WS-level app: single call without team_id
+		var err error
+		slackUsers, err = w.slackService.ListUsers(ctx, "")
+		if err != nil {
+			return goerr.Wrap(err, "failed to list Slack users from API")
+		}
 	}
 
 	// Convert to domain models

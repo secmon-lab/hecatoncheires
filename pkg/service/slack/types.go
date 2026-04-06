@@ -21,8 +21,10 @@ type Service interface {
 	// GetUserInfo retrieves user information for the given user ID
 	GetUserInfo(ctx context.Context, userID string) (*User, error)
 
-	// ListUsers retrieves all non-deleted, non-bot users in the workspace
-	ListUsers(ctx context.Context) ([]*User, error)
+	// ListUsers retrieves all non-deleted, non-bot users.
+	// For org-level apps, team_id is required per Slack API spec.
+	// For WS-level apps, pass empty string (behaves as before).
+	ListUsers(ctx context.Context, teamID string) ([]*User, error)
 
 	// CreateChannel creates a new Slack channel for a case.
 	// The channel name is automatically generated from caseID, caseName, and the given prefix.

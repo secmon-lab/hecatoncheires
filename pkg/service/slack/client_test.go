@@ -37,7 +37,7 @@ func TestIntegration(t *testing.T) {
 	channels, err := svc.ListJoinedChannels(ctx, "")
 	gt.NoError(t, err).Required()
 
-	users, err := svc.ListUsers(ctx)
+	users, err := svc.ListUsers(ctx, "")
 	gt.NoError(t, err).Required()
 
 	t.Run("ListJoinedChannels returns channels", func(t *testing.T) {

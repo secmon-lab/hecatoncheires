@@ -1165,7 +1165,7 @@ func (m *mockSlackService) GetConversationReplies(_ context.Context, _, _ string
 func (m *mockSlackService) GetConversationHistory(_ context.Context, _ string, _ time.Time, _ int) ([]slackService.ConversationMessage, error) {
 	return nil, nil
 }
-func (m *mockSlackService) ListUsers(_ context.Context) ([]*slackService.User, error) {
+func (m *mockSlackService) ListUsers(_ context.Context, _ string) ([]*slackService.User, error) {
 	return nil, nil
 }
 func (m *mockSlackService) GetUserInfo(_ context.Context, _ string) (*slackService.User, error) {

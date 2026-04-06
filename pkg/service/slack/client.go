@@ -187,9 +187,14 @@ func (c *client) GetUserInfo(ctx context.Context, userID string) (*User, error) 
 	}, nil
 }
 
-// ListUsers retrieves all non-deleted, non-bot users in the workspace
-func (c *client) ListUsers(ctx context.Context) ([]*User, error) {
-	users, err := c.api.GetUsersContext(ctx)
+// ListUsers retrieves all non-deleted, non-bot users.
+// For org-level apps, teamID is required per Slack API spec.
+func (c *client) ListUsers(ctx context.Context, teamID string) ([]*User, error) {
+	var opts []slack.GetUsersOption
+	if teamID != "" {
+		opts = append(opts, slack.GetUsersOptionTeamID(teamID))
+	}
+	users, err := c.api.GetUsersContext(ctx, opts...)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to list users")
 	}

@@ -31,7 +31,7 @@ func (m *mockSlackServiceForCommand) GetChannelNames(_ context.Context, _ []stri
 func (m *mockSlackServiceForCommand) GetUserInfo(_ context.Context, _ string) (*slacksvc.User, error) {
 	return nil, nil
 }
-func (m *mockSlackServiceForCommand) ListUsers(_ context.Context) ([]*slacksvc.User, error) {
+func (m *mockSlackServiceForCommand) ListUsers(_ context.Context, _ string) ([]*slacksvc.User, error) {
 	return nil, nil
 }
 func (m *mockSlackServiceForCommand) CreateChannel(_ context.Context, _ int64, _ string, _ string, _ bool, _ string) (string, error) {

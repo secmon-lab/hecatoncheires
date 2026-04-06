@@ -112,7 +112,7 @@ func (m *mockSlackService) GetUserInfo(ctx context.Context, userID string) (*sla
 	}, nil
 }
 
-func (m *mockSlackService) ListUsers(ctx context.Context) ([]*slack.User, error) {
+func (m *mockSlackService) ListUsers(ctx context.Context, teamID string) ([]*slack.User, error) {
 	if m.listUsersFn != nil {
 		return m.listUsersFn(ctx)
 	}

@@ -226,7 +226,14 @@ func cmdServe() *cli.Command {
 					return goerr.Wrap(err, "failed to detect Slack app level")
 				}
 				if slackCfg.IsOrgLevel() {
-					logging.Default().Info("Detected org-level Slack app")
+					logging.Default().Info("Detected org-level Slack app",
+						"enterprise_id", slackCfg.EnterpriseID(),
+						"team_id", slackCfg.AuthTeamID(),
+					)
+				} else {
+					logging.Default().Info("Detected workspace-level Slack app",
+						"team_id", slackCfg.AuthTeamID(),
+					)
 				}
 				if err := slackCfg.ValidateWorkspaceTeamIDs(workspaceConfigs); err != nil {
 					return goerr.Wrap(err, "workspace slack.team_id validation failed")
@@ -266,7 +273,16 @@ func cmdServe() *cli.Command {
 			// to avoid individual DB operations in loops
 			var slackUserWorker *worker.SlackUserRefreshWorker
 			if slackSvc != nil {
-				slackUserWorker = worker.NewSlackUserRefreshWorker(repo, slackSvc, 10*time.Minute)
+				// Collect team IDs for org-level app user refresh
+				var slackTeamIDs []string
+				if slackCfg.IsOrgLevel() {
+					for _, wc := range workspaceConfigs {
+						if wc.SlackTeamID != "" {
+							slackTeamIDs = append(slackTeamIDs, wc.SlackTeamID)
+						}
+					}
+				}
+				slackUserWorker = worker.NewSlackUserRefreshWorker(repo, slackSvc, 10*time.Minute, slackTeamIDs)
 				if err := slackUserWorker.Start(ctx); err != nil {
 					return goerr.Wrap(err, "failed to start Slack user refresh worker")
 				}
