@@ -79,6 +79,9 @@ func (m *mockSlackServiceForCommand) OpenView(_ context.Context, _ string, _ gos
 func (m *mockSlackServiceForCommand) ListUserGroups(_ context.Context, _ string) ([]slacksvc.UserGroup, error) {
 	return nil, nil
 }
+func (m *mockSlackServiceForCommand) ListTeams(_ context.Context) ([]slacksvc.Team, error) {
+	return nil, nil
+}
 func (m *mockSlackServiceForCommand) GetUserGroupMembers(_ context.Context, _ string) ([]string, error) {
 	return nil, nil
 }

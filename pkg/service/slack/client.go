@@ -488,6 +488,37 @@ func (c *client) ListUserGroups(ctx context.Context, teamID string) ([]UserGroup
 	return result, nil
 }
 
+// ListTeams returns all workspaces accessible by the bot token.
+// For org-level apps, this returns all workspaces in the enterprise.
+func (c *client) ListTeams(ctx context.Context) ([]Team, error) {
+	var teams []Team
+	var cursor string
+
+	for {
+		params := slack.ListTeamsParameters{
+			Cursor: cursor,
+		}
+		slackTeams, nextCursor, err := c.api.ListTeamsContext(ctx, params)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to list teams")
+		}
+
+		for _, t := range slackTeams {
+			teams = append(teams, Team{
+				ID:   t.ID,
+				Name: t.Name,
+			})
+		}
+
+		if nextCursor == "" {
+			break
+		}
+		cursor = nextCursor
+	}
+
+	return teams, nil
+}
+
 // GetUserGroupMembers retrieves the member user IDs of a user group
 func (c *client) GetUserGroupMembers(ctx context.Context, groupID string) ([]string, error) {
 	members, err := c.api.GetUserGroupMembersContext(ctx, groupID)

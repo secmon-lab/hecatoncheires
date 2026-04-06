@@ -273,16 +273,7 @@ func cmdServe() *cli.Command {
 			// to avoid individual DB operations in loops
 			var slackUserWorker *worker.SlackUserRefreshWorker
 			if slackSvc != nil {
-				// Collect team IDs for org-level app user refresh
-				var slackTeamIDs []string
-				if slackCfg.IsOrgLevel() {
-					for _, wc := range workspaceConfigs {
-						if wc.SlackTeamID != "" {
-							slackTeamIDs = append(slackTeamIDs, wc.SlackTeamID)
-						}
-					}
-				}
-				slackUserWorker = worker.NewSlackUserRefreshWorker(repo, slackSvc, 10*time.Minute, slackTeamIDs)
+				slackUserWorker = worker.NewSlackUserRefreshWorker(repo, slackSvc, 10*time.Minute, slackCfg.IsOrgLevel())
 				if err := slackUserWorker.Start(ctx); err != nil {
 					return goerr.Wrap(err, "failed to start Slack user refresh worker")
 				}

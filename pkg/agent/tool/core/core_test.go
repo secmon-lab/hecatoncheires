@@ -1203,6 +1203,9 @@ func (m *mockSlackService) OpenView(_ context.Context, _ string, _ goslack.Modal
 func (m *mockSlackService) ListUserGroups(_ context.Context, _ string) ([]slackService.UserGroup, error) {
 	return nil, nil
 }
+func (m *mockSlackService) ListTeams(_ context.Context) ([]slackService.Team, error) {
+	return nil, nil
+}
 func (m *mockSlackService) GetUserGroupMembers(_ context.Context, _ string) ([]string, error) {
 	return nil, nil
 }

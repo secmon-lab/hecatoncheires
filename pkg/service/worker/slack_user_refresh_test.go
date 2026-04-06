@@ -159,6 +159,16 @@ func (m *mockSlackService) GetUserGroupMembers(ctx context.Context, groupID stri
 	return nil, nil
 }
 
+func (m *mockSlackService) ListTeams(ctx context.Context) ([]slack.Team, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var teams []slack.Team
+	for teamID := range m.usersByTeam {
+		teams = append(teams, slack.Team{ID: teamID, Name: "team-" + teamID})
+	}
+	return teams, nil
+}
+
 func TestSlackUserRefreshWorker_ImmediateInitialSync(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.New()
@@ -185,7 +195,7 @@ func TestSlackUserRefreshWorker_ImmediateInitialSync(t *testing.T) {
 	mockSvc.setUsers(mockUsers)
 
 	// Create worker with short interval (not used in this test)
-	worker := worker.NewSlackUserRefreshWorker(repo, mockSvc, 10*time.Minute, nil)
+	worker := worker.NewSlackUserRefreshWorker(repo, mockSvc, 10*time.Minute, false)
 
 	// Start worker (initial sync runs in background goroutine)
 	if err := worker.Start(ctx); err != nil {
@@ -244,7 +254,7 @@ func TestSlackUserRefreshWorker_PeriodicRefresh(t *testing.T) {
 	mockSvc.setUsers(initialUsers)
 
 	// Create worker with very short interval for testing (100ms)
-	worker := worker.NewSlackUserRefreshWorker(repo, mockSvc, 100*time.Millisecond, nil)
+	worker := worker.NewSlackUserRefreshWorker(repo, mockSvc, 100*time.Millisecond, false)
 
 	// Start worker
 	if err := worker.Start(ctx); err != nil {
@@ -327,7 +337,7 @@ func TestSlackUserRefreshWorker_HandlesSlackAPIErrors(t *testing.T) {
 	mockSvc.setUsers(initialUsers)
 
 	// Create worker
-	worker := worker.NewSlackUserRefreshWorker(repo, mockSvc, 100*time.Millisecond, nil)
+	worker := worker.NewSlackUserRefreshWorker(repo, mockSvc, 100*time.Millisecond, false)
 
 	// Start worker
 	if err := worker.Start(ctx); err != nil {
@@ -396,7 +406,7 @@ func TestSlackUserRefreshWorker_StopsCleanly(t *testing.T) {
 	mockSvc.setUsers(mockUsers)
 
 	// Create worker with short interval
-	worker := worker.NewSlackUserRefreshWorker(repo, mockSvc, 100*time.Millisecond, nil)
+	worker := worker.NewSlackUserRefreshWorker(repo, mockSvc, 100*time.Millisecond, false)
 
 	// Start worker
 	if err := worker.Start(ctx); err != nil {
@@ -450,7 +460,7 @@ func TestSlackUserRefreshWorker_SavesMetadataOnSuccess(t *testing.T) {
 	mockSvc.setUsers(mockUsers)
 
 	// Create worker
-	worker := worker.NewSlackUserRefreshWorker(repo, mockSvc, 10*time.Minute, nil)
+	worker := worker.NewSlackUserRefreshWorker(repo, mockSvc, 10*time.Minute, false)
 
 	// Start worker
 	if err := worker.Start(ctx); err != nil {
@@ -508,7 +518,7 @@ func TestSlackUserRefreshWorker_SavesAttemptMetadataOnFailure(t *testing.T) {
 	mockSvc.setUsers(initialUsers)
 
 	// Create worker
-	worker := worker.NewSlackUserRefreshWorker(repo, mockSvc, 100*time.Millisecond, nil)
+	worker := worker.NewSlackUserRefreshWorker(repo, mockSvc, 100*time.Millisecond, false)
 
 	// Start worker
 	if err := worker.Start(ctx); err != nil {
@@ -572,7 +582,7 @@ func TestSlackUserRefreshWorker_OrgLevelMultiTeam(t *testing.T) {
 	})
 
 	// Create worker with org-level team IDs
-	w := worker.NewSlackUserRefreshWorker(repo, mockSvc, 10*time.Minute, []string{"T111", "T222"})
+	w := worker.NewSlackUserRefreshWorker(repo, mockSvc, 10*time.Minute, true)
 	if err := w.Start(ctx); err != nil {
 		t.Fatalf("failed to start worker: %v", err)
 	}
@@ -599,7 +609,7 @@ func TestSlackUserRefreshWorker_WSLevelNoTeamIDs(t *testing.T) {
 	})
 
 	// Create worker with no team IDs (WS-level app)
-	w := worker.NewSlackUserRefreshWorker(repo, mockSvc, 10*time.Minute, nil)
+	w := worker.NewSlackUserRefreshWorker(repo, mockSvc, 10*time.Minute, false)
 	if err := w.Start(ctx); err != nil {
 		t.Fatalf("failed to start worker: %v", err)
 	}

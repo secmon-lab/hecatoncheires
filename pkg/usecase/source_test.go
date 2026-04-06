@@ -205,6 +205,10 @@ func (m *mockSlackService) ListUserGroups(ctx context.Context, teamID string) ([
 	return nil, nil
 }
 
+func (m *mockSlackService) ListTeams(ctx context.Context) ([]slack.Team, error) {
+	return nil, nil
+}
+
 func (m *mockSlackService) GetUserGroupMembers(ctx context.Context, groupID string) ([]string, error) {
 	if m.getUserGroupMembersFn != nil {
 		return m.getUserGroupMembersFn(ctx, groupID)

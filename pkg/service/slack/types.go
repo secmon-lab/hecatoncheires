@@ -85,6 +85,11 @@ type Service interface {
 
 	// GetUserGroupMembers retrieves the member user IDs of a user group.
 	GetUserGroupMembers(ctx context.Context, groupID string) ([]string, error)
+
+	// ListTeams returns all workspace team IDs accessible by the bot token.
+	// For org-level apps, this returns all workspaces in the enterprise.
+	// For WS-level apps, this returns a single workspace.
+	ListTeams(ctx context.Context) ([]Team, error)
 }
 
 // UserGroup represents a Slack user group
@@ -107,6 +112,12 @@ type ConversationMessage struct {
 	Text      string
 	Timestamp string
 	ThreadTS  string
+}
+
+// Team represents a Slack workspace (team)
+type Team struct {
+	ID   string
+	Name string
 }
 
 // User represents a Slack user
