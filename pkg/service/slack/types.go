@@ -9,9 +9,10 @@ import (
 
 // Service provides interface to Slack API for Source operations
 type Service interface {
-	// ListJoinedChannels retrieves the list of channels the bot has joined
-	// Used for channel selection UI
-	ListJoinedChannels(ctx context.Context) ([]Channel, error)
+	// ListJoinedChannels retrieves the list of channels the bot has joined.
+	// If teamID is non-empty, only channels in that workspace are returned (for org-level apps).
+	// If teamID is empty, behaves the same as before (single-workspace mode).
+	ListJoinedChannels(ctx context.Context, teamID string) ([]Channel, error)
 
 	// GetChannelNames retrieves channel names for the given IDs (with caching)
 	// Used for displaying channel names in the UI
@@ -20,14 +21,17 @@ type Service interface {
 	// GetUserInfo retrieves user information for the given user ID
 	GetUserInfo(ctx context.Context, userID string) (*User, error)
 
-	// ListUsers retrieves all non-deleted, non-bot users in the workspace
-	ListUsers(ctx context.Context) ([]*User, error)
+	// ListUsers retrieves all non-deleted, non-bot users.
+	// For org-level apps, team_id is required per Slack API spec.
+	// For WS-level apps, pass empty string (behaves as before).
+	ListUsers(ctx context.Context, teamID string) ([]*User, error)
 
-	// CreateChannel creates a new Slack channel for a case
-	// The channel name is automatically generated from caseID, caseName, and the given prefix
-	// If isPrivate is true, the channel is created as a private channel
-	// Returns the channel ID on success
-	CreateChannel(ctx context.Context, caseID int64, caseName string, prefix string, isPrivate bool) (string, error)
+	// CreateChannel creates a new Slack channel for a case.
+	// The channel name is automatically generated from caseID, caseName, and the given prefix.
+	// If isPrivate is true, the channel is created as a private channel.
+	// If teamID is non-empty, the channel is created in the specified workspace (for org-level apps).
+	// Returns the channel ID on success.
+	CreateChannel(ctx context.Context, caseID int64, caseName string, prefix string, isPrivate bool, teamID string) (string, error)
 
 	// GetConversationMembers retrieves the list of user IDs in the given channel
 	// Handles Slack API pagination internally
@@ -75,11 +79,17 @@ type Service interface {
 	OpenView(ctx context.Context, triggerID string, view slack.ModalViewRequest) error
 
 	// ListUserGroups retrieves all user groups in the workspace.
-	// Used to resolve group handle names to group IDs.
-	ListUserGroups(ctx context.Context) ([]UserGroup, error)
+	// If teamID is non-empty, only groups in that workspace are returned (for org-level apps).
+	// If teamID is empty, behaves the same as before (single-workspace mode).
+	ListUserGroups(ctx context.Context, teamID string) ([]UserGroup, error)
 
 	// GetUserGroupMembers retrieves the member user IDs of a user group.
 	GetUserGroupMembers(ctx context.Context, groupID string) ([]string, error)
+
+	// ListTeams returns all workspace team IDs accessible by the bot token.
+	// For org-level apps, this returns all workspaces in the enterprise.
+	// For WS-level apps, this returns a single workspace.
+	ListTeams(ctx context.Context) ([]Team, error)
 }
 
 // UserGroup represents a Slack user group
@@ -102,6 +112,12 @@ type ConversationMessage struct {
 	Text      string
 	Timestamp string
 	ThreadTS  string
+}
+
+// Team represents a Slack workspace (team)
+type Team struct {
+	ID   string
+	Name string
 }
 
 // User represents a Slack user

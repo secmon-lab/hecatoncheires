@@ -19,6 +19,7 @@ type WorkspaceEntry struct {
 	Workspace          Workspace
 	FieldSchema        *config.FieldSchema
 	SlackChannelPrefix string
+	SlackTeamID        string // Slack Team ID for org-level app support (empty for WS-level apps)
 	SlackInviteUsers   []string
 	SlackInviteGroups  []string
 	CompilePrompt      string

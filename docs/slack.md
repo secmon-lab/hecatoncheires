@@ -9,8 +9,9 @@ Hecatoncheires integrates with Slack for both authentication and event webhooks.
 3. [Slack Interactivity (Action Notifications)](#slack-interactivity-action-notifications)
 4. [Slack Slash Commands (Case Creation)](#slack-slash-commands-case-creation)
 5. [Automatic Risk Channel Creation](#automatic-risk-channel-creation)
-6. [Complete Setup Guide](#complete-setup-guide)
-7. [Environment Variables Reference](#environment-variables-reference)
+6. [Enterprise Grid (Org-Level App) Setup](#enterprise-grid-org-level-app-setup)
+7. [Complete Setup Guide](#complete-setup-guide)
+8. [Environment Variables Reference](#environment-variables-reference)
 
 ---
 
@@ -469,6 +470,116 @@ export HECATONCHEIRES_SLACK_BOT_TOKEN="xoxb-..."
 ```
 
 Creating a risk named "データベースのSQLインジェクション" (ID: 7) will create channel: `#risk-7-データベースのsqlインジェクション`
+
+---
+
+## Enterprise Grid (Org-Level App) Setup
+
+Hecatoncheires supports Slack Enterprise Grid with org-level app installation. This allows a single app to operate across all workspaces in the organization.
+
+### Overview
+
+When using an org-level Slack app:
+
+- **Auto-detection**: At startup, hecatoncheires calls `auth.test` and checks for `enterprise_id` to automatically detect whether the app is org-level or workspace-level
+- **Channel creation**: Channels are created in the workspace specified by `slack.team_id` in the TOML config
+- **User sync**: The background user refresh worker automatically discovers all workspaces via `auth.teams.list` and fetches users from each workspace
+- **Backward compatible**: Existing workspace-level app configurations work without any changes
+
+### Step 1: Create an Org-Level Slack App
+
+1. Go to [https://api.slack.com/apps](https://api.slack.com/apps)
+2. Create a new app or use an existing one
+3. Under **Org Level Apps** (in the app settings sidebar), enable org-level distribution
+4. Configure the same OAuth scopes as described in the [authentication setup](#2-configure-oauth--permissions)
+
+### Step 2: Install the App to All Workspaces
+
+The app must be installed to each workspace where you want to fetch users.
+
+1. Go to the Enterprise Grid admin console: `https://app.slack.com/manage/{ENTERPRISE_ID}`
+2. Click **Manage Organization** (top-right)
+3. Navigate to **Integrations** in the left sidebar
+4. Click **Manage installed apps**
+5. Find your app and click on it
+6. On the **Installations** tab, install the app to all relevant workspaces
+
+> **Important**: The user refresh worker uses `auth.teams.list` to discover workspaces, which only returns workspaces where the app is installed. If the app is only installed in one workspace, only users from that workspace will be fetched.
+
+### Step 3: Find Workspace Team IDs
+
+Each workspace has a Team ID (starts with `T`). You need this for the `slack.team_id` setting in your TOML config.
+
+**From the Enterprise admin console:**
+
+1. Go to `https://app.slack.com/manage/{ENTERPRISE_ID}`
+2. Click **Manage Organization**
+3. Navigate to **Workspaces** in the left sidebar
+4. Click on a workspace
+5. The URL will contain the Team ID: `https://app.slack.com/manage/{ENTERPRISE_ID}/workspaces/{TEAM_ID}/settings`
+
+**From the startup log:**
+
+At startup, hecatoncheires logs the detected Team ID:
+```
+INFO Detected org-level Slack app enterprise_id=E02GQTQ0E48 team_id=T2G71SMA8
+```
+
+### Step 4: Configure Workspace TOML
+
+Add `slack.team_id` to each workspace TOML configuration. This tells hecatoncheires which Slack workspace to create channels in for each hecatoncheires workspace.
+
+```toml
+[workspace]
+id = "risk"
+name = "Risk Management"
+
+[slack]
+channel_prefix = "risk"
+team_id = "T2G71SMA8"  # Required for org-level apps
+
+[slack.invite]
+users = ["U12345678"]
+```
+
+### Validation Rules
+
+At startup, hecatoncheires validates the `slack.team_id` configuration:
+
+| App Type | `slack.team_id` set | `slack.team_id` empty |
+|----------|--------------------|-----------------------|
+| **Org-Level App** | OK | **Startup error** (required) |
+| **WS-Level App** | Must match `auth.test` team_id, otherwise **startup error** | OK (default) |
+
+- For org-level apps, every workspace config MUST have `slack.team_id`
+- For workspace-level apps, `slack.team_id` is optional. If set, it must match the bot's actual workspace
+- If no bot token is configured, validation is skipped entirely
+
+### User Refresh Behavior
+
+The background user refresh worker behaves differently based on the app type:
+
+- **Org-Level App**: Calls `auth.teams.list` to discover all installed workspaces, then calls `users.list` with each Team ID. Users are deduplicated across workspaces
+- **WS-Level App**: Calls `users.list` without a Team ID (single workspace, same as before)
+
+### Troubleshooting
+
+#### Only users from one workspace are fetched
+
+Check the startup log for `fetched users from all workspaces`:
+```
+INFO fetched users from all workspaces team_count=11 unique_user_count=1500
+```
+
+If `team_count` is 1, the app is likely only installed in one workspace. Install it to all workspaces via the Enterprise admin console (see [Step 2](#step-2-install-the-app-to-all-workspaces)).
+
+#### Startup error: "org-level Slack app requires slack.team_id"
+
+All workspace TOML configs must have `slack.team_id` set when using an org-level app. See [Step 3](#step-3-find-workspace-team-ids) for how to find your Team IDs.
+
+#### Startup error: "slack.team_id does not match the bot's workspace"
+
+You have `slack.team_id` set in a workspace config, but the app is a workspace-level (not org-level) app. Either remove the `slack.team_id` setting or switch to an org-level app.
 
 ---
 

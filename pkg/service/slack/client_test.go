@@ -34,10 +34,10 @@ func TestIntegration(t *testing.T) {
 	gt.NoError(t, err).Required()
 
 	// Fetch channels and users once to avoid repeated API calls and rate limiting
-	channels, err := svc.ListJoinedChannels(ctx)
+	channels, err := svc.ListJoinedChannels(ctx, "")
 	gt.NoError(t, err).Required()
 
-	users, err := svc.ListUsers(ctx)
+	users, err := svc.ListUsers(ctx, "")
 	gt.NoError(t, err).Required()
 
 	t.Run("ListJoinedChannels returns channels", func(t *testing.T) {

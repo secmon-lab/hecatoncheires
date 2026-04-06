@@ -222,6 +222,11 @@ When making changes, before finishing the task, always:
 
 All comment and character literal in source code must be in English
 
+### Pull Requests
+
+- PR titles and descriptions (body) must be written in English
+- Commit messages must be written in English
+
 ### Testing
 
 - Test files should have `package {name}_test`. Do not use same package name

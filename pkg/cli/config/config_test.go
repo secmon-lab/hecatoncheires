@@ -827,3 +827,52 @@ type = "text"
 	// Check default labels
 	gt.Value(t, schema.Labels.Case).Equal("Case")
 }
+
+func TestLoadWorkspaceConfigs_SlackTeamID(t *testing.T) {
+	t.Run("explicit team_id", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		content := `
+[workspace]
+id = "risk"
+name = "Risk Management"
+
+[slack]
+team_id = "T0123456789"
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`
+		err := os.WriteFile(configPath, []byte(content), 0644)
+		gt.NoError(t, err).Required()
+
+		configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1)
+		gt.Value(t, configs[0].SlackTeamID).Equal("T0123456789")
+	})
+
+	t.Run("omitted team_id defaults to empty", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		content := `
+[workspace]
+id = "risk"
+name = "Risk Management"
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`
+		err := os.WriteFile(configPath, []byte(content), 0644)
+		gt.NoError(t, err).Required()
+
+		configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1)
+		gt.Value(t, configs[0].SlackTeamID).Equal("")
+	})
+}

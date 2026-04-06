@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 )
@@ -72,6 +73,76 @@ func TestSlackConfigureMissingConfiguration(t *testing.T) {
 	if usecase == nil {
 		t.Error("Configure should return a valid usecase")
 	}
+}
+
+func TestSlackValidateWorkspaceTeamIDs(t *testing.T) {
+	t.Run("org-level app requires team_id on all workspaces", func(t *testing.T) {
+		s := config.NewSlackForTest("", "", "xoxb-token", "", "")
+		s.SetOrgLevelForTest(true, "")
+
+		configs := []*config.WorkspaceConfig{
+			{ID: "ws1", SlackTeamID: "T111"},
+			{ID: "ws2", SlackTeamID: ""},
+		}
+		err := s.ValidateWorkspaceTeamIDs(configs)
+		gt.Value(t, err).NotNil()
+	})
+
+	t.Run("org-level app with all team_ids set succeeds", func(t *testing.T) {
+		s := config.NewSlackForTest("", "", "xoxb-token", "", "")
+		s.SetOrgLevelForTest(true, "")
+
+		configs := []*config.WorkspaceConfig{
+			{ID: "ws1", SlackTeamID: "T111"},
+			{ID: "ws2", SlackTeamID: "T222"},
+		}
+		err := s.ValidateWorkspaceTeamIDs(configs)
+		gt.NoError(t, err)
+	})
+
+	t.Run("ws-level app with empty team_id succeeds", func(t *testing.T) {
+		s := config.NewSlackForTest("", "", "xoxb-token", "", "")
+		s.SetOrgLevelForTest(false, "T999")
+
+		configs := []*config.WorkspaceConfig{
+			{ID: "ws1", SlackTeamID: ""},
+		}
+		err := s.ValidateWorkspaceTeamIDs(configs)
+		gt.NoError(t, err)
+	})
+
+	t.Run("ws-level app with matching team_id succeeds", func(t *testing.T) {
+		s := config.NewSlackForTest("", "", "xoxb-token", "", "")
+		s.SetOrgLevelForTest(false, "T999")
+
+		configs := []*config.WorkspaceConfig{
+			{ID: "ws1", SlackTeamID: "T999"},
+		}
+		err := s.ValidateWorkspaceTeamIDs(configs)
+		gt.NoError(t, err)
+	})
+
+	t.Run("ws-level app with mismatched team_id fails", func(t *testing.T) {
+		s := config.NewSlackForTest("", "", "xoxb-token", "", "")
+		s.SetOrgLevelForTest(false, "T999")
+
+		configs := []*config.WorkspaceConfig{
+			{ID: "ws1", SlackTeamID: "T000"},
+		}
+		err := s.ValidateWorkspaceTeamIDs(configs)
+		gt.Value(t, err).NotNil()
+	})
+
+	t.Run("no bot token skips validation", func(t *testing.T) {
+		s := config.NewSlackForTest("", "", "", "", "")
+		s.SetOrgLevelForTest(false, "")
+
+		configs := []*config.WorkspaceConfig{
+			{ID: "ws1", SlackTeamID: "T000"},
+		}
+		err := s.ValidateWorkspaceTeamIDs(configs)
+		gt.NoError(t, err)
+	})
 }
 
 func TestSlackIsConfigured(t *testing.T) {

@@ -25,6 +25,11 @@ type Slack struct {
 	botToken      string
 	signingSecret string
 	noAuthUID     string
+
+	// Populated by DetectOrgLevel
+	isOrgLevel   bool
+	authTeamID   string
+	enterpriseID string
 }
 
 func (x *Slack) Flags() []cli.Flag {
@@ -143,6 +148,75 @@ func (x *Slack) GetSlackUserInfo(ctx context.Context, userID string) (*SlackUser
 		Email: user.Profile.Email,
 		Name:  user.RealName,
 	}, nil
+}
+
+// DetectOrgLevel calls auth.test to determine if the bot token belongs to an org-level app.
+// It stores the result (isOrgLevel, authTeamID) for later validation.
+// If botToken is empty, this is a no-op (Slack features disabled).
+func (x *Slack) DetectOrgLevel(ctx context.Context) error {
+	if x.botToken == "" {
+		return nil
+	}
+
+	api := slack.New(x.botToken)
+	resp, err := api.AuthTestContext(ctx)
+	if err != nil {
+		return goerr.Wrap(err, "failed to call auth.test to detect org-level app")
+	}
+
+	x.isOrgLevel = resp.EnterpriseID != ""
+	x.authTeamID = resp.TeamID
+	x.enterpriseID = resp.EnterpriseID
+	return nil
+}
+
+// ValidateWorkspaceTeamIDs validates slack.team_id settings in workspace configs
+// based on whether the app is org-level or workspace-level.
+//   - Org-Level App: all workspaces must have slack.team_id set
+//   - WS-Level App: slack.team_id may be empty; if set, must match auth.test team_id
+//
+// If botToken is empty (Slack disabled), validation is skipped.
+func (x *Slack) ValidateWorkspaceTeamIDs(configs []*WorkspaceConfig) error {
+	if x.botToken == "" {
+		return nil
+	}
+
+	if x.isOrgLevel {
+		for _, wc := range configs {
+			if wc.SlackTeamID == "" {
+				return goerr.New("org-level Slack app requires slack.team_id for all workspaces",
+					goerr.V("workspace_id", wc.ID),
+				)
+			}
+		}
+	} else {
+		for _, wc := range configs {
+			if wc.SlackTeamID != "" && wc.SlackTeamID != x.authTeamID {
+				return goerr.New("slack.team_id does not match the bot's workspace",
+					goerr.V("workspace_id", wc.ID),
+					goerr.V("configured_team_id", wc.SlackTeamID),
+					goerr.V("actual_team_id", x.authTeamID),
+				)
+			}
+		}
+	}
+
+	return nil
+}
+
+// IsOrgLevel returns whether the Slack app is org-level installed
+func (x *Slack) IsOrgLevel() bool {
+	return x.isOrgLevel
+}
+
+// AuthTeamID returns the team_id from auth.test response
+func (x *Slack) AuthTeamID() string {
+	return x.authTeamID
+}
+
+// EnterpriseID returns the enterprise_id from auth.test response (empty for WS-level apps)
+func (x *Slack) EnterpriseID() string {
+	return x.enterpriseID
 }
 
 // BotToken returns the Slack bot token

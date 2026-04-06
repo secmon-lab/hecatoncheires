@@ -68,8 +68,9 @@ func New(token string, opts ...Option) (Service, error) {
 	return c, nil
 }
 
-// ListJoinedChannels retrieves the list of channels the bot has joined
-func (c *client) ListJoinedChannels(ctx context.Context) ([]Channel, error) {
+// ListJoinedChannels retrieves the list of channels the bot has joined.
+// If teamID is non-empty, only channels in that workspace are returned (for org-level apps).
+func (c *client) ListJoinedChannels(ctx context.Context, teamID string) ([]Channel, error) {
 	var channels []Channel
 	var cursor string
 
@@ -81,6 +82,7 @@ func (c *client) ListJoinedChannels(ctx context.Context) ([]Channel, error) {
 			ExcludeArchived: true,
 			Limit:           100,
 			Cursor:          cursor,
+			TeamID:          teamID,
 		}
 
 		convs, nextCursor, err := c.api.GetConversationsContext(ctx, params)
@@ -185,9 +187,14 @@ func (c *client) GetUserInfo(ctx context.Context, userID string) (*User, error) 
 	}, nil
 }
 
-// ListUsers retrieves all non-deleted, non-bot users in the workspace
-func (c *client) ListUsers(ctx context.Context) ([]*User, error) {
-	users, err := c.api.GetUsersContext(ctx)
+// ListUsers retrieves all non-deleted, non-bot users.
+// For org-level apps, teamID is required per Slack API spec.
+func (c *client) ListUsers(ctx context.Context, teamID string) ([]*User, error) {
+	var opts []slack.GetUsersOption
+	if teamID != "" {
+		opts = append(opts, slack.GetUsersOptionTeamID(teamID))
+	}
+	users, err := c.api.GetUsersContext(ctx, opts...)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to list users")
 	}
@@ -211,14 +218,16 @@ func (c *client) ListUsers(ctx context.Context) ([]*User, error) {
 	return result, nil
 }
 
-// CreateChannel creates a new Slack channel for a case
-// The channel name is automatically generated from caseID, caseName, and the given prefix
-// If isPrivate is true, the channel is created as a private channel
-func (c *client) CreateChannel(ctx context.Context, caseID int64, caseName string, prefix string, isPrivate bool) (string, error) {
+// CreateChannel creates a new Slack channel for a case.
+// The channel name is automatically generated from caseID, caseName, and the given prefix.
+// If isPrivate is true, the channel is created as a private channel.
+// If teamID is non-empty, the channel is created in the specified workspace (for org-level apps).
+func (c *client) CreateChannel(ctx context.Context, caseID int64, caseName string, prefix string, isPrivate bool, teamID string) (string, error) {
 	channelName := GenerateRiskChannelName(caseID, caseName, prefix)
 	channel, err := c.api.CreateConversationContext(ctx, slack.CreateConversationParams{
 		ChannelName: channelName,
 		IsPrivate:   isPrivate,
+		TeamID:      teamID,
 	})
 	if err != nil {
 		return "", goerr.Wrap(err, "failed to create Slack channel", goerr.V("channelName", channelName), goerr.V("caseID", caseID), goerr.V("caseName", caseName))
@@ -456,9 +465,14 @@ func (c *client) GetBotUserID(ctx context.Context) (string, error) {
 	return c.botUserID, c.botUserIDErr
 }
 
-// ListUserGroups retrieves all user groups in the workspace
-func (c *client) ListUserGroups(ctx context.Context) ([]UserGroup, error) {
-	groups, err := c.api.GetUserGroupsContext(ctx)
+// ListUserGroups retrieves all user groups in the workspace.
+// If teamID is non-empty, only groups in that workspace are returned (for org-level apps).
+func (c *client) ListUserGroups(ctx context.Context, teamID string) ([]UserGroup, error) {
+	var opts []slack.GetUserGroupsOption
+	if teamID != "" {
+		opts = append(opts, slack.GetUserGroupsOptionTeamID(teamID))
+	}
+	groups, err := c.api.GetUserGroupsContext(ctx, opts...)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to list user groups")
 	}
@@ -472,6 +486,37 @@ func (c *client) ListUserGroups(ctx context.Context) ([]UserGroup, error) {
 		})
 	}
 	return result, nil
+}
+
+// ListTeams returns all workspaces accessible by the bot token.
+// For org-level apps, this returns all workspaces in the enterprise.
+func (c *client) ListTeams(ctx context.Context) ([]Team, error) {
+	var teams []Team
+	var cursor string
+
+	for {
+		params := slack.ListTeamsParameters{
+			Cursor: cursor,
+		}
+		slackTeams, nextCursor, err := c.api.ListTeamsContext(ctx, params)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to list teams")
+		}
+
+		for _, t := range slackTeams {
+			teams = append(teams, Team{
+				ID:   t.ID,
+				Name: t.Name,
+			})
+		}
+
+		if nextCursor == "" {
+			break
+		}
+		cursor = nextCursor
+	}
+
+	return teams, nil
 }
 
 // GetUserGroupMembers retrieves the member user IDs of a user group

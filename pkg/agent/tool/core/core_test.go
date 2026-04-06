@@ -1165,19 +1165,19 @@ func (m *mockSlackService) GetConversationReplies(_ context.Context, _, _ string
 func (m *mockSlackService) GetConversationHistory(_ context.Context, _ string, _ time.Time, _ int) ([]slackService.ConversationMessage, error) {
 	return nil, nil
 }
-func (m *mockSlackService) ListUsers(_ context.Context) ([]*slackService.User, error) {
+func (m *mockSlackService) ListUsers(_ context.Context, _ string) ([]*slackService.User, error) {
 	return nil, nil
 }
 func (m *mockSlackService) GetUserInfo(_ context.Context, _ string) (*slackService.User, error) {
 	return nil, nil
 }
-func (m *mockSlackService) ListJoinedChannels(_ context.Context) ([]slackService.Channel, error) {
+func (m *mockSlackService) ListJoinedChannels(_ context.Context, _ string) ([]slackService.Channel, error) {
 	return nil, nil
 }
 func (m *mockSlackService) GetChannelNames(_ context.Context, _ []string) (map[string]string, error) {
 	return nil, nil
 }
-func (m *mockSlackService) CreateChannel(_ context.Context, _ int64, _, _ string, _ bool) (string, error) {
+func (m *mockSlackService) CreateChannel(_ context.Context, _ int64, _, _ string, _ bool, _ string) (string, error) {
 	return "", nil
 }
 func (m *mockSlackService) GetConversationMembers(_ context.Context, _ string) ([]string, error) {
@@ -1200,7 +1200,10 @@ func (m *mockSlackService) UpdateMessage(_ context.Context, _, _ string, _ []gos
 func (m *mockSlackService) OpenView(_ context.Context, _ string, _ goslack.ModalViewRequest) error {
 	return nil
 }
-func (m *mockSlackService) ListUserGroups(_ context.Context) ([]slackService.UserGroup, error) {
+func (m *mockSlackService) ListUserGroups(_ context.Context, _ string) ([]slackService.UserGroup, error) {
+	return nil, nil
+}
+func (m *mockSlackService) ListTeams(_ context.Context) ([]slackService.Team, error) {
 	return nil, nil
 }
 func (m *mockSlackService) GetUserGroupMembers(_ context.Context, _ string) ([]string, error) {

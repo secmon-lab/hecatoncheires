@@ -159,3 +159,24 @@ func TestWorkspaceRegistry_Workspaces(t *testing.T) {
 	gt.Value(t, workspaces[1].ID).Equal("recruit")
 	gt.Value(t, workspaces[1].Name).Equal("Recruitment")
 }
+
+func TestWorkspaceEntry_SlackTeamID(t *testing.T) {
+	reg := model.NewWorkspaceRegistry()
+
+	reg.Register(&model.WorkspaceEntry{
+		Workspace:   model.Workspace{ID: "ws1", Name: "Workspace 1"},
+		SlackTeamID: "T111",
+	})
+	reg.Register(&model.WorkspaceEntry{
+		Workspace:   model.Workspace{ID: "ws2", Name: "Workspace 2"},
+		SlackTeamID: "",
+	})
+
+	entry1, err := reg.Get("ws1")
+	gt.NoError(t, err).Required()
+	gt.Value(t, entry1.SlackTeamID).Equal("T111")
+
+	entry2, err := reg.Get("ws2")
+	gt.NoError(t, err).Required()
+	gt.Value(t, entry2.SlackTeamID).Equal("")
+}

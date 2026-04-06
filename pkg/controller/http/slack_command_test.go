@@ -22,7 +22,7 @@ import (
 // mockSlackServiceForCommand is a minimal mock for slash command handler tests
 type mockSlackServiceForCommand struct{}
 
-func (m *mockSlackServiceForCommand) ListJoinedChannels(_ context.Context) ([]slacksvc.Channel, error) {
+func (m *mockSlackServiceForCommand) ListJoinedChannels(_ context.Context, _ string) ([]slacksvc.Channel, error) {
 	return nil, nil
 }
 func (m *mockSlackServiceForCommand) GetChannelNames(_ context.Context, _ []string) (map[string]string, error) {
@@ -31,10 +31,10 @@ func (m *mockSlackServiceForCommand) GetChannelNames(_ context.Context, _ []stri
 func (m *mockSlackServiceForCommand) GetUserInfo(_ context.Context, _ string) (*slacksvc.User, error) {
 	return nil, nil
 }
-func (m *mockSlackServiceForCommand) ListUsers(_ context.Context) ([]*slacksvc.User, error) {
+func (m *mockSlackServiceForCommand) ListUsers(_ context.Context, _ string) ([]*slacksvc.User, error) {
 	return nil, nil
 }
-func (m *mockSlackServiceForCommand) CreateChannel(_ context.Context, _ int64, _ string, _ string, _ bool) (string, error) {
+func (m *mockSlackServiceForCommand) CreateChannel(_ context.Context, _ int64, _ string, _ string, _ bool, _ string) (string, error) {
 	return "", nil
 }
 func (m *mockSlackServiceForCommand) GetConversationMembers(_ context.Context, _ string) ([]string, error) {
@@ -76,7 +76,10 @@ func (m *mockSlackServiceForCommand) GetBotUserID(_ context.Context) (string, er
 func (m *mockSlackServiceForCommand) OpenView(_ context.Context, _ string, _ goslack.ModalViewRequest) error {
 	return nil
 }
-func (m *mockSlackServiceForCommand) ListUserGroups(_ context.Context) ([]slacksvc.UserGroup, error) {
+func (m *mockSlackServiceForCommand) ListUserGroups(_ context.Context, _ string) ([]slacksvc.UserGroup, error) {
+	return nil, nil
+}
+func (m *mockSlackServiceForCommand) ListTeams(_ context.Context) ([]slacksvc.Team, error) {
 	return nil, nil
 }
 func (m *mockSlackServiceForCommand) GetUserGroupMembers(_ context.Context, _ string) ([]string, error) {
