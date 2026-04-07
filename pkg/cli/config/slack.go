@@ -19,6 +19,12 @@ type SlackUserInfo struct {
 	Name  string
 }
 
+// slackAuthAPI abstracts Slack API calls used by DetectOrgLevel for testability.
+type slackAuthAPI interface {
+	AuthTestContext(ctx context.Context) (*slack.AuthTestResponse, error)
+	ListTeamsContext(ctx context.Context, params slack.ListTeamsParameters) ([]slack.Team, string, error)
+}
+
 type Slack struct {
 	clientID      string
 	clientSecret  string
@@ -30,6 +36,9 @@ type Slack struct {
 	isOrgLevel   bool
 	authTeamID   string
 	enterpriseID string
+
+	// For testing: override the Slack API client used by DetectOrgLevel
+	authAPI slackAuthAPI
 }
 
 func (x *Slack) Flags() []cli.Flag {
@@ -150,24 +159,58 @@ func (x *Slack) GetSlackUserInfo(ctx context.Context, userID string) (*SlackUser
 	}, nil
 }
 
-// DetectOrgLevel calls auth.test to determine if the bot token belongs to an org-level app.
-// It stores the result (isOrgLevel, authTeamID) for later validation.
+// DetectOrgLevel calls auth.test and auth.teams.list to determine if the bot token
+// has access to multiple workspaces (multi-team / org-level behavior).
+// It stores the result (isOrgLevel, authTeamID, enterpriseID) for later validation.
 // If botToken is empty, this is a no-op (Slack features disabled).
 func (x *Slack) DetectOrgLevel(ctx context.Context) error {
 	if x.botToken == "" {
 		return nil
 	}
 
-	api := slack.New(x.botToken)
+	api := x.getAuthAPI()
+
 	resp, err := api.AuthTestContext(ctx)
 	if err != nil {
 		return goerr.Wrap(err, "failed to call auth.test to detect org-level app")
 	}
 
-	x.isOrgLevel = resp.EnterpriseID != ""
 	x.authTeamID = resp.TeamID
 	x.enterpriseID = resp.EnterpriseID
+
+	// Determine multi-team access by counting teams from auth.teams.list.
+	// An app with access to multiple teams needs team_id routing (org-level behavior).
+	// We only need to know if there's more than one team, so limit fetching early.
+	var teamCount int
+	var cursor string
+	for {
+		teams, nextCursor, err := api.ListTeamsContext(ctx, slack.ListTeamsParameters{Cursor: cursor, Limit: 2})
+		if err != nil {
+			return goerr.Wrap(err, "failed to call auth.teams.list to detect multi-team access")
+		}
+		teamCount += len(teams)
+		if teamCount > 1 || nextCursor == "" {
+			break
+		}
+		cursor = nextCursor
+	}
+
+	x.isOrgLevel = teamCount > 1
+
+	logging.Default().Info("detected Slack app team access",
+		"is_multi_team", x.isOrgLevel,
+		"enterprise_id", x.enterpriseID,
+		"auth_team_id", x.authTeamID,
+	)
+
 	return nil
+}
+
+func (x *Slack) getAuthAPI() slackAuthAPI {
+	if x.authAPI != nil {
+		return x.authAPI
+	}
+	return slack.New(x.botToken)
 }
 
 // ValidateWorkspaceTeamIDs validates slack.team_id settings in workspace configs
