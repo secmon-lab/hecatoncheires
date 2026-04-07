@@ -180,24 +180,24 @@ func (x *Slack) DetectOrgLevel(ctx context.Context) error {
 
 	// Determine multi-team access by counting teams from auth.teams.list.
 	// An app with access to multiple teams needs team_id routing (org-level behavior).
-	var allTeams []slack.Team
+	// We only need to know if there's more than one team, so limit fetching early.
+	var teamCount int
 	var cursor string
 	for {
-		teams, nextCursor, err := api.ListTeamsContext(ctx, slack.ListTeamsParameters{Cursor: cursor})
+		teams, nextCursor, err := api.ListTeamsContext(ctx, slack.ListTeamsParameters{Cursor: cursor, Limit: 2})
 		if err != nil {
 			return goerr.Wrap(err, "failed to call auth.teams.list to detect multi-team access")
 		}
-		allTeams = append(allTeams, teams...)
-		if nextCursor == "" {
+		teamCount += len(teams)
+		if teamCount > 1 || nextCursor == "" {
 			break
 		}
 		cursor = nextCursor
 	}
 
-	x.isOrgLevel = len(allTeams) > 1
+	x.isOrgLevel = teamCount > 1
 
 	logging.Default().Info("detected Slack app team access",
-		"team_count", len(allTeams),
 		"is_multi_team", x.isOrgLevel,
 		"enterprise_id", x.enterpriseID,
 		"auth_team_id", x.authTeamID,
