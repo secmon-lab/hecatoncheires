@@ -2,99 +2,94 @@
 const primaryColorRGB = '46, 92, 184'
 
 export const colors = {
-  // Primary blue gradient (from the logo)
+  // Primary — Logo Blue
   primary: {
     rgb: primaryColorRGB,
-    main: '#2E5CB8',      // Logo primary blue
-    light: '#5B8DEE',     // Light blue
-    dark: '#1E3A8A',      // Dark blue
-    gradient: 'linear-gradient(135deg, #2E5CB8 0%, #5B8DEE 50%, #4DD4D4 100%)',
+    main: '#2E5CB8',
+    light: '#5B8DEE',
+    dark: '#1E3A8A',
+    gradient: 'linear-gradient(135deg, #2E5CB8 0%, #5B8DEE 100%)',
     contrastText: '#ffffff',
   },
-  // Secondary colors matching the logo
+  // Secondary — Logo Cyan
   secondary: {
-    main: '#4DD4D4',      // Cyan/Aqua from logo
+    main: '#4DD4D4',
     light: '#7DE5E5',
     dark: '#2BA7A7',
     contrastText: '#ffffff',
   },
-  // Card colors from the design
+  // Card colors
   cards: {
-    orange: '#ff9800',
-    orangeLight: '#ffb74d',
-    orangeGradient: 'linear-gradient(135deg, #FFA726 0%, #FB8C00 100%)',
+    orange: '#F59E0B',
+    orangeLight: '#FEF3C7',
+    orangeGradient: '#F59E0B',
 
-    green: '#4caf50',
-    greenLight: '#81c784',
-    greenGradient: 'linear-gradient(135deg, #66BB6A 0%, #43A047 100%)',
+    green: '#10B981',
+    greenLight: '#D1FAE5',
+    greenGradient: '#10B981',
 
-    red: '#f44336',
-    redLight: '#e57373',
-    redGradient: 'linear-gradient(135deg, #EF5350 0%, #E53935 100%)',
+    red: '#EF4444',
+    redLight: '#FEE2E2',
+    redGradient: '#EF4444',
 
-    cyan: '#00bcd4',
-    cyanLight: '#4dd0e1',
-    cyanGradient: 'linear-gradient(135deg, #26C6DA 0%, #00ACC1 100%)',
+    cyan: '#06B6D4',
+    cyanLight: '#CFFAFE',
+    cyanGradient: '#06B6D4',
 
     purple: '#8B5CF6',
-    purpleLight: '#A78BFA',
-    purpleGradient: 'linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)',
+    purpleLight: '#EDE9FE',
+    purpleGradient: '#8B5CF6',
 
-    blue: '#2E5CB8',
-    blueLight: '#5B8DEE',
-    blueGradient: 'linear-gradient(135deg, #2E5CB8 0%, #5B8DEE 100%)',
+    blue: '#3B82F6',
+    blueLight: '#DBEAFE',
+    blueGradient: '#3B82F6',
   },
   success: {
-    main: '#4caf50',
-    light: '#81c784',
-    dark: '#388e3c',
+    main: '#10B981',
+    light: '#D1FAE5',
+    dark: '#059669',
   },
   warning: {
-    main: '#ff9800',
-    light: '#ffb74d',
-    dark: '#f57c00',
+    main: '#F59E0B',
+    light: '#FEF3C7',
+    dark: '#D97706',
   },
   error: {
-    main: '#f44336',
-    light: '#e57373',
-    dark: '#d32f2f',
+    main: '#EF4444',
+    light: '#FEE2E2',
+    dark: '#DC2626',
   },
   info: {
-    main: '#2196f3',
-    light: '#64b5f6',
-    dark: '#1976d2',
+    main: '#3B82F6',
+    light: '#DBEAFE',
+    dark: '#2563EB',
   },
-  // Background and surfaces
   background: {
-    default: '#f5f6fa',   // Light grayish blue
+    default: '#F1F3F5',
     paper: '#ffffff',
-    dark: '#2d3436',
+    dark: '#1E1E2D',
   },
-  // Text colors
   text: {
-    primary: '#1A1A2E',
+    primary: '#111827',
     secondary: '#6B7280',
-    disabled: '#bdc3c7',
+    disabled: '#D1D5DB',
     hint: '#9CA3AF',
     white: '#ffffff',
-    // Semantic text colors
-    heading: '#1A1A2E',
-    label: '#64748B',
+    heading: '#111827',
+    label: '#6B7280',
     body: '#374151',
     muted: '#6B7280',
   },
-  // Sidebar specific colors (white base, flat design)
   sidebar: {
-    background: '#ffffff',
-    backgroundSolid: '#ffffff',
-    text: '#2E5CB8',
-    textSecondary: `rgba(${primaryColorRGB}, 0.7)`,
-    active: '#E3F2FD',
-    hover: `rgba(${primaryColorRGB}, 0.08)`,
-    border: `rgba(${primaryColorRGB}, 0.12)`,
+    background: '#1E1E2D',
+    backgroundSolid: '#1E1E2D',
+    text: 'rgba(255, 255, 255, 0.6)',
+    textSecondary: 'rgba(255, 255, 255, 0.4)',
+    active: 'rgba(46, 92, 184, 0.2)',
+    hover: 'rgba(255, 255, 255, 0.05)',
+    border: 'rgba(255, 255, 255, 0.08)',
   },
-  // Divider
-  divider: '#e0e0e0',
+  divider: 'rgba(0, 0, 0, 0.06)',
 }
 
 export const spacing = {
@@ -108,19 +103,19 @@ export const spacing = {
 
 export const borderRadius = {
   sm: '4px',
-  md: '8px',
-  lg: '12px',
-  xl: '16px',
+  md: '6px',
+  lg: '10px',
+  xl: '14px',
   round: '50%',
 }
 
 export const shadows = {
-  sm: '0 2px 4px rgba(0, 0, 0, 0.1)',
-  md: '0 4px 8px rgba(0, 0, 0, 0.12)',
-  lg: '0 8px 16px rgba(0, 0, 0, 0.15)',
-  xl: '0 12px 24px rgba(0, 0, 0, 0.2)',
-  card: '0 2px 8px rgba(0, 0, 0, 0.1)',
-  cardHover: '0 4px 16px rgba(0, 0, 0, 0.15)',
+  sm: '0 1px 3px rgba(0, 0, 0, 0.06)',
+  md: '0 4px 6px rgba(0, 0, 0, 0.07)',
+  lg: '0 10px 25px rgba(0, 0, 0, 0.1)',
+  xl: '0 20px 40px rgba(0, 0, 0, 0.15)',
+  card: '0 1px 3px rgba(0, 0, 0, 0.06)',
+  cardHover: '0 4px 12px rgba(0, 0, 0, 0.1)',
 }
 
 export const transitions = {
@@ -130,15 +125,15 @@ export const transitions = {
 }
 
 export const typography = {
-  fontFamily: 'Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif',
+  fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   fontSize: {
     xs: '12px',
-    sm: '14px',
-    md: '16px',
-    lg: '18px',
-    xl: '24px',
-    xxl: '32px',
-    xxxl: '48px',
+    sm: '13px',
+    md: '14px',
+    lg: '16px',
+    xl: '20px',
+    xxl: '24px',
+    xxxl: '36px',
   },
   fontWeight: {
     light: 300,
@@ -147,43 +142,39 @@ export const typography = {
     semibold: 600,
     bold: 700,
   },
-  // Semantic typography scales
   pageTitle: {
-    fontSize: '32px',
+    fontSize: '24px',
     fontWeight: 600,
     lineHeight: 1.2,
   },
   sectionLabel: {
-    fontSize: '13px',
-    fontWeight: 500,
+    fontSize: '11px',
+    fontWeight: 600,
     lineHeight: 1.4,
   },
   bodyText: {
-    fontSize: '15px',
+    fontSize: '14px',
     fontWeight: 400,
     lineHeight: 1.6,
   },
 }
 
-// Card and panel tokens
 export const card = {
   background: '#ffffff',
-  border: '#E5E7EB',
-  radius: '12px',
+  border: 'rgba(0, 0, 0, 0.06)',
+  radius: '10px',
   padding: '20px 24px',
-  shadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
+  shadow: '0 1px 3px rgba(0, 0, 0, 0.06)',
 }
 
-// Level card (LIKELIHOOD/IMPACT)
 export const levelCard = {
-  background: 'linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 100%)',
-  border: '#E2E8F0',
+  background: '#F8F9FA',
+  border: 'rgba(0, 0, 0, 0.06)',
 }
 
-// Table tokens
 export const table = {
-  headerBg: '#F8FAFC',
-  headerBorder: '#E2E8F0',
-  rowBorder: '#F1F5F9',
-  rowHover: '#F8FAFC',
+  headerBg: '#F9FAFB',
+  headerBorder: 'rgba(0, 0, 0, 0.06)',
+  rowBorder: 'rgba(0, 0, 0, 0.04)',
+  rowHover: '#F9FAFB',
 }

@@ -55,13 +55,17 @@ Slack OAuth is used for user authentication via OpenID Connect (OIDC). The syste
      - `email` (to get user's email address)
 
    - **Bot Token Scopes**:
+     - `bookmarks:write` (to add bookmarks to case channels)
      - `channels:history` (to receive message events from public channels via Events API)
      - `channels:manage` (to create, rename, and invite users to public channels)
      - `channels:read` (to list and read channel information, and receive membership events)
      - `chat:write` (to post and update action notification messages in channels)
+     - `commands` (to receive slash command invocations)
      - `files:read` (to access file metadata and download files via `url_private`)
      - `groups:read` (to read private channel information and receive membership events)
      - `groups:write` (to create private channels for private cases)
+     - `team:read` (to list workspaces for org-level Slack app support)
+     - `usergroups:read` (to list user groups and their members for auto-invite)
      - `users:read` (to fetch user profile information including avatar images)
      - `users:read.email` (to access user email addresses from profiles)
 
@@ -413,12 +417,16 @@ This allows you to organize channels by different categories (e.g., `incident-*`
 
 For automatic channel creation and full Slack integration, the bot token must have the following scopes:
 
+- `bookmarks:write` - Add bookmarks to case channels
 - `channels:history` - Receive message events from public channels via Events API
 - `channels:manage` - Create, rename, and invite users to public channels
 - `channels:read` - List and read channel information, receive membership events
+- `chat:write` - Post and update action notification messages in channels
+- `commands` - Receive slash command invocations
 - `files:read` - Access file metadata and download files attached to messages
 - `groups:read` - Read private channel information, receive membership events for private channels
 - `groups:write` - Create private channels for private cases
+- `team:read` - List workspaces for org-level Slack app support
 - `usergroups:read` - List user groups and their members (for auto-invite feature)
 - `users:read` - Fetch user profile information (name, avatar)
 - `users:read.email` - Access user email addresses from profiles
@@ -594,7 +602,7 @@ Follow these steps to set up both authentication and webhooks:
 2. **Configure OAuth** (see [Configure OAuth & Permissions](#2-configure-oauth--permissions))
    - Set redirect URL: `${BASE_URL}/api/auth/callback`
    - Add user scopes: `openid`, `profile`, `email`
-   - Add bot scopes: `channels:history`, `channels:manage`, `channels:read`, `chat:write`, `files:read`, `groups:read`, `groups:write`, `usergroups:read`, `users:read`, `users:read.email`
+   - Add bot scopes: `bookmarks:write`, `channels:history`, `channels:manage`, `channels:read`, `chat:write`, `commands`, `files:read`, `groups:read`, `groups:write`, `team:read`, `usergroups:read`, `users:read`, `users:read.email`
 
 3. **Configure Events API** (see [Events API Setup](#events-api-setup))
    - Enable Event Subscriptions
@@ -975,6 +983,7 @@ These scopes are required for the Bot User OAuth Token (`xoxb-...`):
 
 | Scope | Slack API Method | Purpose | Code Location |
 |-------|-----------------|---------|---------------|
+| `bookmarks:write` | `bookmarks.add` | Add bookmarks to case channels | `pkg/service/slack/client.go` |
 | `channels:history` | Events API | Receive `message.channels` events from public channels | Webhook handler |
 | `channels:manage` | `conversations.create` | Create new public Slack channels for cases | `pkg/service/slack/client.go` |
 | `channels:manage` | `conversations.rename` | Rename Slack channels when case name changes | `pkg/service/slack/client.go` |
@@ -984,9 +993,11 @@ These scopes are required for the Bot User OAuth Token (`xoxb-...`):
 | `channels:read` | Events API | Receive `member_joined_channel` / `member_left_channel` events | `pkg/usecase/slack.go` |
 | `chat:write` | `chat.postMessage` | Post action notification messages to channels | `pkg/service/slack/client.go` |
 | `chat:write` | `chat.update` | Update action notification messages after button clicks | `pkg/service/slack/client.go` |
+| `commands` | Slash commands | Receive slash command invocations (e.g., case creation) | `pkg/controller/http/slack_command.go` |
 | `files:read` | Events API | Access file metadata attached to messages via `url_private` | Webhook handler |
 | `groups:read` | `conversations.info` | Read private channel info and receive membership events | `pkg/service/slack/client.go` |
 | `groups:write` | `conversations.create` | Create private Slack channels for private cases | `pkg/service/slack/client.go` |
+| `team:read` | `auth.teams.list` | List workspaces for org-level Slack app support | `pkg/service/slack/client.go` |
 | `usergroups:read` | `usergroups.list` | List user groups for handle name resolution (auto-invite) | `pkg/service/slack/client.go` |
 | `usergroups:read` | `usergroups.users.list` | Get user group members (auto-invite) | `pkg/service/slack/client.go` |
 | `users:read` | `users.info` | Fetch user profile (name, avatar) | `pkg/service/slack/client.go` |

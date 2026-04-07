@@ -4,7 +4,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: rgba(0, 0, 0, 0.5);
+  background-color: rgba(0, 0, 0, 0.4);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -24,8 +24,9 @@
 
 .modal {
   background-color: var(--bg-paper);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-xl);
+  border: 1px solid var(--border-default);
   max-width: 50rem;
   width: 90%;
   max-height: 90vh;
@@ -37,7 +38,7 @@
 
 @keyframes slideUp {
   from {
-    transform: translateY(20px);
+    transform: translateY(8px);
     opacity: 0;
   }
   to {
@@ -50,15 +51,15 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 24px;
-  border-bottom: 1px solid var(--divider);
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-bottom: 1px solid var(--border-light);
 }
 
 .title {
   margin: 0;
-  font-size: 20px;
+  font-size: 1rem;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text-heading);
 }
 
 .closeButton {
@@ -66,7 +67,7 @@
   border: none;
   padding: var(--spacing-xs);
   cursor: pointer;
-  color: var(--text-secondary);
+  color: var(--text-muted);
   border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
@@ -75,12 +76,12 @@
 }
 
 .closeButton:hover {
-  background-color: var(--bg-hover);
-  color: var(--text-primary);
+  background-color: var(--bg-muted);
+  color: var(--text-body);
 }
 
 .content {
-  padding: 24px;
+  padding: var(--spacing-lg);
   overflow-y: visible;
   flex: 1;
 }
@@ -88,8 +89,9 @@
 .footer {
   padding: var(--spacing-md) var(--spacing-lg);
   display: flex;
-  gap: var(--spacing-md-sm);
+  gap: var(--spacing-sm);
   justify-content: flex-end;
+  border-top: 1px solid var(--border-light);
 }
 
 @media (max-width: var(--breakpoint-mobile)) {
@@ -102,7 +104,7 @@
     width: 100%;
     max-width: 100%;
     max-height: 95vh;
-    border-radius: var(--radius-md) var(--radius-md) 0 0;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
     animation: slideUpMobile var(--transition-normal);
   }
 
@@ -116,21 +118,21 @@
   }
 
   .header {
-    padding: 20px 16px;
+    padding: var(--spacing-md);
   }
 
   .title {
-    font-size: 18px;
+    font-size: 1rem;
   }
 
   .content {
-    padding: 16px;
+    padding: var(--spacing-md);
   }
 
   .footer {
-    padding: 12px 16px;
+    padding: var(--spacing-md-sm) var(--spacing-md);
     flex-direction: column-reverse;
-    gap: 8px;
+    gap: var(--spacing-sm);
   }
 
   .footer > * {
@@ -146,6 +148,6 @@
 
   .header,
   .content {
-    padding: 20px;
+    padding: var(--spacing-md) var(--spacing-lg);
   }
 }

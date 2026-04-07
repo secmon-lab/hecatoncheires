@@ -1,33 +1,29 @@
 .topBar {
   height: var(--topbar-height);
   background-color: var(--topbar-bg);
-  border-bottom: none;
+  border-bottom: 1px solid var(--topbar-border);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 32px;
-  position: fixed;
+  padding: 0 var(--spacing-xl);
+  position: sticky;
   top: 0;
-  left: 0;
-  right: 0;
-  width: 100%;
-  z-index: 1000;
-  box-shadow: var(--shadow-md);
+  z-index: 100;
 }
 
 .leftSection {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: var(--spacing-md);
 }
 
 .menuButton {
-  width: var(--touch-target-min);
-  height: var(--touch-target-min);
+  width: 2.25rem;
+  height: 2.25rem;
   border: none;
   background-color: transparent;
   color: var(--topbar-icon);
-  border-radius: 50%;
+  border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -41,57 +37,24 @@
   color: var(--topbar-text);
 }
 
-.logo {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  text-decoration: none;
-  color: var(--topbar-text);
-  transition: opacity var(--transition-fast);
-}
-
-.logo:hover {
-  opacity: 0.8;
-}
-
-.logoIcon {
-  width: 40px;
-  height: 40px;
-  flex-shrink: 0;
-  object-fit: contain;
-}
-
-.logoText {
-  font-size: 18px;
-  font-weight: 300;
-  letter-spacing: 0.5px;
-  white-space: nowrap;
-}
-
-.title {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 300;
-  color: var(--topbar-text);
-}
-
 .actions {
   display: flex;
-  gap: 12px;
+  gap: var(--spacing-sm);
+  align-items: center;
 }
 
 .iconButton {
-  width: 40px;
-  height: 40px;
+  width: 2.25rem;
+  height: 2.25rem;
   border: none;
   background-color: transparent;
   color: var(--topbar-icon);
-  border-radius: 50%;
+  border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all var(--transition-fast);
 }
 
 .iconButton:hover {
@@ -101,15 +64,11 @@
 
 @media (max-width: var(--breakpoint-mobile)) {
   .topBar {
-    padding: 0 16px;
+    padding: 0 var(--spacing-md);
   }
 
   .leftSection {
-    gap: 8px;
-  }
-
-  .logoText {
-    display: none;
+    gap: var(--spacing-sm);
   }
 
   .iconButton {
@@ -120,6 +79,7 @@
 
 @media (min-width: calc(var(--breakpoint-mobile) + 1px)) and (max-width: var(--breakpoint-tablet)) {
   .topBar {
-    padding: 0 24px;
+    padding: 0 var(--spacing-lg);
   }
+
 }

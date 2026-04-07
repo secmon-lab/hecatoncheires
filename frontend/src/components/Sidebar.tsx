@@ -1,5 +1,5 @@
 import { Shield, ListTodo, Database, BookOpen } from 'lucide-react'
-import { NavLink } from 'react-router-dom'
+import { NavLink, Link } from 'react-router-dom'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
 import styles from './Sidebar.module.css'
@@ -22,6 +22,12 @@ export default function Sidebar({ isOpen = true, onClose }: SidebarProps) {
 
   return (
     <aside className={`${styles.sidebar} ${isOpen ? styles.open : ''}`}>
+      <div className={styles.brand}>
+        <Link to="/" className={styles.brandLink}>
+          <img src="/logo.png" alt={t('appName')} className={styles.brandLogo} />
+          <span className={styles.brandName}>{t('appName')}</span>
+        </Link>
+      </div>
       <nav className={styles.nav}>
         <NavLink
           to={`${wsPrefix}/cases`}

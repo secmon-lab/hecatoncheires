@@ -1,36 +1,68 @@
 .sidebar {
   width: var(--sidebar-width);
-  height: calc(100vh - var(--topbar-height));
+  height: 100vh;
   background: var(--sidebar-bg);
   display: flex;
   flex-direction: column;
   position: fixed;
   left: 0;
-  top: var(--topbar-height);
-  box-shadow: var(--shadow-sidebar);
-  transition: transform var(--transition-normal);
+  top: 0;
   z-index: 1000;
+  transition: transform var(--transition-normal);
+}
+
+.brand {
+  padding: var(--spacing-lg) var(--spacing-lg);
+  border-bottom: 1px solid var(--sidebar-border);
+}
+
+.brandLink {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md-sm);
+  text-decoration: none;
+  color: #ffffff;
+  transition: opacity var(--transition-fast);
+}
+
+.brandLink:hover {
+  opacity: 0.85;
+}
+
+.brandLogo {
+  width: 2rem;
+  height: 2rem;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+.brandName {
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
 }
 
 .nav {
   padding: var(--spacing-md) 0;
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 2px;
+  flex: 1;
 }
 
 .navItem {
   display: flex;
   align-items: center;
-  gap: var(--spacing-sm);
-  padding: var(--spacing-sm) var(--spacing-md);
-  min-height: var(--touch-target-min);
+  gap: var(--spacing-md-sm);
+  padding: var(--spacing-md-sm) var(--spacing-lg);
   color: var(--sidebar-text);
   text-decoration: none;
-  font-size: 14px;
-  font-weight: 400;
+  font-size: 0.875rem;
+  font-weight: 500;
   transition: all var(--transition-fast);
   position: relative;
+  border-left: 3px solid transparent;
 }
 
 .navItem:hover {
@@ -41,16 +73,7 @@
 .navItem.active {
   background-color: var(--sidebar-active-bg);
   color: var(--sidebar-text-active);
-}
-
-.navItem.active::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  background-color: var(--sidebar-active-border);
+  border-left-color: var(--sidebar-active-border);
 }
 
 @media (max-width: var(--breakpoint-tablet)) {
@@ -64,7 +87,7 @@
   }
 
   .navItem {
-    font-size: 15px;
-    padding: var(--spacing-md) 24px;
+    font-size: 0.9375rem;
+    padding: var(--spacing-md) var(--spacing-lg);
   }
 }
