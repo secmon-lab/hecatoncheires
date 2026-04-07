@@ -11,37 +11,36 @@
   transition: all var(--transition-fast);
   outline: none;
   text-transform: none;
-  letter-spacing: -0.01em;
-  font-size: 13px;
+  letter-spacing: 0;
+  font-size: 0.8125rem;
   box-shadow: none;
 }
 
 .button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-  box-shadow: none;
 }
 
 /* Sizes */
 .sm {
-  padding: 6px 12px;
+  padding: 6px 14px;
   min-height: 32px;
 }
 
 .md {
-  padding: 8px 16px;
-  min-height: 36px;
+  padding: 8px 20px;
+  min-height: 38px;
 }
 
 .lg {
-  padding: 10px 20px;
-  font-size: 14px;
-  min-height: 40px;
+  padding: 10px 24px;
+  font-size: 0.875rem;
+  min-height: 42px;
 }
 
 @media (max-width: var(--breakpoint-mobile)) {
   .button {
-    font-size: 13px;
+    font-size: 0.8125rem;
   }
 
   .sm {
@@ -56,19 +55,21 @@
 
   .lg {
     padding: 14px 32px;
-    font-size: 15px;
+    font-size: 0.9375rem;
     min-height: 52px;
   }
 }
 
-/* Variants — flat solid colors */
+/* Primary — Crimson accent */
 .primary {
   background-color: var(--color-primary);
   color: var(--text-white);
+  box-shadow: 0 1px 3px rgba(220, 38, 38, 0.3);
 }
 
 .primary:hover:not(:disabled) {
   background-color: var(--color-primary-dark);
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
 }
 
 .primary:active:not(:disabled) {
@@ -105,7 +106,6 @@
   background-color: var(--bg-paper);
   color: var(--text-body);
   border: 1px solid var(--border-default);
-  box-shadow: none;
 }
 
 .outline:hover:not(:disabled) {
@@ -117,12 +117,10 @@
   background-color: var(--bg-muted);
 }
 
-/* Secondary outline for less emphasis */
 .outlineSecondary {
   background-color: transparent;
   color: var(--text-muted);
   border: 1px solid var(--border-default);
-  box-shadow: none;
 }
 
 .outlineSecondary:hover:not(:disabled) {
@@ -139,7 +137,6 @@
   background-color: transparent;
   color: var(--text-muted);
   border: none;
-  box-shadow: none;
 }
 
 .ghost:hover:not(:disabled) {

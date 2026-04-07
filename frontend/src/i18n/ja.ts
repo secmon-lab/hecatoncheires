@@ -10,6 +10,7 @@ export const ja: Messages = {
   navActions: 'アクション',
   navKnowledges: 'ナレッジ',
   navSources: 'ソース',
+  search: '検索',
 
   // Common buttons
   btnCreate: '作成',

@@ -5,14 +5,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 var(--spacing-lg);
-  position: fixed;
+  padding: 0 var(--spacing-xl);
+  position: sticky;
   top: 0;
-  left: 0;
-  right: 0;
-  width: 100%;
-  z-index: 1000;
-  box-shadow: none;
+  z-index: 100;
 }
 
 .leftSection {
@@ -22,8 +18,8 @@
 }
 
 .menuButton {
-  width: var(--touch-target-min);
-  height: var(--touch-target-min);
+  width: 2.25rem;
+  height: 2.25rem;
   border: none;
   background-color: transparent;
   color: var(--topbar-icon);
@@ -41,38 +37,40 @@
   color: var(--topbar-text);
 }
 
-.logo {
+.searchWrapper {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: var(--spacing-sm);
-  text-decoration: none;
-  color: var(--topbar-text);
-  transition: opacity var(--transition-fast);
 }
 
-.logo:hover {
-  opacity: 0.7;
+.searchIcon {
+  position: absolute;
+  left: var(--spacing-md-sm);
+  color: var(--text-muted);
+  pointer-events: none;
 }
 
-.logoIcon {
-  width: 2rem;
-  height: 2rem;
-  flex-shrink: 0;
-  object-fit: contain;
+.searchInput {
+  padding: var(--spacing-sm) var(--spacing-md) var(--spacing-sm) 2.25rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  font-size: 0.8125rem;
+  color: var(--text-body);
+  background: var(--bg-subtle);
+  outline: none;
+  width: 15rem;
+  transition: all var(--transition-fast);
+  font-family: inherit;
 }
 
-.logoText {
-  font-size: 0.9375rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  white-space: nowrap;
+.searchInput:focus {
+  border-color: var(--color-primary);
+  background: var(--bg-paper);
+  box-shadow: 0 0 0 2px var(--color-primary-shadow);
 }
 
-.title {
-  margin: 0;
-  font-size: 0.9375rem;
-  font-weight: 600;
-  color: var(--topbar-text);
+.searchInput::placeholder {
+  color: var(--text-muted);
 }
 
 .actions {
@@ -82,8 +80,8 @@
 }
 
 .iconButton {
-  width: 2rem;
-  height: 2rem;
+  width: 2.25rem;
+  height: 2.25rem;
   border: none;
   background-color: transparent;
   color: var(--topbar-icon);
@@ -109,7 +107,7 @@
     gap: var(--spacing-sm);
   }
 
-  .logoText {
+  .searchWrapper {
     display: none;
   }
 
@@ -122,5 +120,9 @@
 @media (min-width: calc(var(--breakpoint-mobile) + 1px)) and (max-width: var(--breakpoint-tablet)) {
   .topBar {
     padding: 0 var(--spacing-lg);
+  }
+
+  .searchInput {
+    width: 12rem;
   }
 }

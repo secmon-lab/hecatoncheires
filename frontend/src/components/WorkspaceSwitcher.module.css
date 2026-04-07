@@ -5,10 +5,9 @@
 }
 
 .label {
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   font-weight: 500;
   color: var(--topbar-text);
-  opacity: 0.9;
 }
 
 .trigger {
@@ -18,7 +17,7 @@
   background: transparent;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
-  padding: var(--spacing-xs) var(--spacing-sm);
+  padding: var(--spacing-xs) var(--spacing-md-sm);
   cursor: pointer;
   transition: all var(--transition-fast);
   color: var(--topbar-text);
@@ -32,7 +31,7 @@
 }
 
 .icon {
-  opacity: 0.7;
+  opacity: 0.5;
 }
 
 .dropdown {
@@ -42,7 +41,7 @@
   min-width: 12rem;
   background-color: var(--bg-paper);
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   z-index: 1001;
   overflow: hidden;
@@ -53,7 +52,7 @@
   padding: var(--spacing-sm) var(--spacing-md);
   text-decoration: none;
   color: var(--text-body);
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   transition: background-color var(--transition-fast);
 }
 
@@ -63,6 +62,6 @@
 
 .active {
   background-color: var(--bg-highlight);
-  font-weight: 500;
+  font-weight: 600;
   color: var(--color-primary);
 }

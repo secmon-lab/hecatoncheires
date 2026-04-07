@@ -12,28 +12,28 @@ export default function Dashboard() {
       unit: 'GB',
       link: t('dashGetMoreSpace'),
       icon: Copy,
-      gradient: 'linear-gradient(135deg, #FFA726 0%, #FB8C00 100%)',
+      gradient: 'linear-gradient(135deg, #DC2626 0%, #EF4444 100%)',
     },
     {
       label: t('dashRevenue'),
       value: '$34,245',
       link: t('dashLast24Hours'),
       icon: DollarSign,
-      gradient: 'linear-gradient(135deg, #66BB6A 0%, #43A047 100%)',
+      gradient: 'linear-gradient(135deg, #DC2626 0%, #F87171 100%)',
     },
     {
       label: t('dashFixedIssues'),
       value: '75',
       link: t('dashTrackedGithub'),
       icon: AlertCircle,
-      gradient: 'linear-gradient(135deg, #EF5350 0%, #E53935 100%)',
+      gradient: 'linear-gradient(135deg, #B91C1C 0%, #DC2626 100%)',
     },
     {
       label: t('dashFollowers'),
       value: '+245',
       link: t('dashJustUpdated'),
       icon: Twitter,
-      gradient: 'linear-gradient(135deg, #26C6DA 0%, #00ACC1 100%)',
+      gradient: 'linear-gradient(135deg, #991B1B 0%, #B91C1C 100%)',
     },
   ]
 

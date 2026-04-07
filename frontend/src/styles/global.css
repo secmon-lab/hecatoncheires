@@ -1,46 +1,46 @@
 :root {
-  /* Primary colors */
-  --color-primary-rgb: 59, 130, 246;
-  --color-primary: #3B82F6;
-  --color-primary-light: #60A5FA;
-  --color-primary-dark: #1D4ED8;
-  --color-primary-shadow: rgba(var(--color-primary-rgb), 0.15);
-  --gradient-primary: linear-gradient(135deg, #3B82F6 0%, #60A5FA 100%);
+  /* Primary accent — Crimson Red */
+  --color-primary-rgb: 220, 38, 38;
+  --color-primary: #DC2626;
+  --color-primary-light: #EF4444;
+  --color-primary-dark: #B91C1C;
+  --color-primary-shadow: rgba(var(--color-primary-rgb), 0.2);
+  --gradient-primary: linear-gradient(135deg, #DC2626 0%, #EF4444 100%);
   --color-primary-contrast: #ffffff;
 
-  /* Secondary colors */
-  --color-secondary: #06B6D4;
-  --color-secondary-light: #22D3EE;
-  --color-secondary-dark: #0891B2;
+  /* Secondary accent — Warm Orange */
+  --color-secondary: #F59E0B;
+  --color-secondary-light: #FBBF24;
+  --color-secondary-dark: #D97706;
 
-  /* Flat card colors (no gradients) */
+  /* Flat card accent colors */
   --gradient-orange: #F59E0B;
   --gradient-green: #10B981;
-  --gradient-red: #EF4444;
+  --gradient-red: #DC2626;
   --gradient-cyan: #06B6D4;
   --gradient-purple: #8B5CF6;
   --gradient-blue: #3B82F6;
 
-  /* Status colors (softer, muted tones) */
+  /* Status colors */
   --color-success: #10B981;
   --color-success-light: #D1FAE5;
   --color-success-dark: #059669;
   --color-warning: #F59E0B;
   --color-warning-light: #FEF3C7;
   --color-warning-dark: #D97706;
-  --color-error-rgb: 239, 68, 68;
-  --color-error: #EF4444;
+  --color-error-rgb: 220, 38, 38;
+  --color-error: #DC2626;
   --color-error-light: #FEE2E2;
-  --color-error-dark: #DC2626;
+  --color-error-dark: #B91C1C;
   --color-error-shadow: rgba(var(--color-error-rgb), 0.1);
   --color-info: #3B82F6;
   --color-info-light: #DBEAFE;
   --color-info-dark: #2563EB;
 
   /* Background colors */
-  --bg-default: #F8F9FA;
+  --bg-default: #F1F3F5;
   --bg-paper: #ffffff;
-  --bg-dark: #111827;
+  --bg-dark: #1E1E2D;
   --bg-hover: #F3F4F6;
 
   /* Text colors */
@@ -56,27 +56,27 @@
   --text-body: #374151;
   --text-muted: #9CA3AF;
 
-  /* TopBar colors (light theme) */
+  /* TopBar (light, content-area only) */
   --topbar-bg: #ffffff;
   --topbar-text: #111827;
   --topbar-icon: #6B7280;
   --topbar-hover: rgba(0, 0, 0, 0.04);
-  --topbar-height: 56px;
+  --topbar-height: 60px;
   --topbar-border: rgba(0, 0, 0, 0.06);
 
-  /* Sidebar colors */
-  --sidebar-bg: #ffffff;
-  --sidebar-bg-solid: #ffffff;
-  --sidebar-text: #6B7280;
-  --sidebar-text-active: #111827;
-  --sidebar-text-secondary: rgba(var(--color-primary-rgb), 0.7);
-  --sidebar-active-bg: rgba(59, 130, 246, 0.06);
-  --sidebar-hover-bg: rgba(0, 0, 0, 0.02);
-  --sidebar-active-border: #3B82F6;
-  --sidebar-active: rgba(59, 130, 246, 0.06);
-  --sidebar-hover: rgba(0, 0, 0, 0.04);
-  --sidebar-border: rgba(0, 0, 0, 0.06);
-  --sidebar-width: 240px;
+  /* Sidebar (dark theme) */
+  --sidebar-bg: #1E1E2D;
+  --sidebar-bg-solid: #1E1E2D;
+  --sidebar-text: rgba(255, 255, 255, 0.6);
+  --sidebar-text-active: #ffffff;
+  --sidebar-text-secondary: rgba(255, 255, 255, 0.4);
+  --sidebar-active-bg: rgba(220, 38, 38, 0.15);
+  --sidebar-hover-bg: rgba(255, 255, 255, 0.05);
+  --sidebar-active-border: #DC2626;
+  --sidebar-active: rgba(220, 38, 38, 0.15);
+  --sidebar-hover: rgba(255, 255, 255, 0.05);
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-width: 260px;
 
   /* Divider */
   --divider: rgba(0, 0, 0, 0.06);
@@ -94,23 +94,23 @@
   /* Border radius */
   --radius-sm: 4px;
   --radius-md: 6px;
-  --radius-lg: 8px;
-  --radius-xl: 12px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
 
   /* Card & Panel styles */
   --card-bg: #ffffff;
-  --card-border: rgba(0, 0, 0, 0.08);
-  --card-radius: 8px;
-  --card-padding: 16px 20px;
-  --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --card-border: rgba(0, 0, 0, 0.06);
+  --card-radius: 10px;
+  --card-padding: 20px 24px;
+  --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 
-  /* Level card (LIKELIHOOD/IMPACT) */
+  /* Level card */
   --level-card-bg: #F8F9FA;
   --level-card-border: rgba(0, 0, 0, 0.06);
 
   /* Table styles */
   --table-header-bg: #F9FAFB;
-  --table-header-border: rgba(0, 0, 0, 0.08);
+  --table-header-border: rgba(0, 0, 0, 0.06);
   --table-row-border: rgba(0, 0, 0, 0.04);
   --table-row-hover: #F9FAFB;
 
@@ -124,25 +124,21 @@
   --bg-muted: #F3F4F6;
   --bg-highlight: #F8F9FA;
 
-  /* Shadows (minimal, border-first approach) */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.06);
-  --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.08);
-  --shadow-xl: 0 8px 24px rgba(0, 0, 0, 0.12);
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-card-hover: 0 2px 8px rgba(0, 0, 0, 0.08);
-  --shadow-sidebar: 1px 0 0 rgba(0, 0, 0, 0.06);
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
+  --shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 20px 40px rgba(0, 0, 0, 0.15);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.1);
+  --shadow-sidebar: none;
 
   /* Transitions */
   --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-normal: 300ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-slow: 500ms cubic-bezier(0.4, 0, 0.2, 1);
 
-  /* Breakpoints
-   * NOTE: These values must match the breakpoints defined in src/styles/breakpoints.ts
-   * The TypeScript file is the single source of truth for media query logic.
-   * If you need to change breakpoints, update breakpoints.ts first, then update these CSS variables.
-   */
+  /* Breakpoints */
   --breakpoint-mobile: 767px;
   --breakpoint-tablet: 1023px;
   --breakpoint-desktop: 1024px;

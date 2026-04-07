@@ -1,5 +1,4 @@
-import { Bell, Menu } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Bell, Menu, Search } from 'lucide-react'
 import { useIsMobileOrTablet } from '../hooks/useMediaQuery'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
@@ -21,22 +20,27 @@ export default function TopBar({ onToggleSidebar }: TopBarProps) {
       <div className={styles.leftSection}>
         {isMobileOrTablet && onToggleSidebar && (
           <button className={styles.menuButton} onClick={onToggleSidebar}>
-            <Menu size={24} />
+            <Menu size={20} />
           </button>
         )}
-        <Link to="/" className={styles.logo}>
-          <img src="/logo.png" alt={t('appName')} className={styles.logoIcon} />
-          <span className={styles.logoText}>{t('appName')}</span>
-        </Link>
         <WorkspaceSwitcher
           current={currentWorkspace}
           workspaces={workspaces}
         />
+        <div className={styles.searchWrapper}>
+          <Search size={16} className={styles.searchIcon} />
+          <input
+            type="text"
+            className={styles.searchInput}
+            placeholder={t('search')}
+            readOnly
+          />
+        </div>
       </div>
 
       <div className={styles.actions}>
         <button className={styles.iconButton}>
-          <Bell size={20} />
+          <Bell size={18} />
         </button>
         <UserMenu />
       </div>

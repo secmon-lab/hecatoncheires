@@ -1,24 +1,24 @@
 // RGB color values for dynamic rgba usage
-const primaryColorRGB = '59, 130, 246'
+const primaryColorRGB = '220, 38, 38'
 
 export const colors = {
-  // Primary blue
+  // Primary — Crimson Red
   primary: {
     rgb: primaryColorRGB,
-    main: '#3B82F6',
-    light: '#60A5FA',
-    dark: '#1D4ED8',
-    gradient: 'linear-gradient(135deg, #3B82F6 0%, #60A5FA 100%)',
+    main: '#DC2626',
+    light: '#EF4444',
+    dark: '#B91C1C',
+    gradient: 'linear-gradient(135deg, #DC2626 0%, #EF4444 100%)',
     contrastText: '#ffffff',
   },
-  // Secondary colors
+  // Secondary — Warm Orange
   secondary: {
-    main: '#06B6D4',
-    light: '#22D3EE',
-    dark: '#0891B2',
+    main: '#F59E0B',
+    light: '#FBBF24',
+    dark: '#D97706',
     contrastText: '#ffffff',
   },
-  // Card colors (flat)
+  // Card colors
   cards: {
     orange: '#F59E0B',
     orangeLight: '#FEF3C7',
@@ -28,9 +28,9 @@ export const colors = {
     greenLight: '#D1FAE5',
     greenGradient: '#10B981',
 
-    red: '#EF4444',
+    red: '#DC2626',
     redLight: '#FEE2E2',
-    redGradient: '#EF4444',
+    redGradient: '#DC2626',
 
     cyan: '#06B6D4',
     cyanLight: '#CFFAFE',
@@ -55,45 +55,40 @@ export const colors = {
     dark: '#D97706',
   },
   error: {
-    main: '#EF4444',
+    main: '#DC2626',
     light: '#FEE2E2',
-    dark: '#DC2626',
+    dark: '#B91C1C',
   },
   info: {
     main: '#3B82F6',
     light: '#DBEAFE',
     dark: '#2563EB',
   },
-  // Background and surfaces
   background: {
-    default: '#F8F9FA',
+    default: '#F1F3F5',
     paper: '#ffffff',
-    dark: '#111827',
+    dark: '#1E1E2D',
   },
-  // Text colors
   text: {
     primary: '#111827',
     secondary: '#6B7280',
     disabled: '#D1D5DB',
     hint: '#9CA3AF',
     white: '#ffffff',
-    // Semantic text colors
     heading: '#111827',
     label: '#6B7280',
     body: '#374151',
     muted: '#9CA3AF',
   },
-  // Sidebar specific colors
   sidebar: {
-    background: '#ffffff',
-    backgroundSolid: '#ffffff',
-    text: '#6B7280',
-    textSecondary: `rgba(${primaryColorRGB}, 0.7)`,
-    active: 'rgba(59, 130, 246, 0.06)',
-    hover: 'rgba(0, 0, 0, 0.04)',
-    border: 'rgba(0, 0, 0, 0.06)',
+    background: '#1E1E2D',
+    backgroundSolid: '#1E1E2D',
+    text: 'rgba(255, 255, 255, 0.6)',
+    textSecondary: 'rgba(255, 255, 255, 0.4)',
+    active: 'rgba(220, 38, 38, 0.15)',
+    hover: 'rgba(255, 255, 255, 0.05)',
+    border: 'rgba(255, 255, 255, 0.08)',
   },
-  // Divider
   divider: 'rgba(0, 0, 0, 0.06)',
 }
 
@@ -109,18 +104,18 @@ export const spacing = {
 export const borderRadius = {
   sm: '4px',
   md: '6px',
-  lg: '8px',
-  xl: '12px',
+  lg: '10px',
+  xl: '14px',
   round: '50%',
 }
 
 export const shadows = {
-  sm: '0 1px 2px rgba(0, 0, 0, 0.04)',
-  md: '0 2px 4px rgba(0, 0, 0, 0.06)',
-  lg: '0 4px 12px rgba(0, 0, 0, 0.08)',
-  xl: '0 8px 24px rgba(0, 0, 0, 0.12)',
-  card: '0 1px 2px rgba(0, 0, 0, 0.04)',
-  cardHover: '0 2px 8px rgba(0, 0, 0, 0.08)',
+  sm: '0 1px 3px rgba(0, 0, 0, 0.06)',
+  md: '0 4px 6px rgba(0, 0, 0, 0.07)',
+  lg: '0 10px 25px rgba(0, 0, 0, 0.1)',
+  xl: '0 20px 40px rgba(0, 0, 0, 0.15)',
+  card: '0 1px 3px rgba(0, 0, 0, 0.06)',
+  cardHover: '0 4px 12px rgba(0, 0, 0, 0.1)',
 }
 
 export const transitions = {
@@ -147,7 +142,6 @@ export const typography = {
     semibold: 600,
     bold: 700,
   },
-  // Semantic typography scales
   pageTitle: {
     fontSize: '24px',
     fontWeight: 600,
@@ -165,25 +159,22 @@ export const typography = {
   },
 }
 
-// Card and panel tokens
 export const card = {
   background: '#ffffff',
-  border: 'rgba(0, 0, 0, 0.08)',
-  radius: '8px',
-  padding: '16px 20px',
-  shadow: '0 1px 2px rgba(0, 0, 0, 0.04)',
+  border: 'rgba(0, 0, 0, 0.06)',
+  radius: '10px',
+  padding: '20px 24px',
+  shadow: '0 1px 3px rgba(0, 0, 0, 0.06)',
 }
 
-// Level card (LIKELIHOOD/IMPACT)
 export const levelCard = {
   background: '#F8F9FA',
   border: 'rgba(0, 0, 0, 0.06)',
 }
 
-// Table tokens
 export const table = {
   headerBg: '#F9FAFB',
-  headerBorder: 'rgba(0, 0, 0, 0.08)',
+  headerBorder: 'rgba(0, 0, 0, 0.06)',
   rowBorder: 'rgba(0, 0, 0, 0.04)',
   rowHover: '#F9FAFB',
 }
