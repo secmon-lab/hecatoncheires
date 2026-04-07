@@ -3,7 +3,7 @@ import type { Messages } from './keys'
 export const ja: Messages = {
   // App
   appName: 'Hecatoncheires',
-  appSubtitle: 'AI ネイティブ プロジェクト/ケース管理プラットフォーム',
+  appSubtitle: 'AI ネイティブ ケース管理プラットフォーム',
 
   // Navigation
   navCases: 'ケース',
