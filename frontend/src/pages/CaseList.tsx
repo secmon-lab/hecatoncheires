@@ -26,9 +26,9 @@ interface Case {
   isPrivate: boolean
   accessDenied: boolean
   reporterID?: string
-  reporter?: { id: string; realName: string; imageUrl?: string }
+  reporter?: { id: string; name: string; realName: string; imageUrl?: string }
   assigneeIDs: string[]
-  assignees: Array<{ id: string; realName: string; imageUrl?: string }>
+  assignees: Array<{ id: string; name: string; realName: string; imageUrl?: string }>
   slackChannelID: string
   slackChannelName: string
   createdAt: string
