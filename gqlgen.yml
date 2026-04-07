@@ -54,6 +54,8 @@ models:
         resolver: true
       knowledges:
         resolver: true
+      reporter:
+        resolver: true
       assignees:
         resolver: true
       slackChannelName:

@@ -95,6 +95,8 @@ type ComplexityRoot struct {
 		ID               func(childComplexity int) int
 		IsPrivate        func(childComplexity int) int
 		Knowledges       func(childComplexity int) int
+		Reporter         func(childComplexity int) int
+		ReporterID       func(childComplexity int) int
 		SlackChannelID   func(childComplexity int) int
 		SlackChannelName func(childComplexity int) int
 		SlackChannelURL  func(childComplexity int) int
@@ -329,6 +331,8 @@ type ActionResolver interface {
 type CaseResolver interface {
 	ChannelUserCount(ctx context.Context, obj *graphql1.Case) (int, error)
 	ChannelUsers(ctx context.Context, obj *graphql1.Case, limit *int, offset *int, filter *string) (*graphql1.ChannelUserConnection, error)
+
+	Reporter(ctx context.Context, obj *graphql1.Case) (*graphql1.SlackUser, error)
 
 	Assignees(ctx context.Context, obj *graphql1.Case) ([]*graphql1.SlackUser, error)
 
@@ -616,6 +620,18 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Case.Knowledges(childComplexity), true
+	case "Case.reporter":
+		if e.complexity.Case.Reporter == nil {
+			break
+		}
+
+		return e.complexity.Case.Reporter(childComplexity), true
+	case "Case.reporterID":
+		if e.complexity.Case.ReporterID == nil {
+			break
+		}
+
+		return e.complexity.Case.ReporterID(childComplexity), true
 	case "Case.slackChannelID":
 		if e.complexity.Case.SlackChannelID == nil {
 			break
@@ -1912,6 +1928,8 @@ type Case {
   accessDenied: Boolean!
   channelUserCount: Int!
   channelUsers(limit: Int, offset: Int, filter: String): ChannelUserConnection!
+  reporterID: String
+  reporter: SlackUser
   assigneeIDs: [String!]!
   assignees: [SlackUser!]!
   slackChannelID: String
@@ -2960,6 +2978,10 @@ func (ec *executionContext) fieldContext_Action_case(_ context.Context, field gr
 				return ec.fieldContext_Case_channelUserCount(ctx, field)
 			case "channelUsers":
 				return ec.fieldContext_Case_channelUsers(ctx, field)
+			case "reporterID":
+				return ec.fieldContext_Case_reporterID(ctx, field)
+			case "reporter":
+				return ec.fieldContext_Case_reporter(ctx, field)
 			case "assigneeIDs":
 				return ec.fieldContext_Case_assigneeIDs(ctx, field)
 			case "assignees":
@@ -3814,6 +3836,74 @@ func (ec *executionContext) fieldContext_Case_channelUsers(ctx context.Context, 
 	if fc.Args, err = ec.field_Case_channelUsers_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Case_reporterID(ctx context.Context, field graphql.CollectedField, obj *graphql1.Case) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Case_reporterID,
+		func(ctx context.Context) (any, error) {
+			return obj.ReporterID, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Case_reporterID(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Case",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Case_reporter(ctx context.Context, field graphql.CollectedField, obj *graphql1.Case) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Case_reporter,
+		func(ctx context.Context) (any, error) {
+			return ec.resolvers.Case().Reporter(ctx, obj)
+		},
+		nil,
+		ec.marshalOSlackUser2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackUser,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Case_reporter(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Case",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_SlackUser_id(ctx, field)
+			case "name":
+				return ec.fieldContext_SlackUser_name(ctx, field)
+			case "realName":
+				return ec.fieldContext_SlackUser_realName(ctx, field)
+			case "imageUrl":
+				return ec.fieldContext_SlackUser_imageUrl(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type SlackUser", field.Name)
+		},
 	}
 	return fc, nil
 }
@@ -5320,6 +5410,10 @@ func (ec *executionContext) fieldContext_Knowledge_case(_ context.Context, field
 				return ec.fieldContext_Case_channelUserCount(ctx, field)
 			case "channelUsers":
 				return ec.fieldContext_Case_channelUsers(ctx, field)
+			case "reporterID":
+				return ec.fieldContext_Case_reporterID(ctx, field)
+			case "reporter":
+				return ec.fieldContext_Case_reporter(ctx, field)
 			case "assigneeIDs":
 				return ec.fieldContext_Case_assigneeIDs(ctx, field)
 			case "assignees":
@@ -5731,6 +5825,10 @@ func (ec *executionContext) fieldContext_Mutation_createCase(ctx context.Context
 				return ec.fieldContext_Case_channelUserCount(ctx, field)
 			case "channelUsers":
 				return ec.fieldContext_Case_channelUsers(ctx, field)
+			case "reporterID":
+				return ec.fieldContext_Case_reporterID(ctx, field)
+			case "reporter":
+				return ec.fieldContext_Case_reporter(ctx, field)
 			case "assigneeIDs":
 				return ec.fieldContext_Case_assigneeIDs(ctx, field)
 			case "assignees":
@@ -5812,6 +5910,10 @@ func (ec *executionContext) fieldContext_Mutation_updateCase(ctx context.Context
 				return ec.fieldContext_Case_channelUserCount(ctx, field)
 			case "channelUsers":
 				return ec.fieldContext_Case_channelUsers(ctx, field)
+			case "reporterID":
+				return ec.fieldContext_Case_reporterID(ctx, field)
+			case "reporter":
+				return ec.fieldContext_Case_reporter(ctx, field)
 			case "assigneeIDs":
 				return ec.fieldContext_Case_assigneeIDs(ctx, field)
 			case "assignees":
@@ -5934,6 +6036,10 @@ func (ec *executionContext) fieldContext_Mutation_closeCase(ctx context.Context,
 				return ec.fieldContext_Case_channelUserCount(ctx, field)
 			case "channelUsers":
 				return ec.fieldContext_Case_channelUsers(ctx, field)
+			case "reporterID":
+				return ec.fieldContext_Case_reporterID(ctx, field)
+			case "reporter":
+				return ec.fieldContext_Case_reporter(ctx, field)
 			case "assigneeIDs":
 				return ec.fieldContext_Case_assigneeIDs(ctx, field)
 			case "assignees":
@@ -6015,6 +6121,10 @@ func (ec *executionContext) fieldContext_Mutation_reopenCase(ctx context.Context
 				return ec.fieldContext_Case_channelUserCount(ctx, field)
 			case "channelUsers":
 				return ec.fieldContext_Case_channelUsers(ctx, field)
+			case "reporterID":
+				return ec.fieldContext_Case_reporterID(ctx, field)
+			case "reporter":
+				return ec.fieldContext_Case_reporter(ctx, field)
 			case "assigneeIDs":
 				return ec.fieldContext_Case_assigneeIDs(ctx, field)
 			case "assignees":
@@ -6096,6 +6206,10 @@ func (ec *executionContext) fieldContext_Mutation_syncCaseChannelUsers(ctx conte
 				return ec.fieldContext_Case_channelUserCount(ctx, field)
 			case "channelUsers":
 				return ec.fieldContext_Case_channelUsers(ctx, field)
+			case "reporterID":
+				return ec.fieldContext_Case_reporterID(ctx, field)
+			case "reporter":
+				return ec.fieldContext_Case_reporter(ctx, field)
 			case "assigneeIDs":
 				return ec.fieldContext_Case_assigneeIDs(ctx, field)
 			case "assignees":
@@ -7483,6 +7597,10 @@ func (ec *executionContext) fieldContext_Query_cases(ctx context.Context, field 
 				return ec.fieldContext_Case_channelUserCount(ctx, field)
 			case "channelUsers":
 				return ec.fieldContext_Case_channelUsers(ctx, field)
+			case "reporterID":
+				return ec.fieldContext_Case_reporterID(ctx, field)
+			case "reporter":
+				return ec.fieldContext_Case_reporter(ctx, field)
 			case "assigneeIDs":
 				return ec.fieldContext_Case_assigneeIDs(ctx, field)
 			case "assignees":
@@ -7564,6 +7682,10 @@ func (ec *executionContext) fieldContext_Query_case(ctx context.Context, field g
 				return ec.fieldContext_Case_channelUserCount(ctx, field)
 			case "channelUsers":
 				return ec.fieldContext_Case_channelUsers(ctx, field)
+			case "reporterID":
+				return ec.fieldContext_Case_reporterID(ctx, field)
+			case "reporter":
+				return ec.fieldContext_Case_reporter(ctx, field)
 			case "assigneeIDs":
 				return ec.fieldContext_Case_assigneeIDs(ctx, field)
 			case "assignees":
@@ -12118,6 +12240,41 @@ func (ec *executionContext) _Case(ctx context.Context, sel ast.SelectionSet, obj
 			}
 
 			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "reporterID":
+			out.Values[i] = ec._Case_reporterID(ctx, field, obj)
+		case "reporter":
+			field := field
+
+			innerFunc := func(ctx context.Context, _ *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Case_reporter(ctx, field, obj)
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "assigneeIDs":
 			out.Values[i] = ec._Case_assigneeIDs(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
@@ -16231,6 +16388,13 @@ func (ec *executionContext) marshalOKnowledge2ᚖgithubᚗcomᚋsecmonᚑlabᚋh
 		return graphql.Null
 	}
 	return ec._Knowledge(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalOSlackUser2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackUser(ctx context.Context, sel ast.SelectionSet, v *graphql1.SlackUser) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	return ec._SlackUser(ctx, sel, v)
 }
 
 func (ec *executionContext) marshalOSource2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSource(ctx context.Context, sel ast.SelectionSet, v *graphql1.Source) graphql.Marshaler {

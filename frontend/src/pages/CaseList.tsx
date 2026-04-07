@@ -25,6 +25,8 @@ interface Case {
   status: CaseStatus
   isPrivate: boolean
   accessDenied: boolean
+  reporterID?: string
+  reporter?: { id: string; realName: string; imageUrl?: string }
   assigneeIDs: string[]
   assignees: Array<{ id: string; realName: string; imageUrl?: string }>
   slackChannelID: string
@@ -201,6 +203,12 @@ export default function CaseList() {
         header: t('labelDescription'),
         accessor: 'description' as keyof Case,
         width: '250px',
+      },
+      {
+        key: 'reporter',
+        header: t('labelReporter'),
+        accessor: ((caseItem: Case) => caseItem.reporter ? renderAssignees([caseItem.reporter]) : null) as (row: Case) => ReactElement | null,
+        width: '150px',
       },
       {
         key: 'assignees',

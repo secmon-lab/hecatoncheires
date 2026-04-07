@@ -37,6 +37,8 @@ interface Case {
   isPrivate: boolean
   accessDenied: boolean
   channelUserCount: number
+  reporterID?: string
+  reporter?: { id: string; name: string; realName: string; imageUrl?: string }
   assigneeIDs: string[]
   assignees: Array<{ id: string; name: string; realName: string; imageUrl?: string }>
   slackChannelID: string
@@ -429,20 +431,37 @@ export default function CaseDetail() {
         </div>
 
         <div className={styles.sections}>
-          {/* Assignees section */}
-          {caseItem.assignees && caseItem.assignees.length > 0 && (
+          {/* Reporter & Assignees section */}
+          {(caseItem.reporter || (caseItem.assignees && caseItem.assignees.length > 0)) && (
             <div className={styles.section}>
-              <h3 className={styles.sectionTitle}>{t('sectionAssignees')}</h3>
-              <div className={styles.assigneesInline}>
-                {caseItem.assignees.map((user: any) => (
-                  <span key={user.id} className={styles.assigneeTag}>
-                    {user.imageUrl && (
-                      <img src={user.imageUrl} alt={user.realName} className={styles.avatarSmall} />
-                    )}
-                    {user.realName || user.name}
-                  </span>
-                ))}
-              </div>
+              {caseItem.reporter && (
+                <>
+                  <h3 className={styles.sectionTitle}>{t('labelReporter')}</h3>
+                  <div className={styles.assigneesInline}>
+                    <span className={styles.assigneeTag}>
+                      {caseItem.reporter.imageUrl && (
+                        <img src={caseItem.reporter.imageUrl} alt={caseItem.reporter.realName} className={styles.avatarSmall} />
+                      )}
+                      {caseItem.reporter.realName || caseItem.reporter.name}
+                    </span>
+                  </div>
+                </>
+              )}
+              {caseItem.assignees && caseItem.assignees.length > 0 && (
+                <>
+                  <h3 className={styles.sectionTitle}>{t('sectionAssignees')}</h3>
+                  <div className={styles.assigneesInline}>
+                    {caseItem.assignees.map((user: any) => (
+                      <span key={user.id} className={styles.assigneeTag}>
+                        {user.imageUrl && (
+                          <img src={user.imageUrl} alt={user.realName} className={styles.avatarSmall} />
+                        )}
+                        {user.realName || user.name}
+                      </span>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           )}
 

@@ -96,6 +96,7 @@ export const ja: Messages = {
   errorCaseNotFound: '{caseLabel} が見つかりません',
   badgePrivate: 'プライベート',
   btnReopen: '再オープン',
+  labelReporter: '起票者',
   sectionAssignees: '担当者',
   sectionFields: 'フィールド',
   sectionRelatedActions: '関連アクション',

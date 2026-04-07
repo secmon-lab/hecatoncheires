@@ -94,6 +94,7 @@ export const msgKeys = {
   errorCaseNotFound: 'errorCaseNotFound',
   badgePrivate: 'badgePrivate',
   btnReopen: 'btnReopen',
+  labelReporter: 'labelReporter',
   sectionAssignees: 'sectionAssignees',
   sectionFields: 'sectionFields',
   sectionRelatedActions: 'sectionRelatedActions',

@@ -96,6 +96,7 @@ export const en: Messages = {
   errorCaseNotFound: '{caseLabel} not found',
   badgePrivate: 'Private',
   btnReopen: 'Reopen',
+  labelReporter: 'Reporter',
   sectionAssignees: 'Assignees',
   sectionFields: 'Fields',
   sectionRelatedActions: 'Related Actions',

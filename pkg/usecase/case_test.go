@@ -1088,3 +1088,54 @@ func TestCaseUseCase_CreateCase_AutoInvite(t *testing.T) {
 		gt.Value(t, mock.invitedUserIDs[1]).Equal("UASSIGNEE")
 	})
 }
+
+func TestCaseUseCase_ReporterID(t *testing.T) {
+	t.Run("create case sets reporter from auth token", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UREPORTER"})
+
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Reporter Test", "desc", []string{"UASSIGNEE"}, nil, false)
+		gt.NoError(t, err).Required()
+		gt.String(t, created.ReporterID).Equal("UREPORTER")
+	})
+
+	t.Run("create case without auth token leaves reporter empty", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, "")
+		ctx := context.Background()
+
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "No Reporter", "desc", []string{}, nil, false)
+		gt.NoError(t, err).Required()
+		gt.String(t, created.ReporterID).Equal("")
+	})
+
+	t.Run("update case preserves reporter", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UREPORTER"})
+
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Reporter Preserved", "desc", []string{}, nil, false)
+		gt.NoError(t, err).Required()
+		gt.String(t, created.ReporterID).Equal("UREPORTER")
+
+		// Update with a different user context
+		ctxOther := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
+		updated, err := uc.UpdateCase(ctxOther, testWorkspaceID, created.ID, "Updated Title", "new desc", []string{"UOTHER"}, nil)
+		gt.NoError(t, err).Required()
+		gt.String(t, updated.ReporterID).Equal("UREPORTER") // Reporter should NOT change
+	})
+
+	t.Run("reporter is persisted and retrievable", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UREPORTER"})
+
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Persisted Reporter", "desc", []string{}, nil, false)
+		gt.NoError(t, err).Required()
+
+		retrieved, err := uc.GetCase(ctx, testWorkspaceID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.String(t, retrieved.ReporterID).Equal("UREPORTER")
+	})
+}
