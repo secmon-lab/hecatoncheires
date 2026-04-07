@@ -1,5 +1,11 @@
 package config
 
+import (
+	"context"
+
+	"github.com/slack-go/slack"
+)
+
 // NewSlackForTest creates a Slack config for testing purposes
 func NewSlackForTest(clientID, clientSecret, botToken, signingSecret, noAuthUID string) *Slack {
 	return &Slack{
@@ -15,6 +21,27 @@ func NewSlackForTest(clientID, clientSecret, botToken, signingSecret, noAuthUID 
 func (x *Slack) SetOrgLevelForTest(isOrgLevel bool, authTeamID string) {
 	x.isOrgLevel = isOrgLevel
 	x.authTeamID = authTeamID
+}
+
+// MockSlackAuthAPI is a test double for slackAuthAPI
+type MockSlackAuthAPI struct {
+	AuthTestResp *slack.AuthTestResponse
+	AuthTestErr  error
+	Teams        []slack.Team
+	ListTeamsErr error
+}
+
+func (m *MockSlackAuthAPI) AuthTestContext(_ context.Context) (*slack.AuthTestResponse, error) {
+	return m.AuthTestResp, m.AuthTestErr
+}
+
+func (m *MockSlackAuthAPI) ListTeamsContext(_ context.Context, _ slack.ListTeamsParameters) ([]slack.Team, string, error) {
+	return m.Teams, "", m.ListTeamsErr
+}
+
+// SetAuthAPIForTest injects a mock slackAuthAPI for testing DetectOrgLevel
+func (x *Slack) SetAuthAPIForTest(api *MockSlackAuthAPI) {
+	x.authAPI = api
 }
 
 // NewGeminiForTest creates a Gemini config for testing purposes

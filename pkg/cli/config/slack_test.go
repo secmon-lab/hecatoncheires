@@ -2,11 +2,13 @@ package config_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
+	"github.com/slack-go/slack"
 )
 
 func TestSlackSetNoAuthUID(t *testing.T) {
@@ -166,4 +168,94 @@ func TestSlackIsConfigured(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSlackDetectOrgLevel(t *testing.T) {
+	t.Run("single team results in non-org-level", func(t *testing.T) {
+		s := config.NewSlackForTest("", "", "xoxb-token", "", "")
+		s.SetAuthAPIForTest(&config.MockSlackAuthAPI{
+			AuthTestResp: &slack.AuthTestResponse{
+				TeamID:       "T111",
+				EnterpriseID: "E111",
+			},
+			Teams: []slack.Team{
+				{ID: "T111", Name: "workspace-1"},
+			},
+		})
+
+		err := s.DetectOrgLevel(context.Background())
+		gt.NoError(t, err).Required()
+		gt.Bool(t, s.IsOrgLevel()).False()
+		gt.String(t, s.AuthTeamID()).Equal("T111")
+		gt.String(t, s.EnterpriseID()).Equal("E111")
+	})
+
+	t.Run("multiple teams results in org-level", func(t *testing.T) {
+		s := config.NewSlackForTest("", "", "xoxb-token", "", "")
+		s.SetAuthAPIForTest(&config.MockSlackAuthAPI{
+			AuthTestResp: &slack.AuthTestResponse{
+				TeamID:       "T111",
+				EnterpriseID: "E111",
+			},
+			Teams: []slack.Team{
+				{ID: "T111", Name: "workspace-1"},
+				{ID: "T222", Name: "workspace-2"},
+			},
+		})
+
+		err := s.DetectOrgLevel(context.Background())
+		gt.NoError(t, err).Required()
+		gt.Bool(t, s.IsOrgLevel()).True()
+		gt.String(t, s.AuthTeamID()).Equal("T111")
+		gt.String(t, s.EnterpriseID()).Equal("E111")
+	})
+
+	t.Run("no enterprise ID with single team", func(t *testing.T) {
+		s := config.NewSlackForTest("", "", "xoxb-token", "", "")
+		s.SetAuthAPIForTest(&config.MockSlackAuthAPI{
+			AuthTestResp: &slack.AuthTestResponse{
+				TeamID:       "T111",
+				EnterpriseID: "",
+			},
+			Teams: []slack.Team{
+				{ID: "T111", Name: "workspace-1"},
+			},
+		})
+
+		err := s.DetectOrgLevel(context.Background())
+		gt.NoError(t, err).Required()
+		gt.Bool(t, s.IsOrgLevel()).False()
+		gt.String(t, s.EnterpriseID()).Equal("")
+	})
+
+	t.Run("empty bot token skips detection", func(t *testing.T) {
+		s := config.NewSlackForTest("", "", "", "", "")
+
+		err := s.DetectOrgLevel(context.Background())
+		gt.NoError(t, err).Required()
+		gt.Bool(t, s.IsOrgLevel()).False()
+	})
+
+	t.Run("auth.test error is propagated", func(t *testing.T) {
+		s := config.NewSlackForTest("", "", "xoxb-token", "", "")
+		s.SetAuthAPIForTest(&config.MockSlackAuthAPI{
+			AuthTestErr: fmt.Errorf("auth failed"),
+		})
+
+		err := s.DetectOrgLevel(context.Background())
+		gt.Value(t, err).NotNil()
+	})
+
+	t.Run("auth.teams.list error is propagated", func(t *testing.T) {
+		s := config.NewSlackForTest("", "", "xoxb-token", "", "")
+		s.SetAuthAPIForTest(&config.MockSlackAuthAPI{
+			AuthTestResp: &slack.AuthTestResponse{
+				TeamID: "T111",
+			},
+			ListTeamsErr: fmt.Errorf("list teams failed"),
+		})
+
+		err := s.DetectOrgLevel(context.Background())
+		gt.Value(t, err).NotNil()
+	})
 }
