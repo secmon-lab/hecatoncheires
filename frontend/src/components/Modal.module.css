@@ -24,7 +24,7 @@
 
 .modal {
   background-color: var(--bg-paper);
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-xl);
   border: 1px solid var(--border-default);
   max-width: 50rem;
@@ -104,7 +104,7 @@
     width: 100%;
     max-width: 100%;
     max-height: 95vh;
-    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
     animation: slideUpMobile var(--transition-normal);
   }
 

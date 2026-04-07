@@ -78,7 +78,7 @@ export const colors = {
     heading: '#111827',
     label: '#6B7280',
     body: '#374151',
-    muted: '#9CA3AF',
+    muted: '#6B7280',
   },
   sidebar: {
     background: '#1E1E2D',
