@@ -1,22 +1,22 @@
 :root {
-  /* Primary accent — Crimson Red */
-  --color-primary-rgb: 220, 38, 38;
-  --color-primary: #DC2626;
-  --color-primary-light: #EF4444;
-  --color-primary-dark: #B91C1C;
+  /* Primary accent — Logo Blue */
+  --color-primary-rgb: 46, 92, 184;
+  --color-primary: #2E5CB8;
+  --color-primary-light: #5B8DEE;
+  --color-primary-dark: #1E3A8A;
   --color-primary-shadow: rgba(var(--color-primary-rgb), 0.2);
-  --gradient-primary: linear-gradient(135deg, #DC2626 0%, #EF4444 100%);
+  --gradient-primary: linear-gradient(135deg, #2E5CB8 0%, #5B8DEE 100%);
   --color-primary-contrast: #ffffff;
 
-  /* Secondary accent — Warm Orange */
-  --color-secondary: #F59E0B;
-  --color-secondary-light: #FBBF24;
-  --color-secondary-dark: #D97706;
+  /* Secondary accent — Logo Cyan */
+  --color-secondary: #4DD4D4;
+  --color-secondary-light: #7DE5E5;
+  --color-secondary-dark: #2BA7A7;
 
   /* Flat card accent colors */
   --gradient-orange: #F59E0B;
   --gradient-green: #10B981;
-  --gradient-red: #DC2626;
+  --gradient-red: #EF4444;
   --gradient-cyan: #06B6D4;
   --gradient-purple: #8B5CF6;
   --gradient-blue: #3B82F6;
@@ -28,10 +28,10 @@
   --color-warning: #F59E0B;
   --color-warning-light: #FEF3C7;
   --color-warning-dark: #D97706;
-  --color-error-rgb: 220, 38, 38;
-  --color-error: #DC2626;
+  --color-error-rgb: 239, 68, 68;
+  --color-error: #EF4444;
   --color-error-light: #FEE2E2;
-  --color-error-dark: #B91C1C;
+  --color-error-dark: #DC2626;
   --color-error-shadow: rgba(var(--color-error-rgb), 0.1);
   --color-info: #3B82F6;
   --color-info-light: #DBEAFE;
@@ -70,10 +70,10 @@
   --sidebar-text: rgba(255, 255, 255, 0.6);
   --sidebar-text-active: #ffffff;
   --sidebar-text-secondary: rgba(255, 255, 255, 0.4);
-  --sidebar-active-bg: rgba(220, 38, 38, 0.15);
+  --sidebar-active-bg: rgba(46, 92, 184, 0.2);
   --sidebar-hover-bg: rgba(255, 255, 255, 0.05);
-  --sidebar-active-border: #DC2626;
-  --sidebar-active: rgba(220, 38, 38, 0.15);
+  --sidebar-active-border: #5B8DEE;
+  --sidebar-active: rgba(46, 92, 184, 0.2);
   --sidebar-hover: rgba(255, 255, 255, 0.05);
   --sidebar-border: rgba(255, 255, 255, 0.08);
   --sidebar-width: 260px;

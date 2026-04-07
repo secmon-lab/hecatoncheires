@@ -1,7 +1,6 @@
-import { Bell, Menu, Search } from 'lucide-react'
+import { Bell, Menu } from 'lucide-react'
 import { useIsMobileOrTablet } from '../hooks/useMediaQuery'
 import { useWorkspace } from '../contexts/workspace-context'
-import { useTranslation } from '../i18n'
 import WorkspaceSwitcher from './WorkspaceSwitcher'
 import styles from './TopBar.module.css'
 import { UserMenu } from './UserMenu'
@@ -13,7 +12,6 @@ interface TopBarProps {
 export default function TopBar({ onToggleSidebar }: TopBarProps) {
   const isMobileOrTablet = useIsMobileOrTablet()
   const { currentWorkspace, workspaces } = useWorkspace()
-  const { t } = useTranslation()
 
   return (
     <header className={styles.topBar}>
@@ -27,15 +25,6 @@ export default function TopBar({ onToggleSidebar }: TopBarProps) {
           current={currentWorkspace}
           workspaces={workspaces}
         />
-        <div className={styles.searchWrapper}>
-          <Search size={16} className={styles.searchIcon} />
-          <input
-            type="text"
-            className={styles.searchInput}
-            placeholder={t('search')}
-            readOnly
-          />
-        </div>
       </div>
 
       <div className={styles.actions}>

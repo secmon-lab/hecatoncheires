@@ -50,12 +50,12 @@
   cursor: pointer;
   transition: all var(--transition-fast);
   margin-top: var(--spacing-lg);
-  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.3);
+  box-shadow: 0 2px 8px rgba(46, 92, 184, 0.3);
 }
 
 .login-button:hover {
   background: var(--color-primary-dark);
-  box-shadow: 0 4px 16px rgba(220, 38, 38, 0.35);
+  box-shadow: 0 4px 16px rgba(46, 92, 184, 0.35);
 }
 
 .login-button:active {

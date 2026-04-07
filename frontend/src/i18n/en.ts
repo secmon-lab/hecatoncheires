@@ -10,7 +10,6 @@ export const en: Messages = {
   navActions: 'Actions',
   navKnowledges: 'Knowledges',
   navSources: 'Sources',
-  search: 'Search',
 
   // Common buttons
   btnCreate: 'Create',

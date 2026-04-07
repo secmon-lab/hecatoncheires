@@ -8,7 +8,6 @@ export const msgKeys = {
   navActions: 'navActions',
   navKnowledges: 'navKnowledges',
   navSources: 'navSources',
-  search: 'search',
 
   // Common buttons
   btnCreate: 'btnCreate',

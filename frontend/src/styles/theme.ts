@@ -1,21 +1,21 @@
 // RGB color values for dynamic rgba usage
-const primaryColorRGB = '220, 38, 38'
+const primaryColorRGB = '46, 92, 184'
 
 export const colors = {
-  // Primary — Crimson Red
+  // Primary — Logo Blue
   primary: {
     rgb: primaryColorRGB,
-    main: '#DC2626',
-    light: '#EF4444',
-    dark: '#B91C1C',
-    gradient: 'linear-gradient(135deg, #DC2626 0%, #EF4444 100%)',
+    main: '#2E5CB8',
+    light: '#5B8DEE',
+    dark: '#1E3A8A',
+    gradient: 'linear-gradient(135deg, #2E5CB8 0%, #5B8DEE 100%)',
     contrastText: '#ffffff',
   },
-  // Secondary — Warm Orange
+  // Secondary — Logo Cyan
   secondary: {
-    main: '#F59E0B',
-    light: '#FBBF24',
-    dark: '#D97706',
+    main: '#4DD4D4',
+    light: '#7DE5E5',
+    dark: '#2BA7A7',
     contrastText: '#ffffff',
   },
   // Card colors
@@ -28,9 +28,9 @@ export const colors = {
     greenLight: '#D1FAE5',
     greenGradient: '#10B981',
 
-    red: '#DC2626',
+    red: '#EF4444',
     redLight: '#FEE2E2',
-    redGradient: '#DC2626',
+    redGradient: '#EF4444',
 
     cyan: '#06B6D4',
     cyanLight: '#CFFAFE',
@@ -55,9 +55,9 @@ export const colors = {
     dark: '#D97706',
   },
   error: {
-    main: '#DC2626',
+    main: '#EF4444',
     light: '#FEE2E2',
-    dark: '#B91C1C',
+    dark: '#DC2626',
   },
   info: {
     main: '#3B82F6',
@@ -85,7 +85,7 @@ export const colors = {
     backgroundSolid: '#1E1E2D',
     text: 'rgba(255, 255, 255, 0.6)',
     textSecondary: 'rgba(255, 255, 255, 0.4)',
-    active: 'rgba(220, 38, 38, 0.15)',
+    active: 'rgba(46, 92, 184, 0.2)',
     hover: 'rgba(255, 255, 255, 0.05)',
     border: 'rgba(255, 255, 255, 0.08)',
   },
