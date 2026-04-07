@@ -1,23 +1,22 @@
 .card {
   background: var(--bg-paper);
   border: 1px solid var(--border-light);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   padding: var(--spacing-sm) var(--spacing-md-sm);
   cursor: pointer;
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  transition: border-color var(--transition-fast);
   display: flex;
   flex-direction: column;
   gap: var(--spacing-xs);
-  min-height: 4rem;
+  min-height: 3.5rem;
 }
 
 .card:hover {
   border-color: var(--border-hover);
-  box-shadow: var(--shadow-sm);
 }
 
 .caseName {
-  font-size: 0.6875rem;
+  font-size: 0.625rem;
   color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
@@ -46,8 +45,8 @@
 }
 
 .avatar {
-  width: 1.25rem;
-  height: 1.25rem;
+  width: 1.125rem;
+  height: 1.125rem;
   border-radius: 50%;
   overflow: hidden;
   flex-shrink: 0;
@@ -64,7 +63,7 @@
 }
 
 .avatar span {
-  font-size: 0.625rem;
+  font-size: 0.5625rem;
   font-weight: 600;
   color: var(--text-muted);
 }
@@ -79,5 +78,5 @@
   box-shadow: var(--shadow-lg);
   border-color: var(--color-primary-light);
   cursor: grabbing;
-  transform: rotate(2deg);
+  transform: rotate(1.5deg);
 }

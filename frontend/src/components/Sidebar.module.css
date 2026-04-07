@@ -7,13 +7,13 @@
   position: fixed;
   left: 0;
   top: var(--topbar-height);
-  box-shadow: var(--shadow-sidebar);
+  border-right: 1px solid var(--sidebar-border);
   transition: transform var(--transition-normal);
   z-index: 1000;
 }
 
 .nav {
-  padding: var(--spacing-md) 0;
+  padding: var(--spacing-sm) 0;
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -24,13 +24,15 @@
   align-items: center;
   gap: var(--spacing-sm);
   padding: var(--spacing-sm) var(--spacing-md);
-  min-height: var(--touch-target-min);
+  margin: 0 var(--spacing-sm);
+  min-height: 2.25rem;
   color: var(--sidebar-text);
   text-decoration: none;
-  font-size: 14px;
-  font-weight: 400;
+  font-size: 13px;
+  font-weight: 500;
   transition: all var(--transition-fast);
   position: relative;
+  border-radius: var(--radius-md);
 }
 
 .navItem:hover {
@@ -40,17 +42,18 @@
 
 .navItem.active {
   background-color: var(--sidebar-active-bg);
-  color: var(--sidebar-text-active);
+  color: var(--color-primary);
 }
 
 .navItem.active::before {
   content: '';
   position: absolute;
-  left: 0;
+  left: calc(-1 * var(--spacing-sm));
   top: 0;
   bottom: 0;
-  width: 3px;
+  width: 2px;
   background-color: var(--sidebar-active-border);
+  border-radius: 0 1px 1px 0;
 }
 
 @media (max-width: var(--breakpoint-tablet)) {
@@ -64,7 +67,9 @@
   }
 
   .navItem {
-    font-size: 15px;
-    padding: var(--spacing-md) 24px;
+    font-size: 14px;
+    padding: var(--spacing-md-sm) var(--spacing-lg);
+    margin: 0;
+    border-radius: 0;
   }
 }

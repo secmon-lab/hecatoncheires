@@ -13,9 +13,10 @@
 
 .title {
   margin: 0;
-  font-size: 2rem;
+  font-size: 1.5rem;
   font-weight: 600;
   color: var(--text-heading);
+  letter-spacing: -0.02em;
 }
 
 .subtitle {

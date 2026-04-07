@@ -3,9 +3,9 @@
   align-items: center;
   gap: 0.25rem;
   padding: 0.125rem 0.5rem;
-  border-radius: 0.25rem;
+  border-radius: 9999px;
   font-size: 0.6875rem;
-  font-weight: 600;
+  font-weight: 500;
   transition: all 0.15s ease;
   white-space: nowrap;
   letter-spacing: 0.01em;
@@ -21,41 +21,41 @@
   font-size: 0.6875rem;
 }
 
-/* Variants - Improved contrast ratios (WCAG AA compliant) */
+/* Variants - Soft tinted backgrounds (WCAG AA compliant) */
 .chip.default {
   background: var(--bg-muted);
   color: var(--text-body);
-  border: 1px solid var(--border-strong);
+  border: none;
 }
 
 .chip.category {
-  background: #DBEAFE;
-  color: #1E40AF;
-  border: 1px solid #93C5FD;
+  background: rgba(59, 130, 246, 0.08);
+  color: #2563EB;
+  border: none;
 }
 
 .chip.team {
-  background: #EDE9FE;
-  color: #5B21B6;
-  border: 1px solid #C4B5FD;
+  background: rgba(139, 92, 246, 0.08);
+  color: #7C3AED;
+  border: none;
 }
 
 .chip.user {
-  background: #D1FAE5;
-  color: #065F46;
-  border: 1px solid #6EE7B7;
+  background: rgba(16, 185, 129, 0.08);
+  color: #059669;
+  border: none;
 }
 
 .chip.primary {
-  background: #DBEAFE;
-  color: #1E40AF;
-  border: 1px solid #93C5FD;
+  background: rgba(59, 130, 246, 0.08);
+  color: #2563EB;
+  border: none;
 }
 
 .chip.secondary {
   background: var(--bg-muted);
   color: var(--text-body);
-  border: 1px solid var(--border-strong);
+  border: none;
 }
 
 /* Status variants */
@@ -64,21 +64,21 @@
 }
 
 .chip.status.backlog {
-  background: #DBEAFE;
-  color: #1E40AF;
-  border: 1px solid #93C5FD;
+  background: rgba(59, 130, 246, 0.08);
+  color: #2563EB;
+  border: none;
 }
 
 .chip.status.inProgress {
-  background: #FEF3C7;
-  color: #92400E;
-  border: 1px solid #FCD34D;
+  background: rgba(245, 158, 11, 0.1);
+  color: #B45309;
+  border: none;
 }
 
 .chip.status.done {
-  background: #D1FAE5;
-  color: #065F46;
-  border: 1px solid #6EE7B7;
+  background: rgba(16, 185, 129, 0.08);
+  color: #059669;
+  border: none;
 }
 
 .icon {
@@ -95,24 +95,24 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 1.125rem;
-  height: 1.125rem;
+  width: 1rem;
+  height: 1rem;
   margin-left: 0.125rem;
   padding: 0;
   background: transparent;
   border: none;
   border-radius: 50%;
-  font-size: 1.25rem;
+  font-size: 1.125rem;
   line-height: 1;
   cursor: pointer;
   color: currentColor;
-  opacity: 0.6;
-  transition: all 0.2s ease;
+  opacity: 0.5;
+  transition: all 0.15s ease;
 }
 
 .removeButton:hover {
   opacity: 1;
-  background: rgba(0, 0, 0, 0.1);
+  background: rgba(0, 0, 0, 0.08);
 }
 
 .removeButton:focus {
