@@ -18,6 +18,7 @@ type Case struct {
 	IsPrivate      bool             `json:"isPrivate"`
 	AccessDenied   bool             `json:"accessDenied"`
 	ChannelUserIDs []string         `json:"-"` // Internal: used by channelUsers resolver
+	ReporterID     *string          `json:"reporterID,omitempty"`
 	AssigneeIDs    []string         `json:"assigneeIDs"`
 	Assignees      []*SlackUser     `json:"assignees"`
 	SlackChannelID *string          `json:"slackChannelID,omitempty"`

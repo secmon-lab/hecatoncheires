@@ -37,6 +37,8 @@ interface Case {
   isPrivate: boolean
   accessDenied: boolean
   channelUserCount: number
+  reporterID?: string
+  reporter?: { id: string; name: string; realName: string; imageUrl?: string }
   assigneeIDs: string[]
   assignees: Array<{ id: string; name: string; realName: string; imageUrl?: string }>
   slackChannelID: string
@@ -429,6 +431,20 @@ export default function CaseDetail() {
         </div>
 
         <div className={styles.sections}>
+          {/* Reporter section */}
+          {caseItem.reporter && (
+            <div className={styles.section}>
+              <h3 className={styles.sectionTitle}>{t('labelReporter')}</h3>
+              <div className={styles.assigneesInline}>
+                <span className={styles.assigneeTag}>
+                  {caseItem.reporter.imageUrl && (
+                    <img src={caseItem.reporter.imageUrl} alt={caseItem.reporter.realName || caseItem.reporter.name} className={styles.avatarSmall} />
+                  )}
+                  {caseItem.reporter.realName || caseItem.reporter.name}
+                </span>
+              </div>
+            </div>
+          )}
           {/* Assignees section */}
           {caseItem.assignees && caseItem.assignees.length > 0 && (
             <div className={styles.section}>
@@ -437,7 +453,7 @@ export default function CaseDetail() {
                 {caseItem.assignees.map((user: any) => (
                   <span key={user.id} className={styles.assigneeTag}>
                     {user.imageUrl && (
-                      <img src={user.imageUrl} alt={user.realName} className={styles.avatarSmall} />
+                      <img src={user.imageUrl} alt={user.realName || user.name} className={styles.avatarSmall} />
                     )}
                     {user.realName || user.name}
                   </span>

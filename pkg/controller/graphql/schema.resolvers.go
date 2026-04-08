@@ -103,6 +103,22 @@ func (r *caseResolver) ChannelUsers(ctx context.Context, obj *graphql1.Case, lim
 	}, nil
 }
 
+// Reporter is the resolver for the reporter field.
+func (r *caseResolver) Reporter(ctx context.Context, obj *graphql1.Case) (*graphql1.SlackUser, error) {
+	if obj.ReporterID == nil || *obj.ReporterID == "" {
+		return nil, nil
+	}
+	loaders := GetDataLoaders(ctx)
+	users, err := loaders.SlackUserLoader.Load(ctx, []string{*obj.ReporterID})
+	if err != nil {
+		return nil, err
+	}
+	if len(users) == 0 {
+		return nil, nil
+	}
+	return users[0], nil
+}
+
 // Assignees is the resolver for the assignees field.
 func (r *caseResolver) Assignees(ctx context.Context, obj *graphql1.Case) ([]*graphql1.SlackUser, error) {
 	if len(obj.AssigneeIDs) == 0 {

@@ -110,6 +110,8 @@ type Case {
   accessDenied: Boolean!
   channelUserCount: Int!
   channelUsers(limit: Int, offset: Int, filter: String): ChannelUserConnection!
+  reporterID: String
+  reporter: SlackUser
   assigneeIDs: [String!]!
   assignees: [SlackUser!]!
   slackChannelID: String

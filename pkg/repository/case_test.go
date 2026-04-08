@@ -586,6 +586,59 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.NoError(t, err).Required()
 		gt.Value(t, retrieved.Status).Equal(types.CaseStatusClosed)
 	})
+
+	t.Run("Create and retrieve case with ReporterID", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			Title:       "Reporter Test",
+			Description: "Testing reporter persistence",
+			ReporterID:  "UREPORTER123",
+			AssigneeIDs: []string{"UASSIGNEE"},
+		})
+		gt.NoError(t, err).Required()
+		gt.String(t, created.ReporterID).Equal("UREPORTER123")
+
+		retrieved, err := repo.Case().Get(ctx, wsID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.String(t, retrieved.ReporterID).Equal("UREPORTER123")
+	})
+
+	t.Run("Create case without ReporterID", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			Title: "No Reporter",
+		})
+		gt.NoError(t, err).Required()
+		gt.String(t, created.ReporterID).Equal("")
+
+		retrieved, err := repo.Case().Get(ctx, wsID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.String(t, retrieved.ReporterID).Equal("")
+	})
+
+	t.Run("Update preserves ReporterID", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			Title:      "Reporter Preserved",
+			ReporterID: "UREPORTER456",
+		})
+		gt.NoError(t, err).Required()
+
+		created.Title = "Updated Title"
+		updated, err := repo.Case().Update(ctx, wsID, created)
+		gt.NoError(t, err).Required()
+		gt.String(t, updated.ReporterID).Equal("UREPORTER456")
+
+		retrieved, err := repo.Case().Get(ctx, wsID, updated.ID)
+		gt.NoError(t, err).Required()
+		gt.String(t, retrieved.ReporterID).Equal("UREPORTER456")
+	})
 }
 
 func TestCaseRepository_Memory(t *testing.T) {

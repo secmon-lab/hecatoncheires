@@ -12,6 +12,7 @@ type Case struct {
 	Title          string
 	Description    string
 	Status         types.CaseStatus
+	ReporterID     string   // Slack User ID of the case reporter (immutable after creation)
 	AssigneeIDs    []string // Slack User IDs
 	SlackChannelID string
 	IsPrivate      bool                  // Private mode flag

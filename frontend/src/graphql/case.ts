@@ -9,6 +9,13 @@ export const GET_CASES = gql`
       status
       isPrivate
       accessDenied
+      reporterID
+      reporter {
+        id
+        name
+        realName
+        imageUrl
+      }
       assigneeIDs
       assignees {
         id
@@ -37,6 +44,13 @@ export const GET_CASE = gql`
       isPrivate
       accessDenied
       channelUserCount
+      reporterID
+      reporter {
+        id
+        name
+        realName
+        imageUrl
+      }
       assigneeIDs
       assignees {
         id
@@ -105,6 +119,13 @@ export const CREATE_CASE = gql`
       status
       isPrivate
       accessDenied
+      reporterID
+      reporter {
+        id
+        name
+        realName
+        imageUrl
+      }
       assigneeIDs
       assignees {
         id
@@ -132,6 +153,13 @@ export const UPDATE_CASE = gql`
       status
       isPrivate
       accessDenied
+      reporterID
+      reporter {
+        id
+        name
+        realName
+        imageUrl
+      }
       assigneeIDs
       assignees {
         id
@@ -165,6 +193,13 @@ export const CLOSE_CASE = gql`
       status
       isPrivate
       accessDenied
+      reporterID
+      reporter {
+        id
+        name
+        realName
+        imageUrl
+      }
       assigneeIDs
       assignees {
         id
@@ -192,6 +227,13 @@ export const REOPEN_CASE = gql`
       status
       isPrivate
       accessDenied
+      reporterID
+      reporter {
+        id
+        name
+        realName
+        imageUrl
+      }
       assigneeIDs
       assignees {
         id

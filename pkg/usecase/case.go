@@ -83,11 +83,18 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 		fieldValues = enriched
 	}
 
+	// Set reporter from auth context (immutable after creation)
+	var reporterID string
+	if token, tokenErr := auth.TokenFromContext(ctx); tokenErr == nil {
+		reporterID = token.Sub
+	}
+
 	// Create case with embedded field values
 	caseModel := &model.Case{
 		Title:       title,
 		Description: description,
 		Status:      types.CaseStatusOpen,
+		ReporterID:  reporterID,
 		AssigneeIDs: assigneeIDs,
 		IsPrivate:   isPrivate,
 		FieldValues: fieldValues,
@@ -205,7 +212,8 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, workspaceID string, id in
 		ID:             id,
 		Title:          title,
 		Description:    description,
-		Status:         existingCase.Status, // Preserve status
+		Status:         existingCase.Status,     // Preserve status
+		ReporterID:     existingCase.ReporterID, // Preserve reporter (immutable)
 		AssigneeIDs:    assigneeIDs,
 		SlackChannelID: existingCase.SlackChannelID, // Preserve channel ID
 		IsPrivate:      existingCase.IsPrivate,      // Preserve private mode

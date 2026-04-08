@@ -75,6 +75,7 @@ func copyCase(c *model.Case) *model.Case {
 		Title:          c.Title,
 		Description:    c.Description,
 		Status:         c.Status,
+		ReporterID:     c.ReporterID,
 		AssigneeIDs:    assigneeIDs,
 		SlackChannelID: c.SlackChannelID,
 		IsPrivate:      c.IsPrivate,
