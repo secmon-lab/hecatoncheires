@@ -121,8 +121,7 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 		}
 
 		// Connect channel to the source workspace if it differs from the configured team
-		// admin.conversations.setTeams only supports public channels in Enterprise Grid
-		if !isPrivate && sourceTeamID != "" && sourceTeamID != teamID {
+		if sourceTeamID != "" && sourceTeamID != teamID {
 			if connectErr := uc.slackService.ConnectChannelToWorkspace(ctx, channelID, []string{teamID, sourceTeamID}); connectErr != nil {
 				errutil.Handle(ctx, connectErr, "failed to connect channel to source workspace")
 			}

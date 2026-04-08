@@ -1239,26 +1239,4 @@ func TestCaseUseCase_CreateCase_CrossWorkspaceConnect(t *testing.T) {
 		gt.Value(t, created.SlackChannelID).NotEqual("")
 	})
 
-	t.Run("skips connect for private channels", func(t *testing.T) {
-		repo := memory.New()
-		mock := &mockSlackService{
-			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
-				return fmt.Sprintf("C%d", caseID), nil
-			},
-		}
-
-		registry := model.NewWorkspaceRegistry()
-		registry.Register(&model.WorkspaceEntry{
-			Workspace:   model.Workspace{ID: testWorkspaceID, Name: "Test Workspace"},
-			SlackTeamID: "TCONFIG",
-		})
-		uc := usecase.NewCaseUseCase(repo, registry, mock, "")
-
-		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
-		_, err := uc.CreateCase(ctx, testWorkspaceID, "Private Case", "Description", []string{}, nil, true, "TSOURCE")
-		gt.NoError(t, err).Required()
-
-		// ConnectChannelToWorkspace should NOT be called for private channels
-		gt.String(t, mock.connectedChannelID).Equal("")
-	})
 }
