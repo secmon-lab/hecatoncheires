@@ -33,6 +33,7 @@ Hecatoncheires is an AI-native project/case management platform built with Go an
 - **NEVER check error messages using `strings.Contains(err.Error(), ...)`**
 - **ALWAYS use `errors.Is(err, targetErr)` or `errors.As(err, &target)` for error type checking**
 - Error discrimination must be done by error types, not by parsing error messages
+- **Non-fatal errors (errors that don't require rollback or propagation) MUST be handled via `errutil.Handle(ctx, err, "description")`** — never use raw `logger.Error` or describe error handling as "log only". `errutil.Handle` is the project's standard mechanism for non-fatal error handling
 
 ### Testing Best Practices
 - ALWAYS write tests for ALL code you create. This is NON-NEGOTIABLE.
@@ -206,6 +207,12 @@ In principle, do not trust developers who use this library from outside
 - Do not export unnecessary methods, structs, and variables
 - Assume that exposed items will be changed. Never expose fields that would be problematic if changed
 - Use `export_test.go` for items that need to be exposed for testing purposes
+
+### Documentation
+- **When adding new features, changing APIs, or adding new dependencies/scopes, ALWAYS update the relevant documentation** (`docs/` directory)
+- This includes but is not limited to: new Slack scopes, new environment variables, new configuration options, new API endpoints, changed behavior
+- Documentation updates are part of the implementation, not an afterthought — include them in specs and implementation plans from the start
+- If a feature requires external setup (e.g., adding OAuth scopes in Slack App settings), document the required steps
 
 ### Check
 

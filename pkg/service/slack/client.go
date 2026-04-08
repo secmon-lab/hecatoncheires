@@ -528,3 +528,18 @@ func (c *client) GetUserGroupMembers(ctx context.Context, groupID string) ([]str
 	}
 	return members, nil
 }
+
+// ConnectChannelToWorkspace adds target workspaces to a channel's visibility
+// using admin.conversations.setTeams API (Enterprise Grid only).
+func (c *client) ConnectChannelToWorkspace(ctx context.Context, channelID string, targetTeamIDs []string) error {
+	err := c.api.AdminConversationsSetTeams(ctx, slack.AdminConversationsSetTeamsParams{
+		ChannelID:     channelID,
+		TargetTeamIDs: targetTeamIDs,
+	})
+	if err != nil {
+		return goerr.Wrap(err, "failed to connect channel to workspaces",
+			goerr.V("channel_id", channelID),
+			goerr.V("target_team_ids", targetTeamIDs))
+	}
+	return nil
+}

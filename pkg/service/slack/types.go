@@ -90,6 +90,13 @@ type Service interface {
 	// For org-level apps, this returns all workspaces in the enterprise.
 	// For WS-level apps, this returns a single workspace.
 	ListTeams(ctx context.Context) ([]Team, error)
+
+	// ConnectChannelToWorkspace adds target workspaces to a channel's visibility
+	// using admin.conversations.setTeams API.
+	// Requires admin.conversations:write scope (Enterprise Grid only).
+	// channelID: the channel to connect
+	// targetTeamIDs: workspace IDs that should have access to the channel
+	ConnectChannelToWorkspace(ctx context.Context, channelID string, targetTeamIDs []string) error
 }
 
 // UserGroup represents a Slack user group

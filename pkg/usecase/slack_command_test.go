@@ -57,7 +57,7 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		slackMock := &commandTestSlackService{}
 		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
 
-		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "risk")
+		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "risk", "")
 		gt.NoError(t, err).Required()
 
 		gt.Bool(t, slackMock.openViewCalled).True()
@@ -65,15 +65,17 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		gt.Value(t, slackMock.openViewRequest.CallbackID).Equal(usecase.SlackCallbackIDCreateCase)
 		gt.Value(t, slackMock.openViewRequest.Title.Text).Equal("Create Case")
 
-		// Verify private_metadata contains workspace_id and channel_id
+		// Verify private_metadata contains workspace_id, channel_id, and source_team_id
 		var meta struct {
-			WorkspaceID string `json:"workspace_id"`
-			ChannelID   string `json:"channel_id"`
+			WorkspaceID  string `json:"workspace_id"`
+			ChannelID    string `json:"channel_id"`
+			SourceTeamID string `json:"source_team_id"`
 		}
 		err = json.Unmarshal([]byte(slackMock.openViewRequest.PrivateMetadata), &meta)
 		gt.NoError(t, err).Required()
 		gt.Value(t, meta.WorkspaceID).Equal("risk")
 		gt.Value(t, meta.ChannelID).Equal("C001")
+		gt.Value(t, meta.SourceTeamID).Equal("")
 	})
 
 	t.Run("workspace specified but invalid returns error", func(t *testing.T) {
@@ -86,7 +88,7 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		slackMock := &commandTestSlackService{}
 		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
 
-		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "nonexistent")
+		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "nonexistent", "")
 		gt.Value(t, err).NotNil()
 		gt.Bool(t, slackMock.openViewCalled).False()
 	})
@@ -98,7 +100,7 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		slackMock := &commandTestSlackService{}
 		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
 
-		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "")
+		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "", "")
 		gt.Value(t, err).NotNil()
 		gt.Bool(t, slackMock.openViewCalled).False()
 	})
@@ -113,7 +115,7 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		slackMock := &commandTestSlackService{}
 		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
 
-		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "")
+		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "", "")
 		gt.NoError(t, err).Required()
 
 		gt.Bool(t, slackMock.openViewCalled).True()
@@ -149,7 +151,7 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		slackMock := &commandTestSlackService{}
 		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
 
-		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "risk")
+		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "risk", "")
 		gt.NoError(t, err).Required()
 
 		gt.Bool(t, slackMock.openViewCalled).True()
@@ -170,13 +172,36 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		slackMock := &commandTestSlackService{}
 		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
 
-		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "")
+		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "", "")
 		gt.NoError(t, err).Required()
 
 		gt.Bool(t, slackMock.openViewCalled).True()
 		gt.Value(t, slackMock.openViewRequest.CallbackID).Equal(usecase.SlackCallbackIDSelectWorkspace)
 		gt.Value(t, slackMock.openViewRequest.Title.Text).Equal("Create Case")
 		gt.Value(t, slackMock.openViewRequest.Submit.Text).Equal("Next")
+	})
+
+	t.Run("source team ID is preserved in private_metadata", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
+		})
+
+		slackMock := &commandTestSlackService{}
+		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+
+		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "risk", "TSOURCE")
+		gt.NoError(t, err).Required()
+
+		var meta struct {
+			WorkspaceID  string `json:"workspace_id"`
+			ChannelID    string `json:"channel_id"`
+			SourceTeamID string `json:"source_team_id"`
+		}
+		err = json.Unmarshal([]byte(slackMock.openViewRequest.PrivateMetadata), &meta)
+		gt.NoError(t, err).Required()
+		gt.Value(t, meta.SourceTeamID).Equal("TSOURCE")
 	})
 }
 

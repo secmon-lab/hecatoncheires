@@ -27,7 +27,7 @@ func TestSlackInteractionHandler(t *testing.T) {
 		actionUC := usecase.NewActionUseCase(repo, nil, "")
 
 		ctx := auth.ContextWithToken(t.Context(), &auth.Token{Sub: "UTESTUSER"})
-		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Desc", []string{}, nil, false)
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Desc", []string{}, nil, false, "")
 		gt.NoError(t, err).Required()
 
 		action, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Desc", []string{"U001"}, "", types.ActionStatusTodo, nil)

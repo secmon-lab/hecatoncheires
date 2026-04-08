@@ -55,6 +55,7 @@ Slack OAuth is used for user authentication via OpenID Connect (OIDC). The syste
      - `email` (to get user's email address)
 
    - **Bot Token Scopes**:
+     - `admin.conversations:write` (to connect channels across workspaces in Enterprise Grid; only needed for org-level apps)
      - `bookmarks:write` (to add bookmarks to case channels)
      - `channels:history` (to receive message events from public channels via Events API)
      - `channels:manage` (to create, rename, and invite users to public channels)
@@ -417,6 +418,7 @@ This allows you to organize channels by different categories (e.g., `incident-*`
 
 For automatic channel creation and full Slack integration, the bot token must have the following scopes:
 
+- `admin.conversations:write` - Connect channels across workspaces in Enterprise Grid (only needed for org-level apps)
 - `bookmarks:write` - Add bookmarks to case channels
 - `channels:history` - Receive message events from public channels via Events API
 - `channels:manage` - Create, rename, and invite users to public channels
@@ -491,6 +493,7 @@ When using an org-level Slack app:
 
 - **Auto-detection**: At startup, hecatoncheires calls `auth.test` and checks for `enterprise_id` to automatically detect whether the app is org-level or workspace-level
 - **Channel creation**: Channels are created in the workspace specified by `slack.team_id` in the TOML config
+- **Cross-workspace channel connect**: When a case is created from a slash command in a different workspace than the configured `slack.team_id`, the case channel is automatically connected to the source workspace via `admin.conversations.setTeams`, making the channel visible to users in both workspaces. This requires the `admin.conversations:write` bot scope.
 - **User sync**: The background user refresh worker automatically discovers all workspaces via `auth.teams.list` and fetches users from each workspace
 - **Backward compatible**: Existing workspace-level app configurations work without any changes
 
@@ -499,7 +502,7 @@ When using an org-level Slack app:
 1. Go to [https://api.slack.com/apps](https://api.slack.com/apps)
 2. Create a new app or use an existing one
 3. Under **Org Level Apps** (in the app settings sidebar), enable org-level distribution
-4. Configure the same OAuth scopes as described in the [authentication setup](#2-configure-oauth--permissions)
+4. Configure the same OAuth scopes as described in the [authentication setup](#2-configure-oauth--permissions), including `admin.conversations:write` for cross-workspace channel connectivity
 
 ### Step 2: Install the App to All Workspaces
 
@@ -602,7 +605,7 @@ Follow these steps to set up both authentication and webhooks:
 2. **Configure OAuth** (see [Configure OAuth & Permissions](#2-configure-oauth--permissions))
    - Set redirect URL: `${BASE_URL}/api/auth/callback`
    - Add user scopes: `openid`, `profile`, `email`
-   - Add bot scopes: `bookmarks:write`, `channels:history`, `channels:manage`, `channels:read`, `chat:write`, `commands`, `files:read`, `groups:read`, `groups:write`, `team:read`, `usergroups:read`, `users:read`, `users:read.email`
+   - Add bot scopes: `admin.conversations:write` (org-level only), `bookmarks:write`, `channels:history`, `channels:manage`, `channels:read`, `chat:write`, `commands`, `files:read`, `groups:read`, `groups:write`, `team:read`, `usergroups:read`, `users:read`, `users:read.email`
 
 3. **Configure Events API** (see [Events API Setup](#events-api-setup))
    - Enable Event Subscriptions
@@ -985,6 +988,7 @@ These scopes are required for the Bot User OAuth Token (`xoxb-...`):
 |-------|-----------------|---------|---------------|
 | `bookmarks:write` | `bookmarks.add` | Add bookmarks to case channels | `pkg/service/slack/client.go` |
 | `channels:history` | Events API | Receive `message.channels` events from public channels | Webhook handler |
+| `admin.conversations:write` | `admin.conversations.setTeams` | Connect channels across workspaces in Enterprise Grid (org-level only) | `pkg/service/slack/client.go` |
 | `channels:manage` | `conversations.create` | Create new public Slack channels for cases | `pkg/service/slack/client.go` |
 | `channels:manage` | `conversations.rename` | Rename Slack channels when case name changes | `pkg/service/slack/client.go` |
 | `channels:manage` | `conversations.invite` | Invite users to case channels | `pkg/service/slack/client.go` |

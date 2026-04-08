@@ -69,7 +69,7 @@ func (uc *CaseUseCase) slackChannelPrefixForWorkspace(workspaceID string) string
 	return entry.SlackChannelPrefix
 }
 
-func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue, isPrivate bool) (*model.Case, error) {
+func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue, isPrivate bool, sourceTeamID string) (*model.Case, error) {
 	if title == "" {
 		return nil, goerr.New("case title is required")
 	}
@@ -118,6 +118,13 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 					goerr.V(CaseIDKey, created.ID))
 			}
 			return nil, goerr.Wrap(err, "failed to create Slack channel for case", goerr.V(CaseIDKey, created.ID))
+		}
+
+		// Connect channel to the source workspace if it differs from the configured team
+		if sourceTeamID != "" && sourceTeamID != teamID {
+			if connectErr := uc.slackService.ConnectChannelToWorkspace(ctx, channelID, []string{teamID, sourceTeamID}); connectErr != nil {
+				errutil.Handle(ctx, connectErr, "failed to connect channel to source workspace")
+			}
 		}
 
 		// Invite creator, assignees, and auto-invite users to the channel

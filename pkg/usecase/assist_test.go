@@ -21,7 +21,7 @@ func TestAssistUseCase_BuildAssistSystemPrompt(t *testing.T) {
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		// Create a case
-		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Security Incident", "Suspicious login detected", []string{}, nil, false)
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Security Incident", "Suspicious login detected", []string{}, nil, false, "")
 		gt.NoError(t, err).Required()
 
 		// Create actions with and without DueDate
@@ -61,7 +61,7 @@ func TestAssistUseCase_BuildAssistSystemPrompt(t *testing.T) {
 		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Empty Case", "No actions yet", []string{}, nil, false)
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Empty Case", "No actions yet", []string{}, nil, false, "")
 		gt.NoError(t, err).Required()
 
 		registry := model.NewWorkspaceRegistry()
@@ -88,7 +88,7 @@ func TestAssistUseCase_BuildAssistSystemPrompt(t *testing.T) {
 		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Test", []string{}, nil, false)
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Test", []string{}, nil, false, "")
 		gt.NoError(t, err).Required()
 
 		// Create an assist log
@@ -138,7 +138,7 @@ func TestAssistUseCase_BuildAssistSystemPrompt_Language(t *testing.T) {
 		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Desc", []string{}, nil, false)
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Desc", []string{}, nil, false, "")
 		gt.NoError(t, err).Required()
 
 		registry := model.NewWorkspaceRegistry()
@@ -164,7 +164,7 @@ func TestAssistUseCase_BuildAssistSystemPrompt_Language(t *testing.T) {
 		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Desc", []string{}, nil, false)
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Desc", []string{}, nil, false, "")
 		gt.NoError(t, err).Required()
 
 		registry := model.NewWorkspaceRegistry()
