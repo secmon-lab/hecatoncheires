@@ -14,7 +14,7 @@ import (
 func TestActionUseCase_ListOpenCaseActions(t *testing.T) {
 	t.Run("returns actions from open cases only", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
@@ -45,7 +45,7 @@ func TestActionUseCase_ListOpenCaseActions(t *testing.T) {
 
 	t.Run("returns empty list when no open cases", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
@@ -65,7 +65,7 @@ func TestActionUseCase_ListOpenCaseActions(t *testing.T) {
 
 	t.Run("returns empty list when no actions exist", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
@@ -80,7 +80,7 @@ func TestActionUseCase_ListOpenCaseActions(t *testing.T) {
 
 	t.Run("returns actions from multiple open cases", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 

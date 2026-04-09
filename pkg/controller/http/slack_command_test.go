@@ -82,7 +82,7 @@ func (m *mockSlackServiceForCommand) ListUserGroups(_ context.Context, _ string)
 func (m *mockSlackServiceForCommand) ListTeams(_ context.Context) ([]slacksvc.Team, error) {
 	return nil, nil
 }
-func (m *mockSlackServiceForCommand) ConnectChannelToWorkspace(_ context.Context, _ string, _ []string) error {
+func (m *mockSlackServiceForCommand) PostEphemeral(_ context.Context, _ string, _ string, _ string) error {
 	return nil
 }
 func (m *mockSlackServiceForCommand) GetUserGroupMembers(_ context.Context, _ string) ([]string, error) {

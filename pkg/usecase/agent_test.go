@@ -90,6 +90,10 @@ func (m *agentTestSlackService) OpenView(ctx context.Context, triggerID string, 
 	return nil
 }
 
+func (m *agentTestSlackService) PostEphemeral(_ context.Context, _ string, _ string, _ string) error {
+	return nil
+}
+
 func (m *agentTestSlackService) GetBotUserID(ctx context.Context) (string, error) {
 	if m.getBotUserIDFn != nil {
 		return m.getBotUserIDFn(ctx)

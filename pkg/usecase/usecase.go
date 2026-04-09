@@ -15,6 +15,7 @@ type UseCases struct {
 	workspaceRegistry *model.WorkspaceRegistry
 	notion            notion.Service
 	slackService      slack.Service
+	slackAdminService slack.AdminService
 	githubService     github.Service
 	knowledgeService  knowledge.Service
 	llmClient         gollem.LLMClient
@@ -67,6 +68,12 @@ func WithGitHubService(svc github.Service) Option {
 	}
 }
 
+func WithSlackAdminService(svc slack.AdminService) Option {
+	return func(uc *UseCases) {
+		uc.slackAdminService = svc
+	}
+}
+
 func WithLLMClient(client gollem.LLMClient) Option {
 	return func(uc *UseCases) {
 		uc.llmClient = client
@@ -83,7 +90,7 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 		opt(uc)
 	}
 
-	uc.Case = NewCaseUseCase(repo, registry, uc.slackService, uc.baseURL)
+	uc.Case = NewCaseUseCase(repo, registry, uc.slackService, uc.slackAdminService, uc.baseURL)
 	uc.Action = NewActionUseCase(repo, uc.slackService, uc.baseURL)
 	uc.Source = NewSourceUseCase(repo, uc.notion, uc.slackService, uc.githubService)
 	uc.Compile = NewCompileUseCase(repo, registry, uc.notion, uc.knowledgeService, uc.slackService, uc.githubService, uc.baseURL)

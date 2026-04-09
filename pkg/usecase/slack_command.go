@@ -10,6 +10,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/slack-go/slack"
 )
@@ -149,6 +150,17 @@ func (uc *SlackUseCases) HandleCaseCreationSubmit(ctx context.Context, caseUC *C
 		return goerr.Wrap(err, "failed to create case via slash command",
 			goerr.V("workspace_id", meta.WorkspaceID),
 			goerr.V("user_id", userID))
+	}
+
+	// Notify the creator if cross-workspace connect was needed but not available
+	if meta.ChannelID != "" && meta.SourceTeamID != "" && uc.slackService != nil {
+		configuredTeamID := caseUC.slackTeamIDForWorkspace(meta.WorkspaceID)
+		if meta.SourceTeamID != configuredTeamID && caseUC.slackAdminService == nil {
+			msg := i18n.T(ctx, i18n.MsgCrossWorkspaceConnectUnavailable)
+			if ephErr := uc.slackService.PostEphemeral(ctx, meta.ChannelID, userID, msg); ephErr != nil {
+				errutil.Handle(ctx, ephErr, "failed to post cross-workspace connect notification")
+			}
+		}
 	}
 
 	// Post confirmation message to the channel where the command was invoked

@@ -60,25 +60,26 @@ func (m *sourceTestNotionService) QueryUpdatedPagesFromPage(ctx context.Context,
 
 // mockSlackService is a mock implementation of slack.Service for testing
 type mockSlackService struct {
-	listJoinedChannelsFn        func(ctx context.Context) ([]slack.Channel, error)
-	getChannelNamesFn           func(ctx context.Context, ids []string) (map[string]string, error)
-	getUserInfoFn               func(ctx context.Context, userID string) (*slack.User, error)
-	listUsersFn                 func(ctx context.Context) ([]*slack.User, error)
-	createChannelFn             func(ctx context.Context, caseID int64, caseName string, prefix string) (string, error)
-	renameChannelFn             func(ctx context.Context, channelID string, caseID int64, caseName string, prefix string) error
-	inviteUsersToChannelFn      func(ctx context.Context, channelID string, userIDs []string) error
-	addBookmarkFn               func(ctx context.Context, channelID, title, link string) error
-	getConversationMembersFn    func(ctx context.Context, channelID string) ([]string, error)
-	listUserGroupsFn            func(ctx context.Context) ([]slack.UserGroup, error)
-	getUserGroupMembersFn       func(ctx context.Context, groupID string) ([]string, error)
-	connectChannelToWorkspaceFn func(ctx context.Context, channelID string, targetTeamIDs []string) error
-	invitedChannelID            string
-	invitedUserIDs              []string
-	bookmarkChannelID           string
-	bookmarkTitle               string
-	bookmarkLink                string
-	connectedChannelID          string
-	connectedTargetTeamIDs      []string
+	listJoinedChannelsFn     func(ctx context.Context) ([]slack.Channel, error)
+	getChannelNamesFn        func(ctx context.Context, ids []string) (map[string]string, error)
+	getUserInfoFn            func(ctx context.Context, userID string) (*slack.User, error)
+	listUsersFn              func(ctx context.Context) ([]*slack.User, error)
+	createChannelFn          func(ctx context.Context, caseID int64, caseName string, prefix string) (string, error)
+	renameChannelFn          func(ctx context.Context, channelID string, caseID int64, caseName string, prefix string) error
+	inviteUsersToChannelFn   func(ctx context.Context, channelID string, userIDs []string) error
+	addBookmarkFn            func(ctx context.Context, channelID, title, link string) error
+	getConversationMembersFn func(ctx context.Context, channelID string) ([]string, error)
+	listUserGroupsFn         func(ctx context.Context) ([]slack.UserGroup, error)
+	getUserGroupMembersFn    func(ctx context.Context, groupID string) ([]string, error)
+	postEphemeralFn          func(ctx context.Context, channelID string, userID string, text string) error
+	invitedChannelID         string
+	invitedUserIDs           []string
+	bookmarkChannelID        string
+	bookmarkTitle            string
+	bookmarkLink             string
+	ephemeralChannelID       string
+	ephemeralUserID          string
+	ephemeralText            string
 }
 
 func (m *mockSlackService) ListJoinedChannels(ctx context.Context, teamID string) ([]slack.Channel, error) {
@@ -212,11 +213,12 @@ func (m *mockSlackService) ListTeams(ctx context.Context) ([]slack.Team, error) 
 	return nil, nil
 }
 
-func (m *mockSlackService) ConnectChannelToWorkspace(ctx context.Context, channelID string, targetTeamIDs []string) error {
-	m.connectedChannelID = channelID
-	m.connectedTargetTeamIDs = targetTeamIDs
-	if m.connectChannelToWorkspaceFn != nil {
-		return m.connectChannelToWorkspaceFn(ctx, channelID, targetTeamIDs)
+func (m *mockSlackService) PostEphemeral(ctx context.Context, channelID string, userID string, text string) error {
+	m.ephemeralChannelID = channelID
+	m.ephemeralUserID = userID
+	m.ephemeralText = text
+	if m.postEphemeralFn != nil {
+		return m.postEphemeralFn(ctx, channelID, userID, text)
 	}
 	return nil
 }

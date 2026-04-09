@@ -292,7 +292,7 @@ func TestSlackUseCases_HandleCaseCreationSubmit(t *testing.T) {
 
 		slackMock := &commandTestSlackService{}
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
-		caseUC := usecase.NewCaseUseCase(repo, registry, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 
 		meta, _ := json.Marshal(map[string]string{
 			"workspace_id": "risk",
@@ -355,7 +355,7 @@ func TestSlackUseCases_HandleCaseCreationSubmit(t *testing.T) {
 
 		slackMock := &commandTestSlackService{}
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
-		caseUC := usecase.NewCaseUseCase(repo, registry, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 
 		meta, _ := json.Marshal(map[string]string{
 			"workspace_id": "risk",
@@ -415,7 +415,7 @@ func TestSlackUseCases_HandleCaseCreationSubmit(t *testing.T) {
 
 		slackMock := &commandTestSlackService{}
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
-		caseUC := usecase.NewCaseUseCase(repo, registry, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 
 		meta, _ := json.Marshal(map[string]string{
 			"workspace_id": "risk",

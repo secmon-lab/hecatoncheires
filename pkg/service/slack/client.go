@@ -529,17 +529,15 @@ func (c *client) GetUserGroupMembers(ctx context.Context, groupID string) ([]str
 	return members, nil
 }
 
-// ConnectChannelToWorkspace adds target workspaces to a channel's visibility
-// using admin.conversations.setTeams API (Enterprise Grid only).
-func (c *client) ConnectChannelToWorkspace(ctx context.Context, channelID string, targetTeamIDs []string) error {
-	err := c.api.AdminConversationsSetTeams(ctx, slack.AdminConversationsSetTeamsParams{
-		ChannelID:     channelID,
-		TargetTeamIDs: targetTeamIDs,
-	})
+// PostEphemeral posts an ephemeral message visible only to the specified user in a channel.
+func (c *client) PostEphemeral(ctx context.Context, channelID string, userID string, text string) error {
+	_, err := c.api.PostEphemeralContext(ctx, channelID, userID,
+		slack.MsgOptionText(text, false),
+	)
 	if err != nil {
-		return goerr.Wrap(err, "failed to connect channel to workspaces",
+		return goerr.Wrap(err, "failed to post ephemeral message",
 			goerr.V("channel_id", channelID),
-			goerr.V("target_team_ids", targetTeamIDs))
+			goerr.V("user_id", userID))
 	}
 	return nil
 }

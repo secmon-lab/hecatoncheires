@@ -59,6 +59,9 @@ var messagesEN = [msgKeyCount]string{
 	// Bookmark
 	MsgBookmarkOpenCase: "Open Case",
 
+	// Cross-workspace
+	MsgCrossWorkspaceConnectUnavailable: "The case channel was created in a different workspace. To access it, please ask an admin to connect the channel to your workspace, or manually add it via channel settings.",
+
 	// Errors
 	MsgErrOpenDialog:         "Failed to open case creation dialog. Please try again.",
 	MsgErrWorkspaceSelection: "Failed to process workspace selection. Please try again.",
@@ -108,6 +111,9 @@ var messagesJA = [msgKeyCount]string{
 
 	// Bookmark
 	MsgBookmarkOpenCase: "ケースを開く",
+
+	// Cross-workspace
+	MsgCrossWorkspaceConnectUnavailable: "ケースチャンネルが別のワークスペースに作成されました。アクセスするには、管理者にチャンネルのコネクトを依頼するか、チャンネル設定から手動で追加してください。",
 
 	// Errors
 	MsgErrOpenDialog:         "ケース作成ダイアログを開けませんでした。もう一度お試しください。",

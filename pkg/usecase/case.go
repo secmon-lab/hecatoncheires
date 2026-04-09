@@ -21,14 +21,16 @@ type CaseUseCase struct {
 	repo              interfaces.Repository
 	workspaceRegistry *model.WorkspaceRegistry
 	slackService      slack.Service
+	slackAdminService slack.AdminService
 	baseURL           string
 }
 
-func NewCaseUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, baseURL string) *CaseUseCase {
+func NewCaseUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackAdminService slack.AdminService, baseURL string) *CaseUseCase {
 	return &CaseUseCase{
 		repo:              repo,
 		workspaceRegistry: registry,
 		slackService:      slackService,
+		slackAdminService: slackAdminService,
 		baseURL:           baseURL,
 	}
 }
@@ -122,8 +124,10 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 
 		// Connect channel to the source workspace if it differs from the configured team
 		if sourceTeamID != "" && sourceTeamID != teamID {
-			if connectErr := uc.slackService.ConnectChannelToWorkspace(ctx, channelID, []string{teamID, sourceTeamID}); connectErr != nil {
-				errutil.Handle(ctx, connectErr, "failed to connect channel to source workspace")
+			if uc.slackAdminService != nil {
+				if connectErr := uc.slackAdminService.ConnectChannelToWorkspace(ctx, channelID, []string{teamID, sourceTeamID}); connectErr != nil {
+					errutil.Handle(ctx, connectErr, "failed to connect channel to source workspace")
+				}
 			}
 		}
 

@@ -17,7 +17,7 @@ import (
 func TestAssistUseCase_BuildAssistSystemPrompt(t *testing.T) {
 	t.Run("renders template with all sections including DueDate", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		// Create a case
@@ -58,7 +58,7 @@ func TestAssistUseCase_BuildAssistSystemPrompt(t *testing.T) {
 
 	t.Run("renders template with no actions or messages", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Empty Case", "No actions yet", []string{}, nil, false, "")
@@ -85,7 +85,7 @@ func TestAssistUseCase_BuildAssistSystemPrompt(t *testing.T) {
 
 	t.Run("renders template with assist logs and memories", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Test", []string{}, nil, false, "")
@@ -135,7 +135,7 @@ func TestAssistUseCase_BuildAssistSystemPrompt(t *testing.T) {
 func TestAssistUseCase_BuildAssistSystemPrompt_Language(t *testing.T) {
 	t.Run("includes language instruction when language is set", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Desc", []string{}, nil, false, "")
@@ -161,7 +161,7 @@ func TestAssistUseCase_BuildAssistSystemPrompt_Language(t *testing.T) {
 
 	t.Run("omits language section when language is empty", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Desc", []string{}, nil, false, "")

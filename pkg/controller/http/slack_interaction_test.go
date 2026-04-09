@@ -23,7 +23,7 @@ func TestSlackInteractionHandler(t *testing.T) {
 	setup := func(t *testing.T) (*usecase.ActionUseCase, *httpctrl.SlackInteractionHandler, int64) {
 		t.Helper()
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		actionUC := usecase.NewActionUseCase(repo, nil, "")
 
 		ctx := auth.ContextWithToken(t.Context(), &auth.Token{Sub: "UTESTUSER"})
@@ -251,7 +251,7 @@ func TestSlackInteractionHandler_ViewSubmission(t *testing.T) {
 		})
 		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, &mockSlackServiceForCommand{})
-		caseUC := usecase.NewCaseUseCase(repo, registry, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 
 		handler := httpctrl.NewSlackInteractionHandler(actionUC, nil)
 		handler.WithSlackCommand(slackUC, caseUC)
@@ -305,7 +305,7 @@ func TestSlackInteractionHandler_ViewSubmission(t *testing.T) {
 		})
 		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, &mockSlackServiceForCommand{})
-		caseUC := usecase.NewCaseUseCase(repo, registry, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 
 		handler := httpctrl.NewSlackInteractionHandler(actionUC, nil)
 		handler.WithSlackCommand(slackUC, caseUC)
