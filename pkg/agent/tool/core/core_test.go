@@ -1206,6 +1206,9 @@ func (m *mockSlackService) ListUserGroups(_ context.Context, _ string) ([]slackS
 func (m *mockSlackService) ListTeams(_ context.Context) ([]slackService.Team, error) {
 	return nil, nil
 }
+func (m *mockSlackService) PostEphemeral(_ context.Context, _ string, _ string, _ string) error {
+	return nil
+}
 func (m *mockSlackService) GetUserGroupMembers(_ context.Context, _ string) ([]string, error) {
 	return nil, nil
 }

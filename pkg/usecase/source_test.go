@@ -71,11 +71,15 @@ type mockSlackService struct {
 	getConversationMembersFn func(ctx context.Context, channelID string) ([]string, error)
 	listUserGroupsFn         func(ctx context.Context) ([]slack.UserGroup, error)
 	getUserGroupMembersFn    func(ctx context.Context, groupID string) ([]string, error)
+	postEphemeralFn          func(ctx context.Context, channelID string, userID string, text string) error
 	invitedChannelID         string
 	invitedUserIDs           []string
 	bookmarkChannelID        string
 	bookmarkTitle            string
 	bookmarkLink             string
+	ephemeralChannelID       string
+	ephemeralUserID          string
+	ephemeralText            string
 }
 
 func (m *mockSlackService) ListJoinedChannels(ctx context.Context, teamID string) ([]slack.Channel, error) {
@@ -207,6 +211,16 @@ func (m *mockSlackService) ListUserGroups(ctx context.Context, teamID string) ([
 
 func (m *mockSlackService) ListTeams(ctx context.Context) ([]slack.Team, error) {
 	return nil, nil
+}
+
+func (m *mockSlackService) PostEphemeral(ctx context.Context, channelID string, userID string, text string) error {
+	m.ephemeralChannelID = channelID
+	m.ephemeralUserID = userID
+	m.ephemeralText = text
+	if m.postEphemeralFn != nil {
+		return m.postEphemeralFn(ctx, channelID, userID, text)
+	}
+	return nil
 }
 
 func (m *mockSlackService) GetUserGroupMembers(ctx context.Context, groupID string) ([]string, error) {

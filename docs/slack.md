@@ -491,6 +491,7 @@ When using an org-level Slack app:
 
 - **Auto-detection**: At startup, hecatoncheires calls `auth.test` and checks for `enterprise_id` to automatically detect whether the app is org-level or workspace-level
 - **Channel creation**: Channels are created in the workspace specified by `slack.team_id` in the TOML config
+- **Cross-workspace channel connect**: When a case is created from a slash command in a different workspace than the configured `slack.team_id`, the case channel is automatically connected to the source workspace via `admin.conversations.setTeams`, making the channel visible to users in both workspaces. This requires a **User OAuth Token** (`xoxp-`) with `admin.conversations:write` scope, configured via `--slack-user-oauth-token`. If not configured, the creator receives an ephemeral notification with instructions for manual channel connection.
 - **User sync**: The background user refresh worker automatically discovers all workspaces via `auth.teams.list` and fetches users from each workspace
 - **Backward compatible**: Existing workspace-level app configurations work without any changes
 
@@ -913,6 +914,7 @@ All webhook endpoints require valid Slack signature verification.
 | `HECATONCHEIRES_SLACK_CLIENT_ID` | Yes* | - | Slack OAuth client ID |
 | `HECATONCHEIRES_SLACK_CLIENT_SECRET` | Yes* | - | Slack OAuth client secret |
 | `HECATONCHEIRES_SLACK_BOT_TOKEN` | No*** | - | Slack Bot User OAuth Token (starts with `xoxb-`) |
+| `HECATONCHEIRES_SLACK_USER_OAUTH_TOKEN` | No | - | Slack User OAuth Token (starts with `xoxp-`) for cross-workspace channel connect in Enterprise Grid. Requires `admin.conversations:write` scope. |
 | `HECATONCHEIRES_SLACK_SIGNING_SECRET` | Yes** | - | Slack Events API signing secret |
 | `HECATONCHEIRES_SLACK_CHANNEL_PREFIX` | No | `risk` | Prefix for auto-created Slack channel names for risks (e.g., `incident` creates `#incident-1-risk-name`) |
 | `HECATONCHEIRES_NO_AUTH` | No | - | Slack user ID for no-auth mode (development only) |
@@ -985,6 +987,7 @@ These scopes are required for the Bot User OAuth Token (`xoxb-...`):
 |-------|-----------------|---------|---------------|
 | `bookmarks:write` | `bookmarks.add` | Add bookmarks to case channels | `pkg/service/slack/client.go` |
 | `channels:history` | Events API | Receive `message.channels` events from public channels | Webhook handler |
+| `admin.conversations:write` (User token) | `admin.conversations.setTeams` | Connect channels across workspaces in Enterprise Grid (requires User OAuth Token, org-level only) | `pkg/service/slack/admin_client.go` |
 | `channels:manage` | `conversations.create` | Create new public Slack channels for cases | `pkg/service/slack/client.go` |
 | `channels:manage` | `conversations.rename` | Rename Slack channels when case name changes | `pkg/service/slack/client.go` |
 | `channels:manage` | `conversations.invite` | Invite users to case channels | `pkg/service/slack/client.go` |

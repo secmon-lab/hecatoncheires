@@ -90,6 +90,10 @@ type Service interface {
 	// For org-level apps, this returns all workspaces in the enterprise.
 	// For WS-level apps, this returns a single workspace.
 	ListTeams(ctx context.Context) ([]Team, error)
+
+	// PostEphemeral posts an ephemeral message visible only to the specified user in a channel.
+	// Uses chat.postEphemeral API. The message does not persist across reloads or sessions.
+	PostEphemeral(ctx context.Context, channelID string, userID string, text string) error
 }
 
 // UserGroup represents a Slack user group

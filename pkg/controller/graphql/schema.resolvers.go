@@ -323,7 +323,7 @@ func (r *mutationResolver) CreateCase(ctx context.Context, workspaceID string, i
 	}
 
 	isPrivate := input.IsPrivate != nil && *input.IsPrivate
-	created, err := r.UseCases.Case.CreateCase(ctx, workspaceID, input.Title, description, assigneeIDs, fieldValues, isPrivate)
+	created, err := r.UseCases.Case.CreateCase(ctx, workspaceID, input.Title, description, assigneeIDs, fieldValues, isPrivate, "")
 	if err != nil {
 		return nil, err
 	}

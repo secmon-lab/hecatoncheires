@@ -10,6 +10,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/slack-go/slack"
 )
@@ -33,14 +34,15 @@ const (
 
 // commandMetadata is stored in modal private_metadata as JSON
 type commandMetadata struct {
-	WorkspaceID string `json:"workspace_id"`
-	ChannelID   string `json:"channel_id"`
+	WorkspaceID  string `json:"workspace_id"`
+	ChannelID    string `json:"channel_id"`
+	SourceTeamID string `json:"source_team_id,omitempty"` // Slack workspace ID where the slash command was invoked
 }
 
 // HandleSlashCommand handles a Slack slash command to create a case.
 // If workspaceID is provided (from URL path), it opens the case creation modal directly.
 // If workspaceID is empty, it shows a workspace selection modal (or skips if only one workspace).
-func (uc *SlackUseCases) HandleSlashCommand(ctx context.Context, triggerID, userID, channelID, workspaceID string) error {
+func (uc *SlackUseCases) HandleSlashCommand(ctx context.Context, triggerID, userID, channelID, workspaceID, sourceTeamID string) error {
 	if uc.slackService == nil {
 		return goerr.New("slack service is not available")
 	}
@@ -58,7 +60,7 @@ func (uc *SlackUseCases) HandleSlashCommand(ctx context.Context, triggerID, user
 			return goerr.Wrap(err, "invalid workspace ID",
 				goerr.V("workspace_id", workspaceID))
 		}
-		return uc.openCaseCreationModal(ctx, triggerID, workspaceID, channelID, entry.FieldSchema)
+		return uc.openCaseCreationModal(ctx, triggerID, workspaceID, channelID, sourceTeamID, entry.FieldSchema)
 	}
 
 	// No workspace specified; decide based on workspace count
@@ -68,9 +70,9 @@ func (uc *SlackUseCases) HandleSlashCommand(ctx context.Context, triggerID, user
 		return goerr.New("no workspaces configured")
 	case 1:
 		entry, _ := uc.registry.Get(workspaces[0].ID)
-		return uc.openCaseCreationModal(ctx, triggerID, workspaces[0].ID, channelID, entry.FieldSchema)
+		return uc.openCaseCreationModal(ctx, triggerID, workspaces[0].ID, channelID, sourceTeamID, entry.FieldSchema)
 	default:
-		return uc.openWorkspaceSelectModal(ctx, triggerID, channelID, workspaces)
+		return uc.openWorkspaceSelectModal(ctx, triggerID, channelID, sourceTeamID, workspaces)
 	}
 }
 
@@ -107,7 +109,7 @@ func (uc *SlackUseCases) HandleWorkspaceSelectSubmit(ctx context.Context, callba
 		}
 	}
 
-	view := uc.buildCaseCreationModal(ctx, workspaceID, meta.ChannelID, schema)
+	view := uc.buildCaseCreationModal(ctx, workspaceID, meta.ChannelID, meta.SourceTeamID, schema)
 	return &view, nil
 }
 
@@ -143,11 +145,22 @@ func (uc *SlackUseCases) HandleCaseCreationSubmit(ctx context.Context, caseUC *C
 	userID := callback.User.ID
 
 	// Create case using existing CaseUseCase
-	created, err := caseUC.CreateCase(ctx, meta.WorkspaceID, title, description, []string{userID}, fieldValues, false)
+	created, err := caseUC.CreateCase(ctx, meta.WorkspaceID, title, description, []string{userID}, fieldValues, false, meta.SourceTeamID)
 	if err != nil {
 		return goerr.Wrap(err, "failed to create case via slash command",
 			goerr.V("workspace_id", meta.WorkspaceID),
 			goerr.V("user_id", userID))
+	}
+
+	// Notify the creator if cross-workspace connect was needed but not available
+	if meta.ChannelID != "" && meta.SourceTeamID != "" && uc.slackService != nil {
+		configuredTeamID := caseUC.slackTeamIDForWorkspace(meta.WorkspaceID)
+		if meta.SourceTeamID != configuredTeamID && caseUC.slackAdminService == nil {
+			msg := i18n.T(ctx, i18n.MsgCrossWorkspaceConnectUnavailable)
+			if ephErr := uc.slackService.PostEphemeral(ctx, meta.ChannelID, userID, msg); ephErr != nil {
+				errutil.Handle(ctx, ephErr, "failed to post cross-workspace connect notification")
+			}
+		}
 	}
 
 	// Post confirmation message to the channel where the command was invoked
@@ -172,8 +185,8 @@ func (uc *SlackUseCases) HandleCaseCreationSubmit(ctx context.Context, caseUC *C
 }
 
 // openCaseCreationModal opens the case creation modal directly
-func (uc *SlackUseCases) openCaseCreationModal(ctx context.Context, triggerID, workspaceID, channelID string, schema *config.FieldSchema) error {
-	view := uc.buildCaseCreationModal(ctx, workspaceID, channelID, schema)
+func (uc *SlackUseCases) openCaseCreationModal(ctx context.Context, triggerID, workspaceID, channelID, sourceTeamID string, schema *config.FieldSchema) error {
+	view := uc.buildCaseCreationModal(ctx, workspaceID, channelID, sourceTeamID, schema)
 	if err := uc.slackService.OpenView(ctx, triggerID, view); err != nil {
 		return goerr.Wrap(err, "failed to open case creation modal",
 			goerr.V("workspace_id", workspaceID))
@@ -182,8 +195,8 @@ func (uc *SlackUseCases) openCaseCreationModal(ctx context.Context, triggerID, w
 }
 
 // openWorkspaceSelectModal opens the workspace selection modal
-func (uc *SlackUseCases) openWorkspaceSelectModal(ctx context.Context, triggerID, channelID string, workspaces []model.Workspace) error {
-	view := uc.buildWorkspaceSelectModal(ctx, channelID, workspaces)
+func (uc *SlackUseCases) openWorkspaceSelectModal(ctx context.Context, triggerID, channelID, sourceTeamID string, workspaces []model.Workspace) error {
+	view := uc.buildWorkspaceSelectModal(ctx, channelID, sourceTeamID, workspaces)
 	if err := uc.slackService.OpenView(ctx, triggerID, view); err != nil {
 		return goerr.Wrap(err, "failed to open workspace select modal")
 	}
@@ -191,10 +204,11 @@ func (uc *SlackUseCases) openWorkspaceSelectModal(ctx context.Context, triggerID
 }
 
 // buildCaseCreationModal constructs the Block Kit modal for case creation
-func (uc *SlackUseCases) buildCaseCreationModal(ctx context.Context, workspaceID, channelID string, schema *config.FieldSchema) slack.ModalViewRequest {
+func (uc *SlackUseCases) buildCaseCreationModal(ctx context.Context, workspaceID, channelID, sourceTeamID string, schema *config.FieldSchema) slack.ModalViewRequest {
 	meta := commandMetadata{
-		WorkspaceID: workspaceID,
-		ChannelID:   channelID,
+		WorkspaceID:  workspaceID,
+		ChannelID:    channelID,
+		SourceTeamID: sourceTeamID,
 	}
 	metaJSON, _ := json.Marshal(meta) //nolint:errcheck
 
@@ -446,9 +460,10 @@ func extractFieldValues(blockValues map[string]map[string]slack.BlockAction) map
 }
 
 // buildWorkspaceSelectModal constructs the Block Kit modal for workspace selection
-func (uc *SlackUseCases) buildWorkspaceSelectModal(ctx context.Context, channelID string, workspaces []model.Workspace) slack.ModalViewRequest {
+func (uc *SlackUseCases) buildWorkspaceSelectModal(ctx context.Context, channelID, sourceTeamID string, workspaces []model.Workspace) slack.ModalViewRequest {
 	meta := commandMetadata{
-		ChannelID: channelID,
+		ChannelID:    channelID,
+		SourceTeamID: sourceTeamID,
 	}
 	metaJSON, _ := json.Marshal(meta) //nolint:errcheck
 

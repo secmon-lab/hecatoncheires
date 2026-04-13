@@ -26,11 +26,12 @@ type slackAuthAPI interface {
 }
 
 type Slack struct {
-	clientID      string
-	clientSecret  string
-	botToken      string
-	signingSecret string
-	noAuthUID     string
+	clientID       string
+	clientSecret   string
+	botToken       string
+	userOAuthToken string
+	signingSecret  string
+	noAuthUID      string
 
 	// Populated by DetectOrgLevel
 	isOrgLevel   bool
@@ -65,6 +66,13 @@ func (x *Slack) Flags() []cli.Flag {
 			Sources:     cli.EnvVars("HECATONCHEIRES_SLACK_BOT_TOKEN"),
 		},
 		&cli.StringFlag{
+			Name:        "slack-user-oauth-token",
+			Usage:       "Slack User OAuth Token for admin API (xoxp-..., required for cross-workspace channel connect in Enterprise Grid)",
+			Category:    "Slack",
+			Destination: &x.userOAuthToken,
+			Sources:     cli.EnvVars("HECATONCHEIRES_SLACK_USER_OAUTH_TOKEN"),
+		},
+		&cli.StringFlag{
 			Name:        "slack-signing-secret",
 			Usage:       "Slack Signing Secret (for webhook verification)",
 			Category:    "Slack",
@@ -86,6 +94,7 @@ func (x *Slack) LogAttrs() []slog.Attr {
 	return []slog.Attr{
 		slog.Bool("oauth_configured", x.clientID != "" && x.clientSecret != ""),
 		slog.Bool("bot_token_set", x.botToken != ""),
+		slog.Bool("user_oauth_token_set", x.userOAuthToken != ""),
 		slog.Bool("signing_secret_set", x.signingSecret != ""),
 	}
 }
@@ -265,6 +274,11 @@ func (x *Slack) EnterpriseID() string {
 // BotToken returns the Slack bot token
 func (x *Slack) BotToken() string {
 	return x.botToken
+}
+
+// UserOAuthToken returns the Slack User OAuth Token for admin API operations
+func (x *Slack) UserOAuthToken() string {
+	return x.userOAuthToken
 }
 
 // IsConfigured checks if Slack configuration is complete

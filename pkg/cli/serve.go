@@ -221,6 +221,16 @@ func cmdServe() *cli.Command {
 				ucOpts = append(ucOpts, usecase.WithSlackService(slackSvc))
 				logging.Default().Info("Slack service enabled for Source integration")
 
+				// Initialize Slack Admin service if User OAuth Token is provided
+				if slackCfg.UserOAuthToken() != "" {
+					adminSvc, err := slack.NewAdminClient(slackCfg.UserOAuthToken())
+					if err != nil {
+						return goerr.Wrap(err, "failed to initialize Slack admin service")
+					}
+					ucOpts = append(ucOpts, usecase.WithSlackAdminService(adminSvc))
+					logging.Default().Info("Slack admin service enabled for cross-workspace channel connect")
+				}
+
 				// Detect org-level app and validate workspace team IDs
 				if err := slackCfg.DetectOrgLevel(ctx); err != nil {
 					return goerr.Wrap(err, "failed to detect Slack app level")

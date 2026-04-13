@@ -14,15 +14,15 @@ import (
 func TestActionUseCase_ListOpenCaseActions(t *testing.T) {
 	t.Run("returns actions from open cases only", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		// Create an open case and a closed case
-		openCase, err := caseUC.CreateCase(ctx, testWorkspaceID, "Open Case", "open", []string{}, nil, false)
+		openCase, err := caseUC.CreateCase(ctx, testWorkspaceID, "Open Case", "open", []string{}, nil, false, "")
 		gt.NoError(t, err).Required()
 
-		closedCase, err := caseUC.CreateCase(ctx, testWorkspaceID, "Closed Case", "closed", []string{}, nil, false)
+		closedCase, err := caseUC.CreateCase(ctx, testWorkspaceID, "Closed Case", "closed", []string{}, nil, false, "")
 		gt.NoError(t, err).Required()
 		_, err = caseUC.CloseCase(ctx, testWorkspaceID, closedCase.ID)
 		gt.NoError(t, err).Required()
@@ -45,12 +45,12 @@ func TestActionUseCase_ListOpenCaseActions(t *testing.T) {
 
 	t.Run("returns empty list when no open cases", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		// Create only a closed case
-		closedCase, err := caseUC.CreateCase(ctx, testWorkspaceID, "Closed Case", "closed", []string{}, nil, false)
+		closedCase, err := caseUC.CreateCase(ctx, testWorkspaceID, "Closed Case", "closed", []string{}, nil, false, "")
 		gt.NoError(t, err).Required()
 		_, err = caseUC.CloseCase(ctx, testWorkspaceID, closedCase.ID)
 		gt.NoError(t, err).Required()
@@ -65,12 +65,12 @@ func TestActionUseCase_ListOpenCaseActions(t *testing.T) {
 
 	t.Run("returns empty list when no actions exist", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		// Create an open case with no actions
-		_, err := caseUC.CreateCase(ctx, testWorkspaceID, "Open Case", "open", []string{}, nil, false)
+		_, err := caseUC.CreateCase(ctx, testWorkspaceID, "Open Case", "open", []string{}, nil, false, "")
 		gt.NoError(t, err).Required()
 
 		actions, err := actionUC.ListOpenCaseActions(ctx, testWorkspaceID)
@@ -80,15 +80,15 @@ func TestActionUseCase_ListOpenCaseActions(t *testing.T) {
 
 	t.Run("returns actions from multiple open cases", func(t *testing.T) {
 		repo := memory.New()
-		caseUC := usecase.NewCaseUseCase(repo, nil, nil, "")
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		// Create two open cases
-		case1, err := caseUC.CreateCase(ctx, testWorkspaceID, "Case 1", "desc1", []string{}, nil, false)
+		case1, err := caseUC.CreateCase(ctx, testWorkspaceID, "Case 1", "desc1", []string{}, nil, false, "")
 		gt.NoError(t, err).Required()
 
-		case2, err := caseUC.CreateCase(ctx, testWorkspaceID, "Case 2", "desc2", []string{}, nil, false)
+		case2, err := caseUC.CreateCase(ctx, testWorkspaceID, "Case 2", "desc2", []string{}, nil, false, "")
 		gt.NoError(t, err).Required()
 
 		// Create actions for each case

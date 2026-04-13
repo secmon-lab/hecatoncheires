@@ -78,6 +78,9 @@ const (
 	// Bookmark
 	MsgBookmarkOpenCase
 
+	// Cross-workspace
+	MsgCrossWorkspaceConnectUnavailable
+
 	// Errors
 	MsgErrOpenDialog
 	MsgErrWorkspaceSelection

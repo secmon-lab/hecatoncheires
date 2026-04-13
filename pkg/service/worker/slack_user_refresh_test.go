@@ -169,6 +169,10 @@ func (m *mockSlackService) ListTeams(ctx context.Context) ([]slack.Team, error) 
 	return teams, nil
 }
 
+func (m *mockSlackService) PostEphemeral(_ context.Context, _ string, _ string, _ string) error {
+	return nil
+}
+
 func TestSlackUserRefreshWorker_ImmediateInitialSync(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.New()

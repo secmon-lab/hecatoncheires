@@ -528,3 +528,16 @@ func (c *client) GetUserGroupMembers(ctx context.Context, groupID string) ([]str
 	}
 	return members, nil
 }
+
+// PostEphemeral posts an ephemeral message visible only to the specified user in a channel.
+func (c *client) PostEphemeral(ctx context.Context, channelID string, userID string, text string) error {
+	_, err := c.api.PostEphemeralContext(ctx, channelID, userID,
+		slack.MsgOptionText(text, false),
+	)
+	if err != nil {
+		return goerr.Wrap(err, "failed to post ephemeral message",
+			goerr.V("channel_id", channelID),
+			goerr.V("user_id", userID))
+	}
+	return nil
+}
