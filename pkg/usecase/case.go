@@ -71,9 +71,19 @@ func (uc *CaseUseCase) slackChannelPrefixForWorkspace(workspaceID string) string
 	return entry.SlackChannelPrefix
 }
 
-func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue, isPrivate bool, sourceTeamID string) (*model.Case, error) {
+func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue, isPrivate bool, sourceTeamID string, requestKey string) (*model.Case, error) {
 	if title == "" {
 		return nil, goerr.New("case title is required")
+	}
+
+	// Check request key: if a case with this key already exists, return it
+	if requestKey != "" {
+		existing, err := uc.repo.Case().GetByRequestKey(ctx, workspaceID, requestKey)
+		if err != nil {
+			errutil.Handle(ctx, err, "failed to check request key key")
+		} else if existing != nil {
+			return existing, nil
+		}
 	}
 
 	// Validate and enrich custom fields with Type from config
@@ -100,6 +110,7 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 		AssigneeIDs: assigneeIDs,
 		IsPrivate:   isPrivate,
 		FieldValues: fieldValues,
+		RequestKey:  requestKey,
 	}
 
 	created, err := uc.repo.Case().Create(ctx, workspaceID, caseModel)

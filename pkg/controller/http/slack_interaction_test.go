@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/m-mizutani/gt"
 	httpctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/http"
@@ -27,7 +28,7 @@ func TestSlackInteractionHandler(t *testing.T) {
 		actionUC := usecase.NewActionUseCase(repo, nil, "")
 
 		ctx := auth.ContextWithToken(t.Context(), &auth.Token{Sub: "UTESTUSER"})
-		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Desc", []string{}, nil, false, "")
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Desc", []string{}, nil, false, "", "")
 		gt.NoError(t, err).Required()
 
 		action, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Desc", []string{"U001"}, "", types.ActionStatusTodo, nil)
@@ -343,8 +344,15 @@ func TestSlackInteractionHandler_ViewSubmission(t *testing.T) {
 		handler.ServeHTTP(rec, req)
 		gt.Value(t, rec.Code).Equal(http.StatusOK)
 
-		// Verify case was created in repository
-		cases, err := repo.Case().List(t.Context(), "risk")
+		// Case creation is async (via async.Dispatch), wait for it to complete
+		var cases []*model.Case
+		for range 50 {
+			time.Sleep(10 * time.Millisecond)
+			cases, err = repo.Case().List(t.Context(), "risk")
+			if err == nil && len(cases) > 0 {
+				break
+			}
+		}
 		gt.NoError(t, err).Required()
 		gt.Array(t, cases).Length(1)
 		gt.Value(t, cases[0].Title).Equal("New Case from Slash Command")

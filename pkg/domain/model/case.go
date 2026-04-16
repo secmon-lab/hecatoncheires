@@ -19,6 +19,7 @@ type Case struct {
 	ChannelUserIDs []string              // Slack User IDs of channel members (synced for all cases)
 	AccessDenied   bool                  // Runtime-only: set by UseCase when access is restricted (not persisted)
 	FieldValues    map[string]FieldValue // key = FieldID
+	RequestKey     string                // UUID for preventing duplicate case creation from Slack modals
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }
