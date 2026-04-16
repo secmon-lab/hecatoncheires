@@ -173,11 +173,13 @@ func (r *caseRepository) Update(ctx context.Context, workspaceID string, c *mode
 		Title:          c.Title,
 		Description:    c.Description,
 		Status:         c.Status,
+		ReporterID:     c.ReporterID,
 		AssigneeIDs:    c.AssigneeIDs,
 		SlackChannelID: c.SlackChannelID,
 		IsPrivate:      c.IsPrivate,
 		ChannelUserIDs: c.ChannelUserIDs,
 		FieldValues:    c.FieldValues,
+		IdempotencyKey: c.IdempotencyKey,
 		CreatedAt:      c.CreatedAt,
 		UpdatedAt:      time.Now().UTC(),
 	}
