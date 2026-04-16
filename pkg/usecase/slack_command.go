@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
@@ -34,9 +35,10 @@ const (
 
 // commandMetadata is stored in modal private_metadata as JSON
 type commandMetadata struct {
-	WorkspaceID  string `json:"workspace_id"`
-	ChannelID    string `json:"channel_id"`
-	SourceTeamID string `json:"source_team_id,omitempty"` // Slack workspace ID where the slash command was invoked
+	WorkspaceID    string `json:"workspace_id"`
+	ChannelID      string `json:"channel_id"`
+	SourceTeamID   string `json:"source_team_id,omitempty"`  // Slack workspace ID where the slash command was invoked
+	IdempotencyKey string `json:"idempotency_key,omitempty"` // UUID for preventing duplicate case creation
 }
 
 // HandleSlashCommand handles a Slack slash command to create a case.
@@ -145,7 +147,7 @@ func (uc *SlackUseCases) HandleCaseCreationSubmit(ctx context.Context, caseUC *C
 	userID := callback.User.ID
 
 	// Create case using existing CaseUseCase
-	created, err := caseUC.CreateCase(ctx, meta.WorkspaceID, title, description, []string{userID}, fieldValues, false, meta.SourceTeamID)
+	created, err := caseUC.CreateCase(ctx, meta.WorkspaceID, title, description, []string{userID}, fieldValues, false, meta.SourceTeamID, meta.IdempotencyKey)
 	if err != nil {
 		return goerr.Wrap(err, "failed to create case via slash command",
 			goerr.V("workspace_id", meta.WorkspaceID),
@@ -206,9 +208,10 @@ func (uc *SlackUseCases) openWorkspaceSelectModal(ctx context.Context, triggerID
 // buildCaseCreationModal constructs the Block Kit modal for case creation
 func (uc *SlackUseCases) buildCaseCreationModal(ctx context.Context, workspaceID, channelID, sourceTeamID string, schema *config.FieldSchema) slack.ModalViewRequest {
 	meta := commandMetadata{
-		WorkspaceID:  workspaceID,
-		ChannelID:    channelID,
-		SourceTeamID: sourceTeamID,
+		WorkspaceID:    workspaceID,
+		ChannelID:      channelID,
+		SourceTeamID:   sourceTeamID,
+		IdempotencyKey: uuid.New().String(),
 	}
 	metaJSON, _ := json.Marshal(meta) //nolint:errcheck
 

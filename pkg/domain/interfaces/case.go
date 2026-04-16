@@ -28,6 +28,10 @@ type CaseRepository interface {
 	// Returns nil, nil if no case is found with the given channel ID.
 	GetBySlackChannelID(ctx context.Context, workspaceID string, channelID string) (*model.Case, error)
 
+	// GetByIdempotencyKey retrieves a case by its idempotency key.
+	// Returns nil, nil if no case is found with the given key.
+	GetByIdempotencyKey(ctx context.Context, workspaceID string, key string) (*model.Case, error)
+
 	// CountFieldValues counts the total number of cases with the specified field
 	// and how many of those have a value matching one of validValues.
 	// invalidCount = total - valid detects the existence of invalid values

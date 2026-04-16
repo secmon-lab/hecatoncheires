@@ -89,6 +89,7 @@ func (r *caseRepository) Create(ctx context.Context, workspaceID string, c *mode
 		IsPrivate:      c.IsPrivate,
 		ChannelUserIDs: c.ChannelUserIDs,
 		FieldValues:    c.FieldValues,
+		IdempotencyKey: c.IdempotencyKey,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
@@ -230,6 +231,31 @@ func (r *caseRepository) GetBySlackChannelID(ctx context.Context, workspaceID st
 	if err := docSnap.DataTo(&c); err != nil {
 		return nil, goerr.Wrap(err, "failed to decode case",
 			goerr.V("channel_id", channelID))
+	}
+
+	return &c, nil
+}
+
+func (r *caseRepository) GetByIdempotencyKey(ctx context.Context, workspaceID string, key string) (*model.Case, error) {
+	iter := r.casesCollection(workspaceID).
+		Where("IdempotencyKey", "==", key).
+		Limit(1).
+		Documents(ctx)
+	defer iter.Stop()
+
+	docSnap, err := iter.Next()
+	if err == iterator.Done {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to query case by idempotency key",
+			goerr.V("key", key))
+	}
+
+	var c model.Case
+	if err := docSnap.DataTo(&c); err != nil {
+		return nil, goerr.Wrap(err, "failed to decode case",
+			goerr.V("key", key))
 	}
 
 	return &c, nil
