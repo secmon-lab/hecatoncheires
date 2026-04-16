@@ -81,7 +81,7 @@ func copyCase(c *model.Case) *model.Case {
 		IsPrivate:      c.IsPrivate,
 		ChannelUserIDs: channelUserIDs,
 		FieldValues:    fieldValues,
-		IdempotencyKey: c.IdempotencyKey,
+		CreationKey:    c.CreationKey,
 		CreatedAt:      c.CreatedAt,
 		UpdatedAt:      c.UpdatedAt,
 	}
@@ -203,7 +203,7 @@ func (r *caseRepository) GetBySlackChannelID(ctx context.Context, workspaceID st
 	return nil, nil
 }
 
-func (r *caseRepository) GetByIdempotencyKey(_ context.Context, workspaceID string, key string) (*model.Case, error) {
+func (r *caseRepository) GetByCreationKey(_ context.Context, workspaceID string, key string) (*model.Case, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -213,7 +213,7 @@ func (r *caseRepository) GetByIdempotencyKey(_ context.Context, workspaceID stri
 	}
 
 	for _, c := range ws {
-		if c.IdempotencyKey == key {
+		if c.CreationKey == key {
 			return copyCase(c), nil
 		}
 	}

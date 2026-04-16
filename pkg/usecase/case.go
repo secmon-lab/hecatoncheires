@@ -71,16 +71,16 @@ func (uc *CaseUseCase) slackChannelPrefixForWorkspace(workspaceID string) string
 	return entry.SlackChannelPrefix
 }
 
-func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue, isPrivate bool, sourceTeamID string, idempotencyKey string) (*model.Case, error) {
+func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue, isPrivate bool, sourceTeamID string, creationKey string) (*model.Case, error) {
 	if title == "" {
 		return nil, goerr.New("case title is required")
 	}
 
-	// Check idempotency: if a case with this key already exists, return it
-	if idempotencyKey != "" {
-		existing, err := uc.repo.Case().GetByIdempotencyKey(ctx, workspaceID, idempotencyKey)
+	// Check creation key: if a case with this key already exists, return it
+	if creationKey != "" {
+		existing, err := uc.repo.Case().GetByCreationKey(ctx, workspaceID, creationKey)
 		if err != nil {
-			errutil.Handle(ctx, err, "failed to check idempotency key")
+			errutil.Handle(ctx, err, "failed to check creation key key")
 		} else if existing != nil {
 			return existing, nil
 		}
@@ -103,14 +103,14 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 
 	// Create case with embedded field values
 	caseModel := &model.Case{
-		Title:          title,
-		Description:    description,
-		Status:         types.CaseStatusOpen,
-		ReporterID:     reporterID,
-		AssigneeIDs:    assigneeIDs,
-		IsPrivate:      isPrivate,
-		FieldValues:    fieldValues,
-		IdempotencyKey: idempotencyKey,
+		Title:       title,
+		Description: description,
+		Status:      types.CaseStatusOpen,
+		ReporterID:  reporterID,
+		AssigneeIDs: assigneeIDs,
+		IsPrivate:   isPrivate,
+		FieldValues: fieldValues,
+		CreationKey: creationKey,
 	}
 
 	created, err := uc.repo.Case().Create(ctx, workspaceID, caseModel)

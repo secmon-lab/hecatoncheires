@@ -641,46 +641,46 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.String(t, retrieved.ReporterID).Equal("UREPORTER456")
 	})
 
-	t.Run("GetByIdempotencyKey returns case with matching key", func(t *testing.T) {
+	t.Run("GetByCreationKey returns case with matching key", func(t *testing.T) {
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		idempotencyKey := fmt.Sprintf("test-key-%d", time.Now().UnixNano())
+		creationKey := fmt.Sprintf("test-key-%d", time.Now().UnixNano())
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
-			Title:          "Idempotent Case",
-			IdempotencyKey: idempotencyKey,
+			Title:       "Idempotent Case",
+			CreationKey: creationKey,
 		})
 		gt.NoError(t, err).Required()
 
-		found, err := repo.Case().GetByIdempotencyKey(ctx, wsID, idempotencyKey)
+		found, err := repo.Case().GetByCreationKey(ctx, wsID, creationKey)
 		gt.NoError(t, err).Required()
 		gt.Value(t, found).NotNil()
 		gt.Value(t, found.ID).Equal(created.ID)
 		gt.String(t, found.Title).Equal("Idempotent Case")
-		gt.String(t, found.IdempotencyKey).Equal(idempotencyKey)
+		gt.String(t, found.CreationKey).Equal(creationKey)
 	})
 
-	t.Run("GetByIdempotencyKey returns nil for non-existent key", func(t *testing.T) {
+	t.Run("GetByCreationKey returns nil for non-existent key", func(t *testing.T) {
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		found, err := repo.Case().GetByIdempotencyKey(ctx, wsID, "non-existent-key")
+		found, err := repo.Case().GetByCreationKey(ctx, wsID, "non-existent-key")
 		gt.NoError(t, err).Required()
 		gt.Value(t, found).Nil()
 	})
 
-	t.Run("GetByIdempotencyKey does not match cases with empty key", func(t *testing.T) {
+	t.Run("GetByCreationKey does not match cases with empty key", func(t *testing.T) {
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		// Create a case without idempotency key
+		// Create a case without creation key
 		_, err := repo.Case().Create(ctx, wsID, &model.Case{
 			Title: "No Key Case",
 		})
 		gt.NoError(t, err).Required()
 
 		// Search for empty key should not match
-		found, err := repo.Case().GetByIdempotencyKey(ctx, wsID, "some-key")
+		found, err := repo.Case().GetByCreationKey(ctx, wsID, "some-key")
 		gt.NoError(t, err).Required()
 		gt.Value(t, found).Nil()
 	})

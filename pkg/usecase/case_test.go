@@ -1281,8 +1281,8 @@ func TestCaseUseCase_CreateCase_CrossWorkspaceConnect(t *testing.T) {
 	})
 }
 
-func TestCaseUseCase_CreateCase_Idempotency(t *testing.T) {
-	t.Run("duplicate idempotency key returns existing case without creating new one", func(t *testing.T) {
+func TestCaseUseCase_CreateCase_DuplicateCreationKey(t *testing.T) {
+	t.Run("duplicate creation key returns existing case without creating new one", func(t *testing.T) {
 		repo := memory.New()
 		registry := model.NewWorkspaceRegistry()
 		registry.Register(&model.WorkspaceEntry{
@@ -1291,16 +1291,16 @@ func TestCaseUseCase_CreateCase_Idempotency(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		idempotencyKey := "test-idempotency-key-1"
+		creationKey := "test-idempotency-key-1"
 
 		// First call creates the case
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "First Case", "Description", []string{}, nil, false, "", idempotencyKey)
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "First Case", "Description", []string{}, nil, false, "", creationKey)
 		gt.NoError(t, err).Required()
 		gt.Value(t, created.Title).Equal("First Case")
-		gt.String(t, created.IdempotencyKey).Equal(idempotencyKey)
+		gt.String(t, created.CreationKey).Equal(creationKey)
 
 		// Second call with same key returns existing case
-		duplicate, err := uc.CreateCase(ctx, testWorkspaceID, "Different Title", "Different Desc", []string{}, nil, false, "", idempotencyKey)
+		duplicate, err := uc.CreateCase(ctx, testWorkspaceID, "Different Title", "Different Desc", []string{}, nil, false, "", creationKey)
 		gt.NoError(t, err).Required()
 		gt.Value(t, duplicate.ID).Equal(created.ID)
 		gt.Value(t, duplicate.Title).Equal("First Case")
@@ -1311,7 +1311,7 @@ func TestCaseUseCase_CreateCase_Idempotency(t *testing.T) {
 		gt.Array(t, cases).Length(1)
 	})
 
-	t.Run("empty idempotency key skips dedup check", func(t *testing.T) {
+	t.Run("empty creation key skips dedup check", func(t *testing.T) {
 		repo := memory.New()
 		registry := model.NewWorkspaceRegistry()
 		registry.Register(&model.WorkspaceEntry{
@@ -1330,7 +1330,7 @@ func TestCaseUseCase_CreateCase_Idempotency(t *testing.T) {
 		gt.Value(t, case1.ID).NotEqual(case2.ID)
 	})
 
-	t.Run("different idempotency keys create separate cases", func(t *testing.T) {
+	t.Run("different creation keys create separate cases", func(t *testing.T) {
 		repo := memory.New()
 		registry := model.NewWorkspaceRegistry()
 		registry.Register(&model.WorkspaceEntry{

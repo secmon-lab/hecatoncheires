@@ -89,7 +89,7 @@ func (r *caseRepository) Create(ctx context.Context, workspaceID string, c *mode
 		IsPrivate:      c.IsPrivate,
 		ChannelUserIDs: c.ChannelUserIDs,
 		FieldValues:    c.FieldValues,
-		IdempotencyKey: c.IdempotencyKey,
+		CreationKey:    c.CreationKey,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
@@ -179,7 +179,7 @@ func (r *caseRepository) Update(ctx context.Context, workspaceID string, c *mode
 		IsPrivate:      c.IsPrivate,
 		ChannelUserIDs: c.ChannelUserIDs,
 		FieldValues:    c.FieldValues,
-		IdempotencyKey: c.IdempotencyKey,
+		CreationKey:    c.CreationKey,
 		CreatedAt:      c.CreatedAt,
 		UpdatedAt:      time.Now().UTC(),
 	}
@@ -238,9 +238,9 @@ func (r *caseRepository) GetBySlackChannelID(ctx context.Context, workspaceID st
 	return &c, nil
 }
 
-func (r *caseRepository) GetByIdempotencyKey(ctx context.Context, workspaceID string, key string) (*model.Case, error) {
+func (r *caseRepository) GetByCreationKey(ctx context.Context, workspaceID string, key string) (*model.Case, error) {
 	iter := r.casesCollection(workspaceID).
-		Where("IdempotencyKey", "==", key).
+		Where("CreationKey", "==", key).
 		Limit(1).
 		Documents(ctx)
 	defer iter.Stop()
@@ -250,7 +250,7 @@ func (r *caseRepository) GetByIdempotencyKey(ctx context.Context, workspaceID st
 		return nil, nil
 	}
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to query case by idempotency key",
+		return nil, goerr.Wrap(err, "failed to query case by creation key",
 			goerr.V("key", key))
 	}
 
