@@ -7,7 +7,7 @@ Hecatoncheires integrates with Slack for both authentication and event webhooks.
 1. [Slack OAuth Authentication](#slack-oauth-authentication)
 2. [Slack Events API (Webhooks)](#slack-events-api-webhooks)
 3. [Slack Interactivity (Action Notifications)](#slack-interactivity-action-notifications)
-4. [Slack Slash Commands (Case Creation)](#slack-slash-commands-case-creation)
+4. [Slack Slash Commands (Case Creation & Editing)](#slack-slash-commands-case-creation--editing)
 5. [Automatic Risk Channel Creation](#automatic-risk-channel-creation)
 6. [Enterprise Grid (Org-Level App) Setup](#enterprise-grid-org-level-app-setup)
 7. [Complete Setup Guide](#complete-setup-guide)
@@ -239,23 +239,41 @@ The message is automatically updated when the action is modified (title, assigne
 
 ---
 
-## Slack Slash Commands (Case Creation)
+## Slack Slash Commands (Case Creation & Editing)
 
-Slack slash commands allow users to create cases directly from Slack without opening the web UI. When a slash command is invoked, a modal dialog appears where users can fill in the case title, description, and custom fields defined in the workspace configuration.
+Slack slash commands allow users to create and edit cases directly from Slack without opening the web UI. The slash command behaves differently depending on the channel context:
+
+- **In a case channel**: Opens an edit modal with the current case values prefilled
+- **In any other channel**: Opens a case creation modal
 
 ### How It Works
 
-1. User types a slash command (e.g., `/create-case`) in Slack
+#### Case Creation (non-case channels)
+
+1. User types a slash command (e.g., `/create-case`) in a regular Slack channel
 2. Slack sends a request to Hecatoncheires
 3. A Block Kit modal opens with the case creation form
 4. User fills in the form and submits
 5. A new case is created and a confirmation message is posted to the channel
 
+#### Case Editing (case channels)
+
+1. User types the slash command inside a case's dedicated Slack channel
+2. Hecatoncheires detects that the channel is linked to an existing case
+3. A Block Kit modal opens with all current values prefilled (title, description, and custom fields)
+4. User modifies the values and submits
+5. The case is updated and a confirmation message is posted to the channel
+
+**Notes:**
+- Private case access control is enforced: non-members of a private case channel receive an ephemeral error message
+- Assignees are preserved during edit (they are managed separately in the web UI)
+- If the title is changed, the Slack channel is automatically renamed to match
+
 #### Workspace Selection
 
 The behavior depends on how many workspaces are configured and whether a workspace ID is specified in the URL:
 
-- **Workspace ID in URL** (e.g., `/hooks/slack/command/risk`): Opens the case creation modal directly for that workspace
+- **Workspace ID in URL** (e.g., `/hooks/slack/command/risk`): Opens the case creation modal directly for that workspace (unless the channel already has a linked case)
 - **Single workspace configured**: Opens the case creation modal automatically
 - **Multiple workspaces configured**: Shows a workspace selection modal first, then the case creation modal
 

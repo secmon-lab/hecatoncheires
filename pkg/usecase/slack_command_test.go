@@ -439,3 +439,358 @@ func TestSlackUseCases_HandleCaseCreationSubmit(t *testing.T) {
 		gt.Value(t, err).NotNil()
 	})
 }
+
+func TestSlackUseCases_HandleSlashCommand_EditCase(t *testing.T) {
+	i18n.Init(i18n.LangEN)
+
+	t.Run("opens edit modal when channel has linked case", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
+			FieldSchema: &config.FieldSchema{
+				Fields: []config.FieldDefinition{
+					{ID: "severity", Name: "Severity", Type: types.FieldTypeSelect, Required: true, Options: []config.FieldOption{
+						{ID: "high", Name: "High"},
+						{ID: "low", Name: "Low"},
+					}},
+				},
+			},
+		})
+
+		// Create a case linked to a channel
+		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
+			Title:       "Existing Case",
+			Description: "Existing description",
+			FieldValues: map[string]model.FieldValue{
+				"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "high"},
+			},
+		})
+		gt.NoError(t, err).Required()
+		created.SlackChannelID = "C-CASE-CHANNEL"
+		_, err = repo.Case().Update(context.Background(), "risk", created)
+		gt.NoError(t, err).Required()
+
+		slackMock := &commandTestSlackService{}
+		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+
+		err = uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C-CASE-CHANNEL", "", "")
+		gt.NoError(t, err).Required()
+
+		gt.Bool(t, slackMock.openViewCalled).True()
+		gt.Value(t, slackMock.openViewRequest.CallbackID).Equal(usecase.SlackCallbackIDEditCase)
+		gt.Value(t, slackMock.openViewRequest.Title.Text).Equal("Edit Case")
+		gt.Value(t, slackMock.openViewRequest.Submit.Text).Equal("Save")
+
+		// Verify private_metadata contains case_id
+		var meta struct {
+			WorkspaceID string `json:"workspace_id"`
+			ChannelID   string `json:"channel_id"`
+			CaseID      int64  `json:"case_id"`
+		}
+		err = json.Unmarshal([]byte(slackMock.openViewRequest.PrivateMetadata), &meta)
+		gt.NoError(t, err).Required()
+		gt.Value(t, meta.WorkspaceID).Equal("risk")
+		gt.Value(t, meta.ChannelID).Equal("C-CASE-CHANNEL")
+		gt.Value(t, meta.CaseID).Equal(created.ID)
+
+		// Verify blocks: Title + Description + 1 custom field = 3 blocks
+		gt.Number(t, len(slackMock.openViewRequest.Blocks.BlockSet)).Equal(3)
+	})
+
+	t.Run("opens create modal when channel has no linked case", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
+		})
+
+		slackMock := &commandTestSlackService{}
+		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+
+		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C-NO-CASE", "", "")
+		gt.NoError(t, err).Required()
+
+		gt.Bool(t, slackMock.openViewCalled).True()
+		gt.Value(t, slackMock.openViewRequest.CallbackID).Equal(usecase.SlackCallbackIDCreateCase)
+	})
+
+	t.Run("denies access to private case for non-member", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
+		})
+
+		// Create a private case
+		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
+			Title:          "Private Case",
+			IsPrivate:      true,
+			ChannelUserIDs: []string{"U-MEMBER"},
+		})
+		gt.NoError(t, err).Required()
+		created.SlackChannelID = "C-PRIVATE"
+		_, err = repo.Case().Update(context.Background(), "risk", created)
+		gt.NoError(t, err).Required()
+
+		slackMock := &commandTestSlackService{}
+		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+
+		// Non-member tries to access
+		err = uc.HandleSlashCommand(context.Background(), "trigger-1", "U-OUTSIDER", "C-PRIVATE", "", "")
+		gt.NoError(t, err).Required()
+
+		// Should NOT have opened any modal
+		gt.Bool(t, slackMock.openViewCalled).False()
+		// Should have posted ephemeral error
+		gt.Value(t, slackMock.ephemeralText).Equal("You don't have access to this case.")
+	})
+
+	t.Run("opens edit modal with workspace specified and case exists", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
+		})
+
+		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
+			Title: "WS Case",
+		})
+		gt.NoError(t, err).Required()
+		created.SlackChannelID = "C-WS-CASE"
+		_, err = repo.Case().Update(context.Background(), "risk", created)
+		gt.NoError(t, err).Required()
+
+		slackMock := &commandTestSlackService{}
+		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+
+		err = uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C-WS-CASE", "risk", "")
+		gt.NoError(t, err).Required()
+
+		gt.Bool(t, slackMock.openViewCalled).True()
+		gt.Value(t, slackMock.openViewRequest.CallbackID).Equal(usecase.SlackCallbackIDEditCase)
+	})
+}
+
+func TestSlackUseCases_HandleCaseEditSubmit(t *testing.T) {
+	i18n.Init(i18n.LangEN)
+
+	t.Run("updates case and posts confirmation", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
+			FieldSchema: &config.FieldSchema{
+				Fields: []config.FieldDefinition{
+					{ID: "severity", Name: "Severity", Type: types.FieldTypeSelect, Required: true, Options: []config.FieldOption{
+						{ID: "high", Name: "High"},
+						{ID: "low", Name: "Low"},
+					}},
+				},
+			},
+		})
+
+		// Create an existing case
+		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
+			Title:       "Original Title",
+			Description: "Original description",
+			AssigneeIDs: []string{"U-ASSIGNEE"},
+			FieldValues: map[string]model.FieldValue{
+				"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "high"},
+			},
+		})
+		gt.NoError(t, err).Required()
+
+		slackMock := &commandTestSlackService{}
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+
+		meta, _ := json.Marshal(map[string]any{
+			"workspace_id": "risk",
+			"channel_id":   "C-CASE",
+			"case_id":      created.ID,
+		})
+		callback := &goslack.InteractionCallback{
+			User: goslack.User{ID: "U001"},
+			View: goslack.View{
+				PrivateMetadata: string(meta),
+				State: &goslack.ViewState{
+					Values: map[string]map[string]goslack.BlockAction{
+						"hc_case_title_block": {
+							"hc_case_title": {Value: "Updated Title"},
+						},
+						"hc_case_desc_block": {
+							"hc_case_desc": {Value: "Updated description"},
+						},
+						"hc_field_block_severity": {
+							"hc_field_action_severity": {
+								Type: "static_select",
+								SelectedOption: goslack.OptionBlockObject{
+									Value: "low",
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		err = slackUC.HandleCaseEditSubmit(context.Background(), caseUC, callback)
+		gt.NoError(t, err).Required()
+
+		// Verify case was updated
+		updated, err := repo.Case().Get(context.Background(), "risk", created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.Title).Equal("Updated Title")
+		gt.Value(t, updated.Description).Equal("Updated description")
+		gt.Value(t, updated.FieldValues["severity"].Value).Equal("low")
+
+		// Verify assignees are preserved
+		gt.Array(t, updated.AssigneeIDs).Length(1)
+		gt.Value(t, updated.AssigneeIDs[0]).Equal("U-ASSIGNEE")
+
+		// Verify confirmation message
+		gt.Array(t, slackMock.postedMessages).Length(1)
+		gt.Value(t, slackMock.postedMessages[0].ChannelID).Equal("C-CASE")
+		gt.String(t, slackMock.postedMessages[0].Text).Contains("Updated Title")
+		gt.String(t, slackMock.postedMessages[0].Text).Contains("updated")
+	})
+
+	t.Run("returns error when case not found", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
+		})
+
+		slackMock := &commandTestSlackService{}
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+
+		meta, _ := json.Marshal(map[string]any{
+			"workspace_id": "risk",
+			"channel_id":   "C-CASE",
+			"case_id":      99999,
+		})
+		callback := &goslack.InteractionCallback{
+			User: goslack.User{ID: "U001"},
+			View: goslack.View{
+				PrivateMetadata: string(meta),
+				State: &goslack.ViewState{
+					Values: map[string]map[string]goslack.BlockAction{
+						"hc_case_title_block": {
+							"hc_case_title": {Value: "Updated Title"},
+						},
+					},
+				},
+			},
+		}
+
+		err := slackUC.HandleCaseEditSubmit(context.Background(), caseUC, callback)
+		gt.Value(t, err).NotNil()
+	})
+}
+
+func TestBuildFieldInputBlockWithValue(t *testing.T) {
+	i18n.Init(i18n.LangEN)
+
+	t.Run("text field with initial value", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "risk", Name: "Risk"},
+			FieldSchema: &config.FieldSchema{
+				Fields: []config.FieldDefinition{
+					{ID: "notes", Name: "Notes", Type: types.FieldTypeText},
+				},
+			},
+		})
+
+		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
+			Title: "Test",
+			FieldValues: map[string]model.FieldValue{
+				"notes": {FieldID: "notes", Type: types.FieldTypeText, Value: "initial text"},
+			},
+		})
+		gt.NoError(t, err).Required()
+		created.SlackChannelID = "C-TEST"
+		_, err = repo.Case().Update(context.Background(), "risk", created)
+		gt.NoError(t, err).Required()
+
+		slackMock := &commandTestSlackService{}
+		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+
+		err = uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C-TEST", "", "")
+		gt.NoError(t, err).Required()
+
+		gt.Bool(t, slackMock.openViewCalled).True()
+		gt.Value(t, slackMock.openViewRequest.CallbackID).Equal(usecase.SlackCallbackIDEditCase)
+		// Title + Description + 1 custom field = 3 blocks
+		gt.Number(t, len(slackMock.openViewRequest.Blocks.BlockSet)).Equal(3)
+	})
+
+	t.Run("date field with initial value", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "risk", Name: "Risk"},
+			FieldSchema: &config.FieldSchema{
+				Fields: []config.FieldDefinition{
+					{ID: "due", Name: "Due Date", Type: types.FieldTypeDate},
+				},
+			},
+		})
+
+		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
+			Title: "Test",
+			FieldValues: map[string]model.FieldValue{
+				"due": {FieldID: "due", Type: types.FieldTypeDate, Value: "2026-01-15"},
+			},
+		})
+		gt.NoError(t, err).Required()
+		created.SlackChannelID = "C-DATE"
+		_, err = repo.Case().Update(context.Background(), "risk", created)
+		gt.NoError(t, err).Required()
+
+		slackMock := &commandTestSlackService{}
+		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+
+		err = uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C-DATE", "", "")
+		gt.NoError(t, err).Required()
+
+		gt.Bool(t, slackMock.openViewCalled).True()
+		gt.Value(t, slackMock.openViewRequest.CallbackID).Equal(usecase.SlackCallbackIDEditCase)
+	})
+
+	t.Run("no field values shows empty fields", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "risk", Name: "Risk"},
+			FieldSchema: &config.FieldSchema{
+				Fields: []config.FieldDefinition{
+					{ID: "notes", Name: "Notes", Type: types.FieldTypeText},
+				},
+			},
+		})
+
+		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
+			Title: "No Fields",
+		})
+		gt.NoError(t, err).Required()
+		created.SlackChannelID = "C-NOFIELD"
+		_, err = repo.Case().Update(context.Background(), "risk", created)
+		gt.NoError(t, err).Required()
+
+		slackMock := &commandTestSlackService{}
+		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+
+		err = uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C-NOFIELD", "", "")
+		gt.NoError(t, err).Required()
+
+		gt.Bool(t, slackMock.openViewCalled).True()
+		gt.Value(t, slackMock.openViewRequest.CallbackID).Equal(usecase.SlackCallbackIDEditCase)
+		// Title + Description + 1 custom field = 3 blocks
+		gt.Number(t, len(slackMock.openViewRequest.Blocks.BlockSet)).Equal(3)
+	})
+}

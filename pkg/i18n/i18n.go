@@ -81,10 +81,17 @@ const (
 	// Cross-workspace
 	MsgCrossWorkspaceConnectUnavailable
 
+	// Edit Case Modal
+	MsgModalEditCaseTitle
+	MsgModalEditCaseSubmit
+	MsgCaseUpdated
+	MsgErrCaseNotAccessible
+
 	// Errors
 	MsgErrOpenDialog
 	MsgErrWorkspaceSelection
 	MsgErrCreateCase
+	MsgErrEditCase
 
 	msgKeyCount // sentinel for validation
 )

@@ -350,6 +350,65 @@ func TestSlackInteractionHandler_ViewSubmission(t *testing.T) {
 		gt.Value(t, cases[0].Title).Equal("New Case from Slash Command")
 	})
 
+	t.Run("handles case edit submission", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
+		})
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, &mockSlackServiceForCommand{})
+		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+
+		// Create an existing case
+		ctx := auth.ContextWithToken(t.Context(), &auth.Token{Sub: "UTESTUSER"})
+		created, err := caseUC.CreateCase(ctx, "risk", "Original Title", "Original desc", []string{}, nil, false, "")
+		gt.NoError(t, err).Required()
+
+		handler := httpctrl.NewSlackInteractionHandler(actionUC, nil)
+		handler.WithSlackCommand(slackUC, caseUC)
+
+		meta, _ := json.Marshal(map[string]any{
+			"workspace_id": "risk",
+			"channel_id":   "C-EDIT",
+			"case_id":      created.ID,
+		})
+		callback := goslack.InteractionCallback{
+			Type: goslack.InteractionTypeViewSubmission,
+			User: goslack.User{ID: "U001"},
+			View: goslack.View{
+				CallbackID:      usecase.SlackCallbackIDEditCase,
+				PrivateMetadata: string(meta),
+				State: &goslack.ViewState{
+					Values: map[string]map[string]goslack.BlockAction{
+						"hc_case_title_block": {
+							"hc_case_title": {Value: "Updated Title via Interaction"},
+						},
+						"hc_case_desc_block": {
+							"hc_case_desc": {Value: "Updated desc"},
+						},
+					},
+				},
+			},
+		}
+		payloadJSON, err := json.Marshal(callback)
+		gt.NoError(t, err).Required()
+
+		form := url.Values{"payload": {string(payloadJSON)}}
+		req := httptest.NewRequest(http.MethodPost, "/hooks/slack/interaction", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+
+		// Verify case was updated
+		updated, err := repo.Case().Get(t.Context(), "risk", created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.Title).Equal("Updated Title via Interaction")
+		gt.Value(t, updated.Description).Equal("Updated desc")
+	})
+
 	t.Run("view_submission with no slackUC configured returns 200", func(t *testing.T) {
 		repo := memory.New()
 		actionUC := usecase.NewActionUseCase(repo, nil, "")
