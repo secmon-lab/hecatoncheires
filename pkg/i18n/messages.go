@@ -62,10 +62,17 @@ var messagesEN = [msgKeyCount]string{
 	// Cross-workspace
 	MsgCrossWorkspaceConnectUnavailable: "The case channel was created in a different workspace. To access it, please ask an admin to connect the channel to your workspace, or manually add it via channel settings.",
 
+	// Edit Case Modal
+	MsgModalEditCaseTitle:   "Edit Case",
+	MsgModalEditCaseSubmit:  "Save",
+	MsgCaseUpdated:          "Case #%d *%s* has been updated.",
+	MsgErrCaseNotAccessible: "You don't have access to this case.",
+
 	// Errors
 	MsgErrOpenDialog:         "Failed to open case creation dialog. Please try again.",
 	MsgErrWorkspaceSelection: "Failed to process workspace selection. Please try again.",
 	MsgErrCreateCase:         "Failed to create case. Please try again.",
+	MsgErrEditCase:           "Failed to update case. Please try again.",
 }
 
 var messagesJA = [msgKeyCount]string{
@@ -115,8 +122,15 @@ var messagesJA = [msgKeyCount]string{
 	// Cross-workspace
 	MsgCrossWorkspaceConnectUnavailable: "ケースチャンネルが別のワークスペースに作成されました。アクセスするには、管理者にチャンネルのコネクトを依頼するか、チャンネル設定から手動で追加してください。",
 
+	// Edit Case Modal
+	MsgModalEditCaseTitle:   "ケース編集",
+	MsgModalEditCaseSubmit:  "保存",
+	MsgCaseUpdated:          "ケース #%d *%s* が更新されました。",
+	MsgErrCaseNotAccessible: "このケースにアクセスする権限がありません。",
+
 	// Errors
 	MsgErrOpenDialog:         "ケース作成ダイアログを開けませんでした。もう一度お試しください。",
 	MsgErrWorkspaceSelection: "ワークスペースの選択処理に失敗しました。もう一度お試しください。",
 	MsgErrCreateCase:         "ケースの作成に失敗しました。もう一度お試しください。",
+	MsgErrEditCase:           "ケースの更新に失敗しました。もう一度お試しください。",
 }

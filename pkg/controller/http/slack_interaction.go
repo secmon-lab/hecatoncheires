@@ -169,6 +169,17 @@ func (h *SlackInteractionHandler) handleViewSubmission(w http.ResponseWriter, r 
 			return nil
 		})
 
+	case usecase.SlackCallbackIDEditCase:
+		// Return 200 immediately to close the modal, then process asynchronously
+		w.WriteHeader(http.StatusOK)
+
+		async.Dispatch(ctx, func(ctx context.Context) error {
+			if err := h.slackUC.HandleCaseEditSubmit(ctx, h.caseUC, callback); err != nil {
+				return goerr.Wrap(err, "failed to handle case edit")
+			}
+			return nil
+		})
+
 	default:
 		w.WriteHeader(http.StatusOK)
 	}
