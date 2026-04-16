@@ -616,7 +616,7 @@ func (uc *SlackUseCases) HandleCaseEditSubmit(ctx context.Context, caseUC *CaseU
 	userID := callback.User.ID
 
 	// Get existing case to preserve assignees
-	existingCase, err := caseUC.repo.Case().Get(ctx, meta.WorkspaceID, meta.CaseID)
+	existingCase, err := uc.repo.Case().Get(ctx, meta.WorkspaceID, meta.CaseID)
 	if err != nil {
 		return goerr.Wrap(err, "failed to get existing case for edit",
 			goerr.V("case_id", meta.CaseID))
