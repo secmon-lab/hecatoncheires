@@ -71,16 +71,16 @@ func (uc *CaseUseCase) slackChannelPrefixForWorkspace(workspaceID string) string
 	return entry.SlackChannelPrefix
 }
 
-func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue, isPrivate bool, sourceTeamID string, creationKey string) (*model.Case, error) {
+func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue, isPrivate bool, sourceTeamID string, requestKey string) (*model.Case, error) {
 	if title == "" {
 		return nil, goerr.New("case title is required")
 	}
 
-	// Check creation key: if a case with this key already exists, return it
-	if creationKey != "" {
-		existing, err := uc.repo.Case().GetByCreationKey(ctx, workspaceID, creationKey)
+	// Check request key: if a case with this key already exists, return it
+	if requestKey != "" {
+		existing, err := uc.repo.Case().GetByRequestKey(ctx, workspaceID, requestKey)
 		if err != nil {
-			errutil.Handle(ctx, err, "failed to check creation key key")
+			errutil.Handle(ctx, err, "failed to check request key key")
 		} else if existing != nil {
 			return existing, nil
 		}
@@ -110,7 +110,7 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 		AssigneeIDs: assigneeIDs,
 		IsPrivate:   isPrivate,
 		FieldValues: fieldValues,
-		CreationKey: creationKey,
+		RequestKey:  requestKey,
 	}
 
 	created, err := uc.repo.Case().Create(ctx, workspaceID, caseModel)

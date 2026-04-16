@@ -38,7 +38,7 @@ type commandMetadata struct {
 	WorkspaceID  string `json:"workspace_id"`
 	ChannelID    string `json:"channel_id"`
 	SourceTeamID string `json:"source_team_id,omitempty"` // Slack workspace ID where the slash command was invoked
-	CreationKey  string `json:"creation_key,omitempty"`   // UUID for preventing duplicate case creation
+	RequestKey   string `json:"request_key,omitempty"`    // UUID for preventing duplicate case creation
 }
 
 // HandleSlashCommand handles a Slack slash command to create a case.
@@ -147,7 +147,7 @@ func (uc *SlackUseCases) HandleCaseCreationSubmit(ctx context.Context, caseUC *C
 	userID := callback.User.ID
 
 	// Create case using existing CaseUseCase
-	created, err := caseUC.CreateCase(ctx, meta.WorkspaceID, title, description, []string{userID}, fieldValues, false, meta.SourceTeamID, meta.CreationKey)
+	created, err := caseUC.CreateCase(ctx, meta.WorkspaceID, title, description, []string{userID}, fieldValues, false, meta.SourceTeamID, meta.RequestKey)
 	if err != nil {
 		return goerr.Wrap(err, "failed to create case via slash command",
 			goerr.V("workspace_id", meta.WorkspaceID),
@@ -211,7 +211,7 @@ func (uc *SlackUseCases) buildCaseCreationModal(ctx context.Context, workspaceID
 		WorkspaceID:  workspaceID,
 		ChannelID:    channelID,
 		SourceTeamID: sourceTeamID,
-		CreationKey:  uuid.New().String(),
+		RequestKey:   uuid.New().String(),
 	}
 	metaJSON, _ := json.Marshal(meta) //nolint:errcheck
 
