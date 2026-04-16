@@ -2,6 +2,7 @@ package repository_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -638,6 +639,50 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		retrieved, err := repo.Case().Get(ctx, wsID, updated.ID)
 		gt.NoError(t, err).Required()
 		gt.String(t, retrieved.ReporterID).Equal("UREPORTER456")
+	})
+
+	t.Run("GetByRequestKey returns case with matching key", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		requestKey := fmt.Sprintf("test-key-%d", time.Now().UnixNano())
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			Title:      "Idempotent Case",
+			RequestKey: requestKey,
+		})
+		gt.NoError(t, err).Required()
+
+		found, err := repo.Case().GetByRequestKey(ctx, wsID, requestKey)
+		gt.NoError(t, err).Required()
+		gt.Value(t, found).NotNil()
+		gt.Value(t, found.ID).Equal(created.ID)
+		gt.String(t, found.Title).Equal("Idempotent Case")
+		gt.String(t, found.RequestKey).Equal(requestKey)
+	})
+
+	t.Run("GetByRequestKey returns nil for non-existent key", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		found, err := repo.Case().GetByRequestKey(ctx, wsID, "non-existent-key")
+		gt.NoError(t, err).Required()
+		gt.Value(t, found).Nil()
+	})
+
+	t.Run("GetByRequestKey does not match cases with empty key", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		// Create a case without request key
+		_, err := repo.Case().Create(ctx, wsID, &model.Case{
+			Title: "No Key Case",
+		})
+		gt.NoError(t, err).Required()
+
+		// Search for empty key should not match
+		found, err := repo.Case().GetByRequestKey(ctx, wsID, "some-key")
+		gt.NoError(t, err).Required()
+		gt.Value(t, found).Nil()
 	})
 }
 

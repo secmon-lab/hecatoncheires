@@ -7,6 +7,7 @@ import (
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/slack-go/slack"
@@ -158,30 +159,26 @@ func (h *SlackInteractionHandler) handleViewSubmission(w http.ResponseWriter, r 
 		}
 
 	case usecase.SlackCallbackIDCreateCase:
-		// Case creation → create case and close modal
-		if err := h.slackUC.HandleCaseCreationSubmit(ctx, h.caseUC, callback); err != nil {
-			logger.Error("failed to handle case creation",
-				"error", err,
-			)
-			writeViewSubmissionError(ctx, w, usecase.SlackBlockIDCaseTitle, "Failed to create case. Please try again.")
-			return
-		}
-
-		// Return empty 200 to close the modal
+		// Return 200 immediately to close the modal, then process asynchronously
 		w.WriteHeader(http.StatusOK)
+
+		async.Dispatch(ctx, func(ctx context.Context) error {
+			if err := h.slackUC.HandleCaseCreationSubmit(ctx, h.caseUC, callback); err != nil {
+				return goerr.Wrap(err, "failed to handle case creation")
+			}
+			return nil
+		})
 
 	case usecase.SlackCallbackIDEditCase:
-		// Case edit → update case and close modal
-		if err := h.slackUC.HandleCaseEditSubmit(ctx, h.caseUC, callback); err != nil {
-			logger.Error("failed to handle case edit",
-				"error", err,
-			)
-			writeViewSubmissionError(ctx, w, usecase.SlackBlockIDCaseTitle, "Failed to update case. Please try again.")
-			return
-		}
-
-		// Return empty 200 to close the modal
+		// Return 200 immediately to close the modal, then process asynchronously
 		w.WriteHeader(http.StatusOK)
+
+		async.Dispatch(ctx, func(ctx context.Context) error {
+			if err := h.slackUC.HandleCaseEditSubmit(ctx, h.caseUC, callback); err != nil {
+				return goerr.Wrap(err, "failed to handle case edit")
+			}
+			return nil
+		})
 
 	default:
 		w.WriteHeader(http.StatusOK)
