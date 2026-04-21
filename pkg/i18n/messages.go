@@ -68,6 +68,10 @@ var messagesEN = [msgKeyCount]string{
 	MsgCaseUpdated:          "Case #%d *%s* has been updated.",
 	MsgErrCaseNotAccessible: "You don't have access to this case.",
 
+	// Private case
+	MsgFieldPrivateCase:     "Private case",
+	MsgFieldPrivateCaseDesc: "Only channel members can access this case",
+
 	// Errors
 	MsgErrOpenDialog:         "Failed to open case creation dialog. Please try again.",
 	MsgErrWorkspaceSelection: "Failed to process workspace selection. Please try again.",
@@ -127,6 +131,10 @@ var messagesJA = [msgKeyCount]string{
 	MsgModalEditCaseSubmit:  "保存",
 	MsgCaseUpdated:          "ケース #%d *%s* が更新されました。",
 	MsgErrCaseNotAccessible: "このケースにアクセスする権限がありません。",
+
+	// Private case
+	MsgFieldPrivateCase:     "プライベートケース",
+	MsgFieldPrivateCaseDesc: "チャンネルメンバーのみアクセスできます",
 
 	// Errors
 	MsgErrOpenDialog:         "ケース作成ダイアログを開けませんでした。もう一度お試しください。",
