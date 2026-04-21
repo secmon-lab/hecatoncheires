@@ -78,6 +78,35 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		gt.Value(t, meta.SourceTeamID).Equal("")
 	})
 
+	t.Run("case creation modal includes private checkbox", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
+		})
+
+		slackMock := &commandTestSlackService{}
+		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+
+		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "risk", "")
+		gt.NoError(t, err).Required()
+
+		gt.Bool(t, slackMock.openViewCalled).True()
+		// Title + Description + Private checkbox = 3 blocks
+		gt.Number(t, len(slackMock.openViewRequest.Blocks.BlockSet)).Equal(3)
+
+		found := false
+		for _, block := range slackMock.openViewRequest.Blocks.BlockSet {
+			if inputBlock, ok := block.(*goslack.InputBlock); ok {
+				if inputBlock.BlockID == usecase.SlackBlockIDCasePrivate {
+					found = true
+					break
+				}
+			}
+		}
+		gt.Bool(t, found).True()
+	})
+
 	t.Run("workspace specified but invalid returns error", func(t *testing.T) {
 		repo := memory.New()
 		registry := model.NewWorkspaceRegistry()
@@ -155,8 +184,8 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		gt.Bool(t, slackMock.openViewCalled).True()
-		// Title + Description + 3 custom fields = 5 blocks
-		gt.Number(t, len(slackMock.openViewRequest.Blocks.BlockSet)).Equal(5)
+		// Title + Description + Private checkbox + 3 custom fields = 6 blocks
+		gt.Number(t, len(slackMock.openViewRequest.Blocks.BlockSet)).Equal(6)
 	})
 
 	t.Run("no workspace specified with multiple workspaces opens workspace select modal", func(t *testing.T) {
@@ -404,6 +433,102 @@ func TestSlackUseCases_HandleCaseCreationSubmit(t *testing.T) {
 		gt.Value(t, cases[0].FieldValues).NotNil()
 		gt.Value(t, cases[0].FieldValues["severity"].Value).Equal("high")
 		gt.Value(t, cases[0].FieldValues["notes"].Value).Equal("Important note")
+	})
+
+	t.Run("creates private case when private checkbox is checked", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
+		})
+
+		slackMock := &commandTestSlackService{}
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+
+		meta, _ := json.Marshal(map[string]string{
+			"workspace_id": "risk",
+			"channel_id":   "C001",
+		})
+		callback := &goslack.InteractionCallback{
+			User: goslack.User{ID: "U001"},
+			View: goslack.View{
+				PrivateMetadata: string(meta),
+				State: &goslack.ViewState{
+					Values: map[string]map[string]goslack.BlockAction{
+						"hc_case_title_block": {
+							"hc_case_title": {Value: "Private Case"},
+						},
+						"hc_case_desc_block": {
+							"hc_case_desc": {Value: "Secret stuff"},
+						},
+						usecase.SlackBlockIDCasePrivate: {
+							usecase.SlackActionIDCasePrivate: {
+								SelectedOptions: []goslack.OptionBlockObject{
+									{Value: "private"},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		err := slackUC.HandleCaseCreationSubmit(context.Background(), caseUC, callback)
+		gt.NoError(t, err).Required()
+
+		cases, err := repo.Case().List(context.Background(), "risk")
+		gt.NoError(t, err).Required()
+		gt.Array(t, cases).Length(1)
+		gt.Value(t, cases[0].Title).Equal("Private Case")
+		gt.Bool(t, cases[0].IsPrivate).True()
+	})
+
+	t.Run("creates non-private case when private checkbox is not checked", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
+		})
+
+		slackMock := &commandTestSlackService{}
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+
+		meta, _ := json.Marshal(map[string]string{
+			"workspace_id": "risk",
+			"channel_id":   "C001",
+		})
+		callback := &goslack.InteractionCallback{
+			User: goslack.User{ID: "U001"},
+			View: goslack.View{
+				PrivateMetadata: string(meta),
+				State: &goslack.ViewState{
+					Values: map[string]map[string]goslack.BlockAction{
+						"hc_case_title_block": {
+							"hc_case_title": {Value: "Public Case"},
+						},
+						"hc_case_desc_block": {
+							"hc_case_desc": {Value: "Open stuff"},
+						},
+						usecase.SlackBlockIDCasePrivate: {
+							usecase.SlackActionIDCasePrivate: {
+								SelectedOptions: []goslack.OptionBlockObject{},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		err := slackUC.HandleCaseCreationSubmit(context.Background(), caseUC, callback)
+		gt.NoError(t, err).Required()
+
+		cases, err := repo.Case().List(context.Background(), "risk")
+		gt.NoError(t, err).Required()
+		gt.Array(t, cases).Length(1)
+		gt.Value(t, cases[0].Title).Equal("Public Case")
+		gt.Bool(t, cases[0].IsPrivate).False()
 	})
 
 	t.Run("returns error when title is empty", func(t *testing.T) {

@@ -28,6 +28,8 @@ const (
 	SlackActionIDCaseTitle       = "hc_case_title"
 	SlackBlockIDCaseDescription  = "hc_case_desc_block"
 	SlackActionIDCaseDescription = "hc_case_desc"
+	SlackBlockIDCasePrivate      = "hc_case_private_block"
+	SlackActionIDCasePrivate     = "hc_case_private"
 
 	// Prefix for custom field block/action IDs
 	slackFieldBlockPrefix  = "hc_field_block_"
@@ -166,10 +168,22 @@ func (uc *SlackUseCases) HandleCaseCreationSubmit(ctx context.Context, caseUC *C
 	// Extract custom field values from the view state
 	fieldValues := extractFieldValues(blockValues)
 
+	isPrivate := false
+	if privateBlock, ok := blockValues[SlackBlockIDCasePrivate]; ok {
+		if privateAction, ok := privateBlock[SlackActionIDCasePrivate]; ok {
+			for _, opt := range privateAction.SelectedOptions {
+				if opt.Value == "private" {
+					isPrivate = true
+					break
+				}
+			}
+		}
+	}
+
 	userID := callback.User.ID
 
 	// Create case using existing CaseUseCase
-	created, err := caseUC.CreateCase(ctx, meta.WorkspaceID, title, description, []string{userID}, fieldValues, false, meta.SourceTeamID, meta.RequestKey)
+	created, err := caseUC.CreateCase(ctx, meta.WorkspaceID, title, description, []string{userID}, fieldValues, isPrivate, meta.SourceTeamID, meta.RequestKey)
 	if err != nil {
 		return goerr.Wrap(err, "failed to create case via slash command",
 			goerr.V("workspace_id", meta.WorkspaceID),
@@ -260,9 +274,24 @@ func (uc *SlackUseCases) buildCaseCreationModal(ctx context.Context, workspaceID
 	)
 	descInput.Optional = true
 
+	privateOption := slack.NewOptionBlockObject(
+		"private",
+		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgFieldPrivateCase), false, false),
+		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgFieldPrivateCaseDesc), false, false),
+	)
+	privateCheckbox := slack.NewCheckboxGroupsBlockElement(SlackActionIDCasePrivate, privateOption)
+	privateInput := slack.NewInputBlock(
+		SlackBlockIDCasePrivate,
+		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgFieldPrivateCase), false, false),
+		nil,
+		privateCheckbox,
+	)
+	privateInput.Optional = true
+
 	blocks := []slack.Block{
 		titleInput,
 		descInput,
+		privateInput,
 	}
 
 	// Add custom field inputs from workspace schema

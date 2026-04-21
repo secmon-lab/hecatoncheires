@@ -87,6 +87,10 @@ const (
 	MsgCaseUpdated
 	MsgErrCaseNotAccessible
 
+	// Private case
+	MsgFieldPrivateCase
+	MsgFieldPrivateCaseDesc
+
 	// Errors
 	MsgErrOpenDialog
 	MsgErrWorkspaceSelection
