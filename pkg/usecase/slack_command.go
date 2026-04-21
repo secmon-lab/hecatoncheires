@@ -171,7 +171,12 @@ func (uc *SlackUseCases) HandleCaseCreationSubmit(ctx context.Context, caseUC *C
 	isPrivate := false
 	if privateBlock, ok := blockValues[SlackBlockIDCasePrivate]; ok {
 		if privateAction, ok := privateBlock[SlackActionIDCasePrivate]; ok {
-			isPrivate = len(privateAction.SelectedOptions) > 0
+			for _, opt := range privateAction.SelectedOptions {
+				if opt.Value == "private" {
+					isPrivate = true
+					break
+				}
+			}
 		}
 	}
 
