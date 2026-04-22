@@ -254,8 +254,12 @@ func (uc *SlackUseCases) buildCaseCreationModal(ctx context.Context, workspaceID
 	titleLabel := i18n.T(ctx, i18n.MsgFieldTitle)
 	descLabel := i18n.T(ctx, i18n.MsgFieldDescription)
 	if schema != nil {
-		titleLabel = schema.Labels.Title
-		descLabel = schema.Labels.Description
+		if schema.Labels.Title != "" {
+			titleLabel = schema.Labels.Title
+		}
+		if schema.Labels.Description != "" {
+			descLabel = schema.Labels.Description
+		}
 	}
 
 	titleInput := slack.NewInputBlock(

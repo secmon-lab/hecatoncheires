@@ -213,7 +213,7 @@ export default function CaseForm({ isOpen, onClose, caseItem }: CaseFormProps) {
   const loading = creating || updating || configLoading
   const fieldDefs = configData?.fieldConfiguration?.fields || []
   const caseLabel = configData?.fieldConfiguration?.labels?.case || 'Case'
-  const titleLabel = configData?.fieldConfiguration?.labels?.title || t('labelTitleRequired')
+  const titleLabel = configData?.fieldConfiguration?.labels?.title || t('headerTitle')
   const descriptionLabel = configData?.fieldConfiguration?.labels?.description || t('labelDescription')
 
   return (
