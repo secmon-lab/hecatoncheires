@@ -174,6 +174,8 @@ export default function CaseList() {
   }
 
   const allColumns = useMemo(() => {
+    const titleHeader = configData?.fieldConfiguration?.labels?.title || t('headerTitle')
+    const descHeader = configData?.fieldConfiguration?.labels?.description || t('labelDescription')
     const cols: Array<{ key: string; header: string; accessor: any; width: string; searchValue?: (row: Case) => string }> = [
       {
         key: 'id',
@@ -183,7 +185,7 @@ export default function CaseList() {
       },
       {
         key: 'title',
-        header: t('headerTitle'),
+        header: titleHeader,
         accessor: ((caseItem: Case) => (
           <div className={styles.privateTitleCell}>
             {caseItem.isPrivate && <Lock size={14} className={styles.privateTitleLock} data-testid="private-lock-icon" />}
@@ -200,7 +202,7 @@ export default function CaseList() {
       },
       {
         key: 'description',
-        header: t('labelDescription'),
+        header: descHeader,
         accessor: 'description' as keyof Case,
         width: '250px',
       },

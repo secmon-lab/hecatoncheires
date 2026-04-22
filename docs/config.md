@@ -35,9 +35,11 @@ The application requires a TOML configuration file at startup. This file defines
 id = "risk"
 name = "Risk Management"
 
-# Entity display labels (optional)
+# Entity and field display labels (optional)
 [labels]
 case = "Risk"
+title = "Risk Name"
+description = "Risk Detail"
 
 # Custom field definitions
 [[fields]]
@@ -202,18 +204,22 @@ Workspace IDs must follow the same format as field IDs:
 
 ## Labels
 
-The `[labels]` section customizes entity display names in the UI:
+The `[labels]` section customizes entity and field display names in the UI:
 
 ```toml
 [labels]
-case = "Risk"        # Default: "Case"
+case = "Risk"                # Default: "Case"
+title = "Risk Name"          # Default: "Title"
+description = "Risk Detail"  # Default: "Description"
 ```
 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `case` | `Case` | Display name for the primary entity |
+| `title` | `Title` | Display name for the case title field |
+| `description` | `Description` | Display name for the case description field |
 
-If omitted or empty, the default values are used.
+If omitted or empty, the default values are used. Custom labels are reflected in the web UI (forms, table headers) and in Slack modals.
 
 ---
 
@@ -563,9 +569,11 @@ The following example configures Hecatoncheires as a security risk management sy
 id = "risk"
 name = "Risk Management"
 
-# Customize entity labels to match your domain
+# Customize entity and field labels to match your domain
 [labels]
 case = "Risk"
+title = "Risk Name"
+description = "Risk Detail"
 
 # Slack integration (optional)
 [slack]

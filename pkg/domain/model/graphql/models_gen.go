@@ -87,7 +87,9 @@ type CreateSlackSourceInput struct {
 }
 
 type EntityLabels struct {
-	Case string `json:"case"`
+	Case        string `json:"case"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
 }
 
 type FieldConfiguration struct {

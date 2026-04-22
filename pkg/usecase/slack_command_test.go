@@ -565,6 +565,76 @@ func TestSlackUseCases_HandleCaseCreationSubmit(t *testing.T) {
 	})
 }
 
+func TestSlackUseCases_HandleSlashCommand_CustomLabels(t *testing.T) {
+	i18n.Init(i18n.LangEN)
+
+	t.Run("modal uses custom title and description labels from schema", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
+			FieldSchema: &config.FieldSchema{
+				Labels: config.EntityLabels{
+					Case:        "Risk",
+					Title:       "Risk Name",
+					Description: "Risk Detail",
+				},
+			},
+		})
+
+		slackMock := &commandTestSlackService{}
+		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+
+		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "risk", "")
+		gt.NoError(t, err).Required()
+
+		gt.Bool(t, slackMock.openViewCalled).True()
+
+		// Find title and description input blocks and verify their labels
+		for _, block := range slackMock.openViewRequest.Blocks.BlockSet {
+			inputBlock, ok := block.(*goslack.InputBlock)
+			if !ok {
+				continue
+			}
+			switch inputBlock.BlockID {
+			case usecase.SlackBlockIDCaseTitle:
+				gt.Value(t, inputBlock.Label.Text).Equal("Risk Name")
+			case usecase.SlackBlockIDCaseDescription:
+				gt.Value(t, inputBlock.Label.Text).Equal("Risk Detail")
+			}
+		}
+	})
+
+	t.Run("modal uses default labels when schema has no custom labels", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "task", Name: "Task Management"},
+		})
+
+		slackMock := &commandTestSlackService{}
+		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+
+		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "task", "")
+		gt.NoError(t, err).Required()
+
+		gt.Bool(t, slackMock.openViewCalled).True()
+
+		for _, block := range slackMock.openViewRequest.Blocks.BlockSet {
+			inputBlock, ok := block.(*goslack.InputBlock)
+			if !ok {
+				continue
+			}
+			switch inputBlock.BlockID {
+			case usecase.SlackBlockIDCaseTitle:
+				gt.Value(t, inputBlock.Label.Text).Equal("Title")
+			case usecase.SlackBlockIDCaseDescription:
+				gt.Value(t, inputBlock.Label.Text).Equal("Description")
+			}
+		}
+	})
+}
+
 func TestSlackUseCases_HandleSlashCommand_EditCase(t *testing.T) {
 	i18n.Init(i18n.LangEN)
 
