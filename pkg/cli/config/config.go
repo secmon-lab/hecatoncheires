@@ -401,12 +401,6 @@ func (a *AppConfig) ToDomainFieldSchema() *domainConfig.FieldSchema {
 	if labels.Case == "" {
 		labels.Case = "Case"
 	}
-	if labels.Title == "" {
-		labels.Title = "Title"
-	}
-	if labels.Description == "" {
-		labels.Description = "Description"
-	}
 
 	return &domainConfig.FieldSchema{
 		Fields: fields,

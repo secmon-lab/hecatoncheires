@@ -2634,16 +2634,14 @@ func TestGraphQLHandler_FieldConfigurationCustomLabels(t *testing.T) {
 		gt.Value(t, result.FieldConfiguration.Labels.Description).Equal("Risk Detail")
 	})
 
-	t.Run("returns default title and description labels when not configured", func(t *testing.T) {
+	t.Run("returns empty title and description labels when not configured", func(t *testing.T) {
 		repo := memory.New()
 		registry := model.NewWorkspaceRegistry()
 		registry.Register(&model.WorkspaceEntry{
 			Workspace: model.Workspace{ID: "task", Name: "Tasks"},
 			FieldSchema: &domainConfig.FieldSchema{
 				Labels: domainConfig.EntityLabels{
-					Case:        "Task",
-					Title:       "Title",
-					Description: "Description",
+					Case: "Task",
 				},
 			},
 		})
@@ -2668,7 +2666,7 @@ func TestGraphQLHandler_FieldConfigurationCustomLabels(t *testing.T) {
 		}
 		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
 		gt.Value(t, result.FieldConfiguration.Labels.Case).Equal("Task")
-		gt.Value(t, result.FieldConfiguration.Labels.Title).Equal("Title")
-		gt.Value(t, result.FieldConfiguration.Labels.Description).Equal("Description")
+		gt.Value(t, result.FieldConfiguration.Labels.Title).Equal("")
+		gt.Value(t, result.FieldConfiguration.Labels.Description).Equal("")
 	})
 }

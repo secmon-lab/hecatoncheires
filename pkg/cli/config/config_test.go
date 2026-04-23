@@ -825,8 +825,8 @@ type = "text"
 	gt.NoError(t, err).Required()
 
 	gt.Value(t, schema.Labels.Case).Equal("Case")
-	gt.Value(t, schema.Labels.Title).Equal("Title")
-	gt.Value(t, schema.Labels.Description).Equal("Description")
+	gt.Value(t, schema.Labels.Title).Equal("")
+	gt.Value(t, schema.Labels.Description).Equal("")
 }
 
 func TestLoadFieldSchema_CustomTitleDescriptionLabels(t *testing.T) {
