@@ -478,7 +478,8 @@ welcome_messages = [
   """\
 :rotating_light: Highlights
 - Status: {{.Case.Status}}
-- Severity: {{.Fields.severity}}
+- Severity: {{.Fields.severity.name}} ({{.Fields.severity.id}})
+- Tags: {{range $i, $t := .Fields.tags.items}}{{if $i}}, {{end}}{{$t.name}}{{end}}
 - Reporter: <@{{.Case.ReporterID}}>
 - Assignees: {{range $i, $a := .Case.AssigneeIDs}}{{if $i}}, {{end}}<@{{$a}}>{{end}}
 - Detail: {{.URL}}""",
@@ -507,8 +508,27 @@ welcome_messages = [
 | `.Case.CreatedAt` | time.Time | Creation timestamp (UTC) |
 | `.Workspace.ID` | string | Workspace identifier |
 | `.Workspace.Name` | string | Workspace display name |
-| `.Fields` | map[string]any | Custom field values keyed by Field ID — accessible via `{{.Fields.<id>}}` |
+| `.Fields` | map[string]map[string]any | Custom field values keyed by Field ID — each entry exposes `id` and `name` (and `items` for multi-select) |
 | `.URL` | string | Web UI Case URL when `--base-url` is configured (otherwise empty) |
+
+**Field value structure**
+
+Each Field is exposed as a sub-map with the following sub-keys:
+
+| Sub-key | Description |
+|---------|-------------|
+| `id` | Raw stored value. For `select`, the option ID. For `multi-select`, an array of option IDs. For `text`/`number`/`date`/`url`/`user`/`multi-user`, the raw stored value. |
+| `name` | Display name. For `select`/`multi-select`, the Option `name` from the schema (falls back to the ID when not found). For other field types, mirrors `id`. |
+| `items` | `multi-select` only. Slice of `{id, name}` maps for iteration in templates. |
+
+Examples:
+
+```text
+Severity: {{.Fields.severity.name}}                        ← "High"
+Severity ID: {{.Fields.severity.id}}                        ← "high"
+Tags: {{range $i, $t := .Fields.tags.items}}{{if $i}}, {{end}}{{$t.name}}{{end}}
+Note: {{.Fields.note.id}}                                   ← bare text value
+```
 
 Slack mrkdwn syntax such as `<@USER_ID>` and `<#CHANNEL_ID>` is rendered as-is and expanded by Slack at delivery time.
 

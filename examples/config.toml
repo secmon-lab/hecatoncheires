@@ -109,8 +109,9 @@ welcome_messages = [
   """\
 :rotating_light: 重要事項
 - Status: {{.Case.Status}}
-- Likelihood: {{.Fields.likelihood}}
-- Impact: {{.Fields.impact}}
+- Likelihood: {{.Fields.likelihood.name}}
+- Impact: {{.Fields.impact.name}}
+- Categories: {{range $i, $c := .Fields.category.items}}{{if $i}}, {{end}}{{$c.name}}{{end}}
 - Reporter: <@{{.Case.ReporterID}}>
 - Assignees: {{range $i, $a := .Case.AssigneeIDs}}{{if $i}}, {{end}}<@{{$a}}>{{end}}
 - Detail: {{.URL}}""",

@@ -650,27 +650,44 @@ func TestCaseUseCase_CreateCase_WelcomeMessages(t *testing.T) {
 		gt.Value(t, mock.postedChannelIDs[1]).Equal(created.SlackChannelID)
 	})
 
-	t.Run("template can reference custom Fields by ID", func(t *testing.T) {
+	t.Run("template can reference custom Fields by ID and Name", func(t *testing.T) {
 		repo := memory.New()
 		mock := &mockSlackService{
 			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
 				return fmt.Sprintf("C%d", caseID), nil
 			},
 		}
-		registry := newRegistry([]string{
-			"Severity: {{.Fields.severity}}",
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: testWorkspaceID, Name: "Test"},
+			FieldSchema: &config.FieldSchema{
+				Fields: []config.FieldDefinition{
+					{
+						ID:   "severity",
+						Name: "Severity",
+						Type: types.FieldTypeSelect,
+						Options: []config.FieldOption{
+							{ID: "high", Name: "High"},
+							{ID: "low", Name: "Low"},
+						},
+					},
+				},
+			},
+			SlackWelcomeMessages: []string{
+				"Severity: {{.Fields.severity.name}} ({{.Fields.severity.id}})",
+			},
 		})
 		uc := usecase.NewCaseUseCase(repo, registry, mock, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
 
 		fieldValues := map[string]model.FieldValue{
-			"severity": {FieldID: "severity", Type: types.FieldTypeText, Value: "high"},
+			"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "high"},
 		}
 		_, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "desc", []string{}, fieldValues, false, "", "")
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, mock.postedTexts).Length(1).Required()
-		gt.Value(t, mock.postedTexts[0]).Equal("Severity: high")
+		gt.Value(t, mock.postedTexts[0]).Equal("Severity: High (high)")
 	})
 
 	t.Run("URL is exposed when baseURL is set", func(t *testing.T) {
