@@ -38,6 +38,21 @@ var BuildUpdatedDiscussionMarkdown = buildUpdatedDiscussionMarkdown
 // TestErrAccessDenied is exported for testing
 var TestErrAccessDenied = ErrAccessDenied
 
+// NewWelcomeRendererForTest is exported for testing
+var NewWelcomeRendererForTest = newWelcomeRenderer
+
+// BuildWelcomeFieldsForTest is exported for testing
+var BuildWelcomeFieldsForTest = buildWelcomeFields
+
+// WelcomeContextForTest is exported for testing
+type WelcomeContextForTest = welcomeContext
+
+// WelcomeRendererRenderForTest invokes the (unexported) Render method on a
+// welcomeRenderer for tests in the external package.
+func WelcomeRendererRenderForTest(r *welcomeRenderer, ctx welcomeContext) ([]string, error) {
+	return r.Render(ctx)
+}
+
 // Type aliases for testing
 type GitHubPullRequest = githubsvc.PullRequest
 type GitHubIssue = githubsvc.Issue

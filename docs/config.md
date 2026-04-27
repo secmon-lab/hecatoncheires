@@ -234,7 +234,7 @@ description = "Overall severity assessment"
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `id` | string | **Yes** | Unique identifier. Must match `^[a-z0-9]+(-[a-z0-9]+)*$` |
+| `id` | string | **Yes** | Unique identifier. Must match `^[a-z][a-z0-9_]*$` |
 | `name` | string | **Yes** | Display name shown in the UI |
 | `type` | string | **Yes** | Field type (see [Field Types](#field-types)) |
 | `required` | boolean | No | Whether the field is required (default: `false`) |
@@ -242,20 +242,30 @@ description = "Overall severity assessment"
 
 ### Field ID Format
 
-Field IDs must be lowercase alphanumeric with optional hyphens:
+Field IDs must start with a lowercase letter and consist of lowercase letters,
+digits, and underscores:
 
-- Pattern: `^[a-z0-9]+(-[a-z0-9]+)*$`
+- Pattern: `^[a-z][a-z0-9_]*$`
 - Must be unique across all fields in the configuration
+
+> **Breaking change (Apr 2026)**: Field IDs and Option IDs no longer accept
+> hyphens (`-`). The new pattern aligns with Go identifier rules so that
+> Slack welcome message templates can reference custom field values via dot
+> notation (e.g., `{{.Fields.risk_level}}`). Existing deployments that store
+> hyphenated FieldIDs in Firestore must migrate the data themselves; the
+> application provides no automatic migration. Workspace IDs are unaffected
+> and continue to follow the legacy hyphen-separated format.
 
 | Example | Valid | Reason |
 |---------|-------|--------|
 | `category` | Yes | Simple lowercase |
-| `risk-level` | Yes | Hyphen-separated |
-| `my-field-123` | Yes | With numbers |
+| `risk_level` | Yes | Underscore-separated |
+| `my_field_123` | Yes | With numbers |
+| `risk-level` | **No** | Hyphens are no longer allowed |
 | `MyField` | **No** | Uppercase not allowed |
-| `category_id` | **No** | Underscores not allowed |
+| `1category` | **No** | Cannot start with a digit |
 | `field.name` | **No** | Dots not allowed |
-| `-leading` | **No** | Cannot start with hyphen |
+| `_leading` | **No** | Cannot start with underscore |
 
 ---
 
@@ -311,7 +321,7 @@ name = "Tags"
 type = "multi-select"
 options = [
   { id = "urgent", name = "Urgent" },
-  { id = "review-needed", name = "Review Needed" },
+  { id = "review_needed", name = "Review Needed" },
 ]
 ```
 
@@ -388,7 +398,7 @@ Fields of type `select` or `multi-select` must define at least one option using 
 | `color` | string | No | Color name or hex code (e.g., `red`, `#E53E3E`) |
 | `metadata` | table | No | Arbitrary key-value pairs |
 
-Option IDs must be unique within their parent field and follow the same format as field IDs (`^[a-z0-9]+(-[a-z0-9]+)*$`).
+Option IDs must be unique within their parent field and follow the same format as field IDs (`^[a-z][a-z0-9_]*$`).
 
 ### Metadata
 
@@ -456,6 +466,51 @@ groups = ["S0614TZR7", "@security-response"]
 - Duplicate users (across direct users, group members, creator, and assignees) are automatically deduplicated
 
 **Required bot scope:** `usergroups:read` (in addition to existing scopes)
+
+### Welcome Messages (`welcome_messages`)
+
+After the Slack channel is created and initial members are invited, Hecatoncheires can post a sequence of welcome messages to the channel. Each entry is a Go [`text/template`](https://pkg.go.dev/text/template) string that is rendered against the newly created Case.
+
+```toml
+[slack]
+welcome_messages = [
+  "<@{{.Case.ReporterID}}> Created Case `{{.Case.Title}}`.",
+  """\
+:rotating_light: Highlights
+- Status: {{.Case.Status}}
+- Severity: {{.Fields.severity}}
+- Reporter: <@{{.Case.ReporterID}}>
+- Assignees: {{range $i, $a := .Case.AssigneeIDs}}{{if $i}}, {{end}}<@{{$a}}>{{end}}
+- Detail: {{.URL}}""",
+]
+```
+
+**Behavior**
+
+- Messages are sent in the order they appear in the array, after channel creation, member invitation, and bookmark addition.
+- Templates are parsed at startup; an invalid template aborts the application start with a configuration error.
+- A template that produces an empty string at runtime is skipped (useful for conditional messages with `{{if ...}}...{{end}}`).
+- A failure to render or post a single message is logged via `errutil.Handle` and does **not** roll back case creation; subsequent messages still attempt to post.
+
+**Available template variables**
+
+| Variable | Type | Notes |
+|----------|------|-------|
+| `.Case.ID` | int64 | Case sequence number |
+| `.Case.Title` | string | Case title |
+| `.Case.Description` | string | Case description |
+| `.Case.Status` | CaseStatus | Normalized status string |
+| `.Case.ReporterID` | string | Slack user ID of the reporter |
+| `.Case.AssigneeIDs` | []string | Slack user IDs of assignees |
+| `.Case.SlackChannelID` | string | The freshly-created channel ID |
+| `.Case.IsPrivate` | bool | Whether the case is private |
+| `.Case.CreatedAt` | time.Time | Creation timestamp (UTC) |
+| `.Workspace.ID` | string | Workspace identifier |
+| `.Workspace.Name` | string | Workspace display name |
+| `.Fields` | map[string]any | Custom field values keyed by Field ID — accessible via `{{.Fields.<id>}}` |
+| `.URL` | string | Web UI Case URL when `--base-url` is configured (otherwise empty) |
+
+Slack mrkdwn syntax such as `<@USER_ID>` and `<#CHANNEL_ID>` is rendered as-is and expanded by Slack at delivery time.
 
 ### Private Case Channels
 
@@ -540,7 +595,7 @@ The configuration file is validated at startup. The following rules are enforced
 | Rule | Error |
 |------|-------|
 | Configuration file must exist at the specified path | `ErrConfigNotFound` |
-| All field IDs must match `^[a-z0-9]+(-[a-z0-9]+)*$` | `ErrInvalidFieldID` |
+| All field IDs must match `^[a-z][a-z0-9_]*$` | `ErrInvalidFieldID` |
 | All field names must be non-empty | `ErrMissingName` |
 | Field type must be one of the 8 supported types | `ErrInvalidFieldType` |
 | Field IDs must be unique across the entire configuration | `ErrDuplicateFieldID` |
@@ -548,6 +603,7 @@ The configuration file is validated at startup. The following rules are enforced
 | All option IDs must match the same pattern as field IDs | `ErrInvalidFieldID` |
 | All option names must be non-empty | `ErrMissingName` |
 | Option IDs must be unique within their parent field | `ErrDuplicateOptionID` |
+| Slack welcome message templates must parse | `ErrInvalidWelcomeMessage` |
 
 If any validation fails, the application exits with a descriptive error message including the field ID and context.
 
@@ -592,8 +648,8 @@ name = "Category"
 type = "multi-select"
 required = true
 options = [
-  { id = "data-breach", name = "Data Breach", metadata = { description = "Risk of personal or confidential information leakage", color = "red" } },
-  { id = "system-failure", name = "System Failure", metadata = { description = "Risk of system or service downtime and failures", color = "orange" } },
+  { id = "data_breach", name = "Data Breach", metadata = { description = "Risk of personal or confidential information leakage", color = "red" } },
+  { id = "system_failure", name = "System Failure", metadata = { description = "Risk of system or service downtime and failures", color = "orange" } },
 ]
 
 # Likelihood field: select with scoring
@@ -609,7 +665,7 @@ options = [
 
 # Simple fields without options
 [[fields]]
-id = "specific-impact"
+id = "specific_impact"
 name = "Specific Impact"
 type = "text"
 
@@ -619,7 +675,7 @@ name = "Deadline"
 type = "date"
 
 [[fields]]
-id = "reference-url"
+id = "reference_url"
 name = "Reference URL"
 type = "url"
 ```

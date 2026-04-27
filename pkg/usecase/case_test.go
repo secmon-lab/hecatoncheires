@@ -15,6 +15,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
+	goslack "github.com/slack-go/slack"
 )
 
 const testWorkspaceID = "test-ws"
@@ -613,6 +614,144 @@ func TestCaseUseCase_CreateCase_BookmarkAndMapping(t *testing.T) {
 		gt.Value(t, created.SlackChannelID).NotEqual("")
 	})
 
+}
+
+func TestCaseUseCase_CreateCase_WelcomeMessages(t *testing.T) {
+	newRegistry := func(messages []string) *model.WorkspaceRegistry {
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace:            model.Workspace{ID: testWorkspaceID, Name: "Test"},
+			SlackWelcomeMessages: messages,
+		})
+		return registry
+	}
+
+	t.Run("posts rendered messages in declared order", func(t *testing.T) {
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+		}
+		registry := newRegistry([]string{
+			"Hello {{.Case.Title}}",
+			"Reporter: <@{{.Case.ReporterID}}>",
+		})
+		uc := usecase.NewCaseUseCase(repo, registry, mock, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Phishing", "desc", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		gt.Array(t, mock.postedTexts).Length(2).Required()
+		gt.Value(t, mock.postedTexts[0]).Equal("Hello Phishing")
+		gt.Value(t, mock.postedTexts[1]).Equal("Reporter: <@UCREATOR>")
+		gt.Value(t, mock.postedChannelIDs[0]).Equal(created.SlackChannelID)
+		gt.Value(t, mock.postedChannelIDs[1]).Equal(created.SlackChannelID)
+	})
+
+	t.Run("template can reference custom Fields by ID", func(t *testing.T) {
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+		}
+		registry := newRegistry([]string{
+			"Severity: {{.Fields.severity}}",
+		})
+		uc := usecase.NewCaseUseCase(repo, registry, mock, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+
+		fieldValues := map[string]model.FieldValue{
+			"severity": {FieldID: "severity", Type: types.FieldTypeText, Value: "high"},
+		}
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "desc", []string{}, fieldValues, false, "", "")
+		gt.NoError(t, err).Required()
+
+		gt.Array(t, mock.postedTexts).Length(1).Required()
+		gt.Value(t, mock.postedTexts[0]).Equal("Severity: high")
+	})
+
+	t.Run("URL is exposed when baseURL is set", func(t *testing.T) {
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+		}
+		registry := newRegistry([]string{
+			"Detail: {{.URL}}",
+		})
+		i18n.Init(i18n.LangEN)
+		uc := usecase.NewCaseUseCase(repo, registry, mock, nil, "https://example.com")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "desc", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		expectedURL := fmt.Sprintf("https://example.com/ws/%s/cases/%d", testWorkspaceID, created.ID)
+		gt.Array(t, mock.postedTexts).Length(1).Required()
+		gt.Value(t, mock.postedTexts[0]).Equal("Detail: " + expectedURL)
+	})
+
+	t.Run("send failure does not abort case creation", func(t *testing.T) {
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+			postMessageFn: func(_ context.Context, _ string, _ []goslack.Block, _ string) (string, error) {
+				return "", errors.New("post failed")
+			},
+		}
+		registry := newRegistry([]string{
+			"Hello",
+			"World",
+		})
+		uc := usecase.NewCaseUseCase(repo, registry, mock, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "desc", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+		gt.Value(t, created.SlackChannelID).NotEqual("")
+		// Both messages were attempted even though the first failed.
+		gt.Array(t, mock.postedTexts).Length(2)
+	})
+
+	t.Run("workspace without messages posts nothing", func(t *testing.T) {
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+		}
+		uc := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "desc", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+		gt.Array(t, mock.postedTexts).Length(0)
+	})
+
+	t.Run("private case still receives welcome messages", func(t *testing.T) {
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+		}
+		registry := newRegistry([]string{
+			"private welcome",
+		})
+		uc := usecase.NewCaseUseCase(repo, registry, mock, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "desc", []string{}, nil, true, "", "")
+		gt.NoError(t, err).Required()
+		gt.Array(t, mock.postedTexts).Length(1)
+		gt.Value(t, mock.postedTexts[0]).Equal("private welcome")
+	})
 }
 
 func TestCaseUseCase_PrivateCaseAccessControl(t *testing.T) {
