@@ -66,8 +66,9 @@ func (r *welcomeRenderer) Render(ctx welcomeContext) ([]string, error) {
 	}
 
 	out := make([]string, 0, len(r.templates))
+	var buf bytes.Buffer
 	for i, tmpl := range r.templates {
-		var buf bytes.Buffer
+		buf.Reset()
 		if err := tmpl.Execute(&buf, ctx); err != nil {
 			return out, goerr.Wrap(err, "failed to execute welcome message template",
 				goerr.V("index", i),
@@ -92,8 +93,8 @@ func (r *welcomeRenderer) Render(ctx welcomeContext) ([]string, error) {
 // schema may be nil; in that case all fields fall back to the bare-value
 // representation for both id and name.
 func buildWelcomeFields(c *model.Case, schema *config.FieldSchema) map[string]map[string]any {
-	if c == nil || len(c.FieldValues) == 0 {
-		return nil
+	if c == nil {
+		return map[string]map[string]any{}
 	}
 
 	defs := make(map[string]config.FieldDefinition)
