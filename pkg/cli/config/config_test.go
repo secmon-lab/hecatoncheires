@@ -29,13 +29,13 @@ required = true
 description = "Classification of the case"
 
   [[fields.options]]
-  id = "data-breach"
+  id = "data_breach"
   name = "Data Breach"
   description = "Risk of data leakage"
   color = "#E53E3E"
 
   [[fields.options]]
-  id = "system-failure"
+  id = "system_failure"
   name = "System Failure"
   color = "#DD6B20"
 
@@ -47,7 +47,7 @@ required = true
 description = "Probability of occurrence"
 
   [[fields.options]]
-  id = "very-low"
+  id = "very_low"
   name = "Very Low"
   description = "Extremely unlikely to occur"
   [fields.options.metadata]
@@ -60,7 +60,7 @@ description = "Probability of occurrence"
   score = 4
 
 [[fields]]
-id = "specific-impact"
+id = "specific_impact"
 name = "Specific Impact"
 type = "text"
 required = false
@@ -85,13 +85,13 @@ type = "multi-user"
 required = false
 
 [[fields]]
-id = "due-date"
+id = "due_date"
 name = "Due Date"
 type = "date"
 required = false
 
 [[fields]]
-id = "reference-url"
+id = "reference_url"
 name = "Reference URL"
 type = "url"
 required = false
@@ -144,10 +144,20 @@ type = "text"
 			wantErr: config.ErrInvalidFieldID,
 		},
 		{
-			name: "invalid field ID format (underscore)",
+			name: "invalid field ID format (hyphen no longer allowed)",
 			content: `
 [[fields]]
-id = "category_id"
+id = "category-id"
+name = "Category"
+type = "text"
+`,
+			wantErr: config.ErrInvalidFieldID,
+		},
+		{
+			name: "invalid field ID format (leading digit)",
+			content: `
+[[fields]]
+id = "1category"
 name = "Category"
 type = "text"
 `,
@@ -202,11 +212,11 @@ name = "Category"
 type = "select"
 
   [[fields.options]]
-  id = "option-a"
+  id = "option_a"
   name = "Option A"
 
   [[fields.options]]
-  id = "option-a"
+  id = "option_a"
   name = "Duplicate"
 `,
 			wantErr: config.ErrDuplicateOptionID,
@@ -234,7 +244,7 @@ name = "Category"
 type = "select"
 
   [[fields.options]]
-  id = "option-a"
+  id = "option_a"
 `,
 			wantErr: config.ErrMissingName,
 		},
@@ -283,7 +293,7 @@ type = "multi-select"
 required = true
 
   [[fields.options]]
-  id = "data-breach"
+  id = "data_breach"
   name = "Data Breach"
   color = "#E53E3E"
   [fields.options.metadata]
@@ -317,7 +327,7 @@ required = true
 
 	// Check option details
 	option := field.Options[0]
-	gt.Value(t, option.ID).Equal("data-breach")
+	gt.Value(t, option.ID).Equal("data_breach")
 	gt.Value(t, option.Name).Equal("Data Breach")
 	gt.Value(t, option.Color).Equal("#E53E3E")
 
@@ -805,6 +815,86 @@ type = "text"
 		gt.Array(t, configs).Length(1)
 		gt.Array(t, configs[0].SlackInviteUsers).Length(0)
 		gt.Array(t, configs[0].SlackInviteGroups).Length(0)
+	})
+}
+
+func TestLoadWorkspaceConfigs_SlackWelcomeMessages(t *testing.T) {
+	t.Run("parses welcome messages", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		content := `
+[workspace]
+id = "risk"
+name = "Risk Management"
+
+[slack]
+welcome_messages = [
+  "Hello {{.Case.Title}}",
+  "Reporter: <@{{.Case.ReporterID}}>",
+]
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`
+		err := os.WriteFile(configPath, []byte(content), 0644)
+		gt.NoError(t, err).Required()
+
+		configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1)
+		gt.Array(t, configs[0].SlackWelcomeMessages).Length(2)
+		gt.Value(t, configs[0].SlackWelcomeMessages[0]).Equal("Hello {{.Case.Title}}")
+		gt.Value(t, configs[0].SlackWelcomeMessages[1]).Equal("Reporter: <@{{.Case.ReporterID}}>")
+	})
+
+	t.Run("empty when omitted", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		content := `
+[workspace]
+id = "risk"
+name = "Risk Management"
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`
+		err := os.WriteFile(configPath, []byte(content), 0644)
+		gt.NoError(t, err).Required()
+
+		configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1)
+		gt.Array(t, configs[0].SlackWelcomeMessages).Length(0)
+	})
+
+	t.Run("rejects template with parse error", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		content := `
+[workspace]
+id = "risk"
+name = "Risk Management"
+
+[slack]
+welcome_messages = [
+  "Hello {{.Case.Title",
+]
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`
+		err := os.WriteFile(configPath, []byte(content), 0644)
+		gt.NoError(t, err).Required()
+
+		_, err = config.LoadWorkspaceConfigs([]string{configPath})
+		gt.Value(t, err).NotNil()
+		gt.Error(t, err).Is(config.ErrInvalidWelcomeMessage)
 	})
 }
 

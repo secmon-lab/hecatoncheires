@@ -16,15 +16,16 @@ var ErrWorkspaceNotFound = goerr.New("workspace not found")
 
 // WorkspaceEntry holds workspace identity and its field schema
 type WorkspaceEntry struct {
-	Workspace          Workspace
-	FieldSchema        *config.FieldSchema
-	SlackChannelPrefix string
-	SlackTeamID        string // Slack Team ID for org-level app support (empty for WS-level apps)
-	SlackInviteUsers   []string
-	SlackInviteGroups  []string
-	CompilePrompt      string
-	AssistPrompt       string
-	AssistLanguage     string
+	Workspace            Workspace
+	FieldSchema          *config.FieldSchema
+	SlackChannelPrefix   string
+	SlackTeamID          string // Slack Team ID for org-level app support (empty for WS-level apps)
+	SlackInviteUsers     []string
+	SlackInviteGroups    []string
+	SlackWelcomeMessages []string // Go text/template strings posted to the case channel after creation
+	CompilePrompt        string
+	AssistPrompt         string
+	AssistLanguage       string
 }
 
 // WorkspaceRegistry holds workspace configurations.

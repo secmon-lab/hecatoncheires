@@ -19,11 +19,11 @@ name = "Category"
 type = "multi-select"
 required = true
 options = [
-  { id = "data-breach", name = "Data Breach", metadata = { description = "Risk of personal or confidential information leakage", color = "red" } },
-  { id = "system-failure", name = "System Failure", metadata = { description = "Risk of system or service downtime and failures", color = "orange" } },
+  { id = "data_breach", name = "Data Breach", metadata = { description = "Risk of personal or confidential information leakage", color = "red" } },
+  { id = "system_failure", name = "System Failure", metadata = { description = "Risk of system or service downtime and failures", color = "orange" } },
   { id = "compliance", name = "Compliance", metadata = { description = "Risk of regulatory or internal policy violations", color = "yellow" } },
-  { id = "supply-chain", name = "Supply Chain", metadata = { description = "Risks related to external vendors and third-party services", color = "blue" } },
-  { id = "insider-threat", name = "Insider Threat", metadata = { description = "Intentional or unintentional threats from employees", color = "purple" } },
+  { id = "supply_chain", name = "Supply Chain", metadata = { description = "Risks related to external vendors and third-party services", color = "blue" } },
+  { id = "insider_threat", name = "Insider Threat", metadata = { description = "Intentional or unintentional threats from employees", color = "purple" } },
 ]
 
 [[fields]]
@@ -32,11 +32,11 @@ name = "Likelihood"
 type = "select"
 required = true
 options = [
-  { id = "very-low", name = "Very Low", metadata = { description = "Extremely unlikely to occur", score = 1 } },
+  { id = "very_low", name = "Very Low", metadata = { description = "Extremely unlikely to occur", score = 1 } },
   { id = "low", name = "Low", metadata = { description = "Unlikely to occur", score = 2 } },
   { id = "medium", name = "Medium", metadata = { description = "Moderately likely to occur", score = 3 } },
   { id = "high", name = "High", metadata = { description = "Likely to occur", score = 4 } },
-  { id = "very-high", name = "Very High", metadata = { description = "Very likely to occur", score = 5 } },
+  { id = "very_high", name = "Very High", metadata = { description = "Very likely to occur", score = 5 } },
 ]
 
 [[fields]]
@@ -53,15 +53,15 @@ options = [
 ]
 
 [[fields]]
-id = "response-team"
+id = "response_team"
 name = "Response Team"
 type = "multi-select"
 required = false
 options = [
-  { id = "security-team", name = "Security Team" },
-  { id = "infrastructure-team", name = "Infrastructure Team" },
-  { id = "development-team", name = "Development Team" },
-  { id = "compliance-team", name = "Compliance Team" },
+  { id = "security_team", name = "Security Team" },
+  { id = "infrastructure_team", name = "Infrastructure Team" },
+  { id = "development_team", name = "Development Team" },
+  { id = "compliance_team", name = "Compliance Team" },
 ]
 
 [[fields]]

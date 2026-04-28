@@ -23,16 +23,37 @@ type CaseUseCase struct {
 	slackService      slack.Service
 	slackAdminService slack.AdminService
 	baseURL           string
+	welcomeRenderers  map[string]*welcomeRenderer
 }
 
 func NewCaseUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackAdminService slack.AdminService, baseURL string) *CaseUseCase {
-	return &CaseUseCase{
+	uc := &CaseUseCase{
 		repo:              repo,
 		workspaceRegistry: registry,
 		slackService:      slackService,
 		slackAdminService: slackAdminService,
 		baseURL:           baseURL,
+		welcomeRenderers:  make(map[string]*welcomeRenderer),
 	}
+
+	// Pre-parse welcome message templates per workspace. Configuration loading
+	// already validated each template, so a parse failure here is unexpected
+	// but treated as non-fatal: the workspace simply gets no welcome messages.
+	if registry != nil {
+		for _, entry := range registry.List() {
+			renderer, err := newWelcomeRenderer(entry.SlackWelcomeMessages)
+			if err != nil {
+				logging.Default().Warn("failed to build welcome renderer; skipping welcome messages",
+					"workspaceID", entry.Workspace.ID,
+					"error", err.Error(),
+				)
+				continue
+			}
+			uc.welcomeRenderers[entry.Workspace.ID] = renderer
+		}
+	}
+
+	return uc
 }
 
 func (uc *CaseUseCase) fieldValidatorForWorkspace(workspaceID string) *model.FieldValidator {
@@ -161,12 +182,19 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 		}
 
 		// Add bookmark to the Slack channel linking to the case WebUI
+		caseURL := ""
 		if uc.baseURL != "" {
-			caseURL := fmt.Sprintf("%s/ws/%s/cases/%d", uc.baseURL, workspaceID, created.ID)
+			caseURL = fmt.Sprintf("%s/ws/%s/cases/%d", uc.baseURL, workspaceID, created.ID)
 			if bookmarkErr := uc.slackService.AddBookmark(ctx, channelID, i18n.T(ctx, i18n.MsgBookmarkOpenCase), caseURL); bookmarkErr != nil {
 				errutil.Handle(ctx, bookmarkErr, "failed to add bookmark to Slack channel")
 			}
 		}
+
+		// Post welcome messages defined in workspace configuration. The Case
+		// passed to the renderer carries the freshly-assigned channel ID so
+		// that templates can reference it.
+		created.SlackChannelID = channelID
+		uc.postWelcomeMessages(ctx, workspaceID, created, channelID, caseURL)
 
 		// Sync channel members (for both private and public cases)
 		var channelUserIDs []string
@@ -178,7 +206,6 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 		}
 
 		// Update case with channel ID and members
-		created.SlackChannelID = channelID
 		created.ChannelUserIDs = channelUserIDs
 		updated, err := uc.repo.Case().Update(ctx, workspaceID, created)
 		if err != nil {

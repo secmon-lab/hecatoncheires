@@ -100,7 +100,7 @@ func TestConfigErrors_ContextKeys(t *testing.T) {
 		{
 			name:  "FieldIDKey is string",
 			key:   config.FieldIDKey,
-			value: "test-field",
+			value: "test_field",
 		},
 		{
 			name:  "FieldTypeKey is string",
@@ -110,7 +110,7 @@ func TestConfigErrors_ContextKeys(t *testing.T) {
 		{
 			name:  "OptionIDKey is string",
 			key:   config.OptionIDKey,
-			value: "option-1",
+			value: "option_1",
 		},
 		{
 			name:  "FieldIndexKey is string",
@@ -175,10 +175,10 @@ func TestConfigErrors_ContextExtraction(t *testing.T) {
 			name: "Extract OptionIDKey",
 			buildErr: func() error {
 				return goerr.Wrap(config.ErrDuplicateOptionID, "duplicate option",
-					goerr.V(config.OptionIDKey, "option-1"))
+					goerr.V(config.OptionIDKey, "option_1"))
 			},
 			key:       config.OptionIDKey,
-			wantValue: "option-1",
+			wantValue: "option_1",
 		},
 	}
 
