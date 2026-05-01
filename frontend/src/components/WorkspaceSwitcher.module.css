@@ -5,72 +5,63 @@
 }
 
 .label {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 8px 5px 6px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 500;
-  color: var(--fg);
-}
-
-.label::before,
-.trigger::before {
-  content: '';
-  width: 22px; height: 22px;
-  border-radius: 5px;
-  background: linear-gradient(135deg, oklch(0.55 0.15 264), oklch(0.45 0.16 290));
-  flex-shrink: 0;
+  color: var(--topbar-text);
 }
 
 .trigger {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--spacing-xs);
   background: transparent;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  padding: 5px 8px 5px 6px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-xs) var(--spacing-md-sm);
   cursor: pointer;
-  color: var(--fg);
-  font-size: 13px;
+  transition: all var(--transition-fast);
+  color: var(--topbar-text);
+  font-size: 0.8125rem;
   font-weight: 500;
-  font-family: inherit;
 }
 
 .trigger:hover {
-  background: rgba(127, 127, 127, 0.06);
-  border-color: var(--line);
+  background-color: var(--topbar-hover);
+  border-color: var(--border-hover);
 }
 
-.icon { opacity: 0.6; color: var(--fg-muted); }
+.icon {
+  opacity: 0.5;
+}
 
 .dropdown {
   position: absolute;
-  top: calc(100% + 6px);
+  top: calc(100% + var(--spacing-xs));
   left: 0;
-  min-width: 220px;
-  background: var(--bg-elev);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
+  min-width: 12rem;
+  background-color: var(--bg-paper);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   z-index: 1001;
   overflow: hidden;
-  padding: 4px;
 }
 
 .item {
   display: block;
-  padding: 8px 10px;
+  padding: var(--spacing-sm) var(--spacing-md);
   text-decoration: none;
-  color: var(--fg);
-  font-size: 13px;
-  border-radius: 4px;
+  color: var(--text-body);
+  font-size: 0.8125rem;
+  transition: background-color var(--transition-fast);
 }
-.item:hover { background: var(--bg-sunken); }
+
+.item:hover {
+  background-color: var(--bg-subtle);
+}
 
 .active {
-  background: var(--side-active-bg);
-  color: var(--side-active-fg);
+  background-color: var(--bg-highlight);
   font-weight: 600;
+  color: var(--color-primary);
 }

@@ -1,41 +1,85 @@
 .topBar {
   height: var(--topbar-height);
-  background: var(--bg-top);
-  border-bottom: 1px solid var(--line);
+  background-color: var(--topbar-bg);
+  border-bottom: 1px solid var(--topbar-border);
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 0 16px;
+  justify-content: space-between;
+  padding: 0 var(--spacing-xl);
+  position: sticky;
+  top: 0;
+  z-index: 100;
 }
 
-.leftSection { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.leftSection {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
 
 .menuButton {
-  width: 30px; height: 30px;
-  border: none; background: transparent;
-  color: var(--fg-muted);
-  border-radius: var(--radius);
-  display: flex; align-items: center; justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: none;
+  background-color: transparent;
+  color: var(--topbar-icon);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
+  transition: all var(--transition-fast);
   flex-shrink: 0;
 }
-.menuButton:hover { background: rgba(127, 127, 127, 0.08); color: var(--fg); }
 
-.spacer { flex: 1; }
+.menuButton:hover {
+  background-color: var(--topbar-hover);
+  color: var(--topbar-text);
+}
 
-.actions { display: flex; gap: 4px; align-items: center; }
+.actions {
+  display: flex;
+  gap: var(--spacing-sm);
+  align-items: center;
+}
 
 .iconButton {
-  width: 30px; height: 30px;
-  border: none; background: transparent;
-  color: var(--fg-muted);
-  border-radius: var(--radius);
-  display: flex; align-items: center; justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: none;
+  background-color: transparent;
+  color: var(--topbar-icon);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
+  transition: all var(--transition-fast);
 }
-.iconButton:hover { background: rgba(127, 127, 127, 0.08); color: var(--fg); }
 
-@media (max-width: 767px) {
-  .topBar { padding: 0 12px; }
-  .iconButton { width: var(--touch-target-min); height: var(--touch-target-min); }
+.iconButton:hover {
+  background-color: var(--topbar-hover);
+  color: var(--topbar-text);
+}
+
+@media (max-width: var(--breakpoint-mobile)) {
+  .topBar {
+    padding: 0 var(--spacing-md);
+  }
+
+  .leftSection {
+    gap: var(--spacing-sm);
+  }
+
+  .iconButton {
+    width: var(--touch-target-min);
+    height: var(--touch-target-min);
+  }
+}
+
+@media (min-width: calc(var(--breakpoint-mobile) + 1px)) and (max-width: var(--breakpoint-tablet)) {
+  .topBar {
+    padding: 0 var(--spacing-lg);
+  }
+
 }

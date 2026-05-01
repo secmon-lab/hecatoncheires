@@ -1,13 +1,10 @@
-import { useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { ChevronRight } from 'lucide-react';
-import { useWorkspace } from '../contexts/workspace-context';
-import { useTranslation } from '../i18n';
-import styles from './WorkspaceSelector.module.css';
+import { useEffect } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { useWorkspace } from "../contexts/workspace-context";
+import styles from "./WorkspaceSelector.module.css";
 
 export default function WorkspaceSelector() {
   const { workspaces, isLoading } = useWorkspace();
-  const { t } = useTranslation();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -18,7 +15,7 @@ export default function WorkspaceSelector() {
       return;
     }
 
-    const lastWorkspaceId = localStorage.getItem('lastWorkspaceId');
+    const lastWorkspaceId = localStorage.getItem("lastWorkspaceId");
     if (lastWorkspaceId && workspaces.find((w) => w.id === lastWorkspaceId)) {
       navigate(`/ws/${lastWorkspaceId}/cases`, { replace: true });
     }
@@ -43,35 +40,25 @@ export default function WorkspaceSelector() {
     );
   }
 
-  const mark = (name: string) => name.slice(0, 2).toUpperCase();
-
   return (
     <div className={styles.container}>
-      <div className={styles.inner}>
-        <div className={styles.header}>
-          <img src="/logo-three-heads.png" alt={t('appName')} className={styles.logo} />
-          <div className={styles.titleBlock}>
-            <h1 className={styles.title}>{t('appName')}</h1>
-            <span className={styles.subtitle}>Select a workspace to continue</span>
-          </div>
-        </div>
-        <div className={styles.list}>
-          {workspaces.map((ws) => (
-            <Link
-              key={ws.id}
-              to={`/ws/${ws.id}/cases`}
-              className={styles.card}
-              onClick={() => localStorage.setItem('lastWorkspaceId', ws.id)}
-            >
-              <div className={styles.mark}>{mark(ws.name)}</div>
-              <div className={styles.cardBody}>
-                <div className={styles.cardTitle}>{ws.name}</div>
-                <div className={styles.cardId}>{ws.id}</div>
-              </div>
-              <ChevronRight size={16} className={styles.chev} />
-            </Link>
-          ))}
-        </div>
+      <div className={styles.header}>
+        <img src="/logo-center.png" alt="Hecatoncheires" className={styles.logo} />
+        <h1 className={styles.title}>Select Workspace</h1>
+        <p className={styles.subtitle}>Choose a workspace to get started</p>
+      </div>
+      <div className={styles.grid}>
+        {workspaces.map((ws) => (
+          <Link
+            key={ws.id}
+            to={`/ws/${ws.id}/cases`}
+            className={styles.card}
+            onClick={() => localStorage.setItem("lastWorkspaceId", ws.id)}
+          >
+            <h3 className={styles.cardTitle}>{ws.name}</h3>
+            <span className={styles.cardId}>{ws.id}</span>
+          </Link>
+        ))}
       </div>
     </div>
   );

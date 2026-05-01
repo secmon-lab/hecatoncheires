@@ -1,1 +1,71 @@
-/* Login uses the global .login-stage / .login-card from styles/global.css */
+.login-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background-color: var(--bg-dark);
+}
+
+.login-card {
+  max-width: 400px;
+  width: 100%;
+  padding: var(--spacing-xl);
+  background-color: var(--bg-paper);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xl);
+  margin: var(--spacing-lg);
+}
+
+.login-header {
+  text-align: center;
+  margin-bottom: var(--spacing-xl);
+}
+
+.login-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-heading);
+  margin-bottom: var(--spacing-xs);
+  letter-spacing: -0.02em;
+}
+
+.login-subtitle {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.login-button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-md-sm) var(--spacing-lg);
+  background: var(--color-primary);
+  color: var(--text-white);
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  margin-top: var(--spacing-lg);
+  box-shadow: 0 2px 8px rgba(46, 92, 184, 0.3);
+}
+
+.login-button:hover {
+  background: var(--color-primary-dark);
+  box-shadow: 0 4px 16px rgba(46, 92, 184, 0.35);
+}
+
+.login-button:active {
+  background: var(--color-primary-dark);
+}
+
+.login-description {
+  text-align: center;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  margin-top: var(--spacing-lg);
+  margin-bottom: 0;
+}

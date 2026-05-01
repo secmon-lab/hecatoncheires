@@ -1,48 +1,74 @@
-import { Briefcase, ListTodo, Database, BookOpen } from 'lucide-react'
+import { Shield, ListTodo, Database, BookOpen } from 'lucide-react'
 import { NavLink, Link } from 'react-router-dom'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
+import styles from './Sidebar.module.css'
 
 interface SidebarProps {
   isOpen?: boolean
   onClose?: () => void
 }
 
-export default function Sidebar({ onClose }: SidebarProps) {
+export default function Sidebar({ isOpen = true, onClose }: SidebarProps) {
   const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
   const wsPrefix = currentWorkspace ? `/ws/${currentWorkspace.id}` : ''
 
   const handleNavClick = () => {
-    if (onClose) onClose()
+    if (onClose) {
+      onClose()
+    }
   }
 
-  const items = [
-    { to: `${wsPrefix}/cases`,      Icon: Briefcase, label: t('navCases') },
-    { to: `${wsPrefix}/actions`,    Icon: ListTodo,  label: t('navActions') },
-    { to: `${wsPrefix}/knowledges`, Icon: BookOpen,  label: t('navKnowledges') },
-    { to: `${wsPrefix}/sources`,    Icon: Database,  label: t('navSources') },
-  ]
-
   return (
-    <aside className="h-side">
-      <Link to="/" className="h-side-logo" onClick={handleNavClick}>
-        <img src="/logo-three-heads.png" alt={t('appName')} />
-        <span>{t('appName')}</span>
-      </Link>
-      <nav className="h-side-nav">
-        <div className="h-side-section">Workspace</div>
-        {items.map((it) => (
-          <NavLink
-            key={it.to}
-            to={it.to}
-            className={({ isActive }) => (isActive ? 'active' : '')}
-            onClick={handleNavClick}
-          >
-            <span className="nav-icon"><it.Icon size={15} /></span>
-            <span>{it.label}</span>
-          </NavLink>
-        ))}
+    <aside className={`${styles.sidebar} ${isOpen ? styles.open : ''}`}>
+      <div className={styles.brand}>
+        <Link to="/" className={styles.brandLink}>
+          <img src="/logo.png" alt={t('appName')} className={styles.brandLogo} />
+          <span className={styles.brandName}>{t('appName')}</span>
+        </Link>
+      </div>
+      <nav className={styles.nav}>
+        <NavLink
+          to={`${wsPrefix}/cases`}
+          className={({ isActive }) =>
+            `${styles.navItem} ${isActive ? styles.active : ''}`
+          }
+          onClick={handleNavClick}
+        >
+          <Shield size={20} />
+          <span>{t('navCases')}</span>
+        </NavLink>
+        <NavLink
+          to={`${wsPrefix}/actions`}
+          className={({ isActive }) =>
+            `${styles.navItem} ${isActive ? styles.active : ''}`
+          }
+          onClick={handleNavClick}
+        >
+          <ListTodo size={20} />
+          <span>{t('navActions')}</span>
+        </NavLink>
+        <NavLink
+          to={`${wsPrefix}/knowledges`}
+          className={({ isActive }) =>
+            `${styles.navItem} ${isActive ? styles.active : ''}`
+          }
+          onClick={handleNavClick}
+        >
+          <BookOpen size={20} />
+          <span>{t('navKnowledges')}</span>
+        </NavLink>
+        <NavLink
+          to={`${wsPrefix}/sources`}
+          className={({ isActive }) =>
+            `${styles.navItem} ${isActive ? styles.active : ''}`
+          }
+          onClick={handleNavClick}
+        >
+          <Database size={20} />
+          <span>{t('navSources')}</span>
+        </NavLink>
       </nav>
     </aside>
   )
