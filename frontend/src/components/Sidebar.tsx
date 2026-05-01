@@ -84,11 +84,23 @@ export default function Sidebar() {
           </NavLink>
         ))}
         <div className="h-side-section">{t('sidebarSectionWorkspaceSettings')}</div>
-        <a href="#" onClick={(e) => e.preventDefault()}>
+        <a
+          href="#"
+          aria-disabled="true"
+          title="Coming soon"
+          onClick={(e) => e.preventDefault()}
+          style={{ opacity: 0.45, cursor: 'not-allowed' }}
+        >
           <span className="nav-icon"><IconSettings size={15} /></span>
           <span>{t('navCustomFields')}</span>
         </a>
-        <a href="#" onClick={(e) => e.preventDefault()}>
+        <a
+          href="#"
+          aria-disabled="true"
+          title="Coming soon"
+          onClick={(e) => e.preventDefault()}
+          style={{ opacity: 0.45, cursor: 'not-allowed' }}
+        >
           <span className="nav-icon"><IconUser size={15} /></span>
           <span>{t('navMembers')}</span>
         </a>

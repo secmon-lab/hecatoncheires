@@ -2,8 +2,9 @@ import { useState } from 'react'
 import { useMutation, useQuery } from '@apollo/client'
 import Select from 'react-select'
 import { CREATE_ACTION, UPDATE_ACTION, GET_ACTIONS, GET_ACTION } from '../graphql/action'
-import { GET_CASES } from '../graphql/case'
+import { GET_CASE, GET_CASES } from '../graphql/case'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
+import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
 import Modal from '../components/Modal'
@@ -45,7 +46,16 @@ export default function ActionForm({ action, defaultCaseID, onClose }: ActionFor
   const [description, setDescription] = useState(action?.description || '')
   const [caseID, setCaseID] = useState<number | null>(action?.caseID ?? defaultCaseID ?? null)
   const [status, setStatus] = useState(action?.status || 'BACKLOG')
+  const [assigneeIDs, setAssigneeIDs] = useState<string[]>(action?.assigneeIDs || [])
   const [errors, setErrors] = useState<Record<string, string>>({})
+
+  const { data: usersData } = useQuery(GET_SLACK_USERS)
+  const users = usersData?.slackUsers || []
+  const userOptions = users.map((u: any) => ({
+    value: u.id as string,
+    label: u.realName || u.name,
+  }))
+  const selectedAssignees = userOptions.filter((o: any) => assigneeIDs.includes(o.value))
 
   const { data: casesData } = useQuery(GET_CASES, {
     variables: { workspaceId: currentWorkspace?.id, status: 'OPEN' },
@@ -57,11 +67,31 @@ export default function ActionForm({ action, defaultCaseID, onClose }: ActionFor
   })
   const caseLabel = configData?.fieldConfiguration?.labels?.case || 'Case'
 
+  const createRefetch: any[] = [
+    { query: GET_ACTIONS, variables: { workspaceId: currentWorkspace?.id } },
+  ]
+  if (defaultCaseID) {
+    createRefetch.push({
+      query: GET_CASE,
+      variables: { workspaceId: currentWorkspace?.id, id: defaultCaseID },
+    })
+  }
   const [createAction, { loading: creating }] = useMutation(CREATE_ACTION, {
-    refetchQueries: [{ query: GET_ACTIONS, variables: { workspaceId: currentWorkspace?.id } }],
+    refetchQueries: createRefetch,
   })
+  const updateRefetch: any[] = []
+  if (action) {
+    updateRefetch.push({
+      query: GET_ACTION,
+      variables: { workspaceId: currentWorkspace?.id, id: action.id },
+    })
+    updateRefetch.push({
+      query: GET_CASE,
+      variables: { workspaceId: currentWorkspace?.id, id: action.caseID },
+    })
+  }
   const [updateAction, { loading: updating }] = useMutation(UPDATE_ACTION, {
-    refetchQueries: action ? [{ query: GET_ACTION, variables: { workspaceId: currentWorkspace?.id, id: action.id } }] : [],
+    refetchQueries: updateRefetch,
   })
 
   const submit = async () => {
@@ -75,20 +105,22 @@ export default function ActionForm({ action, defaultCaseID, onClose }: ActionFor
         await updateAction({
           variables: {
             workspaceId: currentWorkspace!.id,
-            input: { id: action.id, title, description, status },
+            input: { id: action.id, title, description, status, assigneeIDs },
           },
         })
       } else {
         await createAction({
           variables: {
             workspaceId: currentWorkspace!.id,
-            input: { caseID: Number(caseID), title, description, status },
+            input: { caseID: Number(caseID), title, description, status, assigneeIDs },
           },
         })
       }
       onClose()
-    } catch (e) {
+    } catch (e: any) {
       console.error('Action mutation failed', e)
+      const msg = e?.graphQLErrors?.[0]?.message || e?.message || String(e)
+      setErrors({ submit: msg })
     }
   }
 
@@ -155,6 +187,18 @@ export default function ActionForm({ action, defaultCaseID, onClose }: ActionFor
             placeholder={t('placeholderActionDescription')}
           />
         </div>
+        <div>
+          <label htmlFor="action-assignees" className="field-label">{t('labelAssignees')}</label>
+          <Select
+            inputId="action-assignees"
+            aria-label={t('labelAssignees')}
+            isMulti
+            options={userOptions}
+            value={selectedAssignees}
+            onChange={(opts: any) => setAssigneeIDs((opts || []).map((o: any) => o.value))}
+            placeholder={t('placeholderAddAssignees')}
+          />
+        </div>
         {isEdit && (
           <div>
             <label htmlFor="action-status" className="field-label">{t('labelStatusRequired')}</label>
@@ -168,6 +212,18 @@ export default function ActionForm({ action, defaultCaseID, onClose }: ActionFor
                 <option key={s} value={s}>{t(statusKeyMap[s])}</option>
               ))}
             </select>
+          </div>
+        )}
+        {errors.submit && (
+          <div style={{
+            padding: '8px 10px',
+            borderRadius: 6,
+            background: 'color-mix(in oklch, var(--danger) 10%, transparent)',
+            border: '1px solid color-mix(in oklch, var(--danger) 30%, transparent)',
+            color: 'var(--danger)',
+            fontSize: 12,
+          }}>
+            {errors.submit}
           </div>
         )}
       </div>

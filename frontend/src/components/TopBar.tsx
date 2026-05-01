@@ -81,7 +81,12 @@ export default function TopBar() {
           {renderedCrumbs}
         </div>
       )}
-      <div className="h-search">
+      <div
+        className="h-search"
+        aria-disabled="true"
+        title="Coming soon"
+        style={{ opacity: 0.6, cursor: 'not-allowed' }}
+      >
         <IconSearch size={14} />
         <span>{t('topbarSearchPlaceholder')}</span>
         <span style={{
@@ -89,9 +94,15 @@ export default function TopBar() {
           background: 'var(--bg-sunken)', border: '1px solid var(--line)',
         }}>⌘K</span>
       </div>
-      <button className="h-icon-btn" title="Notifications" aria-label="Notifications">
+      <button
+        className="h-icon-btn"
+        title="Coming soon"
+        aria-label="Notifications"
+        aria-disabled="true"
+        disabled
+        style={{ opacity: 0.5, cursor: 'not-allowed' }}
+      >
         <IconBell size={16} />
-        <span className="dot" />
       </button>
       <UserMenu />
     </header>

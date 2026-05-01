@@ -13,8 +13,6 @@ import {
   IconChevLeft,
   IconChevRight,
   IconDots,
-  IconFilter,
-  IconSettings,
 } from '../components/Icons'
 import { AvatarStack, StatusBadge, SlackLink } from '../components/Primitives'
 import CaseForm from './CaseForm'
@@ -41,6 +39,7 @@ interface CaseRow {
   reporter?: { id: string; name: string; realName: string; imageUrl?: string } | null
   assignees: Array<{ id: string; name: string; realName: string; imageUrl?: string }>
   slackChannelID: string
+  slackChannelName?: string | null
   createdAt: string
   fields: Array<{ fieldId: string; value: any }>
 }
@@ -117,8 +116,6 @@ export default function CaseList() {
           <div className="sub">{t('subtitleCaseManagement', { caseLabelLower: caseLabel.toLowerCase() })}</div>
         </div>
         <div className="actions">
-          <Button icon={<IconFilter size={14} />}>{t('btnFilter')}</Button>
-          <Button icon={<IconSettings size={14} />}>{t('btnColumns')}</Button>
           <Button variant="primary" icon={<IconPlus size={14} />} onClick={() => setIsFormOpen(true)}>
             {t('btnNewCase', { caseLabel })}
           </Button>
@@ -220,7 +217,7 @@ export default function CaseList() {
                 <td className="mono soft" style={{ fontSize: 12 }}>{formatDate(c.createdAt)}</td>
                 <td>
                   {c.slackChannelID ? (
-                    <SlackLink name={c.slackChannelID} />
+                    <SlackLink name={c.slackChannelName || c.slackChannelID} />
                   ) : (
                     <span className="soft">—</span>
                   )}

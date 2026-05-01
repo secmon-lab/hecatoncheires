@@ -29,6 +29,7 @@ import {
 import { Avatar, Badge, PrivateBadge, StatusBadge } from '../components/Primitives'
 import CaseForm from './CaseForm'
 import CaseDeleteDialog from './CaseDeleteDialog'
+import ActionForm from './ActionForm'
 import styles from './CaseDetail.module.css'
 
 interface User {
@@ -53,6 +54,7 @@ export default function CaseDetail() {
   const { t } = useTranslation()
 
   const [editing, setEditing] = useState(false)
+  const [addingAction, setAddingAction] = useState(false)
   const [confirmClose, setConfirmClose] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [memberFilter, setMemberFilter] = useState('')
@@ -268,14 +270,28 @@ export default function CaseDetail() {
               <div className="row" style={{ marginBottom: 10 }}>
                 <div className="field-label" style={{ marginBottom: 0 }}>{t('sectionRelatedActions')}</div>
                 <span className="spacer" />
-                <Button size="sm" icon={<IconPlus size={12} />}>{t('btnAddAction')}</Button>
+                <Button
+                  size="sm"
+                  icon={<IconPlus size={12} />}
+                  onClick={() => setAddingAction(true)}
+                  data-testid="add-action-button"
+                >
+                  {t('btnAddAction')}
+                </Button>
               </div>
               {(!c.actions || c.actions.length === 0) ? (
                 <div className="card" style={{ padding: 24, textAlign: 'center' }}>
                   <h3 style={{ fontSize: 14, margin: 0 }}>{t('emptyActionsTitle')}</h3>
                   <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>{t('emptyActionsDesc')}</p>
                   <div style={{ marginTop: 12 }}>
-                    <Button size="sm" icon={<IconPlus size={12} />}>{t('btnAddAction')}</Button>
+                    <Button
+                      size="sm"
+                      icon={<IconPlus size={12} />}
+                      onClick={() => setAddingAction(true)}
+                      data-testid="empty-add-action-button"
+                    >
+                      {t('btnAddAction')}
+                    </Button>
                   </div>
                 </div>
               ) : (
@@ -416,6 +432,14 @@ export default function CaseDetail() {
         isPrivate: c.isPrivate, assigneeIDs: c.assigneeIDs || [],
         fields: c.fields || [],
       }} onClose={() => setEditing(false)} />}
+
+      {addingAction && (
+        <ActionForm
+          action={null}
+          defaultCaseID={c.id}
+          onClose={() => setAddingAction(false)}
+        />
+      )}
 
       {confirmClose && (
         <Modal

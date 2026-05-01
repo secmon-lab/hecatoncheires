@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery } from '@apollo/client'
+import Select from 'react-select'
 import { CREATE_CASE, UPDATE_CASE, GET_CASE, GET_CASES } from '../graphql/case'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
@@ -39,7 +40,7 @@ export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
   const [title, setTitle] = useState(caseItem?.title || '')
   const [description, setDescription] = useState(caseItem?.description || '')
   const [isPrivate, setIsPrivate] = useState(caseItem?.isPrivate ?? false)
-  const [assigneeIDs] = useState<string[]>(caseItem?.assigneeIDs || [])
+  const [assigneeIDs, setAssigneeIDs] = useState<string[]>(caseItem?.assigneeIDs || [])
   const [fieldValues, setFieldValues] = useState<Record<string, any>>(() => {
     const map: Record<string, any> = {}
     caseItem?.fields?.forEach((f) => { map[f.fieldId] = f.value })
@@ -94,7 +95,6 @@ export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
               id: caseItem.id,
               title,
               description,
-              isPrivate,
               assigneeIDs,
               fields: fieldArr,
             },
@@ -115,10 +115,18 @@ export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
         })
       }
       onClose()
-    } catch (e) {
+    } catch (e: any) {
       console.error('Case mutation failed', e)
+      const msg = e?.graphQLErrors?.[0]?.message || e?.message || String(e)
+      setErrors({ submit: msg })
     }
   }
+
+  const userOptions = users.map((u) => ({
+    value: u.id,
+    label: u.realName || u.name,
+  }))
+  const selectedAssignees = userOptions.filter((o) => assigneeIDs.includes(o.value))
 
   const submitting = creating || updating
 
@@ -159,6 +167,18 @@ export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
             data-testid="case-description-input"
           />
         </div>
+        <div>
+          <label htmlFor="case-assignees" className="field-label">{t('labelAssignees')}</label>
+          <Select
+            inputId="case-assignees"
+            aria-label={t('labelAssignees')}
+            isMulti
+            options={userOptions}
+            value={selectedAssignees}
+            onChange={(opts: any) => setAssigneeIDs((opts || []).map((o: any) => o.value))}
+            placeholder={t('placeholderSelectAssignees')}
+          />
+        </div>
         {fields.length > 0 && (
           <div>
             <div className="field-label">{t('sectionFields')}</div>
@@ -177,24 +197,38 @@ export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
             </div>
           </div>
         )}
-        <label className="row" style={{ gap: 8, padding: 10, border: '1px solid color-mix(in oklch, var(--warn) 30%, var(--line))', borderRadius: 6, background: 'color-mix(in oklch, var(--warn) 8%, transparent)', alignItems: 'flex-start', cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            checked={isPrivate}
-            onChange={(e) => setIsPrivate(e.target.checked)}
-            style={{ marginTop: 2 }}
-            data-testid="private-case-checkbox"
-          />
-          <div>
-            <div className="row" style={{ gap: 6, fontSize: 13, fontWeight: 500 }}>
-              <IconLock size={12} sw={2} />
-              {t('labelPrivateCase', { caseLabel })}
+        {!isEdit && (
+          <label className="row" style={{ gap: 8, padding: 10, border: '1px solid color-mix(in oklch, var(--warn) 30%, var(--line))', borderRadius: 6, background: 'color-mix(in oklch, var(--warn) 8%, transparent)', alignItems: 'flex-start', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={isPrivate}
+              onChange={(e) => setIsPrivate(e.target.checked)}
+              style={{ marginTop: 2 }}
+              data-testid="private-case-checkbox"
+            />
+            <div>
+              <div className="row" style={{ gap: 6, fontSize: 13, fontWeight: 500 }}>
+                <IconLock size={12} sw={2} />
+                {t('labelPrivateCase', { caseLabel })}
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--fg-muted)', marginTop: 2 }}>
+                {t('hintPrivateCase', { caseLabelLower: caseLabel.toLowerCase() })}
+              </div>
             </div>
-            <div style={{ fontSize: 11.5, color: 'var(--fg-muted)', marginTop: 2 }}>
-              {t('hintPrivateCase', { caseLabelLower: caseLabel.toLowerCase() })}
-            </div>
+          </label>
+        )}
+        {errors.submit && (
+          <div style={{
+            padding: '8px 10px',
+            borderRadius: 6,
+            background: 'color-mix(in oklch, var(--danger) 10%, transparent)',
+            border: '1px solid color-mix(in oklch, var(--danger) 30%, transparent)',
+            color: 'var(--danger)',
+            fontSize: 12,
+          }}>
+            {errors.submit}
           </div>
-        </label>
+        )}
       </div>
     </Modal>
   )

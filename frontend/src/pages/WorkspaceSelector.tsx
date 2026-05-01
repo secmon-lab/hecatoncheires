@@ -1,5 +1,5 @@
-import { useEffect } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
+import { useAuth } from '../contexts/auth-context'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
 import { IconChevRight } from '../components/Icons'
@@ -12,22 +12,18 @@ function workspaceMark(name: string): string {
   return trimmed.slice(0, 2).toUpperCase()
 }
 
+const WORKSPACE_GRADIENTS = [
+  'linear-gradient(135deg, #5b6cff, #8b3fb5)',
+  'linear-gradient(135deg, #ff9b3f, #c8501c)',
+  'linear-gradient(135deg, #2cb38d, #126b56)',
+  'linear-gradient(135deg, #3fb6e5, #1d6f9e)',
+  'linear-gradient(135deg, #e25b8e, #872551)',
+]
+
 export default function WorkspaceSelector() {
   const { workspaces, isLoading } = useWorkspace()
+  const { logout } = useAuth()
   const { t } = useTranslation()
-  const navigate = useNavigate()
-
-  useEffect(() => {
-    if (isLoading) return
-    if (workspaces.length === 1) {
-      navigate(`/ws/${workspaces[0].id}/cases`, { replace: true })
-      return
-    }
-    const last = localStorage.getItem('lastWorkspaceId')
-    if (last && workspaces.find((w) => w.id === last)) {
-      navigate(`/ws/${last}/cases`, { replace: true })
-    }
-  }, [workspaces, isLoading, navigate])
 
   if (isLoading) {
     return (
@@ -39,17 +35,17 @@ export default function WorkspaceSelector() {
 
   if (workspaces.length === 0) {
     return (
-      <div className="login-stage">
+      <div className="login-stage" data-testid="workspace-selector-empty">
         <div className="login-card">
-          <h1>No workspaces configured</h1>
-          <p className="tag">Configure at least one workspace in your config files.</p>
+          <h1>{t('workspaceSelectorEmpty')}</h1>
+          <p className="tag">{t('workspaceSelectorEmptyHint')}</p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="login-stage" style={{ minHeight: '100vh' }}>
+    <div className="login-stage" style={{ minHeight: '100vh' }} data-testid="workspace-selector">
       <div style={{ width: 560, maxWidth: '100%' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 28, justifyContent: 'center' }}>
           <img
@@ -58,16 +54,16 @@ export default function WorkspaceSelector() {
             style={{ width: 42, height: 42, background: 'var(--logo-bg)', borderRadius: 8, padding: 3, objectFit: 'contain' }}
           />
           <div>
-            <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>{t('appName')}</div>
-            <div style={{ fontSize: 13, color: 'var(--fg-muted)' }}>Select a workspace to continue</div>
+            <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>{t('appName')}</h1>
+            <div style={{ fontSize: 13, color: 'var(--fg-muted)' }}>{t('workspaceSelectorSubtitle')}</div>
           </div>
         </div>
         <div className="col" style={{ gap: 8 }}>
-          {workspaces.map((ws) => (
+          {workspaces.map((ws, i) => (
             <Link
               key={ws.id}
               to={`/ws/${ws.id}/cases`}
-              onClick={() => localStorage.setItem('lastWorkspaceId', ws.id)}
+              data-testid={`workspace-item-${ws.id}`}
               className="card"
               style={{
                 display: 'flex', alignItems: 'center', gap: 14,
@@ -78,7 +74,7 @@ export default function WorkspaceSelector() {
               <div
                 style={{
                   width: 40, height: 40, borderRadius: 8,
-                  background: 'linear-gradient(135deg, oklch(0.55 0.15 264), oklch(0.45 0.16 290))',
+                  background: WORKSPACE_GRADIENTS[i % WORKSPACE_GRADIENTS.length],
                   color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: 13, fontWeight: 700,
                 }}
@@ -92,6 +88,20 @@ export default function WorkspaceSelector() {
               <IconChevRight size={16} style={{ color: 'var(--fg-soft)' }} />
             </Link>
           ))}
+        </div>
+        <div style={{ marginTop: 20, textAlign: 'center', color: 'var(--fg-soft)', fontSize: 12 }}>
+          <button
+            type="button"
+            data-testid="workspace-signout"
+            onClick={logout}
+            style={{
+              background: 'none', border: 'none', color: 'inherit',
+              cursor: 'pointer', textDecoration: 'underline', fontSize: 12,
+              fontFamily: 'inherit', padding: 0,
+            }}
+          >
+            {t('btnLogout')}
+          </button>
         </div>
       </div>
     </div>

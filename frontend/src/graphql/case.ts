@@ -24,6 +24,7 @@ export const GET_CASES = gql`
         imageUrl
       }
       slackChannelID
+      slackChannelName
       createdAt
       updatedAt
       fields {
