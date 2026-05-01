@@ -14,7 +14,7 @@ export class ActionListPage extends BasePage {
 
   constructor(page: Page) {
     super(page);
-    this.pageTitle = page.locator('h2').filter({ hasText: /Action/ });
+    this.pageTitle = page.locator('main h1').filter({ hasText: /Action/ });
     this.newActionButton = page.locator('button').filter({ hasText: /New Action/ });
     this.kanbanBoard = page.getByTestId('kanban-board');
     this.loadingIndicator = page.locator('text=Loading...');

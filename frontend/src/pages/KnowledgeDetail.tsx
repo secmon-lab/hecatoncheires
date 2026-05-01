@@ -1,27 +1,16 @@
-import { useParams, useNavigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery } from '@apollo/client'
-import { ArrowLeft, ExternalLink, BookOpen } from 'lucide-react'
-import Button from '../components/Button'
 import { GET_KNOWLEDGE } from '../graphql/knowledge'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
-import styles from './KnowledgeDetail.module.css'
+import Button from '../components/Button'
+import { IconChevLeft, IconExt } from '../components/Icons'
 
-interface Knowledge {
-  id: string
-  caseID: number
-  sourceID: string
-  sourceURLs: string[]
-  title: string
-  summary: string
-  sourcedAt: string
-  createdAt: string
-  updatedAt: string
-  case?: {
-    id: number
-    title: string
-    description: string
-  }
+function formatDate(iso?: string | null) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleDateString()
 }
 
 export default function KnowledgeDetail() {
@@ -30,110 +19,59 @@ export default function KnowledgeDetail() {
   const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
 
-  const { data, loading, error } = useQuery(GET_KNOWLEDGE, {
-    variables: { workspaceId: currentWorkspace!.id, id: id || '' },
-    skip: !id || !currentWorkspace,
+  const { data, loading } = useQuery(GET_KNOWLEDGE, {
+    variables: { workspaceId: currentWorkspace?.id, id },
+    skip: !currentWorkspace || !id,
   })
 
-  const knowledge: Knowledge | undefined = data?.knowledge
-
-  const handleBack = () => {
-    navigate(`/ws/${currentWorkspace!.id}/knowledges`)
-  }
-
-  const handleCaseClick = () => {
-    if (knowledge?.case) {
-      navigate(`/ws/${currentWorkspace!.id}/cases/${knowledge.case.id}`)
-    }
-  }
-
-  if (loading) {
-    return (
-      <div className={styles.container}>
-        <div className={styles.loading}>{t('loading')}</div>
-      </div>
-    )
-  }
-
-  if (error || !knowledge) {
-    return (
-      <div className={styles.container}>
-        <div className={styles.error}>
-          {error ? `${t('errorPrefix')} ${error.message}` : t('errorKnowledgeNotFound')}
-        </div>
-        <Button variant="outline" icon={<ArrowLeft size={20} />} onClick={handleBack}>
-          {t('btnBackToList')}
-        </Button>
-      </div>
-    )
-  }
+  const k = data?.knowledge
+  if (loading) return <div className="h-main-inner muted">{t('loading')}</div>
+  if (!k) return <div className="h-main-inner">{t('errorPrefix')}</div>
 
   return (
-    <div className={styles.container}>
-      <div className={styles.header}>
-        <Button variant="ghost" icon={<ArrowLeft size={20} />} onClick={handleBack}>
+    <div className="h-main-inner" data-testid="knowledge-content" style={{ maxWidth: 900 }}>
+      <div className="row" style={{ marginBottom: 12 }}>
+        <Button variant="ghost" size="sm" icon={<IconChevLeft size={13} />} onClick={() => navigate(`/ws/${currentWorkspace!.id}/knowledges`)}>
           {t('btnBack')}
         </Button>
       </div>
 
-      <div className={styles.content}>
-        <div className={styles.titleSection}>
-          <div className={styles.titleRow}>
-            <BookOpen size={24} className={styles.icon} />
-            <h1>{knowledge.title}</h1>
-          </div>
-          {knowledge.sourceURLs?.length > 0 && (
-            <a
-              href={knowledge.sourceURLs[0]}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={styles.sourceLink}
-            >
-              <ExternalLink size={16} />
-              {t('linkViewSource')}
-            </a>
+      <div className="card" style={{ padding: 24 }}>
+        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600 }}>{k.title}</h1>
+        <div className="soft" style={{ fontSize: 12, marginTop: 6 }}>
+          {formatDate(k.sourcedAt || k.createdAt)}
+          {k.case && (
+            <>
+              {' · '}
+              <a className="slack-link" href={`/ws/${currentWorkspace!.id}/cases/${k.case.id}`}>
+                #{k.case.id} {k.case.title}
+                <IconExt size={10} />
+              </a>
+            </>
           )}
         </div>
-
-        <div className={styles.section}>
-          <h2>{t('sectionSummary')}</h2>
-          <p className={styles.summary}>{knowledge.summary}</p>
-        </div>
-
-        {knowledge.case && (
-          <div className={styles.section}>
-            <h2>{t('sectionRelatedCase')}</h2>
-            <div className={styles.riskCard} onClick={handleCaseClick}>
-              <h3>{knowledge.case.title}</h3>
-              <p>{knowledge.case.description}</p>
-            </div>
-          </div>
+        <hr />
+        {k.summary && (
+          <>
+            <div className="field-label">{t('labelDescription')}</div>
+            <p style={{ fontSize: 13, lineHeight: 1.6, margin: '0 0 16px 0' }}>{k.summary}</p>
+          </>
         )}
-
-        <div className={styles.section}>
-          <h2>{t('sectionSourceInfo')}</h2>
-          <div className={styles.sourceInfo}>
-            <div className={styles.sourceItem}>
-              <span className={styles.sourceLabel}>{t('labelSourceId')}</span>
-              <span className={styles.sourceValue}>{knowledge.sourceID}</span>
-            </div>
-            <div className={styles.sourceItem}>
-              <span className={styles.sourceLabel}>{t('labelSourcedAt')}</span>
-              <span className={styles.sourceValue}>
-                {new Date(knowledge.sourcedAt).toLocaleString()}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div className={styles.metadata}>
-          <div>
-            <strong>{t('labelCreatedTimestamp')}</strong> {new Date(knowledge.createdAt).toLocaleString()}
-          </div>
-          <div>
-            <strong>{t('labelUpdatedTimestamp')}</strong> {new Date(knowledge.updatedAt).toLocaleString()}
-          </div>
-        </div>
+        {k.sourceURLs && k.sourceURLs.length > 0 && (
+          <>
+            <div className="field-label">{t('linkViewSource')}</div>
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
+              {k.sourceURLs.map((url: string) => (
+                <li key={url}>
+                  <a className="slack-link" href={url} target="_blank" rel="noreferrer noopener">
+                    {url}
+                    <IconExt size={10} />
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
       </div>
     </div>
   )

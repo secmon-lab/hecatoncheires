@@ -1,329 +1,176 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery } from '@apollo/client'
 import Select from 'react-select'
-import Modal from '../components/Modal'
-import Button from '../components/Button'
-import { CREATE_ACTION, UPDATE_ACTION, GET_OPEN_CASE_ACTIONS } from '../graphql/action'
+import { CREATE_ACTION, UPDATE_ACTION, GET_ACTIONS, GET_ACTION } from '../graphql/action'
 import { GET_CASES } from '../graphql/case'
-import { GET_SLACK_USERS } from '../graphql/slackUsers'
+import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
-import styles from './ActionForm.module.css'
+import Modal from '../components/Modal'
+import Button from '../components/Button'
 
-interface Action {
+interface ActionItem {
   id: number
   caseID: number
   title: string
   description: string
-  assigneeIDs: string[]
-  assignees: Array<{ id: string; name: string; realName: string; imageUrl?: string }>
-  slackMessageTS: string
   status: string
-  dueDate?: string
+  assigneeIDs: string[]
+  dueDate?: string | null
 }
 
 interface ActionFormProps {
-  isOpen: boolean
+  action: ActionItem | null
+  defaultCaseID?: number
   onClose: () => void
-  action?: Action | null
-  initialCaseID?: number
 }
 
-interface FormErrors {
-  caseID?: string
-  title?: string
-}
+const STATUSES = ['BACKLOG', 'TODO', 'IN_PROGRESS', 'BLOCKED', 'COMPLETED'] as const
 
-export default function ActionForm({ isOpen, onClose, action, initialCaseID }: ActionFormProps) {
+const statusKeyMap = {
+  BACKLOG: 'statusBacklog',
+  TODO: 'statusTodo',
+  IN_PROGRESS: 'statusInProgress',
+  BLOCKED: 'statusBlocked',
+  COMPLETED: 'statusCompleted',
+} as const
+
+export default function ActionForm({ action, defaultCaseID, onClose }: ActionFormProps) {
   const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
-  const [caseID, setCaseID] = useState<number | null>(null)
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [assigneeIDs, setAssigneeIDs] = useState<string[]>([])
-  const [selectedAssignees, setSelectedAssignees] = useState<Array<{ value: string; label: string; image?: string }>>([])
-  const [status, setStatus] = useState('BACKLOG')
-  const [dueDate, setDueDate] = useState('')
-  const [errors, setErrors] = useState<FormErrors>({})
+
+  const isEdit = action !== null
+
+  const [title, setTitle] = useState(action?.title || '')
+  const [description, setDescription] = useState(action?.description || '')
+  const [caseID, setCaseID] = useState<number | null>(action?.caseID ?? defaultCaseID ?? null)
+  const [status, setStatus] = useState(action?.status || 'BACKLOG')
+  const [errors, setErrors] = useState<Record<string, string>>({})
 
   const { data: casesData } = useQuery(GET_CASES, {
-    variables: { workspaceId: currentWorkspace!.id, status: 'OPEN' },
+    variables: { workspaceId: currentWorkspace?.id, status: 'OPEN' },
     skip: !currentWorkspace,
   })
-  const { data: usersData } = useQuery(GET_SLACK_USERS)
+  const { data: configData } = useQuery(GET_FIELD_CONFIGURATION, {
+    variables: { workspaceId: currentWorkspace?.id },
+    skip: !currentWorkspace,
+  })
+  const caseLabel = configData?.fieldConfiguration?.labels?.case || 'Case'
+
   const [createAction, { loading: creating }] = useMutation(CREATE_ACTION, {
-    refetchQueries: [
-      { query: GET_OPEN_CASE_ACTIONS, variables: { workspaceId: currentWorkspace!.id } },
-    ],
-    onCompleted: () => {
-      onClose()
-      resetForm()
-    },
-    onError: (error) => {
-      console.error('Create error:', error)
-    },
+    refetchQueries: [{ query: GET_ACTIONS, variables: { workspaceId: currentWorkspace?.id } }],
   })
-
   const [updateAction, { loading: updating }] = useMutation(UPDATE_ACTION, {
-    refetchQueries: [
-      { query: GET_OPEN_CASE_ACTIONS, variables: { workspaceId: currentWorkspace!.id } },
-    ],
-    onCompleted: () => {
-      onClose()
-      resetForm()
-    },
-    onError: (error) => {
-      console.error('Update error:', error)
-    },
+    refetchQueries: action ? [{ query: GET_ACTION, variables: { workspaceId: currentWorkspace?.id, id: action.id } }] : [],
   })
 
-  useEffect(() => {
-    if (action) {
-      setCaseID(action.caseID)
-      setTitle(action.title)
-      setDescription(action.description)
-      setAssigneeIDs(action.assigneeIDs || [])
-      setSelectedAssignees(
-        (action.assignees || []).map((a) => ({
-          value: a.id,
-          label: a.realName || a.name,
-          image: a.imageUrl,
-        }))
-      )
-      setStatus(action.status || 'BACKLOG')
-      setDueDate(action.dueDate ? action.dueDate.split('T')[0] : '')
-    } else if (initialCaseID) {
-      setCaseID(initialCaseID)
-      resetForm(false)
-    } else {
-      resetForm()
-    }
-  }, [action, initialCaseID, isOpen])
+  const submit = async () => {
+    const errs: Record<string, string> = {}
+    if (!title.trim()) errs.title = t('errorTitleRequired')
+    if (!isEdit && !caseID) errs.caseID = t('errorCaseRequired')
+    if (Object.keys(errs).length > 0) { setErrors(errs); return }
 
-  const resetForm = (resetCaseID = true) => {
-    if (resetCaseID) {
-      setCaseID(null)
-    }
-    setTitle('')
-    setDescription('')
-    setAssigneeIDs([])
-    setSelectedAssignees([])
-    setStatus('BACKLOG')
-    setDueDate('')
-    setErrors({})
-  }
-
-  const validate = () => {
-    const newErrors: FormErrors = {}
-
-    if (!caseID) {
-      newErrors.caseID = t('errorCaseRequired')
-    }
-
-    if (!title.trim()) {
-      newErrors.title = t('errorTitleRequired')
-    }
-
-    setErrors(newErrors)
-    return Object.keys(newErrors).length === 0
-  }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-
-    if (!validate()) {
-      return
-    }
-
-    if (action) {
-      await updateAction({
-        variables: {
-          workspaceId: currentWorkspace!.id,
-          input: {
-            id: action.id,
-            caseID: caseID!,
-            title: title.trim(),
-            description: description.trim(),
-            assigneeIDs,
-            status,
-            dueDate: dueDate ? new Date(dueDate).toISOString() : undefined,
-            clearDueDate: !dueDate && !!action.dueDate,
+    try {
+      if (isEdit && action) {
+        await updateAction({
+          variables: {
+            workspaceId: currentWorkspace!.id,
+            input: { id: action.id, title, description, status },
           },
-        },
-      })
-    } else {
-      await createAction({
-        variables: {
-          workspaceId: currentWorkspace!.id,
-          input: {
-            caseID: caseID!,
-            title: title.trim(),
-            description: description.trim(),
-            assigneeIDs,
-            status,
-            dueDate: dueDate ? new Date(dueDate).toISOString() : undefined,
+        })
+      } else {
+        await createAction({
+          variables: {
+            workspaceId: currentWorkspace!.id,
+            input: { caseID: Number(caseID), title, description, status },
           },
-        },
-      })
+        })
+      }
+      onClose()
+    } catch (e) {
+      console.error('Action mutation failed', e)
     }
   }
 
-  const handleClose = () => {
-    resetForm()
-    onClose()
-  }
-
-  const loading = creating || updating
-
-  const caseOptions = (casesData?.cases || []).map((c: any) => ({
-    value: c.id,
-    label: `${c.title} (ID: ${c.id})`,
+  const submitting = creating || updating
+  const cases = casesData?.cases || []
+  const caseOptions = cases.map((c: any) => ({
+    value: c.id as number,
+    label: c.accessDenied ? `#${c.id}` : `#${c.id} ${c.title}`,
   }))
-
-  const statusOptions = [
-    { value: 'BACKLOG', label: t('statusBacklog') },
-    { value: 'TODO', label: t('statusTodo') },
-    { value: 'IN_PROGRESS', label: t('statusInProgress') },
-    { value: 'BLOCKED', label: t('statusBlocked') },
-    { value: 'COMPLETED', label: t('statusCompleted') },
-  ]
+  const selectedCase = caseOptions.find((o: any) => o.value === caseID) || null
 
   return (
     <Modal
-      isOpen={isOpen}
-      onClose={handleClose}
-      title={action ? t('titleActionFormEdit') : t('titleActionFormNew')}
+      open
+      onClose={onClose}
+      width={560}
+      title={isEdit ? t('titleActionFormEdit') : t('titleActionFormNew')}
       footer={
         <>
-          <Button variant="outline" onClick={handleClose} disabled={loading}>
-            {t('btnCancel')}
-          </Button>
-          <Button variant="primary" onClick={handleSubmit} disabled={loading}>
-            {loading ? t('btnSaving') : t('btnSave')}
+          <Button variant="ghost" onClick={onClose}>{t('btnCancel')}</Button>
+          <Button variant="primary" onClick={submit} disabled={submitting}>
+            {submitting ? (isEdit ? t('btnSaving') : t('btnCreating')) : (isEdit ? t('btnSave') : t('btnCreate'))}
           </Button>
         </>
       }
     >
-      <form onSubmit={handleSubmit} className={styles.form}>
-        <div className={styles.field}>
-          <label htmlFor="caseID" className={styles.label}>
-            {t('labelCaseRequired', { caseLabel: t('navCases') })}
-          </label>
-          <Select
-            inputId="caseID"
-            value={caseOptions.find((opt: any) => opt.value === caseID)}
-            onChange={(selected) => setCaseID(selected?.value || null)}
-            options={caseOptions}
-            isDisabled={loading}
-            placeholder={t('placeholderSelectCase', { caseLabelLower: t('navCases').toLowerCase() })}
-          />
-          {errors.caseID && <span className={styles.error}>{errors.caseID}</span>}
-        </div>
-
-        <div className={styles.field}>
-          <label htmlFor="title" className={styles.label}>
-            {t('labelTitleRequired')}
-          </label>
+      <div className="col" style={{ gap: 14 }}>
+        {!isEdit && (
+          <div>
+            <label htmlFor="action-case" className="field-label">{t('labelCaseRequired', { caseLabel })}</label>
+            <Select
+              inputId="action-case"
+              aria-label={caseLabel}
+              options={caseOptions}
+              value={selectedCase}
+              onChange={(opt: any) => {
+                setCaseID(opt ? opt.value : null)
+                if (errors.caseID) setErrors((p) => { const n = { ...p }; delete n.caseID; return n })
+              }}
+              placeholder={t('placeholderSelectCase', { caseLabelLower: caseLabel.toLowerCase() })}
+              isClearable
+            />
+            {errors.caseID && <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 4 }}>{errors.caseID}</div>}
+          </div>
+        )}
+        <div>
+          <label htmlFor="title" className="field-label">{t('labelTitleRequired')}</label>
           <input
             id="title"
-            type="text"
+            className="input"
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className={`${styles.input} ${errors.title ? styles.inputError : ''}`}
+            onChange={(e) => { setTitle(e.target.value); if (errors.title) setErrors((p) => ({ ...p, title: '' })) }}
             placeholder={t('placeholderActionTitle')}
-            disabled={loading}
           />
-          {errors.title && <span className={styles.error}>{errors.title}</span>}
+          {errors.title && <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 4 }}>{errors.title}</div>}
         </div>
-
-        <div className={styles.field}>
-          <label htmlFor="description" className={styles.label}>
-            {t('labelDescription')}
-          </label>
+        <div>
+          <label htmlFor="description" className="field-label">{t('labelDescription')}</label>
           <textarea
             id="description"
+            className="textarea"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            className={styles.textarea}
             placeholder={t('placeholderActionDescription')}
-            rows={4}
-            disabled={loading}
           />
         </div>
-
-        <div className={styles.field}>
-          <label htmlFor="assigneeIDs" className={styles.label}>{t('labelAssignees')}</label>
-          <Select
-            inputId="assigneeIDs"
-            isMulti
-            isClearable
-            value={selectedAssignees}
-            onChange={(selected) => {
-              const selectedOptions = [...(selected || [])]
-              setSelectedAssignees(selectedOptions)
-              setAssigneeIDs(selectedOptions.map(s => s.value))
-            }}
-            options={(usersData?.slackUsers || []).map((user: { id: string; name: string; realName: string; imageUrl?: string }) => ({
-              value: user.id,
-              label: user.realName || user.name,
-              name: user.name,
-              realName: user.realName,
-              image: user.imageUrl,
-            }))}
-            isDisabled={loading}
-            placeholder={t('placeholderSelectAssignees')}
-            filterOption={(option, inputValue) => {
-              const search = inputValue.toLowerCase()
-              const data = option.data as unknown as { label: string; name: string; realName: string }
-              return (
-                data.label.toLowerCase().includes(search) ||
-                data.name.toLowerCase().includes(search) ||
-                data.realName.toLowerCase().includes(search)
-              )
-            }}
-            formatOptionLabel={(option: { value: string; label: string; image?: string }) => (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                {option.image && (
-                  <img
-                    src={option.image}
-                    alt={option.label}
-                    style={{ width: '24px', height: '24px', borderRadius: '50%' }}
-                  />
-                )}
-                <span>{option.label}</span>
-              </div>
-            )}
-          />
-        </div>
-
-        <div className={styles.field}>
-          <label htmlFor="status" className={styles.label}>
-            {t('labelStatusRequired')}
-          </label>
-          <Select
-            inputId="status"
-            value={statusOptions.find((opt) => opt.value === status)}
-            onChange={(selected) => setStatus(selected?.value || 'BACKLOG')}
-            options={statusOptions}
-            isDisabled={loading}
-          />
-        </div>
-
-        <div className={styles.field}>
-          <label htmlFor="dueDate" className={styles.label}>
-            {t('labelDueDate')}
-          </label>
-          <input
-            id="dueDate"
-            type="date"
-            value={dueDate}
-            onChange={(e) => setDueDate(e.target.value)}
-            className={styles.input}
-            disabled={loading}
-          />
-        </div>
-
-      </form>
+        {isEdit && (
+          <div>
+            <label htmlFor="action-status" className="field-label">{t('labelStatusRequired')}</label>
+            <select
+              id="action-status"
+              className="select"
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+            >
+              {STATUSES.map((s) => (
+                <option key={s} value={s}>{t(statusKeyMap[s])}</option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
     </Modal>
   )
 }

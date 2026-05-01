@@ -1,45 +1,8 @@
-.container {
-  max-width: 100%;
-  margin: 0 auto;
-}
+.titleText { font-weight: 500; line-height: 1.35; }
 
-.header {
+.kanbanWrap {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  margin-bottom: var(--spacing-md);
-  gap: var(--spacing-md);
-}
-
-.title {
-  margin: 0;
-  font-size: 1.5rem;
-  letter-spacing: -0.02em;
-  font-weight: 600;
-  color: var(--text-heading);
-}
-
-.subtitle {
-  margin: 0.375rem 0 0 0;
-  font-size: 0.9375rem;
-  color: var(--text-muted);
-  line-height: 1.5;
-}
-
-.loading,
-.error {
-  padding: 3rem;
-  text-align: center;
-  font-size: 1rem;
-  background: var(--bg-paper);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-sm);
-}
-
-.loading {
-  color: var(--text-muted);
-}
-
-.error {
-  color: var(--color-error);
+  flex-direction: column;
+  height: calc(100vh - 230px);
+  min-height: 480px;
 }

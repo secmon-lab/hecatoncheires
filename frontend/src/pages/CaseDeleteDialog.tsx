@@ -1,93 +1,74 @@
-import { useMutation } from '@apollo/client'
+import { useState } from 'react'
 import Modal from '../components/Modal'
 import Button from '../components/Button'
-import { AlertTriangle } from 'lucide-react'
-import { DELETE_CASE, GET_CASES } from '../graphql/case'
-import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
-import styles from './CaseDeleteDialog.module.css'
+import { IconWarn } from '../components/Icons'
 
 interface CaseDeleteDialogProps {
-  isOpen: boolean
-  onClose: () => void
-  onConfirm: () => void
   caseTitle: string
-  caseId?: number
+  caseLabel: string
+  deleting: boolean
+  onCancel: () => void
+  onConfirm: () => void
 }
 
 export default function CaseDeleteDialog({
-  isOpen,
-  onClose,
-  onConfirm,
   caseTitle,
-  caseId,
+  deleting,
+  onCancel,
+  onConfirm,
 }: CaseDeleteDialogProps) {
-  const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
-  const [deleteCase, { loading }] = useMutation(DELETE_CASE, {
-    update(cache) {
-      if (!caseId) return
-      for (const status of ['OPEN', 'CLOSED']) {
-        const existingCases = cache.readQuery<{ cases: any[] }>({
-          query: GET_CASES,
-          variables: { workspaceId: currentWorkspace!.id, status },
-        })
-        if (existingCases) {
-          cache.writeQuery({
-            query: GET_CASES,
-            variables: { workspaceId: currentWorkspace!.id, status },
-            data: {
-              cases: existingCases.cases.filter((c) => c.id !== caseId),
-            },
-          })
-        }
-      }
-    },
-    onCompleted: () => {
-      onConfirm()
-    },
-    onError: (error) => {
-      console.error('Delete error:', error)
-    },
-  })
-
-  const handleDelete = async () => {
-    if (caseId) {
-      await deleteCase({
-        variables: { workspaceId: currentWorkspace!.id, id: caseId },
-      })
-    } else {
-      onConfirm()
-    }
-  }
+  const [confirmText, setConfirmText] = useState('')
+  const matches = confirmText.trim() === caseTitle.trim()
 
   return (
     <Modal
-      isOpen={isOpen}
-      onClose={onClose}
-      title={t('titleDeleteCase')}
+      open
+      onClose={onCancel}
+      title={
+        <div className="row" style={{ gap: 10 }}>
+          <span style={{
+            width: 28, height: 28, borderRadius: 8,
+            background: 'color-mix(in oklch, var(--danger) 14%, transparent)',
+            color: 'var(--danger)',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <IconWarn size={14} sw={2} />
+          </span>
+          <h3>{t('titleDeleteCase')}</h3>
+        </div>
+      }
+      width={460}
       footer={
         <>
-          <Button variant="outline" onClick={onClose} disabled={loading}>
-            {t('btnCancel')}
-          </Button>
-          <Button variant="danger" onClick={handleDelete} disabled={loading}>
-            {loading ? t('btnDeleting') : t('btnDelete')}
+          <Button variant="ghost" onClick={onCancel}>{t('btnCancel')}</Button>
+          <Button
+            variant="danger"
+            onClick={onConfirm}
+            disabled={!matches || deleting}
+            data-testid="confirm-delete-case-button"
+          >
+            {deleting ? t('btnDeleting') : t('btnDelete')}
           </Button>
         </>
       }
     >
-      <div className={styles.content}>
-        <div className={styles.iconContainer}>
-          <AlertTriangle size={48} className={styles.icon} />
-        </div>
-        <p
-          className={styles.message}
-          dangerouslySetInnerHTML={{ __html: t('msgDeleteCaseConfirm', { title: caseTitle }) }}
+      <p
+        style={{ fontSize: 13, lineHeight: 1.6, margin: 0 }}
+        dangerouslySetInnerHTML={{ __html: t('msgDeleteCaseConfirm', { title: caseTitle }) }}
+      />
+      <p className="muted" style={{ marginTop: 8, fontSize: 12.5 }}>
+        {t('warningDeleteCasePermanent')}
+      </p>
+      <div style={{ marginTop: 12 }}>
+        <div className="field-label">{t('labelTitle')}</div>
+        <input
+          className="input"
+          placeholder={caseTitle}
+          value={confirmText}
+          onChange={(e) => setConfirmText(e.target.value)}
         />
-        <p className={styles.warning}>
-          {t('warningDeleteCasePermanent')}
-        </p>
       </div>
     </Modal>
   )

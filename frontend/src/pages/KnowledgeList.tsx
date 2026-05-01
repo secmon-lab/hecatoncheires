@@ -1,163 +1,99 @@
-import { useState } from 'react'
-import { useQuery } from '@apollo/client'
 import { useNavigate } from 'react-router-dom'
-import { BookOpen, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react'
+import { useQuery } from '@apollo/client'
 import { GET_KNOWLEDGES } from '../graphql/knowledge'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
-import styles from './KnowledgeList.module.css'
+import { IconSearch } from '../components/Icons'
 
 interface Knowledge {
   id: string
-  caseID: number
-  sourceID: string
-  sourceURLs: string[]
+  caseID?: number | null
   title: string
-  summary: string
-  sourcedAt: string
+  summary?: string | null
+  sourcedAt?: string | null
   createdAt: string
   updatedAt: string
-  case?: {
-    id: number
-    title: string
-  }
+  case?: { id: number; title: string } | null
 }
 
-interface KnowledgeConnection {
-  items: Knowledge[]
-  totalCount: number
-  hasMore: boolean
+function formatDate(iso?: string | null) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  const yyyy = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${yyyy}/${mm}/${dd}`
 }
-
-const PAGE_SIZE = 20
 
 export default function KnowledgeList() {
-  const navigate = useNavigate()
   const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
-  const [page, setPage] = useState(0)
+  const navigate = useNavigate()
 
-  const { data, loading, error } = useQuery(GET_KNOWLEDGES, {
-    variables: { workspaceId: currentWorkspace!.id, limit: PAGE_SIZE, offset: page * PAGE_SIZE },
+  const { data } = useQuery(GET_KNOWLEDGES, {
+    variables: { workspaceId: currentWorkspace?.id, limit: 200, offset: 0 },
     skip: !currentWorkspace,
   })
 
-  const handleRowClick = (knowledge: Knowledge) => {
-    navigate(`/ws/${currentWorkspace!.id}/knowledges/${knowledge.id}`)
-  }
-
-  const handleCaseClick = (e: React.MouseEvent, caseId: number) => {
-    e.stopPropagation()
-    navigate(`/ws/${currentWorkspace!.id}/cases/${caseId}`)
-  }
-
-  if (loading) return <div className={styles.loading}>{t('loading')}</div>
-  if (error) return <div className={styles.error}>{t('errorPrefix')} {error.message}</div>
-
-  const connection: KnowledgeConnection = data?.knowledges || { items: [], totalCount: 0, hasMore: false }
-  const totalPages = Math.ceil(connection.totalCount / PAGE_SIZE)
+  const items: Knowledge[] = data?.knowledges?.items || []
+  const total: number = data?.knowledges?.totalCount ?? items.length
 
   return (
-    <div className={styles.container}>
-      <div className={styles.header}>
-        <div className={styles.headerContent}>
-          <BookOpen size={28} className={styles.headerIcon} />
-          <div>
-            <h1>{t('titleKnowledgeBase')}</h1>
-            <p>{t('subtitleKnowledgeBase', { count: connection.totalCount })}</p>
+    <div className="h-main-inner">
+      <div className="h-page-h">
+        <div>
+          <h1>Knowledge</h1>
+          <div className="sub">{total} entries</div>
+        </div>
+        <div className="actions">
+          <div className="h-search" style={{ marginLeft: 0, width: 240 }}>
+            <IconSearch size={13} />
+            <span>{t('placeholderSearch')}</span>
           </div>
         </div>
       </div>
 
-      {connection.items.length === 0 ? (
-        <div className={styles.empty}>
-          <BookOpen size={48} className={styles.emptyIcon} />
-          <h2>{t('emptyKnowledgeTitle')}</h2>
-          <p>{t('emptyKnowledgeDesc')}</p>
-        </div>
-      ) : (
-        <>
-          <table className={styles.table}>
-            <thead>
+      <div className="card" style={{ overflow: 'hidden' }}>
+        <table className="h-table">
+          <thead>
+            <tr>
+              <th>{t('headerTitle')}</th>
+              <th style={{ width: 200 }}>{t('navCases')}</th>
+              <th style={{ width: 120 }}>{t('headerCreated')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.length === 0 && (
               <tr>
-                <th>{t('headerTitle')}</th>
-                <th>{t('headerRelatedCase')}</th>
-                <th>{t('headerSummary')}</th>
-                <th>{t('headerDate')}</th>
-                <th></th>
+                <td colSpan={3} style={{ padding: 32, textAlign: 'center', color: 'var(--fg-soft)' }}>
+                  {t('noDataAvailable')}
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {connection.items.map((knowledge) => (
-                <tr
-                  key={knowledge.id}
-                  className={styles.row}
-                  onClick={() => handleRowClick(knowledge)}
-                >
-                  <td className={styles.titleCell}>{knowledge.title}</td>
-                  <td className={styles.riskCell}>
-                    {knowledge.case ? (
-                      <button
-                        className={styles.riskLink}
-                        onClick={(e) => handleCaseClick(e, knowledge.case!.id)}
-                      >
-                        {knowledge.case.title}
-                      </button>
-                    ) : (
-                      <span className={styles.noRisk}>-</span>
-                    )}
-                  </td>
-                  <td className={styles.summaryCell}>
-                    {knowledge.summary.length > 120
-                      ? knowledge.summary.substring(0, 120) + '...'
-                      : knowledge.summary}
-                  </td>
-                  <td className={styles.dateCell}>
-                    {new Date(knowledge.sourcedAt).toLocaleDateString()}
-                  </td>
-                  <td className={styles.linkCell}>
-                    {knowledge.sourceURLs?.length > 0 && (
-                      <a
-                        href={knowledge.sourceURLs[0]}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={styles.externalLink}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <ExternalLink size={16} />
-                      </a>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          {totalPages > 1 && (
-            <div className={styles.pagination}>
-              <button
-                className={styles.paginationButton}
-                onClick={() => setPage((p) => Math.max(0, p - 1))}
-                disabled={page === 0}
+            )}
+            {items.map((k) => (
+              <tr
+                key={k.id}
+                onClick={() => navigate(`/ws/${currentWorkspace!.id}/knowledges/${k.id}`)}
+                style={{ cursor: 'pointer' }}
               >
-                <ChevronLeft size={16} />
-                {t('btnPrevious')}
-              </button>
-              <span className={styles.paginationInfo}>
-                {t('paginationPageOf', { current: page + 1, total: totalPages })}
-              </span>
-              <button
-                className={styles.paginationButton}
-                onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-                disabled={!connection.hasMore}
-              >
-                {t('btnNext')}
-                <ChevronRight size={16} />
-              </button>
-            </div>
-          )}
-        </>
-      )}
+                <td>
+                  <div style={{ fontWeight: 500 }}>{k.title}</div>
+                  {k.summary && (
+                    <div className="soft" style={{ fontSize: 11.5, marginTop: 2, maxWidth: 540 }}>
+                      {k.summary}
+                    </div>
+                  )}
+                </td>
+                <td className="mono soft" style={{ fontSize: 12 }}>
+                  {k.case ? `#${k.case.id} ${k.case.title}` : '—'}
+                </td>
+                <td className="mono soft" style={{ fontSize: 12 }}>{formatDate(k.createdAt)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

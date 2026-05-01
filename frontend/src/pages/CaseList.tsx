@@ -1,404 +1,282 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery } from '@apollo/client'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Settings, ChevronLeft, ChevronRight, Search, Lock } from 'lucide-react'
-import Table from '../components/Table'
-import Button from '../components/Button'
-import CaseForm from './CaseForm'
 import { GET_CASES } from '../graphql/case'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
-import styles from './CaseList.module.css'
-import type { ReactElement } from 'react'
-
-type CaseStatus = 'OPEN' | 'CLOSED'
+import Button from '../components/Button'
+import {
+  IconPlus,
+  IconSearch,
+  IconLock,
+  IconChevLeft,
+  IconChevRight,
+  IconDots,
+  IconFilter,
+  IconSettings,
+} from '../components/Icons'
+import { AvatarStack, StatusBadge, SlackLink } from '../components/Primitives'
+import CaseForm from './CaseForm'
 
 const PAGE_SIZE = 20
 
-const STORAGE_KEY = 'hecatoncheires-caselist-columns'
-
-interface Case {
+interface FieldOption {
+  id: string
+  name: string
+  color?: string | null
+}
+interface FieldDef {
+  id: string
+  name: string
+  type: string
+  options?: FieldOption[] | null
+}
+interface CaseRow {
   id: number
   title: string
-  description: string
-  status: CaseStatus
+  status: 'OPEN' | 'CLOSED'
   isPrivate: boolean
   accessDenied: boolean
-  reporterID?: string
-  reporter?: { id: string; name: string; realName: string; imageUrl?: string }
-  assigneeIDs: string[]
+  reporter?: { id: string; name: string; realName: string; imageUrl?: string } | null
   assignees: Array<{ id: string; name: string; realName: string; imageUrl?: string }>
   slackChannelID: string
-  slackChannelName: string
   createdAt: string
-  updatedAt: string
   fields: Array<{ fieldId: string; value: any }>
 }
 
-const DEFAULT_HIDDEN_COLUMNS: Record<string, boolean> = {
-  description: false,
+function formatDate(iso: string) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  const yyyy = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${yyyy}/${mm}/${dd}`
 }
 
-function loadColumnVisibility(): Record<string, boolean> {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY)
-    if (stored) return { ...DEFAULT_HIDDEN_COLUMNS, ...JSON.parse(stored) }
-  } catch { /* ignore */ }
-  return { ...DEFAULT_HIDDEN_COLUMNS }
-}
-
-function saveColumnVisibility(visibility: Record<string, boolean>) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(visibility))
+function categoryFor(c: CaseRow, fields: FieldDef[]): string {
+  // Pick the first SELECT-type field as "category" if present.
+  const selectField = fields.find((f) => f.type === 'SELECT')
+  if (!selectField) return ''
+  const v = c.fields.find((cf) => cf.fieldId === selectField.id)?.value
+  if (v == null) return ''
+  const opt = selectField.options?.find((o) => o.id === v || o.name === v)
+  return opt?.name ?? String(v)
 }
 
 export default function CaseList() {
   const navigate = useNavigate()
   const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
-  const [isFormOpen, setIsFormOpen] = useState(false)
-  const [statusFilter, setStatusFilter] = useState<CaseStatus>('OPEN')
-  const [searchText, setSearchText] = useState('')
-  const [currentPage, setCurrentPage] = useState(0)
-  const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>(loadColumnVisibility)
-  const [isColumnSelectorOpen, setIsColumnSelectorOpen] = useState(false)
-  const columnSelectorRef = useRef<HTMLDivElement>(null)
 
-  const { data, loading, error } = useQuery(GET_CASES, {
-    variables: { workspaceId: currentWorkspace!.id, status: statusFilter },
+  const [statusFilter, setStatusFilter] = useState<'OPEN' | 'CLOSED' | 'ALL'>('OPEN')
+  const [searchText, setSearchText] = useState('')
+  const [page, setPage] = useState(0)
+  const [isFormOpen, setIsFormOpen] = useState(false)
+
+  const { data: openData } = useQuery(GET_CASES, {
+    variables: { workspaceId: currentWorkspace?.id, status: 'OPEN' },
+    skip: !currentWorkspace,
+  })
+  const { data: closedData } = useQuery(GET_CASES, {
+    variables: { workspaceId: currentWorkspace?.id, status: 'CLOSED' },
     skip: !currentWorkspace,
   })
   const { data: configData } = useQuery(GET_FIELD_CONFIGURATION, {
-    variables: { workspaceId: currentWorkspace!.id },
+    variables: { workspaceId: currentWorkspace?.id },
     skip: !currentWorkspace,
   })
 
-  // Reset page when filter changes
-  useEffect(() => {
-    setCurrentPage(0)
-  }, [statusFilter, searchText])
+  const openCount = openData?.cases?.length ?? 0
+  const closedCount = closedData?.cases?.length ?? 0
 
-  // Close column selector on outside click
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (columnSelectorRef.current && !columnSelectorRef.current.contains(event.target as Node)) {
-        setIsColumnSelectorOpen(false)
-      }
-    }
+  const cases: CaseRow[] = useMemo(() => {
+    if (statusFilter === 'OPEN') return openData?.cases || []
+    if (statusFilter === 'CLOSED') return closedData?.cases || []
+    return [...(openData?.cases || []), ...(closedData?.cases || [])]
+  }, [statusFilter, openData, closedData])
 
-    if (isColumnSelectorOpen) {
-      document.addEventListener('mousedown', handleClickOutside)
-    }
+  const filtered = useMemo(() => {
+    if (!searchText.trim()) return cases
+    const q = searchText.toLowerCase()
+    return cases.filter((c) => !c.accessDenied && c.title.toLowerCase().includes(q))
+  }, [cases, searchText])
 
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [isColumnSelectorOpen])
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const pageRows = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
 
-  const handleFormClose = () => {
-    setIsFormOpen(false)
-  }
-
-  const handleRowClick = (caseItem: Case) => {
-    if (caseItem.accessDenied) return
-    navigate(`/ws/${currentWorkspace!.id}/cases/${caseItem.id}`)
-  }
-
-  const renderAssignees = (assignees: Array<{ id: string; realName: string; imageUrl?: string }>) => {
-    if (!assignees || assignees.length === 0) return null
-
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-        {assignees.map((user) => (
-          <div key={user.id} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            {user.imageUrl && (
-              <img
-                src={user.imageUrl}
-                alt={user.realName}
-                style={{ width: '24px', height: '24px', borderRadius: '4px' }}
-              />
-            )}
-            <span>{user.realName}</span>
-          </div>
-        ))}
-      </div>
-    )
-  }
-
-  const renderFieldValue = (caseItem: Case, fieldId: string) => {
-    const fieldValue = caseItem.fields.find((f) => f.fieldId === fieldId)
-    if (!fieldValue) return '-'
-
-    const fieldDef = configData?.fieldConfiguration?.fields?.find((f: any) => f.id === fieldId)
-    if (!fieldDef) return String(fieldValue.value)
-
-    switch (fieldDef.type) {
-      case 'TEXT':
-      case 'NUMBER':
-      case 'DATE':
-      case 'URL':
-        return String(fieldValue.value || '-')
-
-      case 'SELECT': {
-        const option = fieldDef.options?.find((opt: any) => opt.id === fieldValue.value)
-        return option ? option.name : fieldValue.value
-      }
-
-      case 'MULTI_SELECT': {
-        const selectedOptions = (fieldValue.value || [])
-          .map((id: string) => fieldDef.options?.find((opt: any) => opt.id === id)?.name)
-          .filter(Boolean)
-        return selectedOptions.length > 0 ? selectedOptions.join(', ') : '-'
-      }
-
-      case 'USER':
-      case 'MULTI_USER':
-        return '-'
-
-      default:
-        return String(fieldValue.value || '-')
-    }
-  }
-
-  const isColumnVisible = (columnKey: string) => {
-    return columnVisibility[columnKey] !== false
-  }
-
-  const toggleColumn = (columnKey: string) => {
-    const newVisibility = {
-      ...columnVisibility,
-      [columnKey]: !isColumnVisible(columnKey),
-    }
-    setColumnVisibility(newVisibility)
-    saveColumnVisibility(newVisibility)
-  }
-
-  const allColumns = useMemo(() => {
-    const cols: Array<{ key: string; header: string; accessor: any; width: string; searchValue?: (row: Case) => string }> = [
-      {
-        key: 'id',
-        header: t('labelId'),
-        accessor: 'id' as keyof Case,
-        width: '48px',
-      },
-      {
-        key: 'title',
-        header: t('headerTitle'),
-        accessor: ((caseItem: Case) => (
-          <div className={styles.privateTitleCell}>
-            {caseItem.isPrivate && <Lock size={14} className={styles.privateTitleLock} data-testid="private-lock-icon" />}
-            <span
-              className={caseItem.accessDenied ? styles.accessDenied : ''}
-              data-testid={caseItem.accessDenied ? 'access-denied-label' : undefined}
-            >
-              {caseItem.accessDenied ? t('badgePrivate') : caseItem.title}
-            </span>
-          </div>
-        )) as (row: Case) => ReactElement,
-        width: '200px',
-        searchValue: (caseItem: Case) => caseItem.accessDenied ? '' : caseItem.title,
-      },
-      {
-        key: 'description',
-        header: t('labelDescription'),
-        accessor: 'description' as keyof Case,
-        width: '250px',
-      },
-      {
-        key: 'reporter',
-        header: t('labelReporter'),
-        accessor: ((caseItem: Case) => caseItem.reporter ? renderAssignees([caseItem.reporter]) : null) as (row: Case) => ReactElement | null,
-        width: '150px',
-      },
-      {
-        key: 'assignees',
-        header: t('headerAssignees'),
-        accessor: ((caseItem: Case) => renderAssignees(caseItem.assignees)) as (row: Case) => ReactElement | null,
-        width: '200px',
-      },
-      {
-        key: 'created',
-        header: t('headerCreated'),
-        accessor: ((caseItem: Case) => new Date(caseItem.createdAt).toLocaleDateString()) as (row: Case) => string,
-        width: '120px',
-      },
-    ]
-
-    if (configData?.fieldConfiguration?.fields) {
-      configData.fieldConfiguration.fields.forEach((field: any) => {
-        cols.push({
-          key: `field-${field.id}`,
-          header: field.name,
-          accessor: ((caseItem: Case) => renderFieldValue(caseItem, field.id)) as (row: Case) => string,
-          width: '150px',
-        })
-      })
-    }
-
-    return cols
-  }, [configData, t])
-
-  const visibleColumns = allColumns
-    .filter((col) => isColumnVisible(col.key))
-    .map(({ header, accessor, width }) => ({ header, accessor, width }))
-
-  // Helper to extract text value from a column for filtering
-  const getColumnTextValue = (caseItem: Case, col: { key: string; accessor: any; searchValue?: (row: Case) => string }): string => {
-    if (col.searchValue) {
-      return col.searchValue(caseItem)
-    }
-    if (typeof col.accessor === 'string') {
-      const val = caseItem[col.accessor as keyof Case]
-      return val != null ? String(val) : ''
-    }
-    // For function accessors, extract text from rendered value
-    const rendered = col.accessor(caseItem)
-    if (typeof rendered === 'string') return rendered
-    return ''
-  }
-
-  // Filter cases by search text across all visible columns
-  const allCases: Case[] = data?.cases || []
-  const filteredCases = useMemo(() => {
-    if (!searchText.trim()) return allCases
-    const query = searchText.toLowerCase()
-    const visibleCols = allColumns.filter((col) => isColumnVisible(col.key))
-    return allCases.filter((c) =>
-      visibleCols.some((col) => getColumnTextValue(c, col).toLowerCase().includes(query))
-    )
-  }, [allCases, searchText, allColumns, columnVisibility])
-
-  // Pagination
-  const totalPages = Math.max(1, Math.ceil(filteredCases.length / PAGE_SIZE))
-  const paginatedCases = filteredCases.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE)
-
-  const caseLabel = configData?.fieldConfiguration?.labels?.case || 'Case'
-
-  if (loading) {
-    return (
-      <div className={styles.container}>
-        <div className={styles.loading}>{t('loading')}</div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className={styles.container}>
-        <div className={styles.error}>{`${t('errorPrefix')} ${error.message}`}</div>
-      </div>
-    )
-  }
+  const fieldDefs: FieldDef[] = configData?.fieldConfiguration?.fields || []
+  const caseLabel = configData?.fieldConfiguration?.labels?.case || t('navCases')
 
   return (
-    <div className={styles.container}>
-      <div className={styles.header}>
+    <div className="h-main-inner">
+      <div className="h-page-h">
         <div>
-          <h2 className={styles.title}>{t('titleCaseManagement', { caseLabel })}</h2>
-          <p className={styles.subtitle}>{t('subtitleCaseManagement', { caseLabelLower: caseLabel.toLowerCase() })}</p>
+          <h1>{t('titleCaseManagement', { caseLabel })}</h1>
+          <div className="sub">{t('subtitleCaseManagement', { caseLabelLower: caseLabel.toLowerCase() })}</div>
         </div>
-        <Button
-          variant="primary"
-          icon={<Plus size={20} />}
-          onClick={() => setIsFormOpen(true)}
-        >
-          {t('btnNewCase', { caseLabel })}
-        </Button>
+        <div className="actions">
+          <Button icon={<IconFilter size={14} />}>{t('btnFilter')}</Button>
+          <Button icon={<IconSettings size={14} />}>{t('btnColumns')}</Button>
+          <Button variant="primary" icon={<IconPlus size={14} />} onClick={() => setIsFormOpen(true)}>
+            {t('btnNewCase', { caseLabel })}
+          </Button>
+        </div>
       </div>
 
-      <div className={styles.toolbar}>
-        <div className={styles.tabs}>
+      <div className="row" style={{ marginBottom: 12, gap: 12, flexWrap: 'wrap' }}>
+        <div className="seg">
           <button
-            className={`${styles.tab} ${statusFilter === 'OPEN' ? styles.tabActive : ''}`}
-            onClick={() => setStatusFilter('OPEN')}
+            className={statusFilter === 'OPEN' ? 'on' : ''}
+            onClick={() => { setStatusFilter('OPEN'); setPage(0) }}
             data-testid="status-tab-open"
           >
             {t('tabOpen')}
+            <span style={{ marginLeft: 6, opacity: 0.7 }}>{openCount}</span>
           </button>
           <button
-            className={`${styles.tab} ${statusFilter === 'CLOSED' ? styles.tabActive : ''}`}
-            onClick={() => setStatusFilter('CLOSED')}
+            className={statusFilter === 'CLOSED' ? 'on' : ''}
+            onClick={() => { setStatusFilter('CLOSED'); setPage(0) }}
             data-testid="status-tab-closed"
           >
             {t('tabClosed')}
+            <span style={{ marginLeft: 6, opacity: 0.7 }}>{closedCount}</span>
+          </button>
+          <button
+            className={statusFilter === 'ALL' ? 'on' : ''}
+            onClick={() => { setStatusFilter('ALL'); setPage(0) }}
+          >
+            {t('tabAll')}
           </button>
         </div>
+        <span className="spacer" />
+        <div className="h-search" style={{ width: 260, marginLeft: 0 }}>
+          <IconSearch size={13} />
+          <input
+            value={searchText}
+            onChange={(e) => { setSearchText(e.target.value); setPage(0) }}
+            placeholder={t('placeholderSearchByTitle')}
+            data-testid="search-filter"
+            style={{
+              flex: 1, border: 'none', background: 'transparent', outline: 'none',
+              fontFamily: 'inherit', color: 'var(--fg)', fontSize: 12.5,
+            }}
+          />
+        </div>
+      </div>
 
-        <div className={styles.toolbarRight}>
-          <div className={styles.searchWrapper}>
-            <Search size={16} className={styles.searchIcon} />
-            <input
-              type="text"
-              value={searchText}
-              onChange={(e) => setSearchText(e.target.value)}
-              placeholder={t('placeholderSearch')}
-              className={styles.searchInput}
-              data-testid="search-filter"
-            />
-          </div>
-
-          <div className={styles.columnSelector} ref={columnSelectorRef}>
-            <button
-              className={styles.columnSelectorButton}
-              onClick={() => setIsColumnSelectorOpen(!isColumnSelectorOpen)}
-              data-testid="column-selector-button"
-              title={t('ariaToggleColumns')}
-            >
-              <Settings size={16} />
-            </button>
-            {isColumnSelectorOpen && (
-              <div className={styles.columnSelectorPopover} data-testid="column-selector-popover">
-                <div className={styles.columnSelectorTitle}>{t('titleColumnSelector')}</div>
-                {allColumns.map((col) => (
-                  <label key={col.key} className={styles.columnSelectorItem}>
-                    <input
-                      type="checkbox"
-                      checked={isColumnVisible(col.key)}
-                      onChange={() => toggleColumn(col.key)}
-                      data-testid={`column-toggle-${col.key}`}
-                    />
-                    <span>{col.header}</span>
-                  </label>
-                ))}
-              </div>
+      <div className="card" style={{ overflow: 'hidden' }}>
+        <table className="h-table">
+          <thead>
+            <tr>
+              <th style={{ width: 64 }}>{t('labelId')}</th>
+              <th>{t('headerTitle')}</th>
+              <th style={{ width: 110 }}>{t('headerStatus')}</th>
+              <th style={{ width: 130 }}>{t('headerCategory')}</th>
+              <th style={{ width: 130 }}>{t('headerAssignees')}</th>
+              <th style={{ width: 110 }}>{t('headerCreated')}</th>
+              <th style={{ width: 180 }}>{t('headerSlack')}</th>
+              <th style={{ width: 38 }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {pageRows.length === 0 && (
+              <tr>
+                <td colSpan={8} style={{ padding: 32, textAlign: 'center', color: 'var(--fg-soft)' }}>
+                  {t('noDataAvailable')}
+                </td>
+              </tr>
             )}
+            {pageRows.map((c) => (
+              <tr
+                key={c.id}
+                onClick={() => {
+                  if (c.accessDenied) return
+                  navigate(`/ws/${currentWorkspace!.id}/cases/${c.id}`)
+                }}
+                style={{ cursor: c.accessDenied ? 'default' : 'pointer' }}
+              >
+                <td className="id mono">#{c.id}</td>
+                <td>
+                  <div className="row" style={{ gap: 8 }}>
+                    {c.isPrivate && (
+                      <span title={t('badgePrivate')} data-testid="private-lock-icon" style={{ color: 'var(--warn)', display: 'inline-flex' }}>
+                        <IconLock size={12} sw={2} />
+                      </span>
+                    )}
+                    {c.accessDenied ? (
+                      <span data-testid="access-denied-label" className="muted" style={{ fontStyle: 'italic' }}>
+                        {t('badgePrivate')}
+                      </span>
+                    ) : (
+                      <span className="title truncate" style={{ maxWidth: 380 }}>{c.title}</span>
+                    )}
+                  </div>
+                </td>
+                <td><StatusBadge status={c.status} labelOpen={t('statusOpen')} labelClosed={t('statusClosed')} /></td>
+                <td><span className="muted">{categoryFor(c, fieldDefs) || '—'}</span></td>
+                <td><AvatarStack users={c.assignees} /></td>
+                <td className="mono soft" style={{ fontSize: 12 }}>{formatDate(c.createdAt)}</td>
+                <td>
+                  {c.slackChannelID ? (
+                    <SlackLink name={c.slackChannelID} />
+                  ) : (
+                    <span className="soft">—</span>
+                  )}
+                </td>
+                <td>
+                  <button
+                    className="h-icon-btn"
+                    style={{ width: 24, height: 24 }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <IconDots size={14} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div
+          data-testid="pagination"
+          style={{
+            padding: '10px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            fontSize: 12, color: 'var(--fg-muted)', borderTop: '1px solid var(--line)',
+          }}
+        >
+          <span>
+            {filtered.length === 0
+              ? '0–0 / 0'
+              : `${page * PAGE_SIZE + 1}–${Math.min((page + 1) * PAGE_SIZE, filtered.length)} / ${filtered.length}`}
+          </span>
+          <div className="row" style={{ gap: 6 }}>
+            <Button
+              size="sm"
+              icon={<IconChevLeft size={12} />}
+              disabled={page === 0}
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              data-testid="pagination-prev"
+            >
+              {t('btnPrevious')}
+            </Button>
+            <span className="mono" data-testid="pagination-info">{page + 1} / {totalPages}</span>
+            <Button
+              size="sm"
+              icon={<IconChevRight size={12} />}
+              disabled={page >= totalPages - 1}
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              data-testid="pagination-next"
+            >
+              {t('btnNext')}
+            </Button>
           </div>
         </div>
       </div>
 
-      <div className={styles.tableWrapper}>
-        <Table columns={visibleColumns} data={paginatedCases} onRowClick={handleRowClick} resizable />
-      </div>
-
-      {totalPages > 1 && (
-        <div className={styles.pagination} data-testid="pagination">
-          <button
-            className={styles.paginationButton}
-            onClick={() => setCurrentPage((p) => Math.max(0, p - 1))}
-            disabled={currentPage === 0}
-            data-testid="pagination-prev"
-          >
-            <ChevronLeft size={16} />
-          </button>
-          <span className={styles.paginationInfo} data-testid="pagination-info">
-            {currentPage + 1} / {totalPages}
-          </span>
-          <button
-            className={styles.paginationButton}
-            onClick={() => setCurrentPage((p) => Math.min(totalPages - 1, p + 1))}
-            disabled={currentPage >= totalPages - 1}
-            data-testid="pagination-next"
-          >
-            <ChevronRight size={16} />
-          </button>
-        </div>
+      {isFormOpen && (
+        <CaseForm caseItem={null} onClose={() => setIsFormOpen(false)} />
       )}
-
-      <CaseForm
-        isOpen={isFormOpen}
-        onClose={handleFormClose}
-        caseItem={null}
-      />
     </div>
   )
 }
