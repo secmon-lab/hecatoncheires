@@ -113,7 +113,9 @@ type ComplexityRoot struct {
 	}
 
 	EntityLabels struct {
-		Case func(childComplexity int) int
+		Case        func(childComplexity int) int
+		Description func(childComplexity int) int
+		Title       func(childComplexity int) int
 	}
 
 	FieldConfiguration struct {
@@ -705,6 +707,18 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.EntityLabels.Case(childComplexity), true
+	case "EntityLabels.description":
+		if e.complexity.EntityLabels.Description == nil {
+			break
+		}
+
+		return e.complexity.EntityLabels.Description(childComplexity), true
+	case "EntityLabels.title":
+		if e.complexity.EntityLabels.Title == nil {
+			break
+		}
+
+		return e.complexity.EntityLabels.Title(childComplexity), true
 
 	case "FieldConfiguration.fields":
 		if e.complexity.FieldConfiguration.Fields == nil {
@@ -1857,6 +1871,8 @@ type FieldDefinition {
 
 type EntityLabels {
   case: String!
+  title: String!
+  description: String!
 }
 
 type FieldConfiguration {
@@ -4435,6 +4451,64 @@ func (ec *executionContext) fieldContext_EntityLabels_case(_ context.Context, fi
 	return fc, nil
 }
 
+func (ec *executionContext) _EntityLabels_title(ctx context.Context, field graphql.CollectedField, obj *graphql1.EntityLabels) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_EntityLabels_title,
+		func(ctx context.Context) (any, error) {
+			return obj.Title, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_EntityLabels_title(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "EntityLabels",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _EntityLabels_description(ctx context.Context, field graphql.CollectedField, obj *graphql1.EntityLabels) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_EntityLabels_description,
+		func(ctx context.Context) (any, error) {
+			return obj.Description, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_EntityLabels_description(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "EntityLabels",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _FieldConfiguration_fields(ctx context.Context, field graphql.CollectedField, obj *graphql1.FieldConfiguration) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -4504,6 +4578,10 @@ func (ec *executionContext) fieldContext_FieldConfiguration_labels(_ context.Con
 			switch field.Name {
 			case "case":
 				return ec.fieldContext_EntityLabels_case(ctx, field)
+			case "title":
+				return ec.fieldContext_EntityLabels_title(ctx, field)
+			case "description":
+				return ec.fieldContext_EntityLabels_description(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type EntityLabels", field.Name)
 		},
@@ -12623,6 +12701,16 @@ func (ec *executionContext) _EntityLabels(ctx context.Context, sel ast.Selection
 			out.Values[i] = graphql.MarshalString("EntityLabels")
 		case "case":
 			out.Values[i] = ec._EntityLabels_case(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "title":
+			out.Values[i] = ec._EntityLabels_title(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "description":
+			out.Values[i] = ec._EntityLabels_description(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}

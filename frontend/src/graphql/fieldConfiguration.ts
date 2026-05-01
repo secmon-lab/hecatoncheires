@@ -19,6 +19,8 @@ export const GET_FIELD_CONFIGURATION = gql`
       }
       labels {
         case
+        title
+        description
       }
     }
   }

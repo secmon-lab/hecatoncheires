@@ -914,8 +914,35 @@ type = "text"
 	schema, err := config.LoadFieldSchema(configPath)
 	gt.NoError(t, err).Required()
 
-	// Check default labels
 	gt.Value(t, schema.Labels.Case).Equal("Case")
+	gt.Value(t, schema.Labels.Title).Equal("")
+	gt.Value(t, schema.Labels.Description).Equal("")
+}
+
+func TestLoadFieldSchema_CustomTitleDescriptionLabels(t *testing.T) {
+	content := `
+[labels]
+case = "Risk"
+title = "Risk Name"
+description = "Risk Detail"
+
+[[fields]]
+id = "status"
+name = "Status"
+type = "text"
+`
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+	err := os.WriteFile(configPath, []byte(content), 0644)
+	gt.NoError(t, err).Required()
+
+	schema, err := config.LoadFieldSchema(configPath)
+	gt.NoError(t, err).Required()
+
+	gt.Value(t, schema.Labels.Case).Equal("Risk")
+	gt.Value(t, schema.Labels.Title).Equal("Risk Name")
+	gt.Value(t, schema.Labels.Description).Equal("Risk Detail")
 }
 
 func TestLoadWorkspaceConfigs_SlackTeamID(t *testing.T) {

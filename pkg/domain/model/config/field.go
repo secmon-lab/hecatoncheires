@@ -23,7 +23,9 @@ type FieldDefinition struct {
 
 // EntityLabels holds display labels for entities
 type EntityLabels struct {
-	Case string // Default: "Case"
+	Case        string // Default: "Case"
+	Title       string // Default: "Title"
+	Description string // Default: "Description"
 }
 
 // FieldSchema holds the complete field configuration

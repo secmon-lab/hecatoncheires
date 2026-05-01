@@ -734,7 +734,9 @@ func (r *queryResolver) FieldConfiguration(ctx context.Context, workspaceID stri
 	return &graphql1.FieldConfiguration{
 		Fields: fields,
 		Labels: &graphql1.EntityLabels{
-			Case: schema.Labels.Case,
+			Case:        schema.Labels.Case,
+			Title:       schema.Labels.Title,
+			Description: schema.Labels.Description,
 		},
 	}, nil
 }

@@ -20,12 +20,48 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
+	domainConfig "github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
 
 const testWorkspaceID = "test-ws"
+
+// setupGraphQLServerWithRegistry creates a test GraphQL server with workspace registry
+func setupGraphQLServerWithRegistry(repo interfaces.Repository, registry *model.WorkspaceRegistry) (http.Handler, error) {
+	uc := usecase.New(repo, registry)
+	resolver := gqlctrl.NewResolver(repo, uc)
+	srv := handler.NewDefaultServer(
+		gqlctrl.NewExecutableSchema(gqlctrl.Config{Resolvers: resolver}),
+	)
+	srv.SetErrorPresenter(func(ctx context.Context, err error) *gqlerror.Error {
+		gqlErr := graphql.DefaultErrorPresenter(ctx, err)
+		wrappedErr := goerr.Wrap(err, "GraphQL error")
+		logging.Default().Error("GraphQL error occurred", "error", wrappedErr)
+		return gqlErr
+	})
+	srv.SetRecoverFunc(func(ctx context.Context, panicValue interface{}) error {
+		var panicErr error
+		switch e := panicValue.(type) {
+		case error:
+			panicErr = e
+		case string:
+			panicErr = goerr.New(e)
+		default:
+			panicErr = goerr.New("panic occurred", goerr.V("panic", panicValue))
+		}
+		wrappedErr := goerr.Wrap(panicErr, "GraphQL panic")
+		logging.Default().Error("GraphQL panic occurred", "error", wrappedErr)
+		return wrappedErr
+	})
+	gqlHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		loaders := gqlctrl.NewDataLoaders(repo)
+		ctx := gqlctrl.WithDataLoaders(r.Context(), loaders)
+		srv.ServeHTTP(w, r.WithContext(ctx))
+	})
+	return httpctrl.New(gqlHandler)
+}
 
 // setupGraphQLServer creates a test GraphQL server with HTTP handler
 func setupGraphQLServer(repo interfaces.Repository) (http.Handler, error) {
@@ -2556,5 +2592,81 @@ func TestGraphQLHandler_PrivateCaseAccessControl(t *testing.T) {
 		gt.NoError(t, json.Unmarshal(resp.Data, &memberResult)).Required()
 		gt.Number(t, len(memberResult.AssistLogs.Items)).GreaterOrEqual(1)
 		gt.Value(t, memberResult.AssistLogs.Items[0].Summary).Equal("Secret analysis")
+	})
+}
+
+func TestGraphQLHandler_FieldConfigurationCustomLabels(t *testing.T) {
+	t.Run("returns custom title and description labels", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
+			FieldSchema: &domainConfig.FieldSchema{
+				Labels: domainConfig.EntityLabels{
+					Case:        "Risk",
+					Title:       "Risk Name",
+					Description: "Risk Detail",
+				},
+			},
+		})
+
+		handler, err := setupGraphQLServerWithRegistry(repo, registry)
+		gt.NoError(t, err).Required()
+
+		query := `query { fieldConfiguration(workspaceId: "risk") { labels { case title description } } }`
+		rec := executeGraphQLRequest(t, handler, query, nil)
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var result struct {
+			FieldConfiguration struct {
+				Labels struct {
+					Case        string `json:"case"`
+					Title       string `json:"title"`
+					Description string `json:"description"`
+				} `json:"labels"`
+			} `json:"fieldConfiguration"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+		gt.Value(t, result.FieldConfiguration.Labels.Case).Equal("Risk")
+		gt.Value(t, result.FieldConfiguration.Labels.Title).Equal("Risk Name")
+		gt.Value(t, result.FieldConfiguration.Labels.Description).Equal("Risk Detail")
+	})
+
+	t.Run("returns empty title and description labels when not configured", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "task", Name: "Tasks"},
+			FieldSchema: &domainConfig.FieldSchema{
+				Labels: domainConfig.EntityLabels{
+					Case: "Task",
+				},
+			},
+		})
+
+		handler, err := setupGraphQLServerWithRegistry(repo, registry)
+		gt.NoError(t, err).Required()
+
+		query := `query { fieldConfiguration(workspaceId: "task") { labels { case title description } } }`
+		rec := executeGraphQLRequest(t, handler, query, nil)
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var result struct {
+			FieldConfiguration struct {
+				Labels struct {
+					Case        string `json:"case"`
+					Title       string `json:"title"`
+					Description string `json:"description"`
+				} `json:"labels"`
+			} `json:"fieldConfiguration"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+		gt.Value(t, result.FieldConfiguration.Labels.Case).Equal("Task")
+		gt.Value(t, result.FieldConfiguration.Labels.Title).Equal("")
+		gt.Value(t, result.FieldConfiguration.Labels.Description).Equal("")
 	})
 }

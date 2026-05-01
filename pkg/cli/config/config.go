@@ -87,7 +87,9 @@ type WorkspaceConfig struct {
 
 // Labels represents entity display labels
 type Labels struct {
-	Case string `toml:"case"`
+	Case        string `toml:"case"`
+	Title       string `toml:"title"`
+	Description string `toml:"description"`
 }
 
 // FieldOption represents an option for select/multi-select fields
@@ -421,9 +423,10 @@ func (a *AppConfig) ToDomainFieldSchema() *domainConfig.FieldSchema {
 	}
 
 	labels := domainConfig.EntityLabels{
-		Case: a.Labels.Case,
+		Case:        a.Labels.Case,
+		Title:       a.Labels.Title,
+		Description: a.Labels.Description,
 	}
-	// Set default labels if not specified
 	if labels.Case == "" {
 		labels.Case = "Case"
 	}

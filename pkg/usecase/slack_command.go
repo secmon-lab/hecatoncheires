@@ -251,9 +251,20 @@ func (uc *SlackUseCases) buildCaseCreationModal(ctx context.Context, workspaceID
 	}
 	metaJSON, _ := json.Marshal(meta) //nolint:errcheck
 
+	titleLabel := i18n.T(ctx, i18n.MsgFieldTitle)
+	descLabel := i18n.T(ctx, i18n.MsgFieldDescription)
+	if schema != nil {
+		if schema.Labels.Title != "" {
+			titleLabel = schema.Labels.Title
+		}
+		if schema.Labels.Description != "" {
+			descLabel = schema.Labels.Description
+		}
+	}
+
 	titleInput := slack.NewInputBlock(
 		SlackBlockIDCaseTitle,
-		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgFieldTitle), false, false),
+		slack.NewTextBlockObject(slack.PlainTextType, titleLabel, false, false),
 		nil,
 		slack.NewPlainTextInputBlockElement(
 			slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgFieldTitlePlaceholder), false, false),
@@ -263,7 +274,7 @@ func (uc *SlackUseCases) buildCaseCreationModal(ctx context.Context, workspaceID
 
 	descInput := slack.NewInputBlock(
 		SlackBlockIDCaseDescription,
-		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgFieldDescription), false, false),
+		slack.NewTextBlockObject(slack.PlainTextType, descLabel, false, false),
 		nil,
 		&slack.PlainTextInputBlockElement{
 			Type:        slack.METPlainTextInput,

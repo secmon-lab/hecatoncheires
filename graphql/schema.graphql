@@ -39,6 +39,8 @@ type FieldDefinition {
 
 type EntityLabels {
   case: String!
+  title: String!
+  description: String!
 }
 
 type FieldConfiguration {

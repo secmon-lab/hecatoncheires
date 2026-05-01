@@ -8,6 +8,8 @@ name = "Risk Management"
 
 [labels]
 case = "Risk"
+title = "Risk Name"
+description = "Risk Detail"
 
 [slack]
 # channel_prefix = "risk"  # Defaults to workspace ID if not specified
