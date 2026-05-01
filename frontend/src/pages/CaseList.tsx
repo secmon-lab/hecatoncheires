@@ -293,17 +293,19 @@ export default function CaseList() {
   return (
     <div className={styles.container}>
       <div className={styles.header}>
-        <div>
-          <h2 className={styles.title}>{t('titleCaseManagement', { caseLabel })}</h2>
+        <div className={styles.headerText}>
+          <h1 className={styles.title}>{t('titleCaseManagement', { caseLabel })}</h1>
           <p className={styles.subtitle}>{t('subtitleCaseManagement', { caseLabelLower: caseLabel.toLowerCase() })}</p>
         </div>
-        <Button
-          variant="primary"
-          icon={<Plus size={20} />}
-          onClick={() => setIsFormOpen(true)}
-        >
-          {t('btnNewCase', { caseLabel })}
-        </Button>
+        <div className={styles.headerActions}>
+          <Button
+            variant="primary"
+            icon={<Plus size={16} />}
+            onClick={() => setIsFormOpen(true)}
+          >
+            {t('btnNewCase', { caseLabel })}
+          </Button>
+        </div>
       </div>
 
       <div className={styles.toolbar}>

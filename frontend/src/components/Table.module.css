@@ -1,137 +1,79 @@
 .tableContainer {
   width: 100%;
   overflow-x: auto;
-  background-color: var(--bg-paper);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border-default);
+  background: var(--bg-elev);
+  border-radius: 0;
+  border: none;
 }
 
-.table {
-  width: 100%;
-  border-collapse: collapse;
-}
+.table { width: 100%; border-collapse: collapse; font-size: 13px; }
 
 .th {
-  padding: var(--spacing-sm) var(--spacing-md);
   text-align: left;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
-  color: var(--text-label);
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  border-bottom: 1px solid var(--table-header-border);
-  background-color: var(--table-header-bg);
-}
-
-.thResizable {
-  position: relative;
-  overflow: hidden;
-}
-
-.thContent {
-  display: block;
+  color: var(--fg-soft);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-elev);
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
+.thResizable { position: relative; overflow: hidden; }
+.thContent { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .resizeHandle {
-  position: absolute;
-  right: 0;
-  top: 0;
-  bottom: 0;
-  width: 4px;
-  cursor: col-resize;
-  background: transparent;
+  position: absolute; right: 0; top: 0; bottom: 0;
+  width: 4px; cursor: col-resize; background: transparent;
   z-index: 1;
 }
-
-.resizeHandle:hover {
-  background: var(--color-primary-light);
-}
+.resizeHandle:hover { background: var(--accent); }
 
 .td {
-  padding: var(--spacing-sm) var(--spacing-md);
+  padding: 10px 12px;
   font-size: 13px;
-  color: var(--text-body);
-  border-bottom: 1px solid var(--table-row-border);
+  color: var(--fg);
+  border-bottom: 1px solid var(--line);
   line-height: 1.5;
+  vertical-align: middle;
 }
+.cellContent { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.cellContent {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+.table tbody tr:last-child .td { border-bottom: none; }
 
-.table tbody tr:last-child .td {
-  border-bottom: none;
-}
-
-.clickableRow {
-  cursor: pointer;
-  transition: background-color var(--transition-fast);
-}
-
-.clickableRow:hover {
-  background-color: var(--table-row-hover);
-}
+.clickableRow { cursor: pointer; transition: background-color 0.1s; }
+.clickableRow:hover { background: color-mix(in oklch, var(--accent) 4%, var(--bg-elev)); }
 
 .emptyState {
-  padding: var(--spacing-xxl) var(--spacing-md);
+  padding: 48px 16px;
   text-align: center;
-  color: var(--text-hint);
-  font-style: italic;
-  background-color: var(--bg-paper);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border-default);
+  color: var(--fg-soft);
+  background: var(--bg-elev);
 }
 
-/* Card view for mobile */
-.cardContainer {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-sm);
-}
+.cardContainer { display: flex; flex-direction: column; gap: 8px; }
 
 .card {
-  background-color: var(--bg-paper);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border-default);
-  padding: var(--spacing-md);
-  transition: border-color var(--transition-fast);
+  background: var(--bg-elev);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  padding: 12px;
+  transition: border-color 0.1s;
 }
-
-.card.clickable {
-  cursor: pointer;
-}
-
-.card.clickable:active {
-  border-color: var(--border-hover);
-  background-color: var(--bg-subtle);
-}
+.card.clickable { cursor: pointer; }
+.card.clickable:active { border-color: var(--line-strong); background: var(--bg-sunken); }
 
 .cardRow {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-xs);
-  padding: var(--spacing-sm) 0;
-  border-bottom: 1px solid var(--border-light);
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
 }
-
-.cardRow:last-child {
-  border-bottom: none;
-}
+.cardRow:last-child { border-bottom: none; }
 
 .cardLabel {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-label);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: 11px; font-weight: 600;
+  color: var(--fg-soft);
+  text-transform: uppercase; letter-spacing: 0.04em;
 }
-
-.cardValue {
-  font-size: 13px;
-  color: var(--text-body);
-}
+.cardValue { font-size: 13px; color: var(--fg); }

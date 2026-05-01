@@ -3,7 +3,7 @@ import type { Messages } from './keys'
 export const en: Messages = {
   // App
   appName: 'Hecatoncheires',
-  appSubtitle: 'AI-native case management platform',
+  appSubtitle: 'An AI-native, customizable project/case management platform with Slack integration.',
 
   // Navigation
   navCases: 'Cases',

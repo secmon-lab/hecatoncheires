@@ -13,21 +13,23 @@
 }
 
 .avatar {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   object-fit: cover;
 }
 
 .avatarPlaceholder {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
-  background: var(--color-primary);
+  background: linear-gradient(135deg, oklch(0.65 0.16 30), oklch(0.55 0.18 350));
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-white);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .dropdown {

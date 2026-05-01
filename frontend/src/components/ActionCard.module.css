@@ -1,34 +1,33 @@
 .card {
-  background: var(--bg-paper);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-md);
-  padding: var(--spacing-sm) var(--spacing-md-sm);
-  cursor: pointer;
-  transition: border-color var(--transition-fast);
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px;
+  cursor: grab;
+  transition: border-color 0.1s;
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-xs);
-  min-height: 3.5rem;
+  gap: 6px;
+  font-size: 12px;
+  box-shadow: var(--shadow-sm);
 }
 
-.card:hover {
-  border-color: var(--border-hover);
-}
+.card:hover { border-color: var(--line-strong); }
 
 .caseName {
-  font-size: 0.625rem;
-  color: var(--text-muted);
+  font-size: 10.5px;
+  color: var(--fg-soft);
+  font-family: var(--font-mono);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  line-height: 1.2;
 }
 
 .title {
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: var(--text-heading);
-  line-height: 1.3;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg);
+  line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
   display: -webkit-box;
@@ -38,45 +37,34 @@
 
 .assignees {
   display: flex;
-  gap: var(--spacing-xs);
   align-items: center;
-  justify-content: flex-end;
+  gap: 8px;
+  color: var(--fg-soft);
+  font-size: 11px;
   margin-top: auto;
 }
 
 .avatar {
-  width: 1.125rem;
-  height: 1.125rem;
+  width: 20px; height: 20px;
   border-radius: 50%;
   overflow: hidden;
   flex-shrink: 0;
-  background: var(--bg-muted);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  background: linear-gradient(135deg, oklch(0.65 0.16 30), oklch(0.55 0.18 350));
+  color: white;
+  display: flex; align-items: center; justify-content: center;
 }
-
-.avatar img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.avatar span {
-  font-size: 0.6875rem;
-  font-weight: 600;
-  color: var(--text-muted);
-}
+.avatar img { width: 100%; height: 100%; object-fit: cover; }
+.avatar span { font-size: 9px; font-weight: 700; }
 
 .dragging {
-  opacity: 0.4;
+  opacity: 0.5;
   box-shadow: none;
-  border-color: var(--border-light);
+  border-color: var(--line);
 }
 
 .dragOverlay {
   box-shadow: var(--shadow-lg);
-  border-color: var(--color-primary-light);
+  border-color: var(--accent);
   cursor: grabbing;
   transform: rotate(1.5deg);
 }

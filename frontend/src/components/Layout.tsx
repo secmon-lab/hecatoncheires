@@ -15,16 +15,14 @@ export default function Layout({ children }: LayoutProps) {
 
   return (
     <div className={styles.layout}>
-      {isMobileMenuOpen && (
-        <div className={styles.backdrop} onClick={close} />
-      )}
-      <Sidebar isOpen={isOpen} onClose={close} />
-      <div className={styles.main}>
-        <TopBar onToggleSidebar={toggle} />
-        <main className={styles.content}>
-          {children || <Outlet />}
-        </main>
+      {isMobileMenuOpen && <div className={styles.backdrop} onClick={close} />}
+      <div className={`${styles.side} ${isOpen ? styles.open : ''}`}>
+        <Sidebar isOpen={isOpen} onClose={close} />
       </div>
+      <div className={styles.top}>
+        <TopBar onToggleSidebar={toggle} />
+      </div>
+      <main className={styles.main}>{children || <Outlet />}</main>
     </div>
   )
 }
