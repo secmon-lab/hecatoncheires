@@ -14,7 +14,7 @@ export class CaseListPage extends BasePage {
 
   constructor(page: Page) {
     super(page);
-    this.pageTitle = page.locator('h2').filter({ hasText: /Management/ });
+    this.pageTitle = page.locator('h1').filter({ hasText: /Management/ });
     this.newCaseButton = page.locator('button').filter({ hasText: /New/ });
     this.casesTable = page.locator('table');
     this.loadingIndicator = page.locator('text=Loading...');
