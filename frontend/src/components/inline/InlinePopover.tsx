@@ -43,11 +43,22 @@ export default function InlinePopover({ anchor, open, onClose, children, width, 
 
   const rect = anchor?.getBoundingClientRect()
   const style: React.CSSProperties = rect
-    ? {
-        top: Math.min(rect.bottom + 4, window.innerHeight - 16),
-        left: Math.min(rect.left, window.innerWidth - (width || 240) - 8),
-        width,
-      }
+    ? (() => {
+        const popMax = 320
+        const margin = 8
+        const spaceBelow = window.innerHeight - rect.bottom - margin
+        const spaceAbove = rect.top - margin
+        const flipAbove = spaceBelow < Math.min(popMax, 160) && spaceAbove > spaceBelow
+        const top = flipAbove
+          ? Math.max(margin, rect.top - 4 - Math.min(popMax, spaceAbove))
+          : Math.min(rect.bottom + 4, window.innerHeight - margin - Math.min(popMax, spaceBelow))
+        return {
+          top,
+          left: Math.min(rect.left, window.innerWidth - (width || 240) - margin),
+          maxHeight: Math.max(120, flipAbove ? spaceAbove : spaceBelow),
+          width,
+        }
+      })()
     : { top: 0, left: 0, width }
 
   return createPortal(

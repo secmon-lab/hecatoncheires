@@ -61,7 +61,7 @@ export default function InlineSelect<V extends string = string>({
     setOpen(false)
     setQuery('')
     if (next === value) return
-    if (next == null) return // clear handling reserved for future
+    if (next == null) return
     await onSave(next)
   }
 
