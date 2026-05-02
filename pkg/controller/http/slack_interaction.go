@@ -112,9 +112,10 @@ func (h *SlackInteractionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 				continue
 			}
 			input := usecase.UpdateActionInput{
-				ID:        actionID,
-				SlackSync: usecase.SlackSyncFull,
-				Actor:     usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: cb.User.ID},
+				ID:                     actionID,
+				SlackSync:              usecase.SlackSyncFull,
+				Actor:                  usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: cb.User.ID},
+				RejectNonHumanAssignee: true,
 			}
 			if a.SelectedUser == "" {
 				input.ClearAssignee = true

@@ -71,6 +71,15 @@ type UpdateActionInput struct {
 
 	SlackSync SlackSyncMode
 	Actor     ActorRef
+
+	// RejectNonHumanAssignee, when true, drops AssigneeID changes whose
+	// target user is missing from the SlackUser DB. The DB only stores
+	// non-bot users, so this is a guard against picks coming from the
+	// Slack users_select element (which has no built-in bot filter).
+	// GraphQL/WebUI callers leave this false: their pickers already show
+	// only synced humans, and silently dropping the change would just
+	// look like a broken UI.
+	RejectNonHumanAssignee bool
 }
 
 type ActionUseCase struct {
@@ -201,23 +210,24 @@ func (uc *ActionUseCase) UpdateAction(ctx context.Context, workspaceID string, i
 	if in.ClearAssignee {
 		action.AssigneeID = ""
 	} else if in.AssigneeID != nil {
-		// Reject bot / unknown users. The SlackUser DB is populated from
-		// Slack's users.list with bots filtered out; an ID we have never
-		// seen is therefore either a bot or simply unknown to us. Refuse
-		// either way: keep the prior assignee and let the Slack message
-		// re-render with the original initial_user.
 		candidate := *in.AssigneeID
-		if candidate != "" {
+		switch {
+		case candidate == "":
+			action.AssigneeID = ""
+		case in.RejectNonHumanAssignee:
+			// Slack-sourced picks: refuse if the target is not a known
+			// human (the SlackUser DB excludes bots at sync time). Keep
+			// the prior assignee so the message re-render restores the
+			// original initial_user.
 			if u, lookupErr := uc.repo.SlackUser().GetByID(ctx, model.SlackUserID(candidate)); lookupErr != nil || u == nil {
 				if lookupErr != nil {
 					errutil.Handle(ctx, lookupErr, "rejected non-human or unknown assignee")
 				}
-				// leave action.AssigneeID untouched
 			} else {
 				action.AssigneeID = candidate
 			}
-		} else {
-			action.AssigneeID = ""
+		default:
+			action.AssigneeID = candidate
 		}
 	}
 	if in.SlackMessageTS != nil {

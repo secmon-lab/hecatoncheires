@@ -196,6 +196,16 @@ func (uc *SlackUseCases) HandleSlackMessage(ctx context.Context, msg *slack.Mess
 
 	logger := logging.From(ctx)
 
+	// Drop the bot's own messages: those are change-notifications we just
+	// posted into the action thread, and re-ingesting them only adds noise
+	// to the WebUI Messages list.
+	if uc.slackService != nil {
+		if botUserID, err := uc.slackService.GetBotUserID(ctx); err == nil && botUserID != "" && msg.UserID() == botUserID {
+			logger.Debug("skipping bot's own message", "user_id", msg.UserID())
+			return nil
+		}
+	}
+
 	// Save to channel-level collection (backward compatible)
 	if err := uc.repo.Slack().PutMessage(ctx, msg); err != nil {
 		return goerr.Wrap(err, "failed to save slack message", goerr.V("messageID", msg.ID()), goerr.V("channelID", msg.ChannelID()))

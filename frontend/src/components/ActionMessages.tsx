@@ -143,7 +143,8 @@ export default function ActionMessages({ workspaceId, actionId, pageSize = 20 }:
   return (
     <div data-testid="action-messages" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-sm)' }}>
       {items.map((m) => {
-        const displayName = userIdToName.get(m.userID) ?? m.userName ?? m.userID
+        const resolved = userIdToName.get(m.userID)
+        const displayName = resolved ?? (m.userName && m.userName !== '' ? m.userName : 'App')
         const avatar = userIdToImage.get(m.userID)
         const body = renderText(m.text, userIdToName)
         return (
