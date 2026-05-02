@@ -48,11 +48,44 @@ func (r *actionResolver) Assignee(ctx context.Context, obj *graphql1.Action) (*g
 }
 
 // Messages is the resolver for the messages field.
-// Wired up in Step 7 once the ActionMessage repository is in place.
 func (r *actionResolver) Messages(ctx context.Context, obj *graphql1.Action, limit *int, cursor *string) (*graphql1.SlackMessageConnection, error) {
-	return &graphql1.SlackMessageConnection{
+	empty := &graphql1.SlackMessageConnection{
 		Items:      []*graphql1.SlackMessage{},
 		NextCursor: "",
+	}
+
+	// Inherit access control from the parent Case: if the requester cannot
+	// see the case, they cannot see the action's thread messages either.
+	loaders := GetDataLoaders(ctx)
+	cases, err := loaders.CaseLoader.Load(ctx, obj.WorkspaceID, []int64{int64(obj.CaseID)})
+	if err != nil {
+		return nil, err
+	}
+	if len(cases) == 0 || cases[0].AccessDenied {
+		return empty, nil
+	}
+
+	limitVal := 20
+	if limit != nil && *limit > 0 {
+		limitVal = *limit
+	}
+	cursorVal := ""
+	if cursor != nil {
+		cursorVal = *cursor
+	}
+
+	messages, nextCursor, err := r.repo.ActionMessage().List(ctx, obj.WorkspaceID, int64(obj.ID), limitVal, cursorVal)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to list action messages from repository")
+	}
+
+	items := make([]*graphql1.SlackMessage, len(messages))
+	for i, m := range messages {
+		items[i] = toGraphQLSlackMessage(m)
+	}
+	return &graphql1.SlackMessageConnection{
+		Items:      items,
+		NextCursor: nextCursor,
 	}, nil
 }
 
@@ -264,40 +297,7 @@ func (r *caseResolver) SlackMessages(ctx context.Context, obj *graphql1.Case, li
 
 	items := make([]*graphql1.SlackMessage, len(messages))
 	for i, m := range messages {
-		threadTS := m.ThreadTS()
-		var threadTSPtr *string
-		if threadTS != "" {
-			threadTSPtr = &threadTS
-		}
-		files := make([]*graphql1.SlackFile, len(m.Files()))
-		for j, f := range m.Files() {
-			thumbURL := f.ThumbURL()
-			var thumbURLPtr *string
-			if thumbURL != "" {
-				thumbURLPtr = &thumbURL
-			}
-			files[j] = &graphql1.SlackFile{
-				ID:         f.ID(),
-				Name:       f.Name(),
-				Mimetype:   f.Mimetype(),
-				Filetype:   f.Filetype(),
-				Size:       f.Size(),
-				URLPrivate: f.URLPrivate(),
-				Permalink:  f.Permalink(),
-				ThumbURL:   thumbURLPtr,
-			}
-		}
-		items[i] = &graphql1.SlackMessage{
-			ID:        m.ID(),
-			ChannelID: m.ChannelID(),
-			ThreadTs:  threadTSPtr,
-			TeamID:    m.TeamID(),
-			UserID:    m.UserID(),
-			UserName:  m.UserName(),
-			Text:      m.Text(),
-			Files:     files,
-			CreatedAt: m.CreatedAt(),
-		}
+		items[i] = toGraphQLSlackMessage(m)
 	}
 
 	return &graphql1.SlackMessageConnection{

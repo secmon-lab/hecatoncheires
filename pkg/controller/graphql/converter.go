@@ -5,8 +5,47 @@ import (
 
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	graphql1 "github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 )
+
+// toGraphQLSlackMessage converts a domain slack.Message to its GraphQL view.
+func toGraphQLSlackMessage(m *slack.Message) *graphql1.SlackMessage {
+	threadTS := m.ThreadTS()
+	var threadTSPtr *string
+	if threadTS != "" {
+		threadTSPtr = &threadTS
+	}
+	files := make([]*graphql1.SlackFile, len(m.Files()))
+	for j, f := range m.Files() {
+		thumbURL := f.ThumbURL()
+		var thumbURLPtr *string
+		if thumbURL != "" {
+			thumbURLPtr = &thumbURL
+		}
+		files[j] = &graphql1.SlackFile{
+			ID:         f.ID(),
+			Name:       f.Name(),
+			Mimetype:   f.Mimetype(),
+			Filetype:   f.Filetype(),
+			Size:       f.Size(),
+			URLPrivate: f.URLPrivate(),
+			Permalink:  f.Permalink(),
+			ThumbURL:   thumbURLPtr,
+		}
+	}
+	return &graphql1.SlackMessage{
+		ID:        m.ID(),
+		ChannelID: m.ChannelID(),
+		ThreadTs:  threadTSPtr,
+		TeamID:    m.TeamID(),
+		UserID:    m.UserID(),
+		UserName:  m.UserName(),
+		Text:      m.Text(),
+		Files:     files,
+		CreatedAt: m.CreatedAt(),
+	}
+}
 
 // toGraphQLCase converts a domain Case to GraphQL Case
 func toGraphQLCase(c *model.Case, workspaceID string) *graphql1.Case {

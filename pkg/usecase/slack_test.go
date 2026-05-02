@@ -10,6 +10,7 @@ import (
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	slackevents "github.com/slack-go/slack/slackevents"
@@ -206,6 +207,97 @@ func TestSlackUseCases_HandleSlackMessage(t *testing.T) {
 		gt.NoError(t, err).Required()
 		gt.Array(t, caseMsgs).Length(1)
 		gt.Value(t, caseMsgs[0].Text()).Equal("Hello from mapped channel")
+	})
+
+	t.Run("saves to action sub-collection when message is in action thread", func(t *testing.T) {
+		repo := memory.New()
+		ctx := context.Background()
+
+		caseRec, err := repo.Case().Create(ctx, "ws-test", &model.Case{
+			Title:          "Test Case",
+			SlackChannelID: "C-ACTION",
+		})
+		gt.NoError(t, err).Required()
+
+		// Create an action with a Slack message TS — the thread anchor.
+		actionRec, err := repo.Action().Create(ctx, "ws-test", &model.Action{
+			CaseID:         caseRec.ID,
+			Title:          "Test Action",
+			Status:         types.ActionStatusTodo,
+			SlackMessageTS: "1700000000.000001",
+		})
+		gt.NoError(t, err).Required()
+
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "ws-test", Name: "Test"},
+		})
+		uc := usecase.New(repo, registry)
+
+		// A reply in the action thread.
+		reply := slack.NewMessageFromData(
+			"reply-msg-001",
+			"C-ACTION",
+			"1700000000.000001",
+			"T123", "U123", "alice", "Working on it",
+			"ev1",
+			time.Now(),
+			nil,
+		)
+
+		gt.NoError(t, uc.Slack.HandleSlackMessage(ctx, reply)).Required()
+
+		// Should be persisted under the action.
+		actionMsgs, _, err := repo.ActionMessage().List(ctx, "ws-test", actionRec.ID, 10, "")
+		gt.NoError(t, err).Required()
+		gt.Array(t, actionMsgs).Length(1)
+		gt.Value(t, actionMsgs[0].Text()).Equal("Working on it")
+		gt.Value(t, actionMsgs[0].ThreadTS()).Equal("1700000000.000001")
+
+		// Also still saved at the case level (case channel collection).
+		caseMsgs, _, err := repo.CaseMessage().List(ctx, "ws-test", caseRec.ID, 10, "")
+		gt.NoError(t, err).Required()
+		gt.Array(t, caseMsgs).Length(1)
+	})
+
+	t.Run("non-thread message in case channel is NOT saved to action sub-collection", func(t *testing.T) {
+		repo := memory.New()
+		ctx := context.Background()
+
+		caseRec, err := repo.Case().Create(ctx, "ws-test", &model.Case{
+			Title:          "Test Case",
+			SlackChannelID: "C-ACTION-2",
+		})
+		gt.NoError(t, err).Required()
+		actionRec, err := repo.Action().Create(ctx, "ws-test", &model.Action{
+			CaseID:         caseRec.ID,
+			Title:          "Test Action",
+			Status:         types.ActionStatusTodo,
+			SlackMessageTS: "1700000000.000002",
+		})
+		gt.NoError(t, err).Required()
+
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "ws-test", Name: "Test"},
+		})
+		uc := usecase.New(repo, registry)
+
+		// Top-level message (no ThreadTS) in the case channel.
+		topLevel := slack.NewMessageFromData(
+			"top-msg-001",
+			"C-ACTION-2",
+			"",
+			"T123", "U123", "alice", "Top-level",
+			"ev1",
+			time.Now(),
+			nil,
+		)
+		gt.NoError(t, uc.Slack.HandleSlackMessage(ctx, topLevel)).Required()
+
+		actionMsgs, _, err := repo.ActionMessage().List(ctx, "ws-test", actionRec.ID, 10, "")
+		gt.NoError(t, err).Required()
+		gt.Array(t, actionMsgs).Length(0)
 	})
 
 	t.Run("does not save to case sub-collection when channel is not mapped", func(t *testing.T) {
