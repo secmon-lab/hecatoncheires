@@ -95,12 +95,8 @@ test.describe('Case Management', () => {
     await caseListPage.fillSearchFilter('Case to Edit');
     await caseListPage.clickCaseByTitle('Case to Edit');
 
-    // Click edit button
-    await caseDetailPage.clickEdit();
-
-    // Update the case
-    await caseFormPage.fillDescription('Updated description');
-    await caseFormPage.submit();
+    // Update the description via Linear-style inline editing
+    await caseDetailPage.setDescription('Updated description');
 
     // Verify the description was updated
     const description = await caseDetailPage.getDescription();

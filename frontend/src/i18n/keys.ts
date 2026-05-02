@@ -180,6 +180,9 @@ export const msgKeys = {
   placeholderAddDescription: 'placeholderAddDescription',
   labelNoDescription: 'labelNoDescription',
   placeholderAddAssignees: 'placeholderAddAssignees',
+  placeholderAddTitle: 'placeholderAddTitle',
+  placeholderAddValue: 'placeholderAddValue',
+  placeholderAddStatus: 'placeholderAddStatus',
   labelDueDate: 'labelDueDate',
   caseLinkLabel: 'caseLinkLabel',
 

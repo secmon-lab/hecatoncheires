@@ -1,6 +1,7 @@
 package model_test
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -344,6 +345,16 @@ func TestFieldValidator_ValidateNumber_MultipleTypes(t *testing.T) {
 			name:    "string (invalid)",
 			value:   "42",
 			wantErr: true,
+		},
+		{
+			name:    "json.Number integer (gqlgen Any input)",
+			value:   json.Number("42"),
+			wantErr: false,
+		},
+		{
+			name:    "json.Number float (gqlgen Any input)",
+			value:   json.Number("3.14"),
+			wantErr: false,
 		},
 	}
 

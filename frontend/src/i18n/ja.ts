@@ -182,6 +182,9 @@ export const ja: Messages = {
   placeholderAddDescription: '説明を追加...',
   labelNoDescription: '説明なし',
   placeholderAddAssignees: '担当者を追加...',
+  placeholderAddTitle: 'タイトルを追加...',
+  placeholderAddValue: '値を入力...',
+  placeholderAddStatus: 'ステータスを選択...',
   labelDueDate: '期限',
   caseLinkLabel: 'ケース #{id} · {title}',
 

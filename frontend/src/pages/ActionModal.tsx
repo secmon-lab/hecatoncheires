@@ -1,16 +1,18 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery } from '@apollo/client'
-import Select from 'react-select'
-import { buildSelectStyles, portalProps } from '../components/selectStyles'
 import { GET_ACTION, UPDATE_ACTION, DELETE_ACTION, GET_ACTIONS } from '../graphql/action'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
 import Modal from '../components/Modal'
 import Button from '../components/Button'
-import { AvatarStack } from '../components/Primitives'
 import { IconCases, IconCheck } from '../components/Icons'
+import InlineText from '../components/inline/InlineText'
+import InlineLongText from '../components/inline/InlineLongText'
+import InlineSelect, { type InlineSelectOption } from '../components/inline/InlineSelect'
+import InlineUserSelect from '../components/inline/InlineUserSelect'
+import InlineDate from '../components/inline/InlineDate'
 
 interface ActionModalProps {
   actionId: number
@@ -18,6 +20,7 @@ interface ActionModalProps {
 }
 
 const STATUSES = ['BACKLOG', 'TODO', 'IN_PROGRESS', 'BLOCKED', 'COMPLETED'] as const
+type Status = typeof STATUSES[number]
 
 const statusKeyMap = {
   BACKLOG: 'statusBacklog',
@@ -26,6 +29,14 @@ const statusKeyMap = {
   BLOCKED: 'statusBlocked',
   COMPLETED: 'statusCompleted',
 } as const
+
+const statusColor: Record<Status, string> = {
+  BACKLOG: '#9ca3af',
+  TODO: '#9ca3af',
+  IN_PROGRESS: '#f59e0b',
+  BLOCKED: '#ef4444',
+  COMPLETED: '#10b981',
+}
 
 function formatDue(iso?: string | null) {
   if (!iso) return null
@@ -55,20 +66,12 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
   })
 
   const action = data?.action
-  const [editingTitle, setEditingTitle] = useState('')
-  const [editing, setEditing] = useState(false)
-  const [editingDescription, setEditingDescription] = useState('')
-  const [, setDescriptionDirty] = useState(false)
   const [savedFlash, setSavedFlash] = useState(false)
 
   const { data: usersData } = useQuery(GET_SLACK_USERS)
   const users = usersData?.slackUsers || []
-  const userOptions = users.map((u: any) => ({
-    value: u.id as string,
-    label: u.realName || u.name,
-  }))
 
-  const [updateAction, { loading: saving }] = useMutation(UPDATE_ACTION, {
+  const [updateAction] = useMutation(UPDATE_ACTION, {
     refetchQueries: [
       { query: GET_ACTION, variables: { workspaceId: currentWorkspace?.id, id: actionId } },
       { query: GET_ACTIONS, variables: { workspaceId: currentWorkspace?.id } },
@@ -78,18 +81,19 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
     refetchQueries: [{ query: GET_ACTIONS, variables: { workspaceId: currentWorkspace?.id } }],
   })
 
-  useEffect(() => {
-    if (action) {
-      setEditingTitle(action.title || '')
-      setEditingDescription(action.description || '')
-      setDescriptionDirty(false)
-    }
-  }, [action?.id])
-
   const flashSaved = () => {
     setSavedFlash(true)
     window.setTimeout(() => setSavedFlash(false), 1500)
   }
+
+  const statusOptions: InlineSelectOption<Status>[] = useMemo(
+    () => STATUSES.map((s) => ({
+      value: s,
+      label: t(statusKeyMap[s]),
+      color: statusColor[s],
+    })),
+    [t],
+  )
 
   const titleEl = useMemo(() => (
     <div className="row" style={{ gap: 12, alignItems: 'center', flex: 1 }}>
@@ -106,8 +110,6 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
           data-testid="action-case-link"
           onClick={(e) => {
             e.preventDefault()
-            // Navigate without calling onClose() — onClose triggers a route
-            // change back to the actions list which would override this nav.
             navigate(`/ws/${currentWorkspace!.id}/cases/${action.case.id}`)
           }}
         >
@@ -122,7 +124,7 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
         </span>
       )}
     </div>
-  ), [actionId, action?.case?.id, action?.case?.title, savedFlash, t, currentWorkspace, navigate, onClose])
+  ), [actionId, action?.case?.id, action?.case?.title, savedFlash, t, currentWorkspace, navigate])
 
   if (!loading && !action) {
     return (
@@ -132,7 +134,7 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
     )
   }
 
-  const handleStatusChange = async (next: string) => {
+  const handleStatusChange = async (next: Status) => {
     if (!action || next === action.status) return
     await updateAction({
       variables: { workspaceId: currentWorkspace!.id, input: { id: action.id, status: next } },
@@ -140,15 +142,33 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
     flashSaved()
   }
 
-  const handleSaveTitle = async () => {
-    if (!action || !editingTitle.trim() || editingTitle === action.title) {
-      setEditing(false)
-      return
-    }
+  const handleSaveTitle = async (next: string) => {
+    if (!action || next === action.title) return
     await updateAction({
-      variables: { workspaceId: currentWorkspace!.id, input: { id: action.id, title: editingTitle.trim() } },
+      variables: { workspaceId: currentWorkspace!.id, input: { id: action.id, title: next } },
     })
-    setEditing(false)
+    flashSaved()
+  }
+
+  const handleSaveDescription = async (next: string) => {
+    if (!action || next === (action.description || '')) return
+    await updateAction({
+      variables: { workspaceId: currentWorkspace!.id, input: { id: action.id, description: next } },
+    })
+    flashSaved()
+  }
+
+  const handleDueDateChange = async (next: string | null) => {
+    if (!action) return
+    const input: any = { id: action.id }
+    if (next == null) {
+      input.clearDueDate = true
+    } else {
+      // Promote a "YYYY-MM-DD" to a full ISO timestamp at midnight UTC so the
+      // backend's Time scalar can parse it.
+      input.dueDate = /^\d{4}-\d{2}-\d{2}$/.test(next) ? `${next}T00:00:00Z` : next
+    }
+    await updateAction({ variables: { workspaceId: currentWorkspace!.id, input } })
     flashSaved()
   }
 
@@ -157,24 +177,6 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
     await updateAction({
       variables: { workspaceId: currentWorkspace!.id, input: { id: action.id, assigneeIDs: next } },
     })
-    flashSaved()
-  }
-
-  const handleSave = async () => {
-    if (!action) return
-    const input: any = { id: action.id }
-    if (editingTitle.trim() && editingTitle !== action.title) input.title = editingTitle.trim()
-    if (editingDescription !== (action.description || '')) input.description = editingDescription
-    if (Object.keys(input).length === 1) {
-      // Nothing changed; still flash to acknowledge the click
-      flashSaved()
-      return
-    }
-    await updateAction({
-      variables: { workspaceId: currentWorkspace!.id, input },
-    })
-    setDescriptionDirty(false)
-    setEditing(false)
     flashSaved()
   }
 
@@ -201,14 +203,6 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
           </Button>
           <span className="spacer" />
           <Button variant="ghost" onClick={onClose}>{t('btnClose')}</Button>
-          <Button
-            variant="primary"
-            onClick={handleSave}
-            disabled={saving}
-            data-testid="action-save-button"
-          >
-            {saving ? t('btnSaving') : t('btnSave')}
-          </Button>
         </>
       }
     >
@@ -216,54 +210,35 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
         <div className="muted">{t('loading')}</div>
       ) : (
         <>
-          {editing ? (
-            <input
-              className="input"
-              autoFocus
-              value={editingTitle}
-              onChange={(e) => setEditingTitle(e.target.value)}
-              onBlur={handleSaveTitle}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleSaveTitle()
-                else if (e.key === 'Escape') { setEditingTitle(action.title); setEditing(false) }
-              }}
-              style={{ height: 38, fontSize: 18, fontWeight: 600, marginBottom: 16, padding: '0 6px' }}
-              data-testid="action-title-input"
+          <div style={{ marginBottom: 16 }}>
+            <InlineText
+              value={action.title || ''}
+              onSave={handleSaveTitle}
+              ariaLabel={t('labelTitle')}
+              variant="title"
+              placeholder={t('placeholderAddTitle')}
+              testId="action-title"
             />
-          ) : (
-            <h3
-              className="titleText"
-              onClick={() => setEditing(true)}
-              style={{ margin: '0 0 16px 0', fontSize: 20, fontWeight: 600, cursor: 'text' }}
-              data-testid="action-title"
-            >
-              {action.title}
-            </h3>
-          )}
+          </div>
 
-          <div className="row" style={{ gap: 18, fontSize: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-            <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+          <div className="row" style={{ gap: 18, fontSize: 13, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div className="row" style={{ gap: 8, alignItems: 'center', minWidth: 0 }}>
               <span className="soft">{t('labelStatus')}</span>
-              <div className="seg" style={{ fontSize: 11 }} data-testid="status-segmented">
-                {STATUSES.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    className={action.status === s ? 'on' : ''}
-                    onClick={() => handleStatusChange(s)}
-                    data-testid={`status-${s}`}
-                  >
-                    {t(statusKeyMap[s])}
-                  </button>
-                ))}
-              </div>
-              {/* keep an a11y dropdown for assistive tech and existing e2e */}
+              <InlineSelect<Status>
+                value={action.status as Status}
+                options={statusOptions}
+                onSave={handleStatusChange}
+                ariaLabel={t('labelStatus')}
+                placeholder={t('placeholderAddStatus')}
+                testId="action-status"
+              />
+              {/* a11y dropdown for assistive tech and existing e2e */}
               <select
                 aria-hidden
                 tabIndex={-1}
                 data-testid="status-dropdown"
                 value={action.status}
-                onChange={(e) => handleStatusChange(e.target.value)}
+                onChange={(e) => handleStatusChange(e.target.value as Status)}
                 style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
               >
                 {STATUSES.map((s) => (
@@ -273,50 +248,38 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
             </div>
             <div className="row" style={{ gap: 8, alignItems: 'center', minWidth: 280, flex: 1 }}>
               <span className="soft">{t('labelAssignees')}</span>
-              {action.assignees && action.assignees.length > 0 && (
-                <AvatarStack users={action.assignees} max={4} />
-              )}
-              <div style={{ flex: 1, minWidth: 200 }}>
-                <Select
-                  inputId={`action-assignees-${action.id}`}
-                  aria-label={t('labelAssignees')}
-                  isMulti
-                  options={userOptions}
-                  value={userOptions.filter((o: any) => (action.assigneeIDs || []).includes(o.value))}
-                  onChange={(opts: any) =>
-                    handleAssigneesChange((opts || []).map((o: any) => o.value))
-                  }
-                  placeholder={t('placeholderAddAssignees')}
-                  classNamePrefix="rs"
-                  {...portalProps}
-                  styles={buildSelectStyles()}
-                />
-              </div>
+              <InlineUserSelect
+                isMulti
+                users={users}
+                value={action.assigneeIDs || []}
+                onSave={handleAssigneesChange}
+                ariaLabel={t('labelAssignees')}
+                placeholder={t('placeholderAddAssignees')}
+                testId="action-assignees"
+              />
             </div>
           </div>
 
-          {due && (
-            <div className="row" style={{ gap: 8, fontSize: 12, marginBottom: 16, alignItems: 'center' }}>
-              <span className="soft">{t('labelDueDate')}</span>
-              <span className="mono" style={{ color: due.urgent || due.overdue ? 'var(--danger)' : 'var(--fg)' }}>
-                {due.label}
-              </span>
+          <div className="row" style={{ gap: 8, fontSize: 13, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span className="soft">{t('labelDueDate')}</span>
+            <div style={{ flex: 1, minWidth: 160, color: due?.urgent || due?.overdue ? 'var(--danger)' : undefined }}>
+              <InlineDate
+                value={action.dueDate || null}
+                onSave={handleDueDateChange}
+                ariaLabel={t('labelDueDate')}
+                placeholder={t('placeholderAddValue')}
+                testId="action-due-date"
+              />
             </div>
-          )}
+          </div>
 
           <div className="field-label">{t('labelDescription')}</div>
-          <textarea
-            className="textarea"
-            value={editingDescription}
-            onChange={(e) => { setEditingDescription(e.target.value); setDescriptionDirty(true) }}
+          <InlineLongText
+            value={action.description || ''}
+            onSave={handleSaveDescription}
+            ariaLabel={t('labelDescription')}
             placeholder={t('placeholderAddDescription')}
-            data-testid="action-description-input"
-            style={{
-              minHeight: 88, fontSize: 13, lineHeight: 1.6,
-              border: '1px dashed var(--line)', borderRadius: 6,
-              padding: '8px 10px', background: 'transparent',
-              color: editingDescription ? 'var(--fg)' : 'var(--fg-muted)',
-            }}
+            testId="action-description"
           />
 
           <div className="field-label" style={{ marginTop: 18 }}>

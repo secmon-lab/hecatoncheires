@@ -182,6 +182,9 @@ export const en: Messages = {
   placeholderAddDescription: 'Add a description...',
   labelNoDescription: 'No description',
   placeholderAddAssignees: 'Add assignees...',
+  placeholderAddTitle: 'Add a title...',
+  placeholderAddValue: 'Add value...',
+  placeholderAddStatus: 'Set status...',
   labelDueDate: 'Due Date',
   caseLinkLabel: 'Case #{id} · {title}',
 

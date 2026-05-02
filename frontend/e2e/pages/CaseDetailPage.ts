@@ -8,7 +8,6 @@ export class CaseDetailPage extends BasePage {
   // Locators
   private readonly caseTitle: Locator;
   private readonly caseDescription: Locator;
-  private readonly editButton: Locator;
   private readonly deleteButton: Locator;
   private readonly backButton: Locator;
   private readonly loadingIndicator: Locator;
@@ -18,11 +17,10 @@ export class CaseDetailPage extends BasePage {
 
   constructor(page: Page) {
     super(page);
-    // Case title is the h1 element inside main content area
-    this.caseTitle = page.locator('main h1').first();
-    // Description is the paragraph with description class
-    this.caseDescription = page.locator('main p').first();
-    this.editButton = page.locator('button').filter({ hasText: /Edit/ }).first();
+    // Case title is the inline-editable text inside the h1 wrapper
+    this.caseTitle = page.getByTestId('case-title');
+    // Description is the inline-editable long-text component
+    this.caseDescription = page.getByTestId('case-description');
     // Delete moved into a kebab/hamburger menu
     this.deleteButton = page.getByTestId('case-delete-menu-item');
     this.backButton = page.locator('button, a').filter({ hasText: /Back/ }).first();
@@ -57,10 +55,25 @@ export class CaseDetailPage extends BasePage {
   }
 
   /**
-   * Click the edit button
+   * Inline-edit the case title (Linear-style: click → input → Enter).
    */
-  async clickEdit(): Promise<void> {
-    await this.editButton.click();
+  async setTitle(next: string): Promise<void> {
+    await this.caseTitle.click();
+    const input = this.page.getByTestId('case-title-input');
+    await input.waitFor({ state: 'visible', timeout: 3000 });
+    await input.fill(next);
+    await input.press('Enter');
+  }
+
+  /**
+   * Inline-edit the case description (click → textarea → Save).
+   */
+  async setDescription(next: string): Promise<void> {
+    await this.caseDescription.click();
+    const input = this.page.getByTestId('case-description-input');
+    await input.waitFor({ state: 'visible', timeout: 3000 });
+    await input.fill(next);
+    await this.page.getByTestId('case-description-save').click();
   }
 
   /**
