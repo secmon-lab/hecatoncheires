@@ -17,6 +17,7 @@ type Repository interface {
 	CaseMessage() CaseMessageRepository
 	Memory() MemoryRepository
 	AssistLog() AssistLogRepository
+	CaseDraft() CaseDraftRepository
 
 	// Auth methods
 	PutToken(ctx context.Context, token *auth.Token) error

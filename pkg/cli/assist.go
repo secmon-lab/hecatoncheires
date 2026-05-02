@@ -101,10 +101,6 @@ func cmdAssist() *cli.Command {
 				usecase.WithSlackService(slackSvc),
 			)
 
-			if uc.Assist == nil {
-				return goerr.New("assist use case is not available (LLM client and Slack service are both required)")
-			}
-
 			logging.Default().Info("Starting assist",
 				"workspace", workspaceID,
 				"logCount", logCount,

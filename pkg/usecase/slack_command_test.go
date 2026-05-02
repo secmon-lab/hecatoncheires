@@ -55,7 +55,7 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		})
 
 		slackMock := &commandTestSlackService{}
-		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		uc := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 
 		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "risk", "")
 		gt.NoError(t, err).Required()
@@ -86,7 +86,7 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		})
 
 		slackMock := &commandTestSlackService{}
-		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		uc := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 
 		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "risk", "")
 		gt.NoError(t, err).Required()
@@ -115,7 +115,7 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		})
 
 		slackMock := &commandTestSlackService{}
-		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		uc := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 
 		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "nonexistent", "")
 		gt.Value(t, err).NotNil()
@@ -127,7 +127,7 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		registry := model.NewWorkspaceRegistry()
 
 		slackMock := &commandTestSlackService{}
-		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		uc := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 
 		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "", "")
 		gt.Value(t, err).NotNil()
@@ -142,7 +142,7 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		})
 
 		slackMock := &commandTestSlackService{}
-		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		uc := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 
 		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "", "")
 		gt.NoError(t, err).Required()
@@ -178,7 +178,7 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		})
 
 		slackMock := &commandTestSlackService{}
-		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		uc := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 
 		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "risk", "")
 		gt.NoError(t, err).Required()
@@ -199,7 +199,7 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		})
 
 		slackMock := &commandTestSlackService{}
-		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		uc := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 
 		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "", "")
 		gt.NoError(t, err).Required()
@@ -218,7 +218,7 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		})
 
 		slackMock := &commandTestSlackService{}
-		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		uc := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 
 		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C001", "risk", "TSOURCE")
 		gt.NoError(t, err).Required()
@@ -245,7 +245,7 @@ func TestSlackUseCases_HandleWorkspaceSelectSubmit(t *testing.T) {
 		})
 
 		slackMock := &commandTestSlackService{}
-		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		uc := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 
 		meta, _ := json.Marshal(map[string]string{"channel_id": "C001"})
 		callback := &goslack.InteractionCallback{
@@ -284,7 +284,7 @@ func TestSlackUseCases_HandleWorkspaceSelectSubmit(t *testing.T) {
 		repo := memory.New()
 		registry := model.NewWorkspaceRegistry()
 		slackMock := &commandTestSlackService{}
-		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		uc := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 
 		meta, _ := json.Marshal(map[string]string{"channel_id": "C001"})
 		callback := &goslack.InteractionCallback{
@@ -320,7 +320,7 @@ func TestSlackUseCases_HandleCaseCreationSubmit(t *testing.T) {
 		})
 
 		slackMock := &commandTestSlackService{}
-		slackUC := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 
 		meta, _ := json.Marshal(map[string]string{
@@ -383,7 +383,7 @@ func TestSlackUseCases_HandleCaseCreationSubmit(t *testing.T) {
 		})
 
 		slackMock := &commandTestSlackService{}
-		slackUC := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 
 		meta, _ := json.Marshal(map[string]string{
@@ -443,7 +443,7 @@ func TestSlackUseCases_HandleCaseCreationSubmit(t *testing.T) {
 		})
 
 		slackMock := &commandTestSlackService{}
-		slackUC := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 
 		meta, _ := json.Marshal(map[string]string{
@@ -492,7 +492,7 @@ func TestSlackUseCases_HandleCaseCreationSubmit(t *testing.T) {
 		})
 
 		slackMock := &commandTestSlackService{}
-		slackUC := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 
 		meta, _ := json.Marshal(map[string]string{
@@ -539,7 +539,7 @@ func TestSlackUseCases_HandleCaseCreationSubmit(t *testing.T) {
 		})
 
 		slackMock := &commandTestSlackService{}
-		slackUC := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 
 		meta, _ := json.Marshal(map[string]string{
@@ -597,7 +597,7 @@ func TestSlackUseCases_HandleSlashCommand_EditCase(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		slackMock := &commandTestSlackService{}
-		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		uc := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 
 		err = uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C-CASE-CHANNEL", "", "")
 		gt.NoError(t, err).Required()
@@ -631,7 +631,7 @@ func TestSlackUseCases_HandleSlashCommand_EditCase(t *testing.T) {
 		})
 
 		slackMock := &commandTestSlackService{}
-		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		uc := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 
 		err := uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C-NO-CASE", "", "")
 		gt.NoError(t, err).Required()
@@ -659,7 +659,7 @@ func TestSlackUseCases_HandleSlashCommand_EditCase(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		slackMock := &commandTestSlackService{}
-		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		uc := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 
 		// Non-member tries to access
 		err = uc.HandleSlashCommand(context.Background(), "trigger-1", "U-OUTSIDER", "C-PRIVATE", "", "")
@@ -687,7 +687,7 @@ func TestSlackUseCases_HandleSlashCommand_EditCase(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		slackMock := &commandTestSlackService{}
-		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		uc := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 
 		err = uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C-WS-CASE", "risk", "")
 		gt.NoError(t, err).Required()
@@ -727,7 +727,7 @@ func TestSlackUseCases_HandleCaseEditSubmit(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		slackMock := &commandTestSlackService{}
-		slackUC := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 
 		meta, _ := json.Marshal(map[string]any{
@@ -789,7 +789,7 @@ func TestSlackUseCases_HandleCaseEditSubmit(t *testing.T) {
 		})
 
 		slackMock := &commandTestSlackService{}
-		slackUC := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 
 		meta, _ := json.Marshal(map[string]any{
@@ -843,7 +843,7 @@ func TestBuildFieldInputBlockWithValue(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		slackMock := &commandTestSlackService{}
-		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		uc := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 
 		err = uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C-TEST", "", "")
 		gt.NoError(t, err).Required()
@@ -878,7 +878,7 @@ func TestBuildFieldInputBlockWithValue(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		slackMock := &commandTestSlackService{}
-		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		uc := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 
 		err = uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C-DATE", "", "")
 		gt.NoError(t, err).Required()
@@ -908,7 +908,7 @@ func TestBuildFieldInputBlockWithValue(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		slackMock := &commandTestSlackService{}
-		uc := usecase.NewSlackUseCases(repo, registry, nil, slackMock)
+		uc := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 
 		err = uc.HandleSlashCommand(context.Background(), "trigger-1", "U001", "C-NOFIELD", "", "")
 		gt.NoError(t, err).Required()

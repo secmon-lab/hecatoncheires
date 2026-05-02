@@ -231,6 +231,14 @@ func (m *mockSlackService) PostEphemeral(ctx context.Context, channelID string, 
 	return nil
 }
 
+func (m *mockSlackService) PostEphemeralBlocks(_ context.Context, _ string, _ string, _ []goslack.Block, _ string) (string, error) {
+	return "ts-eph", nil
+}
+
+func (m *mockSlackService) GetPermalink(_ context.Context, channelID string, ts string) (string, error) {
+	return "https://slack.test/" + channelID + "/" + ts, nil
+}
+
 func (m *mockSlackService) GetUserGroupMembers(ctx context.Context, groupID string) ([]string, error) {
 	if m.getUserGroupMembersFn != nil {
 		return m.getUserGroupMembersFn(ctx, groupID)

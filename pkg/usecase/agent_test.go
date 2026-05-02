@@ -94,6 +94,14 @@ func (m *agentTestSlackService) PostEphemeral(_ context.Context, _ string, _ str
 	return nil
 }
 
+func (m *agentTestSlackService) PostEphemeralBlocks(_ context.Context, _ string, _ string, _ []goslack.Block, _ string) (string, error) {
+	return "ts-eph", nil
+}
+
+func (m *agentTestSlackService) GetPermalink(_ context.Context, channelID string, ts string) (string, error) {
+	return "https://slack.test/" + channelID + "/" + ts, nil
+}
+
 func (m *agentTestSlackService) GetBotUserID(ctx context.Context) (string, error) {
 	if m.getBotUserIDFn != nil {
 		return m.getBotUserIDFn(ctx)

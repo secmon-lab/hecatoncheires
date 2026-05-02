@@ -219,6 +219,9 @@ func (m *mockRepo) Memory() interfaces.MemoryRepository {
 func (m *mockRepo) AssistLog() interfaces.AssistLogRepository {
 	panic("unexpected call: AssistLog()")
 }
+func (m *mockRepo) CaseDraft() interfaces.CaseDraftRepository {
+	panic("unexpected call: CaseDraft()")
+}
 func (m *mockRepo) Close() error { return nil }
 
 // newMockRepo builds a mockRepo with default no-op sub-repos
@@ -1208,6 +1211,12 @@ func (m *mockSlackService) ListTeams(_ context.Context) ([]slackService.Team, er
 }
 func (m *mockSlackService) PostEphemeral(_ context.Context, _ string, _ string, _ string) error {
 	return nil
+}
+func (m *mockSlackService) PostEphemeralBlocks(_ context.Context, _ string, _ string, _ []goslack.Block, _ string) (string, error) {
+	return "ts-eph", nil
+}
+func (m *mockSlackService) GetPermalink(_ context.Context, channelID string, ts string) (string, error) {
+	return "https://slack.test/" + channelID + "/" + ts, nil
 }
 func (m *mockSlackService) GetUserGroupMembers(_ context.Context, _ string) ([]string, error) {
 	return nil, nil

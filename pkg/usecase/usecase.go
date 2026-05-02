@@ -28,6 +28,7 @@ type UseCases struct {
 	Source            *SourceUseCase
 	Compile           *CompileUseCase
 	Assist            *AssistUseCase
+	MentionDraft      *MentionDraftUseCase
 }
 
 type Option func(*UseCases)
@@ -95,12 +96,17 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 	uc.Source = NewSourceUseCase(repo, uc.notion, uc.slackService, uc.githubService)
 	uc.Compile = NewCompileUseCase(repo, registry, uc.notion, uc.knowledgeService, uc.slackService, uc.githubService, uc.baseURL)
 
-	// Create AgentUseCase and AssistUseCase only if LLM client and Slack service are both available
-	if uc.llmClient != nil && uc.slackService != nil {
+	// Whenever Slack is wired, LLM must also be wired — Slack-driven flows
+	// (agent mention, mention-draft, assist) all require LLM by design.
+	if uc.slackService != nil {
+		if uc.llmClient == nil {
+			panic("usecase.New: LLM client is required when Slack service is configured (use WithLLMClient)")
+		}
 		uc.Agent = NewAgentUseCase(repo, registry, uc.slackService, uc.llmClient)
 		uc.Assist = NewAssistUseCase(repo, registry, uc.slackService, uc.llmClient)
+		uc.MentionDraft = NewMentionDraftUseCase(repo, registry, uc.slackService, NewDraftMaterializer(uc.llmClient))
 	}
-	uc.Slack = NewSlackUseCases(repo, registry, uc.Agent, uc.slackService)
+	uc.Slack = NewSlackUseCases(repo, registry, uc.Agent, uc.MentionDraft, uc.slackService)
 
 	return uc
 }

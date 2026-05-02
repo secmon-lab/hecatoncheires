@@ -277,7 +277,10 @@ func TestSlackUseCases_HandleMembershipEvent(t *testing.T) {
 			},
 		}
 
-		uc := usecase.New(repo, registry, usecase.WithSlackService(slackSvc))
+		uc := usecase.New(repo, registry,
+			usecase.WithSlackService(slackSvc),
+			usecase.WithLLMClient(stubMaterializerLLM()),
+		)
 
 		event := &slackevents.EventsAPIEvent{
 			Type: slackevents.CallbackEvent,
@@ -331,7 +334,10 @@ func TestSlackUseCases_HandleMembershipEvent(t *testing.T) {
 			Workspace: model.Workspace{ID: wsID, Name: "Test"},
 		})
 
-		uc := usecase.New(repo, registry, usecase.WithSlackService(slackSvc))
+		uc := usecase.New(repo, registry,
+			usecase.WithSlackService(slackSvc),
+			usecase.WithLLMClient(stubMaterializerLLM()),
+		)
 
 		event := &slackevents.EventsAPIEvent{
 			Type: slackevents.CallbackEvent,
@@ -371,7 +377,10 @@ func TestSlackUseCases_HandleMembershipEvent(t *testing.T) {
 			},
 		}
 
-		uc := usecase.New(repo, registry, usecase.WithSlackService(slackSvc))
+		uc := usecase.New(repo, registry,
+			usecase.WithSlackService(slackSvc),
+			usecase.WithLLMClient(stubMaterializerLLM()),
+		)
 
 		event := &slackevents.EventsAPIEvent{
 			Type: slackevents.CallbackEvent,

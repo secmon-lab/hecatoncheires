@@ -7,8 +7,9 @@ import (
 
 // Workspace represents a workspace's identity
 type Workspace struct {
-	ID   string
-	Name string
+	ID          string
+	Name        string
+	Description string // Human-readable description (e.g. for AI workspace estimation, UI tooltips)
 }
 
 // ErrWorkspaceNotFound is returned when a workspace is not found in the registry

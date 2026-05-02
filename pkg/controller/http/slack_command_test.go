@@ -85,6 +85,12 @@ func (m *mockSlackServiceForCommand) ListTeams(_ context.Context) ([]slacksvc.Te
 func (m *mockSlackServiceForCommand) PostEphemeral(_ context.Context, _ string, _ string, _ string) error {
 	return nil
 }
+func (m *mockSlackServiceForCommand) PostEphemeralBlocks(_ context.Context, _ string, _ string, _ []goslack.Block, _ string) (string, error) {
+	return "ts-eph", nil
+}
+func (m *mockSlackServiceForCommand) GetPermalink(_ context.Context, channelID string, ts string) (string, error) {
+	return "https://slack.test/" + channelID + "/" + ts, nil
+}
 func (m *mockSlackServiceForCommand) GetUserGroupMembers(_ context.Context, _ string) ([]string, error) {
 	return nil, nil
 }
@@ -97,7 +103,7 @@ func TestSlackCommandHandler(t *testing.T) {
 		for _, ws := range workspaces {
 			registry.Register(&model.WorkspaceEntry{Workspace: ws})
 		}
-		slackUC := usecase.NewSlackUseCases(repo, registry, nil, &mockSlackServiceForCommand{})
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, &mockSlackServiceForCommand{})
 		return httpctrl.NewSlackCommandHandler(slackUC)
 	}
 
