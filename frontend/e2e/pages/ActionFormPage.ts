@@ -15,7 +15,8 @@ export class ActionFormPage extends BasePage {
     super(page);
     this.titleInput = page.locator('#title');
     this.descriptionInput = page.locator('#description');
-    this.submitButton = page.locator('button').filter({ hasText: /Save/ }).first();
+    // In create mode the button reads "Create" / "Creating..."; in edit mode "Save" / "Saving...".
+    this.submitButton = page.locator('button').filter({ hasText: /^(Save|Saving|Create|Creating)/ }).first();
     this.cancelButton = page.locator('button').filter({ hasText: /Cancel/ }).first();
   }
 
