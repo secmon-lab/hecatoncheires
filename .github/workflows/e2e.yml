@@ -7,6 +7,7 @@ on:
       - 'pkg/**'
       - 'graphql/**'
       - '.github/workflows/e2e.yml'
+  workflow_dispatch:
 
 jobs:
   e2e-tests:
