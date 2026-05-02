@@ -117,6 +117,10 @@ func (m *mockActionRepo) GetByCases(ctx context.Context, workspaceID string, cas
 	return nil, nil
 }
 
+func (m *mockActionRepo) GetBySlackMessageTS(ctx context.Context, workspaceID string, ts string) (*model.Action, error) {
+	return nil, nil
+}
+
 // ----- mock KnowledgeRepository -----
 
 type mockKnowledgeRepo struct {

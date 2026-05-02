@@ -225,6 +225,33 @@ func (r *actionRepository) GetByCase(ctx context.Context, workspaceID string, ca
 	return actions, nil
 }
 
+func (r *actionRepository) GetBySlackMessageTS(ctx context.Context, workspaceID string, ts string) (*model.Action, error) {
+	if ts == "" {
+		return nil, goerr.Wrap(ErrNotFound, "slack message ts is empty")
+	}
+
+	iter := r.actionsCollection(workspaceID).
+		Where("SlackMessageTS", "==", ts).
+		Limit(1).
+		Documents(ctx)
+	defer iter.Stop()
+
+	docSnap, err := iter.Next()
+	if err == iterator.Done {
+		return nil, goerr.Wrap(ErrNotFound, "action not found", goerr.V("slack_message_ts", ts))
+	}
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to query action by slack message ts", goerr.V("slack_message_ts", ts))
+	}
+
+	var a model.Action
+	if err := docSnap.DataTo(&a); err != nil {
+		return nil, goerr.Wrap(err, "failed to decode action", goerr.V("doc_id", docSnap.Ref.ID))
+	}
+
+	return &a, nil
+}
+
 func (r *actionRepository) GetByCases(ctx context.Context, workspaceID string, caseIDs []int64) (map[int64][]*model.Action, error) {
 	// Initialize result map
 	result := make(map[int64][]*model.Action)
