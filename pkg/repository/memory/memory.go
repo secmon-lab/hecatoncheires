@@ -8,34 +8,38 @@ import (
 type Repository = Memory
 
 type Memory struct {
-	caseRepo    *caseRepository
-	action      *actionRepository
-	tokens      *tokenStore
-	slack       *slackRepository
-	slackUser   *slackUserRepository
-	source      *sourceRepository
-	knowledge   *knowledgeRepository
-	caseMessage *caseMessageRepository
-	memoryStore *memoryRepository
-	assistLog   *assistLogRepository
-	caseDraft   *caseDraftRepository
+	caseRepo      *caseRepository
+	action        *actionRepository
+	tokens        *tokenStore
+	slack         *slackRepository
+	slackUser     *slackUserRepository
+	source        *sourceRepository
+	knowledge     *knowledgeRepository
+	caseMessage   *caseMessageRepository
+	actionMessage *actionMessageRepository
+	actionEvent   *actionEventRepository
+	memoryStore   *memoryRepository
+	assistLog     *assistLogRepository
+	caseDraft     *caseDraftRepository
 }
 
 var _ interfaces.Repository = &Memory{}
 
 func New() *Memory {
 	return &Memory{
-		caseRepo:    newCaseRepository(),
-		action:      newActionRepository(),
-		tokens:      newTokenStore(),
-		slack:       newSlackRepository(),
-		slackUser:   newSlackUserRepository(),
-		source:      newSourceRepository(),
-		knowledge:   newKnowledgeRepository(),
-		caseMessage: newCaseMessageRepository(),
-		memoryStore: newMemoryRepository(),
-		assistLog:   newAssistLogRepository(),
-		caseDraft:   newCaseDraftRepository(),
+		caseRepo:      newCaseRepository(),
+		action:        newActionRepository(),
+		tokens:        newTokenStore(),
+		slack:         newSlackRepository(),
+		slackUser:     newSlackUserRepository(),
+		source:        newSourceRepository(),
+		knowledge:     newKnowledgeRepository(),
+		caseMessage:   newCaseMessageRepository(),
+		actionMessage: newActionMessageRepository(),
+		actionEvent:   newActionEventRepository(),
+		memoryStore:   newMemoryRepository(),
+		assistLog:     newAssistLogRepository(),
+		caseDraft:     newCaseDraftRepository(),
 	}
 }
 
@@ -65,6 +69,14 @@ func (m *Memory) Knowledge() interfaces.KnowledgeRepository {
 
 func (m *Memory) CaseMessage() interfaces.CaseMessageRepository {
 	return m.caseMessage
+}
+
+func (m *Memory) ActionMessage() interfaces.ActionMessageRepository {
+	return m.actionMessage
+}
+
+func (m *Memory) ActionEvent() interfaces.ActionEventRepository {
+	return m.actionEvent
 }
 
 func (m *Memory) Memory() interfaces.MemoryRepository {

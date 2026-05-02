@@ -72,8 +72,8 @@ export const GET_CASE = gql`
         id
         title
         status
-        assigneeIDs
-        assignees {
+        assigneeID
+        assignee {
           id
           name
           realName

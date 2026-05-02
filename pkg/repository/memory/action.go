@@ -33,15 +33,12 @@ func (r *actionRepository) ensureWorkspace(workspaceID string) {
 
 // copyAction creates a deep copy of an action
 func copyAction(a *model.Action) *model.Action {
-	assigneeIDs := make([]string, len(a.AssigneeIDs))
-	copy(assigneeIDs, a.AssigneeIDs)
-
 	copied := &model.Action{
 		ID:             a.ID,
 		CaseID:         a.CaseID,
 		Title:          a.Title,
 		Description:    a.Description,
-		AssigneeIDs:    assigneeIDs,
+		AssigneeID:     a.AssigneeID,
 		SlackMessageTS: a.SlackMessageTS,
 		Status:         a.Status,
 		CreatedAt:      a.CreatedAt,
@@ -161,6 +158,28 @@ func (r *actionRepository) GetByCase(ctx context.Context, workspaceID string, ca
 	}
 
 	return actions, nil
+}
+
+func (r *actionRepository) GetBySlackMessageTS(ctx context.Context, workspaceID string, ts string) (*model.Action, error) {
+	if ts == "" {
+		return nil, goerr.Wrap(ErrNotFound, "slack message ts is empty")
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ws, exists := r.actions[workspaceID]
+	if !exists {
+		return nil, goerr.Wrap(ErrNotFound, "action not found", goerr.V("slack_message_ts", ts))
+	}
+
+	for _, action := range ws {
+		if action.SlackMessageTS == ts {
+			return copyAction(action), nil
+		}
+	}
+
+	return nil, goerr.Wrap(ErrNotFound, "action not found", goerr.V("slack_message_ts", ts))
 }
 
 func (r *actionRepository) GetByCases(ctx context.Context, workspaceID string, caseIDs []int64) (map[int64][]*model.Action, error) {

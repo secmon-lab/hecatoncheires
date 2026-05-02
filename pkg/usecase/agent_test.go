@@ -405,10 +405,10 @@ func TestAgentSystemPrompt_ActionsAndKnowledges(t *testing.T) {
 		}
 		actions := []*model.Action{
 			{
-				ID:          1,
-				Title:       "Investigate the issue",
-				Status:      types.ActionStatusInProgress,
-				AssigneeIDs: []string{"U001", "U002"},
+				ID:         1,
+				Title:      "Investigate the issue",
+				Status:     types.ActionStatusInProgress,
+				AssigneeID: "U001",
 			},
 			{
 				ID:     2,
@@ -423,7 +423,7 @@ func TestAgentSystemPrompt_ActionsAndKnowledges(t *testing.T) {
 		gt.Value(t, strings.Contains(prompt, "## Actions")).Equal(true)
 		gt.Value(t, strings.Contains(prompt, "Investigate the issue")).Equal(true)
 		gt.Value(t, strings.Contains(prompt, "Write report")).Equal(true)
-		gt.Value(t, strings.Contains(prompt, "U001, U002")).Equal(true)
+		gt.Value(t, strings.Contains(prompt, "U001")).Equal(true)
 		gt.Value(t, strings.Contains(prompt, "IN_PROGRESS")).Equal(true)
 		gt.Value(t, strings.Contains(prompt, "TODO")).Equal(true)
 	})

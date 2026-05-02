@@ -32,7 +32,7 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			CaseID:      c.ID,
 			Title:       "Investigate logs",
 			Description: "Check server logs for anomalies",
-			AssigneeIDs: []string{"U123"},
+			AssigneeID:  "U123",
 			Status:      types.ActionStatusTodo,
 		}
 
@@ -189,6 +189,47 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 
 		// Verify it's deleted
 		_, err = repo.Action().Get(ctx, wsID, created.ID)
+		gt.Value(t, err).NotNil()
+	})
+
+	t.Run("GetBySlackMessageTS returns matching action", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		c, err := repo.Case().Create(ctx, wsID, &model.Case{
+			Title: "Test Case",
+		})
+		gt.NoError(t, err).Required()
+
+		ts := "1700000000.000123"
+		created, err := repo.Action().Create(ctx, wsID, &model.Action{
+			CaseID:         c.ID,
+			Title:          "Has slack message",
+			Status:         types.ActionStatusTodo,
+			SlackMessageTS: ts,
+		})
+		gt.NoError(t, err).Required()
+
+		got, err := repo.Action().GetBySlackMessageTS(ctx, wsID, ts)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.ID).Equal(created.ID)
+		gt.Value(t, got.SlackMessageTS).Equal(ts)
+		gt.Value(t, got.Title).Equal("Has slack message")
+	})
+
+	t.Run("GetBySlackMessageTS returns ErrNotFound when no match", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		_, err := repo.Action().GetBySlackMessageTS(ctx, wsID, "9999999999.999999")
+		gt.Value(t, err).NotNil()
+	})
+
+	t.Run("GetBySlackMessageTS returns ErrNotFound for empty ts", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		_, err := repo.Action().GetBySlackMessageTS(ctx, wsID, "")
 		gt.Value(t, err).NotNil()
 	})
 }

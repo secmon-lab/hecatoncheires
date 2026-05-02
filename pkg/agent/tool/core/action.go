@@ -16,14 +16,14 @@ import (
 // actionToMap converts an Action to a map for tool response
 func actionToMap(a *model.Action) map[string]any {
 	m := map[string]any{
-		"id":           a.ID,
-		"case_id":      a.CaseID,
-		"title":        a.Title,
-		"description":  a.Description,
-		"status":       a.Status.String(),
-		"assignee_ids": a.AssigneeIDs,
-		"created_at":   a.CreatedAt.String(),
-		"updated_at":   a.UpdatedAt.String(),
+		"id":          a.ID,
+		"case_id":     a.CaseID,
+		"title":       a.Title,
+		"description": a.Description,
+		"status":      a.Status.String(),
+		"assignee_id": a.AssigneeID,
+		"created_at":  a.CreatedAt.String(),
+		"updated_at":  a.UpdatedAt.String(),
 	}
 	if a.DueDate != nil {
 		m["due_date"] = a.DueDate.Format(time.RFC3339)
@@ -59,10 +59,10 @@ func (t *listActionsTool) Run(ctx context.Context, _ map[string]any) (map[string
 	items := make([]map[string]any, len(actions))
 	for i, a := range actions {
 		item := map[string]any{
-			"id":           a.ID,
-			"title":        a.Title,
-			"status":       a.Status.String(),
-			"assignee_ids": a.AssigneeIDs,
+			"id":          a.ID,
+			"title":       a.Title,
+			"status":      a.Status.String(),
+			"assignee_id": a.AssigneeID,
 		}
 		if a.DueDate != nil {
 			item["due_date"] = a.DueDate.Format(time.RFC3339)
@@ -134,13 +134,10 @@ func (t *createActionTool) Spec() gollem.ToolSpec {
 				Description: "Detailed description of the action",
 				Required:    false,
 			},
-			"assignee_ids": {
-				Type:        gollem.TypeArray,
-				Description: "List of Slack user IDs to assign to this action",
+			"assignee_id": {
+				Type:        gollem.TypeString,
+				Description: "Slack user ID to assign to this action (omit or empty for unassigned)",
 				Required:    false,
-				Items: &gollem.Parameter{
-					Type: gollem.TypeString,
-				},
 			},
 			"status": {
 				Type:        gollem.TypeString,
@@ -180,15 +177,13 @@ func (t *createActionTool) Run(ctx context.Context, args map[string]any) (map[st
 		status = parsed
 	}
 
-	var assigneeIDs []string
-	if rawIDs, ok := args["assignee_ids"].([]any); ok {
-		for _, id := range rawIDs {
-			s, ok := id.(string)
-			if !ok {
-				return nil, fmt.Errorf("invalid item in assignee_ids: expected string user ID, got %T", id)
-			}
-			assigneeIDs = append(assigneeIDs, s)
+	var assigneeID string
+	if v, ok := args["assignee_id"]; ok {
+		s, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid assignee_id: expected string, got %T", v)
 		}
+		assigneeID = s
 	}
 
 	var dueDate *time.Time
@@ -206,7 +201,7 @@ func (t *createActionTool) Run(ctx context.Context, args map[string]any) (map[st
 		Title:       title,
 		Description: description,
 		Status:      status,
-		AssigneeIDs: assigneeIDs,
+		AssigneeID:  assigneeID,
 		DueDate:     dueDate,
 	}
 
@@ -220,7 +215,7 @@ func (t *createActionTool) Run(ctx context.Context, args map[string]any) (map[st
 	return actionToMap(created), nil
 }
 
-// updateActionTool updates the title, description, and/or assignees of an action
+// updateActionTool updates the title, description, and/or assignee of an action
 type updateActionTool struct {
 	repo        interfaces.Repository
 	workspaceID string
@@ -229,7 +224,7 @@ type updateActionTool struct {
 func (t *updateActionTool) Spec() gollem.ToolSpec {
 	return gollem.ToolSpec{
 		Name:        "core__update_action",
-		Description: "Update the title, description, and/or assignees of an existing action",
+		Description: "Update the title, description, and/or assignee of an existing action",
 		Parameters: map[string]*gollem.Parameter{
 			"action_id": {
 				Type:        gollem.TypeInteger,
@@ -246,13 +241,10 @@ func (t *updateActionTool) Spec() gollem.ToolSpec {
 				Description: "New description for the action (omit or empty string to keep current value)",
 				Required:    false,
 			},
-			"assignee_ids": {
-				Type:        gollem.TypeArray,
-				Description: "New list of Slack user IDs to assign to this action (replaces existing assignees; omit to keep current value)",
+			"assignee_id": {
+				Type:        gollem.TypeString,
+				Description: "New Slack user ID to assign (replaces existing). Set to empty string to clear the assignee. Omit to keep current value.",
 				Required:    false,
-				Items: &gollem.Parameter{
-					Type: gollem.TypeString,
-				},
 			},
 			"due_date": {
 				Type:        gollem.TypeString,
@@ -287,16 +279,12 @@ func (t *updateActionTool) Run(ctx context.Context, args map[string]any) (map[st
 	if desc, ok := args["description"].(string); ok && desc != "" {
 		a.Description = desc
 	}
-	if rawIDs, ok := args["assignee_ids"].([]any); ok {
-		assigneeIDs := make([]string, 0, len(rawIDs))
-		for _, id := range rawIDs {
-			s, ok := id.(string)
-			if !ok {
-				return nil, fmt.Errorf("invalid item in assignee_ids: expected string user ID, got %T", id)
-			}
-			assigneeIDs = append(assigneeIDs, s)
+	if v, ok := args["assignee_id"]; ok {
+		s, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid assignee_id: expected string, got %T", v)
 		}
-		a.AssigneeIDs = assigneeIDs
+		a.AssigneeID = s
 	}
 	if dueDateStr, ok := args["due_date"].(string); ok {
 		if dueDateStr == "" {
@@ -364,7 +352,7 @@ func (t *updateActionStatusTool) Run(ctx context.Context, args map[string]any) (
 		return nil, fmt.Errorf("invalid status %q: must be one of BACKLOG, TODO, IN_PROGRESS, BLOCKED, COMPLETED", statusStr)
 	}
 
-	tool.Update(ctx, fmt.Sprintf("Updating action #%d status → %s", actionID, status))
+	tool.Update(ctx, fmt.Sprintf("Updating action #%d status -> %s", actionID, status))
 	a, err := t.repo.Action().Get(ctx, t.workspaceID, actionID)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to get action for status update",
@@ -387,16 +375,16 @@ func (t *updateActionStatusTool) Run(ctx context.Context, args map[string]any) (
 	return actionToMap(updated), nil
 }
 
-// addActionAssigneeTool adds an assignee to an action
-type addActionAssigneeTool struct {
+// setActionAssigneeTool sets (or clears) the assignee of an action
+type setActionAssigneeTool struct {
 	repo        interfaces.Repository
 	workspaceID string
 }
 
-func (t *addActionAssigneeTool) Spec() gollem.ToolSpec {
+func (t *setActionAssigneeTool) Spec() gollem.ToolSpec {
 	return gollem.ToolSpec{
-		Name:        "core__add_action_assignee",
-		Description: "Add an assignee to an action",
+		Name:        "core__set_action_assignee",
+		Description: "Set or clear the assignee of an action. Pass an empty string to clear.",
 		Parameters: map[string]*gollem.Parameter{
 			"action_id": {
 				Type:        gollem.TypeInteger,
@@ -405,28 +393,37 @@ func (t *addActionAssigneeTool) Spec() gollem.ToolSpec {
 			},
 			"assignee_id": {
 				Type:        gollem.TypeString,
-				Description: "Slack user ID of the assignee to add",
+				Description: "Slack user ID of the assignee. Empty string clears the assignee.",
 				Required:    true,
 			},
 		},
 	}
 }
 
-func (t *addActionAssigneeTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
+func (t *setActionAssigneeTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
 	actionID, err := extractInt64(args, "action_id")
 	if err != nil {
 		return nil, err
 	}
 
-	assigneeID, _ := args["assignee_id"].(string)
-	if assigneeID == "" {
+	v, ok := args["assignee_id"]
+	if !ok {
 		return nil, fmt.Errorf("assignee_id is required")
 	}
+	assigneeID, ok := v.(string)
+	if !ok {
+		return nil, fmt.Errorf("assignee_id must be a string, got %T", v)
+	}
 
-	tool.Update(ctx, fmt.Sprintf("Adding assignee %s to action #%d", assigneeID, actionID))
+	if assigneeID == "" {
+		tool.Update(ctx, fmt.Sprintf("Clearing assignee on action #%d", actionID))
+	} else {
+		tool.Update(ctx, fmt.Sprintf("Setting assignee %s on action #%d", assigneeID, actionID))
+	}
+
 	a, err := t.repo.Action().Get(ctx, t.workspaceID, actionID)
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to get action for assignee addition",
+		return nil, goerr.Wrap(err, "failed to get action for assignee update",
 			goerr.V("workspaceID", t.workspaceID),
 			goerr.V("actionID", actionID),
 		)
@@ -435,83 +432,10 @@ func (t *addActionAssigneeTool) Run(ctx context.Context, args map[string]any) (m
 		return nil, fmt.Errorf("action not found: id=%d", actionID)
 	}
 
-	// Avoid duplicate assignees
-	for _, id := range a.AssigneeIDs {
-		if id == assigneeID {
-			return actionToMap(a), nil
-		}
-	}
-
-	a.AssigneeIDs = append(a.AssigneeIDs, assigneeID)
+	a.AssigneeID = assigneeID
 	updated, err := t.repo.Action().Update(ctx, t.workspaceID, a)
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to add assignee to action",
-			goerr.V("workspaceID", t.workspaceID),
-			goerr.V("actionID", actionID),
-		)
-	}
-	return actionToMap(updated), nil
-}
-
-// removeActionAssigneeTool removes an assignee from an action
-type removeActionAssigneeTool struct {
-	repo        interfaces.Repository
-	workspaceID string
-}
-
-func (t *removeActionAssigneeTool) Spec() gollem.ToolSpec {
-	return gollem.ToolSpec{
-		Name:        "core__remove_action_assignee",
-		Description: "Remove an assignee from an action",
-		Parameters: map[string]*gollem.Parameter{
-			"action_id": {
-				Type:        gollem.TypeInteger,
-				Description: "The ID of the action",
-				Required:    true,
-			},
-			"assignee_id": {
-				Type:        gollem.TypeString,
-				Description: "Slack user ID of the assignee to remove",
-				Required:    true,
-			},
-		},
-	}
-}
-
-func (t *removeActionAssigneeTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
-	actionID, err := extractInt64(args, "action_id")
-	if err != nil {
-		return nil, err
-	}
-
-	assigneeID, _ := args["assignee_id"].(string)
-	if assigneeID == "" {
-		return nil, fmt.Errorf("assignee_id is required")
-	}
-
-	tool.Update(ctx, fmt.Sprintf("Removing assignee %s from action #%d", assigneeID, actionID))
-	a, err := t.repo.Action().Get(ctx, t.workspaceID, actionID)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to get action for assignee removal",
-			goerr.V("workspaceID", t.workspaceID),
-			goerr.V("actionID", actionID),
-		)
-	}
-	if a == nil {
-		return nil, fmt.Errorf("action not found: id=%d", actionID)
-	}
-
-	filtered := a.AssigneeIDs[:0]
-	for _, id := range a.AssigneeIDs {
-		if id != assigneeID {
-			filtered = append(filtered, id)
-		}
-	}
-	a.AssigneeIDs = filtered
-
-	updated, err := t.repo.Action().Update(ctx, t.workspaceID, a)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to remove assignee from action",
+		return nil, goerr.Wrap(err, "failed to update action assignee",
 			goerr.V("workspaceID", t.workspaceID),
 			goerr.V("actionID", actionID),
 		)

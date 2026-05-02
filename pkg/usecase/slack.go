@@ -194,7 +194,16 @@ func (uc *SlackUseCases) HandleSlackMessage(ctx context.Context, msg *slack.Mess
 		return goerr.New("message is nil")
 	}
 
-	logger := logging.From(ctx)
+	// Drop our own bot's posts. These are the action change-notification
+	// context blocks we emit ourselves; the ActionEvent feed already
+	// records the same change, so re-ingesting them would double-count.
+	// Other bots (e.g., CI integrations) still pass through.
+	if uc.slackService != nil {
+		if botUserID, err := uc.slackService.GetBotUserID(ctx); err == nil && botUserID != "" && msg.UserID() == botUserID {
+			logging.From(ctx).Debug("skipping bot's own message", "user_id", msg.UserID())
+			return nil
+		}
+	}
 
 	// Save to channel-level collection (backward compatible)
 	if err := uc.repo.Slack().PutMessage(ctx, msg); err != nil {
@@ -221,11 +230,27 @@ func (uc *SlackUseCases) HandleSlackMessage(ctx context.Context, msg *slack.Mess
 					goerr.V("caseID", c.ID),
 				)
 			}
+
+			// If this message is a reply in an action's thread, also persist
+			// it under the action's slack_messages sub-collection so the WebUI
+			// can display the conversation.
+			if msg.ThreadTS() != "" && msg.ThreadTS() != msg.ID() {
+				action, actionErr := uc.repo.Action().GetBySlackMessageTS(ctx, entry.Workspace.ID, msg.ThreadTS())
+				if actionErr == nil && action != nil && action.CaseID == c.ID {
+					if err := uc.repo.ActionMessage().Put(ctx, entry.Workspace.ID, action.ID, msg); err != nil {
+						return goerr.Wrap(err, "failed to save message to action sub-collection",
+							goerr.V("channelID", msg.ChannelID()),
+							goerr.V("workspaceID", entry.Workspace.ID),
+							goerr.V("actionID", action.ID),
+						)
+					}
+				}
+			}
 			break
 		}
 	}
 
-	logger.Info("slack message saved",
+	logging.From(ctx).Info("slack message saved",
 		"messageID", msg.ID(),
 		"channelID", msg.ChannelID(),
 		"userID", msg.UserID(),

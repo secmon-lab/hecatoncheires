@@ -7,12 +7,13 @@ import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
 import Modal from '../components/Modal'
 import Button from '../components/Button'
-import { IconCases, IconCheck } from '../components/Icons'
+import { IconCheck } from '../components/Icons'
 import InlineText from '../components/inline/InlineText'
 import InlineLongText from '../components/inline/InlineLongText'
 import InlineSelect, { type InlineSelectOption } from '../components/inline/InlineSelect'
 import InlineUserSelect from '../components/inline/InlineUserSelect'
 import InlineDate from '../components/inline/InlineDate'
+import ActionActivity from '../components/ActionActivity'
 
 interface ActionModalProps {
   actionId: number
@@ -96,10 +97,10 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
   )
 
   const titleEl = useMemo(() => (
-    <div className="row" style={{ gap: 12, alignItems: 'center', flex: 1 }}>
+    <div className="row" style={{ gap: 12, alignItems: 'center', flex: 1, minWidth: 0 }}>
       <h2
         id="modal-title"
-        style={{ margin: 0, fontSize: 13, fontWeight: 500, color: 'var(--fg-soft)', fontFamily: 'var(--font-mono)' }}
+        style={{ margin: 0, fontSize: 13, fontWeight: 500, color: 'var(--fg-soft)', fontFamily: 'var(--font-mono)', flex: '0 0 auto' }}
       >
         #A-{actionId}
       </h2>
@@ -108,17 +109,20 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
           className="slack-link"
           href={`/ws/${currentWorkspace!.id}/cases/${action.case.id}`}
           data-testid="action-case-link"
+          title={`#${action.case.id} ${action.case.title}`}
+          style={{ flex: '1 1 auto', minWidth: 0, overflow: 'hidden' }}
           onClick={(e) => {
             e.preventDefault()
             navigate(`/ws/${currentWorkspace!.id}/cases/${action.case.id}`)
           }}
         >
-          <IconCases size={11} />
-          #{action.case.id} {action.case.title}
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+            #{action.case.id} {action.case.title}
+          </span>
         </a>
       )}
       {savedFlash && (
-        <span className="badge open" style={{ fontSize: 10 }}>
+        <span className="badge open" style={{ fontSize: 10, flex: '0 0 auto' }}>
           <IconCheck size={9} sw={2.5} />
           {t('feedbackSaved')}
         </span>
@@ -172,10 +176,16 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
     flashSaved()
   }
 
-  const handleAssigneesChange = async (next: string[]) => {
+  const handleAssigneeChange = async (next: string | null) => {
     if (!action) return
+    const input: Record<string, unknown> = { id: action.id }
+    if (next) {
+      input.assigneeID = next
+    } else {
+      input.clearAssignee = true
+    }
     await updateAction({
-      variables: { workspaceId: currentWorkspace!.id, input: { id: action.id, assigneeIDs: next } },
+      variables: { workspaceId: currentWorkspace!.id, input },
     })
     flashSaved()
   }
@@ -247,15 +257,14 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
               </select>
             </div>
             <div className="row" style={{ gap: 8, alignItems: 'center', minWidth: 280, flex: 1 }}>
-              <span className="soft">{t('labelAssignees')}</span>
+              <span className="soft">{t('labelAssignee')}</span>
               <InlineUserSelect
-                isMulti
                 users={users}
-                value={action.assigneeIDs || []}
-                onSave={handleAssigneesChange}
-                ariaLabel={t('labelAssignees')}
-                placeholder={t('placeholderAddAssignees')}
-                testId="action-assignees"
+                value={action.assigneeID || null}
+                onSave={handleAssigneeChange}
+                ariaLabel={t('labelAssignee')}
+                placeholder={t('placeholderSelectAssignee')}
+                testId="action-assignee"
               />
             </div>
           </div>
@@ -282,11 +291,14 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
             testId="action-description"
           />
 
-          <div className="field-label" style={{ marginTop: 18 }}>
-            {t('sectionActivity')}
-          </div>
-          <div className="muted" style={{ fontSize: 12 }}>
-            {t('emptyActivity')}
+          <div style={{ marginTop: 18 }}>
+            <ActionActivity
+              workspaceId={currentWorkspace!.id}
+              actionId={action.id}
+              slackMessageTS={action.slackMessageTS}
+              slackChannelID={action.case?.slackChannelID}
+              slackChannelURL={action.case?.slackChannelURL}
+            />
           </div>
         </>
       )}

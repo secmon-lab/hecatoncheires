@@ -339,7 +339,7 @@ func (uc *AgentUseCase) buildSystemPrompt(c *model.Case, entry *model.WorkspaceE
 			Title:       a.Title,
 			Status:      a.Status.String(),
 			StatusEmoji: a.Status.Emoji(),
-			Assignees:   strings.Join(a.AssigneeIDs, ", "),
+			Assignees:   a.AssigneeID,
 		})
 	}
 

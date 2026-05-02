@@ -29,4 +29,8 @@ type ActionRepository interface {
 	// GetByCases retrieves actions for multiple cases (for batch operations)
 	// Returns a map of case ID to list of actions
 	GetByCases(ctx context.Context, workspaceID string, caseIDs []int64) (map[int64][]*model.Action, error)
+
+	// GetBySlackMessageTS retrieves an action by its Slack message timestamp.
+	// Returns ErrNotFound if no action matches.
+	GetBySlackMessageTS(ctx context.Context, workspaceID string, ts string) (*model.Action, error)
 }

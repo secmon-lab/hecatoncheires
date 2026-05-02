@@ -27,10 +27,10 @@ func TestAssistUseCase_BuildAssistSystemPrompt(t *testing.T) {
 		// Create actions with and without DueDate
 		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		dueDate := time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC)
-		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Investigate logs", "Check auth logs", []string{"U001"}, "", types.ActionStatusInProgress, &dueDate)
+		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Investigate logs", "Check auth logs", "U001", "", types.ActionStatusInProgress, &dueDate)
 		gt.NoError(t, err).Required()
 
-		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Update firewall", "Block suspicious IP", []string{}, "", types.ActionStatusTodo, nil)
+		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Update firewall", "Block suspicious IP", "", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
 		// Create workspace entry with assist prompt

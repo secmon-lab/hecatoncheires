@@ -31,13 +31,118 @@ func (r *actionResolver) Case(ctx context.Context, obj *graphql1.Action) (*graph
 	return toGraphQLCase(cases[0], obj.WorkspaceID), nil
 }
 
-// Assignees is the resolver for the assignees field.
-func (r *actionResolver) Assignees(ctx context.Context, obj *graphql1.Action) ([]*graphql1.SlackUser, error) {
-	if len(obj.AssigneeIDs) == 0 {
-		return []*graphql1.SlackUser{}, nil
+// Assignee is the resolver for the assignee field.
+func (r *actionResolver) Assignee(ctx context.Context, obj *graphql1.Action) (*graphql1.SlackUser, error) {
+	if obj.AssigneeID == nil || *obj.AssigneeID == "" {
+		return nil, nil
 	}
 	loaders := GetDataLoaders(ctx)
-	return loaders.SlackUserLoader.Load(ctx, obj.AssigneeIDs)
+	users, err := loaders.SlackUserLoader.Load(ctx, []string{*obj.AssigneeID})
+	if err != nil {
+		return nil, err
+	}
+	if len(users) == 0 {
+		return nil, nil
+	}
+	return users[0], nil
+}
+
+// Messages is the resolver for the messages field.
+func (r *actionResolver) Messages(ctx context.Context, obj *graphql1.Action, limit *int, cursor *string) (*graphql1.SlackMessageConnection, error) {
+	empty := &graphql1.SlackMessageConnection{
+		Items:      []*graphql1.SlackMessage{},
+		NextCursor: "",
+	}
+
+	// Inherit access control from the parent Case: if the requester cannot
+	// see the case, they cannot see the action's thread messages either.
+	loaders := GetDataLoaders(ctx)
+	cases, err := loaders.CaseLoader.Load(ctx, obj.WorkspaceID, []int64{int64(obj.CaseID)})
+	if err != nil {
+		return nil, err
+	}
+	if len(cases) == 0 || cases[0].AccessDenied {
+		return empty, nil
+	}
+
+	limitVal := 20
+	if limit != nil && *limit > 0 {
+		limitVal = *limit
+	}
+	cursorVal := ""
+	if cursor != nil {
+		cursorVal = *cursor
+	}
+
+	messages, nextCursor, err := r.repo.ActionMessage().List(ctx, obj.WorkspaceID, int64(obj.ID), limitVal, cursorVal)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to list action messages from repository")
+	}
+
+	items := make([]*graphql1.SlackMessage, len(messages))
+	for i, m := range messages {
+		items[i] = toGraphQLSlackMessage(m)
+	}
+	return &graphql1.SlackMessageConnection{
+		Items:      items,
+		NextCursor: nextCursor,
+	}, nil
+}
+
+// Events is the resolver for the events field.
+func (r *actionResolver) Events(ctx context.Context, obj *graphql1.Action, limit *int, cursor *string) (*graphql1.ActionEventConnection, error) {
+	empty := &graphql1.ActionEventConnection{
+		Items:      []*graphql1.ActionEvent{},
+		NextCursor: "",
+	}
+
+	loaders := GetDataLoaders(ctx)
+	cases, err := loaders.CaseLoader.Load(ctx, obj.WorkspaceID, []int64{int64(obj.CaseID)})
+	if err != nil {
+		return nil, err
+	}
+	if len(cases) == 0 || cases[0].AccessDenied {
+		return empty, nil
+	}
+
+	limitVal := 50
+	if limit != nil && *limit > 0 {
+		limitVal = *limit
+	}
+	cursorVal := ""
+	if cursor != nil {
+		cursorVal = *cursor
+	}
+
+	events, nextCursor, err := r.repo.ActionEvent().List(ctx, obj.WorkspaceID, int64(obj.ID), limitVal, cursorVal)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to list action events from repository")
+	}
+
+	items := make([]*graphql1.ActionEvent, len(events))
+	for i, e := range events {
+		items[i] = toGraphQLActionEvent(e)
+	}
+	return &graphql1.ActionEventConnection{
+		Items:      items,
+		NextCursor: nextCursor,
+	}, nil
+}
+
+// Actor is the resolver for the actor field.
+func (r *actionEventResolver) Actor(ctx context.Context, obj *graphql1.ActionEvent) (*graphql1.SlackUser, error) {
+	if obj.ActorID == "" {
+		return nil, nil
+	}
+	loaders := GetDataLoaders(ctx)
+	users, err := loaders.SlackUserLoader.Load(ctx, []string{obj.ActorID})
+	if err != nil {
+		return nil, err
+	}
+	if len(users) == 0 {
+		return nil, nil
+	}
+	return users[0], nil
 }
 
 // ChannelUserCount is the resolver for the channelUserCount field.
@@ -248,40 +353,7 @@ func (r *caseResolver) SlackMessages(ctx context.Context, obj *graphql1.Case, li
 
 	items := make([]*graphql1.SlackMessage, len(messages))
 	for i, m := range messages {
-		threadTS := m.ThreadTS()
-		var threadTSPtr *string
-		if threadTS != "" {
-			threadTSPtr = &threadTS
-		}
-		files := make([]*graphql1.SlackFile, len(m.Files()))
-		for j, f := range m.Files() {
-			thumbURL := f.ThumbURL()
-			var thumbURLPtr *string
-			if thumbURL != "" {
-				thumbURLPtr = &thumbURL
-			}
-			files[j] = &graphql1.SlackFile{
-				ID:         f.ID(),
-				Name:       f.Name(),
-				Mimetype:   f.Mimetype(),
-				Filetype:   f.Filetype(),
-				Size:       f.Size(),
-				URLPrivate: f.URLPrivate(),
-				Permalink:  f.Permalink(),
-				ThumbURL:   thumbURLPtr,
-			}
-		}
-		items[i] = &graphql1.SlackMessage{
-			ID:        m.ID(),
-			ChannelID: m.ChannelID(),
-			ThreadTs:  threadTSPtr,
-			TeamID:    m.TeamID(),
-			UserID:    m.UserID(),
-			UserName:  m.UserName(),
-			Text:      m.Text(),
-			Files:     files,
-			CreatedAt: m.CreatedAt(),
-		}
+		items[i] = toGraphQLSlackMessage(m)
 	}
 
 	return &graphql1.SlackMessageConnection{
@@ -390,9 +462,9 @@ func (r *mutationResolver) SyncCaseChannelUsers(ctx context.Context, workspaceID
 
 // CreateAction is the resolver for the createAction field.
 func (r *mutationResolver) CreateAction(ctx context.Context, workspaceID string, input graphql1.CreateActionInput) (*graphql1.Action, error) {
-	assigneeIDs := input.AssigneeIDs
-	if assigneeIDs == nil {
-		assigneeIDs = []string{}
+	assigneeID := ""
+	if input.AssigneeID != nil {
+		assigneeID = *input.AssigneeID
 	}
 
 	slackMessageTS := ""
@@ -410,7 +482,7 @@ func (r *mutationResolver) CreateAction(ctx context.Context, workspaceID string,
 		description = *input.Description
 	}
 
-	created, err := r.UseCases.Action.CreateAction(ctx, workspaceID, int64(input.CaseID), input.Title, description, assigneeIDs, slackMessageTS, status, input.DueDate)
+	created, err := r.UseCases.Action.CreateAction(ctx, workspaceID, int64(input.CaseID), input.Title, description, assigneeID, slackMessageTS, status, input.DueDate)
 	if err != nil {
 		return nil, err
 	}
@@ -441,7 +513,30 @@ func (r *mutationResolver) UpdateAction(ctx context.Context, workspaceID string,
 		clearDueDate = *input.ClearDueDate
 	}
 
-	updated, err := r.UseCases.Action.UpdateAction(ctx, workspaceID, int64(input.ID), caseID, input.Title, input.Description, input.AssigneeIDs, slackMessageTS, status, input.DueDate, clearDueDate)
+	clearAssignee := false
+	if input.ClearAssignee != nil {
+		clearAssignee = *input.ClearAssignee
+	}
+
+	actor := usecase.ActorRef{Kind: usecase.ActorKindSystem}
+	if token, tokenErr := auth.TokenFromContext(ctx); tokenErr == nil {
+		actor = usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: token.Sub}
+	}
+
+	updated, err := r.UseCases.Action.UpdateAction(ctx, workspaceID, usecase.UpdateActionInput{
+		ID:             int64(input.ID),
+		CaseID:         caseID,
+		Title:          input.Title,
+		Description:    input.Description,
+		AssigneeID:     input.AssigneeID,
+		SlackMessageTS: slackMessageTS,
+		Status:         status,
+		DueDate:        input.DueDate,
+		ClearDueDate:   clearDueDate,
+		ClearAssignee:  clearAssignee,
+		SlackSync:      usecase.SlackSyncFull,
+		Actor:          actor,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -990,6 +1085,9 @@ func (r *queryResolver) AssistLogs(ctx context.Context, workspaceID string, case
 // Action returns ActionResolver implementation.
 func (r *Resolver) Action() ActionResolver { return &actionResolver{r} }
 
+// ActionEvent returns ActionEventResolver implementation.
+func (r *Resolver) ActionEvent() ActionEventResolver { return &actionEventResolver{r} }
+
 // Case returns CaseResolver implementation.
 func (r *Resolver) Case() CaseResolver { return &caseResolver{r} }
 
@@ -1003,6 +1101,7 @@ func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
 func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 
 type actionResolver struct{ *Resolver }
+type actionEventResolver struct{ *Resolver }
 type caseResolver struct{ *Resolver }
 type knowledgeResolver struct{ *Resolver }
 type mutationResolver struct{ *Resolver }

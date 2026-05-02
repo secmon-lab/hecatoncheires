@@ -139,13 +139,40 @@ type Action {
   case: Case
   title: String!
   description: String
-  assigneeIDs: [String!]!
-  assignees: [SlackUser!]!
+  assigneeID: String
+  assignee: SlackUser
   slackMessageTS: String
   status: ActionStatus!
   dueDate: Time
   createdAt: Time!
   updatedAt: Time!
+  messages(limit: Int, cursor: String): SlackMessageConnection!
+  events(limit: Int, cursor: String): ActionEventConnection!
+}
+
+enum ActionEventKind {
+  CREATED
+  TITLE_CHANGED
+  STATUS_CHANGED
+  ASSIGNEE_CHANGED
+}
+
+# ActionEvent records a single change to an Action, surfaced in the
+# WebUI activity feed alongside thread messages.
+type ActionEvent {
+  id: String!
+  actionID: Int!
+  kind: ActionEventKind!
+  actorID: String!
+  actor: SlackUser
+  oldValue: String!
+  newValue: String!
+  createdAt: Time!
+}
+
+type ActionEventConnection {
+  items: [ActionEvent!]!
+  nextCursor: String!
 }
 
 # Inputs
@@ -172,7 +199,7 @@ input CreateActionInput {
   caseID: Int!
   title: String!
   description: String
-  assigneeIDs: [String!]
+  assigneeID: String
   slackMessageTS: String
   status: ActionStatus
   dueDate: Time
@@ -183,11 +210,12 @@ input UpdateActionInput {
   caseID: Int
   title: String
   description: String
-  assigneeIDs: [String!]
+  assigneeID: String
   slackMessageTS: String
   status: ActionStatus
   dueDate: Time
   clearDueDate: Boolean
+  clearAssignee: Boolean
 }
 
 # Slack User

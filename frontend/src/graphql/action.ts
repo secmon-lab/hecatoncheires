@@ -1,28 +1,34 @@
 import { gql } from '@apollo/client'
 
+const ACTION_FIELDS = `
+  id
+  caseID
+  case {
+    id
+    title
+    slackChannelID
+    slackChannelURL
+  }
+  title
+  description
+  assigneeID
+  assignee {
+    id
+    name
+    realName
+    imageUrl
+  }
+  slackMessageTS
+  status
+  dueDate
+  createdAt
+  updatedAt
+`
+
 export const GET_ACTIONS = gql`
   query GetActions($workspaceId: String!) {
     actions(workspaceId: $workspaceId) {
-      id
-      caseID
-      case {
-        id
-        title
-      }
-      title
-      description
-      assigneeIDs
-      assignees {
-        id
-        name
-        realName
-        imageUrl
-      }
-      slackMessageTS
-      status
-      dueDate
-      createdAt
-      updatedAt
+      ${ACTION_FIELDS}
     }
   }
 `
@@ -30,26 +36,64 @@ export const GET_ACTIONS = gql`
 export const GET_ACTION = gql`
   query GetAction($workspaceId: String!, $id: Int!) {
     action(workspaceId: $workspaceId, id: $id) {
+      ${ACTION_FIELDS}
+    }
+  }
+`
+
+export const GET_ACTION_MESSAGES = gql`
+  query GetActionMessages($workspaceId: String!, $id: Int!, $limit: Int, $cursor: String) {
+    action(workspaceId: $workspaceId, id: $id) {
       id
-      caseID
-      case {
-        id
-        title
+      messages(limit: $limit, cursor: $cursor) {
+        items {
+          id
+          channelID
+          threadTS
+          teamID
+          userID
+          userName
+          text
+          createdAt
+          files {
+            id
+            name
+            mimetype
+            filetype
+            size
+            urlPrivate
+            permalink
+            thumbURL
+          }
+        }
+        nextCursor
       }
-      title
-      description
-      assigneeIDs
-      assignees {
-        id
-        name
-        realName
-        imageUrl
+    }
+  }
+`
+
+export const GET_ACTION_EVENTS = gql`
+  query GetActionEvents($workspaceId: String!, $id: Int!, $limit: Int, $cursor: String) {
+    action(workspaceId: $workspaceId, id: $id) {
+      id
+      events(limit: $limit, cursor: $cursor) {
+        items {
+          id
+          actionID
+          kind
+          actorID
+          actor {
+            id
+            name
+            realName
+            imageUrl
+          }
+          oldValue
+          newValue
+          createdAt
+        }
+        nextCursor
       }
-      slackMessageTS
-      status
-      dueDate
-      createdAt
-      updatedAt
     }
   }
 `
@@ -57,22 +101,7 @@ export const GET_ACTION = gql`
 export const CREATE_ACTION = gql`
   mutation CreateAction($workspaceId: String!, $input: CreateActionInput!) {
     createAction(workspaceId: $workspaceId, input: $input) {
-      id
-      caseID
-      title
-      description
-      assigneeIDs
-      assignees {
-        id
-        name
-        realName
-        imageUrl
-      }
-      slackMessageTS
-      status
-      dueDate
-      createdAt
-      updatedAt
+      ${ACTION_FIELDS}
     }
   }
 `
@@ -80,22 +109,7 @@ export const CREATE_ACTION = gql`
 export const UPDATE_ACTION = gql`
   mutation UpdateAction($workspaceId: String!, $input: UpdateActionInput!) {
     updateAction(workspaceId: $workspaceId, input: $input) {
-      id
-      caseID
-      title
-      description
-      assigneeIDs
-      assignees {
-        id
-        name
-        realName
-        imageUrl
-      }
-      slackMessageTS
-      status
-      dueDate
-      createdAt
-      updatedAt
+      ${ACTION_FIELDS}
     }
   }
 `
@@ -109,26 +123,7 @@ export const DELETE_ACTION = gql`
 export const GET_OPEN_CASE_ACTIONS = gql`
   query GetOpenCaseActions($workspaceId: String!) {
     openCaseActions(workspaceId: $workspaceId) {
-      id
-      caseID
-      case {
-        id
-        title
-      }
-      title
-      description
-      assigneeIDs
-      assignees {
-        id
-        name
-        realName
-        imageUrl
-      }
-      slackMessageTS
-      status
-      dueDate
-      createdAt
-      updatedAt
+      ${ACTION_FIELDS}
     }
   }
 `

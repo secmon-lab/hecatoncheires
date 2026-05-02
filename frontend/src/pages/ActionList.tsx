@@ -22,8 +22,8 @@ interface ActionRow {
   case?: { id: number; title: string }
   title: string
   description: string
-  assigneeIDs: string[]
-  assignees: Array<{ id: string; name: string; realName: string; imageUrl?: string }>
+  assigneeID: string | null
+  assignee: { id: string; name: string; realName: string; imageUrl?: string } | null
   status: ActionStatus
   dueDate?: string | null
   createdAt: string
@@ -191,8 +191,8 @@ export default function ActionList() {
                   )}
                   <span className={`title ${styles.titleText}`}>{a.title}</span>
                   <div className="meta">
-                    {a.assignees?.[0]
-                      ? <Avatar size="sm" name={a.assignees[0].name} realName={a.assignees[0].realName} imageUrl={a.assignees[0].imageUrl} />
+                    {a.assignee
+                      ? <Avatar size="sm" name={a.assignee.name} realName={a.assignee.realName} imageUrl={a.assignee.imageUrl} />
                       : <span style={{ width: 20 }} />
                     }
                     <span className="spacer" />

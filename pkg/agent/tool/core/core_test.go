@@ -117,6 +117,10 @@ func (m *mockActionRepo) GetByCases(ctx context.Context, workspaceID string, cas
 	return nil, nil
 }
 
+func (m *mockActionRepo) GetBySlackMessageTS(ctx context.Context, workspaceID string, ts string) (*model.Action, error) {
+	return nil, nil
+}
+
 // ----- mock KnowledgeRepository -----
 
 type mockKnowledgeRepo struct {
@@ -204,6 +208,12 @@ func (m *mockRepo) Source() interfaces.SourceRepository       { panic("unexpecte
 func (m *mockRepo) CaseMessage() interfaces.CaseMessageRepository {
 	panic("unexpected call: CaseMessage()")
 }
+func (m *mockRepo) ActionMessage() interfaces.ActionMessageRepository {
+	panic("unexpected call: ActionMessage()")
+}
+func (m *mockRepo) ActionEvent() interfaces.ActionEventRepository {
+	panic("unexpected call: ActionEvent()")
+}
 func (m *mockRepo) PutToken(ctx context.Context, token *auth.Token) error {
 	panic("unexpected call: PutToken()")
 }
@@ -247,11 +257,11 @@ func findTool(tools []gollem.Tool, name string) gollem.Tool {
 
 // ----- tests -----
 
-func TestNew_ReturnsNineTools(t *testing.T) {
+func TestNew_ReturnsEightTools(t *testing.T) {
 	repo := newMockRepo(nil, nil)
 	llm := &mockLLMClient{}
 	tools := core.New(repo, testWorkspaceID, testCaseID, llm)
-	gt.Array(t, tools).Length(9)
+	gt.Array(t, tools).Length(8)
 }
 
 func TestListActionsTool(t *testing.T) {
@@ -278,7 +288,7 @@ func TestListActionsTool(t *testing.T) {
 		actionRepo := &mockActionRepo{
 			getByCaseFn: func(ctx context.Context, workspaceID string, caseID int64) ([]*model.Action, error) {
 				return []*model.Action{
-					{ID: 1, CaseID: caseID, Title: "Fix bug", Status: types.ActionStatusTodo, AssigneeIDs: []string{"U001"}},
+					{ID: 1, CaseID: caseID, Title: "Fix bug", Status: types.ActionStatusTodo, AssigneeID: "U001"},
 					{ID: 2, CaseID: caseID, Title: "Write docs", Status: types.ActionStatusCompleted},
 				}, nil
 			},
@@ -372,18 +382,17 @@ func TestCreateActionTool(t *testing.T) {
 		tools := core.New(repo, testWorkspaceID, testCaseID, &mockLLMClient{})
 
 		result, err := findTool(tools, "core__create_action").Run(ctx, map[string]any{
-			"title":        "New investigation",
-			"description":  "Look into the alerts",
-			"status":       "IN_PROGRESS",
-			"assignee_ids": []any{"U001", "U002"},
+			"title":       "New investigation",
+			"description": "Look into the alerts",
+			"status":      "IN_PROGRESS",
+			"assignee_id": "U001",
 		})
 		gt.NoError(t, err)
 		gt.Value(t, captured.CaseID).Equal(testCaseID)
 		gt.Value(t, captured.Title).Equal("New investigation")
 		gt.Value(t, captured.Description).Equal("Look into the alerts")
 		gt.Value(t, captured.Status).Equal(types.ActionStatusInProgress)
-		gt.Array(t, captured.AssigneeIDs).Has("U001")
-		gt.Array(t, captured.AssigneeIDs).Has("U002")
+		gt.Value(t, captured.AssigneeID).Equal("U001")
 		gt.Value(t, result["id"]).Equal(int64(10))
 	})
 
@@ -427,8 +436,8 @@ func TestCreateActionTool(t *testing.T) {
 		tools := core.New(repo, testWorkspaceID, testCaseID, &mockLLMClient{})
 
 		_, err := findTool(tools, "core__create_action").Run(ctx, map[string]any{
-			"title":        "Test",
-			"assignee_ids": []any{"U001", 42},
+			"title":       "Test",
+			"assignee_id": 42,
 		})
 		gt.Error(t, err)
 	})
@@ -438,7 +447,7 @@ func TestUpdateActionTool(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("updates title and description", func(t *testing.T) {
-		original := &model.Action{ID: 5, CaseID: testCaseID, Title: "Old title", Description: "Old desc", Status: types.ActionStatusTodo, AssigneeIDs: []string{"U001"}}
+		original := &model.Action{ID: 5, CaseID: testCaseID, Title: "Old title", Description: "Old desc", Status: types.ActionStatusTodo, AssigneeID: "U001"}
 		var updated *model.Action
 		actionRepo := &mockActionRepo{
 			getFn: func(_ context.Context, _ string, id int64) (*model.Action, error) {
@@ -463,12 +472,12 @@ func TestUpdateActionTool(t *testing.T) {
 		gt.Value(t, updated.Description).Equal("New description")
 		gt.Value(t, result["title"]).Equal("New title")
 		gt.Value(t, result["description"]).Equal("New description")
-		// Assignees should not be changed
-		gt.Array(t, updated.AssigneeIDs).Has("U001")
+		// Assignee should not be changed
+		gt.Value(t, updated.AssigneeID).Equal("U001")
 	})
 
-	t.Run("replaces assignee_ids when provided", func(t *testing.T) {
-		original := &model.Action{ID: 6, CaseID: testCaseID, Title: "Task", Status: types.ActionStatusTodo, AssigneeIDs: []string{"U001", "U002"}}
+	t.Run("replaces assignee_id when provided", func(t *testing.T) {
+		original := &model.Action{ID: 6, CaseID: testCaseID, Title: "Task", Status: types.ActionStatusTodo, AssigneeID: "U001"}
 		var updated *model.Action
 		actionRepo := &mockActionRepo{
 			getFn: func(_ context.Context, _ string, _ int64) (*model.Action, error) {
@@ -483,12 +492,34 @@ func TestUpdateActionTool(t *testing.T) {
 		tools := core.New(repo, testWorkspaceID, testCaseID, &mockLLMClient{})
 
 		_, err := findTool(tools, "core__update_action").Run(ctx, map[string]any{
-			"action_id":    float64(6),
-			"assignee_ids": []any{"U003"},
+			"action_id":   float64(6),
+			"assignee_id": "U003",
 		})
 		gt.NoError(t, err)
-		gt.Array(t, updated.AssigneeIDs).Length(1)
-		gt.Array(t, updated.AssigneeIDs).Has("U003")
+		gt.Value(t, updated.AssigneeID).Equal("U003")
+	})
+
+	t.Run("clears assignee_id when empty string provided", func(t *testing.T) {
+		original := &model.Action{ID: 60, CaseID: testCaseID, Title: "Task", Status: types.ActionStatusTodo, AssigneeID: "U001"}
+		var updated *model.Action
+		actionRepo := &mockActionRepo{
+			getFn: func(_ context.Context, _ string, _ int64) (*model.Action, error) {
+				return original, nil
+			},
+			updateFn: func(_ context.Context, _ string, action *model.Action) (*model.Action, error) {
+				updated = action
+				return action, nil
+			},
+		}
+		repo := newMockRepo(actionRepo, nil)
+		tools := core.New(repo, testWorkspaceID, testCaseID, &mockLLMClient{})
+
+		_, err := findTool(tools, "core__update_action").Run(ctx, map[string]any{
+			"action_id":   float64(60),
+			"assignee_id": "",
+		})
+		gt.NoError(t, err)
+		gt.Value(t, updated.AssigneeID).Equal("")
 	})
 
 	t.Run("keeps description when empty string provided", func(t *testing.T) {
@@ -569,8 +600,8 @@ func TestUpdateActionTool(t *testing.T) {
 		tools := core.New(repo, testWorkspaceID, testCaseID, &mockLLMClient{})
 
 		_, err := findTool(tools, "core__update_action").Run(ctx, map[string]any{
-			"action_id":    float64(10),
-			"assignee_ids": []any{"U001", 99},
+			"action_id":   float64(10),
+			"assignee_id": 99,
 		})
 		gt.Error(t, err)
 	})
@@ -632,11 +663,11 @@ func TestUpdateActionStatusTool(t *testing.T) {
 	})
 }
 
-func TestAddActionAssigneeTool(t *testing.T) {
+func TestSetActionAssigneeTool(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("adds new assignee to action", func(t *testing.T) {
-		original := &model.Action{ID: 3, CaseID: testCaseID, Title: "Task", Status: types.ActionStatusTodo, AssigneeIDs: []string{"U001"}}
+	t.Run("sets the assignee", func(t *testing.T) {
+		original := &model.Action{ID: 3, CaseID: testCaseID, Title: "Task", Status: types.ActionStatusTodo, AssigneeID: "U001"}
 		var updated *model.Action
 		actionRepo := &mockActionRepo{
 			getFn: func(_ context.Context, _ string, _ int64) (*model.Action, error) {
@@ -650,58 +681,16 @@ func TestAddActionAssigneeTool(t *testing.T) {
 		repo := newMockRepo(actionRepo, nil)
 		tools := core.New(repo, testWorkspaceID, testCaseID, &mockLLMClient{})
 
-		_, err := findTool(tools, "core__add_action_assignee").Run(ctx, map[string]any{
+		_, err := findTool(tools, "core__set_action_assignee").Run(ctx, map[string]any{
 			"action_id":   float64(3),
 			"assignee_id": "U002",
 		})
 		gt.NoError(t, err)
-		gt.Array(t, updated.AssigneeIDs).Has("U001")
-		gt.Array(t, updated.AssigneeIDs).Has("U002")
-		gt.Array(t, updated.AssigneeIDs).Length(2)
+		gt.Value(t, updated.AssigneeID).Equal("U002")
 	})
 
-	t.Run("does not call Update when assignee already present", func(t *testing.T) {
-		original := &model.Action{ID: 3, CaseID: testCaseID, Title: "Task", Status: types.ActionStatusTodo, AssigneeIDs: []string{"U001"}}
-		updateCalled := false
-		actionRepo := &mockActionRepo{
-			getFn: func(_ context.Context, _ string, _ int64) (*model.Action, error) {
-				return original, nil
-			},
-			updateFn: func(_ context.Context, _ string, action *model.Action) (*model.Action, error) {
-				updateCalled = true
-				return action, nil
-			},
-		}
-		repo := newMockRepo(actionRepo, nil)
-		tools := core.New(repo, testWorkspaceID, testCaseID, &mockLLMClient{})
-
-		result, err := findTool(tools, "core__add_action_assignee").Run(ctx, map[string]any{
-			"action_id":   float64(3),
-			"assignee_id": "U001", // already present
-		})
-		gt.NoError(t, err)
-		gt.Value(t, updateCalled).Equal(false)
-		ids := result["assignee_ids"].([]string)
-		gt.Array(t, ids).Length(1)
-	})
-
-	t.Run("returns error when assignee_id is empty", func(t *testing.T) {
-		repo := newMockRepo(nil, nil)
-		tools := core.New(repo, testWorkspaceID, testCaseID, &mockLLMClient{})
-
-		_, err := findTool(tools, "core__add_action_assignee").Run(ctx, map[string]any{
-			"action_id":   float64(1),
-			"assignee_id": "",
-		})
-		gt.Error(t, err)
-	})
-}
-
-func TestRemoveActionAssigneeTool(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("removes specified assignee from action", func(t *testing.T) {
-		original := &model.Action{ID: 4, CaseID: testCaseID, Title: "Task", Status: types.ActionStatusTodo, AssigneeIDs: []string{"U001", "U002", "U003"}}
+	t.Run("clears the assignee when empty string", func(t *testing.T) {
+		original := &model.Action{ID: 4, CaseID: testCaseID, Title: "Task", Status: types.ActionStatusTodo, AssigneeID: "U001"}
 		var updated *model.Action
 		actionRepo := &mockActionRepo{
 			getFn: func(_ context.Context, _ string, _ int64) (*model.Action, error) {
@@ -715,46 +704,20 @@ func TestRemoveActionAssigneeTool(t *testing.T) {
 		repo := newMockRepo(actionRepo, nil)
 		tools := core.New(repo, testWorkspaceID, testCaseID, &mockLLMClient{})
 
-		_, err := findTool(tools, "core__remove_action_assignee").Run(ctx, map[string]any{
+		_, err := findTool(tools, "core__set_action_assignee").Run(ctx, map[string]any{
 			"action_id":   float64(4),
-			"assignee_id": "U002",
+			"assignee_id": "",
 		})
 		gt.NoError(t, err)
-		gt.Array(t, updated.AssigneeIDs).Length(2)
-		gt.Array(t, updated.AssigneeIDs).Has("U001")
-		gt.Array(t, updated.AssigneeIDs).Has("U003")
+		gt.Value(t, updated.AssigneeID).Equal("")
 	})
 
-	t.Run("no-op when removing non-existent assignee", func(t *testing.T) {
-		original := &model.Action{ID: 4, CaseID: testCaseID, Title: "Task", Status: types.ActionStatusTodo, AssigneeIDs: []string{"U001"}}
-		var updated *model.Action
-		actionRepo := &mockActionRepo{
-			getFn: func(_ context.Context, _ string, _ int64) (*model.Action, error) {
-				return original, nil
-			},
-			updateFn: func(_ context.Context, _ string, action *model.Action) (*model.Action, error) {
-				updated = action
-				return action, nil
-			},
-		}
-		repo := newMockRepo(actionRepo, nil)
-		tools := core.New(repo, testWorkspaceID, testCaseID, &mockLLMClient{})
-
-		_, err := findTool(tools, "core__remove_action_assignee").Run(ctx, map[string]any{
-			"action_id":   float64(4),
-			"assignee_id": "U999",
-		})
-		gt.NoError(t, err)
-		gt.Array(t, updated.AssigneeIDs).Length(1)
-	})
-
-	t.Run("returns error when assignee_id is empty", func(t *testing.T) {
+	t.Run("returns error when assignee_id is missing", func(t *testing.T) {
 		repo := newMockRepo(nil, nil)
 		tools := core.New(repo, testWorkspaceID, testCaseID, &mockLLMClient{})
 
-		_, err := findTool(tools, "core__remove_action_assignee").Run(ctx, map[string]any{
-			"action_id":   float64(1),
-			"assignee_id": "",
+		_, err := findTool(tools, "core__set_action_assignee").Run(ctx, map[string]any{
+			"action_id": float64(1),
 		})
 		gt.Error(t, err)
 	})
@@ -991,41 +954,41 @@ func TestToolUpdateCalls(t *testing.T) {
 		})
 		gt.NoError(t, err)
 		gt.Array(t, *msgs).Length(1)
-		gt.Value(t, (*msgs)[0]).Equal("Updating action #3 status → COMPLETED")
+		gt.Value(t, (*msgs)[0]).Equal("Updating action #3 status -> COMPLETED")
 	})
 
-	t.Run("add_action_assignee posts update message", func(t *testing.T) {
+	t.Run("set_action_assignee posts update message when setting", func(t *testing.T) {
 		ctx, msgs := newCtxWithUpdateCapture()
-		original := &model.Action{ID: 2, Title: "T", Status: types.ActionStatusTodo, AssigneeIDs: []string{}}
+		original := &model.Action{ID: 2, Title: "T", Status: types.ActionStatusTodo}
 		actionRepo := &mockActionRepo{
 			getFn:    func(_ context.Context, _ string, _ int64) (*model.Action, error) { return original, nil },
 			updateFn: func(_ context.Context, _ string, a *model.Action) (*model.Action, error) { return a, nil },
 		}
 		tools := core.New(newMockRepo(actionRepo, nil), testWorkspaceID, testCaseID, &mockLLMClient{})
-		_, err := findTool(tools, "core__add_action_assignee").Run(ctx, map[string]any{
+		_, err := findTool(tools, "core__set_action_assignee").Run(ctx, map[string]any{
 			"action_id":   float64(2),
 			"assignee_id": "U005",
 		})
 		gt.NoError(t, err)
 		gt.Array(t, *msgs).Length(1)
-		gt.Value(t, (*msgs)[0]).Equal("Adding assignee U005 to action #2")
+		gt.Value(t, (*msgs)[0]).Equal("Setting assignee U005 on action #2")
 	})
 
-	t.Run("remove_action_assignee posts update message", func(t *testing.T) {
+	t.Run("set_action_assignee posts update message when clearing", func(t *testing.T) {
 		ctx, msgs := newCtxWithUpdateCapture()
-		original := &model.Action{ID: 9, Title: "T", Status: types.ActionStatusTodo, AssigneeIDs: []string{"U001"}}
+		original := &model.Action{ID: 9, Title: "T", Status: types.ActionStatusTodo, AssigneeID: "U001"}
 		actionRepo := &mockActionRepo{
 			getFn:    func(_ context.Context, _ string, _ int64) (*model.Action, error) { return original, nil },
 			updateFn: func(_ context.Context, _ string, a *model.Action) (*model.Action, error) { return a, nil },
 		}
 		tools := core.New(newMockRepo(actionRepo, nil), testWorkspaceID, testCaseID, &mockLLMClient{})
-		_, err := findTool(tools, "core__remove_action_assignee").Run(ctx, map[string]any{
+		_, err := findTool(tools, "core__set_action_assignee").Run(ctx, map[string]any{
 			"action_id":   float64(9),
-			"assignee_id": "U001",
+			"assignee_id": "",
 		})
 		gt.NoError(t, err)
 		gt.Array(t, *msgs).Length(1)
-		gt.Value(t, (*msgs)[0]).Equal("Removing assignee U001 from action #9")
+		gt.Value(t, (*msgs)[0]).Equal("Clearing assignee on action #9")
 	})
 
 	t.Run("search_knowledge posts update message with query", func(t *testing.T) {
@@ -1230,8 +1193,8 @@ func TestNewForAssist_ReturnsAllTools(t *testing.T) {
 	slk := &mockSlackService{}
 	tools := core.NewForAssist(repo, testWorkspaceID, testCaseID, llm, slk, "C12345")
 
-	// 9 base tools + 2 knowledge write + 1 slack post + 4 memory tools = 16
-	gt.Array(t, tools).Length(16)
+	// 8 base tools + 2 knowledge write + 1 slack post + 4 memory tools = 15
+	gt.Array(t, tools).Length(15)
 
 	toolNames := make(map[string]bool)
 	for _, tl := range tools {

@@ -69,8 +69,9 @@ export default function InlineUserSelect(props: Props) {
     } else {
       setOpen(false)
       setQuery('')
-      if (props.value === id) return
-      await props.onSave(id)
+      // Single-select: clicking the active user clears the selection.
+      const next = props.value === id ? null : id
+      await props.onSave(next)
     }
   }
 

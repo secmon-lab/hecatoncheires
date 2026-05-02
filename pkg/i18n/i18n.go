@@ -60,6 +60,26 @@ const (
 	MsgActionNew     // "New action: %s"
 	MsgActionUpdated // "Action updated: %s"
 
+	// Action status select labels (Slack Block Kit)
+	MsgActionStatusBacklog
+	MsgActionStatusTodo
+	MsgActionStatusInProgressLabel
+	MsgActionStatusBlocked
+	MsgActionStatusCompletedLabel
+
+	// Action interactive controls (Slack Block Kit)
+	MsgActionOpenInWeb
+	MsgActionStatusPlaceholder
+	MsgActionAssigneePlaceholder
+
+	// Action change notifications (Slack thread)
+	MsgActionChangeTitle              // ":pencil2: %s changed title: %q -> %q"
+	MsgActionChangeStatus             // ":arrows_counterclockwise: %s changed status: %s -> %s"
+	MsgActionChangeAssigneeAssigned   // ":bust_in_silhouette: %s assigned %s"
+	MsgActionChangeAssigneeUnassigned // ":bust_in_silhouette: %s unassigned %s"
+	MsgActionChangeAssigneeReplaced   // ":bust_in_silhouette: %s changed assignee: %s -> %s"
+	MsgActionChangeActorSystem        // "system"
+
 	// Agent
 	MsgAgentThinking
 	MsgAgentAnalyzing
