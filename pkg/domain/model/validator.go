@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -121,9 +122,18 @@ func (v *FieldValidator) validateText(fieldDef config.FieldDefinition, fv FieldV
 
 // validateNumber validates a number field value
 func (v *FieldValidator) validateNumber(fieldDef config.FieldDefinition, fv FieldValue) error {
-	switch fv.Value.(type) {
+	switch x := fv.Value.(type) {
 	case float64, int, int64, int32:
 		return nil
+	case json.Number:
+		// gqlgen feeds Any-typed numeric inputs as json.Number; accept them
+		// after confirming they parse.
+		if _, err := x.Float64(); err == nil {
+			return nil
+		}
+		return goerr.Wrap(ErrInvalidFieldType, "value must be number",
+			goerr.V(ExpectedTypeKey, types.FieldTypeNumber),
+			goerr.V(ActualTypeKey, fmt.Sprintf("%T", fv.Value)))
 	default:
 		return goerr.Wrap(ErrInvalidFieldType, "value must be number",
 			goerr.V(ExpectedTypeKey, types.FieldTypeNumber),
