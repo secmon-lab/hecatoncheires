@@ -109,7 +109,7 @@ func TestSlackInteractionHandler(t *testing.T) {
 		gt.Value(t, action.Status).Equal(types.ActionStatusCompleted)
 	})
 
-	t.Run("handles users_select to set assignee", func(t *testing.T) {
+	t.Run("handles assignee_select to set assignee", func(t *testing.T) {
 		actionUC, handler, actionID := setup(t)
 
 		blockID := usecase.SlackActionAssigneeBlockID(testWorkspaceID, actionID)
@@ -119,9 +119,11 @@ func TestSlackInteractionHandler(t *testing.T) {
 			ActionCallback: goslack.ActionCallbacks{
 				BlockActions: []*goslack.BlockAction{
 					{
-						ActionID:     usecase.SlackActionIDAssigneeSelect,
-						BlockID:      blockID,
-						SelectedUser: "U999",
+						ActionID: usecase.SlackActionIDAssigneeSelect,
+						BlockID:  blockID,
+						SelectedOption: goslack.OptionBlockObject{
+							Value: testWorkspaceID + ":" + itoa(actionID) + ":U999",
+						},
 					},
 				},
 			},
@@ -143,7 +145,7 @@ func TestSlackInteractionHandler(t *testing.T) {
 		gt.Value(t, action.AssigneeID).Equal("U999")
 	})
 
-	t.Run("handles users_select with no user (clears assignee)", func(t *testing.T) {
+	t.Run("handles assignee_select with empty user (clears assignee)", func(t *testing.T) {
 		actionUC, handler, actionID := setup(t)
 
 		blockID := usecase.SlackActionAssigneeBlockID(testWorkspaceID, actionID)
@@ -153,9 +155,11 @@ func TestSlackInteractionHandler(t *testing.T) {
 			ActionCallback: goslack.ActionCallbacks{
 				BlockActions: []*goslack.BlockAction{
 					{
-						ActionID:     usecase.SlackActionIDAssigneeSelect,
-						BlockID:      blockID,
-						SelectedUser: "",
+						ActionID: usecase.SlackActionIDAssigneeSelect,
+						BlockID:  blockID,
+						SelectedOption: goslack.OptionBlockObject{
+							Value: testWorkspaceID + ":" + itoa(actionID) + ":",
+						},
 					},
 				},
 			},
