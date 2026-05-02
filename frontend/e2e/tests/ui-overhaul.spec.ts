@@ -162,14 +162,15 @@ test.describe('UI overhaul regressions', () => {
     await caseListPage.clickNewCaseButton();
     await caseFormPage.waitForFormVisible();
 
-    // react-select hides the underlying <input id="category"> behind a
-    // styled control wrapper. Clicking the control (or pressing ArrowDown
-    // on the focused input) is the reliable way to open the menu.
-    await page.locator('#category').focus();
-    await page.keyboard.press('ArrowDown');
-    // Menu must be portaled to body, outside the modal
-    const menu = page.locator('body > .rs__menu-portal, .rs__menu-portal');
-    await expect(menu).toBeVisible();
+    // react-select hides <input id="category"> behind a styled control
+    // wrapper; clicking the wrapper is the reliable open path. The portal
+    // div is always mounted, so assert visibility on the actual menu list
+    // and assert it lives outside the modal (i.e., portaled to body).
+    await page.locator('.rs__control', { has: page.locator('#category') }).click();
+    const menuList = page.locator('.rs__menu-list');
+    await expect(menuList).toBeVisible();
+    expect(await page.locator('[role="dialog"] .rs__menu-list').count()).toBe(0);
+    expect(await page.locator('.rs__menu-portal .rs__menu-list').count()).toBeGreaterThan(0);
   });
 
   test('SELECT placeholder is no longer the ugly "-- Select --" string', async ({ page }) => {
