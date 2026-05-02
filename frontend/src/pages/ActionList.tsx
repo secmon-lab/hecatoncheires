@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@apollo/client'
-import { GET_ACTIONS, UPDATE_ACTION } from '../graphql/action'
+import { GET_OPEN_CASE_ACTIONS, UPDATE_ACTION } from '../graphql/action'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
 import Button from '../components/Button'
@@ -60,15 +60,15 @@ export default function ActionList() {
   const [draggingId, setDraggingId] = useState<number | null>(null)
   const [dragOverCol, setDragOverCol] = useState<ActionStatus | null>(null)
 
-  const { data } = useQuery(GET_ACTIONS, {
+  const { data } = useQuery(GET_OPEN_CASE_ACTIONS, {
     variables: { workspaceId: currentWorkspace?.id },
     skip: !currentWorkspace,
   })
   const [updateAction] = useMutation(UPDATE_ACTION, {
-    refetchQueries: [{ query: GET_ACTIONS, variables: { workspaceId: currentWorkspace?.id } }],
+    refetchQueries: [{ query: GET_OPEN_CASE_ACTIONS, variables: { workspaceId: currentWorkspace?.id } }],
   })
 
-  const actions: ActionRow[] = data?.actions || []
+  const actions: ActionRow[] = data?.openCaseActions || []
   const filtered = useMemo(() => {
     if (!search.trim()) return actions
     const q = search.toLowerCase()
