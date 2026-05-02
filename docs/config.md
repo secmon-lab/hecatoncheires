@@ -106,12 +106,23 @@ The `serve` command (alias: `s`) starts the HTTP server.
 | `--github-app-id` | `HECATONCHEIRES_GITHUB_APP_ID` | - | No | GitHub App ID for GitHub Source integration |
 | `--github-app-installation-id` | `HECATONCHEIRES_GITHUB_APP_INSTALLATION_ID` | - | No | GitHub App Installation ID |
 | `--github-app-private-key` | `HECATONCHEIRES_GITHUB_APP_PRIVATE_KEY` | - | No | GitHub App private key (PEM string or file path) |
+| `--llm-provider` | `HECATONCHEIRES_LLM_PROVIDER` | - | No\*\*\*\* | LLM provider: `openai`, `claude`, or `gemini`. Empty disables AI features |
+| `--llm-model` | `HECATONCHEIRES_LLM_MODEL` | - | No | LLM model name (provider default if empty) |
+| `--llm-openai-api-key` | `HECATONCHEIRES_LLM_OPENAI_API_KEY` | - | No\*\*\*\* | OpenAI API key (required when `--llm-provider=openai`) |
+| `--llm-claude-api-key` | `HECATONCHEIRES_LLM_CLAUDE_API_KEY` | - | No\*\*\*\* | Anthropic Claude API key (used with direct Anthropic access) |
+| `--llm-gemini-project-id` | `HECATONCHEIRES_LLM_GEMINI_PROJECT_ID` | - | No\*\*\*\* | Google Cloud project ID (Gemini, or Claude via Vertex AI) |
+| `--llm-gemini-location` | `HECATONCHEIRES_LLM_GEMINI_LOCATION` | `global` | No | Google Cloud location for Gemini / Claude on Vertex AI |
 
 \* Required for OAuth mode. Alternatively, use `--no-auth` with `--slack-bot-token` for development.
 
 \*\* Required when using `--no-auth`. Also enables user avatar display and Slack user refresh worker.
 
 \*\*\* Required only to enable Slack webhook integration. Without this, webhook endpoints are not registered.
+
+\*\*\*\* `--llm-provider` is optional for `serve` (AI features will be disabled if unset). When set, the matching provider credentials become required:
+- `openai` → `--llm-openai-api-key`
+- `claude` → either `--llm-claude-api-key` (direct Anthropic API) **or** `--llm-gemini-project-id` (Vertex AI). The two are mutually exclusive.
+- `gemini` → `--llm-gemini-project-id` and `--llm-gemini-location`
 
 ### Compile Command Flags
 
@@ -127,6 +138,12 @@ The `compile` command (alias: `c`) extracts knowledge from external sources usin
 | `--github-app-id` | `HECATONCHEIRES_GITHUB_APP_ID` | - | No | GitHub App ID for GitHub Source integration |
 | `--github-app-installation-id` | `HECATONCHEIRES_GITHUB_APP_INSTALLATION_ID` | - | No | GitHub App Installation ID |
 | `--github-app-private-key` | `HECATONCHEIRES_GITHUB_APP_PRIVATE_KEY` | - | No | GitHub App private key (PEM string or file path) |
+| `--llm-provider` | `HECATONCHEIRES_LLM_PROVIDER` | - | Yes | LLM provider: `openai`, `claude`, or `gemini` |
+| `--llm-model` | `HECATONCHEIRES_LLM_MODEL` | - | No | LLM model name (provider default if empty) |
+| `--llm-openai-api-key` | `HECATONCHEIRES_LLM_OPENAI_API_KEY` | - | Cond. | OpenAI API key (required for `openai`) |
+| `--llm-claude-api-key` | `HECATONCHEIRES_LLM_CLAUDE_API_KEY` | - | Cond. | Anthropic Claude API key (for `claude` direct API) |
+| `--llm-gemini-project-id` | `HECATONCHEIRES_LLM_GEMINI_PROJECT_ID` | - | Cond. | Google Cloud project ID (for `gemini` or `claude` on Vertex AI) |
+| `--llm-gemini-location` | `HECATONCHEIRES_LLM_GEMINI_LOCATION` | `global` | No | Google Cloud location |
 
 ### Migrate Command Flags
 
@@ -588,15 +605,38 @@ The `assist` command runs an AI agent that periodically reviews open cases and p
 ### Usage
 
 The assist feature requires:
-- Gemini LLM client configuration (via `--gemini-api-key`)
+- An LLM provider (via `--llm-provider` and the matching credential flags). Supported providers: `openai`, `claude` (direct Anthropic API or Vertex AI), `gemini`.
 - Slack Bot Token (via `--slack-bot-token`)
 
-Run the assist command:
+Run the assist command (Gemini on Vertex AI example):
 
 ```bash
 hecatoncheires assist \
   --slack-bot-token=xoxb-YOUR_BOT_TOKEN \
-  --gemini-api-key=YOUR_GEMINI_KEY \
+  --llm-provider=gemini \
+  --llm-gemini-project-id=YOUR_GCP_PROJECT \
+  --llm-gemini-location=global \
+  --workspace=risk
+```
+
+Or with OpenAI:
+
+```bash
+hecatoncheires assist \
+  --slack-bot-token=xoxb-YOUR_BOT_TOKEN \
+  --llm-provider=openai \
+  --llm-openai-api-key=sk-YOUR_OPENAI_KEY \
+  --workspace=risk
+```
+
+Or with Claude on Vertex AI:
+
+```bash
+hecatoncheires assist \
+  --slack-bot-token=xoxb-YOUR_BOT_TOKEN \
+  --llm-provider=claude \
+  --llm-gemini-project-id=YOUR_GCP_PROJECT \
+  --llm-gemini-location=us-east5 \
   --workspace=risk
 ```
 

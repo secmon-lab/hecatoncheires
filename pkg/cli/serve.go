@@ -167,7 +167,7 @@ func cmdServe() *cli.Command {
 	var appCfg config.AppConfig
 	var repoCfg config.Repository
 	var slackCfg config.Slack
-	var geminiCfg config.Gemini
+	var llmCfg config.LLM
 	var githubCfg config.GitHub
 
 	flags := []cli.Flag{
@@ -217,7 +217,7 @@ func cmdServe() *cli.Command {
 	flags = append(flags, appCfg.Flags()...)
 	flags = append(flags, repoCfg.Flags()...)
 	flags = append(flags, slackCfg.Flags()...)
-	flags = append(flags, geminiCfg.Flags()...)
+	flags = append(flags, llmCfg.Flags()...)
 	flags = append(flags, githubCfg.Flags()...)
 
 	return &cli.Command{
@@ -328,16 +328,16 @@ func cmdServe() *cli.Command {
 				logging.Default().Info("Slack Bot Token not configured, Slack Source features will be limited")
 			}
 
-			// Initialize Gemini LLM client if configured (optional for AI agent)
-			llmClient, err := geminiCfg.Configure(ctx)
+			// Initialize LLM client if configured (optional for AI agent)
+			llmClient, err := llmCfg.NewClient(ctx)
 			if err != nil {
-				return goerr.Wrap(err, "failed to initialize Gemini LLM client")
+				return goerr.Wrap(err, "failed to initialize LLM client")
 			}
 			if llmClient != nil {
 				ucOpts = append(ucOpts, usecase.WithLLMClient(llmClient))
-				logging.Default().Info("Gemini LLM client enabled for AI agent", logAttrsToArgs(geminiCfg.LogAttrs())...)
+				logging.Default().Info("LLM client enabled for AI agent", logAttrsToArgs(llmCfg.LogAttrs())...)
 			} else {
-				logging.Default().Info("Gemini not configured, AI agent features will be disabled")
+				logging.Default().Info("LLM provider not configured, AI agent features will be disabled")
 			}
 
 			// Initialize GitHub service if configured

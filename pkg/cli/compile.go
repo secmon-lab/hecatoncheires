@@ -22,7 +22,7 @@ func cmdCompile() *cli.Command {
 	var baseURL string
 	var appCfg config.AppConfig
 	var repoCfg config.Repository
-	var geminiCfg config.Gemini
+	var llmCfg config.LLM
 	var githubCfg config.GitHub
 
 	flags := []cli.Flag{
@@ -61,7 +61,7 @@ func cmdCompile() *cli.Command {
 	// Add shared config flags
 	flags = append(flags, appCfg.Flags()...)
 	flags = append(flags, repoCfg.Flags()...)
-	flags = append(flags, geminiCfg.Flags()...)
+	flags = append(flags, llmCfg.Flags()...)
 	flags = append(flags, githubCfg.Flags()...)
 
 	return &cli.Command{
@@ -106,14 +106,15 @@ func cmdCompile() *cli.Command {
 				return goerr.Wrap(err, "failed to initialize Notion service")
 			}
 
-			// Initialize Gemini LLM client
-			llmClient, err := geminiCfg.Configure(ctx)
+			// Initialize LLM client (required)
+			if !llmCfg.IsEnabled() {
+				return goerr.New("--llm-provider is required for compile")
+			}
+			llmClient, err := llmCfg.NewClient(ctx)
 			if err != nil {
-				return goerr.Wrap(err, "failed to initialize Gemini client")
+				return goerr.Wrap(err, "failed to initialize LLM client")
 			}
-			if llmClient != nil {
-				logging.Default().Info("Gemini LLM client enabled", logAttrsToArgs(geminiCfg.LogAttrs())...)
-			}
+			logging.Default().Info("LLM client enabled", logAttrsToArgs(llmCfg.LogAttrs())...)
 
 			// Initialize knowledge service
 			knowledgeSvc, err := knowledge.New(llmClient)
