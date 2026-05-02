@@ -3,7 +3,7 @@ import { useMutation, useQuery } from '@apollo/client'
 import Select from 'react-select'
 import UserSelect from '../components/UserSelect'
 import { buildSelectStyles, portalProps } from '../components/selectStyles'
-import { CREATE_ACTION, UPDATE_ACTION, GET_ACTIONS, GET_ACTION } from '../graphql/action'
+import { CREATE_ACTION, UPDATE_ACTION, GET_ACTIONS, GET_ACTION, GET_OPEN_CASE_ACTIONS } from '../graphql/action'
 import { GET_CASE, GET_CASES } from '../graphql/case'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
@@ -74,6 +74,7 @@ export default function ActionForm({ action, defaultCaseID, onClose }: ActionFor
 
   const createRefetch: any[] = [
     { query: GET_ACTIONS, variables: { workspaceId: currentWorkspace?.id } },
+    { query: GET_OPEN_CASE_ACTIONS, variables: { workspaceId: currentWorkspace?.id } },
   ]
   if (defaultCaseID) {
     createRefetch.push({
@@ -84,7 +85,9 @@ export default function ActionForm({ action, defaultCaseID, onClose }: ActionFor
   const [createAction, { loading: creating }] = useMutation(CREATE_ACTION, {
     refetchQueries: createRefetch,
   })
-  const updateRefetch: any[] = []
+  const updateRefetch: any[] = [
+    { query: GET_OPEN_CASE_ACTIONS, variables: { workspaceId: currentWorkspace?.id } },
+  ]
   if (action) {
     updateRefetch.push({
       query: GET_ACTION,

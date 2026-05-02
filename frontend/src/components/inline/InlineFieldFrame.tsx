@@ -1,4 +1,4 @@
-import type { ReactNode, KeyboardEvent, MouseEvent } from 'react'
+import { forwardRef, type ReactNode, type KeyboardEvent, type MouseEvent } from 'react'
 import styles from './Inline.module.css'
 
 interface Props {
@@ -12,18 +12,11 @@ interface Props {
   className?: string
 }
 
-// Shared frame for selectable / single-line editable inline fields. Renders
-// a button-like wrapper that becomes the interactive trigger to enter editing.
-export default function InlineFieldFrame({
-  children,
-  onActivate,
-  ariaLabel,
-  disabled,
-  block,
-  text,
-  testId,
-  className,
-}: Props) {
+// Shared frame for selectable / single-line editable inline fields.
+const InlineFieldFrame = forwardRef<HTMLDivElement, Props>(function InlineFieldFrame(
+  { children, onActivate, ariaLabel, disabled, block, text, testId, className },
+  ref,
+) {
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (disabled) return
     if (e.key === 'Enter' || e.key === ' ') {
@@ -50,6 +43,7 @@ export default function InlineFieldFrame({
 
   return (
     <div
+      ref={ref}
       role="button"
       tabIndex={disabled ? -1 : 0}
       aria-label={ariaLabel}
@@ -62,4 +56,6 @@ export default function InlineFieldFrame({
       {children}
     </div>
   )
-}
+})
+
+export default InlineFieldFrame

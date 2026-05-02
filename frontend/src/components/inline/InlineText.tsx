@@ -125,6 +125,7 @@ export default function InlineText({
       text
       block
       testId={testId}
+      className={variant === 'title' ? styles.frameTitle : undefined}
     >
       <span className={isEmpty ? styles.placeholder : undefined}>
         {isEmpty ? placeholder || '—' : value}

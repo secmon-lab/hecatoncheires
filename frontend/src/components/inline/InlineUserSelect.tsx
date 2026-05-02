@@ -76,32 +76,32 @@ export default function InlineUserSelect(props: Props) {
 
   return (
     <>
-      <div ref={anchorRef} style={{ display: 'inline-flex', maxWidth: '100%' }}>
-        <InlineFieldFrame
-          ariaLabel={ariaLabel}
-          disabled={disabled}
-          onActivate={() => setOpen((v) => !v)}
-          testId={testId}
-        >
-          {selectedUsers.length === 0 ? (
-            <span className={styles.placeholder}>{placeholder || '—'}</span>
-          ) : selectedUsers.length === 1 ? (
-            <>
-              <Avatar
-                size="sm"
-                name={selectedUsers[0].name}
-                realName={selectedUsers[0].realName}
-                imageUrl={selectedUsers[0].imageUrl}
-              />
-              <span className={styles.optionLabel}>
-                {selectedUsers[0].realName || selectedUsers[0].name}
-              </span>
-            </>
-          ) : (
-            <AvatarStack users={selectedUsers} max={4} />
-          )}
-        </InlineFieldFrame>
-      </div>
+      <InlineFieldFrame
+        ref={anchorRef}
+        ariaLabel={ariaLabel}
+        disabled={disabled}
+        onActivate={() => setOpen((v) => !v)}
+        testId={testId}
+        block
+      >
+        {selectedUsers.length === 0 ? (
+          <span className={styles.placeholder}>{placeholder || '—'}</span>
+        ) : selectedUsers.length === 1 ? (
+          <>
+            <Avatar
+              size="sm"
+              name={selectedUsers[0].name}
+              realName={selectedUsers[0].realName}
+              imageUrl={selectedUsers[0].imageUrl}
+            />
+            <span className={styles.triggerLabel}>
+              {selectedUsers[0].realName || selectedUsers[0].name}
+            </span>
+          </>
+        ) : (
+          <AvatarStack users={selectedUsers} max={4} />
+        )}
+      </InlineFieldFrame>
       <InlinePopover
         anchor={anchorRef.current}
         open={open}

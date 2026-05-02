@@ -209,14 +209,24 @@ export default function CaseDetail() {
     })
   }
   const handleFieldChange = async (fieldId: string, value: any) => {
-    const others = (c.fields || [])
-      .filter((f: any) => f.fieldId !== fieldId)
-      .map((f: any) => ({ fieldId: f.fieldId, value: f.value }))
-    const next = value == null || value === '' || (Array.isArray(value) && value.length === 0)
-      ? others
-      : [...others, { fieldId, value }]
+    // Send only the changed field. The backend merges this with existing
+    // values, so we don't risk re-validating stale entries (e.g. option IDs
+    // from a prior config) that would cause the whole update to be rejected.
+    let v = value
+    // Promote a "YYYY-MM-DD" date to RFC3339 — the backend's date validator
+    // requires a full timestamp string.
+    if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) {
+      v = `${v}T00:00:00Z`
+    }
+    // Empty single-value: nothing to persist (the backend has no explicit
+    // "clear field" path; preserve current value).
+    const isEmptySingle = v == null || v === ''
+    if (isEmptySingle) return
     await updateCase({
-      variables: { workspaceId: currentWorkspace!.id, input: { id: caseId, fields: next } },
+      variables: {
+        workspaceId: currentWorkspace!.id,
+        input: { id: caseId, fields: [{ fieldId, value: v }] },
+      },
     })
   }
 

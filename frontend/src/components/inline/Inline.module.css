@@ -10,10 +10,21 @@
   border: 1px solid transparent;
   border-radius: 5px;
   cursor: pointer;
-  font-size: 13px;
-  color: var(--fg);
+  /* Inherit typography from the parent so wrappers like <h1> keep their size. */
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  color: inherit;
   transition: background-color 80ms ease, border-color 80ms ease;
   max-width: 100%;
+}
+
+/* Larger hit-area when used as a title (used together with variant="title"). */
+.frameTitle {
+  min-height: 36px;
+  padding: 4px 8px;
+  margin: -4px -8px;
+  border-radius: 6px;
 }
 
 .frame:hover:not(.disabled) {
@@ -30,6 +41,7 @@
 .frameBlock {
   display: flex;
   width: 100%;
+  min-width: 0;
 }
 
 .frameText {
@@ -52,7 +64,10 @@
   min-height: 26px;
   padding: 3px 6px;
   margin: -3px -6px;
-  font-size: 13px;
+  /* Match the surrounding text by default so the visual jump on click is small. */
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
   font-family: inherit;
   color: var(--fg);
   background-color: var(--bg-elev);
@@ -63,9 +78,10 @@
 }
 
 .inputTitle {
-  font-size: 20px;
-  font-weight: 600;
-  min-height: 30px;
+  min-height: 36px;
+  padding: 4px 8px;
+  margin: -4px -8px;
+  border-radius: 6px;
 }
 
 .textarea {
@@ -152,7 +168,8 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 6px 8px;
+  padding: 8px 12px;
+  min-height: 32px;
   border: none;
   border-radius: 4px;
   background: transparent;
@@ -161,6 +178,14 @@
   font-size: 13px;
   font-family: inherit;
   cursor: pointer;
+}
+
+/* Label inside the trigger frame: allow wrapping so values are not cut off. */
+.triggerLabel {
+  flex: 1;
+  white-space: normal;
+  word-break: break-word;
+  text-align: left;
 }
 
 .option:hover,

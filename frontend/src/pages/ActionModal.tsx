@@ -12,6 +12,7 @@ import InlineText from '../components/inline/InlineText'
 import InlineLongText from '../components/inline/InlineLongText'
 import InlineSelect, { type InlineSelectOption } from '../components/inline/InlineSelect'
 import InlineUserSelect from '../components/inline/InlineUserSelect'
+import InlineDate from '../components/inline/InlineDate'
 
 interface ActionModalProps {
   actionId: number
@@ -157,6 +158,20 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
     flashSaved()
   }
 
+  const handleDueDateChange = async (next: string | null) => {
+    if (!action) return
+    const input: any = { id: action.id }
+    if (next == null) {
+      input.clearDueDate = true
+    } else {
+      // Promote a "YYYY-MM-DD" to a full ISO timestamp at midnight UTC so the
+      // backend's Time scalar can parse it.
+      input.dueDate = /^\d{4}-\d{2}-\d{2}$/.test(next) ? `${next}T00:00:00Z` : next
+    }
+    await updateAction({ variables: { workspaceId: currentWorkspace!.id, input } })
+    flashSaved()
+  }
+
   const handleAssigneesChange = async (next: string[]) => {
     if (!action) return
     await updateAction({
@@ -206,8 +221,8 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
             />
           </div>
 
-          <div className="row" style={{ gap: 18, fontSize: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-            <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+          <div className="row" style={{ gap: 18, fontSize: 13, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div className="row" style={{ gap: 8, alignItems: 'center', minWidth: 0 }}>
               <span className="soft">{t('labelStatus')}</span>
               <InlineSelect<Status>
                 value={action.status as Status}
@@ -245,14 +260,18 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
             </div>
           </div>
 
-          {due && (
-            <div className="row" style={{ gap: 8, fontSize: 12, marginBottom: 16, alignItems: 'center' }}>
-              <span className="soft">{t('labelDueDate')}</span>
-              <span className="mono" style={{ color: due.urgent || due.overdue ? 'var(--danger)' : 'var(--fg)' }}>
-                {due.label}
-              </span>
+          <div className="row" style={{ gap: 8, fontSize: 13, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span className="soft">{t('labelDueDate')}</span>
+            <div style={{ flex: 1, minWidth: 160, color: due?.urgent || due?.overdue ? 'var(--danger)' : undefined }}>
+              <InlineDate
+                value={action.dueDate || null}
+                onSave={handleDueDateChange}
+                ariaLabel={t('labelDueDate')}
+                placeholder={t('placeholderAddValue')}
+                testId="action-due-date"
+              />
             </div>
-          )}
+          </div>
 
           <div className="field-label">{t('labelDescription')}</div>
           <InlineLongText

@@ -54,22 +54,22 @@ export default function InlineMultiSelect<V extends string = string>({
 
   return (
     <>
-      <div ref={anchorRef} style={{ display: 'inline-flex', maxWidth: '100%' }}>
-        <InlineFieldFrame
-          ariaLabel={ariaLabel}
-          disabled={disabled}
-          onActivate={() => setOpen((v) => !v)}
-          testId={testId}
-        >
-          {selectedOptions.length === 0 ? (
-            <span className={styles.placeholder}>{placeholder || '—'}</span>
-          ) : (
-            <span className={styles.optionLabel}>
-              {selectedOptions.map((o) => o.label).join(', ')}
-            </span>
-          )}
-        </InlineFieldFrame>
-      </div>
+      <InlineFieldFrame
+        ref={anchorRef}
+        ariaLabel={ariaLabel}
+        disabled={disabled}
+        onActivate={() => setOpen((v) => !v)}
+        testId={testId}
+        block
+      >
+        {selectedOptions.length === 0 ? (
+          <span className={styles.placeholder}>{placeholder || '—'}</span>
+        ) : (
+          <span className={styles.triggerLabel}>
+            {selectedOptions.map((o) => o.label).join(', ')}
+          </span>
+        )}
+      </InlineFieldFrame>
       <InlinePopover
         anchor={anchorRef.current}
         open={open}

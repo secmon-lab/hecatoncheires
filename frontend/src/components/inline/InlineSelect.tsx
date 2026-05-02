@@ -42,6 +42,9 @@ export default function InlineSelect<V extends string = string>({
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const anchorRef = useRef<HTMLDivElement>(null)
+  // Frame fills its parent so that the trigger occupies the full column width
+  // (e.g. a kv-list value cell), letting the label wrap naturally instead of
+  // ellipsis-truncating.
 
   const current = useMemo(
     () => options.find((o) => o.value === value) || null,
@@ -64,27 +67,27 @@ export default function InlineSelect<V extends string = string>({
 
   return (
     <>
-      <div ref={anchorRef} style={{ display: 'inline-flex', maxWidth: '100%' }}>
-        <InlineFieldFrame
-          ariaLabel={ariaLabel}
-          disabled={disabled}
-          onActivate={() => setOpen((v) => !v)}
-          testId={testId}
-        >
-          {current ? (
-            <>
-              {current.icon ?? (
-                current.color && (
-                  <span className={styles.pip} style={{ background: current.color }} />
-                )
-              )}
-              <span className={styles.optionLabel}>{current.label}</span>
-            </>
-          ) : (
-            <span className={styles.placeholder}>{placeholder || '—'}</span>
-          )}
-        </InlineFieldFrame>
-      </div>
+      <InlineFieldFrame
+        ref={anchorRef}
+        ariaLabel={ariaLabel}
+        disabled={disabled}
+        onActivate={() => setOpen((v) => !v)}
+        testId={testId}
+        block
+      >
+        {current ? (
+          <>
+            {current.icon ?? (
+              current.color && (
+                <span className={styles.pip} style={{ background: current.color }} />
+              )
+            )}
+            <span className={styles.triggerLabel}>{current.label}</span>
+          </>
+        ) : (
+          <span className={styles.placeholder}>{placeholder || '—'}</span>
+        )}
+      </InlineFieldFrame>
       <InlinePopover
         anchor={anchorRef.current}
         open={open}
