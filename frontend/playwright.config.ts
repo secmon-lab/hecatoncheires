@@ -15,11 +15,13 @@ export default defineConfig({
   // Fail the build on CI if you accidentally left test.only in the source code
   forbidOnly: !!process.env.CI,
 
-  // Retry on CI only
-  retries: process.env.CI ? 2 : 0,
+  // Retry on CI only. Keep at 1 — failing tests should be fixed, not papered over with extra retries.
+  retries: process.env.CI ? 1 : 0,
 
-  // Opt out of parallel tests on CI
-  workers: process.env.CI ? 1 : undefined,
+  // E2E tests share a single backend with an in-memory repository, so we keep
+  // the workers low to avoid cross-test data races. 2 is a safe modest bump
+  // from full serialization.
+  workers: process.env.CI ? 2 : undefined,
 
   // Reporter to use
   reporter: [
@@ -42,12 +44,13 @@ export default defineConfig({
     // Video on failure
     video: 'retain-on-failure',
 
-    // Maximum time each action such as `click()` can take
-    actionTimeout: 10000,
+    // Maximum time each action such as `click()` can take. 5s is plenty for
+    // a local app; the previous 10s mostly inflated failure latency.
+    actionTimeout: 5000,
   },
 
   // Global timeout for each test
-  timeout: 30000,
+  timeout: 20000,
 
   // Global timeout for the whole test run
   globalTimeout: process.env.CI ? 600000 : 120000, // 10 minutes on CI, 2 minutes locally
