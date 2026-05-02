@@ -68,6 +68,10 @@ export default function InlineText({
       setEditing(false)
       return
     }
+    // Suppress the blur-triggered commit that fires when setEditing(false)
+    // unmounts the input below. Without this, Enter and the synthetic blur
+    // both call onSave with the same draft, posting the change twice.
+    skipBlurSave.current = true
     setSaving(true)
     try {
       await onSave(next)

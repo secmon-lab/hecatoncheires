@@ -28,6 +28,36 @@ func TestSlackInteractionHandler(t *testing.T) {
 		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		actionUC := usecase.NewActionUseCase(repo, nil, "")
 
+		// Register the seed assignee in the SlackUser DB so UpdateAction's
+		// bot-rejection guard accepts it.
+		gt.NoError(t, repo.SlackUser().SaveMany(t.Context(), []*model.SlackUser{
+			{ID: "U001", Name: "alice", RealName: "Alice"},
+		})).Required()
+
+		ctx := auth.ContextWithToken(t.Context(), &auth.Token{Sub: "UTESTUSER"})
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Desc", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		action, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Desc", "U001", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+
+		handler := httpctrl.NewSlackInteractionHandler(actionUC, nil)
+		return actionUC, handler, action.ID
+	}
+
+	// setupWithUser is like setup but also registers extraUserID as a known
+	// human in the SlackUser DB so the bot-rejection guard lets it through.
+	setupWithUser := func(t *testing.T, extraUserID string) (*usecase.ActionUseCase, *httpctrl.SlackInteractionHandler, int64) {
+		t.Helper()
+		repo := memory.New()
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
+
+		gt.NoError(t, repo.SlackUser().SaveMany(t.Context(), []*model.SlackUser{
+			{ID: "U001", Name: "alice", RealName: "Alice"},
+			{ID: model.SlackUserID(extraUserID), Name: "extra", RealName: "Extra"},
+		})).Required()
+
 		ctx := auth.ContextWithToken(t.Context(), &auth.Token{Sub: "UTESTUSER"})
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Desc", []string{}, nil, false, "", "")
 		gt.NoError(t, err).Required()
@@ -109,8 +139,8 @@ func TestSlackInteractionHandler(t *testing.T) {
 		gt.Value(t, action.Status).Equal(types.ActionStatusCompleted)
 	})
 
-	t.Run("handles assignee_select to set assignee", func(t *testing.T) {
-		actionUC, handler, actionID := setup(t)
+	t.Run("handles users_select to set assignee", func(t *testing.T) {
+		actionUC, handler, actionID := setupWithUser(t, "U999")
 
 		blockID := usecase.SlackActionAssigneeBlockID(testWorkspaceID, actionID)
 		callback := goslack.InteractionCallback{
@@ -119,11 +149,9 @@ func TestSlackInteractionHandler(t *testing.T) {
 			ActionCallback: goslack.ActionCallbacks{
 				BlockActions: []*goslack.BlockAction{
 					{
-						ActionID: usecase.SlackActionIDAssigneeSelect,
-						BlockID:  blockID,
-						SelectedOption: goslack.OptionBlockObject{
-							Value: testWorkspaceID + ":" + itoa(actionID) + ":U999",
-						},
+						ActionID:     usecase.SlackActionIDAssigneeSelect,
+						BlockID:      blockID,
+						SelectedUser: "U999",
 					},
 				},
 			},
@@ -145,7 +173,7 @@ func TestSlackInteractionHandler(t *testing.T) {
 		gt.Value(t, action.AssigneeID).Equal("U999")
 	})
 
-	t.Run("handles assignee_select with empty user (clears assignee)", func(t *testing.T) {
+	t.Run("handles users_select with empty user (clears assignee)", func(t *testing.T) {
 		actionUC, handler, actionID := setup(t)
 
 		blockID := usecase.SlackActionAssigneeBlockID(testWorkspaceID, actionID)
@@ -155,11 +183,9 @@ func TestSlackInteractionHandler(t *testing.T) {
 			ActionCallback: goslack.ActionCallbacks{
 				BlockActions: []*goslack.BlockAction{
 					{
-						ActionID: usecase.SlackActionIDAssigneeSelect,
-						BlockID:  blockID,
-						SelectedOption: goslack.OptionBlockObject{
-							Value: testWorkspaceID + ":" + itoa(actionID) + ":",
-						},
+						ActionID:     usecase.SlackActionIDAssigneeSelect,
+						BlockID:      blockID,
+						SelectedUser: "",
 					},
 				},
 			},
@@ -179,6 +205,42 @@ func TestSlackInteractionHandler(t *testing.T) {
 		action, err := actionUC.GetAction(t.Context(), testWorkspaceID, actionID)
 		gt.NoError(t, err).Required()
 		gt.Value(t, action.AssigneeID).Equal("")
+	})
+
+	t.Run("rejects bot / unknown user assignee", func(t *testing.T) {
+		actionUC, handler, actionID := setup(t)
+
+		blockID := usecase.SlackActionAssigneeBlockID(testWorkspaceID, actionID)
+		callback := goslack.InteractionCallback{
+			Type: goslack.InteractionTypeBlockActions,
+			User: goslack.User{ID: "U001"},
+			ActionCallback: goslack.ActionCallbacks{
+				BlockActions: []*goslack.BlockAction{
+					{
+						ActionID:     usecase.SlackActionIDAssigneeSelect,
+						BlockID:      blockID,
+						SelectedUser: "BBOT123", // not in SlackUser DB
+					},
+				},
+			},
+		}
+		payloadJSON, err := json.Marshal(callback)
+		gt.NoError(t, err).Required()
+
+		form := url.Values{"payload": {string(payloadJSON)}}
+		req := httptest.NewRequest(http.MethodPost, "/hooks/slack/interaction", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		async.Wait()
+
+		// Assignee must remain unchanged because the selected user is not
+		// in the SlackUser DB (treated as a bot / unknown).
+		action, err := actionUC.GetAction(t.Context(), testWorkspaceID, actionID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, action.AssigneeID).Equal("U001")
 	})
 
 	t.Run("returns 400 for missing payload", func(t *testing.T) {

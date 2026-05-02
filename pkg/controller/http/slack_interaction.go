@@ -103,11 +103,11 @@ func (h *SlackInteractionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 			})
 
 		case usecase.SlackActionIDAssigneeSelect:
-			workspaceID, actionID, selectedUserID, err := usecase.ParseSlackAssigneeSelectValue(a.SelectedOption.Value)
+			workspaceID, actionID, err := usecase.ParseSlackAssigneeBlockID(a.BlockID)
 			if err != nil {
-				logging.From(ctx).Warn("failed to parse assignee_select value",
+				logging.From(ctx).Warn("failed to parse assignee block_id",
 					"error", err,
-					"value", a.SelectedOption.Value,
+					"block_id", a.BlockID,
 				)
 				continue
 			}
@@ -116,10 +116,10 @@ func (h *SlackInteractionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 				SlackSync: usecase.SlackSyncFull,
 				Actor:     usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: cb.User.ID},
 			}
-			if selectedUserID == "" {
+			if a.SelectedUser == "" {
 				input.ClearAssignee = true
 			} else {
-				selected := selectedUserID
+				selected := a.SelectedUser
 				input.AssigneeID = &selected
 			}
 			async.Dispatch(ctx, func(ctx context.Context) error {

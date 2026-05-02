@@ -458,6 +458,12 @@ func TestActionUseCase_UpdateAction_SlackSync(t *testing.T) {
 		actionUC := usecase.NewActionUseCase(repo, mock, "https://example.com")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
+		// Register the human users that the bot-rejection guard will look up.
+		gt.NoError(t, repo.SlackUser().SaveMany(ctx, []*model.SlackUser{
+			{ID: "U001", Name: "alice", RealName: "Alice"},
+			{ID: "U999", Name: "carol", RealName: "Carol"},
+		})).Required()
+
 		_, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
 		gt.NoError(t, err).Required()
 		c, err := repo.Case().List(ctx, testWorkspaceID)

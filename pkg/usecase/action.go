@@ -201,7 +201,24 @@ func (uc *ActionUseCase) UpdateAction(ctx context.Context, workspaceID string, i
 	if in.ClearAssignee {
 		action.AssigneeID = ""
 	} else if in.AssigneeID != nil {
-		action.AssigneeID = *in.AssigneeID
+		// Reject bot / unknown users. The SlackUser DB is populated from
+		// Slack's users.list with bots filtered out; an ID we have never
+		// seen is therefore either a bot or simply unknown to us. Refuse
+		// either way: keep the prior assignee and let the Slack message
+		// re-render with the original initial_user.
+		candidate := *in.AssigneeID
+		if candidate != "" {
+			if u, lookupErr := uc.repo.SlackUser().GetByID(ctx, model.SlackUserID(candidate)); lookupErr != nil || u == nil {
+				if lookupErr != nil {
+					errutil.Handle(ctx, lookupErr, "rejected non-human or unknown assignee")
+				}
+				// leave action.AssigneeID untouched
+			} else {
+				action.AssigneeID = candidate
+			}
+		} else {
+			action.AssigneeID = ""
+		}
 	}
 	if in.SlackMessageTS != nil {
 		action.SlackMessageTS = *in.SlackMessageTS
@@ -438,7 +455,7 @@ func (uc *ActionUseCase) buildActionMessageBlocks(ctx context.Context, workspace
 	}
 
 	statusSelect := buildStatusSelect(ctx, workspaceID, action)
-	assigneeSelect := uc.buildAssigneeSelect(ctx, workspaceID, action)
+	assigneeSelect := buildAssigneeSelect(ctx, action)
 	// One actions block carries both selects so they render side-by-side.
 	blocks = append(blocks, goslack.NewActionBlock(
 		SlackActionAssigneeBlockID(workspaceID, action.ID),
@@ -472,107 +489,16 @@ func buildStatusSelect(ctx context.Context, workspaceID string, action *model.Ac
 	return sel
 }
 
-// buildAssigneeSelect renders a static_select whose options are non-bot
-// members of the case channel (plus an "Unassigned" sentinel). We use a
-// static_select rather than users_select because Slack's users_select has
-// no way to exclude bots / apps from the candidate list.
-func (uc *ActionUseCase) buildAssigneeSelect(ctx context.Context, workspaceID string, action *model.Action) *goslack.SelectBlockElement {
+// buildAssigneeSelect renders a users_select. Slack offers no native
+// "exclude bots" toggle, so the handler treats a bot selection as a
+// reject + re-render rather than filtering at render time.
+func buildAssigneeSelect(ctx context.Context, action *model.Action) *goslack.SelectBlockElement {
 	placeholder := goslack.NewTextBlockObject(goslack.PlainTextType, i18n.T(ctx, i18n.MsgActionAssigneePlaceholder), true, false)
-
-	// Sentinel for clearing the assignee.
-	unassignedLabel := goslack.NewTextBlockObject(goslack.PlainTextType, i18n.T(ctx, i18n.MsgActionNoAssign), true, false)
-	unassignedOpt := goslack.NewOptionBlockObject(
-		fmt.Sprintf("%s:%d:", workspaceID, action.ID),
-		unassignedLabel, nil,
-	)
-	options := []*goslack.OptionBlockObject{unassignedOpt}
-
-	candidates := uc.assigneeCandidates(ctx, workspaceID, action)
-	// Slack caps static_select options at 100; cap defensively.
-	const maxOptions = 99
-	if len(candidates) > maxOptions {
-		candidates = candidates[:maxOptions]
-	}
-
-	var initial *goslack.OptionBlockObject
-	if action.AssigneeID == "" {
-		initial = unassignedOpt
-	}
-	for _, u := range candidates {
-		label := assigneeOptionLabel(u)
-		text := goslack.NewTextBlockObject(goslack.PlainTextType, label, true, false)
-		opt := goslack.NewOptionBlockObject(
-			fmt.Sprintf("%s:%d:%s", workspaceID, action.ID, u.ID),
-			text, nil,
-		)
-		options = append(options, opt)
-		if string(u.ID) == action.AssigneeID {
-			initial = opt
-		}
-	}
-
-	sel := goslack.NewOptionsSelectBlockElement(goslack.OptTypeStatic, placeholder, SlackActionIDAssigneeSelect, options...)
-	if initial != nil {
-		sel.InitialOption = initial
+	sel := goslack.NewOptionsSelectBlockElement(goslack.OptTypeUser, placeholder, SlackActionIDAssigneeSelect)
+	if action.AssigneeID != "" {
+		sel.InitialUser = action.AssigneeID
 	}
 	return sel
-}
-
-// assigneeCandidates returns non-bot users that may be assigned to the
-// action: the case channel members that exist in the SlackUser DB (which
-// itself excludes bots during sync). On any lookup error we fall back to
-// the empty list — the dropdown still gets the Unassigned sentinel.
-func (uc *ActionUseCase) assigneeCandidates(ctx context.Context, workspaceID string, action *model.Action) []*model.SlackUser {
-	caseModel, err := uc.repo.Case().Get(ctx, workspaceID, action.CaseID)
-	if err != nil || caseModel == nil {
-		return nil
-	}
-	if len(caseModel.ChannelUserIDs) == 0 {
-		return nil
-	}
-	ids := make([]model.SlackUserID, 0, len(caseModel.ChannelUserIDs))
-	for _, id := range caseModel.ChannelUserIDs {
-		ids = append(ids, model.SlackUserID(id))
-	}
-	userMap, err := uc.repo.SlackUser().GetByIDs(ctx, ids)
-	if err != nil {
-		errutil.Handle(ctx, err, "failed to load slack users for assignee select")
-		return nil
-	}
-	// Iterate ChannelUserIDs to keep a stable, channel-membership-ordered list.
-	users := make([]*model.SlackUser, 0, len(userMap))
-	for _, id := range caseModel.ChannelUserIDs {
-		if u, ok := userMap[model.SlackUserID(id)]; ok && u != nil {
-			users = append(users, u)
-		}
-	}
-	// If the current assignee is not a current channel member, surface them
-	// at the top so the dropdown can render the existing selection.
-	if action.AssigneeID != "" {
-		found := false
-		for _, u := range users {
-			if string(u.ID) == action.AssigneeID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			if u, ok := userMap[model.SlackUserID(action.AssigneeID)]; ok && u != nil {
-				users = append([]*model.SlackUser{u}, users...)
-			}
-		}
-	}
-	return users
-}
-
-func assigneeOptionLabel(u *model.SlackUser) string {
-	if u.RealName != "" && u.Name != "" && u.RealName != u.Name {
-		return fmt.Sprintf("%s (%s)", u.RealName, u.Name)
-	}
-	if u.RealName != "" {
-		return u.RealName
-	}
-	return u.Name
 }
 
 // SlackActionAssigneeBlockID returns the block_id that wraps the users_select
@@ -580,31 +506,6 @@ func assigneeOptionLabel(u *model.SlackUser) string {
 // users_select callbacks carry no `value` field.
 func SlackActionAssigneeBlockID(workspaceID string, actionID int64) string {
 	return fmt.Sprintf("%s:%s:%d", slackActionAssigneeBlockIDPrefix, workspaceID, actionID)
-}
-
-// ParseSlackAssigneeSelectValue parses a static_select option value of the
-// form "{workspaceID}:{actionID}:{slackUserID}" used by the assignee
-// dropdown. An empty trailing segment means "Unassigned".
-func ParseSlackAssigneeSelectValue(value string) (workspaceID string, actionID int64, slackUserID string, err error) {
-	lastColon := strings.LastIndex(value, ":")
-	if lastColon < 0 {
-		return "", 0, "", goerr.New("invalid assignee_select value: missing user_id separator", goerr.V("value", value))
-	}
-	slackUserID = value[lastColon+1:]
-	rest := value[:lastColon]
-
-	mid := strings.LastIndex(rest, ":")
-	if mid < 0 {
-		return "", 0, "", goerr.New("invalid assignee_select value: missing action_id separator", goerr.V("value", value))
-	}
-	idPart := rest[mid+1:]
-	wsPart := rest[:mid]
-
-	var id int64
-	if _, parseErr := fmt.Sscanf(idPart, "%d", &id); parseErr != nil {
-		return "", 0, "", goerr.Wrap(parseErr, "failed to parse action_id", goerr.V("value", value))
-	}
-	return wsPart, id, slackUserID, nil
 }
 
 // ParseSlackAssigneeBlockID parses a block_id of the form
