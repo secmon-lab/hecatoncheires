@@ -16,6 +16,22 @@ type SourceConfig interface {
 	IsSourceConfig()
 }
 
+type ActionEvent struct {
+	ID        string          `json:"id"`
+	ActionID  int             `json:"actionID"`
+	Kind      ActionEventKind `json:"kind"`
+	ActorID   string          `json:"actorID"`
+	Actor     *SlackUser      `json:"actor,omitempty"`
+	OldValue  string          `json:"oldValue"`
+	NewValue  string          `json:"newValue"`
+	CreatedAt time.Time       `json:"createdAt"`
+}
+
+type ActionEventConnection struct {
+	Items      []*ActionEvent `json:"items"`
+	NextCursor string         `json:"nextCursor"`
+}
+
 type AssistLog struct {
 	ID        string    `json:"id"`
 	CaseID    int       `json:"caseId"`
@@ -300,6 +316,65 @@ type UpdateSourceInput struct {
 type Workspace struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+}
+
+type ActionEventKind string
+
+const (
+	ActionEventKindCreated         ActionEventKind = "CREATED"
+	ActionEventKindTitleChanged    ActionEventKind = "TITLE_CHANGED"
+	ActionEventKindStatusChanged   ActionEventKind = "STATUS_CHANGED"
+	ActionEventKindAssigneeChanged ActionEventKind = "ASSIGNEE_CHANGED"
+)
+
+var AllActionEventKind = []ActionEventKind{
+	ActionEventKindCreated,
+	ActionEventKindTitleChanged,
+	ActionEventKindStatusChanged,
+	ActionEventKindAssigneeChanged,
+}
+
+func (e ActionEventKind) IsValid() bool {
+	switch e {
+	case ActionEventKindCreated, ActionEventKindTitleChanged, ActionEventKindStatusChanged, ActionEventKindAssigneeChanged:
+		return true
+	}
+	return false
+}
+
+func (e ActionEventKind) String() string {
+	return string(e)
+}
+
+func (e *ActionEventKind) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = ActionEventKind(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid ActionEventKind", str)
+	}
+	return nil
+}
+
+func (e ActionEventKind) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *ActionEventKind) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e ActionEventKind) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
 }
 
 type FieldType string

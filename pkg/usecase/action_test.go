@@ -478,7 +478,23 @@ func TestActionUseCase_UpdateAction_SlackSync(t *testing.T) {
 		return repo, actionUC, mock, action
 	}
 
-	t.Run("status change with SlackSyncFull updates message and posts thread notification", func(t *testing.T) {
+	// listChangeEvents pulls the ActionEvent stream for the action and drops the
+	// CREATED record so each test only sees diffs produced by UpdateAction.
+	listChangeEvents := func(t *testing.T, repo *memory.Repository, ctx context.Context, actionID int64) []*model.ActionEvent {
+		t.Helper()
+		events, _, err := repo.ActionEvent().List(ctx, testWorkspaceID, actionID, 100, "")
+		gt.NoError(t, err).Required()
+		var diffs []*model.ActionEvent
+		for _, e := range events {
+			if e.Kind == types.ActionEventCreated {
+				continue
+			}
+			diffs = append(diffs, e)
+		}
+		return diffs
+	}
+
+	t.Run("status change with SlackSyncFull updates message and records status event", func(t *testing.T) {
 		repo, actionUC, mock, action := setup(t)
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
@@ -494,15 +510,24 @@ func TestActionUseCase_UpdateAction_SlackSync(t *testing.T) {
 		updated, err := repo.Action().Get(ctx, testWorkspaceID, action.ID)
 		gt.NoError(t, err).Required()
 		gt.Value(t, updated.Status).Equal(types.ActionStatusInProgress)
-
 		gt.Bool(t, mock.updateMessageCalled).True()
+		// SlackSyncFull both refreshes the message AND posts a thread
+		// summary so channel watchers can see the change without opening
+		// the WebUI. The ingest path drops these context-block posts so
+		// they don't double-count in the ActionEvent feed.
 		gt.Bool(t, mock.postThreadCalled).True()
-		gt.Value(t, mock.postThreadTS).Equal("1234567890.123456")
 		gt.String(t, mock.postThreadText).Contains("<@UDOER>")
+
+		diffs := listChangeEvents(t, repo, ctx, action.ID)
+		gt.Array(t, diffs).Length(1).Required()
+		gt.Value(t, diffs[0].Kind).Equal(types.ActionEventStatusChanged)
+		gt.Value(t, diffs[0].ActorID).Equal("UDOER")
+		gt.Value(t, diffs[0].OldValue).Equal(types.ActionStatusTodo.String())
+		gt.Value(t, diffs[0].NewValue).Equal(types.ActionStatusInProgress.String())
 	})
 
-	t.Run("assignee replacement renders replaced i18n line", func(t *testing.T) {
-		_, actionUC, mock, action := setup(t)
+	t.Run("assignee replacement records assignee event", func(t *testing.T) {
+		repo, actionUC, _, action := setup(t)
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		newAssignee := "U999"
@@ -514,13 +539,15 @@ func TestActionUseCase_UpdateAction_SlackSync(t *testing.T) {
 		})
 		gt.NoError(t, err).Required()
 
-		gt.Bool(t, mock.postThreadCalled).True()
-		gt.String(t, mock.postThreadText).Contains("<@U999>")
-		gt.String(t, mock.postThreadText).Contains("<@U001>")
+		diffs := listChangeEvents(t, repo, ctx, action.ID)
+		gt.Array(t, diffs).Length(1).Required()
+		gt.Value(t, diffs[0].Kind).Equal(types.ActionEventAssigneeChanged)
+		gt.Value(t, diffs[0].OldValue).Equal("U001")
+		gt.Value(t, diffs[0].NewValue).Equal("U999")
 	})
 
-	t.Run("assignee clear renders unassigned i18n line", func(t *testing.T) {
-		_, actionUC, mock, action := setup(t)
+	t.Run("assignee clear records empty newValue", func(t *testing.T) {
+		repo, actionUC, _, action := setup(t)
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		_, err := actionUC.UpdateAction(ctx, testWorkspaceID, usecase.UpdateActionInput{
@@ -531,12 +558,15 @@ func TestActionUseCase_UpdateAction_SlackSync(t *testing.T) {
 		})
 		gt.NoError(t, err).Required()
 
-		gt.Bool(t, mock.postThreadCalled).True()
-		gt.String(t, mock.postThreadText).Contains("<@U001>")
+		diffs := listChangeEvents(t, repo, ctx, action.ID)
+		gt.Array(t, diffs).Length(1).Required()
+		gt.Value(t, diffs[0].Kind).Equal(types.ActionEventAssigneeChanged)
+		gt.Value(t, diffs[0].OldValue).Equal("U001")
+		gt.Value(t, diffs[0].NewValue).Equal("")
 	})
 
-	t.Run("SlackSyncMessageOnly skips thread notification", func(t *testing.T) {
-		_, actionUC, mock, action := setup(t)
+	t.Run("SlackSyncMessageOnly refreshes message and still records event", func(t *testing.T) {
+		repo, actionUC, mock, action := setup(t)
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		newStatus := types.ActionStatusInProgress
@@ -548,10 +578,13 @@ func TestActionUseCase_UpdateAction_SlackSync(t *testing.T) {
 		gt.NoError(t, err).Required()
 		gt.Bool(t, mock.updateMessageCalled).True()
 		gt.Bool(t, mock.postThreadCalled).False()
+
+		diffs := listChangeEvents(t, repo, ctx, action.ID)
+		gt.Array(t, diffs).Length(1).Required()
 	})
 
-	t.Run("SlackSyncSkip skips both", func(t *testing.T) {
-		_, actionUC, mock, action := setup(t)
+	t.Run("SlackSyncSkip skips Slack but still records event", func(t *testing.T) {
+		repo, actionUC, mock, action := setup(t)
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		newStatus := types.ActionStatusInProgress
@@ -563,10 +596,13 @@ func TestActionUseCase_UpdateAction_SlackSync(t *testing.T) {
 		gt.NoError(t, err).Required()
 		gt.Bool(t, mock.updateMessageCalled).False()
 		gt.Bool(t, mock.postThreadCalled).False()
+
+		diffs := listChangeEvents(t, repo, ctx, action.ID)
+		gt.Array(t, diffs).Length(1).Required()
 	})
 
-	t.Run("no observable change does not post thread notification", func(t *testing.T) {
-		_, actionUC, mock, action := setup(t)
+	t.Run("no observable change records no event", func(t *testing.T) {
+		repo, actionUC, mock, action := setup(t)
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		// Set status to its current value: no diff in title/status/assignee.
@@ -579,10 +615,13 @@ func TestActionUseCase_UpdateAction_SlackSync(t *testing.T) {
 		})
 		gt.NoError(t, err).Required()
 		gt.Bool(t, mock.postThreadCalled).False()
+
+		diffs := listChangeEvents(t, repo, ctx, action.ID)
+		gt.Array(t, diffs).Length(0)
 	})
 
-	t.Run("system actor renders system literal", func(t *testing.T) {
-		_, actionUC, mock, action := setup(t)
+	t.Run("system actor records event with empty actorID", func(t *testing.T) {
+		repo, actionUC, _, action := setup(t)
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		newTitle := "Renamed"
@@ -594,9 +633,13 @@ func TestActionUseCase_UpdateAction_SlackSync(t *testing.T) {
 		})
 		gt.NoError(t, err).Required()
 
-		gt.Bool(t, mock.postThreadCalled).True()
-		// Body must not embed an empty mention; must contain the system literal.
-		gt.String(t, mock.postThreadText).Contains("system")
+		diffs := listChangeEvents(t, repo, ctx, action.ID)
+		gt.Array(t, diffs).Length(1).Required()
+		gt.Value(t, diffs[0].Kind).Equal(types.ActionEventTitleChanged)
+		// System-driven changes leave ActorID empty; the WebUI renders a
+		// neutral "system" label in that case.
+		gt.Value(t, diffs[0].ActorID).Equal("")
+		gt.Value(t, diffs[0].NewValue).Equal("Renamed")
 	})
 }
 

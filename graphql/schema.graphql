@@ -147,6 +147,32 @@ type Action {
   createdAt: Time!
   updatedAt: Time!
   messages(limit: Int, cursor: String): SlackMessageConnection!
+  events(limit: Int, cursor: String): ActionEventConnection!
+}
+
+enum ActionEventKind {
+  CREATED
+  TITLE_CHANGED
+  STATUS_CHANGED
+  ASSIGNEE_CHANGED
+}
+
+# ActionEvent records a single change to an Action, surfaced in the
+# WebUI activity feed alongside thread messages.
+type ActionEvent {
+  id: String!
+  actionID: Int!
+  kind: ActionEventKind!
+  actorID: String!
+  actor: SlackUser
+  oldValue: String!
+  newValue: String!
+  createdAt: Time!
+}
+
+type ActionEventConnection {
+  items: [ActionEvent!]!
+  nextCursor: String!
 }
 
 # Inputs

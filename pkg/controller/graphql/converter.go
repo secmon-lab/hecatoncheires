@@ -47,6 +47,21 @@ func toGraphQLSlackMessage(m *slack.Message) *graphql1.SlackMessage {
 	}
 }
 
+// toGraphQLActionEvent converts a domain ActionEvent to its GraphQL view.
+// The Actor sub-field is left nil here; the resolver fills it via the
+// SlackUser dataloader to share the per-request batching layer.
+func toGraphQLActionEvent(e *model.ActionEvent) *graphql1.ActionEvent {
+	return &graphql1.ActionEvent{
+		ID:        e.ID,
+		ActionID:  int(e.ActionID),
+		Kind:      graphql1.ActionEventKind(e.Kind),
+		ActorID:   e.ActorID,
+		OldValue:  e.OldValue,
+		NewValue:  e.NewValue,
+		CreatedAt: e.CreatedAt,
+	}
+}
+
 // toGraphQLCase converts a domain Case to GraphQL Case
 func toGraphQLCase(c *model.Case, workspaceID string) *graphql1.Case {
 	// Ensure non-null list fields are never nil (schema: [String!]!)

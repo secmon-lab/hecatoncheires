@@ -6,6 +6,8 @@ const ACTION_FIELDS = `
   case {
     id
     title
+    slackChannelID
+    slackChannelURL
   }
   title
   description
@@ -63,6 +65,32 @@ export const GET_ACTION_MESSAGES = gql`
             permalink
             thumbURL
           }
+        }
+        nextCursor
+      }
+    }
+  }
+`
+
+export const GET_ACTION_EVENTS = gql`
+  query GetActionEvents($workspaceId: String!, $id: Int!, $limit: Int, $cursor: String) {
+    action(workspaceId: $workspaceId, id: $id) {
+      id
+      events(limit: $limit, cursor: $cursor) {
+        items {
+          id
+          actionID
+          kind
+          actorID
+          actor {
+            id
+            name
+            realName
+            imageUrl
+          }
+          oldValue
+          newValue
+          createdAt
         }
         nextCursor
       }

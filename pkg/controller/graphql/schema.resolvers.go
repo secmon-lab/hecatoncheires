@@ -89,6 +89,62 @@ func (r *actionResolver) Messages(ctx context.Context, obj *graphql1.Action, lim
 	}, nil
 }
 
+// Events is the resolver for the events field.
+func (r *actionResolver) Events(ctx context.Context, obj *graphql1.Action, limit *int, cursor *string) (*graphql1.ActionEventConnection, error) {
+	empty := &graphql1.ActionEventConnection{
+		Items:      []*graphql1.ActionEvent{},
+		NextCursor: "",
+	}
+
+	loaders := GetDataLoaders(ctx)
+	cases, err := loaders.CaseLoader.Load(ctx, obj.WorkspaceID, []int64{int64(obj.CaseID)})
+	if err != nil {
+		return nil, err
+	}
+	if len(cases) == 0 || cases[0].AccessDenied {
+		return empty, nil
+	}
+
+	limitVal := 50
+	if limit != nil && *limit > 0 {
+		limitVal = *limit
+	}
+	cursorVal := ""
+	if cursor != nil {
+		cursorVal = *cursor
+	}
+
+	events, nextCursor, err := r.repo.ActionEvent().List(ctx, obj.WorkspaceID, int64(obj.ID), limitVal, cursorVal)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to list action events from repository")
+	}
+
+	items := make([]*graphql1.ActionEvent, len(events))
+	for i, e := range events {
+		items[i] = toGraphQLActionEvent(e)
+	}
+	return &graphql1.ActionEventConnection{
+		Items:      items,
+		NextCursor: nextCursor,
+	}, nil
+}
+
+// Actor is the resolver for the actor field.
+func (r *actionEventResolver) Actor(ctx context.Context, obj *graphql1.ActionEvent) (*graphql1.SlackUser, error) {
+	if obj.ActorID == "" {
+		return nil, nil
+	}
+	loaders := GetDataLoaders(ctx)
+	users, err := loaders.SlackUserLoader.Load(ctx, []string{obj.ActorID})
+	if err != nil {
+		return nil, err
+	}
+	if len(users) == 0 {
+		return nil, nil
+	}
+	return users[0], nil
+}
+
 // ChannelUserCount is the resolver for the channelUserCount field.
 func (r *caseResolver) ChannelUserCount(ctx context.Context, obj *graphql1.Case) (int, error) {
 	return len(obj.ChannelUserIDs), nil
@@ -1029,6 +1085,9 @@ func (r *queryResolver) AssistLogs(ctx context.Context, workspaceID string, case
 // Action returns ActionResolver implementation.
 func (r *Resolver) Action() ActionResolver { return &actionResolver{r} }
 
+// ActionEvent returns ActionEventResolver implementation.
+func (r *Resolver) ActionEvent() ActionEventResolver { return &actionEventResolver{r} }
+
 // Case returns CaseResolver implementation.
 func (r *Resolver) Case() CaseResolver { return &caseResolver{r} }
 
@@ -1042,6 +1101,7 @@ func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
 func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 
 type actionResolver struct{ *Resolver }
+type actionEventResolver struct{ *Resolver }
 type caseResolver struct{ *Resolver }
 type knowledgeResolver struct{ *Resolver }
 type mutationResolver struct{ *Resolver }

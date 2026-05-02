@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
@@ -135,6 +136,23 @@ func (uc *ActionUseCase) CreateAction(ctx context.Context, workspaceID string, c
 			goerr.V(CaseIDKey, caseID))
 	}
 
+	// Record the creation event so the WebUI activity feed can show
+	// "X created this action" alongside subsequent edits.
+	creator := ""
+	if token, tokenErr := auth.TokenFromContext(ctx); tokenErr == nil {
+		creator = token.Sub
+	}
+	if err := uc.repo.ActionEvent().Put(ctx, workspaceID, created.ID, &model.ActionEvent{
+		ID:        uuid.NewString(),
+		ActionID:  created.ID,
+		Kind:      types.ActionEventCreated,
+		ActorID:   creator,
+		NewValue:  created.Title,
+		CreatedAt: created.CreatedAt,
+	}); err != nil {
+		errutil.Handle(ctx, err, "failed to record action created event")
+	}
+
 	if uc.slackService != nil && caseModel.SlackChannelID != "" {
 		actionURL := uc.actionWebURL(workspaceID, caseID, created.ID)
 		blocks := uc.buildActionMessageBlocks(ctx, workspaceID, created, actionURL)
@@ -252,6 +270,11 @@ func (uc *ActionUseCase) UpdateAction(ctx context.Context, workspaceID string, i
 		return nil, goerr.Wrap(err, "failed to update action", goerr.V(ActionIDKey, in.ID))
 	}
 
+	// Record change history regardless of Slack sync mode. The activity feed
+	// in the WebUI reads ActionEvent records as the source of truth for
+	// "what changed when, by whom".
+	uc.recordActionEvents(ctx, workspaceID, existing, updated, in.Actor)
+
 	switch in.SlackSync {
 	case SlackSyncSkip:
 		// no Slack side effects
@@ -259,6 +282,10 @@ func (uc *ActionUseCase) UpdateAction(ctx context.Context, workspaceID string, i
 		uc.refreshSlackMessage(ctx, workspaceID, updated)
 	case SlackSyncFull:
 		uc.refreshSlackMessage(ctx, workspaceID, updated)
+		// Slack thread also gets a human-readable context-block summary so
+		// channel watchers see the change without opening the WebUI. The
+		// ingest path drops these on the floor (HandleSlackMessage skips
+		// our own bot ID) so they never enter the activity feed twice.
 		uc.postActionChangeNotification(ctx, workspaceID, existing, updated, in.Actor)
 	}
 
@@ -368,7 +395,9 @@ func (uc *ActionUseCase) refreshSlackMessage(ctx context.Context, workspaceID st
 }
 
 // postActionChangeNotification posts a context-block thread reply summarising
-// changes to title / status / assignee. Best-effort.
+// changes to title / status / assignee. Slack channel watchers rely on this
+// to see history without opening the WebUI; the ingest path drops these
+// posts so they don't double-count in the ActionEvent feed.
 func (uc *ActionUseCase) postActionChangeNotification(ctx context.Context, workspaceID string, before, after *model.Action, actor ActorRef) {
 	if uc.slackService == nil || after.SlackMessageTS == "" {
 		return
@@ -428,6 +457,42 @@ func mentionUser(slackUserID string) string {
 	return fmt.Sprintf("<@%s>", slackUserID)
 }
 
+// recordActionEvents emits one ActionEvent per observable field diff
+// (title / status / assignee). The activity feed reads this stream to
+// render the change history. Best-effort: failures are logged but do
+// not abort the caller.
+func (uc *ActionUseCase) recordActionEvents(ctx context.Context, workspaceID string, before, after *model.Action, actor ActorRef) {
+	actorID := ""
+	if actor.Kind == ActorKindSlackUser {
+		actorID = actor.ID
+	}
+
+	put := func(kind types.ActionEventKind, oldVal, newVal string) {
+		event := &model.ActionEvent{
+			ID:        uuid.NewString(),
+			ActionID:  after.ID,
+			Kind:      kind,
+			ActorID:   actorID,
+			OldValue:  oldVal,
+			NewValue:  newVal,
+			CreatedAt: time.Now().UTC(),
+		}
+		if err := uc.repo.ActionEvent().Put(ctx, workspaceID, after.ID, event); err != nil {
+			errutil.Handle(ctx, err, "failed to record action event")
+		}
+	}
+
+	if before.Title != after.Title {
+		put(types.ActionEventTitleChanged, before.Title, after.Title)
+	}
+	if before.Status != after.Status {
+		put(types.ActionEventStatusChanged, before.Status.String(), after.Status.String())
+	}
+	if before.AssigneeID != after.AssigneeID {
+		put(types.ActionEventAssigneeChanged, before.AssigneeID, after.AssigneeID)
+	}
+}
+
 func (uc *ActionUseCase) actionWebURL(workspaceID string, caseID, actionID int64) string {
 	if uc.baseURL == "" {
 		return ""
@@ -446,9 +511,12 @@ func (uc *ActionUseCase) actionWebURL(workspaceID string, caseID, actionID int64
 //     uses static_select instead of users_select so we can omit bots from
 //     the candidate list (Slack's users_select has no built-in bot filter).
 func (uc *ActionUseCase) buildActionMessageBlocks(ctx context.Context, workspaceID string, action *model.Action, actionURL string) []goslack.Block {
-	titleText := fmt.Sprintf("%s *%s*", action.Status.Emoji(), action.Title)
+	// "Action:" prefix labels the message in the channel feed so readers can
+	// tell at a glance that this row is an action card (vs. a case post or a
+	// thread reply).
+	titleText := fmt.Sprintf("*Action:* %s *%s*", action.Status.Emoji(), action.Title)
 	if actionURL != "" {
-		titleText = fmt.Sprintf("%s *<%s|%s>*", action.Status.Emoji(), actionURL, action.Title)
+		titleText = fmt.Sprintf("*Action:* %s *<%s|%s>*", action.Status.Emoji(), actionURL, action.Title)
 	}
 	blocks := []goslack.Block{
 		goslack.NewSectionBlock(

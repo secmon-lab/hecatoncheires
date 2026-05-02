@@ -194,14 +194,13 @@ func (uc *SlackUseCases) HandleSlackMessage(ctx context.Context, msg *slack.Mess
 		return goerr.New("message is nil")
 	}
 
-	logger := logging.From(ctx)
-
-	// Drop the bot's own messages: those are change-notifications we just
-	// posted into the action thread, and re-ingesting them only adds noise
-	// to the WebUI Messages list.
+	// Drop our own bot's posts. These are the action change-notification
+	// context blocks we emit ourselves; the ActionEvent feed already
+	// records the same change, so re-ingesting them would double-count.
+	// Other bots (e.g., CI integrations) still pass through.
 	if uc.slackService != nil {
 		if botUserID, err := uc.slackService.GetBotUserID(ctx); err == nil && botUserID != "" && msg.UserID() == botUserID {
-			logger.Debug("skipping bot's own message", "user_id", msg.UserID())
+			logging.From(ctx).Debug("skipping bot's own message", "user_id", msg.UserID())
 			return nil
 		}
 	}
@@ -251,7 +250,7 @@ func (uc *SlackUseCases) HandleSlackMessage(ctx context.Context, msg *slack.Mess
 		}
 	}
 
-	logger.Info("slack message saved",
+	logging.From(ctx).Info("slack message saved",
 		"messageID", msg.ID(),
 		"channelID", msg.ChannelID(),
 		"userID", msg.UserID(),

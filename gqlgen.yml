@@ -78,6 +78,12 @@ models:
         resolver: true
       messages:
         resolver: true
+      events:
+        resolver: true
+  ActionEvent:
+    fields:
+      actor:
+        resolver: true
   Knowledge:
     model:
       - github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql.Knowledge
