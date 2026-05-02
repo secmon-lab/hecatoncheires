@@ -28,6 +28,8 @@ export class ActionDetailPage extends BasePage {
    * Get the action title displayed in the modal body
    */
   async getTitle(): Promise<string> {
+    // Multiple elements share class names like "titleText" (kanban cards + modal h3),
+    // so target the modal title via its dedicated test id.
     const titleText = this.page.getByTestId('action-title');
     await titleText.waitFor({ state: 'visible', timeout: 5000 });
     return await titleText.textContent() || '';

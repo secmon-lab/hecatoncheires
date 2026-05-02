@@ -14,7 +14,8 @@ export class CaseListPage extends BasePage {
 
   constructor(page: Page) {
     super(page);
-    this.pageTitle = page.locator('main h1').filter({ hasText: /Management/ });
+    // h1 is "{caseLabel}s" (e.g. "Cases") in the redesigned tactical layout.
+    this.pageTitle = page.locator('main h1').first();
     this.newCaseButton = page.locator('button').filter({ hasText: /New/ });
     this.casesTable = page.locator('table');
     this.loadingIndicator = page.locator('text=Loading...');
