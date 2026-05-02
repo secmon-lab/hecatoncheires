@@ -328,16 +328,21 @@ func cmdServe() *cli.Command {
 				logging.Default().Info("Slack Bot Token not configured, Slack Source features will be limited")
 			}
 
-			// Initialize LLM client (mandatory)
+			// Initialize LLM client. Required for Slack-based features
+			// (agent / assist / mention-draft) — usecase.New enforces that
+			// strictly when slackService is configured. When LLM isn't set
+			// up (e.g. e2e tests without API keys) we run in a degraded
+			// mode that still serves the GraphQL API + frontend.
 			llmClient, err := llmCfg.NewClient(ctx)
 			if err != nil {
 				return goerr.Wrap(err, "failed to initialize LLM client")
 			}
 			if llmClient == nil {
-				return goerr.New("LLM provider is required but not configured")
+				logging.Default().Warn("LLM provider not configured; Slack-driven AI features will be unavailable")
+			} else {
+				ucOpts = append(ucOpts, usecase.WithLLMClient(llmClient))
+				logging.Default().Info("LLM client enabled", logAttrsToArgs(llmCfg.LogAttrs())...)
 			}
-			ucOpts = append(ucOpts, usecase.WithLLMClient(llmClient))
-			logging.Default().Info("LLM client enabled", logAttrsToArgs(llmCfg.LogAttrs())...)
 
 			// Initialize GitHub service if configured
 			githubSvc, err := githubCfg.Configure()
