@@ -49,14 +49,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-playwright-
 
+      # We only test against chromium and the GitHub-hosted ubuntu runner
+      # already ships the system libs Playwright needs, so skip apt-based
+      # `install-deps` entirely (it adds ~8 minutes). When the browser cache
+      # misses we just download chromium itself.
       - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         working-directory: frontend
-        run: |
-          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
-            pnpm exec playwright install-deps
-          else
-            pnpm exec playwright install --with-deps
-          fi
+        run: pnpm exec playwright install chromium
 
       - name: Run E2E tests
         run: ./frontend/scripts/e2e.sh
