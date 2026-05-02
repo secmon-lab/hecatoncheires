@@ -15,6 +15,7 @@ type Repository interface {
 	Source() SourceRepository
 	Knowledge() KnowledgeRepository
 	CaseMessage() CaseMessageRepository
+	ActionMessage() ActionMessageRepository
 	Memory() MemoryRepository
 	AssistLog() AssistLogRepository
 	CaseDraft() CaseDraftRepository

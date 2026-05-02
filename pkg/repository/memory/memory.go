@@ -15,8 +15,9 @@ type Memory struct {
 	slackUser   *slackUserRepository
 	source      *sourceRepository
 	knowledge   *knowledgeRepository
-	caseMessage *caseMessageRepository
-	memoryStore *memoryRepository
+	caseMessage   *caseMessageRepository
+	actionMessage *actionMessageRepository
+	memoryStore   *memoryRepository
 	assistLog   *assistLogRepository
 	caseDraft   *caseDraftRepository
 }
@@ -32,8 +33,9 @@ func New() *Memory {
 		slackUser:   newSlackUserRepository(),
 		source:      newSourceRepository(),
 		knowledge:   newKnowledgeRepository(),
-		caseMessage: newCaseMessageRepository(),
-		memoryStore: newMemoryRepository(),
+		caseMessage:   newCaseMessageRepository(),
+		actionMessage: newActionMessageRepository(),
+		memoryStore:   newMemoryRepository(),
 		assistLog:   newAssistLogRepository(),
 		caseDraft:   newCaseDraftRepository(),
 	}
@@ -65,6 +67,10 @@ func (m *Memory) Knowledge() interfaces.KnowledgeRepository {
 
 func (m *Memory) CaseMessage() interfaces.CaseMessageRepository {
 	return m.caseMessage
+}
+
+func (m *Memory) ActionMessage() interfaces.ActionMessageRepository {
+	return m.actionMessage
 }
 
 func (m *Memory) Memory() interfaces.MemoryRepository {

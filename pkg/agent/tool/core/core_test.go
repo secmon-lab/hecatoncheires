@@ -204,6 +204,9 @@ func (m *mockRepo) Source() interfaces.SourceRepository       { panic("unexpecte
 func (m *mockRepo) CaseMessage() interfaces.CaseMessageRepository {
 	panic("unexpected call: CaseMessage()")
 }
+func (m *mockRepo) ActionMessage() interfaces.ActionMessageRepository {
+	panic("unexpected call: ActionMessage()")
+}
 func (m *mockRepo) PutToken(ctx context.Context, token *auth.Token) error {
 	panic("unexpected call: PutToken()")
 }
