@@ -178,10 +178,11 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
     flashSaved()
   }
 
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const handleDelete = async () => {
     if (!action) return
-    if (!window.confirm(t('warningDeleteActionPermanent'))) return
     await deleteAction({ variables: { workspaceId: currentWorkspace!.id, id: action.id } })
+    setConfirmDelete(false)
     onClose()
   }
 
@@ -195,7 +196,7 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
       title={titleEl}
       footer={
         <>
-          <Button variant="danger" onClick={handleDelete} disabled={deleting} data-testid="action-delete-button">
+          <Button variant="danger" onClick={() => setConfirmDelete(true)} disabled={deleting} data-testid="action-delete-button">
             {t('btnDelete')}
           </Button>
           <span className="spacer" />
@@ -325,6 +326,31 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
             {t('emptyActivity')}
           </div>
         </>
+      )}
+      {confirmDelete && action && (
+        <Modal
+          open
+          onClose={() => setConfirmDelete(false)}
+          title={t('titleDeleteAction')}
+          width={420}
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setConfirmDelete(false)}>{t('btnCancel')}</Button>
+              <Button
+                variant="danger"
+                onClick={handleDelete}
+                disabled={deleting}
+                data-testid="action-delete-confirm-button"
+              >
+                {deleting ? t('btnDeleting') : t('btnDelete')}
+              </Button>
+            </>
+          }
+        >
+          <p style={{ fontSize: 13, lineHeight: 1.6, margin: 0 }}>
+            {t('warningDeleteActionPermanent')}
+          </p>
+        </Modal>
       )}
     </Modal>
   )
