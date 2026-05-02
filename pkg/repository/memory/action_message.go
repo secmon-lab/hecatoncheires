@@ -85,10 +85,7 @@ func (r *actionMessageRepository) List(_ context.Context, workspaceID string, ac
 	}
 
 	end := startIdx + limit
-	hasMore := false
-	if end < len(sorted) {
-		hasMore = true
-	}
+	hasMore := end < len(sorted)
 	if end > len(sorted) {
 		end = len(sorted)
 	}

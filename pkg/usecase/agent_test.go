@@ -405,10 +405,10 @@ func TestAgentSystemPrompt_ActionsAndKnowledges(t *testing.T) {
 		}
 		actions := []*model.Action{
 			{
-				ID:          1,
-				Title:       "Investigate the issue",
-				Status:      types.ActionStatusInProgress,
-				AssigneeID:  "U001",
+				ID:         1,
+				Title:      "Investigate the issue",
+				Status:     types.ActionStatusInProgress,
+				AssigneeID: "U001",
 			},
 			{
 				ID:     2,

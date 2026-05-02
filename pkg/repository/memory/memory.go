@@ -8,36 +8,36 @@ import (
 type Repository = Memory
 
 type Memory struct {
-	caseRepo    *caseRepository
-	action      *actionRepository
-	tokens      *tokenStore
-	slack       *slackRepository
-	slackUser   *slackUserRepository
-	source      *sourceRepository
-	knowledge   *knowledgeRepository
+	caseRepo      *caseRepository
+	action        *actionRepository
+	tokens        *tokenStore
+	slack         *slackRepository
+	slackUser     *slackUserRepository
+	source        *sourceRepository
+	knowledge     *knowledgeRepository
 	caseMessage   *caseMessageRepository
 	actionMessage *actionMessageRepository
 	memoryStore   *memoryRepository
-	assistLog   *assistLogRepository
-	caseDraft   *caseDraftRepository
+	assistLog     *assistLogRepository
+	caseDraft     *caseDraftRepository
 }
 
 var _ interfaces.Repository = &Memory{}
 
 func New() *Memory {
 	return &Memory{
-		caseRepo:    newCaseRepository(),
-		action:      newActionRepository(),
-		tokens:      newTokenStore(),
-		slack:       newSlackRepository(),
-		slackUser:   newSlackUserRepository(),
-		source:      newSourceRepository(),
-		knowledge:   newKnowledgeRepository(),
+		caseRepo:      newCaseRepository(),
+		action:        newActionRepository(),
+		tokens:        newTokenStore(),
+		slack:         newSlackRepository(),
+		slackUser:     newSlackUserRepository(),
+		source:        newSourceRepository(),
+		knowledge:     newKnowledgeRepository(),
 		caseMessage:   newCaseMessageRepository(),
 		actionMessage: newActionMessageRepository(),
 		memoryStore:   newMemoryRepository(),
-		assistLog:   newAssistLogRepository(),
-		caseDraft:   newCaseDraftRepository(),
+		assistLog:     newAssistLogRepository(),
+		caseDraft:     newCaseDraftRepository(),
 	}
 }
 

@@ -9,18 +9,18 @@ import (
 )
 
 type Firestore struct {
-	client      *firestore.Client
-	caseRepo    *caseRepository
-	action      *actionRepository
-	slack       *slackRepository
-	slackUser   *slackUserRepository
-	source      *sourceRepository
-	knowledge   *knowledgeRepository
+	client        *firestore.Client
+	caseRepo      *caseRepository
+	action        *actionRepository
+	slack         *slackRepository
+	slackUser     *slackUserRepository
+	source        *sourceRepository
+	knowledge     *knowledgeRepository
 	caseMessage   *caseMessageRepository
 	actionMessage *actionMessageRepository
 	memory        *firestoreMemoryRepository
-	assistLog   *firestoreAssistLogRepository
-	caseDraft   *caseDraftRepository
+	assistLog     *firestoreAssistLogRepository
+	caseDraft     *caseDraftRepository
 }
 
 var _ interfaces.Repository = &Firestore{}
@@ -41,18 +41,18 @@ func New(ctx context.Context, projectID, databaseID string) (*Firestore, error) 
 	}
 
 	f := &Firestore{
-		client:      client,
-		caseRepo:    newCaseRepository(client),
-		action:      newActionRepository(client),
-		slack:       newSlackRepository(client),
-		slackUser:   newSlackUserRepository(client),
-		source:      newSourceRepository(client),
-		knowledge:   newKnowledgeRepository(client),
+		client:        client,
+		caseRepo:      newCaseRepository(client),
+		action:        newActionRepository(client),
+		slack:         newSlackRepository(client),
+		slackUser:     newSlackUserRepository(client),
+		source:        newSourceRepository(client),
+		knowledge:     newKnowledgeRepository(client),
 		caseMessage:   newCaseMessageRepository(client),
 		actionMessage: newActionMessageRepository(client),
 		memory:        newFirestoreMemoryRepository(client),
-		assistLog:   newFirestoreAssistLogRepository(client),
-		caseDraft:   newCaseDraftRepository(client),
+		assistLog:     newFirestoreAssistLogRepository(client),
+		caseDraft:     newCaseDraftRepository(client),
 	}
 
 	return f, nil
