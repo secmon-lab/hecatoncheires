@@ -21,10 +21,10 @@ import (
 const (
 	SlackActionIDStatusSelect   = "hc_action_status"
 	SlackActionIDAssigneeSelect = "hc_action_assignee"
-	slackActionStatusBlockID    = "hc_action_status_block"
-	// slackActionAssigneeBlockIDPrefix is followed by ":{workspaceID}:{actionID}"
-	// so that handlers can recover (workspaceID, actionID) from a users_select
-	// callback (which carries no `value`).
+	// slackActionAssigneeBlockIDPrefix is followed by ":{workspaceID}:{actionID}".
+	// The status_select and users_select share a single actions block whose
+	// block_id encodes (workspaceID, actionID), since users_select carries no
+	// `value` for the handler to recover them from.
 	slackActionAssigneeBlockIDPrefix = "hc_action_assignee_block"
 )
 
@@ -409,13 +409,23 @@ func (uc *ActionUseCase) actionWebURL(workspaceID string, caseID, actionID int64
 }
 
 // buildActionMessageBlocks constructs the Block Kit blocks for the action's
-// primary Slack message: header, optional description, Open-in-Web link,
-// and the status_select / users_select interactive controls.
+// primary Slack message. Layout:
+//   - section: bold title that links to the WebUI (or plain title when no URL),
+//     so the user can jump to the action from the title itself.
+//   - section: optional description.
+//   - actions: status_select and users_select side-by-side. The assignee
+//     callback recovers (workspaceID, actionID) from this block's block_id
+//     since users_select carries no `value`; status_select carries the same
+//     trio in its option value.
 func (uc *ActionUseCase) buildActionMessageBlocks(ctx context.Context, workspaceID string, action *model.Action, actionURL string) []goslack.Block {
+	titleText := fmt.Sprintf("%s *%s*", action.Status.Emoji(), action.Title)
+	if actionURL != "" {
+		titleText = fmt.Sprintf("%s *<%s|%s>*", action.Status.Emoji(), actionURL, action.Title)
+	}
 	blocks := []goslack.Block{
-		goslack.NewHeaderBlock(
-			goslack.NewTextBlockObject(goslack.PlainTextType,
-				i18n.T(ctx, i18n.MsgActionHeader, action.Status.Emoji(), action.Title), true, false),
+		goslack.NewSectionBlock(
+			goslack.NewTextBlockObject(goslack.MarkdownType, titleText, false, false),
+			nil, nil,
 		),
 	}
 
@@ -426,19 +436,16 @@ func (uc *ActionUseCase) buildActionMessageBlocks(ctx context.Context, workspace
 		))
 	}
 
-	if actionURL != "" {
-		blocks = append(blocks, goslack.NewSectionBlock(
-			goslack.NewTextBlockObject(goslack.MarkdownType,
-				fmt.Sprintf("<%s|%s>", actionURL, i18n.T(ctx, i18n.MsgActionOpenInWeb)), false, false),
-			nil, nil,
-		))
-	}
-
 	statusSelect := buildStatusSelect(ctx, workspaceID, action)
-	blocks = append(blocks, goslack.NewActionBlock(slackActionStatusBlockID, statusSelect))
-
 	assigneeSelect := buildAssigneeSelect(ctx, action)
-	blocks = append(blocks, goslack.NewActionBlock(SlackActionAssigneeBlockID(workspaceID, action.ID), assigneeSelect))
+	// One actions block carries both selects so they render side-by-side.
+	// The block_id encodes (workspaceID, actionID) so the assignee callback
+	// can recover them; status_select still carries the trio in its value.
+	blocks = append(blocks, goslack.NewActionBlock(
+		SlackActionAssigneeBlockID(workspaceID, action.ID),
+		statusSelect,
+		assigneeSelect,
+	))
 
 	return blocks
 }
