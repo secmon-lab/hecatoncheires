@@ -29,8 +29,8 @@ export class CaseDetailPage extends BasePage {
     this.loadingIndicator = page.locator('text=Loading...');
     // Slack channel link is now in the title row (an <a> tag starting with #)
     this.slackChannelLink = page.locator('a').filter({ hasText: /^#/ }).first();
-    // Fields section title is now rendered as <span class="h-aside-title">Fields</span>
-    this.fieldsSection = page.locator('.h-aside-title').filter({ hasText: 'Fields' }).locator('..');
+    // The redesigned aside exposes a stable data-testid on the section.
+    this.fieldsSection = page.getByTestId('case-fields-inline');
     // Empty action state title is now an h3 ("No actions yet") in the redesigned detail layout
     this.emptyActionState = page.locator('h3').filter({ hasText: 'No actions yet' }).first();
   }
@@ -106,9 +106,7 @@ export class CaseDetailPage extends BasePage {
    * Check if the Fields section is visible
    */
   async isFieldsSectionVisible(): Promise<boolean> {
-    // Section header is rendered as <span class="h-aside-title"> after the redesign.
-    const fieldsHeading = this.page.locator('.h-aside-title').filter({ hasText: 'Fields' }).first();
-    return await fieldsHeading.isVisible();
+    return await this.fieldsSection.isVisible();
   }
 
   /**
