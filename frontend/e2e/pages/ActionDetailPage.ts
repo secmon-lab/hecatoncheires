@@ -7,14 +7,12 @@ import { BasePage } from './BasePage';
 export class ActionDetailPage extends BasePage {
   // Locators
   private readonly modalTitle: Locator;
-  private readonly editButton: Locator;
   private readonly deleteButton: Locator;
   private readonly loadingIndicator: Locator;
 
   constructor(page: Page) {
     super(page);
     this.modalTitle = page.locator('#modal-title');
-    this.editButton = page.locator('button').filter({ hasText: /Edit/ }).first();
     this.deleteButton = page.locator('button').filter({ hasText: /Delete/ }).first();
     this.loadingIndicator = page.locator('text=Loading...');
   }
@@ -30,16 +28,31 @@ export class ActionDetailPage extends BasePage {
    * Get the action title displayed in the modal body
    */
   async getTitle(): Promise<string> {
-    const titleText = this.page.locator('[class*="titleText"]');
+    const titleText = this.page.getByTestId('action-title');
     await titleText.waitFor({ state: 'visible', timeout: 5000 });
     return await titleText.textContent() || '';
   }
 
   /**
-   * Click the Edit button in the modal
+   * Inline-edit the action title (Linear-style: click → input → Enter).
    */
-  async clickEdit(): Promise<void> {
-    await this.editButton.click();
+  async setTitle(next: string): Promise<void> {
+    await this.page.getByTestId('action-title').click();
+    const input = this.page.getByTestId('action-title-input');
+    await input.waitFor({ state: 'visible', timeout: 3000 });
+    await input.fill(next);
+    await input.press('Enter');
+  }
+
+  /**
+   * Inline-edit the action description.
+   */
+  async setDescription(next: string): Promise<void> {
+    await this.page.getByTestId('action-description').click();
+    const input = this.page.getByTestId('action-description-input');
+    await input.waitFor({ state: 'visible', timeout: 3000 });
+    await input.fill(next);
+    await this.page.getByTestId('action-description-save').click();
   }
 
   /**

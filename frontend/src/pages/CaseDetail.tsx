@@ -13,7 +13,10 @@ import {
 } from '../graphql/case'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
-import FieldDisplay from '../components/fields/FieldDisplay'
+import InlineCustomField from '../components/inline/InlineCustomField'
+import InlineText from '../components/inline/InlineText'
+import InlineLongText from '../components/inline/InlineLongText'
+import InlineUserSelect from '../components/inline/InlineUserSelect'
 import FilterDropdown from '../components/FilterDropdown'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
@@ -33,8 +36,6 @@ import {
   IconBell,
 } from '../components/Icons'
 import { Avatar, PrivateBadge, StatusBadge } from '../components/Primitives'
-import UserSelect from '../components/UserSelect'
-import CaseForm from './CaseForm'
 import CaseDeleteDialog from './CaseDeleteDialog'
 import ActionForm from './ActionForm'
 import ActionModal from './ActionModal'
@@ -93,7 +94,6 @@ export default function CaseDetail() {
   const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
 
-  const [editing, setEditing] = useState(false)
   const [addingAction, setAddingAction] = useState(false)
   const [actionStatusFilters, setActionStatusFilters] = useState<string[]>([])
   const [actionAssigneeFilters, setActionAssigneeFilters] = useState<string[]>([])
@@ -196,6 +196,29 @@ export default function CaseDetail() {
       },
     })
   }
+  const handleTitleChange = async (next: string) => {
+    if (next === c.title) return
+    await updateCase({
+      variables: { workspaceId: currentWorkspace!.id, input: { id: caseId, title: next } },
+    })
+  }
+  const handleDescriptionChange = async (next: string) => {
+    if (next === (c.description || '')) return
+    await updateCase({
+      variables: { workspaceId: currentWorkspace!.id, input: { id: caseId, description: next } },
+    })
+  }
+  const handleFieldChange = async (fieldId: string, value: any) => {
+    const others = (c.fields || [])
+      .filter((f: any) => f.fieldId !== fieldId)
+      .map((f: any) => ({ fieldId: f.fieldId, value: f.value }))
+    const next = value == null || value === '' || (Array.isArray(value) && value.length === 0)
+      ? others
+      : [...others, { fieldId, value }]
+    await updateCase({
+      variables: { workspaceId: currentWorkspace!.id, input: { id: caseId, fields: next } },
+    })
+  }
 
   const members: User[] = membersData?.case?.channelUsers?.items || []
   const memberTotal: number = membersData?.case?.channelUserCount ?? channelUserCount
@@ -225,14 +248,6 @@ export default function CaseDetail() {
           aria-label={t('btnWatch')}
         >
           {t('btnWatch')}
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => setEditing(true)}
-          data-testid="case-edit-button"
-        >
-          {t('btnEdit')}
         </Button>
         {c.status === 'OPEN' ? (
           <Button
@@ -292,7 +307,17 @@ export default function CaseDetail() {
       {/* title row */}
       <div className="h-detail-h">
         <span className="h-detail-id">#{c.id}</span>
-        <h1>{c.title}</h1>
+        <h1 style={{ flex: 1, margin: 0 }}>
+          <InlineText
+            value={c.title}
+            onSave={handleTitleChange}
+            ariaLabel={t('labelTitle')}
+            variant="title"
+            placeholder={t('placeholderAddTitle')}
+            disabled={updating}
+            testId="case-title"
+          />
+        </h1>
         <div className="h-detail-badges">
           {isPrivate && <span data-testid="private-badge"><PrivateBadge label={t('badgePrivate')} /></span>}
         </div>
@@ -347,7 +372,14 @@ export default function CaseDetail() {
             <div className="h-section-h">
               <span className="h-section-title">{t('labelDescription')}</span>
             </div>
-            <p>{c.description || t('labelNoDescription')}</p>
+            <InlineLongText
+              value={c.description || ''}
+              onSave={handleDescriptionChange}
+              ariaLabel={t('labelDescription')}
+              placeholder={t('placeholderAddDescription')}
+              disabled={updating}
+              testId="case-description"
+            />
           </section>
 
           <section className="h-section">
@@ -550,30 +582,15 @@ export default function CaseDetail() {
             <div className="h-aside-h">
               <span className="h-aside-title">{t('sectionAssignees')}</span>
             </div>
-            <UserSelect
-              inputId={`case-${c.id}-assignees`}
-              aria-label={t('sectionAssignees')}
+            <InlineUserSelect
               isMulti
-              isClearable
-              isDisabled={updating}
-              options={slackUsers.map((u: User) => ({
-                value: u.id,
-                label: u.realName || u.name,
-                name: u.name,
-                realName: u.realName,
-                imageUrl: u.imageUrl,
-              }))}
-              value={(c.assignees || []).map((u: User) => ({
-                value: u.id,
-                label: u.realName || u.name,
-                name: u.name,
-                realName: u.realName,
-                imageUrl: u.imageUrl,
-              }))}
-              onChange={(opts: any) =>
-                handleAssigneesChange(((opts || []) as any[]).map((o) => o.value))
-              }
-              placeholder={t('emptyValue')}
+              users={slackUsers}
+              value={c.assigneeIDs || []}
+              onSave={(ids) => handleAssigneesChange(ids as string[])}
+              ariaLabel={t('sectionAssignees')}
+              placeholder={t('placeholderAddAssignees')}
+              disabled={updating}
+              testId="case-assignees"
             />
           </section>
 
@@ -601,7 +618,13 @@ export default function CaseDetail() {
                     <div key={f.id} className="kv-row" data-testid={`case-field-${f.id}`}>
                       <span className="kv-label">{f.name}</span>
                       <span className="kv-value">
-                        <FieldDisplay field={f} value={fv?.value} users={slackUsers} />
+                        <InlineCustomField
+                          field={f}
+                          value={fv?.value}
+                          users={slackUsers}
+                          disabled={updating}
+                          onSave={(v) => handleFieldChange(f.id, v)}
+                        />
                       </span>
                     </div>
                   )
@@ -650,12 +673,6 @@ export default function CaseDetail() {
           )}
         </aside>
       </div>
-
-      {editing && <CaseForm caseItem={{
-        id: c.id, title: c.title, description: c.description,
-        isPrivate: c.isPrivate, assigneeIDs: c.assigneeIDs || [],
-        fields: c.fields || [],
-      }} onClose={() => setEditing(false)} />}
 
       {addingAction && (
         <ActionForm
