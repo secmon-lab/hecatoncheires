@@ -70,6 +70,7 @@ func (x *LLM) Flags() []cli.Flag {
 func (x *LLM) IsEnabled() bool { return x.provider != "" }
 
 // LogAttrs returns log attributes for the LLM configuration. Secrets are never included.
+// Provider-specific attributes are emitted only when relevant to the active provider.
 func (x *LLM) LogAttrs() []slog.Attr {
 	attrs := []slog.Attr{
 		slog.String("provider", x.provider),
@@ -77,11 +78,23 @@ func (x *LLM) LogAttrs() []slog.Attr {
 	if x.model != "" {
 		attrs = append(attrs, slog.String("model", x.model))
 	}
-	if x.geminiProjectID != "" {
-		attrs = append(attrs, slog.String("gcp_project_id", x.geminiProjectID))
-	}
-	if x.geminiLocation != "" {
-		attrs = append(attrs, slog.String("gcp_location", x.geminiLocation))
+
+	switch x.provider {
+	case "claude":
+		// Only Vertex AI mode uses GCP project/location.
+		if x.geminiProjectID != "" {
+			attrs = append(attrs,
+				slog.String("gcp_project_id", x.geminiProjectID),
+				slog.String("gcp_location", x.geminiLocation),
+			)
+		}
+	case "gemini":
+		if x.geminiProjectID != "" {
+			attrs = append(attrs, slog.String("gcp_project_id", x.geminiProjectID))
+		}
+		if x.geminiLocation != "" {
+			attrs = append(attrs, slog.String("gcp_location", x.geminiLocation))
+		}
 	}
 	return attrs
 }

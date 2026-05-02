@@ -84,6 +84,12 @@ func TestLLM_LogAttrs_DoesNotLeakSecrets(t *testing.T) {
 		gt.String(t, s).NotEqual("claude-secret")
 	}
 
+	// OpenAI provider should not emit GCP attributes even when fields happen to be set.
+	for _, a := range attrs {
+		gt.String(t, a.Key).NotEqual("gcp_project_id")
+		gt.String(t, a.Key).NotEqual("gcp_location")
+	}
+
 	// Sanity: provider is logged.
 	found := false
 	for _, a := range attrs {
@@ -92,6 +98,33 @@ func TestLLM_LogAttrs_DoesNotLeakSecrets(t *testing.T) {
 		}
 	}
 	gt.Bool(t, found).True()
+}
+
+func TestLLM_LogAttrs_ClaudeDirectAPI_OmitsGCP(t *testing.T) {
+	cfg := config.NewLLMForTest("claude", "", "", "anthropic-key", "", "global")
+	attrs := cfg.LogAttrs()
+
+	for _, a := range attrs {
+		gt.String(t, a.Key).NotEqual("gcp_project_id")
+		gt.String(t, a.Key).NotEqual("gcp_location")
+	}
+}
+
+func TestLLM_LogAttrs_ClaudeVertex_IncludesGCP(t *testing.T) {
+	cfg := config.NewLLMForTest("claude", "", "", "", "proj", "us-east5")
+	attrs := cfg.LogAttrs()
+
+	hasProject, hasLocation := false, false
+	for _, a := range attrs {
+		if a.Key == "gcp_project_id" && a.Value.String() == "proj" {
+			hasProject = true
+		}
+		if a.Key == "gcp_location" && a.Value.String() == "us-east5" {
+			hasLocation = true
+		}
+	}
+	gt.Bool(t, hasProject).True()
+	gt.Bool(t, hasLocation).True()
 }
 
 func TestLLM_IsEnabled(t *testing.T) {
