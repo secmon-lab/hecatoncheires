@@ -16,7 +16,7 @@ export class CaseFormPage extends BasePage {
     super(page);
     this.titleInput = page.getByTestId('case-title-input');
     this.descriptionInput = page.getByTestId('case-description-input');
-    this.submitButton = page.locator('button').filter({ hasText: /Save/ }).first();
+    this.submitButton = page.getByTestId('case-submit-button');
     this.cancelButton = page.locator('button').filter({ hasText: /Cancel/ }).first();
     this.closeButton = page.locator('button').first(); // X button
   }

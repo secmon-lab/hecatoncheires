@@ -146,7 +146,12 @@ export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>{t('btnCancel')}</Button>
-          <Button variant="primary" onClick={handleSubmit} disabled={submitting}>
+          <Button
+            variant="primary"
+            onClick={handleSubmit}
+            disabled={submitting}
+            data-testid="case-submit-button"
+          >
             {submitting ? (isEdit ? t('btnSaving') : t('btnCreating')) : (isEdit ? t('btnSave') : t('btnCreate'))}
           </Button>
         </>
