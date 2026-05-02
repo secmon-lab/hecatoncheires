@@ -17,6 +17,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 	goslack "github.com/slack-go/slack"
 )
 
@@ -38,40 +39,7 @@ func TestSlackInteractionHandler(t *testing.T) {
 		return actionUC, handler, action.ID
 	}
 
-	t.Run("handles assign button click", func(t *testing.T) {
-		actionUC, handler, actionID := setup(t)
-
-		callback := goslack.InteractionCallback{
-			Type: goslack.InteractionTypeBlockActions,
-			User: goslack.User{ID: "UNEW"},
-			ActionCallback: goslack.ActionCallbacks{
-				BlockActions: []*goslack.BlockAction{
-					{
-						ActionID: usecase.SlackActionIDAssign,
-						Value:    "test-ws:" + itoa(actionID),
-					},
-				},
-			},
-		}
-		payloadJSON, err := json.Marshal(callback)
-		gt.NoError(t, err).Required()
-
-		form := url.Values{"payload": {string(payloadJSON)}}
-		req := httptest.NewRequest(http.MethodPost, "/hooks/slack/interaction", strings.NewReader(form.Encode()))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		rec := httptest.NewRecorder()
-
-		handler.ServeHTTP(rec, req)
-		gt.Value(t, rec.Code).Equal(http.StatusOK)
-
-		// With single-assignee model, assign-to-me on an already-assigned action
-		// is a no-op; the original assignee is preserved.
-		action, err := actionUC.GetAction(t.Context(), testWorkspaceID, actionID)
-		gt.NoError(t, err).Required()
-		gt.Value(t, action.AssigneeID).Equal("U001")
-	})
-
-	t.Run("handles in_progress button click", func(t *testing.T) {
+	t.Run("handles status_select to IN_PROGRESS", func(t *testing.T) {
 		actionUC, handler, actionID := setup(t)
 
 		callback := goslack.InteractionCallback{
@@ -80,8 +48,11 @@ func TestSlackInteractionHandler(t *testing.T) {
 			ActionCallback: goslack.ActionCallbacks{
 				BlockActions: []*goslack.BlockAction{
 					{
-						ActionID: usecase.SlackActionIDInProgress,
-						Value:    "test-ws:" + itoa(actionID),
+						ActionID: usecase.SlackActionIDStatusSelect,
+						BlockID:  "hc_action_status_block",
+						SelectedOption: goslack.OptionBlockObject{
+							Value: testWorkspaceID + ":" + itoa(actionID) + ":IN_PROGRESS",
+						},
 					},
 				},
 			},
@@ -96,13 +67,14 @@ func TestSlackInteractionHandler(t *testing.T) {
 
 		handler.ServeHTTP(rec, req)
 		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		async.Wait()
 
 		action, err := actionUC.GetAction(t.Context(), testWorkspaceID, actionID)
 		gt.NoError(t, err).Required()
 		gt.Value(t, action.Status).Equal(types.ActionStatusInProgress)
 	})
 
-	t.Run("handles complete button click", func(t *testing.T) {
+	t.Run("handles status_select to COMPLETED", func(t *testing.T) {
 		actionUC, handler, actionID := setup(t)
 
 		callback := goslack.InteractionCallback{
@@ -111,8 +83,11 @@ func TestSlackInteractionHandler(t *testing.T) {
 			ActionCallback: goslack.ActionCallbacks{
 				BlockActions: []*goslack.BlockAction{
 					{
-						ActionID: usecase.SlackActionIDComplete,
-						Value:    "test-ws:" + itoa(actionID),
+						ActionID: usecase.SlackActionIDStatusSelect,
+						BlockID:  "hc_action_status_block",
+						SelectedOption: goslack.OptionBlockObject{
+							Value: testWorkspaceID + ":" + itoa(actionID) + ":COMPLETED",
+						},
 					},
 				},
 			},
@@ -127,10 +102,79 @@ func TestSlackInteractionHandler(t *testing.T) {
 
 		handler.ServeHTTP(rec, req)
 		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		async.Wait()
 
 		action, err := actionUC.GetAction(t.Context(), testWorkspaceID, actionID)
 		gt.NoError(t, err).Required()
 		gt.Value(t, action.Status).Equal(types.ActionStatusCompleted)
+	})
+
+	t.Run("handles users_select to set assignee", func(t *testing.T) {
+		actionUC, handler, actionID := setup(t)
+
+		blockID := usecase.SlackActionAssigneeBlockID(testWorkspaceID, actionID)
+		callback := goslack.InteractionCallback{
+			Type: goslack.InteractionTypeBlockActions,
+			User: goslack.User{ID: "U001"},
+			ActionCallback: goslack.ActionCallbacks{
+				BlockActions: []*goslack.BlockAction{
+					{
+						ActionID:     usecase.SlackActionIDAssigneeSelect,
+						BlockID:      blockID,
+						SelectedUser: "U999",
+					},
+				},
+			},
+		}
+		payloadJSON, err := json.Marshal(callback)
+		gt.NoError(t, err).Required()
+
+		form := url.Values{"payload": {string(payloadJSON)}}
+		req := httptest.NewRequest(http.MethodPost, "/hooks/slack/interaction", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		async.Wait()
+
+		action, err := actionUC.GetAction(t.Context(), testWorkspaceID, actionID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, action.AssigneeID).Equal("U999")
+	})
+
+	t.Run("handles users_select with no user (clears assignee)", func(t *testing.T) {
+		actionUC, handler, actionID := setup(t)
+
+		blockID := usecase.SlackActionAssigneeBlockID(testWorkspaceID, actionID)
+		callback := goslack.InteractionCallback{
+			Type: goslack.InteractionTypeBlockActions,
+			User: goslack.User{ID: "U001"},
+			ActionCallback: goslack.ActionCallbacks{
+				BlockActions: []*goslack.BlockAction{
+					{
+						ActionID:     usecase.SlackActionIDAssigneeSelect,
+						BlockID:      blockID,
+						SelectedUser: "",
+					},
+				},
+			},
+		}
+		payloadJSON, err := json.Marshal(callback)
+		gt.NoError(t, err).Required()
+
+		form := url.Values{"payload": {string(payloadJSON)}}
+		req := httptest.NewRequest(http.MethodPost, "/hooks/slack/interaction", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		async.Wait()
+
+		action, err := actionUC.GetAction(t.Context(), testWorkspaceID, actionID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, action.AssigneeID).Equal("")
 	})
 
 	t.Run("returns 400 for missing payload", func(t *testing.T) {

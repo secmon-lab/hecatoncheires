@@ -11,6 +11,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	goslack "github.com/slack-go/slack"
@@ -105,7 +106,9 @@ func TestActionUseCase_UpdateAction(t *testing.T) {
 
 		newTitle := "Updated Title"
 		newStatus := types.ActionStatusInProgress
-		updated, err := actionUC.UpdateAction(ctx, testWorkspaceID, created.ID, nil, &newTitle, nil, nil, nil, &newStatus, nil, false, false)
+		updated, err := actionUC.UpdateAction(ctx, testWorkspaceID, usecase.UpdateActionInput{
+			ID: created.ID, Title: &newTitle, Status: &newStatus, SlackSync: usecase.SlackSyncSkip,
+		})
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, updated.Title).Equal("Updated Title")
@@ -128,7 +131,9 @@ func TestActionUseCase_UpdateAction(t *testing.T) {
 		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c1.ID, "Test Action", "Description", "", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
-		updated, err := actionUC.UpdateAction(ctx, testWorkspaceID, created.ID, &c2.ID, nil, nil, nil, nil, nil, nil, false, false)
+		updated, err := actionUC.UpdateAction(ctx, testWorkspaceID, usecase.UpdateActionInput{
+			ID: created.ID, CaseID: &c2.ID, SlackSync: usecase.SlackSyncSkip,
+		})
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, updated.CaseID).Equal(c2.ID)
@@ -147,7 +152,9 @@ func TestActionUseCase_UpdateAction(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		newCaseID := int64(999)
-		_, err = actionUC.UpdateAction(ctx, testWorkspaceID, created.ID, &newCaseID, nil, nil, nil, nil, nil, nil, false, false)
+		_, err = actionUC.UpdateAction(ctx, testWorkspaceID, usecase.UpdateActionInput{
+			ID: created.ID, CaseID: &newCaseID, SlackSync: usecase.SlackSyncSkip,
+		})
 		gt.Value(t, err).NotNil()
 		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
 	})
@@ -157,7 +164,9 @@ func TestActionUseCase_UpdateAction(t *testing.T) {
 		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		_, err := actionUC.UpdateAction(ctx, testWorkspaceID, 999, nil, nil, nil, nil, nil, nil, nil, false, false)
+		_, err := actionUC.UpdateAction(ctx, testWorkspaceID, usecase.UpdateActionInput{
+			ID: 999, SlackSync: usecase.SlackSyncSkip,
+		})
 		gt.Value(t, err).NotNil()
 		gt.Error(t, err).Is(usecase.ErrActionNotFound)
 	})
@@ -410,133 +419,230 @@ func TestActionUseCase_CreateAction_SlackNotification(t *testing.T) {
 	})
 }
 
-func TestActionUseCase_HandleSlackInteraction(t *testing.T) {
-	setup := func(t *testing.T) (*memory.Repository, *usecase.ActionUseCase, *actionTestSlackMock, *model.Case, *model.Action) {
+// actionTestSlackMockExt extends actionTestSlackMock to also capture
+// PostThreadMessage calls used by change-notification tests.
+type actionTestSlackMockExt struct {
+	actionTestSlackMock
+	postThreadCalled  bool
+	postThreadChannel string
+	postThreadTS      string
+	postThreadBlocks  []goslack.Block
+	postThreadText    string
+}
+
+func (m *actionTestSlackMockExt) PostThreadMessage(ctx context.Context, channelID string, threadTS string, blocks []goslack.Block, text string) (string, error) {
+	m.postThreadCalled = true
+	m.postThreadChannel = channelID
+	m.postThreadTS = threadTS
+	m.postThreadBlocks = blocks
+	m.postThreadText = text
+	return "thread-reply-ts", nil
+}
+
+func TestActionUseCase_UpdateAction_SlackSync(t *testing.T) {
+	i18n.Init(i18n.LangEN)
+	setup := func(t *testing.T) (*memory.Repository, *usecase.ActionUseCase, *actionTestSlackMockExt, *model.Action) {
 		t.Helper()
 		repo := memory.New()
-		mock := &actionTestSlackMock{
-			mockSlackService: mockSlackService{
-				createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
-					return fmt.Sprintf("C%d", caseID), nil
+		mock := &actionTestSlackMockExt{
+			actionTestSlackMock: actionTestSlackMock{
+				mockSlackService: mockSlackService{
+					createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+						return fmt.Sprintf("C%d", caseID), nil
+					},
 				},
+				postMessageTS: "1234567890.123456",
 			},
-			postMessageTS: "1234567890.123456",
 		}
 		caseUC := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
 		actionUC := usecase.NewActionUseCase(repo, mock, "https://example.com")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		_, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+		c, err := repo.Case().List(ctx, testWorkspaceID)
 		gt.NoError(t, err).Required()
 
-		action, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Desc", "U001", "", types.ActionStatusTodo, nil)
+		action, err := actionUC.CreateAction(ctx, testWorkspaceID, c[0].ID, "Test Action", "Desc", "U001", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
-		// Reset mock tracking after creation
+		// Reset call tracking after creation
 		mock.updateMessageCalled = false
-
-		return repo, actionUC, mock, c, action
+		mock.postThreadCalled = false
+		return repo, actionUC, mock, action
 	}
 
-	t.Run("assign adds user to assignees", func(t *testing.T) {
-		repo, actionUC, mock, _, action := setup(t)
+	t.Run("status change with SlackSyncFull updates message and posts thread notification", func(t *testing.T) {
+		repo, actionUC, mock, action := setup(t)
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		// Action initially has AssigneeID "U001". The Assign-to-me semantics
-		// with single-assignee model: assign only when currently unassigned.
-		// Therefore clicking Assign-to-me on an already-assigned action is a no-op.
-		err := actionUC.HandleSlackInteraction(ctx, testWorkspaceID, action.ID, "UNEW", usecase.SlackActionIDAssign)
-		gt.NoError(t, err).Required()
-
-		updated, err := repo.Action().Get(ctx, testWorkspaceID, action.ID)
-		gt.NoError(t, err).Required()
-		gt.Value(t, updated.AssigneeID).Equal("U001")
-
-		// Slack message is still re-rendered when interaction is processed,
-		// even if no domain change happened, to reflect any state.
-		gt.Value(t, mock.updateMessageCalled).Equal(true)
-	})
-
-	t.Run("assign does not overwrite existing assignee", func(t *testing.T) {
-		repo, actionUC, _, _, action := setup(t)
-		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
-
-		err := actionUC.HandleSlackInteraction(ctx, testWorkspaceID, action.ID, "U001", usecase.SlackActionIDAssign)
-		gt.NoError(t, err).Required()
-
-		updated, err := repo.Action().Get(ctx, testWorkspaceID, action.ID)
-		gt.NoError(t, err).Required()
-		gt.Value(t, updated.AssigneeID).Equal("U001")
-	})
-
-	t.Run("in_progress changes status", func(t *testing.T) {
-		repo, actionUC, _, _, action := setup(t)
-		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
-
-		err := actionUC.HandleSlackInteraction(ctx, testWorkspaceID, action.ID, "U001", usecase.SlackActionIDInProgress)
+		newStatus := types.ActionStatusInProgress
+		_, err := actionUC.UpdateAction(ctx, testWorkspaceID, usecase.UpdateActionInput{
+			ID:        action.ID,
+			Status:    &newStatus,
+			SlackSync: usecase.SlackSyncFull,
+			Actor:     usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: "UDOER"},
+		})
 		gt.NoError(t, err).Required()
 
 		updated, err := repo.Action().Get(ctx, testWorkspaceID, action.ID)
 		gt.NoError(t, err).Required()
 		gt.Value(t, updated.Status).Equal(types.ActionStatusInProgress)
+
+		gt.Bool(t, mock.updateMessageCalled).True()
+		gt.Bool(t, mock.postThreadCalled).True()
+		gt.Value(t, mock.postThreadTS).Equal("1234567890.123456")
+		gt.String(t, mock.postThreadText).Contains("<@UDOER>")
 	})
 
-	t.Run("complete changes status", func(t *testing.T) {
-		repo, actionUC, _, _, action := setup(t)
+	t.Run("assignee replacement renders replaced i18n line", func(t *testing.T) {
+		_, actionUC, mock, action := setup(t)
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		err := actionUC.HandleSlackInteraction(ctx, testWorkspaceID, action.ID, "U001", usecase.SlackActionIDComplete)
+		newAssignee := "U999"
+		_, err := actionUC.UpdateAction(ctx, testWorkspaceID, usecase.UpdateActionInput{
+			ID:         action.ID,
+			AssigneeID: &newAssignee,
+			SlackSync:  usecase.SlackSyncFull,
+			Actor:      usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: "UDOER"},
+		})
 		gt.NoError(t, err).Required()
 
-		updated, err := repo.Action().Get(ctx, testWorkspaceID, action.ID)
-		gt.NoError(t, err).Required()
-		gt.Value(t, updated.Status).Equal(types.ActionStatusCompleted)
+		gt.Bool(t, mock.postThreadCalled).True()
+		gt.String(t, mock.postThreadText).Contains("<@U999>")
+		gt.String(t, mock.postThreadText).Contains("<@U001>")
 	})
 
-	t.Run("unknown action type is ignored", func(t *testing.T) {
-		repo, actionUC, _, _, action := setup(t)
+	t.Run("assignee clear renders unassigned i18n line", func(t *testing.T) {
+		_, actionUC, mock, action := setup(t)
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		err := actionUC.HandleSlackInteraction(ctx, testWorkspaceID, action.ID, "U001", "unknown_action")
+		_, err := actionUC.UpdateAction(ctx, testWorkspaceID, usecase.UpdateActionInput{
+			ID:            action.ID,
+			ClearAssignee: true,
+			SlackSync:     usecase.SlackSyncFull,
+			Actor:         usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: "UDOER"},
+		})
 		gt.NoError(t, err).Required()
 
-		// Action should be unchanged
-		unchanged, err := repo.Action().Get(ctx, testWorkspaceID, action.ID)
-		gt.NoError(t, err).Required()
-		gt.Value(t, unchanged.Status).Equal(types.ActionStatusTodo)
+		gt.Bool(t, mock.postThreadCalled).True()
+		gt.String(t, mock.postThreadText).Contains("<@U001>")
 	})
 
-	t.Run("non-existent action returns error", func(t *testing.T) {
-		_, actionUC, _, _, _ := setup(t)
+	t.Run("SlackSyncMessageOnly skips thread notification", func(t *testing.T) {
+		_, actionUC, mock, action := setup(t)
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		err := actionUC.HandleSlackInteraction(ctx, testWorkspaceID, 99999, "U001", usecase.SlackActionIDAssign)
+		newStatus := types.ActionStatusInProgress
+		_, err := actionUC.UpdateAction(ctx, testWorkspaceID, usecase.UpdateActionInput{
+			ID:        action.ID,
+			Status:    &newStatus,
+			SlackSync: usecase.SlackSyncMessageOnly,
+		})
+		gt.NoError(t, err).Required()
+		gt.Bool(t, mock.updateMessageCalled).True()
+		gt.Bool(t, mock.postThreadCalled).False()
+	})
+
+	t.Run("SlackSyncSkip skips both", func(t *testing.T) {
+		_, actionUC, mock, action := setup(t)
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		newStatus := types.ActionStatusInProgress
+		_, err := actionUC.UpdateAction(ctx, testWorkspaceID, usecase.UpdateActionInput{
+			ID:        action.ID,
+			Status:    &newStatus,
+			SlackSync: usecase.SlackSyncSkip,
+		})
+		gt.NoError(t, err).Required()
+		gt.Bool(t, mock.updateMessageCalled).False()
+		gt.Bool(t, mock.postThreadCalled).False()
+	})
+
+	t.Run("no observable change does not post thread notification", func(t *testing.T) {
+		_, actionUC, mock, action := setup(t)
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		// Set status to its current value: no diff in title/status/assignee.
+		current := action.Status
+		_, err := actionUC.UpdateAction(ctx, testWorkspaceID, usecase.UpdateActionInput{
+			ID:        action.ID,
+			Status:    &current,
+			SlackSync: usecase.SlackSyncFull,
+			Actor:     usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: "UDOER"},
+		})
+		gt.NoError(t, err).Required()
+		gt.Bool(t, mock.postThreadCalled).False()
+	})
+
+	t.Run("system actor renders system literal", func(t *testing.T) {
+		_, actionUC, mock, action := setup(t)
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		newTitle := "Renamed"
+		_, err := actionUC.UpdateAction(ctx, testWorkspaceID, usecase.UpdateActionInput{
+			ID:        action.ID,
+			Title:     &newTitle,
+			SlackSync: usecase.SlackSyncFull,
+			Actor:     usecase.ActorRef{Kind: usecase.ActorKindSystem},
+		})
+		gt.NoError(t, err).Required()
+
+		gt.Bool(t, mock.postThreadCalled).True()
+		// Body must not embed an empty mention; must contain the system literal.
+		gt.String(t, mock.postThreadText).Contains("system")
+	})
+}
+
+func TestParseSlackStatusSelectValue(t *testing.T) {
+	t.Run("valid value", func(t *testing.T) {
+		ws, id, status, err := usecase.ParseSlackStatusSelectValue("test-ws:42:IN_PROGRESS")
+		gt.NoError(t, err).Required()
+		gt.Value(t, ws).Equal("test-ws")
+		gt.Value(t, id).Equal(int64(42))
+		gt.Value(t, status).Equal(types.ActionStatusInProgress)
+	})
+
+	t.Run("workspace with hyphen", func(t *testing.T) {
+		ws, id, status, err := usecase.ParseSlackStatusSelectValue("my-workspace:123:COMPLETED")
+		gt.NoError(t, err).Required()
+		gt.Value(t, ws).Equal("my-workspace")
+		gt.Value(t, id).Equal(int64(123))
+		gt.Value(t, status).Equal(types.ActionStatusCompleted)
+	})
+
+	t.Run("invalid status", func(t *testing.T) {
+		_, _, _, err := usecase.ParseSlackStatusSelectValue("ws:1:NOT_A_STATUS")
+		gt.Value(t, err).NotNil()
+	})
+
+	t.Run("invalid action id", func(t *testing.T) {
+		_, _, _, err := usecase.ParseSlackStatusSelectValue("ws:notnum:TODO")
+		gt.Value(t, err).NotNil()
+	})
+
+	t.Run("missing fields", func(t *testing.T) {
+		_, _, _, err := usecase.ParseSlackStatusSelectValue("only-one-field")
 		gt.Value(t, err).NotNil()
 	})
 }
 
-func TestParseSlackActionValue(t *testing.T) {
-	t.Run("valid value", func(t *testing.T) {
-		ws, id, err := usecase.ParseSlackActionValue("test-ws:42")
+func TestParseSlackAssigneeBlockID(t *testing.T) {
+	t.Run("round-trip", func(t *testing.T) {
+		blockID := usecase.SlackActionAssigneeBlockID("test-ws", 42)
+		ws, id, err := usecase.ParseSlackAssigneeBlockID(blockID)
 		gt.NoError(t, err).Required()
 		gt.Value(t, ws).Equal("test-ws")
 		gt.Value(t, id).Equal(int64(42))
 	})
 
-	t.Run("workspace with hyphen", func(t *testing.T) {
-		ws, id, err := usecase.ParseSlackActionValue("my-workspace:123")
-		gt.NoError(t, err).Required()
-		gt.Value(t, ws).Equal("my-workspace")
-		gt.Value(t, id).Equal(int64(123))
-	})
-
-	t.Run("invalid format without colon", func(t *testing.T) {
-		_, _, err := usecase.ParseSlackActionValue("invalid")
+	t.Run("invalid prefix", func(t *testing.T) {
+		_, _, err := usecase.ParseSlackAssigneeBlockID("not_our_block_id")
 		gt.Value(t, err).NotNil()
 	})
 
-	t.Run("invalid action ID", func(t *testing.T) {
-		_, _, err := usecase.ParseSlackActionValue("ws:notanumber")
+	t.Run("missing action id", func(t *testing.T) {
+		_, _, err := usecase.ParseSlackAssigneeBlockID("hc_action_assignee_block:onlyws")
 		gt.Value(t, err).NotNil()
 	})
 }
@@ -596,7 +702,9 @@ func TestActionUseCase_DueDate(t *testing.T) {
 		gt.Value(t, created.DueDate == nil).Equal(true)
 
 		dueDate := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-		updated, err := actionUC.UpdateAction(ctx, testWorkspaceID, created.ID, nil, nil, nil, nil, nil, nil, &dueDate, false, false)
+		updated, err := actionUC.UpdateAction(ctx, testWorkspaceID, usecase.UpdateActionInput{
+			ID: created.ID, DueDate: &dueDate, SlackSync: usecase.SlackSyncSkip,
+		})
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, updated.DueDate).NotNil()
@@ -618,7 +726,9 @@ func TestActionUseCase_DueDate(t *testing.T) {
 		gt.Value(t, created.DueDate).NotNil()
 
 		// Clear due date using clearDueDate=true
-		updated, err := actionUC.UpdateAction(ctx, testWorkspaceID, created.ID, nil, nil, nil, nil, nil, nil, nil, true, false)
+		updated, err := actionUC.UpdateAction(ctx, testWorkspaceID, usecase.UpdateActionInput{
+			ID: created.ID, ClearDueDate: true, SlackSync: usecase.SlackSyncSkip,
+		})
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, updated.DueDate == nil).Equal(true)
@@ -639,7 +749,9 @@ func TestActionUseCase_DueDate(t *testing.T) {
 
 		// Update only title, leave dueDate unchanged (nil, false)
 		newTitle := "Updated Title"
-		updated, err := actionUC.UpdateAction(ctx, testWorkspaceID, created.ID, nil, &newTitle, nil, nil, nil, nil, nil, false, false)
+		updated, err := actionUC.UpdateAction(ctx, testWorkspaceID, usecase.UpdateActionInput{
+			ID: created.ID, Title: &newTitle, SlackSync: usecase.SlackSyncSkip,
+		})
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, updated.Title).Equal("Updated Title")
@@ -698,7 +810,9 @@ func TestActionUseCase_PrivateCaseAccessControl(t *testing.T) {
 
 		// Non-member cannot update action
 		newTitle := "Updated"
-		_, err = actionUC.UpdateAction(nonMemberCtx, testWorkspaceID, action.ID, nil, &newTitle, nil, nil, nil, nil, nil, false, false)
+		_, err = actionUC.UpdateAction(nonMemberCtx, testWorkspaceID, usecase.UpdateActionInput{
+			ID: action.ID, Title: &newTitle, SlackSync: usecase.SlackSyncSkip,
+		})
 		gt.Error(t, err).Is(usecase.ErrAccessDenied)
 	})
 

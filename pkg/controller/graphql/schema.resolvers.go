@@ -462,7 +462,25 @@ func (r *mutationResolver) UpdateAction(ctx context.Context, workspaceID string,
 		clearAssignee = *input.ClearAssignee
 	}
 
-	updated, err := r.UseCases.Action.UpdateAction(ctx, workspaceID, int64(input.ID), caseID, input.Title, input.Description, input.AssigneeID, slackMessageTS, status, input.DueDate, clearDueDate, clearAssignee)
+	actor := usecase.ActorRef{Kind: usecase.ActorKindSystem}
+	if token, tokenErr := auth.TokenFromContext(ctx); tokenErr == nil {
+		actor = usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: token.Sub}
+	}
+
+	updated, err := r.UseCases.Action.UpdateAction(ctx, workspaceID, usecase.UpdateActionInput{
+		ID:             int64(input.ID),
+		CaseID:         caseID,
+		Title:          input.Title,
+		Description:    input.Description,
+		AssigneeID:     input.AssigneeID,
+		SlackMessageTS: slackMessageTS,
+		Status:         status,
+		DueDate:        input.DueDate,
+		ClearDueDate:   clearDueDate,
+		ClearAssignee:  clearAssignee,
+		SlackSync:      usecase.SlackSyncFull,
+		Actor:          actor,
+	})
 	if err != nil {
 		return nil, err
 	}

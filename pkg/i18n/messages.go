@@ -41,6 +41,26 @@ var messagesEN = [msgKeyCount]string{
 	MsgActionNew:        "New action: %s",
 	MsgActionUpdated:    "Action updated: %s",
 
+	// Action status select labels
+	MsgActionStatusBacklog:         "Backlog",
+	MsgActionStatusTodo:            "Todo",
+	MsgActionStatusInProgressLabel: "In Progress",
+	MsgActionStatusBlocked:         "Blocked",
+	MsgActionStatusCompletedLabel:  "Completed",
+
+	// Action interactive controls
+	MsgActionOpenInWeb:           "Open in Web",
+	MsgActionStatusPlaceholder:   "Select status",
+	MsgActionAssigneePlaceholder: "Select assignee",
+
+	// Action change notifications
+	MsgActionChangeTitle:              ":pencil2: %s changed title: %q -> %q",
+	MsgActionChangeStatus:             ":arrows_counterclockwise: %s changed status: %s -> %s",
+	MsgActionChangeAssigneeAssigned:   ":bust_in_silhouette: %s assigned %s",
+	MsgActionChangeAssigneeUnassigned: ":bust_in_silhouette: %s unassigned %s",
+	MsgActionChangeAssigneeReplaced:   ":bust_in_silhouette: %s changed assignee: %s -> %s",
+	MsgActionChangeActorSystem:        "system",
+
 	// Agent
 	MsgAgentThinking:      "Thinking...",
 	MsgAgentAnalyzing:     "Analyzing...",
@@ -104,6 +124,26 @@ var messagesJA = [msgKeyCount]string{
 	MsgActionStatus:     "ステータス: %s",
 	MsgActionNew:        "新しいアクション: %s",
 	MsgActionUpdated:    "アクション更新: %s",
+
+	// Action status select labels
+	MsgActionStatusBacklog:         "バックログ",
+	MsgActionStatusTodo:            "ToDo",
+	MsgActionStatusInProgressLabel: "進行中",
+	MsgActionStatusBlocked:         "ブロック",
+	MsgActionStatusCompletedLabel:  "完了",
+
+	// Action interactive controls
+	MsgActionOpenInWeb:           "Web で開く",
+	MsgActionStatusPlaceholder:   "ステータスを選択",
+	MsgActionAssigneePlaceholder: "担当者を選択",
+
+	// Action change notifications
+	MsgActionChangeTitle:              ":pencil2: %s がタイトルを変更しました: %q → %q",
+	MsgActionChangeStatus:             ":arrows_counterclockwise: %s がステータスを変更しました: %s → %s",
+	MsgActionChangeAssigneeAssigned:   ":bust_in_silhouette: %s が %s をアサインしました",
+	MsgActionChangeAssigneeUnassigned: ":bust_in_silhouette: %s が %s のアサインを解除しました",
+	MsgActionChangeAssigneeReplaced:   ":bust_in_silhouette: %s が担当者を変更しました: %s → %s",
+	MsgActionChangeActorSystem:        "システム",
 
 	// Agent
 	MsgAgentThinking:      "考え中...",

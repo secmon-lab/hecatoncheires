@@ -74,31 +74,62 @@ func (h *SlackInteractionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 
 	// Process each action in the callback
 	for _, action := range callback.ActionCallback.BlockActions {
+		a := action
+		cb := callback
 		// Only process our action IDs
-		switch action.ActionID {
-		case usecase.SlackActionIDAssign, usecase.SlackActionIDInProgress, usecase.SlackActionIDComplete:
-			// Parse the button value to get workspaceID and actionID
-			workspaceID, actionID, err := usecase.ParseSlackActionValue(action.Value)
+		switch a.ActionID {
+		case usecase.SlackActionIDStatusSelect:
+			workspaceID, actionID, status, err := usecase.ParseSlackStatusSelectValue(a.SelectedOption.Value)
 			if err != nil {
-				logger := logging.From(ctx)
-				logger.Warn("failed to parse Slack action value",
+				logging.From(ctx).Warn("failed to parse status_select value",
 					"error", err,
-					"value", action.Value,
+					"value", a.SelectedOption.Value,
 				)
 				continue
 			}
-
-			userID := callback.User.ID
-			if err := h.actionUC.HandleSlackInteraction(ctx, workspaceID, actionID, userID, action.ActionID); err != nil {
-				logger := logging.From(ctx)
-				logger.Error("failed to handle Slack interaction",
-					"error", err,
-					"action_id", action.ActionID,
-					"workspace_id", workspaceID,
-					"action_id_num", actionID,
-					"user_id", userID,
-				)
+			input := usecase.UpdateActionInput{
+				ID:        actionID,
+				Status:    &status,
+				SlackSync: usecase.SlackSyncFull,
+				Actor:     usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: cb.User.ID},
 			}
+			async.Dispatch(ctx, func(ctx context.Context) error {
+				if _, err := h.actionUC.UpdateAction(ctx, workspaceID, input); err != nil {
+					return goerr.Wrap(err, "failed to update action status from Slack",
+						goerr.V("workspace_id", workspaceID),
+						goerr.V("action_id", actionID))
+				}
+				return nil
+			})
+
+		case usecase.SlackActionIDAssigneeSelect:
+			workspaceID, actionID, err := usecase.ParseSlackAssigneeBlockID(a.BlockID)
+			if err != nil {
+				logging.From(ctx).Warn("failed to parse assignee block_id",
+					"error", err,
+					"block_id", a.BlockID,
+				)
+				continue
+			}
+			input := usecase.UpdateActionInput{
+				ID:        actionID,
+				SlackSync: usecase.SlackSyncFull,
+				Actor:     usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: cb.User.ID},
+			}
+			if a.SelectedUser == "" {
+				input.ClearAssignee = true
+			} else {
+				selected := a.SelectedUser
+				input.AssigneeID = &selected
+			}
+			async.Dispatch(ctx, func(ctx context.Context) error {
+				if _, err := h.actionUC.UpdateAction(ctx, workspaceID, input); err != nil {
+					return goerr.Wrap(err, "failed to update action assignee from Slack",
+						goerr.V("workspace_id", workspaceID),
+						goerr.V("action_id", actionID))
+				}
+				return nil
+			})
 
 		case usecase.SlackAgentSessionActionsID:
 			if h.agentUC == nil || action.SelectedOption.Value == "" {
