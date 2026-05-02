@@ -28,7 +28,7 @@ func TestActionUseCase_CreateAction(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		// Create action
-		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Action Description", []string{"U001"}, "msg-123", types.ActionStatusTodo, nil)
+		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Action Description", "U001", "msg-123", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
 		gt.Number(t, created.ID).NotEqual(0)
@@ -47,7 +47,7 @@ func TestActionUseCase_CreateAction(t *testing.T) {
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
 		gt.NoError(t, err).Required()
 
-		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "", "Description", []string{}, "", types.ActionStatusTodo, nil)
+		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "", "Description", "", "", types.ActionStatusTodo, nil)
 		gt.Value(t, err).NotNil()
 	})
 
@@ -56,7 +56,7 @@ func TestActionUseCase_CreateAction(t *testing.T) {
 		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		_, err := actionUC.CreateAction(ctx, testWorkspaceID, 999, "Test Action", "Description", []string{}, "", types.ActionStatusTodo, nil)
+		_, err := actionUC.CreateAction(ctx, testWorkspaceID, 999, "Test Action", "Description", "", "", types.ActionStatusTodo, nil)
 		gt.Value(t, err).NotNil()
 		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
 	})
@@ -70,7 +70,7 @@ func TestActionUseCase_CreateAction(t *testing.T) {
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
 		gt.NoError(t, err).Required()
 
-		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Description", []string{}, "", "invalid-status", nil)
+		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Description", "", "", "invalid-status", nil)
 		gt.Value(t, err).NotNil()
 	})
 
@@ -83,7 +83,7 @@ func TestActionUseCase_CreateAction(t *testing.T) {
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
 		gt.NoError(t, err).Required()
 
-		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Description", []string{}, "", "", nil)
+		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Description", "", "", "", nil)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, created.Status).Equal(types.ActionStatusTodo)
@@ -100,12 +100,12 @@ func TestActionUseCase_UpdateAction(t *testing.T) {
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
 		gt.NoError(t, err).Required()
 
-		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Original Title", "Original Description", []string{"U001"}, "", types.ActionStatusTodo, nil)
+		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Original Title", "Original Description", "U001", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
 		newTitle := "Updated Title"
 		newStatus := types.ActionStatusInProgress
-		updated, err := actionUC.UpdateAction(ctx, testWorkspaceID, created.ID, nil, &newTitle, nil, nil, nil, &newStatus, nil, false)
+		updated, err := actionUC.UpdateAction(ctx, testWorkspaceID, created.ID, nil, &newTitle, nil, nil, nil, &newStatus, nil, false, false)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, updated.Title).Equal("Updated Title")
@@ -125,10 +125,10 @@ func TestActionUseCase_UpdateAction(t *testing.T) {
 		c2, err := caseUC.CreateCase(ctx, testWorkspaceID, "Case 2", "Description 2", []string{}, nil, false, "", "")
 		gt.NoError(t, err).Required()
 
-		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c1.ID, "Test Action", "Description", []string{}, "", types.ActionStatusTodo, nil)
+		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c1.ID, "Test Action", "Description", "", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
-		updated, err := actionUC.UpdateAction(ctx, testWorkspaceID, created.ID, &c2.ID, nil, nil, nil, nil, nil, nil, false)
+		updated, err := actionUC.UpdateAction(ctx, testWorkspaceID, created.ID, &c2.ID, nil, nil, nil, nil, nil, nil, false, false)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, updated.CaseID).Equal(c2.ID)
@@ -143,11 +143,11 @@ func TestActionUseCase_UpdateAction(t *testing.T) {
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
 		gt.NoError(t, err).Required()
 
-		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Description", []string{}, "", types.ActionStatusTodo, nil)
+		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Description", "", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
 		newCaseID := int64(999)
-		_, err = actionUC.UpdateAction(ctx, testWorkspaceID, created.ID, &newCaseID, nil, nil, nil, nil, nil, nil, false)
+		_, err = actionUC.UpdateAction(ctx, testWorkspaceID, created.ID, &newCaseID, nil, nil, nil, nil, nil, nil, false, false)
 		gt.Value(t, err).NotNil()
 		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
 	})
@@ -157,7 +157,7 @@ func TestActionUseCase_UpdateAction(t *testing.T) {
 		actionUC := usecase.NewActionUseCase(repo, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		_, err := actionUC.UpdateAction(ctx, testWorkspaceID, 999, nil, nil, nil, nil, nil, nil, nil, false)
+		_, err := actionUC.UpdateAction(ctx, testWorkspaceID, 999, nil, nil, nil, nil, nil, nil, nil, false, false)
 		gt.Value(t, err).NotNil()
 		gt.Error(t, err).Is(usecase.ErrActionNotFound)
 	})
@@ -173,7 +173,7 @@ func TestActionUseCase_DeleteAction(t *testing.T) {
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
 		gt.NoError(t, err).Required()
 
-		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Description", []string{}, "", types.ActionStatusTodo, nil)
+		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Description", "", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
 		gt.NoError(t, actionUC.DeleteAction(ctx, testWorkspaceID, created.ID)).Required()
@@ -203,7 +203,7 @@ func TestActionUseCase_GetAction(t *testing.T) {
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
 		gt.NoError(t, err).Required()
 
-		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Description", []string{}, "", types.ActionStatusTodo, nil)
+		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Description", "", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
 		retrieved, err := actionUC.GetAction(ctx, testWorkspaceID, created.ID)
@@ -234,10 +234,10 @@ func TestActionUseCase_ListActions(t *testing.T) {
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
 		gt.NoError(t, err).Required()
 
-		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Action 1", "Description 1", []string{}, "", types.ActionStatusTodo, nil)
+		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Action 1", "Description 1", "", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
-		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Action 2", "Description 2", []string{}, "", types.ActionStatusTodo, nil)
+		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Action 2", "Description 2", "", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
 		actions, err := actionUC.ListActions(ctx, testWorkspaceID)
@@ -260,13 +260,13 @@ func TestActionUseCase_GetActionsByCase(t *testing.T) {
 		c2, err := caseUC.CreateCase(ctx, testWorkspaceID, "Case 2", "Description 2", []string{}, nil, false, "", "")
 		gt.NoError(t, err).Required()
 
-		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c1.ID, "Action 1-1", "Description", []string{}, "", types.ActionStatusTodo, nil)
+		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c1.ID, "Action 1-1", "Description", "", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
-		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c1.ID, "Action 1-2", "Description", []string{}, "", types.ActionStatusTodo, nil)
+		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c1.ID, "Action 1-2", "Description", "", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
-		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c2.ID, "Action 2-1", "Description", []string{}, "", types.ActionStatusTodo, nil)
+		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c2.ID, "Action 2-1", "Description", "", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
 		actions, err := actionUC.GetActionsByCase(ctx, testWorkspaceID, c1.ID)
@@ -334,7 +334,7 @@ func TestActionUseCase_CreateAction_SlackNotification(t *testing.T) {
 		gt.Value(t, c.SlackChannelID).NotEqual("")
 
 		// Create action
-		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Action Desc", []string{"U001"}, "", types.ActionStatusTodo, nil)
+		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Action Desc", "U001", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
 		// Verify Slack message was posted
@@ -364,7 +364,7 @@ func TestActionUseCase_CreateAction_SlackNotification(t *testing.T) {
 		gt.NoError(t, err).Required()
 		gt.Value(t, c.SlackChannelID).Equal("")
 
-		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Desc", []string{}, "", types.ActionStatusTodo, nil)
+		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Desc", "", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
 		// Slack message should NOT have been posted
@@ -380,7 +380,7 @@ func TestActionUseCase_CreateAction_SlackNotification(t *testing.T) {
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
 		gt.NoError(t, err).Required()
 
-		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Desc", []string{}, "", types.ActionStatusTodo, nil)
+		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Desc", "", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 		gt.Value(t, created.SlackMessageTS).Equal("")
 	})
@@ -403,7 +403,7 @@ func TestActionUseCase_CreateAction_SlackNotification(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		// Action creation should still succeed
-		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Desc", []string{}, "", types.ActionStatusTodo, nil)
+		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Desc", "", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 		gt.Value(t, created.Title).Equal("Test Action")
 		gt.Value(t, created.SlackMessageTS).Equal("") // No TS because posting failed
@@ -429,7 +429,7 @@ func TestActionUseCase_HandleSlackInteraction(t *testing.T) {
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
 		gt.NoError(t, err).Required()
 
-		action, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Desc", []string{"U001"}, "", types.ActionStatusTodo, nil)
+		action, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Desc", "U001", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
 		// Reset mock tracking after creation
@@ -442,21 +442,22 @@ func TestActionUseCase_HandleSlackInteraction(t *testing.T) {
 		repo, actionUC, mock, _, action := setup(t)
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
+		// Action initially has AssigneeID "U001". The Assign-to-me semantics
+		// with single-assignee model: assign only when currently unassigned.
+		// Therefore clicking Assign-to-me on an already-assigned action is a no-op.
 		err := actionUC.HandleSlackInteraction(ctx, testWorkspaceID, action.ID, "UNEW", usecase.SlackActionIDAssign)
 		gt.NoError(t, err).Required()
 
-		// Verify assignee was added
 		updated, err := repo.Action().Get(ctx, testWorkspaceID, action.ID)
 		gt.NoError(t, err).Required()
-		gt.Array(t, updated.AssigneeIDs).Length(2)
-		gt.Value(t, updated.AssigneeIDs[0]).Equal("U001")
-		gt.Value(t, updated.AssigneeIDs[1]).Equal("UNEW")
+		gt.Value(t, updated.AssigneeID).Equal("U001")
 
-		// Verify Slack message was updated
+		// Slack message is still re-rendered when interaction is processed,
+		// even if no domain change happened, to reflect any state.
 		gt.Value(t, mock.updateMessageCalled).Equal(true)
 	})
 
-	t.Run("assign does not duplicate existing user", func(t *testing.T) {
+	t.Run("assign does not overwrite existing assignee", func(t *testing.T) {
 		repo, actionUC, _, _, action := setup(t)
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
@@ -465,8 +466,7 @@ func TestActionUseCase_HandleSlackInteraction(t *testing.T) {
 
 		updated, err := repo.Action().Get(ctx, testWorkspaceID, action.ID)
 		gt.NoError(t, err).Required()
-		gt.Array(t, updated.AssigneeIDs).Length(1)
-		gt.Value(t, updated.AssigneeIDs[0]).Equal("U001")
+		gt.Value(t, updated.AssigneeID).Equal("U001")
 	})
 
 	t.Run("in_progress changes status", func(t *testing.T) {
@@ -552,7 +552,7 @@ func TestActionUseCase_DueDate(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		dueDate := time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC)
-		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Action with due date", "Description", []string{}, "", types.ActionStatusTodo, &dueDate)
+		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Action with due date", "Description", "", "", types.ActionStatusTodo, &dueDate)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, created.DueDate).NotNil()
@@ -576,7 +576,7 @@ func TestActionUseCase_DueDate(t *testing.T) {
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
 		gt.NoError(t, err).Required()
 
-		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Action without due date", "Description", []string{}, "", types.ActionStatusTodo, nil)
+		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Action without due date", "Description", "", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, created.DueDate == nil).Equal(true)
@@ -591,12 +591,12 @@ func TestActionUseCase_DueDate(t *testing.T) {
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
 		gt.NoError(t, err).Required()
 
-		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Action", "Description", []string{}, "", types.ActionStatusTodo, nil)
+		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Action", "Description", "", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 		gt.Value(t, created.DueDate == nil).Equal(true)
 
 		dueDate := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-		updated, err := actionUC.UpdateAction(ctx, testWorkspaceID, created.ID, nil, nil, nil, nil, nil, nil, &dueDate, false)
+		updated, err := actionUC.UpdateAction(ctx, testWorkspaceID, created.ID, nil, nil, nil, nil, nil, nil, &dueDate, false, false)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, updated.DueDate).NotNil()
@@ -613,12 +613,12 @@ func TestActionUseCase_DueDate(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		dueDate := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Action", "Description", []string{}, "", types.ActionStatusTodo, &dueDate)
+		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Action", "Description", "", "", types.ActionStatusTodo, &dueDate)
 		gt.NoError(t, err).Required()
 		gt.Value(t, created.DueDate).NotNil()
 
 		// Clear due date using clearDueDate=true
-		updated, err := actionUC.UpdateAction(ctx, testWorkspaceID, created.ID, nil, nil, nil, nil, nil, nil, nil, true)
+		updated, err := actionUC.UpdateAction(ctx, testWorkspaceID, created.ID, nil, nil, nil, nil, nil, nil, nil, true, false)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, updated.DueDate == nil).Equal(true)
@@ -634,12 +634,12 @@ func TestActionUseCase_DueDate(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		dueDate := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Action", "Description", []string{}, "", types.ActionStatusTodo, &dueDate)
+		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Action", "Description", "", "", types.ActionStatusTodo, &dueDate)
 		gt.NoError(t, err).Required()
 
 		// Update only title, leave dueDate unchanged (nil, false)
 		newTitle := "Updated Title"
-		updated, err := actionUC.UpdateAction(ctx, testWorkspaceID, created.ID, nil, &newTitle, nil, nil, nil, nil, nil, false)
+		updated, err := actionUC.UpdateAction(ctx, testWorkspaceID, created.ID, nil, &newTitle, nil, nil, nil, nil, nil, false, false)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, updated.Title).Equal("Updated Title")
@@ -667,12 +667,12 @@ func TestActionUseCase_PrivateCaseAccessControl(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		// Member can create action
-		action, err := actionUC.CreateAction(memberCtx, testWorkspaceID, created.ID, "Member Action", "Desc", []string{}, "", types.ActionStatusTodo, nil)
+		action, err := actionUC.CreateAction(memberCtx, testWorkspaceID, created.ID, "Member Action", "Desc", "", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 		gt.Value(t, action.Title).Equal("Member Action")
 
 		// Non-member cannot create action
-		_, err = actionUC.CreateAction(nonMemberCtx, testWorkspaceID, created.ID, "Non-member Action", "Desc", []string{}, "", types.ActionStatusTodo, nil)
+		_, err = actionUC.CreateAction(nonMemberCtx, testWorkspaceID, created.ID, "Non-member Action", "Desc", "", "", types.ActionStatusTodo, nil)
 		gt.Error(t, err).Is(usecase.ErrAccessDenied)
 	})
 
@@ -693,12 +693,12 @@ func TestActionUseCase_PrivateCaseAccessControl(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		// Member creates action
-		action, err := actionUC.CreateAction(memberCtx, testWorkspaceID, created.ID, "Action", "Desc", []string{}, "", types.ActionStatusTodo, nil)
+		action, err := actionUC.CreateAction(memberCtx, testWorkspaceID, created.ID, "Action", "Desc", "", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
 		// Non-member cannot update action
 		newTitle := "Updated"
-		_, err = actionUC.UpdateAction(nonMemberCtx, testWorkspaceID, action.ID, nil, &newTitle, nil, nil, nil, nil, nil, false)
+		_, err = actionUC.UpdateAction(nonMemberCtx, testWorkspaceID, action.ID, nil, &newTitle, nil, nil, nil, nil, nil, false, false)
 		gt.Error(t, err).Is(usecase.ErrAccessDenied)
 	})
 
@@ -719,7 +719,7 @@ func TestActionUseCase_PrivateCaseAccessControl(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		// Member creates action
-		action, err := actionUC.CreateAction(memberCtx, testWorkspaceID, created.ID, "Action", "Desc", []string{}, "", types.ActionStatusTodo, nil)
+		action, err := actionUC.CreateAction(memberCtx, testWorkspaceID, created.ID, "Action", "Desc", "", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
 		// Non-member cannot delete action
@@ -737,7 +737,7 @@ func TestActionUseCase_PrivateCaseAccessControl(t *testing.T) {
 		// Create public case with action
 		pubCase, err := caseUC.CreateCase(memberCtx, testWorkspaceID, "Public Case", "Desc", []string{}, nil, false, "", "")
 		gt.NoError(t, err).Required()
-		_, err = actionUC.CreateAction(memberCtx, testWorkspaceID, pubCase.ID, "Public Action", "Desc", []string{}, "", types.ActionStatusTodo, nil)
+		_, err = actionUC.CreateAction(memberCtx, testWorkspaceID, pubCase.ID, "Public Action", "Desc", "", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
 		// Create private case with action (directly via repo)
@@ -750,7 +750,7 @@ func TestActionUseCase_PrivateCaseAccessControl(t *testing.T) {
 		}
 		privCreated, err := repo.Case().Create(memberCtx, testWorkspaceID, privateCase)
 		gt.NoError(t, err).Required()
-		_, err = actionUC.CreateAction(memberCtx, testWorkspaceID, privCreated.ID, "Private Action", "Desc", []string{}, "", types.ActionStatusTodo, nil)
+		_, err = actionUC.CreateAction(memberCtx, testWorkspaceID, privCreated.ID, "Private Action", "Desc", "", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
 		// Member sees both actions
@@ -781,7 +781,7 @@ func TestActionUseCase_PrivateCaseAccessControl(t *testing.T) {
 		created, err := repo.Case().Create(memberCtx, testWorkspaceID, privateCase)
 		gt.NoError(t, err).Required()
 
-		_, err = actionUC.CreateAction(memberCtx, testWorkspaceID, created.ID, "Action", "Desc", []string{}, "", types.ActionStatusTodo, nil)
+		_, err = actionUC.CreateAction(memberCtx, testWorkspaceID, created.ID, "Action", "Desc", "", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
 		// Member sees actions

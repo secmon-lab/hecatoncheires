@@ -245,7 +245,7 @@ func (uc *AssistUseCase) buildAssistSystemPrompt(ctx context.Context, entry *mod
 			Title:       a.Title,
 			Status:      a.Status.String(),
 			StatusEmoji: a.Status.Emoji(),
-			Assignees:   strings.Join(a.AssigneeIDs, ", "),
+			Assignees:   a.AssigneeID,
 			DueDate:     dueDate,
 		})
 	}

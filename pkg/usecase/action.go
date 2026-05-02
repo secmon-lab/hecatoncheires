@@ -39,7 +39,7 @@ func NewActionUseCase(repo interfaces.Repository, slackService slack.Service, ba
 	}
 }
 
-func (uc *ActionUseCase) CreateAction(ctx context.Context, workspaceID string, caseID int64, title, description string, assigneeIDs []string, slackMessageTS string, status types.ActionStatus, dueDate *time.Time) (*model.Action, error) {
+func (uc *ActionUseCase) CreateAction(ctx context.Context, workspaceID string, caseID int64, title, description string, assigneeID string, slackMessageTS string, status types.ActionStatus, dueDate *time.Time) (*model.Action, error) {
 	if title == "" {
 		return nil, goerr.New("action title is required")
 	}
@@ -67,16 +67,11 @@ func (uc *ActionUseCase) CreateAction(ctx context.Context, workspaceID string, c
 		return nil, goerr.New("invalid action status", goerr.V("status", status))
 	}
 
-	// Ensure assigneeIDs is not nil
-	if assigneeIDs == nil {
-		assigneeIDs = []string{}
-	}
-
 	action := &model.Action{
 		CaseID:         caseID,
 		Title:          title,
 		Description:    description,
-		AssigneeIDs:    assigneeIDs,
+		AssigneeID:     assigneeID,
 		SlackMessageTS: slackMessageTS,
 		Status:         status,
 		DueDate:        dueDate,
@@ -115,7 +110,7 @@ func (uc *ActionUseCase) CreateAction(ctx context.Context, workspaceID string, c
 	return created, nil
 }
 
-func (uc *ActionUseCase) UpdateAction(ctx context.Context, workspaceID string, id int64, caseID *int64, title, description *string, assigneeIDs []string, slackMessageTS *string, status *types.ActionStatus, dueDate *time.Time, clearDueDate bool) (*model.Action, error) {
+func (uc *ActionUseCase) UpdateAction(ctx context.Context, workspaceID string, id int64, caseID *int64, title, description *string, assigneeID *string, slackMessageTS *string, status *types.ActionStatus, dueDate *time.Time, clearDueDate bool, clearAssignee bool) (*model.Action, error) {
 	// Get existing action
 	existing, err := uc.repo.Action().Get(ctx, workspaceID, id)
 	if err != nil {
@@ -148,7 +143,7 @@ func (uc *ActionUseCase) UpdateAction(ctx context.Context, workspaceID string, i
 		CaseID:         existing.CaseID,
 		Title:          existing.Title,
 		Description:    existing.Description,
-		AssigneeIDs:    existing.AssigneeIDs,
+		AssigneeID:     existing.AssigneeID,
 		SlackMessageTS: existing.SlackMessageTS,
 		Status:         existing.Status,
 		DueDate:        existing.DueDate,
@@ -171,8 +166,10 @@ func (uc *ActionUseCase) UpdateAction(ctx context.Context, workspaceID string, i
 		action.Description = *description
 	}
 
-	if assigneeIDs != nil {
-		action.AssigneeIDs = assigneeIDs
+	if clearAssignee {
+		action.AssigneeID = ""
+	} else if assigneeID != nil {
+		action.AssigneeID = *assigneeID
 	}
 
 	if slackMessageTS != nil {
@@ -308,16 +305,9 @@ func (uc *ActionUseCase) HandleSlackInteraction(ctx context.Context, workspaceID
 
 	switch actionType {
 	case SlackActionIDAssign:
-		// Add user to assignees if not already present
-		found := false
-		for _, id := range existing.AssigneeIDs {
-			if id == userID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			existing.AssigneeIDs = append(existing.AssigneeIDs, userID)
+		// Single-assignee model: assign to clicker if currently unassigned
+		if existing.AssigneeID == "" {
+			existing.AssigneeID = userID
 		}
 
 	case SlackActionIDInProgress:
@@ -384,14 +374,10 @@ func (uc *ActionUseCase) buildActionMessageBlocks(ctx context.Context, action *m
 		))
 	}
 
-	// Context: Assignees, status, and link
+	// Context: Assignee, status, and link
 	contextParts := []string{}
-	if len(action.AssigneeIDs) > 0 {
-		mentions := make([]string, len(action.AssigneeIDs))
-		for i, id := range action.AssigneeIDs {
-			mentions[i] = fmt.Sprintf("<@%s>", id)
-		}
-		contextParts = append(contextParts, strings.Join(mentions, " "))
+	if action.AssigneeID != "" {
+		contextParts = append(contextParts, fmt.Sprintf("<@%s>", action.AssigneeID))
 	} else {
 		contextParts = append(contextParts, i18n.T(ctx, i18n.MsgActionNoAssign))
 	}
@@ -409,7 +395,7 @@ func (uc *ActionUseCase) buildActionMessageBlocks(ctx context.Context, action *m
 	buttonValue := fmt.Sprintf("%s:%d", workspaceID, action.ID)
 
 	var buttons []goslack.BlockElement
-	if len(action.AssigneeIDs) == 0 {
+	if action.AssigneeID == "" {
 		buttons = append(buttons, goslack.NewButtonBlockElement(SlackActionIDAssign, buttonValue,
 			goslack.NewTextBlockObject(goslack.PlainTextType, i18n.T(ctx, i18n.MsgActionAssignToMe), true, false),
 		))

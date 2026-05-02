@@ -33,15 +33,12 @@ func (r *actionRepository) ensureWorkspace(workspaceID string) {
 
 // copyAction creates a deep copy of an action
 func copyAction(a *model.Action) *model.Action {
-	assigneeIDs := make([]string, len(a.AssigneeIDs))
-	copy(assigneeIDs, a.AssigneeIDs)
-
 	copied := &model.Action{
 		ID:             a.ID,
 		CaseID:         a.CaseID,
 		Title:          a.Title,
 		Description:    a.Description,
-		AssigneeIDs:    assigneeIDs,
+		AssigneeID:     a.AssigneeID,
 		SlackMessageTS: a.SlackMessageTS,
 		Status:         a.Status,
 		CreatedAt:      a.CreatedAt,

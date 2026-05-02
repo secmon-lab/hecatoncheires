@@ -390,9 +390,12 @@ func (r *mutationResolver) SyncCaseChannelUsers(ctx context.Context, workspaceID
 
 // CreateAction is the resolver for the createAction field.
 func (r *mutationResolver) CreateAction(ctx context.Context, workspaceID string, input graphql1.CreateActionInput) (*graphql1.Action, error) {
-	assigneeIDs := input.AssigneeIDs
-	if assigneeIDs == nil {
-		assigneeIDs = []string{}
+	// TEMP (Step 0 of action-slack-interactive): take first assignee from list
+	// to satisfy the new single-AssigneeID model. Step 1 changes the schema input
+	// to a single assigneeID field.
+	assigneeID := ""
+	if len(input.AssigneeIDs) > 0 {
+		assigneeID = input.AssigneeIDs[0]
 	}
 
 	slackMessageTS := ""
@@ -410,7 +413,7 @@ func (r *mutationResolver) CreateAction(ctx context.Context, workspaceID string,
 		description = *input.Description
 	}
 
-	created, err := r.UseCases.Action.CreateAction(ctx, workspaceID, int64(input.CaseID), input.Title, description, assigneeIDs, slackMessageTS, status, input.DueDate)
+	created, err := r.UseCases.Action.CreateAction(ctx, workspaceID, int64(input.CaseID), input.Title, description, assigneeID, slackMessageTS, status, input.DueDate)
 	if err != nil {
 		return nil, err
 	}
@@ -441,7 +444,20 @@ func (r *mutationResolver) UpdateAction(ctx context.Context, workspaceID string,
 		clearDueDate = *input.ClearDueDate
 	}
 
-	updated, err := r.UseCases.Action.UpdateAction(ctx, workspaceID, int64(input.ID), caseID, input.Title, input.Description, input.AssigneeIDs, slackMessageTS, status, input.DueDate, clearDueDate)
+	// TEMP (Step 0 of action-slack-interactive): collapse list input to a single
+	// AssigneeID. Step 1 changes the schema input to assigneeID + clearAssignee.
+	var assigneeID *string
+	clearAssignee := false
+	if input.AssigneeIDs != nil {
+		if len(input.AssigneeIDs) == 0 {
+			clearAssignee = true
+		} else {
+			s := input.AssigneeIDs[0]
+			assigneeID = &s
+		}
+	}
+
+	updated, err := r.UseCases.Action.UpdateAction(ctx, workspaceID, int64(input.ID), caseID, input.Title, input.Description, assigneeID, slackMessageTS, status, input.DueDate, clearDueDate, clearAssignee)
 	if err != nil {
 		return nil, err
 	}

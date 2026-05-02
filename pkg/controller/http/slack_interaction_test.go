@@ -31,7 +31,7 @@ func TestSlackInteractionHandler(t *testing.T) {
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Desc", []string{}, nil, false, "", "")
 		gt.NoError(t, err).Required()
 
-		action, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Desc", []string{"U001"}, "", types.ActionStatusTodo, nil)
+		action, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Desc", "U001", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
 		handler := httpctrl.NewSlackInteractionHandler(actionUC, nil)
@@ -64,11 +64,11 @@ func TestSlackInteractionHandler(t *testing.T) {
 		handler.ServeHTTP(rec, req)
 		gt.Value(t, rec.Code).Equal(http.StatusOK)
 
-		// Verify assignee was added
+		// With single-assignee model, assign-to-me on an already-assigned action
+		// is a no-op; the original assignee is preserved.
 		action, err := actionUC.GetAction(t.Context(), testWorkspaceID, actionID)
 		gt.NoError(t, err).Required()
-		gt.Array(t, action.AssigneeIDs).Length(2)
-		gt.Value(t, action.AssigneeIDs[1]).Equal("UNEW")
+		gt.Value(t, action.AssigneeID).Equal("U001")
 	})
 
 	t.Run("handles in_progress button click", func(t *testing.T) {

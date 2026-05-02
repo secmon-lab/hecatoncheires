@@ -12,8 +12,8 @@ type Action struct {
 	CaseID         int64 // Required: Action must be associated with a Case (1:n relationship)
 	Title          string
 	Description    string
-	AssigneeIDs    []string // Slack User IDs
-	SlackMessageTS string   // Optional: Slack message ID (timestamp)
+	AssigneeID     string // Slack User ID; empty string means unassigned
+	SlackMessageTS string // Optional: Slack message ID (timestamp)
 	Status         types.ActionStatus
 	DueDate        *time.Time // Optional: deadline for the action
 	CreatedAt      time.Time

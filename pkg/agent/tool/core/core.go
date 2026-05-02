@@ -16,8 +16,7 @@ func New(repo interfaces.Repository, workspaceID string, caseID int64, llmClient
 		&createActionTool{repo: repo, workspaceID: workspaceID, caseID: caseID},
 		&updateActionTool{repo: repo, workspaceID: workspaceID},
 		&updateActionStatusTool{repo: repo, workspaceID: workspaceID},
-		&addActionAssigneeTool{repo: repo, workspaceID: workspaceID},
-		&removeActionAssigneeTool{repo: repo, workspaceID: workspaceID},
+		&setActionAssigneeTool{repo: repo, workspaceID: workspaceID},
 		&searchKnowledgeTool{repo: repo, workspaceID: workspaceID, llmClient: llmClient},
 		&getKnowledgeTool{repo: repo, workspaceID: workspaceID},
 	}

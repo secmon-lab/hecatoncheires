@@ -32,7 +32,7 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			CaseID:      c.ID,
 			Title:       "Investigate logs",
 			Description: "Check server logs for anomalies",
-			AssigneeIDs: []string{"U123"},
+			AssigneeID:  "U123",
 			Status:      types.ActionStatusTodo,
 		}
 
