@@ -103,7 +103,9 @@ test.describe('UI overhaul regressions', () => {
     });
     await actionListPage.waitForBoardLoad();
 
-    // Initially in Backlog
+    // Filter the kanban to just the action under test so unrelated seeded
+    // actions don't perturb the column counts.
+    await actionListPage.searchActions('DnD Action');
     expect(await actionListPage.getColumnCount('Backlog')).toBe(1);
     expect(await actionListPage.getColumnCount('In Progress')).toBe(0);
 
@@ -112,6 +114,7 @@ test.describe('UI overhaul regressions', () => {
     // Re-load to make sure the change was persisted
     await page.reload();
     await actionListPage.waitForBoardLoad();
+    await actionListPage.searchActions('DnD Action');
     expect(await actionListPage.getColumnCount('Backlog')).toBe(0);
     expect(await actionListPage.getColumnCount('In Progress')).toBe(1);
   });
@@ -129,6 +132,8 @@ test.describe('UI overhaul regressions', () => {
       customFields: { category: 'bug' },
     });
 
+    await caseListPage.waitForTableLoad();
+    await caseListPage.fillSearchFilter('Save Sanitize Case');
     await caseListPage.clickCaseByTitle('Save Sanitize Case');
     await caseDetailPage.waitForPageLoad();
 
