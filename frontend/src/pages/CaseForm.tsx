@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery } from '@apollo/client'
-import Select from 'react-select'
+import UserSelect from '../components/UserSelect'
 import { CREATE_CASE, UPDATE_CASE, GET_CASE, GET_CASES } from '../graphql/case'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
@@ -10,6 +10,7 @@ import Modal from '../components/Modal'
 import Button from '../components/Button'
 import CustomFieldRenderer from '../components/fields/CustomFieldRenderer'
 import { IconLock } from '../components/Icons'
+import { sanitizeFieldValues } from '../utils/sanitizeFieldValues'
 
 interface User {
   id: string
@@ -82,9 +83,12 @@ export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
     })
     if (Object.keys(errs).length > 0) { setErrors(errs); return }
 
-    const fieldArr = Object.entries(fieldValues)
-      .filter(([, v]) => v !== undefined && v !== null && v !== '')
-      .map(([fieldID, value]) => ({ fieldID, value }))
+    const fieldArr = sanitizeFieldValues(
+      Object.entries(fieldValues)
+        .filter(([, v]) => v !== undefined && v !== null && v !== '')
+        .map(([fieldId, value]) => ({ fieldId, value })),
+      fields,
+    )
 
     try {
       if (isEdit && caseItem) {
@@ -125,6 +129,9 @@ export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
   const userOptions = users.map((u) => ({
     value: u.id,
     label: u.realName || u.name,
+    name: u.name,
+    realName: u.realName,
+    imageUrl: u.imageUrl,
   }))
   const selectedAssignees = userOptions.filter((o) => assigneeIDs.includes(o.value))
 
@@ -169,7 +176,7 @@ export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
         </div>
         <div>
           <label htmlFor="case-assignees" className="field-label">{t('labelAssignees')}</label>
-          <Select
+          <UserSelect
             inputId="case-assignees"
             aria-label={t('labelAssignees')}
             isMulti
@@ -182,7 +189,7 @@ export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
         {fields.length > 0 && (
           <div>
             <div className="field-label">{t('sectionFields')}</div>
-            <div className="col" style={{ gap: 12, padding: 12, background: 'var(--bg-sunken)', border: '1px dashed var(--line-strong)', borderRadius: 6 }}>
+            <div className="col" style={{ gap: 12 }}>
               {fields.map((f: any) => (
                 <CustomFieldRenderer
                   key={f.id}

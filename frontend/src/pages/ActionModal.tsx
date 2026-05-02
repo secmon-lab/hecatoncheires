@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery } from '@apollo/client'
 import Select from 'react-select'
+import { buildSelectStyles, portalProps } from '../components/selectStyles'
 import { GET_ACTION, UPDATE_ACTION, DELETE_ACTION, GET_ACTIONS } from '../graphql/action'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import { useWorkspace } from '../contexts/workspace-context'
@@ -57,7 +58,7 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
   const [editingTitle, setEditingTitle] = useState('')
   const [editing, setEditing] = useState(false)
   const [editingDescription, setEditingDescription] = useState('')
-  const [descriptionDirty, setDescriptionDirty] = useState(false)
+  const [, setDescriptionDirty] = useState(false)
   const [savedFlash, setSavedFlash] = useState(false)
 
   const { data: usersData } = useQuery(GET_SLACK_USERS)
@@ -102,10 +103,12 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
         <a
           className="slack-link"
           href={`/ws/${currentWorkspace!.id}/cases/${action.case.id}`}
+          data-testid="action-case-link"
           onClick={(e) => {
             e.preventDefault()
+            // Navigate without calling onClose() — onClose triggers a route
+            // change back to the actions list which would override this nav.
             navigate(`/ws/${currentWorkspace!.id}/cases/${action.case.id}`)
-            onClose()
           }}
         >
           <IconCases size={11} />
@@ -157,12 +160,21 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
     flashSaved()
   }
 
-  const handleSaveDescription = async () => {
-    if (!action || !descriptionDirty) return
+  const handleSave = async () => {
+    if (!action) return
+    const input: any = { id: action.id }
+    if (editingTitle.trim() && editingTitle !== action.title) input.title = editingTitle.trim()
+    if (editingDescription !== (action.description || '')) input.description = editingDescription
+    if (Object.keys(input).length === 1) {
+      // Nothing changed; still flash to acknowledge the click
+      flashSaved()
+      return
+    }
     await updateAction({
-      variables: { workspaceId: currentWorkspace!.id, input: { id: action.id, description: editingDescription } },
+      variables: { workspaceId: currentWorkspace!.id, input },
     })
     setDescriptionDirty(false)
+    setEditing(false)
     flashSaved()
   }
 
@@ -190,8 +202,8 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
           <Button variant="ghost" onClick={onClose}>{t('btnClose')}</Button>
           <Button
             variant="primary"
-            onClick={handleSaveDescription}
-            disabled={!descriptionDirty || saving}
+            onClick={handleSave}
+            disabled={saving}
             data-testid="action-save-button"
           >
             {saving ? t('btnSaving') : t('btnSave')}
@@ -275,6 +287,8 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
                   }
                   placeholder={t('placeholderAddAssignees')}
                   classNamePrefix="rs"
+                  {...portalProps}
+                  styles={buildSelectStyles()}
                 />
               </div>
             </div>

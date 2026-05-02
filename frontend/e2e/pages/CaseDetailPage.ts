@@ -23,7 +23,8 @@ export class CaseDetailPage extends BasePage {
     // Description is the paragraph with description class
     this.caseDescription = page.locator('main p').first();
     this.editButton = page.locator('button').filter({ hasText: /Edit/ }).first();
-    this.deleteButton = page.locator('button').filter({ hasText: /Delete/ }).first();
+    // Delete moved into a kebab/hamburger menu
+    this.deleteButton = page.getByTestId('case-delete-menu-item');
     this.backButton = page.locator('button, a').filter({ hasText: /Back/ }).first();
     this.loadingIndicator = page.locator('text=Loading...');
     // Slack channel link is now in the title row (an <a> tag starting with #)
@@ -63,9 +64,11 @@ export class CaseDetailPage extends BasePage {
   }
 
   /**
-   * Click the delete button
+   * Click the delete button (opens the kebab menu first, then the delete item)
    */
   async clickDelete(): Promise<void> {
+    await this.page.getByTestId('case-menu-button').click();
+    await this.deleteButton.waitFor({ state: 'visible', timeout: 3000 });
     await this.deleteButton.click();
   }
 

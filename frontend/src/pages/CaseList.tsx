@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useQuery } from '@apollo/client'
 import { useNavigate } from 'react-router-dom'
 import { GET_CASES } from '../graphql/case'
@@ -13,8 +13,9 @@ import {
   IconChevLeft,
   IconChevRight,
   IconDots,
+  IconSettings,
 } from '../components/Icons'
-import { AvatarStack, StatusBadge, SlackLink } from '../components/Primitives'
+import { Avatar, AvatarStack, StatusBadge, SlackLink } from '../components/Primitives'
 import CaseForm from './CaseForm'
 
 const PAGE_SIZE = 20
@@ -30,19 +31,35 @@ interface FieldDef {
   type: string
   options?: FieldOption[] | null
 }
+interface CaseUser {
+  id: string
+  name: string
+  realName: string
+  imageUrl?: string
+}
 interface CaseRow {
   id: number
   title: string
   status: 'OPEN' | 'CLOSED'
   isPrivate: boolean
   accessDenied: boolean
-  reporter?: { id: string; name: string; realName: string; imageUrl?: string } | null
-  assignees: Array<{ id: string; name: string; realName: string; imageUrl?: string }>
+  reporter?: CaseUser | null
+  assignees: CaseUser[]
   slackChannelID: string
   slackChannelName?: string | null
   createdAt: string
   fields: Array<{ fieldId: string; value: any }>
 }
+
+const BUILTIN_COLUMNS = [
+  { key: 'status', labelKey: 'headerStatus' as const, width: 110 },
+  { key: 'assignees', labelKey: 'headerAssignees' as const, width: 140 },
+  { key: 'reporter', labelKey: 'labelReporter' as const, width: 140 },
+  { key: 'created', labelKey: 'headerCreated' as const, width: 110 },
+  { key: 'slack', labelKey: 'headerSlack' as const, width: 110 },
+] as const
+
+const DEFAULT_VISIBLE = ['status', 'assignees', 'created', 'slack']
 
 function formatDate(iso: string) {
   if (!iso) return '—'
@@ -54,14 +71,47 @@ function formatDate(iso: string) {
   return `${yyyy}/${mm}/${dd}`
 }
 
-function categoryFor(c: CaseRow, fields: FieldDef[]): string {
-  // Pick the first SELECT-type field as "category" if present.
-  const selectField = fields.find((f) => f.type === 'SELECT')
-  if (!selectField) return ''
-  const v = c.fields.find((cf) => cf.fieldId === selectField.id)?.value
-  if (v == null) return ''
-  const opt = selectField.options?.find((o) => o.id === v || o.name === v)
-  return opt?.name ?? String(v)
+function renderFieldValue(value: any, def: FieldDef): React.ReactNode {
+  if (value == null || value === '') return <span className="soft">—</span>
+  switch (def.type) {
+    case 'SELECT': {
+      const opt = def.options?.find((o) => o.id === value || o.name === value)
+      const text = opt?.name ?? String(value)
+      return <span className="badge">{text}</span>
+    }
+    case 'MULTI_SELECT': {
+      const arr: any[] = Array.isArray(value) ? value : [value]
+      return (
+        <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
+          {arr.map((v) => {
+            const opt = def.options?.find((o) => o.id === v || o.name === v)
+            return <span key={String(v)} className="chip" style={{ height: 20, fontSize: 11 }}>{opt?.name ?? String(v)}</span>
+          })}
+        </div>
+      )
+    }
+    case 'DATE': {
+      try { return <span className="mono soft" style={{ fontSize: 12 }}>{new Date(value).toLocaleDateString()}</span> } catch { return String(value) }
+    }
+    case 'NUMBER':
+      return <span className="mono">{String(value)}</span>
+    case 'URL':
+      return (
+        <a href={String(value)} target="_blank" rel="noreferrer noopener" style={{ color: 'var(--accent)' }} onClick={(e) => e.stopPropagation()}>
+          {String(value)}
+        </a>
+      )
+    case 'USER': {
+      // value is a slackUserID; fall back to mono id since we only have id here
+      return <span className="mono soft" style={{ fontSize: 12 }}>{String(value)}</span>
+    }
+    case 'MULTI_USER': {
+      const arr: any[] = Array.isArray(value) ? value : [value]
+      return <span className="mono soft" style={{ fontSize: 12 }}>{arr.length} users</span>
+    }
+    default:
+      return <span className="truncate" style={{ display: 'inline-block', maxWidth: 220 }}>{String(value)}</span>
+  }
 }
 
 export default function CaseList() {
@@ -73,6 +123,34 @@ export default function CaseList() {
   const [searchText, setSearchText] = useState('')
   const [page, setPage] = useState(0)
   const [isFormOpen, setIsFormOpen] = useState(false)
+  const [columnsOpen, setColumnsOpen] = useState(false)
+  const columnsBtnRef = useRef<HTMLDivElement>(null)
+
+  const wsKey = currentWorkspace?.id || 'default'
+  const storageKey = `caseListColumns:${wsKey}`
+
+  const [visibleCols, setVisibleCols] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(storageKey)
+      if (raw) return JSON.parse(raw)
+    } catch {}
+    return DEFAULT_VISIBLE
+  })
+
+  useEffect(() => {
+    try { localStorage.setItem(storageKey, JSON.stringify(visibleCols)) } catch {}
+  }, [storageKey, visibleCols])
+
+  useEffect(() => {
+    if (!columnsOpen) return
+    const onClick = (e: MouseEvent) => {
+      if (columnsBtnRef.current && !columnsBtnRef.current.contains(e.target as Node)) {
+        setColumnsOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [columnsOpen])
 
   const { data: openData } = useQuery(GET_CASES, {
     variables: { workspaceId: currentWorkspace?.id, status: 'OPEN' },
@@ -108,6 +186,47 @@ export default function CaseList() {
   const fieldDefs: FieldDef[] = configData?.fieldConfiguration?.fields || []
   const caseLabel = configData?.fieldConfiguration?.labels?.case || t('navCases')
 
+  const allColumns = [
+    ...BUILTIN_COLUMNS.map((c) => ({ key: c.key, label: t(c.labelKey), width: c.width, custom: false as const })),
+    ...fieldDefs.map((f) => ({ key: `field:${f.id}`, label: f.name, width: 160, custom: true as const, def: f })),
+  ]
+
+  const isVisible = (key: string) => visibleCols.includes(key)
+  const toggleColumn = (key: string) => {
+    setVisibleCols((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key])
+  }
+
+  const renderCell = (col: typeof allColumns[number], c: CaseRow) => {
+    if (!col.custom) {
+      switch (col.key) {
+        case 'status':
+          return <StatusBadge status={c.status} labelOpen={t('statusOpen')} labelClosed={t('statusClosed')} />
+        case 'assignees':
+          return c.assignees && c.assignees.length > 0 ? <AvatarStack users={c.assignees} /> : <span className="soft">—</span>
+        case 'reporter':
+          return c.reporter ? (
+            <div className="row" style={{ gap: 6, fontSize: 12 }}>
+              <Avatar size="sm" name={c.reporter.name} realName={c.reporter.realName} imageUrl={c.reporter.imageUrl} />
+              <span className="truncate" style={{ maxWidth: 100 }}>{c.reporter.realName}</span>
+            </div>
+          ) : <span className="soft">—</span>
+        case 'created':
+          return <span className="mono soft" style={{ fontSize: 12 }}>{formatDate(c.createdAt)}</span>
+        case 'slack':
+          return c.slackChannelID
+            ? <SlackLink name="" href={`slack://channel?id=${c.slackChannelID}`} />
+            : <span className="soft">—</span>
+      }
+    } else {
+      const fieldDef = col.def!
+      const v = c.fields.find((cf) => cf.fieldId === fieldDef.id)?.value
+      return renderFieldValue(v, fieldDef)
+    }
+    return null
+  }
+
+  const visibleColumns = allColumns.filter((c) => isVisible(c.key))
+
   return (
     <div className="h-main-inner">
       <div className="h-page-h">
@@ -116,6 +235,47 @@ export default function CaseList() {
           <div className="sub">{t('subtitleCaseManagement', { caseLabelLower: caseLabel.toLowerCase() })}</div>
         </div>
         <div className="actions">
+          <div ref={columnsBtnRef} style={{ position: 'relative' }}>
+            <Button
+              icon={<IconSettings size={14} />}
+              onClick={() => setColumnsOpen((v) => !v)}
+              data-testid="column-selector-button"
+            >
+              {t('btnColumns')}
+            </Button>
+            {columnsOpen && (
+              <div
+                data-testid="column-selector-popover"
+                style={{
+                  position: 'absolute', right: 0, top: 'calc(100% + 6px)',
+                  zIndex: 50, minWidth: 220,
+                  background: 'var(--bg-elev)', border: '1px solid var(--line)',
+                  borderRadius: 6, boxShadow: 'var(--shadow-md)', padding: 6,
+                }}
+              >
+                <div className="soft" style={{ fontSize: 11, padding: '4px 8px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
+                  {t('titleColumnSelector')}
+                </div>
+                {allColumns.map((c) => (
+                  <label
+                    key={c.key}
+                    data-testid={`column-toggle-${c.key}`}
+                    className="row"
+                    style={{ gap: 8, padding: '6px 8px', cursor: 'pointer', fontSize: 12.5, borderRadius: 4 }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-sunken)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isVisible(c.key)}
+                      onChange={() => toggleColumn(c.key)}
+                    />
+                    <span>{c.label}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
           <Button variant="primary" icon={<IconPlus size={14} />} onClick={() => setIsFormOpen(true)}>
             {t('btnNewCase', { caseLabel })}
           </Button>
@@ -169,18 +329,16 @@ export default function CaseList() {
             <tr>
               <th style={{ width: 64 }}>{t('labelId')}</th>
               <th>{t('headerTitle')}</th>
-              <th style={{ width: 110 }}>{t('headerStatus')}</th>
-              <th style={{ width: 130 }}>{t('headerCategory')}</th>
-              <th style={{ width: 130 }}>{t('headerAssignees')}</th>
-              <th style={{ width: 110 }}>{t('headerCreated')}</th>
-              <th style={{ width: 180 }}>{t('headerSlack')}</th>
+              {visibleColumns.map((c) => (
+                <th key={c.key} style={{ width: c.width }}>{c.label}</th>
+              ))}
               <th style={{ width: 38 }}></th>
             </tr>
           </thead>
           <tbody>
             {pageRows.length === 0 && (
               <tr>
-                <td colSpan={8} style={{ padding: 32, textAlign: 'center', color: 'var(--fg-soft)' }}>
+                <td colSpan={3 + visibleColumns.length} style={{ padding: 32, textAlign: 'center', color: 'var(--fg-soft)' }}>
                   {t('noDataAvailable')}
                 </td>
               </tr>
@@ -211,17 +369,9 @@ export default function CaseList() {
                     )}
                   </div>
                 </td>
-                <td><StatusBadge status={c.status} labelOpen={t('statusOpen')} labelClosed={t('statusClosed')} /></td>
-                <td><span className="muted">{categoryFor(c, fieldDefs) || '—'}</span></td>
-                <td><AvatarStack users={c.assignees} /></td>
-                <td className="mono soft" style={{ fontSize: 12 }}>{formatDate(c.createdAt)}</td>
-                <td>
-                  {c.slackChannelID ? (
-                    <SlackLink name={c.slackChannelName || c.slackChannelID} />
-                  ) : (
-                    <span className="soft">—</span>
-                  )}
-                </td>
+                {visibleColumns.map((col) => (
+                  <td key={col.key}>{renderCell(col, c)}</td>
+                ))}
                 <td>
                   <button
                     className="h-icon-btn"

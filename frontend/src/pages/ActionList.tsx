@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { useQuery } from '@apollo/client'
-import { GET_ACTIONS } from '../graphql/action'
+import { useMutation, useQuery } from '@apollo/client'
+import { GET_ACTIONS, UPDATE_ACTION } from '../graphql/action'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
 import Button from '../components/Button'
@@ -57,10 +57,15 @@ export default function ActionList() {
 
   const [search, setSearch] = useState('')
   const [showCreate, setShowCreate] = useState(false)
+  const [draggingId, setDraggingId] = useState<number | null>(null)
+  const [dragOverCol, setDragOverCol] = useState<ActionStatus | null>(null)
 
   const { data } = useQuery(GET_ACTIONS, {
     variables: { workspaceId: currentWorkspace?.id },
     skip: !currentWorkspace,
+  })
+  const [updateAction] = useMutation(UPDATE_ACTION, {
+    refetchQueries: [{ query: GET_ACTIONS, variables: { workspaceId: currentWorkspace?.id } }],
   })
 
   const actions: ActionRow[] = data?.actions || []
@@ -83,6 +88,25 @@ export default function ActionList() {
   }, [filtered])
 
   const detailActionId = actionId ? Number(actionId) : null
+
+  const handleDrop = async (target: ActionStatus) => {
+    const id = draggingId
+    setDraggingId(null)
+    setDragOverCol(null)
+    if (id == null) return
+    const a = actions.find((x) => x.id === id)
+    if (!a || a.status === target) return
+    try {
+      await updateAction({
+        variables: { workspaceId: currentWorkspace!.id, input: { id, status: target } },
+        optimisticResponse: {
+          updateAction: { ...a, status: target, __typename: 'Action' },
+        },
+      })
+    } catch (e) {
+      console.error('Failed to move action', e)
+    }
+  }
 
   const openCount = actions.filter((a) => a.status !== 'COMPLETED').length
 
@@ -135,6 +159,10 @@ export default function ActionList() {
             key={col.status}
             className="kan-col"
             data-testid={`kanban-column-${col.slug}`}
+            onDragOver={(e) => { e.preventDefault(); if (dragOverCol !== col.status) setDragOverCol(col.status) }}
+            onDragLeave={() => { if (dragOverCol === col.status) setDragOverCol(null) }}
+            onDrop={(e) => { e.preventDefault(); handleDrop(col.status) }}
+            style={dragOverCol === col.status ? { outline: '2px dashed var(--accent)', outlineOffset: -2 } : undefined}
           >
             <div className="kan-h">
               <span className={`pip ${col.pip}`} style={{ width: 8, height: 8, borderRadius: '50%' }} />
@@ -148,8 +176,15 @@ export default function ActionList() {
                   type="button"
                   className="kan-card"
                   data-testid="action-card"
+                  draggable
+                  onDragStart={(e) => {
+                    setDraggingId(a.id)
+                    e.dataTransfer.effectAllowed = 'move'
+                    e.dataTransfer.setData('text/plain', String(a.id))
+                  }}
+                  onDragEnd={() => { setDraggingId(null); setDragOverCol(null) }}
                   onClick={() => navigate(`/ws/${currentWorkspace!.id}/actions/${a.id}`)}
-                  style={{ textAlign: 'left' }}
+                  style={{ textAlign: 'left', opacity: draggingId === a.id ? 0.4 : 1, cursor: draggingId === a.id ? 'grabbing' : 'grab' }}
                 >
                   {a.case && (
                     <span className="case-link">#{a.case.id} {a.case.title}</span>

@@ -29,6 +29,22 @@ export const en: Messages = {
   btnCreating: 'Creating...',
   btnDeleting: 'Deleting...',
   btnSaving: 'Saving...',
+  btnMore: 'More',
+  btnWatch: 'Watch',
+  btnChange: 'Change…',
+  labelBy: 'by',
+  msgPrivateBanner: 'This case is Private. Only members of #{channel} ({count} people) can view or edit.',
+  labelProgress: '{done}/{total} completed',
+  filterStatus: 'Status',
+  filterAssignee: 'Assignee',
+  filterAllStatuses: 'All statuses',
+  filterAllAssignees: 'All assignees',
+  filterUnassigned: 'Unassigned',
+  filterAllShort: 'All',
+  filterAllAssigneesShort: 'Everyone',
+  emptyActionsFilter: 'No actions match the current filters.',
+  labelCount: '{count} items',
+  labelCompleted: 'Completed ',
 
   // Common labels
   labelTitle: 'Title',
@@ -273,7 +289,7 @@ export const en: Messages = {
   assistLogNextSteps: 'Next Steps',
 
   // Select field
-  placeholderSelect: '-- Select --',
+  placeholderSelect: 'Select an option…',
 
   // Dashboard (placeholder/demo content)
   dashUsedSpace: 'Used Space',

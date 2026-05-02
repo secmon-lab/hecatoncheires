@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { useMutation, useQuery } from '@apollo/client'
 import Select from 'react-select'
+import UserSelect from '../components/UserSelect'
+import { buildSelectStyles, portalProps } from '../components/selectStyles'
 import { CREATE_ACTION, UPDATE_ACTION, GET_ACTIONS, GET_ACTION } from '../graphql/action'
 import { GET_CASE, GET_CASES } from '../graphql/case'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
@@ -54,6 +56,9 @@ export default function ActionForm({ action, defaultCaseID, onClose }: ActionFor
   const userOptions = users.map((u: any) => ({
     value: u.id as string,
     label: u.realName || u.name,
+    name: u.name,
+    realName: u.realName,
+    imageUrl: u.imageUrl,
   }))
   const selectedAssignees = userOptions.filter((o: any) => assigneeIDs.includes(o.value))
 
@@ -162,6 +167,9 @@ export default function ActionForm({ action, defaultCaseID, onClose }: ActionFor
               }}
               placeholder={t('placeholderSelectCase', { caseLabelLower: caseLabel.toLowerCase() })}
               isClearable
+              classNamePrefix="rs"
+              {...portalProps}
+              styles={buildSelectStyles()}
             />
             {errors.caseID && <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 4 }}>{errors.caseID}</div>}
           </div>
@@ -189,7 +197,7 @@ export default function ActionForm({ action, defaultCaseID, onClose }: ActionFor
         </div>
         <div>
           <label htmlFor="action-assignees" className="field-label">{t('labelAssignees')}</label>
-          <Select
+          <UserSelect
             inputId="action-assignees"
             aria-label={t('labelAssignees')}
             isMulti

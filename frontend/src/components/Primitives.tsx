@@ -144,19 +144,22 @@ interface SlackLinkProps {
 }
 
 export function SlackLink({ name, href, ext }: SlackLinkProps) {
+  const iconOnly = !name
   return (
     <a
-      className="slack-link"
+      className={`slack-link${iconOnly ? ' icon-only' : ''}`}
       href={href || '#'}
+      aria-label={iconOnly ? 'Slack channel' : undefined}
       target={href ? '_blank' : undefined}
       rel={href ? 'noreferrer noopener' : undefined}
       onClick={(e) => {
         if (!href) e.preventDefault()
       }}
     >
-      <IconSlack size={11} />#{name}
-      {ext && (
-        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <IconSlack size={iconOnly ? 14 : 11} />
+      {name ? <>#{name}</> : <span style={{ fontFamily: 'inherit', fontWeight: 500 }}>Slack</span>}
+      {(ext || iconOnly) && (
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M14 4h6v6M10 14L20 4" />
         </svg>
       )}

@@ -15,6 +15,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	graphql1 "github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 )
 
 // Case is the resolver for the case field.
@@ -333,19 +334,18 @@ func (r *mutationResolver) CreateCase(ctx context.Context, workspaceID string, i
 
 // UpdateCase is the resolver for the updateCase field.
 func (r *mutationResolver) UpdateCase(ctx context.Context, workspaceID string, input graphql1.UpdateCaseInput) (*graphql1.Case, error) {
-	assigneeIDs := input.AssigneeIDs
-	if assigneeIDs == nil {
-		assigneeIDs = []string{}
+	patch := usecase.CaseUpdate{
+		Title:       input.Title,
+		Description: input.Description,
+	}
+	if input.AssigneeIDs != nil {
+		patch.SetAssignees(input.AssigneeIDs)
+	}
+	if input.Fields != nil {
+		patch.Fields = toDomainFieldValues(input.Fields)
 	}
 
-	fieldValues := toDomainFieldValues(input.Fields)
-
-	description := ""
-	if input.Description != nil {
-		description = *input.Description
-	}
-
-	updated, err := r.UseCases.Case.UpdateCase(ctx, workspaceID, int64(input.ID), input.Title, description, assigneeIDs, fieldValues)
+	updated, err := r.UseCases.Case.UpdateCase(ctx, workspaceID, int64(input.ID), patch)
 	if err != nil {
 		return nil, err
 	}

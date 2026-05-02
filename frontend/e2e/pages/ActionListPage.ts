@@ -131,4 +131,14 @@ export class ActionListPage extends BasePage {
       await clearButton.click();
     }
   }
+
+  /**
+   * Drag a card by title to a target column. Uses Playwright's dragTo
+   * which dispatches HTML5 drag events that the kanban listens for.
+   */
+  async dragActionToColumn(title: string, targetColumnTitle: string): Promise<void> {
+    const card = this.getActionCardByTitle(title);
+    const target = this.page.getByTestId(`kanban-column-${this.getColumnSlug(targetColumnTitle)}`);
+    await card.dragTo(target);
+  }
 }

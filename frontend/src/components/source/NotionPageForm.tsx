@@ -3,12 +3,11 @@ import { useMutation } from '@apollo/client'
 import { useNavigate } from 'react-router-dom'
 import { useWorkspace } from '../../contexts/workspace-context'
 import { useTranslation } from '../../i18n'
-import { CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
 import Modal from '../Modal'
 import Button from '../Button'
+import { IconCheck, IconExt, IconWarn } from '../Icons'
 import { CREATE_NOTION_PAGE_SOURCE, VALIDATE_NOTION_PAGE, GET_SOURCES } from '../../graphql/source'
 import { parseNotionID } from '../../utils/notion'
-import styles from './source.module.css'
 
 interface NotionPageFormProps {
   isOpen: boolean
@@ -18,6 +17,7 @@ interface NotionPageFormProps {
 interface FormErrors {
   pageID?: string
   name?: string
+  form?: string
 }
 
 interface ValidationResult {
@@ -46,12 +46,15 @@ export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps)
   const [createSource, { loading: creating }] = useMutation(CREATE_NOTION_PAGE_SOURCE, {
     update(cache, { data }) {
       if (!data?.createNotionPageSource) return
-      const existingData = cache.readQuery<{ sources: unknown[] }>({ query: GET_SOURCES, variables: { workspaceId: currentWorkspace!.id } })
-      if (existingData) {
+      const existing = cache.readQuery<{ sources: unknown[] }>({
+        query: GET_SOURCES,
+        variables: { workspaceId: currentWorkspace!.id },
+      })
+      if (existing) {
         cache.writeQuery({
           query: GET_SOURCES,
           variables: { workspaceId: currentWorkspace!.id },
-          data: { sources: [...existingData.sources, data.createNotionPageSource] },
+          data: { sources: [...existing.sources, data.createNotionPageSource] },
         })
       }
     },
@@ -61,15 +64,11 @@ export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps)
       navigate(`/ws/${currentWorkspace!.id}/sources/${data.createNotionPageSource.id}`)
     },
     onError: (error) => {
-      console.error('Create source error:', error)
+      setErrors((p) => ({ ...p, form: error.message || t('errorCreateSource') }))
     },
   })
 
-  useEffect(() => {
-    if (!isOpen) {
-      resetForm()
-    }
-  }, [isOpen])
+  useEffect(() => { if (!isOpen) resetForm() }, [isOpen])
 
   const resetForm = () => {
     setPageID('')
@@ -77,88 +76,52 @@ export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps)
     setDescription('')
     setEnabled(true)
     setRecursive(false)
-    setMaxDepth(0)
+    setMaxDepth(4)
     setErrors({})
     setValidationResult(null)
     setIsValidating(false)
   }
 
-  const handlePageIDChange = (value: string) => {
-    setPageID(value)
-    setValidationResult(null)
-  }
-
   const handleValidate = async () => {
-    if (!pageID.trim()) {
-      setErrors({ pageID: t('errorPageIdRequired') })
-      return
-    }
-
-    const parsedID = parseNotionID(pageID)
-    if (!parsedID) {
-      setErrors({ pageID: t('errorInvalidPageId') })
-      return
-    }
-
+    if (!pageID.trim()) { setErrors({ pageID: t('errorPageIdRequired') }); return }
+    const parsed = parseNotionID(pageID)
+    if (!parsed) { setErrors({ pageID: t('errorInvalidPageId') }); return }
     setErrors({})
     setIsValidating(true)
-
     try {
       const result = await validateNotionPage({
-        variables: { workspaceId: currentWorkspace!.id, pageID: parsedID },
+        variables: { workspaceId: currentWorkspace!.id, pageID: parsed },
       })
-
-      const validation: ValidationResult | null = result.data?.validateNotionPage ?? null
-      setValidationResult(validation)
-
-      if (validation?.valid && validation.pageTitle && !name) {
-        setName(validation.pageTitle)
-      }
-    } catch (error) {
-      console.error('Validation error:', error)
+      const v: ValidationResult | null = result.data?.validateNotionPage ?? null
+      setValidationResult(v)
+      if (v?.valid && v.pageTitle && !name) setName(v.pageTitle)
+    } catch {
       setValidationResult({
         valid: false,
         pageTitle: null,
         pageURL: null,
         errorMessage: t('errorValidatePage'),
       })
-    } finally {
-      setIsValidating(false)
-    }
+    } finally { setIsValidating(false) }
   }
 
   const validate = () => {
-    const newErrors: FormErrors = {}
-
-    if (!pageID.trim()) {
-      newErrors.pageID = t('errorPageIdRequired')
-    }
-
-    if (!name.trim()) {
-      newErrors.name = t('errorNameRequired')
-    }
-
-    if (!validationResult?.valid) {
-      newErrors.pageID = t('errorValidatePageFirst')
-    }
-
-    setErrors(newErrors)
-    return Object.keys(newErrors).length === 0
+    const e: FormErrors = {}
+    if (!pageID.trim()) e.pageID = t('errorPageIdRequired')
+    if (!name.trim()) e.name = t('errorNameRequired')
+    if (!validationResult?.valid) e.pageID = t('errorValidatePageFirst')
+    setErrors(e)
+    return Object.keys(e).length === 0
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-
-    if (!validate()) {
-      return
-    }
-
-    const parsedID = parseNotionID(pageID)
+  const handleSubmit = async () => {
+    if (!validate()) return
+    const parsed = parseNotionID(pageID)
     await createSource({
       variables: {
         workspaceId: currentWorkspace!.id,
         input: {
-          pageID: parsedID ?? pageID.trim(),
+          pageID: parsed ?? pageID.trim(),
           name: name.trim(),
           description: description.trim() || undefined,
           enabled,
@@ -169,176 +132,146 @@ export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps)
     })
   }
 
-  const handleClose = () => {
-    resetForm()
-    onClose()
-  }
-
-  const loading = creating
+  const handleClose = () => { resetForm(); onClose() }
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
+      width={600}
       title={t('titleAddNotionPageSource')}
       footer={
         <>
-          <Button variant="outline" onClick={handleClose} disabled={loading}>
-            {t('btnCancel')}
-          </Button>
+          <Button variant="ghost" onClick={handleClose} disabled={creating}>{t('btnCancel')}</Button>
           <Button
             variant="primary"
             onClick={handleSubmit}
-            disabled={loading || !validationResult?.valid}
+            disabled={creating || !validationResult?.valid}
           >
-            {loading ? t('btnCreating') : t('btnCreateSource')}
+            {creating ? t('btnCreating') : t('btnCreateSource')}
           </Button>
         </>
       }
     >
-      <form onSubmit={handleSubmit} className={styles.form}>
-        <div className={styles.field}>
-          <label htmlFor="pageID" className={styles.label}>
-            {t('labelPageIdRequired')}
-          </label>
-          <div className={styles.inputWithButton}>
+      <div className="col" style={{ gap: 14 }}>
+        {errors.form && (
+          <div style={{
+            padding: '8px 10px', borderRadius: 6,
+            background: 'color-mix(in oklch, var(--danger) 10%, transparent)',
+            border: '1px solid color-mix(in oklch, var(--danger) 30%, transparent)',
+            color: 'var(--danger)', fontSize: 12,
+          }}>{errors.form}</div>
+        )}
+        <div>
+          <label htmlFor="np-id" className="field-label">{t('labelPageIdRequired')}</label>
+          <div className="row" style={{ gap: 6 }}>
             <input
-              id="pageID"
-              type="text"
+              id="np-id"
+              className="input mono"
               value={pageID}
-              onChange={(e) => handlePageIDChange(e.target.value)}
-              className={`${styles.input} ${errors.pageID ? styles.inputError : ''}`}
+              onChange={(e) => { setPageID(e.target.value); setValidationResult(null) }}
               placeholder={t('placeholderNotionPageId')}
-              disabled={loading}
+              disabled={creating}
+              style={{ flex: 1 }}
             />
-            <Button
-              variant="outline"
-              onClick={handleValidate}
-              disabled={loading || isValidating || !pageID.trim()}
-              type="button"
-            >
-              {isValidating ? (
-                <Loader2 size={16} className={styles.spinner} />
-              ) : (
-                t('btnValidate')
-              )}
+            <Button onClick={handleValidate} disabled={creating || isValidating || !pageID.trim()}>
+              {isValidating ? '…' : t('btnValidate')}
             </Button>
           </div>
-          {errors.pageID && <span className={styles.error}>{errors.pageID}</span>}
-          <p className={styles.hint}>
-            {t('hintNotionPageId')}
-          </p>
+          {errors.pageID && <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 4 }}>{errors.pageID}</div>}
+          <div className="soft" style={{ fontSize: 11.5, marginTop: 4 }}>{t('hintNotionPageId')}</div>
         </div>
-
         {validationResult && (
-          <div className={validationResult.valid ? styles.validationSuccess : styles.validationError}>
-            {validationResult.valid ? (
-              <>
-                <CheckCircle size={20} />
-                <div className={styles.validationContent}>
-                  <span className={styles.validationTitle}>{t('validationPageFound')}</span>
-                  <span className={styles.validationDetail}>{validationResult.pageTitle}</span>
-                  {validationResult.pageURL && (
-                    <a
-                      href={validationResult.pageURL}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className={styles.validationLink}
-                    >
-                      {t('linkOpenNotion')}
-                    </a>
-                  )}
-                </div>
-              </>
-            ) : (
-              <>
-                <AlertCircle size={20} />
-                <div className={styles.validationContent}>
-                  <span className={styles.validationTitle}>{t('validationFailed')}</span>
-                  <span className={styles.validationDetail}>{validationResult.errorMessage}</span>
-                </div>
-              </>
+          <div style={{
+            padding: 10, borderRadius: 6, fontSize: 12,
+            background: validationResult.valid
+              ? 'color-mix(in oklch, var(--ok) 10%, transparent)'
+              : 'color-mix(in oklch, var(--danger) 10%, transparent)',
+            border: `1px solid color-mix(in oklch, ${validationResult.valid ? 'var(--ok)' : 'var(--danger)'} 30%, transparent)`,
+          }}>
+            <div className="row" style={{ gap: 8 }}>
+              <span style={{ color: validationResult.valid ? 'var(--ok)' : 'var(--danger)' }}>
+                {validationResult.valid ? <IconCheck size={13} /> : <IconWarn size={13} />}
+              </span>
+              <b>{validationResult.valid ? t('validationPageFound') : t('validationFailed')}</b>
+              <span className="spacer" />
+              {validationResult.pageURL && (
+                <a
+                  href={validationResult.pageURL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: 'var(--accent)', fontSize: 11 }}
+                >
+                  {t('linkOpenNotion')}<IconExt size={10} style={{ verticalAlign: -1, marginLeft: 3 }} />
+                </a>
+              )}
+            </div>
+            {(validationResult.pageTitle || validationResult.errorMessage) && (
+              <div className="soft" style={{ fontSize: 11, marginTop: 2 }}>
+                {validationResult.pageTitle || validationResult.errorMessage}
+              </div>
             )}
           </div>
         )}
-
-        <div className={styles.field}>
-          <label htmlFor="name" className={styles.label}>
-            {t('labelNameRequired')}
-          </label>
+        <div>
+          <label htmlFor="np-name" className="field-label">{t('labelNameRequired')}</label>
           <input
-            id="name"
-            type="text"
+            id="np-name"
+            className="input"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className={`${styles.input} ${errors.name ? styles.inputError : ''}`}
             placeholder={t('placeholderSourceName')}
-            disabled={loading}
+            disabled={creating}
           />
-          {errors.name && <span className={styles.error}>{errors.name}</span>}
+          {errors.name && <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 4 }}>{errors.name}</div>}
         </div>
-
-        <div className={styles.field}>
-          <label htmlFor="description" className={styles.label}>
-            {t('labelDescription')}
-          </label>
+        <div>
+          <label htmlFor="np-desc" className="field-label">{t('labelDescription')}</label>
           <textarea
-            id="description"
+            id="np-desc"
+            className="textarea"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            className={styles.textarea}
             placeholder={t('placeholderSourceDescription')}
             rows={3}
-            disabled={loading}
+            disabled={creating}
           />
         </div>
-
-        <div className={styles.checkboxField}>
-          <label className={styles.checkboxLabel}>
-            <input
-              type="checkbox"
-              checked={recursive}
-              onChange={(e) => setRecursive(e.target.checked)}
-              className={styles.checkbox}
-              disabled={loading}
-            />
-            <span>{t('labelIncludeChildPages')}</span>
-          </label>
-        </div>
-
+        <label className="row" style={{ gap: 8, fontSize: 13 }}>
+          <input
+            type="checkbox"
+            checked={recursive}
+            onChange={(e) => setRecursive(e.target.checked)}
+            disabled={creating}
+          />
+          <span>{t('labelIncludeChildPages')}</span>
+        </label>
         {recursive && (
-          <div className={styles.field}>
-            <label htmlFor="maxDepth" className={styles.label}>
-              {t('labelMaxDepth')}
-            </label>
+          <div>
+            <label htmlFor="np-depth" className="field-label">{t('labelMaxDepth')}</label>
             <input
-              id="maxDepth"
+              id="np-depth"
               type="number"
               min={0}
               value={maxDepth}
               onChange={(e) => setMaxDepth(Math.max(0, parseInt(e.target.value, 10) || 0))}
-              className={styles.input}
-              disabled={loading}
+              className="input"
+              disabled={creating}
+              style={{ width: 100 }}
             />
-            <p className={styles.hint}>
-              {t('hintMaxDepth')}
-            </p>
+            <div className="soft" style={{ fontSize: 11.5, marginTop: 4 }}>{t('hintMaxDepth')}</div>
           </div>
         )}
-
-        <div className={styles.checkboxField}>
-          <label className={styles.checkboxLabel}>
-            <input
-              type="checkbox"
-              checked={enabled}
-              onChange={(e) => setEnabled(e.target.checked)}
-              className={styles.checkbox}
-              disabled={loading}
-            />
-            <span>{t('labelEnableSource')}</span>
-          </label>
-        </div>
-      </form>
+        <label className="row" style={{ gap: 8, fontSize: 13 }}>
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => setEnabled(e.target.checked)}
+            disabled={creating}
+          />
+          <span>{t('labelEnableSource')}</span>
+        </label>
+      </div>
     </Modal>
   )
 }

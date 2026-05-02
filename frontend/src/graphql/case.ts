@@ -81,6 +81,7 @@ export const GET_CASE = gql`
         }
         dueDate
         createdAt
+        updatedAt
       }
       knowledges {
         id

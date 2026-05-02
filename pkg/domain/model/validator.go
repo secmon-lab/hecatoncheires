@@ -24,6 +24,18 @@ func NewFieldValidator(schema *config.FieldSchema) *FieldValidator {
 // ValidateCaseFields validates field values for a Case and returns enriched values with Type injected from config.
 // The input map is not modified; a new map is returned with Type set on each FieldValue.
 func (v *FieldValidator) ValidateCaseFields(fieldValues map[string]FieldValue) (map[string]FieldValue, error) {
+	return v.validateCaseFields(fieldValues, false)
+}
+
+// ValidateCaseFieldsPartial is the partial-update variant: only the supplied
+// field values are type-checked, and missing required fields do NOT fail.
+// Use this for UpdateCase where the caller may submit a subset of fields and
+// the remaining values are preserved untouched on the existing Case.
+func (v *FieldValidator) ValidateCaseFieldsPartial(fieldValues map[string]FieldValue) (map[string]FieldValue, error) {
+	return v.validateCaseFields(fieldValues, true)
+}
+
+func (v *FieldValidator) validateCaseFields(fieldValues map[string]FieldValue, partial bool) (map[string]FieldValue, error) {
 	// Build a map of field definitions by ID for quick lookup
 	fieldDefMap := make(map[string]config.FieldDefinition)
 	for _, fd := range v.schema.Fields {
@@ -51,6 +63,10 @@ func (v *FieldValidator) ValidateCaseFields(fieldValues map[string]FieldValue) (
 			return nil, goerr.Wrap(err, "field validation failed",
 				goerr.V(FieldIDKey, fieldID))
 		}
+	}
+
+	if partial {
+		return result, nil
 	}
 
 	// Check for missing required fields

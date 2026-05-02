@@ -7,10 +7,14 @@ import {
   CLOSE_CASE,
   REOPEN_CASE,
   DELETE_CASE,
+  UPDATE_CASE,
   SYNC_CASE_CHANNEL_USERS,
   GET_CASES,
 } from '../graphql/case'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
+import { GET_SLACK_USERS } from '../graphql/slackUsers'
+import FieldDisplay from '../components/fields/FieldDisplay'
+import FilterDropdown from '../components/FilterDropdown'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
 import Button from '../components/Button'
@@ -25,11 +29,15 @@ import {
   IconCalendar,
   IconSlack,
   IconExt,
+  IconDots,
+  IconBell,
 } from '../components/Icons'
-import { Avatar, Badge, PrivateBadge, StatusBadge } from '../components/Primitives'
+import { Avatar, PrivateBadge, StatusBadge } from '../components/Primitives'
+import UserSelect from '../components/UserSelect'
 import CaseForm from './CaseForm'
 import CaseDeleteDialog from './CaseDeleteDialog'
 import ActionForm from './ActionForm'
+import ActionModal from './ActionModal'
 import styles from './CaseDetail.module.css'
 
 interface User {
@@ -46,17 +54,52 @@ function formatTimestamp(iso?: string | null) {
   return d.toLocaleString()
 }
 
+function formatHHMM(iso?: string | null) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  return `${hh}:${mm}`
+}
+
+const STATUS_CLASS: Record<string, string> = {
+  BACKLOG: 'backlog',
+  TODO: 'todo',
+  IN_PROGRESS: 'in-progress',
+  BLOCKED: 'blocked',
+  COMPLETED: 'done',
+}
+const STATUS_PIP: Record<string, string> = {
+  BACKLOG: 'pip-bg',
+  TODO: 'pip-todo',
+  IN_PROGRESS: 'pip-prog',
+  BLOCKED: 'pip-block',
+  COMPLETED: 'pip-done',
+}
+const STATUS_LABEL_KEY = {
+  BACKLOG: 'statusBacklog',
+  TODO: 'statusTodo',
+  IN_PROGRESS: 'statusInProgress',
+  BLOCKED: 'statusBlocked',
+  COMPLETED: 'statusCompleted',
+} as const
+
 export default function CaseDetail() {
-  const { id } = useParams<{ id: string }>()
+  const { id, actionId: actionIdParam } = useParams<{ id: string; actionId?: string }>()
   const caseId = Number(id)
+  const openActionId = actionIdParam ? Number(actionIdParam) : null
   const navigate = useNavigate()
   const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
 
   const [editing, setEditing] = useState(false)
   const [addingAction, setAddingAction] = useState(false)
+  const [actionStatusFilters, setActionStatusFilters] = useState<string[]>([])
+  const [actionAssigneeFilters, setActionAssigneeFilters] = useState<string[]>([])
   const [confirmClose, setConfirmClose] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
   const [memberFilter, setMemberFilter] = useState('')
 
   const { data, loading, error } = useQuery(GET_CASE, {
@@ -97,12 +140,16 @@ export default function CaseDetail() {
 
   const [closeCase, { loading: closing }] = useMutation(CLOSE_CASE, { refetchQueries: refetchOptions })
   const [reopenCase, { loading: reopening }] = useMutation(REOPEN_CASE, { refetchQueries: refetchOptions })
+  const [updateCase, { loading: updating }] = useMutation(UPDATE_CASE, { refetchQueries: refetchOptions })
   const [deleteCase, { loading: deleting }] = useMutation(DELETE_CASE, {
     refetchQueries: [
       { query: GET_CASES, variables: { workspaceId: currentWorkspace?.id, status: 'OPEN' } },
       { query: GET_CASES, variables: { workspaceId: currentWorkspace?.id, status: 'CLOSED' } },
     ],
   })
+  const { data: slackUsersData } = useQuery(GET_SLACK_USERS)
+  const slackUsers = slackUsersData?.slackUsers || []
+
   const [syncMembers, { loading: syncing }] = useMutation(SYNC_CASE_CHANNEL_USERS, {
     refetchQueries: [{
       query: GET_CASE_MEMBERS,
@@ -141,46 +188,26 @@ export default function CaseDetail() {
   const handleSync = async () => {
     await syncMembers({ variables: { workspaceId: currentWorkspace!.id, id: caseId } })
   }
-
-  const renderFieldValue = (fieldId: string) => {
-    const fv = c.fields?.find((f: any) => f.fieldId === fieldId)
-    if (!fv) return <span className="soft">{t('emptyValue')}</span>
-    const def = fields.find((f: any) => f.id === fieldId)
-    if (!def) return <span>{String(fv.value)}</span>
-    switch (def.type) {
-      case 'TEXT':
-      case 'NUMBER':
-      case 'DATE':
-        return <span>{String(fv.value ?? '—')}</span>
-      case 'URL':
-        return (
-          <a href={String(fv.value)} target="_blank" rel="noreferrer noopener" style={{ color: 'var(--accent)' }}>
-            {String(fv.value)}<IconExt size={10} style={{ verticalAlign: -1, marginLeft: 4 }} />
-          </a>
-        )
-      case 'SELECT': {
-        const opt = def.options?.find((o: any) => o.id === fv.value)
-        return <Badge>{opt ? opt.name : String(fv.value)}</Badge>
-      }
-      case 'MULTI_SELECT': {
-        const names = (fv.value || []).map((vid: string) => def.options?.find((o: any) => o.id === vid)?.name).filter(Boolean)
-        return (
-          <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
-            {names.length === 0 ? <span className="soft">—</span> : names.map((n: string) => <span key={n} className="chip" style={{ height: 20, fontSize: 11 }}>{n}</span>)}
-          </div>
-        )
-      }
-      default:
-        return <span>{String(fv.value ?? '—')}</span>
-    }
+  const handleAssigneesChange = async (ids: string[]) => {
+    await updateCase({
+      variables: {
+        workspaceId: currentWorkspace!.id,
+        input: { id: caseId, assigneeIDs: ids },
+      },
+    })
   }
 
   const members: User[] = membersData?.case?.channelUsers?.items || []
   const memberTotal: number = membersData?.case?.channelUserCount ?? channelUserCount
 
+  const totalActions = c.actions?.length || 0
+  const doneActions = (c.actions || []).filter((a: any) => a.status === 'COMPLETED').length
+  const progressPct = totalActions > 0 ? Math.round((doneActions / totalActions) * 100) : 0
+
   return (
-    <div className="h-main-inner" style={{ maxWidth: 1100 }}>
-      <div className="row" style={{ marginBottom: 12 }}>
+    <div className="h-main-inner" style={{ maxWidth: 1180 }}>
+      {/* top action row */}
+      <div className="row" style={{ marginBottom: 18 }}>
         <Button
           variant="ghost"
           size="sm"
@@ -190,9 +217,27 @@ export default function CaseDetail() {
           {t('btnBack')}
         </Button>
         <span className="spacer" />
+        <Button
+          size="sm"
+          variant="ghost"
+          icon={<IconBell size={13} />}
+          data-testid="watch-case-button"
+          aria-label={t('btnWatch')}
+        >
+          {t('btnWatch')}
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => setEditing(true)}
+          data-testid="case-edit-button"
+        >
+          {t('btnEdit')}
+        </Button>
         {c.status === 'OPEN' ? (
           <Button
             size="sm"
+            variant="danger"
             icon={<IconCheck size={13} />}
             onClick={() => setConfirmClose(true)}
             disabled={closing}
@@ -210,221 +255,400 @@ export default function CaseDetail() {
             {t('btnReopen')}
           </Button>
         )}
-        <Button size="sm" onClick={() => setEditing(true)}>{t('btnEdit')}</Button>
-        <Button size="sm" variant="danger" onClick={() => setConfirmDelete(true)}>
-          {t('btnDelete')}
-        </Button>
+        <div style={{ position: 'relative' }}>
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<IconDots size={14} />}
+            onClick={() => setMenuOpen((v) => !v)}
+            aria-label={t('btnMore')}
+            data-testid="case-menu-button"
+          />
+          {menuOpen && (
+            <>
+              <div
+                onClick={() => setMenuOpen(false)}
+                style={{ position: 'fixed', inset: 0, zIndex: 100 }}
+              />
+              <div
+                role="menu"
+                data-testid="case-menu-popover"
+                className={styles.kebabMenu}
+              >
+                <button
+                  type="button"
+                  onClick={() => { setMenuOpen(false); setConfirmDelete(true) }}
+                  data-testid="case-delete-menu-item"
+                  className={`${styles.kebabItem} ${styles.kebabDanger}`}
+                >
+                  {t('btnDelete')}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
-      <div className="card" style={{ padding: 24 }}>
-        <div className="row" style={{ alignItems: 'flex-start', gap: 12, marginBottom: 8 }}>
-          <span className="mono soft" style={{ fontSize: 13, marginTop: 4 }}>#{c.id}</span>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, letterSpacing: '-0.02em', flex: 1 }}>
-            {c.title}
-          </h1>
-          <div className="row" style={{ gap: 6 }}>
-            <StatusBadge status={c.status} labelOpen={t('statusOpen')} labelClosed={t('statusClosed')} />
-            {isPrivate && <span data-testid="private-badge"><PrivateBadge label={t('badgePrivate')} /></span>}
-          </div>
+      {/* title row */}
+      <div className="h-detail-h">
+        <span className="h-detail-id">#{c.id}</span>
+        <h1>{c.title}</h1>
+        <div className="h-detail-badges">
+          {isPrivate && <span data-testid="private-badge"><PrivateBadge label={t('badgePrivate')} /></span>}
         </div>
+      </div>
 
-        <div className="row soft" style={{ fontSize: 12, gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
-          <span><IconCalendar size={11} style={{ marginRight: 4, verticalAlign: '-2px' }} />
-            {t('labelCreatedTimestamp')} <span className="mono" data-testid="created-timestamp-value">{formatTimestamp(c.createdAt)}</span>
-          </span>
+      {/* sub-meta */}
+      <div className="h-detail-meta">
+        <span>
+          <IconCalendar size={11} style={{ marginRight: 4, verticalAlign: '-2px' }} />
+          {t('labelCreatedTimestamp')} <span className="mono" data-testid="created-timestamp-value">{formatTimestamp(c.createdAt)}</span>
+        </span>
+        <span>
+          {t('labelUpdatedTimestamp')} <span className="mono" data-testid="updated-timestamp-value">{formatTimestamp(c.updatedAt)}</span>
+        </span>
+        {c.reporter && (
           <span>
-            {t('labelUpdatedTimestamp')} <span className="mono" data-testid="updated-timestamp-value">{formatTimestamp(c.updatedAt)}</span>
+            {t('labelBy')} <span className="name">{c.reporter.realName || c.reporter.name}</span>
           </span>
-          {slackChannelID && (
-            <a
-              className="slack-link"
-              href={slackChannelURL || `slack://channel?id=${slackChannelID}`}
-              target="_blank"
-              rel="noreferrer noopener"
-            >
-              <IconSlack size={11} />#{slackChannelName || slackChannelID}
-              <IconExt size={10} />
-            </a>
+        )}
+        <span className="spacer" />
+        {slackChannelID && (
+          <a
+            className="slack-link"
+            href={slackChannelURL || `slack://channel?id=${slackChannelID}`}
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            <IconSlack size={11} />#{slackChannelName || slackChannelID}
+            <IconExt size={10} />
+          </a>
+        )}
+      </div>
+
+      {/* private banner */}
+      {isPrivate && (
+        <div className="h-banner warn" data-testid="case-private-banner">
+          <IconLock size={13} sw={2} />
+          <span className="h-banner-text">
+            {t('msgPrivateBanner', {
+              channel: slackChannelName || slackChannelID,
+              count: String(channelUserCount || 0),
+            })}
+          </span>
+        </div>
+      )}
+
+      {/* main grid */}
+      <div className="h-detail-grid">
+        {/* left column */}
+        <div>
+          <section className="h-section h-detail-body">
+            <div className="h-section-h">
+              <span className="h-section-title">{t('labelDescription')}</span>
+            </div>
+            <p>{c.description || t('labelNoDescription')}</p>
+          </section>
+
+          <section className="h-section">
+            <div className="h-section-h">
+              <span className="h-section-title">{t('sectionRelatedActions')}</span>
+              {totalActions > 0 && (
+                <>
+                  <span className="h-section-progress" data-testid="related-actions-progress">
+                    {t('labelProgress', { done: String(doneActions), total: String(totalActions) })}
+                  </span>
+                  <div className="h-section-bar">
+                    <span data-testid="related-actions-progress-bar" style={{ width: `${progressPct}%` }} />
+                  </div>
+                </>
+              )}
+              <span className="spacer" />
+              <Button
+                size="sm"
+                icon={<IconPlus size={12} />}
+                onClick={() => setAddingAction(true)}
+                data-testid="add-action-button"
+              >
+                {t('btnAddAction')}
+              </Button>
+            </div>
+
+            {totalActions > 0 && (() => {
+              const STATUS_ORDER: Array<{ value: string; labelKey: 'statusBacklog' | 'statusTodo' | 'statusInProgress' | 'statusBlocked' | 'statusCompleted' }> = [
+                { value: 'BACKLOG', labelKey: 'statusBacklog' },
+                { value: 'TODO', labelKey: 'statusTodo' },
+                { value: 'IN_PROGRESS', labelKey: 'statusInProgress' },
+                { value: 'BLOCKED', labelKey: 'statusBlocked' },
+                { value: 'COMPLETED', labelKey: 'statusCompleted' },
+              ]
+              const presentStatuses = new Set<string>(c.actions.map((a: any) => a.status))
+              const statusOpts = STATUS_ORDER
+                .filter((s) => presentStatuses.has(s.value))
+                .map((s) => ({ value: s.value, label: t(s.labelKey) }))
+
+              const assigneeMap = new Map<string, { value: string; label: string }>()
+              let anyUnassigned = false
+              c.actions.forEach((a: any) => {
+                if (!a.assignees || a.assignees.length === 0) {
+                  anyUnassigned = true
+                  return
+                }
+                a.assignees.forEach((u: any) => {
+                  if (!assigneeMap.has(u.id)) {
+                    assigneeMap.set(u.id, { value: u.id, label: u.realName || u.name })
+                  }
+                })
+              })
+              const assigneeOpts: Array<{ value: string; label: string }> = []
+              if (anyUnassigned) assigneeOpts.push({ value: 'NONE', label: t('filterUnassigned') })
+              assigneeOpts.push(...Array.from(assigneeMap.values()))
+
+              const filtered = (c.actions as any[]).filter((a) => {
+                if (actionStatusFilters.length > 0 && !actionStatusFilters.includes(a.status)) return false
+                if (actionAssigneeFilters.length > 0) {
+                  const wantUnassigned = actionAssigneeFilters.includes('NONE')
+                  const isUnassigned = !a.assignees || a.assignees.length === 0
+                  const userIds = actionAssigneeFilters.filter((id) => id !== 'NONE')
+                  const matchesUser = userIds.length > 0
+                    && (a.assignees || []).some((u: any) => userIds.includes(u.id))
+                  if (!((wantUnassigned && isUnassigned) || matchesUser)) return false
+                }
+                return true
+              })
+
+              return (
+                <>
+                  <div className="h-filter-bar">
+                    <FilterDropdown
+                      testId="related-action-status-filter"
+                      label="Status"
+                      allLabel={t('filterAllShort')}
+                      options={statusOpts}
+                      value={actionStatusFilters}
+                      onChange={setActionStatusFilters}
+                    />
+                    <FilterDropdown
+                      testId="related-action-assignee-filter"
+                      label="Assignee"
+                      allLabel={t('filterAllAssigneesShort')}
+                      options={assigneeOpts}
+                      value={actionAssigneeFilters}
+                      onChange={setActionAssigneeFilters}
+                    />
+                    <span className="h-filter-count">{t('labelCount', { count: filtered.length })}</span>
+                  </div>
+
+                  {filtered.length === 0 ? (
+                    <div className="card" style={{ padding: 16, textAlign: 'center' }} data-testid="related-actions-empty-after-filter">
+                      <p className="muted" style={{ fontSize: 12, margin: 0 }}>{t('emptyActionsFilter')}</p>
+                    </div>
+                  ) : (
+                    <div className="h-action-list">
+                      {filtered.map((a: any) => {
+                        const status = String(a.status)
+                        const cls = STATUS_CLASS[status] || 'backlog'
+                        const pip = STATUS_PIP[status] || 'pip-bg'
+                        const labelKey = STATUS_LABEL_KEY[status as keyof typeof STATUS_LABEL_KEY]
+                        return (
+                          <Link
+                            key={a.id}
+                            to={`/ws/${currentWorkspace!.id}/cases/${c.id}/actions/${a.id}`}
+                            className="h-action-row"
+                            data-testid="case-related-action"
+                            data-status={status}
+                          >
+                            <span className={`h-action-pip ${pip}`} />
+                            <span className="h-action-title">{a.title}</span>
+                            {labelKey && (
+                              <span
+                                className={`h-action-status ${cls}`}
+                                data-testid="case-related-action-status"
+                              >
+                                {t(labelKey)}
+                              </span>
+                            )}
+                            {status === 'COMPLETED' && a.updatedAt && (
+                              <span className="h-action-meta" data-testid="case-related-action-completed-at">
+                                {t('labelCompleted')}<span className="mono">{formatHHMM(a.updatedAt)}</span>
+                              </span>
+                            )}
+                            {a.assignees?.[0] && (
+                              <Avatar
+                                size="sm"
+                                name={a.assignees[0].name}
+                                realName={a.assignees[0].realName}
+                                imageUrl={a.assignees[0].imageUrl}
+                              />
+                            )}
+                          </Link>
+                        )
+                      })}
+                    </div>
+                  )}
+                </>
+              )
+            })()}
+
+            {totalActions === 0 && (
+              <div className="card" style={{ padding: 24, textAlign: 'center' }}>
+                <h3 style={{ fontSize: 14, margin: 0 }}>{t('emptyActionsTitle')}</h3>
+                <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>{t('emptyActionsDesc')}</p>
+                <div style={{ marginTop: 12 }}>
+                  <Button
+                    size="sm"
+                    icon={<IconPlus size={12} />}
+                    onClick={() => setAddingAction(true)}
+                    data-testid="empty-add-action-button"
+                  >
+                    {t('btnAddAction')}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </section>
+
+          {c.knowledges && c.knowledges.length > 0 && (
+            <section className="h-section">
+              <div className="h-section-h">
+                <span className="h-section-title">{t('sectionRelatedKnowledge', { count: c.knowledges.length })}</span>
+              </div>
+              <div className="col" style={{ gap: 6 }}>
+                {c.knowledges.map((k: any) => (
+                  <Link
+                    key={k.id}
+                    to={`/ws/${currentWorkspace!.id}/knowledges/${k.id}`}
+                    className="h-action-row"
+                  >
+                    <span className="h-action-title">
+                      {k.title}
+                      {k.summary && <span className="soft" style={{ fontSize: 11.5, marginLeft: 8, fontWeight: 400 }}>{k.summary}</span>}
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </section>
           )}
         </div>
 
-        {isPrivate && (
-          <div className="private-banner" style={{ marginBottom: 20 }}>
-            <IconLock size={13} sw={2} />
-            <span>
-              This case is <b>Private</b>. Only members of <b>#{slackChannelName || slackChannelID}</b> can view or edit.
-            </span>
-          </div>
-        )}
+        {/* right column / sidebar */}
+        <aside className="h-aside">
+          <section className="h-aside-section">
+            <div className="h-aside-h">
+              <span className="h-aside-title">{t('labelStatus')}</span>
+            </div>
+            <div data-testid="aside-status-display" className="h-status-strong">
+              <StatusBadge
+                status={c.status}
+                labelOpen={t('statusOpen')}
+                labelClosed={t('statusClosed')}
+              />
+            </div>
+          </section>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 24 }}>
-          <div className="col" style={{ gap: 24 }}>
-            <section>
-              <div className="field-label">{t('labelDescription')}</div>
-              <p style={{ fontSize: 13.5, lineHeight: 1.65, whiteSpace: 'pre-wrap', margin: 0 }}>
-                {c.description || t('labelNoDescription')}
-              </p>
+          <section className="h-aside-section" data-testid="case-assignees-inline">
+            <div className="h-aside-h">
+              <span className="h-aside-title">{t('sectionAssignees')}</span>
+            </div>
+            <UserSelect
+              inputId={`case-${c.id}-assignees`}
+              aria-label={t('sectionAssignees')}
+              isMulti
+              isClearable
+              isDisabled={updating}
+              options={slackUsers.map((u: User) => ({
+                value: u.id,
+                label: u.realName || u.name,
+                name: u.name,
+                realName: u.realName,
+                imageUrl: u.imageUrl,
+              }))}
+              value={(c.assignees || []).map((u: User) => ({
+                value: u.id,
+                label: u.realName || u.name,
+                name: u.name,
+                realName: u.realName,
+                imageUrl: u.imageUrl,
+              }))}
+              onChange={(opts: any) =>
+                handleAssigneesChange(((opts || []) as any[]).map((o) => o.value))
+              }
+              placeholder={t('emptyValue')}
+            />
+          </section>
+
+          {c.reporter && (
+            <section className="h-aside-section">
+              <div className="h-aside-h">
+                <span className="h-aside-title">{t('labelReporter')}</span>
+              </div>
+              <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                <Avatar size="sm" name={c.reporter.name} realName={c.reporter.realName} imageUrl={c.reporter.imageUrl} />
+                <span style={{ fontSize: 13 }}>{c.reporter.realName || c.reporter.name}</span>
+              </div>
             </section>
+          )}
 
-            <section>
-              <div className="row" style={{ marginBottom: 10 }}>
-                <div className="field-label" style={{ marginBottom: 0 }}>{t('sectionRelatedActions')}</div>
+          {fields.length > 0 && (
+            <section className="h-aside-section" data-testid="case-fields-inline">
+              <div className="h-aside-h">
+                <span className="h-aside-title">{t('sectionFields')}</span>
+              </div>
+              <div className="kv-list">
+                {fields.map((f: any) => {
+                  const fv = c.fields?.find((x: any) => x.fieldId === f.id)
+                  return (
+                    <div key={f.id} className="kv-row" data-testid={`case-field-${f.id}`}>
+                      <span className="kv-label">{f.name}</span>
+                      <span className="kv-value">
+                        <FieldDisplay field={f} value={fv?.value} users={slackUsers} />
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            </section>
+          )}
+
+          {isPrivate && slackChannelID && (
+            <section className="h-aside-section" data-testid="channel-members-section">
+              <div className="h-aside-h">
+                <span className="h-aside-title">
+                  {t('sectionChannelMembers', { count: memberTotal })}
+                </span>
                 <span className="spacer" />
                 <Button
                   size="sm"
-                  icon={<IconPlus size={12} />}
-                  onClick={() => setAddingAction(true)}
-                  data-testid="add-action-button"
+                  variant="ghost"
+                  onClick={handleSync}
+                  disabled={syncing}
+                  data-testid="sync-members-button"
+                  icon={<IconRefresh size={12} />}
                 >
-                  {t('btnAddAction')}
+                  {t('btnSync')}
                 </Button>
               </div>
-              {(!c.actions || c.actions.length === 0) ? (
-                <div className="card" style={{ padding: 24, textAlign: 'center' }}>
-                  <h3 style={{ fontSize: 14, margin: 0 }}>{t('emptyActionsTitle')}</h3>
-                  <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>{t('emptyActionsDesc')}</p>
-                  <div style={{ marginTop: 12 }}>
-                    <Button
-                      size="sm"
-                      icon={<IconPlus size={12} />}
-                      onClick={() => setAddingAction(true)}
-                      data-testid="empty-add-action-button"
-                    >
-                      {t('btnAddAction')}
-                    </Button>
+              <div className="h-search" style={{ width: '100%', marginLeft: 0, marginBottom: 8 }}>
+                <IconSearch size={13} />
+                <input
+                  value={memberFilter}
+                  onChange={(e) => setMemberFilter(e.target.value)}
+                  placeholder={t('placeholderFilterMembers')}
+                  data-testid="member-search-filter"
+                  style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontFamily: 'inherit', fontSize: 12.5, color: 'var(--fg)' }}
+                />
+              </div>
+              <div className="col" style={{ gap: 0 }}>
+                {members.map((m) => (
+                  <div key={m.id} className={styles.memberItem}>
+                    <Avatar size="sm" name={m.name} realName={m.realName} imageUrl={m.imageUrl} />
+                    <span className={`name truncate ${styles.name}`}>{m.realName}</span>
                   </div>
-                </div>
-              ) : (
-                <div className="col" style={{ gap: 6 }}>
-                  {c.actions.map((a: any) => (
-                    <Link
-                      key={a.id}
-                      to={`/ws/${currentWorkspace!.id}/cases/${c.id}/actions/${a.id}`}
-                      className="row"
-                      style={{
-                        padding: 10, border: '1px solid var(--line)', borderRadius: 6, gap: 10,
-                        background: 'var(--bg-elev)', textDecoration: 'none', color: 'inherit',
-                      }}
-                    >
-                      <span
-                        className={'pip ' + ({
-                          BACKLOG: 'pip-bg', TODO: 'pip-todo', IN_PROGRESS: 'pip-prog',
-                          BLOCKED: 'pip-block', COMPLETED: 'pip-done',
-                        }[a.status as string] || 'pip-bg')}
-                        style={{ width: 8, height: 8, borderRadius: '50%' }}
-                      />
-                      <span style={{ fontSize: 13, fontWeight: 500, flex: 1, textDecoration: a.status === 'COMPLETED' ? 'line-through' : 'none', color: a.status === 'COMPLETED' ? 'var(--fg-soft)' : undefined }}>
-                        {a.title}
-                      </span>
-                      {a.assignees?.[0] && <Avatar size="sm" name={a.assignees[0].name} realName={a.assignees[0].realName} imageUrl={a.assignees[0].imageUrl} />}
-                    </Link>
-                  ))}
-                </div>
-              )}
+                ))}
+              </div>
             </section>
-
-            {c.knowledges && c.knowledges.length > 0 && (
-              <section>
-                <div className="field-label">{t('sectionRelatedKnowledge', { count: c.knowledges.length })}</div>
-                <div className="col" style={{ gap: 6 }}>
-                  {c.knowledges.map((k: any) => (
-                    <Link
-                      key={k.id}
-                      to={`/ws/${currentWorkspace!.id}/knowledges/${k.id}`}
-                      style={{ display: 'block', padding: 10, border: '1px solid var(--line)', borderRadius: 6, background: 'var(--bg-elev)', textDecoration: 'none', color: 'inherit' }}
-                    >
-                      <div style={{ fontSize: 13, fontWeight: 500 }}>{k.title}</div>
-                      {k.summary && <div className="soft" style={{ fontSize: 11.5, marginTop: 2 }}>{k.summary}</div>}
-                    </Link>
-                  ))}
-                </div>
-              </section>
-            )}
-          </div>
-
-          <aside className="col" style={{ gap: 18 }}>
-            <section>
-              <div className="field-label">{t('sectionAssignees')}</div>
-              {(!c.assignees || c.assignees.length === 0) ? (
-                <span className="soft" style={{ fontSize: 12 }}>{t('emptyValue')}</span>
-              ) : (
-                <div className="col" style={{ gap: 6 }}>
-                  {c.assignees.map((u: User) => (
-                    <div key={u.id} className="row" style={{ gap: 8 }}>
-                      <Avatar size="sm" name={u.name} realName={u.realName} imageUrl={u.imageUrl} />
-                      <span style={{ fontSize: 13 }}>{u.realName}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            {c.reporter && (
-              <section>
-                <div className="field-label">{t('labelReporter')}</div>
-                <div className="row" style={{ gap: 8 }}>
-                  <Avatar size="sm" name={c.reporter.name} realName={c.reporter.realName} imageUrl={c.reporter.imageUrl} />
-                  <span style={{ fontSize: 13 }}>{c.reporter.realName}</span>
-                </div>
-              </section>
-            )}
-
-            {fields.length > 0 && (
-              <section>
-                <h3 style={{ margin: 0, fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--fg-soft)', marginBottom: 6 }}>
-                  {t('sectionFields')}
-                </h3>
-                <div className="col" style={{ gap: 8 }}>
-                  {fields.map((f: any) => (
-                    <div key={f.id} style={{ padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 6 }}>
-                      <div style={{ fontSize: 10.5, color: 'var(--fg-soft)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>{f.name}</div>
-                      <div style={{ fontSize: 13, marginTop: 2 }}>{renderFieldValue(f.id)}</div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {isPrivate && slackChannelID && (
-              <section data-testid="channel-members-section">
-                <div className="row" style={{ marginBottom: 8 }}>
-                  <h3 style={{ margin: 0, fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--fg-soft)' }}>
-                    {t('sectionChannelMembers', { count: memberTotal })}
-                  </h3>
-                  <span className="spacer" />
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={handleSync}
-                    disabled={syncing}
-                    data-testid="sync-members-button"
-                    icon={<IconRefresh size={12} />}
-                  >
-                    {t('btnSync')}
-                  </Button>
-                </div>
-                <div className="h-search" style={{ width: '100%', marginLeft: 0, marginBottom: 8 }}>
-                  <IconSearch size={13} />
-                  <input
-                    value={memberFilter}
-                    onChange={(e) => setMemberFilter(e.target.value)}
-                    placeholder={t('placeholderFilterMembers')}
-                    data-testid="member-search-filter"
-                    style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontFamily: 'inherit', fontSize: 12.5, color: 'var(--fg)' }}
-                  />
-                </div>
-                <div className="col" style={{ gap: 0 }}>
-                  {members.map((m) => (
-                    <div key={m.id} className={styles.memberItem}>
-                      <Avatar size="sm" name={m.name} realName={m.realName} imageUrl={m.imageUrl} />
-                      <span className={`name truncate ${styles.name}`}>{m.realName}</span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
-          </aside>
-        </div>
+          )}
+        </aside>
       </div>
 
       {editing && <CaseForm caseItem={{
@@ -438,6 +662,13 @@ export default function CaseDetail() {
           action={null}
           defaultCaseID={c.id}
           onClose={() => setAddingAction(false)}
+        />
+      )}
+
+      {openActionId !== null && (
+        <ActionModal
+          actionId={openActionId}
+          onClose={() => navigate(`/ws/${currentWorkspace!.id}/cases/${c.id}`)}
         />
       )}
 

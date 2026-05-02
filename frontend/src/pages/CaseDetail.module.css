@@ -7,3 +7,31 @@
   color: var(--fg);
 }
 .memberItem .name { flex: 1; min-width: 0; }
+
+.kebabMenu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 101;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  min-width: 160px;
+  padding: 4px;
+}
+.kebabItem {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--fg);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  border-radius: 4px;
+  font-family: inherit;
+}
+.kebabItem:hover { background: var(--bg-sunken); }
+.kebabDanger { color: var(--danger); }

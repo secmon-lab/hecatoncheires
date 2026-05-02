@@ -219,12 +219,39 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 	return created, nil
 }
 
-func (uc *CaseUseCase) UpdateCase(ctx context.Context, workspaceID string, id int64, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue) (*model.Case, error) {
-	if title == "" {
-		return nil, goerr.New("case title is required")
-	}
+// CaseUpdate represents a partial update to a Case. Each pointer/slice is
+// nil-vs-set: nil means "preserve the existing value", a non-nil pointer
+// means "set to this value (including empty string)". For Fields the nil
+// case preserves all stored field values; a non-nil map merges the supplied
+// entries on top of the existing ones (entries are not removed individually
+// — clients should send the empty value to clear a field if needed).
+type CaseUpdate struct {
+	Title       *string
+	Description *string
+	// nil means "preserve existing assignees"; a non-nil slice (including an
+	// empty one) means "replace assignees with this list".
+	AssigneeIDs []string
+	// nil means "preserve all stored field values". A non-nil map merges its
+	// entries on top of the existing values (callers cannot remove individual
+	// entries via this API).
+	Fields    map[string]model.FieldValue
+	hasAssign bool
+}
 
-	// Get existing case to check if title changed
+// SetAssignees marks the patch as "replacing assignees with ids" (which may
+// be empty). Use this rather than assigning the field directly so that the
+// nil-vs-empty distinction is preserved through callers that may construct
+// an empty slice for a missing input.
+func (p *CaseUpdate) SetAssignees(ids []string) {
+	if ids == nil {
+		ids = []string{}
+	}
+	p.AssigneeIDs = ids
+	p.hasAssign = true
+}
+
+func (uc *CaseUseCase) UpdateCase(ctx context.Context, workspaceID string, id int64, patch CaseUpdate) (*model.Case, error) {
+	// Get existing case so we can preserve every field the caller didn't touch.
 	existingCase, err := uc.repo.Case().Get(ctx, workspaceID, id)
 	if err != nil {
 		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
@@ -237,13 +264,47 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, workspaceID string, id in
 			goerr.V(CaseIDKey, id), goerr.V("user_id", token.Sub))
 	}
 
-	// Validate and enrich custom fields with Type from config
-	if validator := uc.fieldValidatorForWorkspace(workspaceID); validator != nil {
-		enriched, err := validator.ValidateCaseFields(fieldValues)
-		if err != nil {
-			return nil, goerr.Wrap(err, "field validation failed", goerr.V(CaseIDKey, id))
+	title := existingCase.Title
+	if patch.Title != nil {
+		t := *patch.Title
+		if t == "" {
+			return nil, goerr.New("case title cannot be empty", goerr.V(CaseIDKey, id))
 		}
-		fieldValues = enriched
+		title = t
+	}
+
+	description := existingCase.Description
+	if patch.Description != nil {
+		description = *patch.Description
+	}
+
+	assigneeIDs := existingCase.AssigneeIDs
+	if patch.hasAssign {
+		assigneeIDs = patch.AssigneeIDs
+	}
+
+	// Build the field-value map. Without a patch, preserve the existing map
+	// verbatim (no validator pass — stale option IDs from a prior config must
+	// not cause an unrelated update to fail).
+	fieldValues := existingCase.FieldValues
+	if patch.Fields != nil {
+		// Partial validation: only the submitted entries are type-checked.
+		validated := patch.Fields
+		if validator := uc.fieldValidatorForWorkspace(workspaceID); validator != nil {
+			enriched, err := validator.ValidateCaseFieldsPartial(validated)
+			if err != nil {
+				return nil, goerr.Wrap(err, "field validation failed", goerr.V(CaseIDKey, id))
+			}
+			validated = enriched
+		}
+		merged := make(map[string]model.FieldValue, len(existingCase.FieldValues)+len(validated))
+		for k, v := range existingCase.FieldValues {
+			merged[k] = v
+		}
+		for k, v := range validated {
+			merged[k] = v
+		}
+		fieldValues = merged
 	}
 
 	// Rename Slack channel if title changed and channel exists
@@ -256,19 +317,18 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, workspaceID string, id in
 		}
 	}
 
-	// Update case with embedded field values
 	caseModel := &model.Case{
 		ID:             id,
 		Title:          title,
 		Description:    description,
-		Status:         existingCase.Status,     // Preserve status
-		ReporterID:     existingCase.ReporterID, // Preserve reporter (immutable)
+		Status:         existingCase.Status,
+		ReporterID:     existingCase.ReporterID,
 		AssigneeIDs:    assigneeIDs,
-		SlackChannelID: existingCase.SlackChannelID, // Preserve channel ID
-		IsPrivate:      existingCase.IsPrivate,      // Preserve private mode
-		ChannelUserIDs: existingCase.ChannelUserIDs, // Preserve channel users
+		SlackChannelID: existingCase.SlackChannelID,
+		IsPrivate:      existingCase.IsPrivate,
+		ChannelUserIDs: existingCase.ChannelUserIDs,
 		FieldValues:    fieldValues,
-		CreatedAt:      existingCase.CreatedAt, // Preserve creation time
+		CreatedAt:      existingCase.CreatedAt,
 	}
 
 	updated, err := uc.repo.Case().Update(ctx, workspaceID, caseModel)

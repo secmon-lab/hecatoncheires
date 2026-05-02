@@ -174,7 +174,11 @@ func TestCaseUseCase_UpdateCase(t *testing.T) {
 		updatedFieldValues := map[string]model.FieldValue{
 			"priority": {FieldID: "priority", Value: "low"},
 		}
-		updated, err := uc.UpdateCase(ctx, testWorkspaceID, created.ID, "Updated Title", "Updated Description", []string{"U002"}, updatedFieldValues)
+		updatedTitle := "Updated Title"
+		updatedDesc := "Updated Description"
+		patch := usecase.CaseUpdate{Title: &updatedTitle, Description: &updatedDesc, Fields: updatedFieldValues}
+		patch.SetAssignees([]string{"U002"})
+		updated, err := uc.UpdateCase(ctx, testWorkspaceID, created.ID, patch)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, updated.Title).Equal("Updated Title")
@@ -187,12 +191,64 @@ func TestCaseUseCase_UpdateCase(t *testing.T) {
 		gt.Value(t, retrieved.FieldValues["priority"].Value).Equal("low")
 	})
 
+	t.Run("partial update preserves untouched title, description, assignees and merges fields", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UORIG"})
+
+		original := map[string]model.FieldValue{
+			"stage":    {FieldID: "stage", Value: "screen"},
+			"priority": {FieldID: "priority", Value: "low"},
+		}
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Original", "OrigDesc", []string{"U001"}, original, false, "", "")
+		gt.NoError(t, err).Required()
+
+		// Empty patch: nothing should change.
+		untouched, err := uc.UpdateCase(ctx, testWorkspaceID, created.ID, usecase.CaseUpdate{})
+		gt.NoError(t, err).Required()
+		gt.String(t, untouched.Title).Equal("Original")
+		gt.String(t, untouched.Description).Equal("OrigDesc")
+		gt.Array(t, untouched.AssigneeIDs).Length(1)
+		gt.Value(t, untouched.FieldValues["stage"].Value).Equal("screen")
+		gt.Value(t, untouched.FieldValues["priority"].Value).Equal("low")
+
+		// Update only one field — others (including required ones, if any)
+		// must not be touched and must not be re-validated.
+		updated, err := uc.UpdateCase(ctx, testWorkspaceID, created.ID, usecase.CaseUpdate{
+			Fields: map[string]model.FieldValue{
+				"priority": {FieldID: "priority", Value: "high"},
+			},
+		})
+		gt.NoError(t, err).Required()
+		gt.String(t, updated.Title).Equal("Original")
+		gt.String(t, updated.Description).Equal("OrigDesc")
+		gt.Array(t, updated.AssigneeIDs).Length(1)
+		gt.Value(t, updated.FieldValues["stage"].Value).Equal("screen")
+		gt.Value(t, updated.FieldValues["priority"].Value).Equal("high")
+
+		// Update assignees only — title/description/fields preserved.
+		patch := usecase.CaseUpdate{}
+		patch.SetAssignees([]string{"U002", "U003"})
+		assignUpd, err := uc.UpdateCase(ctx, testWorkspaceID, created.ID, patch)
+		gt.NoError(t, err).Required()
+		gt.String(t, assignUpd.Title).Equal("Original")
+		gt.Array(t, assignUpd.AssigneeIDs).Length(2)
+		gt.Value(t, assignUpd.FieldValues["stage"].Value).Equal("screen")
+
+		// Empty title is rejected.
+		empty := ""
+		_, err = uc.UpdateCase(ctx, testWorkspaceID, created.ID, usecase.CaseUpdate{Title: &empty})
+		gt.Value(t, err).NotNil()
+	})
+
 	t.Run("update non-existent case fails", func(t *testing.T) {
 		repo := memory.New()
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		_, err := uc.UpdateCase(ctx, testWorkspaceID, 999, "Title", "Description", []string{}, nil)
+		title := "Title"
+		desc := "Description"
+		_, err := uc.UpdateCase(ctx, testWorkspaceID, 999, usecase.CaseUpdate{Title: &title, Description: &desc})
 		gt.Value(t, err).NotNil()
 		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
 	})
@@ -901,7 +957,11 @@ func TestCaseUseCase_PrivateCaseAccessControl(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		nonMemberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "USTRANGER"})
-		_, err = uc.UpdateCase(nonMemberCtx, testWorkspaceID, created.ID, "Hacked", "Hacked desc", []string{}, nil)
+		hackTitle := "Hacked"
+		hackDesc := "Hacked desc"
+		hackPatch := usecase.CaseUpdate{Title: &hackTitle, Description: &hackDesc}
+		hackPatch.SetAssignees([]string{})
+		_, err = uc.UpdateCase(nonMemberCtx, testWorkspaceID, created.ID, hackPatch)
 		gt.Value(t, err).NotNil()
 		gt.Error(t, err).Is(usecase.TestErrAccessDenied)
 	})
@@ -1277,7 +1337,11 @@ func TestCaseUseCase_ReporterID(t *testing.T) {
 
 		// Update with a different user context
 		ctxOther := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
-		updated, err := uc.UpdateCase(ctxOther, testWorkspaceID, created.ID, "Updated Title", "new desc", []string{"UOTHER"}, nil)
+		ut := "Updated Title"
+		ud := "new desc"
+		repPatch := usecase.CaseUpdate{Title: &ut, Description: &ud}
+		repPatch.SetAssignees([]string{"UOTHER"})
+		updated, err := uc.UpdateCase(ctxOther, testWorkspaceID, created.ID, repPatch)
 		gt.NoError(t, err).Required()
 		gt.String(t, updated.ReporterID).Equal("UREPORTER") // Reporter should NOT change
 	})
