@@ -18,7 +18,7 @@ interface ActionItem {
   title: string
   description: string
   status: string
-  assigneeIDs: string[]
+  assigneeID: string | null
   dueDate?: string | null
 }
 
@@ -48,7 +48,7 @@ export default function ActionForm({ action, defaultCaseID, onClose }: ActionFor
   const [description, setDescription] = useState(action?.description || '')
   const [caseID, setCaseID] = useState<number | null>(action?.caseID ?? defaultCaseID ?? null)
   const [status, setStatus] = useState(action?.status || 'BACKLOG')
-  const [assigneeIDs, setAssigneeIDs] = useState<string[]>(action?.assigneeIDs || [])
+  const [assigneeID, setAssigneeID] = useState<string | null>(action?.assigneeID ?? null)
   const [errors, setErrors] = useState<Record<string, string>>({})
 
   const { data: usersData } = useQuery(GET_SLACK_USERS)
@@ -60,7 +60,7 @@ export default function ActionForm({ action, defaultCaseID, onClose }: ActionFor
     realName: u.realName,
     imageUrl: u.imageUrl,
   }))
-  const selectedAssignees = userOptions.filter((o: any) => assigneeIDs.includes(o.value))
+  const selectedAssignee = userOptions.find((o: any) => o.value === assigneeID) || null
 
   const { data: casesData } = useQuery(GET_CASES, {
     variables: { workspaceId: currentWorkspace?.id, status: 'OPEN' },
@@ -110,17 +110,27 @@ export default function ActionForm({ action, defaultCaseID, onClose }: ActionFor
 
     try {
       if (isEdit && action) {
+        const updateInput: Record<string, unknown> = { id: action.id, title, description, status }
+        if (assigneeID) {
+          updateInput.assigneeID = assigneeID
+        } else {
+          updateInput.clearAssignee = true
+        }
         await updateAction({
           variables: {
             workspaceId: currentWorkspace!.id,
-            input: { id: action.id, title, description, status, assigneeIDs },
+            input: updateInput,
           },
         })
       } else {
+        const createInput: Record<string, unknown> = { caseID: Number(caseID), title, description, status }
+        if (assigneeID) {
+          createInput.assigneeID = assigneeID
+        }
         await createAction({
           variables: {
             workspaceId: currentWorkspace!.id,
-            input: { caseID: Number(caseID), title, description, status, assigneeIDs },
+            input: createInput,
           },
         })
       }
@@ -199,15 +209,15 @@ export default function ActionForm({ action, defaultCaseID, onClose }: ActionFor
           />
         </div>
         <div>
-          <label htmlFor="action-assignees" className="field-label">{t('labelAssignees')}</label>
+          <label htmlFor="action-assignee" className="field-label">{t('labelAssignee')}</label>
           <UserSelect
-            inputId="action-assignees"
-            aria-label={t('labelAssignees')}
-            isMulti
+            inputId="action-assignee"
+            aria-label={t('labelAssignee')}
+            isClearable
             options={userOptions}
-            value={selectedAssignees}
-            onChange={(opts: any) => setAssigneeIDs((opts || []).map((o: any) => o.value))}
-            placeholder={t('placeholderAddAssignees')}
+            value={selectedAssignee}
+            onChange={(opt: any) => setAssigneeID(opt ? opt.value : null)}
+            placeholder={t('placeholderSelectAssignee')}
           />
         </div>
         {isEdit && (

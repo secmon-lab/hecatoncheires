@@ -52,14 +52,15 @@ type DirectiveRoot struct {
 
 type ComplexityRoot struct {
 	Action struct {
-		AssigneeIDs    func(childComplexity int) int
-		Assignees      func(childComplexity int) int
+		Assignee       func(childComplexity int) int
+		AssigneeID     func(childComplexity int) int
 		Case           func(childComplexity int) int
 		CaseID         func(childComplexity int) int
 		CreatedAt      func(childComplexity int) int
 		Description    func(childComplexity int) int
 		DueDate        func(childComplexity int) int
 		ID             func(childComplexity int) int
+		Messages       func(childComplexity int, limit *int, cursor *string) int
 		SlackMessageTs func(childComplexity int) int
 		Status         func(childComplexity int) int
 		Title          func(childComplexity int) int
@@ -326,7 +327,9 @@ type ComplexityRoot struct {
 type ActionResolver interface {
 	Case(ctx context.Context, obj *graphql1.Action) (*graphql1.Case, error)
 
-	Assignees(ctx context.Context, obj *graphql1.Action) ([]*graphql1.SlackUser, error)
+	Assignee(ctx context.Context, obj *graphql1.Action) (*graphql1.SlackUser, error)
+
+	Messages(ctx context.Context, obj *graphql1.Action, limit *int, cursor *string) (*graphql1.SlackMessageConnection, error)
 }
 type CaseResolver interface {
 	ChannelUserCount(ctx context.Context, obj *graphql1.Case) (int, error)
@@ -408,18 +411,18 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 	_ = ec
 	switch typeName + "." + field {
 
-	case "Action.assigneeIDs":
-		if e.complexity.Action.AssigneeIDs == nil {
+	case "Action.assignee":
+		if e.complexity.Action.Assignee == nil {
 			break
 		}
 
-		return e.complexity.Action.AssigneeIDs(childComplexity), true
-	case "Action.assignees":
-		if e.complexity.Action.Assignees == nil {
+		return e.complexity.Action.Assignee(childComplexity), true
+	case "Action.assigneeID":
+		if e.complexity.Action.AssigneeID == nil {
 			break
 		}
 
-		return e.complexity.Action.Assignees(childComplexity), true
+		return e.complexity.Action.AssigneeID(childComplexity), true
 	case "Action.case":
 		if e.complexity.Action.Case == nil {
 			break
@@ -456,6 +459,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Action.ID(childComplexity), true
+	case "Action.messages":
+		if e.complexity.Action.Messages == nil {
+			break
+		}
+
+		args, err := ec.field_Action_messages_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Action.Messages(childComplexity, args["limit"].(*int), args["cursor"].(*string)), true
 	case "Action.slackMessageTS":
 		if e.complexity.Action.SlackMessageTs == nil {
 			break
@@ -1957,13 +1971,14 @@ type Action {
   case: Case
   title: String!
   description: String
-  assigneeIDs: [String!]!
-  assignees: [SlackUser!]!
+  assigneeID: String
+  assignee: SlackUser
   slackMessageTS: String
   status: ActionStatus!
   dueDate: Time
   createdAt: Time!
   updatedAt: Time!
+  messages(limit: Int, cursor: String): SlackMessageConnection!
 }
 
 # Inputs
@@ -1990,7 +2005,7 @@ input CreateActionInput {
   caseID: Int!
   title: String!
   description: String
-  assigneeIDs: [String!]
+  assigneeID: String
   slackMessageTS: String
   status: ActionStatus
   dueDate: Time
@@ -2001,11 +2016,12 @@ input UpdateActionInput {
   caseID: Int
   title: String
   description: String
-  assigneeIDs: [String!]
+  assigneeID: String
   slackMessageTS: String
   status: ActionStatus
   dueDate: Time
   clearDueDate: Boolean
+  clearAssignee: Boolean
 }
 
 # Slack User
@@ -2264,6 +2280,22 @@ var parsedSchema = gqlparser.MustLoadSchema(sources...)
 // endregion ************************** generated!.gotpl **************************
 
 // region    ***************************** args.gotpl *****************************
+
+func (ec *executionContext) field_Action_messages_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "limit", ec.unmarshalOInt2ᚖint)
+	if err != nil {
+		return nil, err
+	}
+	args["limit"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "cursor", ec.unmarshalOString2ᚖstring)
+	if err != nil {
+		return nil, err
+	}
+	args["cursor"] = arg1
+	return args, nil
+}
 
 func (ec *executionContext) field_Case_channelUsers_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
@@ -3072,23 +3104,23 @@ func (ec *executionContext) fieldContext_Action_description(_ context.Context, f
 	return fc, nil
 }
 
-func (ec *executionContext) _Action_assigneeIDs(ctx context.Context, field graphql.CollectedField, obj *graphql1.Action) (ret graphql.Marshaler) {
+func (ec *executionContext) _Action_assigneeID(ctx context.Context, field graphql.CollectedField, obj *graphql1.Action) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
 		ec.OperationContext,
 		field,
-		ec.fieldContext_Action_assigneeIDs,
+		ec.fieldContext_Action_assigneeID,
 		func(ctx context.Context) (any, error) {
-			return obj.AssigneeIDs, nil
+			return obj.AssigneeID, nil
 		},
 		nil,
-		ec.marshalNString2ᚕstringᚄ,
+		ec.marshalOString2ᚖstring,
 		true,
-		true,
+		false,
 	)
 }
 
-func (ec *executionContext) fieldContext_Action_assigneeIDs(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Action_assigneeID(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Action",
 		Field:      field,
@@ -3101,23 +3133,23 @@ func (ec *executionContext) fieldContext_Action_assigneeIDs(_ context.Context, f
 	return fc, nil
 }
 
-func (ec *executionContext) _Action_assignees(ctx context.Context, field graphql.CollectedField, obj *graphql1.Action) (ret graphql.Marshaler) {
+func (ec *executionContext) _Action_assignee(ctx context.Context, field graphql.CollectedField, obj *graphql1.Action) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
 		ec.OperationContext,
 		field,
-		ec.fieldContext_Action_assignees,
+		ec.fieldContext_Action_assignee,
 		func(ctx context.Context) (any, error) {
-			return ec.resolvers.Action().Assignees(ctx, obj)
+			return ec.resolvers.Action().Assignee(ctx, obj)
 		},
 		nil,
-		ec.marshalNSlackUser2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackUserᚄ,
+		ec.marshalOSlackUser2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackUser,
 		true,
-		true,
+		false,
 	)
 }
 
-func (ec *executionContext) fieldContext_Action_assignees(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Action_assignee(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Action",
 		Field:      field,
@@ -3281,6 +3313,53 @@ func (ec *executionContext) fieldContext_Action_updatedAt(_ context.Context, fie
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type Time does not have child fields")
 		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Action_messages(ctx context.Context, field graphql.CollectedField, obj *graphql1.Action) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Action_messages,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Action().Messages(ctx, obj, fc.Args["limit"].(*int), fc.Args["cursor"].(*string))
+		},
+		nil,
+		ec.marshalNSlackMessageConnection2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackMessageConnection,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Action_messages(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Action",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "items":
+				return ec.fieldContext_SlackMessageConnection_items(ctx, field)
+			case "nextCursor":
+				return ec.fieldContext_SlackMessageConnection_nextCursor(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type SlackMessageConnection", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Action_messages_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
 	}
 	return fc, nil
 }
@@ -4135,10 +4214,10 @@ func (ec *executionContext) fieldContext_Case_actions(_ context.Context, field g
 				return ec.fieldContext_Action_title(ctx, field)
 			case "description":
 				return ec.fieldContext_Action_description(ctx, field)
-			case "assigneeIDs":
-				return ec.fieldContext_Action_assigneeIDs(ctx, field)
-			case "assignees":
-				return ec.fieldContext_Action_assignees(ctx, field)
+			case "assigneeID":
+				return ec.fieldContext_Action_assigneeID(ctx, field)
+			case "assignee":
+				return ec.fieldContext_Action_assignee(ctx, field)
 			case "slackMessageTS":
 				return ec.fieldContext_Action_slackMessageTS(ctx, field)
 			case "status":
@@ -4149,6 +4228,8 @@ func (ec *executionContext) fieldContext_Case_actions(_ context.Context, field g
 				return ec.fieldContext_Action_createdAt(ctx, field)
 			case "updatedAt":
 				return ec.fieldContext_Action_updatedAt(ctx, field)
+			case "messages":
+				return ec.fieldContext_Action_messages(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Action", field.Name)
 		},
@@ -6288,10 +6369,10 @@ func (ec *executionContext) fieldContext_Mutation_createAction(ctx context.Conte
 				return ec.fieldContext_Action_title(ctx, field)
 			case "description":
 				return ec.fieldContext_Action_description(ctx, field)
-			case "assigneeIDs":
-				return ec.fieldContext_Action_assigneeIDs(ctx, field)
-			case "assignees":
-				return ec.fieldContext_Action_assignees(ctx, field)
+			case "assigneeID":
+				return ec.fieldContext_Action_assigneeID(ctx, field)
+			case "assignee":
+				return ec.fieldContext_Action_assignee(ctx, field)
 			case "slackMessageTS":
 				return ec.fieldContext_Action_slackMessageTS(ctx, field)
 			case "status":
@@ -6302,6 +6383,8 @@ func (ec *executionContext) fieldContext_Mutation_createAction(ctx context.Conte
 				return ec.fieldContext_Action_createdAt(ctx, field)
 			case "updatedAt":
 				return ec.fieldContext_Action_updatedAt(ctx, field)
+			case "messages":
+				return ec.fieldContext_Action_messages(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Action", field.Name)
 		},
@@ -6355,10 +6438,10 @@ func (ec *executionContext) fieldContext_Mutation_updateAction(ctx context.Conte
 				return ec.fieldContext_Action_title(ctx, field)
 			case "description":
 				return ec.fieldContext_Action_description(ctx, field)
-			case "assigneeIDs":
-				return ec.fieldContext_Action_assigneeIDs(ctx, field)
-			case "assignees":
-				return ec.fieldContext_Action_assignees(ctx, field)
+			case "assigneeID":
+				return ec.fieldContext_Action_assigneeID(ctx, field)
+			case "assignee":
+				return ec.fieldContext_Action_assignee(ctx, field)
 			case "slackMessageTS":
 				return ec.fieldContext_Action_slackMessageTS(ctx, field)
 			case "status":
@@ -6369,6 +6452,8 @@ func (ec *executionContext) fieldContext_Mutation_updateAction(ctx context.Conte
 				return ec.fieldContext_Action_createdAt(ctx, field)
 			case "updatedAt":
 				return ec.fieldContext_Action_updatedAt(ctx, field)
+			case "messages":
+				return ec.fieldContext_Action_messages(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Action", field.Name)
 		},
@@ -7764,10 +7849,10 @@ func (ec *executionContext) fieldContext_Query_actions(ctx context.Context, fiel
 				return ec.fieldContext_Action_title(ctx, field)
 			case "description":
 				return ec.fieldContext_Action_description(ctx, field)
-			case "assigneeIDs":
-				return ec.fieldContext_Action_assigneeIDs(ctx, field)
-			case "assignees":
-				return ec.fieldContext_Action_assignees(ctx, field)
+			case "assigneeID":
+				return ec.fieldContext_Action_assigneeID(ctx, field)
+			case "assignee":
+				return ec.fieldContext_Action_assignee(ctx, field)
 			case "slackMessageTS":
 				return ec.fieldContext_Action_slackMessageTS(ctx, field)
 			case "status":
@@ -7778,6 +7863,8 @@ func (ec *executionContext) fieldContext_Query_actions(ctx context.Context, fiel
 				return ec.fieldContext_Action_createdAt(ctx, field)
 			case "updatedAt":
 				return ec.fieldContext_Action_updatedAt(ctx, field)
+			case "messages":
+				return ec.fieldContext_Action_messages(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Action", field.Name)
 		},
@@ -7831,10 +7918,10 @@ func (ec *executionContext) fieldContext_Query_action(ctx context.Context, field
 				return ec.fieldContext_Action_title(ctx, field)
 			case "description":
 				return ec.fieldContext_Action_description(ctx, field)
-			case "assigneeIDs":
-				return ec.fieldContext_Action_assigneeIDs(ctx, field)
-			case "assignees":
-				return ec.fieldContext_Action_assignees(ctx, field)
+			case "assigneeID":
+				return ec.fieldContext_Action_assigneeID(ctx, field)
+			case "assignee":
+				return ec.fieldContext_Action_assignee(ctx, field)
 			case "slackMessageTS":
 				return ec.fieldContext_Action_slackMessageTS(ctx, field)
 			case "status":
@@ -7845,6 +7932,8 @@ func (ec *executionContext) fieldContext_Query_action(ctx context.Context, field
 				return ec.fieldContext_Action_createdAt(ctx, field)
 			case "updatedAt":
 				return ec.fieldContext_Action_updatedAt(ctx, field)
+			case "messages":
+				return ec.fieldContext_Action_messages(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Action", field.Name)
 		},
@@ -7898,10 +7987,10 @@ func (ec *executionContext) fieldContext_Query_actionsByCase(ctx context.Context
 				return ec.fieldContext_Action_title(ctx, field)
 			case "description":
 				return ec.fieldContext_Action_description(ctx, field)
-			case "assigneeIDs":
-				return ec.fieldContext_Action_assigneeIDs(ctx, field)
-			case "assignees":
-				return ec.fieldContext_Action_assignees(ctx, field)
+			case "assigneeID":
+				return ec.fieldContext_Action_assigneeID(ctx, field)
+			case "assignee":
+				return ec.fieldContext_Action_assignee(ctx, field)
 			case "slackMessageTS":
 				return ec.fieldContext_Action_slackMessageTS(ctx, field)
 			case "status":
@@ -7912,6 +8001,8 @@ func (ec *executionContext) fieldContext_Query_actionsByCase(ctx context.Context
 				return ec.fieldContext_Action_createdAt(ctx, field)
 			case "updatedAt":
 				return ec.fieldContext_Action_updatedAt(ctx, field)
+			case "messages":
+				return ec.fieldContext_Action_messages(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Action", field.Name)
 		},
@@ -7965,10 +8056,10 @@ func (ec *executionContext) fieldContext_Query_openCaseActions(ctx context.Conte
 				return ec.fieldContext_Action_title(ctx, field)
 			case "description":
 				return ec.fieldContext_Action_description(ctx, field)
-			case "assigneeIDs":
-				return ec.fieldContext_Action_assigneeIDs(ctx, field)
-			case "assignees":
-				return ec.fieldContext_Action_assignees(ctx, field)
+			case "assigneeID":
+				return ec.fieldContext_Action_assigneeID(ctx, field)
+			case "assignee":
+				return ec.fieldContext_Action_assignee(ctx, field)
 			case "slackMessageTS":
 				return ec.fieldContext_Action_slackMessageTS(ctx, field)
 			case "status":
@@ -7979,6 +8070,8 @@ func (ec *executionContext) fieldContext_Query_openCaseActions(ctx context.Conte
 				return ec.fieldContext_Action_createdAt(ctx, field)
 			case "updatedAt":
 				return ec.fieldContext_Action_updatedAt(ctx, field)
+			case "messages":
+				return ec.fieldContext_Action_messages(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Action", field.Name)
 		},
@@ -11169,7 +11262,7 @@ func (ec *executionContext) unmarshalInputCreateActionInput(ctx context.Context,
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"caseID", "title", "description", "assigneeIDs", "slackMessageTS", "status", "dueDate"}
+	fieldsInOrder := [...]string{"caseID", "title", "description", "assigneeID", "slackMessageTS", "status", "dueDate"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -11197,13 +11290,13 @@ func (ec *executionContext) unmarshalInputCreateActionInput(ctx context.Context,
 				return it, err
 			}
 			it.Description = data
-		case "assigneeIDs":
-			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("assigneeIDs"))
-			data, err := ec.unmarshalOString2ᚕstringᚄ(ctx, v)
+		case "assigneeID":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("assigneeID"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
 			if err != nil {
 				return it, err
 			}
-			it.AssigneeIDs = data
+			it.AssigneeID = data
 		case "slackMessageTS":
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("slackMessageTS"))
 			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
@@ -11533,7 +11626,7 @@ func (ec *executionContext) unmarshalInputUpdateActionInput(ctx context.Context,
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"id", "caseID", "title", "description", "assigneeIDs", "slackMessageTS", "status", "dueDate", "clearDueDate"}
+	fieldsInOrder := [...]string{"id", "caseID", "title", "description", "assigneeID", "slackMessageTS", "status", "dueDate", "clearDueDate", "clearAssignee"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -11568,13 +11661,13 @@ func (ec *executionContext) unmarshalInputUpdateActionInput(ctx context.Context,
 				return it, err
 			}
 			it.Description = data
-		case "assigneeIDs":
-			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("assigneeIDs"))
-			data, err := ec.unmarshalOString2ᚕstringᚄ(ctx, v)
+		case "assigneeID":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("assigneeID"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
 			if err != nil {
 				return it, err
 			}
-			it.AssigneeIDs = data
+			it.AssigneeID = data
 		case "slackMessageTS":
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("slackMessageTS"))
 			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
@@ -11603,6 +11696,13 @@ func (ec *executionContext) unmarshalInputUpdateActionInput(ctx context.Context,
 				return it, err
 			}
 			it.ClearDueDate = data
+		case "clearAssignee":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("clearAssignee"))
+			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ClearAssignee = data
 		}
 	}
 
@@ -11932,24 +12032,18 @@ func (ec *executionContext) _Action(ctx context.Context, sel ast.SelectionSet, o
 			}
 		case "description":
 			out.Values[i] = ec._Action_description(ctx, field, obj)
-		case "assigneeIDs":
-			out.Values[i] = ec._Action_assigneeIDs(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				atomic.AddUint32(&out.Invalids, 1)
-			}
-		case "assignees":
+		case "assigneeID":
+			out.Values[i] = ec._Action_assigneeID(ctx, field, obj)
+		case "assignee":
 			field := field
 
-			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+			innerFunc := func(ctx context.Context, _ *graphql.FieldSet) (res graphql.Marshaler) {
 				defer func() {
 					if r := recover(); r != nil {
 						ec.Error(ctx, ec.Recover(ctx, r))
 					}
 				}()
-				res = ec._Action_assignees(ctx, field, obj)
-				if res == graphql.Null {
-					atomic.AddUint32(&fs.Invalids, 1)
-				}
+				res = ec._Action_assignee(ctx, field, obj)
 				return res
 			}
 
@@ -11992,6 +12086,42 @@ func (ec *executionContext) _Action(ctx context.Context, sel ast.SelectionSet, o
 			if out.Values[i] == graphql.Null {
 				atomic.AddUint32(&out.Invalids, 1)
 			}
+		case "messages":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Action_messages(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}

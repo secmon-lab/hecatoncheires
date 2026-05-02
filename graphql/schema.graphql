@@ -139,13 +139,14 @@ type Action {
   case: Case
   title: String!
   description: String
-  assigneeIDs: [String!]!
-  assignees: [SlackUser!]!
+  assigneeID: String
+  assignee: SlackUser
   slackMessageTS: String
   status: ActionStatus!
   dueDate: Time
   createdAt: Time!
   updatedAt: Time!
+  messages(limit: Int, cursor: String): SlackMessageConnection!
 }
 
 # Inputs
@@ -172,7 +173,7 @@ input CreateActionInput {
   caseID: Int!
   title: String!
   description: String
-  assigneeIDs: [String!]
+  assigneeID: String
   slackMessageTS: String
   status: ActionStatus
   dueDate: Time
@@ -183,11 +184,12 @@ input UpdateActionInput {
   caseID: Int
   title: String
   description: String
-  assigneeIDs: [String!]
+  assigneeID: String
   slackMessageTS: String
   status: ActionStatus
   dueDate: Time
   clearDueDate: Boolean
+  clearAssignee: Boolean
 }
 
 # Slack User

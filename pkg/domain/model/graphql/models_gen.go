@@ -42,7 +42,7 @@ type CreateActionInput struct {
 	CaseID         int                 `json:"caseID"`
 	Title          string              `json:"title"`
 	Description    *string             `json:"description,omitempty"`
-	AssigneeIDs    []string            `json:"assigneeIDs,omitempty"`
+	AssigneeID     *string             `json:"assigneeID,omitempty"`
 	SlackMessageTs *string             `json:"slackMessageTS,omitempty"`
 	Status         *types.ActionStatus `json:"status,omitempty"`
 	DueDate        *time.Time          `json:"dueDate,omitempty"`
@@ -258,11 +258,12 @@ type UpdateActionInput struct {
 	CaseID         *int                `json:"caseID,omitempty"`
 	Title          *string             `json:"title,omitempty"`
 	Description    *string             `json:"description,omitempty"`
-	AssigneeIDs    []string            `json:"assigneeIDs,omitempty"`
+	AssigneeID     *string             `json:"assigneeID,omitempty"`
 	SlackMessageTs *string             `json:"slackMessageTS,omitempty"`
 	Status         *types.ActionStatus `json:"status,omitempty"`
 	DueDate        *time.Time          `json:"dueDate,omitempty"`
 	ClearDueDate   *bool               `json:"clearDueDate,omitempty"`
+	ClearAssignee  *bool               `json:"clearAssignee,omitempty"`
 }
 
 type UpdateCaseInput struct {

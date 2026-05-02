@@ -37,8 +37,8 @@ type Action struct {
 	Case           *Case              `json:"case,omitempty"`
 	Title          string             `json:"title"`
 	Description    string             `json:"description"`
-	AssigneeIDs    []string           `json:"assigneeIDs"`
-	Assignees      []*SlackUser       `json:"assignees"`
+	AssigneeID     *string            `json:"assigneeID,omitempty"`
+	Assignee       *SlackUser         `json:"assignee,omitempty"`
 	SlackMessageTs *string            `json:"slackMessageTS,omitempty"`
 	Status         types.ActionStatus `json:"status"`
 	DueDate        *time.Time         `json:"dueDate,omitempty"`

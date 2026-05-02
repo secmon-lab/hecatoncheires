@@ -31,13 +31,29 @@ func (r *actionResolver) Case(ctx context.Context, obj *graphql1.Action) (*graph
 	return toGraphQLCase(cases[0], obj.WorkspaceID), nil
 }
 
-// Assignees is the resolver for the assignees field.
-func (r *actionResolver) Assignees(ctx context.Context, obj *graphql1.Action) ([]*graphql1.SlackUser, error) {
-	if len(obj.AssigneeIDs) == 0 {
-		return []*graphql1.SlackUser{}, nil
+// Assignee is the resolver for the assignee field.
+func (r *actionResolver) Assignee(ctx context.Context, obj *graphql1.Action) (*graphql1.SlackUser, error) {
+	if obj.AssigneeID == nil || *obj.AssigneeID == "" {
+		return nil, nil
 	}
 	loaders := GetDataLoaders(ctx)
-	return loaders.SlackUserLoader.Load(ctx, obj.AssigneeIDs)
+	users, err := loaders.SlackUserLoader.Load(ctx, []string{*obj.AssigneeID})
+	if err != nil {
+		return nil, err
+	}
+	if len(users) == 0 {
+		return nil, nil
+	}
+	return users[0], nil
+}
+
+// Messages is the resolver for the messages field.
+// Wired up in Step 7 once the ActionMessage repository is in place.
+func (r *actionResolver) Messages(ctx context.Context, obj *graphql1.Action, limit *int, cursor *string) (*graphql1.SlackMessageConnection, error) {
+	return &graphql1.SlackMessageConnection{
+		Items:      []*graphql1.SlackMessage{},
+		NextCursor: "",
+	}, nil
 }
 
 // ChannelUserCount is the resolver for the channelUserCount field.
@@ -390,12 +406,9 @@ func (r *mutationResolver) SyncCaseChannelUsers(ctx context.Context, workspaceID
 
 // CreateAction is the resolver for the createAction field.
 func (r *mutationResolver) CreateAction(ctx context.Context, workspaceID string, input graphql1.CreateActionInput) (*graphql1.Action, error) {
-	// TEMP (Step 0 of action-slack-interactive): take first assignee from list
-	// to satisfy the new single-AssigneeID model. Step 1 changes the schema input
-	// to a single assigneeID field.
 	assigneeID := ""
-	if len(input.AssigneeIDs) > 0 {
-		assigneeID = input.AssigneeIDs[0]
+	if input.AssigneeID != nil {
+		assigneeID = *input.AssigneeID
 	}
 
 	slackMessageTS := ""
@@ -444,20 +457,12 @@ func (r *mutationResolver) UpdateAction(ctx context.Context, workspaceID string,
 		clearDueDate = *input.ClearDueDate
 	}
 
-	// TEMP (Step 0 of action-slack-interactive): collapse list input to a single
-	// AssigneeID. Step 1 changes the schema input to assigneeID + clearAssignee.
-	var assigneeID *string
 	clearAssignee := false
-	if input.AssigneeIDs != nil {
-		if len(input.AssigneeIDs) == 0 {
-			clearAssignee = true
-		} else {
-			s := input.AssigneeIDs[0]
-			assigneeID = &s
-		}
+	if input.ClearAssignee != nil {
+		clearAssignee = *input.ClearAssignee
 	}
 
-	updated, err := r.UseCases.Action.UpdateAction(ctx, workspaceID, int64(input.ID), caseID, input.Title, input.Description, assigneeID, slackMessageTS, status, input.DueDate, clearDueDate, clearAssignee)
+	updated, err := r.UseCases.Action.UpdateAction(ctx, workspaceID, int64(input.ID), caseID, input.Title, input.Description, input.AssigneeID, slackMessageTS, status, input.DueDate, clearDueDate, clearAssignee)
 	if err != nil {
 		return nil, err
 	}

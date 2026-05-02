@@ -74,7 +74,9 @@ models:
     fields:
       case:
         resolver: true
-      assignees:
+      assignee:
+        resolver: true
+      messages:
         resolver: true
   Knowledge:
     model:

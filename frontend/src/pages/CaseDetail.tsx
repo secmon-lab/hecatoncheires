@@ -432,15 +432,13 @@ export default function CaseDetail() {
               const assigneeMap = new Map<string, { value: string; label: string }>()
               let anyUnassigned = false
               c.actions.forEach((a: any) => {
-                if (!a.assignees || a.assignees.length === 0) {
+                if (!a.assignee) {
                   anyUnassigned = true
                   return
                 }
-                a.assignees.forEach((u: any) => {
-                  if (!assigneeMap.has(u.id)) {
-                    assigneeMap.set(u.id, { value: u.id, label: u.realName || u.name })
-                  }
-                })
+                if (!assigneeMap.has(a.assignee.id)) {
+                  assigneeMap.set(a.assignee.id, { value: a.assignee.id, label: a.assignee.realName || a.assignee.name })
+                }
               })
               const assigneeOpts: Array<{ value: string; label: string }> = []
               if (anyUnassigned) assigneeOpts.push({ value: 'NONE', label: t('filterUnassigned') })
@@ -450,10 +448,10 @@ export default function CaseDetail() {
                 if (actionStatusFilters.length > 0 && !actionStatusFilters.includes(a.status)) return false
                 if (actionAssigneeFilters.length > 0) {
                   const wantUnassigned = actionAssigneeFilters.includes('NONE')
-                  const isUnassigned = !a.assignees || a.assignees.length === 0
+                  const isUnassigned = !a.assignee
                   const userIds = actionAssigneeFilters.filter((id) => id !== 'NONE')
                   const matchesUser = userIds.length > 0
-                    && (a.assignees || []).some((u: any) => userIds.includes(u.id))
+                    && a.assignee != null && userIds.includes(a.assignee.id)
                   if (!((wantUnassigned && isUnassigned) || matchesUser)) return false
                 }
                 return true
@@ -515,12 +513,12 @@ export default function CaseDetail() {
                                 {t('labelCompleted')}<span className="mono">{formatHHMM(a.updatedAt)}</span>
                               </span>
                             )}
-                            {a.assignees?.[0] && (
+                            {a.assignee && (
                               <Avatar
                                 size="sm"
-                                name={a.assignees[0].name}
-                                realName={a.assignees[0].realName}
-                                imageUrl={a.assignees[0].imageUrl}
+                                name={a.assignee.name}
+                                realName={a.assignee.realName}
+                                imageUrl={a.assignee.imageUrl}
                               />
                             )}
                           </Link>

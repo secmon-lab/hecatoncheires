@@ -172,10 +172,16 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
     flashSaved()
   }
 
-  const handleAssigneesChange = async (next: string[]) => {
+  const handleAssigneeChange = async (next: string | null) => {
     if (!action) return
+    const input: Record<string, unknown> = { id: action.id }
+    if (next) {
+      input.assigneeID = next
+    } else {
+      input.clearAssignee = true
+    }
     await updateAction({
-      variables: { workspaceId: currentWorkspace!.id, input: { id: action.id, assigneeIDs: next } },
+      variables: { workspaceId: currentWorkspace!.id, input },
     })
     flashSaved()
   }
@@ -247,15 +253,14 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
               </select>
             </div>
             <div className="row" style={{ gap: 8, alignItems: 'center', minWidth: 280, flex: 1 }}>
-              <span className="soft">{t('labelAssignees')}</span>
+              <span className="soft">{t('labelAssignee')}</span>
               <InlineUserSelect
-                isMulti
                 users={users}
-                value={action.assigneeIDs || []}
-                onSave={handleAssigneesChange}
-                ariaLabel={t('labelAssignees')}
-                placeholder={t('placeholderAddAssignees')}
-                testId="action-assignees"
+                value={action.assigneeID || null}
+                onSave={handleAssigneeChange}
+                ariaLabel={t('labelAssignee')}
+                placeholder={t('placeholderSelectAssignee')}
+                testId="action-assignee"
               />
             </div>
           </div>

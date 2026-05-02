@@ -51,12 +51,10 @@ func toGraphQLAction(a *model.Action, workspaceID string) *graphql1.Action {
 		slackMessageTS = a.SlackMessageTS
 	}
 
-	// Ensure non-null list fields are never nil (schema: [String!]!)
-	// TEMP (Step 0 of action-slack-interactive): wrap single AssigneeID into list
-	// for the existing schema; Step 1 changes the schema to a single field.
-	assigneeIDs := []string{}
+	var assigneeID *string
 	if a.AssigneeID != "" {
-		assigneeIDs = []string{a.AssigneeID}
+		s := a.AssigneeID
+		assigneeID = &s
 	}
 
 	return &graphql1.Action{
@@ -65,7 +63,7 @@ func toGraphQLAction(a *model.Action, workspaceID string) *graphql1.Action {
 		CaseID:         int(a.CaseID),
 		Title:          a.Title,
 		Description:    a.Description,
-		AssigneeIDs:    assigneeIDs,
+		AssigneeID:     assigneeID,
 		SlackMessageTs: &slackMessageTS,
 		Status:         a.Status,
 		DueDate:        a.DueDate,
