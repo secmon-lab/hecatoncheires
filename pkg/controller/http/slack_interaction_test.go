@@ -251,7 +251,7 @@ func TestSlackInteractionHandler_ViewSubmission(t *testing.T) {
 			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
 		})
 		actionUC := usecase.NewActionUseCase(repo, nil, "")
-		slackUC := usecase.NewSlackUseCases(repo, registry, nil, &mockSlackServiceForCommand{})
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, &mockSlackServiceForCommand{})
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 
 		handler := httpctrl.NewSlackInteractionHandler(actionUC, nil)
@@ -305,7 +305,7 @@ func TestSlackInteractionHandler_ViewSubmission(t *testing.T) {
 			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
 		})
 		actionUC := usecase.NewActionUseCase(repo, nil, "")
-		slackUC := usecase.NewSlackUseCases(repo, registry, nil, &mockSlackServiceForCommand{})
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, &mockSlackServiceForCommand{})
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 
 		handler := httpctrl.NewSlackInteractionHandler(actionUC, nil)
@@ -365,7 +365,7 @@ func TestSlackInteractionHandler_ViewSubmission(t *testing.T) {
 			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
 		})
 		actionUC := usecase.NewActionUseCase(repo, nil, "")
-		slackUC := usecase.NewSlackUseCases(repo, registry, nil, &mockSlackServiceForCommand{})
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, &mockSlackServiceForCommand{})
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 
 		// Create an existing case

@@ -328,17 +328,16 @@ func cmdServe() *cli.Command {
 				logging.Default().Info("Slack Bot Token not configured, Slack Source features will be limited")
 			}
 
-			// Initialize LLM client if configured (optional for AI agent)
+			// Initialize LLM client (mandatory)
 			llmClient, err := llmCfg.NewClient(ctx)
 			if err != nil {
 				return goerr.Wrap(err, "failed to initialize LLM client")
 			}
-			if llmClient != nil {
-				ucOpts = append(ucOpts, usecase.WithLLMClient(llmClient))
-				logging.Default().Info("LLM client enabled for AI agent", logAttrsToArgs(llmCfg.LogAttrs())...)
-			} else {
-				logging.Default().Info("LLM provider not configured, AI agent features will be disabled")
+			if llmClient == nil {
+				return goerr.New("LLM provider is required but not configured")
 			}
+			ucOpts = append(ucOpts, usecase.WithLLMClient(llmClient))
+			logging.Default().Info("LLM client enabled", logAttrsToArgs(llmCfg.LogAttrs())...)
 
 			// Initialize GitHub service if configured
 			githubSvc, err := githubCfg.Configure()
@@ -450,6 +449,7 @@ func cmdServe() *cli.Command {
 				// Add slash command handler and configure interaction handler for view submissions
 				slackCommandHandler := httpctrl.NewSlackCommandHandler(uc.Slack)
 				slackInteractionHandler.WithSlackCommand(uc.Slack, uc.Case)
+				slackInteractionHandler.WithMentionDraft(uc.MentionDraft)
 				httpOpts = append(httpOpts, httpctrl.WithSlackInteraction(slackInteractionHandler))
 				httpOpts = append(httpOpts, httpctrl.WithSlackCommand(slackCommandHandler))
 				logging.Default().Info("Slack interaction handler enabled")

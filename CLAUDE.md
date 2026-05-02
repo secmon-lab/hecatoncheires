@@ -35,6 +35,34 @@ Hecatoncheires is an AI-native project/case management platform built with Go an
 - Error discrimination must be done by error types, not by parsing error messages
 - **Non-fatal errors (errors that don't require rollback or propagation) MUST be handled via `errutil.Handle(ctx, err, "description")`** — never use raw `logger.Error` or describe error handling as "log only". `errutil.Handle` is the project's standard mechanism for non-fatal error handling
 
+### Logging
+- **Never call `slog.Info()`, `slog.Error()`, `slog.Debug()`, `slog.Warn()` or other global slog logger functions directly.** Always obtain a logger via `logging.From(ctx)` from `pkg/utils/logging/`
+- Attribute constructors (`slog.String()`, `slog.Any()`, `slog.Int64()`, etc.) are fine — use them as-is
+
+### Resource Cleanup
+- **ALWAYS use `safe.Close(ctx, closer)` from `pkg/utils/safe`** to close `io.Closer` resources
+- **NEVER use `_ = x.Close()` or bare `x.Close()`** — use `safe.Close` instead for nil-safe, error-logged cleanup
+
+### Background Goroutines
+- Background goroutines launch via `pkg/utils/async.Dispatch` / `RunParallel`, never raw `go func(){...}()`. Those helpers wrap panic recovery, logger context propagation, and error reporting
+- Tests that exercise async tails must call `async.Wait()` before asserting on side effects — do not rely on `time.Sleep`
+
+### Implementation Completeness
+- **NEVER leave incomplete implementations, TODOs, or placeholder code**
+- **NEVER skip implementation because it's complex or lengthy**
+- **ALWAYS complete the full implementation in one go**
+- If a task seems too complex, break it down into smaller steps, but complete ALL steps
+- Long code is acceptable — incomplete code is NOT
+
+### Multi-Instance Safety (Stateless Design)
+- **The application is designed to run as multiple concurrent instances** (horizontal scaling). Any design that assumes single-instance will break in production
+- **NEVER hold cross-request state in process memory.** State that must survive across separate requests, goroutines that originated elsewhere, or instance boundaries MUST be persisted to a shared backend (Firestore / GCS / Pub/Sub)
+- **Allowed in-memory state**: only within a single continuous processing flow (e.g. variables within one HTTP request, one goroutine's local variables, one WebSocket connection's live buffer for the duration of that connection). As soon as the flow ends, the state must be gone or persisted
+- **Forbidden patterns**:
+  - In-memory registry/map keyed by ID that other requests look up (e.g. `map[SessionID]*Handler` at package level)
+  - Singleton caches of business data without a shared backend
+  - Cross-goroutine coordination via channels at package scope
+
 ### Testing Best Practices
 - ALWAYS write tests for ALL code you create. This is NON-NEGOTIABLE.
 - Writing code without tests is UNACCEPTABLE.
@@ -222,6 +250,7 @@ When making changes, before finishing the task, always:
 - Run `golangci-lint run ./...` to check lint error
 - Run `gosec -exclude-generated -quiet ./...` to check security issue
 - Run `zenv go test ./...` to ensure ALL tests pass
+- **NEVER run `go build` to verify code.** Use `go vet ./...` instead to check for compile errors
 - If frontend files were changed: Run `pnpm test` in `frontend/` to execute Vitest unit tests
 - Verify test coverage for your changes - EVERY new function/method MUST be tested
 
@@ -233,6 +262,9 @@ All comment and character literal in source code must be in English
 
 - PR titles and descriptions (body) must be written in English
 - Commit messages must be written in English
+- **Commit messages must be a single line.** No body paragraphs. State the change in one sentence. Explanation goes in the PR description, not the commit
+- Follow Semantic Commit format: `<type>: <subject>` (types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `ci`, `style`, `perf`)
+- Keep PR titles short (under 70 characters); use the body for details
 
 ### Testing
 

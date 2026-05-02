@@ -30,8 +30,9 @@ var workspaceIDPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 // WorkspaceBaseConfig represents the [workspace] section in a TOML config
 type WorkspaceBaseConfig struct {
-	ID   string `toml:"id"`
-	Name string `toml:"name"`
+	ID          string `toml:"id"`
+	Name        string `toml:"name"`
+	Description string `toml:"description"` // Human-readable description used to disambiguate workspaces (especially for AI-side workspace estimation)
 }
 
 // SlackInviteSection represents the [slack.invite] section in a TOML config
@@ -74,6 +75,7 @@ type AppConfig struct {
 type WorkspaceConfig struct {
 	ID                   string
 	Name                 string
+	Description          string
 	SlackChannelPrefix   string
 	SlackTeamID          string
 	SlackInviteUsers     []string
@@ -338,6 +340,7 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 	return &WorkspaceConfig{
 		ID:                   wsID,
 		Name:                 wsName,
+		Description:          appCfg.Workspace.Description,
 		SlackChannelPrefix:   slackPrefix,
 		SlackTeamID:          appCfg.Slack.TeamID,
 		SlackInviteUsers:     appCfg.Slack.Invite.Users,
@@ -376,8 +379,9 @@ func (a *AppConfig) Configure(c *cli.Command) ([]*WorkspaceConfig, *model.Worksp
 	for _, wc := range workspaceConfigs {
 		registry.Register(&model.WorkspaceEntry{
 			Workspace: model.Workspace{
-				ID:   wc.ID,
-				Name: wc.Name,
+				ID:          wc.ID,
+				Name:        wc.Name,
+				Description: wc.Description,
 			},
 			FieldSchema:          wc.FieldSchema,
 			SlackChannelPrefix:   wc.SlackChannelPrefix,

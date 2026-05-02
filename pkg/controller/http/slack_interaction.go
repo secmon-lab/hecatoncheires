@@ -15,10 +15,11 @@ import (
 
 // SlackInteractionHandler handles Slack interactive component payloads (button clicks, modal submissions, etc.)
 type SlackInteractionHandler struct {
-	actionUC *usecase.ActionUseCase
-	agentUC  *usecase.AgentUseCase
-	slackUC  *usecase.SlackUseCases
-	caseUC   *usecase.CaseUseCase
+	actionUC       *usecase.ActionUseCase
+	agentUC        *usecase.AgentUseCase
+	slackUC        *usecase.SlackUseCases
+	caseUC         *usecase.CaseUseCase
+	mentionDraftUC *usecase.MentionDraftUseCase
 }
 
 // NewSlackInteractionHandler creates a new Slack interaction handler
@@ -33,6 +34,12 @@ func NewSlackInteractionHandler(actionUC *usecase.ActionUseCase, agentUC *usecas
 func (h *SlackInteractionHandler) WithSlackCommand(slackUC *usecase.SlackUseCases, caseUC *usecase.CaseUseCase) {
 	h.slackUC = slackUC
 	h.caseUC = caseUC
+}
+
+// WithMentionDraft wires the MentionDraftUseCase so this handler dispatches
+// the draft preview's button/select interactions and Edit modal submission.
+func (h *SlackInteractionHandler) WithMentionDraft(uc *usecase.MentionDraftUseCase) {
+	h.mentionDraftUC = uc
 }
 
 // ServeHTTP handles Slack interaction webhook requests
@@ -117,6 +124,29 @@ func (h *SlackInteractionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 				}
 			}
 
+		case usecase.ActionIDDraftSelectWS,
+			usecase.ActionIDDraftSubmit,
+			usecase.ActionIDDraftEdit,
+			usecase.ActionIDDraftCancel:
+			if h.mentionDraftUC == nil {
+				continue
+			}
+			a := action
+			cb := callback
+			async.Dispatch(ctx, func(ctx context.Context) error {
+				switch a.ActionID {
+				case usecase.ActionIDDraftSelectWS:
+					return h.mentionDraftUC.HandleSelectWorkspace(ctx, &cb, a)
+				case usecase.ActionIDDraftSubmit:
+					return h.mentionDraftUC.HandleSubmit(ctx, h.caseUC, &cb, a)
+				case usecase.ActionIDDraftEdit:
+					return h.mentionDraftUC.HandleEdit(ctx, &cb, a)
+				case usecase.ActionIDDraftCancel:
+					return h.mentionDraftUC.HandleCancel(ctx, &cb, a)
+				}
+				return nil
+			})
+
 		default:
 			// Unknown action ID, skip
 			continue
@@ -168,6 +198,20 @@ func (h *SlackInteractionHandler) handleViewSubmission(w http.ResponseWriter, r 
 			}
 			return nil
 		})
+
+	case usecase.SlackCallbackIDDraftEdit:
+		// Draft Edit modal submission → close modal and create case asynchronously.
+		w.WriteHeader(http.StatusOK)
+		if h.mentionDraftUC == nil {
+			return
+		}
+		async.Dispatch(ctx, func(ctx context.Context) error {
+			if err := h.mentionDraftUC.HandleEditSubmit(ctx, h.caseUC, callback); err != nil {
+				return goerr.Wrap(err, "failed to handle draft edit submit")
+			}
+			return nil
+		})
+		return
 
 	case usecase.SlackCallbackIDEditCase:
 		// Return 200 immediately to close the modal, then process asynchronously

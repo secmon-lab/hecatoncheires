@@ -541,3 +541,31 @@ func (c *client) PostEphemeral(ctx context.Context, channelID string, userID str
 	}
 	return nil
 }
+
+// PostEphemeralBlocks posts an ephemeral Block Kit message and returns the message timestamp.
+func (c *client) PostEphemeralBlocks(ctx context.Context, channelID string, userID string, blocks []slack.Block, text string) (string, error) {
+	ts, err := c.api.PostEphemeralContext(ctx, channelID, userID,
+		slack.MsgOptionBlocks(blocks...),
+		slack.MsgOptionText(text, false),
+	)
+	if err != nil {
+		return "", goerr.Wrap(err, "failed to post ephemeral block message",
+			goerr.V("channel_id", channelID),
+			goerr.V("user_id", userID))
+	}
+	return ts, nil
+}
+
+// GetPermalink retrieves the permalink for a specific message.
+func (c *client) GetPermalink(ctx context.Context, channelID string, messageTS string) (string, error) {
+	link, err := c.api.GetPermalinkContext(ctx, &slack.PermalinkParameters{
+		Channel: channelID,
+		Ts:      messageTS,
+	})
+	if err != nil {
+		return "", goerr.Wrap(err, "failed to get permalink",
+			goerr.V("channel_id", channelID),
+			goerr.V("message_ts", messageTS))
+	}
+	return link, nil
+}
