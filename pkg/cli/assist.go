@@ -18,7 +18,7 @@ func cmdAssist() *cli.Command {
 	var messageCount int
 	var appCfg config.AppConfig
 	var repoCfg config.Repository
-	var geminiCfg config.Gemini
+	var llmCfg config.LLM
 
 	flags := []cli.Flag{
 		&cli.StringFlag{
@@ -52,7 +52,7 @@ func cmdAssist() *cli.Command {
 	// Add shared config flags
 	flags = append(flags, appCfg.Flags()...)
 	flags = append(flags, repoCfg.Flags()...)
-	flags = append(flags, geminiCfg.Flags()...)
+	flags = append(flags, llmCfg.Flags()...)
 
 	return &cli.Command{
 		Name:    "assist",
@@ -77,11 +77,15 @@ func cmdAssist() *cli.Command {
 				}
 			}()
 
-			// Initialize Gemini LLM client (required)
-			llmClient, err := geminiCfg.Configure(ctx)
-			if err != nil {
-				return goerr.Wrap(err, "failed to initialize Gemini client")
+			// Initialize LLM client (required)
+			if !llmCfg.IsEnabled() {
+				return goerr.New("--llm-provider is required for assist")
 			}
+			llmClient, err := llmCfg.NewClient(ctx)
+			if err != nil {
+				return goerr.Wrap(err, "failed to initialize LLM client")
+			}
+			logging.Default().Info("LLM client enabled", logAttrsToArgs(llmCfg.LogAttrs())...)
 
 			// Initialize Slack service (required)
 			if slackBotToken == "" {
