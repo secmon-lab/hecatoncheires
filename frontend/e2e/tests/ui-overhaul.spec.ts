@@ -34,6 +34,7 @@ test.describe('UI overhaul regressions', () => {
       customFields: { category: 'task' },
     });
 
+    await caseListPage.fillSearchFilter('Header Layout Case');
     await caseListPage.clickCaseByTitle('Header Layout Case');
     await caseDetailPage.waitForPageLoad();
 
@@ -63,6 +64,7 @@ test.describe('UI overhaul regressions', () => {
       customFields: { category: 'task' },
     });
 
+    await caseListPage.fillSearchFilter('Related Action Case');
     await caseListPage.clickCaseByTitle('Related Action Case');
     await caseDetailPage.waitForPageLoad();
 
