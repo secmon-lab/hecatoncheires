@@ -579,18 +579,17 @@ func formatFieldValueForDisplay(fd config.FieldDefinition, fv model.FieldValue) 
 	return fmt.Sprintf("`%v`", fv.Value)
 }
 
-// buildFieldPairSections renders schema fields as a single SectionBlock
-// whose fields[] entries are plain_text. Slack's section.fields[] grid
-// reliably renders side-by-side in 2 columns when the entries are
-// plain_text — multi-line mrkdwn entries can collapse to one column.
-// Markdown emphasis isn't available here, so we use ASCII conventions:
-// "Label:" newline "value", and required-missing fields are tagged with
-// "⚠ required — not set" instead of italic markers.
+// buildFieldPairSections renders schema fields as a single mrkdwn section,
+// one line per field formatted `*Label:* value`. We tried Slack's
+// section.fields[] (both mrkdwn and plain_text) for a 2-column grid, but
+// the in-thread width consistently collapses it to a single column —
+// the flat definition-list reads more cleanly there than half-broken
+// columns.
 func buildFieldPairSections(fields []config.FieldDefinition, values map[string]model.FieldValue) []goslack.Block {
 	if len(fields) == 0 {
 		return nil
 	}
-	cells := make([]*goslack.TextBlockObject, 0, len(fields))
+	lines := make([]string, 0, len(fields))
 	for _, fd := range fields {
 		label := fallbackText(fd.Name, fd.ID)
 		fv, present := values[fd.ID]
@@ -598,29 +597,20 @@ func buildFieldPairSections(fields []config.FieldDefinition, values map[string]m
 		var valueText string
 		switch {
 		case hasValue:
-			valueText = stripMrkdwnFormatting(formatFieldValueForDisplay(fd, fv))
+			valueText = formatFieldValueForDisplay(fd, fv)
 		case fd.Required:
-			valueText = "⚠ required — not set"
+			valueText = "⚠️ _required — not set_"
 		default:
-			valueText = "(not set)"
+			valueText = "_not set_"
 		}
-		cells = append(cells, goslack.NewTextBlockObject(
-			goslack.PlainTextType,
-			fmt.Sprintf("%s:\n%s", label, valueText),
-			true, false,
-		))
+		lines = append(lines, fmt.Sprintf("*%s:* %s", label, valueText))
 	}
-	return []goslack.Block{goslack.NewSectionBlock(nil, cells, nil)}
-}
-
-// stripMrkdwnFormatting removes mrkdwn-only markers (backticks, italic
-// underscores) from a value string so it renders cleanly inside a
-// plain_text TextBlockObject. Slack user/channel mentions ("<@U123>",
-// "<#C123>") are left intact — plain_text fields render those as the
-// underlying ID, which is acceptable for the at-a-glance preview.
-func stripMrkdwnFormatting(s string) string {
-	r := strings.NewReplacer("`", "", "_", "")
-	return r.Replace(s)
+	return []goslack.Block{
+		goslack.NewSectionBlock(
+			goslack.NewTextBlockObject(goslack.MarkdownType, strings.Join(lines, "\n"), false, false),
+			nil, nil,
+		),
+	}
 }
 
 // buildTitleAndDescriptionMarkdown renders the title as a level-1 markdown
@@ -635,7 +625,7 @@ func buildTitleAndDescriptionMarkdown(blockID, title, description string) goslac
 	desc := strings.TrimSpace(description)
 
 	var sb strings.Builder
-	sb.WriteString("# ")
+	sb.WriteString("# 🎫 ")
 	sb.WriteString(escapeMarkdownInline(title))
 	sb.WriteString("\n")
 	if desc != "" {

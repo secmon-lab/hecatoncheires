@@ -221,7 +221,8 @@ func (uc *MentionDraftUseCase) HandleEdit(ctx context.Context, callback *goslack
 
 // HandleCancel marks the draft preview as canceled in place: the existing
 // blocks are kept (so the conversation has a record of what was drafted),
-// the action buttons are stripped, and a "Canceled" tail is appended. The
+// every ActionBlock is stripped (workspace selector + buttons live in the
+// same ActionBlock now, both go), and a "Canceled" tail is appended. The
 // underlying draft is deleted from the repository.
 func (uc *MentionDraftUseCase) HandleCancel(ctx context.Context, callback *goslack.InteractionCallback, _ *goslack.BlockAction) error {
 	if callback == nil {
@@ -229,12 +230,11 @@ func (uc *MentionDraftUseCase) HandleCancel(ctx context.Context, callback *gosla
 	}
 	draft, err := uc.locateDraftFromCallback(ctx, callback)
 	if err != nil {
-		// Draft already gone — best-effort: just append a canceled tail.
-		_ = uc.respondAppendCanceledTail(ctx, callback)
+		_ = uc.appendCanceledTail(ctx, callback, "", "")
 		return nil
 	}
 
-	if err := uc.respondAppendCanceledTail(ctx, callback); err != nil {
+	if err := uc.appendCanceledTail(ctx, callback, draft.EphemeralChannelID, draft.EphemeralMessageTS); err != nil {
 		errutil.Handle(ctx, err, "failed to render canceled tail")
 	}
 	if err := uc.repo.CaseDraft().Delete(ctx, draft.ID); err != nil {
@@ -243,14 +243,16 @@ func (uc *MentionDraftUseCase) HandleCancel(ctx context.Context, callback *gosla
 	return nil
 }
 
-// respondAppendCanceledTail rebuilds the original message minus the action
-// buttons and appends a "Canceled" context block at the end, then sends the
-// result via response_url replace_original.
-func (uc *MentionDraftUseCase) respondAppendCanceledTail(ctx context.Context, callback *goslack.InteractionCallback) error {
+// appendCanceledTail rebuilds the original message minus all ActionBlocks
+// (which carry both the workspace selector and the action buttons) and
+// appends a "Canceled" context block at the end. Updates the original
+// thread message via chat.update; response_url's replace_original is
+// unreliable for thread replies (returns 500 in some flows).
+func (uc *MentionDraftUseCase) appendCanceledTail(ctx context.Context, callback *goslack.InteractionCallback, channelID, messageTS string) error {
 	original := callback.Message.Blocks.BlockSet
 	kept := make([]goslack.Block, 0, len(original))
 	for _, b := range original {
-		if ab, ok := b.(*goslack.ActionBlock); ok && ab.BlockID == BlockIDDraftActions {
+		if _, isAction := b.(*goslack.ActionBlock); isAction {
 			continue
 		}
 		kept = append(kept, b)
@@ -262,7 +264,11 @@ func (uc *MentionDraftUseCase) respondAppendCanceledTail(ctx context.Context, ca
 			goslack.NewTextBlockObject(goslack.MarkdownType, "❌ *Canceled*", false, false),
 		),
 	)
-	return uc.respondReplaceOriginal(ctx, callback.ResponseURL, kept, "Case draft canceled")
+	const fallback = "Case draft canceled"
+	if channelID != "" && messageTS != "" && uc.slackService != nil {
+		return uc.slackService.UpdateMessage(ctx, channelID, messageTS, kept, fallback)
+	}
+	return uc.respondReplaceOriginal(ctx, callback.ResponseURL, kept, fallback)
 }
 
 // HandleEditSubmit processes the view_submission for the Edit modal.
