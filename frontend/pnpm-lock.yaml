@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  yaml@<2.0.0: '>=2.8.3'
+
 importers:
 
   .:
