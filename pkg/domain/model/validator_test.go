@@ -246,6 +246,63 @@ func TestFieldValidator_ValidateCaseFields(t *testing.T) {
 	}
 }
 
+func TestFieldValidator_ValidateCaseFieldsPartial(t *testing.T) {
+	schema := &config.FieldSchema{
+		Fields: []config.FieldDefinition{
+			{
+				ID:       "stage",
+				Name:     "Stage",
+				Type:     types.FieldTypeSelect,
+				Required: true,
+				Options: []config.FieldOption{
+					{ID: "screening", Name: "Screening"},
+					{ID: "tech-interview", Name: "Tech Interview"},
+				},
+			},
+			{
+				ID:       "channel",
+				Name:     "Channel",
+				Type:     types.FieldTypeSelect,
+				Required: false,
+				Options: []config.FieldOption{
+					{ID: "referral", Name: "Referral"},
+					{ID: "agent", Name: "Agent"},
+				},
+			},
+		},
+	}
+	validator := model.NewFieldValidator(schema)
+
+	t.Run("missing required field is allowed in partial mode", func(t *testing.T) {
+		got, err := validator.ValidateCaseFieldsPartial(map[string]model.FieldValue{
+			"channel": {FieldID: "channel", Value: "referral"},
+		})
+		gt.NoError(t, err).Required()
+		gt.Map(t, got).HasKey("channel")
+	})
+
+	t.Run("invalid option is still rejected in partial mode", func(t *testing.T) {
+		_, err := validator.ValidateCaseFieldsPartial(map[string]model.FieldValue{
+			"stage": {FieldID: "stage", Value: "no-such-stage"},
+		})
+		gt.Error(t, err).Is(model.ErrInvalidOptionID)
+	})
+
+	t.Run("empty input is fine in partial mode", func(t *testing.T) {
+		got, err := validator.ValidateCaseFieldsPartial(map[string]model.FieldValue{})
+		gt.NoError(t, err).Required()
+		gt.Array(t, mapKeys(got)).Length(0)
+	})
+}
+
+func mapKeys(m map[string]model.FieldValue) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
 func TestFieldValidator_ValidateNumber_MultipleTypes(t *testing.T) {
 	schema := &config.FieldSchema{
 		Fields: []config.FieldDefinition{

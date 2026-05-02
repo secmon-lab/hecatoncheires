@@ -284,21 +284,20 @@ test.describe('Case Management', () => {
   test('should toggle column visibility', async ({ page }) => {
     const caseListPage = new CaseListPage(page);
 
-    // Verify ID column is visible
-    let isVisible = await caseListPage.isColumnVisible('ID');
+    // Status is a toggleable built-in column shown by default
+    let isVisible = await caseListPage.isColumnVisible('Status');
     expect(isVisible).toBeTruthy();
 
-    // Open column selector and toggle ID off
+    // Open column selector and toggle Status off
     await caseListPage.openColumnSelector();
-    await caseListPage.toggleColumn('id');
+    await caseListPage.toggleColumn('status');
 
-    // Verify ID column is hidden
-    isVisible = await caseListPage.isColumnVisible('ID');
+    isVisible = await caseListPage.isColumnVisible('Status');
     expect(isVisible).toBeFalsy();
 
-    // Toggle ID back on
-    await caseListPage.toggleColumn('id');
-    isVisible = await caseListPage.isColumnVisible('ID');
+    // Toggle Status back on
+    await caseListPage.toggleColumn('status');
+    isVisible = await caseListPage.isColumnVisible('Status');
     expect(isVisible).toBeTruthy();
   });
 

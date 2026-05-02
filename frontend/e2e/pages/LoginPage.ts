@@ -11,7 +11,7 @@ export class LoginPage extends BasePage {
 
   constructor(page: Page) {
     super(page);
-    this.pageTitle = page.locator('h2').filter({ hasText: /Hecatoncheires/ });
+    this.pageTitle = page.locator('h1, h2').filter({ hasText: /Hecatoncheires/ });
     this.loginButton = page.locator('button').filter({ hasText: /Sign in/ });
   }
 

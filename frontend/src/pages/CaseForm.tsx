@@ -1,343 +1,247 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery } from '@apollo/client'
-import Select from 'react-select'
-import Modal from '../components/Modal'
-import Button from '../components/Button'
-import CustomFieldRenderer from '../components/fields/CustomFieldRenderer'
-import { CREATE_CASE, UPDATE_CASE, GET_CASES } from '../graphql/case'
+import UserSelect from '../components/UserSelect'
+import { CREATE_CASE, UPDATE_CASE, GET_CASE, GET_CASES } from '../graphql/case'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
-import styles from './CaseForm.module.css'
+import Modal from '../components/Modal'
+import Button from '../components/Button'
+import CustomFieldRenderer from '../components/fields/CustomFieldRenderer'
+import { IconLock } from '../components/Icons'
+import { sanitizeFieldValues } from '../utils/sanitizeFieldValues'
 
-interface Case {
+interface User {
+  id: string
+  name: string
+  realName: string
+  imageUrl?: string
+}
+
+interface CaseItem {
   id: number
   title: string
   description: string
+  isPrivate: boolean
   assigneeIDs: string[]
-  assignees: Array<{ id: string; name: string; realName: string; imageUrl?: string }>
   fields: Array<{ fieldId: string; value: any }>
 }
 
 interface CaseFormProps {
-  isOpen: boolean
+  caseItem: CaseItem | null
   onClose: () => void
-  caseItem?: Case | null
 }
 
-interface FormErrors {
-  title?: string
-  [key: string]: string | undefined
-}
-
-export default function CaseForm({ isOpen, onClose, caseItem }: CaseFormProps) {
+export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
   const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [assigneeIDs, setAssigneeIDs] = useState<string[]>([])
-  const [selectedAssignees, setSelectedAssignees] = useState<Array<{ value: string; label: string; image?: string }>>([])
-  const [fieldValues, setFieldValues] = useState<Record<string, any>>({})
-  const [isPrivate, setIsPrivate] = useState(false)
-  const [errors, setErrors] = useState<FormErrors>({})
 
-  const { data: configData, loading: configLoading } = useQuery(GET_FIELD_CONFIGURATION, {
-    variables: { workspaceId: currentWorkspace!.id },
+  const isEdit = caseItem !== null
+  const [title, setTitle] = useState(caseItem?.title || '')
+  const [description, setDescription] = useState(caseItem?.description || '')
+  const [isPrivate, setIsPrivate] = useState(caseItem?.isPrivate ?? false)
+  const [assigneeIDs, setAssigneeIDs] = useState<string[]>(caseItem?.assigneeIDs || [])
+  const [fieldValues, setFieldValues] = useState<Record<string, any>>(() => {
+    const map: Record<string, any> = {}
+    caseItem?.fields?.forEach((f) => { map[f.fieldId] = f.value })
+    return map
+  })
+  const [errors, setErrors] = useState<Record<string, string>>({})
+
+  const { data: configData } = useQuery(GET_FIELD_CONFIGURATION, {
+    variables: { workspaceId: currentWorkspace?.id },
     skip: !currentWorkspace,
   })
   const { data: usersData } = useQuery(GET_SLACK_USERS)
+  const users: User[] = usersData?.slackUsers || []
 
   const [createCase, { loading: creating }] = useMutation(CREATE_CASE, {
-    update(cache, { data }) {
-      if (!data?.createCase) return
-      const existingCases = cache.readQuery<{ cases: Case[] }>({
-        query: GET_CASES,
-        variables: { workspaceId: currentWorkspace!.id, status: 'OPEN' },
-      })
-      if (existingCases) {
-        cache.writeQuery({
-          query: GET_CASES,
-          variables: { workspaceId: currentWorkspace!.id, status: 'OPEN' },
-          data: { cases: [...existingCases.cases, data.createCase] },
-        })
-      }
-    },
-    onCompleted: () => {
-      onClose()
-      resetForm()
-    },
-    onError: (error) => {
-      console.error('Create error:', error)
-    },
+    refetchQueries: [{ query: GET_CASES, variables: { workspaceId: currentWorkspace?.id, status: 'OPEN' } }],
   })
-
   const [updateCase, { loading: updating }] = useMutation(UPDATE_CASE, {
-    update(cache, { data }) {
-      if (!data?.updateCase) return
-      cache.modify({
-        fields: {
-          cases(existingCases = []) {
-            return existingCases.map((caseRef: Case) =>
-              caseRef.id === data.updateCase.id ? data.updateCase : caseRef
-            )
-          },
-        },
-      })
-    },
-    onCompleted: () => {
-      onClose()
-      resetForm()
-    },
-    onError: (error) => {
-      console.error('Update error:', error)
-    },
+    refetchQueries: caseItem ? [{ query: GET_CASE, variables: { workspaceId: currentWorkspace?.id, id: caseItem.id } }] : [],
   })
 
-  useEffect(() => {
-    if (caseItem) {
-      setTitle(caseItem.title)
-      setDescription(caseItem.description)
-      setAssigneeIDs(caseItem.assigneeIDs || [])
-      setSelectedAssignees(
-        (caseItem.assignees || []).map((a) => ({
-          value: a.id,
-          label: a.realName || a.name,
-          image: a.imageUrl,
-        }))
-      )
-      const values: Record<string, any> = {}
-      caseItem.fields.forEach((f) => {
-        values[f.fieldId] = f.value
-      })
-      setFieldValues(values)
-    } else {
-      resetForm()
-    }
-  }, [caseItem, isOpen])
-
-  const resetForm = () => {
-    setTitle('')
-    setDescription('')
-    setAssigneeIDs([])
-    setSelectedAssignees([])
-    setIsPrivate(false)
-    setFieldValues({})
-    setErrors({})
-  }
-
-  const validate = () => {
-    const newErrors: FormErrors = {}
-
-    if (!title.trim()) {
-      newErrors.title = t('errorTitleRequired')
-    }
-
-    // Validate custom fields
-    const fieldDefs = configData?.fieldConfiguration?.fields || []
-    fieldDefs.forEach((field: any) => {
-      if (field.required) {
-        const value = fieldValues[field.id]
-        if (value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0)) {
-          newErrors[field.id] = t('errorFieldRequired', { fieldName: field.name })
-        }
-      }
-    })
-
-    setErrors(newErrors)
-    return Object.keys(newErrors).length === 0
-  }
+  const fields = configData?.fieldConfiguration?.fields || []
+  const caseLabel = configData?.fieldConfiguration?.labels?.case || 'Case'
 
   const handleFieldChange = (fieldID: string, value: any) => {
-    setFieldValues((prev) => ({
-      ...prev,
-      [fieldID]: value,
-    }))
-    // Clear error for this field
+    setFieldValues((prev) => ({ ...prev, [fieldID]: value }))
     if (errors[fieldID]) {
-      setErrors((prev) => {
-        const newErrors = { ...prev }
-        delete newErrors[fieldID]
-        return newErrors
-      })
+      setErrors((prev) => { const n = { ...prev }; delete n[fieldID]; return n })
     }
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleSubmit = async () => {
+    const errs: Record<string, string> = {}
+    if (!title.trim()) errs.title = t('errorTitleRequired')
+    fields.forEach((f: any) => {
+      if (f.required && (fieldValues[f.id] === undefined || fieldValues[f.id] === null || fieldValues[f.id] === '')) {
+        errs[f.id] = t('errorFieldRequired', { fieldName: f.name })
+      }
+    })
+    if (Object.keys(errs).length > 0) { setErrors(errs); return }
 
-    if (!validate()) {
-      return
-    }
+    const fieldArr = sanitizeFieldValues(
+      Object.entries(fieldValues)
+        .filter(([, v]) => v !== undefined && v !== null && v !== '')
+        .map(([fieldId, value]) => ({ fieldId, value })),
+      fields,
+    )
 
-    // Convert field values to GraphQL input format
-    const fields = Object.entries(fieldValues).map(([fieldId, value]) => ({
-      fieldId,
-      value,
-    }))
-
-    if (caseItem) {
-      await updateCase({
-        variables: {
-          workspaceId: currentWorkspace!.id,
-          input: {
-            id: caseItem.id,
-            title: title.trim(),
-            description: description.trim(),
-            assigneeIDs,
-            fields,
+    try {
+      if (isEdit && caseItem) {
+        await updateCase({
+          variables: {
+            workspaceId: currentWorkspace!.id,
+            input: {
+              id: caseItem.id,
+              title,
+              description,
+              assigneeIDs,
+              fields: fieldArr,
+            },
           },
-        },
-      })
-    } else {
-      await createCase({
-        variables: {
-          workspaceId: currentWorkspace!.id,
-          input: {
-            title: title.trim(),
-            description: description.trim(),
-            assigneeIDs,
-            fields,
-            isPrivate,
+        })
+      } else {
+        await createCase({
+          variables: {
+            workspaceId: currentWorkspace!.id,
+            input: {
+              title,
+              description,
+              isPrivate,
+              assigneeIDs,
+              fields: fieldArr,
+            },
           },
-        },
-      })
+        })
+      }
+      onClose()
+    } catch (e: any) {
+      console.error('Case mutation failed', e)
+      const msg = e?.graphQLErrors?.[0]?.message || e?.message || String(e)
+      setErrors({ submit: msg })
     }
   }
 
-  const handleClose = () => {
-    resetForm()
-    onClose()
-  }
+  const userOptions = users.map((u) => ({
+    value: u.id,
+    label: u.realName || u.name,
+    name: u.name,
+    realName: u.realName,
+    imageUrl: u.imageUrl,
+  }))
+  const selectedAssignees = userOptions.filter((o) => assigneeIDs.includes(o.value))
 
-  const loading = creating || updating || configLoading
-  const fieldDefs = configData?.fieldConfiguration?.fields || []
-  const caseLabel = configData?.fieldConfiguration?.labels?.case || 'Case'
+  const submitting = creating || updating
 
   return (
     <Modal
-      isOpen={isOpen}
-      onClose={handleClose}
-      title={caseItem ? t('titleCaseFormEdit', { caseLabel }) : t('titleCaseFormNew', { caseLabel })}
+      open
+      onClose={onClose}
+      width={580}
+      title={isEdit ? t('titleCaseFormEdit', { caseLabel }) : t('titleCaseFormNew', { caseLabel })}
       footer={
         <>
-          <Button variant="outline" onClick={handleClose} disabled={loading}>
-            {t('btnCancel')}
-          </Button>
-          <Button variant="primary" onClick={handleSubmit} disabled={loading}>
-            {loading ? t('btnSaving') : t('btnSave')}
+          <Button variant="ghost" onClick={onClose}>{t('btnCancel')}</Button>
+          <Button
+            variant="primary"
+            onClick={handleSubmit}
+            disabled={submitting}
+            data-testid="case-submit-button"
+          >
+            {submitting ? (isEdit ? t('btnSaving') : t('btnCreating')) : (isEdit ? t('btnSave') : t('btnCreate'))}
           </Button>
         </>
       }
     >
-      <form onSubmit={handleSubmit} className={styles.form}>
-        <div className={styles.field}>
-          <label htmlFor="title" className={styles.label}>
-            {t('labelTitleRequired')}
-          </label>
+      <div className="col" style={{ gap: 14 }}>
+        <div>
+          <div className="field-label">{t('labelTitleRequired')}</div>
           <input
-            id="title"
-            type="text"
+            className="input"
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className={`${styles.input} ${errors.title ? styles.inputError : ''}`}
+            onChange={(e) => { setTitle(e.target.value); if (errors.title) setErrors((p) => ({ ...p, title: '' })) }}
             placeholder={t('placeholderCaseTitle', { caseLabelLower: caseLabel.toLowerCase() })}
-            disabled={loading}
+            data-testid="case-title-input"
           />
-          {errors.title && <span className={styles.error}>{errors.title}</span>}
+          {errors.title && <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 4 }}>{errors.title}</div>}
         </div>
-
-        <div className={styles.field}>
-          <label htmlFor="description" className={styles.label}>
-            {t('labelDescription')}
-          </label>
+        <div>
+          <div className="field-label">{t('labelDescription')}</div>
           <textarea
-            id="description"
+            className="textarea"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            className={styles.textarea}
             placeholder={t('placeholderCaseDescription', { caseLabelLower: caseLabel.toLowerCase() })}
-            rows={4}
-            disabled={loading}
+            data-testid="case-description-input"
           />
         </div>
-
-        {!caseItem && (
-          <div className={styles.field}>
-            <label className={styles.checkboxLabel}>
-              <input
-                type="checkbox"
-                checked={isPrivate}
-                onChange={(e) => setIsPrivate(e.target.checked)}
-                disabled={loading}
-                className={styles.checkbox}
-              />
-              <span>{t('labelPrivateCase', { caseLabel: caseLabel.toLowerCase() })}</span>
-            </label>
-            <span className={styles.hint}>
-              {t('hintPrivateCase', { caseLabelLower: caseLabel.toLowerCase() })}
-            </span>
+        <div>
+          <label htmlFor="case-assignees" className="field-label">{t('labelAssignees')}</label>
+          <UserSelect
+            inputId="case-assignees"
+            aria-label={t('labelAssignees')}
+            isMulti
+            options={userOptions}
+            value={selectedAssignees}
+            onChange={(opts: any) => setAssigneeIDs((opts || []).map((o: any) => o.value))}
+            placeholder={t('placeholderSelectAssignees')}
+          />
+        </div>
+        {fields.length > 0 && (
+          <div>
+            <div className="field-label">{t('sectionFields')}</div>
+            <div className="col" style={{ gap: 12 }}>
+              {fields.map((f: any) => (
+                <CustomFieldRenderer
+                  key={f.id}
+                  field={f}
+                  value={fieldValues[f.id]}
+                  onChange={handleFieldChange}
+                  users={users}
+                  error={errors[f.id]}
+                  disabled={submitting}
+                />
+              ))}
+            </div>
           </div>
         )}
-
-        <div className={styles.field}>
-          <label htmlFor="assigneeIDs" className={styles.label}>{t('labelAssignees')}</label>
-          <Select
-            inputId="assigneeIDs"
-            isMulti
-            isClearable
-            value={selectedAssignees}
-            onChange={(selected) => {
-              const selectedOptions = [...(selected || [])]
-              setSelectedAssignees(selectedOptions)
-              setAssigneeIDs(selectedOptions.map(s => s.value))
-            }}
-            options={(usersData?.slackUsers || []).map((user: { id: string; name: string; realName: string; imageUrl?: string }) => ({
-              value: user.id,
-              label: user.realName || user.name,
-              name: user.name,
-              realName: user.realName,
-              image: user.imageUrl,
-            }))}
-            isDisabled={loading}
-            placeholder={t('placeholderSelectAssignees')}
-            filterOption={(option, inputValue) => {
-              const search = inputValue.toLowerCase()
-              const data = option.data as unknown as { label: string; name: string; realName: string }
-              return (
-                data.label.toLowerCase().includes(search) ||
-                data.name.toLowerCase().includes(search) ||
-                data.realName.toLowerCase().includes(search)
-              )
-            }}
-            formatOptionLabel={(option: { value: string; label: string; image?: string }) => (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                {option.image && (
-                  <img
-                    src={option.image}
-                    alt={option.label}
-                    style={{ width: '24px', height: '24px', borderRadius: '50%' }}
-                  />
-                )}
-                <span>{option.label}</span>
+        {!isEdit && (
+          <label className="row" style={{ gap: 8, padding: 10, border: '1px solid color-mix(in oklch, var(--warn) 30%, var(--line))', borderRadius: 6, background: 'color-mix(in oklch, var(--warn) 8%, transparent)', alignItems: 'flex-start', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={isPrivate}
+              onChange={(e) => setIsPrivate(e.target.checked)}
+              style={{ marginTop: 2 }}
+              data-testid="private-case-checkbox"
+            />
+            <div>
+              <div className="row" style={{ gap: 6, fontSize: 13, fontWeight: 500 }}>
+                <IconLock size={12} sw={2} />
+                {t('labelPrivateCase', { caseLabel })}
               </div>
-            )}
-          />
-        </div>
-
-        {fieldDefs.map((field: any) => (
-          <CustomFieldRenderer
-            key={field.id}
-            field={field}
-            value={fieldValues[field.id]}
-            onChange={handleFieldChange}
-            users={usersData?.slackUsers || []}
-            error={errors[field.id]}
-            disabled={loading}
-            showMetadata={true}
-          />
-        ))}
-      </form>
+              <div style={{ fontSize: 11.5, color: 'var(--fg-muted)', marginTop: 2 }}>
+                {t('hintPrivateCase', { caseLabelLower: caseLabel.toLowerCase() })}
+              </div>
+            </div>
+          </label>
+        )}
+        {errors.submit && (
+          <div style={{
+            padding: '8px 10px',
+            borderRadius: 6,
+            background: 'color-mix(in oklch, var(--danger) 10%, transparent)',
+            border: '1px solid color-mix(in oklch, var(--danger) 30%, transparent)',
+            color: 'var(--danger)',
+            fontSize: 12,
+          }}>
+            {errors.submit}
+          </div>
+        )}
+      </div>
     </Modal>
   )
 }

@@ -1,787 +1,717 @@
-import { useParams, useNavigate } from 'react-router-dom'
+import { useState, useMemo } from 'react'
+import { useNavigate, useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation } from '@apollo/client'
-import { ArrowLeft, Edit, MoreVertical, Trash2, Plus, ExternalLink, BookOpen, Bot, ChevronLeft, ChevronRight, XCircle, RotateCcw, ClipboardList, Lock, Users, RefreshCw, Search } from 'lucide-react'
-import { useState, useRef, useEffect, useMemo } from 'react'
-import Markdown from 'react-markdown'
+import {
+  GET_CASE,
+  GET_CASE_MEMBERS,
+  CLOSE_CASE,
+  REOPEN_CASE,
+  DELETE_CASE,
+  UPDATE_CASE,
+  SYNC_CASE_CHANNEL_USERS,
+  GET_CASES,
+} from '../graphql/case'
+import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
+import { GET_SLACK_USERS } from '../graphql/slackUsers'
+import FieldDisplay from '../components/fields/FieldDisplay'
+import FilterDropdown from '../components/FilterDropdown'
+import { useWorkspace } from '../contexts/workspace-context'
+import { useTranslation } from '../i18n'
 import Button from '../components/Button'
-import Chip from '../components/Chip'
 import Modal from '../components/Modal'
+import {
+  IconChevLeft,
+  IconLock,
+  IconCheck,
+  IconRefresh,
+  IconSearch,
+  IconPlus,
+  IconCalendar,
+  IconSlack,
+  IconExt,
+  IconDots,
+  IconBell,
+} from '../components/Icons'
+import { Avatar, PrivateBadge, StatusBadge } from '../components/Primitives'
+import UserSelect from '../components/UserSelect'
 import CaseForm from './CaseForm'
 import CaseDeleteDialog from './CaseDeleteDialog'
 import ActionForm from './ActionForm'
 import ActionModal from './ActionModal'
-import { GET_CASE, GET_CASES, CLOSE_CASE, REOPEN_CASE, GET_CASE_MEMBERS, SYNC_CASE_CHANNEL_USERS } from '../graphql/case'
-import { GET_ASSIST_LOGS } from '../graphql/assistLog'
-import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
-import { useWorkspace } from '../contexts/workspace-context'
-import { useTranslation } from '../i18n'
 import styles from './CaseDetail.module.css'
 
-interface Knowledge {
+interface User {
   id: string
-  caseID: number
-  sourceID: string
-  sourceURLs: string[]
-  title: string
-  summary: string
-  sourcedAt: string
-  createdAt: string
-  updatedAt: string
+  name: string
+  realName: string
+  imageUrl?: string | null
 }
 
-interface Case {
-  id: number
-  title: string
-  description: string
-  status: 'OPEN' | 'CLOSED'
-  isPrivate: boolean
-  accessDenied: boolean
-  channelUserCount: number
-  reporterID?: string
-  reporter?: { id: string; name: string; realName: string; imageUrl?: string }
-  assigneeIDs: string[]
-  assignees: Array<{ id: string; name: string; realName: string; imageUrl?: string }>
-  slackChannelID: string
-  slackChannelName: string
-  slackChannelURL: string
-  fields: Array<{ fieldId: string; value: any }>
-  actions?: Array<{
-    id: number
-    title: string
-    status: string
-    assigneeIDs: string[]
-    assignees: Array<{ id: string; name: string; realName: string; imageUrl?: string }>
-    dueDate?: string
-    createdAt: string
-  }>
-  knowledges?: Knowledge[]
-  createdAt: string
-  updatedAt: string
+function formatTimestamp(iso?: string | null) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleString()
 }
 
-const STATUS_COLORS: Record<string, number> = {
-  BACKLOG: 0,
-  TODO: 1,
-  IN_PROGRESS: 2,
-  BLOCKED: 3,
-  COMPLETED: 4,
+function formatHHMM(iso?: string | null) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  return `${hh}:${mm}`
 }
+
+const STATUS_CLASS: Record<string, string> = {
+  BACKLOG: 'backlog',
+  TODO: 'todo',
+  IN_PROGRESS: 'in-progress',
+  BLOCKED: 'blocked',
+  COMPLETED: 'done',
+}
+const STATUS_PIP: Record<string, string> = {
+  BACKLOG: 'pip-bg',
+  TODO: 'pip-todo',
+  IN_PROGRESS: 'pip-prog',
+  BLOCKED: 'pip-block',
+  COMPLETED: 'pip-done',
+}
+const STATUS_LABEL_KEY = {
+  BACKLOG: 'statusBacklog',
+  TODO: 'statusTodo',
+  IN_PROGRESS: 'statusInProgress',
+  BLOCKED: 'statusBlocked',
+  COMPLETED: 'statusCompleted',
+} as const
 
 export default function CaseDetail() {
-  const { id, actionId } = useParams<{ id: string; actionId?: string }>()
+  const { id, actionId: actionIdParam } = useParams<{ id: string; actionId?: string }>()
+  const caseId = Number(id)
+  const openActionId = actionIdParam ? Number(actionIdParam) : null
   const navigate = useNavigate()
   const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
-  const [isFormOpen, setIsFormOpen] = useState(false)
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
-  const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false)
-  const [isActionFormOpen, setIsActionFormOpen] = useState(false)
-  const [isMenuOpen, setIsMenuOpen] = useState(false)
-  const [selectedActionId, setSelectedActionId] = useState<number | null>(null)
-  const [knowledgePage, setKnowledgePage] = useState(0)
-  const knowledgePageSize = 5
-  const [memberPage, setMemberPage] = useState(0)
+
+  const [editing, setEditing] = useState(false)
+  const [addingAction, setAddingAction] = useState(false)
+  const [actionStatusFilters, setActionStatusFilters] = useState<string[]>([])
+  const [actionAssigneeFilters, setActionAssigneeFilters] = useState<string[]>([])
+  const [confirmClose, setConfirmClose] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
   const [memberFilter, setMemberFilter] = useState('')
-  const [memberFilterDebounced, setMemberFilterDebounced] = useState('')
-  const memberPageSize = 20
-  const menuRef = useRef<HTMLDivElement>(null)
 
-  const STATUS_LABELS: Record<string, string> = useMemo(() => ({
-    BACKLOG: t('statusBacklog'),
-    TODO: t('statusTodo'),
-    IN_PROGRESS: t('statusInProgress'),
-    BLOCKED: t('statusBlocked'),
-    COMPLETED: t('statusCompleted'),
-  }), [t])
-
-  // Debounce member filter
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setMemberFilterDebounced(memberFilter)
-      setMemberPage(0)
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [memberFilter])
-
-  // Handle permalink: open action modal if actionId is in URL
-  useEffect(() => {
-    if (actionId) {
-      setSelectedActionId(parseInt(actionId))
-    }
-  }, [actionId])
-
-  const { data: caseData, loading: caseLoading, error: caseError, refetch } = useQuery(GET_CASE, {
-    variables: { workspaceId: currentWorkspace!.id, id: parseInt(id || '0') },
-    skip: !id || !currentWorkspace,
+  const { data, loading, error } = useQuery(GET_CASE, {
+    variables: { workspaceId: currentWorkspace?.id, id: caseId },
+    skip: !currentWorkspace || Number.isNaN(caseId),
   })
-
   const { data: configData } = useQuery(GET_FIELD_CONFIGURATION, {
-    variables: { workspaceId: currentWorkspace!.id },
+    variables: { workspaceId: currentWorkspace?.id },
     skip: !currentWorkspace,
   })
 
-  const caseId = id ? parseInt(id, 10) : 0
-  const { data: assistLogData } = useQuery(GET_ASSIST_LOGS, {
+  const c = data?.case
+  const isPrivate = !!c?.isPrivate
+  const slackChannelID: string = c?.slackChannelID || ''
+  const slackChannelName: string = c?.slackChannelName || ''
+  const slackChannelURL: string | null = c?.slackChannelURL || null
+  const channelUserCount: number = c?.channelUserCount || 0
+
+  const { data: membersData } = useQuery(GET_CASE_MEMBERS, {
     variables: {
-      workspaceId: currentWorkspace!.id,
-      caseId,
-      limit: 3,
+      workspaceId: currentWorkspace?.id,
+      id: caseId,
+      limit: 200,
       offset: 0,
+      filter: memberFilter || undefined,
     },
-    skip: !currentWorkspace || !caseId,
+    skip: !currentWorkspace || Number.isNaN(caseId) || !isPrivate || !slackChannelID,
   })
 
-  const { data: memberData, loading: memberLoading, refetch: refetchMembers } = useQuery(GET_CASE_MEMBERS, {
-    variables: {
-      workspaceId: currentWorkspace!.id,
-      id: caseId,
-      limit: memberPageSize,
-      offset: memberPage * memberPageSize,
-      filter: memberFilterDebounced,
-    },
-    skip: !currentWorkspace || !caseId,
+  const refetchOptions = useMemo(
+    () => [
+      { query: GET_CASE, variables: { workspaceId: currentWorkspace?.id, id: caseId } },
+      { query: GET_CASES, variables: { workspaceId: currentWorkspace?.id, status: 'OPEN' } },
+      { query: GET_CASES, variables: { workspaceId: currentWorkspace?.id, status: 'CLOSED' } },
+    ],
+    [currentWorkspace?.id, caseId],
+  )
+
+  const [closeCase, { loading: closing }] = useMutation(CLOSE_CASE, { refetchQueries: refetchOptions })
+  const [reopenCase, { loading: reopening }] = useMutation(REOPEN_CASE, { refetchQueries: refetchOptions })
+  const [updateCase, { loading: updating }] = useMutation(UPDATE_CASE, { refetchQueries: refetchOptions })
+  const [deleteCase, { loading: deleting }] = useMutation(DELETE_CASE, {
+    refetchQueries: [
+      { query: GET_CASES, variables: { workspaceId: currentWorkspace?.id, status: 'OPEN' } },
+      { query: GET_CASES, variables: { workspaceId: currentWorkspace?.id, status: 'CLOSED' } },
+    ],
   })
+  const { data: slackUsersData } = useQuery(GET_SLACK_USERS)
+  const slackUsers = slackUsersData?.slackUsers || []
 
   const [syncMembers, { loading: syncing }] = useMutation(SYNC_CASE_CHANNEL_USERS, {
-    variables: { workspaceId: currentWorkspace!.id, id: caseId },
-    onCompleted: () => {
-      refetch()
-      refetchMembers()
-    },
+    refetchQueries: [{
+      query: GET_CASE_MEMBERS,
+      variables: { workspaceId: currentWorkspace?.id, id: caseId, limit: 200, offset: 0, filter: memberFilter || undefined },
+    }],
   })
 
-  const [closeCase] = useMutation(CLOSE_CASE)
-  const [reopenCase] = useMutation(REOPEN_CASE)
-
-  const caseItem: Case | undefined = caseData?.case
-  const fieldDefs = configData?.fieldConfiguration?.fields || []
-  const caseLabel = configData?.fieldConfiguration?.labels?.case || 'Case'
-  const assistLogTotalCount = assistLogData?.assistLogs?.totalCount || 0
-
-  const handleBack = () => {
-    navigate(`/ws/${currentWorkspace!.id}/cases`)
+  if (loading) {
+    return <div className="h-main-inner muted">{t('loading')}</div>
   }
-
-  const handleEdit = () => {
-    setIsFormOpen(true)
-  }
-
-  const handleDelete = () => {
-    setIsDeleteDialogOpen(true)
-  }
-
-  const handleDeleteConfirm = () => {
-    setIsDeleteDialogOpen(false)
-    navigate(`/ws/${currentWorkspace!.id}/cases`)
-  }
-
-  const handleCloseCase = async () => {
-    if (!caseItem) return
-    try {
-      await closeCase({
-        variables: { workspaceId: currentWorkspace!.id, id: caseItem.id },
-        refetchQueries: [
-          { query: GET_CASES, variables: { workspaceId: currentWorkspace!.id, status: 'OPEN' } },
-          { query: GET_CASES, variables: { workspaceId: currentWorkspace!.id, status: 'CLOSED' } },
-        ],
-      })
-      refetch()
-    } catch (err) {
-      console.error('Failed to close case:', err)
-    }
-  }
-
-  const handleReopenCase = async () => {
-    if (!caseItem) return
-    try {
-      await reopenCase({
-        variables: { workspaceId: currentWorkspace!.id, id: caseItem.id },
-        refetchQueries: [
-          { query: GET_CASES, variables: { workspaceId: currentWorkspace!.id, status: 'OPEN' } },
-          { query: GET_CASES, variables: { workspaceId: currentWorkspace!.id, status: 'CLOSED' } },
-        ],
-      })
-      refetch()
-    } catch (err) {
-      console.error('Failed to reopen case:', err)
-    }
-  }
-
-  const handleActionClick = (clickedActionId: number) => {
-    setSelectedActionId(clickedActionId)
-    navigate(`/ws/${currentWorkspace!.id}/cases/${id}/actions/${clickedActionId}`, { replace: true })
-  }
-
-  const handleActionModalClose = () => {
-    setSelectedActionId(null)
-    navigate(`/ws/${currentWorkspace!.id}/cases/${id}`, { replace: true })
-  }
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setIsMenuOpen(false)
-      }
-    }
-
-    if (isMenuOpen) {
-      document.addEventListener('mousedown', handleClickOutside)
-    }
-
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [isMenuOpen])
-
-  const parseMetadata = (meta: any): Record<string, any> | null => {
-    if (!meta) return null
-    if (typeof meta === 'object') return meta
-    if (typeof meta === 'string') {
-      try { return JSON.parse(meta) } catch { return null }
-    }
-    return null
-  }
-
-  const renderFieldValue = (fieldId: string, value: any) => {
-    const fieldDef = fieldDefs.find((f: any) => f.id === fieldId)
-    if (!fieldDef) return String(value)
-
-    switch (fieldDef.type) {
-      case 'TEXT':
-      case 'NUMBER':
-      case 'DATE':
-        return String(value || '-')
-
-      case 'URL':
-        return value ? (
-          <a href={value} target="_blank" rel="noopener noreferrer" className={styles.link}>
-            {value}
-          </a>
-        ) : (
-          '-'
-        )
-
-      case 'SELECT': {
-        const option = fieldDef.options?.find((opt: any) => opt.id === value)
-        if (!option) return value || '-'
-        const meta = parseMetadata(option.metadata)
-        const metaEntries = meta ? Object.entries(meta) : []
-        return (
-          <>
-            <span>{option.name}</span>
-            {metaEntries.length > 0 && (
-              <div className={styles.fieldMetaList}>
-                {metaEntries.map(([k, v]) => (
-                  <span key={k} className={styles.fieldMeta}>{k}: {String(v)}</span>
-                ))}
-              </div>
-            )}
-          </>
-        )
-      }
-
-      case 'MULTI_SELECT': {
-        const selected = (value || [])
-          .map((id: string) => fieldDef.options?.find((opt: any) => opt.id === id))
-          .filter(Boolean)
-        if (selected.length === 0) return '-'
-        return (
-          <div className={styles.multiSelectList}>
-            {selected.map((opt: any) => {
-              const meta = parseMetadata(opt.metadata)
-              const metaEntries = meta ? Object.entries(meta) : []
-              return (
-                <div key={opt.id} className={styles.multiSelectItem}>
-                  <span>{opt.name}</span>
-                  {metaEntries.length > 0 && (
-                    <div className={styles.fieldMetaList}>
-                      {metaEntries.map(([k, v]) => (
-                        <span key={k} className={styles.fieldMeta}>{k}: {String(v)}</span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        )
-      }
-
-      case 'USER':
-      case 'MULTI_USER':
-        return '-'
-
-      default:
-        return String(value || '-')
-    }
-  }
-
-  if (caseLoading) {
+  if (error || !c) {
     return (
-      <div className={styles.container}>
-        <div className={styles.loading}>{t('loading')}</div>
-      </div>
-    )
-  }
-
-  if (caseError || !caseItem) {
-    return (
-      <div className={styles.container}>
-        <div className={styles.error}>
-          {caseError ? `${t('errorPrefix')} ${caseError.message}` : t('errorCaseNotFound', { caseLabel })}
+      <div className="h-main-inner">
+        <div className="card" style={{ padding: 24, color: 'var(--danger)' }}>
+          {t('errorCaseNotFound', { caseLabel: configData?.fieldConfiguration?.labels?.case || 'Case' })}
         </div>
-        <Button variant="outline" icon={<ArrowLeft size={20} />} onClick={handleBack}>
-          {t('btnBackToList')}
-        </Button>
       </div>
     )
   }
+
+  const caseLabel = configData?.fieldConfiguration?.labels?.case || 'Case'
+  const fields = configData?.fieldConfiguration?.fields || []
+
+  const handleClose = async () => {
+    await closeCase({ variables: { workspaceId: currentWorkspace!.id, id: caseId } })
+    setConfirmClose(false)
+  }
+  const handleReopen = async () => {
+    await reopenCase({ variables: { workspaceId: currentWorkspace!.id, id: caseId } })
+  }
+  const handleDelete = async () => {
+    await deleteCase({ variables: { workspaceId: currentWorkspace!.id, id: caseId } })
+    setConfirmDelete(false)
+    navigate(`/ws/${currentWorkspace!.id}/cases`)
+  }
+  const handleSync = async () => {
+    await syncMembers({ variables: { workspaceId: currentWorkspace!.id, id: caseId } })
+  }
+  const handleAssigneesChange = async (ids: string[]) => {
+    await updateCase({
+      variables: {
+        workspaceId: currentWorkspace!.id,
+        input: { id: caseId, assigneeIDs: ids },
+      },
+    })
+  }
+
+  const members: User[] = membersData?.case?.channelUsers?.items || []
+  const memberTotal: number = membersData?.case?.channelUserCount ?? channelUserCount
+
+  const totalActions = c.actions?.length || 0
+  const doneActions = (c.actions || []).filter((a: any) => a.status === 'COMPLETED').length
+  const progressPct = totalActions > 0 ? Math.round((doneActions / totalActions) * 100) : 0
 
   return (
-    <div className={styles.container}>
-      <div className={styles.header}>
-        <Button variant="outline" icon={<ArrowLeft size={20} />} onClick={handleBack}>
+    <div className="h-main-inner" style={{ maxWidth: 1180 }}>
+      {/* top action row */}
+      <div className="row" style={{ marginBottom: 18 }}>
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={<IconChevLeft size={13} />}
+          onClick={() => navigate(`/ws/${currentWorkspace!.id}/cases`)}
+        >
           {t('btnBack')}
         </Button>
-        <div className={styles.actions}>
-          {caseItem.status === 'OPEN' ? (
-            <Button variant="outline" icon={<XCircle size={20} />} onClick={() => setIsCloseDialogOpen(true)} className={styles.closeButton} data-testid="close-case-button">
-              {t('btnClose')}
-            </Button>
-          ) : (
-            <Button variant="outline" icon={<RotateCcw size={20} />} onClick={handleReopenCase} className={styles.reopenButton}>
-              {t('btnReopen')}
-            </Button>
-          )}
-          <Button variant="outline" icon={<Edit size={20} />} onClick={handleEdit}>
-            {t('btnEdit')}
+        <span className="spacer" />
+        <Button
+          size="sm"
+          variant="ghost"
+          icon={<IconBell size={13} />}
+          data-testid="watch-case-button"
+          aria-label={t('btnWatch')}
+        >
+          {t('btnWatch')}
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => setEditing(true)}
+          data-testid="case-edit-button"
+        >
+          {t('btnEdit')}
+        </Button>
+        {c.status === 'OPEN' ? (
+          <Button
+            size="sm"
+            variant="danger"
+            icon={<IconCheck size={13} />}
+            onClick={() => setConfirmClose(true)}
+            disabled={closing}
+            data-testid="close-case-button"
+          >
+            {t('btnClose')}
           </Button>
-          <div style={{ position: 'relative' }} ref={menuRef}>
-            <Button
-              variant="outline"
-              icon={<MoreVertical size={20} />}
-              onClick={() => setIsMenuOpen(!isMenuOpen)}
-            />
-            {isMenuOpen && (
-              <div className={styles.menu}>
+        ) : (
+          <Button
+            size="sm"
+            icon={<IconRefresh size={13} />}
+            onClick={handleReopen}
+            disabled={reopening}
+          >
+            {t('btnReopen')}
+          </Button>
+        )}
+        <div style={{ position: 'relative' }}>
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<IconDots size={14} />}
+            onClick={() => setMenuOpen((v) => !v)}
+            aria-label={t('btnMore')}
+            data-testid="case-menu-button"
+          />
+          {menuOpen && (
+            <>
+              <div
+                onClick={() => setMenuOpen(false)}
+                style={{ position: 'fixed', inset: 0, zIndex: 100 }}
+              />
+              <div
+                role="menu"
+                data-testid="case-menu-popover"
+                className={styles.kebabMenu}
+              >
                 <button
-                  className={styles.menuItem}
-                  onClick={() => {
-                    setIsMenuOpen(false)
-                    handleDelete()
-                  }}
+                  type="button"
+                  onClick={() => { setMenuOpen(false); setConfirmDelete(true) }}
+                  data-testid="case-delete-menu-item"
+                  className={`${styles.kebabItem} ${styles.kebabDanger}`}
                 >
-                  <Trash2 size={16} />
-                  <span>{t('btnDelete')}</span>
+                  {t('btnDelete')}
                 </button>
               </div>
-            )}
-          </div>
+            </>
+          )}
         </div>
       </div>
 
-      <div className={styles.content}>
-        <div className={styles.titleSection}>
-          <div className={styles.titleRow}>
-            <div className={styles.titleLeft}>
-              <h1 className={styles.title}>{caseItem.title}</h1>
-              <Chip variant="status" colorIndex={caseItem.status === 'OPEN' ? 2 : 5}>
-                {caseItem.status === 'OPEN' ? t('statusOpen') : t('statusClosed')}
-              </Chip>
-              {caseItem.isPrivate && (
-                <span className={styles.privateBadge} data-testid="private-badge">
-                  <Lock size={14} />
-                  {t('badgePrivate')}
-                </span>
-              )}
-            </div>
-            {caseItem.slackChannelID && (
-              <a
-                href={caseItem.slackChannelURL || `https://slack.com/app_redirect?channel=${caseItem.slackChannelID}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className={styles.slackChannelLink}
-              >
-                #{caseItem.slackChannelName || caseItem.slackChannelID}
-                <ExternalLink size={14} />
-              </a>
-            )}
-          </div>
-          {caseItem.description && (
-            <div className={styles.description}>
-              <Markdown>{caseItem.description}</Markdown>
-            </div>
-          )}
-          <div className={styles.metaRow}>
-            <div className={styles.timestamps}>
-              <span className={styles.timestampLabel}>{t('labelCreatedTimestamp')}</span>
-              <span className={styles.timestampValue} data-testid="created-timestamp-value">{new Date(caseItem.createdAt).toLocaleString()}</span>
-              <span className={styles.timestampDivider} />
-              <span className={styles.timestampLabel}>{t('labelUpdatedTimestamp')}</span>
-              <span className={styles.timestampValue} data-testid="updated-timestamp-value">{new Date(caseItem.updatedAt).toLocaleString()}</span>
-            </div>
-            <button
-              className={styles.assistLogLink}
-              onClick={() => navigate(`/ws/${currentWorkspace!.id}/cases/${caseItem.id}/assists`)}
-            >
-              <Bot size={14} />
-              {t('linkAssistLogs')}{assistLogTotalCount > 0 && ` (${assistLogTotalCount})`}
-            </button>
-          </div>
+      {/* title row */}
+      <div className="h-detail-h">
+        <span className="h-detail-id">#{c.id}</span>
+        <h1>{c.title}</h1>
+        <div className="h-detail-badges">
+          {isPrivate && <span data-testid="private-badge"><PrivateBadge label={t('badgePrivate')} /></span>}
         </div>
+      </div>
 
-        <div className={styles.sections}>
-          {/* Reporter section */}
-          {caseItem.reporter && (
-            <div className={styles.section}>
-              <h3 className={styles.sectionTitle}>{t('labelReporter')}</h3>
-              <div className={styles.assigneesInline}>
-                <span className={styles.assigneeTag}>
-                  {caseItem.reporter.imageUrl && (
-                    <img src={caseItem.reporter.imageUrl} alt={caseItem.reporter.realName || caseItem.reporter.name} className={styles.avatarSmall} />
-                  )}
-                  {caseItem.reporter.realName || caseItem.reporter.name}
-                </span>
-              </div>
-            </div>
-          )}
-          {/* Assignees section */}
-          {caseItem.assignees && caseItem.assignees.length > 0 && (
-            <div className={styles.section}>
-              <h3 className={styles.sectionTitle}>{t('sectionAssignees')}</h3>
-              <div className={styles.assigneesInline}>
-                {caseItem.assignees.map((user: any) => (
-                  <span key={user.id} className={styles.assigneeTag}>
-                    {user.imageUrl && (
-                      <img src={user.imageUrl} alt={user.realName || user.name} className={styles.avatarSmall} />
-                    )}
-                    {user.realName || user.name}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
+      {/* sub-meta */}
+      <div className="h-detail-meta">
+        <span>
+          <IconCalendar size={11} style={{ marginRight: 4, verticalAlign: '-2px' }} />
+          {t('labelCreatedTimestamp')} <span className="mono" data-testid="created-timestamp-value">{formatTimestamp(c.createdAt)}</span>
+        </span>
+        <span>
+          {t('labelUpdatedTimestamp')} <span className="mono" data-testid="updated-timestamp-value">{formatTimestamp(c.updatedAt)}</span>
+        </span>
+        {c.reporter && (
+          <span>
+            {t('labelBy')} <span className="name">{c.reporter.realName || c.reporter.name}</span>
+          </span>
+        )}
+        <span className="spacer" />
+        {slackChannelID && (
+          <a
+            className="slack-link"
+            href={slackChannelURL || `slack://channel?id=${slackChannelID}`}
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            <IconSlack size={11} />#{slackChannelName || slackChannelID}
+            <IconExt size={10} />
+          </a>
+        )}
+      </div>
 
-          {/* Fields section (custom fields) */}
-          <div className={styles.section}>
-            <h3 className={styles.sectionTitle}>{t('sectionFields')}</h3>
-            <div className={styles.fieldsGrid}>
-              {caseItem.fields.map((fieldValue) => {
-                const fieldDef = fieldDefs.find((f: any) => f.id === fieldValue.fieldId)
-                if (!fieldDef) return null
-                return (
-                  <div key={fieldValue.fieldId} className={styles.fieldItem}>
-                    <div className={styles.fieldLabel}>{fieldDef.name}</div>
-                    <div className={styles.fieldValue}>
-                      {renderFieldValue(fieldValue.fieldId, fieldValue.value)}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
+      {/* private banner */}
+      {isPrivate && (
+        <div className="h-banner warn" data-testid="case-private-banner">
+          <IconLock size={13} sw={2} />
+          <span className="h-banner-text">
+            {t('msgPrivateBanner', {
+              channel: slackChannelName || slackChannelID,
+              count: String(channelUserCount || 0),
+            })}
+          </span>
+        </div>
+      )}
 
-          {/* Related Actions section */}
-          <div className={styles.section}>
-            <div className={styles.sectionHeader}>
-              <h3 className={styles.sectionTitle}>{t('sectionRelatedActions')}</h3>
-              {caseItem.actions && caseItem.actions.length > 0 && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  icon={<Plus size={14} />}
-                  onClick={() => setIsActionFormOpen(true)}
-                >
-                  {t('btnAddAction')}
-                </Button>
-              )}
+      {/* main grid */}
+      <div className="h-detail-grid">
+        {/* left column */}
+        <div>
+          <section className="h-section h-detail-body">
+            <div className="h-section-h">
+              <span className="h-section-title">{t('labelDescription')}</span>
             </div>
-            {caseItem.actions && caseItem.actions.length > 0 ? (
-              <table className={styles.actionTable}>
-                <thead>
-                  <tr>
-                    <th>{t('headerTitle')}</th>
-                    <th>{t('headerAssignees')}</th>
-                    <th>{t('headerStatus')}</th>
-                    <th>{t('headerDueDate')}</th>
-                    <th>{t('headerCreated')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {caseItem.actions.map((action) => (
-                    <tr
-                      key={action.id}
-                      className={styles.actionRow}
-                      onClick={() => handleActionClick(action.id)}
-                    >
-                      <td className={styles.titleCell}>{action.title}</td>
-                      <td className={styles.assigneeCell}>
-                        {action.assignees && action.assignees.length > 0 ? (
-                          <div className={styles.actionAssignees}>
-                            {action.assignees.map((user) => (
-                              <span key={user.id} className={styles.actionAssigneeTag}>
-                                {user.imageUrl && (
-                                  <img src={user.imageUrl} alt={user.realName} className={styles.avatarSmall} />
-                                )}
-                                <span>{user.realName || user.name}</span>
-                              </span>
-                            ))}
-                          </div>
-                        ) : (
-                          <span className={styles.noAssignee}>-</span>
-                        )}
-                      </td>
-                      <td className={styles.statusCell}>
-                        <Chip variant="status" colorIndex={STATUS_COLORS[action.status] || 0}>
-                          {STATUS_LABELS[action.status] || action.status}
-                        </Chip>
-                      </td>
-                      <td className={styles.dateCell}>
-                        {action.dueDate ? new Date(action.dueDate).toLocaleDateString() : '-'}
-                      </td>
-                      <td className={styles.dateCell}>
-                        {new Date(action.createdAt).toLocaleDateString()}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <div className={styles.emptyState}>
-                <ClipboardList size={32} className={styles.emptyStateIcon} />
-                <p className={styles.emptyStateTitle}>{t('emptyActionsTitle')}</p>
-                <p className={styles.emptyStateDescription}>{t('emptyActionsDesc')}</p>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  icon={<Plus size={14} />}
-                  onClick={() => setIsActionFormOpen(true)}
-                >
-                  {t('btnAddAction')}
-                </Button>
-              </div>
-            )}
-          </div>
+            <p>{c.description || t('labelNoDescription')}</p>
+          </section>
 
-          {caseItem.knowledges && caseItem.knowledges.length > 0 && (
-            <div className={styles.section}>
-              <div className={styles.sectionHeader}>
-                <h3 className={styles.sectionTitle}>
-                  <BookOpen size={16} />
-                  {t('sectionRelatedKnowledge', { count: caseItem.knowledges.length })}
-                </h3>
-              </div>
-              <table className={styles.knowledgeTable}>
-                <thead>
-                  <tr>
-                    <th>{t('headerTitle')}</th>
-                    <th>{t('headerSummary')}</th>
-                    <th>{t('headerDate')}</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {caseItem.knowledges
-                    .slice(knowledgePage * knowledgePageSize, (knowledgePage + 1) * knowledgePageSize)
-                    .map((knowledge) => (
-                      <tr
-                        key={knowledge.id}
-                        className={styles.knowledgeRow}
-                        onClick={() => navigate(`/ws/${currentWorkspace!.id}/knowledges/${knowledge.id}`)}
-                      >
-                        <td className={styles.knowledgeTitleCell}>{knowledge.title}</td>
-                        <td className={styles.knowledgeSummaryCell}>
-                          {knowledge.summary.length > 50
-                            ? knowledge.summary.substring(0, 50) + '...'
-                            : knowledge.summary}
-                        </td>
-                        <td className={styles.knowledgeDateCell}>
-                          {new Date(knowledge.sourcedAt).toLocaleDateString()}
-                        </td>
-                        <td className={styles.knowledgeLinkCell}>
-                          {knowledge.sourceURLs?.length > 0 && (
-                            <a
-                              href={knowledge.sourceURLs[0]}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className={styles.knowledgeExternalLink}
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <ExternalLink size={16} />
-                            </a>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
-              {caseItem.knowledges.length > knowledgePageSize && (
-                <div className={styles.pagination}>
-                  <button
-                    className={styles.paginationButton}
-                    onClick={() => setKnowledgePage((p) => Math.max(0, p - 1))}
-                    disabled={knowledgePage === 0}
-                  >
-                    <ChevronLeft size={16} />
-                  </button>
-                  <span className={styles.paginationInfo}>
-                    {knowledgePage + 1} / {Math.ceil(caseItem.knowledges.length / knowledgePageSize)}
-                  </span>
-                  <button
-                    className={styles.paginationButton}
-                    onClick={() =>
-                      setKnowledgePage((p) =>
-                        Math.min(Math.ceil(caseItem.knowledges!.length / knowledgePageSize) - 1, p + 1)
-                      )
-                    }
-                    disabled={knowledgePage >= Math.ceil(caseItem.knowledges.length / knowledgePageSize) - 1}
-                  >
-                    <ChevronRight size={16} />
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Channel Members section */}
-          {caseItem.channelUserCount > 0 && (
-            <div className={styles.section} data-testid="channel-members-section">
-              <div className={styles.sectionHeader}>
-                <h3 className={styles.sectionTitle}>
-                  <Users size={16} />
-                  {t('sectionChannelMembers', { count: caseItem.channelUserCount })}
-                </h3>
-                <div className={styles.memberActions}>
-                  <div className={styles.memberSearchWrapper}>
-                    <Search size={14} className={styles.memberSearchIcon} />
-                    <input
-                      type="text"
-                      value={memberFilter}
-                      onChange={(e) => setMemberFilter(e.target.value)}
-                      placeholder={t('placeholderFilterMembers')}
-                      className={styles.memberSearchInput}
-                      data-testid="member-search-filter"
-                    />
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    icon={<RefreshCw size={14} className={syncing ? styles.spinning : ''} />}
-                    onClick={() => syncMembers()}
-                    disabled={syncing}
-                    data-testid="sync-members-button"
-                  >
-                    {t('btnSync')}
-                  </Button>
-                </div>
-              </div>
-              {memberLoading ? (
-                <div className={styles.memberLoading}>{t('loadingMembers')}</div>
-              ) : (
+          <section className="h-section">
+            <div className="h-section-h">
+              <span className="h-section-title">{t('sectionRelatedActions')}</span>
+              {totalActions > 0 && (
                 <>
-                  <div className={styles.memberGrid}>
-                    {(memberData?.case?.channelUsers?.items || []).map((user: { id: string; name: string; realName: string; imageUrl?: string }) => (
-                      <div key={user.id} className={styles.memberItem}>
-                        {user.imageUrl ? (
-                          <img src={user.imageUrl} alt={user.realName} className={styles.memberAvatar} />
-                        ) : (
-                          <div className={styles.memberAvatarPlaceholder}>
-                            {(user.realName || user.name).charAt(0).toUpperCase()}
-                          </div>
-                        )}
-                        <div className={styles.memberInfo}>
-                          <span className={styles.memberName}>{user.realName || user.name}</span>
-                          <span className={styles.memberHandle}>@{user.name}</span>
-                        </div>
-                      </div>
-                    ))}
+                  <span className="h-section-progress" data-testid="related-actions-progress">
+                    {t('labelProgress', { done: String(doneActions), total: String(totalActions) })}
+                  </span>
+                  <div className="h-section-bar">
+                    <span data-testid="related-actions-progress-bar" style={{ width: `${progressPct}%` }} />
                   </div>
-                  {(memberData?.case?.channelUsers?.totalCount || 0) > memberPageSize && (
-                    <div className={styles.pagination}>
-                      <button
-                        className={styles.paginationButton}
-                        onClick={() => setMemberPage((p) => Math.max(0, p - 1))}
-                        disabled={memberPage === 0}
-                      >
-                        <ChevronLeft size={16} />
-                      </button>
-                      <span className={styles.paginationInfo}>
-                        {memberPage + 1} / {Math.ceil((memberData?.case?.channelUsers?.totalCount || 0) / memberPageSize)}
-                      </span>
-                      <button
-                        className={styles.paginationButton}
-                        onClick={() =>
-                          setMemberPage((p) =>
-                            Math.min(Math.ceil((memberData?.case?.channelUsers?.totalCount || 0) / memberPageSize) - 1, p + 1)
-                          )
-                        }
-                        disabled={!memberData?.case?.channelUsers?.hasMore}
-                      >
-                        <ChevronRight size={16} />
-                      </button>
+                </>
+              )}
+              <span className="spacer" />
+              <Button
+                size="sm"
+                icon={<IconPlus size={12} />}
+                onClick={() => setAddingAction(true)}
+                data-testid="add-action-button"
+              >
+                {t('btnAddAction')}
+              </Button>
+            </div>
+
+            {totalActions > 0 && (() => {
+              const STATUS_ORDER: Array<{ value: string; labelKey: 'statusBacklog' | 'statusTodo' | 'statusInProgress' | 'statusBlocked' | 'statusCompleted' }> = [
+                { value: 'BACKLOG', labelKey: 'statusBacklog' },
+                { value: 'TODO', labelKey: 'statusTodo' },
+                { value: 'IN_PROGRESS', labelKey: 'statusInProgress' },
+                { value: 'BLOCKED', labelKey: 'statusBlocked' },
+                { value: 'COMPLETED', labelKey: 'statusCompleted' },
+              ]
+              const presentStatuses = new Set<string>(c.actions.map((a: any) => a.status))
+              const statusOpts = STATUS_ORDER
+                .filter((s) => presentStatuses.has(s.value))
+                .map((s) => ({ value: s.value, label: t(s.labelKey) }))
+
+              const assigneeMap = new Map<string, { value: string; label: string }>()
+              let anyUnassigned = false
+              c.actions.forEach((a: any) => {
+                if (!a.assignees || a.assignees.length === 0) {
+                  anyUnassigned = true
+                  return
+                }
+                a.assignees.forEach((u: any) => {
+                  if (!assigneeMap.has(u.id)) {
+                    assigneeMap.set(u.id, { value: u.id, label: u.realName || u.name })
+                  }
+                })
+              })
+              const assigneeOpts: Array<{ value: string; label: string }> = []
+              if (anyUnassigned) assigneeOpts.push({ value: 'NONE', label: t('filterUnassigned') })
+              assigneeOpts.push(...Array.from(assigneeMap.values()))
+
+              const filtered = (c.actions as any[]).filter((a) => {
+                if (actionStatusFilters.length > 0 && !actionStatusFilters.includes(a.status)) return false
+                if (actionAssigneeFilters.length > 0) {
+                  const wantUnassigned = actionAssigneeFilters.includes('NONE')
+                  const isUnassigned = !a.assignees || a.assignees.length === 0
+                  const userIds = actionAssigneeFilters.filter((id) => id !== 'NONE')
+                  const matchesUser = userIds.length > 0
+                    && (a.assignees || []).some((u: any) => userIds.includes(u.id))
+                  if (!((wantUnassigned && isUnassigned) || matchesUser)) return false
+                }
+                return true
+              })
+
+              return (
+                <>
+                  <div className="h-filter-bar">
+                    <FilterDropdown
+                      testId="related-action-status-filter"
+                      label="Status"
+                      allLabel={t('filterAllShort')}
+                      options={statusOpts}
+                      value={actionStatusFilters}
+                      onChange={setActionStatusFilters}
+                    />
+                    <FilterDropdown
+                      testId="related-action-assignee-filter"
+                      label="Assignee"
+                      allLabel={t('filterAllAssigneesShort')}
+                      options={assigneeOpts}
+                      value={actionAssigneeFilters}
+                      onChange={setActionAssigneeFilters}
+                    />
+                    <span className="h-filter-count">{t('labelCount', { count: filtered.length })}</span>
+                  </div>
+
+                  {filtered.length === 0 ? (
+                    <div className="card" style={{ padding: 16, textAlign: 'center' }} data-testid="related-actions-empty-after-filter">
+                      <p className="muted" style={{ fontSize: 12, margin: 0 }}>{t('emptyActionsFilter')}</p>
+                    </div>
+                  ) : (
+                    <div className="h-action-list">
+                      {filtered.map((a: any) => {
+                        const status = String(a.status)
+                        const cls = STATUS_CLASS[status] || 'backlog'
+                        const pip = STATUS_PIP[status] || 'pip-bg'
+                        const labelKey = STATUS_LABEL_KEY[status as keyof typeof STATUS_LABEL_KEY]
+                        return (
+                          <Link
+                            key={a.id}
+                            to={`/ws/${currentWorkspace!.id}/cases/${c.id}/actions/${a.id}`}
+                            className="h-action-row"
+                            data-testid="case-related-action"
+                            data-status={status}
+                          >
+                            <span className={`h-action-pip ${pip}`} />
+                            <span className="h-action-title">{a.title}</span>
+                            {labelKey && (
+                              <span
+                                className={`h-action-status ${cls}`}
+                                data-testid="case-related-action-status"
+                              >
+                                {t(labelKey)}
+                              </span>
+                            )}
+                            {status === 'COMPLETED' && a.updatedAt && (
+                              <span className="h-action-meta" data-testid="case-related-action-completed-at">
+                                {t('labelCompleted')}<span className="mono">{formatHHMM(a.updatedAt)}</span>
+                              </span>
+                            )}
+                            {a.assignees?.[0] && (
+                              <Avatar
+                                size="sm"
+                                name={a.assignees[0].name}
+                                realName={a.assignees[0].realName}
+                                imageUrl={a.assignees[0].imageUrl}
+                              />
+                            )}
+                          </Link>
+                        )
+                      })}
                     </div>
                   )}
                 </>
-              )}
+              )
+            })()}
+
+            {totalActions === 0 && (
+              <div className="card" style={{ padding: 24, textAlign: 'center' }}>
+                <h3 style={{ fontSize: 14, margin: 0 }}>{t('emptyActionsTitle')}</h3>
+                <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>{t('emptyActionsDesc')}</p>
+                <div style={{ marginTop: 12 }}>
+                  <Button
+                    size="sm"
+                    icon={<IconPlus size={12} />}
+                    onClick={() => setAddingAction(true)}
+                    data-testid="empty-add-action-button"
+                  >
+                    {t('btnAddAction')}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </section>
+
+          {c.knowledges && c.knowledges.length > 0 && (
+            <section className="h-section">
+              <div className="h-section-h">
+                <span className="h-section-title">{t('sectionRelatedKnowledge', { count: c.knowledges.length })}</span>
+              </div>
+              <div className="col" style={{ gap: 6 }}>
+                {c.knowledges.map((k: any) => (
+                  <Link
+                    key={k.id}
+                    to={`/ws/${currentWorkspace!.id}/knowledges/${k.id}`}
+                    className="h-action-row"
+                  >
+                    <span className="h-action-title">
+                      {k.title}
+                      {k.summary && <span className="soft" style={{ fontSize: 11.5, marginLeft: 8, fontWeight: 400 }}>{k.summary}</span>}
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
+
+        {/* right column / sidebar */}
+        <aside className="h-aside">
+          <section className="h-aside-section">
+            <div className="h-aside-h">
+              <span className="h-aside-title">{t('labelStatus')}</span>
             </div>
+            <div data-testid="aside-status-display" className="h-status-strong">
+              <StatusBadge
+                status={c.status}
+                labelOpen={t('statusOpen')}
+                labelClosed={t('statusClosed')}
+              />
+            </div>
+          </section>
+
+          <section className="h-aside-section" data-testid="case-assignees-inline">
+            <div className="h-aside-h">
+              <span className="h-aside-title">{t('sectionAssignees')}</span>
+            </div>
+            <UserSelect
+              inputId={`case-${c.id}-assignees`}
+              aria-label={t('sectionAssignees')}
+              isMulti
+              isClearable
+              isDisabled={updating}
+              options={slackUsers.map((u: User) => ({
+                value: u.id,
+                label: u.realName || u.name,
+                name: u.name,
+                realName: u.realName,
+                imageUrl: u.imageUrl,
+              }))}
+              value={(c.assignees || []).map((u: User) => ({
+                value: u.id,
+                label: u.realName || u.name,
+                name: u.name,
+                realName: u.realName,
+                imageUrl: u.imageUrl,
+              }))}
+              onChange={(opts: any) =>
+                handleAssigneesChange(((opts || []) as any[]).map((o) => o.value))
+              }
+              placeholder={t('emptyValue')}
+            />
+          </section>
+
+          {c.reporter && (
+            <section className="h-aside-section">
+              <div className="h-aside-h">
+                <span className="h-aside-title">{t('labelReporter')}</span>
+              </div>
+              <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                <Avatar size="sm" name={c.reporter.name} realName={c.reporter.realName} imageUrl={c.reporter.imageUrl} />
+                <span style={{ fontSize: 13 }}>{c.reporter.realName || c.reporter.name}</span>
+              </div>
+            </section>
           )}
 
-        </div>
+          {fields.length > 0 && (
+            <section className="h-aside-section" data-testid="case-fields-inline">
+              <div className="h-aside-h">
+                <span className="h-aside-title">{t('sectionFields')}</span>
+              </div>
+              <div className="kv-list">
+                {fields.map((f: any) => {
+                  const fv = c.fields?.find((x: any) => x.fieldId === f.id)
+                  return (
+                    <div key={f.id} className="kv-row" data-testid={`case-field-${f.id}`}>
+                      <span className="kv-label">{f.name}</span>
+                      <span className="kv-value">
+                        <FieldDisplay field={f} value={fv?.value} users={slackUsers} />
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            </section>
+          )}
+
+          {isPrivate && slackChannelID && (
+            <section className="h-aside-section" data-testid="channel-members-section">
+              <div className="h-aside-h">
+                <span className="h-aside-title">
+                  {t('sectionChannelMembers', { count: memberTotal })}
+                </span>
+                <span className="spacer" />
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={handleSync}
+                  disabled={syncing}
+                  data-testid="sync-members-button"
+                  icon={<IconRefresh size={12} />}
+                >
+                  {t('btnSync')}
+                </Button>
+              </div>
+              <div className="h-search" style={{ width: '100%', marginLeft: 0, marginBottom: 8 }}>
+                <IconSearch size={13} />
+                <input
+                  value={memberFilter}
+                  onChange={(e) => setMemberFilter(e.target.value)}
+                  placeholder={t('placeholderFilterMembers')}
+                  data-testid="member-search-filter"
+                  style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontFamily: 'inherit', fontSize: 12.5, color: 'var(--fg)' }}
+                />
+              </div>
+              <div className="col" style={{ gap: 0 }}>
+                {members.map((m) => (
+                  <div key={m.id} className={styles.memberItem}>
+                    <Avatar size="sm" name={m.name} realName={m.realName} imageUrl={m.imageUrl} />
+                    <span className={`name truncate ${styles.name}`}>{m.realName}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+        </aside>
       </div>
 
-      <CaseForm isOpen={isFormOpen} onClose={() => setIsFormOpen(false)} caseItem={caseItem} />
+      {editing && <CaseForm caseItem={{
+        id: c.id, title: c.title, description: c.description,
+        isPrivate: c.isPrivate, assigneeIDs: c.assigneeIDs || [],
+        fields: c.fields || [],
+      }} onClose={() => setEditing(false)} />}
 
-      <CaseDeleteDialog
-        isOpen={isDeleteDialogOpen}
-        onClose={() => setIsDeleteDialogOpen(false)}
-        onConfirm={handleDeleteConfirm}
-        caseTitle={caseItem.title}
-      />
-
-      <Modal
-        isOpen={isCloseDialogOpen}
-        onClose={() => setIsCloseDialogOpen(false)}
-        title={t('titleCloseCase', { caseLabel })}
-        footer={
-          <>
-            <Button variant="outline" onClick={() => setIsCloseDialogOpen(false)}>
-              {t('btnCancel')}
-            </Button>
-            <Button
-              variant="danger"
-              data-testid="confirm-close-button"
-              onClick={async () => {
-                await handleCloseCase()
-                setIsCloseDialogOpen(false)
-              }}
-            >
-              {t('btnClose')}
-            </Button>
-          </>
-        }
-      >
-        <p
-          style={{ margin: 0, color: 'var(--text-body)' }}
-          dangerouslySetInnerHTML={{ __html: t('msgCloseCaseConfirm', { title: caseItem.title }) }}
-        />
-      </Modal>
-
-      {isActionFormOpen && (
+      {addingAction && (
         <ActionForm
-          isOpen={isActionFormOpen}
-          initialCaseID={caseItem.id}
-          onClose={() => {
-            setIsActionFormOpen(false)
-            refetch()
-          }}
+          action={null}
+          defaultCaseID={c.id}
+          onClose={() => setAddingAction(false)}
         />
       )}
 
-      <ActionModal
-        actionId={selectedActionId}
-        isOpen={selectedActionId !== null}
-        onClose={handleActionModalClose}
-      />
+      {openActionId !== null && (
+        <ActionModal
+          actionId={openActionId}
+          onClose={() => navigate(`/ws/${currentWorkspace!.id}/cases/${c.id}`)}
+        />
+      )}
+
+      {confirmClose && (
+        <Modal
+          open
+          onClose={() => setConfirmClose(false)}
+          title={t('titleCloseCase', { caseLabel })}
+          width={460}
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setConfirmClose(false)}>{t('btnCancel')}</Button>
+              <Button variant="primary" onClick={handleClose} disabled={closing} data-testid="confirm-close-button">
+                {t('btnClose')}
+              </Button>
+            </>
+          }
+        >
+          <div
+            style={{ fontSize: 13, lineHeight: 1.6 }}
+            dangerouslySetInnerHTML={{ __html: t('msgCloseCaseConfirm', { title: escapeHtml(c.title) }) }}
+          />
+        </Modal>
+      )}
+
+      {confirmDelete && (
+        <CaseDeleteDialog
+          caseTitle={c.title}
+          caseLabel={caseLabel}
+          deleting={deleting}
+          onCancel={() => setConfirmDelete(false)}
+          onConfirm={handleDelete}
+        />
+      )}
     </div>
   )
+}
+
+function escapeHtml(s: string) {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
 }

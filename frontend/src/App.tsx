@@ -1,6 +1,5 @@
-import { Routes, Route } from 'react-router-dom'
+import { Navigate, Routes, Route } from 'react-router-dom'
 import Layout from './components/Layout'
-import Top from './pages/Top'
 import CaseList from './pages/CaseList'
 import CaseDetail from './pages/CaseDetail'
 import ActionList from './pages/ActionList'
@@ -19,7 +18,7 @@ function App() {
       <Routes>
         <Route path="/" element={<WorkspaceSelector />} />
         <Route path="/ws/:workspaceId" element={<WorkspaceGuard><Layout /></WorkspaceGuard>}>
-          <Route index element={<Top />} />
+          <Route index element={<Navigate to="cases" replace />} />
           <Route path="cases" element={<CaseList />} />
           <Route path="cases/:id" element={<CaseDetail />} />
           <Route path="cases/:id/actions/:actionId" element={<CaseDetail />} />

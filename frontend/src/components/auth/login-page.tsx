@@ -1,31 +1,27 @@
-import { SlackIcon } from '../icons/SlackIcon';
-import { useTranslation } from '../../i18n';
-import './login-page.css';
+import { IconSlack } from '../Icons'
+import { useTranslation } from '../../i18n'
 
 export function LoginPage() {
-  const { t } = useTranslation();
+  const { t } = useTranslation()
 
   const handleLogin = () => {
-    window.location.href = "/api/auth/login";
-  };
+    window.location.href = '/api/auth/login'
+  }
 
   return (
-    <div className="login-container">
+    <div className="login-stage" style={{ minHeight: '100vh' }}>
       <div className="login-card">
-        <div className="login-header">
-          <h2 className="login-title">{t('appName')}</h2>
-          <p className="login-subtitle">{t('appSubtitle')}</p>
+        <div className="login-hero">
+          <img src="/logo-fullbody.png" alt={t('appName')} />
         </div>
-
-        <button onClick={handleLogin} className="login-button">
-          <SlackIcon style={{ marginRight: '8px' }} />
+        <h1>{t('appName')}</h1>
+        <p className="tag">{t('appSubtitle')}</p>
+        <button className="btn slack" onClick={handleLogin} style={{ margin: '0 auto' }}>
+          <IconSlack size={20} />
           {t('btnSignInSlack')}
         </button>
-
-        <p className="login-description">
-          {t('loginDescription')}
-        </p>
       </div>
+      <div className="login-foot">© 2026 Hecatoncheires</div>
     </div>
-  );
+  )
 }

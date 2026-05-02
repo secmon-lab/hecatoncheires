@@ -1,4 +1,5 @@
 import Select from 'react-select'
+import { buildSelectStyles, portalProps } from '../selectStyles'
 import styles from './FieldComponents.module.css'
 
 interface User {
@@ -50,22 +51,26 @@ export default function UserField({
       {description && <p className={styles.description}>{description}</p>}
       <Select
         inputId={fieldId}
+        aria-label={label}
         options={options}
         value={selectedOption}
         onChange={(option) => onChange(option?.value || '')}
         isClearable
         isDisabled={disabled}
         placeholder="Select a user..."
+        classNamePrefix="rs"
+        {...portalProps}
+        styles={buildSelectStyles({ error: !!error })}
         filterOption={(option, inputValue) => {
           const search = inputValue.toLowerCase()
-          const data = option.data
+          const data = option.data as any
           return (
             data.label.toLowerCase().includes(search) ||
             data.name.toLowerCase().includes(search) ||
             data.realName.toLowerCase().includes(search)
           )
         }}
-        formatOptionLabel={(option) => (
+        formatOptionLabel={(option: any) => (
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             {option.image && (
               <img

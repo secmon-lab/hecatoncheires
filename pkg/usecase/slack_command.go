@@ -651,7 +651,13 @@ func (uc *SlackUseCases) HandleCaseEditSubmit(ctx context.Context, caseUC *CaseU
 			goerr.V("case_id", meta.CaseID))
 	}
 
-	updated, err := caseUC.UpdateCase(ctx, meta.WorkspaceID, meta.CaseID, title, description, existingCase.AssigneeIDs, fieldValues)
+	_ = existingCase // assignees are preserved by default
+	patch := CaseUpdate{
+		Title:       &title,
+		Description: &description,
+		Fields:      fieldValues,
+	}
+	updated, err := caseUC.UpdateCase(ctx, meta.WorkspaceID, meta.CaseID, patch)
 	if err != nil {
 		return goerr.Wrap(err, "failed to update case via slash command",
 			goerr.V("workspace_id", meta.WorkspaceID),

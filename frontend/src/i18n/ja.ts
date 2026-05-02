@@ -29,6 +29,22 @@ export const ja: Messages = {
   btnCreating: '作成中...',
   btnDeleting: '削除中...',
   btnSaving: '保存中...',
+  btnMore: 'その他',
+  btnWatch: 'Watch',
+  btnChange: '変更…',
+  labelBy: 'by',
+  msgPrivateBanner: 'このケースは Private です。#{channel} チャンネルのメンバー ({count}名) のみ閲覧・編集できます。',
+  labelProgress: '{done}/{total} 完了',
+  filterStatus: 'ステータス',
+  filterAssignee: '担当者',
+  filterAllStatuses: 'すべてのステータス',
+  filterAllAssignees: 'すべての担当者',
+  filterUnassigned: '未アサイン',
+  filterAllShort: 'すべて',
+  filterAllAssigneesShort: '全員',
+  emptyActionsFilter: '条件に一致するアクションがありません',
+  labelCount: '{count} 件',
+  labelCompleted: '完了 ',
 
   // Common labels
   labelTitle: 'タイトル',
@@ -77,8 +93,24 @@ export const ja: Messages = {
   ariaToggleColumns: 'カラム切替',
 
   // Cases
-  titleCaseManagement: '{caseLabel} 管理',
-  subtitleCaseManagement: '{caseLabelLower}の管理・追跡',
+  titleCaseManagement: '{caseLabel}',
+  subtitleCaseManagement: 'ワークスペース内のすべての{caseLabelLower}を管理',
+  btnFilter: 'フィルタ',
+  btnColumns: '列の表示',
+  tabAll: 'すべて',
+  headerCategory: 'カテゴリ',
+  headerSlack: 'Slack',
+  placeholderSearchByTitle: 'タイトルで検索…',
+  navCustomFields: 'Custom fields',
+  navMembers: 'Members',
+  sidebarSectionWorkspace: 'Workspace',
+  sidebarSectionWorkspaceSettings: 'Workspace settings',
+  topbarSearchPlaceholder: 'Search cases, actions, channels…',
+  workspaceSelectorSubtitle: 'ワークスペースを選択してください',
+  workspaceSelectorEmpty: 'ワークスペースが設定されていません',
+  workspaceSelectorEmptyHint: '設定ファイルで少なくとも 1 つのワークスペースを設定してください。',
+  sectionActivity: 'アクティビティ',
+  emptyActivity: 'アクティビティはまだありません。',
   btnNewCase: '新規 {caseLabel}',
   tabOpen: 'オープン',
   tabClosed: 'クローズ',
@@ -257,7 +289,7 @@ export const ja: Messages = {
   assistLogNextSteps: '次のステップ',
 
   // Select field
-  placeholderSelect: '-- 選択 --',
+  placeholderSelect: '選択してください…',
 
   // Dashboard (placeholder/demo content)
   dashUsedSpace: '使用容量',

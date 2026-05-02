@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
 	gqlctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/graphql"
 	httpctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/http"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
@@ -37,10 +39,12 @@ func logAttrsToArgs(attrs []slog.Attr) []any {
 	return args
 }
 
-// graphqlErrorStatusMiddleware wraps the GraphQL handler to return HTTP 500 when errors occur
+// graphqlErrorStatusMiddleware maps GraphQL error responses to an appropriate
+// HTTP status. The ErrorPresenter tags client-faulted errors (validation,
+// not-found, access-denied) with extensions.code; this middleware reads those
+// codes and returns 4xx for them. Genuine server faults stay 5xx.
 func graphqlErrorStatusMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Capture the response
 		rec := &responseRecorder{
 			ResponseWriter: w,
 			body:           &bytes.Buffer{},
@@ -49,20 +53,92 @@ func graphqlErrorStatusMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(rec, r)
 
-		// Check if response contains GraphQL errors
 		var gqlResp struct {
-			Errors []interface{} `json:"errors"`
+			Errors []gqlErrorEnvelope `json:"errors"`
 		}
+
 		if err := json.Unmarshal(rec.body.Bytes(), &gqlResp); err == nil && len(gqlResp.Errors) > 0 {
-			// GraphQL errors found, set status to 500
-			w.WriteHeader(http.StatusInternalServerError)
+			w.WriteHeader(httpStatusForGraphQLErrors(gqlResp.Errors))
 		} else {
 			w.WriteHeader(rec.statusCode)
 		}
 
-		// Write the captured body to the original writer
 		_, _ = w.Write(rec.body.Bytes())
 	})
+}
+
+// gqlErrorEnvelope is the shape we care about in a GraphQL error response —
+// just enough to read extensions.code for HTTP status mapping.
+type gqlErrorEnvelope struct {
+	Extensions struct {
+		Code string `json:"code"`
+	} `json:"extensions"`
+}
+
+// httpStatusForGraphQLErrors picks the worst (most-server-faulty) HTTP status
+// across all errors. If every error is a tagged client error we return its
+// 4xx; otherwise we fall back to 500.
+func httpStatusForGraphQLErrors(errs []gqlErrorEnvelope) int {
+	worst := 0
+	for _, e := range errs {
+		s := statusForExtensionCode(e.Extensions.Code)
+		if s == 0 {
+			return http.StatusInternalServerError
+		}
+		if s > worst {
+			worst = s
+		}
+	}
+	if worst == 0 {
+		return http.StatusInternalServerError
+	}
+	return worst
+}
+
+// classifyError maps a domain/usecase error to a GraphQL extensions.code.
+// Returning "" leaves the error untagged, which the HTTP middleware treats
+// as a server fault (500).
+func classifyError(err error) string {
+	switch {
+	case errors.Is(err, model.ErrInvalidFieldType),
+		errors.Is(err, model.ErrInvalidOptionID),
+		errors.Is(err, model.ErrMissingRequired),
+		errors.Is(err, model.ErrInvalidNotionID),
+		errors.Is(err, model.ErrInvalidGitHubRepo):
+		return "BAD_USER_INPUT"
+	case errors.Is(err, usecase.ErrCaseNotFound),
+		errors.Is(err, usecase.ErrActionNotFound),
+		errors.Is(err, model.ErrWorkspaceNotFound):
+		return "NOT_FOUND"
+	case errors.Is(err, usecase.ErrAccessDenied):
+		return "FORBIDDEN"
+	case errors.Is(err, usecase.ErrCaseAlreadyClosed),
+		errors.Is(err, usecase.ErrCaseAlreadyOpen),
+		errors.Is(err, usecase.ErrDuplicateField):
+		return "CONFLICT"
+	}
+	return ""
+}
+
+func isClientError(err error) bool {
+	return classifyError(err) != ""
+}
+
+func statusForExtensionCode(code string) int {
+	switch code {
+	case "BAD_USER_INPUT":
+		return http.StatusBadRequest
+	case "NOT_FOUND":
+		return http.StatusNotFound
+	case "FORBIDDEN":
+		return http.StatusForbidden
+	case "CONFLICT":
+		return http.StatusConflict
+	case "UNAUTHENTICATED":
+		return http.StatusUnauthorized
+	default:
+		return 0
+	}
 }
 
 // responseRecorder captures HTTP responses for inspection
@@ -295,14 +371,26 @@ func cmdServe() *cli.Command {
 				gqlctrl.NewExecutableSchema(gqlctrl.Config{Resolvers: resolver}),
 			)
 
-			// Configure error presenter with stack traces
+			// Configure error presenter with stack traces and client/server
+			// classification (extensions.code is read by graphqlErrorStatusMiddleware
+			// to map errors to the right HTTP status).
 			srv.SetErrorPresenter(func(ctx context.Context, err error) *gqlerror.Error {
-				// Convert to GraphQL error first
 				gqlErr := graphql.DefaultErrorPresenter(ctx, err)
+				if gqlErr.Extensions == nil {
+					gqlErr.Extensions = map[string]any{}
+				}
+				if code := classifyError(err); code != "" {
+					gqlErr.Extensions["code"] = code
+				}
 
-				// Wrap error with goerr and log with stack trace
+				// Log full stack trace for diagnostics. Client-faulted errors
+				// are logged at warn (they're expected), server faults at error.
 				wrappedErr := goerr.Wrap(err, "GraphQL error")
-				logging.Default().Error("GraphQL error occurred", "error", wrappedErr)
+				if isClientError(err) {
+					logging.Default().Warn("GraphQL request rejected", "error", wrappedErr)
+				} else {
+					logging.Default().Error("GraphQL error occurred", "error", wrappedErr)
+				}
 
 				return gqlErr
 			})

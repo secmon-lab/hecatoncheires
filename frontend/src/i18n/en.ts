@@ -29,6 +29,22 @@ export const en: Messages = {
   btnCreating: 'Creating...',
   btnDeleting: 'Deleting...',
   btnSaving: 'Saving...',
+  btnMore: 'More',
+  btnWatch: 'Watch',
+  btnChange: 'Change…',
+  labelBy: 'by',
+  msgPrivateBanner: 'This case is Private. Only members of #{channel} ({count} people) can view or edit.',
+  labelProgress: '{done}/{total} completed',
+  filterStatus: 'Status',
+  filterAssignee: 'Assignee',
+  filterAllStatuses: 'All statuses',
+  filterAllAssignees: 'All assignees',
+  filterUnassigned: 'Unassigned',
+  filterAllShort: 'All',
+  filterAllAssigneesShort: 'Everyone',
+  emptyActionsFilter: 'No actions match the current filters.',
+  labelCount: '{count} items',
+  labelCompleted: 'Completed ',
 
   // Common labels
   labelTitle: 'Title',
@@ -77,8 +93,24 @@ export const en: Messages = {
   ariaToggleColumns: 'Toggle columns',
 
   // Cases
-  titleCaseManagement: '{caseLabel} Management',
-  subtitleCaseManagement: 'Manage and track {caseLabelLower}s',
+  titleCaseManagement: '{caseLabel}s',
+  subtitleCaseManagement: 'Manage all {caseLabelLower}s in this workspace',
+  btnFilter: 'Filter',
+  btnColumns: 'Columns',
+  tabAll: 'All',
+  headerCategory: 'Category',
+  headerSlack: 'Slack',
+  placeholderSearchByTitle: 'Search by title...',
+  navCustomFields: 'Custom fields',
+  navMembers: 'Members',
+  sidebarSectionWorkspace: 'Workspace',
+  sidebarSectionWorkspaceSettings: 'Workspace settings',
+  topbarSearchPlaceholder: 'Search cases, actions, channels…',
+  workspaceSelectorSubtitle: 'Select a workspace to continue',
+  workspaceSelectorEmpty: 'No workspaces configured',
+  workspaceSelectorEmptyHint: 'Configure at least one workspace in your config files.',
+  sectionActivity: 'Activity',
+  emptyActivity: 'No activity yet.',
   btnNewCase: 'New {caseLabel}',
   tabOpen: 'Open',
   tabClosed: 'Closed',
@@ -257,7 +289,7 @@ export const en: Messages = {
   assistLogNextSteps: 'Next Steps',
 
   // Select field
-  placeholderSelect: '-- Select --',
+  placeholderSelect: 'Select an option…',
 
   // Dashboard (placeholder/demo content)
   dashUsedSpace: 'Used Space',

@@ -14,9 +14,9 @@ export class CaseFormPage extends BasePage {
 
   constructor(page: Page) {
     super(page);
-    this.titleInput = page.locator('input[placeholder*="title"]').first();
-    this.descriptionInput = page.locator('textarea[placeholder*="description"]').first();
-    this.submitButton = page.locator('button').filter({ hasText: /Save/ }).first();
+    this.titleInput = page.getByTestId('case-title-input');
+    this.descriptionInput = page.getByTestId('case-description-input');
+    this.submitButton = page.getByTestId('case-submit-button');
     this.cancelButton = page.locator('button').filter({ hasText: /Cancel/ }).first();
     this.closeButton = page.locator('button').first(); // X button
   }
@@ -50,23 +50,25 @@ export class CaseFormPage extends BasePage {
    * Automatically detects if it's a select or input field
    */
   async fillCustomField(fieldId: string, value: string): Promise<void> {
-    // Capitalize first letter of fieldId for label matching
-    const fieldLabel = fieldId.charAt(0).toUpperCase() + fieldId.slice(1);
-
-    // Try to find as a select/combobox by accessible name or label
-    const selectByLabel = this.page.getByRole('combobox', { name: new RegExp(fieldLabel, 'i') });
-    const selectCount = await selectByLabel.count();
-
-    if (selectCount > 0) {
-      // It's a select field - use selectOption
-      // Capitalize first letter of value to match options like "Bug", "Feature"
+    // SELECT/MULTI_SELECT fields are rendered as react-select with id=fieldId
+    const rsInput = this.page.locator(`#${fieldId}`);
+    const isReactSelect = (await rsInput.count()) > 0
+      && (await rsInput.getAttribute('role')) === 'combobox';
+    if (isReactSelect) {
+      await rsInput.click();
       const optionValue = value.charAt(0).toUpperCase() + value.slice(1);
-      await selectByLabel.first().selectOption({ label: optionValue });
-    } else {
-      // Try as a regular input field
-      const inputField = this.page.locator(`[name="${fieldId}"], [data-field-id="${fieldId}"], input[placeholder*="${fieldLabel}"]`).first();
-      await inputField.fill(value);
+      // react-select portals the menu to body; pick by visible text
+      const opt = this.page.locator('.rs__option').filter({ hasText: optionValue }).first();
+      await opt.waitFor({ state: 'visible', timeout: 3000 });
+      await opt.click();
+      return;
     }
+    // TEXT / NUMBER / etc.
+    const fieldLabel = fieldId.charAt(0).toUpperCase() + fieldId.slice(1);
+    const inputField = this.page.locator(
+      `#${fieldId}, [name="${fieldId}"], [data-field-id="${fieldId}"], input[placeholder*="${fieldLabel}"]`,
+    ).first();
+    await inputField.fill(value);
   }
 
   /**

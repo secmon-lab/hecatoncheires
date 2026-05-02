@@ -1977,7 +1977,10 @@ input CreateCaseInput {
 
 input UpdateCaseInput {
   id: Int!
-  title: String!
+  # All fields below are optional. Omitted fields preserve their current value
+  # on the existing Case. This allows true partial updates from clients that
+  # only want to change one thing (e.g. inline edit of assignees).
+  title: String
   description: String
   assigneeIDs: [String!]
   fields: [FieldValueInput!]
@@ -11629,7 +11632,7 @@ func (ec *executionContext) unmarshalInputUpdateCaseInput(ctx context.Context, o
 			it.ID = data
 		case "title":
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("title"))
-			data, err := ec.unmarshalNString2string(ctx, v)
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
 			if err != nil {
 				return it, err
 			}

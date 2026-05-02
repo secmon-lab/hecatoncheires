@@ -1,557 +1,357 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { useQuery, useMutation } from '@apollo/client'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useMutation, useQuery } from '@apollo/client'
 import Select from 'react-select'
-import Markdown from 'react-markdown'
-import { Trash2, AlertTriangle, Check, Pencil } from 'lucide-react'
-import Modal from '../components/Modal'
-import Button from '../components/Button'
-import Chip from '../components/Chip'
-import { GET_ACTION, UPDATE_ACTION, DELETE_ACTION, GET_OPEN_CASE_ACTIONS } from '../graphql/action'
+import { buildSelectStyles, portalProps } from '../components/selectStyles'
+import { GET_ACTION, UPDATE_ACTION, DELETE_ACTION, GET_ACTIONS } from '../graphql/action'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
-import styles from './ActionModal.module.css'
+import Modal from '../components/Modal'
+import Button from '../components/Button'
+import { AvatarStack } from '../components/Primitives'
+import { IconCases, IconCheck } from '../components/Icons'
 
 interface ActionModalProps {
-  actionId: number | null
-  isOpen: boolean
+  actionId: number
   onClose: () => void
 }
 
-interface AssigneeOption {
-  value: string
-  label: string
-  name: string
-  realName: string
-  image?: string
+const STATUSES = ['BACKLOG', 'TODO', 'IN_PROGRESS', 'BLOCKED', 'COMPLETED'] as const
+
+const statusKeyMap = {
+  BACKLOG: 'statusBacklog',
+  TODO: 'statusTodo',
+  IN_PROGRESS: 'statusInProgress',
+  BLOCKED: 'statusBlocked',
+  COMPLETED: 'statusCompleted',
+} as const
+
+function formatDue(iso?: string | null) {
+  if (!iso) return null
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return null
+  const today = new Date()
+  const sameDay =
+    d.getFullYear() === today.getFullYear() &&
+    d.getMonth() === today.getMonth() &&
+    d.getDate() === today.getDate()
+  const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  const overdue = d.getTime() < today.getTime() && !sameDay
+  return {
+    label: sameDay ? `今日 ${time}` : `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} ${time}`,
+    urgent: sameDay,
+    overdue,
+  }
 }
 
-const STATUS_COLORS: Record<string, number> = {
-  BACKLOG: 0,
-  TODO: 1,
-  IN_PROGRESS: 2,
-  BLOCKED: 3,
-  COMPLETED: 4,
-}
-
-// STATUS_OPTIONS is defined inside the component to support i18n
-
-function useFeedback() {
-  const [visible, setVisible] = useState(false)
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const show = useCallback(() => {
-    setVisible(true)
-    if (timerRef.current) clearTimeout(timerRef.current)
-    timerRef.current = setTimeout(() => setVisible(false), 2000)
-  }, [])
-
-  useEffect(() => {
-    return () => { if (timerRef.current) clearTimeout(timerRef.current) }
-  }, [])
-
-  return { visible, show }
-}
-
-export default function ActionModal({ actionId, isOpen, onClose }: ActionModalProps) {
-  const navigate = useNavigate()
+export default function ActionModal({ actionId, onClose }: ActionModalProps) {
   const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
-
-  const STATUS_OPTIONS = useMemo(() => [
-    { value: 'BACKLOG', label: t('statusBacklog') },
-    { value: 'TODO', label: t('statusTodo') },
-    { value: 'IN_PROGRESS', label: t('statusInProgress') },
-    { value: 'BLOCKED', label: t('statusBlocked') },
-    { value: 'COMPLETED', label: t('statusCompleted') },
-  ], [t])
-  const [isDeleteConfirm, setIsDeleteConfirm] = useState(false)
-
-  // Title inline edit
-  const [isEditingTitle, setIsEditingTitle] = useState(false)
-  const [editTitle, setEditTitle] = useState('')
-  const [savingTitle, setSavingTitle] = useState(false)
-  const titleFeedback = useFeedback()
-
-  // Description
-  const [isEditingDescription, setIsEditingDescription] = useState(false)
-  const [editDescription, setEditDescription] = useState('')
-  const [savingDescription, setSavingDescription] = useState(false)
-  const descFeedback = useFeedback()
-
-  // Sidebar auto-save feedback
-  const statusFeedback = useFeedback()
-  const assigneeFeedback = useFeedback()
-
-  const { data: actionData, loading, error } = useQuery(GET_ACTION, {
-    variables: { workspaceId: currentWorkspace!.id, id: actionId },
-    skip: !actionId || !currentWorkspace,
+  const navigate = useNavigate()
+  const { data, loading } = useQuery(GET_ACTION, {
+    variables: { workspaceId: currentWorkspace?.id, id: actionId },
+    skip: !currentWorkspace,
   })
+
+  const action = data?.action
+  const [editingTitle, setEditingTitle] = useState('')
+  const [editing, setEditing] = useState(false)
+  const [editingDescription, setEditingDescription] = useState('')
+  const [, setDescriptionDirty] = useState(false)
+  const [savedFlash, setSavedFlash] = useState(false)
 
   const { data: usersData } = useQuery(GET_SLACK_USERS)
+  const users = usersData?.slackUsers || []
+  const userOptions = users.map((u: any) => ({
+    value: u.id as string,
+    label: u.realName || u.name,
+  }))
 
-  const [updateAction] = useMutation(UPDATE_ACTION, {
+  const [updateAction, { loading: saving }] = useMutation(UPDATE_ACTION, {
     refetchQueries: [
-      { query: GET_ACTION, variables: { workspaceId: currentWorkspace!.id, id: actionId } },
-      { query: GET_OPEN_CASE_ACTIONS, variables: { workspaceId: currentWorkspace!.id } },
+      { query: GET_ACTION, variables: { workspaceId: currentWorkspace?.id, id: actionId } },
+      { query: GET_ACTIONS, variables: { workspaceId: currentWorkspace?.id } },
     ],
-    onError: (err) => {
-      console.error('Update error:', err)
-    },
   })
-
   const [deleteAction, { loading: deleting }] = useMutation(DELETE_ACTION, {
-    refetchQueries: [
-      { query: GET_OPEN_CASE_ACTIONS, variables: { workspaceId: currentWorkspace!.id } },
-    ],
-    onCompleted: () => {
-      setIsDeleteConfirm(false)
-      onClose()
-    },
-    onError: (err) => {
-      console.error('Delete error:', err)
-    },
+    refetchQueries: [{ query: GET_ACTIONS, variables: { workspaceId: currentWorkspace?.id } }],
   })
 
-  const action = actionData?.action
-
-  // Sync local description from server data
   useEffect(() => {
     if (action) {
-      setEditDescription(action.description || '')
+      setEditingTitle(action.title || '')
+      setEditingDescription(action.description || '')
+      setDescriptionDirty(false)
     }
-  }, [action])
+  }, [action?.id])
 
-  // Reset state when modal closes
-  useEffect(() => {
-    if (!isOpen) {
-      setIsDeleteConfirm(false)
-      setIsEditingTitle(false)
-      setIsEditingDescription(false)
+  const flashSaved = () => {
+    setSavedFlash(true)
+    window.setTimeout(() => setSavedFlash(false), 1500)
+  }
+
+  const titleEl = useMemo(() => (
+    <div className="row" style={{ gap: 12, alignItems: 'center', flex: 1 }}>
+      <h2
+        id="modal-title"
+        style={{ margin: 0, fontSize: 13, fontWeight: 500, color: 'var(--fg-soft)', fontFamily: 'var(--font-mono)' }}
+      >
+        #A-{actionId}
+      </h2>
+      {action?.case && (
+        <a
+          className="slack-link"
+          href={`/ws/${currentWorkspace!.id}/cases/${action.case.id}`}
+          data-testid="action-case-link"
+          onClick={(e) => {
+            e.preventDefault()
+            // Navigate without calling onClose() — onClose triggers a route
+            // change back to the actions list which would override this nav.
+            navigate(`/ws/${currentWorkspace!.id}/cases/${action.case.id}`)
+          }}
+        >
+          <IconCases size={11} />
+          #{action.case.id} {action.case.title}
+        </a>
+      )}
+      {savedFlash && (
+        <span className="badge open" style={{ fontSize: 10 }}>
+          <IconCheck size={9} sw={2.5} />
+          {t('feedbackSaved')}
+        </span>
+      )}
+    </div>
+  ), [actionId, action?.case?.id, action?.case?.title, savedFlash, t, currentWorkspace, navigate, onClose])
+
+  if (!loading && !action) {
+    return (
+      <Modal open onClose={onClose} title={t('errorActionNotFound')}>
+        <p className="muted">{t('errorActionNotFound')}</p>
+      </Modal>
+    )
+  }
+
+  const handleStatusChange = async (next: string) => {
+    if (!action || next === action.status) return
+    await updateAction({
+      variables: { workspaceId: currentWorkspace!.id, input: { id: action.id, status: next } },
+    })
+    flashSaved()
+  }
+
+  const handleSaveTitle = async () => {
+    if (!action || !editingTitle.trim() || editingTitle === action.title) {
+      setEditing(false)
+      return
     }
-  }, [isOpen])
-
-  // --- Handlers ---
-
-  const handleTitleEditStart = () => {
-    if (!action) return
-    setEditTitle(action.title)
-    setIsEditingTitle(true)
-  }
-
-  const handleTitleSave = async () => {
-    if (!action || !editTitle.trim()) return
-    setSavingTitle(true)
     await updateAction({
-      variables: {
-        workspaceId: currentWorkspace!.id,
-        input: { id: action.id, title: editTitle.trim() },
-      },
+      variables: { workspaceId: currentWorkspace!.id, input: { id: action.id, title: editingTitle.trim() } },
     })
-    setSavingTitle(false)
-    setIsEditingTitle(false)
-    titleFeedback.show()
+    setEditing(false)
+    flashSaved()
   }
 
-  const handleTitleCancel = () => {
-    setIsEditingTitle(false)
-  }
-
-  const handleDescriptionEditStart = () => {
-    if (!action) return
-    setEditDescription(action.description || '')
-    setIsEditingDescription(true)
-  }
-
-  const handleDescriptionSave = async () => {
-    if (!action) return
-    setSavingDescription(true)
-    await updateAction({
-      variables: {
-        workspaceId: currentWorkspace!.id,
-        input: { id: action.id, description: editDescription.trim() },
-      },
-    })
-    setSavingDescription(false)
-    setIsEditingDescription(false)
-    descFeedback.show()
-  }
-
-  const handleDescriptionCancel = () => {
-    setIsEditingDescription(false)
-    setEditDescription(action?.description || '')
-  }
-
-  const handleStatusChange = async (newStatus: string) => {
-    if (!action || newStatus === action.status) return
-    await updateAction({
-      variables: {
-        workspaceId: currentWorkspace!.id,
-        input: { id: action.id, status: newStatus },
-      },
-    })
-    statusFeedback.show()
-  }
-
-  const handleAssigneeChange = async (newAssigneeIDs: string[]) => {
+  const handleAssigneesChange = async (next: string[]) => {
     if (!action) return
     await updateAction({
-      variables: {
-        workspaceId: currentWorkspace!.id,
-        input: { id: action.id, assigneeIDs: newAssigneeIDs },
-      },
+      variables: { workspaceId: currentWorkspace!.id, input: { id: action.id, assigneeIDs: next } },
     })
-    assigneeFeedback.show()
+    flashSaved()
   }
 
+  const handleSave = async () => {
+    if (!action) return
+    const input: any = { id: action.id }
+    if (editingTitle.trim() && editingTitle !== action.title) input.title = editingTitle.trim()
+    if (editingDescription !== (action.description || '')) input.description = editingDescription
+    if (Object.keys(input).length === 1) {
+      // Nothing changed; still flash to acknowledge the click
+      flashSaved()
+      return
+    }
+    await updateAction({
+      variables: { workspaceId: currentWorkspace!.id, input },
+    })
+    setDescriptionDirty(false)
+    setEditing(false)
+    flashSaved()
+  }
+
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const handleDelete = async () => {
     if (!action) return
-    await deleteAction({
-      variables: { workspaceId: currentWorkspace!.id, id: action.id },
-    })
-  }
-
-  const handleCaseClick = () => {
-    if (action?.case) {
-      onClose()
-      navigate(`/ws/${currentWorkspace!.id}/cases/${action.case.id}`)
-    }
-  }
-
-  const handleClose = () => {
-    setIsDeleteConfirm(false)
-    setIsEditingTitle(false)
-    setIsEditingDescription(false)
+    await deleteAction({ variables: { workspaceId: currentWorkspace!.id, id: action.id } })
+    setConfirmDelete(false)
     onClose()
   }
 
-  if (!isOpen) return null
+  const due = action ? formatDue(action.dueDate) : null
 
-  // Delete confirmation
-  if (isDeleteConfirm) {
-    return (
-      <Modal
-        isOpen={true}
-        onClose={() => setIsDeleteConfirm(false)}
-        title={t('titleDeleteAction')}
-        footer={
-          <>
-            <Button variant="outline" onClick={() => setIsDeleteConfirm(false)} disabled={deleting}>
-              {t('btnCancel')}
-            </Button>
-            <Button variant="danger" onClick={handleDelete} disabled={deleting}>
-              {deleting ? t('btnDeleting') : t('btnDelete')}
-            </Button>
-          </>
-        }
-      >
-        <div className={styles.deleteContent}>
-          <AlertTriangle size={48} className={styles.deleteIcon} />
-          <p className={styles.deleteMessage} dangerouslySetInnerHTML={{ __html: t('msgDeleteActionConfirm', { title: action?.title || '' }) }} />
-          <p className={styles.deleteWarning}>{t('warningDeleteActionPermanent')}</p>
-        </div>
-      </Modal>
-    )
-  }
-
-  // Loading / Error
-  if (loading) {
-    return (
-      <Modal isOpen={true} onClose={handleClose} title={t('titleAction')}>
-        <div className={styles.loading}>{t('loading')}</div>
-      </Modal>
-    )
-  }
-
-  if (error || !action) {
-    return (
-      <Modal
-        isOpen={true}
-        onClose={handleClose}
-        title={t('titleAction')}
-        footer={
-          <Button variant="outline" onClick={handleClose}>{t('btnClose')}</Button>
-        }
-      >
-        <div className={styles.error}>
-          {error ? `${t('errorPrefix')} ${error.message}` : t('errorActionNotFound')}
-        </div>
-      </Modal>
-    )
-  }
-
-  // Assignee options for Select
-  const assigneeOptions: AssigneeOption[] = (usersData?.slackUsers || []).map(
-    (user: { id: string; name: string; realName: string; imageUrl?: string }) => ({
-      value: user.id,
-      label: user.realName || user.name,
-      name: user.name,
-      realName: user.realName,
-      image: user.imageUrl,
-    })
-  )
-
-  const selectedAssignees = assigneeOptions.filter((opt) =>
-    (action.assigneeIDs || []).includes(opt.value)
-  )
-
-  // Unified view
   return (
     <Modal
-      isOpen={true}
-      onClose={handleClose}
-      title={t('titleAction')}
+      open
+      onClose={onClose}
+      width={680}
+      title={titleEl}
+      footer={
+        <>
+          <Button variant="danger" onClick={() => setConfirmDelete(true)} disabled={deleting} data-testid="action-delete-button">
+            {t('btnDelete')}
+          </Button>
+          <span className="spacer" />
+          <Button variant="ghost" onClick={onClose}>{t('btnClose')}</Button>
+          <Button
+            variant="primary"
+            onClick={handleSave}
+            disabled={saving}
+            data-testid="action-save-button"
+          >
+            {saving ? t('btnSaving') : t('btnSave')}
+          </Button>
+        </>
+      }
     >
-      <div className={styles.body}>
-        {/* Case link */}
-        {action.case && (
-          <span className={styles.caseLink} onClick={handleCaseClick}>
-            {t('caseLinkLabel', { id: String(action.caseID), title: action.case.title })}
-          </span>
-        )}
-
-        {/* Title section */}
-        <div className={styles.titleSection}>
-          {isEditingTitle ? (
-            <div className={styles.titleEditRow}>
-              <input
-                type="text"
-                value={editTitle}
-                onChange={(e) => setEditTitle(e.target.value)}
-                className={styles.titleInput}
-                autoFocus
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleTitleSave()
-                  if (e.key === 'Escape') handleTitleCancel()
-                }}
-                disabled={savingTitle}
-              />
-              <Button variant="primary" onClick={handleTitleSave} disabled={savingTitle || !editTitle.trim()}>
-                {savingTitle ? t('btnSaving') : t('btnSave')}
-              </Button>
-              <Button variant="outline" onClick={handleTitleCancel} disabled={savingTitle}>
-                {t('btnCancel')}
-              </Button>
-            </div>
+      {loading ? (
+        <div className="muted">{t('loading')}</div>
+      ) : (
+        <>
+          {editing ? (
+            <input
+              className="input"
+              autoFocus
+              value={editingTitle}
+              onChange={(e) => setEditingTitle(e.target.value)}
+              onBlur={handleSaveTitle}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSaveTitle()
+                else if (e.key === 'Escape') { setEditingTitle(action.title); setEditing(false) }
+              }}
+              style={{ height: 38, fontSize: 18, fontWeight: 600, marginBottom: 16, padding: '0 6px' }}
+              data-testid="action-title-input"
+            />
           ) : (
-            <div className={styles.titleDisplay} onClick={handleTitleEditStart}>
-              <h2 className={styles.titleText}>{action.title}</h2>
-              <Pencil size={14} className={styles.titleEditIcon} />
-              {titleFeedback.visible && (
-                <span className={styles.feedbackInline}>
-                  <Check size={14} /> {t('feedbackUpdated')}
-                </span>
-              )}
-            </div>
+            <h3
+              className="titleText"
+              onClick={() => setEditing(true)}
+              style={{ margin: '0 0 16px 0', fontSize: 20, fontWeight: 600, cursor: 'text' }}
+              data-testid="action-title"
+            >
+              {action.title}
+            </h3>
           )}
-        </div>
 
-        {/* Two-column layout */}
-        <div className={styles.columns}>
-          {/* Main: Description */}
-          <div className={styles.mainColumn}>
-            <label className={styles.fieldLabel}>{t('labelDescription')}</label>
-            {isEditingDescription ? (
-              <>
-                <textarea
-                  value={editDescription}
-                  onChange={(e) => setEditDescription(e.target.value)}
-                  className={styles.descriptionTextarea}
-                  placeholder={t('placeholderAddDescription')}
-                  rows={10}
-                  autoFocus
-                />
-                <div className={styles.descriptionActions}>
-                  <Button variant="outline" icon={<Trash2 size={16} />} onClick={() => setIsDeleteConfirm(true)}>
-                    {t('btnDelete')}
-                  </Button>
-                  <div className={styles.descriptionActionsRight}>
-                    {descFeedback.visible && (
-                      <span className={styles.feedbackInline}>
-                        <Check size={14} /> {t('feedbackSaved')}
-                      </span>
-                    )}
-                    <Button variant="outline" onClick={handleDescriptionCancel} disabled={savingDescription}>
-                      {t('btnCancel')}
-                    </Button>
-                    <Button
-                      variant="primary"
-                      onClick={handleDescriptionSave}
-                      disabled={savingDescription}
-                    >
-                      {savingDescription ? t('btnSaving') : t('btnSave')}
-                    </Button>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className={styles.descriptionDisplay}>
-                  {action.description ? (
-                    <div className={styles.descriptionMarkdown}>
-                      <Markdown>{action.description}</Markdown>
-                    </div>
-                  ) : (
-                    <p className={styles.descriptionPlaceholder}>{t('labelNoDescription')}</p>
-                  )}
-                </div>
-                <div className={styles.descriptionActions}>
-                  <Button variant="outline" icon={<Trash2 size={16} />} onClick={() => setIsDeleteConfirm(true)}>
-                    {t('btnDelete')}
-                  </Button>
-                  <div className={styles.descriptionActionsRight}>
-                    {descFeedback.visible && (
-                      <span className={styles.feedbackInline}>
-                        <Check size={14} /> {t('feedbackSaved')}
-                      </span>
-                    )}
-                    <Button
-                      variant="primary"
-                      icon={<Pencil size={14} />}
-                      onClick={handleDescriptionEditStart}
-                    >
-                      {t('btnEdit')}
-                    </Button>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* Sidebar: Status, Assignees, Meta */}
-          <div className={styles.sidebar}>
-            {/* Status */}
-            <div className={styles.sidebarSection}>
-              <label className={styles.fieldLabel}>{t('labelStatus')}</label>
-              {/* Hidden native select for E2E testing */}
+          <div className="row" style={{ gap: 18, fontSize: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+              <span className="soft">{t('labelStatus')}</span>
+              <div className="seg" style={{ fontSize: 11 }} data-testid="status-segmented">
+                {STATUSES.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    className={action.status === s ? 'on' : ''}
+                    onClick={() => handleStatusChange(s)}
+                    data-testid={`status-${s}`}
+                  >
+                    {t(statusKeyMap[s])}
+                  </button>
+                ))}
+              </div>
+              {/* keep an a11y dropdown for assistive tech and existing e2e */}
               <select
+                aria-hidden
+                tabIndex={-1}
+                data-testid="status-dropdown"
                 value={action.status}
                 onChange={(e) => handleStatusChange(e.target.value)}
-                className={styles.hiddenSelect}
-                data-testid="status-dropdown"
+                style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
               >
-                {STATUS_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                {STATUSES.map((s) => (
+                  <option key={s} value={s}>{t(statusKeyMap[s])}</option>
                 ))}
               </select>
-              <Select
-                value={STATUS_OPTIONS.find((opt) => opt.value === action.status)}
-                onChange={(selected) => {
-                  if (selected) handleStatusChange(selected.value)
-                }}
-                options={STATUS_OPTIONS}
-                isSearchable={false}
-                classNamePrefix="status-select"
-                styles={{
-                  control: (base) => ({ ...base, minHeight: '2rem', fontSize: '0.8125rem' }),
-                  valueContainer: (base) => ({ ...base, padding: '0 0.5rem' }),
-                  indicatorsContainer: (base) => ({ ...base, height: '2rem' }),
-                }}
-                formatOptionLabel={(option) => (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
-                    <Chip variant="status" colorIndex={STATUS_COLORS[option.value] || 0}>
-                      {option.label}
-                    </Chip>
-                  </div>
-                )}
-              />
-              {statusFeedback.visible && (
-                <span className={styles.feedback}>
-                  <Check size={12} /> {t('feedbackUpdated')}
-                </span>
+            </div>
+            <div className="row" style={{ gap: 8, alignItems: 'center', minWidth: 280, flex: 1 }}>
+              <span className="soft">{t('labelAssignees')}</span>
+              {action.assignees && action.assignees.length > 0 && (
+                <AvatarStack users={action.assignees} max={4} />
               )}
-            </div>
-
-            {/* Assignees */}
-            <div className={styles.sidebarSection}>
-              <label className={styles.fieldLabel}>{t('labelAssignees')}</label>
-              <Select<AssigneeOption, true>
-                isMulti
-                isClearable={false}
-                value={selectedAssignees}
-                onChange={(selected) => {
-                  const ids = [...(selected || [])].map((s) => s.value)
-                  handleAssigneeChange(ids)
-                }}
-                options={assigneeOptions}
-                placeholder={t('placeholderAddAssignees')}
-                classNamePrefix="assignee-select"
-                styles={{
-                  control: (base) => ({ ...base, minHeight: '2.25rem', fontSize: '0.8125rem', alignItems: 'center' }),
-                  valueContainer: (base) => ({ ...base, padding: '0.25rem 0.5rem' }),
-                  indicatorsContainer: (base) => ({ ...base, minHeight: '2.25rem' }),
-                  multiValue: (base) => ({ ...base, margin: '2px 2px' }),
-                }}
-                filterOption={(option, inputValue) => {
-                  const search = inputValue.toLowerCase()
-                  const data = option.data
-                  return (
-                    data.label.toLowerCase().includes(search) ||
-                    data.name.toLowerCase().includes(search) ||
-                    data.realName.toLowerCase().includes(search)
-                  )
-                }}
-                formatOptionLabel={(option) => (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
-                    {option.image && (
-                      <img
-                        src={option.image}
-                        alt={option.label}
-                        style={{ width: '1.125rem', height: '1.125rem', borderRadius: '50%' }}
-                      />
-                    )}
-                    <span>{option.label}</span>
-                  </div>
-                )}
-              />
-              {assigneeFeedback.visible && (
-                <span className={styles.feedback}>
-                  <Check size={12} /> {t('feedbackUpdated')}
-                </span>
-              )}
-            </div>
-
-            {/* Due Date */}
-            <div className={styles.sidebarSection}>
-              <label className={styles.fieldLabel}>{t('labelDueDate')}</label>
-              <input
-                type="date"
-                value={action.dueDate ? new Date(action.dueDate).toISOString().split('T')[0] : ''}
-                onChange={async (e) => {
-                  const val = e.target.value
-                  await updateAction({
-                    variables: {
-                      workspaceId: currentWorkspace!.id,
-                      input: {
-                        id: action.id,
-                        ...(val ? { dueDate: new Date(val).toISOString() } : { clearDueDate: true }),
-                      },
-                    },
-                  })
-                }}
-                className={styles.dueDateInput}
-              />
-            </div>
-
-            {/* Metadata */}
-            <div className={styles.sidebarMeta}>
-              <div className={styles.metaItem}>
-                <label className={styles.fieldLabel}>{t('labelCreated')}</label>
-                <span className={styles.metaValue}>
-                  {new Date(action.createdAt).toLocaleString()}
-                </span>
-              </div>
-              <div className={styles.metaItem}>
-                <label className={styles.fieldLabel}>{t('labelUpdated')}</label>
-                <span className={styles.metaValue}>
-                  {new Date(action.updatedAt).toLocaleString()}
-                </span>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <Select
+                  inputId={`action-assignees-${action.id}`}
+                  aria-label={t('labelAssignees')}
+                  isMulti
+                  options={userOptions}
+                  value={userOptions.filter((o: any) => (action.assigneeIDs || []).includes(o.value))}
+                  onChange={(opts: any) =>
+                    handleAssigneesChange((opts || []).map((o: any) => o.value))
+                  }
+                  placeholder={t('placeholderAddAssignees')}
+                  classNamePrefix="rs"
+                  {...portalProps}
+                  styles={buildSelectStyles()}
+                />
               </div>
             </div>
           </div>
-        </div>
-      </div>
+
+          {due && (
+            <div className="row" style={{ gap: 8, fontSize: 12, marginBottom: 16, alignItems: 'center' }}>
+              <span className="soft">{t('labelDueDate')}</span>
+              <span className="mono" style={{ color: due.urgent || due.overdue ? 'var(--danger)' : 'var(--fg)' }}>
+                {due.label}
+              </span>
+            </div>
+          )}
+
+          <div className="field-label">{t('labelDescription')}</div>
+          <textarea
+            className="textarea"
+            value={editingDescription}
+            onChange={(e) => { setEditingDescription(e.target.value); setDescriptionDirty(true) }}
+            placeholder={t('placeholderAddDescription')}
+            data-testid="action-description-input"
+            style={{
+              minHeight: 88, fontSize: 13, lineHeight: 1.6,
+              border: '1px dashed var(--line)', borderRadius: 6,
+              padding: '8px 10px', background: 'transparent',
+              color: editingDescription ? 'var(--fg)' : 'var(--fg-muted)',
+            }}
+          />
+
+          <div className="field-label" style={{ marginTop: 18 }}>
+            {t('sectionActivity')}
+          </div>
+          <div className="muted" style={{ fontSize: 12 }}>
+            {t('emptyActivity')}
+          </div>
+        </>
+      )}
+      {confirmDelete && action && (
+        <Modal
+          open
+          onClose={() => setConfirmDelete(false)}
+          title={t('titleDeleteAction')}
+          width={420}
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setConfirmDelete(false)}>{t('btnCancel')}</Button>
+              <Button
+                variant="danger"
+                onClick={handleDelete}
+                disabled={deleting}
+                data-testid="action-delete-confirm-button"
+              >
+                {deleting ? t('btnDeleting') : t('btnDelete')}
+              </Button>
+            </>
+          }
+        >
+          <p style={{ fontSize: 13, lineHeight: 1.6, margin: 0 }}>
+            {t('warningDeleteActionPermanent')}
+          </p>
+        </Modal>
+      )}
     </Modal>
   )
 }

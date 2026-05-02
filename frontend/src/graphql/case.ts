@@ -24,6 +24,7 @@ export const GET_CASES = gql`
         imageUrl
       }
       slackChannelID
+      slackChannelName
       createdAt
       updatedAt
       fields {
@@ -80,6 +81,7 @@ export const GET_CASE = gql`
         }
         dueDate
         createdAt
+        updatedAt
       }
       knowledges {
         id

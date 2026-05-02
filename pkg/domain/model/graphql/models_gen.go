@@ -267,7 +267,7 @@ type UpdateActionInput struct {
 
 type UpdateCaseInput struct {
 	ID          int                `json:"id"`
-	Title       string             `json:"title"`
+	Title       *string            `json:"title,omitempty"`
 	Description *string            `json:"description,omitempty"`
 	AssigneeIDs []string           `json:"assigneeIDs,omitempty"`
 	Fields      []*FieldValueInput `json:"fields,omitempty"`
