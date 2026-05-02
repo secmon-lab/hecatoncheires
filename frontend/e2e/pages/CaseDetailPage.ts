@@ -106,7 +106,8 @@ export class CaseDetailPage extends BasePage {
    * Check if the Fields section is visible
    */
   async isFieldsSectionVisible(): Promise<boolean> {
-    const fieldsHeading = this.page.locator('h3').filter({ hasText: 'Fields' }).first();
+    // Section header is rendered as <span class="h-aside-title"> after the redesign.
+    const fieldsHeading = this.page.locator('.h-aside-title').filter({ hasText: 'Fields' }).first();
     return await fieldsHeading.isVisible();
   }
 
