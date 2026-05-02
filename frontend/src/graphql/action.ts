@@ -39,6 +39,37 @@ export const GET_ACTION = gql`
   }
 `
 
+export const GET_ACTION_MESSAGES = gql`
+  query GetActionMessages($workspaceId: String!, $id: Int!, $limit: Int, $cursor: String) {
+    action(workspaceId: $workspaceId, id: $id) {
+      id
+      messages(limit: $limit, cursor: $cursor) {
+        items {
+          id
+          channelID
+          threadTS
+          teamID
+          userID
+          userName
+          text
+          createdAt
+          files {
+            id
+            name
+            mimetype
+            filetype
+            size
+            urlPrivate
+            permalink
+            thumbURL
+          }
+        }
+        nextCursor
+      }
+    }
+  }
+`
+
 export const CREATE_ACTION = gql`
   mutation CreateAction($workspaceId: String!, $input: CreateActionInput!) {
     createAction(workspaceId: $workspaceId, input: $input) {

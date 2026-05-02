@@ -13,6 +13,7 @@ import InlineLongText from '../components/inline/InlineLongText'
 import InlineSelect, { type InlineSelectOption } from '../components/inline/InlineSelect'
 import InlineUserSelect from '../components/inline/InlineUserSelect'
 import InlineDate from '../components/inline/InlineDate'
+import ActionMessages from '../components/ActionMessages'
 
 interface ActionModalProps {
   actionId: number
@@ -288,11 +289,9 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
           />
 
           <div className="field-label" style={{ marginTop: 18 }}>
-            {t('sectionActivity')}
+            {t('sectionMessages')}
           </div>
-          <div className="muted" style={{ fontSize: 12 }}>
-            {t('emptyActivity')}
-          </div>
+          <ActionMessages workspaceId={currentWorkspace!.id} actionId={action.id} />
         </>
       )}
       {confirmDelete && action && (
