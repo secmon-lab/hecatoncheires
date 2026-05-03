@@ -31,9 +31,10 @@ export function actionStatusColorStyle(value: string | null | undefined): CSSPro
   return { background: actionStatusColor(value) }
 }
 
-// actionStatusSlug derives a stable kebab-case test id from a status id.
-// Existing E2E selectors use forms like "kanban-column-in-progress"; map
-// underscores to hyphens and lowercase to keep them working.
-export function actionStatusSlug(id: string): string {
-  return id.toLowerCase().replace(/_/g, '-')
+// actionStatusSlug derives a stable kebab-case test id from a status id or
+// display label. Lowercases and collapses underscores / whitespace to hyphens
+// so e2e selectors like "kanban-column-in-progress" / "kanban-column-to-do"
+// keep working regardless of which form is passed in.
+export function actionStatusSlug(value: string): string {
+  return value.toLowerCase().trim().replace(/[\s_]+/g, '-')
 }

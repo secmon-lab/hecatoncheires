@@ -156,7 +156,7 @@ export default function ActionList() {
           <div
             key={col.id}
             className="kan-col"
-            data-testid={`kanban-column-${actionStatusSlug(col.id)}`}
+            data-testid={`kanban-column-${actionStatusSlug(label(col.id))}`}
             onDragOver={(e) => { e.preventDefault(); if (dragOverCol !== col.id) setDragOverCol(col.id) }}
             onDragLeave={() => { if (dragOverCol === col.id) setDragOverCol(null) }}
             onDrop={(e) => { e.preventDefault(); handleDrop(col.id) }}

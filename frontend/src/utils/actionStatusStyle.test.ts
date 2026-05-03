@@ -39,4 +39,10 @@ describe('actionStatusSlug', () => {
     expect(actionStatusSlug('backlog')).toBe('backlog')
     expect(actionStatusSlug('Waiting_User')).toBe('waiting-user')
   })
+
+  it('collapses whitespace in display labels', () => {
+    expect(actionStatusSlug('To Do')).toBe('to-do')
+    expect(actionStatusSlug('In Progress')).toBe('in-progress')
+    expect(actionStatusSlug('  Quick   Triage ')).toBe('quick-triage')
+  })
 })
