@@ -20,7 +20,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
 
-//go:embed prompt/assist_system.md
+//go:embed prompts/assist_system.md
 var assistSystemPromptTmpl string
 
 var assistSystemPrompt = template.Must(template.New("assist_system").Parse(assistSystemPromptTmpl))
