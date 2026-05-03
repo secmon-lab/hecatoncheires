@@ -25,7 +25,7 @@ func TestAssistUseCase_BuildAssistSystemPrompt(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		// Create actions with and without DueDate
-		actionUC := usecase.NewActionUseCase(repo, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
 		dueDate := time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC)
 		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Investigate logs", "Check auth logs", "U001", "", types.ActionStatusInProgress, &dueDate)
 		gt.NoError(t, err).Required()

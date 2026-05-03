@@ -20,6 +20,17 @@ export const GET_FIELD_CONFIGURATION = gql`
       labels {
         case
       }
+      actionConfig {
+        initial
+        closed
+        statuses {
+          id
+          name
+          description
+          color
+          emoji
+        }
+      }
     }
   }
 `

@@ -648,3 +648,11 @@ func (uc *CaseUseCase) GetFieldConfiguration(workspaceID string) *config.FieldSc
 		},
 	}
 }
+
+// GetActionStatusSet returns the resolved ActionStatusSet for the workspace,
+// falling back to the legacy default when the workspace is unknown or has no
+// custom configuration. This is the canonical accessor for any layer that
+// needs to render or validate action statuses outside ActionUseCase.
+func (uc *CaseUseCase) GetActionStatusSet(workspaceID string) *model.ActionStatusSet {
+	return resolveActionStatusSet(uc.workspaceRegistry, workspaceID)
+}

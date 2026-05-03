@@ -44,6 +44,30 @@ type EntityLabels {
 type FieldConfiguration {
   fields: [FieldDefinition!]!
   labels: EntityLabels!
+  actionConfig: ActionConfig!
+}
+
+# ActionStatusDefinition describes a single action status configurable per
+# workspace in TOML. `name` is the display label written by the workspace
+# operator in whatever language they prefer. `color` is either a semantic
+# preset name or a #RRGGBB hex code. See the user-facing config docs for
+# the accepted preset list.
+type ActionStatusDefinition {
+  id: ID!
+  name: String!
+  description: String
+  color: String
+  emoji: String
+}
+
+# ActionConfig is the resolved per-workspace action status configuration.
+# `initial` is the id of the status assigned to newly created actions.
+# `closed` lists the status ids that are treated as closed for filtering /
+# completion checks. `statuses` is the full ordered list to render.
+type ActionConfig {
+  initial: ID!
+  closed: [ID!]!
+  statuses: [ActionStatusDefinition!]!
 }
 
 # Custom field value
@@ -125,14 +149,6 @@ type Case {
   updatedAt: Time!
 }
 
-enum ActionStatus {
-  BACKLOG
-  TODO
-  IN_PROGRESS
-  BLOCKED
-  COMPLETED
-}
-
 type Action {
   id: Int!
   caseID: Int!
@@ -142,7 +158,9 @@ type Action {
   assigneeID: String
   assignee: SlackUser
   slackMessageTS: String
-  status: ActionStatus!
+  # Action status id. Validity is workspace-scoped: clients should resolve the
+  # display name / color / emoji from FieldConfiguration.actionConfig.
+  status: String!
   dueDate: Time
   createdAt: Time!
   updatedAt: Time!
@@ -201,7 +219,8 @@ input CreateActionInput {
   description: String
   assigneeID: String
   slackMessageTS: String
-  status: ActionStatus
+  # Status id. Must match a status defined for the workspace.
+  status: String
   dueDate: Time
 }
 
@@ -212,7 +231,8 @@ input UpdateActionInput {
   description: String
   assigneeID: String
   slackMessageTS: String
-  status: ActionStatus
+  # Status id. Must match a status defined for the workspace.
+  status: String
   dueDate: Time
   clearDueDate: Boolean
   clearAssignee: Boolean

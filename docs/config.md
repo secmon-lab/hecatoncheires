@@ -14,8 +14,9 @@ Hecatoncheires is configured through a combination of a TOML configuration file 
 8. [Slack Section](#slack-section)
 9. [Compile Section](#compile-section)
 10. [Assist Section](#assist-section)
-11. [Validation Rules](#validation-rules)
-12. [Complete Example](#complete-example)
+11. [Action Section](#action-section)
+12. [Validation Rules](#validation-rules)
+13. [Complete Example](#complete-example)
 
 ---
 
@@ -648,6 +649,100 @@ The AI agent will:
 
 ---
 
+## Action Section
+
+The `[action]` section is **optional**. When omitted, the workspace inherits a built-in default set of action statuses (`BACKLOG`, `TODO`, `IN_PROGRESS`, `BLOCKED`, `COMPLETED`) so that data written before configurable statuses keeps working unchanged. Define this section to tailor the action workflow to your team.
+
+```toml
+[action]
+initial = "queued"            # Required when [action] is present
+closed  = ["done", "cancelled"]   # Optional, defaults to []
+
+[[action.status]]
+id = "queued"
+name = "Queued"
+description = "Awaiting triage"
+color = "idle"                 # See "Color values" below
+emoji = "📋"
+
+[[action.status]]
+id = "doing"
+name = "Doing"
+color = "active"
+emoji = "▶️"
+
+[[action.status]]
+id = "done"
+name = "Done"
+color = "success"
+emoji = "✅"
+```
+
+### `[action]` keys
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `initial` | string | **Yes** | ID of the status assigned to newly created actions. Must match one of the `[[action.status]]` IDs. |
+| `closed` | string[] | No | IDs treated as "closed" for filtering / completion checks. Each ID must match a defined status. Defaults to `[]`. |
+
+### `[[action.status]]` keys
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `id` | string | **Yes** | Stable identifier. Must match `^[A-Za-z0-9]+([_-][A-Za-z0-9]+)*$` and be unique within the workspace. Stored in the database as the action's status. |
+| `name` | string | **Yes** | Display label. Write it in whichever language fits the workspace — there is no localization layer. |
+| `description` | string | No | Free-form description (currently unused in the UI; reserved for tooltips). |
+| `color` | string | No | UI color. See "Color values" below. Defaults to the neutral `idle` preset. |
+| `emoji` | string | No | Single emoji used in Slack messages and web UI badges. |
+
+### Color values
+
+The `color` field accepts **two and only two** kinds of value. Any other string fails validation at startup.
+
+#### 1. Semantic preset name (recommended)
+
+Each preset expresses the **kind** of state, not a specific named status. Pick the preset that matches your status's intent — preset names are matched case-insensitively.
+
+| Preset | Intended meaning | Suggested for statuses like |
+|--------|------------------|-----------------------------|
+| `idle` | Not started yet, queued, reserved | `backlog`, `queued`, `new` |
+| `active` | Work in progress, someone is on it | `in_progress`, `doing`, `wip` |
+| `waiting` | Waiting on someone else (review / external response / dependency) | `in_review`, `waiting_for_user`, `qa` |
+| `paused` | Intentionally on hold | `on_hold`, `parked` |
+| `attention` | Needs attention / something off-track | `needs_input`, `flagged` |
+| `blocked` | Cannot proceed; something is preventing progress | `blocked`, `dependency_failed` |
+| `success` | Completed in the desired way | `done`, `resolved`, `shipped` |
+| `neutral_done` | Closed without value judgment (won't fix, expired, withdrawn) | `cancelled`, `wont_fix`, `expired` |
+| `failure` | Closed in an undesired way (failed, rejected, abandoned) | `failed`, `rejected`, `lost` |
+
+Presets resolve to CSS variables (`--action-status-<preset>`) on the frontend and follow the active light/dark theme.
+
+#### 2. Hex color code
+
+When no preset captures what you need, supply an absolute color as `#RRGGBB` or `#RGB`. Example: `"#5EAEDC"`, `"#abc"`. Hex codes do **not** follow the theme, so pick a color that reads on both light and dark backgrounds.
+
+#### Not supported (will fail validation)
+
+- CSS variable references like `"var(--ok)"` — the supported entry point is the preset list above.
+- CSS color keywords like `"red"`, `"blue"`.
+- Function notations: `rgb(...)`, `rgba(...)`, `hsl(...)`, `oklch(...)`.
+- Any string that is neither a preset name nor `#RRGGBB`/`#RGB`.
+
+#### Examples
+
+| Value | Result |
+|-------|--------|
+| `"success"` | ✅ Preset, theme-aware green |
+| `"WAITING"` | ✅ Case-insensitive preset match |
+| `"#5EAEDC"` | ✅ Absolute hex |
+| `"#abc"` | ✅ Short hex |
+| (omitted) | ✅ Falls back to `idle` |
+| `"var(--ok)"` | ❌ Validation error |
+| `"red"` | ❌ Validation error |
+| `"rgb(255,0,0)"` | ❌ Validation error |
+
+---
+
 ## Validation Rules
 
 The configuration file is validated at startup. The following rules are enforced:
@@ -664,6 +759,10 @@ The configuration file is validated at startup. The following rules are enforced
 | All option names must be non-empty | `ErrMissingName` |
 | Option IDs must be unique within their parent field | `ErrDuplicateOptionID` |
 | Slack welcome message templates must parse | `ErrInvalidWelcomeMessage` |
+| Action status IDs must match `^[A-Za-z0-9]+([_-][A-Za-z0-9]+)*$`, be at most 32 characters, and be unique within the workspace | (action status validation) |
+| `[action] initial` must reference a defined `[[action.status]] id` | (action status validation) |
+| Each entry in `[action] closed` must reference a defined `[[action.status]] id` | (action status validation) |
+| `[[action.status]] color` must be a preset name or `#RRGGBB` / `#RGB` | (action status validation) |
 
 If any validation fails, the application exits with a descriptive error message including the field ID and context.
 

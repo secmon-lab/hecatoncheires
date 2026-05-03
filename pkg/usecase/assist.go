@@ -131,7 +131,7 @@ func (uc *AssistUseCase) processCase(ctx context.Context, entry *model.Workspace
 	}
 
 	// Build tools
-	coreTools := core.NewForAssist(uc.repo, wsID, c.ID, uc.llmClient, uc.slackService, c.SlackChannelID)
+	coreTools := core.NewForAssist(uc.repo, wsID, c.ID, entry.ActionStatusSet, uc.llmClient, uc.slackService, c.SlackChannelID)
 
 	// Create and execute the agent
 	agent := gollem.New(uc.llmClient,
@@ -235,6 +235,7 @@ func (uc *AssistUseCase) buildAssistSystemPrompt(ctx context.Context, entry *mod
 	if err != nil {
 		return "", goerr.Wrap(err, "failed to get actions for case")
 	}
+	statusSet := resolveActionStatusSet(uc.registry, wsID)
 	for _, a := range actions {
 		dueDate := ""
 		if a.DueDate != nil {
@@ -244,7 +245,7 @@ func (uc *AssistUseCase) buildAssistSystemPrompt(ctx context.Context, entry *mod
 			ID:          a.ID,
 			Title:       a.Title,
 			Status:      a.Status.String(),
-			StatusEmoji: a.Status.Emoji(),
+			StatusEmoji: statusSet.Emoji(string(a.Status)),
 			Assignees:   a.AssigneeID,
 			DueDate:     dueDate,
 		})

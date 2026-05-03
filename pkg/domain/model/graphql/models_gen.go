@@ -8,12 +8,16 @@ import (
 	"io"
 	"strconv"
 	"time"
-
-	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 )
 
 type SourceConfig interface {
 	IsSourceConfig()
+}
+
+type ActionConfig struct {
+	Initial  string                    `json:"initial"`
+	Closed   []string                  `json:"closed"`
+	Statuses []*ActionStatusDefinition `json:"statuses"`
 }
 
 type ActionEvent struct {
@@ -30,6 +34,14 @@ type ActionEvent struct {
 type ActionEventConnection struct {
 	Items      []*ActionEvent `json:"items"`
 	NextCursor string         `json:"nextCursor"`
+}
+
+type ActionStatusDefinition struct {
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Description *string `json:"description,omitempty"`
+	Color       *string `json:"color,omitempty"`
+	Emoji       *string `json:"emoji,omitempty"`
 }
 
 type AssistLog struct {
@@ -55,13 +67,13 @@ type ChannelUserConnection struct {
 }
 
 type CreateActionInput struct {
-	CaseID         int                 `json:"caseID"`
-	Title          string              `json:"title"`
-	Description    *string             `json:"description,omitempty"`
-	AssigneeID     *string             `json:"assigneeID,omitempty"`
-	SlackMessageTs *string             `json:"slackMessageTS,omitempty"`
-	Status         *types.ActionStatus `json:"status,omitempty"`
-	DueDate        *time.Time          `json:"dueDate,omitempty"`
+	CaseID         int        `json:"caseID"`
+	Title          string     `json:"title"`
+	Description    *string    `json:"description,omitempty"`
+	AssigneeID     *string    `json:"assigneeID,omitempty"`
+	SlackMessageTs *string    `json:"slackMessageTS,omitempty"`
+	Status         *string    `json:"status,omitempty"`
+	DueDate        *time.Time `json:"dueDate,omitempty"`
 }
 
 type CreateCaseInput struct {
@@ -107,8 +119,9 @@ type EntityLabels struct {
 }
 
 type FieldConfiguration struct {
-	Fields []*FieldDefinition `json:"fields"`
-	Labels *EntityLabels      `json:"labels"`
+	Fields       []*FieldDefinition `json:"fields"`
+	Labels       *EntityLabels      `json:"labels"`
+	ActionConfig *ActionConfig      `json:"actionConfig"`
 }
 
 type FieldDefinition struct {
@@ -270,16 +283,16 @@ type Source struct {
 }
 
 type UpdateActionInput struct {
-	ID             int                 `json:"id"`
-	CaseID         *int                `json:"caseID,omitempty"`
-	Title          *string             `json:"title,omitempty"`
-	Description    *string             `json:"description,omitempty"`
-	AssigneeID     *string             `json:"assigneeID,omitempty"`
-	SlackMessageTs *string             `json:"slackMessageTS,omitempty"`
-	Status         *types.ActionStatus `json:"status,omitempty"`
-	DueDate        *time.Time          `json:"dueDate,omitempty"`
-	ClearDueDate   *bool               `json:"clearDueDate,omitempty"`
-	ClearAssignee  *bool               `json:"clearAssignee,omitempty"`
+	ID             int        `json:"id"`
+	CaseID         *int       `json:"caseID,omitempty"`
+	Title          *string    `json:"title,omitempty"`
+	Description    *string    `json:"description,omitempty"`
+	AssigneeID     *string    `json:"assigneeID,omitempty"`
+	SlackMessageTs *string    `json:"slackMessageTS,omitempty"`
+	Status         *string    `json:"status,omitempty"`
+	DueDate        *time.Time `json:"dueDate,omitempty"`
+	ClearDueDate   *bool      `json:"clearDueDate,omitempty"`
+	ClearAssignee  *bool      `json:"clearAssignee,omitempty"`
 }
 
 type UpdateCaseInput struct {

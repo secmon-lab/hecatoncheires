@@ -9,6 +9,7 @@ import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
+import { useActionStatuses } from '../hooks/useActionStatuses'
 import Modal from '../components/Modal'
 import Button from '../components/Button'
 
@@ -28,26 +29,17 @@ interface ActionFormProps {
   onClose: () => void
 }
 
-const STATUSES = ['BACKLOG', 'TODO', 'IN_PROGRESS', 'BLOCKED', 'COMPLETED'] as const
-
-const statusKeyMap = {
-  BACKLOG: 'statusBacklog',
-  TODO: 'statusTodo',
-  IN_PROGRESS: 'statusInProgress',
-  BLOCKED: 'statusBlocked',
-  COMPLETED: 'statusCompleted',
-} as const
-
 export default function ActionForm({ action, defaultCaseID, onClose }: ActionFormProps) {
   const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
+  const { statuses, initialId, label } = useActionStatuses(currentWorkspace?.id)
 
   const isEdit = action !== null
 
   const [title, setTitle] = useState(action?.title || '')
   const [description, setDescription] = useState(action?.description || '')
   const [caseID, setCaseID] = useState<number | null>(action?.caseID ?? defaultCaseID ?? null)
-  const [status, setStatus] = useState(action?.status || 'BACKLOG')
+  const [status, setStatus] = useState(action?.status || initialId)
   const [assigneeID, setAssigneeID] = useState<string | null>(action?.assigneeID ?? null)
   const [errors, setErrors] = useState<Record<string, string>>({})
 
@@ -229,8 +221,8 @@ export default function ActionForm({ action, defaultCaseID, onClose }: ActionFor
               value={status}
               onChange={(e) => setStatus(e.target.value)}
             >
-              {STATUSES.map((s) => (
-                <option key={s} value={s}>{t(statusKeyMap[s])}</option>
+              {statuses.map((s) => (
+                <option key={s.id} value={s.id}>{label(s.id)}</option>
               ))}
             </select>
           </div>

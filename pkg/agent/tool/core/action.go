@@ -117,6 +117,7 @@ type createActionTool struct {
 	repo        interfaces.Repository
 	workspaceID string
 	caseID      int64
+	statusSet   *model.ActionStatusSet
 }
 
 func (t *createActionTool) Spec() gollem.ToolSpec {
@@ -141,15 +142,9 @@ func (t *createActionTool) Spec() gollem.ToolSpec {
 			},
 			"status": {
 				Type:        gollem.TypeString,
-				Description: "Initial status of the action (default: TODO)",
+				Description: fmt.Sprintf("Initial status of the action (default: %s)", t.statusSet.InitialID()),
 				Required:    false,
-				Enum: []string{
-					types.ActionStatusBacklog.String(),
-					types.ActionStatusTodo.String(),
-					types.ActionStatusInProgress.String(),
-					types.ActionStatusBlocked.String(),
-					types.ActionStatusCompleted.String(),
-				},
+				Enum:        t.statusSet.IDs(),
 			},
 			"due_date": {
 				Type:        gollem.TypeString,
@@ -168,13 +163,12 @@ func (t *createActionTool) Run(ctx context.Context, args map[string]any) (map[st
 
 	description, _ := args["description"].(string)
 
-	status := types.ActionStatusTodo
+	status := types.ActionStatus(t.statusSet.InitialID())
 	if s, ok := args["status"].(string); ok && s != "" {
-		parsed, err := types.ParseActionStatus(s)
-		if err != nil {
-			return nil, fmt.Errorf("invalid status %q: must be one of BACKLOG, TODO, IN_PROGRESS, BLOCKED, COMPLETED", s)
+		if !t.statusSet.IsValid(s) {
+			return nil, fmt.Errorf("invalid status %q: must be one of %v", s, t.statusSet.IDs())
 		}
-		status = parsed
+		status = types.ActionStatus(s)
 	}
 
 	var assigneeID string
@@ -312,6 +306,7 @@ func (t *updateActionTool) Run(ctx context.Context, args map[string]any) (map[st
 type updateActionStatusTool struct {
 	repo        interfaces.Repository
 	workspaceID string
+	statusSet   *model.ActionStatusSet
 }
 
 func (t *updateActionStatusTool) Spec() gollem.ToolSpec {
@@ -328,13 +323,7 @@ func (t *updateActionStatusTool) Spec() gollem.ToolSpec {
 				Type:        gollem.TypeString,
 				Description: "New status for the action",
 				Required:    true,
-				Enum: []string{
-					types.ActionStatusBacklog.String(),
-					types.ActionStatusTodo.String(),
-					types.ActionStatusInProgress.String(),
-					types.ActionStatusBlocked.String(),
-					types.ActionStatusCompleted.String(),
-				},
+				Enum:        t.statusSet.IDs(),
 			},
 		},
 	}
@@ -347,10 +336,10 @@ func (t *updateActionStatusTool) Run(ctx context.Context, args map[string]any) (
 	}
 
 	statusStr, _ := args["status"].(string)
-	status, err := types.ParseActionStatus(statusStr)
-	if err != nil {
-		return nil, fmt.Errorf("invalid status %q: must be one of BACKLOG, TODO, IN_PROGRESS, BLOCKED, COMPLETED", statusStr)
+	if !t.statusSet.IsValid(statusStr) {
+		return nil, fmt.Errorf("invalid status %q: must be one of %v", statusStr, t.statusSet.IDs())
 	}
+	status := types.ActionStatus(statusStr)
 
 	tool.Update(ctx, fmt.Sprintf("Updating action #%d status -> %s", actionID, status))
 	a, err := t.repo.Action().Get(ctx, t.workspaceID, actionID)

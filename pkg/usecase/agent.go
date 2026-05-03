@@ -117,7 +117,7 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 	})
 
 	// Build core tools for this case
-	coreTools := core.New(uc.repo, entry.Workspace.ID, foundCase.ID, uc.llmClient)
+	coreTools := core.New(uc.repo, entry.Workspace.ID, foundCase.ID, entry.ActionStatusSet, uc.llmClient)
 
 	// Create and execute the gollem Agent
 	agent := gollem.New(uc.llmClient,
@@ -333,12 +333,16 @@ func (uc *AgentUseCase) buildSystemPrompt(c *model.Case, entry *model.WorkspaceE
 	}
 
 	// Build action list
+	statusSet := model.DefaultActionStatusSet()
+	if entry != nil && entry.ActionStatusSet != nil {
+		statusSet = entry.ActionStatusSet
+	}
 	for _, a := range actions {
 		data.Actions = append(data.Actions, promptAction{
 			ID:          a.ID,
 			Title:       a.Title,
 			Status:      a.Status.String(),
-			StatusEmoji: a.Status.Emoji(),
+			StatusEmoji: statusSet.Emoji(string(a.Status)),
 			Assignees:   a.AssigneeID,
 		})
 	}

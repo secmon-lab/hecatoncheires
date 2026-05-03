@@ -3,6 +3,8 @@ import { useQuery } from '@apollo/client'
 import { GET_ACTION_MESSAGES, GET_ACTION_EVENTS } from '../graphql/action'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import { useTranslation, type MsgKey } from '../i18n'
+import { useActionStatuses } from '../hooks/useActionStatuses'
+import { actionStatusColorStyle } from '../utils/actionStatusStyle'
 import Button from './Button'
 
 type EventKind =
@@ -146,21 +148,6 @@ function formatTimestampFull(iso: string): string {
   return `${yyyy}-${mm}-${dd} ${hh}:${mi}`
 }
 
-const STATUS_KEY_MAP: Record<string, MsgKey> = {
-  BACKLOG: 'statusBacklog',
-  TODO: 'statusTodo',
-  IN_PROGRESS: 'statusInProgress',
-  BLOCKED: 'statusBlocked',
-  COMPLETED: 'statusCompleted',
-}
-
-const STATUS_COLORS: Record<string, string> = {
-  BACKLOG: '#9ca3af',
-  TODO: '#9ca3af',
-  IN_PROGRESS: '#f59e0b',
-  BLOCKED: '#ef4444',
-  COMPLETED: '#10b981',
-}
 
 const EVENT_KEY_MAP: Record<EventKind, MsgKey> = {
   CREATED: 'activityEventCreated',
@@ -229,6 +216,12 @@ const styles: Record<string, CSSProperties> = {
 export default function ActionActivity({ workspaceId, actionId, pageSize = 20, slackMessageTS, slackChannelID, slackChannelURL }: ActionActivityProps) {
   const slackPermalink = buildSlackPermalink(slackChannelURL, slackChannelID, slackMessageTS)
   const { t } = useTranslation()
+  const actionStatuses = useActionStatuses(workspaceId)
+  const statusLabel = (id: string) => actionStatuses.label(id)
+  const statusColor = (id: string) => {
+    const def = actionStatuses.get(id)
+    return (actionStatusColorStyle(def?.color).background as string) ?? 'var(--text-muted)'
+  }
   const [tab, setTab] = useState<Tab>('all')
 
   const messagesQuery = useQuery<MessagesData>(GET_ACTION_MESSAGES, {
@@ -309,7 +302,7 @@ export default function ActionActivity({ workspaceId, actionId, pageSize = 20, s
           {visible.map((it) => it.kind === 'message' ? (
             <MessageRow key={`m-${it.data.id}`} message={it.data} userIndex={userIndex} t={t} />
           ) : (
-            <EventRow key={`e-${it.data.id}`} event={it.data} userIndex={userIndex} t={t} />
+            <EventRow key={`e-${it.data.id}`} event={it.data} userIndex={userIndex} t={t} statusLabel={statusLabel} statusColor={statusColor} />
           ))}
         </div>
       )}
@@ -432,7 +425,13 @@ function MessageRow({ message, userIndex, t }: { message: SlackMessage; userInde
   )
 }
 
-function EventRow({ event, userIndex, t }: { event: ActionEvent; userIndex: UserIndex; t: (k: MsgKey, p?: Record<string, string | number>) => string }) {
+function EventRow({ event, userIndex, t, statusLabel, statusColor }: {
+  event: ActionEvent
+  userIndex: UserIndex
+  t: (k: MsgKey, p?: Record<string, string | number>) => string
+  statusLabel: (id: string) => string
+  statusColor: (id: string) => string
+}) {
   const actorName = event.actorID
     ? (event.actor?.realName || event.actor?.name || userIndex.byName.get(event.actorID) || event.actorID)
     : t('activityActorSystem')
@@ -443,7 +442,7 @@ function EventRow({ event, userIndex, t }: { event: ActionEvent; userIndex: User
       <div style={styles.eventLine}>
         <span style={styles.eventActor}>{actorName}</span>
         <span style={styles.eventVerb}>{t(EVENT_KEY_MAP[event.kind])}</span>
-        <EventDelta event={event} userIndex={userIndex} t={t} />
+        <EventDelta event={event} userIndex={userIndex} t={t} statusLabel={statusLabel} statusColor={statusColor} />
         <span style={styles.eventTime} title={formatTimestampFull(event.createdAt)}>
           {event.kind === 'CREATED'
             ? formatTimestamp(event.createdAt, t('activityToday'))
@@ -454,7 +453,13 @@ function EventRow({ event, userIndex, t }: { event: ActionEvent; userIndex: User
   )
 }
 
-function EventDelta({ event, userIndex, t }: { event: ActionEvent; userIndex: UserIndex; t: (k: MsgKey, p?: Record<string, string | number>) => string }) {
+function EventDelta({ event, userIndex, t, statusLabel, statusColor }: {
+  event: ActionEvent
+  userIndex: UserIndex
+  t: (k: MsgKey, p?: Record<string, string | number>) => string
+  statusLabel: (id: string) => string
+  statusColor: (id: string) => string
+}) {
   switch (event.kind) {
     case 'CREATED':
       return null
@@ -469,9 +474,9 @@ function EventDelta({ event, userIndex, t }: { event: ActionEvent; userIndex: Us
     case 'STATUS_CHANGED':
       return (
         <span style={styles.inline}>
-          {event.oldValue && <StatusPill status={event.oldValue} t={t} />}
+          {event.oldValue && <StatusPill status={event.oldValue} statusLabel={statusLabel} statusColor={statusColor} />}
           <span style={styles.arrow} aria-hidden>{t('activityArrowTo')}</span>
-          {event.newValue && <StatusPill status={event.newValue} t={t} />}
+          {event.newValue && <StatusPill status={event.newValue} statusLabel={statusLabel} statusColor={statusColor} />}
         </span>
       )
     case 'ASSIGNEE_CHANGED':
@@ -489,14 +494,11 @@ function EventDelta({ event, userIndex, t }: { event: ActionEvent; userIndex: Us
   }
 }
 
-function StatusPill({ status, t }: { status: string; t: (k: MsgKey) => string }) {
-  const key = STATUS_KEY_MAP[status]
-  const label = key ? t(key) : status
-  const color = STATUS_COLORS[status] ?? 'var(--text-muted)'
+function StatusPill({ status, statusLabel, statusColor }: { status: string; statusLabel: (id: string) => string; statusColor: (id: string) => string }) {
   return (
     <span style={styles.statusPill}>
-      <span style={{ ...styles.statusDot, background: color }} />
-      {label}
+      <span style={{ ...styles.statusDot, background: statusColor(status) }} />
+      {statusLabel(status)}
     </span>
   )
 }

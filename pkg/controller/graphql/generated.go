@@ -69,6 +69,12 @@ type ComplexityRoot struct {
 		UpdatedAt      func(childComplexity int) int
 	}
 
+	ActionConfig struct {
+		Closed   func(childComplexity int) int
+		Initial  func(childComplexity int) int
+		Statuses func(childComplexity int) int
+	}
+
 	ActionEvent struct {
 		ActionID  func(childComplexity int) int
 		Actor     func(childComplexity int) int
@@ -83,6 +89,14 @@ type ComplexityRoot struct {
 	ActionEventConnection struct {
 		Items      func(childComplexity int) int
 		NextCursor func(childComplexity int) int
+	}
+
+	ActionStatusDefinition struct {
+		Color       func(childComplexity int) int
+		Description func(childComplexity int) int
+		Emoji       func(childComplexity int) int
+		ID          func(childComplexity int) int
+		Name        func(childComplexity int) int
 	}
 
 	AssistLog struct {
@@ -136,8 +150,9 @@ type ComplexityRoot struct {
 	}
 
 	FieldConfiguration struct {
-		Fields func(childComplexity int) int
-		Labels func(childComplexity int) int
+		ActionConfig func(childComplexity int) int
+		Fields       func(childComplexity int) int
+		Labels       func(childComplexity int) int
 	}
 
 	FieldDefinition struct {
@@ -528,6 +543,25 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.Action.UpdatedAt(childComplexity), true
 
+	case "ActionConfig.closed":
+		if e.complexity.ActionConfig.Closed == nil {
+			break
+		}
+
+		return e.complexity.ActionConfig.Closed(childComplexity), true
+	case "ActionConfig.initial":
+		if e.complexity.ActionConfig.Initial == nil {
+			break
+		}
+
+		return e.complexity.ActionConfig.Initial(childComplexity), true
+	case "ActionConfig.statuses":
+		if e.complexity.ActionConfig.Statuses == nil {
+			break
+		}
+
+		return e.complexity.ActionConfig.Statuses(childComplexity), true
+
 	case "ActionEvent.actionID":
 		if e.complexity.ActionEvent.ActionID == nil {
 			break
@@ -589,6 +623,37 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.ActionEventConnection.NextCursor(childComplexity), true
+
+	case "ActionStatusDefinition.color":
+		if e.complexity.ActionStatusDefinition.Color == nil {
+			break
+		}
+
+		return e.complexity.ActionStatusDefinition.Color(childComplexity), true
+	case "ActionStatusDefinition.description":
+		if e.complexity.ActionStatusDefinition.Description == nil {
+			break
+		}
+
+		return e.complexity.ActionStatusDefinition.Description(childComplexity), true
+	case "ActionStatusDefinition.emoji":
+		if e.complexity.ActionStatusDefinition.Emoji == nil {
+			break
+		}
+
+		return e.complexity.ActionStatusDefinition.Emoji(childComplexity), true
+	case "ActionStatusDefinition.id":
+		if e.complexity.ActionStatusDefinition.ID == nil {
+			break
+		}
+
+		return e.complexity.ActionStatusDefinition.ID(childComplexity), true
+	case "ActionStatusDefinition.name":
+		if e.complexity.ActionStatusDefinition.Name == nil {
+			break
+		}
+
+		return e.complexity.ActionStatusDefinition.Name(childComplexity), true
 
 	case "AssistLog.actions":
 		if e.complexity.AssistLog.Actions == nil {
@@ -815,6 +880,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.EntityLabels.Case(childComplexity), true
 
+	case "FieldConfiguration.actionConfig":
+		if e.complexity.FieldConfiguration.ActionConfig == nil {
+			break
+		}
+
+		return e.complexity.FieldConfiguration.ActionConfig(childComplexity), true
 	case "FieldConfiguration.fields":
 		if e.complexity.FieldConfiguration.Fields == nil {
 			break
@@ -1971,6 +2042,30 @@ type EntityLabels {
 type FieldConfiguration {
   fields: [FieldDefinition!]!
   labels: EntityLabels!
+  actionConfig: ActionConfig!
+}
+
+# ActionStatusDefinition describes a single action status configurable per
+# workspace in TOML. ` + "`" + `name` + "`" + ` is the display label written by the workspace
+# operator in whatever language they prefer. ` + "`" + `color` + "`" + ` is either a semantic
+# preset name or a #RRGGBB hex code. See the user-facing config docs for
+# the accepted preset list.
+type ActionStatusDefinition {
+  id: ID!
+  name: String!
+  description: String
+  color: String
+  emoji: String
+}
+
+# ActionConfig is the resolved per-workspace action status configuration.
+# ` + "`" + `initial` + "`" + ` is the id of the status assigned to newly created actions.
+# ` + "`" + `closed` + "`" + ` lists the status ids that are treated as closed for filtering /
+# completion checks. ` + "`" + `statuses` + "`" + ` is the full ordered list to render.
+type ActionConfig {
+  initial: ID!
+  closed: [ID!]!
+  statuses: [ActionStatusDefinition!]!
 }
 
 # Custom field value
@@ -2052,14 +2147,6 @@ type Case {
   updatedAt: Time!
 }
 
-enum ActionStatus {
-  BACKLOG
-  TODO
-  IN_PROGRESS
-  BLOCKED
-  COMPLETED
-}
-
 type Action {
   id: Int!
   caseID: Int!
@@ -2069,7 +2156,9 @@ type Action {
   assigneeID: String
   assignee: SlackUser
   slackMessageTS: String
-  status: ActionStatus!
+  # Action status id. Validity is workspace-scoped: clients should resolve the
+  # display name / color / emoji from FieldConfiguration.actionConfig.
+  status: String!
   dueDate: Time
   createdAt: Time!
   updatedAt: Time!
@@ -2128,7 +2217,8 @@ input CreateActionInput {
   description: String
   assigneeID: String
   slackMessageTS: String
-  status: ActionStatus
+  # Status id. Must match a status defined for the workspace.
+  status: String
   dueDate: Time
 }
 
@@ -2139,7 +2229,8 @@ input UpdateActionInput {
   description: String
   assigneeID: String
   slackMessageTS: String
-  status: ActionStatus
+  # Status id. Must match a status defined for the workspace.
+  status: String
   dueDate: Time
   clearDueDate: Boolean
   clearAssignee: Boolean
@@ -3348,7 +3439,7 @@ func (ec *executionContext) _Action_status(ctx context.Context, field graphql.Co
 			return obj.Status, nil
 		},
 		nil,
-		ec.marshalNActionStatus2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋtypesᚐActionStatus,
+		ec.marshalNString2string,
 		true,
 		true,
 	)
@@ -3361,7 +3452,7 @@ func (ec *executionContext) fieldContext_Action_status(_ context.Context, field 
 		IsMethod:   false,
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			return nil, errors.New("field of type ActionStatus does not have child fields")
+			return nil, errors.New("field of type String does not have child fields")
 		},
 	}
 	return fc, nil
@@ -3544,6 +3635,105 @@ func (ec *executionContext) fieldContext_Action_events(ctx context.Context, fiel
 	if fc.Args, err = ec.field_Action_events_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ActionConfig_initial(ctx context.Context, field graphql.CollectedField, obj *graphql1.ActionConfig) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ActionConfig_initial,
+		func(ctx context.Context) (any, error) {
+			return obj.Initial, nil
+		},
+		nil,
+		ec.marshalNID2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ActionConfig_initial(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ActionConfig",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type ID does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ActionConfig_closed(ctx context.Context, field graphql.CollectedField, obj *graphql1.ActionConfig) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ActionConfig_closed,
+		func(ctx context.Context) (any, error) {
+			return obj.Closed, nil
+		},
+		nil,
+		ec.marshalNID2ᚕstringᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ActionConfig_closed(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ActionConfig",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type ID does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ActionConfig_statuses(ctx context.Context, field graphql.CollectedField, obj *graphql1.ActionConfig) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ActionConfig_statuses,
+		func(ctx context.Context) (any, error) {
+			return obj.Statuses, nil
+		},
+		nil,
+		ec.marshalNActionStatusDefinition2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionStatusDefinitionᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ActionConfig_statuses(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ActionConfig",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_ActionStatusDefinition_id(ctx, field)
+			case "name":
+				return ec.fieldContext_ActionStatusDefinition_name(ctx, field)
+			case "description":
+				return ec.fieldContext_ActionStatusDefinition_description(ctx, field)
+			case "color":
+				return ec.fieldContext_ActionStatusDefinition_color(ctx, field)
+			case "emoji":
+				return ec.fieldContext_ActionStatusDefinition_emoji(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type ActionStatusDefinition", field.Name)
+		},
 	}
 	return fc, nil
 }
@@ -3856,6 +4046,151 @@ func (ec *executionContext) _ActionEventConnection_nextCursor(ctx context.Contex
 func (ec *executionContext) fieldContext_ActionEventConnection_nextCursor(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "ActionEventConnection",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ActionStatusDefinition_id(ctx context.Context, field graphql.CollectedField, obj *graphql1.ActionStatusDefinition) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ActionStatusDefinition_id,
+		func(ctx context.Context) (any, error) {
+			return obj.ID, nil
+		},
+		nil,
+		ec.marshalNID2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ActionStatusDefinition_id(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ActionStatusDefinition",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type ID does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ActionStatusDefinition_name(ctx context.Context, field graphql.CollectedField, obj *graphql1.ActionStatusDefinition) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ActionStatusDefinition_name,
+		func(ctx context.Context) (any, error) {
+			return obj.Name, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ActionStatusDefinition_name(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ActionStatusDefinition",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ActionStatusDefinition_description(ctx context.Context, field graphql.CollectedField, obj *graphql1.ActionStatusDefinition) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ActionStatusDefinition_description,
+		func(ctx context.Context) (any, error) {
+			return obj.Description, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_ActionStatusDefinition_description(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ActionStatusDefinition",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ActionStatusDefinition_color(ctx context.Context, field graphql.CollectedField, obj *graphql1.ActionStatusDefinition) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ActionStatusDefinition_color,
+		func(ctx context.Context) (any, error) {
+			return obj.Color, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_ActionStatusDefinition_color(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ActionStatusDefinition",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ActionStatusDefinition_emoji(ctx context.Context, field graphql.CollectedField, obj *graphql1.ActionStatusDefinition) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ActionStatusDefinition_emoji,
+		func(ctx context.Context) (any, error) {
+			return obj.Emoji, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_ActionStatusDefinition_emoji(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ActionStatusDefinition",
 		Field:      field,
 		IsMethod:   false,
 		IsResolver: false,
@@ -5094,6 +5429,43 @@ func (ec *executionContext) fieldContext_FieldConfiguration_labels(_ context.Con
 				return ec.fieldContext_EntityLabels_case(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type EntityLabels", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _FieldConfiguration_actionConfig(ctx context.Context, field graphql.CollectedField, obj *graphql1.FieldConfiguration) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_FieldConfiguration_actionConfig,
+		func(ctx context.Context) (any, error) {
+			return obj.ActionConfig, nil
+		},
+		nil,
+		ec.marshalNActionConfig2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionConfig,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_FieldConfiguration_actionConfig(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "FieldConfiguration",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "initial":
+				return ec.fieldContext_ActionConfig_initial(ctx, field)
+			case "closed":
+				return ec.fieldContext_ActionConfig_closed(ctx, field)
+			case "statuses":
+				return ec.fieldContext_ActionConfig_statuses(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type ActionConfig", field.Name)
 		},
 	}
 	return fc, nil
@@ -8635,6 +9007,8 @@ func (ec *executionContext) fieldContext_Query_fieldConfiguration(ctx context.Co
 				return ec.fieldContext_FieldConfiguration_fields(ctx, field)
 			case "labels":
 				return ec.fieldContext_FieldConfiguration_labels(ctx, field)
+			case "actionConfig":
+				return ec.fieldContext_FieldConfiguration_actionConfig(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type FieldConfiguration", field.Name)
 		},
@@ -11822,7 +12196,7 @@ func (ec *executionContext) unmarshalInputCreateActionInput(ctx context.Context,
 			it.SlackMessageTs = data
 		case "status":
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("status"))
-			data, err := ec.unmarshalOActionStatus2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋtypesᚐActionStatus(ctx, v)
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
 			if err != nil {
 				return it, err
 			}
@@ -12193,7 +12567,7 @@ func (ec *executionContext) unmarshalInputUpdateActionInput(ctx context.Context,
 			it.SlackMessageTs = data
 		case "status":
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("status"))
-			data, err := ec.unmarshalOActionStatus2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋtypesᚐActionStatus(ctx, v)
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
 			if err != nil {
 				return it, err
 			}
@@ -12697,6 +13071,55 @@ func (ec *executionContext) _Action(ctx context.Context, sel ast.SelectionSet, o
 	return out
 }
 
+var actionConfigImplementors = []string{"ActionConfig"}
+
+func (ec *executionContext) _ActionConfig(ctx context.Context, sel ast.SelectionSet, obj *graphql1.ActionConfig) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, actionConfigImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("ActionConfig")
+		case "initial":
+			out.Values[i] = ec._ActionConfig_initial(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "closed":
+			out.Values[i] = ec._ActionConfig_closed(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "statuses":
+			out.Values[i] = ec._ActionConfig_statuses(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
 var actionEventImplementors = []string{"ActionEvent"}
 
 func (ec *executionContext) _ActionEvent(ctx context.Context, sel ast.SelectionSet, obj *graphql1.ActionEvent) graphql.Marshaler {
@@ -12820,6 +13243,56 @@ func (ec *executionContext) _ActionEventConnection(ctx context.Context, sel ast.
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var actionStatusDefinitionImplementors = []string{"ActionStatusDefinition"}
+
+func (ec *executionContext) _ActionStatusDefinition(ctx context.Context, sel ast.SelectionSet, obj *graphql1.ActionStatusDefinition) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, actionStatusDefinitionImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("ActionStatusDefinition")
+		case "id":
+			out.Values[i] = ec._ActionStatusDefinition_id(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "name":
+			out.Values[i] = ec._ActionStatusDefinition_name(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "description":
+			out.Values[i] = ec._ActionStatusDefinition_description(ctx, field, obj)
+		case "color":
+			out.Values[i] = ec._ActionStatusDefinition_color(ctx, field, obj)
+		case "emoji":
+			out.Values[i] = ec._ActionStatusDefinition_emoji(ctx, field, obj)
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -13498,6 +13971,11 @@ func (ec *executionContext) _FieldConfiguration(ctx context.Context, sel ast.Sel
 			}
 		case "labels":
 			out.Values[i] = ec._FieldConfiguration_labels(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "actionConfig":
+			out.Values[i] = ec._FieldConfiguration_actionConfig(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
@@ -15676,6 +16154,16 @@ func (ec *executionContext) marshalNAction2ᚖgithubᚗcomᚋsecmonᚑlabᚋheca
 	return ec._Action(ctx, sel, v)
 }
 
+func (ec *executionContext) marshalNActionConfig2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionConfig(ctx context.Context, sel ast.SelectionSet, v *graphql1.ActionConfig) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._ActionConfig(ctx, sel, v)
+}
+
 func (ec *executionContext) marshalNActionEvent2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionEventᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.ActionEvent) graphql.Marshaler {
 	ret := make(graphql.Array, len(v))
 	var wg sync.WaitGroup
@@ -15754,21 +16242,58 @@ func (ec *executionContext) marshalNActionEventKind2githubᚗcomᚋsecmonᚑlab�
 	return v
 }
 
-func (ec *executionContext) unmarshalNActionStatus2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋtypesᚐActionStatus(ctx context.Context, v any) (types.ActionStatus, error) {
-	tmp, err := graphql.UnmarshalString(v)
-	res := types.ActionStatus(tmp)
-	return res, graphql.ErrorOnPath(ctx, err)
+func (ec *executionContext) marshalNActionStatusDefinition2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionStatusDefinitionᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.ActionStatusDefinition) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNActionStatusDefinition2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionStatusDefinition(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
 }
 
-func (ec *executionContext) marshalNActionStatus2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋtypesᚐActionStatus(ctx context.Context, sel ast.SelectionSet, v types.ActionStatus) graphql.Marshaler {
-	_ = sel
-	res := graphql.MarshalString(string(v))
-	if res == graphql.Null {
+func (ec *executionContext) marshalNActionStatusDefinition2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionStatusDefinition(ctx context.Context, sel ast.SelectionSet, v *graphql1.ActionStatusDefinition) graphql.Marshaler {
+	if v == nil {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
 			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
 		}
+		return graphql.Null
 	}
-	return res
+	return ec._ActionStatusDefinition(ctx, sel, v)
 }
 
 func (ec *executionContext) unmarshalNAny2interface(ctx context.Context, v any) (any, error) {
@@ -16235,6 +16760,36 @@ func (ec *executionContext) marshalNID2string(ctx context.Context, sel ast.Selec
 		}
 	}
 	return res
+}
+
+func (ec *executionContext) unmarshalNID2ᚕstringᚄ(ctx context.Context, v any) ([]string, error) {
+	var vSlice []any
+	vSlice = graphql.CoerceList(v)
+	var err error
+	res := make([]string, len(vSlice))
+	for i := range vSlice {
+		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithIndex(i))
+		res[i], err = ec.unmarshalNID2string(ctx, vSlice[i])
+		if err != nil {
+			return nil, err
+		}
+	}
+	return res, nil
+}
+
+func (ec *executionContext) marshalNID2ᚕstringᚄ(ctx context.Context, sel ast.SelectionSet, v []string) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	for i := range v {
+		ret[i] = ec.marshalNID2string(ctx, sel, v[i])
+	}
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
 }
 
 func (ec *executionContext) unmarshalNInt2int(ctx context.Context, v any) (int, error) {
@@ -17114,25 +17669,6 @@ func (ec *executionContext) marshalOAction2ᚖgithubᚗcomᚋsecmonᚑlabᚋheca
 		return graphql.Null
 	}
 	return ec._Action(ctx, sel, v)
-}
-
-func (ec *executionContext) unmarshalOActionStatus2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋtypesᚐActionStatus(ctx context.Context, v any) (*types.ActionStatus, error) {
-	if v == nil {
-		return nil, nil
-	}
-	tmp, err := graphql.UnmarshalString(v)
-	res := types.ActionStatus(tmp)
-	return &res, graphql.ErrorOnPath(ctx, err)
-}
-
-func (ec *executionContext) marshalOActionStatus2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋtypesᚐActionStatus(ctx context.Context, sel ast.SelectionSet, v *types.ActionStatus) graphql.Marshaler {
-	if v == nil {
-		return graphql.Null
-	}
-	_ = sel
-	_ = ctx
-	res := graphql.MarshalString(string(*v))
-	return res
 }
 
 func (ec *executionContext) unmarshalOBoolean2bool(ctx context.Context, v any) (bool, error) {

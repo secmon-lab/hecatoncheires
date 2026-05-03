@@ -5,6 +5,8 @@ import { GET_ACTION, UPDATE_ACTION, DELETE_ACTION, GET_ACTIONS } from '../graphq
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
+import { useActionStatuses } from '../hooks/useActionStatuses'
+import { actionStatusColor } from '../utils/actionStatusStyle'
 import Modal from '../components/Modal'
 import Button from '../components/Button'
 import { IconCheck } from '../components/Icons'
@@ -18,25 +20,6 @@ import ActionActivity from '../components/ActionActivity'
 interface ActionModalProps {
   actionId: number
   onClose: () => void
-}
-
-const STATUSES = ['BACKLOG', 'TODO', 'IN_PROGRESS', 'BLOCKED', 'COMPLETED'] as const
-type Status = typeof STATUSES[number]
-
-const statusKeyMap = {
-  BACKLOG: 'statusBacklog',
-  TODO: 'statusTodo',
-  IN_PROGRESS: 'statusInProgress',
-  BLOCKED: 'statusBlocked',
-  COMPLETED: 'statusCompleted',
-} as const
-
-const statusColor: Record<Status, string> = {
-  BACKLOG: '#9ca3af',
-  TODO: '#9ca3af',
-  IN_PROGRESS: '#f59e0b',
-  BLOCKED: '#ef4444',
-  COMPLETED: '#10b981',
 }
 
 function formatDue(iso?: string | null) {
@@ -61,6 +44,7 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
   const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const { statuses, label: statusLabel } = useActionStatuses(currentWorkspace?.id)
   const { data, loading } = useQuery(GET_ACTION, {
     variables: { workspaceId: currentWorkspace?.id, id: actionId },
     skip: !currentWorkspace,
@@ -87,13 +71,13 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
     window.setTimeout(() => setSavedFlash(false), 1500)
   }
 
-  const statusOptions: InlineSelectOption<Status>[] = useMemo(
-    () => STATUSES.map((s) => ({
-      value: s,
-      label: t(statusKeyMap[s]),
-      color: statusColor[s],
+  const statusOptions: InlineSelectOption<string>[] = useMemo(
+    () => statuses.map((s) => ({
+      value: s.id,
+      label: statusLabel(s.id),
+      color: actionStatusColor(s.color),
     })),
-    [t],
+    [statuses, statusLabel],
   )
 
   const titleEl = useMemo(() => (
@@ -138,7 +122,7 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
     )
   }
 
-  const handleStatusChange = async (next: Status) => {
+  const handleStatusChange = async (next: string) => {
     if (!action || next === action.status) return
     await updateAction({
       variables: { workspaceId: currentWorkspace!.id, input: { id: action.id, status: next } },
@@ -234,8 +218,8 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
           <div className="row" style={{ gap: 18, fontSize: 13, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
             <div className="row" style={{ gap: 8, alignItems: 'center', minWidth: 0 }}>
               <span className="soft">{t('labelStatus')}</span>
-              <InlineSelect<Status>
-                value={action.status as Status}
+              <InlineSelect<string>
+                value={action.status as string}
                 options={statusOptions}
                 onSave={handleStatusChange}
                 ariaLabel={t('labelStatus')}
@@ -248,11 +232,11 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
                 tabIndex={-1}
                 data-testid="status-dropdown"
                 value={action.status}
-                onChange={(e) => handleStatusChange(e.target.value as Status)}
+                onChange={(e) => handleStatusChange(e.target.value)}
                 style={{ position: 'absolute', width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
               >
-                {STATUSES.map((s) => (
-                  <option key={s} value={s}>{t(statusKeyMap[s])}</option>
+                {statuses.map((s) => (
+                  <option key={s.id} value={s.id}>{statusLabel(s.id)}</option>
                 ))}
               </select>
             </div>

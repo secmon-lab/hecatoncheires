@@ -85,16 +85,38 @@ type UpdateActionInput struct {
 
 type ActionUseCase struct {
 	repo         interfaces.Repository
+	registry     *model.WorkspaceRegistry
 	slackService slack.Service
 	baseURL      string
 }
 
-func NewActionUseCase(repo interfaces.Repository, slackService slack.Service, baseURL string) *ActionUseCase {
+func NewActionUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, baseURL string) *ActionUseCase {
 	return &ActionUseCase{
 		repo:         repo,
+		registry:     registry,
 		slackService: slackService,
 		baseURL:      baseURL,
 	}
+}
+
+// statusSet returns the configured ActionStatusSet for the given workspace,
+// falling back to the default set when the workspace is unknown or has no
+// custom configuration.
+func (uc *ActionUseCase) statusSet(workspaceID string) *model.ActionStatusSet {
+	return resolveActionStatusSet(uc.registry, workspaceID)
+}
+
+// resolveActionStatusSet is shared helper for any code path that needs the
+// workspace's ActionStatusSet but only has a registry handle.
+func resolveActionStatusSet(registry *model.WorkspaceRegistry, workspaceID string) *model.ActionStatusSet {
+	if registry == nil {
+		return model.DefaultActionStatusSet()
+	}
+	entry, err := registry.Get(workspaceID)
+	if err != nil || entry == nil || entry.ActionStatusSet == nil {
+		return model.DefaultActionStatusSet()
+	}
+	return entry.ActionStatusSet
 }
 
 func (uc *ActionUseCase) CreateAction(ctx context.Context, workspaceID string, caseID int64, title, description string, assigneeID string, slackMessageTS string, status types.ActionStatus, dueDate *time.Time) (*model.Action, error) {
@@ -113,11 +135,14 @@ func (uc *ActionUseCase) CreateAction(ctx context.Context, workspaceID string, c
 			goerr.V(CaseIDKey, caseID), goerr.V("user_id", token.Sub))
 	}
 
+	statusSet := uc.statusSet(workspaceID)
 	if status == "" {
-		status = types.ActionStatusTodo
+		status = types.ActionStatus(statusSet.InitialID())
 	}
-	if !status.IsValid() {
-		return nil, goerr.New("invalid action status", goerr.V("status", status))
+	if !statusSet.IsValid(string(status)) {
+		return nil, goerr.New("invalid action status",
+			goerr.V("status", status),
+			goerr.V("workspace_id", workspaceID))
 	}
 
 	action := &model.Action{
@@ -269,9 +294,10 @@ func (uc *ActionUseCase) UpdateAction(ctx context.Context, workspaceID string, i
 		action.SlackMessageTS = *in.SlackMessageTS
 	}
 	if in.Status != nil {
-		if !in.Status.IsValid() {
+		if !uc.statusSet(workspaceID).IsValid(string(*in.Status)) {
 			return nil, goerr.New("invalid action status",
 				goerr.V("status", *in.Status),
+				goerr.V("workspace_id", workspaceID),
 				goerr.V(ActionIDKey, in.ID))
 		}
 		action.Status = *in.Status
@@ -533,12 +559,14 @@ func (uc *ActionUseCase) actionWebURL(workspaceID string, caseID, actionID int64
 //     uses static_select instead of users_select so we can omit bots from
 //     the candidate list (Slack's users_select has no built-in bot filter).
 func (uc *ActionUseCase) buildActionMessageBlocks(ctx context.Context, workspaceID string, action *model.Action, actionURL string) []goslack.Block {
+	statusSet := uc.statusSet(workspaceID)
+	emoji := statusSet.Emoji(string(action.Status))
 	// "Action:" prefix labels the message in the channel feed so readers can
 	// tell at a glance that this row is an action card (vs. a case post or a
 	// thread reply).
-	titleText := fmt.Sprintf("*Action:* %s *%s*", action.Status.Emoji(), action.Title)
+	titleText := fmt.Sprintf("*Action:* %s *%s*", emoji, action.Title)
 	if actionURL != "" {
-		titleText = fmt.Sprintf("*Action:* %s *<%s|%s>*", action.Status.Emoji(), actionURL, action.Title)
+		titleText = fmt.Sprintf("*Action:* %s *<%s|%s>*", emoji, actionURL, action.Title)
 	}
 	blocks := []goslack.Block{
 		goslack.NewSectionBlock(
@@ -554,7 +582,7 @@ func (uc *ActionUseCase) buildActionMessageBlocks(ctx context.Context, workspace
 		))
 	}
 
-	statusSelect := buildStatusSelect(ctx, workspaceID, action)
+	statusSelect := buildStatusSelect(ctx, workspaceID, action, statusSet)
 	assigneeSelect := buildAssigneeSelect(ctx, action)
 	// One actions block carries both selects so they render side-by-side.
 	blocks = append(blocks, goslack.NewActionBlock(
@@ -566,18 +594,19 @@ func (uc *ActionUseCase) buildActionMessageBlocks(ctx context.Context, workspace
 	return blocks
 }
 
-func buildStatusSelect(ctx context.Context, workspaceID string, action *model.Action) *goslack.SelectBlockElement {
-	options := make([]*goslack.OptionBlockObject, 0, len(types.AllActionStatuses()))
+func buildStatusSelect(ctx context.Context, workspaceID string, action *model.Action, statusSet *model.ActionStatusSet) *goslack.SelectBlockElement {
+	defs := statusSet.Statuses()
+	options := make([]*goslack.OptionBlockObject, 0, len(defs))
 	var initial *goslack.OptionBlockObject
-	for _, s := range types.AllActionStatuses() {
-		label := goslack.NewTextBlockObject(goslack.PlainTextType, statusLabel(ctx, s), true, false)
+	for _, def := range defs {
+		label := goslack.NewTextBlockObject(goslack.PlainTextType, statusLabel(ctx, def), true, false)
 		opt := goslack.NewOptionBlockObject(
-			fmt.Sprintf("%s:%d:%s", workspaceID, action.ID, s),
+			fmt.Sprintf("%s:%d:%s", workspaceID, action.ID, def.ID),
 			label,
 			nil,
 		)
 		options = append(options, opt)
-		if s == action.Status {
+		if def.ID == string(action.Status) {
 			initial = opt
 		}
 	}
@@ -628,20 +657,14 @@ func ParseSlackAssigneeBlockID(blockID string) (workspaceID string, actionID int
 	return workspaceID, actionID, nil
 }
 
-func statusLabel(ctx context.Context, s types.ActionStatus) string {
-	switch s {
-	case types.ActionStatusBacklog:
-		return i18n.T(ctx, i18n.MsgActionStatusBacklog)
-	case types.ActionStatusTodo:
-		return i18n.T(ctx, i18n.MsgActionStatusTodo)
-	case types.ActionStatusInProgress:
-		return i18n.T(ctx, i18n.MsgActionStatusInProgressLabel)
-	case types.ActionStatusBlocked:
-		return i18n.T(ctx, i18n.MsgActionStatusBlocked)
-	case types.ActionStatusCompleted:
-		return i18n.T(ctx, i18n.MsgActionStatusCompletedLabel)
+// statusLabel renders the user-facing label for an Action status definition.
+// The workspace operator picks the language by writing `name` in their
+// preferred locale; we just fall back to the id when name is absent.
+func statusLabel(_ context.Context, def model.ActionStatusDefinition) string {
+	if def.Name != "" {
+		return def.Name
 	}
-	return s.String()
+	return def.ID
 }
 
 // ParseSlackStatusSelectValue parses a status_select option value of the form
@@ -666,9 +689,11 @@ func ParseSlackStatusSelectValue(value string) (workspaceID string, actionID int
 	if _, parseErr := fmt.Sscanf(idPart, "%d", &id); parseErr != nil {
 		return "", 0, "", goerr.Wrap(parseErr, "failed to parse action_id", goerr.V("value", value))
 	}
-	parsed, parseErr := types.ParseActionStatus(statusPart)
-	if parseErr != nil {
-		return "", 0, "", goerr.Wrap(parseErr, "failed to parse status", goerr.V("value", value))
+	// statusPart is validated against the workspace's ActionStatusSet by the
+	// caller (the controller already knows the workspace). Here we just carry
+	// the raw value forward — keeping this parser dependency-free.
+	if statusPart == "" {
+		return "", 0, "", goerr.New("empty status in status_select value", goerr.V("value", value))
 	}
-	return wsPart, id, parsed, nil
+	return wsPart, id, types.ActionStatus(statusPart), nil
 }
