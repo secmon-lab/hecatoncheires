@@ -641,6 +641,34 @@ func TestActionUseCase_UpdateAction_SlackSync(t *testing.T) {
 		gt.Value(t, diffs[0].ActorID).Equal("")
 		gt.Value(t, diffs[0].NewValue).Equal("Renamed")
 	})
+
+	t.Run("multiple field changes share a single CreatedAt", func(t *testing.T) {
+		repo, actionUC, _, action := setup(t)
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		newTitle := "Renamed"
+		newStatus := types.ActionStatusInProgress
+		newAssignee := "UASSIGNEE"
+		_, err := actionUC.UpdateAction(ctx, testWorkspaceID, usecase.UpdateActionInput{
+			ID:         action.ID,
+			Title:      &newTitle,
+			Status:     &newStatus,
+			AssigneeID: &newAssignee,
+			SlackSync:  usecase.SlackSyncSkip,
+			Actor:      usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: "UDOER"},
+		})
+		gt.NoError(t, err).Required()
+
+		diffs := listChangeEvents(t, repo, ctx, action.ID)
+		gt.Array(t, diffs).Length(3).Required()
+		// All sibling diffs from one UpdateAction call must share the same
+		// CreatedAt so the activity feed groups them deterministically; any
+		// drift would let the sort flip per call.
+		ts := diffs[0].CreatedAt
+		for _, d := range diffs[1:] {
+			gt.Bool(t, d.CreatedAt.Equal(ts)).True()
+		}
+	})
 }
 
 func TestParseSlackStatusSelectValue(t *testing.T) {
@@ -861,6 +889,74 @@ func TestActionUseCase_PrivateCaseAccessControl(t *testing.T) {
 		newTitle := "Updated"
 		_, err = actionUC.UpdateAction(nonMemberCtx, testWorkspaceID, usecase.UpdateActionInput{
 			ID: action.ID, Title: &newTitle, SlackSync: usecase.SlackSyncSkip,
+		})
+		gt.Error(t, err).Is(usecase.ErrAccessDenied)
+	})
+
+	// Slack interactivity routes UpdateAction through async.Dispatch, which
+	// hands the usecase a fresh background context with no auth token. The
+	// access check must therefore fall back to the supplied Actor.ID when
+	// the Slack actor is not a channel member.
+	t.Run("update action in private case as Slack non-member is denied without token", func(t *testing.T) {
+		repo := memory.New()
+		actionUC := usecase.NewActionUseCase(repo, nil, "")
+		memberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMEMBER"})
+		// Simulate the post-async.Dispatch context: no auth token attached.
+		bgCtx := context.Background()
+
+		privateCase := &model.Case{
+			Title:          "Private Case",
+			Description:    "Secret",
+			IsPrivate:      true,
+			ChannelUserIDs: []string{"UMEMBER"},
+			AssigneeIDs:    []string{},
+		}
+		created, err := repo.Case().Create(memberCtx, testWorkspaceID, privateCase)
+		gt.NoError(t, err).Required()
+
+		action, err := actionUC.CreateAction(memberCtx, testWorkspaceID, created.ID, "Action", "Desc", "", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+
+		newStatus := types.ActionStatusInProgress
+
+		// Slack non-member: should be rejected via Actor.ID fallback.
+		_, err = actionUC.UpdateAction(bgCtx, testWorkspaceID, usecase.UpdateActionInput{
+			ID:        action.ID,
+			Status:    &newStatus,
+			SlackSync: usecase.SlackSyncSkip,
+			Actor:     usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: "UOTHER"},
+		})
+		gt.Error(t, err).Is(usecase.ErrAccessDenied)
+
+		// Slack member: should succeed even though the context has no token.
+		updated, err := actionUC.UpdateAction(bgCtx, testWorkspaceID, usecase.UpdateActionInput{
+			ID:        action.ID,
+			Status:    &newStatus,
+			SlackSync: usecase.SlackSyncSkip,
+			Actor:     usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: "UMEMBER"},
+		})
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.Status).Equal(types.ActionStatusInProgress)
+
+		// System actor with no token: backward-compat path stays open.
+		newStatus2 := types.ActionStatusCompleted
+		updated, err = actionUC.UpdateAction(bgCtx, testWorkspaceID, usecase.UpdateActionInput{
+			ID:        action.ID,
+			Status:    &newStatus2,
+			SlackSync: usecase.SlackSyncSkip,
+			Actor:     usecase.ActorRef{Kind: usecase.ActorKindSystem},
+		})
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.Status).Equal(types.ActionStatusCompleted)
+
+		// Slack actor with empty ID (malformed callback): must be denied
+		// rather than silently bypassing access control.
+		newStatus3 := types.ActionStatusBlocked
+		_, err = actionUC.UpdateAction(bgCtx, testWorkspaceID, usecase.UpdateActionInput{
+			ID:        action.ID,
+			Status:    &newStatus3,
+			SlackSync: usecase.SlackSyncSkip,
+			Actor:     usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: ""},
 		})
 		gt.Error(t, err).Is(usecase.ErrAccessDenied)
 	})

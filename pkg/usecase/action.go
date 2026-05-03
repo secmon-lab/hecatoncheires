@@ -187,10 +187,27 @@ func (uc *ActionUseCase) UpdateAction(ctx context.Context, workspaceID string, i
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to get parent case", goerr.V(CaseIDKey, existing.CaseID))
 	}
-	token, tokenErr := auth.TokenFromContext(ctx)
-	if tokenErr == nil && !model.IsCaseAccessible(parentCase, token.Sub) {
+	// Resolve the acting user from either the auth token (GraphQL/WebUI) or
+	// the Slack interaction Actor (Slack callback path). The latter is
+	// required because async.Dispatch hands the usecase a fresh background
+	// context with no token, so a tokenErr-only check would silently bypass
+	// access control on Slack-initiated updates. checkAccess is tracked
+	// separately from actorID so that a user-initiated call with an empty
+	// ID (malformed token, Slack actor missing user ID) results in a deny
+	// for private cases rather than a silent bypass; only ActorKindSystem
+	// — which has no identified user by design — skips the check.
+	var actorID string
+	var checkAccess bool
+	if token, tokenErr := auth.TokenFromContext(ctx); tokenErr == nil {
+		actorID = token.Sub
+		checkAccess = true
+	} else if in.Actor.Kind == ActorKindSlackUser {
+		actorID = in.Actor.ID
+		checkAccess = true
+	}
+	if checkAccess && !model.IsCaseAccessible(parentCase, actorID) {
 		return nil, goerr.Wrap(ErrAccessDenied, "cannot update action in private case",
-			goerr.V(ActionIDKey, in.ID), goerr.V("user_id", token.Sub))
+			goerr.V(ActionIDKey, in.ID), goerr.V("user_id", actorID))
 	}
 
 	if in.CaseID != nil && *in.CaseID != existing.CaseID {
@@ -467,6 +484,11 @@ func (uc *ActionUseCase) recordActionEvents(ctx context.Context, workspaceID str
 		actorID = actor.ID
 	}
 
+	// Capture a single timestamp so all events emitted from one UpdateAction
+	// call share an identical CreatedAt; otherwise the activity feed sees
+	// sub-microsecond drift between sibling diffs and the sort becomes
+	// dependent on map iteration order.
+	now := time.Now().UTC()
 	put := func(kind types.ActionEventKind, oldVal, newVal string) {
 		event := &model.ActionEvent{
 			ID:        uuid.NewString(),
@@ -475,7 +497,7 @@ func (uc *ActionUseCase) recordActionEvents(ctx context.Context, workspaceID str
 			ActorID:   actorID,
 			OldValue:  oldVal,
 			NewValue:  newVal,
-			CreatedAt: time.Now().UTC(),
+			CreatedAt: now,
 		}
 		if err := uc.repo.ActionEvent().Put(ctx, workspaceID, after.ID, event); err != nil {
 			errutil.Handle(ctx, err, "failed to record action event")
