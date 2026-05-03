@@ -26,7 +26,6 @@ export const GET_FIELD_CONFIGURATION = gql`
         statuses {
           id
           name
-          nameJa
           description
           color
           emoji

@@ -661,7 +661,6 @@ closed  = ["done", "cancelled"]   # Optional, defaults to []
 [[action.status]]
 id = "queued"
 name = "Queued"
-name_ja = "待機中"             # Optional Japanese override
 description = "Awaiting triage"
 color = "idle"                 # See "Color values" below
 emoji = "📋"
@@ -691,8 +690,7 @@ emoji = "✅"
 | Key | Type | Required | Description |
 |-----|------|----------|-------------|
 | `id` | string | **Yes** | Stable identifier. Must match `^[A-Za-z0-9]+([_-][A-Za-z0-9]+)*$` and be unique within the workspace. Stored in the database as the action's status. |
-| `name` | string | **Yes** | Default display label. |
-| `name_ja` | string | No | Japanese display label; takes precedence over `name` when the user's locale is Japanese. |
+| `name` | string | **Yes** | Display label. Write it in whichever language fits the workspace — there is no localization layer. |
 | `description` | string | No | Free-form description (currently unused in the UI; reserved for tooltips). |
 | `color` | string | No | UI color. See "Color values" below. Defaults to the neutral `idle` preset. |
 | `emoji` | string | No | Single emoji used in Slack messages and web UI badges. |

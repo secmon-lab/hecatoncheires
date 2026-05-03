@@ -636,12 +636,9 @@ func ParseSlackAssigneeBlockID(blockID string) (workspaceID string, actionID int
 }
 
 // statusLabel renders the user-facing label for an Action status definition.
-// Workspace TOML may provide a Japanese name via `name_ja`; when present and
-// the request is in Japanese, it takes precedence over the default `name`.
-func statusLabel(ctx context.Context, def model.ActionStatusDefinition) string {
-	if def.NameJA != "" && i18n.LangFromContext(ctx) == i18n.LangJA {
-		return def.NameJA
-	}
+// The workspace operator picks the language by writing `name` in their
+// preferred locale; we just fall back to the id when name is absent.
+func statusLabel(_ context.Context, def model.ActionStatusDefinition) string {
 	if def.Name != "" {
 		return def.Name
 	}

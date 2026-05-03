@@ -134,7 +134,6 @@ welcome_messages = [
 # [[action.status]]
 # id = "queued"
 # name = "Queued"
-# name_ja = "待機中"
 # color = "idle"
 # emoji = "📋"
 #

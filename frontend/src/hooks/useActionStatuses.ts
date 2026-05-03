@@ -1,12 +1,10 @@
 import { useQuery } from '@apollo/client'
 import { useMemo } from 'react'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
-import { useTranslation } from '../i18n'
 
 export type ActionStatusDef = {
   id: string
   name: string
-  nameJa?: string | null
   description?: string | null
   color?: string | null
   emoji?: string | null
@@ -35,7 +33,6 @@ const fallbackConfig: ActionStatusConfig = {
 // While the query is loading, it returns the legacy default set so the UI
 // can render synchronously without flashing empty columns.
 export function useActionStatuses(workspaceId: string | undefined) {
-  const { lang } = useTranslation()
   const { data, loading, error } = useQuery(GET_FIELD_CONFIGURATION, {
     variables: { workspaceId: workspaceId ?? '' },
     skip: !workspaceId,
@@ -62,7 +59,6 @@ export function useActionStatuses(workspaceId: string | undefined) {
   const label = (id: string): string => {
     const def = byId.get(id)
     if (!def) return id
-    if (lang === 'ja' && def.nameJa) return def.nameJa
     return def.name || def.id
   }
 

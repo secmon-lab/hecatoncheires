@@ -97,7 +97,6 @@ type ComplexityRoot struct {
 		Emoji       func(childComplexity int) int
 		ID          func(childComplexity int) int
 		Name        func(childComplexity int) int
-		NameJa      func(childComplexity int) int
 	}
 
 	AssistLog struct {
@@ -655,12 +654,6 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.ActionStatusDefinition.Name(childComplexity), true
-	case "ActionStatusDefinition.nameJa":
-		if e.complexity.ActionStatusDefinition.NameJa == nil {
-			break
-		}
-
-		return e.complexity.ActionStatusDefinition.NameJa(childComplexity), true
 
 	case "AssistLog.actions":
 		if e.complexity.AssistLog.Actions == nil {
@@ -2053,14 +2046,13 @@ type FieldConfiguration {
 }
 
 # ActionStatusDefinition describes a single action status configurable per
-# workspace in TOML. The ` + "`" + `name` + "`" + ` is the default display label (English by
-# default); ` + "`" + `nameJa` + "`" + ` overrides it when the client locale is Japanese.
-# ` + "`" + `color` + "`" + ` is either a semantic preset name or a #RRGGBB hex code. See the
-# user-facing config docs for the accepted preset list.
+# workspace in TOML. ` + "`" + `name` + "`" + ` is the display label written by the workspace
+# operator in whatever language they prefer. ` + "`" + `color` + "`" + ` is either a semantic
+# preset name or a #RRGGBB hex code. See the user-facing config docs for
+# the accepted preset list.
 type ActionStatusDefinition {
   id: ID!
   name: String!
-  nameJa: String
   description: String
   color: String
   emoji: String
@@ -3733,8 +3725,6 @@ func (ec *executionContext) fieldContext_ActionConfig_statuses(_ context.Context
 				return ec.fieldContext_ActionStatusDefinition_id(ctx, field)
 			case "name":
 				return ec.fieldContext_ActionStatusDefinition_name(ctx, field)
-			case "nameJa":
-				return ec.fieldContext_ActionStatusDefinition_nameJa(ctx, field)
 			case "description":
 				return ec.fieldContext_ActionStatusDefinition_description(ctx, field)
 			case "color":
@@ -4112,35 +4102,6 @@ func (ec *executionContext) _ActionStatusDefinition_name(ctx context.Context, fi
 }
 
 func (ec *executionContext) fieldContext_ActionStatusDefinition_name(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
-	fc = &graphql.FieldContext{
-		Object:     "ActionStatusDefinition",
-		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
-		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			return nil, errors.New("field of type String does not have child fields")
-		},
-	}
-	return fc, nil
-}
-
-func (ec *executionContext) _ActionStatusDefinition_nameJa(ctx context.Context, field graphql.CollectedField, obj *graphql1.ActionStatusDefinition) (ret graphql.Marshaler) {
-	return graphql.ResolveField(
-		ctx,
-		ec.OperationContext,
-		field,
-		ec.fieldContext_ActionStatusDefinition_nameJa,
-		func(ctx context.Context) (any, error) {
-			return obj.NameJa, nil
-		},
-		nil,
-		ec.marshalOString2ᚖstring,
-		true,
-		false,
-	)
-}
-
-func (ec *executionContext) fieldContext_ActionStatusDefinition_nameJa(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "ActionStatusDefinition",
 		Field:      field,
@@ -13326,8 +13287,6 @@ func (ec *executionContext) _ActionStatusDefinition(ctx context.Context, sel ast
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
-		case "nameJa":
-			out.Values[i] = ec._ActionStatusDefinition_nameJa(ctx, field, obj)
 		case "description":
 			out.Values[i] = ec._ActionStatusDefinition_description(ctx, field, obj)
 		case "color":

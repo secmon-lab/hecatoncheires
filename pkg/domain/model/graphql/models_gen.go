@@ -39,7 +39,6 @@ type ActionEventConnection struct {
 type ActionStatusDefinition struct {
 	ID          string  `json:"id"`
 	Name        string  `json:"name"`
-	NameJa      *string `json:"nameJa,omitempty"`
 	Description *string `json:"description,omitempty"`
 	Color       *string `json:"color,omitempty"`
 	Emoji       *string `json:"emoji,omitempty"`

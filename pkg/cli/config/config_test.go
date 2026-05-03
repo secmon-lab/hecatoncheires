@@ -1003,7 +1003,6 @@ closed = ["done", "abandoned"]
 [[action.status]]
 id = "queued"
 name = "Queued"
-name_ja = "待機中"
 color = "idle"
 emoji = "📋"
 
@@ -1041,7 +1040,8 @@ color = "neutral_done"
 	gt.Bool(t, set.IsValid("waiting_user")).True()
 	def, ok := set.Get("queued")
 	gt.Bool(t, ok).True()
-	gt.Value(t, def.NameJA).Equal("待機中")
+	gt.Value(t, def.Name).Equal("Queued")
+	gt.Value(t, def.Emoji).Equal("📋")
 }
 
 func TestLoadWorkspaceConfigs_ActionStatuses_InvalidColor(t *testing.T) {

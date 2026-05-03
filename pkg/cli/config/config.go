@@ -84,7 +84,6 @@ type ActionSection struct {
 type ActionStatusConfigRow struct {
 	ID          string `toml:"id"`
 	Name        string `toml:"name"`
-	NameJA      string `toml:"name_ja"`
 	Description string `toml:"description"`
 	Color       string `toml:"color"`
 	Emoji       string `toml:"emoji"`
@@ -233,7 +232,6 @@ func (a *AppConfig) resolveActionStatusSet() (*model.ActionStatusSet, error) {
 		defs = append(defs, model.ActionStatusDefinition{
 			ID:          row.ID,
 			Name:        row.Name,
-			NameJA:      row.NameJA,
 			Description: row.Description,
 			Color:       row.Color,
 			Emoji:       row.Emoji,

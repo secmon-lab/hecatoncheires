@@ -833,11 +833,7 @@ func (r *queryResolver) FieldConfiguration(ctx context.Context, workspaceID stri
 	gqlStatuses := make([]*graphql1.ActionStatusDefinition, 0, len(statusDefs))
 	for _, def := range statusDefs {
 		def := def
-		var nameJa, description, color, emoji *string
-		if def.NameJA != "" {
-			v := def.NameJA
-			nameJa = &v
-		}
+		var description, color, emoji *string
 		if def.Description != "" {
 			v := def.Description
 			description = &v
@@ -853,7 +849,6 @@ func (r *queryResolver) FieldConfiguration(ctx context.Context, workspaceID stri
 		gqlStatuses = append(gqlStatuses, &graphql1.ActionStatusDefinition{
 			ID:          def.ID,
 			Name:        def.Name,
-			NameJa:      nameJa,
 			Description: description,
 			Color:       color,
 			Emoji:       emoji,

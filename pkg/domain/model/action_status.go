@@ -55,7 +55,6 @@ var hexColorPattern = regexp.MustCompile(`^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$`)
 type ActionStatusDefinition struct {
 	ID          string
 	Name        string
-	NameJA      string
 	Description string
 	Color       string // either a preset name (lowercase) or "#RRGGBB" / "#RGB"
 	Emoji       string

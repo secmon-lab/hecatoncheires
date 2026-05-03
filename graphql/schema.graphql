@@ -48,14 +48,13 @@ type FieldConfiguration {
 }
 
 # ActionStatusDefinition describes a single action status configurable per
-# workspace in TOML. The `name` is the default display label (English by
-# default); `nameJa` overrides it when the client locale is Japanese.
-# `color` is either a semantic preset name or a #RRGGBB hex code. See the
-# user-facing config docs for the accepted preset list.
+# workspace in TOML. `name` is the display label written by the workspace
+# operator in whatever language they prefer. `color` is either a semantic
+# preset name or a #RRGGBB hex code. See the user-facing config docs for
+# the accepted preset list.
 type ActionStatusDefinition {
   id: ID!
   name: String!
-  nameJa: String
   description: String
   color: String
   emoji: String
