@@ -911,7 +911,7 @@ func TestActionUseCase_PrivateCaseAccessControl(t *testing.T) {
 	// the Slack actor is not a channel member.
 	t.Run("update action in private case as Slack non-member is denied without token", func(t *testing.T) {
 		repo := memory.New()
-		actionUC := usecase.NewActionUseCase(repo, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
 		memberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMEMBER"})
 		// Simulate the post-async.Dispatch context: no auth token attached.
 		bgCtx := context.Background()

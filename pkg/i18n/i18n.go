@@ -104,11 +104,37 @@ const (
 	MsgFieldPrivateCase
 	MsgFieldPrivateCaseDesc
 
+	// Case assignees field
+	MsgFieldCaseAssignees
+
 	// Errors
 	MsgErrOpenDialog
 	MsgErrWorkspaceSelection
 	MsgErrCreateCase
 	MsgErrEditCase
+
+	// Command choice modal (case channel /cmd without subcommand)
+	MsgModalCommandChoiceTitle
+	MsgFieldCommandChoice
+	MsgChoiceUpdateCase
+	MsgChoiceCreateAction
+
+	// Action creation modal
+	MsgModalCreateActionTitle
+	MsgModalCreateActionSubmit
+	MsgFieldAction // "Action" label
+	MsgFieldActionTitle
+	MsgFieldActionTitlePlaceholder
+	MsgFieldActionDescription
+	MsgFieldActionDescPlaceholder
+	MsgFieldActionAssignee
+	MsgFieldActionStatusLabel
+	MsgFieldActionDueDate
+	MsgActionCreated // "Action #%d *%s* has been created."
+
+	// Errors related to commands
+	MsgErrUnknownSubcommand // "Unknown subcommand: %s. Available: update, action."
+	MsgErrCreateAction      // "Failed to create action. Please try again."
 
 	msgKeyCount // sentinel for validation
 )

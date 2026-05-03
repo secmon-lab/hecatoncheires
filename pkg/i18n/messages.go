@@ -85,11 +85,37 @@ var messagesEN = [msgKeyCount]string{
 	MsgFieldPrivateCase:     "Private case",
 	MsgFieldPrivateCaseDesc: "Only channel members can access this case",
 
+	// Case assignees
+	MsgFieldCaseAssignees: "Assignees",
+
 	// Errors
 	MsgErrOpenDialog:         "Failed to open case creation dialog. Please try again.",
 	MsgErrWorkspaceSelection: "Failed to process workspace selection. Please try again.",
 	MsgErrCreateCase:         "Failed to create case. Please try again.",
 	MsgErrEditCase:           "Failed to update case. Please try again.",
+
+	// Command choice modal
+	MsgModalCommandChoiceTitle: "Choose Action",
+	MsgFieldCommandChoice:      "What would you like to do?",
+	MsgChoiceUpdateCase:        "Edit case",
+	MsgChoiceCreateAction:      "Create action",
+
+	// Action creation modal
+	MsgModalCreateActionTitle:      "Create Action",
+	MsgModalCreateActionSubmit:     "Create",
+	MsgFieldAction:                 "Action",
+	MsgFieldActionTitle:            "Title",
+	MsgFieldActionTitlePlaceholder: "Enter action title",
+	MsgFieldActionDescription:      "Description",
+	MsgFieldActionDescPlaceholder:  "Enter action description (optional)",
+	MsgFieldActionAssignee:         "Assignee",
+	MsgFieldActionStatusLabel:      "Status",
+	MsgFieldActionDueDate:          "Due date",
+	MsgActionCreated:               "Action #%d *%s* has been created.",
+
+	// Errors related to commands
+	MsgErrUnknownSubcommand: "Unknown subcommand: %q. Available: `update`, `action`.",
+	MsgErrCreateAction:      "Failed to create action. Please try again.",
 }
 
 var messagesJA = [msgKeyCount]string{
@@ -162,9 +188,35 @@ var messagesJA = [msgKeyCount]string{
 	MsgFieldPrivateCase:     "プライベートケース",
 	MsgFieldPrivateCaseDesc: "チャンネルメンバーのみアクセスできます",
 
+	// Case assignees
+	MsgFieldCaseAssignees: "担当者",
+
 	// Errors
 	MsgErrOpenDialog:         "ケース作成ダイアログを開けませんでした。もう一度お試しください。",
 	MsgErrWorkspaceSelection: "ワークスペースの選択処理に失敗しました。もう一度お試しください。",
 	MsgErrCreateCase:         "ケースの作成に失敗しました。もう一度お試しください。",
 	MsgErrEditCase:           "ケースの更新に失敗しました。もう一度お試しください。",
+
+	// Command choice modal
+	MsgModalCommandChoiceTitle: "操作を選択",
+	MsgFieldCommandChoice:      "何をしますか？",
+	MsgChoiceUpdateCase:        "ケースを編集",
+	MsgChoiceCreateAction:      "アクションを作成",
+
+	// Action creation modal
+	MsgModalCreateActionTitle:      "アクション作成",
+	MsgModalCreateActionSubmit:     "作成",
+	MsgFieldAction:                 "アクション",
+	MsgFieldActionTitle:            "タイトル",
+	MsgFieldActionTitlePlaceholder: "アクションタイトルを入力",
+	MsgFieldActionDescription:      "説明",
+	MsgFieldActionDescPlaceholder:  "アクションの説明を入力（任意）",
+	MsgFieldActionAssignee:         "担当者",
+	MsgFieldActionStatusLabel:      "ステータス",
+	MsgFieldActionDueDate:          "期日",
+	MsgActionCreated:               "アクション #%d *%s* が作成されました。",
+
+	// Errors related to commands
+	MsgErrUnknownSubcommand: "不明なサブコマンドです: %q。利用可能: `update`, `action`。",
+	MsgErrCreateAction:      "アクションの作成に失敗しました。もう一度お試しください。",
 }
