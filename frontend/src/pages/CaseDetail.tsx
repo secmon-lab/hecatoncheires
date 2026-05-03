@@ -20,6 +20,8 @@ import InlineUserSelect from '../components/inline/InlineUserSelect'
 import FilterDropdown from '../components/FilterDropdown'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
+import { useActionStatuses } from '../hooks/useActionStatuses'
+import { actionStatusColorStyle } from '../utils/actionStatusStyle'
 import Button from '../components/Button'
 import Modal from '../components/Modal'
 import {
@@ -64,28 +66,6 @@ function formatHHMM(iso?: string | null) {
   return `${hh}:${mm}`
 }
 
-const STATUS_CLASS: Record<string, string> = {
-  BACKLOG: 'backlog',
-  TODO: 'todo',
-  IN_PROGRESS: 'in-progress',
-  BLOCKED: 'blocked',
-  COMPLETED: 'done',
-}
-const STATUS_PIP: Record<string, string> = {
-  BACKLOG: 'pip-bg',
-  TODO: 'pip-todo',
-  IN_PROGRESS: 'pip-prog',
-  BLOCKED: 'pip-block',
-  COMPLETED: 'pip-done',
-}
-const STATUS_LABEL_KEY = {
-  BACKLOG: 'statusBacklog',
-  TODO: 'statusTodo',
-  IN_PROGRESS: 'statusInProgress',
-  BLOCKED: 'statusBlocked',
-  COMPLETED: 'statusCompleted',
-} as const
-
 export default function CaseDetail() {
   const { id, actionId: actionIdParam } = useParams<{ id: string; actionId?: string }>()
   const caseId = Number(id)
@@ -93,6 +73,7 @@ export default function CaseDetail() {
   const navigate = useNavigate()
   const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
+  const actionStatuses = useActionStatuses(currentWorkspace?.id)
 
   const [addingAction, setAddingAction] = useState(false)
   const [actionStatusFilters, setActionStatusFilters] = useState<string[]>([])
@@ -417,17 +398,10 @@ export default function CaseDetail() {
             </div>
 
             {totalActions > 0 && (() => {
-              const STATUS_ORDER: Array<{ value: string; labelKey: 'statusBacklog' | 'statusTodo' | 'statusInProgress' | 'statusBlocked' | 'statusCompleted' }> = [
-                { value: 'BACKLOG', labelKey: 'statusBacklog' },
-                { value: 'TODO', labelKey: 'statusTodo' },
-                { value: 'IN_PROGRESS', labelKey: 'statusInProgress' },
-                { value: 'BLOCKED', labelKey: 'statusBlocked' },
-                { value: 'COMPLETED', labelKey: 'statusCompleted' },
-              ]
               const presentStatuses = new Set<string>(c.actions.map((a: any) => a.status))
-              const statusOpts = STATUS_ORDER
-                .filter((s) => presentStatuses.has(s.value))
-                .map((s) => ({ value: s.value, label: t(s.labelKey) }))
+              const statusOpts = actionStatuses.statuses
+                .filter((s) => presentStatuses.has(s.id))
+                .map((s) => ({ value: s.id, label: actionStatuses.label(s.id) }))
 
               const assigneeMap = new Map<string, { value: string; label: string }>()
               let anyUnassigned = false
@@ -487,9 +461,9 @@ export default function CaseDetail() {
                     <div className="h-action-list">
                       {filtered.map((a: any) => {
                         const status = String(a.status)
-                        const cls = STATUS_CLASS[status] || 'backlog'
-                        const pip = STATUS_PIP[status] || 'pip-bg'
-                        const labelKey = STATUS_LABEL_KEY[status as keyof typeof STATUS_LABEL_KEY]
+                        const def = actionStatuses.get(status)
+                        const colorStyle = actionStatusColorStyle(def?.color)
+                        const closed = actionStatuses.isClosed(status)
                         return (
                           <Link
                             key={a.id}
@@ -498,17 +472,16 @@ export default function CaseDetail() {
                             data-testid="case-related-action"
                             data-status={status}
                           >
-                            <span className={`h-action-pip ${pip}`} />
+                            <span className="h-action-pip" style={{ ...colorStyle, borderRadius: '50%' }} />
                             <span className="h-action-title">{a.title}</span>
-                            {labelKey && (
-                              <span
-                                className={`h-action-status ${cls}`}
-                                data-testid="case-related-action-status"
-                              >
-                                {t(labelKey)}
-                              </span>
-                            )}
-                            {status === 'COMPLETED' && a.updatedAt && (
+                            <span
+                              className="h-action-status"
+                              style={{ color: colorStyle.background as string }}
+                              data-testid="case-related-action-status"
+                            >
+                              {actionStatuses.label(status)}
+                            </span>
+                            {closed && a.updatedAt && (
                               <span className="h-action-meta" data-testid="case-related-action-completed-at">
                                 {t('labelCompleted')}<span className="mono">{formatHHMM(a.updatedAt)}</span>
                               </span>

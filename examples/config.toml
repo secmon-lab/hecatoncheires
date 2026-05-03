@@ -116,3 +116,48 @@ welcome_messages = [
 - Assignees: {{range $i, $a := .Case.AssigneeIDs}}{{if $i}}, {{end}}<@{{$a}}>{{end}}
 - Detail: {{.URL}}""",
 ]
+
+# Action statuses (optional)
+# When the [action] section is omitted the workspace falls back to the
+# built-in defaults: BACKLOG / TODO / IN_PROGRESS / BLOCKED / COMPLETED
+# (initial = BACKLOG, closed = [COMPLETED]).
+#
+# Define [action] to tailor the workflow. `initial` picks the status assigned
+# to newly created actions, and `closed` lists the ids treated as closed for
+# filtering / completion checks. See docs/config.md → "Action Section" for
+# the full list of accepted `color` preset names and other rules.
+#
+# [action]
+# initial = "queued"
+# closed  = ["done", "wont_fix"]
+#
+# [[action.status]]
+# id = "queued"
+# name = "Queued"
+# name_ja = "待機中"
+# color = "idle"
+# emoji = "📋"
+#
+# [[action.status]]
+# id = "doing"
+# name = "Doing"
+# color = "active"
+# emoji = "▶️"
+#
+# [[action.status]]
+# id = "review"
+# name = "In Review"
+# color = "waiting"
+# emoji = "👀"
+#
+# [[action.status]]
+# id = "done"
+# name = "Done"
+# color = "success"
+# emoji = "✅"
+#
+# [[action.status]]
+# id = "wont_fix"
+# name = "Won't Fix"
+# color = "neutral_done"
+# emoji = "🚫"

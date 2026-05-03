@@ -966,3 +966,166 @@ type = "text"
 		gt.Value(t, configs[0].SlackTeamID).Equal("")
 	})
 }
+
+func TestLoadWorkspaceConfigs_ActionStatuses_Default(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+	content := `
+[workspace]
+id = "risk"
+name = "Risk"
+`
+	gt.NoError(t, os.WriteFile(configPath, []byte(content), 0644)).Required()
+
+	configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+	gt.NoError(t, err).Required()
+	gt.Array(t, configs).Length(1).Required()
+
+	set := configs[0].ActionStatusSet
+	gt.Value(t, set).NotNil().Required()
+	gt.Value(t, set.InitialID()).Equal("BACKLOG")
+	gt.Bool(t, set.IsClosed("COMPLETED")).True()
+	gt.Bool(t, set.IsClosed("BACKLOG")).False()
+}
+
+func TestLoadWorkspaceConfigs_ActionStatuses_Custom(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+	content := `
+[workspace]
+id = "ops"
+name = "Ops"
+
+[action]
+initial = "queued"
+closed = ["done", "abandoned"]
+
+[[action.status]]
+id = "queued"
+name = "Queued"
+name_ja = "待機中"
+color = "idle"
+emoji = "📋"
+
+[[action.status]]
+id = "working"
+name = "Working"
+color = "active"
+
+[[action.status]]
+id = "waiting_user"
+name = "Waiting on user"
+color = "waiting"
+
+[[action.status]]
+id = "done"
+name = "Done"
+color = "success"
+emoji = "✅"
+
+[[action.status]]
+id = "abandoned"
+name = "Abandoned"
+color = "neutral_done"
+`
+	gt.NoError(t, os.WriteFile(configPath, []byte(content), 0644)).Required()
+
+	configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+	gt.NoError(t, err).Required()
+	gt.Array(t, configs).Length(1).Required()
+
+	set := configs[0].ActionStatusSet
+	gt.Value(t, set).NotNil().Required()
+	gt.Value(t, set.InitialID()).Equal("queued")
+	gt.Value(t, set.ClosedIDs()).Equal([]string{"done", "abandoned"})
+	gt.Bool(t, set.IsValid("waiting_user")).True()
+	def, ok := set.Get("queued")
+	gt.Bool(t, ok).True()
+	gt.Value(t, def.NameJA).Equal("待機中")
+}
+
+func TestLoadWorkspaceConfigs_ActionStatuses_InvalidColor(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+	content := `
+[workspace]
+id = "ops"
+
+[action]
+initial = "x"
+
+[[action.status]]
+id = "x"
+name = "X"
+color = "rainbow"
+`
+	gt.NoError(t, os.WriteFile(configPath, []byte(content), 0644)).Required()
+
+	_, err := config.LoadWorkspaceConfigs([]string{configPath})
+	gt.Error(t, err)
+}
+
+func TestLoadWorkspaceConfigs_ActionStatuses_InitialMissing(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+	content := `
+[workspace]
+id = "ops"
+
+[action]
+initial = "ghost"
+
+[[action.status]]
+id = "real"
+name = "Real"
+`
+	gt.NoError(t, os.WriteFile(configPath, []byte(content), 0644)).Required()
+
+	_, err := config.LoadWorkspaceConfigs([]string{configPath})
+	gt.Error(t, err)
+}
+
+func TestLoadWorkspaceConfigs_ActionStatuses_ClosedMissing(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+	content := `
+[workspace]
+id = "ops"
+
+[action]
+initial = "x"
+closed = ["ghost"]
+
+[[action.status]]
+id = "x"
+name = "X"
+`
+	gt.NoError(t, os.WriteFile(configPath, []byte(content), 0644)).Required()
+
+	_, err := config.LoadWorkspaceConfigs([]string{configPath})
+	gt.Error(t, err)
+}
+
+func TestLoadWorkspaceConfigs_ActionStatuses_DuplicateID(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+	content := `
+[workspace]
+id = "ops"
+
+[action]
+initial = "x"
+
+[[action.status]]
+id = "x"
+name = "X"
+
+[[action.status]]
+id = "x"
+name = "X again"
+`
+	gt.NoError(t, os.WriteFile(configPath, []byte(content), 0644)).Required()
+
+	_, err := config.LoadWorkspaceConfigs([]string{configPath})
+	gt.Error(t, err)
+}

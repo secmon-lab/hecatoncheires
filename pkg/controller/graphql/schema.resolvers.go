@@ -472,9 +472,10 @@ func (r *mutationResolver) CreateAction(ctx context.Context, workspaceID string,
 		slackMessageTS = *input.SlackMessageTs
 	}
 
-	status := types.ActionStatusTodo
+	// Empty status lets the usecase substitute the workspace's initial id.
+	var status types.ActionStatus
 	if input.Status != nil {
-		status = *input.Status
+		status = types.ActionStatus(*input.Status)
 	}
 
 	description := ""
@@ -505,7 +506,8 @@ func (r *mutationResolver) UpdateAction(ctx context.Context, workspaceID string,
 
 	var status *types.ActionStatus
 	if input.Status != nil {
-		status = input.Status
+		s := types.ActionStatus(*input.Status)
+		status = &s
 	}
 
 	clearDueDate := false
@@ -826,10 +828,52 @@ func (r *queryResolver) FieldConfiguration(ctx context.Context, workspaceID stri
 		}
 	}
 
+	statusSet := r.UseCases.Case.GetActionStatusSet(workspaceID)
+	statusDefs := statusSet.Statuses()
+	gqlStatuses := make([]*graphql1.ActionStatusDefinition, 0, len(statusDefs))
+	for _, def := range statusDefs {
+		def := def
+		var nameJa, description, color, emoji *string
+		if def.NameJA != "" {
+			v := def.NameJA
+			nameJa = &v
+		}
+		if def.Description != "" {
+			v := def.Description
+			description = &v
+		}
+		if def.Color != "" {
+			v := def.Color
+			color = &v
+		}
+		if def.Emoji != "" {
+			v := def.Emoji
+			emoji = &v
+		}
+		gqlStatuses = append(gqlStatuses, &graphql1.ActionStatusDefinition{
+			ID:          def.ID,
+			Name:        def.Name,
+			NameJa:      nameJa,
+			Description: description,
+			Color:       color,
+			Emoji:       emoji,
+		})
+	}
+
+	closedIDs := statusSet.ClosedIDs()
+	if closedIDs == nil {
+		closedIDs = []string{}
+	}
+
 	return &graphql1.FieldConfiguration{
 		Fields: fields,
 		Labels: &graphql1.EntityLabels{
 			Case: schema.Labels.Case,
+		},
+		ActionConfig: &graphql1.ActionConfig{
+			Initial:  statusSet.InitialID(),
+			Closed:   closedIDs,
+			Statuses: gqlStatuses,
 		},
 	}, nil
 }
@@ -1106,3 +1150,15 @@ type caseResolver struct{ *Resolver }
 type knowledgeResolver struct{ *Resolver }
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
+
+// !!! WARNING !!!
+// The code below was going to be deleted when updating resolvers. It has been copied here so you have
+// one last chance to move it out of harms way if you want. There are two reasons this happens:
+//  - When renaming or deleting a resolver the old code will be put in here. You can safely delete
+//    it when you're done.
+//  - You have helper methods in this file. Move them out to keep these resolver files clean.
+/*
+	func (r *actionResolver) Status(ctx context.Context, obj *graphql1.Action) (string, error) {
+	panic(fmt.Errorf("not implemented: Status - status"))
+}
+*/

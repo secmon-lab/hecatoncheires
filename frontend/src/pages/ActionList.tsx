@@ -4,6 +4,11 @@ import { useMutation, useQuery } from '@apollo/client'
 import { GET_OPEN_CASE_ACTIONS, UPDATE_ACTION } from '../graphql/action'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
+import { useActionStatuses } from '../hooks/useActionStatuses'
+import {
+  actionStatusColorStyle,
+  actionStatusSlug,
+} from '../utils/actionStatusStyle'
 import Button from '../components/Button'
 import {
   IconPlus,
@@ -14,8 +19,6 @@ import ActionForm from './ActionForm'
 import ActionModal from './ActionModal'
 import styles from './ActionList.module.css'
 
-type ActionStatus = 'BACKLOG' | 'TODO' | 'IN_PROGRESS' | 'BLOCKED' | 'COMPLETED'
-
 interface ActionRow {
   id: number
   caseID: number
@@ -24,18 +27,10 @@ interface ActionRow {
   description: string
   assigneeID: string | null
   assignee: { id: string; name: string; realName: string; imageUrl?: string } | null
-  status: ActionStatus
+  status: string
   dueDate?: string | null
   createdAt: string
 }
-
-const COLUMNS: Array<{ status: ActionStatus; labelKey: 'statusBacklog' | 'statusTodo' | 'statusInProgress' | 'statusBlocked' | 'statusCompleted'; pip: string; slug: string }> = [
-  { status: 'BACKLOG',     labelKey: 'statusBacklog',    pip: 'pip-bg',    slug: 'backlog' },
-  { status: 'TODO',        labelKey: 'statusTodo',       pip: 'pip-todo',  slug: 'to-do' },
-  { status: 'IN_PROGRESS', labelKey: 'statusInProgress', pip: 'pip-prog',  slug: 'in-progress' },
-  { status: 'BLOCKED',     labelKey: 'statusBlocked',    pip: 'pip-block', slug: 'blocked' },
-  { status: 'COMPLETED',   labelKey: 'statusCompleted',  pip: 'pip-done',  slug: 'completed' },
-]
 
 function formatDue(iso?: string | null) {
   if (!iso) return '—'
@@ -58,7 +53,8 @@ export default function ActionList() {
   const [search, setSearch] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const [draggingId, setDraggingId] = useState<number | null>(null)
-  const [dragOverCol, setDragOverCol] = useState<ActionStatus | null>(null)
+  const [dragOverCol, setDragOverCol] = useState<string | null>(null)
+  const { statuses, isClosed, label } = useActionStatuses(currentWorkspace?.id)
 
   const { data } = useQuery(GET_OPEN_CASE_ACTIONS, {
     variables: { workspaceId: currentWorkspace?.id },
@@ -80,16 +76,18 @@ export default function ActionList() {
   }, [actions, search])
 
   const grouped = useMemo(() => {
-    const map: Record<ActionStatus, ActionRow[]> = {
-      BACKLOG: [], TODO: [], IN_PROGRESS: [], BLOCKED: [], COMPLETED: [],
-    }
-    filtered.forEach((a) => { (map[a.status] || (map.BACKLOG)).push(a) })
+    const map: Record<string, ActionRow[]> = {}
+    statuses.forEach((s) => { map[s.id] = [] })
+    filtered.forEach((a) => {
+      if (!map[a.status]) map[a.status] = []
+      map[a.status].push(a)
+    })
     return map
-  }, [filtered])
+  }, [filtered, statuses])
 
   const detailActionId = actionId ? Number(actionId) : null
 
-  const handleDrop = async (target: ActionStatus) => {
+  const handleDrop = async (target: string) => {
     const id = draggingId
     setDraggingId(null)
     setDragOverCol(null)
@@ -108,7 +106,7 @@ export default function ActionList() {
     }
   }
 
-  const openCount = actions.filter((a) => a.status !== 'COMPLETED').length
+  const openCount = actions.filter((a) => !isClosed(a.status)).length
 
   return (
     <div className="h-main-inner" style={{ display: 'flex', flexDirection: 'column' }}>
@@ -154,23 +152,26 @@ export default function ActionList() {
         data-testid="kanban-board"
         className={`kanban ${styles.kanbanWrap}`}
       >
-        {COLUMNS.map((col) => (
+        {statuses.map((col) => (
           <div
-            key={col.status}
+            key={col.id}
             className="kan-col"
-            data-testid={`kanban-column-${col.slug}`}
-            onDragOver={(e) => { e.preventDefault(); if (dragOverCol !== col.status) setDragOverCol(col.status) }}
-            onDragLeave={() => { if (dragOverCol === col.status) setDragOverCol(null) }}
-            onDrop={(e) => { e.preventDefault(); handleDrop(col.status) }}
-            style={dragOverCol === col.status ? { outline: '2px dashed var(--accent)', outlineOffset: -2 } : undefined}
+            data-testid={`kanban-column-${actionStatusSlug(col.id)}`}
+            onDragOver={(e) => { e.preventDefault(); if (dragOverCol !== col.id) setDragOverCol(col.id) }}
+            onDragLeave={() => { if (dragOverCol === col.id) setDragOverCol(null) }}
+            onDrop={(e) => { e.preventDefault(); handleDrop(col.id) }}
+            style={dragOverCol === col.id ? { outline: '2px dashed var(--accent)', outlineOffset: -2 } : undefined}
           >
             <div className="kan-h">
-              <span className={`pip ${col.pip}`} style={{ width: 8, height: 8, borderRadius: '50%' }} />
-              {t(col.labelKey)}
-              <span className="count">{grouped[col.status].length}</span>
+              <span
+                className="pip"
+                style={{ width: 8, height: 8, borderRadius: '50%', ...actionStatusColorStyle(col.color) }}
+              />
+              {label(col.id)}
+              <span className="count">{(grouped[col.id] ?? []).length}</span>
             </div>
             <div className="kan-list">
-              {grouped[col.status].map((a) => (
+              {(grouped[col.id] ?? []).map((a) => (
                 <button
                   key={a.id}
                   type="button"

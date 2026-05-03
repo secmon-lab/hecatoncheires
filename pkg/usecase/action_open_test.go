@@ -15,7 +15,7 @@ func TestActionUseCase_ListOpenCaseActions(t *testing.T) {
 	t.Run("returns actions from open cases only", func(t *testing.T) {
 		repo := memory.New()
 		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		// Create an open case and a closed case
@@ -46,7 +46,7 @@ func TestActionUseCase_ListOpenCaseActions(t *testing.T) {
 	t.Run("returns empty list when no open cases", func(t *testing.T) {
 		repo := memory.New()
 		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		// Create only a closed case
@@ -66,7 +66,7 @@ func TestActionUseCase_ListOpenCaseActions(t *testing.T) {
 	t.Run("returns empty list when no actions exist", func(t *testing.T) {
 		repo := memory.New()
 		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		// Create an open case with no actions
@@ -81,7 +81,7 @@ func TestActionUseCase_ListOpenCaseActions(t *testing.T) {
 	t.Run("returns actions from multiple open cases", func(t *testing.T) {
 		repo := memory.New()
 		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		// Create two open cases
@@ -117,7 +117,7 @@ func TestActionUseCase_ListOpenCaseActions(t *testing.T) {
 
 	t.Run("returns empty list when no cases exist", func(t *testing.T) {
 		repo := memory.New()
-		actionUC := usecase.NewActionUseCase(repo, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		actions, err := actionUC.ListOpenCaseActions(ctx, testWorkspaceID)

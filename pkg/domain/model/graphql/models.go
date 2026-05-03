@@ -31,19 +31,22 @@ type Case struct {
 
 // Action is a custom GraphQL model with WorkspaceID for argument-based propagation.
 type Action struct {
-	ID             int                `json:"id"`
-	WorkspaceID    string             `json:"-"`
-	CaseID         int                `json:"caseID"`
-	Case           *Case              `json:"case,omitempty"`
-	Title          string             `json:"title"`
-	Description    string             `json:"description"`
-	AssigneeID     *string            `json:"assigneeID,omitempty"`
-	Assignee       *SlackUser         `json:"assignee,omitempty"`
-	SlackMessageTs *string            `json:"slackMessageTS,omitempty"`
-	Status         types.ActionStatus `json:"status"`
-	DueDate        *time.Time         `json:"dueDate,omitempty"`
-	CreatedAt      time.Time          `json:"createdAt"`
-	UpdatedAt      time.Time          `json:"updatedAt"`
+	ID             int        `json:"id"`
+	WorkspaceID    string     `json:"-"`
+	CaseID         int        `json:"caseID"`
+	Case           *Case      `json:"case,omitempty"`
+	Title          string     `json:"title"`
+	Description    string     `json:"description"`
+	AssigneeID     *string    `json:"assigneeID,omitempty"`
+	Assignee       *SlackUser `json:"assignee,omitempty"`
+	SlackMessageTs *string    `json:"slackMessageTS,omitempty"`
+	// Status is the per-workspace status id (no longer a typed enum). The
+	// allowed value set is defined in TOML via [[action.status]] and exposed
+	// to clients through FieldConfiguration.actionConfig.
+	Status    string     `json:"status"`
+	DueDate   *time.Time `json:"dueDate,omitempty"`
+	CreatedAt time.Time  `json:"createdAt"`
+	UpdatedAt time.Time  `json:"updatedAt"`
 }
 
 // Knowledge is a custom GraphQL model with WorkspaceID for argument-based propagation.

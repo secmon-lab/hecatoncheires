@@ -60,13 +60,6 @@ const (
 	MsgActionNew     // "New action: %s"
 	MsgActionUpdated // "Action updated: %s"
 
-	// Action status select labels (Slack Block Kit)
-	MsgActionStatusBacklog
-	MsgActionStatusTodo
-	MsgActionStatusInProgressLabel
-	MsgActionStatusBlocked
-	MsgActionStatusCompletedLabel
-
 	// Action interactive controls (Slack Block Kit)
 	MsgActionOpenInWeb
 	MsgActionStatusPlaceholder

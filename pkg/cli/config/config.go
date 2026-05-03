@@ -69,6 +69,25 @@ type AppConfig struct {
 	Slack     SlackSection        `toml:"slack"`
 	Compile   CompileSection      `toml:"compile"`
 	Assist    AssistSection       `toml:"assist"`
+	Action    *ActionSection      `toml:"action"`
+}
+
+// ActionSection represents the [action] section in a TOML config.
+// When omitted (nil), the workspace inherits the default action status set.
+type ActionSection struct {
+	Initial string                  `toml:"initial"`
+	Closed  []string                `toml:"closed"`
+	Status  []ActionStatusConfigRow `toml:"status"`
+}
+
+// ActionStatusConfigRow represents a single [[action.status]] entry.
+type ActionStatusConfigRow struct {
+	ID          string `toml:"id"`
+	Name        string `toml:"name"`
+	NameJA      string `toml:"name_ja"`
+	Description string `toml:"description"`
+	Color       string `toml:"color"`
+	Emoji       string `toml:"emoji"`
 }
 
 // WorkspaceConfig represents a fully resolved workspace configuration
@@ -82,6 +101,7 @@ type WorkspaceConfig struct {
 	SlackInviteGroups    []string
 	SlackWelcomeMessages []string
 	FieldSchema          *domainConfig.FieldSchema
+	ActionStatusSet      *model.ActionStatusSet
 	CompilePrompt        string
 	AssistPrompt         string
 	AssistLanguage       string
@@ -192,7 +212,34 @@ func (a *AppConfig) Validate() error {
 		fieldIDs[field.ID] = true
 	}
 
+	// [action] is optional. When supplied, build the ActionStatusSet eagerly so
+	// schema errors surface at startup.
+	if _, err := a.resolveActionStatusSet(); err != nil {
+		return goerr.Wrap(err, "invalid [action] section")
+	}
+
 	return nil
+}
+
+// resolveActionStatusSet returns the ActionStatusSet implied by the [action]
+// section, or the default set when [action] is omitted.
+func (a *AppConfig) resolveActionStatusSet() (*model.ActionStatusSet, error) {
+	if a.Action == nil {
+		return model.DefaultActionStatusSet(), nil
+	}
+
+	defs := make([]model.ActionStatusDefinition, 0, len(a.Action.Status))
+	for _, row := range a.Action.Status {
+		defs = append(defs, model.ActionStatusDefinition{
+			ID:          row.ID,
+			Name:        row.Name,
+			NameJA:      row.NameJA,
+			Description: row.Description,
+			Color:       row.Color,
+			Emoji:       row.Emoji,
+		})
+	}
+	return model.NewActionStatusSet(a.Action.Initial, a.Action.Closed, defs)
 }
 
 // LoadFieldSchema loads the field schema configuration from a TOML file
@@ -337,6 +384,11 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 		}
 	}
 
+	statusSet, err := appCfg.resolveActionStatusSet()
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to resolve action status set", goerr.V(ConfigPathKey, path))
+	}
+
 	return &WorkspaceConfig{
 		ID:                   wsID,
 		Name:                 wsName,
@@ -347,6 +399,7 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 		SlackInviteGroups:    appCfg.Slack.Invite.Groups,
 		SlackWelcomeMessages: appCfg.Slack.WelcomeMessages,
 		FieldSchema:          appCfg.ToDomainFieldSchema(),
+		ActionStatusSet:      statusSet,
 		CompilePrompt:        appCfg.Compile.Prompt,
 		AssistPrompt:         appCfg.Assist.Prompt,
 		AssistLanguage:       appCfg.Assist.Language,
@@ -384,6 +437,7 @@ func (a *AppConfig) Configure(c *cli.Command) ([]*WorkspaceConfig, *model.Worksp
 				Description: wc.Description,
 			},
 			FieldSchema:          wc.FieldSchema,
+			ActionStatusSet:      wc.ActionStatusSet,
 			SlackChannelPrefix:   wc.SlackChannelPrefix,
 			SlackTeamID:          wc.SlackTeamID,
 			SlackInviteUsers:     wc.SlackInviteUsers,

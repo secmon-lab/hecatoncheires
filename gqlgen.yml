@@ -41,9 +41,6 @@ models:
   CaseStatus:
     model:
       - github.com/secmon-lab/hecatoncheires/pkg/domain/types.CaseStatus
-  ActionStatus:
-    model:
-      - github.com/secmon-lab/hecatoncheires/pkg/domain/types.ActionStatus
   Case:
     model:
       - github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql.Case

@@ -41,13 +41,6 @@ var messagesEN = [msgKeyCount]string{
 	MsgActionNew:        "New action: %s",
 	MsgActionUpdated:    "Action updated: %s",
 
-	// Action status select labels
-	MsgActionStatusBacklog:         "Backlog",
-	MsgActionStatusTodo:            "Todo",
-	MsgActionStatusInProgressLabel: "In Progress",
-	MsgActionStatusBlocked:         "Blocked",
-	MsgActionStatusCompletedLabel:  "Completed",
-
 	// Action interactive controls
 	MsgActionOpenInWeb:           "Open in Web",
 	MsgActionStatusPlaceholder:   "Select status",
@@ -124,13 +117,6 @@ var messagesJA = [msgKeyCount]string{
 	MsgActionStatus:     "ステータス: %s",
 	MsgActionNew:        "新しいアクション: %s",
 	MsgActionUpdated:    "アクション更新: %s",
-
-	// Action status select labels
-	MsgActionStatusBacklog:         "バックログ",
-	MsgActionStatusTodo:            "ToDo",
-	MsgActionStatusInProgressLabel: "進行中",
-	MsgActionStatusBlocked:         "ブロック",
-	MsgActionStatusCompletedLabel:  "完了",
 
 	// Action interactive controls
 	MsgActionOpenInWeb:           "Web で開く",
