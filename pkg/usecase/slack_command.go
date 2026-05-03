@@ -1129,7 +1129,11 @@ func (uc *SlackUseCases) buildActionCreationModal(ctx context.Context, workspace
 		SlackBlockIDActionAssignee,
 		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgFieldActionAssignee), false, false),
 		nil,
-		slack.NewOptionsSelectBlockElement(slack.OptTypeUser, nil, SlackActionIDActionAssignee),
+		slack.NewOptionsSelectBlockElement(
+			slack.OptTypeUser,
+			slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgActionAssigneePlaceholder), false, false),
+			SlackActionIDActionAssignee,
+		),
 	)
 	assigneeInput.Optional = true
 
@@ -1138,13 +1142,13 @@ func (uc *SlackUseCases) buildActionCreationModal(ctx context.Context, workspace
 	for _, s := range statusSet.Statuses() {
 		statusOptions = append(statusOptions, slack.NewOptionBlockObject(
 			s.ID,
-			slack.NewTextBlockObject(slack.PlainTextType, s.Name, false, false),
+			slack.NewTextBlockObject(slack.PlainTextType, statusLabel(ctx, s), false, false),
 			nil,
 		))
 	}
 	statusElement := slack.NewOptionsSelectBlockElement(
 		slack.OptTypeStatic,
-		nil,
+		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgActionStatusPlaceholder), false, false),
 		SlackActionIDActionStatusIn,
 		statusOptions...,
 	)
