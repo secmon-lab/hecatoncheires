@@ -93,7 +93,7 @@ const EMOJI_MAP: Record<string, string> = {
 }
 
 function renderEmojiTokens(text: string): string {
-  return text.replace(/:([a-z0-9_+-]+):/gi, (_m, name) => EMOJI_MAP[name.toLowerCase()] ?? '•')
+  return text.replace(/:([a-z0-9_+-]+):/gi, (m, name) => EMOJI_MAP[name.toLowerCase()] ?? m)
 }
 
 function renderText(text: string, userIdToName: Map<string, string>): string {
