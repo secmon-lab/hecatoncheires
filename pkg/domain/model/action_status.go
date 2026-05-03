@@ -2,6 +2,7 @@ package model
 
 import (
 	"regexp"
+	"strings"
 
 	"github.com/m-mizutani/goerr/v2"
 )
@@ -10,6 +11,13 @@ import (
 // `_` / `-` separators. Uppercase is allowed so the legacy default IDs
 // (`BACKLOG`, `TODO`, ...) remain valid as DB values.
 var actionStatusIDPattern = regexp.MustCompile(`^[A-Za-z0-9]+([_-][A-Za-z0-9]+)*$`)
+
+// actionStatusIDMaxLen caps status IDs at 32 chars. Status IDs are embedded
+// in Slack `static_select` option `value` fields together with a workspace ID
+// and an action ID (`workspaceID:actionID:statusID`). Slack enforces a 75-char
+// limit on `value`; capping IDs here keeps the composite well within bounds
+// even with a long workspace slug and a 19-digit action ID.
+const actionStatusIDMaxLen = 32
 
 // ActionStatusColorPreset is a semantic preset name. The actual color value is
 // resolved on the frontend; the backend only validates membership.
@@ -75,6 +83,11 @@ func NewActionStatusSet(initialID string, closedIDs []string, statuses []ActionS
 				goerr.V("status_id", s.ID),
 				goerr.V("pattern", actionStatusIDPattern.String()))
 		}
+		if len(s.ID) > actionStatusIDMaxLen {
+			return nil, goerr.New("action status id exceeds maximum length",
+				goerr.V("status_id", s.ID),
+				goerr.V("max_len", actionStatusIDMaxLen))
+		}
 		if s.Name == "" {
 			return nil, goerr.New("action status name is required",
 				goerr.V("status_id", s.ID))
@@ -125,7 +138,7 @@ func validateActionStatusColor(color string) error {
 		return nil
 	}
 	for _, preset := range allActionStatusColorPresets() {
-		if string(preset) == color {
+		if strings.EqualFold(string(preset), color) {
 			return nil
 		}
 	}

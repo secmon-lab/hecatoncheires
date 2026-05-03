@@ -761,7 +761,7 @@ The configuration file is validated at startup. The following rules are enforced
 | All option names must be non-empty | `ErrMissingName` |
 | Option IDs must be unique within their parent field | `ErrDuplicateOptionID` |
 | Slack welcome message templates must parse | `ErrInvalidWelcomeMessage` |
-| Action status IDs must match `^[A-Za-z0-9]+([_-][A-Za-z0-9]+)*$` and be unique within the workspace | (action status validation) |
+| Action status IDs must match `^[A-Za-z0-9]+([_-][A-Za-z0-9]+)*$`, be at most 32 characters, and be unique within the workspace | (action status validation) |
 | `[action] initial` must reference a defined `[[action.status]] id` | (action status validation) |
 | Each entry in `[action] closed` must reference a defined `[[action.status]] id` | (action status validation) |
 | `[[action.status]] color` must be a preset name or `#RRGGBB` / `#RGB` | (action status validation) |

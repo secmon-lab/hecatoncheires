@@ -109,6 +109,20 @@ func TestNewActionStatusSet_errors(t *testing.T) {
 		_, err := model.NewActionStatusSet("x", nil, defs)
 		gt.NoError(t, err)
 	})
+
+	t.Run("accepts color preset case-insensitively", func(t *testing.T) {
+		defs := []model.ActionStatusDefinition{{ID: "x", Name: "X", Color: "Active"}}
+		_, err := model.NewActionStatusSet("x", nil, defs)
+		gt.NoError(t, err)
+	})
+
+	t.Run("rejects status id over 32 characters", func(t *testing.T) {
+		// 33-char id: pattern-valid but too long.
+		longID := "abcdefghij_abcdefghij_abcdefghij_x"
+		defs := []model.ActionStatusDefinition{{ID: longID, Name: "X"}}
+		_, err := model.NewActionStatusSet(longID, nil, defs)
+		gt.Error(t, err)
+	})
 }
 
 func TestDefaultActionStatusSet(t *testing.T) {
