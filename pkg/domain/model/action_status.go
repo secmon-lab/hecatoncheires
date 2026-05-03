@@ -205,7 +205,7 @@ func (s *ActionStatusSet) Emoji(id string) string {
 func DefaultActionStatusSet() *ActionStatusSet {
 	defs := []ActionStatusDefinition{
 		{ID: "BACKLOG", Name: "Backlog", Color: "idle", Emoji: "\U0001F4CB"},
-		{ID: "TODO", Name: "Todo", Color: "idle", Emoji: "\U0001F4CC"},
+		{ID: "TODO", Name: "To Do", Color: "idle", Emoji: "\U0001F4CC"},
 		{ID: "IN_PROGRESS", Name: "In Progress", Color: "active", Emoji: "▶️"},
 		{ID: "BLOCKED", Name: "Blocked", Color: "blocked", Emoji: "\U0001F6D1"},
 		{ID: "COMPLETED", Name: "Completed", Color: "success", Emoji: "✅"},

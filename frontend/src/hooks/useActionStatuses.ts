@@ -23,7 +23,7 @@ const fallbackConfig: ActionStatusConfig = {
   closed: ['COMPLETED'],
   statuses: [
     { id: 'BACKLOG', name: 'Backlog', color: 'idle', emoji: '📋' },
-    { id: 'TODO', name: 'Todo', color: 'idle', emoji: '📌' },
+    { id: 'TODO', name: 'To Do', color: 'idle', emoji: '📌' },
     { id: 'IN_PROGRESS', name: 'In Progress', color: 'active', emoji: '▶️' },
     { id: 'BLOCKED', name: 'Blocked', color: 'blocked', emoji: '🛑' },
     { id: 'COMPLETED', name: 'Completed', color: 'success', emoji: '✅' },
