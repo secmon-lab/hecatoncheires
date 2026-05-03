@@ -191,14 +191,21 @@ func (uc *ActionUseCase) UpdateAction(ctx context.Context, workspaceID string, i
 	// the Slack interaction Actor (Slack callback path). The latter is
 	// required because async.Dispatch hands the usecase a fresh background
 	// context with no token, so a tokenErr-only check would silently bypass
-	// access control on Slack-initiated updates.
+	// access control on Slack-initiated updates. checkAccess is tracked
+	// separately from actorID so that a user-initiated call with an empty
+	// ID (malformed token, Slack actor missing user ID) results in a deny
+	// for private cases rather than a silent bypass; only ActorKindSystem
+	// — which has no identified user by design — skips the check.
 	var actorID string
+	var checkAccess bool
 	if token, tokenErr := auth.TokenFromContext(ctx); tokenErr == nil {
 		actorID = token.Sub
+		checkAccess = true
 	} else if in.Actor.Kind == ActorKindSlackUser {
 		actorID = in.Actor.ID
+		checkAccess = true
 	}
-	if actorID != "" && !model.IsCaseAccessible(parentCase, actorID) {
+	if checkAccess && !model.IsCaseAccessible(parentCase, actorID) {
 		return nil, goerr.Wrap(ErrAccessDenied, "cannot update action in private case",
 			goerr.V(ActionIDKey, in.ID), goerr.V("user_id", actorID))
 	}

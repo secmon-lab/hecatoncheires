@@ -948,6 +948,17 @@ func TestActionUseCase_PrivateCaseAccessControl(t *testing.T) {
 		})
 		gt.NoError(t, err).Required()
 		gt.Value(t, updated.Status).Equal(types.ActionStatusCompleted)
+
+		// Slack actor with empty ID (malformed callback): must be denied
+		// rather than silently bypassing access control.
+		newStatus3 := types.ActionStatusBlocked
+		_, err = actionUC.UpdateAction(bgCtx, testWorkspaceID, usecase.UpdateActionInput{
+			ID:        action.ID,
+			Status:    &newStatus3,
+			SlackSync: usecase.SlackSyncSkip,
+			Actor:     usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: ""},
+		})
+		gt.Error(t, err).Is(usecase.ErrAccessDenied)
 	})
 
 	t.Run("delete action in private case as non-member returns access denied", func(t *testing.T) {
