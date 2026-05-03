@@ -24,7 +24,7 @@ import (
 	goslack "github.com/slack-go/slack" //nolint:depguard
 )
 
-//go:embed prompt/agent_system.md
+//go:embed prompts/agent_system.md
 var agentSystemPromptTmpl string
 
 var agentSystemPrompt = template.Must(template.New("agent_system").Parse(agentSystemPromptTmpl))
