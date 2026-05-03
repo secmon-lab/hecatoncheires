@@ -534,6 +534,131 @@ func TestSlackInteractionHandler_ViewSubmission(t *testing.T) {
 		gt.Value(t, updated.Description).Equal("Updated desc")
 	})
 
+	t.Run("handles command choice submission with response_action update", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
+		})
+		actionUC := usecase.NewActionUseCase(repo, registry, nil, "")
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, &mockSlackServiceForCommand{})
+		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+
+		// Seed a case so HandleCommandChoiceSubmit can resolve it.
+		created, err := repo.Case().Create(t.Context(), "risk", &model.Case{Title: "Existing"})
+		gt.NoError(t, err).Required()
+
+		handler := httpctrl.NewSlackInteractionHandler(actionUC, nil)
+		handler.WithSlackCommand(slackUC, caseUC)
+
+		meta, _ := json.Marshal(map[string]any{
+			"workspace_id": "risk",
+			"channel_id":   "C-CASE",
+			"case_id":      created.ID,
+		})
+		callback := goslack.InteractionCallback{
+			Type: goslack.InteractionTypeViewSubmission,
+			User: goslack.User{ID: "U001"},
+			View: goslack.View{
+				CallbackID:      usecase.SlackCallbackIDCommandChoice,
+				PrivateMetadata: string(meta),
+				State: &goslack.ViewState{
+					Values: map[string]map[string]goslack.BlockAction{
+						usecase.SlackBlockIDCommandChoice: {
+							usecase.SlackActionIDCommandChoice: {
+								SelectedOption: goslack.OptionBlockObject{Value: "create_action"},
+							},
+						},
+					},
+				},
+			},
+		}
+		payloadJSON, err := json.Marshal(callback)
+		gt.NoError(t, err).Required()
+
+		form := url.Values{"payload": {string(payloadJSON)}}
+		req := httptest.NewRequest(http.MethodPost, "/hooks/slack/interaction", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+
+		var resp struct {
+			ResponseAction string `json:"response_action"`
+			View           struct {
+				CallbackID string `json:"callback_id"`
+			} `json:"view"`
+		}
+		err = json.Unmarshal(rec.Body.Bytes(), &resp)
+		gt.NoError(t, err).Required()
+		gt.Value(t, resp.ResponseAction).Equal("update")
+		gt.Value(t, resp.View.CallbackID).Equal(usecase.SlackCallbackIDCreateAction)
+	})
+
+	t.Run("handles action creation submission asynchronously", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
+		})
+		mockSvc := &mockSlackServiceForCommand{}
+		actionUC := usecase.NewActionUseCase(repo, registry, mockSvc, "")
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, mockSvc)
+		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+
+		created, err := repo.Case().Create(t.Context(), "risk", &model.Case{Title: "Parent"})
+		gt.NoError(t, err).Required()
+
+		handler := httpctrl.NewSlackInteractionHandler(actionUC, nil)
+		handler.WithSlackCommand(slackUC, caseUC)
+
+		meta, _ := json.Marshal(map[string]any{
+			"workspace_id": "risk",
+			"channel_id":   "C-CASE",
+			"case_id":      created.ID,
+		})
+		callback := goslack.InteractionCallback{
+			Type: goslack.InteractionTypeViewSubmission,
+			User: goslack.User{ID: "U001"},
+			View: goslack.View{
+				CallbackID:      usecase.SlackCallbackIDCreateAction,
+				PrivateMetadata: string(meta),
+				State: &goslack.ViewState{
+					Values: map[string]map[string]goslack.BlockAction{
+						usecase.SlackBlockIDActionTitle: {
+							usecase.SlackActionIDActionTitle: {Value: "Async Action"},
+						},
+						usecase.SlackBlockIDActionStatusInput: {
+							usecase.SlackActionIDActionStatusIn: {
+								Type:           "static_select",
+								SelectedOption: goslack.OptionBlockObject{Value: "TODO"},
+							},
+						},
+					},
+				},
+			},
+		}
+		payloadJSON, err := json.Marshal(callback)
+		gt.NoError(t, err).Required()
+
+		form := url.Values{"payload": {string(payloadJSON)}}
+		req := httptest.NewRequest(http.MethodPost, "/hooks/slack/interaction", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+
+		// Async tail completes via async.Dispatch.
+		async.Wait()
+
+		actions, err := repo.Action().GetByCase(t.Context(), "risk", created.ID)
+		gt.NoError(t, err).Required()
+		gt.Array(t, actions).Length(1).Required()
+		gt.Value(t, actions[0].Title).Equal("Async Action")
+	})
+
 	t.Run("view_submission with no slackUC configured returns 200", func(t *testing.T) {
 		repo := memory.New()
 		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")

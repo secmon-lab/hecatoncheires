@@ -29,6 +29,7 @@ func (h *SlackCommandHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	userID := r.FormValue("user_id")
 	channelID := r.FormValue("channel_id")
 	sourceTeamID := r.FormValue("team_id")
+	text := r.FormValue("text")
 	workspaceID := chi.URLParam(r, "ws_id")
 
 	if triggerID == "" {
@@ -36,7 +37,7 @@ func (h *SlackCommandHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if err := h.slackUC.HandleSlashCommand(ctx, triggerID, userID, channelID, workspaceID, sourceTeamID); err != nil {
+	if err := h.slackUC.HandleSlashCommand(ctx, triggerID, userID, channelID, workspaceID, sourceTeamID, text); err != nil {
 		logger := logging.From(ctx)
 		logger.Error("failed to handle slash command",
 			"error", err,

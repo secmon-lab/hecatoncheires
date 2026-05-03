@@ -220,6 +220,39 @@ func (h *SlackInteractionHandler) handleViewSubmission(w http.ResponseWriter, r 
 			logger.Error("failed to encode view submission response", "error", err)
 		}
 
+	case usecase.SlackCallbackIDCommandChoice:
+		// Command choice (edit case vs create action) → swap to chosen modal
+		view, err := h.slackUC.HandleCommandChoiceSubmit(r.Context(), callback)
+		if err != nil {
+			logger.Error("failed to handle command choice",
+				"error", err,
+			)
+			writeViewSubmissionError(ctx, w, usecase.SlackBlockIDCommandChoice, "Failed to process selection. Please try again.")
+			return
+		}
+		resp := slack.ViewSubmissionResponse{
+			ResponseAction: slack.RAUpdate,
+			View:           view,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			logger.Error("failed to encode view submission response", "error", err)
+		}
+
+	case usecase.SlackCallbackIDCreateAction:
+		// Action creation modal submission → close modal, run async.
+		w.WriteHeader(http.StatusOK)
+
+		if h.actionUC == nil {
+			return
+		}
+		async.Dispatch(ctx, func(ctx context.Context) error {
+			if err := h.slackUC.HandleActionCreationSubmit(ctx, h.actionUC, callback); err != nil {
+				return goerr.Wrap(err, "failed to handle action creation submit")
+			}
+			return nil
+		})
+
 	case usecase.SlackCallbackIDCreateCase:
 		// Return 200 immediately to close the modal, then process asynchronously
 		w.WriteHeader(http.StatusOK)
