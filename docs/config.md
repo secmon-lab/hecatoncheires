@@ -113,7 +113,7 @@ The `serve` command (alias: `s`) starts the HTTP server.
 | `--llm-claude-api-key` | `HECATONCHEIRES_LLM_CLAUDE_API_KEY` | - | No\*\*\*\* | Anthropic Claude API key (used with direct Anthropic access) |
 | `--llm-gemini-project-id` | `HECATONCHEIRES_LLM_GEMINI_PROJECT_ID` | - | No\*\*\*\* | Google Cloud project ID (Gemini, or Claude via Vertex AI) |
 | `--llm-gemini-location` | `HECATONCHEIRES_LLM_GEMINI_LOCATION` | `global` | No | Google Cloud location for Gemini / Claude on Vertex AI |
-| `--embedding-gemini-project-id` | `HECATONCHEIRES_EMBEDDING_GEMINI_PROJECT_ID` | - | Yes | Google Cloud project ID for the Gemini embedding client. Required regardless of `--llm-provider` |
+| `--embedding-gemini-project-id` | `HECATONCHEIRES_EMBEDDING_GEMINI_PROJECT_ID` | - | Cond. | Google Cloud project ID for the Gemini embedding client. Required whenever `--llm-provider` is set |
 | `--embedding-gemini-location` | `HECATONCHEIRES_EMBEDDING_GEMINI_LOCATION` | `global` | No | Google Cloud location for the Gemini embedding client |
 | `--embedding-model` | `HECATONCHEIRES_EMBEDDING_MODEL` | `gemini-embedding-2` | No | Gemini embedding model name |
 | `--cloud-storage-bucket` | `HECATONCHEIRES_CLOUD_STORAGE_BUCKET` | - | Yes\*\*\*\*\* | Cloud Storage bucket holding agent thread session History/Trace blobs. See [agent-session.md](./agent-session.md) |
@@ -130,7 +130,7 @@ The `serve` command (alias: `s`) starts the HTTP server.
 - `claude` → either `--llm-claude-api-key` (direct Anthropic API) **or** `--llm-gemini-project-id` (Vertex AI). The two are mutually exclusive.
 - `gemini` → `--llm-gemini-project-id` and `--llm-gemini-location`
 
-The embedding client is configured separately and is **always required** for every CLI command (Gemini-only, distinct from `--llm-provider`). It powers similarity search over Memory and Knowledge regardless of which provider drives chat completion. The default model is `gemini-embedding-2`; the dimension is fixed at 768 to match the existing Firestore vector index. Application Default Credentials must be authorized for the project.
+The embedding client is configured separately from `--llm-provider` and is **required whenever LLM is enabled** (`--llm-provider` set on `serve`, or always for `assist` / `compile`). It powers similarity search over Memory and Knowledge regardless of which provider drives chat completion. The default model is `gemini-embedding-2`; the dimension is fixed at 768 to match the existing Firestore vector index. Application Default Credentials must be authorized for the project. Without `--llm-provider`, `serve` runs in a degraded mode that does not need the embedder either.
 
 \*\*\*\*\* Required whenever `--slack-bot-token` is configured. The agent that responds to Slack mentions persists per-thread conversation History and execution Trace into the bucket so follow-up mentions can resume the session. The service account needs **Storage Object Admin** on the bucket.
 

@@ -368,21 +368,23 @@ func cmdServe() *cli.Command {
 			} else {
 				ucOpts = append(ucOpts, usecase.WithLLMClient(llmClient))
 				logging.Default().Info("LLM client enabled", logAttrsToArgs(llmCfg.LogAttrs())...)
-			}
 
-			// Initialize Embedding client. Always required: every CLI mode
-			// (serve / assist / compile) ultimately relies on the embedder
-			// for memory / knowledge similarity search. Embedding is Gemini-
-			// only and configured independently from --llm-provider.
-			if !embCfg.IsEnabled() {
-				return goerr.New("--embedding-gemini-project-id is required")
+				// Embedding is mandatory whenever LLM is wired: agent /
+				// assist / mention-draft all rely on memory / knowledge
+				// similarity search, which uses the dedicated embedder.
+				// It is configured independently from --llm-provider so
+				// chat completion and embedding can target different
+				// providers (embedding is Gemini-only).
+				if !embCfg.IsEnabled() {
+					return goerr.New("--embedding-gemini-project-id is required when --llm-provider is set")
+				}
+				embedClient, err := embCfg.NewClient(ctx)
+				if err != nil {
+					return goerr.Wrap(err, "failed to initialize embedding client")
+				}
+				ucOpts = append(ucOpts, usecase.WithEmbedClient(embedClient))
+				logging.Default().Info("Embedding client enabled", logAttrsToArgs(embCfg.LogAttrs())...)
 			}
-			embedClient, err := embCfg.NewClient(ctx)
-			if err != nil {
-				return goerr.Wrap(err, "failed to initialize embedding client")
-			}
-			ucOpts = append(ucOpts, usecase.WithEmbedClient(embedClient))
-			logging.Default().Info("Embedding client enabled", logAttrsToArgs(embCfg.LogAttrs())...)
 
 			// Initialize GitHub service if configured
 			githubSvc, err := githubCfg.Configure()
