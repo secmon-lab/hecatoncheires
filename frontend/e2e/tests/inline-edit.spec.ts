@@ -43,7 +43,7 @@ test.describe('Inline edit — covered field types', () => {
     await caseListPage.waitForTableLoad();
   });
 
-  test('saves SELECT and TEXT fields without GraphQL errors', async ({ page }) => {
+  test('inline edits persist after reload', async ({ page }) => {
     const caseListPage = new CaseListPage(page);
     const caseFormPage = new CaseFormPage(page);
     const caseDetailPage = new CaseDetailPage(page);
@@ -62,22 +62,34 @@ test.describe('Inline edit — covered field types', () => {
 
     const watcher = graphqlErrorWatcher(page);
 
+    // Match the UpdateCase mutation specifically — UPDATE_CASE has
+    // `refetchQueries`, so several /graphql POSTs follow each edit and a
+    // generic predicate could resolve on a refetch instead of the mutation.
+    const isUpdateCaseResponse = (r: import('@playwright/test').Response) => {
+      if (!r.url().includes('/graphql') || r.request().method() !== 'POST') return false;
+      const body = r.request().postDataJSON?.();
+      return body?.operationName === 'UpdateCase';
+    };
+
     // SELECT — change category from bug → feature.
     await page.getByTestId('field-category').click();
+    const categoryResp = page.waitForResponse(isUpdateCaseResponse);
     await page.getByTestId('field-category-option-feature').click();
-    await page.waitForResponse((r) => r.url().includes('/graphql') && r.request().method() === 'POST');
+    await categoryResp;
 
     // SELECT (newly set) — priority high.
     await page.getByTestId('field-priority').click();
+    const priorityResp = page.waitForResponse(isUpdateCaseResponse);
     await page.getByTestId('field-priority-option-high').click();
-    await page.waitForResponse((r) => r.url().includes('/graphql') && r.request().method() === 'POST');
+    await priorityResp;
 
     // TEXT — custom-field "description".
     await page.getByTestId('field-description').click();
     const textInput = page.getByTestId('field-description-input');
     await textInput.fill('hello world');
+    const descriptionResp = page.waitForResponse(isUpdateCaseResponse);
     await textInput.press('Enter');
-    await page.waitForResponse((r) => r.url().includes('/graphql') && r.request().method() === 'POST');
+    await descriptionResp;
 
     watcher.stop();
     expect(watcher.failures, `GraphQL responses returned errors: ${watcher.failures.join('\n')}`).toEqual([]);
