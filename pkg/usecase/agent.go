@@ -155,6 +155,13 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 
 	coreTools := core.New(uc.repo, entry.Workspace.ID, foundCase.ID, entry.ActionStatusSet, uc.llmClient)
 
+	// Note: gollem's WithHistoryRepository follows a load-mutate-overwrite
+	// pattern (Load at session start, Save after every LLM turn). Two
+	// concurrent mentions on the same thread would therefore race
+	// last-writer-wins on the persisted History. We accept that trade-off
+	// because Slack mentions on a single thread are effectively serial
+	// (humans typing) and adding GCS generation preconditions here would
+	// require deeper changes inside gollem itself.
 	agent := gollem.New(uc.llmClient,
 		gollem.WithSystemPrompt(systemPrompt),
 		gollem.WithTools(coreTools...),
@@ -275,8 +282,10 @@ func (uc *AgentUseCase) partitionConversation(ctx context.Context, msg *slackmod
 
 	// Continuing session: fetch all replies on the thread and surface the
 	// ones we haven't seen yet (excluding our own posts and the current
-	// mention message itself).
-	replies, err := uc.slackService.GetConversationReplies(ctx, msg.ChannelID(), session.ThreadTS, 100)
+	// mention message itself). The limit is set to Slack's per-call maximum
+	// (1000) so a long quiet stretch between mentions doesn't silently drop
+	// "unprocessed" messages — pagination would only matter beyond that.
+	replies, err := uc.slackService.GetConversationReplies(ctx, msg.ChannelID(), session.ThreadTS, 1000)
 	if err != nil {
 		return nil, nil, goerr.Wrap(err, "failed to fetch thread replies")
 	}
