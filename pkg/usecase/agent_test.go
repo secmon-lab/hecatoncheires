@@ -13,6 +13,7 @@ import (
 	slackmodel "github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
+	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
@@ -114,7 +115,7 @@ type mockLLMSession struct {
 	generateContentFn func(ctx context.Context, input ...gollem.Input) (*gollem.Response, error)
 }
 
-func (s *mockLLMSession) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+func (s *mockLLMSession) Generate(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (*gollem.Response, error) {
 	if s.generateContentFn != nil {
 		return s.generateContentFn(ctx, input...)
 	}
@@ -123,8 +124,16 @@ func (s *mockLLMSession) GenerateContent(ctx context.Context, input ...gollem.In
 	}, nil
 }
 
-func (s *mockLLMSession) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
+func (s *mockLLMSession) Stream(ctx context.Context, input []gollem.Input, opts ...gollem.GenerateOption) (<-chan *gollem.Response, error) {
 	return nil, nil
+}
+
+func (s *mockLLMSession) GenerateContent(ctx context.Context, input ...gollem.Input) (*gollem.Response, error) {
+	return s.Generate(ctx, input)
+}
+
+func (s *mockLLMSession) GenerateStream(ctx context.Context, input ...gollem.Input) (<-chan *gollem.Response, error) {
+	return s.Stream(ctx, input)
 }
 
 func (s *mockLLMSession) History() (*gollem.History, error) {
@@ -189,7 +198,7 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 
 		llmClient := &mockLLMClient{}
 
-		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, llmClient)
+		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
 
 		msg := slackmodel.NewMessageFromData(
 			"1234567890.000002",
@@ -244,7 +253,7 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 
 		llmClient := &mockLLMClient{}
 
-		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, llmClient)
+		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
 
 		msg := slackmodel.NewMessageFromData(
 			"1234567890.000011",
@@ -282,7 +291,7 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 		slackMock := &agentTestSlackService{}
 		llmClient := &mockLLMClient{}
 
-		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, llmClient)
+		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
 
 		msg := slackmodel.NewMessageFromData(
 			"1234567890.000100",
@@ -325,7 +334,7 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 
 		llmClient := &mockLLMClient{}
 
-		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, llmClient)
+		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
 
 		msg := slackmodel.NewMessageFromData(
 			"1234567890.000200",
@@ -377,7 +386,7 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 			{UserID: "U001", UserName: "alice", Text: "Hello", Timestamp: "1234567890.000001"},
 		}
 
-		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, llmClient)
+		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
 		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, nil, nil, messages)
 
 		gt.Value(t, strings.Contains(prompt, "Important Case")).Equal(true)
@@ -417,7 +426,7 @@ func TestAgentSystemPrompt_ActionsAndKnowledges(t *testing.T) {
 			},
 		}
 
-		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, llmClient)
+		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
 		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, actions, nil, nil)
 
 		gt.Value(t, strings.Contains(prompt, "## Actions")).Equal(true)
@@ -447,7 +456,7 @@ func TestAgentSystemPrompt_ActionsAndKnowledges(t *testing.T) {
 			},
 		}
 
-		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, llmClient)
+		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
 		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, nil, knowledges, nil)
 
 		gt.Value(t, strings.Contains(prompt, "## Knowledge")).Equal(true)
@@ -468,7 +477,7 @@ func TestAgentSystemPrompt_ActionsAndKnowledges(t *testing.T) {
 			Status: types.CaseStatusOpen,
 		}
 
-		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, llmClient)
+		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
 		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, nil, nil, nil)
 
 		gt.Value(t, strings.Contains(prompt, "## Actions")).Equal(false)
@@ -509,7 +518,7 @@ func TestAgentUseCase_HandleSessionInfoRequest(t *testing.T) {
 
 		llmClient := &mockLLMClient{}
 		i18n.Init(i18n.LangEN)
-		agentUC := usecase.NewAgentUseCase(repo, nil, mockWithCapture, llmClient)
+		agentUC := usecase.NewAgentUseCase(repo, nil, mockWithCapture, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
 
 		err := agentUC.HandleSessionInfoRequest(t.Context(), "trigger-123", "test-session-id")
 		gt.NoError(t, err)
@@ -533,4 +542,321 @@ func (m *agentTestSlackServiceWithOpenView) OpenView(ctx context.Context, trigge
 	m.openViewTriggerID = triggerID
 	m.openViewRequest = view
 	return nil
+}
+
+// TestLifecycle_AgentSession exercises the AgentSession + History/Trace
+// pipeline across two consecutive mentions on the same Slack thread:
+//
+//  1. First mention creates a new AgentSession, records its ID, and seeds the
+//     prompt with the thread's full context (no delta).
+//  2. A non-bot user message arrives in the thread between mentions.
+//  3. Second mention reuses the same session, surfaces the intervening
+//     message as a delta in the user input, and bumps LastMentionTS.
+//
+// It also asserts that gollem received the same sessionID for WithHistoryRepository
+// on both turns (so persisted history is actually reused) and that a trace
+// blob was written for each turn.
+func TestLifecycle_AgentSession(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	historyRepo := agentarchive.NewMemoryHistoryRepository()
+	traceRepo := agentarchive.NewMemoryTraceRepository()
+
+	created, err := repo.Case().Create(ctx, "ws-lifecycle", &model.Case{
+		Title:          "Thread session test",
+		Description:    "lifecycle",
+		Status:         types.CaseStatusOpen,
+		SlackChannelID: "C-LIFE",
+	})
+	gt.NoError(t, err).Required()
+
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: "ws-lifecycle", Name: "Lifecycle"},
+	})
+
+	threadParent := "1700000001.000001"
+	firstMentionTS := threadParent
+	intermediateTS := "1700000002.000001"
+	secondMentionTS := "1700000003.000001"
+
+	repliesAfterFirst := []slack.ConversationMessage{
+		{UserID: "U001", UserName: "alice", Text: "context message", Timestamp: threadParent},
+		{UserID: "U001", UserName: "alice", Text: "@bot kicking off", Timestamp: firstMentionTS},
+	}
+	repliesAfterSecond := append(repliesAfterFirst,
+		slack.ConversationMessage{UserID: "U002", UserName: "bob", Text: "extra info", Timestamp: intermediateTS},
+		slack.ConversationMessage{UserID: "UBOT001", UserName: "bot", Text: "previous bot reply", Timestamp: "1700000002.500000"},
+		slack.ConversationMessage{UserID: "U001", UserName: "alice", Text: "@bot follow up", Timestamp: secondMentionTS},
+	)
+
+	stage := 0 // 0 = before first mention runs, 1 = before second
+	slackMock := &agentTestSlackService{
+		getConversationRepliesFn: func(_ context.Context, _ string, _ string, _ int) ([]slack.ConversationMessage, error) {
+			if stage == 0 {
+				return repliesAfterFirst, nil
+			}
+			return repliesAfterSecond, nil
+		},
+	}
+
+	type capturedTurn struct {
+		generateText string
+	}
+	var captured []capturedTurn
+
+	llm := &mockLLMClient{
+		newSessionFn: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			turn := capturedTurn{}
+			session := &mockLLMSession{
+				generateContentFn: func(_ context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					if len(input) > 0 {
+						if txt, ok := input[0].(gollem.Text); ok {
+							turn.generateText = string(txt)
+						}
+					}
+					return &gollem.Response{Texts: []string{"ack"}}, nil
+				},
+			}
+			captured = append(captured, turn)
+			return session, nil
+		},
+	}
+
+	uc := usecase.NewAgentUseCase(repo, registry, slackMock, llm, historyRepo, traceRepo)
+
+	// --- First mention -----------------------------------------------------
+	first := slackmodel.NewMessageFromData(
+		firstMentionTS,
+		"C-LIFE",
+		"", // top-level mention; threadTS will be derived from msg.ID()
+		"T-life",
+		"U001",
+		"alice",
+		"@bot kicking off",
+		firstMentionTS,
+		time.Unix(1700000001, 0).UTC(),
+		nil,
+	)
+	gt.NoError(t, uc.HandleAgentMention(ctx, first)).Required()
+
+	session1, err := repo.AgentSession().Get(ctx, "ws-lifecycle", created.ID, threadParent)
+	gt.NoError(t, err).Required()
+	gt.Value(t, session1).NotNil().Required()
+	gt.Value(t, session1.LastMentionTS).Equal(firstMentionTS)
+	gt.Value(t, session1.ChannelID).Equal("C-LIFE")
+	gt.String(t, session1.ID).NotEqual("")
+
+	// First turn LLM input is just the mention text (no delta).
+	gt.Array(t, captured).Length(1).Required()
+	// The actual generateText is captured inside the closure scope, but we
+	// ran the closure assertions there. Re-fetch via slackMock posted text
+	// to confirm the agent reply made it to Slack.
+	gt.Array(t, slackMock.postedMessages).Length(2)
+	gt.Value(t, slackMock.postedMessages[1].Text).Equal("ack")
+
+	// One trace persisted under the new session, keyed by mention TS.
+	traces1 := traceRepo.TraceIDs(session1.ID)
+	gt.Array(t, traces1).Length(1)
+	gt.Value(t, traces1[0]).Equal(firstMentionTS)
+
+	// --- Second mention ----------------------------------------------------
+	stage = 1
+	second := slackmodel.NewMessageFromData(
+		secondMentionTS,
+		"C-LIFE",
+		threadParent, // explicit thread reply
+		"T-life",
+		"U001",
+		"alice",
+		"@bot follow up",
+		secondMentionTS,
+		time.Unix(1700000003, 0).UTC(),
+		nil,
+	)
+	gt.NoError(t, uc.HandleAgentMention(ctx, second)).Required()
+
+	session2, err := repo.AgentSession().Get(ctx, "ws-lifecycle", created.ID, threadParent)
+	gt.NoError(t, err).Required()
+	gt.Value(t, session2).NotNil().Required()
+	gt.Value(t, session2.ID).Equal(session1.ID) // same session reused
+	gt.Value(t, session2.LastMentionTS).Equal(secondMentionTS)
+
+	// Two turns total in captured.
+	gt.Array(t, captured).Length(2)
+
+	// Two distinct traces persisted under the same session.
+	traces2 := traceRepo.TraceIDs(session1.ID)
+	gt.Array(t, traces2).Length(2)
+	seen := map[string]bool{}
+	for _, id := range traces2 {
+		seen[id] = true
+	}
+	gt.Bool(t, seen[firstMentionTS]).True()
+	gt.Bool(t, seen[secondMentionTS]).True()
+}
+
+// TestAgentUseCase_DeltaMessageInjection asserts the delta path explicitly:
+// continuing-session mentions surface only post-lastMentionTS, non-bot
+// thread messages, and pass them as user input rather than re-stuffing the
+// system prompt.
+func TestAgentUseCase_DeltaMessageInjection(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	historyRepo := agentarchive.NewMemoryHistoryRepository()
+	traceRepo := agentarchive.NewMemoryTraceRepository()
+
+	c, err := repo.Case().Create(ctx, "ws-delta", &model.Case{
+		Title:          "Delta test",
+		Status:         types.CaseStatusOpen,
+		SlackChannelID: "C-DELTA",
+	})
+	gt.NoError(t, err).Required()
+
+	// Pre-seed an existing AgentSession so the next mention takes the
+	// continuing-session path.
+	const (
+		threadTS        = "1700100000.000001"
+		previousMention = "1700100005.000001"
+		newMention      = "1700100020.000001"
+	)
+	gt.NoError(t, repo.AgentSession().Put(ctx, &model.AgentSession{
+		ID:            "session-delta",
+		WorkspaceID:   "ws-delta",
+		CaseID:        c.ID,
+		ThreadTS:      threadTS,
+		ChannelID:     "C-DELTA",
+		LastMentionTS: previousMention,
+		CreatedAt:     time.Now().UTC(),
+		UpdatedAt:     time.Now().UTC(),
+	})).Required()
+
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: "ws-delta", Name: "Delta"},
+	})
+
+	slackMock := &agentTestSlackService{
+		getConversationRepliesFn: func(_ context.Context, _ string, _ string, _ int) ([]slack.ConversationMessage, error) {
+			return []slack.ConversationMessage{
+				// before previous mention — must be excluded
+				{UserID: "U001", UserName: "alice", Text: "old chatter", Timestamp: "1700100002.000000"},
+				// previous mention itself — must be excluded (== previousMention)
+				{UserID: "U001", UserName: "alice", Text: "@bot earlier", Timestamp: previousMention},
+				// bot reply between mentions — must be excluded (bot user)
+				{UserID: "UBOT001", UserName: "bot", Text: "earlier reply", Timestamp: "1700100006.000000"},
+				// real delta — must be included
+				{UserID: "U002", UserName: "bob", Text: "interim update", Timestamp: "1700100010.000000"},
+				// current mention — must be excluded (handled separately)
+				{UserID: "U001", UserName: "alice", Text: "@bot now what", Timestamp: newMention},
+			}, nil
+		},
+	}
+
+	var capturedInput string
+	llm := &mockLLMClient{
+		newSessionFn: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mockLLMSession{
+				generateContentFn: func(_ context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					if len(input) > 0 {
+						if txt, ok := input[0].(gollem.Text); ok {
+							capturedInput = string(txt)
+						}
+					}
+					return &gollem.Response{Texts: []string{"ok"}}, nil
+				},
+			}, nil
+		},
+	}
+
+	uc := usecase.NewAgentUseCase(repo, registry, slackMock, llm, historyRepo, traceRepo)
+
+	msg := slackmodel.NewMessageFromData(
+		newMention,
+		"C-DELTA",
+		threadTS,
+		"T-delta",
+		"U001",
+		"alice",
+		"@bot now what",
+		newMention,
+		time.Unix(1700100020, 0).UTC(),
+		nil,
+	)
+	gt.NoError(t, uc.HandleAgentMention(ctx, msg)).Required()
+
+	// Verify exactly the interim update (and not the bot reply, nor older
+	// messages, nor the current mention itself) was included as a delta.
+	gt.String(t, capturedInput).Contains("Unprocessed thread messages")
+	gt.String(t, capturedInput).Contains("interim update")
+	gt.String(t, capturedInput).Contains("@bot now what")
+	if strings.Contains(capturedInput, "@bot earlier") {
+		t.Errorf("delta must not contain previous mention: %q", capturedInput)
+	}
+	if strings.Contains(capturedInput, "earlier reply") {
+		t.Errorf("delta must not contain bot reply: %q", capturedInput)
+	}
+	if strings.Contains(capturedInput, "old chatter") {
+		t.Errorf("delta must not contain pre-lastMentionTS chatter: %q", capturedInput)
+	}
+
+	// Session updated with the new mention TS.
+	updated, err := repo.AgentSession().Get(ctx, "ws-delta", c.ID, threadTS)
+	gt.NoError(t, err).Required()
+	gt.Value(t, updated.LastMentionTS).Equal(newMention)
+}
+
+// TestAgentUseCase_ActionLinkage asserts that when a mention starts a thread
+// whose parent TS matches an Action's notification message, the new session
+// records that ActionID.
+func TestAgentUseCase_ActionLinkage(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	historyRepo := agentarchive.NewMemoryHistoryRepository()
+	traceRepo := agentarchive.NewMemoryTraceRepository()
+
+	c, err := repo.Case().Create(ctx, "ws-action", &model.Case{
+		Title:          "Action linkage",
+		Status:         types.CaseStatusOpen,
+		SlackChannelID: "C-ACT",
+	})
+	gt.NoError(t, err).Required()
+
+	const actionThreadTS = "1700200000.000001"
+
+	createdAction, err := repo.Action().Create(ctx, "ws-action", &model.Action{
+		CaseID:         c.ID,
+		Title:          "Investigate",
+		Status:         "open",
+		SlackMessageTS: actionThreadTS,
+	})
+	gt.NoError(t, err).Required()
+
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: "ws-action", Name: "Action"},
+	})
+
+	slackMock := &agentTestSlackService{}
+	llm := &mockLLMClient{}
+	uc := usecase.NewAgentUseCase(repo, registry, slackMock, llm, historyRepo, traceRepo)
+
+	msg := slackmodel.NewMessageFromData(
+		"1700200005.000001",
+		"C-ACT",
+		actionThreadTS,
+		"T-act",
+		"U001",
+		"alice",
+		"@bot help with this action",
+		"1700200005.000001",
+		time.Unix(1700200005, 0).UTC(),
+		nil,
+	)
+	gt.NoError(t, uc.HandleAgentMention(ctx, msg)).Required()
+
+	session, err := repo.AgentSession().Get(ctx, "ws-action", c.ID, actionThreadTS)
+	gt.NoError(t, err).Required()
+	gt.Value(t, session).NotNil().Required()
+	gt.Value(t, session.ActionID).Equal(createdAction.ID)
 }

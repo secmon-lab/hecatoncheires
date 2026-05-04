@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/trace"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/github"
@@ -19,6 +20,8 @@ type UseCases struct {
 	githubService     github.Service
 	knowledgeService  knowledge.Service
 	llmClient         gollem.LLMClient
+	historyRepo       gollem.HistoryRepository
+	traceRepo         trace.Repository
 	baseURL           string
 	Case              *CaseUseCase
 	Action            *ActionUseCase
@@ -81,6 +84,22 @@ func WithLLMClient(client gollem.LLMClient) Option {
 	}
 }
 
+// WithHistoryRepository sets the gollem.HistoryRepository used by the agent
+// session flow to persist conversation history across mentions.
+func WithHistoryRepository(repo gollem.HistoryRepository) Option {
+	return func(uc *UseCases) {
+		uc.historyRepo = repo
+	}
+}
+
+// WithTraceRepository sets the trace.Repository used by the agent session
+// flow to persist execution traces.
+func WithTraceRepository(repo trace.Repository) Option {
+	return func(uc *UseCases) {
+		uc.traceRepo = repo
+	}
+}
+
 func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...Option) *UseCases {
 	uc := &UseCases{
 		repo:              repo,
@@ -102,7 +121,15 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 		if uc.llmClient == nil {
 			panic("usecase.New: LLM client is required when Slack service is configured (use WithLLMClient)")
 		}
-		uc.Agent = NewAgentUseCase(repo, registry, uc.slackService, uc.llmClient)
+		// Agent depends on the persistent History/Trace archive. Callers
+		// that drive Slack events (the serve CLI) MUST wire both; callers
+		// that only use Assist (the assist CLI) may omit them, in which
+		// case the Agent usecase is simply not constructed.
+		if uc.historyRepo != nil && uc.traceRepo != nil {
+			uc.Agent = NewAgentUseCase(repo, registry, uc.slackService, uc.llmClient, uc.historyRepo, uc.traceRepo)
+		} else if uc.historyRepo != nil || uc.traceRepo != nil {
+			panic("usecase.New: WithHistoryRepository and WithTraceRepository must be paired")
+		}
 		uc.Assist = NewAssistUseCase(repo, registry, uc.slackService, uc.llmClient)
 		uc.MentionDraft = NewMentionDraftUseCase(repo, registry, uc.slackService, NewDraftMaterializer(uc.llmClient))
 	}

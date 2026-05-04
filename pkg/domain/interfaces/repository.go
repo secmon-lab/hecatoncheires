@@ -20,6 +20,7 @@ type Repository interface {
 	Memory() MemoryRepository
 	AssistLog() AssistLogRepository
 	CaseDraft() CaseDraftRepository
+	AgentSession() AgentSessionRepository
 
 	// Auth methods
 	PutToken(ctx context.Context, token *auth.Token) error

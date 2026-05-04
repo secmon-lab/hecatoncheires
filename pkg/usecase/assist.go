@@ -372,7 +372,7 @@ All output for actions, reasoning, and next_steps MUST be in markdown format.
 Agent output:
 %s`, languageInstruction, agentOutput)
 
-	summaryResp, err := session.GenerateContent(ctx, gollem.Text(prompt))
+	summaryResp, err := session.Generate(ctx, []gollem.Input{gollem.Text(prompt)})
 	if err != nil {
 		return goerr.Wrap(err, "failed to generate assist log summary")
 	}

@@ -186,9 +186,9 @@ func (m *DraftMaterializer) materializeOnce(
 		return nil, goerr.Wrap(err, "failed to create LLM session for materializer")
 	}
 
-	resp, err := session.GenerateContent(ctx, gollem.Text(prompt))
+	resp, err := session.Generate(ctx, []gollem.Input{gollem.Text(prompt)})
 	if err != nil {
-		return nil, goerr.Wrap(err, "LLM GenerateContent failed for materializer")
+		return nil, goerr.Wrap(err, "LLM Generate failed for materializer")
 	}
 	if len(resp.Texts) == 0 {
 		return nil, goerr.New("LLM returned no content for materializer")

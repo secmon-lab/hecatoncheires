@@ -10,6 +10,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
+	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
@@ -151,7 +152,7 @@ func TestSlackUseCases_AppMention_CaseBoundChannelDoesNotInvokeDraft(t *testing.
 	slackMock := newCollectorOnlyMockSlack()
 	llm := stubMaterializerLLM()
 	mentionDraft := usecase.NewMentionDraftUseCase(repo, registry, slackMock, usecase.NewDraftMaterializer(llm))
-	agent := usecase.NewAgentUseCase(repo, registry, slackMock, llm)
+	agent := usecase.NewAgentUseCase(repo, registry, slackMock, llm, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
 	slackUC := usecase.NewSlackUseCases(repo, registry, agent, mentionDraft, slackMock)
 
 	ev := &slackevents.EventsAPIEvent{
