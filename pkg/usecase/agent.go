@@ -611,14 +611,20 @@ func (uc *AgentUseCase) newTraceMessage(channelID, threadTS string) *traceMessag
 	}
 }
 
-// buildContextBlocks builds context blocks from the accumulated trace lines
-func (tm *traceMessage) buildContextBlocks() []goslack.Block {
-	text := strings.Join(tm.lines, " | ")
-	return []goslack.Block{
-		goslack.NewContextBlock("",
-			goslack.NewTextBlockObject(goslack.MarkdownType, text, false, false),
-		),
+// buildTraceContextBlocks renders one context block per trace line so progress
+// reads as a vertical list instead of a single ever-growing one-liner.
+func buildTraceContextBlocks(lines []string) []goslack.Block {
+	blocks := make([]goslack.Block, 0, len(lines))
+	for _, line := range lines {
+		blocks = append(blocks, goslack.NewContextBlock("",
+			goslack.NewTextBlockObject(goslack.MarkdownType, line, false, false),
+		))
 	}
+	return blocks
+}
+
+func (tm *traceMessage) buildContextBlocks() []goslack.Block {
+	return buildTraceContextBlocks(tm.lines)
 }
 
 // update adds a line to the trace message and posts/updates in Slack as a context block
@@ -629,7 +635,7 @@ func (tm *traceMessage) update(ctx context.Context, line string) {
 	logger := logging.From(ctx)
 	tm.lines = append(tm.lines, line)
 	blocks := tm.buildContextBlocks()
-	fallback := strings.Join(tm.lines, " | ")
+	fallback := strings.Join(tm.lines, "\n")
 
 	if tm.messageTS == "" {
 		ts, err := tm.slackService.PostThreadMessage(ctx, tm.channelID, tm.threadTS, blocks, fallback)

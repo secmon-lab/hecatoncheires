@@ -16,6 +16,9 @@ var BuildSlackSourceURLs = buildSlackSourceURLs
 // BuildAgentSystemPrompt is exported for testing
 var BuildAgentSystemPrompt = (*AgentUseCase).buildSystemPrompt
 
+// BuildTraceContextBlocksForTest is exported for testing
+var BuildTraceContextBlocksForTest = buildTraceContextBlocks
+
 // BuildAssistSystemPrompt is exported for testing
 var BuildAssistSystemPrompt = (*AssistUseCase).buildAssistSystemPrompt
 
