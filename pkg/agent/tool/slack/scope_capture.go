@@ -36,10 +36,11 @@ func scopeCaptureFromContext(ctx context.Context) *scopeCapture {
 }
 
 // scopeCaptureMaxBody caps how much of a Slack response body the wrapper
-// reads when attempting to parse missing_scope details. Slack search
-// responses are well under this size; the limit is a safety net against a
-// pathologically large response body.
-const scopeCaptureMaxBody = 4 << 20 // 4 MiB
+// buffers while looking for missing_scope details. The full error response
+// is on the order of a few hundred bytes; anything larger is a real result
+// payload that we deliberately do not parse — we just stream it through
+// untouched to slack-go.
+const scopeCaptureMaxBody = 64 << 10 // 64 KiB
 
 // capturingHTTPClient wraps an http.Client to extract Slack `missing_scope`
 // metadata (`needed` / `provided`) from the response body before handing the
@@ -59,12 +60,23 @@ func (c *capturingHTTPClient) Do(req *http.Request) (*http.Response, error) {
 		return resp, nil
 	}
 
-	body, readErr := io.ReadAll(io.LimitReader(resp.Body, scopeCaptureMaxBody))
-	safe.Close(req.Context(), resp.Body)
-	resp.Body = io.NopCloser(bytes.NewReader(body))
+	// Read one extra byte so we can detect bodies larger than the budget.
+	// In the oversize case we splice the buffered prefix back in front of
+	// the remaining stream, so slack-go receives the response intact.
+	head, readErr := io.ReadAll(io.LimitReader(resp.Body, scopeCaptureMaxBody+1))
 	if readErr != nil {
+		safe.Close(req.Context(), resp.Body)
+		return nil, readErr
+	}
+	if len(head) > scopeCaptureMaxBody {
+		resp.Body = struct {
+			io.Reader
+			io.Closer
+		}{io.MultiReader(bytes.NewReader(head), resp.Body), resp.Body}
 		return resp, nil
 	}
+	safe.Close(req.Context(), resp.Body)
+	resp.Body = io.NopCloser(bytes.NewReader(head))
 
 	var parsed struct {
 		OK       bool   `json:"ok"`
@@ -72,7 +84,7 @@ func (c *capturingHTTPClient) Do(req *http.Request) (*http.Response, error) {
 		Needed   string `json:"needed"`
 		Provided string `json:"provided"`
 	}
-	if jsonErr := json.Unmarshal(body, &parsed); jsonErr != nil {
+	if jsonErr := json.Unmarshal(head, &parsed); jsonErr != nil {
 		return resp, nil
 	}
 	if parsed.OK || parsed.Error != "missing_scope" {
