@@ -153,7 +153,7 @@ func (uc *AssistUseCase) processCase(ctx context.Context, entry *model.Workspace
 		CaseID:      c.ID,
 		StatusSet:   entry.ActionStatusSet,
 		EmbedClient: uc.embedClient,
-		ActionUC:    uc.actionUC,
+		ActionUC:    NewActionToolAdapter(uc.actionUC),
 	})
 	slackTools := slacktool.NewForAssist(slacktool.Deps{
 		Bot:       uc.slackService,

@@ -192,7 +192,7 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 		CaseID:      foundCase.ID,
 		StatusSet:   entry.ActionStatusSet,
 		EmbedClient: uc.embedClient,
-		ActionUC:    uc.actionUC,
+		ActionUC:    NewActionToolAdapter(uc.actionUC),
 	})
 
 	// Slack and Notion tools are independent packages. Each gates its own tools

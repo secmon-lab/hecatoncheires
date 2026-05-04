@@ -117,7 +117,7 @@ func (t *getActionTool) Run(ctx context.Context, args map[string]any) (map[strin
 // directly) is what triggers the Slack channel post, ActionEvent recording,
 // and any future side-effects that CreateAction owns.
 type createActionTool struct {
-	actionUC    ActionCreator
+	actionUC    ActionMutator
 	workspaceID string
 	caseID      int64
 	statusSet   *model.ActionStatusSet
@@ -213,9 +213,12 @@ func (t *createActionTool) Run(ctx context.Context, args map[string]any) (map[st
 	return actionToMap(created), nil
 }
 
-// updateActionTool updates the title, description, and/or assignee of an action
+// updateActionTool updates the title, description, and/or assignee of an
+// action through the unified ActionUseCase entry point. Routing through
+// the usecase (instead of poking the repository directly) is what triggers
+// the Slack message refresh, ActionEvent recording, and access checks.
 type updateActionTool struct {
-	repo        interfaces.Repository
+	actionUC    ActionMutator
 	workspaceID string
 }
 
@@ -259,44 +262,50 @@ func (t *updateActionTool) Run(ctx context.Context, args map[string]any) (map[st
 		return nil, err
 	}
 
-	tool.Update(ctx, fmt.Sprintf("Updating action #%d...", actionID))
-	a, err := t.repo.Action().Get(ctx, t.workspaceID, actionID)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to get action for update",
-			goerr.V("workspaceID", t.workspaceID),
-			goerr.V("actionID", actionID),
-		)
-	}
-	if a == nil {
-		return nil, fmt.Errorf("action not found: id=%d", actionID)
+	if t.actionUC == nil {
+		return nil, goerr.New("update_action tool is not wired to an ActionUseCase",
+			goerr.V("workspaceID", t.workspaceID))
 	}
 
+	var params UpdateActionParams
+
+	// title: tool contract says omit-or-empty means "no change". Only a
+	// non-empty value is forwarded as a real edit.
 	if title, ok := args["title"].(string); ok && title != "" {
-		a.Title = title
+		params.Title = &title
 	}
+	// description: same rule as title.
 	if desc, ok := args["description"].(string); ok && desc != "" {
-		a.Description = desc
+		params.Description = &desc
 	}
+	// assignee_id: present-but-empty is the explicit clear signal; a
+	// non-empty value reassigns. Absent key means no change.
 	if v, ok := args["assignee_id"]; ok {
 		s, ok := v.(string)
 		if !ok {
 			return nil, fmt.Errorf("invalid assignee_id: expected string, got %T", v)
 		}
-		a.AssigneeID = s
+		if s == "" {
+			params.ClearAssignee = true
+		} else {
+			params.AssigneeID = &s
+		}
 	}
+	// due_date: present-but-empty clears, RFC3339 sets, absent leaves alone.
 	if dueDateStr, ok := args["due_date"].(string); ok {
 		if dueDateStr == "" {
-			a.DueDate = nil
+			params.ClearDueDate = true
 		} else {
 			parsed, err := time.Parse(time.RFC3339, dueDateStr)
 			if err != nil {
 				return nil, fmt.Errorf("invalid due_date format %q: expected RFC3339 (e.g. 2025-03-01T00:00:00Z)", dueDateStr)
 			}
-			a.DueDate = &parsed
+			params.DueDate = &parsed
 		}
 	}
 
-	updated, err := t.repo.Action().Update(ctx, t.workspaceID, a)
+	tool.Update(ctx, fmt.Sprintf("Updating action #%d...", actionID))
+	updated, err := t.actionUC.UpdateAction(ctx, t.workspaceID, actionID, params)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to update action",
 			goerr.V("workspaceID", t.workspaceID),
@@ -306,9 +315,10 @@ func (t *updateActionTool) Run(ctx context.Context, args map[string]any) (map[st
 	return actionToMap(updated), nil
 }
 
-// updateActionStatusTool updates the status of an action
+// updateActionStatusTool updates the status of an action through the
+// unified ActionUseCase entry point.
 type updateActionStatusTool struct {
-	repo        interfaces.Repository
+	actionUC    ActionMutator
 	workspaceID string
 	statusSet   *model.ActionStatusSet
 }
@@ -345,20 +355,15 @@ func (t *updateActionStatusTool) Run(ctx context.Context, args map[string]any) (
 	}
 	status := types.ActionStatus(statusStr)
 
-	tool.Update(ctx, fmt.Sprintf("Updating action #%d status -> %s", actionID, status))
-	a, err := t.repo.Action().Get(ctx, t.workspaceID, actionID)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to get action for status update",
-			goerr.V("workspaceID", t.workspaceID),
-			goerr.V("actionID", actionID),
-		)
-	}
-	if a == nil {
-		return nil, fmt.Errorf("action not found: id=%d", actionID)
+	if t.actionUC == nil {
+		return nil, goerr.New("update_action_status tool is not wired to an ActionUseCase",
+			goerr.V("workspaceID", t.workspaceID))
 	}
 
-	a.Status = status
-	updated, err := t.repo.Action().Update(ctx, t.workspaceID, a)
+	tool.Update(ctx, fmt.Sprintf("Updating action #%d status -> %s", actionID, status))
+	updated, err := t.actionUC.UpdateAction(ctx, t.workspaceID, actionID, UpdateActionParams{
+		Status: &status,
+	})
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to update action status",
 			goerr.V("workspaceID", t.workspaceID),
@@ -368,9 +373,10 @@ func (t *updateActionStatusTool) Run(ctx context.Context, args map[string]any) (
 	return actionToMap(updated), nil
 }
 
-// setActionAssigneeTool sets (or clears) the assignee of an action
+// setActionAssigneeTool sets (or clears) the assignee of an action through
+// the unified ActionUseCase entry point.
 type setActionAssigneeTool struct {
-	repo        interfaces.Repository
+	actionUC    ActionMutator
 	workspaceID string
 }
 
@@ -408,25 +414,21 @@ func (t *setActionAssigneeTool) Run(ctx context.Context, args map[string]any) (m
 		return nil, fmt.Errorf("assignee_id must be a string, got %T", v)
 	}
 
+	if t.actionUC == nil {
+		return nil, goerr.New("set_action_assignee tool is not wired to an ActionUseCase",
+			goerr.V("workspaceID", t.workspaceID))
+	}
+
+	var params UpdateActionParams
 	if assigneeID == "" {
+		params.ClearAssignee = true
 		tool.Update(ctx, fmt.Sprintf("Clearing assignee on action #%d", actionID))
 	} else {
+		params.AssigneeID = &assigneeID
 		tool.Update(ctx, fmt.Sprintf("Setting assignee %s on action #%d", assigneeID, actionID))
 	}
 
-	a, err := t.repo.Action().Get(ctx, t.workspaceID, actionID)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to get action for assignee update",
-			goerr.V("workspaceID", t.workspaceID),
-			goerr.V("actionID", actionID),
-		)
-	}
-	if a == nil {
-		return nil, fmt.Errorf("action not found: id=%d", actionID)
-	}
-
-	a.AssigneeID = assigneeID
-	updated, err := t.repo.Action().Update(ctx, t.workspaceID, a)
+	updated, err := t.actionUC.UpdateAction(ctx, t.workspaceID, actionID, params)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to update action assignee",
 			goerr.V("workspaceID", t.workspaceID),
