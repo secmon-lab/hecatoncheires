@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -505,6 +506,57 @@ func TestParseAgentActionValue(t *testing.T) {
 		gt.NoError(t, err)
 		gt.Value(t, action).Equal("show_session_info")
 		gt.Value(t, data).Equal("0193a7b0-7c3d-7e8f-9a1b-2c3d4e5f6a7b")
+	})
+}
+
+func TestBuildTraceContextBlocks(t *testing.T) {
+	t.Run("empty lines produce empty blocks", func(t *testing.T) {
+		blocks := usecase.BuildTraceContextBlocksForTest(nil)
+		gt.Array(t, blocks).Length(0)
+	})
+
+	t.Run("each line becomes its own context block", func(t *testing.T) {
+		lines := []string{
+			"\U0001f527 `tool_a`",
+			"\U0001f527 `tool_b`",
+			"❌ Error: boom",
+		}
+		blocks := usecase.BuildTraceContextBlocksForTest(lines)
+		gt.Array(t, blocks).Length(len(lines)).Required()
+
+		for i, block := range blocks {
+			ctxBlock, ok := block.(*goslack.ContextBlock)
+			gt.Bool(t, ok).True().Required()
+			gt.Value(t, ctxBlock.Type).Equal(goslack.MBTContext)
+			gt.Array(t, ctxBlock.ContextElements.Elements).Length(1).Required()
+
+			text, ok := ctxBlock.ContextElements.Elements[0].(*goslack.TextBlockObject)
+			gt.Bool(t, ok).True().Required()
+			gt.Value(t, text.Type).Equal(goslack.MarkdownType)
+			gt.String(t, text.Text).Equal(lines[i])
+		}
+	})
+
+	t.Run("caps blocks at Slack's 50-block per-message limit", func(t *testing.T) {
+		lines := make([]string, 75)
+		for i := range lines {
+			lines[i] = fmt.Sprintf("line-%02d", i)
+		}
+		blocks := usecase.BuildTraceContextBlocksForTest(lines)
+		gt.Array(t, blocks).Length(50).Required()
+
+		// The most recent lines must survive (lines[25] .. lines[74]).
+		first, ok := blocks[0].(*goslack.ContextBlock)
+		gt.Bool(t, ok).True().Required()
+		firstText, ok := first.ContextElements.Elements[0].(*goslack.TextBlockObject)
+		gt.Bool(t, ok).True().Required()
+		gt.String(t, firstText.Text).Equal("line-25")
+
+		last, ok := blocks[49].(*goslack.ContextBlock)
+		gt.Bool(t, ok).True().Required()
+		lastText, ok := last.ContextElements.Elements[0].(*goslack.TextBlockObject)
+		gt.Bool(t, ok).True().Required()
+		gt.String(t, lastText.Text).Equal("line-74")
 	})
 }
 
