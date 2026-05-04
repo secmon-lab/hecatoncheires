@@ -564,11 +564,6 @@ type agentPromptData struct {
 // detail is surfaced, to avoid drowning the LLM in unrelated work items.
 // Otherwise the case-wide actions list is rendered as a title-only summary.
 func (uc *AgentUseCase) buildSystemPrompt(c *model.Case, entry *model.WorkspaceEntry, channelID string, now time.Time, currentAction *model.Action, actions []*model.Action, knowledges []*model.Knowledge, messages []slack.ConversationMessage) string {
-	statusSet := model.DefaultActionStatusSet()
-	if entry != nil && entry.ActionStatusSet != nil {
-		statusSet = entry.ActionStatusSet
-	}
-
 	data := agentPromptData{
 		ChannelID: channelID,
 		Now:       now.UTC().Format(time.RFC3339),
@@ -592,6 +587,10 @@ func (uc *AgentUseCase) buildSystemPrompt(c *model.Case, entry *model.WorkspaceE
 	}
 
 	if currentAction != nil {
+		statusSet := model.DefaultActionStatusSet()
+		if entry != nil && entry.ActionStatusSet != nil {
+			statusSet = entry.ActionStatusSet
+		}
 		due := ""
 		if currentAction.DueDate != nil {
 			due = currentAction.DueDate.UTC().Format(time.RFC3339)
