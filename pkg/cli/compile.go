@@ -23,6 +23,7 @@ func cmdCompile() *cli.Command {
 	var appCfg config.AppConfig
 	var repoCfg config.Repository
 	var llmCfg config.LLM
+	var embCfg config.Embedding
 	var githubCfg config.GitHub
 
 	flags := []cli.Flag{
@@ -62,6 +63,7 @@ func cmdCompile() *cli.Command {
 	flags = append(flags, appCfg.Flags()...)
 	flags = append(flags, repoCfg.Flags()...)
 	flags = append(flags, llmCfg.Flags()...)
+	flags = append(flags, embCfg.Flags()...)
 	flags = append(flags, githubCfg.Flags()...)
 
 	return &cli.Command{
@@ -116,8 +118,18 @@ func cmdCompile() *cli.Command {
 			}
 			logging.Default().Info("LLM client enabled", logAttrsToArgs(llmCfg.LogAttrs())...)
 
+			// Initialize Embedding client (required)
+			if !embCfg.IsEnabled() {
+				return goerr.New("--embedding-gemini-project-id is required for compile")
+			}
+			embedClient, err := embCfg.NewClient(ctx)
+			if err != nil {
+				return goerr.Wrap(err, "failed to initialize embedding client")
+			}
+			logging.Default().Info("Embedding client enabled", logAttrsToArgs(embCfg.LogAttrs())...)
+
 			// Initialize knowledge service
-			knowledgeSvc, err := knowledge.New(llmClient)
+			knowledgeSvc, err := knowledge.New(llmClient, embedClient)
 			if err != nil {
 				return goerr.Wrap(err, "failed to initialize knowledge service")
 			}

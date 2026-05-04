@@ -257,4 +257,3 @@ func convertConversationMessages(msgs []slackservice.ConversationMessage) []map[
 	}
 	return out
 }
-

@@ -55,3 +55,12 @@ func NewLLMForTest(provider, model, openaiAPIKey, claudeAPIKey, geminiProjectID,
 		geminiLocation:  geminiLocation,
 	}
 }
+
+// NewEmbeddingForTest creates an Embedding config for testing purposes.
+func NewEmbeddingForTest(geminiProjectID, geminiLocation, model string) *Embedding {
+	return &Embedding{
+		geminiProjectID: geminiProjectID,
+		geminiLocation:  geminiLocation,
+		model:           model,
+	}
+}

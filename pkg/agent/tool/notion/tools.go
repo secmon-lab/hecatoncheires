@@ -147,4 +147,3 @@ func (t *getPageTool) Run(ctx context.Context, args map[string]any) (map[string]
 		"truncated": res.Truncated,
 	}, nil
 }
-

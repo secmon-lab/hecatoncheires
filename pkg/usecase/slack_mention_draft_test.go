@@ -152,7 +152,7 @@ func TestSlackUseCases_AppMention_CaseBoundChannelDoesNotInvokeDraft(t *testing.
 	slackMock := newCollectorOnlyMockSlack()
 	llm := stubMaterializerLLM()
 	mentionDraft := usecase.NewMentionDraftUseCase(repo, registry, slackMock, usecase.NewDraftMaterializer(llm))
-	agent := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llm, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
+	agent := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llm, nil, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
 	slackUC := usecase.NewSlackUseCases(repo, registry, agent, mentionDraft, slackMock)
 
 	ev := &slackevents.EventsAPIEvent{

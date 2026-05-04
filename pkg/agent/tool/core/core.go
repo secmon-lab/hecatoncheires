@@ -17,7 +17,7 @@ type Deps struct {
 	WorkspaceID string
 	CaseID      int64
 	StatusSet   *model.ActionStatusSet
-	LLMClient   gollem.LLMClient
+	EmbedClient interfaces.EmbedClient
 }
 
 // New builds core tools for the agent mention use case: action management plus
@@ -36,7 +36,7 @@ func New(deps Deps) []gollem.Tool {
 		&updateActionTool{repo: deps.Repo, workspaceID: deps.WorkspaceID},
 		&updateActionStatusTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, statusSet: statusSet},
 		&setActionAssigneeTool{repo: deps.Repo, workspaceID: deps.WorkspaceID},
-		&searchKnowledgeTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, llmClient: deps.LLMClient},
+		&searchKnowledgeTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, embedClient: deps.EmbedClient},
 		&getKnowledgeTool{repo: deps.Repo, workspaceID: deps.WorkspaceID},
 	}
 }
@@ -49,15 +49,15 @@ func NewForAssist(deps Deps) []gollem.Tool {
 
 	// Knowledge write tools
 	tools = append(tools,
-		&createKnowledgeTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, caseID: deps.CaseID, llmClient: deps.LLMClient},
-		&updateKnowledgeTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, llmClient: deps.LLMClient},
+		&createKnowledgeTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, caseID: deps.CaseID, embedClient: deps.EmbedClient},
+		&updateKnowledgeTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, embedClient: deps.EmbedClient},
 	)
 
 	// Memory tools
 	tools = append(tools,
-		&createMemoryTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, caseID: deps.CaseID, llmClient: deps.LLMClient},
+		&createMemoryTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, caseID: deps.CaseID, embedClient: deps.EmbedClient},
 		&deleteMemoryTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, caseID: deps.CaseID},
-		&searchMemoryTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, caseID: deps.CaseID, llmClient: deps.LLMClient},
+		&searchMemoryTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, caseID: deps.CaseID, embedClient: deps.EmbedClient},
 		&listMemoriesTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, caseID: deps.CaseID},
 	)
 

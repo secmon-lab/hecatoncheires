@@ -170,6 +170,7 @@ func cmdServe() *cli.Command {
 	var repoCfg config.Repository
 	var slackCfg config.Slack
 	var llmCfg config.LLM
+	var embCfg config.Embedding
 	var githubCfg config.GitHub
 	var storageCfg config.Storage
 
@@ -221,6 +222,7 @@ func cmdServe() *cli.Command {
 	flags = append(flags, repoCfg.Flags()...)
 	flags = append(flags, slackCfg.Flags()...)
 	flags = append(flags, llmCfg.Flags()...)
+	flags = append(flags, embCfg.Flags()...)
 	flags = append(flags, githubCfg.Flags()...)
 	flags = append(flags, storageCfg.Flags()...)
 
@@ -367,6 +369,20 @@ func cmdServe() *cli.Command {
 				ucOpts = append(ucOpts, usecase.WithLLMClient(llmClient))
 				logging.Default().Info("LLM client enabled", logAttrsToArgs(llmCfg.LogAttrs())...)
 			}
+
+			// Initialize Embedding client. Always required: every CLI mode
+			// (serve / assist / compile) ultimately relies on the embedder
+			// for memory / knowledge similarity search. Embedding is Gemini-
+			// only and configured independently from --llm-provider.
+			if !embCfg.IsEnabled() {
+				return goerr.New("--embedding-gemini-project-id is required")
+			}
+			embedClient, err := embCfg.NewClient(ctx)
+			if err != nil {
+				return goerr.Wrap(err, "failed to initialize embedding client")
+			}
+			ucOpts = append(ucOpts, usecase.WithEmbedClient(embedClient))
+			logging.Default().Info("Embedding client enabled", logAttrsToArgs(embCfg.LogAttrs())...)
 
 			// Initialize GitHub service if configured
 			githubSvc, err := githubCfg.Configure()

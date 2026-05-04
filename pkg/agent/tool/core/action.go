@@ -431,4 +431,3 @@ func (t *setActionAssigneeTool) Run(ctx context.Context, args map[string]any) (m
 	}
 	return actionToMap(updated), nil
 }
-

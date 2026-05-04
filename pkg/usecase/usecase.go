@@ -24,6 +24,7 @@ type UseCases struct {
 	githubService     github.Service
 	knowledgeService  knowledge.Service
 	llmClient         gollem.LLMClient
+	embedClient       interfaces.EmbedClient
 	historyRepo       gollem.HistoryRepository
 	traceRepo         trace.Repository
 	baseURL           string
@@ -105,6 +106,16 @@ func WithLLMClient(client gollem.LLMClient) Option {
 	}
 }
 
+// WithEmbedClient sets the embedding client used by core tools (memory /
+// knowledge similarity search) and the knowledge extraction service. Always
+// required when the LLM-driven flows are wired; configured separately so it
+// can target Gemini regardless of the chat completion provider.
+func WithEmbedClient(client interfaces.EmbedClient) Option {
+	return func(uc *UseCases) {
+		uc.embedClient = client
+	}
+}
+
 // WithHistoryRepository sets the gollem.HistoryRepository used by the agent
 // session flow to persist conversation history across mentions.
 func WithHistoryRepository(repo gollem.HistoryRepository) Option {
@@ -136,22 +147,27 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 	uc.Source = NewSourceUseCase(repo, uc.notion, uc.slackService, uc.githubService)
 	uc.Compile = NewCompileUseCase(repo, registry, uc.notion, uc.knowledgeService, uc.slackService, uc.githubService, uc.baseURL)
 
-	// Whenever Slack is wired, LLM must also be wired — Slack-driven flows
-	// (agent mention, mention-draft, assist) all require LLM by design.
+	// Whenever Slack is wired, LLM and Embed clients must also be wired —
+	// Slack-driven flows (agent mention, mention-draft, assist) all require
+	// LLM by design, and the agent/assist core tools need an embedder for
+	// memory / knowledge similarity search.
 	if uc.slackService != nil {
 		if uc.llmClient == nil {
 			panic("usecase.New: LLM client is required when Slack service is configured (use WithLLMClient)")
+		}
+		if uc.embedClient == nil {
+			panic("usecase.New: Embed client is required when Slack service is configured (use WithEmbedClient)")
 		}
 		// Agent depends on the persistent History/Trace archive. Callers
 		// that drive Slack events (the serve CLI) MUST wire both; callers
 		// that only use Assist (the assist CLI) may omit them, in which
 		// case the Agent usecase is simply not constructed.
 		if uc.historyRepo != nil && uc.traceRepo != nil {
-			uc.Agent = NewAgentUseCase(repo, registry, uc.slackService, uc.slackSearch, uc.notionTool, uc.llmClient, uc.historyRepo, uc.traceRepo)
+			uc.Agent = NewAgentUseCase(repo, registry, uc.slackService, uc.slackSearch, uc.notionTool, uc.llmClient, uc.embedClient, uc.historyRepo, uc.traceRepo)
 		} else if uc.historyRepo != nil || uc.traceRepo != nil {
 			panic("usecase.New: WithHistoryRepository and WithTraceRepository must be paired")
 		}
-		uc.Assist = NewAssistUseCase(repo, registry, uc.slackService, uc.slackSearch, uc.notionTool, uc.llmClient)
+		uc.Assist = NewAssistUseCase(repo, registry, uc.slackService, uc.slackSearch, uc.notionTool, uc.llmClient, uc.embedClient)
 		uc.MentionDraft = NewMentionDraftUseCase(repo, registry, uc.slackService, NewDraftMaterializer(uc.llmClient))
 	}
 	uc.Slack = NewSlackUseCases(repo, registry, uc.Agent, uc.MentionDraft, uc.slackService)

@@ -15,7 +15,7 @@ import (
 type searchKnowledgeTool struct {
 	repo        interfaces.Repository
 	workspaceID string
-	llmClient   gollem.LLMClient
+	embedClient interfaces.EmbedClient
 }
 
 func (t *searchKnowledgeTool) Spec() gollem.ToolSpec {
@@ -50,7 +50,7 @@ func (t *searchKnowledgeTool) Run(ctx context.Context, args map[string]any) (map
 		limit = int(v)
 	}
 
-	embeddings, err := t.llmClient.GenerateEmbedding(ctx, model.EmbeddingDimension, []string{query})
+	embeddings, err := t.embedClient.GenerateEmbedding(ctx, model.EmbeddingDimension, []string{query})
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to generate embedding for search query",
 			goerr.V("query", query),
@@ -91,7 +91,7 @@ type createKnowledgeTool struct {
 	repo        interfaces.Repository
 	workspaceID string
 	caseID      int64
-	llmClient   gollem.LLMClient
+	embedClient interfaces.EmbedClient
 }
 
 func (t *createKnowledgeTool) Spec() gollem.ToolSpec {
@@ -125,7 +125,7 @@ func (t *createKnowledgeTool) Run(ctx context.Context, args map[string]any) (map
 
 	tool.Update(ctx, fmt.Sprintf("Creating knowledge: %s", title))
 
-	embedding, err := generateKnowledgeEmbedding(ctx, t.llmClient, title, summary)
+	embedding, err := generateKnowledgeEmbedding(ctx, t.embedClient, title, summary)
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +154,7 @@ func (t *createKnowledgeTool) Run(ctx context.Context, args map[string]any) (map
 type updateKnowledgeTool struct {
 	repo        interfaces.Repository
 	workspaceID string
-	llmClient   gollem.LLMClient
+	embedClient interfaces.EmbedClient
 }
 
 func (t *updateKnowledgeTool) Spec() gollem.ToolSpec {
@@ -203,7 +203,7 @@ func (t *updateKnowledgeTool) Run(ctx context.Context, args map[string]any) (map
 		existing.Summary = summary
 	}
 
-	embedding, err := generateKnowledgeEmbedding(ctx, t.llmClient, existing.Title, existing.Summary)
+	embedding, err := generateKnowledgeEmbedding(ctx, t.embedClient, existing.Title, existing.Summary)
 	if err != nil {
 		return nil, err
 	}
@@ -230,9 +230,9 @@ func (t *updateKnowledgeTool) Run(ctx context.Context, args map[string]any) (map
 }
 
 // generateKnowledgeEmbedding generates a float32 embedding from title and summary
-func generateKnowledgeEmbedding(ctx context.Context, llmClient gollem.LLMClient, title, summary string) ([]float32, error) {
+func generateKnowledgeEmbedding(ctx context.Context, embedClient interfaces.EmbedClient, title, summary string) ([]float32, error) {
 	text := title + "\n" + summary
-	embeddings, err := llmClient.GenerateEmbedding(ctx, model.EmbeddingDimension, []string{text})
+	embeddings, err := embedClient.GenerateEmbedding(ctx, model.EmbeddingDimension, []string{text})
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to generate embedding for knowledge")
 	}

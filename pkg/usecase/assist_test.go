@@ -40,7 +40,7 @@ func TestAssistUseCase_BuildAssistSystemPrompt(t *testing.T) {
 			AssistPrompt: "Check deadlines and follow up on pending items.",
 		})
 
-		assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil, nil, nil)
+		assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil, nil, nil, nil)
 		entry, err := registry.Get(testWorkspaceID)
 		gt.NoError(t, err).Required()
 
@@ -70,7 +70,7 @@ func TestAssistUseCase_BuildAssistSystemPrompt(t *testing.T) {
 			AssistPrompt: "Monitor this case.",
 		})
 
-		assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil, nil, nil)
+		assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil, nil, nil, nil)
 		entry, err := registry.Get(testWorkspaceID)
 		gt.NoError(t, err).Required()
 
@@ -117,7 +117,7 @@ func TestAssistUseCase_BuildAssistSystemPrompt(t *testing.T) {
 			AssistPrompt: "Assist this case.",
 		})
 
-		assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil, nil, nil)
+		assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil, nil, nil, nil)
 		entry, err := registry.Get(testWorkspaceID)
 		gt.NoError(t, err).Required()
 
@@ -148,7 +148,7 @@ func TestAssistUseCase_BuildAssistSystemPrompt_Language(t *testing.T) {
 			AssistLanguage: "Japanese",
 		})
 
-		assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil, nil, nil)
+		assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil, nil, nil, nil)
 		entry, err := registry.Get(testWorkspaceID)
 		gt.NoError(t, err).Required()
 
@@ -173,7 +173,7 @@ func TestAssistUseCase_BuildAssistSystemPrompt_Language(t *testing.T) {
 			AssistPrompt: "Check deadlines.",
 		})
 
-		assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil, nil, nil)
+		assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil, nil, nil, nil)
 		entry, err := registry.Get(testWorkspaceID)
 		gt.NoError(t, err).Required()
 
@@ -195,7 +195,7 @@ func TestAssistUseCase_RunAssist_SkipsWorkspaceWithoutAssistConfig(t *testing.T)
 		// AssistPrompt is empty - should be skipped
 	})
 
-	assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil, nil, nil)
+	assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil, nil, nil, nil)
 	err := assistUC.RunAssist(ctx, usecase.AssistOption{})
 	gt.NoError(t, err)
 }
@@ -206,7 +206,7 @@ func TestAssistUseCase_RunAssist_DefaultOptions(t *testing.T) {
 
 	// Empty registry - no workspaces to process
 	registry := model.NewWorkspaceRegistry()
-	assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil, nil, nil)
+	assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil, nil, nil, nil)
 
 	err := assistUC.RunAssist(ctx, usecase.AssistOption{})
 	gt.NoError(t, err)
@@ -224,7 +224,7 @@ func TestAssistUseCase_RunAssist_WorkspaceFilter(t *testing.T) {
 		Workspace: model.Workspace{ID: "ws-2", Name: "Workspace 2"},
 	})
 
-	assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil, nil, nil)
+	assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil, nil, nil, nil)
 
 	// Filter to non-existent workspace should fail
 	err := assistUC.RunAssist(ctx, usecase.AssistOption{WorkspaceID: "ws-nonexistent"})

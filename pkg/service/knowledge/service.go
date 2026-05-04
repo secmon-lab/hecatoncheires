@@ -8,25 +8,34 @@ import (
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 )
 
 // client implements Service interface
 type client struct {
-	llmClient gollem.LLMClient
+	llmClient   gollem.LLMClient
+	embedClient interfaces.EmbedClient
 }
 
 // Option is a functional option for client configuration
 type Option func(*client)
 
-// New creates a new Knowledge service with the provided LLM client
-func New(llmClient gollem.LLMClient, opts ...Option) (Service, error) {
+// New creates a new Knowledge service. llmClient drives chat completion for
+// knowledge extraction; embedClient generates the embedding stored alongside
+// each result and is configured separately so it can target Gemini regardless
+// of the chat provider.
+func New(llmClient gollem.LLMClient, embedClient interfaces.EmbedClient, opts ...Option) (Service, error) {
 	if llmClient == nil {
 		return nil, goerr.New("LLM client is required")
 	}
+	if embedClient == nil {
+		return nil, goerr.New("Embed client is required")
+	}
 
 	c := &client{
-		llmClient: llmClient,
+		llmClient:   llmClient,
+		embedClient: embedClient,
 	}
 
 	for _, opt := range opts {
@@ -186,7 +195,7 @@ func (c *client) buildResponseSchema() *gollem.Parameter {
 
 // generateEmbedding generates an embedding vector for the given text
 func (c *client) generateEmbedding(ctx context.Context, text string) ([]float32, error) {
-	embeddings, err := c.llmClient.GenerateEmbedding(ctx, model.EmbeddingDimension, []string{text})
+	embeddings, err := c.embedClient.GenerateEmbedding(ctx, model.EmbeddingDimension, []string{text})
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to generate embedding")
 	}
