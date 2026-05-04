@@ -1291,6 +1291,38 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 		_, err = repo.Action().Get(ctx, testWorkspaceID, createdAction.ID)
 		gt.Value(t, err).NotNil()
 	})
+
+	t.Run("postActionSlackMessage surfaces usecase error", func(t *testing.T) {
+		// The test harness wires no Slack service; calling
+		// postActionSlackMessage exercises the resolver → usecase plumbing
+		// and verifies that the strict "slack not configured" error
+		// surfaces as a GraphQL error rather than a panic or silent OK.
+		actionForRepost := &model.Action{
+			CaseID:      createdCase.ID,
+			Title:       "Action to repost",
+			Description: "Initial Slack post never happened",
+		}
+		createdAction, err := repo.Action().Create(ctx, testWorkspaceID, actionForRepost)
+		gt.NoError(t, err).Required()
+
+		mutation := `
+			mutation($workspaceId: String!, $id: Int!) {
+				postActionSlackMessage(workspaceId: $workspaceId, id: $id) {
+					id
+				}
+			}
+		`
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          createdAction.ID,
+		}
+
+		rec := executeGraphQLRequest(t, handler, mutation, variables)
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+
+		resp := parseGraphQLResponse(t, rec)
+		gt.Number(t, len(resp.Errors)).GreaterOrEqual(1)
+	})
 }
 
 func TestGraphQLHandler_NoopMutation(t *testing.T) {

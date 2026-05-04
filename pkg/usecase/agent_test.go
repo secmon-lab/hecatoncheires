@@ -199,7 +199,7 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 
 		llmClient := &mockLLMClient{}
 
-		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
+		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil)
 
 		msg := slackmodel.NewMessageFromData(
 			"1234567890.000002",
@@ -254,7 +254,7 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 
 		llmClient := &mockLLMClient{}
 
-		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
+		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil)
 
 		msg := slackmodel.NewMessageFromData(
 			"1234567890.000011",
@@ -292,7 +292,7 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 		slackMock := &agentTestSlackService{}
 		llmClient := &mockLLMClient{}
 
-		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
+		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil)
 
 		msg := slackmodel.NewMessageFromData(
 			"1234567890.000100",
@@ -335,7 +335,7 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 
 		llmClient := &mockLLMClient{}
 
-		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
+		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil)
 
 		msg := slackmodel.NewMessageFromData(
 			"1234567890.000200",
@@ -387,7 +387,7 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 			{UserID: "U001", UserName: "alice", Text: "Hello", Timestamp: "1234567890.000001"},
 		}
 
-		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
+		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil)
 		now := time.Date(2026, 5, 4, 12, 30, 0, 0, time.UTC)
 		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, "C0TEST", now, nil, nil, nil, messages)
 
@@ -413,7 +413,7 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 			Status: types.CaseStatusOpen,
 		}
 
-		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
+		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil)
 		now := time.Date(2026, 5, 4, 12, 30, 45, 0, time.UTC)
 		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, "C0123ABC", now, nil, nil, nil, nil)
 
@@ -453,7 +453,7 @@ func TestAgentSystemPrompt_ActionsAndKnowledges(t *testing.T) {
 			},
 		}
 
-		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
+		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil)
 		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, "C0TEST", fixedNow, nil, actions, nil, nil)
 
 		gt.Value(t, strings.Contains(prompt, "## Actions")).Equal(true)
@@ -494,7 +494,7 @@ func TestAgentSystemPrompt_ActionsAndKnowledges(t *testing.T) {
 			{ID: 8, Title: "Sibling action"},
 		}
 
-		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
+		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil)
 		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, "C0TEST", fixedNow, currentAction, others, nil, nil)
 
 		gt.Value(t, strings.Contains(prompt, "## Current Action")).Equal(true)
@@ -526,7 +526,7 @@ func TestAgentSystemPrompt_ActionsAndKnowledges(t *testing.T) {
 			Status: types.ActionStatusTodo,
 		}
 
-		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
+		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil)
 		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, "C0TEST", fixedNow, currentAction, nil, nil, nil)
 
 		gt.Value(t, strings.Contains(prompt, "Assignee: unassigned")).Equal(true)
@@ -555,7 +555,7 @@ func TestAgentSystemPrompt_ActionsAndKnowledges(t *testing.T) {
 			},
 		}
 
-		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
+		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil)
 		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, "C0TEST", fixedNow, nil, nil, knowledges, nil)
 
 		gt.Value(t, strings.Contains(prompt, "## Knowledge")).Equal(true)
@@ -576,7 +576,7 @@ func TestAgentSystemPrompt_ActionsAndKnowledges(t *testing.T) {
 			Status: types.CaseStatusOpen,
 		}
 
-		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
+		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil)
 		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, "C0TEST", fixedNow, nil, nil, nil, nil)
 
 		gt.Value(t, strings.Contains(prompt, "## Actions")).Equal(false)
@@ -669,7 +669,7 @@ func TestAgentUseCase_HandleSessionInfoRequest(t *testing.T) {
 
 		llmClient := &mockLLMClient{}
 		i18n.Init(i18n.LangEN)
-		agentUC := usecase.NewAgentUseCase(repo, nil, mockWithCapture, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
+		agentUC := usecase.NewAgentUseCase(repo, nil, mockWithCapture, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil)
 
 		err := agentUC.HandleSessionInfoRequest(t.Context(), "trigger-123", "test-session-id")
 		gt.NoError(t, err)
@@ -774,7 +774,7 @@ func TestLifecycle_AgentSession(t *testing.T) {
 		},
 	}
 
-	uc := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llm, llm, historyRepo, traceRepo)
+	uc := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llm, llm, historyRepo, traceRepo, nil)
 
 	// --- First mention -----------------------------------------------------
 	first := slackmodel.NewMessageFromData(
@@ -920,7 +920,7 @@ func TestAgentUseCase_DeltaMessageInjection(t *testing.T) {
 		},
 	}
 
-	uc := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llm, llm, historyRepo, traceRepo)
+	uc := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llm, llm, historyRepo, traceRepo, nil)
 
 	msg := slackmodel.NewMessageFromData(
 		newMention,
@@ -990,7 +990,7 @@ func TestAgentUseCase_ActionLinkage(t *testing.T) {
 
 	slackMock := &agentTestSlackService{}
 	llm := &mockLLMClient{}
-	uc := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llm, llm, historyRepo, traceRepo)
+	uc := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llm, llm, historyRepo, traceRepo, nil)
 
 	msg := slackmodel.NewMessageFromData(
 		"1700200005.000001",

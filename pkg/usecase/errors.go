@@ -12,6 +12,10 @@ var (
 	ErrCaseAlreadyClosed = errors.New("case is already closed")
 	ErrCaseAlreadyOpen   = errors.New("case is already open")
 
+	// Action Slack-post state errors
+	ErrSlackMessageAlreadyPosted = errors.New("action already has a Slack message")
+	ErrCaseHasNoSlackChannel     = errors.New("parent case has no Slack channel")
+
 	// Access control errors
 	ErrAccessDenied = errors.New("access denied to private case")
 

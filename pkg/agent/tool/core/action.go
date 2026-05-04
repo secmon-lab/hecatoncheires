@@ -112,9 +112,12 @@ func (t *getActionTool) Run(ctx context.Context, args map[string]any) (map[strin
 	return actionToMap(a), nil
 }
 
-// createActionTool creates a new action
+// createActionTool creates a new action through the unified ActionUseCase
+// entry point. Routing through the usecase (instead of poking the repository
+// directly) is what triggers the Slack channel post, ActionEvent recording,
+// and any future side-effects that CreateAction owns.
 type createActionTool struct {
-	repo        interfaces.Repository
+	actionUC    ActionCreator
 	workspaceID string
 	caseID      int64
 	statusSet   *model.ActionStatusSet
@@ -161,6 +164,11 @@ func (t *createActionTool) Run(ctx context.Context, args map[string]any) (map[st
 		return nil, fmt.Errorf("title is required")
 	}
 
+	if t.actionUC == nil {
+		return nil, goerr.New("create_action tool is not wired to an ActionUseCase",
+			goerr.V("workspaceID", t.workspaceID))
+	}
+
 	description, _ := args["description"].(string)
 
 	status := types.ActionStatus(t.statusSet.InitialID())
@@ -190,16 +198,12 @@ func (t *createActionTool) Run(ctx context.Context, args map[string]any) (map[st
 	}
 
 	tool.Update(ctx, fmt.Sprintf("Creating action: %s", title))
-	action := &model.Action{
-		CaseID:      t.caseID,
-		Title:       title,
-		Description: description,
-		Status:      status,
-		AssigneeID:  assigneeID,
-		DueDate:     dueDate,
-	}
 
-	created, err := t.repo.Action().Create(ctx, t.workspaceID, action)
+	// Route through the unified usecase entry point so that Slack posting,
+	// ActionEvent records, and any future side-effects fire identically to
+	// the GraphQL and Slack-modal create paths. Initial SlackMessageTS is
+	// empty; CreateAction itself fills it in once the channel post returns.
+	created, err := t.actionUC.CreateAction(ctx, t.workspaceID, t.caseID, title, description, assigneeID, "", status, dueDate)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to create action",
 			goerr.V("workspaceID", t.workspaceID),

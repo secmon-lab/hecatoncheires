@@ -163,11 +163,11 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 		// that only use Assist (the assist CLI) may omit them, in which
 		// case the Agent usecase is simply not constructed.
 		if uc.historyRepo != nil && uc.traceRepo != nil {
-			uc.Agent = NewAgentUseCase(repo, registry, uc.slackService, uc.slackSearch, uc.notionTool, uc.llmClient, uc.embedClient, uc.historyRepo, uc.traceRepo)
+			uc.Agent = NewAgentUseCase(repo, registry, uc.slackService, uc.slackSearch, uc.notionTool, uc.llmClient, uc.embedClient, uc.historyRepo, uc.traceRepo, uc.Action)
 		} else if uc.historyRepo != nil || uc.traceRepo != nil {
 			panic("usecase.New: WithHistoryRepository and WithTraceRepository must be paired")
 		}
-		uc.Assist = NewAssistUseCase(repo, registry, uc.slackService, uc.slackSearch, uc.notionTool, uc.llmClient, uc.embedClient)
+		uc.Assist = NewAssistUseCase(repo, registry, uc.slackService, uc.slackSearch, uc.notionTool, uc.llmClient, uc.embedClient, uc.Action)
 		uc.MentionDraft = NewMentionDraftUseCase(repo, registry, uc.slackService, NewDraftMaterializer(uc.llmClient))
 	}
 	uc.Slack = NewSlackUseCases(repo, registry, uc.Agent, uc.MentionDraft, uc.slackService)

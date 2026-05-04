@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gt"
@@ -14,6 +15,25 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 )
+
+// mockActionCreator captures CreateAction calls so the create_action tool
+// tests can verify the tool routes through the unified ActionUseCase entry
+// point. The real ActionUseCase is exercised by usecase-level tests; here
+// we only check the tool's argument-extraction behaviour.
+type mockActionCreator struct {
+	createFn func(ctx context.Context, workspaceID string, caseID int64, title, description string, assigneeID string, slackMessageTS string, status types.ActionStatus, dueDate *time.Time) (*model.Action, error)
+}
+
+func (m *mockActionCreator) CreateAction(ctx context.Context, workspaceID string, caseID int64, title, description string, assigneeID string, slackMessageTS string, status types.ActionStatus, dueDate *time.Time) (*model.Action, error) {
+	if m.createFn != nil {
+		return m.createFn(ctx, workspaceID, caseID, title, description, assigneeID, slackMessageTS, status, dueDate)
+	}
+	return &model.Action{
+		ID: 1, CaseID: caseID, Title: title, Description: description,
+		AssigneeID: assigneeID, SlackMessageTS: slackMessageTS,
+		Status: status, DueDate: dueDate,
+	}, nil
+}
 
 // newCtxWithUpdateCapture returns a context that captures all update messages
 // and a pointer to the slice where they are appended.
@@ -368,18 +388,27 @@ func TestCreateActionTool(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("creates action with correct fields", func(t *testing.T) {
-		var captured *model.Action
-		actionRepo := &mockActionRepo{
-			createFn: func(ctx context.Context, workspaceID string, action *model.Action) (*model.Action, error) {
-				gt.Value(t, workspaceID).Equal(testWorkspaceID)
-				captured = action
-				result := *action
-				result.ID = 10
-				return &result, nil
+		var (
+			capturedWorkspaceID string
+			capturedCaseID      int64
+			capturedTitle       string
+			capturedDescription string
+			capturedAssigneeID  string
+			capturedStatus      types.ActionStatus
+		)
+		creator := &mockActionCreator{
+			createFn: func(_ context.Context, workspaceID string, caseID int64, title, description string, assigneeID string, _ string, status types.ActionStatus, _ *time.Time) (*model.Action, error) {
+				capturedWorkspaceID = workspaceID
+				capturedCaseID = caseID
+				capturedTitle = title
+				capturedDescription = description
+				capturedAssigneeID = assigneeID
+				capturedStatus = status
+				return &model.Action{ID: 10, CaseID: caseID, Title: title, Description: description, AssigneeID: assigneeID, Status: status}, nil
 			},
 		}
-		repo := newMockRepo(actionRepo, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		repo := newMockRepo(nil, nil)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}, ActionUC: creator})
 
 		result, err := findTool(tools, "core__create_action").Run(ctx, map[string]any{
 			"title":       "New investigation",
@@ -388,35 +417,36 @@ func TestCreateActionTool(t *testing.T) {
 			"assignee_id": "U001",
 		})
 		gt.NoError(t, err)
-		gt.Value(t, captured.CaseID).Equal(testCaseID)
-		gt.Value(t, captured.Title).Equal("New investigation")
-		gt.Value(t, captured.Description).Equal("Look into the alerts")
-		gt.Value(t, captured.Status).Equal(types.ActionStatusInProgress)
-		gt.Value(t, captured.AssigneeID).Equal("U001")
+		gt.Value(t, capturedWorkspaceID).Equal(testWorkspaceID)
+		gt.Value(t, capturedCaseID).Equal(testCaseID)
+		gt.Value(t, capturedTitle).Equal("New investigation")
+		gt.Value(t, capturedDescription).Equal("Look into the alerts")
+		gt.Value(t, capturedStatus).Equal(types.ActionStatusInProgress)
+		gt.Value(t, capturedAssigneeID).Equal("U001")
 		gt.Value(t, result["id"]).Equal(int64(10))
 	})
 
 	t.Run("defaults status to TODO when omitted", func(t *testing.T) {
-		var captured *model.Action
-		actionRepo := &mockActionRepo{
-			createFn: func(ctx context.Context, workspaceID string, action *model.Action) (*model.Action, error) {
-				captured = action
-				return action, nil
+		var capturedStatus types.ActionStatus
+		creator := &mockActionCreator{
+			createFn: func(_ context.Context, _ string, caseID int64, title, description string, assigneeID string, _ string, status types.ActionStatus, _ *time.Time) (*model.Action, error) {
+				capturedStatus = status
+				return &model.Action{ID: 1, CaseID: caseID, Title: title, Description: description, AssigneeID: assigneeID, Status: status}, nil
 			},
 		}
-		repo := newMockRepo(actionRepo, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		repo := newMockRepo(nil, nil)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}, ActionUC: creator})
 
 		_, err := findTool(tools, "core__create_action").Run(ctx, map[string]any{"title": "Quick task"})
 		gt.NoError(t, err)
 		// With no statusSet override, the tool falls back to
 		// model.DefaultActionStatusSet() whose initial id is BACKLOG.
-		gt.Value(t, captured.Status).Equal(types.ActionStatusBacklog)
+		gt.Value(t, capturedStatus).Equal(types.ActionStatusBacklog)
 	})
 
 	t.Run("returns error when title is missing", func(t *testing.T) {
 		repo := newMockRepo(nil, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}, ActionUC: &mockActionCreator{}})
 
 		_, err := findTool(tools, "core__create_action").Run(ctx, map[string]any{})
 		gt.Error(t, err)
@@ -424,7 +454,7 @@ func TestCreateActionTool(t *testing.T) {
 
 	t.Run("returns error for invalid status", func(t *testing.T) {
 		repo := newMockRepo(nil, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}, ActionUC: &mockActionCreator{}})
 
 		_, err := findTool(tools, "core__create_action").Run(ctx, map[string]any{
 			"title":  "Test",
@@ -435,11 +465,24 @@ func TestCreateActionTool(t *testing.T) {
 
 	t.Run("returns error when assignee_ids contains non-string element", func(t *testing.T) {
 		repo := newMockRepo(nil, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}, ActionUC: &mockActionCreator{}})
 
 		_, err := findTool(tools, "core__create_action").Run(ctx, map[string]any{
 			"title":       "Test",
 			"assignee_id": 42,
+		})
+		gt.Error(t, err)
+	})
+
+	t.Run("returns error when ActionUC dependency is nil", func(t *testing.T) {
+		// Guards against silent regression to the legacy repository-direct
+		// path: if Deps.ActionUC is forgotten by a future caller, the tool
+		// should fail loudly rather than skip Slack posting.
+		repo := newMockRepo(nil, nil)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+
+		_, err := findTool(tools, "core__create_action").Run(ctx, map[string]any{
+			"title": "Should not reach repo",
 		})
 		gt.Error(t, err)
 	})
@@ -913,12 +956,8 @@ func TestToolUpdateCalls(t *testing.T) {
 
 	t.Run("create_action posts update message with title", func(t *testing.T) {
 		ctx, msgs := newCtxWithUpdateCapture()
-		actionRepo := &mockActionRepo{
-			createFn: func(_ context.Context, _ string, a *model.Action) (*model.Action, error) {
-				return a, nil
-			},
-		}
-		tools := core.New(core.Deps{Repo: newMockRepo(actionRepo, nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		creator := &mockActionCreator{}
+		tools := core.New(core.Deps{Repo: newMockRepo(nil, nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}, ActionUC: creator})
 		_, err := findTool(tools, "core__create_action").Run(ctx, map[string]any{"title": "Deploy fix"})
 		gt.NoError(t, err)
 		gt.Array(t, *msgs).Length(1)

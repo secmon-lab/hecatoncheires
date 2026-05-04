@@ -6,10 +6,24 @@
 package core
 
 import (
+	"context"
+	"time"
+
 	"github.com/m-mizutani/gollem"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 )
+
+// ActionCreator is the narrow surface of the ActionUseCase that the
+// core__create_action tool depends on. Defined here so the tool can route
+// creation through the unified usecase entry point (which handles Slack
+// posting, ActionEvent recording, and access control) without taking a
+// dependency on the entire usecase package — which would create an import
+// cycle (pkg/usecase already imports pkg/agent/tool/core).
+type ActionCreator interface {
+	CreateAction(ctx context.Context, workspaceID string, caseID int64, title, description string, assigneeID string, slackMessageTS string, status types.ActionStatus, dueDate *time.Time) (*model.Action, error)
+}
 
 // Deps groups the dependencies the core tool factories need.
 type Deps struct {
@@ -18,6 +32,11 @@ type Deps struct {
 	CaseID      int64
 	StatusSet   *model.ActionStatusSet
 	EmbedClient interfaces.EmbedClient
+	// ActionUC routes core__create_action through the unified usecase entry
+	// point. Required when the agent flow expects newly created actions to
+	// trigger Slack notifications, ActionEvent records, and any future
+	// CreateAction-side effects.
+	ActionUC ActionCreator
 }
 
 // New builds core tools for the agent mention use case: action management plus
@@ -32,7 +51,7 @@ func New(deps Deps) []gollem.Tool {
 	return []gollem.Tool{
 		&listActionsTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, caseID: deps.CaseID},
 		&getActionTool{repo: deps.Repo, workspaceID: deps.WorkspaceID},
-		&createActionTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, caseID: deps.CaseID, statusSet: statusSet},
+		&createActionTool{actionUC: deps.ActionUC, workspaceID: deps.WorkspaceID, caseID: deps.CaseID, statusSet: statusSet},
 		&updateActionTool{repo: deps.Repo, workspaceID: deps.WorkspaceID},
 		&updateActionStatusTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, statusSet: statusSet},
 		&setActionAssigneeTool{repo: deps.Repo, workspaceID: deps.WorkspaceID},
