@@ -169,6 +169,7 @@ func TestSearchMessages(t *testing.T) {
 				"ok": false,
 				"error": "missing_scope",
 				"needed": "search:read",
+				"provided": "channels:read,users:read",
 				"response_metadata": {"messages": ["required scope: search:read"], "warnings": ["superfluous_charset"]}
 			}`))
 		})
@@ -185,6 +186,8 @@ func TestSearchMessages(t *testing.T) {
 		gt.Value(t, values["slack_error"]).Equal("missing_scope")
 		gt.Value(t, values["query"]).Equal("incident")
 		gt.Value(t, values["count"]).Equal(7)
+		gt.Value(t, values["slack_needed_scope"]).Equal("search:read")
+		gt.Value(t, values["slack_provided_scope"]).Equal("channels:read,users:read")
 
 		msgs, ok := values["slack_response_messages"].([]string)
 		gt.Bool(t, ok).True().Required()
@@ -195,5 +198,49 @@ func TestSearchMessages(t *testing.T) {
 		gt.Bool(t, ok).True().Required()
 		gt.Array(t, warns).Length(1).Required()
 		gt.String(t, warns[0]).Equal("superfluous_charset")
+	})
+
+	t.Run("missing_scope without provided populates only needed", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/search.messages", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok": false, "error": "missing_scope", "needed": "search:read"}`))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		svc := slacktool.NewSearchClientWithAPIURLForTest("xoxp-test", srv.URL+"/")
+		_, err := svc.SearchMessages(context.Background(), "q", slacktool.SearchOptions{})
+		gt.Value(t, err).NotNil()
+
+		var ge *goerr.Error
+		gt.Bool(t, errors.As(err, &ge)).True().Required()
+		values := ge.Values()
+		gt.Value(t, values["slack_needed_scope"]).Equal("search:read")
+		_, hasProvided := values["slack_provided_scope"]
+		gt.Bool(t, hasProvided).False()
+	})
+
+	t.Run("non scope error does not attach needed/provided", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/search.messages", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok": false, "error": "ratelimited"}`))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		svc := slacktool.NewSearchClientWithAPIURLForTest("xoxp-test", srv.URL+"/")
+		_, err := svc.SearchMessages(context.Background(), "q", slacktool.SearchOptions{})
+		gt.Value(t, err).NotNil()
+
+		var ge *goerr.Error
+		gt.Bool(t, errors.As(err, &ge)).True().Required()
+		values := ge.Values()
+		gt.Value(t, values["slack_error"]).Equal("ratelimited")
+		_, hasNeeded := values["slack_needed_scope"]
+		gt.Bool(t, hasNeeded).False()
+		_, hasProvided := values["slack_provided_scope"]
+		gt.Bool(t, hasProvided).False()
 	})
 }
