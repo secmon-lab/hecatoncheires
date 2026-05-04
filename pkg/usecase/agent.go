@@ -611,9 +611,19 @@ func (uc *AgentUseCase) newTraceMessage(channelID, threadTS string) *traceMessag
 	}
 }
 
+// maxTraceBlocks caps the number of context blocks emitted per trace message.
+// Slack rejects messages with more than 50 blocks (`invalid_blocks`), so when a
+// long-running agent produces more lines we keep only the most recent ones.
+const maxTraceBlocks = 50
+
 // buildTraceContextBlocks renders one context block per trace line so progress
-// reads as a vertical list instead of a single ever-growing one-liner.
+// reads as a vertical list instead of a single ever-growing one-liner. When the
+// line count exceeds Slack's 50-block message limit, only the most recent lines
+// are rendered.
 func buildTraceContextBlocks(lines []string) []goslack.Block {
+	if len(lines) > maxTraceBlocks {
+		lines = lines[len(lines)-maxTraceBlocks:]
+	}
 	blocks := make([]goslack.Block, 0, len(lines))
 	for _, line := range lines {
 		blocks = append(blocks, goslack.NewContextBlock("",

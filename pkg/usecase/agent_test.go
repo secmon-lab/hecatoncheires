@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -534,6 +535,28 @@ func TestBuildTraceContextBlocks(t *testing.T) {
 			gt.Value(t, text.Type).Equal(goslack.MarkdownType)
 			gt.String(t, text.Text).Equal(lines[i])
 		}
+	})
+
+	t.Run("caps blocks at Slack's 50-block per-message limit", func(t *testing.T) {
+		lines := make([]string, 75)
+		for i := range lines {
+			lines[i] = fmt.Sprintf("line-%02d", i)
+		}
+		blocks := usecase.BuildTraceContextBlocksForTest(lines)
+		gt.Array(t, blocks).Length(50).Required()
+
+		// The most recent lines must survive (lines[25] .. lines[74]).
+		first, ok := blocks[0].(*goslack.ContextBlock)
+		gt.Bool(t, ok).True().Required()
+		firstText, ok := first.ContextElements.Elements[0].(*goslack.TextBlockObject)
+		gt.Bool(t, ok).True().Required()
+		gt.String(t, firstText.Text).Equal("line-25")
+
+		last, ok := blocks[49].(*goslack.ContextBlock)
+		gt.Bool(t, ok).True().Required()
+		lastText, ok := last.ContextElements.Elements[0].(*goslack.TextBlockObject)
+		gt.Bool(t, ok).True().Required()
+		gt.String(t, lastText.Text).Equal("line-74")
 	})
 }
 
