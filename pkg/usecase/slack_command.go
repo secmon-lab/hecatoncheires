@@ -1251,23 +1251,11 @@ func (uc *SlackUseCases) HandleActionCreationSubmit(ctx context.Context, actionU
 		return goerr.Wrap(err, "failed to parse action create private_metadata")
 	}
 
-	created, err := actionUC.CreateAction(ctx, meta.WorkspaceID, meta.CaseID, title, description, assigneeID, "", status, dueDate)
-	if err != nil {
+	if _, err := actionUC.CreateAction(ctx, meta.WorkspaceID, meta.CaseID, title, description, assigneeID, "", status, dueDate); err != nil {
 		return goerr.Wrap(err, "failed to create action via slash command",
 			goerr.V("workspace_id", meta.WorkspaceID),
 			goerr.V("case_id", meta.CaseID),
 			goerr.V("user_id", callback.User.ID))
-	}
-
-	// Post a confirmation message into the case channel, mirroring the
-	// HandleCaseEditSubmit / HandleCaseCreationSubmit pattern. CreateAction
-	// already posts the action's own Block Kit message; this is a short
-	// human-readable confirmation tied to the slash command.
-	if meta.ChannelID != "" && uc.slackService != nil {
-		confirmText := i18n.T(ctx, i18n.MsgActionCreated, created.ID, created.Title)
-		if _, err := uc.slackService.PostMessage(ctx, meta.ChannelID, nil, confirmText); err != nil {
-			errutil.Handle(ctx, err, "failed to post action creation confirmation message")
-		}
 	}
 
 	return nil

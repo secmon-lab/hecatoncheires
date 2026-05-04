@@ -130,7 +130,6 @@ const (
 	MsgFieldActionAssignee
 	MsgFieldActionStatusLabel
 	MsgFieldActionDueDate
-	MsgActionCreated // "Action #%d *%s* has been created."
 
 	// Errors related to commands
 	MsgErrUnknownSubcommand // "Unknown subcommand: %s. Available: update, action."

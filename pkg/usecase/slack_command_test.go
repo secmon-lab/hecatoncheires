@@ -3,7 +3,6 @@ package usecase_test
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/m-mizutani/gt"
@@ -1414,7 +1413,7 @@ func TestSlackUseCases_HandleCommandChoiceSubmit(t *testing.T) {
 func TestSlackUseCases_HandleActionCreationSubmit(t *testing.T) {
 	i18n.Init(i18n.LangEN)
 
-	t.Run("creates action with all fields and posts confirmation", func(t *testing.T) {
+	t.Run("creates action with all fields", func(t *testing.T) {
 		repo := memory.New()
 		registry := model.NewWorkspaceRegistry()
 		registry.Register(&model.WorkspaceEntry{
@@ -1484,16 +1483,12 @@ func TestSlackUseCases_HandleActionCreationSubmit(t *testing.T) {
 		gt.Value(t, actions[0].Status).Equal(types.ActionStatus("TODO"))
 		gt.Value(t, actions[0].DueDate).NotNil()
 
-		// CreateAction posts the action's own Block Kit message; the slash
-		// handler also posts a short confirmation. We expect at least the
-		// confirmation tied to the case channel.
-		foundConfirm := false
-		for _, msg := range slackMock.postedMessages {
-			if msg.ChannelID == "C-CASE" && containsAll(msg.Text, "Investigate alert") {
-				foundConfirm = true
-			}
-		}
-		gt.Bool(t, foundConfirm).True()
+		// CreateAction posts the action's own Block Kit message into the
+		// case channel; the slash handler does not add a separate
+		// confirmation post.
+		gt.Array(t, slackMock.postedMessages).Length(1).Required()
+		gt.Value(t, slackMock.postedMessages[0].ChannelID).Equal("C-CASE")
+		gt.String(t, slackMock.postedMessages[0].Text).Contains("Investigate alert")
 	})
 
 	t.Run("returns error when title is empty", func(t *testing.T) {
@@ -1549,15 +1544,4 @@ func TestSlackUseCases_HandleActionCreationSubmit(t *testing.T) {
 		err := slackUC.HandleActionCreationSubmit(context.Background(), nil, callback)
 		gt.Value(t, err).NotNil()
 	})
-}
-
-// containsAll is a tiny helper for asserting multiple substrings in a single
-// message; keeps the assertion list short while still being explicit.
-func containsAll(s string, subs ...string) bool {
-	for _, sub := range subs {
-		if !strings.Contains(s, sub) {
-			return false
-		}
-	}
-	return true
 }
