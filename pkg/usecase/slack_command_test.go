@@ -11,6 +11,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
+	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	goslack "github.com/slack-go/slack"
 )
@@ -1407,6 +1408,47 @@ func TestSlackUseCases_HandleCommandChoiceSubmit(t *testing.T) {
 
 		_, err = uc.HandleCommandChoiceSubmit(context.Background(), callback)
 		gt.Error(t, err).Is(usecase.ErrAccessDenied)
+	})
+
+	t.Run("renders next modal in user's Slack locale", func(t *testing.T) {
+		repo, registry, caseID := setup(t)
+		slackMock := &commandTestSlackService{
+			mockSlackService: mockSlackService{
+				getUserInfoFn: func(_ context.Context, userID string) (*slack.User, error) {
+					return &slack.User{ID: userID, Locale: "ja-JP"}, nil
+				},
+			},
+		}
+		uc := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
+
+		meta, _ := json.Marshal(map[string]any{
+			"workspace_id": "risk",
+			"channel_id":   "C-CASE",
+			"case_id":      caseID,
+		})
+		callback := &goslack.InteractionCallback{
+			User: goslack.User{ID: "U001"},
+			View: goslack.View{
+				PrivateMetadata: string(meta),
+				State: &goslack.ViewState{
+					Values: map[string]map[string]goslack.BlockAction{
+						usecase.SlackBlockIDCommandChoice: {
+							usecase.SlackActionIDCommandChoice: {
+								SelectedOption: goslack.OptionBlockObject{Value: "create_action"},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		view, err := uc.HandleCommandChoiceSubmit(context.Background(), callback)
+		gt.NoError(t, err).Required()
+		gt.Value(t, view).NotNil().Required()
+
+		jaCtx := i18n.ContextWithLang(context.Background(), i18n.LangJA)
+		gt.Value(t, view.Title.Text).Equal(i18n.T(jaCtx, i18n.MsgModalCreateActionTitle))
+		gt.Value(t, view.Title.Text).NotEqual(i18n.T(context.Background(), i18n.MsgModalCreateActionTitle))
 	})
 }
 
