@@ -56,6 +56,15 @@ func NewLLMForTest(provider, model, openaiAPIKey, claudeAPIKey, geminiProjectID,
 	}
 }
 
+// NewEmbeddingForTest creates an Embedding config for testing purposes.
+func NewEmbeddingForTest(geminiProjectID, geminiLocation, model string) *Embedding {
+	return &Embedding{
+		geminiProjectID: geminiProjectID,
+		geminiLocation:  geminiLocation,
+		model:           model,
+	}
+}
+
 // NewSentryForTest creates a Sentry config for testing.
 func NewSentryForTest(dsn, environment, release string) *Sentry {
 	return &Sentry{

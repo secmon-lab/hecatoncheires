@@ -41,6 +41,7 @@ type AgentUseCase struct {
 	slackSearch  slacktool.SearchService
 	notionTool   notiontool.Client
 	llmClient    gollem.LLMClient
+	embedClient  interfaces.EmbedClient
 	historyRepo  gollem.HistoryRepository
 	traceRepo    trace.Repository
 }
@@ -53,7 +54,7 @@ type AgentUseCase struct {
 // historyRepo and traceRepo are required: the agent session flow persists
 // gollem.History across mentions and writes a trace for each Execute. Pass
 // agentarchive.NewMemoryHistoryRepository / NewMemoryTraceRepository in tests.
-func NewAgentUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackSearch slacktool.SearchService, notionTool notiontool.Client, llmClient gollem.LLMClient, historyRepo gollem.HistoryRepository, traceRepo trace.Repository) *AgentUseCase {
+func NewAgentUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackSearch slacktool.SearchService, notionTool notiontool.Client, llmClient gollem.LLMClient, embedClient interfaces.EmbedClient, historyRepo gollem.HistoryRepository, traceRepo trace.Repository) *AgentUseCase {
 	return &AgentUseCase{
 		repo:         repo,
 		registry:     registry,
@@ -61,6 +62,7 @@ func NewAgentUseCase(repo interfaces.Repository, registry *model.WorkspaceRegist
 		slackSearch:  slackSearch,
 		notionTool:   notionTool,
 		llmClient:    llmClient,
+		embedClient:  embedClient,
 		historyRepo:  historyRepo,
 		traceRepo:    traceRepo,
 	}
@@ -168,7 +170,7 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 		WorkspaceID: entry.Workspace.ID,
 		CaseID:      foundCase.ID,
 		StatusSet:   entry.ActionStatusSet,
-		LLMClient:   uc.llmClient,
+		EmbedClient: uc.embedClient,
 	})
 
 	// Slack and Notion tools are independent packages. Each gates its own tools

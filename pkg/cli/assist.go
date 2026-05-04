@@ -19,6 +19,7 @@ func cmdAssist() *cli.Command {
 	var appCfg config.AppConfig
 	var repoCfg config.Repository
 	var llmCfg config.LLM
+	var embCfg config.Embedding
 
 	flags := []cli.Flag{
 		&cli.StringFlag{
@@ -53,6 +54,7 @@ func cmdAssist() *cli.Command {
 	flags = append(flags, appCfg.Flags()...)
 	flags = append(flags, repoCfg.Flags()...)
 	flags = append(flags, llmCfg.Flags()...)
+	flags = append(flags, embCfg.Flags()...)
 
 	return &cli.Command{
 		Name:    "assist",
@@ -87,6 +89,16 @@ func cmdAssist() *cli.Command {
 			}
 			logging.Default().Info("LLM client enabled", logAttrsToArgs(llmCfg.LogAttrs())...)
 
+			// Initialize Embedding client (required)
+			if !embCfg.IsEnabled() {
+				return goerr.New("--embedding-gemini-project-id is required for assist")
+			}
+			embedClient, err := embCfg.NewClient(ctx)
+			if err != nil {
+				return goerr.Wrap(err, "failed to initialize embedding client")
+			}
+			logging.Default().Info("Embedding client enabled", logAttrsToArgs(embCfg.LogAttrs())...)
+
 			// Initialize Slack service (required)
 			if slackBotToken == "" {
 				return goerr.New("--slack-bot-token is required for assist")
@@ -98,6 +110,7 @@ func cmdAssist() *cli.Command {
 
 			uc := usecase.New(repo, registry,
 				usecase.WithLLMClient(llmClient),
+				usecase.WithEmbedClient(embedClient),
 				usecase.WithSlackService(slackSvc),
 			)
 

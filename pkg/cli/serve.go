@@ -171,6 +171,7 @@ func cmdServe() *cli.Command {
 	var repoCfg config.Repository
 	var slackCfg config.Slack
 	var llmCfg config.LLM
+	var embCfg config.Embedding
 	var githubCfg config.GitHub
 	var storageCfg config.Storage
 	var sentryCfg config.Sentry
@@ -223,6 +224,7 @@ func cmdServe() *cli.Command {
 	flags = append(flags, repoCfg.Flags()...)
 	flags = append(flags, slackCfg.Flags()...)
 	flags = append(flags, llmCfg.Flags()...)
+	flags = append(flags, embCfg.Flags()...)
 	flags = append(flags, githubCfg.Flags()...)
 	flags = append(flags, storageCfg.Flags()...)
 	flags = append(flags, sentryCfg.Flags()...)
@@ -376,6 +378,22 @@ func cmdServe() *cli.Command {
 			} else {
 				ucOpts = append(ucOpts, usecase.WithLLMClient(llmClient))
 				logging.Default().Info("LLM client enabled", logAttrsToArgs(llmCfg.LogAttrs())...)
+
+				// Embedding is mandatory whenever LLM is wired: agent /
+				// assist / mention-draft all rely on memory / knowledge
+				// similarity search, which uses the dedicated embedder.
+				// It is configured independently from --llm-provider so
+				// chat completion and embedding can target different
+				// providers (embedding is Gemini-only).
+				if !embCfg.IsEnabled() {
+					return goerr.New("--embedding-gemini-project-id is required when --llm-provider is set")
+				}
+				embedClient, err := embCfg.NewClient(ctx)
+				if err != nil {
+					return goerr.Wrap(err, "failed to initialize embedding client")
+				}
+				ucOpts = append(ucOpts, usecase.WithEmbedClient(embedClient))
+				logging.Default().Info("Embedding client enabled", logAttrsToArgs(embCfg.LogAttrs())...)
 			}
 
 			// Initialize GitHub service if configured

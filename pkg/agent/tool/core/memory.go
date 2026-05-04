@@ -16,7 +16,7 @@ type createMemoryTool struct {
 	repo        interfaces.Repository
 	workspaceID string
 	caseID      int64
-	llmClient   gollem.LLMClient
+	embedClient interfaces.EmbedClient
 }
 
 func (t *createMemoryTool) Spec() gollem.ToolSpec {
@@ -41,7 +41,7 @@ func (t *createMemoryTool) Run(ctx context.Context, args map[string]any) (map[st
 
 	tool.Update(ctx, "Creating memory...")
 
-	embedding, err := generateMemoryEmbedding(ctx, t.llmClient, claim)
+	embedding, err := generateMemoryEmbedding(ctx, t.embedClient, claim)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +109,7 @@ type searchMemoryTool struct {
 	repo        interfaces.Repository
 	workspaceID string
 	caseID      int64
-	llmClient   gollem.LLMClient
+	embedClient interfaces.EmbedClient
 }
 
 func (t *searchMemoryTool) Spec() gollem.ToolSpec {
@@ -144,7 +144,7 @@ func (t *searchMemoryTool) Run(ctx context.Context, args map[string]any) (map[st
 		limit = int(v)
 	}
 
-	embedding, err := generateMemoryEmbedding(ctx, t.llmClient, query)
+	embedding, err := generateMemoryEmbedding(ctx, t.embedClient, query)
 	if err != nil {
 		return nil, err
 	}
@@ -206,8 +206,8 @@ func (t *listMemoriesTool) Run(ctx context.Context, args map[string]any) (map[st
 }
 
 // generateMemoryEmbedding generates a float32 embedding from claim text
-func generateMemoryEmbedding(ctx context.Context, llmClient gollem.LLMClient, text string) ([]float32, error) {
-	embeddings, err := llmClient.GenerateEmbedding(ctx, model.EmbeddingDimension, []string{text})
+func generateMemoryEmbedding(ctx context.Context, embedClient interfaces.EmbedClient, text string) ([]float32, error) {
+	embeddings, err := embedClient.GenerateEmbedding(ctx, model.EmbeddingDimension, []string{text})
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to generate embedding for memory")
 	}

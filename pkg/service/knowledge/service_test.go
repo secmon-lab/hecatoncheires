@@ -6,11 +6,24 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/llm/gemini"
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/knowledge"
 )
+
+// stubLLMClient is a no-op gollem.LLMClient used to prove that knowledge.New
+// validates dependencies independently of the chat client.
+type stubLLMClient struct{}
+
+func (stubLLMClient) NewSession(context.Context, ...gollem.SessionOption) (gollem.Session, error) {
+	return nil, nil
+}
+
+func (stubLLMClient) GenerateEmbedding(context.Context, int, []string) ([][]float64, error) {
+	return nil, nil
+}
 
 func TestExtract_WithRealGemini(t *testing.T) {
 	projectID := os.Getenv("TEST_GEMINI_PROJECT")
@@ -29,8 +42,9 @@ func TestExtract_WithRealGemini(t *testing.T) {
 	llmClient, err := gemini.New(ctx, projectID, location)
 	gt.NoError(t, err).Required()
 
-	// Create knowledge service
-	svc, err := knowledge.New(llmClient)
+	// Create knowledge service. The same Gemini client serves both chat and
+	// embedding for this integration test.
+	svc, err := knowledge.New(llmClient, llmClient)
 	gt.NoError(t, err).Required()
 
 	t.Run("Extract returns related knowledge", func(t *testing.T) {
@@ -152,8 +166,15 @@ Please update to v2.3.6 or later immediately.
 }
 
 func TestNew_RequiresLLMClient(t *testing.T) {
-	_, err := knowledge.New(nil)
+	_, err := knowledge.New(nil, nil)
 	gt.Value(t, err).NotNil()
+	gt.String(t, err.Error()).Contains("LLM client")
+}
+
+func TestNew_RequiresEmbedClient(t *testing.T) {
+	_, err := knowledge.New(stubLLMClient{}, nil)
+	gt.Value(t, err).NotNil()
+	gt.String(t, err.Error()).Contains("Embed client")
 }
 
 func TestBuildSystemPrompt(t *testing.T) {

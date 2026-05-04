@@ -42,11 +42,12 @@ type AssistUseCase struct {
 	slackSearch  slacktool.SearchService
 	notionTool   notiontool.Client
 	llmClient    gollem.LLMClient
+	embedClient  interfaces.EmbedClient
 }
 
 // NewAssistUseCase creates a new AssistUseCase.
 // slackSearch and notionTool are optional; pass nil to omit the corresponding tools.
-func NewAssistUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackSearch slacktool.SearchService, notionTool notiontool.Client, llmClient gollem.LLMClient) *AssistUseCase {
+func NewAssistUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackSearch slacktool.SearchService, notionTool notiontool.Client, llmClient gollem.LLMClient, embedClient interfaces.EmbedClient) *AssistUseCase {
 	return &AssistUseCase{
 		repo:         repo,
 		registry:     registry,
@@ -54,6 +55,7 @@ func NewAssistUseCase(repo interfaces.Repository, registry *model.WorkspaceRegis
 		slackSearch:  slackSearch,
 		notionTool:   notionTool,
 		llmClient:    llmClient,
+		embedClient:  embedClient,
 	}
 }
 
@@ -144,7 +146,7 @@ func (uc *AssistUseCase) processCase(ctx context.Context, entry *model.Workspace
 		WorkspaceID: wsID,
 		CaseID:      c.ID,
 		StatusSet:   entry.ActionStatusSet,
-		LLMClient:   uc.llmClient,
+		EmbedClient: uc.embedClient,
 	})
 	slackTools := slacktool.NewForAssist(slacktool.Deps{
 		Bot:       uc.slackService,
