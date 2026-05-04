@@ -34,7 +34,7 @@ func NewCloudStorageTraceRepository(client *storage.Client, bucket, prefix strin
 const SessionIDLabel = "session_id"
 
 func traceObject(prefix, sessionID, traceID string) string {
-	return objectPath(prefix, sessionID, "traces", traceID+".json")
+	return traceObjectPath(prefix, sessionID, traceID)
 }
 
 // Save writes the trace as JSON under the bucket. The session ID is read from

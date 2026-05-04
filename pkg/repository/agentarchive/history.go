@@ -30,7 +30,7 @@ func NewCloudStorageHistoryRepository(client *storage.Client, bucket, prefix str
 }
 
 func (r *CloudStorageHistoryRepository) historyObject(sessionID string) string {
-	return objectPath(r.prefix, sessionID, "history.json")
+	return historyObjectPath(r.prefix, sessionID)
 }
 
 // Load returns the persisted history for the given sessionID. It returns
