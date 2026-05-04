@@ -43,11 +43,16 @@ type AssistUseCase struct {
 	notionTool   notiontool.Client
 	llmClient    gollem.LLMClient
 	embedClient  interfaces.EmbedClient
+	// actionUC routes core__create_action through the unified usecase entry
+	// point so assist-driven creates trigger the same Slack post and event
+	// records as GraphQL/Slack-modal creates.
+	actionUC *ActionUseCase
 }
 
 // NewAssistUseCase creates a new AssistUseCase.
 // slackSearch and notionTool are optional; pass nil to omit the corresponding tools.
-func NewAssistUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackSearch slacktool.SearchService, notionTool notiontool.Client, llmClient gollem.LLMClient, embedClient interfaces.EmbedClient) *AssistUseCase {
+// actionUC is required: the core__create_action tool calls through it.
+func NewAssistUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackSearch slacktool.SearchService, notionTool notiontool.Client, llmClient gollem.LLMClient, embedClient interfaces.EmbedClient, actionUC *ActionUseCase) *AssistUseCase {
 	return &AssistUseCase{
 		repo:         repo,
 		registry:     registry,
@@ -56,6 +61,7 @@ func NewAssistUseCase(repo interfaces.Repository, registry *model.WorkspaceRegis
 		notionTool:   notionTool,
 		llmClient:    llmClient,
 		embedClient:  embedClient,
+		actionUC:     actionUC,
 	}
 }
 
@@ -147,6 +153,7 @@ func (uc *AssistUseCase) processCase(ctx context.Context, entry *model.Workspace
 		CaseID:      c.ID,
 		StatusSet:   entry.ActionStatusSet,
 		EmbedClient: uc.embedClient,
+		ActionUC:    NewActionToolAdapter(uc.actionUC),
 	})
 	slackTools := slacktool.NewForAssist(slacktool.Deps{
 		Bot:       uc.slackService,

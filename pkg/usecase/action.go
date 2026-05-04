@@ -179,24 +179,105 @@ func (uc *ActionUseCase) CreateAction(ctx context.Context, workspaceID string, c
 	}
 
 	if uc.slackService != nil && caseModel.SlackChannelID != "" {
-		actionURL := uc.actionWebURL(workspaceID, caseID, created.ID)
-		blocks := uc.buildActionMessageBlocks(ctx, workspaceID, created, actionURL)
-		fallbackText := i18n.T(ctx, i18n.MsgActionNew, created.Title)
-		ts, postErr := uc.slackService.PostMessage(ctx, caseModel.SlackChannelID, blocks, fallbackText)
+		posted, postErr := uc.postSlackMessageForAction(ctx, workspaceID, created, caseModel)
 		if postErr != nil {
 			errutil.Handle(ctx, postErr, "failed to post Slack notification for action")
-		} else if ts != "" {
-			created.SlackMessageTS = ts
-			updated, updateErr := uc.repo.Action().Update(ctx, workspaceID, created)
-			if updateErr != nil {
-				errutil.Handle(ctx, updateErr, "failed to update action with Slack message timestamp")
-			} else {
-				created = updated
-			}
+		} else {
+			created = posted
 		}
 	}
 
 	return created, nil
+}
+
+// PostSlackMessageToAction posts the Action's primary Slack message and
+// persists the resulting timestamp on the Action. It exists for two callers
+// that operate on actions whose initial CreateAction post never reached
+// Slack:
+//   - The WebUI "Post to Slack" button on actions whose SlackMessageTS is
+//     empty (e.g. the action was created before the tool path was unified
+//     with the usecase).
+//   - The diagnosis fix-unsent-action job, which sweeps such actions in
+//     bulk.
+//
+// Unlike CreateAction's best-effort tail, this method is strict: a missing
+// Slack channel, an already-posted action, or a Slack/PostMessage error
+// surface as typed errors so the caller can react. Callers that want
+// CreateAction-style "log and move on" behaviour should call CreateAction
+// instead.
+func (uc *ActionUseCase) PostSlackMessageToAction(ctx context.Context, workspaceID string, actionID int64) (*model.Action, error) {
+	if uc.slackService == nil {
+		return nil, goerr.New("slack service is not configured", goerr.V(ActionIDKey, actionID))
+	}
+
+	action, err := uc.repo.Action().Get(ctx, workspaceID, actionID)
+	if err != nil {
+		return nil, goerr.Wrap(ErrActionNotFound, "action not found", goerr.V(ActionIDKey, actionID))
+	}
+
+	parentCase, err := uc.repo.Case().Get(ctx, workspaceID, action.CaseID)
+	if err != nil {
+		return nil, goerr.Wrap(ErrCaseNotFound, "parent case not found",
+			goerr.V(ActionIDKey, actionID),
+			goerr.V(CaseIDKey, action.CaseID))
+	}
+
+	if token, tokenErr := auth.TokenFromContext(ctx); tokenErr == nil && !model.IsCaseAccessible(parentCase, token.Sub) {
+		return nil, goerr.Wrap(ErrAccessDenied, "cannot post Slack message for action in private case",
+			goerr.V(ActionIDKey, actionID),
+			goerr.V("user_id", token.Sub))
+	}
+
+	if action.SlackMessageTS != "" {
+		return nil, goerr.Wrap(ErrSlackMessageAlreadyPosted, "action already has a Slack message",
+			goerr.V(ActionIDKey, actionID),
+			goerr.V("slack_message_ts", action.SlackMessageTS))
+	}
+	if parentCase.SlackChannelID == "" {
+		return nil, goerr.Wrap(ErrCaseHasNoSlackChannel, "parent case has no Slack channel",
+			goerr.V(ActionIDKey, actionID),
+			goerr.V(CaseIDKey, action.CaseID))
+	}
+
+	updated, err := uc.postSlackMessageForAction(ctx, workspaceID, action, parentCase)
+	if err != nil {
+		return nil, err
+	}
+	return updated, nil
+}
+
+// postSlackMessageForAction posts the Action's primary Slack message and
+// persists the resulting message timestamp on the Action. It is the single
+// shared implementation used by:
+//   - CreateAction (initial post during action creation; best-effort)
+//   - PostSlackMessageToAction (user-driven re-post for actions that
+//     missed the initial post; strict — error propagated to caller)
+//   - diagnosis.UseCase.FixUnsentActions (batch repair; per-action error
+//     bucketed into the report)
+//
+// Preconditions: uc.slackService != nil and caseModel.SlackChannelID != "".
+// Callers MUST verify these and decide their own policy (skip / error /
+// degrade) for the missing-channel case.
+func (uc *ActionUseCase) postSlackMessageForAction(ctx context.Context, workspaceID string, action *model.Action, caseModel *model.Case) (*model.Action, error) {
+	actionURL := uc.actionWebURL(workspaceID, action.CaseID, action.ID)
+	blocks := uc.buildActionMessageBlocks(ctx, workspaceID, action, actionURL)
+	fallbackText := i18n.T(ctx, i18n.MsgActionNew, action.Title)
+	ts, postErr := uc.slackService.PostMessage(ctx, caseModel.SlackChannelID, blocks, fallbackText)
+	if postErr != nil {
+		return action, goerr.Wrap(postErr, "failed to post Slack message for action",
+			goerr.V(ActionIDKey, action.ID),
+			goerr.V(CaseIDKey, action.CaseID))
+	}
+	if ts == "" {
+		return action, nil
+	}
+	action.SlackMessageTS = ts
+	updated, updateErr := uc.repo.Action().Update(ctx, workspaceID, action)
+	if updateErr != nil {
+		return action, goerr.Wrap(updateErr, "failed to persist Slack message timestamp",
+			goerr.V(ActionIDKey, action.ID))
+	}
+	return updated, nil
 }
 
 // UpdateAction is the single entry point for mutating an Action. All transports

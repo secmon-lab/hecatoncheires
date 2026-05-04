@@ -44,6 +44,11 @@ type AgentUseCase struct {
 	embedClient  interfaces.EmbedClient
 	historyRepo  gollem.HistoryRepository
 	traceRepo    trace.Repository
+	// actionUC is the unified entry point for Action mutations. The
+	// core__create_action tool calls through this to keep tool-driven
+	// creates aligned with GraphQL/Slack-modal creates (Slack post,
+	// ActionEvent records, etc.).
+	actionUC *ActionUseCase
 }
 
 // NewAgentUseCase creates a new AgentUseCase instance.
@@ -54,7 +59,10 @@ type AgentUseCase struct {
 // historyRepo and traceRepo are required: the agent session flow persists
 // gollem.History across mentions and writes a trace for each Execute. Pass
 // agentarchive.NewMemoryHistoryRepository / NewMemoryTraceRepository in tests.
-func NewAgentUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackSearch slacktool.SearchService, notionTool notiontool.Client, llmClient gollem.LLMClient, embedClient interfaces.EmbedClient, historyRepo gollem.HistoryRepository, traceRepo trace.Repository) *AgentUseCase {
+//
+// actionUC is required: the core__create_action tool routes through it so all
+// Action create paths share the same usecase implementation.
+func NewAgentUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackSearch slacktool.SearchService, notionTool notiontool.Client, llmClient gollem.LLMClient, embedClient interfaces.EmbedClient, historyRepo gollem.HistoryRepository, traceRepo trace.Repository, actionUC *ActionUseCase) *AgentUseCase {
 	return &AgentUseCase{
 		repo:         repo,
 		registry:     registry,
@@ -65,6 +73,7 @@ func NewAgentUseCase(repo interfaces.Repository, registry *model.WorkspaceRegist
 		embedClient:  embedClient,
 		historyRepo:  historyRepo,
 		traceRepo:    traceRepo,
+		actionUC:     actionUC,
 	}
 }
 
@@ -183,6 +192,7 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 		CaseID:      foundCase.ID,
 		StatusSet:   entry.ActionStatusSet,
 		EmbedClient: uc.embedClient,
+		ActionUC:    NewActionToolAdapter(uc.actionUC),
 	})
 
 	// Slack and Notion tools are independent packages. Each gates its own tools

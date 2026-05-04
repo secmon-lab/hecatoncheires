@@ -1,6 +1,6 @@
 import { useMemo, useState, type CSSProperties } from 'react'
-import { useQuery } from '@apollo/client'
-import { GET_ACTION_MESSAGES, GET_ACTION_EVENTS } from '../graphql/action'
+import { useQuery, useMutation } from '@apollo/client'
+import { GET_ACTION_MESSAGES, GET_ACTION_EVENTS, POST_ACTION_SLACK_MESSAGE, GET_ACTION } from '../graphql/action'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import { useTranslation, type MsgKey } from '../i18n'
 import { useActionStatuses } from '../hooks/useActionStatuses'
@@ -208,14 +208,35 @@ const styles: Record<string, CSSProperties> = {
   arrow: { color: 'var(--text-muted)', fontSize: 12 },
   empty: { color: 'var(--text-muted)', fontSize: 12, padding: '8px 0' },
   loadMoreBar: { display: 'flex', gap: 8, alignSelf: 'flex-start' },
-  slackLinkRow: { display: 'flex', justifyContent: 'flex-end', paddingTop: 4 },
+  slackLinkRow: { display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, paddingTop: 4 },
   slackLink: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--accent)', textDecoration: 'none', padding: '4px 10px', borderRadius: 6, border: '1px solid color-mix(in oklch, var(--accent) 25%, var(--line))', background: 'color-mix(in oklch, var(--accent) 6%, transparent)' },
+  slackPostButton: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--accent)', cursor: 'pointer', padding: '4px 10px', borderRadius: 6, border: '1px solid color-mix(in oklch, var(--accent) 25%, var(--line))', background: 'color-mix(in oklch, var(--accent) 6%, transparent)' },
+  slackPostError: { fontSize: 12, color: 'var(--color-error)' },
   inline: { display: 'inline-flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' },
 }
 
 export default function ActionActivity({ workspaceId, actionId, pageSize = 20, slackMessageTS, slackChannelID, slackChannelURL }: ActionActivityProps) {
   const slackPermalink = buildSlackPermalink(slackChannelURL, slackChannelID, slackMessageTS)
   const { t } = useTranslation()
+
+  // Self-repair entry point for actions whose initial Slack post never
+  // happened (e.g. tool-created actions before the create paths were
+  // unified). The button is shown in place of the "reply in Slack thread"
+  // link when slackMessageTS is empty; clicking it triggers the unified
+  // post path on the backend, which writes the timestamp back so the
+  // permalink computation here will start returning a real URL on the
+  // next render via the GET_ACTION refetch.
+  const [postActionSlackMessage, postSlackState] = useMutation(POST_ACTION_SLACK_MESSAGE, {
+    refetchQueries: [{ query: GET_ACTION, variables: { workspaceId, id: actionId } }],
+  })
+  const handlePostToSlack = () => {
+    void postActionSlackMessage({ variables: { workspaceId, id: actionId } }).catch(() => {
+      // Apollo surfaces the error through `postSlackState.error`, which
+      // the inline error message below renders. Swallow the rejection
+      // here so it does not bubble up as an unhandled promise warning.
+    })
+  }
+
   const actionStatuses = useActionStatuses(workspaceId)
   const statusLabel = (id: string) => actionStatuses.label(id)
   const statusColor = (id: string) => {
@@ -362,7 +383,7 @@ export default function ActionActivity({ workspaceId, actionId, pageSize = 20, s
         </div>
       ) : null}
 
-      {slackPermalink && (
+      {slackPermalink ? (
         <div style={styles.slackLinkRow}>
           <a
             href={slackPermalink}
@@ -374,6 +395,28 @@ export default function ActionActivity({ workspaceId, actionId, pageSize = 20, s
             <span aria-hidden>💬</span>
             <span>{t('activityOpenInSlack')}</span>
           </a>
+        </div>
+      ) : (
+        <div style={styles.slackLinkRow}>
+          <button
+            type="button"
+            onClick={handlePostToSlack}
+            disabled={postSlackState.loading}
+            style={styles.slackPostButton}
+            data-testid="activity-slack-post"
+          >
+            <span aria-hidden>💬</span>
+            <span>
+              {postSlackState.loading
+                ? t('activityPostToSlackPosting')
+                : t('activityPostToSlack')}
+            </span>
+          </button>
+          {postSlackState.error && (
+            <span style={styles.slackPostError} role="alert" data-testid="activity-slack-post-error">
+              {t('activityPostToSlackError')}
+            </span>
+          )}
         </div>
       )}
     </div>

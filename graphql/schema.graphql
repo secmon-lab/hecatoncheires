@@ -474,6 +474,11 @@ type Mutation {
   createAction(workspaceId: String!, input: CreateActionInput!): Action!
   updateAction(workspaceId: String!, input: UpdateActionInput!): Action!
   deleteAction(workspaceId: String!, id: Int!): Boolean!
+  # Posts the Slack message for an Action whose initial post was missed
+  # (legacy tool-created actions before the create paths were unified).
+  # Errors if the action already has a Slack message timestamp or if the
+  # parent Case has no Slack channel.
+  postActionSlackMessage(workspaceId: String!, id: Int!): Action!
 
   # Sources
   createNotionDBSource(workspaceId: String!, input: CreateNotionDBSourceInput!): Source!
