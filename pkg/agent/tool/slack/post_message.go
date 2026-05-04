@@ -1,4 +1,4 @@
-package core
+package slacktool
 
 import (
 	"context"
@@ -7,18 +7,18 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool"
-	slackService "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
+	slackservice "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 )
 
-// postMessageTool posts a message to the case's Slack channel
+// postMessageTool posts a message to the case's Slack channel.
 type postMessageTool struct {
-	slack     slackService.Service
+	slack     slackservice.Service
 	channelID string
 }
 
 func (t *postMessageTool) Spec() gollem.ToolSpec {
 	return gollem.ToolSpec{
-		Name:        "core__post_message",
+		Name:        "slack__post_message",
 		Description: "Post a text message to the case's Slack channel. Use thread_ts to reply in a specific thread.",
 		Parameters: map[string]*gollem.Parameter{
 			"text": {

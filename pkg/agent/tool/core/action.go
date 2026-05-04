@@ -93,7 +93,7 @@ func (t *getActionTool) Spec() gollem.ToolSpec {
 }
 
 func (t *getActionTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
-	actionID, err := extractInt64(args, "action_id")
+	actionID, err := tool.ExtractInt64(args, "action_id")
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +250,7 @@ func (t *updateActionTool) Spec() gollem.ToolSpec {
 }
 
 func (t *updateActionTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
-	actionID, err := extractInt64(args, "action_id")
+	actionID, err := tool.ExtractInt64(args, "action_id")
 	if err != nil {
 		return nil, err
 	}
@@ -330,7 +330,7 @@ func (t *updateActionStatusTool) Spec() gollem.ToolSpec {
 }
 
 func (t *updateActionStatusTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
-	actionID, err := extractInt64(args, "action_id")
+	actionID, err := tool.ExtractInt64(args, "action_id")
 	if err != nil {
 		return nil, err
 	}
@@ -390,7 +390,7 @@ func (t *setActionAssigneeTool) Spec() gollem.ToolSpec {
 }
 
 func (t *setActionAssigneeTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
-	actionID, err := extractInt64(args, "action_id")
+	actionID, err := tool.ExtractInt64(args, "action_id")
 	if err != nil {
 		return nil, err
 	}
@@ -432,20 +432,3 @@ func (t *setActionAssigneeTool) Run(ctx context.Context, args map[string]any) (m
 	return actionToMap(updated), nil
 }
 
-// extractInt64 extracts an int64 value from args map, accepting int, int64, or float64
-func extractInt64(args map[string]any, key string) (int64, error) {
-	v, ok := args[key]
-	if !ok || v == nil {
-		return 0, fmt.Errorf("%s is required", key)
-	}
-	switch n := v.(type) {
-	case int:
-		return int64(n), nil
-	case int64:
-		return n, nil
-	case float64:
-		return int64(n), nil
-	default:
-		return 0, fmt.Errorf("%s must be an integer, got %T", key, v)
-	}
-}

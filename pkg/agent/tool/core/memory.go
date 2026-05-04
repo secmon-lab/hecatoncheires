@@ -140,7 +140,7 @@ func (t *searchMemoryTool) Run(ctx context.Context, args map[string]any) (map[st
 	tool.Update(ctx, fmt.Sprintf("Searching memories: %s", query))
 
 	limit := 5
-	if v, err := extractInt64(args, "limit"); err == nil && v > 0 {
+	if v, err := tool.ExtractInt64(args, "limit"); err == nil && v > 0 {
 		limit = int(v)
 	}
 

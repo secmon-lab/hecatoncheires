@@ -3,6 +3,8 @@ package usecase
 import (
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/trace"
+	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
+	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/github"
@@ -15,8 +17,10 @@ type UseCases struct {
 	repo              interfaces.Repository
 	workspaceRegistry *model.WorkspaceRegistry
 	notion            notion.Service
+	notionTool        notiontool.Client
 	slackService      slack.Service
 	slackAdminService slack.AdminService
+	slackSearch       slacktool.SearchService
 	githubService     github.Service
 	knowledgeService  knowledge.Service
 	llmClient         gollem.LLMClient
@@ -78,6 +82,23 @@ func WithSlackAdminService(svc slack.AdminService) Option {
 	}
 }
 
+// WithSlackSearchService configures the Slack User-token-backed search client.
+// When set, the agent gains the slack__search_messages tool. Requires the
+// underlying User OAuth Token to have the search:read scope.
+func WithSlackSearchService(svc slacktool.SearchService) Option {
+	return func(uc *UseCases) {
+		uc.slackSearch = svc
+	}
+}
+
+// WithNotionToolClient configures the agent-tool Notion client.
+// When set, the agent gains the notion__search and notion__get_page tools.
+func WithNotionToolClient(c notiontool.Client) Option {
+	return func(uc *UseCases) {
+		uc.notionTool = c
+	}
+}
+
 func WithLLMClient(client gollem.LLMClient) Option {
 	return func(uc *UseCases) {
 		uc.llmClient = client
@@ -126,11 +147,11 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 		// that only use Assist (the assist CLI) may omit them, in which
 		// case the Agent usecase is simply not constructed.
 		if uc.historyRepo != nil && uc.traceRepo != nil {
-			uc.Agent = NewAgentUseCase(repo, registry, uc.slackService, uc.llmClient, uc.historyRepo, uc.traceRepo)
+			uc.Agent = NewAgentUseCase(repo, registry, uc.slackService, uc.slackSearch, uc.notionTool, uc.llmClient, uc.historyRepo, uc.traceRepo)
 		} else if uc.historyRepo != nil || uc.traceRepo != nil {
 			panic("usecase.New: WithHistoryRepository and WithTraceRepository must be paired")
 		}
-		uc.Assist = NewAssistUseCase(repo, registry, uc.slackService, uc.llmClient)
+		uc.Assist = NewAssistUseCase(repo, registry, uc.slackService, uc.slackSearch, uc.notionTool, uc.llmClient)
 		uc.MentionDraft = NewMentionDraftUseCase(repo, registry, uc.slackService, NewDraftMaterializer(uc.llmClient))
 	}
 	uc.Slack = NewSlackUseCases(repo, registry, uc.Agent, uc.MentionDraft, uc.slackService)
