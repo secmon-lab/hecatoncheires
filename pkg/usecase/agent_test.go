@@ -387,7 +387,8 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 		}
 
 		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
-		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, nil, nil, messages)
+		now := time.Date(2026, 5, 4, 12, 30, 0, 0, time.UTC)
+		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, "C0TEST", now, nil, nil, nil, messages)
 
 		gt.Value(t, strings.Contains(prompt, "Important Case")).Equal(true)
 		gt.Value(t, strings.Contains(prompt, "This is very important")).Equal(true)
@@ -397,10 +398,35 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 		gt.Value(t, strings.Contains(prompt, "Slack's mrkdwn format")).Equal(true)
 		gt.Value(t, strings.Contains(prompt, "Do NOT use Markdown headers")).Equal(true)
 	})
+
+	t.Run("system prompt includes channel ID and current time", func(t *testing.T) {
+		repo := memory.New()
+		slackMock := &agentTestSlackService{}
+		llmClient := &mockLLMClient{}
+
+		entry := &model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "ws-test", Name: "Test"},
+		}
+		c := &model.Case{
+			Title:  "Test Case",
+			Status: types.CaseStatusOpen,
+		}
+
+		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
+		now := time.Date(2026, 5, 4, 12, 30, 45, 0, time.UTC)
+		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, "C0123ABC", now, nil, nil, nil, nil)
+
+		gt.Value(t, strings.Contains(prompt, "## Slack Context")).Equal(true)
+		gt.Value(t, strings.Contains(prompt, "Channel ID: C0123ABC")).Equal(true)
+		gt.Value(t, strings.Contains(prompt, "## Current Time")).Equal(true)
+		gt.Value(t, strings.Contains(prompt, "2026-05-04T12:30:45Z")).Equal(true)
+	})
 }
 
 func TestAgentSystemPrompt_ActionsAndKnowledges(t *testing.T) {
-	t.Run("prompt includes actions when present", func(t *testing.T) {
+	fixedNow := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
+
+	t.Run("Actions list outside action thread is title-only", func(t *testing.T) {
 		repo := memory.New()
 		slackMock := &agentTestSlackService{}
 		llmClient := &mockLLMClient{}
@@ -427,14 +453,86 @@ func TestAgentSystemPrompt_ActionsAndKnowledges(t *testing.T) {
 		}
 
 		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
-		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, actions, nil, nil)
+		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, "C0TEST", fixedNow, nil, actions, nil, nil)
 
 		gt.Value(t, strings.Contains(prompt, "## Actions")).Equal(true)
 		gt.Value(t, strings.Contains(prompt, "Investigate the issue")).Equal(true)
 		gt.Value(t, strings.Contains(prompt, "Write report")).Equal(true)
-		gt.Value(t, strings.Contains(prompt, "U001")).Equal(true)
+		// Status / Assignee detail must NOT leak into the case-wide list.
+		gt.Value(t, strings.Contains(prompt, "U001")).Equal(false)
+		gt.Value(t, strings.Contains(prompt, "IN_PROGRESS")).Equal(false)
+		gt.Value(t, strings.Contains(prompt, "TODO")).Equal(false)
+		// And the Current Action section must be absent.
+		gt.Value(t, strings.Contains(prompt, "## Current Action")).Equal(false)
+	})
+
+	t.Run("prompt shows Current Action when in action thread", func(t *testing.T) {
+		repo := memory.New()
+		slackMock := &agentTestSlackService{}
+		llmClient := &mockLLMClient{}
+
+		entry := &model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "ws-test", Name: "Test"},
+		}
+		c := &model.Case{
+			Title:  "Test Case",
+			Status: types.CaseStatusOpen,
+		}
+		due := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
+		currentAction := &model.Action{
+			ID:          7,
+			Title:       "Patch the vulnerable library",
+			Description: "Bump dep to 1.2.3 and rerun integration tests.",
+			Status:      types.ActionStatusInProgress,
+			AssigneeID:  "U777",
+			DueDate:     &due,
+		}
+		// Sibling actions on the same case must NOT appear when the thread
+		// is bound to currentAction.
+		others := []*model.Action{
+			{ID: 8, Title: "Sibling action"},
+		}
+
+		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
+		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, "C0TEST", fixedNow, currentAction, others, nil, nil)
+
+		gt.Value(t, strings.Contains(prompt, "## Current Action")).Equal(true)
+		gt.Value(t, strings.Contains(prompt, "Patch the vulnerable library")).Equal(true)
 		gt.Value(t, strings.Contains(prompt, "IN_PROGRESS")).Equal(true)
-		gt.Value(t, strings.Contains(prompt, "TODO")).Equal(true)
+		gt.Value(t, strings.Contains(prompt, "Assignee: U777")).Equal(true)
+		gt.Value(t, strings.Contains(prompt, "Bump dep to 1.2.3")).Equal(true)
+		gt.Value(t, strings.Contains(prompt, "2026-06-01T09:00:00Z")).Equal(true)
+		// Case-wide actions must be suppressed in this mode.
+		gt.Value(t, strings.Contains(prompt, "## Actions")).Equal(false)
+		gt.Value(t, strings.Contains(prompt, "Sibling action")).Equal(false)
+	})
+
+	t.Run("Current Action without assignee renders unassigned", func(t *testing.T) {
+		repo := memory.New()
+		slackMock := &agentTestSlackService{}
+		llmClient := &mockLLMClient{}
+
+		entry := &model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "ws-test", Name: "Test"},
+		}
+		c := &model.Case{
+			Title:  "Test Case",
+			Status: types.CaseStatusOpen,
+		}
+		currentAction := &model.Action{
+			ID:     9,
+			Title:  "Triage",
+			Status: types.ActionStatusTodo,
+		}
+
+		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
+		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, "C0TEST", fixedNow, currentAction, nil, nil, nil)
+
+		gt.Value(t, strings.Contains(prompt, "Assignee: unassigned")).Equal(true)
+		// No Due line when DueDate is nil.
+		gt.Value(t, strings.Contains(prompt, "- Due:")).Equal(false)
+		// No Description section when Description is empty.
+		gt.Value(t, strings.Contains(prompt, "### Description")).Equal(false)
 	})
 
 	t.Run("prompt includes knowledge when present", func(t *testing.T) {
@@ -457,7 +555,7 @@ func TestAgentSystemPrompt_ActionsAndKnowledges(t *testing.T) {
 		}
 
 		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
-		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, nil, knowledges, nil)
+		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, "C0TEST", fixedNow, nil, nil, knowledges, nil)
 
 		gt.Value(t, strings.Contains(prompt, "## Knowledge")).Equal(true)
 		gt.Value(t, strings.Contains(prompt, "knowledge-001")).Equal(true)
@@ -478,9 +576,10 @@ func TestAgentSystemPrompt_ActionsAndKnowledges(t *testing.T) {
 		}
 
 		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
-		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, nil, nil, nil)
+		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, "C0TEST", fixedNow, nil, nil, nil, nil)
 
 		gt.Value(t, strings.Contains(prompt, "## Actions")).Equal(false)
+		gt.Value(t, strings.Contains(prompt, "## Current Action")).Equal(false)
 		gt.Value(t, strings.Contains(prompt, "## Knowledge")).Equal(false)
 	})
 }

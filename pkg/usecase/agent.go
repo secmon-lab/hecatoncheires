@@ -135,7 +135,19 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 	if err != nil {
 		return goerr.Wrap(err, "failed to partition conversation")
 	}
-	systemPrompt := uc.buildSystemPrompt(foundCase, entry, actions, knowledges, systemMessages)
+	// When this thread is bound to a specific Action, surface that action's
+	// detail instead of the case-wide action list (which would just be noise
+	// for an action-scoped conversation).
+	var currentAction *model.Action
+	if session.ActionID != 0 {
+		for _, a := range actions {
+			if a.ID == session.ActionID {
+				currentAction = a
+				break
+			}
+		}
+	}
+	systemPrompt := uc.buildSystemPrompt(foundCase, entry, msg.ChannelID(), time.Now().UTC(), currentAction, actions, knowledges, systemMessages)
 	userInput := buildAgentUserInput(deltaMessages, msg)
 
 	// Slack-side trace banner (per-mention; not persisted).
@@ -504,13 +516,26 @@ type promptMessage struct {
 	Text        string
 }
 
-// promptAction represents an action for template rendering
+// promptAction represents a single action in the case-wide action list
+// (rendered when the agent is NOT in an action-bound thread). It is kept
+// minimal — only ID and Title — because outside an action thread the LLM
+// only needs to know which actions exist; details are reachable via tools.
 type promptAction struct {
+	ID    int64
+	Title string
+}
+
+// promptCurrentAction represents the action that the current Slack thread
+// is bound to (when AgentSession.ActionID != 0). The full set of fields is
+// inlined so the LLM can answer questions about it without a tool call.
+type promptCurrentAction struct {
 	ID          int64
 	Title       string
 	Status      string
 	StatusEmoji string
-	Assignees   string
+	Assignee    string // empty when unassigned; template renders "unassigned"
+	Description string
+	DueDate     string // empty when no due date set
 }
 
 // promptKnowledge represents a knowledge entry for template rendering
@@ -521,16 +546,33 @@ type promptKnowledge struct {
 
 // agentPromptData holds all data for the agent system prompt template
 type agentPromptData struct {
-	Case       *model.Case
-	Fields     []promptField
-	Actions    []promptAction
-	Knowledges []promptKnowledge
-	Messages   []promptMessage
+	ChannelID     string
+	Now           string
+	Case          *model.Case
+	Fields        []promptField
+	CurrentAction *promptCurrentAction
+	Actions       []promptAction
+	Knowledges    []promptKnowledge
+	Messages      []promptMessage
 }
 
-func (uc *AgentUseCase) buildSystemPrompt(c *model.Case, entry *model.WorkspaceEntry, actions []*model.Action, knowledges []*model.Knowledge, messages []slack.ConversationMessage) string {
+// buildSystemPrompt renders the agent system prompt.
+//
+// When currentAction is non-nil, the agent is responding inside a Slack
+// thread bound to that action (AgentSession.ActionID != 0). In that mode
+// the case-wide actions list is suppressed — only the current action's
+// detail is surfaced, to avoid drowning the LLM in unrelated work items.
+// Otherwise the case-wide actions list is rendered as a title-only summary.
+func (uc *AgentUseCase) buildSystemPrompt(c *model.Case, entry *model.WorkspaceEntry, channelID string, now time.Time, currentAction *model.Action, actions []*model.Action, knowledges []*model.Knowledge, messages []slack.ConversationMessage) string {
+	statusSet := model.DefaultActionStatusSet()
+	if entry != nil && entry.ActionStatusSet != nil {
+		statusSet = entry.ActionStatusSet
+	}
+
 	data := agentPromptData{
-		Case: c,
+		ChannelID: channelID,
+		Now:       now.UTC().Format(time.RFC3339),
+		Case:      c,
 	}
 
 	// Build field values with schema names
@@ -549,19 +591,28 @@ func (uc *AgentUseCase) buildSystemPrompt(c *model.Case, entry *model.WorkspaceE
 		}
 	}
 
-	// Build action list
-	statusSet := model.DefaultActionStatusSet()
-	if entry != nil && entry.ActionStatusSet != nil {
-		statusSet = entry.ActionStatusSet
-	}
-	for _, a := range actions {
-		data.Actions = append(data.Actions, promptAction{
-			ID:          a.ID,
-			Title:       a.Title,
-			Status:      a.Status.String(),
-			StatusEmoji: statusSet.Emoji(string(a.Status)),
-			Assignees:   a.AssigneeID,
-		})
+	if currentAction != nil {
+		due := ""
+		if currentAction.DueDate != nil {
+			due = currentAction.DueDate.UTC().Format(time.RFC3339)
+		}
+		data.CurrentAction = &promptCurrentAction{
+			ID:          currentAction.ID,
+			Title:       currentAction.Title,
+			Status:      currentAction.Status.String(),
+			StatusEmoji: statusSet.Emoji(string(currentAction.Status)),
+			Assignee:    currentAction.AssigneeID,
+			Description: currentAction.Description,
+			DueDate:     due,
+		}
+	} else {
+		// Case-wide action list: title-only summary.
+		for _, a := range actions {
+			data.Actions = append(data.Actions, promptAction{
+				ID:    a.ID,
+				Title: a.Title,
+			})
+		}
 	}
 
 	// Build knowledge list
