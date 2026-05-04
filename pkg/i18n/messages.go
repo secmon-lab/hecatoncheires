@@ -111,7 +111,6 @@ var messagesEN = [msgKeyCount]string{
 	MsgFieldActionAssignee:         "Assignee",
 	MsgFieldActionStatusLabel:      "Status",
 	MsgFieldActionDueDate:          "Due date",
-	MsgActionCreated:               "Action #%d *%s* has been created.",
 
 	// Errors related to commands
 	MsgErrUnknownSubcommand: "Unknown subcommand: %q. Available: `update`, `action`.",
@@ -214,7 +213,6 @@ var messagesJA = [msgKeyCount]string{
 	MsgFieldActionAssignee:         "担当者",
 	MsgFieldActionStatusLabel:      "ステータス",
 	MsgFieldActionDueDate:          "期日",
-	MsgActionCreated:               "アクション #%d *%s* が作成されました。",
 
 	// Errors related to commands
 	MsgErrUnknownSubcommand: "不明なサブコマンドです: %q。利用可能: `update`, `action`。",

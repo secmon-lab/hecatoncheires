@@ -64,3 +64,12 @@ func NewEmbeddingForTest(geminiProjectID, geminiLocation, model string) *Embeddi
 		model:           model,
 	}
 }
+
+// NewSentryForTest creates a Sentry config for testing.
+func NewSentryForTest(dsn, environment, release string) *Sentry {
+	return &Sentry{
+		dsn:         dsn,
+		environment: environment,
+		release:     release,
+	}
+}
