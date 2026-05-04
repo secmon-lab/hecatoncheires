@@ -20,8 +20,9 @@ import (
 // pkg/usecase/diagnosis. Repair logic must NOT live in this CLI layer.
 func cmdDiagnosis() *cli.Command {
 	return &cli.Command{
-		Name:  "diagnosis",
-		Usage: "Run one-shot data inspection / repair jobs",
+		Name:    "diagnosis",
+		Aliases: []string{"d"},
+		Usage:   "Run one-shot data inspection / repair jobs",
 		Commands: []*cli.Command{
 			cmdFixUnsentAction(),
 		},
