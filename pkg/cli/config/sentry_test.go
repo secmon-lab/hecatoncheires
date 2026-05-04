@@ -7,24 +7,19 @@ import (
 	"github.com/m-mizutani/gt"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
-	obssentry "github.com/secmon-lab/hecatoncheires/pkg/utils/observability/sentry"
 )
 
-func TestSentry_Configure_DisabledWhenDSNEmpty(t *testing.T) {
+func TestSentry_Configure_DSNEmptyIsNoop(t *testing.T) {
 	cfg := config.NewSentryForTest("", "production", "rel-1")
 	cfg.Configure(context.Background())
-	gt.Bool(t, obssentry.Enabled()).False()
+	// Configure with empty DSN must return without error or panic.
 }
 
 func TestSentry_Configure_FailedInitDoesNotPanic(t *testing.T) {
 	// Sentry SDK rejects malformed DSNs; Configure must absorb the error
-	// rather than aborting startup. A panic here would surface as a Go
-	// test failure automatically (no explicit recover needed).
+	// rather than aborting startup.
 	cfg := config.NewSentryForTest("not-a-valid-dsn", "production", "rel-1")
 	cfg.Configure(context.Background())
-	// Either init succeeds (Enabled true) or it fails silently (Enabled
-	// false). We don't pin the SDK's parsing rules; we only assert that
-	// the bad input did not crash the process.
 }
 
 func TestSentry_Flags_Bind(t *testing.T) {

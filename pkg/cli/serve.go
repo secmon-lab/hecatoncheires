@@ -28,8 +28,8 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/worker"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
-	obssentry "github.com/secmon-lab/hecatoncheires/pkg/utils/observability/sentry"
 	"github.com/urfave/cli/v3"
 )
 
@@ -238,7 +238,7 @@ func cmdServe() *cli.Command {
 			// errors do not abort startup — losing observability is
 			// strictly better than refusing to serve.
 			sentryCfg.Configure(ctx)
-			defer obssentry.Flush(2 * time.Second)
+			defer errutil.FlushSentry(2 * time.Second)
 
 			// Load workspace configurations and build registry
 			workspaceConfigs, registry, err := appCfg.Configure(c)

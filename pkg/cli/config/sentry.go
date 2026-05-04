@@ -8,12 +8,11 @@ import (
 
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
-	obssentry "github.com/secmon-lab/hecatoncheires/pkg/utils/observability/sentry"
 )
 
 // Sentry binds the HECATONCHEIRES_SENTRY_* CLI flags / env vars and drives
-// the obssentry package's lifecycle. An empty DSN keeps Sentry disabled and
-// the rest of the values are ignored.
+// the Sentry SDK lifecycle through errutil. An empty DSN keeps Sentry
+// disabled and the rest of the values are ignored.
 type Sentry struct {
 	dsn         string
 	environment string
@@ -67,7 +66,7 @@ func (x *Sentry) Configure(ctx context.Context) {
 		return
 	}
 
-	if err := obssentry.Init(obssentry.Config{
+	if err := errutil.InitSentry(errutil.SentryConfig{
 		DSN:         x.dsn,
 		Environment: x.environment,
 		Release:     x.release,
