@@ -651,6 +651,25 @@ The AI agent will:
 3. Execute the custom prompt to generate insights
 4. Post findings to the case's Slack channel
 
+### Agent tool registry (Slack mention & assist)
+
+The agent's available tools depend on which optional services are wired up.
+Tools are split across three packages: `pkg/agent/tool/core` (case domain
+state), `pkg/agent/tool/slack` (Slack-backed tools), and `pkg/agent/tool/notion`
+(Notion-backed tools). The table below lists what each one provides and which
+configuration enables it.
+
+| Tool | Enabled by | Purpose |
+|------|------------|---------|
+| `core__list_actions`, `core__get_action`, `core__create_action`, `core__update_action`, `core__update_action_status`, `core__set_action_assignee` | Always | Manage the case's action items. |
+| `core__search_knowledge`, `core__get_knowledge` | Always (LLM client required) | Semantic search and retrieval over knowledge entries. |
+| `core__create_knowledge`, `core__update_knowledge` | Assist only | Persist new knowledge produced by the assist agent. |
+| `core__create_memory`, `core__delete_memory`, `core__search_memory`, `core__list_memories` | Assist only | Manage per-case agent memory. |
+| `slack__post_message` | Assist only (`HECATONCHEIRES_SLACK_BOT_TOKEN`) | Post a message to the case's Slack channel. |
+| `slack__get_messages` | `HECATONCHEIRES_SLACK_BOT_TOKEN` | Bulk fetch of one or more Slack messages and their thread context (max 10 per call, parallel, partial failure tolerated). |
+| `slack__search_messages` | `HECATONCHEIRES_SLACK_USER_OAUTH_TOKEN` with `search:read` scope | Workspace-wide Slack message search. See [docs/slack.md](slack.md#user-token-scopes). |
+| `notion__search`, `notion__get_page` | `HECATONCHEIRES_NOTION_API_TOKEN` | Notion title search and Markdown content retrieval. See [docs/notion.md](notion.md). |
+
 ---
 
 ## Action Section

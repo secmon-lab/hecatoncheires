@@ -46,7 +46,7 @@ func (t *searchKnowledgeTool) Run(ctx context.Context, args map[string]any) (map
 	tool.Update(ctx, fmt.Sprintf("Searching knowledge: %s", query))
 
 	limit := 5
-	if v, err := extractInt64(args, "limit"); err == nil && v > 0 {
+	if v, err := tool.ExtractInt64(args, "limit"); err == nil && v > 0 {
 		limit = int(v)
 	}
 

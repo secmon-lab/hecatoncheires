@@ -17,6 +17,8 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/vektah/gqlparser/v2/gqlerror"
 
+	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
+	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
 	gqlctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/graphql"
 	httpctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/http"
@@ -276,16 +278,26 @@ func cmdServe() *cli.Command {
 				usecase.WithBaseURL(baseURL),
 			}
 
-			// Initialize Notion service if token is provided
+			// Initialize Notion services if token is provided. Two clients are
+			// constructed off the same token: pkg/service/notion drives
+			// Source/Compile, and pkg/agent/tool/notion drives the agent's
+			// notion__search / notion__get_page tools.
 			if notionToken != "" {
 				notionSvc, err := notion.New(notionToken)
 				if err != nil {
 					return goerr.Wrap(err, "failed to initialize notion service")
 				}
 				ucOpts = append(ucOpts, usecase.WithNotion(notionSvc))
+
+				notionToolClient, err := notiontool.NewClient(notionToken)
+				if err != nil {
+					return goerr.Wrap(err, "failed to initialize notion tool client")
+				}
+				ucOpts = append(ucOpts, usecase.WithNotionToolClient(notionToolClient))
+
 				logging.Default().Info("Notion service enabled")
 			} else {
-				logging.Default().Info("Notion API token not configured, Source features will be limited")
+				logging.Default().Info("Notion API token not configured, Source features and Notion agent tools disabled")
 			}
 
 			// Initialize Slack service for Source integration if bot token is provided
@@ -299,7 +311,10 @@ func cmdServe() *cli.Command {
 				ucOpts = append(ucOpts, usecase.WithSlackService(slackSvc))
 				logging.Default().Info("Slack service enabled for Source integration")
 
-				// Initialize Slack Admin service if User OAuth Token is provided
+				// Initialize Slack Admin / Search services if User OAuth Token is provided.
+				// The same User OAuth Token backs both:
+				//   - admin.conversations.* (cross-workspace channel connect)
+				//   - search.messages       (agent message search; needs search:read scope)
 				if slackCfg.UserOAuthToken() != "" {
 					adminSvc, err := slack.NewAdminClient(slackCfg.UserOAuthToken())
 					if err != nil {
@@ -307,6 +322,13 @@ func cmdServe() *cli.Command {
 					}
 					ucOpts = append(ucOpts, usecase.WithSlackAdminService(adminSvc))
 					logging.Default().Info("Slack admin service enabled for cross-workspace channel connect")
+
+					searchSvc, err := slacktool.NewSearchClient(slackCfg.UserOAuthToken())
+					if err != nil {
+						return goerr.Wrap(err, "failed to initialize Slack search service")
+					}
+					ucOpts = append(ucOpts, usecase.WithSlackSearchService(searchSvc))
+					logging.Default().Info("Slack search service enabled for agent (requires search:read scope)")
 				}
 
 				// Detect org-level app and validate workspace team IDs

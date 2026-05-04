@@ -13,6 +13,8 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
+	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
+	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
@@ -37,15 +39,20 @@ type AssistUseCase struct {
 	repo         interfaces.Repository
 	registry     *model.WorkspaceRegistry
 	slackService slack.Service
+	slackSearch  slacktool.SearchService
+	notionTool   notiontool.Client
 	llmClient    gollem.LLMClient
 }
 
-// NewAssistUseCase creates a new AssistUseCase
-func NewAssistUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, llmClient gollem.LLMClient) *AssistUseCase {
+// NewAssistUseCase creates a new AssistUseCase.
+// slackSearch and notionTool are optional; pass nil to omit the corresponding tools.
+func NewAssistUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackSearch slacktool.SearchService, notionTool notiontool.Client, llmClient gollem.LLMClient) *AssistUseCase {
 	return &AssistUseCase{
 		repo:         repo,
 		registry:     registry,
 		slackService: slackService,
+		slackSearch:  slackSearch,
+		notionTool:   notionTool,
 		llmClient:    llmClient,
 	}
 }
@@ -130,13 +137,31 @@ func (uc *AssistUseCase) processCase(ctx context.Context, entry *model.Workspace
 		return goerr.Wrap(err, "failed to build system prompt")
 	}
 
-	// Build tools
-	coreTools := core.NewForAssist(uc.repo, wsID, c.ID, entry.ActionStatusSet, uc.llmClient, uc.slackService, c.SlackChannelID)
+	// Build tools — core (action / knowledge / memory) plus Slack (read-only +
+	// post_message) plus Notion when configured.
+	coreTools := core.NewForAssist(core.Deps{
+		Repo:        uc.repo,
+		WorkspaceID: wsID,
+		CaseID:      c.ID,
+		StatusSet:   entry.ActionStatusSet,
+		LLMClient:   uc.llmClient,
+	})
+	slackTools := slacktool.NewForAssist(slacktool.Deps{
+		Bot:       uc.slackService,
+		Search:    uc.slackSearch,
+		ChannelID: c.SlackChannelID,
+	})
+	notionTools := notiontool.New(notiontool.Deps{Client: uc.notionTool})
+
+	allTools := make([]gollem.Tool, 0, len(coreTools)+len(slackTools)+len(notionTools))
+	allTools = append(allTools, coreTools...)
+	allTools = append(allTools, slackTools...)
+	allTools = append(allTools, notionTools...)
 
 	// Create and execute the agent
 	agent := gollem.New(uc.llmClient,
 		gollem.WithSystemPrompt(systemPrompt),
-		gollem.WithTools(coreTools...),
+		gollem.WithTools(allTools...),
 	)
 
 	resp, err := agent.Execute(ctx, gollem.Text(entry.AssistPrompt))
