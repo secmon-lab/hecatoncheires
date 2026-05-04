@@ -82,8 +82,14 @@ func pickToolByName(t *testing.T, tools []gollem.Tool, name string) gollem.Tool 
 
 func TestSearchMessagesTool_ErrorRoutesThroughErrutilHandle(t *testing.T) {
 	search := &fakeSearchService{
-		searchFn: func(_ context.Context, _ string, _ slacktool.SearchOptions) (*slacktool.SearchResult, error) {
-			return nil, goerr.New("upstream failure", goerr.V("slack_error", "missing_scope"))
+		// Mirror search_client.go's behaviour: the upstream client wraps
+		// the API error with the query value, so the tool no longer needs
+		// to re-wrap it.
+		searchFn: func(_ context.Context, query string, _ slacktool.SearchOptions) (*slacktool.SearchResult, error) {
+			return nil, goerr.New("upstream failure",
+				goerr.V("slack_error", "missing_scope"),
+				goerr.V("query", query),
+			)
 		},
 	}
 

@@ -61,11 +61,8 @@ func (t *searchMessagesTool) Run(ctx context.Context, args map[string]any) (map[
 
 	res, err := t.search.SearchMessages(ctx, query, opts)
 	if err != nil {
-		wrapped := goerr.Wrap(err, "failed to search slack messages",
-			goerr.V("query", query),
-		)
-		errutil.Handle(ctx, wrapped, "slack search messages failed")
-		return nil, wrapped
+		errutil.Handle(ctx, err, "slack search messages failed")
+		return nil, err
 	}
 
 	messages := make([]map[string]any, 0, len(res.Messages))
