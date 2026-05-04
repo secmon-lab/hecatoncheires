@@ -45,8 +45,8 @@ type FixUnsentActionsReport struct {
 //
 // This routine intentionally does NOT route every Action change through
 // the standard CreateAction / UpdateAction surfaces — the spec for this
-// repair carved out an exemption ("usecaseを無視して処理してよい"). In
-// practice the post / persist pair is owned by the shared
+// repair carved out an exemption that the repair may bypass the usecase
+// layer. In practice the post / persist pair is owned by the shared
 // ActionUseCase.postSlackMessageForAction helper, so we still benefit
 // from the same Slack rendering and timestamp-write logic that
 // CreateAction uses.
@@ -64,6 +64,14 @@ func (uc *UseCase) FixUnsentActions(ctx context.Context) (FixUnsentActionsReport
 
 	for _, entry := range uc.registry.List() {
 		workspaceID := entry.Workspace.ID
+		// One-shot in-memory scan per workspace: this is an operator-run
+		// repair tool, not a hot path. For workspaces with O(10^5+)
+		// actions a streaming or paginated repository iterator would be
+		// preferable, but the existing ActionRepository surface returns
+		// the full list and adding a paginated variant just for this
+		// job is over-engineering until a real workspace hits that
+		// scale. Revisit if the repair starts touching live operational
+		// budgets.
 		actions, err := uc.repo.Action().List(ctx, workspaceID)
 		if err != nil {
 			// Listing should not fail for normal operation; if it does,
