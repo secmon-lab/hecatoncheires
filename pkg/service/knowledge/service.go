@@ -60,7 +60,7 @@ func (c *client) Extract(ctx context.Context, input Input) ([]Result, error) {
 	}
 
 	// Generate content
-	resp, err := session.GenerateContent(ctx, gollem.Text(userPrompt))
+	resp, err := session.Generate(ctx, []gollem.Input{gollem.Text(userPrompt)})
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to generate content from LLM")
 	}

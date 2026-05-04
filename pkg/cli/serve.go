@@ -169,6 +169,7 @@ func cmdServe() *cli.Command {
 	var slackCfg config.Slack
 	var llmCfg config.LLM
 	var githubCfg config.GitHub
+	var storageCfg config.Storage
 
 	flags := []cli.Flag{
 		&cli.StringFlag{
@@ -219,6 +220,7 @@ func cmdServe() *cli.Command {
 	flags = append(flags, slackCfg.Flags()...)
 	flags = append(flags, llmCfg.Flags()...)
 	flags = append(flags, githubCfg.Flags()...)
+	flags = append(flags, storageCfg.Flags()...)
 
 	return &cli.Command{
 		Name:    "serve",
@@ -355,6 +357,26 @@ func cmdServe() *cli.Command {
 			} else {
 				logging.Default().Info("GitHub App not configured, GitHub Source features will be disabled")
 			}
+
+			// Configure agent session archive (Cloud Storage) when Slack is wired.
+			// Slack-driven AI flows (mention agent) require History + Trace
+			// persistence; the bucket flag is mandatory in that case.
+			var storageCleanup func()
+			if slackSvc != nil {
+				historyRepo, traceRepo, cleanup, err := storageCfg.Configure(ctx)
+				if err != nil {
+					return goerr.Wrap(err, "failed to configure agent storage")
+				}
+				storageCleanup = cleanup
+				ucOpts = append(ucOpts, usecase.WithHistoryRepository(historyRepo))
+				ucOpts = append(ucOpts, usecase.WithTraceRepository(traceRepo))
+				logging.Default().Info("Agent session archive enabled", logAttrsToArgs(storageCfg.LogAttrs())...)
+			}
+			defer func() {
+				if storageCleanup != nil {
+					storageCleanup()
+				}
+			}()
 
 			uc := usecase.New(repo, registry, ucOpts...)
 

@@ -113,6 +113,8 @@ The `serve` command (alias: `s`) starts the HTTP server.
 | `--llm-claude-api-key` | `HECATONCHEIRES_LLM_CLAUDE_API_KEY` | - | No\*\*\*\* | Anthropic Claude API key (used with direct Anthropic access) |
 | `--llm-gemini-project-id` | `HECATONCHEIRES_LLM_GEMINI_PROJECT_ID` | - | No\*\*\*\* | Google Cloud project ID (Gemini, or Claude via Vertex AI) |
 | `--llm-gemini-location` | `HECATONCHEIRES_LLM_GEMINI_LOCATION` | `global` | No | Google Cloud location for Gemini / Claude on Vertex AI |
+| `--cloud-storage-bucket` | `HECATONCHEIRES_CLOUD_STORAGE_BUCKET` | - | Yes\*\*\*\*\* | Cloud Storage bucket holding agent thread session History/Trace blobs. See [agent-session.md](./agent-session.md) |
+| `--cloud-storage-prefix` | `HECATONCHEIRES_CLOUD_STORAGE_PREFIX` | - | No | Optional object key prefix within the Cloud Storage bucket |
 
 \* Required for OAuth mode. Alternatively, use `--no-auth` with `--slack-bot-token` for development.
 
@@ -124,6 +126,8 @@ The `serve` command (alias: `s`) starts the HTTP server.
 - `openai` → `--llm-openai-api-key`
 - `claude` → either `--llm-claude-api-key` (direct Anthropic API) **or** `--llm-gemini-project-id` (Vertex AI). The two are mutually exclusive.
 - `gemini` → `--llm-gemini-project-id` and `--llm-gemini-location`
+
+\*\*\*\*\* Required whenever `--slack-bot-token` is configured. The agent that responds to Slack mentions persists per-thread conversation History and execution Trace into the bucket so follow-up mentions can resume the session. The service account needs **Storage Object Admin** on the bucket.
 
 ### Compile Command Flags
 

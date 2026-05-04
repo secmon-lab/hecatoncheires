@@ -11,6 +11,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
+	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	slackevents "github.com/slack-go/slack/slackevents"
@@ -372,6 +373,8 @@ func TestSlackUseCases_HandleMembershipEvent(t *testing.T) {
 		uc := usecase.New(repo, registry,
 			usecase.WithSlackService(slackSvc),
 			usecase.WithLLMClient(stubMaterializerLLM()),
+			usecase.WithHistoryRepository(agentarchive.NewMemoryHistoryRepository()),
+			usecase.WithTraceRepository(agentarchive.NewMemoryTraceRepository()),
 		)
 
 		event := &slackevents.EventsAPIEvent{
@@ -429,6 +432,8 @@ func TestSlackUseCases_HandleMembershipEvent(t *testing.T) {
 		uc := usecase.New(repo, registry,
 			usecase.WithSlackService(slackSvc),
 			usecase.WithLLMClient(stubMaterializerLLM()),
+			usecase.WithHistoryRepository(agentarchive.NewMemoryHistoryRepository()),
+			usecase.WithTraceRepository(agentarchive.NewMemoryTraceRepository()),
 		)
 
 		event := &slackevents.EventsAPIEvent{
@@ -472,6 +477,8 @@ func TestSlackUseCases_HandleMembershipEvent(t *testing.T) {
 		uc := usecase.New(repo, registry,
 			usecase.WithSlackService(slackSvc),
 			usecase.WithLLMClient(stubMaterializerLLM()),
+			usecase.WithHistoryRepository(agentarchive.NewMemoryHistoryRepository()),
+			usecase.WithTraceRepository(agentarchive.NewMemoryTraceRepository()),
 		)
 
 		event := &slackevents.EventsAPIEvent{

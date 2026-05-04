@@ -213,6 +213,8 @@ The application is configured via CLI flags or environment variables:
 
 - `HECATONCHEIRES_ADDR` - HTTP server address (default: `:8080`)
 - `HECATONCHEIRES_GRAPHIQL` - Enable GraphiQL playground (default: `true`)
+- `HECATONCHEIRES_CLOUD_STORAGE_BUCKET` - Cloud Storage bucket for agent History/Trace persistence (required when Slack is wired). See `docs/agent-session.md`.
+- `HECATONCHEIRES_CLOUD_STORAGE_PREFIX` - Optional object key prefix within the Cloud Storage bucket
 - Logger configuration (format, level, output destination)
 
 ## Testing

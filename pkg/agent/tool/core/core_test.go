@@ -232,6 +232,9 @@ func (m *mockRepo) AssistLog() interfaces.AssistLogRepository {
 func (m *mockRepo) CaseDraft() interfaces.CaseDraftRepository {
 	panic("unexpected call: CaseDraft()")
 }
+func (m *mockRepo) AgentSession() interfaces.AgentSessionRepository {
+	panic("unexpected call: AgentSession()")
+}
 func (m *mockRepo) Close() error { return nil }
 
 // newMockRepo builds a mockRepo with default no-op sub-repos
