@@ -16,6 +16,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
+	obssentry "github.com/secmon-lab/hecatoncheires/pkg/utils/observability/sentry"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/safe"
 )
 
@@ -87,8 +88,11 @@ func New(gqlHandler http.Handler, opts ...Options) (*Server, error) {
 		opt(s)
 	}
 
-	// Middleware
+	// Middleware. Sentry sits right after RequestID so every request gets
+	// its own Sentry Hub on the context (no-op when Sentry is disabled).
+	// Repanic=true means panics still bubble up to chi's Recoverer.
 	r.Use(middleware.RequestID)
+	r.Use(obssentry.HTTPMiddleware)
 	r.Use(accessLogger)
 	r.Use(middleware.Recoverer)
 

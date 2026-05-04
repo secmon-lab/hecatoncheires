@@ -55,3 +55,12 @@ func NewLLMForTest(provider, model, openaiAPIKey, claudeAPIKey, geminiProjectID,
 		geminiLocation:  geminiLocation,
 	}
 }
+
+// NewSentryForTest creates a Sentry config for testing.
+func NewSentryForTest(dsn, environment, release string) *Sentry {
+	return &Sentry{
+		dsn:         dsn,
+		environment: environment,
+		release:     release,
+	}
+}

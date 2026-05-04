@@ -29,6 +29,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/service/worker"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
+	obssentry "github.com/secmon-lab/hecatoncheires/pkg/utils/observability/sentry"
 	"github.com/urfave/cli/v3"
 )
 
@@ -172,6 +173,7 @@ func cmdServe() *cli.Command {
 	var llmCfg config.LLM
 	var githubCfg config.GitHub
 	var storageCfg config.Storage
+	var sentryCfg config.Sentry
 
 	flags := []cli.Flag{
 		&cli.StringFlag{
@@ -223,6 +225,7 @@ func cmdServe() *cli.Command {
 	flags = append(flags, llmCfg.Flags()...)
 	flags = append(flags, githubCfg.Flags()...)
 	flags = append(flags, storageCfg.Flags()...)
+	flags = append(flags, sentryCfg.Flags()...)
 
 	return &cli.Command{
 		Name:    "serve",
@@ -230,6 +233,13 @@ func cmdServe() *cli.Command {
 		Usage:   "Start HTTP server",
 		Flags:   flags,
 		Action: func(ctx context.Context, c *cli.Command) error {
+			// Initialize Sentry as early as possible so subsequent failures
+			// (config load, repo init, etc.) can be reported. Sentry init
+			// errors do not abort startup — losing observability is
+			// strictly better than refusing to serve.
+			sentryCfg.Configure(ctx)
+			defer obssentry.Flush(2 * time.Second)
+
 			// Load workspace configurations and build registry
 			workspaceConfigs, registry, err := appCfg.Configure(c)
 			if err != nil {

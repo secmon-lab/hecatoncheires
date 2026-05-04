@@ -104,10 +104,12 @@ func (c *searchClient) SearchMessages(ctx context.Context, query string, opts Se
 	}
 	resp, err := c.api.SearchMessagesContext(ctx, query, params)
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to search slack messages",
+		opts := []goerr.Option{
 			goerr.V("query", query),
 			goerr.V("count", count),
-		)
+		}
+		opts = append(opts, slackErrorAttrs(err)...)
+		return nil, goerr.Wrap(err, "failed to search slack messages", opts...)
 	}
 
 	out := &SearchResult{

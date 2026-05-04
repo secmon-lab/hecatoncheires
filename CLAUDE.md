@@ -216,6 +216,7 @@ The application is configured via CLI flags or environment variables:
 - `HECATONCHEIRES_CLOUD_STORAGE_BUCKET` - Cloud Storage bucket for agent History/Trace persistence (required when Slack is wired). See `docs/agent-session.md`.
 - `HECATONCHEIRES_CLOUD_STORAGE_PREFIX` - Optional object key prefix within the Cloud Storage bucket
 - Logger configuration (format, level, output destination)
+- Sentry (optional) - `HECATONCHEIRES_SENTRY_DSN` enables Sentry error reporting via `errutil.Handle`. Companion vars: `HECATONCHEIRES_SENTRY_ENV`, `HECATONCHEIRES_SENTRY_RELEASE`. See `docs/config.md` § Observability (Sentry).
 
 ## Testing
 

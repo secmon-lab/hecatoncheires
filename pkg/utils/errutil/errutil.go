@@ -7,40 +7,43 @@ import (
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
+	obssentry "github.com/secmon-lab/hecatoncheires/pkg/utils/observability/sentry"
 )
 
-// Handle logs the error with a message and returns an appropriate user-facing error.
-// This function ensures that all errors, especially 5xx errors, are properly logged.
+// Handle records a non-fatal or already-propagated error to both the
+// structured log and (if configured) Sentry. The logger is taken from ctx
+// so request-scoped fields propagate; goerr values become structured log
+// attributes and Sentry contexts.
 func Handle(ctx context.Context, err error, msg string) {
 	if err == nil {
 		return
 	}
 
-	logger := logging.Default()
+	logger := logging.From(ctx)
 
-	// Extract goerr values for structured logging
-	if ge := goerr.Unwrap(err); ge != nil {
-		// Log with all context from goerr
+	var ge *goerr.Error
+	if errors.As(err, &ge) {
 		logger.Error(msg,
 			"error", err.Error(),
 			"values", ge.Values(),
-			"stack", ge.StackTrace(),
+			"stack", ge.Stacks(),
 		)
 	} else {
-		// Log standard error
 		logger.Error(msg, "error", err.Error())
 	}
+
+	obssentry.Capture(ctx, err)
 }
 
-// HandleHTTP logs the error and writes an appropriate HTTP error response.
+// HandleHTTP logs the error like Handle and additionally writes an HTTP
+// error response with the given status code. The logger is taken from ctx.
 func HandleHTTP(ctx context.Context, w http.ResponseWriter, err error, statusCode int) {
 	if err == nil {
 		return
 	}
 
-	logger := logging.Default()
+	logger := logging.From(ctx)
 
-	// Always log errors, especially 5xx errors
 	var ge *goerr.Error
 	if errors.As(err, &ge) {
 		logger.Error("HTTP error",
@@ -56,6 +59,6 @@ func HandleHTTP(ctx context.Context, w http.ResponseWriter, err error, statusCod
 		)
 	}
 
-	// Write HTTP error response
+	obssentry.Capture(ctx, err)
 	http.Error(w, err.Error(), statusCode)
 }

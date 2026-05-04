@@ -8,6 +8,7 @@ import (
 	"github.com/m-mizutani/gollem"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool"
 	slackservice "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
 // postMessageTool posts a message to the case's Slack channel.
@@ -47,10 +48,14 @@ func (t *postMessageTool) Run(ctx context.Context, args map[string]any) (map[str
 		tool.Update(ctx, "Posting thread reply...")
 		ts, err := t.slack.PostThreadReply(ctx, t.channelID, threadTS, text)
 		if err != nil {
-			return nil, goerr.Wrap(err, "failed to post thread reply",
-				goerr.V("channelID", t.channelID),
-				goerr.V("threadTS", threadTS),
-			)
+			opts := []goerr.Option{
+				goerr.V("channel_id", t.channelID),
+				goerr.V("thread_ts", threadTS),
+			}
+			opts = append(opts, slackErrorAttrs(err)...)
+			wrapped := goerr.Wrap(err, "failed to post thread reply", opts...)
+			errutil.Handle(ctx, wrapped, "slack post thread reply failed")
+			return nil, wrapped
 		}
 		return map[string]any{
 			"timestamp":  ts,
@@ -62,9 +67,13 @@ func (t *postMessageTool) Run(ctx context.Context, args map[string]any) (map[str
 	tool.Update(ctx, "Posting message...")
 	ts, err := t.slack.PostMessage(ctx, t.channelID, nil, text)
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to post message",
-			goerr.V("channelID", t.channelID),
-		)
+		opts := []goerr.Option{
+			goerr.V("channel_id", t.channelID),
+		}
+		opts = append(opts, slackErrorAttrs(err)...)
+		wrapped := goerr.Wrap(err, "failed to post message", opts...)
+		errutil.Handle(ctx, wrapped, "slack post message failed")
+		return nil, wrapped
 	}
 	return map[string]any{
 		"timestamp":  ts,
