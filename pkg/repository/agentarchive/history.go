@@ -29,10 +29,6 @@ func NewCloudStorageHistoryRepository(client *storage.Client, bucket, prefix str
 	return &CloudStorageHistoryRepository{client: client, bucket: bucket, prefix: prefix}
 }
 
-func (r *CloudStorageHistoryRepository) historyObject(sessionID string) string {
-	return historyObjectPath(r.prefix, sessionID)
-}
-
 // Load returns the persisted history for the given sessionID. It returns
 // (nil, nil) when no history is stored yet, or when the persisted blob is
 // unreadable (corrupt JSON, version mismatch); in the latter cases the error
@@ -42,7 +38,8 @@ func (r *CloudStorageHistoryRepository) Load(ctx context.Context, sessionID stri
 		return nil, goerr.New("sessionID is required")
 	}
 
-	obj := r.client.Bucket(r.bucket).Object(r.historyObject(sessionID))
+	objName := historyObjectPath(r.prefix, sessionID)
+	obj := r.client.Bucket(r.bucket).Object(objName)
 	rc, err := obj.NewReader(ctx)
 	if err != nil {
 		if errors.Is(err, storage.ErrObjectNotExist) {
@@ -50,7 +47,7 @@ func (r *CloudStorageHistoryRepository) Load(ctx context.Context, sessionID stri
 		}
 		return nil, goerr.Wrap(err, "failed to open history object",
 			goerr.V("bucket", r.bucket),
-			goerr.V("object", r.historyObject(sessionID)),
+			goerr.V("object", objName),
 		)
 	}
 	defer safe.Close(ctx, rc)
@@ -59,7 +56,7 @@ func (r *CloudStorageHistoryRepository) Load(ctx context.Context, sessionID stri
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to read history object",
 			goerr.V("bucket", r.bucket),
-			goerr.V("object", r.historyObject(sessionID)),
+			goerr.V("object", objName),
 		)
 	}
 
@@ -67,7 +64,7 @@ func (r *CloudStorageHistoryRepository) Load(ctx context.Context, sessionID stri
 	if err := json.Unmarshal(data, &h); err != nil {
 		errutil.Handle(ctx, goerr.Wrap(err, "history blob is unreadable; restarting session",
 			goerr.V("bucket", r.bucket),
-			goerr.V("object", r.historyObject(sessionID)),
+			goerr.V("object", objName),
 		), "agent history load fallback")
 		return nil, nil
 	}
@@ -91,20 +88,20 @@ func (r *CloudStorageHistoryRepository) Save(ctx context.Context, sessionID stri
 		return goerr.Wrap(err, "failed to marshal history")
 	}
 
-	obj := r.client.Bucket(r.bucket).Object(r.historyObject(sessionID))
-	w := obj.NewWriter(ctx)
+	objName := historyObjectPath(r.prefix, sessionID)
+	w := r.client.Bucket(r.bucket).Object(objName).NewWriter(ctx)
 	w.ContentType = "application/json"
 	if _, err := w.Write(data); err != nil {
 		safe.Close(ctx, w)
 		return goerr.Wrap(err, "failed to write history object",
 			goerr.V("bucket", r.bucket),
-			goerr.V("object", r.historyObject(sessionID)),
+			goerr.V("object", objName),
 		)
 	}
 	if err := w.Close(); err != nil {
 		return goerr.Wrap(err, "failed to close history writer",
 			goerr.V("bucket", r.bucket),
-			goerr.V("object", r.historyObject(sessionID)),
+			goerr.V("object", objName),
 		)
 	}
 	return nil

@@ -33,10 +33,6 @@ func NewCloudStorageTraceRepository(client *storage.Client, bucket, prefix strin
 // ID. Callers MUST populate it when constructing the recorder.
 const SessionIDLabel = "session_id"
 
-func traceObject(prefix, sessionID, traceID string) string {
-	return traceObjectPath(prefix, sessionID, traceID)
-}
-
 // Save writes the trace as JSON under the bucket. The session ID is read from
 // trace.Metadata.Labels["session_id"]; an error is returned if missing.
 func (r *CloudStorageTraceRepository) Save(ctx context.Context, t *trace.Trace) error {
@@ -60,7 +56,7 @@ func (r *CloudStorageTraceRepository) Save(ctx context.Context, t *trace.Trace) 
 		)
 	}
 
-	objName := traceObject(r.prefix, sessionID, t.TraceID)
+	objName := traceObjectPath(r.prefix, sessionID, t.TraceID)
 	w := r.client.Bucket(r.bucket).Object(objName).NewWriter(ctx)
 	w.ContentType = "application/json"
 	if _, err := w.Write(data); err != nil {
