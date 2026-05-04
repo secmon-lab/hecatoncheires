@@ -182,6 +182,8 @@ func (uc *SlackUseCases) HandleSlashCommand(ctx context.Context, triggerID, user
 // HandleWorkspaceSelectSubmit processes the workspace selection modal submission.
 // It returns the case creation modal view to replace the current modal via response_action: update.
 func (uc *SlackUseCases) HandleWorkspaceSelectSubmit(ctx context.Context, callback *slack.InteractionCallback) (*slack.ModalViewRequest, error) {
+	ctx = uc.contextWithUserLang(ctx, callback.User.ID)
+
 	// Extract selected workspace from radio buttons
 	blockValues := callback.View.State.Values
 	radioBlock, ok := blockValues[SlackBlockIDWorkspaceSelect]
@@ -219,6 +221,8 @@ func (uc *SlackUseCases) HandleWorkspaceSelectSubmit(ctx context.Context, callba
 // HandleCaseCreationSubmit processes the case creation modal submission.
 // It creates a case using CaseUseCase and posts a confirmation message.
 func (uc *SlackUseCases) HandleCaseCreationSubmit(ctx context.Context, caseUC *CaseUseCase, callback *slack.InteractionCallback) error {
+	ctx = uc.contextWithUserLang(ctx, callback.User.ID)
+
 	// Extract fields from view state
 	blockValues := callback.View.State.Values
 
@@ -718,6 +722,8 @@ func (uc *SlackUseCases) buildCaseEditModal(ctx context.Context, workspaceID, ch
 // HandleCaseEditSubmit processes the case edit modal submission.
 // It updates the case using CaseUseCase and posts a confirmation message.
 func (uc *SlackUseCases) HandleCaseEditSubmit(ctx context.Context, caseUC *CaseUseCase, callback *slack.InteractionCallback) error {
+	ctx = uc.contextWithUserLang(ctx, callback.User.ID)
+
 	blockValues := callback.View.State.Values
 
 	title := ""
@@ -1026,6 +1032,8 @@ func (uc *SlackUseCases) buildCommandChoiceModal(ctx context.Context, workspaceI
 // It returns the next view (case edit modal or action creation modal) so the
 // controller can respond with response_action: update.
 func (uc *SlackUseCases) HandleCommandChoiceSubmit(ctx context.Context, callback *slack.InteractionCallback) (*slack.ModalViewRequest, error) {
+	ctx = uc.contextWithUserLang(ctx, callback.User.ID)
+
 	blockValues := callback.View.State.Values
 	radioBlock, ok := blockValues[SlackBlockIDCommandChoice]
 	if !ok {
@@ -1202,6 +1210,8 @@ func (uc *SlackUseCases) HandleActionCreationSubmit(ctx context.Context, actionU
 	if actionUC == nil {
 		return goerr.New("action usecase is not available")
 	}
+
+	ctx = uc.contextWithUserLang(ctx, callback.User.ID)
 
 	blockValues := callback.View.State.Values
 
