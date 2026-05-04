@@ -8,6 +8,7 @@ import (
 	"github.com/m-mizutani/gollem"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool"
 	slackservice "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -60,9 +61,8 @@ func (t *searchMessagesTool) Run(ctx context.Context, args map[string]any) (map[
 
 	res, err := t.search.SearchMessages(ctx, query, opts)
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to search slack messages",
-			goerr.V("query", query),
-		)
+		errutil.Handle(ctx, err, "slack search messages failed")
+		return nil, err
 	}
 
 	messages := make([]map[string]any, 0, len(res.Messages))
@@ -221,6 +221,13 @@ func (t *getMessagesTool) fetchOne(ctx context.Context, tgt messageTarget, inclu
 
 	permalink, err := t.slack.GetPermalink(ctx, tgt.channelID, tgt.ts)
 	if err != nil {
+		opts := []goerr.Option{
+			goerr.V("channel_id", tgt.channelID),
+			goerr.V("ts", tgt.ts),
+		}
+		opts = append(opts, slackErrorAttrs(err)...)
+		wrapped := goerr.Wrap(err, "failed to get slack permalink", opts...)
+		errutil.Handle(ctx, wrapped, "slack get permalink failed")
 		out["error"] = err.Error()
 		return out
 	}
@@ -232,6 +239,14 @@ func (t *getMessagesTool) fetchOne(ctx context.Context, tgt messageTarget, inclu
 	}
 	msgs, err := t.slack.GetConversationReplies(ctx, tgt.channelID, tgt.ts, limit)
 	if err != nil {
+		opts := []goerr.Option{
+			goerr.V("channel_id", tgt.channelID),
+			goerr.V("ts", tgt.ts),
+			goerr.V("limit", limit),
+		}
+		opts = append(opts, slackErrorAttrs(err)...)
+		wrapped := goerr.Wrap(err, "failed to get slack conversation replies", opts...)
+		errutil.Handle(ctx, wrapped, "slack get conversation replies failed")
 		out["error"] = err.Error()
 		return out
 	}
@@ -257,4 +272,3 @@ func convertConversationMessages(msgs []slackservice.ConversationMessage) []map[
 	}
 	return out
 }
-

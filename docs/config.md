@@ -17,6 +17,8 @@ Hecatoncheires is configured through a combination of a TOML configuration file 
 11. [Action Section](#action-section)
 12. [Validation Rules](#validation-rules)
 13. [Complete Example](#complete-example)
+14. [GitHub Source Integration](#github-source-integration)
+15. [Observability (Sentry)](#observability-sentry)
 
 ---
 
@@ -115,6 +117,9 @@ The `serve` command (alias: `s`) starts the HTTP server.
 | `--llm-gemini-location` | `HECATONCHEIRES_LLM_GEMINI_LOCATION` | `global` | No | Google Cloud location for Gemini / Claude on Vertex AI |
 | `--cloud-storage-bucket` | `HECATONCHEIRES_CLOUD_STORAGE_BUCKET` | - | Yes\*\*\*\*\* | Cloud Storage bucket holding agent thread session History/Trace blobs. See [agent-session.md](./agent-session.md) |
 | `--cloud-storage-prefix` | `HECATONCHEIRES_CLOUD_STORAGE_PREFIX` | - | No | Optional object key prefix within the Cloud Storage bucket |
+| `--sentry-dsn` | `HECATONCHEIRES_SENTRY_DSN` | - | No | Sentry DSN. Setting a non-empty value enables Sentry error reporting via `errutil.Handle`. See [Observability (Sentry)](#observability-sentry) |
+| `--sentry-env` | `HECATONCHEIRES_SENTRY_ENV` | - | No | Sentry environment tag (e.g., `production`, `staging`) |
+| `--sentry-release` | `HECATONCHEIRES_SENTRY_RELEASE` | - | No | Sentry release identifier (e.g., commit SHA) |
 
 \* Required for OAuth mode. Alternatively, use `--no-auth` with `--slack-bot-token` for development.
 
@@ -901,6 +906,48 @@ GitHub Sources are managed via the GraphQL API:
 Repositories can be specified in `owner/repo` format or as full GitHub URLs (e.g., `https://github.com/owner/repo`).
 
 ---
+
+## Observability (Sentry)
+
+The server can forward errors to [Sentry](https://sentry.io/) in addition to
+the structured log. Sentry is opt-in: leaving `HECATONCHEIRES_SENTRY_DSN`
+empty keeps the SDK uninitialized and the integration becomes a cheap no-op
+(one atomic flag check per error).
+
+### Environment variables
+
+| Env Var | Default | Description |
+|---------|---------|-------------|
+| `HECATONCHEIRES_SENTRY_DSN` | - | Sentry DSN. **Setting this enables Sentry.** |
+| `HECATONCHEIRES_SENTRY_ENV` | - | Environment tag (`production`, `staging`, etc.) |
+| `HECATONCHEIRES_SENTRY_RELEASE` | - | Release identifier — set to the commit SHA in CI |
+
+### What gets reported
+
+Every call to `errutil.Handle` (and the HTTP variant) feeds the error to
+Sentry's `CaptureException`. `goerr` values attached to the error appear as
+the **`goerr_values`** Sentry context, so structured fields such as
+`slack_error`, `query`, or `case_id` show up alongside the exception
+without per-call site changes.
+
+For HTTP requests, Sentry middleware sits right after `RequestID` so
+captures inside a handler automatically carry the request URL, method, and
+headers. Panics propagate through the middleware (`Repanic: true`) so chi's
+`Recoverer` still produces a `500` response after Sentry has captured the
+event.
+
+### Operational troubleshoot
+
+- **Slack `missing_scope` even after adding the scope**: re-install the
+  Slack App to the workspace. Adding scopes in the App Manifest does not
+  re-issue existing tokens; the `xoxp-...` you had before the change still
+  carries the old scope set. Re-install (Install App → Reinstall to
+  Workspace) and replace the token in `HECATONCHEIRES_SLACK_USER_OAUTH_TOKEN`.
+- **Confirming what scope Slack actually wants**: when a Slack call fails,
+  the wrapped error carries the `slack_error` / `slack_response_messages` /
+  `slack_response_warnings` fields. Both the structured log and the Sentry
+  `goerr_values` context include these — search for them to find the
+  Slack-side error code without parsing free-form error strings.
 
 ## See Also
 
