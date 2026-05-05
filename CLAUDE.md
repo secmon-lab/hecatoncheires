@@ -116,6 +116,11 @@ The application follows Domain-Driven Design (DDD) with clean architecture:
 - Development mode: Hot reload on port 5173
 - Production mode: Served from embedded files
 
+##### pnpm version & lockfile policy
+- The pnpm version is pinned in `frontend/package.json` (`packageManager` field). Use Corepack (`corepack enable`) so the local pnpm matches the pin; do NOT install pnpm globally
+- All non-interactive entry points (CI, `frontend/scripts/e2e.sh`, the Dockerfile) MUST install with `--frozen-lockfile`. Never invoke a bare `pnpm install` from a script — it silently rewrites `pnpm-lock.yaml` on version/peer drift
+- `pnpm-lock.yaml` is updated only by an explicit, manual `pnpm install` inside `frontend/`. If `--frozen-lockfile` fails, investigate the drift (pnpm version mismatch, deliberate `package.json` change) — do not just re-run with `pnpm install` to "fix" it
+
 ##### Frontend CSS Styling Guidelines
 **NEVER hardcode color values, spacing, or sizes in CSS files.** Always use CSS variables defined in `frontend/src/styles/global.css`.
 

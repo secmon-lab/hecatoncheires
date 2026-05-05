@@ -38,8 +38,8 @@ Configurable via two CLI flags / environment variables:
 Object layout under the bucket:
 
 ```
-{prefix}/agent_sessions/{sessionID}/history.json
-{prefix}/agent_sessions/{sessionID}/traces/{traceID}.json
+{prefix}/v1/sessions/{sessionID}/history.json
+{prefix}/v1/traces/{sessionID}/{traceID}.json
 ```
 
 - `sessionID` = `AgentSession.ID` (UUIDv7).

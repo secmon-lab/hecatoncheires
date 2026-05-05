@@ -518,6 +518,15 @@ func (r *mutationResolver) DeleteAction(ctx context.Context, workspaceID string,
 	return true, nil
 }
 
+// PostActionSlackMessage is the resolver for the postActionSlackMessage field.
+func (r *mutationResolver) PostActionSlackMessage(ctx context.Context, workspaceID string, id int) (*graphql1.Action, error) {
+	updated, err := r.UseCases.Action.PostSlackMessageToAction(ctx, workspaceID, int64(id))
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLAction(updated, workspaceID), nil
+}
+
 // CreateNotionDBSource is the resolver for the createNotionDBSource field.
 func (r *mutationResolver) CreateNotionDBSource(ctx context.Context, workspaceID string, input graphql1.CreateNotionDBSourceInput) (*graphql1.Source, error) {
 	created, err := r.UseCases.Source.CreateNotionDBSource(ctx, workspaceID, toUseCaseCreateNotionDBSourceInput(input))

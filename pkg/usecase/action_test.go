@@ -421,6 +421,177 @@ func TestActionUseCase_CreateAction_SlackNotification(t *testing.T) {
 	})
 }
 
+func TestActionUseCase_PostSlackMessageToAction(t *testing.T) {
+	t.Run("posts message and persists timestamp on unposted action", func(t *testing.T) {
+		repo := memory.New()
+		mock := &actionTestSlackMock{
+			mockSlackService: mockSlackService{
+				createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+					return fmt.Sprintf("C%d", caseID), nil
+				},
+			},
+			postMessageTS: "9999.123456",
+		}
+		caseUC := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, mock, "https://example.com")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+		gt.Value(t, c.SlackChannelID).NotEqual("")
+
+		// Simulate an action created via the legacy tool path: directly via
+		// the repository, bypassing CreateAction. SlackMessageTS stays empty.
+		raw, err := repo.Action().Create(ctx, testWorkspaceID, &model.Action{
+			CaseID: c.ID,
+			Title:  "Unsent Action",
+			Status: types.ActionStatusTodo,
+		})
+		gt.NoError(t, err).Required()
+		gt.Value(t, raw.SlackMessageTS).Equal("")
+
+		// Reset mock so we observe only the PostSlackMessageToAction call.
+		mock.postMessageCalled = false
+
+		updated, err := actionUC.PostSlackMessageToAction(ctx, testWorkspaceID, raw.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, mock.postMessageCalled).Equal(true)
+		gt.Value(t, mock.postMessageChannel).Equal(c.SlackChannelID)
+		gt.Value(t, updated.SlackMessageTS).Equal("9999.123456")
+
+		retrieved, err := actionUC.GetAction(ctx, testWorkspaceID, raw.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, retrieved.SlackMessageTS).Equal("9999.123456")
+	})
+
+	t.Run("returns ErrSlackMessageAlreadyPosted for action with existing TS", func(t *testing.T) {
+		repo := memory.New()
+		mock := &actionTestSlackMock{
+			mockSlackService: mockSlackService{
+				createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+					return fmt.Sprintf("C%d", caseID), nil
+				},
+			},
+			postMessageTS: "1.1",
+		}
+		caseUC := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, mock, "https://example.com")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Posted Action", "Desc", "", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+		gt.Value(t, created.SlackMessageTS).NotEqual("")
+
+		mock.postMessageCalled = false
+		_, err = actionUC.PostSlackMessageToAction(ctx, testWorkspaceID, created.ID)
+		gt.Error(t, err).Is(usecase.ErrSlackMessageAlreadyPosted)
+		gt.Value(t, mock.postMessageCalled).Equal(false)
+	})
+
+	t.Run("returns ErrCaseHasNoSlackChannel when parent has no channel", func(t *testing.T) {
+		repo := memory.New()
+		// Build a Slack mock that records calls but returns a TS — to confirm
+		// that PostMessage was NEVER invoked when channel is missing.
+		mock := &actionTestSlackMock{postMessageTS: "should-not-be-used"}
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, mock, "https://example.com")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+		gt.Value(t, c.SlackChannelID).Equal("")
+
+		raw, err := repo.Action().Create(ctx, testWorkspaceID, &model.Action{
+			CaseID: c.ID,
+			Title:  "Unsent Action",
+			Status: types.ActionStatusTodo,
+		})
+		gt.NoError(t, err).Required()
+
+		_, err = actionUC.PostSlackMessageToAction(ctx, testWorkspaceID, raw.ID)
+		gt.Error(t, err).Is(usecase.ErrCaseHasNoSlackChannel)
+		gt.Value(t, mock.postMessageCalled).Equal(false)
+	})
+
+	t.Run("returns ErrActionNotFound for unknown action", func(t *testing.T) {
+		repo := memory.New()
+		mock := &actionTestSlackMock{}
+		actionUC := usecase.NewActionUseCase(repo, nil, mock, "https://example.com")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		_, err := actionUC.PostSlackMessageToAction(ctx, testWorkspaceID, 99999)
+		gt.Error(t, err).Is(usecase.ErrActionNotFound)
+	})
+
+	t.Run("denies access to non-member of private case", func(t *testing.T) {
+		repo := memory.New()
+		mock := &actionTestSlackMock{
+			mockSlackService: mockSlackService{
+				createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+					return fmt.Sprintf("C%d", caseID), nil
+				},
+			},
+			postMessageTS: "should-not-post",
+		}
+		caseUC := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, mock, "https://example.com")
+		memberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMEMBER"})
+
+		c, err := caseUC.CreateCase(memberCtx, testWorkspaceID, "Private Case", "Desc",
+			[]string{"UMEMBER"}, nil, true, "", "")
+		gt.NoError(t, err).Required()
+
+		raw, err := repo.Action().Create(memberCtx, testWorkspaceID, &model.Action{
+			CaseID: c.ID,
+			Title:  "Private Action",
+			Status: types.ActionStatusTodo,
+		})
+		gt.NoError(t, err).Required()
+
+		outsiderCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOUTSIDER"})
+		_, err = actionUC.PostSlackMessageToAction(outsiderCtx, testWorkspaceID, raw.ID)
+		gt.Error(t, err).Is(usecase.ErrAccessDenied)
+		gt.Value(t, mock.postMessageCalled).Equal(false)
+	})
+
+	t.Run("returns wrapped error when Slack PostMessage fails", func(t *testing.T) {
+		repo := memory.New()
+		mock := &actionTestSlackMock{
+			mockSlackService: mockSlackService{
+				createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+					return fmt.Sprintf("C%d", caseID), nil
+				},
+			},
+			postMessageErr: errors.New("slack outage"),
+		}
+		caseUC := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, mock, "https://example.com")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		raw, err := repo.Action().Create(ctx, testWorkspaceID, &model.Action{
+			CaseID: c.ID,
+			Title:  "Unsent",
+			Status: types.ActionStatusTodo,
+		})
+		gt.NoError(t, err).Required()
+
+		_, err = actionUC.PostSlackMessageToAction(ctx, testWorkspaceID, raw.ID)
+		gt.Value(t, err).NotNil()
+		// Slack failure must NOT be silently swallowed for the strict path.
+		gt.String(t, err.Error()).Contains("slack outage")
+
+		retrieved, err := actionUC.GetAction(ctx, testWorkspaceID, raw.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, retrieved.SlackMessageTS).Equal("")
+	})
+}
+
 // actionTestSlackMockExt extends actionTestSlackMock to also capture
 // PostThreadMessage calls used by change-notification tests.
 type actionTestSlackMockExt struct {

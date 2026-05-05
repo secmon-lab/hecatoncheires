@@ -210,6 +210,7 @@ type ComplexityRoot struct {
 		DeleteCase             func(childComplexity int, workspaceID string, id int) int
 		DeleteSource           func(childComplexity int, workspaceID string, id string) int
 		Noop                   func(childComplexity int) int
+		PostActionSlackMessage func(childComplexity int, workspaceID string, id int) int
 		ReopenCase             func(childComplexity int, workspaceID string, id int) int
 		SyncCaseChannelUsers   func(childComplexity int, workspaceID string, id int) int
 		UpdateAction           func(childComplexity int, workspaceID string, input graphql1.UpdateActionInput) int
@@ -370,6 +371,7 @@ type MutationResolver interface {
 	CreateAction(ctx context.Context, workspaceID string, input graphql1.CreateActionInput) (*graphql1.Action, error)
 	UpdateAction(ctx context.Context, workspaceID string, input graphql1.UpdateActionInput) (*graphql1.Action, error)
 	DeleteAction(ctx context.Context, workspaceID string, id int) (bool, error)
+	PostActionSlackMessage(ctx context.Context, workspaceID string, id int) (*graphql1.Action, error)
 	CreateNotionDBSource(ctx context.Context, workspaceID string, input graphql1.CreateNotionDBSourceInput) (*graphql1.Source, error)
 	CreateNotionPageSource(ctx context.Context, workspaceID string, input graphql1.CreateNotionPageSourceInput) (*graphql1.Source, error)
 	CreateSlackSource(ctx context.Context, workspaceID string, input graphql1.CreateSlackSourceInput) (*graphql1.Source, error)
@@ -1148,6 +1150,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.Noop(childComplexity), true
+	case "Mutation.postActionSlackMessage":
+		if e.complexity.Mutation.PostActionSlackMessage == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_postActionSlackMessage_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.PostActionSlackMessage(childComplexity, args["workspaceId"].(string), args["id"].(int)), true
 	case "Mutation.reopenCase":
 		if e.complexity.Mutation.ReopenCase == nil {
 			break
@@ -2310,6 +2323,11 @@ type Mutation {
   createAction(workspaceId: String!, input: CreateActionInput!): Action!
   updateAction(workspaceId: String!, input: UpdateActionInput!): Action!
   deleteAction(workspaceId: String!, id: Int!): Boolean!
+  # Posts the Slack message for an Action whose initial post was missed
+  # (legacy tool-created actions before the create paths were unified).
+  # Errors if the action already has a Slack message timestamp or if the
+  # parent Case has no Slack channel.
+  postActionSlackMessage(workspaceId: String!, id: Int!): Action!
 
   # Sources
   createNotionDBSource(workspaceId: String!, input: CreateNotionDBSourceInput!): Source!
@@ -2553,6 +2571,22 @@ func (ec *executionContext) field_Mutation_deleteSource_args(ctx context.Context
 	}
 	args["workspaceId"] = arg0
 	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_postActionSlackMessage_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNInt2int)
 	if err != nil {
 		return nil, err
 	}
@@ -6682,6 +6716,77 @@ func (ec *executionContext) fieldContext_Mutation_deleteAction(ctx context.Conte
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Mutation_deleteAction_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_postActionSlackMessage(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_postActionSlackMessage,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().PostActionSlackMessage(ctx, fc.Args["workspaceId"].(string), fc.Args["id"].(int))
+		},
+		nil,
+		ec.marshalNAction2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐAction,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_postActionSlackMessage(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Action_id(ctx, field)
+			case "caseID":
+				return ec.fieldContext_Action_caseID(ctx, field)
+			case "case":
+				return ec.fieldContext_Action_case(ctx, field)
+			case "title":
+				return ec.fieldContext_Action_title(ctx, field)
+			case "description":
+				return ec.fieldContext_Action_description(ctx, field)
+			case "assigneeID":
+				return ec.fieldContext_Action_assigneeID(ctx, field)
+			case "assignee":
+				return ec.fieldContext_Action_assignee(ctx, field)
+			case "slackMessageTS":
+				return ec.fieldContext_Action_slackMessageTS(ctx, field)
+			case "status":
+				return ec.fieldContext_Action_status(ctx, field)
+			case "dueDate":
+				return ec.fieldContext_Action_dueDate(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Action_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Action_updatedAt(ctx, field)
+			case "messages":
+				return ec.fieldContext_Action_messages(ctx, field)
+			case "events":
+				return ec.fieldContext_Action_events(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Action", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_postActionSlackMessage_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -13527,6 +13632,13 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 		case "deleteAction":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_deleteAction(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "postActionSlackMessage":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_postActionSlackMessage(ctx, field)
 			})
 			if out.Values[i] == graphql.Null {
 				out.Invalids++

@@ -44,6 +44,11 @@ type AgentUseCase struct {
 	embedClient  interfaces.EmbedClient
 	historyRepo  gollem.HistoryRepository
 	traceRepo    trace.Repository
+	// actionUC is the unified entry point for Action mutations. The
+	// core__create_action tool calls through this to keep tool-driven
+	// creates aligned with GraphQL/Slack-modal creates (Slack post,
+	// ActionEvent records, etc.).
+	actionUC *ActionUseCase
 }
 
 // NewAgentUseCase creates a new AgentUseCase instance.
@@ -54,7 +59,10 @@ type AgentUseCase struct {
 // historyRepo and traceRepo are required: the agent session flow persists
 // gollem.History across mentions and writes a trace for each Execute. Pass
 // agentarchive.NewMemoryHistoryRepository / NewMemoryTraceRepository in tests.
-func NewAgentUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackSearch slacktool.SearchService, notionTool notiontool.Client, llmClient gollem.LLMClient, embedClient interfaces.EmbedClient, historyRepo gollem.HistoryRepository, traceRepo trace.Repository) *AgentUseCase {
+//
+// actionUC is required: the core__create_action tool routes through it so all
+// Action create paths share the same usecase implementation.
+func NewAgentUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackSearch slacktool.SearchService, notionTool notiontool.Client, llmClient gollem.LLMClient, embedClient interfaces.EmbedClient, historyRepo gollem.HistoryRepository, traceRepo trace.Repository, actionUC *ActionUseCase) *AgentUseCase {
 	return &AgentUseCase{
 		repo:         repo,
 		registry:     registry,
@@ -65,6 +73,7 @@ func NewAgentUseCase(repo interfaces.Repository, registry *model.WorkspaceRegist
 		embedClient:  embedClient,
 		historyRepo:  historyRepo,
 		traceRepo:    traceRepo,
+		actionUC:     actionUC,
 	}
 }
 
@@ -131,7 +140,19 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 	if err != nil {
 		return goerr.Wrap(err, "failed to partition conversation")
 	}
-	systemPrompt := uc.buildSystemPrompt(foundCase, entry, actions, systemMessages)
+	// When this thread is bound to a specific Action, surface that action's
+	// detail instead of the case-wide action list (which would just be noise
+	// for an action-scoped conversation).
+	var currentAction *model.Action
+	if session.ActionID != 0 {
+		for _, a := range actions {
+			if a.ID == session.ActionID {
+				currentAction = a
+				break
+			}
+		}
+	}
+	systemPrompt := uc.buildSystemPrompt(foundCase, entry, msg.ChannelID(), time.Now().UTC(), currentAction, actions, systemMessages)
 	userInput := buildAgentUserInput(deltaMessages, msg)
 
 	// Slack-side trace banner (per-mention; not persisted).
@@ -166,6 +187,7 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 		WorkspaceID: entry.Workspace.ID,
 		CaseID:      foundCase.ID,
 		StatusSet:   entry.ActionStatusSet,
+		ActionUC:    NewActionToolAdapter(uc.actionUC),
 	})
 
 	// Slack and Notion tools are independent packages. Each gates its own tools
@@ -499,26 +521,51 @@ type promptMessage struct {
 	Text        string
 }
 
-// promptAction represents an action for template rendering
+// promptAction represents a single action in the case-wide action list
+// (rendered when the agent is NOT in an action-bound thread). It is kept
+// minimal — only ID and Title — because outside an action thread the LLM
+// only needs to know which actions exist; details are reachable via tools.
 type promptAction struct {
+	ID    int64
+	Title string
+}
+
+// promptCurrentAction represents the action that the current Slack thread
+// is bound to (when AgentSession.ActionID != 0). The full set of fields is
+// inlined so the LLM can answer questions about it without a tool call.
+type promptCurrentAction struct {
 	ID          int64
 	Title       string
 	Status      string
 	StatusEmoji string
-	Assignees   string
+	Assignee    string // empty when unassigned; template renders "unassigned"
+	Description string
+	DueDate     string // empty when no due date set
 }
 
 // agentPromptData holds all data for the agent system prompt template
 type agentPromptData struct {
-	Case     *model.Case
-	Fields   []promptField
-	Actions  []promptAction
-	Messages []promptMessage
+	ChannelID     string
+	Now           string
+	Case          *model.Case
+	Fields        []promptField
+	CurrentAction *promptCurrentAction
+	Actions       []promptAction
+	Messages      []promptMessage
 }
 
-func (uc *AgentUseCase) buildSystemPrompt(c *model.Case, entry *model.WorkspaceEntry, actions []*model.Action, messages []slack.ConversationMessage) string {
+// buildSystemPrompt renders the agent system prompt.
+//
+// When currentAction is non-nil, the agent is responding inside a Slack
+// thread bound to that action (AgentSession.ActionID != 0). In that mode
+// the case-wide actions list is suppressed — only the current action's
+// detail is surfaced, to avoid drowning the LLM in unrelated work items.
+// Otherwise the case-wide actions list is rendered as a title-only summary.
+func (uc *AgentUseCase) buildSystemPrompt(c *model.Case, entry *model.WorkspaceEntry, channelID string, now time.Time, currentAction *model.Action, actions []*model.Action, messages []slack.ConversationMessage) string {
 	data := agentPromptData{
-		Case: c,
+		ChannelID: channelID,
+		Now:       now.UTC().Format(time.RFC3339),
+		Case:      c,
 	}
 
 	// Build field values with schema names
@@ -537,19 +584,32 @@ func (uc *AgentUseCase) buildSystemPrompt(c *model.Case, entry *model.WorkspaceE
 		}
 	}
 
-	// Build action list
-	statusSet := model.DefaultActionStatusSet()
-	if entry != nil && entry.ActionStatusSet != nil {
-		statusSet = entry.ActionStatusSet
-	}
-	for _, a := range actions {
-		data.Actions = append(data.Actions, promptAction{
-			ID:          a.ID,
-			Title:       a.Title,
-			Status:      a.Status.String(),
-			StatusEmoji: statusSet.Emoji(string(a.Status)),
-			Assignees:   a.AssigneeID,
-		})
+	if currentAction != nil {
+		statusSet := model.DefaultActionStatusSet()
+		if entry != nil && entry.ActionStatusSet != nil {
+			statusSet = entry.ActionStatusSet
+		}
+		due := ""
+		if currentAction.DueDate != nil {
+			due = currentAction.DueDate.UTC().Format(time.RFC3339)
+		}
+		data.CurrentAction = &promptCurrentAction{
+			ID:          currentAction.ID,
+			Title:       currentAction.Title,
+			Status:      currentAction.Status.String(),
+			StatusEmoji: statusSet.Emoji(string(currentAction.Status)),
+			Assignee:    currentAction.AssigneeID,
+			Description: currentAction.Description,
+			DueDate:     due,
+		}
+	} else {
+		// Case-wide action list: title-only summary.
+		for _, a := range actions {
+			data.Actions = append(data.Actions, promptAction{
+				ID:    a.ID,
+				Title: a.Title,
+			})
+		}
 	}
 
 	// Build conversation messages
@@ -593,14 +653,30 @@ func (uc *AgentUseCase) newTraceMessage(channelID, threadTS string) *traceMessag
 	}
 }
 
-// buildContextBlocks builds context blocks from the accumulated trace lines
-func (tm *traceMessage) buildContextBlocks() []goslack.Block {
-	text := strings.Join(tm.lines, " | ")
-	return []goslack.Block{
-		goslack.NewContextBlock("",
-			goslack.NewTextBlockObject(goslack.MarkdownType, text, false, false),
-		),
+// maxTraceBlocks caps the number of context blocks emitted per trace message.
+// Slack rejects messages with more than 50 blocks (`invalid_blocks`), so when a
+// long-running agent produces more lines we keep only the most recent ones.
+const maxTraceBlocks = 50
+
+// buildTraceContextBlocks renders one context block per trace line so progress
+// reads as a vertical list instead of a single ever-growing one-liner. When the
+// line count exceeds Slack's 50-block message limit, only the most recent lines
+// are rendered.
+func buildTraceContextBlocks(lines []string) []goslack.Block {
+	if len(lines) > maxTraceBlocks {
+		lines = lines[len(lines)-maxTraceBlocks:]
 	}
+	blocks := make([]goslack.Block, 0, len(lines))
+	for _, line := range lines {
+		blocks = append(blocks, goslack.NewContextBlock("",
+			goslack.NewTextBlockObject(goslack.MarkdownType, line, false, false),
+		))
+	}
+	return blocks
+}
+
+func (tm *traceMessage) buildContextBlocks() []goslack.Block {
+	return buildTraceContextBlocks(tm.lines)
 }
 
 // update adds a line to the trace message and posts/updates in Slack as a context block
@@ -611,7 +687,7 @@ func (tm *traceMessage) update(ctx context.Context, line string) {
 	logger := logging.From(ctx)
 	tm.lines = append(tm.lines, line)
 	blocks := tm.buildContextBlocks()
-	fallback := strings.Join(tm.lines, " | ")
+	fallback := strings.Join(tm.lines, "\n")
 
 	if tm.messageTS == "" {
 		ts, err := tm.slackService.PostThreadMessage(ctx, tm.channelID, tm.threadTS, blocks, fallback)

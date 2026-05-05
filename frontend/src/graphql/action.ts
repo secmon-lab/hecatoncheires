@@ -120,6 +120,14 @@ export const DELETE_ACTION = gql`
   }
 `
 
+export const POST_ACTION_SLACK_MESSAGE = gql`
+  mutation PostActionSlackMessage($workspaceId: String!, $id: Int!) {
+    postActionSlackMessage(workspaceId: $workspaceId, id: $id) {
+      ${ACTION_FIELDS}
+    }
+  }
+`
+
 export const GET_OPEN_CASE_ACTIONS = gql`
   query GetOpenCaseActions($workspaceId: String!) {
     openCaseActions(workspaceId: $workspaceId) {

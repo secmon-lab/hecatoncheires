@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -198,7 +199,7 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 
 		llmClient := &mockLLMClient{}
 
-		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
+		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil)
 
 		msg := slackmodel.NewMessageFromData(
 			"1234567890.000002",
@@ -253,7 +254,7 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 
 		llmClient := &mockLLMClient{}
 
-		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
+		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil)
 
 		msg := slackmodel.NewMessageFromData(
 			"1234567890.000011",
@@ -291,7 +292,7 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 		slackMock := &agentTestSlackService{}
 		llmClient := &mockLLMClient{}
 
-		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
+		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil)
 
 		msg := slackmodel.NewMessageFromData(
 			"1234567890.000100",
@@ -334,7 +335,7 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 
 		llmClient := &mockLLMClient{}
 
-		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
+		agentUC := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil)
 
 		msg := slackmodel.NewMessageFromData(
 			"1234567890.000200",
@@ -386,8 +387,9 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 			{UserID: "U001", UserName: "alice", Text: "Hello", Timestamp: "1234567890.000001"},
 		}
 
-		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
-		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, nil, messages)
+		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil)
+		now := time.Date(2026, 5, 4, 12, 30, 0, 0, time.UTC)
+		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, "C0TEST", now, nil, nil, messages)
 
 		gt.Value(t, strings.Contains(prompt, "Important Case")).Equal(true)
 		gt.Value(t, strings.Contains(prompt, "This is very important")).Equal(true)
@@ -397,10 +399,35 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 		gt.Value(t, strings.Contains(prompt, "Slack's mrkdwn format")).Equal(true)
 		gt.Value(t, strings.Contains(prompt, "Do NOT use Markdown headers")).Equal(true)
 	})
+
+	t.Run("system prompt includes channel ID and current time", func(t *testing.T) {
+		repo := memory.New()
+		slackMock := &agentTestSlackService{}
+		llmClient := &mockLLMClient{}
+
+		entry := &model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "ws-test", Name: "Test"},
+		}
+		c := &model.Case{
+			Title:  "Test Case",
+			Status: types.CaseStatusOpen,
+		}
+
+		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil)
+		now := time.Date(2026, 5, 4, 12, 30, 45, 0, time.UTC)
+		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, "C0123ABC", now, nil, nil, nil)
+
+		gt.Value(t, strings.Contains(prompt, "## Slack Context")).Equal(true)
+		gt.Value(t, strings.Contains(prompt, "Channel ID: C0123ABC")).Equal(true)
+		gt.Value(t, strings.Contains(prompt, "## Current Time")).Equal(true)
+		gt.Value(t, strings.Contains(prompt, "2026-05-04T12:30:45Z")).Equal(true)
+	})
 }
 
 func TestAgentSystemPrompt_Actions(t *testing.T) {
-	t.Run("prompt includes actions when present", func(t *testing.T) {
+	fixedNow := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
+
+	t.Run("Actions list outside action thread is title-only", func(t *testing.T) {
 		repo := memory.New()
 		slackMock := &agentTestSlackService{}
 		llmClient := &mockLLMClient{}
@@ -426,15 +453,87 @@ func TestAgentSystemPrompt_Actions(t *testing.T) {
 			},
 		}
 
-		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
-		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, actions, nil)
+		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil)
+		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, "C0TEST", fixedNow, nil, actions, nil)
 
 		gt.Value(t, strings.Contains(prompt, "## Actions")).Equal(true)
 		gt.Value(t, strings.Contains(prompt, "Investigate the issue")).Equal(true)
 		gt.Value(t, strings.Contains(prompt, "Write report")).Equal(true)
-		gt.Value(t, strings.Contains(prompt, "U001")).Equal(true)
+		// Status / Assignee detail must NOT leak into the case-wide list.
+		gt.Value(t, strings.Contains(prompt, "U001")).Equal(false)
+		gt.Value(t, strings.Contains(prompt, "IN_PROGRESS")).Equal(false)
+		gt.Value(t, strings.Contains(prompt, "TODO")).Equal(false)
+		// And the Current Action section must be absent.
+		gt.Value(t, strings.Contains(prompt, "## Current Action")).Equal(false)
+	})
+
+	t.Run("prompt shows Current Action when in action thread", func(t *testing.T) {
+		repo := memory.New()
+		slackMock := &agentTestSlackService{}
+		llmClient := &mockLLMClient{}
+
+		entry := &model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "ws-test", Name: "Test"},
+		}
+		c := &model.Case{
+			Title:  "Test Case",
+			Status: types.CaseStatusOpen,
+		}
+		due := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
+		currentAction := &model.Action{
+			ID:          7,
+			Title:       "Patch the vulnerable library",
+			Description: "Bump dep to 1.2.3 and rerun integration tests.",
+			Status:      types.ActionStatusInProgress,
+			AssigneeID:  "U777",
+			DueDate:     &due,
+		}
+		// Sibling actions on the same case must NOT appear when the thread
+		// is bound to currentAction.
+		others := []*model.Action{
+			{ID: 8, Title: "Sibling action"},
+		}
+
+		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil)
+		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, "C0TEST", fixedNow, currentAction, others, nil)
+
+		gt.Value(t, strings.Contains(prompt, "## Current Action")).Equal(true)
+		gt.Value(t, strings.Contains(prompt, "Patch the vulnerable library")).Equal(true)
 		gt.Value(t, strings.Contains(prompt, "IN_PROGRESS")).Equal(true)
-		gt.Value(t, strings.Contains(prompt, "TODO")).Equal(true)
+		gt.Value(t, strings.Contains(prompt, "Assignee: U777")).Equal(true)
+		gt.Value(t, strings.Contains(prompt, "Bump dep to 1.2.3")).Equal(true)
+		gt.Value(t, strings.Contains(prompt, "2026-06-01T09:00:00Z")).Equal(true)
+		// Case-wide actions must be suppressed in this mode.
+		gt.Value(t, strings.Contains(prompt, "## Actions")).Equal(false)
+		gt.Value(t, strings.Contains(prompt, "Sibling action")).Equal(false)
+	})
+
+	t.Run("Current Action without assignee renders unassigned", func(t *testing.T) {
+		repo := memory.New()
+		slackMock := &agentTestSlackService{}
+		llmClient := &mockLLMClient{}
+
+		entry := &model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "ws-test", Name: "Test"},
+		}
+		c := &model.Case{
+			Title:  "Test Case",
+			Status: types.CaseStatusOpen,
+		}
+		currentAction := &model.Action{
+			ID:     9,
+			Title:  "Triage",
+			Status: types.ActionStatusTodo,
+		}
+
+		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil)
+		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, "C0TEST", fixedNow, currentAction, nil, nil)
+
+		gt.Value(t, strings.Contains(prompt, "Assignee: unassigned")).Equal(true)
+		// No Due line when DueDate is nil.
+		gt.Value(t, strings.Contains(prompt, "- Due:")).Equal(false)
+		// No Description section when Description is empty.
+		gt.Value(t, strings.Contains(prompt, "### Description")).Equal(false)
 	})
 
 	t.Run("actions section absent when empty", func(t *testing.T) {
@@ -450,10 +549,11 @@ func TestAgentSystemPrompt_Actions(t *testing.T) {
 			Status: types.CaseStatusOpen,
 		}
 
-		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
-		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, nil, nil)
+		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil)
+		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, "C0TEST", fixedNow, nil, nil, nil)
 
 		gt.Value(t, strings.Contains(prompt, "## Actions")).Equal(false)
+		gt.Value(t, strings.Contains(prompt, "## Current Action")).Equal(false)
 	})
 }
 
@@ -480,6 +580,57 @@ func TestParseAgentActionValue(t *testing.T) {
 	})
 }
 
+func TestBuildTraceContextBlocks(t *testing.T) {
+	t.Run("empty lines produce empty blocks", func(t *testing.T) {
+		blocks := usecase.BuildTraceContextBlocksForTest(nil)
+		gt.Array(t, blocks).Length(0)
+	})
+
+	t.Run("each line becomes its own context block", func(t *testing.T) {
+		lines := []string{
+			"\U0001f527 `tool_a`",
+			"\U0001f527 `tool_b`",
+			"❌ Error: boom",
+		}
+		blocks := usecase.BuildTraceContextBlocksForTest(lines)
+		gt.Array(t, blocks).Length(len(lines)).Required()
+
+		for i, block := range blocks {
+			ctxBlock, ok := block.(*goslack.ContextBlock)
+			gt.Bool(t, ok).True().Required()
+			gt.Value(t, ctxBlock.Type).Equal(goslack.MBTContext)
+			gt.Array(t, ctxBlock.ContextElements.Elements).Length(1).Required()
+
+			text, ok := ctxBlock.ContextElements.Elements[0].(*goslack.TextBlockObject)
+			gt.Bool(t, ok).True().Required()
+			gt.Value(t, text.Type).Equal(goslack.MarkdownType)
+			gt.String(t, text.Text).Equal(lines[i])
+		}
+	})
+
+	t.Run("caps blocks at Slack's 50-block per-message limit", func(t *testing.T) {
+		lines := make([]string, 75)
+		for i := range lines {
+			lines[i] = fmt.Sprintf("line-%02d", i)
+		}
+		blocks := usecase.BuildTraceContextBlocksForTest(lines)
+		gt.Array(t, blocks).Length(50).Required()
+
+		// The most recent lines must survive (lines[25] .. lines[74]).
+		first, ok := blocks[0].(*goslack.ContextBlock)
+		gt.Bool(t, ok).True().Required()
+		firstText, ok := first.ContextElements.Elements[0].(*goslack.TextBlockObject)
+		gt.Bool(t, ok).True().Required()
+		gt.String(t, firstText.Text).Equal("line-25")
+
+		last, ok := blocks[49].(*goslack.ContextBlock)
+		gt.Bool(t, ok).True().Required()
+		lastText, ok := last.ContextElements.Elements[0].(*goslack.TextBlockObject)
+		gt.Bool(t, ok).True().Required()
+		gt.String(t, lastText.Text).Equal("line-74")
+	})
+}
+
 func TestAgentUseCase_HandleSessionInfoRequest(t *testing.T) {
 	t.Run("opens modal with session ID", func(t *testing.T) {
 		repo := memory.New()
@@ -490,7 +641,7 @@ func TestAgentUseCase_HandleSessionInfoRequest(t *testing.T) {
 
 		llmClient := &mockLLMClient{}
 		i18n.Init(i18n.LangEN)
-		agentUC := usecase.NewAgentUseCase(repo, nil, mockWithCapture, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
+		agentUC := usecase.NewAgentUseCase(repo, nil, mockWithCapture, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil)
 
 		err := agentUC.HandleSessionInfoRequest(t.Context(), "trigger-123", "test-session-id")
 		gt.NoError(t, err)
@@ -595,7 +746,7 @@ func TestLifecycle_AgentSession(t *testing.T) {
 		},
 	}
 
-	uc := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llm, llm, historyRepo, traceRepo)
+	uc := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llm, llm, historyRepo, traceRepo, nil)
 
 	// --- First mention -----------------------------------------------------
 	first := slackmodel.NewMessageFromData(
@@ -741,7 +892,7 @@ func TestAgentUseCase_DeltaMessageInjection(t *testing.T) {
 		},
 	}
 
-	uc := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llm, llm, historyRepo, traceRepo)
+	uc := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llm, llm, historyRepo, traceRepo, nil)
 
 	msg := slackmodel.NewMessageFromData(
 		newMention,
@@ -811,7 +962,7 @@ func TestAgentUseCase_ActionLinkage(t *testing.T) {
 
 	slackMock := &agentTestSlackService{}
 	llm := &mockLLMClient{}
-	uc := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llm, llm, historyRepo, traceRepo)
+	uc := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, llm, llm, historyRepo, traceRepo, nil)
 
 	msg := slackmodel.NewMessageFromData(
 		"1700200005.000001",

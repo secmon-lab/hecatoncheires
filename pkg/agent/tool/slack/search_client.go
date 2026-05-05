@@ -68,8 +68,11 @@ func NewSearchClient(userToken string) (SearchService, error) {
 	if userToken == "" {
 		return nil, goerr.New("Slack User OAuth Token is required for SearchService")
 	}
+	httpClient := &capturingHTTPClient{
+		inner: &http.Client{Timeout: slackHTTPTimeout},
+	}
 	return &searchClient{
-		api: slack.New(userToken, slack.OptionHTTPClient(&http.Client{Timeout: slackHTTPTimeout})),
+		api: slack.New(userToken, slack.OptionHTTPClient(httpClient)),
 	}, nil
 }
 
@@ -102,13 +105,20 @@ func (c *searchClient) SearchMessages(ctx context.Context, query string, opts Se
 		Count:         count,
 		Page:          1,
 	}
-	resp, err := c.api.SearchMessagesContext(ctx, query, params)
+	captureCtx, capture := contextWithScopeCapture(ctx)
+	resp, err := c.api.SearchMessagesContext(captureCtx, query, params)
 	if err != nil {
 		opts := []goerr.Option{
 			goerr.V("query", query),
 			goerr.V("count", count),
 		}
 		opts = append(opts, slackErrorAttrs(err)...)
+		if capture.needed != "" {
+			opts = append(opts, goerr.V("slack_needed_scope", capture.needed))
+		}
+		if capture.provided != "" {
+			opts = append(opts, goerr.V("slack_provided_scope", capture.provided))
+		}
 		return nil, goerr.Wrap(err, "failed to search slack messages", opts...)
 	}
 

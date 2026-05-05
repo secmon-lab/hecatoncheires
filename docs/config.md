@@ -18,6 +18,7 @@ Hecatoncheires is configured through a combination of a TOML configuration file 
 12. [Complete Example](#complete-example)
 13. [GitHub Source Integration](#github-source-integration)
 14. [Observability (Sentry)](#observability-sentry)
+15. [Diagnosis Command](#diagnosis-command)
 
 ---
 
@@ -143,6 +144,51 @@ The `migrate` command (alias: `m`) manages Firestore indexes.
 | `--firestore-project-id` | `HECATONCHEIRES_FIRESTORE_PROJECT_ID` | - | Yes | Google Cloud Firestore project ID |
 | `--firestore-database-id` | `HECATONCHEIRES_FIRESTORE_DATABASE_ID` | `(default)` | No | Firestore database ID |
 | `--dry-run` | - | `false` | No | Preview migration changes without applying |
+
+### Diagnosis Command
+
+The `diagnosis` command groups one-shot data inspection / repair jobs. Each
+sub-subcommand is a self-contained job; the umbrella itself takes no flags.
+
+#### `diagnosis fix-unsent-action`
+
+Re-posts Slack messages for Actions whose initial Slack post never reached
+Slack. The job sweeps every workspace in the registry, finds Actions with an
+empty `SlackMessageTS`, and replays the post via the unified
+`ActionUseCase.PostSlackMessageToAction` entry point. Repeat runs are safe:
+already-posted Actions are skipped.
+
+```bash
+hecatoncheires diagnosis fix-unsent-action \
+  --config=./config.toml \
+  --slack-bot-token=xoxb-... \
+  --firestore-project-id=...
+```
+
+| Flag | Env Var | Default | Required | Description |
+|------|---------|---------|----------|-------------|
+| `--config` | `HECATONCHEIRES_CONFIG` | `./config.toml` | Yes | Workspace configuration file |
+| `--base-url` | `HECATONCHEIRES_BASE_URL` | - | No | Base URL used to render the action's WebUI link inside the Slack message |
+| `--default-lang` | `HECATONCHEIRES_DEFAULT_LANG` | `en` | No | Default language for the Slack message text (`en`, `ja`) |
+| `--slack-bot-token` | `HECATONCHEIRES_SLACK_BOT_TOKEN` | - | Yes | Slack Bot Token used to post the recovery messages |
+| `--firestore-project-id` | `HECATONCHEIRES_FIRESTORE_PROJECT_ID` | - | Cond. | Required when using the Firestore backend |
+| `--firestore-database-id` | `HECATONCHEIRES_FIRESTORE_DATABASE_ID` | `(default)` | No | Firestore database ID |
+| Sentry flags | see [Observability (Sentry)](#observability-sentry) | - | No | Same flags as `serve` for error reporting |
+
+The job logs a final summary line:
+
+```
+fix-unsent-action complete total=N fixed=X skipped=Y failed=Z
+```
+
+- `Total` — Actions found with an empty `SlackMessageTS`
+- `Fixed` — Successfully posted; timestamp persisted
+- `Skipped` — Documented skip conditions (parent Case has no Slack channel,
+  the Action was already posted by a concurrent run, or the row was deleted
+  during the sweep)
+- `Failed` — Unexpected errors. Each is reported via `errutil.Handle` so it
+  reaches the configured error sink (Sentry / log); the sweep continues
+  past failures so a single bad row never blocks the rest
 
 ### Authentication Modes
 

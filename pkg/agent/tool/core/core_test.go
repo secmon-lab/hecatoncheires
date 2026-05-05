@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gt"
@@ -14,6 +15,54 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 )
+
+// mockActionMutator captures CreateAction and UpdateAction calls so the
+// create / update / set-assignee / status tool tests can verify the tools
+// route through the unified ActionUseCase entry point. The real
+// ActionUseCase (and its Slack post / refresh / event recording) is
+// exercised by usecase-level tests; here we only check the tool's
+// argument-extraction behaviour.
+type mockActionMutator struct {
+	createFn func(ctx context.Context, workspaceID string, caseID int64, title, description string, assigneeID string, slackMessageTS string, status types.ActionStatus, dueDate *time.Time) (*model.Action, error)
+	updateFn func(ctx context.Context, workspaceID string, actionID int64, params core.UpdateActionParams) (*model.Action, error)
+}
+
+func (m *mockActionMutator) CreateAction(ctx context.Context, workspaceID string, caseID int64, title, description string, assigneeID string, slackMessageTS string, status types.ActionStatus, dueDate *time.Time) (*model.Action, error) {
+	if m.createFn != nil {
+		return m.createFn(ctx, workspaceID, caseID, title, description, assigneeID, slackMessageTS, status, dueDate)
+	}
+	return &model.Action{
+		ID: 1, CaseID: caseID, Title: title, Description: description,
+		AssigneeID: assigneeID, SlackMessageTS: slackMessageTS,
+		Status: status, DueDate: dueDate,
+	}, nil
+}
+
+func (m *mockActionMutator) UpdateAction(ctx context.Context, workspaceID string, actionID int64, params core.UpdateActionParams) (*model.Action, error) {
+	if m.updateFn != nil {
+		return m.updateFn(ctx, workspaceID, actionID, params)
+	}
+	// Default: synthesize a minimal Action reflecting the requested edits.
+	// Callers that need to assert on persisted state should provide their
+	// own updateFn.
+	a := &model.Action{ID: actionID}
+	if params.Title != nil {
+		a.Title = *params.Title
+	}
+	if params.Description != nil {
+		a.Description = *params.Description
+	}
+	if params.AssigneeID != nil {
+		a.AssigneeID = *params.AssigneeID
+	}
+	if params.Status != nil {
+		a.Status = *params.Status
+	}
+	if params.DueDate != nil {
+		a.DueDate = params.DueDate
+	}
+	return a, nil
+}
 
 // newCtxWithUpdateCapture returns a context that captures all update messages
 // and a pointer to the slice where they are appended.
@@ -161,7 +210,7 @@ func findTool(tools []gollem.Tool, name string) gollem.Tool {
 
 func TestNew_ReturnsSixTools(t *testing.T) {
 	repo := newMockRepo(nil)
-	tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+	tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: &mockActionMutator{}})
 	gt.Array(t, tools).Length(6)
 
 	toolNames := make(map[string]bool)
@@ -178,7 +227,7 @@ func TestNew_ReturnsSixTools(t *testing.T) {
 
 func TestNewForAssist_ReturnsSameSixTools(t *testing.T) {
 	repo := newMockRepo(nil)
-	tools := core.NewForAssist(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+	tools := core.NewForAssist(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: &mockActionMutator{}})
 	gt.Array(t, tools).Length(6)
 }
 
@@ -286,18 +335,27 @@ func TestCreateActionTool(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("creates action with correct fields", func(t *testing.T) {
-		var captured *model.Action
-		actionRepo := &mockActionRepo{
-			createFn: func(ctx context.Context, workspaceID string, action *model.Action) (*model.Action, error) {
-				gt.Value(t, workspaceID).Equal(testWorkspaceID)
-				captured = action
-				result := *action
-				result.ID = 10
-				return &result, nil
+		var (
+			capturedWorkspaceID string
+			capturedCaseID      int64
+			capturedTitle       string
+			capturedDescription string
+			capturedAssigneeID  string
+			capturedStatus      types.ActionStatus
+		)
+		creator := &mockActionMutator{
+			createFn: func(_ context.Context, workspaceID string, caseID int64, title, description string, assigneeID string, _ string, status types.ActionStatus, _ *time.Time) (*model.Action, error) {
+				capturedWorkspaceID = workspaceID
+				capturedCaseID = caseID
+				capturedTitle = title
+				capturedDescription = description
+				capturedAssigneeID = assigneeID
+				capturedStatus = status
+				return &model.Action{ID: 10, CaseID: caseID, Title: title, Description: description, AssigneeID: assigneeID, Status: status}, nil
 			},
 		}
-		repo := newMockRepo(actionRepo)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+		repo := newMockRepo(nil)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: creator})
 
 		result, err := findTool(tools, "core__create_action").Run(ctx, map[string]any{
 			"title":       "New investigation",
@@ -306,35 +364,36 @@ func TestCreateActionTool(t *testing.T) {
 			"assignee_id": "U001",
 		})
 		gt.NoError(t, err)
-		gt.Value(t, captured.CaseID).Equal(testCaseID)
-		gt.Value(t, captured.Title).Equal("New investigation")
-		gt.Value(t, captured.Description).Equal("Look into the alerts")
-		gt.Value(t, captured.Status).Equal(types.ActionStatusInProgress)
-		gt.Value(t, captured.AssigneeID).Equal("U001")
+		gt.Value(t, capturedWorkspaceID).Equal(testWorkspaceID)
+		gt.Value(t, capturedCaseID).Equal(testCaseID)
+		gt.Value(t, capturedTitle).Equal("New investigation")
+		gt.Value(t, capturedDescription).Equal("Look into the alerts")
+		gt.Value(t, capturedStatus).Equal(types.ActionStatusInProgress)
+		gt.Value(t, capturedAssigneeID).Equal("U001")
 		gt.Value(t, result["id"]).Equal(int64(10))
 	})
 
-	t.Run("defaults status to BACKLOG when omitted", func(t *testing.T) {
-		var captured *model.Action
-		actionRepo := &mockActionRepo{
-			createFn: func(ctx context.Context, workspaceID string, action *model.Action) (*model.Action, error) {
-				captured = action
-				return action, nil
+	t.Run("defaults status to TODO when omitted", func(t *testing.T) {
+		var capturedStatus types.ActionStatus
+		creator := &mockActionMutator{
+			createFn: func(_ context.Context, _ string, caseID int64, title, description string, assigneeID string, _ string, status types.ActionStatus, _ *time.Time) (*model.Action, error) {
+				capturedStatus = status
+				return &model.Action{ID: 1, CaseID: caseID, Title: title, Description: description, AssigneeID: assigneeID, Status: status}, nil
 			},
 		}
-		repo := newMockRepo(actionRepo)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+		repo := newMockRepo(nil)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: creator})
 
 		_, err := findTool(tools, "core__create_action").Run(ctx, map[string]any{"title": "Quick task"})
 		gt.NoError(t, err)
 		// With no statusSet override, the tool falls back to
 		// model.DefaultActionStatusSet() whose initial id is BACKLOG.
-		gt.Value(t, captured.Status).Equal(types.ActionStatusBacklog)
+		gt.Value(t, capturedStatus).Equal(types.ActionStatusBacklog)
 	})
 
 	t.Run("returns error when title is missing", func(t *testing.T) {
 		repo := newMockRepo(nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: &mockActionMutator{}})
 
 		_, err := findTool(tools, "core__create_action").Run(ctx, map[string]any{})
 		gt.Error(t, err)
@@ -342,7 +401,7 @@ func TestCreateActionTool(t *testing.T) {
 
 	t.Run("returns error for invalid status", func(t *testing.T) {
 		repo := newMockRepo(nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: &mockActionMutator{}})
 
 		_, err := findTool(tools, "core__create_action").Run(ctx, map[string]any{
 			"title":  "Test",
@@ -353,11 +412,24 @@ func TestCreateActionTool(t *testing.T) {
 
 	t.Run("returns error when assignee_ids contains non-string element", func(t *testing.T) {
 		repo := newMockRepo(nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: &mockActionMutator{}})
 
 		_, err := findTool(tools, "core__create_action").Run(ctx, map[string]any{
 			"title":       "Test",
 			"assignee_id": 42,
+		})
+		gt.Error(t, err)
+	})
+
+	t.Run("returns error when ActionUC dependency is nil", func(t *testing.T) {
+		// Guards against silent regression to the legacy repository-direct
+		// path: if Deps.ActionUC is forgotten by a future caller, the tool
+		// should fail loudly rather than skip Slack posting.
+		repo := newMockRepo(nil)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+
+		_, err := findTool(tools, "core__create_action").Run(ctx, map[string]any{
+			"title": "Should not reach repo",
 		})
 		gt.Error(t, err)
 	})
@@ -366,162 +438,160 @@ func TestCreateActionTool(t *testing.T) {
 func TestUpdateActionTool(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("updates title and description", func(t *testing.T) {
-		original := &model.Action{ID: 5, CaseID: testCaseID, Title: "Old title", Description: "Old desc", Status: types.ActionStatusTodo, AssigneeID: "U001"}
-		var updated *model.Action
-		actionRepo := &mockActionRepo{
-			getFn: func(_ context.Context, _ string, id int64) (*model.Action, error) {
-				gt.Value(t, id).Equal(int64(5))
-				return original, nil
-			},
-			updateFn: func(_ context.Context, _ string, action *model.Action) (*model.Action, error) {
-				updated = action
-				return action, nil
+	// captureUpdateMutator returns a mutator whose UpdateAction stores the
+	// invocation arguments into the supplied pointers. Tests then assert on
+	// what was captured rather than reaching for repository.Update.
+	captureUpdateMutator := func(capID *int64, capParams *core.UpdateActionParams) *mockActionMutator {
+		return &mockActionMutator{
+			updateFn: func(_ context.Context, _ string, actionID int64, params core.UpdateActionParams) (*model.Action, error) {
+				*capID = actionID
+				*capParams = params
+				return &model.Action{ID: actionID}, nil
 			},
 		}
-		repo := newMockRepo(actionRepo)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+	}
 
-		result, err := findTool(tools, "core__update_action").Run(ctx, map[string]any{
+	t.Run("forwards title and description as pointer fields", func(t *testing.T) {
+		var capID int64
+		var capParams core.UpdateActionParams
+		mutator := captureUpdateMutator(&capID, &capParams)
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: mutator})
+
+		_, err := findTool(tools, "core__update_action").Run(ctx, map[string]any{
 			"action_id":   float64(5),
 			"title":       "New title",
 			"description": "New description",
 		})
 		gt.NoError(t, err)
-		gt.Value(t, updated.Title).Equal("New title")
-		gt.Value(t, updated.Description).Equal("New description")
-		gt.Value(t, result["title"]).Equal("New title")
-		gt.Value(t, result["description"]).Equal("New description")
-		// Assignee should not be changed
-		gt.Value(t, updated.AssigneeID).Equal("U001")
+		gt.Value(t, capID).Equal(int64(5))
+		gt.Value(t, capParams.Title).NotNil().Required()
+		gt.Value(t, *capParams.Title).Equal("New title")
+		gt.Value(t, capParams.Description).NotNil().Required()
+		gt.Value(t, *capParams.Description).Equal("New description")
+		// Assignee fields untouched: tool must signal "no change", not
+		// accidentally clear or reassign.
+		gt.Value(t, capParams.AssigneeID).Nil()
+		gt.Bool(t, capParams.ClearAssignee).False()
 	})
 
-	t.Run("replaces assignee_id when provided", func(t *testing.T) {
-		original := &model.Action{ID: 6, CaseID: testCaseID, Title: "Task", Status: types.ActionStatusTodo, AssigneeID: "U001"}
-		var updated *model.Action
-		actionRepo := &mockActionRepo{
-			getFn: func(_ context.Context, _ string, _ int64) (*model.Action, error) {
-				return original, nil
-			},
-			updateFn: func(_ context.Context, _ string, action *model.Action) (*model.Action, error) {
-				updated = action
-				return action, nil
-			},
-		}
-		repo := newMockRepo(actionRepo)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+	t.Run("forwards non-empty assignee_id as AssigneeID", func(t *testing.T) {
+		var capID int64
+		var capParams core.UpdateActionParams
+		mutator := captureUpdateMutator(&capID, &capParams)
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: mutator})
 
 		_, err := findTool(tools, "core__update_action").Run(ctx, map[string]any{
 			"action_id":   float64(6),
 			"assignee_id": "U003",
 		})
 		gt.NoError(t, err)
-		gt.Value(t, updated.AssigneeID).Equal("U003")
+		gt.Value(t, capParams.AssigneeID).NotNil().Required()
+		gt.Value(t, *capParams.AssigneeID).Equal("U003")
+		gt.Bool(t, capParams.ClearAssignee).False()
 	})
 
-	t.Run("clears assignee_id when empty string provided", func(t *testing.T) {
-		original := &model.Action{ID: 60, CaseID: testCaseID, Title: "Task", Status: types.ActionStatusTodo, AssigneeID: "U001"}
-		var updated *model.Action
-		actionRepo := &mockActionRepo{
-			getFn: func(_ context.Context, _ string, _ int64) (*model.Action, error) {
-				return original, nil
-			},
-			updateFn: func(_ context.Context, _ string, action *model.Action) (*model.Action, error) {
-				updated = action
-				return action, nil
-			},
-		}
-		repo := newMockRepo(actionRepo)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+	t.Run("translates empty assignee_id into ClearAssignee=true", func(t *testing.T) {
+		var capID int64
+		var capParams core.UpdateActionParams
+		mutator := captureUpdateMutator(&capID, &capParams)
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: mutator})
 
 		_, err := findTool(tools, "core__update_action").Run(ctx, map[string]any{
 			"action_id":   float64(60),
 			"assignee_id": "",
 		})
 		gt.NoError(t, err)
-		gt.Value(t, updated.AssigneeID).Equal("")
+		// AssigneeID stays nil — the explicit clear flag is what the
+		// usecase reads.
+		gt.Value(t, capParams.AssigneeID).Nil()
+		gt.Bool(t, capParams.ClearAssignee).True()
 	})
 
-	t.Run("keeps description when empty string provided", func(t *testing.T) {
-		original := &model.Action{ID: 7, CaseID: testCaseID, Title: "Task", Description: "Old desc", Status: types.ActionStatusTodo}
-		var updated *model.Action
-		actionRepo := &mockActionRepo{
-			getFn: func(_ context.Context, _ string, _ int64) (*model.Action, error) {
-				return original, nil
-			},
-			updateFn: func(_ context.Context, _ string, action *model.Action) (*model.Action, error) {
-				updated = action
-				return action, nil
-			},
-		}
-		repo := newMockRepo(actionRepo)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+	t.Run("translates empty due_date into ClearDueDate=true", func(t *testing.T) {
+		var capID int64
+		var capParams core.UpdateActionParams
+		mutator := captureUpdateMutator(&capID, &capParams)
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: mutator})
+
+		_, err := findTool(tools, "core__update_action").Run(ctx, map[string]any{
+			"action_id": float64(61),
+			"due_date":  "",
+		})
+		gt.NoError(t, err)
+		gt.Value(t, capParams.DueDate).Nil()
+		gt.Bool(t, capParams.ClearDueDate).True()
+	})
+
+	t.Run("treats empty description as no-change", func(t *testing.T) {
+		var capID int64
+		var capParams core.UpdateActionParams
+		mutator := captureUpdateMutator(&capID, &capParams)
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: mutator})
 
 		_, err := findTool(tools, "core__update_action").Run(ctx, map[string]any{
 			"action_id":   float64(7),
 			"description": "",
 		})
 		gt.NoError(t, err)
-		gt.Value(t, updated.Description).Equal("Old desc")
+		// No-change semantics: pointer stays nil so usecase keeps the
+		// stored description.
+		gt.Value(t, capParams.Description).Nil()
 	})
 
-	t.Run("keeps title when not provided", func(t *testing.T) {
-		original := &model.Action{ID: 8, CaseID: testCaseID, Title: "Keep this title", Status: types.ActionStatusTodo}
-		var updated *model.Action
-		actionRepo := &mockActionRepo{
-			getFn: func(_ context.Context, _ string, _ int64) (*model.Action, error) {
-				return original, nil
-			},
-			updateFn: func(_ context.Context, _ string, action *model.Action) (*model.Action, error) {
-				updated = action
-				return action, nil
-			},
-		}
-		repo := newMockRepo(actionRepo)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+	t.Run("omits unspecified fields entirely", func(t *testing.T) {
+		var capID int64
+		var capParams core.UpdateActionParams
+		mutator := captureUpdateMutator(&capID, &capParams)
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: mutator})
 
+		desc := "Added desc"
 		_, err := findTool(tools, "core__update_action").Run(ctx, map[string]any{
 			"action_id":   float64(8),
-			"description": "Added desc",
+			"description": desc,
 		})
 		gt.NoError(t, err)
-		gt.Value(t, updated.Title).Equal("Keep this title")
+		gt.Value(t, capParams.Title).Nil()
+		gt.Value(t, capParams.AssigneeID).Nil()
+		gt.Value(t, capParams.Status).Nil()
+		gt.Value(t, capParams.DueDate).Nil()
+		gt.Bool(t, capParams.ClearAssignee).False()
+		gt.Bool(t, capParams.ClearDueDate).False()
 	})
 
 	t.Run("returns error when action_id missing", func(t *testing.T) {
-		repo := newMockRepo(nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
-
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: &mockActionMutator{}})
 		_, err := findTool(tools, "core__update_action").Run(ctx, map[string]any{})
 		gt.Error(t, err)
 	})
 
-	t.Run("returns error when action not found", func(t *testing.T) {
-		actionRepo := &mockActionRepo{
-			getFn: func(_ context.Context, _ string, _ int64) (*model.Action, error) {
-				return nil, nil
+	t.Run("propagates ActionUseCase error", func(t *testing.T) {
+		mutator := &mockActionMutator{
+			updateFn: func(_ context.Context, _ string, _ int64, _ core.UpdateActionParams) (*model.Action, error) {
+				return nil, errors.New("not found")
 			},
 		}
-		repo := newMockRepo(actionRepo)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: mutator})
 
-		_, err := findTool(tools, "core__update_action").Run(ctx, map[string]any{"action_id": float64(999)})
+		_, err := findTool(tools, "core__update_action").Run(ctx, map[string]any{"action_id": float64(999), "title": "X"})
 		gt.Error(t, err)
 	})
 
-	t.Run("returns error when assignee_ids contains non-string element", func(t *testing.T) {
-		original := &model.Action{ID: 10, Title: "T", Status: types.ActionStatusTodo}
-		actionRepo := &mockActionRepo{
-			getFn: func(_ context.Context, _ string, _ int64) (*model.Action, error) {
-				return original, nil
-			},
-		}
-		repo := newMockRepo(actionRepo)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
-
+	t.Run("returns error when assignee_id is non-string", func(t *testing.T) {
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: &mockActionMutator{}})
 		_, err := findTool(tools, "core__update_action").Run(ctx, map[string]any{
 			"action_id":   float64(10),
 			"assignee_id": 99,
+		})
+		gt.Error(t, err)
+	})
+
+	t.Run("returns error when ActionUC dependency is nil", func(t *testing.T) {
+		// Same regression guard as create_action: nil ActionUC must error
+		// loudly, not silently fall back to repo.Action().Update.
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+		_, err := findTool(tools, "core__update_action").Run(ctx, map[string]any{
+			"action_id": float64(1),
+			"title":     "Anything",
 		})
 		gt.Error(t, err)
 	})
@@ -530,39 +600,41 @@ func TestUpdateActionTool(t *testing.T) {
 func TestUpdateActionStatusTool(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("fetches action then updates with new status", func(t *testing.T) {
-		original := &model.Action{ID: 5, CaseID: testCaseID, Title: "Old task", Status: types.ActionStatusTodo}
-		var updated *model.Action
-		actionRepo := &mockActionRepo{
-			getFn: func(ctx context.Context, workspaceID string, id int64) (*model.Action, error) {
-				gt.Value(t, id).Equal(int64(5))
-				return original, nil
-			},
-			updateFn: func(ctx context.Context, workspaceID string, action *model.Action) (*model.Action, error) {
-				updated = action
-				return action, nil
+	t.Run("forwards status as a pointer to ActionStatus", func(t *testing.T) {
+		var capID int64
+		var capParams core.UpdateActionParams
+		mutator := &mockActionMutator{
+			updateFn: func(_ context.Context, _ string, actionID int64, params core.UpdateActionParams) (*model.Action, error) {
+				capID = actionID
+				capParams = params
+				return &model.Action{ID: actionID, Status: *params.Status}, nil
 			},
 		}
-		repo := newMockRepo(actionRepo)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: mutator})
 
 		result, err := findTool(tools, "core__update_action_status").Run(ctx, map[string]any{
 			"action_id": float64(5),
 			"status":    "COMPLETED",
 		})
 		gt.NoError(t, err)
-		gt.Value(t, updated.Status).Equal(types.ActionStatusCompleted)
+		gt.Value(t, capID).Equal(int64(5))
+		gt.Value(t, capParams.Status).NotNil().Required()
+		gt.Value(t, *capParams.Status).Equal(types.ActionStatusCompleted)
+		// All other fields should be empty: status update must not
+		// accidentally clear the assignee or zero the title.
+		gt.Value(t, capParams.Title).Nil()
+		gt.Value(t, capParams.AssigneeID).Nil()
+		gt.Bool(t, capParams.ClearAssignee).False()
 		gt.Value(t, result["status"]).Equal("COMPLETED")
 	})
 
-	t.Run("returns error when Get fails", func(t *testing.T) {
-		actionRepo := &mockActionRepo{
-			getFn: func(_ context.Context, _ string, _ int64) (*model.Action, error) {
-				return nil, errors.New("db error")
+	t.Run("propagates ActionUseCase error", func(t *testing.T) {
+		mutator := &mockActionMutator{
+			updateFn: func(_ context.Context, _ string, _ int64, _ core.UpdateActionParams) (*model.Action, error) {
+				return nil, errors.New("usecase error")
 			},
 		}
-		repo := newMockRepo(actionRepo)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: mutator})
 
 		_, err := findTool(tools, "core__update_action_status").Run(ctx, map[string]any{
 			"action_id": float64(1),
@@ -572,12 +644,20 @@ func TestUpdateActionStatusTool(t *testing.T) {
 	})
 
 	t.Run("returns error for invalid status string", func(t *testing.T) {
-		repo := newMockRepo(nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: &mockActionMutator{}})
 
 		_, err := findTool(tools, "core__update_action_status").Run(ctx, map[string]any{
 			"action_id": float64(1),
 			"status":    "UNKNOWN_STATUS",
+		})
+		gt.Error(t, err)
+	})
+
+	t.Run("returns error when ActionUC dependency is nil", func(t *testing.T) {
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+		_, err := findTool(tools, "core__update_action_status").Run(ctx, map[string]any{
+			"action_id": float64(1),
+			"status":    "COMPLETED",
 		})
 		gt.Error(t, err)
 	})
@@ -586,58 +666,62 @@ func TestUpdateActionStatusTool(t *testing.T) {
 func TestSetActionAssigneeTool(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("sets the assignee", func(t *testing.T) {
-		original := &model.Action{ID: 3, CaseID: testCaseID, Title: "Task", Status: types.ActionStatusTodo, AssigneeID: "U001"}
-		var updated *model.Action
-		actionRepo := &mockActionRepo{
-			getFn: func(_ context.Context, _ string, _ int64) (*model.Action, error) {
-				return original, nil
-			},
-			updateFn: func(_ context.Context, _ string, action *model.Action) (*model.Action, error) {
-				updated = action
-				return action, nil
+	t.Run("forwards non-empty assignee_id as AssigneeID", func(t *testing.T) {
+		var capID int64
+		var capParams core.UpdateActionParams
+		mutator := &mockActionMutator{
+			updateFn: func(_ context.Context, _ string, actionID int64, params core.UpdateActionParams) (*model.Action, error) {
+				capID = actionID
+				capParams = params
+				return &model.Action{ID: actionID, AssigneeID: *params.AssigneeID}, nil
 			},
 		}
-		repo := newMockRepo(actionRepo)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: mutator})
 
 		_, err := findTool(tools, "core__set_action_assignee").Run(ctx, map[string]any{
 			"action_id":   float64(3),
 			"assignee_id": "U002",
 		})
 		gt.NoError(t, err)
-		gt.Value(t, updated.AssigneeID).Equal("U002")
+		gt.Value(t, capID).Equal(int64(3))
+		gt.Value(t, capParams.AssigneeID).NotNil().Required()
+		gt.Value(t, *capParams.AssigneeID).Equal("U002")
+		gt.Bool(t, capParams.ClearAssignee).False()
 	})
 
-	t.Run("clears the assignee when empty string", func(t *testing.T) {
-		original := &model.Action{ID: 4, CaseID: testCaseID, Title: "Task", Status: types.ActionStatusTodo, AssigneeID: "U001"}
-		var updated *model.Action
-		actionRepo := &mockActionRepo{
-			getFn: func(_ context.Context, _ string, _ int64) (*model.Action, error) {
-				return original, nil
-			},
-			updateFn: func(_ context.Context, _ string, action *model.Action) (*model.Action, error) {
-				updated = action
-				return action, nil
+	t.Run("translates empty assignee_id into ClearAssignee=true", func(t *testing.T) {
+		var capParams core.UpdateActionParams
+		mutator := &mockActionMutator{
+			updateFn: func(_ context.Context, _ string, actionID int64, params core.UpdateActionParams) (*model.Action, error) {
+				capParams = params
+				return &model.Action{ID: actionID}, nil
 			},
 		}
-		repo := newMockRepo(actionRepo)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: mutator})
 
 		_, err := findTool(tools, "core__set_action_assignee").Run(ctx, map[string]any{
 			"action_id":   float64(4),
 			"assignee_id": "",
 		})
 		gt.NoError(t, err)
-		gt.Value(t, updated.AssigneeID).Equal("")
+		gt.Value(t, capParams.AssigneeID).Nil()
+		gt.Bool(t, capParams.ClearAssignee).True()
 	})
 
 	t.Run("returns error when assignee_id is missing", func(t *testing.T) {
-		repo := newMockRepo(nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: &mockActionMutator{}})
 
 		_, err := findTool(tools, "core__set_action_assignee").Run(ctx, map[string]any{
 			"action_id": float64(1),
+		})
+		gt.Error(t, err)
+	})
+
+	t.Run("returns error when ActionUC dependency is nil", func(t *testing.T) {
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+		_, err := findTool(tools, "core__set_action_assignee").Run(ctx, map[string]any{
+			"action_id":   float64(1),
+			"assignee_id": "U001",
 		})
 		gt.Error(t, err)
 	})
@@ -676,12 +760,8 @@ func TestToolUpdateCalls(t *testing.T) {
 
 	t.Run("create_action posts update message with title", func(t *testing.T) {
 		ctx, msgs := newCtxWithUpdateCapture()
-		actionRepo := &mockActionRepo{
-			createFn: func(_ context.Context, _ string, a *model.Action) (*model.Action, error) {
-				return a, nil
-			},
-		}
-		tools := core.New(core.Deps{Repo: newMockRepo(actionRepo), WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+		creator := &mockActionMutator{}
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: creator})
 		_, err := findTool(tools, "core__create_action").Run(ctx, map[string]any{"title": "Deploy fix"})
 		gt.NoError(t, err)
 		gt.Array(t, *msgs).Length(1)
@@ -690,12 +770,8 @@ func TestToolUpdateCalls(t *testing.T) {
 
 	t.Run("update_action posts update message with action ID", func(t *testing.T) {
 		ctx, msgs := newCtxWithUpdateCapture()
-		original := &model.Action{ID: 11, Title: "T", Status: types.ActionStatusTodo}
-		actionRepo := &mockActionRepo{
-			getFn:    func(_ context.Context, _ string, _ int64) (*model.Action, error) { return original, nil },
-			updateFn: func(_ context.Context, _ string, a *model.Action) (*model.Action, error) { return a, nil },
-		}
-		tools := core.New(core.Deps{Repo: newMockRepo(actionRepo), WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+		mutator := &mockActionMutator{}
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: mutator})
 		_, err := findTool(tools, "core__update_action").Run(ctx, map[string]any{
 			"action_id":   float64(11),
 			"description": "Updated desc",
@@ -707,12 +783,8 @@ func TestToolUpdateCalls(t *testing.T) {
 
 	t.Run("update_action_status posts update message with ID and status", func(t *testing.T) {
 		ctx, msgs := newCtxWithUpdateCapture()
-		original := &model.Action{ID: 3, Title: "T", Status: types.ActionStatusTodo}
-		actionRepo := &mockActionRepo{
-			getFn:    func(_ context.Context, _ string, _ int64) (*model.Action, error) { return original, nil },
-			updateFn: func(_ context.Context, _ string, a *model.Action) (*model.Action, error) { return a, nil },
-		}
-		tools := core.New(core.Deps{Repo: newMockRepo(actionRepo), WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+		mutator := &mockActionMutator{}
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: mutator})
 		_, err := findTool(tools, "core__update_action_status").Run(ctx, map[string]any{
 			"action_id": float64(3),
 			"status":    "COMPLETED",
@@ -724,12 +796,8 @@ func TestToolUpdateCalls(t *testing.T) {
 
 	t.Run("set_action_assignee posts update message when setting", func(t *testing.T) {
 		ctx, msgs := newCtxWithUpdateCapture()
-		original := &model.Action{ID: 2, Title: "T", Status: types.ActionStatusTodo}
-		actionRepo := &mockActionRepo{
-			getFn:    func(_ context.Context, _ string, _ int64) (*model.Action, error) { return original, nil },
-			updateFn: func(_ context.Context, _ string, a *model.Action) (*model.Action, error) { return a, nil },
-		}
-		tools := core.New(core.Deps{Repo: newMockRepo(actionRepo), WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+		mutator := &mockActionMutator{}
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: mutator})
 		_, err := findTool(tools, "core__set_action_assignee").Run(ctx, map[string]any{
 			"action_id":   float64(2),
 			"assignee_id": "U005",
@@ -741,12 +809,8 @@ func TestToolUpdateCalls(t *testing.T) {
 
 	t.Run("set_action_assignee posts update message when clearing", func(t *testing.T) {
 		ctx, msgs := newCtxWithUpdateCapture()
-		original := &model.Action{ID: 9, Title: "T", Status: types.ActionStatusTodo, AssigneeID: "U001"}
-		actionRepo := &mockActionRepo{
-			getFn:    func(_ context.Context, _ string, _ int64) (*model.Action, error) { return original, nil },
-			updateFn: func(_ context.Context, _ string, a *model.Action) (*model.Action, error) { return a, nil },
-		}
-		tools := core.New(core.Deps{Repo: newMockRepo(actionRepo), WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+		mutator := &mockActionMutator{}
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: mutator})
 		_, err := findTool(tools, "core__set_action_assignee").Run(ctx, map[string]any{
 			"action_id":   float64(9),
 			"assignee_id": "",
