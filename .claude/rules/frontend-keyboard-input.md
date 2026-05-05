@@ -124,15 +124,26 @@ This rule is enforced by ESLint (`no-restricted-syntax` in
 `frontend/eslint.config.js`). The following patterns will fail
 `pnpm lint` outside of `frontend/src/utils/keyboard.ts`:
 
-- `e.key === 'Enter'`
-- `e.key === ' '`
-- `keyCode === 13`
-- `keyCode === 229`
-- `*.isComposing` member access
+- `e.key === 'Enter'` / `'Enter' === e.key` / `e.key == 'Enter'`
+- `e.key === ' '` (and Yoda / `==` variants)
+- `keyCode === 13` (and Yoda / `==` variants)
+- `keyCode === 229` (and Yoda / `==` variants)
+- `*.isComposing` member access (anywhere in the codebase)
 
 If you genuinely need a new variant (e.g. multi-key activation,
 modifier-aware shortcuts), **add a new helper to `keyboard.ts`** and use
 it from the call site. Do not disable the lint rule.
+
+## Reserved identifier: `isComposing`
+
+The `isComposing` identifier is **reserved for IME composition state**.
+The lint rule flags any `*.isComposing` member access codebase-wide,
+which intentionally matches more than just `event.nativeEvent.isComposing`.
+
+**Do not use `isComposing` as a property name on unrelated objects**
+(e.g. domain models, component state, custom hooks). Pick a different
+name. This avoids false-positive lint hits and keeps the identifier's
+meaning unambiguous in code search.
 
 ## Why This Matters
 

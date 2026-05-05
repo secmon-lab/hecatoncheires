@@ -6,28 +6,36 @@
 // See `.claude/rules/frontend-keyboard-input.md` for the policy details.
 import tsParser from '@typescript-eslint/parser'
 
+// We use `operator=/^={2,3}$/` so both `===` and `==` are caught, and we
+// cover both `right.value` and `left.value` so Yoda-style comparisons
+// (`'Enter' === e.key`) cannot slip through.
+const eqOp = "[operator=/^={2,3}$/]"
+
 const restrictedKeyboard = [
   {
-    selector: "BinaryExpression[operator='==='][right.value='Enter']",
+    selector: `BinaryExpression${eqOp}:matches([right.value='Enter'], [left.value='Enter'])`,
     message:
       "Direct 'Enter' key detection is forbidden. Use commitOnEnter / activateOnEnterOrSpace from src/utils/keyboard. Direct detection breaks IME (CJK) users.",
   },
   {
-    selector: "BinaryExpression[operator='==='][right.value=' ']",
+    selector: `BinaryExpression${eqOp}:matches([right.value=' '], [left.value=' '])`,
     message:
       "Direct Space-key detection is forbidden. Use activateOnEnterOrSpace from src/utils/keyboard.",
   },
   {
-    selector: "BinaryExpression[operator='==='][right.value=13]",
+    selector: `BinaryExpression${eqOp}:matches([right.value=13], [left.value=13])`,
     message:
       'Direct keyCode === 13 detection is forbidden. Use commitOnEnter / activateOnEnterOrSpace from src/utils/keyboard.',
   },
   {
-    selector: "BinaryExpression[operator='==='][right.value=229]",
+    selector: `BinaryExpression${eqOp}:matches([right.value=229], [left.value=229])`,
     message:
       'Direct keyCode === 229 detection is forbidden. IME composition checks must live inside src/utils/keyboard.ts only.',
   },
   {
+    // NOTE: this matches *any* `.isComposing` property access. The `isComposing`
+    // identifier is reserved for IME composition state across this codebase —
+    // do not use it for other purposes (see frontend-keyboard-input.md).
     selector: "MemberExpression[property.name='isComposing']",
     message:
       'Direct isComposing access is forbidden. Use commitOnEnter / activateOnEnterOrSpace from src/utils/keyboard.',
