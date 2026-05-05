@@ -2,8 +2,10 @@
 FROM node:18-alpine AS build-frontend
 WORKDIR /app/frontend
 
-# Install pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# Enable Corepack. The actual pnpm version comes from the `packageManager`
+# field in frontend/package.json (pinned for reproducibility), so we do not
+# pin a moving target like `pnpm@latest` here.
+RUN corepack enable
 
 # Copy package files first for better caching
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
