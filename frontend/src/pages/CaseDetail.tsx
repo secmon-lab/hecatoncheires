@@ -521,27 +521,6 @@ export default function CaseDetail() {
             )}
           </section>
 
-          {c.knowledges && c.knowledges.length > 0 && (
-            <section className="h-section">
-              <div className="h-section-h">
-                <span className="h-section-title">{t('sectionRelatedKnowledge', { count: c.knowledges.length })}</span>
-              </div>
-              <div className="col" style={{ gap: 6 }}>
-                {c.knowledges.map((k: any) => (
-                  <Link
-                    key={k.id}
-                    to={`/ws/${currentWorkspace!.id}/knowledges/${k.id}`}
-                    className="h-action-row"
-                  >
-                    <span className="h-action-title">
-                      {k.title}
-                      {k.summary && <span className="soft" style={{ fontSize: 11.5, marginLeft: 8, fontWeight: 400 }}>{k.summary}</span>}
-                    </span>
-                  </Link>
-                ))}
-              </div>
-            </section>
-          )}
         </div>
 
         {/* right column / sidebar */}

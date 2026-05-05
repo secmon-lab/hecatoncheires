@@ -8,7 +8,6 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/github"
-	"github.com/secmon-lab/hecatoncheires/pkg/service/knowledge"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 )
@@ -22,7 +21,6 @@ type UseCases struct {
 	slackAdminService slack.AdminService
 	slackSearch       slacktool.SearchService
 	githubService     github.Service
-	knowledgeService  knowledge.Service
 	llmClient         gollem.LLMClient
 	embedClient       interfaces.EmbedClient
 	historyRepo       gollem.HistoryRepository
@@ -34,7 +32,6 @@ type UseCases struct {
 	Auth              AuthUseCaseInterface
 	Slack             *SlackUseCases
 	Source            *SourceUseCase
-	Compile           *CompileUseCase
 	Assist            *AssistUseCase
 	MentionDraft      *MentionDraftUseCase
 }
@@ -56,12 +53,6 @@ func WithNotion(svc notion.Service) Option {
 func WithSlackService(svc slack.Service) Option {
 	return func(uc *UseCases) {
 		uc.slackService = svc
-	}
-}
-
-func WithKnowledgeService(svc knowledge.Service) Option {
-	return func(uc *UseCases) {
-		uc.knowledgeService = svc
 	}
 }
 
@@ -145,18 +136,19 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 	uc.Case = NewCaseUseCase(repo, registry, uc.slackService, uc.slackAdminService, uc.baseURL)
 	uc.Action = NewActionUseCase(repo, registry, uc.slackService, uc.baseURL)
 	uc.Source = NewSourceUseCase(repo, uc.notion, uc.slackService, uc.githubService)
-	uc.Compile = NewCompileUseCase(repo, registry, uc.notion, uc.knowledgeService, uc.slackService, uc.githubService, uc.baseURL)
 
 	// Whenever Slack is wired, LLM and Embed clients must also be wired —
 	// Slack-driven flows (agent mention, mention-draft, assist) all require
-	// LLM by design, and the agent/assist core tools need an embedder for
-	// memory / knowledge similarity search.
+	// LLM by design. The embedder has no current production consumer (Memory
+	// and Knowledge were demolished pending redesign), but the wiring is
+	// preserved so the upcoming similarity-search redesign can pick it up
+	// without re-plumbing the CLI/usecase boundary.
 	if uc.slackService != nil {
 		if uc.llmClient == nil {
 			panic("usecase.New: LLM client is required when Slack service is configured (use WithLLMClient)")
 		}
 		if uc.embedClient == nil {
-			panic("usecase.New: Embed client is required when Slack service is configured (use WithEmbedClient)")
+			panic("usecase.New: Embed client is required when Slack service is configured (use WithEmbedClient); reserved for upcoming similarity-search redesign")
 		}
 		// Agent depends on the persistent History/Trace archive. Callers
 		// that drive Slack events (the serve CLI) MUST wire both; callers

@@ -387,7 +387,7 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 		}
 
 		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
-		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, nil, nil, messages)
+		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, nil, messages)
 
 		gt.Value(t, strings.Contains(prompt, "Important Case")).Equal(true)
 		gt.Value(t, strings.Contains(prompt, "This is very important")).Equal(true)
@@ -399,7 +399,7 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 	})
 }
 
-func TestAgentSystemPrompt_ActionsAndKnowledges(t *testing.T) {
+func TestAgentSystemPrompt_Actions(t *testing.T) {
 	t.Run("prompt includes actions when present", func(t *testing.T) {
 		repo := memory.New()
 		slackMock := &agentTestSlackService{}
@@ -427,7 +427,7 @@ func TestAgentSystemPrompt_ActionsAndKnowledges(t *testing.T) {
 		}
 
 		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
-		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, actions, nil, nil)
+		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, actions, nil)
 
 		gt.Value(t, strings.Contains(prompt, "## Actions")).Equal(true)
 		gt.Value(t, strings.Contains(prompt, "Investigate the issue")).Equal(true)
@@ -437,34 +437,7 @@ func TestAgentSystemPrompt_ActionsAndKnowledges(t *testing.T) {
 		gt.Value(t, strings.Contains(prompt, "TODO")).Equal(true)
 	})
 
-	t.Run("prompt includes knowledge when present", func(t *testing.T) {
-		repo := memory.New()
-		slackMock := &agentTestSlackService{}
-		llmClient := &mockLLMClient{}
-
-		entry := &model.WorkspaceEntry{
-			Workspace: model.Workspace{ID: "ws-test", Name: "Test"},
-		}
-		c := &model.Case{
-			Title:  "Test Case",
-			Status: types.CaseStatusOpen,
-		}
-		knowledges := []*model.Knowledge{
-			{
-				ID:    model.KnowledgeID("knowledge-001"),
-				Title: "How to handle this type of incident",
-			},
-		}
-
-		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
-		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, nil, knowledges, nil)
-
-		gt.Value(t, strings.Contains(prompt, "## Knowledge")).Equal(true)
-		gt.Value(t, strings.Contains(prompt, "knowledge-001")).Equal(true)
-		gt.Value(t, strings.Contains(prompt, "How to handle this type of incident")).Equal(true)
-	})
-
-	t.Run("actions and knowledge sections absent when empty", func(t *testing.T) {
+	t.Run("actions section absent when empty", func(t *testing.T) {
 		repo := memory.New()
 		slackMock := &agentTestSlackService{}
 		llmClient := &mockLLMClient{}
@@ -478,10 +451,9 @@ func TestAgentSystemPrompt_ActionsAndKnowledges(t *testing.T) {
 		}
 
 		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository())
-		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, nil, nil, nil)
+		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, nil, nil)
 
 		gt.Value(t, strings.Contains(prompt, "## Actions")).Equal(false)
-		gt.Value(t, strings.Contains(prompt, "## Knowledge")).Equal(false)
 	})
 }
 

@@ -8,7 +8,6 @@ export const en: Messages = {
   // Navigation
   navCases: 'Cases',
   navActions: 'Actions',
-  navKnowledges: 'Knowledges',
   navSources: 'Sources',
 
   // Common buttons
@@ -154,7 +153,6 @@ export const en: Messages = {
   sectionAssignees: 'Assignees',
   sectionFields: 'Fields',
   sectionRelatedActions: 'Related Actions',
-  sectionRelatedKnowledge: 'Related Knowledge ({count})',
   sectionChannelMembers: 'Channel Members ({count})',
   placeholderFilterMembers: 'Filter by name...',
   loadingMembers: 'Loading members...',
@@ -288,21 +286,6 @@ export const en: Messages = {
   errorValidateDatabaseFirst: 'Please validate the database ID first',
   errorValidateDatabase: 'Failed to validate database. Please try again.',
   validationDatabaseFound: 'Database found',
-
-  // Knowledge
-  titleKnowledgeBase: 'Knowledge Base',
-  subtitleKnowledgeBase: 'AI-extracted knowledge from configured sources ({count} items)',
-  headerRelatedCase: 'Related Case',
-  headerSummary: 'Summary',
-  headerDate: 'Date',
-  errorKnowledgeNotFound: 'Knowledge not found',
-  sectionSummary: 'Summary',
-  sectionRelatedCase: 'Related Case',
-  sectionSourceInfo: 'Source Information',
-  labelSourceId: 'Source ID:',
-  labelSourcedAt: 'Sourced At:',
-  emptyKnowledgeTitle: 'No knowledge found',
-  emptyKnowledgeDesc: 'Knowledge will appear here once extracted from your configured sources.',
 
   // Assist Logs
   titleAssistLogs: 'Assist Logs',

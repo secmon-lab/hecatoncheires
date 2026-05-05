@@ -115,15 +115,11 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 		logger.Error("failed to post session start", "error", err.Error())
 	}
 
-	// Fetch case context (actions, knowledge) every turn — these may have
-	// been mutated since the previous mention by direct GraphQL/UI edits.
+	// Fetch case context (actions) every turn — these may have been mutated
+	// since the previous mention by direct GraphQL/UI edits.
 	actions, err := uc.repo.Action().GetByCase(ctx, entry.Workspace.ID, foundCase.ID)
 	if err != nil {
 		return goerr.Wrap(err, "failed to get actions for case")
-	}
-	knowledges, err := uc.repo.Knowledge().ListByCaseID(ctx, entry.Workspace.ID, foundCase.ID)
-	if err != nil {
-		return goerr.Wrap(err, "failed to get knowledge for case")
 	}
 
 	// Build prompt + user input. For a fresh session we drop the full thread
@@ -135,7 +131,7 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 	if err != nil {
 		return goerr.Wrap(err, "failed to partition conversation")
 	}
-	systemPrompt := uc.buildSystemPrompt(foundCase, entry, actions, knowledges, systemMessages)
+	systemPrompt := uc.buildSystemPrompt(foundCase, entry, actions, systemMessages)
 	userInput := buildAgentUserInput(deltaMessages, msg)
 
 	// Slack-side trace banner (per-mention; not persisted).
@@ -164,13 +160,12 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 		}),
 	)
 
-	// Build core tools (action / knowledge) for this case.
+	// Build core tools (action) for this case.
 	coreTools := core.New(core.Deps{
 		Repo:        uc.repo,
 		WorkspaceID: entry.Workspace.ID,
 		CaseID:      foundCase.ID,
 		StatusSet:   entry.ActionStatusSet,
-		EmbedClient: uc.embedClient,
 	})
 
 	// Slack and Notion tools are independent packages. Each gates its own tools
@@ -513,22 +508,15 @@ type promptAction struct {
 	Assignees   string
 }
 
-// promptKnowledge represents a knowledge entry for template rendering
-type promptKnowledge struct {
-	ID    string
-	Title string
-}
-
 // agentPromptData holds all data for the agent system prompt template
 type agentPromptData struct {
-	Case       *model.Case
-	Fields     []promptField
-	Actions    []promptAction
-	Knowledges []promptKnowledge
-	Messages   []promptMessage
+	Case     *model.Case
+	Fields   []promptField
+	Actions  []promptAction
+	Messages []promptMessage
 }
 
-func (uc *AgentUseCase) buildSystemPrompt(c *model.Case, entry *model.WorkspaceEntry, actions []*model.Action, knowledges []*model.Knowledge, messages []slack.ConversationMessage) string {
+func (uc *AgentUseCase) buildSystemPrompt(c *model.Case, entry *model.WorkspaceEntry, actions []*model.Action, messages []slack.ConversationMessage) string {
 	data := agentPromptData{
 		Case: c,
 	}
@@ -561,14 +549,6 @@ func (uc *AgentUseCase) buildSystemPrompt(c *model.Case, entry *model.WorkspaceE
 			Status:      a.Status.String(),
 			StatusEmoji: statusSet.Emoji(string(a.Status)),
 			Assignees:   a.AssigneeID,
-		})
-	}
-
-	// Build knowledge list
-	for _, k := range knowledges {
-		data.Knowledges = append(data.Knowledges, promptKnowledge{
-			ID:    string(k.ID),
-			Title: k.Title,
 		})
 	}
 

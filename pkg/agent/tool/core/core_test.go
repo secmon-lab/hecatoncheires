@@ -30,27 +30,6 @@ const (
 	testCaseID      = int64(100)
 )
 
-// ----- mock LLM client -----
-
-type mockLLMClient struct {
-	generateEmbeddingFn func(ctx context.Context, dimension int, input []string) ([][]float64, error)
-}
-
-func (m *mockLLMClient) NewSession(ctx context.Context, options ...gollem.SessionOption) (gollem.Session, error) {
-	return nil, nil
-}
-
-func (m *mockLLMClient) GenerateEmbedding(ctx context.Context, dimension int, input []string) ([][]float64, error) {
-	if m.generateEmbeddingFn != nil {
-		return m.generateEmbeddingFn(ctx, dimension, input)
-	}
-	vec := make([]float64, dimension)
-	for i := range vec {
-		vec[i] = 0.1
-	}
-	return [][]float64{vec}, nil
-}
-
 // ----- mock ActionRepository -----
 
 type mockActionRepo struct {
@@ -118,84 +97,13 @@ func (m *mockActionRepo) GetBySlackMessageTS(ctx context.Context, workspaceID st
 	return nil, nil
 }
 
-// ----- mock KnowledgeRepository -----
-
-type mockKnowledgeRepo struct {
-	createFn             func(ctx context.Context, workspaceID string, knowledge *model.Knowledge) (*model.Knowledge, error)
-	getFn                func(ctx context.Context, workspaceID string, id model.KnowledgeID) (*model.Knowledge, error)
-	listByCaseIDFn       func(ctx context.Context, workspaceID string, caseID int64) ([]*model.Knowledge, error)
-	listByCaseIDsFn      func(ctx context.Context, workspaceID string, caseIDs []int64) (map[int64][]*model.Knowledge, error)
-	listBySourceIDFn     func(ctx context.Context, workspaceID string, sourceID model.SourceID) ([]*model.Knowledge, error)
-	listWithPaginationFn func(ctx context.Context, workspaceID string, limit, offset int) ([]*model.Knowledge, int, error)
-	deleteFn             func(ctx context.Context, workspaceID string, id model.KnowledgeID) error
-	findByEmbeddingFn    func(ctx context.Context, workspaceID string, embedding []float32, limit int) ([]*model.Knowledge, error)
-}
-
-func (m *mockKnowledgeRepo) Create(ctx context.Context, workspaceID string, knowledge *model.Knowledge) (*model.Knowledge, error) {
-	if m.createFn != nil {
-		return m.createFn(ctx, workspaceID, knowledge)
-	}
-	return knowledge, nil
-}
-
-func (m *mockKnowledgeRepo) Get(ctx context.Context, workspaceID string, id model.KnowledgeID) (*model.Knowledge, error) {
-	if m.getFn != nil {
-		return m.getFn(ctx, workspaceID, id)
-	}
-	return nil, errors.New("not found")
-}
-
-func (m *mockKnowledgeRepo) ListByCaseID(ctx context.Context, workspaceID string, caseID int64) ([]*model.Knowledge, error) {
-	if m.listByCaseIDFn != nil {
-		return m.listByCaseIDFn(ctx, workspaceID, caseID)
-	}
-	return nil, nil
-}
-
-func (m *mockKnowledgeRepo) ListByCaseIDs(ctx context.Context, workspaceID string, caseIDs []int64) (map[int64][]*model.Knowledge, error) {
-	if m.listByCaseIDsFn != nil {
-		return m.listByCaseIDsFn(ctx, workspaceID, caseIDs)
-	}
-	return nil, nil
-}
-
-func (m *mockKnowledgeRepo) ListBySourceID(ctx context.Context, workspaceID string, sourceID model.SourceID) ([]*model.Knowledge, error) {
-	if m.listBySourceIDFn != nil {
-		return m.listBySourceIDFn(ctx, workspaceID, sourceID)
-	}
-	return nil, nil
-}
-
-func (m *mockKnowledgeRepo) ListWithPagination(ctx context.Context, workspaceID string, limit, offset int) ([]*model.Knowledge, int, error) {
-	if m.listWithPaginationFn != nil {
-		return m.listWithPaginationFn(ctx, workspaceID, limit, offset)
-	}
-	return nil, 0, nil
-}
-
-func (m *mockKnowledgeRepo) Delete(ctx context.Context, workspaceID string, id model.KnowledgeID) error {
-	if m.deleteFn != nil {
-		return m.deleteFn(ctx, workspaceID, id)
-	}
-	return nil
-}
-
-func (m *mockKnowledgeRepo) FindByEmbedding(ctx context.Context, workspaceID string, embedding []float32, limit int) ([]*model.Knowledge, error) {
-	if m.findByEmbeddingFn != nil {
-		return m.findByEmbeddingFn(ctx, workspaceID, embedding, limit)
-	}
-	return nil, nil
-}
-
 // ----- mock Repository -----
 
 type mockRepo struct {
-	actionRepo    interfaces.ActionRepository
-	knowledgeRepo interfaces.KnowledgeRepository
+	actionRepo interfaces.ActionRepository
 }
 
-func (m *mockRepo) Action() interfaces.ActionRepository       { return m.actionRepo }
-func (m *mockRepo) Knowledge() interfaces.KnowledgeRepository { return m.knowledgeRepo }
+func (m *mockRepo) Action() interfaces.ActionRepository { return m.actionRepo }
 
 // Unused methods — panic to catch accidental calls in tests
 func (m *mockRepo) Case() interfaces.CaseRepository           { panic("unexpected call: Case()") }
@@ -220,9 +128,6 @@ func (m *mockRepo) GetToken(ctx context.Context, tokenID auth.TokenID) (*auth.To
 func (m *mockRepo) DeleteToken(ctx context.Context, tokenID auth.TokenID) error {
 	panic("unexpected call: DeleteToken()")
 }
-func (m *mockRepo) Memory() interfaces.MemoryRepository {
-	panic("unexpected call: Memory()")
-}
 func (m *mockRepo) AssistLog() interfaces.AssistLogRepository {
 	panic("unexpected call: AssistLog()")
 }
@@ -235,14 +140,11 @@ func (m *mockRepo) AgentSession() interfaces.AgentSessionRepository {
 func (m *mockRepo) Close() error { return nil }
 
 // newMockRepo builds a mockRepo with default no-op sub-repos
-func newMockRepo(actionRepo interfaces.ActionRepository, knowledgeRepo interfaces.KnowledgeRepository) *mockRepo {
+func newMockRepo(actionRepo interfaces.ActionRepository) *mockRepo {
 	if actionRepo == nil {
 		actionRepo = &mockActionRepo{}
 	}
-	if knowledgeRepo == nil {
-		knowledgeRepo = &mockKnowledgeRepo{}
-	}
-	return &mockRepo{actionRepo: actionRepo, knowledgeRepo: knowledgeRepo}
+	return &mockRepo{actionRepo: actionRepo}
 }
 
 // findTool returns the tool with the given name from the list
@@ -257,11 +159,27 @@ func findTool(tools []gollem.Tool, name string) gollem.Tool {
 
 // ----- tests -----
 
-func TestNew_ReturnsEightTools(t *testing.T) {
-	repo := newMockRepo(nil, nil)
-	llm := &mockLLMClient{}
-	tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: llm})
-	gt.Array(t, tools).Length(8)
+func TestNew_ReturnsSixTools(t *testing.T) {
+	repo := newMockRepo(nil)
+	tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+	gt.Array(t, tools).Length(6)
+
+	toolNames := make(map[string]bool)
+	for _, tl := range tools {
+		toolNames[tl.Spec().Name] = true
+	}
+	gt.Value(t, toolNames["core__list_actions"]).Equal(true)
+	gt.Value(t, toolNames["core__get_action"]).Equal(true)
+	gt.Value(t, toolNames["core__create_action"]).Equal(true)
+	gt.Value(t, toolNames["core__update_action"]).Equal(true)
+	gt.Value(t, toolNames["core__update_action_status"]).Equal(true)
+	gt.Value(t, toolNames["core__set_action_assignee"]).Equal(true)
+}
+
+func TestNewForAssist_ReturnsSameSixTools(t *testing.T) {
+	repo := newMockRepo(nil)
+	tools := core.NewForAssist(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+	gt.Array(t, tools).Length(6)
 }
 
 func TestListActionsTool(t *testing.T) {
@@ -275,8 +193,8 @@ func TestListActionsTool(t *testing.T) {
 				return []*model.Action{}, nil
 			},
 		}
-		repo := newMockRepo(actionRepo, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		repo := newMockRepo(actionRepo)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 
 		result, err := findTool(tools, "core__list_actions").Run(ctx, map[string]any{})
 		gt.NoError(t, err)
@@ -293,8 +211,8 @@ func TestListActionsTool(t *testing.T) {
 				}, nil
 			},
 		}
-		repo := newMockRepo(actionRepo, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		repo := newMockRepo(actionRepo)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 
 		result, err := findTool(tools, "core__list_actions").Run(ctx, map[string]any{})
 		gt.NoError(t, err)
@@ -310,8 +228,8 @@ func TestListActionsTool(t *testing.T) {
 				return nil, errors.New("database unavailable")
 			},
 		}
-		repo := newMockRepo(actionRepo, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		repo := newMockRepo(actionRepo)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 
 		_, err := findTool(tools, "core__list_actions").Run(ctx, map[string]any{})
 		gt.Error(t, err)
@@ -331,8 +249,8 @@ func TestGetActionTool(t *testing.T) {
 				return &model.Action{ID: id, CaseID: testCaseID, Title: "My action", Status: types.ActionStatusInProgress}, nil
 			},
 		}
-		repo := newMockRepo(actionRepo, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		repo := newMockRepo(actionRepo)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 
 		result, err := findTool(tools, "core__get_action").Run(ctx, map[string]any{"action_id": float64(42)})
 		gt.NoError(t, err)
@@ -348,16 +266,16 @@ func TestGetActionTool(t *testing.T) {
 				return nil, errors.New("not found")
 			},
 		}
-		repo := newMockRepo(actionRepo, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		repo := newMockRepo(actionRepo)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 
 		_, err := findTool(tools, "core__get_action").Run(ctx, map[string]any{"action_id": float64(999)})
 		gt.Error(t, err)
 	})
 
 	t.Run("returns error when action_id is missing", func(t *testing.T) {
-		repo := newMockRepo(nil, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		repo := newMockRepo(nil)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 
 		_, err := findTool(tools, "core__get_action").Run(ctx, map[string]any{})
 		gt.Error(t, err)
@@ -378,8 +296,8 @@ func TestCreateActionTool(t *testing.T) {
 				return &result, nil
 			},
 		}
-		repo := newMockRepo(actionRepo, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		repo := newMockRepo(actionRepo)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 
 		result, err := findTool(tools, "core__create_action").Run(ctx, map[string]any{
 			"title":       "New investigation",
@@ -396,7 +314,7 @@ func TestCreateActionTool(t *testing.T) {
 		gt.Value(t, result["id"]).Equal(int64(10))
 	})
 
-	t.Run("defaults status to TODO when omitted", func(t *testing.T) {
+	t.Run("defaults status to BACKLOG when omitted", func(t *testing.T) {
 		var captured *model.Action
 		actionRepo := &mockActionRepo{
 			createFn: func(ctx context.Context, workspaceID string, action *model.Action) (*model.Action, error) {
@@ -404,8 +322,8 @@ func TestCreateActionTool(t *testing.T) {
 				return action, nil
 			},
 		}
-		repo := newMockRepo(actionRepo, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		repo := newMockRepo(actionRepo)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 
 		_, err := findTool(tools, "core__create_action").Run(ctx, map[string]any{"title": "Quick task"})
 		gt.NoError(t, err)
@@ -415,16 +333,16 @@ func TestCreateActionTool(t *testing.T) {
 	})
 
 	t.Run("returns error when title is missing", func(t *testing.T) {
-		repo := newMockRepo(nil, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		repo := newMockRepo(nil)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 
 		_, err := findTool(tools, "core__create_action").Run(ctx, map[string]any{})
 		gt.Error(t, err)
 	})
 
 	t.Run("returns error for invalid status", func(t *testing.T) {
-		repo := newMockRepo(nil, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		repo := newMockRepo(nil)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 
 		_, err := findTool(tools, "core__create_action").Run(ctx, map[string]any{
 			"title":  "Test",
@@ -434,8 +352,8 @@ func TestCreateActionTool(t *testing.T) {
 	})
 
 	t.Run("returns error when assignee_ids contains non-string element", func(t *testing.T) {
-		repo := newMockRepo(nil, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		repo := newMockRepo(nil)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 
 		_, err := findTool(tools, "core__create_action").Run(ctx, map[string]any{
 			"title":       "Test",
@@ -461,8 +379,8 @@ func TestUpdateActionTool(t *testing.T) {
 				return action, nil
 			},
 		}
-		repo := newMockRepo(actionRepo, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		repo := newMockRepo(actionRepo)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 
 		result, err := findTool(tools, "core__update_action").Run(ctx, map[string]any{
 			"action_id":   float64(5),
@@ -490,8 +408,8 @@ func TestUpdateActionTool(t *testing.T) {
 				return action, nil
 			},
 		}
-		repo := newMockRepo(actionRepo, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		repo := newMockRepo(actionRepo)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 
 		_, err := findTool(tools, "core__update_action").Run(ctx, map[string]any{
 			"action_id":   float64(6),
@@ -513,8 +431,8 @@ func TestUpdateActionTool(t *testing.T) {
 				return action, nil
 			},
 		}
-		repo := newMockRepo(actionRepo, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		repo := newMockRepo(actionRepo)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 
 		_, err := findTool(tools, "core__update_action").Run(ctx, map[string]any{
 			"action_id":   float64(60),
@@ -536,8 +454,8 @@ func TestUpdateActionTool(t *testing.T) {
 				return action, nil
 			},
 		}
-		repo := newMockRepo(actionRepo, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		repo := newMockRepo(actionRepo)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 
 		_, err := findTool(tools, "core__update_action").Run(ctx, map[string]any{
 			"action_id":   float64(7),
@@ -559,8 +477,8 @@ func TestUpdateActionTool(t *testing.T) {
 				return action, nil
 			},
 		}
-		repo := newMockRepo(actionRepo, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		repo := newMockRepo(actionRepo)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 
 		_, err := findTool(tools, "core__update_action").Run(ctx, map[string]any{
 			"action_id":   float64(8),
@@ -571,8 +489,8 @@ func TestUpdateActionTool(t *testing.T) {
 	})
 
 	t.Run("returns error when action_id missing", func(t *testing.T) {
-		repo := newMockRepo(nil, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		repo := newMockRepo(nil)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 
 		_, err := findTool(tools, "core__update_action").Run(ctx, map[string]any{})
 		gt.Error(t, err)
@@ -584,8 +502,8 @@ func TestUpdateActionTool(t *testing.T) {
 				return nil, nil
 			},
 		}
-		repo := newMockRepo(actionRepo, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		repo := newMockRepo(actionRepo)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 
 		_, err := findTool(tools, "core__update_action").Run(ctx, map[string]any{"action_id": float64(999)})
 		gt.Error(t, err)
@@ -598,8 +516,8 @@ func TestUpdateActionTool(t *testing.T) {
 				return original, nil
 			},
 		}
-		repo := newMockRepo(actionRepo, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		repo := newMockRepo(actionRepo)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 
 		_, err := findTool(tools, "core__update_action").Run(ctx, map[string]any{
 			"action_id":   float64(10),
@@ -625,8 +543,8 @@ func TestUpdateActionStatusTool(t *testing.T) {
 				return action, nil
 			},
 		}
-		repo := newMockRepo(actionRepo, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		repo := newMockRepo(actionRepo)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 
 		result, err := findTool(tools, "core__update_action_status").Run(ctx, map[string]any{
 			"action_id": float64(5),
@@ -643,8 +561,8 @@ func TestUpdateActionStatusTool(t *testing.T) {
 				return nil, errors.New("db error")
 			},
 		}
-		repo := newMockRepo(actionRepo, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		repo := newMockRepo(actionRepo)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 
 		_, err := findTool(tools, "core__update_action_status").Run(ctx, map[string]any{
 			"action_id": float64(1),
@@ -654,8 +572,8 @@ func TestUpdateActionStatusTool(t *testing.T) {
 	})
 
 	t.Run("returns error for invalid status string", func(t *testing.T) {
-		repo := newMockRepo(nil, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		repo := newMockRepo(nil)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 
 		_, err := findTool(tools, "core__update_action_status").Run(ctx, map[string]any{
 			"action_id": float64(1),
@@ -680,8 +598,8 @@ func TestSetActionAssigneeTool(t *testing.T) {
 				return action, nil
 			},
 		}
-		repo := newMockRepo(actionRepo, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		repo := newMockRepo(actionRepo)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 
 		_, err := findTool(tools, "core__set_action_assignee").Run(ctx, map[string]any{
 			"action_id":   float64(3),
@@ -703,8 +621,8 @@ func TestSetActionAssigneeTool(t *testing.T) {
 				return action, nil
 			},
 		}
-		repo := newMockRepo(actionRepo, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		repo := newMockRepo(actionRepo)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 
 		_, err := findTool(tools, "core__set_action_assignee").Run(ctx, map[string]any{
 			"action_id":   float64(4),
@@ -715,166 +633,11 @@ func TestSetActionAssigneeTool(t *testing.T) {
 	})
 
 	t.Run("returns error when assignee_id is missing", func(t *testing.T) {
-		repo := newMockRepo(nil, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		repo := newMockRepo(nil)
+		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 
 		_, err := findTool(tools, "core__set_action_assignee").Run(ctx, map[string]any{
 			"action_id": float64(1),
-		})
-		gt.Error(t, err)
-	})
-}
-
-func TestSearchKnowledgeTool(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("generates embedding and calls FindByEmbedding with correct args", func(t *testing.T) {
-		var gotQuery string
-		var gotDimension int
-		var gotLimit int
-
-		knowledgeRepo := &mockKnowledgeRepo{
-			findByEmbeddingFn: func(ctx context.Context, workspaceID string, embedding []float32, limit int) ([]*model.Knowledge, error) {
-				gt.Value(t, workspaceID).Equal(testWorkspaceID)
-				gotLimit = limit
-				return []*model.Knowledge{
-					{ID: "k-001", Title: "Incident playbook", Summary: "Step by step guide"},
-				}, nil
-			},
-		}
-		llm := &mockLLMClient{
-			generateEmbeddingFn: func(ctx context.Context, dimension int, input []string) ([][]float64, error) {
-				gotDimension = dimension
-				gotQuery = input[0]
-				vec := make([]float64, dimension)
-				for i := range vec {
-					vec[i] = 0.5
-				}
-				return [][]float64{vec}, nil
-			},
-		}
-		repo := newMockRepo(nil, knowledgeRepo)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: llm})
-
-		result, err := findTool(tools, "core__search_knowledge").Run(ctx, map[string]any{
-			"query": "incident response",
-			"limit": float64(3),
-		})
-		gt.NoError(t, err)
-		gt.Value(t, gotQuery).Equal("incident response")
-		gt.Value(t, gotDimension).Equal(model.EmbeddingDimension)
-		gt.Value(t, gotLimit).Equal(3)
-		items := result["knowledges"].([]map[string]any)
-		gt.Array(t, items).Length(1)
-		gt.Value(t, items[0]["title"]).Equal("Incident playbook")
-		gt.Value(t, items[0]["summary"]).Equal("Step by step guide")
-	})
-
-	t.Run("uses default limit of 5 when omitted", func(t *testing.T) {
-		var gotLimit int
-		knowledgeRepo := &mockKnowledgeRepo{
-			findByEmbeddingFn: func(_ context.Context, _ string, _ []float32, limit int) ([]*model.Knowledge, error) {
-				gotLimit = limit
-				return nil, nil
-			},
-		}
-		repo := newMockRepo(nil, knowledgeRepo)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
-
-		_, err := findTool(tools, "core__search_knowledge").Run(ctx, map[string]any{"query": "test query"})
-		gt.NoError(t, err)
-		gt.Value(t, gotLimit).Equal(5)
-	})
-
-	t.Run("returns error when query is empty", func(t *testing.T) {
-		repo := newMockRepo(nil, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
-
-		_, err := findTool(tools, "core__search_knowledge").Run(ctx, map[string]any{"query": ""})
-		gt.Error(t, err)
-	})
-
-	t.Run("propagates embedding generation error", func(t *testing.T) {
-		llm := &mockLLMClient{
-			generateEmbeddingFn: func(_ context.Context, _ int, _ []string) ([][]float64, error) {
-				return nil, errors.New("embedding API down")
-			},
-		}
-		repo := newMockRepo(nil, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: llm})
-
-		_, err := findTool(tools, "core__search_knowledge").Run(ctx, map[string]any{"query": "test"})
-		gt.Error(t, err)
-	})
-
-	t.Run("propagates FindByEmbedding error", func(t *testing.T) {
-		knowledgeRepo := &mockKnowledgeRepo{
-			findByEmbeddingFn: func(_ context.Context, _ string, _ []float32, _ int) ([]*model.Knowledge, error) {
-				return nil, errors.New("vector index unavailable")
-			},
-		}
-		repo := newMockRepo(nil, knowledgeRepo)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
-
-		_, err := findTool(tools, "core__search_knowledge").Run(ctx, map[string]any{"query": "test"})
-		gt.Error(t, err)
-	})
-}
-
-func TestGetKnowledgeTool(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("passes correct workspace and knowledge ID to repository", func(t *testing.T) {
-		var gotWorkspaceID string
-		var gotKnowledgeID model.KnowledgeID
-		knowledgeRepo := &mockKnowledgeRepo{
-			getFn: func(ctx context.Context, workspaceID string, id model.KnowledgeID) (*model.Knowledge, error) {
-				gotWorkspaceID = workspaceID
-				gotKnowledgeID = id
-				return &model.Knowledge{
-					ID:         id,
-					CaseID:     testCaseID,
-					Title:      "Root cause analysis",
-					Summary:    "Detailed findings",
-					SourceURLs: []string{"https://wiki.example.com/rca"},
-				}, nil
-			},
-		}
-		repo := newMockRepo(nil, knowledgeRepo)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
-
-		result, err := findTool(tools, "core__get_knowledge").Run(ctx, map[string]any{
-			"knowledge_id": "k-abc-123",
-		})
-		gt.NoError(t, err)
-		gt.Value(t, gotWorkspaceID).Equal(testWorkspaceID)
-		gt.Value(t, gotKnowledgeID).Equal(model.KnowledgeID("k-abc-123"))
-		gt.Value(t, result["title"]).Equal("Root cause analysis")
-		gt.Value(t, result["summary"]).Equal("Detailed findings")
-		gt.Value(t, result["id"]).Equal("k-abc-123")
-	})
-
-	t.Run("propagates repository error", func(t *testing.T) {
-		knowledgeRepo := &mockKnowledgeRepo{
-			getFn: func(_ context.Context, _ string, _ model.KnowledgeID) (*model.Knowledge, error) {
-				return nil, errors.New("not found")
-			},
-		}
-		repo := newMockRepo(nil, knowledgeRepo)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
-
-		_, err := findTool(tools, "core__get_knowledge").Run(ctx, map[string]any{
-			"knowledge_id": "non-existent",
-		})
-		gt.Error(t, err)
-	})
-
-	t.Run("returns error when knowledge_id is empty", func(t *testing.T) {
-		repo := newMockRepo(nil, nil)
-		tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
-
-		_, err := findTool(tools, "core__get_knowledge").Run(ctx, map[string]any{
-			"knowledge_id": "",
 		})
 		gt.Error(t, err)
 	})
@@ -890,7 +653,7 @@ func TestToolUpdateCalls(t *testing.T) {
 				return []*model.Action{}, nil
 			},
 		}
-		tools := core.New(core.Deps{Repo: newMockRepo(actionRepo, nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		tools := core.New(core.Deps{Repo: newMockRepo(actionRepo), WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 		_, err := findTool(tools, "core__list_actions").Run(ctx, map[string]any{})
 		gt.NoError(t, err)
 		gt.Array(t, *msgs).Length(1)
@@ -904,7 +667,7 @@ func TestToolUpdateCalls(t *testing.T) {
 				return &model.Action{ID: id, Title: "T", Status: types.ActionStatusTodo}, nil
 			},
 		}
-		tools := core.New(core.Deps{Repo: newMockRepo(actionRepo, nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		tools := core.New(core.Deps{Repo: newMockRepo(actionRepo), WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 		_, err := findTool(tools, "core__get_action").Run(ctx, map[string]any{"action_id": float64(7)})
 		gt.NoError(t, err)
 		gt.Array(t, *msgs).Length(1)
@@ -918,7 +681,7 @@ func TestToolUpdateCalls(t *testing.T) {
 				return a, nil
 			},
 		}
-		tools := core.New(core.Deps{Repo: newMockRepo(actionRepo, nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		tools := core.New(core.Deps{Repo: newMockRepo(actionRepo), WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 		_, err := findTool(tools, "core__create_action").Run(ctx, map[string]any{"title": "Deploy fix"})
 		gt.NoError(t, err)
 		gt.Array(t, *msgs).Length(1)
@@ -932,7 +695,7 @@ func TestToolUpdateCalls(t *testing.T) {
 			getFn:    func(_ context.Context, _ string, _ int64) (*model.Action, error) { return original, nil },
 			updateFn: func(_ context.Context, _ string, a *model.Action) (*model.Action, error) { return a, nil },
 		}
-		tools := core.New(core.Deps{Repo: newMockRepo(actionRepo, nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		tools := core.New(core.Deps{Repo: newMockRepo(actionRepo), WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 		_, err := findTool(tools, "core__update_action").Run(ctx, map[string]any{
 			"action_id":   float64(11),
 			"description": "Updated desc",
@@ -949,7 +712,7 @@ func TestToolUpdateCalls(t *testing.T) {
 			getFn:    func(_ context.Context, _ string, _ int64) (*model.Action, error) { return original, nil },
 			updateFn: func(_ context.Context, _ string, a *model.Action) (*model.Action, error) { return a, nil },
 		}
-		tools := core.New(core.Deps{Repo: newMockRepo(actionRepo, nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		tools := core.New(core.Deps{Repo: newMockRepo(actionRepo), WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 		_, err := findTool(tools, "core__update_action_status").Run(ctx, map[string]any{
 			"action_id": float64(3),
 			"status":    "COMPLETED",
@@ -966,7 +729,7 @@ func TestToolUpdateCalls(t *testing.T) {
 			getFn:    func(_ context.Context, _ string, _ int64) (*model.Action, error) { return original, nil },
 			updateFn: func(_ context.Context, _ string, a *model.Action) (*model.Action, error) { return a, nil },
 		}
-		tools := core.New(core.Deps{Repo: newMockRepo(actionRepo, nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		tools := core.New(core.Deps{Repo: newMockRepo(actionRepo), WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 		_, err := findTool(tools, "core__set_action_assignee").Run(ctx, map[string]any{
 			"action_id":   float64(2),
 			"assignee_id": "U005",
@@ -983,7 +746,7 @@ func TestToolUpdateCalls(t *testing.T) {
 			getFn:    func(_ context.Context, _ string, _ int64) (*model.Action, error) { return original, nil },
 			updateFn: func(_ context.Context, _ string, a *model.Action) (*model.Action, error) { return a, nil },
 		}
-		tools := core.New(core.Deps{Repo: newMockRepo(actionRepo, nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
+		tools := core.New(core.Deps{Repo: newMockRepo(actionRepo), WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 		_, err := findTool(tools, "core__set_action_assignee").Run(ctx, map[string]any{
 			"action_id":   float64(9),
 			"assignee_id": "",
@@ -991,264 +754,5 @@ func TestToolUpdateCalls(t *testing.T) {
 		gt.NoError(t, err)
 		gt.Array(t, *msgs).Length(1)
 		gt.Value(t, (*msgs)[0]).Equal("Clearing assignee on action #9")
-	})
-
-	t.Run("search_knowledge posts update message with query", func(t *testing.T) {
-		ctx, msgs := newCtxWithUpdateCapture()
-		knowledgeRepo := &mockKnowledgeRepo{
-			findByEmbeddingFn: func(_ context.Context, _ string, _ []float32, _ int) ([]*model.Knowledge, error) {
-				return nil, nil
-			},
-		}
-		tools := core.New(core.Deps{Repo: newMockRepo(nil, knowledgeRepo), WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
-		_, err := findTool(tools, "core__search_knowledge").Run(ctx, map[string]any{"query": "firewall rules"})
-		gt.NoError(t, err)
-		gt.Array(t, *msgs).Length(1)
-		gt.Value(t, (*msgs)[0]).Equal("Searching knowledge: firewall rules")
-	})
-
-	t.Run("get_knowledge posts update message with ID", func(t *testing.T) {
-		ctx, msgs := newCtxWithUpdateCapture()
-		knowledgeRepo := &mockKnowledgeRepo{
-			getFn: func(_ context.Context, _ string, id model.KnowledgeID) (*model.Knowledge, error) {
-				return &model.Knowledge{ID: id, Title: "Test"}, nil
-			},
-		}
-		tools := core.New(core.Deps{Repo: newMockRepo(nil, knowledgeRepo), WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
-		_, err := findTool(tools, "core__get_knowledge").Run(ctx, map[string]any{"knowledge_id": "k-xyz"})
-		gt.NoError(t, err)
-		gt.Array(t, *msgs).Length(1)
-		gt.Value(t, (*msgs)[0]).Equal("Getting knowledge k-xyz...")
-	})
-}
-
-// ----- mock MemoryRepository -----
-
-type mockMemoryRepo struct {
-	createFn          func(ctx context.Context, workspaceID string, caseID int64, memory *model.Memory) (*model.Memory, error)
-	deleteFn          func(ctx context.Context, workspaceID string, caseID int64, memoryID model.MemoryID) error
-	listFn            func(ctx context.Context, workspaceID string, caseID int64) ([]*model.Memory, error)
-	findByEmbeddingFn func(ctx context.Context, workspaceID string, caseID int64, embedding []float32, limit int) ([]*model.Memory, error)
-}
-
-func (m *mockMemoryRepo) Create(ctx context.Context, workspaceID string, caseID int64, memory *model.Memory) (*model.Memory, error) {
-	if m.createFn != nil {
-		return m.createFn(ctx, workspaceID, caseID, memory)
-	}
-	created := *memory
-	created.ID = model.NewMemoryID()
-	return &created, nil
-}
-
-func (m *mockMemoryRepo) Get(_ context.Context, _ string, _ int64, _ model.MemoryID) (*model.Memory, error) {
-	return nil, errors.New("not found")
-}
-
-func (m *mockMemoryRepo) Delete(ctx context.Context, workspaceID string, caseID int64, memoryID model.MemoryID) error {
-	if m.deleteFn != nil {
-		return m.deleteFn(ctx, workspaceID, caseID, memoryID)
-	}
-	return nil
-}
-
-func (m *mockMemoryRepo) List(ctx context.Context, workspaceID string, caseID int64) ([]*model.Memory, error) {
-	if m.listFn != nil {
-		return m.listFn(ctx, workspaceID, caseID)
-	}
-	return nil, nil
-}
-
-func (m *mockMemoryRepo) FindByEmbedding(ctx context.Context, workspaceID string, caseID int64, embedding []float32, limit int) ([]*model.Memory, error) {
-	if m.findByEmbeddingFn != nil {
-		return m.findByEmbeddingFn(ctx, workspaceID, caseID, embedding, limit)
-	}
-	return nil, nil
-}
-
-// ----- mock AssistLogRepository -----
-
-type mockAssistLogRepo struct{}
-
-func (m *mockAssistLogRepo) Create(_ context.Context, _ string, _ int64, log *model.AssistLog) (*model.AssistLog, error) {
-	return log, nil
-}
-func (m *mockAssistLogRepo) List(_ context.Context, _ string, _ int64, _, _ int) ([]*model.AssistLog, int, error) {
-	return nil, 0, nil
-}
-
-// ----- mockRepoWithMemory extends mockRepo with Memory and AssistLog support -----
-
-type mockRepoWithMemory struct {
-	mockRepo
-	memoryRepo    interfaces.MemoryRepository
-	assistLogRepo interfaces.AssistLogRepository
-}
-
-func (m *mockRepoWithMemory) Memory() interfaces.MemoryRepository       { return m.memoryRepo }
-func (m *mockRepoWithMemory) AssistLog() interfaces.AssistLogRepository { return m.assistLogRepo }
-
-func newMockRepoForAssist(knowledgeRepo interfaces.KnowledgeRepository, memoryRepo interfaces.MemoryRepository) *mockRepoWithMemory {
-	if knowledgeRepo == nil {
-		knowledgeRepo = &mockKnowledgeRepo{}
-	}
-	if memoryRepo == nil {
-		memoryRepo = &mockMemoryRepo{}
-	}
-	return &mockRepoWithMemory{
-		mockRepo: mockRepo{
-			actionRepo:    &mockActionRepo{},
-			knowledgeRepo: knowledgeRepo,
-		},
-		memoryRepo:    memoryRepo,
-		assistLogRepo: &mockAssistLogRepo{},
-	}
-}
-
-// ----- NewForAssist tests -----
-
-func TestNewForAssist_ReturnsAllTools(t *testing.T) {
-	repo := newMockRepoForAssist(nil, nil)
-	llm := &mockLLMClient{}
-	tools := core.NewForAssist(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: llm})
-
-	// 8 base tools + 2 knowledge write + 4 memory tools = 14.
-	// Slack post_message lives in pkg/agent/tool/slack now and is registered
-	// separately by the assist usecase, so it is not counted here.
-	gt.Array(t, tools).Length(14)
-
-	toolNames := make(map[string]bool)
-	for _, tl := range tools {
-		toolNames[tl.Spec().Name] = true
-	}
-	gt.Value(t, toolNames["core__create_knowledge"]).Equal(true)
-	gt.Value(t, toolNames["core__update_knowledge"]).Equal(true)
-	gt.Value(t, toolNames["core__create_memory"]).Equal(true)
-	gt.Value(t, toolNames["core__delete_memory"]).Equal(true)
-	gt.Value(t, toolNames["core__search_memory"]).Equal(true)
-	gt.Value(t, toolNames["core__list_memories"]).Equal(true)
-}
-
-func TestCreateMemoryTool(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("creates memory with claim", func(t *testing.T) {
-		var captured *model.Memory
-		memoryRepo := &mockMemoryRepo{
-			createFn: func(_ context.Context, wsID string, caseID int64, mem *model.Memory) (*model.Memory, error) {
-				gt.Value(t, wsID).Equal(testWorkspaceID)
-				gt.Value(t, caseID).Equal(testCaseID)
-				captured = mem
-				created := *mem
-				created.ID = "mem-1"
-				return &created, nil
-			},
-		}
-		repo := newMockRepoForAssist(nil, memoryRepo)
-		tools := core.NewForAssist(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
-
-		result, err := findTool(tools, "core__create_memory").Run(ctx, map[string]any{"claim": "The server restart is scheduled for Friday"})
-		gt.NoError(t, err)
-		gt.Value(t, captured.Claim).Equal("The server restart is scheduled for Friday")
-		gt.Value(t, captured.CaseID).Equal(testCaseID)
-		gt.Value(t, len(captured.Embedding) > 0).Equal(true)
-		gt.Value(t, result["claim"]).Equal("The server restart is scheduled for Friday")
-	})
-
-	t.Run("returns error when claim is empty", func(t *testing.T) {
-		repo := newMockRepoForAssist(nil, nil)
-		tools := core.NewForAssist(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
-
-		_, err := findTool(tools, "core__create_memory").Run(ctx, map[string]any{"claim": ""})
-		gt.Error(t, err)
-	})
-}
-
-func TestDeleteMemoryTool(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("deletes memory by ID", func(t *testing.T) {
-		var gotMemoryID model.MemoryID
-		memoryRepo := &mockMemoryRepo{
-			deleteFn: func(_ context.Context, _ string, _ int64, memID model.MemoryID) error {
-				gotMemoryID = memID
-				return nil
-			},
-		}
-		repo := newMockRepoForAssist(nil, memoryRepo)
-		tools := core.NewForAssist(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
-
-		result, err := findTool(tools, "core__delete_memory").Run(ctx, map[string]any{"memory_id": "mem-123"})
-		gt.NoError(t, err)
-		gt.Value(t, gotMemoryID).Equal(model.MemoryID("mem-123"))
-		gt.Value(t, result["deleted"]).Equal(true)
-	})
-
-	t.Run("returns error when memory_id is empty", func(t *testing.T) {
-		repo := newMockRepoForAssist(nil, nil)
-		tools := core.NewForAssist(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
-
-		_, err := findTool(tools, "core__delete_memory").Run(ctx, map[string]any{"memory_id": ""})
-		gt.Error(t, err)
-	})
-}
-
-func TestListMemoriesTool(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("lists memories for case", func(t *testing.T) {
-		memoryRepo := &mockMemoryRepo{
-			listFn: func(_ context.Context, wsID string, caseID int64) ([]*model.Memory, error) {
-				gt.Value(t, wsID).Equal(testWorkspaceID)
-				gt.Value(t, caseID).Equal(testCaseID)
-				return []*model.Memory{
-					{ID: "m1", CaseID: caseID, Claim: "fact one"},
-					{ID: "m2", CaseID: caseID, Claim: "fact two"},
-				}, nil
-			},
-		}
-		repo := newMockRepoForAssist(nil, memoryRepo)
-		tools := core.NewForAssist(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
-
-		result, err := findTool(tools, "core__list_memories").Run(ctx, map[string]any{})
-		gt.NoError(t, err)
-		items := result["memories"].([]map[string]any)
-		gt.Array(t, items).Length(2)
-		gt.Value(t, items[0]["claim"]).Equal("fact one")
-		gt.Value(t, result["count"]).Equal(2)
-	})
-}
-
-func TestCreateKnowledgeTool(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("creates knowledge with title and summary", func(t *testing.T) {
-		var captured *model.Knowledge
-		knowledgeRepo := &mockKnowledgeRepo{
-			createFn: func(_ context.Context, wsID string, knowledge *model.Knowledge) (*model.Knowledge, error) {
-				gt.Value(t, wsID).Equal(testWorkspaceID)
-				captured = knowledge
-				return knowledge, nil
-			},
-		}
-		repo := newMockRepoForAssist(knowledgeRepo, nil)
-		tools := core.NewForAssist(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
-
-		result, err := findTool(tools, "core__create_knowledge").Run(ctx, map[string]any{
-			"title":   "Root Cause",
-			"summary": "The issue was caused by a misconfiguration",
-		})
-		gt.NoError(t, err)
-		gt.Value(t, captured.Title).Equal("Root Cause")
-		gt.Value(t, captured.Summary).Equal("The issue was caused by a misconfiguration")
-		gt.Value(t, captured.CaseID).Equal(testCaseID)
-		gt.Value(t, result["title"]).Equal("Root Cause")
-	})
-
-	t.Run("returns error when title is empty", func(t *testing.T) {
-		repo := newMockRepoForAssist(nil, nil)
-		tools := core.NewForAssist(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, EmbedClient: &mockLLMClient{}})
-
-		_, err := findTool(tools, "core__create_knowledge").Run(ctx, map[string]any{"title": "", "summary": "text"})
-		gt.Error(t, err)
 	})
 }

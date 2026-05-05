@@ -83,12 +83,6 @@ export const GET_CASE = gql`
         createdAt
         updatedAt
       }
-      knowledges {
-        id
-        title
-        summary
-        sourcedAt
-      }
     }
   }
 `

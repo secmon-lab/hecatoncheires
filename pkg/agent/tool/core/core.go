@@ -1,8 +1,7 @@
 // Package core contains gollem tools that operate on the case's domain state
-// — actions, knowledge, and (in the assist flow) memory. Slack and Notion
-// integrations live in their own tool packages (pkg/agent/tool/slack,
-// pkg/agent/tool/notion); this package intentionally has no dependency on
-// either external service.
+// — currently actions. Slack and Notion integrations live in their own tool
+// packages (pkg/agent/tool/slack, pkg/agent/tool/notion); this package
+// intentionally has no dependency on either external service.
 package core
 
 import (
@@ -17,12 +16,10 @@ type Deps struct {
 	WorkspaceID string
 	CaseID      int64
 	StatusSet   *model.ActionStatusSet
-	EmbedClient interfaces.EmbedClient
 }
 
-// New builds core tools for the agent mention use case: action management plus
-// knowledge search/get. deps.StatusSet may be nil; it falls back to
-// model.DefaultActionStatusSet().
+// New builds core tools for the agent mention use case: action management.
+// deps.StatusSet may be nil; it falls back to model.DefaultActionStatusSet().
 func New(deps Deps) []gollem.Tool {
 	statusSet := deps.StatusSet
 	if statusSet == nil {
@@ -36,30 +33,12 @@ func New(deps Deps) []gollem.Tool {
 		&updateActionTool{repo: deps.Repo, workspaceID: deps.WorkspaceID},
 		&updateActionStatusTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, statusSet: statusSet},
 		&setActionAssigneeTool{repo: deps.Repo, workspaceID: deps.WorkspaceID},
-		&searchKnowledgeTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, embedClient: deps.EmbedClient},
-		&getKnowledgeTool{repo: deps.Repo, workspaceID: deps.WorkspaceID},
 	}
 }
 
-// NewForAssist builds tools for the assist use case. In addition to the base
-// tools from New(), it includes the knowledge write tools (create/update) and
-// the case memory CRUD + search tools.
+// NewForAssist builds tools for the assist use case. Currently identical to
+// New(); kept as a separate factory so future assist-only tools can be added
+// without touching the mention flow.
 func NewForAssist(deps Deps) []gollem.Tool {
-	tools := New(deps)
-
-	// Knowledge write tools
-	tools = append(tools,
-		&createKnowledgeTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, caseID: deps.CaseID, embedClient: deps.EmbedClient},
-		&updateKnowledgeTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, embedClient: deps.EmbedClient},
-	)
-
-	// Memory tools
-	tools = append(tools,
-		&createMemoryTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, caseID: deps.CaseID, embedClient: deps.EmbedClient},
-		&deleteMemoryTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, caseID: deps.CaseID},
-		&searchMemoryTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, caseID: deps.CaseID, embedClient: deps.EmbedClient},
-		&listMemoriesTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, caseID: deps.CaseID},
-	)
-
-	return tools
+	return New(deps)
 }

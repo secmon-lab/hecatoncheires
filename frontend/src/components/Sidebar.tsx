@@ -5,13 +5,11 @@ import { useAuth } from '../contexts/auth-context'
 import { useTranslation } from '../i18n'
 import { GET_CASES } from '../graphql/case'
 import { GET_ACTIONS } from '../graphql/action'
-import { GET_KNOWLEDGES } from '../graphql/knowledge'
 import { GET_SOURCES } from '../graphql/source'
 import { Avatar } from './Primitives'
 import {
   IconCases,
   IconActions,
-  IconKnowledge,
   IconSources,
   IconSettings,
   IconUser,
@@ -20,7 +18,6 @@ import {
 interface NavCount {
   cases: number | null
   actions: number | null
-  knowledges: number | null
   sources: number | null
 }
 
@@ -33,10 +30,6 @@ function useNavCounts(workspaceId: string | undefined): NavCount {
     variables: { workspaceId },
     skip: !workspaceId,
   })
-  const { data: knowledges } = useQuery(GET_KNOWLEDGES, {
-    variables: { workspaceId },
-    skip: !workspaceId,
-  })
   const { data: sources } = useQuery(GET_SOURCES, {
     variables: { workspaceId },
     skip: !workspaceId,
@@ -44,7 +37,6 @@ function useNavCounts(workspaceId: string | undefined): NavCount {
   return {
     cases: cases?.cases?.length ?? null,
     actions: actions?.actions?.length ?? null,
-    knowledges: knowledges?.knowledges?.length ?? null,
     sources: sources?.sources?.length ?? null,
   }
 }
@@ -59,7 +51,6 @@ export default function Sidebar() {
   const items = [
     { id: 'cases',      label: t('navCases'),      Icon: IconCases,     to: `${wsPrefix}/cases`,      count: counts.cases },
     { id: 'actions',    label: t('navActions'),    Icon: IconActions,   to: `${wsPrefix}/actions`,    count: counts.actions },
-    { id: 'knowledges', label: t('navKnowledges'), Icon: IconKnowledge, to: `${wsPrefix}/knowledges`, count: counts.knowledges },
     { id: 'sources',    label: t('navSources'),    Icon: IconSources,   to: `${wsPrefix}/sources`,    count: counts.sources },
   ]
 

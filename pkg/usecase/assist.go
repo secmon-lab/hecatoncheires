@@ -139,14 +139,13 @@ func (uc *AssistUseCase) processCase(ctx context.Context, entry *model.Workspace
 		return goerr.Wrap(err, "failed to build system prompt")
 	}
 
-	// Build tools — core (action / knowledge / memory) plus Slack (read-only +
-	// post_message) plus Notion when configured.
+	// Build tools — core (action) plus Slack (read-only + post_message)
+	// plus Notion when configured.
 	coreTools := core.NewForAssist(core.Deps{
 		Repo:        uc.repo,
 		WorkspaceID: wsID,
 		CaseID:      c.ID,
 		StatusSet:   entry.ActionStatusSet,
-		EmbedClient: uc.embedClient,
 	})
 	slackTools := slacktool.NewForAssist(slacktool.Deps{
 		Bot:       uc.slackService,
@@ -212,13 +211,6 @@ type assistPromptAssistLog struct {
 	NextSteps string
 }
 
-// assistPromptMemory represents a memory for the template
-type assistPromptMemory struct {
-	ID        string
-	Claim     string
-	CreatedAt string
-}
-
 // assistPromptData holds all data for the assist system prompt template
 type assistPromptData struct {
 	CurrentTime  string
@@ -227,7 +219,6 @@ type assistPromptData struct {
 	Actions      []assistPromptAction
 	Messages     []assistPromptMessage
 	AssistLogs   []assistPromptAssistLog
-	Memories     []assistPromptMemory
 	AssistPrompt string
 	Language     string
 }
@@ -310,19 +301,6 @@ func (uc *AssistUseCase) buildAssistSystemPrompt(ctx context.Context, entry *mod
 			Actions:   l.Actions,
 			Reasoning: l.Reasoning,
 			NextSteps: l.NextSteps,
-		})
-	}
-
-	// Fetch memories
-	memories, err := uc.repo.Memory().List(ctx, wsID, c.ID)
-	if err != nil {
-		return "", goerr.Wrap(err, "failed to get memories")
-	}
-	for _, m := range memories {
-		data.Memories = append(data.Memories, assistPromptMemory{
-			ID:        string(m.ID),
-			Claim:     m.Claim,
-			CreatedAt: m.CreatedAt.Format(time.RFC3339),
 		})
 	}
 

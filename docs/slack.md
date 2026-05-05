@@ -365,7 +365,7 @@ When a case is updated and its name changes:
 For private cases, additional behavior applies:
 
 - The Slack channel is created as a **private channel**, restricting visibility to invited members only
-- Channel member IDs are synced to the case and used for **access control** — only channel members can view the case, its actions, knowledges, and assist logs via the API and UI
+- Channel member IDs are synced to the case and used for **access control** — only channel members can view the case, its actions, and assist logs via the API and UI
 - Member sync happens automatically when `member_joined_channel` or `member_left_channel` events are received, or manually via the **Sync** button on the case detail page
 - Bot users are automatically filtered out from the stored member list
 

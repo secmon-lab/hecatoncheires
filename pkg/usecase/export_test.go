@@ -7,12 +7,6 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 )
 
-// BuildThreadedMarkdown is exported for testing
-var BuildThreadedMarkdown = buildThreadedMarkdown
-
-// BuildSlackSourceURLs is exported for testing
-var BuildSlackSourceURLs = buildSlackSourceURLs
-
 // BuildAgentSystemPrompt is exported for testing
 var BuildAgentSystemPrompt = (*AgentUseCase).buildSystemPrompt
 
@@ -24,16 +18,6 @@ type AssistPromptData = assistPromptData
 type AssistPromptAction = assistPromptAction
 type AssistPromptMessage = assistPromptMessage
 type AssistPromptAssistLog = assistPromptAssistLog
-type AssistPromptMemory = assistPromptMemory
-
-// BuildPRMarkdown is exported for testing
-var BuildPRMarkdown = buildPRMarkdown
-
-// BuildIssueMarkdown is exported for testing
-var BuildIssueMarkdown = buildIssueMarkdown
-
-// BuildUpdatedDiscussionMarkdown is exported for testing
-var BuildUpdatedDiscussionMarkdown = buildUpdatedDiscussionMarkdown
 
 // TestErrAccessDenied is exported for testing
 var TestErrAccessDenied = ErrAccessDenied

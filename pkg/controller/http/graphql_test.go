@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/handler"
@@ -817,206 +816,6 @@ func TestGraphQLHandler_FrontendCasesQuery(t *testing.T) {
 		// Check that the error message mentions the invalid field
 		if len(resp.Errors) > 0 {
 			gt.Value(t, resp.Errors[0].Message).Equal(`Cannot query field "fieldID" on type "FieldValue". Did you mean "fieldId"?`)
-		}
-	})
-}
-
-func TestGraphQLHandler_FrontendKnowledgesQuery(t *testing.T) {
-	repo := memory.New()
-	handler, err := setupGraphQLServer(repo)
-	gt.NoError(t, err).Required()
-
-	ctx := context.Background()
-
-	// Create a test case first
-	testCase := &model.Case{
-		Title:       "Test Case for Knowledge",
-		Description: "Case for knowledge testing",
-		AssigneeIDs: []string{"U001"},
-	}
-
-	createdCase, err := repo.Case().Create(ctx, testWorkspaceID, testCase)
-	gt.NoError(t, err).Required()
-
-	// Create test knowledge linked to the case
-	now := time.Now()
-	testKnowledge := &model.Knowledge{
-		ID:         model.NewKnowledgeID(),
-		CaseID:     createdCase.ID,
-		SourceID:   "source-001",
-		SourceURLs: []string{"https://example.com/source"},
-		Title:      "Test Knowledge Title",
-		Summary:    "Test knowledge summary",
-		SourcedAt:  now,
-		CreatedAt:  now,
-		UpdatedAt:  now,
-	}
-
-	createdKnowledge, err := repo.Knowledge().Create(ctx, testWorkspaceID, testKnowledge)
-	gt.NoError(t, err).Required()
-
-	t.Run("frontend GET_KNOWLEDGES query format", func(t *testing.T) {
-		// This mimics the query structure used by the frontend
-		query := `
-			query GetKnowledges($workspaceId: String!) {
-				knowledges(workspaceId: $workspaceId, limit: 100, offset: 0) {
-					items {
-						id
-						caseID
-						case {
-							id
-							title
-							description
-						}
-						sourceID
-						sourceURLs
-						title
-						summary
-						sourcedAt
-						createdAt
-						updatedAt
-					}
-					totalCount
-					hasMore
-				}
-			}
-		`
-
-		variables := map[string]interface{}{
-			"workspaceId": testWorkspaceID,
-		}
-
-		rec := executeGraphQLRequest(t, handler, query, variables)
-
-		gt.Value(t, rec.Code).Equal(http.StatusOK)
-
-		resp := parseGraphQLResponse(t, rec)
-
-		gt.Array(t, resp.Errors).Length(0)
-
-		gt.Value(t, resp.Data).NotNil().Required()
-
-		var result struct {
-			Knowledges struct {
-				Items []struct {
-					ID     string `json:"id"`
-					CaseID int    `json:"caseID"`
-					Case   *struct {
-						ID          int    `json:"id"`
-						Title       string `json:"title"`
-						Description string `json:"description"`
-					} `json:"case"`
-					SourceID   string   `json:"sourceID"`
-					SourceURLs []string `json:"sourceURLs"`
-					Title      string   `json:"title"`
-					Summary    string   `json:"summary"`
-				} `json:"items"`
-				TotalCount int  `json:"totalCount"`
-				HasMore    bool `json:"hasMore"`
-			} `json:"knowledges"`
-		}
-
-		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
-
-		gt.Array(t, result.Knowledges.Items).Length(1).Required()
-
-		k := result.Knowledges.Items[0]
-		gt.Value(t, k.ID).Equal(string(createdKnowledge.ID))
-		gt.Value(t, int64(k.CaseID)).Equal(createdCase.ID)
-		gt.Value(t, k.Title).Equal("Test Knowledge Title")
-		gt.Value(t, k.Case).NotNil()
-		if k.Case != nil {
-			gt.Value(t, int64(k.Case.ID)).Equal(createdCase.ID)
-			gt.Value(t, k.Case.Title).Equal("Test Case for Knowledge")
-		}
-	})
-
-	t.Run("frontend GET_KNOWLEDGE query format", func(t *testing.T) {
-		// This mimics the query structure used by the frontend for single knowledge
-		query := `
-			query GetKnowledge($workspaceId: String!, $id: String!) {
-				knowledge(workspaceId: $workspaceId, id: $id) {
-					id
-					caseID
-					case {
-						id
-						title
-						description
-					}
-					sourceID
-					sourceURLs
-					title
-					summary
-					sourcedAt
-					createdAt
-					updatedAt
-				}
-			}
-		`
-
-		variables := map[string]interface{}{
-			"workspaceId": testWorkspaceID,
-			"id":          string(createdKnowledge.ID),
-		}
-
-		rec := executeGraphQLRequest(t, handler, query, variables)
-
-		gt.Value(t, rec.Code).Equal(http.StatusOK)
-
-		resp := parseGraphQLResponse(t, rec)
-
-		gt.Array(t, resp.Errors).Length(0)
-
-		gt.Value(t, resp.Data).NotNil().Required()
-
-		var result struct {
-			Knowledge struct {
-				ID     string `json:"id"`
-				CaseID int    `json:"caseID"`
-				Case   *struct {
-					ID          int    `json:"id"`
-					Title       string `json:"title"`
-					Description string `json:"description"`
-				} `json:"case"`
-				Title string `json:"title"`
-			} `json:"knowledge"`
-		}
-
-		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
-
-		gt.Value(t, result.Knowledge.ID).Equal(string(createdKnowledge.ID))
-
-		gt.Value(t, int64(result.Knowledge.CaseID)).Equal(createdCase.ID)
-
-		gt.Value(t, result.Knowledge.Case).NotNil()
-	})
-
-	t.Run("verify riskID field does not exist", func(t *testing.T) {
-		// This should fail because riskID is not a valid field
-		query := `
-			query($workspaceId: String!) {
-				knowledges(workspaceId: $workspaceId, limit: 10, offset: 0) {
-					items {
-						id
-						riskID
-					}
-				}
-			}
-		`
-
-		variables := map[string]interface{}{
-			"workspaceId": testWorkspaceID,
-		}
-
-		rec := executeGraphQLRequest(t, handler, query, variables)
-
-		resp := parseGraphQLResponse(t, rec)
-
-		gt.Number(t, len(resp.Errors)).GreaterOrEqual(1)
-
-		// Check that the error message mentions the invalid field
-		if len(resp.Errors) > 0 {
-			gt.Value(t, resp.Errors[0].Message).Equal(`Cannot query field "riskID" on type "Knowledge". Did you mean "caseID"?`)
 		}
 	})
 }
@@ -2365,9 +2164,6 @@ func TestGraphQLHandler_PrivateCaseAccessControl(t *testing.T) {
 						id
 						title
 					}
-					knowledges {
-						id
-					}
 				}
 			}
 		`
@@ -2389,16 +2185,12 @@ func TestGraphQLHandler_PrivateCaseAccessControl(t *testing.T) {
 				Actions      []struct {
 					ID int `json:"id"`
 				} `json:"actions"`
-				Knowledges []struct {
-					ID int `json:"id"`
-				} `json:"knowledges"`
 			} `json:"case"`
 		}
 		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
 
 		gt.Value(t, result.Case.AccessDenied).Equal(true)
 		gt.Array(t, result.Case.Actions).Length(0)
-		gt.Array(t, result.Case.Knowledges).Length(0)
 	})
 
 	t.Run("without auth token private case is fully visible (backward compat)", func(t *testing.T) {
@@ -2436,61 +2228,6 @@ func TestGraphQLHandler_PrivateCaseAccessControl(t *testing.T) {
 
 		gt.Value(t, result.Case.Title).Equal("Private Case")
 		gt.Value(t, result.Case.AccessDenied).Equal(false)
-	})
-
-	t.Run("knowledge root query returns nil for non-member of private case", func(t *testing.T) {
-		// Create a knowledge linked to the private case
-		knowledge := &model.Knowledge{
-			CaseID:  createdPrivate.ID,
-			Title:   "Secret Knowledge",
-			Summary: "Secret summary",
-		}
-		createdKnowledge, err := repo.Knowledge().Create(ctx, testWorkspaceID, knowledge)
-		gt.NoError(t, err).Required()
-
-		query := `
-			query($workspaceId: String!, $id: String!) {
-				knowledge(workspaceId: $workspaceId, id: $id) {
-					id
-					title
-				}
-			}
-		`
-		variables := map[string]interface{}{
-			"workspaceId": testWorkspaceID,
-			"id":          string(createdKnowledge.ID),
-		}
-
-		// Non-member should get null
-		rec := executeGraphQLRequestWithAuth(t, handler, query, variables, "UOTHER")
-		gt.Value(t, rec.Code).Equal(http.StatusOK)
-		resp := parseGraphQLResponse(t, rec)
-		gt.Array(t, resp.Errors).Length(0)
-
-		var result struct {
-			Knowledge *struct {
-				ID    string `json:"id"`
-				Title string `json:"title"`
-			} `json:"knowledge"`
-		}
-		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
-		gt.Value(t, result.Knowledge == nil).Equal(true)
-
-		// Member should see it
-		rec = executeGraphQLRequestWithAuth(t, handler, query, variables, "UMEMBER")
-		gt.Value(t, rec.Code).Equal(http.StatusOK)
-		resp = parseGraphQLResponse(t, rec)
-		gt.Array(t, resp.Errors).Length(0)
-
-		var memberResult struct {
-			Knowledge *struct {
-				ID    string `json:"id"`
-				Title string `json:"title"`
-			} `json:"knowledge"`
-		}
-		gt.NoError(t, json.Unmarshal(resp.Data, &memberResult)).Required()
-		gt.Value(t, memberResult.Knowledge != nil).Equal(true)
-		gt.Value(t, memberResult.Knowledge.Title).Equal("Secret Knowledge")
 	})
 
 	t.Run("assistLogs root query returns empty for non-member of private case", func(t *testing.T) {
