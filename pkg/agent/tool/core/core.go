@@ -31,6 +31,10 @@ type ActionMutator interface {
 	// actor, full Slack sync) so tool-driven edits behave identically to
 	// GraphQL / Slack-modal edits.
 	UpdateAction(ctx context.Context, workspaceID string, actionID int64, params UpdateActionParams) (*model.Action, error)
+	// ArchiveAction is invoked by core__archive_action.
+	ArchiveAction(ctx context.Context, workspaceID string, actionID int64) (*model.Action, error)
+	// UnarchiveAction is invoked by core__unarchive_action.
+	UnarchiveAction(ctx context.Context, workspaceID string, actionID int64) (*model.Action, error)
 }
 
 // UpdateActionParams describes a partial Action update from the agent tool
@@ -76,6 +80,8 @@ func New(deps Deps) []gollem.Tool {
 		&updateActionTool{actionUC: deps.ActionUC, workspaceID: deps.WorkspaceID},
 		&updateActionStatusTool{actionUC: deps.ActionUC, workspaceID: deps.WorkspaceID, statusSet: statusSet},
 		&setActionAssigneeTool{actionUC: deps.ActionUC, workspaceID: deps.WorkspaceID},
+		&archiveActionTool{actionUC: deps.ActionUC, workspaceID: deps.WorkspaceID},
+		&unarchiveActionTool{actionUC: deps.ActionUC, workspaceID: deps.WorkspaceID},
 	}
 }
 

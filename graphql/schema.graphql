@@ -142,7 +142,10 @@ type Case {
   slackChannelName: String
   slackChannelURL: String
   fields: [FieldValue!]!       # Resolved from case_field_values via DataLoader
-  actions: [Action!]!
+  # actions exposes the case's actions. Defaults to active (non-archived)
+  # actions; pass includeArchived=true to also include archived actions
+  # (used by the Case detail "Archived" view toggle).
+  actions(includeArchived: Boolean): [Action!]!
   slackMessages(limit: Int, cursor: String): SlackMessageConnection!
   createdAt: Time!
   updatedAt: Time!
@@ -161,6 +164,10 @@ type Action {
   # display name / color / emoji from FieldConfiguration.actionConfig.
   status: String!
   dueDate: Time
+  # archived is true when the action is in the archived state (i.e. hidden from
+  # default Kanban / Case detail views). Mirrors archivedAt != null.
+  archived: Boolean!
+  archivedAt: Time
   createdAt: Time!
   updatedAt: Time!
   messages(limit: Int, cursor: String): SlackMessageConnection!
@@ -172,6 +179,8 @@ enum ActionEventKind {
   TITLE_CHANGED
   STATUS_CHANGED
   ASSIGNEE_CHANGED
+  ARCHIVED
+  UNARCHIVED
 }
 
 # ActionEvent records a single change to an Action, surfaced in the
@@ -413,9 +422,11 @@ type Query {
   case(workspaceId: String!, id: Int!): Case
 
   # Actions
-  actions(workspaceId: String!): [Action!]!
+  # `includeArchived` defaults to false so default views never accidentally
+  # surface archived actions.
+  actions(workspaceId: String!, includeArchived: Boolean): [Action!]!
   action(workspaceId: String!, id: Int!): Action
-  actionsByCase(workspaceId: String!, caseID: Int!): [Action!]!
+  actionsByCase(workspaceId: String!, caseID: Int!, includeArchived: Boolean): [Action!]!
   openCaseActions(workspaceId: String!): [Action!]!
 
   # Configuration
@@ -448,7 +459,11 @@ type Mutation {
   # Actions
   createAction(workspaceId: String!, input: CreateActionInput!): Action!
   updateAction(workspaceId: String!, input: UpdateActionInput!): Action!
-  deleteAction(workspaceId: String!, id: Int!): Boolean!
+  # Archive an action so it disappears from default Kanban / Case detail views.
+  # Archived actions remain in storage and can be restored via unarchiveAction.
+  archiveAction(workspaceId: String!, id: Int!): Action!
+  # Restore a previously archived action back to active state.
+  unarchiveAction(workspaceId: String!, id: Int!): Action!
   # Posts the Slack message for an Action whose initial post was missed
   # (legacy tool-created actions before the create paths were unified).
   # Errors if the action already has a Slack message timestamp or if the

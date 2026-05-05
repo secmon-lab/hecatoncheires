@@ -52,6 +52,8 @@ var messagesEN = [msgKeyCount]string{
 	MsgActionChangeAssigneeAssigned:   ":bust_in_silhouette: %s assigned %s",
 	MsgActionChangeAssigneeUnassigned: ":bust_in_silhouette: %s unassigned %s",
 	MsgActionChangeAssigneeReplaced:   ":bust_in_silhouette: %s changed assignee: %s -> %s",
+	MsgActionChangeArchived:           ":file_cabinet: %s archived action %q",
+	MsgActionChangeUnarchived:         ":outbox_tray: %s unarchived action %q",
 	MsgActionChangeActorSystem:        "system",
 
 	// Agent
@@ -149,6 +151,8 @@ var messagesJA = [msgKeyCount]string{
 	MsgActionChangeAssigneeAssigned:   ":bust_in_silhouette: %s が %s をアサインしました",
 	MsgActionChangeAssigneeUnassigned: ":bust_in_silhouette: %s が %s のアサインを解除しました",
 	MsgActionChangeAssigneeReplaced:   ":bust_in_silhouette: %s が担当者を変更しました: %s → %s",
+	MsgActionChangeArchived:           ":file_cabinet: %s がアクション %q をアーカイブしました",
+	MsgActionChangeUnarchived:         ":outbox_tray: %s がアクション %q のアーカイブを解除しました",
 	MsgActionChangeActorSystem:        "システム",
 
 	// Agent

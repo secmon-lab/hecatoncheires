@@ -10,6 +10,8 @@ const (
 	ActionEventTitleChanged    ActionEventKind = "TITLE_CHANGED"
 	ActionEventStatusChanged   ActionEventKind = "STATUS_CHANGED"
 	ActionEventAssigneeChanged ActionEventKind = "ASSIGNEE_CHANGED"
+	ActionEventArchived        ActionEventKind = "ARCHIVED"
+	ActionEventUnarchived      ActionEventKind = "UNARCHIVED"
 )
 
 func (k ActionEventKind) IsValid() bool {
@@ -17,7 +19,9 @@ func (k ActionEventKind) IsValid() bool {
 	case ActionEventCreated,
 		ActionEventTitleChanged,
 		ActionEventStatusChanged,
-		ActionEventAssigneeChanged:
+		ActionEventAssigneeChanged,
+		ActionEventArchived,
+		ActionEventUnarchived:
 		return true
 	}
 	return false

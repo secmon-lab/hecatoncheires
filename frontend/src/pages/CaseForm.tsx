@@ -60,7 +60,9 @@ export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
     refetchQueries: [{ query: GET_CASES, variables: { workspaceId: currentWorkspace?.id, status: 'OPEN' } }],
   })
   const [updateCase, { loading: updating }] = useMutation(UPDATE_CASE, {
-    refetchQueries: caseItem ? [{ query: GET_CASE, variables: { workspaceId: currentWorkspace?.id, id: caseItem.id } }] : [],
+    refetchQueries: caseItem
+      ? [{ query: GET_CASE, variables: { workspaceId: currentWorkspace?.id, id: caseItem.id, includeArchivedActions: false } }]
+      : [],
   })
 
   const fields = configData?.fieldConfiguration?.fields || []

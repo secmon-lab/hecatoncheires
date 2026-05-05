@@ -16,6 +16,12 @@ type Action struct {
 	SlackMessageTS string // Optional: Slack message ID (timestamp)
 	Status         types.ActionStatus
 	DueDate        *time.Time // Optional: deadline for the action
+	ArchivedAt     *time.Time // nil = active; non-nil = archived at the given time
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+}
+
+// IsArchived reports whether the action is currently archived.
+func (a *Action) IsArchived() bool {
+	return a != nil && a.ArchivedAt != nil
 }

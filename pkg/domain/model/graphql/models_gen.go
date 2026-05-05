@@ -332,6 +332,8 @@ const (
 	ActionEventKindTitleChanged    ActionEventKind = "TITLE_CHANGED"
 	ActionEventKindStatusChanged   ActionEventKind = "STATUS_CHANGED"
 	ActionEventKindAssigneeChanged ActionEventKind = "ASSIGNEE_CHANGED"
+	ActionEventKindArchived        ActionEventKind = "ARCHIVED"
+	ActionEventKindUnarchived      ActionEventKind = "UNARCHIVED"
 )
 
 var AllActionEventKind = []ActionEventKind{
@@ -339,11 +341,13 @@ var AllActionEventKind = []ActionEventKind{
 	ActionEventKindTitleChanged,
 	ActionEventKindStatusChanged,
 	ActionEventKindAssigneeChanged,
+	ActionEventKindArchived,
+	ActionEventKindUnarchived,
 }
 
 func (e ActionEventKind) IsValid() bool {
 	switch e {
-	case ActionEventKindCreated, ActionEventKindTitleChanged, ActionEventKindStatusChanged, ActionEventKindAssigneeChanged:
+	case ActionEventKindCreated, ActionEventKindTitleChanged, ActionEventKindStatusChanged, ActionEventKindAssigneeChanged, ActionEventKindArchived, ActionEventKindUnarchived:
 		return true
 	}
 	return false

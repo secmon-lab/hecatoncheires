@@ -52,6 +52,8 @@ type DirectiveRoot struct {
 
 type ComplexityRoot struct {
 	Action struct {
+		Archived       func(childComplexity int) int
+		ArchivedAt     func(childComplexity int) int
 		Assignee       func(childComplexity int) int
 		AssigneeID     func(childComplexity int) int
 		Case           func(childComplexity int) int
@@ -116,7 +118,7 @@ type ComplexityRoot struct {
 
 	Case struct {
 		AccessDenied     func(childComplexity int) int
-		Actions          func(childComplexity int) int
+		Actions          func(childComplexity int, includeArchived *bool) int
 		AssigneeIDs      func(childComplexity int) int
 		Assignees        func(childComplexity int) int
 		ChannelUserCount func(childComplexity int) int
@@ -199,6 +201,7 @@ type ComplexityRoot struct {
 	}
 
 	Mutation struct {
+		ArchiveAction          func(childComplexity int, workspaceID string, id int) int
 		CloseCase              func(childComplexity int, workspaceID string, id int) int
 		CreateAction           func(childComplexity int, workspaceID string, input graphql1.CreateActionInput) int
 		CreateCase             func(childComplexity int, workspaceID string, input graphql1.CreateCaseInput) int
@@ -206,13 +209,13 @@ type ComplexityRoot struct {
 		CreateNotionDBSource   func(childComplexity int, workspaceID string, input graphql1.CreateNotionDBSourceInput) int
 		CreateNotionPageSource func(childComplexity int, workspaceID string, input graphql1.CreateNotionPageSourceInput) int
 		CreateSlackSource      func(childComplexity int, workspaceID string, input graphql1.CreateSlackSourceInput) int
-		DeleteAction           func(childComplexity int, workspaceID string, id int) int
 		DeleteCase             func(childComplexity int, workspaceID string, id int) int
 		DeleteSource           func(childComplexity int, workspaceID string, id string) int
 		Noop                   func(childComplexity int) int
 		PostActionSlackMessage func(childComplexity int, workspaceID string, id int) int
 		ReopenCase             func(childComplexity int, workspaceID string, id int) int
 		SyncCaseChannelUsers   func(childComplexity int, workspaceID string, id int) int
+		UnarchiveAction        func(childComplexity int, workspaceID string, id int) int
 		UpdateAction           func(childComplexity int, workspaceID string, input graphql1.UpdateActionInput) int
 		UpdateCase             func(childComplexity int, workspaceID string, input graphql1.UpdateCaseInput) int
 		UpdateGitHubSource     func(childComplexity int, workspaceID string, input graphql1.UpdateGitHubSourceInput) int
@@ -252,8 +255,8 @@ type ComplexityRoot struct {
 
 	Query struct {
 		Action              func(childComplexity int, workspaceID string, id int) int
-		Actions             func(childComplexity int, workspaceID string) int
-		ActionsByCase       func(childComplexity int, workspaceID string, caseID int) int
+		Actions             func(childComplexity int, workspaceID string, includeArchived *bool) int
+		ActionsByCase       func(childComplexity int, workspaceID string, caseID int, includeArchived *bool) int
 		AssistLogs          func(childComplexity int, workspaceID string, caseID int, limit *int, offset *int) int
 		Case                func(childComplexity int, workspaceID string, id int) int
 		Cases               func(childComplexity int, workspaceID string, status *types.CaseStatus) int
@@ -357,7 +360,7 @@ type CaseResolver interface {
 	SlackChannelName(ctx context.Context, obj *graphql1.Case) (*string, error)
 	SlackChannelURL(ctx context.Context, obj *graphql1.Case) (*string, error)
 	Fields(ctx context.Context, obj *graphql1.Case) ([]*graphql1.FieldValue, error)
-	Actions(ctx context.Context, obj *graphql1.Case) ([]*graphql1.Action, error)
+	Actions(ctx context.Context, obj *graphql1.Case, includeArchived *bool) ([]*graphql1.Action, error)
 	SlackMessages(ctx context.Context, obj *graphql1.Case, limit *int, cursor *string) (*graphql1.SlackMessageConnection, error)
 }
 type MutationResolver interface {
@@ -370,7 +373,8 @@ type MutationResolver interface {
 	SyncCaseChannelUsers(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error)
 	CreateAction(ctx context.Context, workspaceID string, input graphql1.CreateActionInput) (*graphql1.Action, error)
 	UpdateAction(ctx context.Context, workspaceID string, input graphql1.UpdateActionInput) (*graphql1.Action, error)
-	DeleteAction(ctx context.Context, workspaceID string, id int) (bool, error)
+	ArchiveAction(ctx context.Context, workspaceID string, id int) (*graphql1.Action, error)
+	UnarchiveAction(ctx context.Context, workspaceID string, id int) (*graphql1.Action, error)
 	PostActionSlackMessage(ctx context.Context, workspaceID string, id int) (*graphql1.Action, error)
 	CreateNotionDBSource(ctx context.Context, workspaceID string, input graphql1.CreateNotionDBSourceInput) (*graphql1.Source, error)
 	CreateNotionPageSource(ctx context.Context, workspaceID string, input graphql1.CreateNotionPageSourceInput) (*graphql1.Source, error)
@@ -389,9 +393,9 @@ type QueryResolver interface {
 	Workspaces(ctx context.Context) ([]*graphql1.Workspace, error)
 	Cases(ctx context.Context, workspaceID string, status *types.CaseStatus) ([]*graphql1.Case, error)
 	Case(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error)
-	Actions(ctx context.Context, workspaceID string) ([]*graphql1.Action, error)
+	Actions(ctx context.Context, workspaceID string, includeArchived *bool) ([]*graphql1.Action, error)
 	Action(ctx context.Context, workspaceID string, id int) (*graphql1.Action, error)
-	ActionsByCase(ctx context.Context, workspaceID string, caseID int) ([]*graphql1.Action, error)
+	ActionsByCase(ctx context.Context, workspaceID string, caseID int, includeArchived *bool) ([]*graphql1.Action, error)
 	OpenCaseActions(ctx context.Context, workspaceID string) ([]*graphql1.Action, error)
 	FieldConfiguration(ctx context.Context, workspaceID string) (*graphql1.FieldConfiguration, error)
 	SlackUsers(ctx context.Context) ([]*graphql1.SlackUser, error)
@@ -421,6 +425,18 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 	_ = ec
 	switch typeName + "." + field {
 
+	case "Action.archived":
+		if e.complexity.Action.Archived == nil {
+			break
+		}
+
+		return e.complexity.Action.Archived(childComplexity), true
+	case "Action.archivedAt":
+		if e.complexity.Action.ArchivedAt == nil {
+			break
+		}
+
+		return e.complexity.Action.ArchivedAt(childComplexity), true
 	case "Action.assignee":
 		if e.complexity.Action.Assignee == nil {
 			break
@@ -701,7 +717,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			break
 		}
 
-		return e.complexity.Case.Actions(childComplexity), true
+		args, err := ec.field_Case_actions_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Case.Actions(childComplexity, args["includeArchived"].(*bool)), true
 	case "Case.assigneeIDs":
 		if e.complexity.Case.AssigneeIDs == nil {
 			break
@@ -1034,6 +1055,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.GitHubRepository.Repo(childComplexity), true
 
+	case "Mutation.archiveAction":
+		if e.complexity.Mutation.ArchiveAction == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_archiveAction_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.ArchiveAction(childComplexity, args["workspaceId"].(string), args["id"].(int)), true
 	case "Mutation.closeCase":
 		if e.complexity.Mutation.CloseCase == nil {
 			break
@@ -1111,17 +1143,6 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.CreateSlackSource(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.CreateSlackSourceInput)), true
-	case "Mutation.deleteAction":
-		if e.complexity.Mutation.DeleteAction == nil {
-			break
-		}
-
-		args, err := ec.field_Mutation_deleteAction_args(ctx, rawArgs)
-		if err != nil {
-			return 0, false
-		}
-
-		return e.complexity.Mutation.DeleteAction(childComplexity, args["workspaceId"].(string), args["id"].(int)), true
 	case "Mutation.deleteCase":
 		if e.complexity.Mutation.DeleteCase == nil {
 			break
@@ -1183,6 +1204,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.SyncCaseChannelUsers(childComplexity, args["workspaceId"].(string), args["id"].(int)), true
+	case "Mutation.unarchiveAction":
+		if e.complexity.Mutation.UnarchiveAction == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_unarchiveAction_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.UnarchiveAction(childComplexity, args["workspaceId"].(string), args["id"].(int)), true
 	case "Mutation.updateAction":
 		if e.complexity.Mutation.UpdateAction == nil {
 			break
@@ -1382,7 +1414,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Query.Actions(childComplexity, args["workspaceId"].(string)), true
+		return e.complexity.Query.Actions(childComplexity, args["workspaceId"].(string), args["includeArchived"].(*bool)), true
 	case "Query.actionsByCase":
 		if e.complexity.Query.ActionsByCase == nil {
 			break
@@ -1393,7 +1425,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Query.ActionsByCase(childComplexity, args["workspaceId"].(string), args["caseID"].(int)), true
+		return e.complexity.Query.ActionsByCase(childComplexity, args["workspaceId"].(string), args["caseID"].(int), args["includeArchived"].(*bool)), true
 	case "Query.assistLogs":
 		if e.complexity.Query.AssistLogs == nil {
 			break
@@ -2016,7 +2048,10 @@ type Case {
   slackChannelName: String
   slackChannelURL: String
   fields: [FieldValue!]!       # Resolved from case_field_values via DataLoader
-  actions: [Action!]!
+  # actions exposes the case's actions. Defaults to active (non-archived)
+  # actions; pass includeArchived=true to also include archived actions
+  # (used by the Case detail "Archived" view toggle).
+  actions(includeArchived: Boolean): [Action!]!
   slackMessages(limit: Int, cursor: String): SlackMessageConnection!
   createdAt: Time!
   updatedAt: Time!
@@ -2035,6 +2070,10 @@ type Action {
   # display name / color / emoji from FieldConfiguration.actionConfig.
   status: String!
   dueDate: Time
+  # archived is true when the action is in the archived state (i.e. hidden from
+  # default Kanban / Case detail views). Mirrors archivedAt != null.
+  archived: Boolean!
+  archivedAt: Time
   createdAt: Time!
   updatedAt: Time!
   messages(limit: Int, cursor: String): SlackMessageConnection!
@@ -2046,6 +2085,8 @@ enum ActionEventKind {
   TITLE_CHANGED
   STATUS_CHANGED
   ASSIGNEE_CHANGED
+  ARCHIVED
+  UNARCHIVED
 }
 
 # ActionEvent records a single change to an Action, surfaced in the
@@ -2287,9 +2328,11 @@ type Query {
   case(workspaceId: String!, id: Int!): Case
 
   # Actions
-  actions(workspaceId: String!): [Action!]!
+  # ` + "`" + `includeArchived` + "`" + ` defaults to false so default views never accidentally
+  # surface archived actions.
+  actions(workspaceId: String!, includeArchived: Boolean): [Action!]!
   action(workspaceId: String!, id: Int!): Action
-  actionsByCase(workspaceId: String!, caseID: Int!): [Action!]!
+  actionsByCase(workspaceId: String!, caseID: Int!, includeArchived: Boolean): [Action!]!
   openCaseActions(workspaceId: String!): [Action!]!
 
   # Configuration
@@ -2322,7 +2365,11 @@ type Mutation {
   # Actions
   createAction(workspaceId: String!, input: CreateActionInput!): Action!
   updateAction(workspaceId: String!, input: UpdateActionInput!): Action!
-  deleteAction(workspaceId: String!, id: Int!): Boolean!
+  # Archive an action so it disappears from default Kanban / Case detail views.
+  # Archived actions remain in storage and can be restored via unarchiveAction.
+  archiveAction(workspaceId: String!, id: Int!): Action!
+  # Restore a previously archived action back to active state.
+  unarchiveAction(workspaceId: String!, id: Int!): Action!
   # Posts the Slack message for an Action whose initial post was missed
   # (legacy tool-created actions before the create paths were unified).
   # Errors if the action already has a Slack message timestamp or if the
@@ -2381,6 +2428,17 @@ func (ec *executionContext) field_Action_messages_args(ctx context.Context, rawA
 	return args, nil
 }
 
+func (ec *executionContext) field_Case_actions_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "includeArchived", ec.unmarshalOBoolean2ᚖbool)
+	if err != nil {
+		return nil, err
+	}
+	args["includeArchived"] = arg0
+	return args, nil
+}
+
 func (ec *executionContext) field_Case_channelUsers_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -2415,6 +2473,22 @@ func (ec *executionContext) field_Case_slackMessages_args(ctx context.Context, r
 		return nil, err
 	}
 	args["cursor"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_archiveAction_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg1
 	return args, nil
 }
 
@@ -2530,22 +2604,6 @@ func (ec *executionContext) field_Mutation_createSlackSource_args(ctx context.Co
 	return args, nil
 }
 
-func (ec *executionContext) field_Mutation_deleteAction_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
-	var err error
-	args := map[string]any{}
-	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
-	if err != nil {
-		return nil, err
-	}
-	args["workspaceId"] = arg0
-	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNInt2int)
-	if err != nil {
-		return nil, err
-	}
-	args["id"] = arg1
-	return args, nil
-}
-
 func (ec *executionContext) field_Mutation_deleteCase_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -2611,6 +2669,22 @@ func (ec *executionContext) field_Mutation_reopenCase_args(ctx context.Context, 
 }
 
 func (ec *executionContext) field_Mutation_syncCaseChannelUsers_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_unarchiveAction_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
 	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
@@ -2778,6 +2852,11 @@ func (ec *executionContext) field_Query_actionsByCase_args(ctx context.Context, 
 		return nil, err
 	}
 	args["caseID"] = arg1
+	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "includeArchived", ec.unmarshalOBoolean2ᚖbool)
+	if err != nil {
+		return nil, err
+	}
+	args["includeArchived"] = arg2
 	return args, nil
 }
 
@@ -2789,6 +2868,11 @@ func (ec *executionContext) field_Query_actions_args(ctx context.Context, rawArg
 		return nil, err
 	}
 	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "includeArchived", ec.unmarshalOBoolean2ᚖbool)
+	if err != nil {
+		return nil, err
+	}
+	args["includeArchived"] = arg1
 	return args, nil
 }
 
@@ -3308,6 +3392,64 @@ func (ec *executionContext) _Action_dueDate(ctx context.Context, field graphql.C
 }
 
 func (ec *executionContext) fieldContext_Action_dueDate(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Action",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Action_archived(ctx context.Context, field graphql.CollectedField, obj *graphql1.Action) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Action_archived,
+		func(ctx context.Context) (any, error) {
+			return obj.Archived, nil
+		},
+		nil,
+		ec.marshalNBoolean2bool,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Action_archived(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Action",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Action_archivedAt(ctx context.Context, field graphql.CollectedField, obj *graphql1.Action) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Action_archivedAt,
+		func(ctx context.Context) (any, error) {
+			return obj.ArchivedAt, nil
+		},
+		nil,
+		ec.marshalOTime2ᚖtimeᚐTime,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Action_archivedAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Action",
 		Field:      field,
@@ -4857,7 +4999,8 @@ func (ec *executionContext) _Case_actions(ctx context.Context, field graphql.Col
 		field,
 		ec.fieldContext_Case_actions,
 		func(ctx context.Context) (any, error) {
-			return ec.resolvers.Case().Actions(ctx, obj)
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Case().Actions(ctx, obj, fc.Args["includeArchived"].(*bool))
 		},
 		nil,
 		ec.marshalNAction2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionᚄ,
@@ -4866,7 +5009,7 @@ func (ec *executionContext) _Case_actions(ctx context.Context, field graphql.Col
 	)
 }
 
-func (ec *executionContext) fieldContext_Case_actions(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Case_actions(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Case",
 		Field:      field,
@@ -4894,6 +5037,10 @@ func (ec *executionContext) fieldContext_Case_actions(_ context.Context, field g
 				return ec.fieldContext_Action_status(ctx, field)
 			case "dueDate":
 				return ec.fieldContext_Action_dueDate(ctx, field)
+			case "archived":
+				return ec.fieldContext_Action_archived(ctx, field)
+			case "archivedAt":
+				return ec.fieldContext_Action_archivedAt(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Action_createdAt(ctx, field)
 			case "updatedAt":
@@ -4905,6 +5052,17 @@ func (ec *executionContext) fieldContext_Case_actions(_ context.Context, field g
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Action", field.Name)
 		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Case_actions_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
 	}
 	return fc, nil
 }
@@ -6584,6 +6742,10 @@ func (ec *executionContext) fieldContext_Mutation_createAction(ctx context.Conte
 				return ec.fieldContext_Action_status(ctx, field)
 			case "dueDate":
 				return ec.fieldContext_Action_dueDate(ctx, field)
+			case "archived":
+				return ec.fieldContext_Action_archived(ctx, field)
+			case "archivedAt":
+				return ec.fieldContext_Action_archivedAt(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Action_createdAt(ctx, field)
 			case "updatedAt":
@@ -6655,6 +6817,10 @@ func (ec *executionContext) fieldContext_Mutation_updateAction(ctx context.Conte
 				return ec.fieldContext_Action_status(ctx, field)
 			case "dueDate":
 				return ec.fieldContext_Action_dueDate(ctx, field)
+			case "archived":
+				return ec.fieldContext_Action_archived(ctx, field)
+			case "archivedAt":
+				return ec.fieldContext_Action_archivedAt(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Action_createdAt(ctx, field)
 			case "updatedAt":
@@ -6681,31 +6847,65 @@ func (ec *executionContext) fieldContext_Mutation_updateAction(ctx context.Conte
 	return fc, nil
 }
 
-func (ec *executionContext) _Mutation_deleteAction(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+func (ec *executionContext) _Mutation_archiveAction(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
 		ec.OperationContext,
 		field,
-		ec.fieldContext_Mutation_deleteAction,
+		ec.fieldContext_Mutation_archiveAction,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Mutation().DeleteAction(ctx, fc.Args["workspaceId"].(string), fc.Args["id"].(int))
+			return ec.resolvers.Mutation().ArchiveAction(ctx, fc.Args["workspaceId"].(string), fc.Args["id"].(int))
 		},
 		nil,
-		ec.marshalNBoolean2bool,
+		ec.marshalNAction2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐAction,
 		true,
 		true,
 	)
 }
 
-func (ec *executionContext) fieldContext_Mutation_deleteAction(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Mutation_archiveAction(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Mutation",
 		Field:      field,
 		IsMethod:   true,
 		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			return nil, errors.New("field of type Boolean does not have child fields")
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Action_id(ctx, field)
+			case "caseID":
+				return ec.fieldContext_Action_caseID(ctx, field)
+			case "case":
+				return ec.fieldContext_Action_case(ctx, field)
+			case "title":
+				return ec.fieldContext_Action_title(ctx, field)
+			case "description":
+				return ec.fieldContext_Action_description(ctx, field)
+			case "assigneeID":
+				return ec.fieldContext_Action_assigneeID(ctx, field)
+			case "assignee":
+				return ec.fieldContext_Action_assignee(ctx, field)
+			case "slackMessageTS":
+				return ec.fieldContext_Action_slackMessageTS(ctx, field)
+			case "status":
+				return ec.fieldContext_Action_status(ctx, field)
+			case "dueDate":
+				return ec.fieldContext_Action_dueDate(ctx, field)
+			case "archived":
+				return ec.fieldContext_Action_archived(ctx, field)
+			case "archivedAt":
+				return ec.fieldContext_Action_archivedAt(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Action_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Action_updatedAt(ctx, field)
+			case "messages":
+				return ec.fieldContext_Action_messages(ctx, field)
+			case "events":
+				return ec.fieldContext_Action_events(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Action", field.Name)
 		},
 	}
 	defer func() {
@@ -6715,7 +6915,82 @@ func (ec *executionContext) fieldContext_Mutation_deleteAction(ctx context.Conte
 		}
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
-	if fc.Args, err = ec.field_Mutation_deleteAction_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+	if fc.Args, err = ec.field_Mutation_archiveAction_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_unarchiveAction(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_unarchiveAction,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().UnarchiveAction(ctx, fc.Args["workspaceId"].(string), fc.Args["id"].(int))
+		},
+		nil,
+		ec.marshalNAction2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐAction,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_unarchiveAction(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Action_id(ctx, field)
+			case "caseID":
+				return ec.fieldContext_Action_caseID(ctx, field)
+			case "case":
+				return ec.fieldContext_Action_case(ctx, field)
+			case "title":
+				return ec.fieldContext_Action_title(ctx, field)
+			case "description":
+				return ec.fieldContext_Action_description(ctx, field)
+			case "assigneeID":
+				return ec.fieldContext_Action_assigneeID(ctx, field)
+			case "assignee":
+				return ec.fieldContext_Action_assignee(ctx, field)
+			case "slackMessageTS":
+				return ec.fieldContext_Action_slackMessageTS(ctx, field)
+			case "status":
+				return ec.fieldContext_Action_status(ctx, field)
+			case "dueDate":
+				return ec.fieldContext_Action_dueDate(ctx, field)
+			case "archived":
+				return ec.fieldContext_Action_archived(ctx, field)
+			case "archivedAt":
+				return ec.fieldContext_Action_archivedAt(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Action_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Action_updatedAt(ctx, field)
+			case "messages":
+				return ec.fieldContext_Action_messages(ctx, field)
+			case "events":
+				return ec.fieldContext_Action_events(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Action", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_unarchiveAction_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -6767,6 +7042,10 @@ func (ec *executionContext) fieldContext_Mutation_postActionSlackMessage(ctx con
 				return ec.fieldContext_Action_status(ctx, field)
 			case "dueDate":
 				return ec.fieldContext_Action_dueDate(ctx, field)
+			case "archived":
+				return ec.fieldContext_Action_archived(ctx, field)
+			case "archivedAt":
+				return ec.fieldContext_Action_archivedAt(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Action_createdAt(ctx, field)
 			case "updatedAt":
@@ -8098,7 +8377,7 @@ func (ec *executionContext) _Query_actions(ctx context.Context, field graphql.Co
 		ec.fieldContext_Query_actions,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Query().Actions(ctx, fc.Args["workspaceId"].(string))
+			return ec.resolvers.Query().Actions(ctx, fc.Args["workspaceId"].(string), fc.Args["includeArchived"].(*bool))
 		},
 		nil,
 		ec.marshalNAction2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionᚄ,
@@ -8135,6 +8414,10 @@ func (ec *executionContext) fieldContext_Query_actions(ctx context.Context, fiel
 				return ec.fieldContext_Action_status(ctx, field)
 			case "dueDate":
 				return ec.fieldContext_Action_dueDate(ctx, field)
+			case "archived":
+				return ec.fieldContext_Action_archived(ctx, field)
+			case "archivedAt":
+				return ec.fieldContext_Action_archivedAt(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Action_createdAt(ctx, field)
 			case "updatedAt":
@@ -8206,6 +8489,10 @@ func (ec *executionContext) fieldContext_Query_action(ctx context.Context, field
 				return ec.fieldContext_Action_status(ctx, field)
 			case "dueDate":
 				return ec.fieldContext_Action_dueDate(ctx, field)
+			case "archived":
+				return ec.fieldContext_Action_archived(ctx, field)
+			case "archivedAt":
+				return ec.fieldContext_Action_archivedAt(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Action_createdAt(ctx, field)
 			case "updatedAt":
@@ -8240,7 +8527,7 @@ func (ec *executionContext) _Query_actionsByCase(ctx context.Context, field grap
 		ec.fieldContext_Query_actionsByCase,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Query().ActionsByCase(ctx, fc.Args["workspaceId"].(string), fc.Args["caseID"].(int))
+			return ec.resolvers.Query().ActionsByCase(ctx, fc.Args["workspaceId"].(string), fc.Args["caseID"].(int), fc.Args["includeArchived"].(*bool))
 		},
 		nil,
 		ec.marshalNAction2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionᚄ,
@@ -8277,6 +8564,10 @@ func (ec *executionContext) fieldContext_Query_actionsByCase(ctx context.Context
 				return ec.fieldContext_Action_status(ctx, field)
 			case "dueDate":
 				return ec.fieldContext_Action_dueDate(ctx, field)
+			case "archived":
+				return ec.fieldContext_Action_archived(ctx, field)
+			case "archivedAt":
+				return ec.fieldContext_Action_archivedAt(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Action_createdAt(ctx, field)
 			case "updatedAt":
@@ -8348,6 +8639,10 @@ func (ec *executionContext) fieldContext_Query_openCaseActions(ctx context.Conte
 				return ec.fieldContext_Action_status(ctx, field)
 			case "dueDate":
 				return ec.fieldContext_Action_dueDate(ctx, field)
+			case "archived":
+				return ec.fieldContext_Action_archived(ctx, field)
+			case "archivedAt":
+				return ec.fieldContext_Action_archivedAt(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Action_createdAt(ctx, field)
 			case "updatedAt":
@@ -12250,6 +12545,13 @@ func (ec *executionContext) _Action(ctx context.Context, sel ast.SelectionSet, o
 			}
 		case "dueDate":
 			out.Values[i] = ec._Action_dueDate(ctx, field, obj)
+		case "archived":
+			out.Values[i] = ec._Action_archived(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "archivedAt":
+			out.Values[i] = ec._Action_archivedAt(ctx, field, obj)
 		case "createdAt":
 			out.Values[i] = ec._Action_createdAt(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
@@ -13629,9 +13931,16 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
-		case "deleteAction":
+		case "archiveAction":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
-				return ec._Mutation_deleteAction(ctx, field)
+				return ec._Mutation_archiveAction(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "unarchiveAction":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_unarchiveAction(ctx, field)
 			})
 			if out.Values[i] == graphql.Null {
 				out.Invalids++

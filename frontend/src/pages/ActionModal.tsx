@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery } from '@apollo/client'
-import { GET_ACTION, UPDATE_ACTION, DELETE_ACTION, GET_ACTIONS } from '../graphql/action'
+import { GET_ACTION, UPDATE_ACTION, ARCHIVE_ACTION, UNARCHIVE_ACTION, GET_ACTIONS } from '../graphql/action'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
@@ -62,8 +62,17 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
       { query: GET_ACTIONS, variables: { workspaceId: currentWorkspace?.id } },
     ],
   })
-  const [deleteAction, { loading: deleting }] = useMutation(DELETE_ACTION, {
-    refetchQueries: [{ query: GET_ACTIONS, variables: { workspaceId: currentWorkspace?.id } }],
+  const [archiveAction, { loading: archiving }] = useMutation(ARCHIVE_ACTION, {
+    refetchQueries: [
+      { query: GET_ACTION, variables: { workspaceId: currentWorkspace?.id, id: actionId } },
+      { query: GET_ACTIONS, variables: { workspaceId: currentWorkspace?.id } },
+    ],
+  })
+  const [unarchiveAction, { loading: unarchiving }] = useMutation(UNARCHIVE_ACTION, {
+    refetchQueries: [
+      { query: GET_ACTION, variables: { workspaceId: currentWorkspace?.id, id: actionId } },
+      { query: GET_ACTIONS, variables: { workspaceId: currentWorkspace?.id } },
+    ],
   })
 
   const flashSaved = () => {
@@ -105,6 +114,15 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
           </span>
         </a>
       )}
+      {action?.archived && (
+        <span
+          className="badge"
+          data-testid="action-archived-badge"
+          style={{ fontSize: 10, flex: '0 0 auto', background: 'var(--bg-muted)', color: 'var(--text-muted)' }}
+        >
+          {t('badgeArchived')}
+        </span>
+      )}
       {savedFlash && (
         <span className="badge open" style={{ fontSize: 10, flex: '0 0 auto' }}>
           <IconCheck size={9} sw={2.5} />
@@ -112,7 +130,7 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
         </span>
       )}
     </div>
-  ), [actionId, action?.case?.id, action?.case?.title, savedFlash, t, currentWorkspace, navigate])
+  ), [actionId, action?.archived, action?.case?.id, action?.case?.title, savedFlash, t, currentWorkspace, navigate])
 
   if (!loading && !action) {
     return (
@@ -174,13 +192,24 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
     flashSaved()
   }
 
-  const [confirmDelete, setConfirmDelete] = useState(false)
-  const handleDelete = async () => {
+  const [confirmArchive, setConfirmArchive] = useState(false)
+  const [confirmUnarchive, setConfirmUnarchive] = useState(false)
+  const handleArchive = async () => {
     if (!action) return
-    await deleteAction({ variables: { workspaceId: currentWorkspace!.id, id: action.id } })
-    setConfirmDelete(false)
+    await archiveAction({ variables: { workspaceId: currentWorkspace!.id, id: action.id } })
+    setConfirmArchive(false)
     onClose()
   }
+  const handleUnarchive = async () => {
+    if (!action) return
+    await unarchiveAction({ variables: { workspaceId: currentWorkspace!.id, id: action.id } })
+    setConfirmUnarchive(false)
+    // Close the modal after unarchive: when the user is on the Archived view
+    // toggle in CaseDetail, the now-restored action no longer belongs in
+    // that slice and leaving the modal open would dangle on stale data.
+    onClose()
+  }
+  const isArchived = !!action?.archived
 
   const due = action ? formatDue(action.dueDate) : null
 
@@ -192,9 +221,25 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
       title={titleEl}
       footer={
         <>
-          <Button variant="danger" onClick={() => setConfirmDelete(true)} disabled={deleting} data-testid="action-delete-button">
-            {t('btnDelete')}
-          </Button>
+          {isArchived ? (
+            <Button
+              variant="primary"
+              onClick={() => setConfirmUnarchive(true)}
+              disabled={unarchiving}
+              data-testid="action-unarchive-button"
+            >
+              {t('btnUnarchive')}
+            </Button>
+          ) : (
+            <Button
+              variant="danger"
+              onClick={() => setConfirmArchive(true)}
+              disabled={archiving}
+              data-testid="action-archive-button"
+            >
+              {t('btnArchive')}
+            </Button>
+          )}
           <span className="spacer" />
           <Button variant="ghost" onClick={onClose}>{t('btnClose')}</Button>
         </>
@@ -286,29 +331,63 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
           </div>
         </>
       )}
-      {confirmDelete && action && (
+      {confirmArchive && action && (
         <Modal
           open
-          onClose={() => setConfirmDelete(false)}
-          title={t('titleDeleteAction')}
+          onClose={() => setConfirmArchive(false)}
+          title={t('titleArchiveAction')}
           width={420}
           footer={
             <>
-              <Button variant="ghost" onClick={() => setConfirmDelete(false)}>{t('btnCancel')}</Button>
+              <Button variant="ghost" onClick={() => setConfirmArchive(false)}>{t('btnCancel')}</Button>
               <Button
                 variant="danger"
-                onClick={handleDelete}
-                disabled={deleting}
-                data-testid="action-delete-confirm-button"
+                onClick={handleArchive}
+                disabled={archiving}
+                data-testid="action-archive-confirm-button"
               >
-                {deleting ? t('btnDeleting') : t('btnDelete')}
+                {t('btnArchive')}
               </Button>
             </>
           }
         >
-          <p style={{ fontSize: 13, lineHeight: 1.6, margin: 0 }}>
-            {t('warningDeleteActionPermanent')}
+          <p
+            style={{ fontSize: 13, lineHeight: 1.6, margin: 0 }}
+            dangerouslySetInnerHTML={{
+              __html: t('msgArchiveActionConfirm', { title: action.title || '' }),
+            }}
+          />
+          <p style={{ fontSize: 12, lineHeight: 1.6, marginTop: 8, color: 'var(--text-muted)' }}>
+            {t('noteArchiveActionReversible')}
           </p>
+        </Modal>
+      )}
+      {confirmUnarchive && action && (
+        <Modal
+          open
+          onClose={() => setConfirmUnarchive(false)}
+          title={t('titleUnarchiveAction')}
+          width={420}
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setConfirmUnarchive(false)}>{t('btnCancel')}</Button>
+              <Button
+                variant="primary"
+                onClick={handleUnarchive}
+                disabled={unarchiving}
+                data-testid="action-unarchive-confirm-button"
+              >
+                {t('btnUnarchive')}
+              </Button>
+            </>
+          }
+        >
+          <p
+            style={{ fontSize: 13, lineHeight: 1.6, margin: 0 }}
+            dangerouslySetInnerHTML={{
+              __html: t('msgUnarchiveActionConfirm', { title: action.title || '' }),
+            }}
+          />
         </Modal>
       )}
     </Modal>

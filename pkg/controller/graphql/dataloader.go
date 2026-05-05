@@ -127,8 +127,11 @@ func NewActionsByCaseLoader(repo interfaces.Repository) *ActionsByCaseLoader {
 	return &ActionsByCaseLoader{repo: repo}
 }
 
+// Load returns the active (non-archived) actions for each case ID. The
+// archived view is fetched directly through the usecase from the resolver
+// because it's an opt-in toggle, not the default sub-resolver path.
 func (l *ActionsByCaseLoader) Load(ctx context.Context, workspaceID string, caseIDs []int64) (map[int64][]*model.Action, error) {
-	actions, err := l.repo.Action().GetByCases(ctx, workspaceID, caseIDs)
+	actions, err := l.repo.Action().GetByCases(ctx, workspaceID, caseIDs, interfaces.ActionListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to load actions by case: %w", err)
 	}

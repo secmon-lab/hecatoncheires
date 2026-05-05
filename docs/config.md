@@ -670,7 +670,7 @@ configuration enables it.
 
 | Tool | Enabled by | Purpose |
 |------|------------|---------|
-| `core__list_actions`, `core__get_action`, `core__create_action`, `core__update_action`, `core__update_action_status`, `core__set_action_assignee` | Always | Manage the case's action items. |
+| `core__list_actions`, `core__get_action`, `core__create_action`, `core__update_action`, `core__update_action_status`, `core__set_action_assignee`, `core__archive_action`, `core__unarchive_action` | Always | Manage the case's action items. `core__list_actions` accepts an optional `include_archived` parameter (default `false`); archived actions are hidden from default views but retained for later restoration via `core__unarchive_action`. There is no destructive delete tool — the archive lifecycle replaces deletion. |
 | `slack__post_message` | Assist only (`HECATONCHEIRES_SLACK_BOT_TOKEN`) | Post a message to the case's Slack channel. |
 | `slack__get_messages` | `HECATONCHEIRES_SLACK_BOT_TOKEN` | Bulk fetch of one or more Slack messages and their thread context (max 10 per call, parallel, partial failure tolerated). |
 | `slack__search_messages` | `HECATONCHEIRES_SLACK_USER_OAUTH_TOKEN` with `search:read` scope | Workspace-wide Slack message search. See [docs/slack.md](slack.md#user-token-scopes). |

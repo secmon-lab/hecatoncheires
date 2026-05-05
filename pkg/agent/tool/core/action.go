@@ -22,11 +22,15 @@ func actionToMap(a *model.Action) map[string]any {
 		"description": a.Description,
 		"status":      a.Status.String(),
 		"assignee_id": a.AssigneeID,
+		"archived":    a.IsArchived(),
 		"created_at":  a.CreatedAt.String(),
 		"updated_at":  a.UpdatedAt.String(),
 	}
 	if a.DueDate != nil {
 		m["due_date"] = a.DueDate.Format(time.RFC3339)
+	}
+	if a.ArchivedAt != nil {
+		m["archived_at"] = a.ArchivedAt.Format(time.RFC3339)
 	}
 	return m
 }
@@ -41,14 +45,25 @@ type listActionsTool struct {
 func (t *listActionsTool) Spec() gollem.ToolSpec {
 	return gollem.ToolSpec{
 		Name:        "core__list_actions",
-		Description: "List all actions associated with the current case",
-		Parameters:  map[string]*gollem.Parameter{},
+		Description: "List all actions associated with the current case. By default archived actions are excluded; pass include_archived=true to include them.",
+		Parameters: map[string]*gollem.Parameter{
+			"include_archived": {
+				Type:        gollem.TypeBoolean,
+				Description: "When true, include archived actions in the result. Default false.",
+			},
+		},
 	}
 }
 
-func (t *listActionsTool) Run(ctx context.Context, _ map[string]any) (map[string]any, error) {
+func (t *listActionsTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
 	tool.Update(ctx, "Listing actions...")
-	actions, err := t.repo.Action().GetByCase(ctx, t.workspaceID, t.caseID)
+	includeArchived := false
+	if v, ok := args["include_archived"]; ok {
+		if b, ok := v.(bool); ok {
+			includeArchived = b
+		}
+	}
+	actions, err := t.repo.Action().GetByCase(ctx, t.workspaceID, t.caseID, interfaces.ActionListOptions{IncludeArchived: includeArchived})
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to list actions",
 			goerr.V("workspaceID", t.workspaceID),
@@ -63,9 +78,13 @@ func (t *listActionsTool) Run(ctx context.Context, _ map[string]any) (map[string
 			"title":       a.Title,
 			"status":      a.Status.String(),
 			"assignee_id": a.AssigneeID,
+			"archived":    a.IsArchived(),
 		}
 		if a.DueDate != nil {
 			item["due_date"] = a.DueDate.Format(time.RFC3339)
+		}
+		if a.ArchivedAt != nil {
+			item["archived_at"] = a.ArchivedAt.Format(time.RFC3339)
 		}
 		items[i] = item
 	}
@@ -431,6 +450,93 @@ func (t *setActionAssigneeTool) Run(ctx context.Context, args map[string]any) (m
 	updated, err := t.actionUC.UpdateAction(ctx, t.workspaceID, actionID, params)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to update action assignee",
+			goerr.V("workspaceID", t.workspaceID),
+			goerr.V("actionID", actionID),
+		)
+	}
+	return actionToMap(updated), nil
+}
+
+// archiveActionTool archives an action through the unified ActionUseCase entry
+// point. Archived actions disappear from default Kanban / Case detail views
+// but remain in storage so they can be unarchived later.
+type archiveActionTool struct {
+	actionUC    ActionMutator
+	workspaceID string
+}
+
+func (t *archiveActionTool) Spec() gollem.ToolSpec {
+	return gollem.ToolSpec{
+		Name:        "core__archive_action",
+		Description: "Archive an action so it disappears from active views. Archived actions can be unarchived later via core__unarchive_action.",
+		Parameters: map[string]*gollem.Parameter{
+			"action_id": {
+				Type:        gollem.TypeInteger,
+				Description: "The ID of the action to archive",
+				Required:    true,
+			},
+		},
+	}
+}
+
+func (t *archiveActionTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
+	actionID, err := tool.ExtractInt64(args, "action_id")
+	if err != nil {
+		return nil, err
+	}
+
+	if t.actionUC == nil {
+		return nil, goerr.New("archive_action tool is not wired to an ActionUseCase",
+			goerr.V("workspaceID", t.workspaceID))
+	}
+
+	tool.Update(ctx, fmt.Sprintf("Archiving action #%d", actionID))
+	updated, err := t.actionUC.ArchiveAction(ctx, t.workspaceID, actionID)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to archive action",
+			goerr.V("workspaceID", t.workspaceID),
+			goerr.V("actionID", actionID),
+		)
+	}
+	return actionToMap(updated), nil
+}
+
+// unarchiveActionTool restores a previously archived action through the
+// unified ActionUseCase entry point.
+type unarchiveActionTool struct {
+	actionUC    ActionMutator
+	workspaceID string
+}
+
+func (t *unarchiveActionTool) Spec() gollem.ToolSpec {
+	return gollem.ToolSpec{
+		Name:        "core__unarchive_action",
+		Description: "Restore a previously archived action back to active state.",
+		Parameters: map[string]*gollem.Parameter{
+			"action_id": {
+				Type:        gollem.TypeInteger,
+				Description: "The ID of the action to unarchive",
+				Required:    true,
+			},
+		},
+	}
+}
+
+func (t *unarchiveActionTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
+	actionID, err := tool.ExtractInt64(args, "action_id")
+	if err != nil {
+		return nil, err
+	}
+
+	if t.actionUC == nil {
+		return nil, goerr.New("unarchive_action tool is not wired to an ActionUseCase",
+			goerr.V("workspaceID", t.workspaceID))
+	}
+
+	tool.Update(ctx, fmt.Sprintf("Unarchiving action #%d", actionID))
+	updated, err := t.actionUC.UnarchiveAction(ctx, t.workspaceID, actionID)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to unarchive action",
 			goerr.V("workspaceID", t.workspaceID),
 			goerr.V("actionID", actionID),
 		)

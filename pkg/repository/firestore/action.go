@@ -7,6 +7,7 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
@@ -85,6 +86,7 @@ func (r *actionRepository) Create(ctx context.Context, workspaceID string, actio
 		SlackMessageTS: action.SlackMessageTS,
 		Status:         action.Status,
 		DueDate:        action.DueDate,
+		ArchivedAt:     action.ArchivedAt,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
@@ -117,7 +119,7 @@ func (r *actionRepository) Get(ctx context.Context, workspaceID string, id int64
 	return &a, nil
 }
 
-func (r *actionRepository) List(ctx context.Context, workspaceID string) ([]*model.Action, error) {
+func (r *actionRepository) List(ctx context.Context, workspaceID string, opts interfaces.ActionListOptions) ([]*model.Action, error) {
 	iter := r.actionsCollection(workspaceID).Documents(ctx)
 	defer iter.Stop()
 
@@ -134,6 +136,10 @@ func (r *actionRepository) List(ctx context.Context, workspaceID string) ([]*mod
 		var a model.Action
 		if err := docSnap.DataTo(&a); err != nil {
 			return nil, goerr.Wrap(err, "failed to decode action", goerr.V("doc_id", docSnap.Ref.ID))
+		}
+
+		if !opts.IncludeArchived && a.IsArchived() {
+			continue
 		}
 
 		actions = append(actions, &a)
@@ -165,6 +171,7 @@ func (r *actionRepository) Update(ctx context.Context, workspaceID string, actio
 		SlackMessageTS: action.SlackMessageTS,
 		Status:         action.Status,
 		DueDate:        action.DueDate,
+		ArchivedAt:     action.ArchivedAt,
 		CreatedAt:      action.CreatedAt,
 		UpdatedAt:      time.Now().UTC(),
 	}
@@ -198,7 +205,7 @@ func (r *actionRepository) Delete(ctx context.Context, workspaceID string, id in
 	return nil
 }
 
-func (r *actionRepository) GetByCase(ctx context.Context, workspaceID string, caseID int64) ([]*model.Action, error) {
+func (r *actionRepository) GetByCase(ctx context.Context, workspaceID string, caseID int64, opts interfaces.ActionListOptions) ([]*model.Action, error) {
 	iter := r.actionsCollection(workspaceID).
 		Where("CaseID", "==", caseID).
 		Documents(ctx)
@@ -217,6 +224,10 @@ func (r *actionRepository) GetByCase(ctx context.Context, workspaceID string, ca
 		var a model.Action
 		if err := docSnap.DataTo(&a); err != nil {
 			return nil, goerr.Wrap(err, "failed to decode action", goerr.V("doc_id", docSnap.Ref.ID))
+		}
+
+		if !opts.IncludeArchived && a.IsArchived() {
+			continue
 		}
 
 		actions = append(actions, &a)
@@ -252,7 +263,7 @@ func (r *actionRepository) GetBySlackMessageTS(ctx context.Context, workspaceID 
 	return &a, nil
 }
 
-func (r *actionRepository) GetByCases(ctx context.Context, workspaceID string, caseIDs []int64) (map[int64][]*model.Action, error) {
+func (r *actionRepository) GetByCases(ctx context.Context, workspaceID string, caseIDs []int64, opts interfaces.ActionListOptions) (map[int64][]*model.Action, error) {
 	// Initialize result map
 	result := make(map[int64][]*model.Action)
 	for _, caseID := range caseIDs {
@@ -262,7 +273,7 @@ func (r *actionRepository) GetByCases(ctx context.Context, workspaceID string, c
 	// Execute parallel queries for each case ID
 	// (avoids creating new composite index)
 	for _, caseID := range caseIDs {
-		actions, err := r.GetByCase(ctx, workspaceID, caseID)
+		actions, err := r.GetByCase(ctx, workspaceID, caseID, opts)
 		if err != nil {
 			return nil, goerr.Wrap(err, "failed to get actions by case", goerr.V("case_id", caseID))
 		}

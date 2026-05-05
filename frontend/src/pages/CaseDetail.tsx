@@ -78,13 +78,22 @@ export default function CaseDetail() {
   const [addingAction, setAddingAction] = useState(false)
   const [actionStatusFilters, setActionStatusFilters] = useState<string[]>([])
   const [actionAssigneeFilters, setActionAssigneeFilters] = useState<string[]>([])
+  // Two-value toggle: 'open' shows non-archived actions (default); 'archived'
+  // shows only archived. Intentionally avoiding a third "All" view because
+  // the i18n labels for "Active" and "Archived" sit too close visually —
+  // the toggle reads cleanly as a binary choice.
+  const [actionView, setActionView] = useState<'open' | 'archived'>('open')
   const [confirmClose, setConfirmClose] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [memberFilter, setMemberFilter] = useState('')
 
   const { data, loading, error } = useQuery(GET_CASE, {
-    variables: { workspaceId: currentWorkspace?.id, id: caseId },
+    variables: {
+      workspaceId: currentWorkspace?.id,
+      id: caseId,
+      includeArchivedActions: actionView === 'archived',
+    },
     skip: !currentWorkspace || Number.isNaN(caseId),
   })
   const { data: configData } = useQuery(GET_FIELD_CONFIGURATION, {
@@ -112,11 +121,18 @@ export default function CaseDetail() {
 
   const refetchOptions = useMemo(
     () => [
-      { query: GET_CASE, variables: { workspaceId: currentWorkspace?.id, id: caseId } },
+      {
+        query: GET_CASE,
+        variables: {
+          workspaceId: currentWorkspace?.id,
+          id: caseId,
+          includeArchivedActions: actionView === 'archived',
+        },
+      },
       { query: GET_CASES, variables: { workspaceId: currentWorkspace?.id, status: 'OPEN' } },
       { query: GET_CASES, variables: { workspaceId: currentWorkspace?.id, status: 'CLOSED' } },
     ],
-    [currentWorkspace?.id, caseId],
+    [currentWorkspace?.id, caseId, actionView],
   )
 
   const [closeCase, { loading: closing }] = useMutation(CLOSE_CASE, { refetchQueries: refetchOptions })
@@ -376,7 +392,7 @@ export default function CaseDetail() {
           <section className="h-section">
             <div className="h-section-h">
               <span className="h-section-title">{t('sectionRelatedActions')}</span>
-              {totalActions > 0 && (
+              {totalActions > 0 && actionView === 'open' && (
                 <>
                   <span className="h-section-progress" data-testid="related-actions-progress">
                     {t('labelProgress', { done: String(doneActions), total: String(totalActions) })}
@@ -387,14 +403,43 @@ export default function CaseDetail() {
                 </>
               )}
               <span className="spacer" />
-              <Button
-                size="sm"
-                icon={<IconPlus size={12} />}
-                onClick={() => setAddingAction(true)}
-                data-testid="add-action-button"
+              <div
+                className="seg-toggle"
+                role="tablist"
+                aria-label="Action view"
+                data-testid="action-view-toggle"
               >
-                {t('btnAddAction')}
-              </Button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={actionView === 'open'}
+                  className={actionView === 'open' ? 'seg-toggle-btn seg-toggle-btn--active' : 'seg-toggle-btn'}
+                  onClick={() => setActionView('open')}
+                  data-testid="action-view-open"
+                >
+                  {t('lblViewOpenActions')}
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={actionView === 'archived'}
+                  className={actionView === 'archived' ? 'seg-toggle-btn seg-toggle-btn--active' : 'seg-toggle-btn'}
+                  onClick={() => setActionView('archived')}
+                  data-testid="action-view-archived"
+                >
+                  {t('lblViewArchivedActions')}
+                </button>
+              </div>
+              {actionView === 'open' && (
+                <Button
+                  size="sm"
+                  icon={<IconPlus size={12} />}
+                  onClick={() => setAddingAction(true)}
+                  data-testid="add-action-button"
+                >
+                  {t('btnAddAction')}
+                </Button>
+              )}
             </div>
 
             {totalActions > 0 && (() => {

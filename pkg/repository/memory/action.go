@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 )
 
@@ -48,6 +49,10 @@ func copyAction(a *model.Action) *model.Action {
 		d := *a.DueDate
 		copied.DueDate = &d
 	}
+	if a.ArchivedAt != nil {
+		t := *a.ArchivedAt
+		copied.ArchivedAt = &t
+	}
 	return copied
 }
 
@@ -85,7 +90,7 @@ func (r *actionRepository) Get(ctx context.Context, workspaceID string, id int64
 	return copyAction(action), nil
 }
 
-func (r *actionRepository) List(ctx context.Context, workspaceID string) ([]*model.Action, error) {
+func (r *actionRepository) List(ctx context.Context, workspaceID string, opts interfaces.ActionListOptions) ([]*model.Action, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -96,6 +101,9 @@ func (r *actionRepository) List(ctx context.Context, workspaceID string) ([]*mod
 
 	actions := make([]*model.Action, 0, len(ws))
 	for _, action := range ws {
+		if !opts.IncludeArchived && action.IsArchived() {
+			continue
+		}
 		actions = append(actions, copyAction(action))
 	}
 
@@ -141,7 +149,7 @@ func (r *actionRepository) Delete(ctx context.Context, workspaceID string, id in
 	return nil
 }
 
-func (r *actionRepository) GetByCase(ctx context.Context, workspaceID string, caseID int64) ([]*model.Action, error) {
+func (r *actionRepository) GetByCase(ctx context.Context, workspaceID string, caseID int64, opts interfaces.ActionListOptions) ([]*model.Action, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -152,9 +160,13 @@ func (r *actionRepository) GetByCase(ctx context.Context, workspaceID string, ca
 
 	actions := make([]*model.Action, 0)
 	for _, action := range ws {
-		if action.CaseID == caseID {
-			actions = append(actions, copyAction(action))
+		if action.CaseID != caseID {
+			continue
 		}
+		if !opts.IncludeArchived && action.IsArchived() {
+			continue
+		}
+		actions = append(actions, copyAction(action))
 	}
 
 	return actions, nil
@@ -182,7 +194,7 @@ func (r *actionRepository) GetBySlackMessageTS(ctx context.Context, workspaceID 
 	return nil, goerr.Wrap(ErrNotFound, "action not found", goerr.V("slack_message_ts", ts))
 }
 
-func (r *actionRepository) GetByCases(ctx context.Context, workspaceID string, caseIDs []int64) (map[int64][]*model.Action, error) {
+func (r *actionRepository) GetByCases(ctx context.Context, workspaceID string, caseIDs []int64, opts interfaces.ActionListOptions) (map[int64][]*model.Action, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -205,9 +217,13 @@ func (r *actionRepository) GetByCases(ctx context.Context, workspaceID string, c
 
 	// Collect actions for each case
 	for _, action := range ws {
-		if caseIDMap[action.CaseID] {
-			result[action.CaseID] = append(result[action.CaseID], copyAction(action))
+		if !caseIDMap[action.CaseID] {
+			continue
 		}
+		if !opts.IncludeArchived && action.IsArchived() {
+			continue
+		}
+		result[action.CaseID] = append(result[action.CaseID], copyAction(action))
 	}
 
 	return result, nil

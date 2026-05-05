@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
@@ -72,7 +73,10 @@ func (uc *UseCase) FixUnsentActions(ctx context.Context) (FixUnsentActionsReport
 		// job is over-engineering until a real workspace hits that
 		// scale. Revisit if the repair starts touching live operational
 		// budgets.
-		actions, err := uc.repo.Action().List(ctx, workspaceID)
+		// Sweep archived actions too — an archived action with no Slack
+		// post is still a candidate for repair (operators can unarchive
+		// later and the message will be there).
+		actions, err := uc.repo.Action().List(ctx, workspaceID, interfaces.ActionListOptions{IncludeArchived: true})
 		if err != nil {
 			// Listing should not fail for normal operation; if it does,
 			// surface the whole-workspace error and move on so the rest
