@@ -71,12 +71,38 @@ cleanup() {
 trap cleanup EXIT
 
 # Frontend install
+#
+# Always use --frozen-lockfile here. Plain `pnpm install` can silently rewrite
+# pnpm-lock.yaml whenever the local pnpm version, peer-dep resolution, or
+# registry cache disagrees with what produced the committed lockfile, and that
+# rewrite often goes unnoticed and gets pushed. Running e2e must never mutate
+# the lockfile — if it would need to, fail fast and let the developer update
+# the lockfile deliberately (run `pnpm install` in frontend/ on its own).
 if [ "${E2E_SKIP_FRONTEND_INSTALL:-}" = "1" ]; then
   echo "==> Skipping frontend install (E2E_SKIP_FRONTEND_INSTALL=1)"
 else
-  echo "==> Installing frontend dependencies..."
+  echo "==> Installing frontend dependencies (frozen lockfile)..."
   cd "$FRONTEND_DIR"
-  pnpm install
+  if ! pnpm install --frozen-lockfile; then
+    cat >&2 <<'EOF'
+
+ERROR: pnpm install --frozen-lockfile failed.
+
+This means frontend/pnpm-lock.yaml is out of sync with frontend/package.json.
+The e2e runner intentionally refuses to silently rewrite the lockfile.
+
+If you intended to update dependencies, run the install yourself:
+
+    cd frontend && pnpm install
+
+then commit the updated pnpm-lock.yaml and re-run the e2e tests.
+
+If you did NOT change dependencies, your local pnpm version may differ from
+the one pinned in frontend/package.json (packageManager). Enable Corepack
+(`corepack enable`) so it auto-installs the pinned pnpm.
+EOF
+    exit 1
+  fi
 fi
 
 # Frontend build
