@@ -1073,7 +1073,12 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 			"id":          createdAction.ID,
 		}
 
-		rec := executeGraphQLRequest(t, handler, archiveMutation, variables)
+		// Archive/Unarchive resolvers reject requests without an
+		// authenticated user, so we route through the auth-injecting
+		// helper. Using a test user ID is sufficient because the case
+		// created by the surrounding test is public.
+		const archiveTestUser = "U-archive-test"
+		rec := executeGraphQLRequestWithAuth(t, handler, archiveMutation, variables, archiveTestUser)
 		gt.Value(t, rec.Code).Equal(http.StatusOK)
 		resp := parseGraphQLResponse(t, rec)
 		gt.Array(t, resp.Errors).Length(0)
@@ -1103,7 +1108,7 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 			}
 		`
 
-		rec = executeGraphQLRequest(t, handler, unarchiveMutation, variables)
+		rec = executeGraphQLRequestWithAuth(t, handler, unarchiveMutation, variables, archiveTestUser)
 		gt.Value(t, rec.Code).Equal(http.StatusOK)
 		resp = parseGraphQLResponse(t, rec)
 		gt.Array(t, resp.Errors).Length(0)
@@ -1118,6 +1123,36 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 		gt.Bool(t, unarchiveResult.UnarchiveAction.Archived).False()
 
 		stored, err = repo.Action().Get(ctx, testWorkspaceID, createdAction.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, stored.IsArchived()).False()
+	})
+
+	t.Run("archive action without auth token returns error", func(t *testing.T) {
+		// Confirm the resolver hardening: a missing auth context must
+		// surface as a GraphQL error rather than silently falling back
+		// to ActorKindSystem.
+		actionForUnauthArchive := &model.Action{
+			CaseID:      createdCase.ID,
+			Title:       "Action to Archive Unauth",
+			Description: "Unauthenticated archive should fail",
+		}
+		created, err := repo.Action().Create(ctx, testWorkspaceID, actionForUnauthArchive)
+		gt.NoError(t, err).Required()
+
+		mutation := `
+			mutation($workspaceId: String!, $id: Int!) {
+				archiveAction(workspaceId: $workspaceId, id: $id) { id }
+			}
+		`
+		rec := executeGraphQLRequest(t, handler, mutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          created.ID,
+		})
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(1).Required()
+
+		stored, err := repo.Action().Get(ctx, testWorkspaceID, created.ID)
 		gt.NoError(t, err).Required()
 		gt.Bool(t, stored.IsArchived()).False()
 	})

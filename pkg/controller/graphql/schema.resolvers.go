@@ -528,27 +528,38 @@ func (r *mutationResolver) UpdateAction(ctx context.Context, workspaceID string,
 }
 
 // ArchiveAction is the resolver for the archiveAction field.
+//
+// GraphQL is an externally exposed transport, so the resolver must always
+// have an authenticated user. Falling back to ActorKindSystem here would let
+// any unauthenticated request that slipped past the auth middleware bypass
+// the private-case access check inside ArchiveAction's usecase. System-level
+// archive flows go through the agent-tool adapter, never through GraphQL.
 func (r *mutationResolver) ArchiveAction(ctx context.Context, workspaceID string, id int) (*graphql1.Action, error) {
-	actor := usecase.ActorRef{Kind: usecase.ActorKindSystem}
-	if token, err := auth.TokenFromContext(ctx); err == nil {
-		actor = usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: token.Sub}
-	}
-	updated, err := r.UseCases.Action.ArchiveAction(ctx, workspaceID, int64(id), actor)
+	token, err := auth.TokenFromContext(ctx)
 	if err != nil {
 		return nil, err
+	}
+	actor := usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: token.Sub}
+	updated, archiveErr := r.UseCases.Action.ArchiveAction(ctx, workspaceID, int64(id), actor)
+	if archiveErr != nil {
+		return nil, archiveErr
 	}
 	return toGraphQLAction(updated, workspaceID), nil
 }
 
 // UnarchiveAction is the resolver for the unarchiveAction field.
+//
+// Mirrors ArchiveAction's auth requirement: a missing token is treated as a
+// hard error rather than a silent fallback to system actor.
 func (r *mutationResolver) UnarchiveAction(ctx context.Context, workspaceID string, id int) (*graphql1.Action, error) {
-	actor := usecase.ActorRef{Kind: usecase.ActorKindSystem}
-	if token, err := auth.TokenFromContext(ctx); err == nil {
-		actor = usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: token.Sub}
-	}
-	updated, err := r.UseCases.Action.UnarchiveAction(ctx, workspaceID, int64(id), actor)
+	token, err := auth.TokenFromContext(ctx)
 	if err != nil {
 		return nil, err
+	}
+	actor := usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: token.Sub}
+	updated, unarchiveErr := r.UseCases.Action.UnarchiveAction(ctx, workspaceID, int64(id), actor)
+	if unarchiveErr != nil {
+		return nil, unarchiveErr
 	}
 	return toGraphQLAction(updated, workspaceID), nil
 }

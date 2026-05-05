@@ -204,6 +204,10 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
     if (!action) return
     await unarchiveAction({ variables: { workspaceId: currentWorkspace!.id, id: action.id } })
     setConfirmUnarchive(false)
+    // Close the modal after unarchive: when the user is on the Archived view
+    // toggle in CaseDetail, the now-restored action no longer belongs in
+    // that slice and leaving the modal open would dangle on stale data.
+    onClose()
   }
   const isArchived = !!action?.archived
 
