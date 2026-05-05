@@ -43,10 +43,12 @@ type Action struct {
 	// Status is the per-workspace status id (no longer a typed enum). The
 	// allowed value set is defined in TOML via [[action.status]] and exposed
 	// to clients through FieldConfiguration.actionConfig.
-	Status    string     `json:"status"`
-	DueDate   *time.Time `json:"dueDate,omitempty"`
-	CreatedAt time.Time  `json:"createdAt"`
-	UpdatedAt time.Time  `json:"updatedAt"`
+	Status     string     `json:"status"`
+	DueDate    *time.Time `json:"dueDate,omitempty"`
+	Archived   bool       `json:"archived"`
+	ArchivedAt *time.Time `json:"archivedAt,omitempty"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	UpdatedAt  time.Time  `json:"updatedAt"`
 }
 
 // Knowledge is a custom GraphQL model with WorkspaceID for argument-based propagation.

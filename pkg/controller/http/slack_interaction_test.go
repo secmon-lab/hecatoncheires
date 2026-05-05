@@ -12,6 +12,7 @@ import (
 
 	"github.com/m-mizutani/gt"
 	httpctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/http"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
@@ -653,7 +654,7 @@ func TestSlackInteractionHandler_ViewSubmission(t *testing.T) {
 		// Async tail completes via async.Dispatch.
 		async.Wait()
 
-		actions, err := repo.Action().GetByCase(t.Context(), "risk", created.ID)
+		actions, err := repo.Action().GetByCase(t.Context(), "risk", created.ID, interfaces.ActionListOptions{})
 		gt.NoError(t, err).Required()
 		gt.Array(t, actions).Length(1).Required()
 		gt.Value(t, actions[0].Title).Equal("Async Action")

@@ -71,6 +71,8 @@ const (
 	MsgActionChangeAssigneeAssigned   // ":bust_in_silhouette: %s assigned %s"
 	MsgActionChangeAssigneeUnassigned // ":bust_in_silhouette: %s unassigned %s"
 	MsgActionChangeAssigneeReplaced   // ":bust_in_silhouette: %s changed assignee: %s -> %s"
+	MsgActionChangeArchived           // ":file_cabinet: %s archived action %q"
+	MsgActionChangeUnarchived         // ":outbox_tray: %s unarchived action %q"
 	MsgActionChangeActorSystem        // "system"
 
 	// Agent

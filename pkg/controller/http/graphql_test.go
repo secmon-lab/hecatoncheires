@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/handler"
@@ -19,6 +20,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
@@ -644,8 +646,8 @@ func TestGraphQLHandler_DeleteCaseMutation(t *testing.T) {
 
 		gt.Array(t, resp.Errors).Length(0)
 
-		// Verify associated actions were also deleted
-		actions, err := repo.Action().GetByCase(ctx, testWorkspaceID, createdCase.ID)
+		// Verify associated actions were also deleted (cascade includes archived)
+		actions, err := repo.Action().GetByCase(ctx, testWorkspaceID, createdCase.ID, interfaces.ActionListOptions{IncludeArchived: true})
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, actions).Length(0)
@@ -1047,19 +1049,22 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 		gt.Value(t, updatedAction.Title).Equal("Updated Action Title")
 	})
 
-	t.Run("delete action", func(t *testing.T) {
-		// Create an action to delete
-		actionToDelete := &model.Action{
+	t.Run("archive and unarchive action", func(t *testing.T) {
+		// Create an action to archive
+		actionToArchive := &model.Action{
 			CaseID:      createdCase.ID,
-			Title:       "Action to Delete",
-			Description: "This action will be deleted",
+			Title:       "Action to Archive",
+			Description: "This action will be archived",
 		}
-		createdAction, err := repo.Action().Create(ctx, testWorkspaceID, actionToDelete)
+		createdAction, err := repo.Action().Create(ctx, testWorkspaceID, actionToArchive)
 		gt.NoError(t, err).Required()
 
-		mutation := `
+		archiveMutation := `
 			mutation($workspaceId: String!, $id: Int!) {
-				deleteAction(workspaceId: $workspaceId, id: $id)
+				archiveAction(workspaceId: $workspaceId, id: $id) {
+					id
+					archived
+				}
 			}
 		`
 
@@ -1068,27 +1073,120 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 			"id":          createdAction.ID,
 		}
 
-		rec := executeGraphQLRequest(t, handler, mutation, variables)
-
+		rec := executeGraphQLRequest(t, handler, archiveMutation, variables)
 		gt.Value(t, rec.Code).Equal(http.StatusOK)
-
 		resp := parseGraphQLResponse(t, rec)
-
 		gt.Array(t, resp.Errors).Length(0)
-
 		gt.Value(t, resp.Data).NotNil().Required()
 
-		var result struct {
-			DeleteAction bool `json:"deleteAction"`
+		var archiveResult struct {
+			ArchiveAction struct {
+				ID       int  `json:"id"`
+				Archived bool `json:"archived"`
+			} `json:"archiveAction"`
 		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &archiveResult)).Required()
+		gt.Bool(t, archiveResult.ArchiveAction.Archived).True()
 
-		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+		// The action document is preserved; ArchivedAt is set
+		stored, err := repo.Action().Get(ctx, testWorkspaceID, createdAction.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, stored.IsArchived()).True()
 
-		gt.Bool(t, result.DeleteAction).True()
+		// Now unarchive
+		unarchiveMutation := `
+			mutation($workspaceId: String!, $id: Int!) {
+				unarchiveAction(workspaceId: $workspaceId, id: $id) {
+					id
+					archived
+				}
+			}
+		`
 
-		// Verify the action was actually deleted from repository
-		_, err = repo.Action().Get(ctx, testWorkspaceID, createdAction.ID)
-		gt.Value(t, err).NotNil()
+		rec = executeGraphQLRequest(t, handler, unarchiveMutation, variables)
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp = parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var unarchiveResult struct {
+			UnarchiveAction struct {
+				ID       int  `json:"id"`
+				Archived bool `json:"archived"`
+			} `json:"unarchiveAction"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &unarchiveResult)).Required()
+		gt.Bool(t, unarchiveResult.UnarchiveAction.Archived).False()
+
+		stored, err = repo.Action().Get(ctx, testWorkspaceID, createdAction.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, stored.IsArchived()).False()
+	})
+
+	t.Run("actionsByCase respects includeArchived", func(t *testing.T) {
+		// Set up: one active and one archived action
+		caseForArchiveQuery, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{Title: "archive query case"})
+		gt.NoError(t, err).Required()
+
+		active, err := repo.Action().Create(ctx, testWorkspaceID, &model.Action{
+			CaseID: caseForArchiveQuery.ID, Title: "active action", Status: types.ActionStatusTodo,
+		})
+		gt.NoError(t, err).Required()
+
+		archived, err := repo.Action().Create(ctx, testWorkspaceID, &model.Action{
+			CaseID: caseForArchiveQuery.ID, Title: "archived action", Status: types.ActionStatusTodo,
+		})
+		gt.NoError(t, err).Required()
+		now := time.Now().UTC()
+		archived.ArchivedAt = &now
+		_, err = repo.Action().Update(ctx, testWorkspaceID, archived)
+		gt.NoError(t, err).Required()
+
+		query := `
+			query($workspaceId: String!, $caseID: Int!, $includeArchived: Boolean) {
+				actionsByCase(workspaceId: $workspaceId, caseID: $caseID, includeArchived: $includeArchived) {
+					id
+					archived
+				}
+			}
+		`
+
+		// Default: includeArchived omitted → only active
+		rec := executeGraphQLRequest(t, handler, query, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"caseID":      caseForArchiveQuery.ID,
+		})
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var defaultResult struct {
+			ActionsByCase []struct {
+				ID       int  `json:"id"`
+				Archived bool `json:"archived"`
+			} `json:"actionsByCase"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &defaultResult)).Required()
+		gt.Array(t, defaultResult.ActionsByCase).Length(1).Required()
+		gt.Value(t, defaultResult.ActionsByCase[0].ID).Equal(int(active.ID))
+
+		// includeArchived=true → both
+		rec = executeGraphQLRequest(t, handler, query, map[string]interface{}{
+			"workspaceId":     testWorkspaceID,
+			"caseID":          caseForArchiveQuery.ID,
+			"includeArchived": true,
+		})
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp = parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var allResult struct {
+			ActionsByCase []struct {
+				ID       int  `json:"id"`
+				Archived bool `json:"archived"`
+			} `json:"actionsByCase"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &allResult)).Required()
+		gt.Array(t, allResult.ActionsByCase).Length(2)
 	})
 
 	t.Run("postActionSlackMessage surfaces usecase error", func(t *testing.T) {

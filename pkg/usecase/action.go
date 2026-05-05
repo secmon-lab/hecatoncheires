@@ -416,26 +416,136 @@ func (uc *ActionUseCase) UpdateAction(ctx context.Context, workspaceID string, i
 	return updated, nil
 }
 
-func (uc *ActionUseCase) DeleteAction(ctx context.Context, workspaceID string, id int64) error {
+// ArchiveAction marks an action as archived so it disappears from default
+// listings (Kanban, Case detail). Archived actions can be unarchived later
+// via UnarchiveAction. The action document itself is preserved; only the
+// public lifecycle hides it. Idempotency: archiving an already-archived
+// action returns ErrActionAlreadyArchived rather than silently succeeding,
+// because callers should distinguish "already done" from "now done" for
+// UI feedback.
+func (uc *ActionUseCase) ArchiveAction(ctx context.Context, workspaceID string, id int64, actor ActorRef) (*model.Action, error) {
+	existing, parentCase, err := uc.loadActionForArchive(ctx, workspaceID, id, actor)
+	if err != nil {
+		return nil, err
+	}
+	if existing.IsArchived() {
+		return nil, goerr.Wrap(ErrActionAlreadyArchived, "action is already archived", goerr.V(ActionIDKey, id))
+	}
+
+	now := time.Now().UTC()
+	existing.ArchivedAt = &now
+	updated, err := uc.repo.Action().Update(ctx, workspaceID, existing)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to archive action", goerr.V(ActionIDKey, id))
+	}
+
+	uc.recordArchiveEvent(ctx, workspaceID, updated, types.ActionEventArchived, actor)
+	uc.notifyArchiveOnSlack(ctx, workspaceID, updated, parentCase, types.ActionEventArchived, actor)
+	return updated, nil
+}
+
+// UnarchiveAction restores a previously archived action back to active state.
+func (uc *ActionUseCase) UnarchiveAction(ctx context.Context, workspaceID string, id int64, actor ActorRef) (*model.Action, error) {
+	existing, parentCase, err := uc.loadActionForArchive(ctx, workspaceID, id, actor)
+	if err != nil {
+		return nil, err
+	}
+	if !existing.IsArchived() {
+		return nil, goerr.Wrap(ErrActionNotArchived, "action is not archived", goerr.V(ActionIDKey, id))
+	}
+
+	existing.ArchivedAt = nil
+	updated, err := uc.repo.Action().Update(ctx, workspaceID, existing)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to unarchive action", goerr.V(ActionIDKey, id))
+	}
+
+	uc.recordArchiveEvent(ctx, workspaceID, updated, types.ActionEventUnarchived, actor)
+	uc.notifyArchiveOnSlack(ctx, workspaceID, updated, parentCase, types.ActionEventUnarchived, actor)
+	return updated, nil
+}
+
+// loadActionForArchive fetches the action and parent case, and verifies that
+// the actor is allowed to mutate it. Mirrors UpdateAction's access-control
+// pattern so Slack-initiated archive/unarchive (no auth token in context)
+// still gets checked through ActorRef.
+func (uc *ActionUseCase) loadActionForArchive(ctx context.Context, workspaceID string, id int64, actor ActorRef) (*model.Action, *model.Case, error) {
 	existing, err := uc.repo.Action().Get(ctx, workspaceID, id)
 	if err != nil {
-		return goerr.Wrap(ErrActionNotFound, "action not found", goerr.V(ActionIDKey, id))
+		return nil, nil, goerr.Wrap(ErrActionNotFound, "action not found", goerr.V(ActionIDKey, id))
 	}
 
 	parentCase, err := uc.repo.Case().Get(ctx, workspaceID, existing.CaseID)
 	if err != nil {
-		return goerr.Wrap(err, "failed to get parent case", goerr.V(CaseIDKey, existing.CaseID))
-	}
-	token, tokenErr := auth.TokenFromContext(ctx)
-	if tokenErr == nil && !model.IsCaseAccessible(parentCase, token.Sub) {
-		return goerr.Wrap(ErrAccessDenied, "cannot delete action in private case",
-			goerr.V(ActionIDKey, id), goerr.V("user_id", token.Sub))
+		return nil, nil, goerr.Wrap(err, "failed to get parent case", goerr.V(CaseIDKey, existing.CaseID))
 	}
 
-	if err := uc.repo.Action().Delete(ctx, workspaceID, id); err != nil {
-		return goerr.Wrap(ErrActionNotFound, "action not found", goerr.V(ActionIDKey, id))
+	var actorID string
+	var checkAccess bool
+	if token, tokenErr := auth.TokenFromContext(ctx); tokenErr == nil {
+		actorID = token.Sub
+		checkAccess = true
+	} else if actor.Kind == ActorKindSlackUser {
+		actorID = actor.ID
+		checkAccess = true
 	}
-	return nil
+	if checkAccess && !model.IsCaseAccessible(parentCase, actorID) {
+		return nil, nil, goerr.Wrap(ErrAccessDenied, "cannot mutate action in private case",
+			goerr.V(ActionIDKey, id), goerr.V("user_id", actorID))
+	}
+
+	return existing, parentCase, nil
+}
+
+// recordArchiveEvent appends an ActionEvent for ARCHIVED / UNARCHIVED kind.
+// Best-effort: failures are reported via errutil.Handle so the archive
+// itself still succeeds.
+func (uc *ActionUseCase) recordArchiveEvent(ctx context.Context, workspaceID string, action *model.Action, kind types.ActionEventKind, actor ActorRef) {
+	actorID := ""
+	if actor.Kind == ActorKindSlackUser {
+		actorID = actor.ID
+	}
+	event := &model.ActionEvent{
+		ID:        uuid.NewString(),
+		ActionID:  action.ID,
+		Kind:      kind,
+		ActorID:   actorID,
+		NewValue:  action.Title,
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := uc.repo.ActionEvent().Put(ctx, workspaceID, action.ID, event); err != nil {
+		errutil.Handle(ctx, err, "failed to record action archive event")
+	}
+}
+
+// notifyArchiveOnSlack refreshes the Slack message (so an archived badge can
+// render) and posts a context-block thread reply describing who archived
+// what. Best-effort throughout.
+func (uc *ActionUseCase) notifyArchiveOnSlack(ctx context.Context, workspaceID string, action *model.Action, caseModel *model.Case, kind types.ActionEventKind, actor ActorRef) {
+	if uc.slackService == nil || action.SlackMessageTS == "" || caseModel == nil || caseModel.SlackChannelID == "" {
+		return
+	}
+
+	uc.refreshSlackMessage(ctx, workspaceID, action)
+
+	actorMention := renderActor(ctx, actor)
+	var msg string
+	switch kind {
+	case types.ActionEventArchived:
+		msg = i18n.T(ctx, i18n.MsgActionChangeArchived, actorMention, action.Title)
+	case types.ActionEventUnarchived:
+		msg = i18n.T(ctx, i18n.MsgActionChangeUnarchived, actorMention, action.Title)
+	default:
+		return
+	}
+	blocks := []goslack.Block{
+		goslack.NewContextBlock("",
+			goslack.NewTextBlockObject(goslack.MarkdownType, msg, false, false),
+		),
+	}
+	if _, postErr := uc.slackService.PostThreadMessage(ctx, caseModel.SlackChannelID, action.SlackMessageTS, blocks, msg); postErr != nil {
+		errutil.Handle(ctx, postErr, "failed to post action archive notification")
+	}
 }
 
 func (uc *ActionUseCase) GetAction(ctx context.Context, workspaceID string, id int64) (*model.Action, error) {
@@ -446,8 +556,8 @@ func (uc *ActionUseCase) GetAction(ctx context.Context, workspaceID string, id i
 	return action, nil
 }
 
-func (uc *ActionUseCase) ListActions(ctx context.Context, workspaceID string) ([]*model.Action, error) {
-	actions, err := uc.repo.Action().List(ctx, workspaceID)
+func (uc *ActionUseCase) ListActions(ctx context.Context, workspaceID string, opts interfaces.ActionListOptions) ([]*model.Action, error) {
+	actions, err := uc.repo.Action().List(ctx, workspaceID, opts)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to list actions")
 	}
@@ -477,7 +587,7 @@ func (uc *ActionUseCase) ListActions(ctx context.Context, workspaceID string) ([
 	return actions, nil
 }
 
-func (uc *ActionUseCase) GetActionsByCase(ctx context.Context, workspaceID string, caseID int64) ([]*model.Action, error) {
+func (uc *ActionUseCase) GetActionsByCase(ctx context.Context, workspaceID string, caseID int64, opts interfaces.ActionListOptions) ([]*model.Action, error) {
 	parentCase, err := uc.repo.Case().Get(ctx, workspaceID, caseID)
 	if err != nil {
 		return []*model.Action{}, nil
@@ -487,7 +597,7 @@ func (uc *ActionUseCase) GetActionsByCase(ctx context.Context, workspaceID strin
 		return []*model.Action{}, nil
 	}
 
-	actions, err := uc.repo.Action().GetByCase(ctx, workspaceID, caseID)
+	actions, err := uc.repo.Action().GetByCase(ctx, workspaceID, caseID, opts)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to get actions by case", goerr.V(CaseIDKey, caseID))
 	}

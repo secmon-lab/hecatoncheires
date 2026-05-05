@@ -255,8 +255,9 @@ func (uc *AssistUseCase) buildAssistSystemPrompt(ctx context.Context, entry *mod
 		}
 	}
 
-	// Fetch actions
-	actions, err := uc.repo.Action().GetByCase(ctx, wsID, c.ID)
+	// Fetch actions (archived actions are intentionally excluded — the
+	// assist prompt summarises the active state of a case)
+	actions, err := uc.repo.Action().GetByCase(ctx, wsID, c.ID, interfaces.ActionListOptions{})
 	if err != nil {
 		return "", goerr.Wrap(err, "failed to get actions for case")
 	}

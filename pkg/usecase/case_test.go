@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/m-mizutani/gt"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
@@ -277,7 +278,7 @@ func TestCaseUseCase_DeleteCase(t *testing.T) {
 		gt.Value(t, err).NotNil()
 
 		// Verify actions are deleted
-		actions, err := actionUC.GetActionsByCase(ctx, testWorkspaceID, created.ID)
+		actions, err := actionUC.GetActionsByCase(ctx, testWorkspaceID, created.ID, interfaces.ActionListOptions{IncludeArchived: true})
 		gt.NoError(t, err).Required()
 		gt.Array(t, actions).Length(0)
 	})

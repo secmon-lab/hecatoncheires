@@ -23,8 +23,10 @@ import (
 // exercised by usecase-level tests; here we only check the tool's
 // argument-extraction behaviour.
 type mockActionMutator struct {
-	createFn func(ctx context.Context, workspaceID string, caseID int64, title, description string, assigneeID string, slackMessageTS string, status types.ActionStatus, dueDate *time.Time) (*model.Action, error)
-	updateFn func(ctx context.Context, workspaceID string, actionID int64, params core.UpdateActionParams) (*model.Action, error)
+	createFn    func(ctx context.Context, workspaceID string, caseID int64, title, description string, assigneeID string, slackMessageTS string, status types.ActionStatus, dueDate *time.Time) (*model.Action, error)
+	updateFn    func(ctx context.Context, workspaceID string, actionID int64, params core.UpdateActionParams) (*model.Action, error)
+	archiveFn   func(ctx context.Context, workspaceID string, actionID int64) (*model.Action, error)
+	unarchiveFn func(ctx context.Context, workspaceID string, actionID int64) (*model.Action, error)
 }
 
 func (m *mockActionMutator) CreateAction(ctx context.Context, workspaceID string, caseID int64, title, description string, assigneeID string, slackMessageTS string, status types.ActionStatus, dueDate *time.Time) (*model.Action, error) {
@@ -64,6 +66,21 @@ func (m *mockActionMutator) UpdateAction(ctx context.Context, workspaceID string
 	return a, nil
 }
 
+func (m *mockActionMutator) ArchiveAction(ctx context.Context, workspaceID string, actionID int64) (*model.Action, error) {
+	if m.archiveFn != nil {
+		return m.archiveFn(ctx, workspaceID, actionID)
+	}
+	now := time.Now().UTC()
+	return &model.Action{ID: actionID, ArchivedAt: &now}, nil
+}
+
+func (m *mockActionMutator) UnarchiveAction(ctx context.Context, workspaceID string, actionID int64) (*model.Action, error) {
+	if m.unarchiveFn != nil {
+		return m.unarchiveFn(ctx, workspaceID, actionID)
+	}
+	return &model.Action{ID: actionID}, nil
+}
+
 // newCtxWithUpdateCapture returns a context that captures all update messages
 // and a pointer to the slice where they are appended.
 func newCtxWithUpdateCapture() (context.Context, *[]string) {
@@ -84,11 +101,11 @@ const (
 type mockActionRepo struct {
 	createFn     func(ctx context.Context, workspaceID string, action *model.Action) (*model.Action, error)
 	getFn        func(ctx context.Context, workspaceID string, id int64) (*model.Action, error)
-	listFn       func(ctx context.Context, workspaceID string) ([]*model.Action, error)
+	listFn       func(ctx context.Context, workspaceID string, opts interfaces.ActionListOptions) ([]*model.Action, error)
 	updateFn     func(ctx context.Context, workspaceID string, action *model.Action) (*model.Action, error)
 	deleteFn     func(ctx context.Context, workspaceID string, id int64) error
-	getByCaseFn  func(ctx context.Context, workspaceID string, caseID int64) ([]*model.Action, error)
-	getByCasesFn func(ctx context.Context, workspaceID string, caseIDs []int64) (map[int64][]*model.Action, error)
+	getByCaseFn  func(ctx context.Context, workspaceID string, caseID int64, opts interfaces.ActionListOptions) ([]*model.Action, error)
+	getByCasesFn func(ctx context.Context, workspaceID string, caseIDs []int64, opts interfaces.ActionListOptions) (map[int64][]*model.Action, error)
 }
 
 func (m *mockActionRepo) Create(ctx context.Context, workspaceID string, action *model.Action) (*model.Action, error) {
@@ -107,9 +124,9 @@ func (m *mockActionRepo) Get(ctx context.Context, workspaceID string, id int64) 
 	return nil, errors.New("not found")
 }
 
-func (m *mockActionRepo) List(ctx context.Context, workspaceID string) ([]*model.Action, error) {
+func (m *mockActionRepo) List(ctx context.Context, workspaceID string, opts interfaces.ActionListOptions) ([]*model.Action, error) {
 	if m.listFn != nil {
-		return m.listFn(ctx, workspaceID)
+		return m.listFn(ctx, workspaceID, opts)
 	}
 	return nil, nil
 }
@@ -128,16 +145,16 @@ func (m *mockActionRepo) Delete(ctx context.Context, workspaceID string, id int6
 	return nil
 }
 
-func (m *mockActionRepo) GetByCase(ctx context.Context, workspaceID string, caseID int64) ([]*model.Action, error) {
+func (m *mockActionRepo) GetByCase(ctx context.Context, workspaceID string, caseID int64, opts interfaces.ActionListOptions) ([]*model.Action, error) {
 	if m.getByCaseFn != nil {
-		return m.getByCaseFn(ctx, workspaceID, caseID)
+		return m.getByCaseFn(ctx, workspaceID, caseID, opts)
 	}
 	return nil, nil
 }
 
-func (m *mockActionRepo) GetByCases(ctx context.Context, workspaceID string, caseIDs []int64) (map[int64][]*model.Action, error) {
+func (m *mockActionRepo) GetByCases(ctx context.Context, workspaceID string, caseIDs []int64, opts interfaces.ActionListOptions) (map[int64][]*model.Action, error) {
 	if m.getByCasesFn != nil {
-		return m.getByCasesFn(ctx, workspaceID, caseIDs)
+		return m.getByCasesFn(ctx, workspaceID, caseIDs, opts)
 	}
 	return nil, nil
 }
@@ -208,16 +225,18 @@ func findTool(tools []gollem.Tool, name string) gollem.Tool {
 
 // ----- tests -----
 
-func TestNew_ReturnsSixTools(t *testing.T) {
+func TestNew_ReturnsAllTools(t *testing.T) {
 	repo := newMockRepo(nil)
 	tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: &mockActionMutator{}})
-	gt.Array(t, tools).Length(6)
+	gt.Array(t, tools).Length(8)
 
 	toolNames := make(map[string]bool)
 	for _, tl := range tools {
 		toolNames[tl.Spec().Name] = true
 	}
 	gt.Value(t, toolNames["core__list_actions"]).Equal(true)
+	gt.Value(t, toolNames["core__archive_action"]).Equal(true)
+	gt.Value(t, toolNames["core__unarchive_action"]).Equal(true)
 	gt.Value(t, toolNames["core__get_action"]).Equal(true)
 	gt.Value(t, toolNames["core__create_action"]).Equal(true)
 	gt.Value(t, toolNames["core__update_action"]).Equal(true)
@@ -225,10 +244,10 @@ func TestNew_ReturnsSixTools(t *testing.T) {
 	gt.Value(t, toolNames["core__set_action_assignee"]).Equal(true)
 }
 
-func TestNewForAssist_ReturnsSameSixTools(t *testing.T) {
+func TestNewForAssist_ReturnsSameTools(t *testing.T) {
 	repo := newMockRepo(nil)
 	tools := core.NewForAssist(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: &mockActionMutator{}})
-	gt.Array(t, tools).Length(6)
+	gt.Array(t, tools).Length(8)
 }
 
 func TestListActionsTool(t *testing.T) {
@@ -236,9 +255,10 @@ func TestListActionsTool(t *testing.T) {
 
 	t.Run("returns empty list when repository returns no actions", func(t *testing.T) {
 		actionRepo := &mockActionRepo{
-			getByCaseFn: func(ctx context.Context, workspaceID string, caseID int64) ([]*model.Action, error) {
+			getByCaseFn: func(ctx context.Context, workspaceID string, caseID int64, opts interfaces.ActionListOptions) ([]*model.Action, error) {
 				gt.Value(t, workspaceID).Equal(testWorkspaceID)
 				gt.Value(t, caseID).Equal(testCaseID)
+				gt.Bool(t, opts.IncludeArchived).False()
 				return []*model.Action{}, nil
 			},
 		}
@@ -253,7 +273,7 @@ func TestListActionsTool(t *testing.T) {
 
 	t.Run("returns actions from repository", func(t *testing.T) {
 		actionRepo := &mockActionRepo{
-			getByCaseFn: func(ctx context.Context, workspaceID string, caseID int64) ([]*model.Action, error) {
+			getByCaseFn: func(ctx context.Context, workspaceID string, caseID int64, opts interfaces.ActionListOptions) ([]*model.Action, error) {
 				return []*model.Action{
 					{ID: 1, CaseID: caseID, Title: "Fix bug", Status: types.ActionStatusTodo, AssigneeID: "U001"},
 					{ID: 2, CaseID: caseID, Title: "Write docs", Status: types.ActionStatusCompleted},
@@ -273,7 +293,7 @@ func TestListActionsTool(t *testing.T) {
 
 	t.Run("propagates repository error", func(t *testing.T) {
 		actionRepo := &mockActionRepo{
-			getByCaseFn: func(_ context.Context, _ string, _ int64) ([]*model.Action, error) {
+			getByCaseFn: func(_ context.Context, _ string, _ int64, _ interfaces.ActionListOptions) ([]*model.Action, error) {
 				return nil, errors.New("database unavailable")
 			},
 		}
@@ -733,7 +753,7 @@ func TestToolUpdateCalls(t *testing.T) {
 	t.Run("list_actions posts update message", func(t *testing.T) {
 		ctx, msgs := newCtxWithUpdateCapture()
 		actionRepo := &mockActionRepo{
-			getByCaseFn: func(_ context.Context, _ string, _ int64) ([]*model.Action, error) {
+			getByCaseFn: func(_ context.Context, _ string, _ int64, _ interfaces.ActionListOptions) ([]*model.Action, error) {
 				return []*model.Action{}, nil
 			},
 		}
@@ -818,5 +838,121 @@ func TestToolUpdateCalls(t *testing.T) {
 		gt.NoError(t, err)
 		gt.Array(t, *msgs).Length(1)
 		gt.Value(t, (*msgs)[0]).Equal("Clearing assignee on action #9")
+	})
+}
+
+func TestArchiveActionTool(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("archive_action invokes ActionMutator.ArchiveAction", func(t *testing.T) {
+		var gotID int64
+		now := time.Now().UTC()
+		mutator := &mockActionMutator{
+			archiveFn: func(_ context.Context, _ string, actionID int64) (*model.Action, error) {
+				gotID = actionID
+				return &model.Action{ID: actionID, Title: "archived", ArchivedAt: &now}, nil
+			},
+		}
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: mutator})
+
+		result, err := findTool(tools, "core__archive_action").Run(ctx, map[string]any{
+			"action_id": float64(7),
+		})
+		gt.NoError(t, err).Required()
+		gt.Value(t, gotID).Equal(int64(7))
+		gt.Value(t, result["archived"]).Equal(true)
+	})
+
+	t.Run("archive_action propagates ActionMutator error", func(t *testing.T) {
+		mutator := &mockActionMutator{
+			archiveFn: func(_ context.Context, _ string, _ int64) (*model.Action, error) {
+				return nil, errors.New("already archived")
+			},
+		}
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: mutator})
+
+		_, err := findTool(tools, "core__archive_action").Run(ctx, map[string]any{
+			"action_id": float64(8),
+		})
+		gt.Error(t, err)
+	})
+
+	t.Run("archive_action without ActionUC returns error", func(t *testing.T) {
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+
+		_, err := findTool(tools, "core__archive_action").Run(ctx, map[string]any{
+			"action_id": float64(1),
+		})
+		gt.Error(t, err)
+	})
+}
+
+func TestUnarchiveActionTool(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("unarchive_action invokes ActionMutator.UnarchiveAction", func(t *testing.T) {
+		var gotID int64
+		mutator := &mockActionMutator{
+			unarchiveFn: func(_ context.Context, _ string, actionID int64) (*model.Action, error) {
+				gotID = actionID
+				return &model.Action{ID: actionID, Title: "restored"}, nil
+			},
+		}
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: mutator})
+
+		result, err := findTool(tools, "core__unarchive_action").Run(ctx, map[string]any{
+			"action_id": float64(3),
+		})
+		gt.NoError(t, err).Required()
+		gt.Value(t, gotID).Equal(int64(3))
+		gt.Value(t, result["archived"]).Equal(false)
+	})
+
+	t.Run("unarchive_action propagates ActionMutator error", func(t *testing.T) {
+		mutator := &mockActionMutator{
+			unarchiveFn: func(_ context.Context, _ string, _ int64) (*model.Action, error) {
+				return nil, errors.New("not archived")
+			},
+		}
+		tools := core.New(core.Deps{Repo: newMockRepo(nil), WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: mutator})
+
+		_, err := findTool(tools, "core__unarchive_action").Run(ctx, map[string]any{
+			"action_id": float64(4),
+		})
+		gt.Error(t, err)
+	})
+}
+
+func TestListActionsTool_IncludeArchived(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("default omits IncludeArchived", func(t *testing.T) {
+		var gotOpts interfaces.ActionListOptions
+		actionRepo := &mockActionRepo{
+			getByCaseFn: func(_ context.Context, _ string, _ int64, opts interfaces.ActionListOptions) ([]*model.Action, error) {
+				gotOpts = opts
+				return []*model.Action{}, nil
+			},
+		}
+		tools := core.New(core.Deps{Repo: newMockRepo(actionRepo), WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+		_, err := findTool(tools, "core__list_actions").Run(ctx, map[string]any{})
+		gt.NoError(t, err).Required()
+		gt.Bool(t, gotOpts.IncludeArchived).False()
+	})
+
+	t.Run("propagates include_archived=true", func(t *testing.T) {
+		var gotOpts interfaces.ActionListOptions
+		actionRepo := &mockActionRepo{
+			getByCaseFn: func(_ context.Context, _ string, _ int64, opts interfaces.ActionListOptions) ([]*model.Action, error) {
+				gotOpts = opts
+				return []*model.Action{}, nil
+			},
+		}
+		tools := core.New(core.Deps{Repo: newMockRepo(actionRepo), WorkspaceID: testWorkspaceID, CaseID: testCaseID})
+		_, err := findTool(tools, "core__list_actions").Run(ctx, map[string]any{
+			"include_archived": true,
+		})
+		gt.NoError(t, err).Required()
+		gt.Bool(t, gotOpts.IncludeArchived).True()
 	})
 }

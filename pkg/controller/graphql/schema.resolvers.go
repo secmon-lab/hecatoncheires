@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	goerr "github.com/m-mizutani/goerr/v2"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	graphql1 "github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql"
@@ -284,10 +285,26 @@ func (r *caseResolver) Fields(ctx context.Context, obj *graphql1.Case) ([]*graph
 }
 
 // Actions is the resolver for the actions field.
-func (r *caseResolver) Actions(ctx context.Context, obj *graphql1.Case) ([]*graphql1.Action, error) {
+func (r *caseResolver) Actions(ctx context.Context, obj *graphql1.Case, includeArchived *bool) ([]*graphql1.Action, error) {
 	if obj.AccessDenied {
 		return []*graphql1.Action{}, nil
 	}
+
+	// Default path uses the per-case dataloader (active actions only). Only
+	// when the caller opts in to archived results do we bypass the loader
+	// and route through the usecase, which already handles access control.
+	if includeArchived != nil && *includeArchived {
+		actions, err := r.UseCases.Action.GetActionsByCase(ctx, obj.WorkspaceID, int64(obj.ID), interfaces.ActionListOptions{IncludeArchived: true})
+		if err != nil {
+			return nil, err
+		}
+		result := make([]*graphql1.Action, len(actions))
+		for i, a := range actions {
+			result[i] = toGraphQLAction(a, obj.WorkspaceID)
+		}
+		return result, nil
+	}
+
 	loaders := GetDataLoaders(ctx)
 	actionsMap, err := loaders.ActionsByCaseLoader.Load(ctx, obj.WorkspaceID, []int64{int64(obj.ID)})
 	if err != nil {
@@ -510,12 +527,30 @@ func (r *mutationResolver) UpdateAction(ctx context.Context, workspaceID string,
 	return toGraphQLAction(updated, workspaceID), nil
 }
 
-// DeleteAction is the resolver for the deleteAction field.
-func (r *mutationResolver) DeleteAction(ctx context.Context, workspaceID string, id int) (bool, error) {
-	if err := r.UseCases.Action.DeleteAction(ctx, workspaceID, int64(id)); err != nil {
-		return false, err
+// ArchiveAction is the resolver for the archiveAction field.
+func (r *mutationResolver) ArchiveAction(ctx context.Context, workspaceID string, id int) (*graphql1.Action, error) {
+	actor := usecase.ActorRef{Kind: usecase.ActorKindSystem}
+	if token, err := auth.TokenFromContext(ctx); err == nil {
+		actor = usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: token.Sub}
 	}
-	return true, nil
+	updated, err := r.UseCases.Action.ArchiveAction(ctx, workspaceID, int64(id), actor)
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLAction(updated, workspaceID), nil
+}
+
+// UnarchiveAction is the resolver for the unarchiveAction field.
+func (r *mutationResolver) UnarchiveAction(ctx context.Context, workspaceID string, id int) (*graphql1.Action, error) {
+	actor := usecase.ActorRef{Kind: usecase.ActorKindSystem}
+	if token, err := auth.TokenFromContext(ctx); err == nil {
+		actor = usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: token.Sub}
+	}
+	updated, err := r.UseCases.Action.UnarchiveAction(ctx, workspaceID, int64(id), actor)
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLAction(updated, workspaceID), nil
 }
 
 // PostActionSlackMessage is the resolver for the postActionSlackMessage field.
@@ -707,8 +742,12 @@ func (r *queryResolver) Case(ctx context.Context, workspaceID string, id int) (*
 }
 
 // Actions is the resolver for the actions field.
-func (r *queryResolver) Actions(ctx context.Context, workspaceID string) ([]*graphql1.Action, error) {
-	actions, err := r.UseCases.Action.ListActions(ctx, workspaceID)
+func (r *queryResolver) Actions(ctx context.Context, workspaceID string, includeArchived *bool) ([]*graphql1.Action, error) {
+	opts := interfaces.ActionListOptions{}
+	if includeArchived != nil {
+		opts.IncludeArchived = *includeArchived
+	}
+	actions, err := r.UseCases.Action.ListActions(ctx, workspaceID, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -732,8 +771,12 @@ func (r *queryResolver) Action(ctx context.Context, workspaceID string, id int) 
 }
 
 // ActionsByCase is the resolver for the actionsByCase field.
-func (r *queryResolver) ActionsByCase(ctx context.Context, workspaceID string, caseID int) ([]*graphql1.Action, error) {
-	actions, err := r.UseCases.Action.GetActionsByCase(ctx, workspaceID, int64(caseID))
+func (r *queryResolver) ActionsByCase(ctx context.Context, workspaceID string, caseID int, includeArchived *bool) ([]*graphql1.Action, error) {
+	opts := interfaces.ActionListOptions{}
+	if includeArchived != nil {
+		opts.IncludeArchived = *includeArchived
+	}
+	actions, err := r.UseCases.Action.GetActionsByCase(ctx, workspaceID, int64(caseID), opts)
 	if err != nil {
 		return nil, err
 	}

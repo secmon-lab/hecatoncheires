@@ -16,6 +16,10 @@ var (
 	ErrSlackMessageAlreadyPosted = errors.New("action already has a Slack message")
 	ErrCaseHasNoSlackChannel     = errors.New("parent case has no Slack channel")
 
+	// Action archive state errors
+	ErrActionAlreadyArchived = errors.New("action is already archived")
+	ErrActionNotArchived     = errors.New("action is not archived")
+
 	// Access control errors
 	ErrAccessDenied = errors.New("access denied to private case")
 

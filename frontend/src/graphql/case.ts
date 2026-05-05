@@ -36,7 +36,7 @@ export const GET_CASES = gql`
 `
 
 export const GET_CASE = gql`
-  query GetCase($workspaceId: String!, $id: Int!) {
+  query GetCase($workspaceId: String!, $id: Int!, $includeArchivedActions: Boolean) {
     case(workspaceId: $workspaceId, id: $id) {
       id
       title
@@ -68,7 +68,7 @@ export const GET_CASE = gql`
         fieldId
         value
       }
-      actions {
+      actions(includeArchived: $includeArchivedActions) {
         id
         title
         status
@@ -80,6 +80,8 @@ export const GET_CASE = gql`
           imageUrl
         }
         dueDate
+        archived
+        archivedAt
         createdAt
         updatedAt
       }

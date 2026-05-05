@@ -60,3 +60,14 @@ func (a *actionToolAdapter) UpdateAction(ctx context.Context, workspaceID string
 		SlackSync:     SlackSyncFull,
 	})
 }
+
+// ArchiveAction pins Actor to ActorKindSystem so tool-triggered archives
+// match the attribution of other tool-driven mutations.
+func (a *actionToolAdapter) ArchiveAction(ctx context.Context, workspaceID string, actionID int64) (*model.Action, error) {
+	return a.uc.ArchiveAction(ctx, workspaceID, actionID, ActorRef{Kind: ActorKindSystem})
+}
+
+// UnarchiveAction mirrors ArchiveAction's actor pinning.
+func (a *actionToolAdapter) UnarchiveAction(ctx context.Context, workspaceID string, actionID int64) (*model.Action, error) {
+	return a.uc.UnarchiveAction(ctx, workspaceID, actionID, ActorRef{Kind: ActorKindSystem})
+}

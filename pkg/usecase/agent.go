@@ -125,8 +125,10 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 	}
 
 	// Fetch case context (actions) every turn — these may have been mutated
-	// since the previous mention by direct GraphQL/UI edits.
-	actions, err := uc.repo.Action().GetByCase(ctx, entry.Workspace.ID, foundCase.ID)
+	// since the previous mention by direct GraphQL/UI edits. Archived
+	// actions are excluded so the agent's working set matches what the
+	// channel sees.
+	actions, err := uc.repo.Action().GetByCase(ctx, entry.Workspace.ID, foundCase.ID, interfaces.ActionListOptions{})
 	if err != nil {
 		return goerr.Wrap(err, "failed to get actions for case")
 	}

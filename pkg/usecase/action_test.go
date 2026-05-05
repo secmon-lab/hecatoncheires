@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/m-mizutani/gt"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
@@ -174,8 +175,8 @@ func TestActionUseCase_UpdateAction(t *testing.T) {
 	})
 }
 
-func TestActionUseCase_DeleteAction(t *testing.T) {
-	t.Run("delete action", func(t *testing.T) {
+func TestActionUseCase_ArchiveAction(t *testing.T) {
+	t.Run("archive action sets ArchivedAt and hides from default list", func(t *testing.T) {
 		repo := memory.New()
 		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
@@ -187,20 +188,120 @@ func TestActionUseCase_DeleteAction(t *testing.T) {
 		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Description", "", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
-		gt.NoError(t, actionUC.DeleteAction(ctx, testWorkspaceID, created.ID)).Required()
+		archived, err := actionUC.ArchiveAction(ctx, testWorkspaceID, created.ID, usecase.ActorRef{Kind: usecase.ActorKindSystem})
+		gt.NoError(t, err).Required()
+		gt.Value(t, archived.ArchivedAt).NotNil()
+		gt.Bool(t, archived.IsArchived()).True()
 
-		_, err = actionUC.GetAction(ctx, testWorkspaceID, created.ID)
-		gt.Value(t, err).NotNil()
+		// Default list excludes archived
+		got, err := actionUC.GetActionsByCase(ctx, testWorkspaceID, c.ID, interfaces.ActionListOptions{})
+		gt.NoError(t, err).Required()
+		gt.Array(t, got).Length(0)
+
+		// IncludeArchived returns it
+		gotAll, err := actionUC.GetActionsByCase(ctx, testWorkspaceID, c.ID, interfaces.ActionListOptions{IncludeArchived: true})
+		gt.NoError(t, err).Required()
+		gt.Array(t, gotAll).Length(1).Required()
+		gt.Value(t, gotAll[0].ID).Equal(created.ID)
+
+		// Get still returns archived action
+		fetched, err := actionUC.GetAction(ctx, testWorkspaceID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, fetched.IsArchived()).True()
+
+		// ActionEvent recorded
+		events, _, err := repo.ActionEvent().List(ctx, testWorkspaceID, created.ID, 100, "")
+		gt.NoError(t, err).Required()
+		archiveEventCount := 0
+		for _, e := range events {
+			if e.Kind == types.ActionEventArchived {
+				archiveEventCount++
+			}
+		}
+		gt.Number(t, archiveEventCount).Equal(1)
 	})
 
-	t.Run("delete non-existent action fails", func(t *testing.T) {
+	t.Run("archive already archived action returns ErrActionAlreadyArchived", func(t *testing.T) {
+		repo := memory.New()
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Description", "", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+
+		_, err = actionUC.ArchiveAction(ctx, testWorkspaceID, created.ID, usecase.ActorRef{Kind: usecase.ActorKindSystem})
+		gt.NoError(t, err).Required()
+
+		_, err = actionUC.ArchiveAction(ctx, testWorkspaceID, created.ID, usecase.ActorRef{Kind: usecase.ActorKindSystem})
+		gt.Error(t, err).Is(usecase.ErrActionAlreadyArchived)
+	})
+
+	t.Run("archive non-existent action returns ErrActionNotFound", func(t *testing.T) {
 		repo := memory.New()
 		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		err := actionUC.DeleteAction(ctx, testWorkspaceID, 999)
-		gt.Value(t, err).NotNil()
+		_, err := actionUC.ArchiveAction(ctx, testWorkspaceID, 999, usecase.ActorRef{Kind: usecase.ActorKindSystem})
 		gt.Error(t, err).Is(usecase.ErrActionNotFound)
+	})
+}
+
+func TestActionUseCase_UnarchiveAction(t *testing.T) {
+	t.Run("unarchive restores active state and records event", func(t *testing.T) {
+		repo := memory.New()
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Description", "", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+
+		_, err = actionUC.ArchiveAction(ctx, testWorkspaceID, created.ID, usecase.ActorRef{Kind: usecase.ActorKindSystem})
+		gt.NoError(t, err).Required()
+
+		restored, err := actionUC.UnarchiveAction(ctx, testWorkspaceID, created.ID, usecase.ActorRef{Kind: usecase.ActorKindSystem})
+		gt.NoError(t, err).Required()
+		gt.Value(t, restored.ArchivedAt).Nil()
+		gt.Bool(t, restored.IsArchived()).False()
+
+		// Default list now includes it again
+		got, err := actionUC.GetActionsByCase(ctx, testWorkspaceID, c.ID, interfaces.ActionListOptions{})
+		gt.NoError(t, err).Required()
+		gt.Array(t, got).Length(1).Required()
+		gt.Value(t, got[0].ID).Equal(created.ID)
+
+		events, _, err := repo.ActionEvent().List(ctx, testWorkspaceID, created.ID, 100, "")
+		gt.NoError(t, err).Required()
+		unarchiveCount := 0
+		for _, e := range events {
+			if e.Kind == types.ActionEventUnarchived {
+				unarchiveCount++
+			}
+		}
+		gt.Number(t, unarchiveCount).Equal(1)
+	})
+
+	t.Run("unarchive non-archived action returns ErrActionNotArchived", func(t *testing.T) {
+		repo := memory.New()
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Description", "", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+
+		_, err = actionUC.UnarchiveAction(ctx, testWorkspaceID, created.ID, usecase.ActorRef{Kind: usecase.ActorKindSystem})
+		gt.Error(t, err).Is(usecase.ErrActionNotArchived)
 	})
 }
 
@@ -251,7 +352,7 @@ func TestActionUseCase_ListActions(t *testing.T) {
 		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Action 2", "Description 2", "", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
-		actions, err := actionUC.ListActions(ctx, testWorkspaceID)
+		actions, err := actionUC.ListActions(ctx, testWorkspaceID, interfaces.ActionListOptions{})
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, actions).Length(2)
@@ -280,7 +381,7 @@ func TestActionUseCase_GetActionsByCase(t *testing.T) {
 		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c2.ID, "Action 2-1", "Description", "", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
-		actions, err := actionUC.GetActionsByCase(ctx, testWorkspaceID, c1.ID)
+		actions, err := actionUC.GetActionsByCase(ctx, testWorkspaceID, c1.ID, interfaces.ActionListOptions{})
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, actions).Length(2)
@@ -1164,8 +1265,8 @@ func TestActionUseCase_PrivateCaseAccessControl(t *testing.T) {
 		action, err := actionUC.CreateAction(memberCtx, testWorkspaceID, created.ID, "Action", "Desc", "", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
-		// Non-member cannot delete action
-		err = actionUC.DeleteAction(nonMemberCtx, testWorkspaceID, action.ID)
+		// Non-member cannot archive action
+		_, err = actionUC.ArchiveAction(nonMemberCtx, testWorkspaceID, action.ID, usecase.ActorRef{Kind: usecase.ActorKindSystem})
 		gt.Error(t, err).Is(usecase.ErrAccessDenied)
 	})
 
@@ -1196,12 +1297,12 @@ func TestActionUseCase_PrivateCaseAccessControl(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		// Member sees both actions
-		memberActions, err := actionUC.ListActions(memberCtx, testWorkspaceID)
+		memberActions, err := actionUC.ListActions(memberCtx, testWorkspaceID, interfaces.ActionListOptions{})
 		gt.NoError(t, err).Required()
 		gt.Array(t, memberActions).Length(2)
 
 		// Non-member sees only public action
-		nonMemberActions, err := actionUC.ListActions(nonMemberCtx, testWorkspaceID)
+		nonMemberActions, err := actionUC.ListActions(nonMemberCtx, testWorkspaceID, interfaces.ActionListOptions{})
 		gt.NoError(t, err).Required()
 		gt.Array(t, nonMemberActions).Length(1)
 		gt.Value(t, nonMemberActions[0].Title).Equal("Public Action")
@@ -1227,12 +1328,12 @@ func TestActionUseCase_PrivateCaseAccessControl(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		// Member sees actions
-		memberActions, err := actionUC.GetActionsByCase(memberCtx, testWorkspaceID, created.ID)
+		memberActions, err := actionUC.GetActionsByCase(memberCtx, testWorkspaceID, created.ID, interfaces.ActionListOptions{})
 		gt.NoError(t, err).Required()
 		gt.Array(t, memberActions).Length(1)
 
 		// Non-member gets empty list
-		nonMemberActions, err := actionUC.GetActionsByCase(nonMemberCtx, testWorkspaceID, created.ID)
+		nonMemberActions, err := actionUC.GetActionsByCase(nonMemberCtx, testWorkspaceID, created.ID, interfaces.ActionListOptions{})
 		gt.NoError(t, err).Required()
 		gt.Array(t, nonMemberActions).Length(0)
 	})

@@ -21,6 +21,8 @@ const ACTION_FIELDS = `
   slackMessageTS
   status
   dueDate
+  archived
+  archivedAt
   createdAt
   updatedAt
 `
@@ -114,9 +116,19 @@ export const UPDATE_ACTION = gql`
   }
 `
 
-export const DELETE_ACTION = gql`
-  mutation DeleteAction($workspaceId: String!, $id: Int!) {
-    deleteAction(workspaceId: $workspaceId, id: $id)
+export const ARCHIVE_ACTION = gql`
+  mutation ArchiveAction($workspaceId: String!, $id: Int!) {
+    archiveAction(workspaceId: $workspaceId, id: $id) {
+      ${ACTION_FIELDS}
+    }
+  }
+`
+
+export const UNARCHIVE_ACTION = gql`
+  mutation UnarchiveAction($workspaceId: String!, $id: Int!) {
+    unarchiveAction(workspaceId: $workspaceId, id: $id) {
+      ${ACTION_FIELDS}
+    }
   }
 `
 
