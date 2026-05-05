@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import styles from './Inline.module.css'
 import Button from '../Button'
 import { useTranslation } from '../../i18n'
+import { commitOnEnter, activateOnEnterOrSpace } from '../../utils/keyboard'
 
 interface Props {
   value: string
@@ -73,15 +74,11 @@ export default function InlineLongText({
           aria-label={ariaLabel}
           disabled={saving}
           onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault()
-              void commit()
-            } else if (e.key === 'Escape') {
-              e.preventDefault()
-              cancel()
-            }
-          }}
+          onKeyDown={commitOnEnter({
+            onCommit: () => void commit(),
+            onCancel: cancel,
+            requireModifier: true,
+          })}
           data-testid={testId ? `${testId}-input` : undefined}
         />
         <div className={styles.editFooter}>
@@ -119,13 +116,11 @@ export default function InlineLongText({
       onClick={() => {
         if (!disabled) setEditing(true)
       }}
-      onKeyDown={(e) => {
-        if (disabled) return
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          setEditing(true)
-        }
-      }}
+      onKeyDown={
+        disabled
+          ? undefined
+          : activateOnEnterOrSpace(() => setEditing(true))
+      }
       data-testid={testId}
     >
       {isEmpty ? placeholder || '—' : value}

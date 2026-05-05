@@ -7,6 +7,7 @@ import { CheckCircle, AlertCircle, Loader, X } from 'lucide-react'
 import Modal from '../Modal'
 import Button from '../Button'
 import { CREATE_GITHUB_SOURCE, VALIDATE_GITHUB_REPO, GET_SOURCES } from '../../graphql/source'
+import { commitOnEnter } from '../../utils/keyboard'
 import styles from './source.module.css'
 
 interface GitHubFormProps {
@@ -112,12 +113,9 @@ export default function GitHubForm({ isOpen, onClose }: GitHubFormProps) {
     })
   }
 
-  const handleRepoKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      handleAddRepo()
-    }
-  }
+  const handleRepoKeyDown = commitOnEnter({
+    onCommit: handleAddRepo,
+  })
 
   const handleRemoveRepo = (fullName: string) => {
     setRepositories((prev) => prev.filter((r) => r.fullName !== fullName))

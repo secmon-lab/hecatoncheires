@@ -73,4 +73,28 @@ describe('InlineLongText', () => {
     await waitFor(() => expect(screen.queryByTestId('d-input')).toBeNull())
     expect(onSave).not.toHaveBeenCalled()
   })
+
+  it('does NOT save on Cmd+Enter while IME is composing', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    renderWithI18n(<InlineLongText value="あ" onSave={onSave} ariaLabel="desc" testId="d" />)
+
+    fireEvent.click(screen.getByTestId('d'))
+    const ta = await screen.findByTestId('d-input') as HTMLTextAreaElement
+    fireEvent.change(ta, { target: { value: 'あい' } })
+    fireEvent.keyDown(ta, { key: 'Enter', metaKey: true, isComposing: true })
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('d-input')).not.toBeNull()
+  })
+
+  it('does NOT enter edit mode when display div receives Enter while IME is composing', () => {
+    const onSave = vi.fn()
+    renderWithI18n(<InlineLongText value="A" onSave={onSave} ariaLabel="desc" testId="d" />)
+
+    const display = screen.getByTestId('d')
+    fireEvent.keyDown(display, { key: 'Enter', isComposing: true })
+
+    // Still in display mode — IME composition must not trigger edit activation.
+    expect(screen.queryByTestId('d-input')).toBeNull()
+  })
 })

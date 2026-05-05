@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import InlineFieldFrame from './InlineFieldFrame'
+import { commitOnEnter } from '../../utils/keyboard'
 import styles from './Inline.module.css'
 
 interface Props {
@@ -74,16 +75,13 @@ export default function InlineDate({
         aria-label={ariaLabel}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => void commit(draft)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault()
-            void commit(draft)
-          } else if (e.key === 'Escape') {
-            e.preventDefault()
+        onKeyDown={commitOnEnter({
+          onCommit: () => void commit(draft),
+          onCancel: () => {
             setDraft(toDateInputValue(value))
             setEditing(false)
-          }
-        }}
+          },
+        })}
         data-testid={testId ? `${testId}-input` : undefined}
       />
     )

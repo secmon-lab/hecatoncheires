@@ -18,6 +18,7 @@ Hecatoncheires is an AI-native project/case management platform built with Go an
 - `go build` - Build the main binary
 - `go test ./...` - Run all tests
 - `go test ./pkg/path/to/package` - Run tests for specific package
+- `task lint:frontend` - Run ESLint on the frontend (or `pnpm lint` inside `frontend/`)
 
 ### Code Generation
 - `go tool gqlgen generate` - Generate GraphQL resolvers and types from schema
@@ -155,6 +156,9 @@ padding: var(--spacing-md-lg) var(--spacing-md);
 right: 1.25rem;
 ```
 
+##### Keyboard & IME Input — MANDATORY
+**Any keyboard handler that triggers a destructive action on Enter (save, submit, mode change, navigation) MUST guard against IME composition** using `isImeComposing` from `frontend/src/utils/keyboard.ts`. CJK users press Enter to confirm IME conversions — un-guarded handlers silently corrupt their input. Never write `if (e.key === 'Enter') { ...side effect... }` without the guard. See `.claude/rules/frontend-keyboard-input.md` for full details.
+
 ##### Internationalization (i18n) — MANDATORY
 **All user-facing text in both frontend and backend MUST use the i18n system. Hardcoding strings is prohibited.**
 
@@ -259,7 +263,12 @@ When making changes, before finishing the task, always:
 - Run `gosec -exclude-generated -quiet ./...` to check security issue
 - Run `zenv go test ./...` to ensure ALL tests pass
 - **NEVER run `go build` to verify code.** Use `go vet ./...` instead to check for compile errors
-- If frontend files were changed: Run `pnpm test` in `frontend/` to execute Vitest unit tests
+- **MANDATORY whenever any file under `frontend/` changes**:
+  - Run `pnpm test` in `frontend/` to execute Vitest unit tests
+  - Run `pnpm lint` in `frontend/` to execute ESLint
+  - Both MUST pass before declaring the task complete. Do not skip lint
+    even for "trivial" changes — the keyboard / IME policy is enforced
+    here and silent regressions are exactly what lint is for
 - Verify test coverage for your changes - EVERY new function/method MUST be tested
 
 ### Language

@@ -81,4 +81,47 @@ describe('InlineText', () => {
     fireEvent.click(screen.getByTestId('t'))
     expect(screen.queryByTestId('t-input')).toBeNull()
   })
+
+  it('does NOT save on Enter while IME is composing (isComposing=true)', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    renderWithI18n(<InlineText value="あ" onSave={onSave} ariaLabel="title" testId="t" />)
+
+    fireEvent.click(screen.getByTestId('t'))
+    const input = await screen.findByTestId('t-input') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'あい' } })
+    // The Enter that confirms the IME conversion — must NOT trigger save.
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: true })
+
+    expect(onSave).not.toHaveBeenCalled()
+    // Still in edit mode — user can keep typing.
+    expect(screen.queryByTestId('t-input')).not.toBeNull()
+  })
+
+  it('does NOT save on Enter when keyCode=229 (legacy Safari IME)', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    renderWithI18n(<InlineText value="A" onSave={onSave} ariaLabel="title" testId="t" />)
+
+    fireEvent.click(screen.getByTestId('t'))
+    const input = await screen.findByTestId('t-input') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'B' } })
+    fireEvent.keyDown(input, { key: 'Enter', keyCode: 229 })
+
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('saves on Enter after IME composition ends', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    renderWithI18n(<InlineText value="あ" onSave={onSave} ariaLabel="title" testId="t" />)
+
+    fireEvent.click(screen.getByTestId('t'))
+    const input = await screen.findByTestId('t-input') as HTMLInputElement
+    fireEvent.change(input, { target: { value: '愛' } })
+    // First Enter confirms IME — no save.
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: true })
+    expect(onSave).not.toHaveBeenCalled()
+    // Second Enter (post-composition) — should save.
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith('愛'))
+  })
 })
