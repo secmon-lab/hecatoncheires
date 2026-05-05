@@ -5,7 +5,6 @@ import (
 
 	"github.com/m-mizutani/fireconf"
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/urfave/cli/v3"
 )
@@ -107,52 +106,12 @@ func cmdMigrate() *cli.Command {
 }
 
 // getIndexConfig returns the Firestore index configuration.
-// Knowledges and memories are stored in subcollections
-// (workspaces/{workspaceID}/knowledges/, workspaces/{workspaceID}/cases/{caseID}/memories/).
-// Firestore vector indexes require COLLECTION scope for FindNearest queries
-// on specific subcollections. The collection-group name ensures the index
-// applies across all workspace subcollections.
+// Currently empty: the previous knowledges / memories vector indexes were
+// removed when those features were demolished. The skeleton is preserved so
+// the upcoming redesign can register new collections here without rewiring
+// the migrate subcommand.
 func getIndexConfig() *fireconf.Config {
 	return &fireconf.Config{
-		Collections: []fireconf.Collection{
-			{
-				Name: "knowledges",
-				Indexes: []fireconf.Index{
-					// Vector search index for embedding similarity search.
-					// Field name matches the Go struct field Knowledge.Embedding
-					// stored as firestore.Vector32.
-					{
-						QueryScope: fireconf.QueryScopeCollection,
-						Fields: []fireconf.IndexField{
-							{
-								Path: "Embedding",
-								Vector: &fireconf.VectorConfig{
-									Dimension: model.EmbeddingDimension,
-								},
-							},
-						},
-					},
-				},
-			},
-			{
-				Name: "memories",
-				Indexes: []fireconf.Index{
-					// Vector search index for memory embedding similarity search.
-					// Field name matches the Go struct field Memory.Embedding
-					// stored as firestore.Vector32.
-					{
-						QueryScope: fireconf.QueryScopeCollection,
-						Fields: []fireconf.IndexField{
-							{
-								Path: "Embedding",
-								Vector: &fireconf.VectorConfig{
-									Dimension: model.EmbeddingDimension,
-								},
-							},
-						},
-					},
-				},
-			},
-		},
+		Collections: []fireconf.Collection{},
 	}
 }

@@ -83,11 +83,6 @@ const (
 	MsgAgentError
 	MsgAgentSessionInfo
 
-	// Knowledge
-	MsgKnowledgeHeader // "Knowledge: %s"
-	MsgKnowledgeSource
-	MsgKnowledgeLink
-
 	// Bookmark
 	MsgBookmarkOpenCase
 

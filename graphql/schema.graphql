@@ -143,7 +143,6 @@ type Case {
   slackChannelURL: String
   fields: [FieldValue!]!       # Resolved from case_field_values via DataLoader
   actions: [Action!]!
-  knowledges: [Knowledge!]!
   slackMessages(limit: Int, cursor: String): SlackMessageConnection!
   createdAt: Time!
   updatedAt: Time!
@@ -244,26 +243,6 @@ type SlackUser {
   name: String!
   realName: String!
   imageUrl: String
-}
-
-# Knowledge
-type Knowledge {
-  id: String!
-  caseID: Int!
-  case: Case
-  sourceID: String!
-  sourceURLs: [String!]!
-  title: String!
-  summary: String!
-  sourcedAt: Time!
-  createdAt: Time!
-  updatedAt: Time!
-}
-
-type KnowledgeConnection {
-  items: [Knowledge!]!
-  totalCount: Int!
-  hasMore: Boolean!
 }
 
 # Source types
@@ -450,10 +429,6 @@ type Query {
   sources(workspaceId: String!): [Source!]!
   source(workspaceId: String!, id: String!): Source
   validateGitHubRepo(workspaceId: String!, repository: String!): GitHubRepoValidationResult!
-
-  # Knowledge
-  knowledge(workspaceId: String!, id: String!): Knowledge
-  knowledges(workspaceId: String!, limit: Int, offset: Int): KnowledgeConnection!
 
   # Assist Logs
   assistLogs(workspaceId: String!, caseId: Int!, limit: Int, offset: Int): AssistLogConnection!

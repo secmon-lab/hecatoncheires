@@ -8,7 +8,6 @@ export const ja: Messages = {
   // Navigation
   navCases: 'ケース',
   navActions: 'アクション',
-  navKnowledges: 'ナレッジ',
   navSources: 'ソース',
 
   // Common buttons
@@ -157,7 +156,6 @@ export const ja: Messages = {
   sectionAssignees: '担当者',
   sectionFields: 'フィールド',
   sectionRelatedActions: '関連アクション',
-  sectionRelatedKnowledge: '関連ナレッジ ({count})',
   sectionChannelMembers: 'チャンネルメンバー ({count})',
   placeholderFilterMembers: '名前で絞り込み...',
   loadingMembers: 'メンバーを読み込み中...',
@@ -291,21 +289,6 @@ export const ja: Messages = {
   errorValidateDatabaseFirst: '先にデータベース ID を検証してください',
   errorValidateDatabase: 'データベースの検証に失敗しました。もう一度お試しください。',
   validationDatabaseFound: 'データベースが見つかりました',
-
-  // Knowledge
-  titleKnowledgeBase: 'ナレッジベース',
-  subtitleKnowledgeBase: 'ソースから AI が抽出したナレッジ（{count} 件）',
-  headerRelatedCase: '関連ケース',
-  headerSummary: '概要',
-  headerDate: '日付',
-  errorKnowledgeNotFound: 'ナレッジが見つかりません',
-  sectionSummary: '概要',
-  sectionRelatedCase: '関連ケース',
-  sectionSourceInfo: 'ソース情報',
-  labelSourceId: 'ソース ID:',
-  labelSourcedAt: '取得日:',
-  emptyKnowledgeTitle: 'ナレッジがありません',
-  emptyKnowledgeDesc: 'ソースが設定されると、ここにナレッジが表示されます。',
 
   // Assist Logs
   titleAssistLogs: 'アシストログ',

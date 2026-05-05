@@ -306,29 +306,6 @@ func (r *caseResolver) Actions(ctx context.Context, obj *graphql1.Case) ([]*grap
 	return result, nil
 }
 
-// Knowledges is the resolver for the knowledges field.
-func (r *caseResolver) Knowledges(ctx context.Context, obj *graphql1.Case) ([]*graphql1.Knowledge, error) {
-	if obj.AccessDenied {
-		return []*graphql1.Knowledge{}, nil
-	}
-	loaders := GetDataLoaders(ctx)
-	knowledgesMap, err := loaders.KnowledgesByCaseLoader.Load(ctx, obj.WorkspaceID, []int64{int64(obj.ID)})
-	if err != nil {
-		return nil, err
-	}
-	knowledges, ok := knowledgesMap[int64(obj.ID)]
-	if !ok {
-		return []*graphql1.Knowledge{}, nil
-	}
-
-	// Convert domain Knowledge to GraphQL Knowledge
-	result := make([]*graphql1.Knowledge, len(knowledges))
-	for i, k := range knowledges {
-		result[i] = toGraphQLKnowledge(k, obj.WorkspaceID)
-	}
-	return result, nil
-}
-
 // SlackMessages is the resolver for the slackMessages field.
 func (r *caseResolver) SlackMessages(ctx context.Context, obj *graphql1.Case, limit *int, cursor *string) (*graphql1.SlackMessageConnection, error) {
 	if obj.AccessDenied {
@@ -360,19 +337,6 @@ func (r *caseResolver) SlackMessages(ctx context.Context, obj *graphql1.Case, li
 		Items:      items,
 		NextCursor: nextCursor,
 	}, nil
-}
-
-// Case is the resolver for the case field.
-func (r *knowledgeResolver) Case(ctx context.Context, obj *graphql1.Knowledge) (*graphql1.Case, error) {
-	loaders := GetDataLoaders(ctx)
-	cases, err := loaders.CaseLoader.Load(ctx, obj.WorkspaceID, []int64{int64(obj.CaseID)})
-	if err != nil {
-		return nil, err
-	}
-	if len(cases) == 0 {
-		return nil, nil
-	}
-	return toGraphQLCase(cases[0], obj.WorkspaceID), nil
 }
 
 // Noop is the resolver for the noop field.
@@ -994,87 +958,6 @@ func (r *queryResolver) ValidateGitHubRepo(ctx context.Context, workspaceID stri
 	return gql, nil
 }
 
-// Knowledge is the resolver for the knowledge field.
-func (r *queryResolver) Knowledge(ctx context.Context, workspaceID string, id string) (*graphql1.Knowledge, error) {
-	knowledge, err := r.repo.Knowledge().Get(ctx, workspaceID, model.KnowledgeID(id))
-	if err != nil {
-		return nil, err
-	}
-
-	// Access control: check parent case
-	parentCase, err := r.repo.Case().Get(ctx, workspaceID, knowledge.CaseID)
-	if err == nil {
-		token, tokenErr := auth.TokenFromContext(ctx)
-		if tokenErr == nil && !model.IsCaseAccessible(parentCase, token.Sub) {
-			return nil, nil
-		}
-	}
-
-	return toGraphQLKnowledge(knowledge, workspaceID), nil
-}
-
-// Knowledges is the resolver for the knowledges field.
-func (r *queryResolver) Knowledges(ctx context.Context, workspaceID string, limit *int, offset *int) (*graphql1.KnowledgeConnection, error) {
-	// Set defaults if not provided
-	limitVal := 100
-	if limit != nil && *limit > 0 {
-		limitVal = *limit
-	}
-
-	offsetVal := 0
-	if offset != nil && *offset > 0 {
-		offsetVal = *offset
-	}
-
-	knowledges, totalCount, err := r.repo.Knowledge().ListWithPagination(ctx, workspaceID, limitVal, offsetVal)
-	if err != nil {
-		return nil, err
-	}
-
-	// Access control: filter out knowledges from inaccessible private cases
-	token, tokenErr := auth.TokenFromContext(ctx)
-	filteredKnowledges := knowledges
-	if tokenErr == nil {
-		// Collect unique case IDs to avoid N+1 queries
-		caseIDSet := make(map[int64]struct{})
-		for _, k := range knowledges {
-			caseIDSet[k.CaseID] = struct{}{}
-		}
-
-		// Fetch each unique case once and build accessibility map
-		accessibleCases := make(map[int64]bool, len(caseIDSet))
-		for caseID := range caseIDSet {
-			parentCase, caseErr := r.repo.Case().Get(ctx, workspaceID, caseID)
-			if caseErr != nil {
-				continue
-			}
-			accessibleCases[caseID] = model.IsCaseAccessible(parentCase, token.Sub)
-		}
-
-		filteredKnowledges = make([]*model.Knowledge, 0, len(knowledges))
-		for _, k := range knowledges {
-			if accessibleCases[k.CaseID] {
-				filteredKnowledges = append(filteredKnowledges, k)
-			}
-		}
-		totalCount = len(filteredKnowledges)
-	}
-
-	// Convert domain Knowledge to GraphQL Knowledge
-	items := make([]*graphql1.Knowledge, len(filteredKnowledges))
-	for i, k := range filteredKnowledges {
-		items[i] = toGraphQLKnowledge(k, workspaceID)
-	}
-
-	hasMore := (offsetVal + len(filteredKnowledges)) < totalCount
-
-	return &graphql1.KnowledgeConnection{
-		Items:      items,
-		TotalCount: totalCount,
-		HasMore:    hasMore,
-	}, nil
-}
-
 // AssistLogs is the resolver for the assistLogs field.
 func (r *queryResolver) AssistLogs(ctx context.Context, workspaceID string, caseID int, limit *int, offset *int) (*graphql1.AssistLogConnection, error) {
 	// Access control: check parent case
@@ -1139,9 +1022,6 @@ func (r *Resolver) ActionEvent() ActionEventResolver { return &actionEventResolv
 // Case returns CaseResolver implementation.
 func (r *Resolver) Case() CaseResolver { return &caseResolver{r} }
 
-// Knowledge returns KnowledgeResolver implementation.
-func (r *Resolver) Knowledge() KnowledgeResolver { return &knowledgeResolver{r} }
-
 // Mutation returns MutationResolver implementation.
 func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
 
@@ -1151,6 +1031,5 @@ func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 type actionResolver struct{ *Resolver }
 type actionEventResolver struct{ *Resolver }
 type caseResolver struct{ *Resolver }
-type knowledgeResolver struct{ *Resolver }
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }

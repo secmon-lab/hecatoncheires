@@ -12,14 +12,13 @@ Hecatoncheires is configured through a combination of a TOML configuration file 
 6. [Field Types](#field-types)
 7. [Options (for select / multi-select)](#options-for-select--multi-select)
 8. [Slack Section](#slack-section)
-9. [Compile Section](#compile-section)
-10. [Assist Section](#assist-section)
-11. [Action Section](#action-section)
-12. [Validation Rules](#validation-rules)
-13. [Complete Example](#complete-example)
-14. [GitHub Source Integration](#github-source-integration)
-15. [Observability (Sentry)](#observability-sentry)
-16. [Diagnosis Command](#diagnosis-command)
+9. [Assist Section](#assist-section)
+10. [Action Section](#action-section)
+11. [Validation Rules](#validation-rules)
+12. [Complete Example](#complete-example)
+13. [GitHub Source Integration](#github-source-integration)
+14. [Observability (Sentry)](#observability-sentry)
+15. [Diagnosis Command](#diagnosis-command)
 
 ---
 
@@ -57,10 +56,6 @@ options = [
 # Slack integration (optional)
 [slack]
 channel_prefix = "risk"
-
-# AI compile configuration (optional)
-[compile]
-prompt = "Extract key information from the source material."
 
 # AI assist configuration (optional)
 [assist]
@@ -136,33 +131,9 @@ The `serve` command (alias: `s`) starts the HTTP server.
 - `claude` → either `--llm-claude-api-key` (direct Anthropic API) **or** `--llm-gemini-project-id` (Vertex AI). The two are mutually exclusive.
 - `gemini` → `--llm-gemini-project-id` and `--llm-gemini-location`
 
-The embedding client is configured separately from `--llm-provider` and is **required whenever LLM is enabled** (`--llm-provider` set on `serve`, or always for `assist` / `compile`). It powers similarity search over Memory and Knowledge regardless of which provider drives chat completion. The default model is `gemini-embedding-2`; the dimension is fixed at 768 to match the existing Firestore vector index. Application Default Credentials must be authorized for the project. Without `--llm-provider`, `serve` runs in a degraded mode that does not need the embedder either.
+The embedding client is configured separately from `--llm-provider` and is **required whenever LLM is enabled** (`--llm-provider` set on `serve`, or always for `assist`). It is reserved for upcoming similarity-search features; the wiring is preserved so callers can keep the same flags through the redesign. The default model is `gemini-embedding-2`; the dimension is fixed at 768. Application Default Credentials must be authorized for the project. Without `--llm-provider`, `serve` runs in a degraded mode that does not need the embedder either.
 
 \*\*\*\*\* Required whenever `--slack-bot-token` is configured. The agent that responds to Slack mentions persists per-thread conversation History and execution Trace into the bucket so follow-up mentions can resume the session. The service account needs **Storage Object Admin** on the bucket.
-
-### Compile Command Flags
-
-The `compile` command (alias: `c`) extracts knowledge from external sources using LLM.
-
-| Flag | Env Var | Default | Required | Description |
-|------|---------|---------|----------|-------------|
-| `--notion-api-token` | `HECATONCHEIRES_NOTION_API_TOKEN` | - | Yes | Notion API token for Source integration |
-| `--since` | `HECATONCHEIRES_COMPILE_SINCE` | 24h ago | No | Process pages updated since this time (RFC3339 format) |
-| `--workspace` | `HECATONCHEIRES_COMPILE_WORKSPACE` | - | No | Target workspace ID (if empty, process all workspaces) |
-| `--base-url` | `HECATONCHEIRES_BASE_URL` | - | No | Base URL for the application |
-| `--slack-bot-token` | `HECATONCHEIRES_SLACK_BOT_TOKEN` | - | No | Slack Bot Token for sending notifications |
-| `--github-app-id` | `HECATONCHEIRES_GITHUB_APP_ID` | - | No | GitHub App ID for GitHub Source integration |
-| `--github-app-installation-id` | `HECATONCHEIRES_GITHUB_APP_INSTALLATION_ID` | - | No | GitHub App Installation ID |
-| `--github-app-private-key` | `HECATONCHEIRES_GITHUB_APP_PRIVATE_KEY` | - | No | GitHub App private key (PEM string or file path) |
-| `--llm-provider` | `HECATONCHEIRES_LLM_PROVIDER` | - | Yes | LLM provider: `openai`, `claude`, or `gemini` |
-| `--llm-model` | `HECATONCHEIRES_LLM_MODEL` | - | No | LLM model name (provider default if empty) |
-| `--llm-openai-api-key` | `HECATONCHEIRES_LLM_OPENAI_API_KEY` | - | Cond. | OpenAI API key (required for `openai`) |
-| `--llm-claude-api-key` | `HECATONCHEIRES_LLM_CLAUDE_API_KEY` | - | Cond. | Anthropic Claude API key (for `claude` direct API) |
-| `--llm-gemini-project-id` | `HECATONCHEIRES_LLM_GEMINI_PROJECT_ID` | - | Cond. | Google Cloud project ID (for `gemini` or `claude` on Vertex AI) |
-| `--llm-gemini-location` | `HECATONCHEIRES_LLM_GEMINI_LOCATION` | `global` | No | Google Cloud location |
-| `--embedding-gemini-project-id` | `HECATONCHEIRES_EMBEDDING_GEMINI_PROJECT_ID` | - | Yes | Google Cloud project ID for the Gemini embedding client |
-| `--embedding-gemini-location` | `HECATONCHEIRES_EMBEDDING_GEMINI_LOCATION` | `global` | No | Google Cloud location for the Gemini embedding client |
-| `--embedding-model` | `HECATONCHEIRES_EMBEDDING_MODEL` | `gemini-embedding-2` | No | Gemini embedding model name |
 
 ### Migrate Command Flags
 
@@ -618,30 +589,9 @@ Slack mrkdwn syntax such as `<@USER_ID>` and `<#CHANNEL_ID>` is rendered as-is a
 When a case is created with the **Private** flag enabled, the associated Slack channel is created as a **private channel** instead of a public one. This ensures that only invited members can view the channel content.
 
 Private cases also track channel membership:
-- Channel member IDs are stored on the case and used for access control — only channel members can view the case details, actions, knowledges, and assist logs associated with a private case.
+- Channel member IDs are stored on the case and used for access control — only channel members can view the case details, actions, and assist logs associated with a private case.
 - Members can be synced from the Slack channel via the **Sync** button on the case detail page or through the `syncCaseChannelUsers` GraphQL mutation.
 - Bot users are automatically filtered out from the member list.
-
----
-
-## Compile Section
-
-The `[compile]` section configures the AI-powered knowledge compilation feature. This section is optional.
-
-```toml
-[compile]
-prompt = "Extract key information from the source material and summarize it."
-```
-
-### Properties
-
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `prompt` | string | No | Custom prompt for the LLM when compiling knowledge from external sources |
-
-The `compile` command processes external data sources (Notion pages, GitHub PRs/Issues, etc.) to extract structured knowledge. The `prompt` field allows you to customize how the LLM should interpret and extract information from these sources.
-
-If omitted, the system uses a default prompt optimized for general knowledge extraction.
 
 ---
 
@@ -721,9 +671,6 @@ configuration enables it.
 | Tool | Enabled by | Purpose |
 |------|------------|---------|
 | `core__list_actions`, `core__get_action`, `core__create_action`, `core__update_action`, `core__update_action_status`, `core__set_action_assignee` | Always | Manage the case's action items. |
-| `core__search_knowledge`, `core__get_knowledge` | Always (LLM client required) | Semantic search and retrieval over knowledge entries. |
-| `core__create_knowledge`, `core__update_knowledge` | Assist only | Persist new knowledge produced by the assist agent. |
-| `core__create_memory`, `core__delete_memory`, `core__search_memory`, `core__list_memories` | Assist only | Manage per-case agent memory. |
 | `slack__post_message` | Assist only (`HECATONCHEIRES_SLACK_BOT_TOKEN`) | Post a message to the case's Slack channel. |
 | `slack__get_messages` | `HECATONCHEIRES_SLACK_BOT_TOKEN` | Bulk fetch of one or more Slack messages and their thread context (max 10 per call, parallel, partial failure tolerated). |
 | `slack__search_messages` | `HECATONCHEIRES_SLACK_USER_OAUTH_TOKEN` with `search:read` scope | Workspace-wide Slack message search. See [docs/slack.md](slack.md#user-token-scopes). |
@@ -873,10 +820,6 @@ channel_prefix = "risk"
 users = ["U12345678"]
 groups = ["@security-response"]
 
-# AI compile configuration (optional)
-[compile]
-prompt = "Extract security risk information, focusing on likelihood, impact, and mitigation strategies."
-
 # AI assist configuration (optional)
 [assist]
 prompt = "Check action deadlines and follow up on pending items. Remind the team of overdue tasks."
@@ -925,7 +868,7 @@ type = "url"
 
 ## GitHub Source Integration
 
-Hecatoncheires can fetch Pull Requests, Issues, and comments from GitHub repositories as external data sources for knowledge extraction. This requires a GitHub App with appropriate permissions.
+Hecatoncheires can fetch Pull Requests, Issues, and comments from GitHub repositories as external data sources. This requires a GitHub App with appropriate permissions.
 
 ### GitHub App Setup
 

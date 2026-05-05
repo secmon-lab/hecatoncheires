@@ -13,11 +13,9 @@ type Repository interface {
 	Slack() SlackRepository
 	SlackUser() SlackUserRepository
 	Source() SourceRepository
-	Knowledge() KnowledgeRepository
 	CaseMessage() CaseMessageRepository
 	ActionMessage() ActionMessageRepository
 	ActionEvent() ActionEventRepository
-	Memory() MemoryRepository
 	AssistLog() AssistLogRepository
 	CaseDraft() CaseDraftRepository
 	AgentSession() AgentSessionRepository

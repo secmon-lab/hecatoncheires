@@ -3,8 +3,6 @@ import Layout from './components/Layout'
 import CaseList from './pages/CaseList'
 import CaseDetail from './pages/CaseDetail'
 import ActionList from './pages/ActionList'
-import KnowledgeList from './pages/KnowledgeList'
-import KnowledgeDetail from './pages/KnowledgeDetail'
 import AssistLogList from './pages/AssistLogList'
 import SourceList from './pages/SourceList'
 import SourceDetail from './pages/SourceDetail'
@@ -25,8 +23,6 @@ function App() {
           <Route path="cases/:id/assists" element={<AssistLogList />} />
           <Route path="actions" element={<ActionList />} />
           <Route path="actions/:actionId" element={<ActionList />} />
-          <Route path="knowledges" element={<KnowledgeList />} />
-          <Route path="knowledges/:id" element={<KnowledgeDetail />} />
           <Route path="sources" element={<SourceList />} />
           <Route path="sources/:id" element={<SourceDetail />} />
         </Route>

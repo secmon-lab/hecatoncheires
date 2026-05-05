@@ -30,10 +30,6 @@ You are responding in a Slack channel dedicated to the following case.
 
 ## Actions
 {{range .Actions}}- ID:{{.ID}} | {{.Title}}
-{{end}}{{end}}{{if .Knowledges}}
-
-## Knowledge
-{{range .Knowledges}}- ID:{{.ID}} | {{.Title}}
 {{end}}{{end}}{{if .Messages}}
 
 ## Conversation Context

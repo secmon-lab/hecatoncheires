@@ -1,13 +1,11 @@
 # Notion Integration
 
-Hecatoncheires integrates with Notion to:
+Hecatoncheires integrates with Notion to surface Notion content to the AI agent through tools registered in `pkg/agent/tool/notion/`:
 
-- Compile knowledge entries from Notion pages and databases (`compile` CLI subcommand and `Source` ingestion pipeline) — backed by `pkg/service/notion`.
-- Surface Notion content to the AI agent through tools registered in `pkg/agent/tool/notion/`:
-  - `notion__search` — search pages and databases shared with the integration.
-  - `notion__get_page` — retrieve a page's content as Notion-flavored Markdown.
+- `notion__search` — search pages and databases shared with the integration.
+- `notion__get_page` — retrieve a page's content as Notion-flavored Markdown.
 
-This document covers the setup needed for both use cases.
+This document covers the Notion setup needed for those tools.
 
 ## 1. Create a Notion Internal Integration
 
@@ -18,7 +16,7 @@ This document covers the setup needed for both use cases.
    - **Associated workspace**: pick the workspace that owns the pages/databases you want to expose.
    - **Type**: **Internal**.
 4. Under **Capabilities**, enable:
-   - **Read content** — required for both `Search` and the Markdown content endpoint (and for the existing knowledge ingestion pipeline).
+   - **Read content** — required for both `Search` and the Markdown content endpoint.
    - The other capabilities (Update content / Insert content / etc.) are **not** required for the agent tools.
 5. Click **Save**.
 6. Copy the **Internal Integration Token** (starts with `secret_…`). This is the value passed via `--notion-api-token` / `HECATONCHEIRES_NOTION_API_TOKEN`.
@@ -29,7 +27,7 @@ This document covers the setup needed for both use cases.
 
 Notion's permission model is opt-in: a page or database is invisible to the integration until it is explicitly shared.
 
-For each top-level page or database you want the agent (or compile pipeline) to see:
+For each top-level page or database you want the agent to see:
 
 1. Open it in Notion.
 2. Click **Share → Add connections** and select the integration you created above.
@@ -77,7 +75,7 @@ The `GET /v1/pages/{page_id}/markdown` endpoint was introduced by Notion in earl
 - File-based blocks (image / file / video / audio / PDF) are returned as pre-signed URLs; those URLs expire after a short period, so consumers must download attachments promptly if they intend to persist them.
 - Pages exceeding ~20,000 blocks are returned with `truncated: true`. Hecatoncheires propagates this flag through `core__notion_get_page` so the agent can warn the user.
 
-> The third-party `jomei/notionapi` Go client used elsewhere in the codebase does not expose this endpoint, so `pkg/agent/tool/notion/client.go` calls it directly with `net/http` while reusing the same API token. The Markdown endpoint and the Search endpoint live in the agent tool package because they are exclusively used by the agent — `pkg/service/notion` keeps only the Source/Compile-facing surface.
+> The third-party `jomei/notionapi` Go client used elsewhere in the codebase does not expose this endpoint, so `pkg/agent/tool/notion/client.go` calls it directly with `net/http` while reusing the same API token. The Markdown endpoint and the Search endpoint live in the agent tool package because they are exclusively used by the agent — `pkg/service/notion` keeps only the Source-facing surface.
 
 ## 5. Operational Notes
 

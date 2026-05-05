@@ -6,7 +6,6 @@ export const msgKeys = {
   // Navigation
   navCases: 'navCases',
   navActions: 'navActions',
-  navKnowledges: 'navKnowledges',
   navSources: 'navSources',
 
   // Common buttons
@@ -155,7 +154,6 @@ export const msgKeys = {
   sectionAssignees: 'sectionAssignees',
   sectionFields: 'sectionFields',
   sectionRelatedActions: 'sectionRelatedActions',
-  sectionRelatedKnowledge: 'sectionRelatedKnowledge',
   sectionChannelMembers: 'sectionChannelMembers',
   placeholderFilterMembers: 'placeholderFilterMembers',
   loadingMembers: 'loadingMembers',
@@ -289,21 +287,6 @@ export const msgKeys = {
   errorValidateDatabaseFirst: 'errorValidateDatabaseFirst',
   errorValidateDatabase: 'errorValidateDatabase',
   validationDatabaseFound: 'validationDatabaseFound',
-
-  // Knowledge
-  titleKnowledgeBase: 'titleKnowledgeBase',
-  subtitleKnowledgeBase: 'subtitleKnowledgeBase',
-  headerRelatedCase: 'headerRelatedCase',
-  headerSummary: 'headerSummary',
-  headerDate: 'headerDate',
-  errorKnowledgeNotFound: 'errorKnowledgeNotFound',
-  sectionSummary: 'sectionSummary',
-  sectionRelatedCase: 'sectionRelatedCase',
-  sectionSourceInfo: 'sectionSourceInfo',
-  labelSourceId: 'labelSourceId',
-  labelSourcedAt: 'labelSourcedAt',
-  emptyKnowledgeTitle: 'emptyKnowledgeTitle',
-  emptyKnowledgeDesc: 'emptyKnowledgeDesc',
 
   // Assist Logs
   titleAssistLogs: 'titleAssistLogs',

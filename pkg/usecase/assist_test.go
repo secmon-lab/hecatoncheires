@@ -83,7 +83,7 @@ func TestAssistUseCase_BuildAssistSystemPrompt(t *testing.T) {
 		gt.Value(t, strings.Contains(prompt, "## Actions")).Equal(false)
 	})
 
-	t.Run("renders template with assist logs and memories", func(t *testing.T) {
+	t.Run("renders template with assist logs", func(t *testing.T) {
 		repo := memory.New()
 		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
@@ -100,15 +100,6 @@ func TestAssistUseCase_BuildAssistSystemPrompt(t *testing.T) {
 			NextSteps: "Follow up next week",
 		}
 		_, err = repo.AssistLog().Create(ctx, testWorkspaceID, c.ID, assistLog)
-		gt.NoError(t, err).Required()
-
-		// Create a memory
-		mem := &model.Memory{
-			CaseID:    c.ID,
-			Claim:     "User prefers email notifications",
-			Embedding: make([]float32, 768),
-		}
-		_, err = repo.Memory().Create(ctx, testWorkspaceID, c.ID, mem)
 		gt.NoError(t, err).Required()
 
 		registry := model.NewWorkspaceRegistry()
@@ -128,7 +119,6 @@ func TestAssistUseCase_BuildAssistSystemPrompt(t *testing.T) {
 		gt.Value(t, strings.Contains(prompt, "Checked deadlines")).Equal(true)
 		gt.Value(t, strings.Contains(prompt, "Two actions were overdue")).Equal(true)
 		gt.Value(t, strings.Contains(prompt, "Follow up next week")).Equal(true)
-		gt.Value(t, strings.Contains(prompt, "User prefers email notifications")).Equal(true)
 	})
 }
 

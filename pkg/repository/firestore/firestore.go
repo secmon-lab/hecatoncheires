@@ -15,11 +15,9 @@ type Firestore struct {
 	slack         *slackRepository
 	slackUser     *slackUserRepository
 	source        *sourceRepository
-	knowledge     *knowledgeRepository
 	caseMessage   *caseMessageRepository
 	actionMessage *actionMessageRepository
 	actionEvent   *actionEventRepository
-	memory        *firestoreMemoryRepository
 	assistLog     *firestoreAssistLogRepository
 	caseDraft     *caseDraftRepository
 	agentSession  *agentSessionRepository
@@ -49,11 +47,9 @@ func New(ctx context.Context, projectID, databaseID string) (*Firestore, error) 
 		slack:         newSlackRepository(client),
 		slackUser:     newSlackUserRepository(client),
 		source:        newSourceRepository(client),
-		knowledge:     newKnowledgeRepository(client),
 		caseMessage:   newCaseMessageRepository(client),
 		actionMessage: newActionMessageRepository(client),
 		actionEvent:   newActionEventRepository(client),
-		memory:        newFirestoreMemoryRepository(client),
 		assistLog:     newFirestoreAssistLogRepository(client),
 		caseDraft:     newCaseDraftRepository(client),
 		agentSession:  newAgentSessionRepository(client),
@@ -82,10 +78,6 @@ func (f *Firestore) Source() interfaces.SourceRepository {
 	return f.source
 }
 
-func (f *Firestore) Knowledge() interfaces.KnowledgeRepository {
-	return f.knowledge
-}
-
 func (f *Firestore) CaseMessage() interfaces.CaseMessageRepository {
 	return f.caseMessage
 }
@@ -96,10 +88,6 @@ func (f *Firestore) ActionMessage() interfaces.ActionMessageRepository {
 
 func (f *Firestore) ActionEvent() interfaces.ActionEventRepository {
 	return f.actionEvent
-}
-
-func (f *Firestore) Memory() interfaces.MemoryRepository {
-	return f.memory
 }
 
 func (f *Firestore) AssistLog() interfaces.AssistLogRepository {

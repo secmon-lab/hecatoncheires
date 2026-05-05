@@ -176,12 +176,6 @@ type GitHubRepository struct {
 	Repo  string `json:"repo"`
 }
 
-type KnowledgeConnection struct {
-	Items      []*Knowledge `json:"items"`
-	TotalCount int          `json:"totalCount"`
-	HasMore    bool         `json:"hasMore"`
-}
-
 type Mutation struct {
 }
 

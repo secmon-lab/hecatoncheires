@@ -11,25 +11,21 @@ import (
 
 // DataLoaders holds all the data loaders used in the GraphQL resolvers
 type DataLoaders struct {
-	repo                   interfaces.Repository
-	SlackUserLoader        *SlackUserLoader
-	ActionLoader           *ActionLoader
-	ActionsByCaseLoader    *ActionsByCaseLoader
-	CaseLoader             *CaseLoader
-	KnowledgeLoader        *KnowledgeLoader
-	KnowledgesByCaseLoader *KnowledgesByCaseLoader
+	repo                interfaces.Repository
+	SlackUserLoader     *SlackUserLoader
+	ActionLoader        *ActionLoader
+	ActionsByCaseLoader *ActionsByCaseLoader
+	CaseLoader          *CaseLoader
 }
 
 // NewDataLoaders creates a new DataLoaders instance
 func NewDataLoaders(repo interfaces.Repository) *DataLoaders {
 	return &DataLoaders{
-		repo:                   repo,
-		SlackUserLoader:        NewSlackUserLoader(repo),
-		ActionLoader:           NewActionLoader(repo),
-		ActionsByCaseLoader:    NewActionsByCaseLoader(repo),
-		CaseLoader:             NewCaseLoader(repo),
-		KnowledgeLoader:        NewKnowledgeLoader(repo),
-		KnowledgesByCaseLoader: NewKnowledgesByCaseLoader(repo),
+		repo:                repo,
+		SlackUserLoader:     NewSlackUserLoader(repo),
+		ActionLoader:        NewActionLoader(repo),
+		ActionsByCaseLoader: NewActionsByCaseLoader(repo),
+		CaseLoader:          NewCaseLoader(repo),
 	}
 }
 
@@ -160,44 +156,4 @@ func (l *CaseLoader) Load(ctx context.Context, workspaceID string, ids []int64) 
 	}
 
 	return cases, nil
-}
-
-// KnowledgeLoader loads knowledge by ID
-type KnowledgeLoader struct {
-	repo interfaces.Repository
-}
-
-func NewKnowledgeLoader(repo interfaces.Repository) *KnowledgeLoader {
-	return &KnowledgeLoader{repo: repo}
-}
-
-func (l *KnowledgeLoader) Load(ctx context.Context, workspaceID string, ids []model.KnowledgeID) ([]*model.Knowledge, error) {
-	knowledges := make([]*model.Knowledge, len(ids))
-	for i, id := range ids {
-		k, err := l.repo.Knowledge().Get(ctx, workspaceID, id)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load knowledge %s: %w", id, err)
-		}
-		knowledges[i] = k
-	}
-
-	return knowledges, nil
-}
-
-// KnowledgesByCaseLoader loads knowledges by case ID
-type KnowledgesByCaseLoader struct {
-	repo interfaces.Repository
-}
-
-func NewKnowledgesByCaseLoader(repo interfaces.Repository) *KnowledgesByCaseLoader {
-	return &KnowledgesByCaseLoader{repo: repo}
-}
-
-func (l *KnowledgesByCaseLoader) Load(ctx context.Context, workspaceID string, caseIDs []int64) (map[int64][]*model.Knowledge, error) {
-	knowledges, err := l.repo.Knowledge().ListByCaseIDs(ctx, workspaceID, caseIDs)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load knowledges by case: %w", err)
-	}
-
-	return knowledges, nil
 }

@@ -64,11 +64,6 @@ var messagesEN = [msgKeyCount]string{
 	MsgAgentError:         "An error occurred while processing your request. Please try again later.",
 	MsgAgentSessionInfo:   "Session Info",
 
-	// Knowledge
-	MsgKnowledgeHeader: "Knowledge: %s",
-	MsgKnowledgeSource: "Source",
-	MsgKnowledgeLink:   "\U0001f517 Link",
-
 	// Bookmark
 	MsgBookmarkOpenCase: "Open Case",
 
@@ -165,11 +160,6 @@ var messagesJA = [msgKeyCount]string{
 	MsgAgentOnIt:          "対応中...",
 	MsgAgentError:         "リクエストの処理中にエラーが発生しました。しばらくしてから再試行してください。",
 	MsgAgentSessionInfo:   "セッション情報",
-
-	// Knowledge
-	MsgKnowledgeHeader: "ナレッジ: %s",
-	MsgKnowledgeSource: "ソース",
-	MsgKnowledgeLink:   "\U0001f517 リンク",
 
 	// Bookmark
 	MsgBookmarkOpenCase: "ケースを開く",
