@@ -1,4 +1,5 @@
-import { forwardRef, type ReactNode, type KeyboardEvent, type MouseEvent } from 'react'
+import { forwardRef, type ReactNode, type MouseEvent } from 'react'
+import { activateOnEnterOrSpace } from '../../utils/keyboard'
 import styles from './Inline.module.css'
 
 interface Props {
@@ -17,13 +18,7 @@ const InlineFieldFrame = forwardRef<HTMLDivElement, Props>(function InlineFieldF
   { children, onActivate, ariaLabel, disabled, block, text, testId, className },
   ref,
 ) {
-  const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (disabled) return
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault()
-      onActivate()
-    }
-  }
+  const handleKeyDown = disabled ? undefined : activateOnEnterOrSpace(onActivate)
 
   const handleClick = (e: MouseEvent<HTMLDivElement>) => {
     if (disabled) return

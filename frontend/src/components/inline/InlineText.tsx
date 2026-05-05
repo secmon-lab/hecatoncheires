@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import InlineFieldFrame from './InlineFieldFrame'
+import { commitOnEnter } from '../../utils/keyboard'
 import styles from './Inline.module.css'
 
 interface Props {
@@ -99,15 +100,10 @@ export default function InlineText({
         disabled={saving}
         aria-label={ariaLabel}
         onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault()
-            void commit()
-          } else if (e.key === 'Escape') {
-            e.preventDefault()
-            cancel()
-          }
-        }}
+        onKeyDown={commitOnEnter({
+          onCommit: () => void commit(),
+          onCancel: cancel,
+        })}
         onBlur={() => {
           if (skipBlurSave.current) {
             skipBlurSave.current = false

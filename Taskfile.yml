@@ -24,3 +24,9 @@ tasks:
     desc: "Run E2E tests with Playwright (includes backend startup and teardown)"
     cmds:
       - ./frontend/scripts/e2e.sh
+
+  lint:frontend:
+    desc: "Run ESLint on the frontend"
+    dir: frontend
+    cmds:
+      - pnpm lint
