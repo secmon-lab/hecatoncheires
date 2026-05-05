@@ -97,10 +97,12 @@ func WithLLMClient(client gollem.LLMClient) Option {
 	}
 }
 
-// WithEmbedClient sets the embedding client used by core tools (memory /
-// knowledge similarity search) and the knowledge extraction service. Always
-// required when the LLM-driven flows are wired; configured separately so it
-// can target Gemini regardless of the chat completion provider.
+// WithEmbedClient sets the embedding client. The Memory / Knowledge similarity
+// search consumers were demolished pending redesign, so the client currently
+// has no production reader; the option is preserved so the upcoming redesign
+// can drop similarity-search features back in without rewiring the CLI /
+// usecase boundary. Configured separately from the chat completion LLM so it
+// can target Gemini regardless of provider.
 func WithEmbedClient(client interfaces.EmbedClient) Option {
 	return func(uc *UseCases) {
 		uc.embedClient = client
@@ -137,18 +139,17 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 	uc.Action = NewActionUseCase(repo, registry, uc.slackService, uc.baseURL)
 	uc.Source = NewSourceUseCase(repo, uc.notion, uc.slackService, uc.githubService)
 
-	// Whenever Slack is wired, LLM and Embed clients must also be wired —
-	// Slack-driven flows (agent mention, mention-draft, assist) all require
-	// LLM by design. The embedder has no current production consumer (Memory
-	// and Knowledge were demolished pending redesign), but the wiring is
-	// preserved so the upcoming similarity-search redesign can pick it up
-	// without re-plumbing the CLI/usecase boundary.
+	// Whenever Slack is wired, the LLM client must also be wired — Slack-driven
+	// flows (agent mention, mention-draft, assist) all require LLM by design.
+	// The embed client is intentionally NOT enforced here: its only consumers
+	// (Memory / Knowledge similarity search) were demolished pending redesign,
+	// so requiring it would block minimal local-dev configurations without any
+	// functional benefit. The wiring is preserved (field + WithEmbedClient
+	// option) so the redesign can plug new consumers back in without changes
+	// at the CLI / usecase boundary.
 	if uc.slackService != nil {
 		if uc.llmClient == nil {
 			panic("usecase.New: LLM client is required when Slack service is configured (use WithLLMClient)")
-		}
-		if uc.embedClient == nil {
-			panic("usecase.New: Embed client is required when Slack service is configured (use WithEmbedClient); reserved for upcoming similarity-search redesign")
 		}
 		// Agent depends on the persistent History/Trace archive. Callers
 		// that drive Slack events (the serve CLI) MUST wire both; callers
