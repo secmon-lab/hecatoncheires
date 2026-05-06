@@ -250,7 +250,7 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
         <div className="muted">{t('loading')}</div>
       ) : (
         <>
-          <div style={{ marginBottom: 'var(--spacing-lg)' }}>
+          <div style={{ marginBottom: 'var(--sp-6)' }}>
             <InlineText
               value={action.title || ''}
               onSave={handleSaveTitle}
@@ -261,9 +261,13 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
             />
           </div>
 
-          <div className="row" style={{ gap: 'var(--spacing-lg)', fontSize: 13, marginBottom: 'var(--spacing-lg)', flexWrap: 'wrap', alignItems: 'center' }}>
-            <div className="row" style={{ gap: 'var(--spacing-sm)', alignItems: 'center', minWidth: 0 }}>
-              <span className="soft">{t('labelStatus')}</span>
+          {/* Meta fields — vertical stack with a fixed-width label column.
+              Mirrors the designer mock under tmp/hecatoncheires/screens-2.jsx
+              so labels never wrap mid-character (which is what happens when
+              a flex row gets squeezed and the inline label column collapses). */}
+          <div className="col" style={{ gap: 8, marginBottom: 'var(--sp-6)', fontSize: 13 }}>
+            <div className="row" style={{ gap: 'var(--sp-4)', alignItems: 'center' }}>
+              <span className="soft" style={{ width: 78, flexShrink: 0, fontSize: 12, whiteSpace: 'nowrap' }}>{t('labelStatus')}</span>
               <InlineSelect<string>
                 value={action.status as string}
                 options={statusOptions}
@@ -286,33 +290,34 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
                 ))}
               </select>
             </div>
-            <div className="row" style={{ gap: 'var(--spacing-sm)', alignItems: 'center', minWidth: 280, flex: 1 }}>
-              <span className="soft">{t('labelAssignee')}</span>
-              <InlineUserSelect
-                users={users}
-                value={action.assigneeID || null}
-                onSave={handleAssigneeChange}
-                ariaLabel={t('labelAssignee')}
-                placeholder={t('placeholderSelectAssignee')}
-                testId="action-assignee"
-              />
+            <div className="row" style={{ gap: 'var(--sp-4)', alignItems: 'center' }}>
+              <span className="soft" style={{ width: 78, flexShrink: 0, fontSize: 12, whiteSpace: 'nowrap' }}>{t('labelAssignee')}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <InlineUserSelect
+                  users={users}
+                  value={action.assigneeID || null}
+                  onSave={handleAssigneeChange}
+                  ariaLabel={t('labelAssignee')}
+                  placeholder={t('placeholderSelectAssignee')}
+                  testId="action-assignee"
+                />
+              </div>
+            </div>
+            <div className="row" style={{ gap: 'var(--sp-4)', alignItems: 'center' }}>
+              <span className="soft" style={{ width: 78, flexShrink: 0, fontSize: 12, whiteSpace: 'nowrap' }}>{t('labelDueDate')}</span>
+              <div style={{ flex: 1, minWidth: 160, color: due?.urgent || due?.overdue ? 'var(--danger)' : undefined }}>
+                <InlineDate
+                  value={action.dueDate || null}
+                  onSave={handleDueDateChange}
+                  ariaLabel={t('labelDueDate')}
+                  placeholder={t('placeholderAddValue')}
+                  testId="action-due-date"
+                />
+              </div>
             </div>
           </div>
 
-          <div className="row" style={{ gap: 'var(--spacing-sm)', fontSize: 13, marginBottom: 'var(--spacing-lg)', alignItems: 'center', flexWrap: 'wrap' }}>
-            <span className="soft">{t('labelDueDate')}</span>
-            <div style={{ flex: 1, minWidth: 160, color: due?.urgent || due?.overdue ? 'var(--danger)' : undefined }}>
-              <InlineDate
-                value={action.dueDate || null}
-                onSave={handleDueDateChange}
-                ariaLabel={t('labelDueDate')}
-                placeholder={t('placeholderAddValue')}
-                testId="action-due-date"
-              />
-            </div>
-          </div>
-
-          <div style={{ marginBottom: 'var(--spacing-lg)' }}>
+          <div style={{ marginBottom: 'var(--sp-8)' }}>
             <div className="field-label">{t('labelDescription')}</div>
             <InlineLongText
               value={action.description || ''}
@@ -323,11 +328,11 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
             />
           </div>
 
-          <div style={{ marginBottom: 'var(--spacing-lg)' }}>
+          <div style={{ marginBottom: 'var(--sp-8)' }}>
             <StepList workspaceId={currentWorkspace!.id} actionId={action.id} />
           </div>
 
-          <div style={{ marginTop: 'var(--spacing-lg)' }}>
+          <div style={{ marginTop: 'var(--sp-6)' }}>
             <ActionActivity
               workspaceId={currentWorkspace!.id}
               actionId={action.id}
