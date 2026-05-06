@@ -285,28 +285,19 @@ func (r *caseResolver) Fields(ctx context.Context, obj *graphql1.Case) ([]*graph
 }
 
 // Actions is the resolver for the actions field.
-func (r *caseResolver) Actions(ctx context.Context, obj *graphql1.Case, includeArchived *bool) ([]*graphql1.Action, error) {
+func (r *caseResolver) Actions(ctx context.Context, obj *graphql1.Case, archived *bool) ([]*graphql1.Action, error) {
 	if obj.AccessDenied {
 		return []*graphql1.Action{}, nil
 	}
 
-	// Default path uses the per-case dataloader (active actions only). Only
-	// when the caller opts in to archived results do we bypass the loader
-	// and route through the usecase, which already handles access control.
-	if includeArchived != nil && *includeArchived {
-		actions, err := r.UseCases.Action.GetActionsByCase(ctx, obj.WorkspaceID, int64(obj.ID), interfaces.ActionListOptions{IncludeArchived: true})
-		if err != nil {
-			return nil, err
-		}
-		result := make([]*graphql1.Action, len(actions))
-		for i, a := range actions {
-			result[i] = toGraphQLAction(a, obj.WorkspaceID)
-		}
-		return result, nil
-	}
-
 	loaders := GetDataLoaders(ctx)
-	actionsMap, err := loaders.ActionsByCaseLoader.Load(ctx, obj.WorkspaceID, []int64{int64(obj.ID)})
+	var actionsMap map[int64][]*model.Action
+	var err error
+	if archived != nil && *archived {
+		actionsMap, err = loaders.ArchivedActionsByCaseLoader.Load(ctx, obj.WorkspaceID, []int64{int64(obj.ID)})
+	} else {
+		actionsMap, err = loaders.ActiveActionsByCaseLoader.Load(ctx, obj.WorkspaceID, []int64{int64(obj.ID)})
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -755,8 +746,8 @@ func (r *queryResolver) Case(ctx context.Context, workspaceID string, id int) (*
 // Actions is the resolver for the actions field.
 func (r *queryResolver) Actions(ctx context.Context, workspaceID string, includeArchived *bool) ([]*graphql1.Action, error) {
 	opts := interfaces.ActionListOptions{}
-	if includeArchived != nil {
-		opts.IncludeArchived = *includeArchived
+	if includeArchived != nil && *includeArchived {
+		opts.ArchiveScope = interfaces.ActionArchiveScopeAll
 	}
 	actions, err := r.UseCases.Action.ListActions(ctx, workspaceID, opts)
 	if err != nil {
@@ -784,8 +775,8 @@ func (r *queryResolver) Action(ctx context.Context, workspaceID string, id int) 
 // ActionsByCase is the resolver for the actionsByCase field.
 func (r *queryResolver) ActionsByCase(ctx context.Context, workspaceID string, caseID int, includeArchived *bool) ([]*graphql1.Action, error) {
 	opts := interfaces.ActionListOptions{}
-	if includeArchived != nil {
-		opts.IncludeArchived = *includeArchived
+	if includeArchived != nil && *includeArchived {
+		opts.ArchiveScope = interfaces.ActionArchiveScopeAll
 	}
 	actions, err := r.UseCases.Action.GetActionsByCase(ctx, workspaceID, int64(caseID), opts)
 	if err != nil {

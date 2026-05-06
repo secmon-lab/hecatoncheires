@@ -138,7 +138,7 @@ func (r *actionRepository) List(ctx context.Context, workspaceID string, opts in
 			return nil, goerr.Wrap(err, "failed to decode action", goerr.V("doc_id", docSnap.Ref.ID))
 		}
 
-		if !opts.IncludeArchived && a.IsArchived() {
+		if !opts.ArchiveScope.Allows(a.IsArchived()) {
 			continue
 		}
 
@@ -226,7 +226,7 @@ func (r *actionRepository) GetByCase(ctx context.Context, workspaceID string, ca
 			return nil, goerr.Wrap(err, "failed to decode action", goerr.V("doc_id", docSnap.Ref.ID))
 		}
 
-		if !opts.IncludeArchived && a.IsArchived() {
+		if !opts.ArchiveScope.Allows(a.IsArchived()) {
 			continue
 		}
 

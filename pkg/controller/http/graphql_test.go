@@ -647,7 +647,7 @@ func TestGraphQLHandler_DeleteCaseMutation(t *testing.T) {
 		gt.Array(t, resp.Errors).Length(0)
 
 		// Verify associated actions were also deleted (cascade includes archived)
-		actions, err := repo.Action().GetByCase(ctx, testWorkspaceID, createdCase.ID, interfaces.ActionListOptions{IncludeArchived: true})
+		actions, err := repo.Action().GetByCase(ctx, testWorkspaceID, createdCase.ID, interfaces.ActionListOptions{ArchiveScope: interfaces.ActionArchiveScopeAll})
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, actions).Length(0)

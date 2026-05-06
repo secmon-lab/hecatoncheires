@@ -198,11 +198,17 @@ func TestActionUseCase_ArchiveAction(t *testing.T) {
 		gt.NoError(t, err).Required()
 		gt.Array(t, got).Length(0)
 
-		// IncludeArchived returns it
-		gotAll, err := actionUC.GetActionsByCase(ctx, testWorkspaceID, c.ID, interfaces.ActionListOptions{IncludeArchived: true})
+		// ArchiveScopeAll returns archived action too
+		gotAll, err := actionUC.GetActionsByCase(ctx, testWorkspaceID, c.ID, interfaces.ActionListOptions{ArchiveScope: interfaces.ActionArchiveScopeAll})
 		gt.NoError(t, err).Required()
 		gt.Array(t, gotAll).Length(1).Required()
 		gt.Value(t, gotAll[0].ID).Equal(created.ID)
+
+		// ArchiveScopeArchivedOnly returns just the archived action
+		gotArchived, err := actionUC.GetActionsByCase(ctx, testWorkspaceID, c.ID, interfaces.ActionListOptions{ArchiveScope: interfaces.ActionArchiveScopeArchivedOnly})
+		gt.NoError(t, err).Required()
+		gt.Array(t, gotArchived).Length(1).Required()
+		gt.Value(t, gotArchived[0].ID).Equal(created.ID)
 
 		// Get still returns archived action
 		fetched, err := actionUC.GetAction(ctx, testWorkspaceID, created.ID)

@@ -69,12 +69,12 @@ export default function ActionForm({ action, defaultCaseID, onClose }: ActionFor
     { query: GET_OPEN_CASE_ACTIONS, variables: { workspaceId: currentWorkspace?.id } },
   ]
   if (defaultCaseID) {
-    // CaseDetail defaults to the 'open' view (includeArchivedActions=false);
+    // CaseDetail defaults to the 'open' view (archivedActions=false);
     // matching that exactly is what makes Apollo's refetchQueries actually
     // refresh the page after mutating an action.
     createRefetch.push({
       query: GET_CASE,
-      variables: { workspaceId: currentWorkspace?.id, id: defaultCaseID, includeArchivedActions: false },
+      variables: { workspaceId: currentWorkspace?.id, id: defaultCaseID, archivedActions: false },
     })
   }
   const [createAction, { loading: creating }] = useMutation(CREATE_ACTION, {
@@ -90,7 +90,7 @@ export default function ActionForm({ action, defaultCaseID, onClose }: ActionFor
     })
     updateRefetch.push({
       query: GET_CASE,
-      variables: { workspaceId: currentWorkspace?.id, id: action.caseID, includeArchivedActions: false },
+      variables: { workspaceId: currentWorkspace?.id, id: action.caseID, archivedActions: false },
     })
   }
   const [updateAction, { loading: updating }] = useMutation(UPDATE_ACTION, {

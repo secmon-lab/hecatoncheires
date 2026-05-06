@@ -258,7 +258,7 @@ func TestListActionsTool(t *testing.T) {
 			getByCaseFn: func(ctx context.Context, workspaceID string, caseID int64, opts interfaces.ActionListOptions) ([]*model.Action, error) {
 				gt.Value(t, workspaceID).Equal(testWorkspaceID)
 				gt.Value(t, caseID).Equal(testCaseID)
-				gt.Bool(t, opts.IncludeArchived).False()
+				gt.Value(t, opts.ArchiveScope).Equal(interfaces.ActionArchiveScopeActiveOnly)
 				return []*model.Action{}, nil
 			},
 		}
@@ -926,7 +926,7 @@ func TestUnarchiveActionTool(t *testing.T) {
 func TestListActionsTool_IncludeArchived(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("default omits IncludeArchived", func(t *testing.T) {
+	t.Run("default uses ActiveOnly scope", func(t *testing.T) {
 		var gotOpts interfaces.ActionListOptions
 		actionRepo := &mockActionRepo{
 			getByCaseFn: func(_ context.Context, _ string, _ int64, opts interfaces.ActionListOptions) ([]*model.Action, error) {
@@ -937,10 +937,10 @@ func TestListActionsTool_IncludeArchived(t *testing.T) {
 		tools := core.New(core.Deps{Repo: newMockRepo(actionRepo), WorkspaceID: testWorkspaceID, CaseID: testCaseID})
 		_, err := findTool(tools, "core__list_actions").Run(ctx, map[string]any{})
 		gt.NoError(t, err).Required()
-		gt.Bool(t, gotOpts.IncludeArchived).False()
+		gt.Value(t, gotOpts.ArchiveScope).Equal(interfaces.ActionArchiveScopeActiveOnly)
 	})
 
-	t.Run("propagates include_archived=true", func(t *testing.T) {
+	t.Run("include_archived=true maps to ArchiveScopeAll", func(t *testing.T) {
 		var gotOpts interfaces.ActionListOptions
 		actionRepo := &mockActionRepo{
 			getByCaseFn: func(_ context.Context, _ string, _ int64, opts interfaces.ActionListOptions) ([]*model.Action, error) {
@@ -953,6 +953,6 @@ func TestListActionsTool_IncludeArchived(t *testing.T) {
 			"include_archived": true,
 		})
 		gt.NoError(t, err).Required()
-		gt.Bool(t, gotOpts.IncludeArchived).True()
+		gt.Value(t, gotOpts.ArchiveScope).Equal(interfaces.ActionArchiveScopeAll)
 	})
 }

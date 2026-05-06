@@ -118,7 +118,7 @@ type ComplexityRoot struct {
 
 	Case struct {
 		AccessDenied     func(childComplexity int) int
-		Actions          func(childComplexity int, includeArchived *bool) int
+		Actions          func(childComplexity int, archived *bool) int
 		AssigneeIDs      func(childComplexity int) int
 		Assignees        func(childComplexity int) int
 		ChannelUserCount func(childComplexity int) int
@@ -360,7 +360,7 @@ type CaseResolver interface {
 	SlackChannelName(ctx context.Context, obj *graphql1.Case) (*string, error)
 	SlackChannelURL(ctx context.Context, obj *graphql1.Case) (*string, error)
 	Fields(ctx context.Context, obj *graphql1.Case) ([]*graphql1.FieldValue, error)
-	Actions(ctx context.Context, obj *graphql1.Case, includeArchived *bool) ([]*graphql1.Action, error)
+	Actions(ctx context.Context, obj *graphql1.Case, archived *bool) ([]*graphql1.Action, error)
 	SlackMessages(ctx context.Context, obj *graphql1.Case, limit *int, cursor *string) (*graphql1.SlackMessageConnection, error)
 }
 type MutationResolver interface {
@@ -722,7 +722,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Case.Actions(childComplexity, args["includeArchived"].(*bool)), true
+		return e.complexity.Case.Actions(childComplexity, args["archived"].(*bool)), true
 	case "Case.assigneeIDs":
 		if e.complexity.Case.AssigneeIDs == nil {
 			break
@@ -2048,10 +2048,11 @@ type Case {
   slackChannelName: String
   slackChannelURL: String
   fields: [FieldValue!]!       # Resolved from case_field_values via DataLoader
-  # actions exposes the case's actions. Defaults to active (non-archived)
-  # actions; pass includeArchived=true to also include archived actions
-  # (used by the Case detail "Archived" view toggle).
-  actions(includeArchived: Boolean): [Action!]!
+  # actions exposes the case's actions. Pass archived=true to retrieve only
+  # archived actions; archived=false or unset returns only active
+  # (non-archived) actions. Both slices share the dataloader path so this
+  # field is safe to call repeatedly within a request.
+  actions(archived: Boolean): [Action!]!
   slackMessages(limit: Int, cursor: String): SlackMessageConnection!
   createdAt: Time!
   updatedAt: Time!
@@ -2431,11 +2432,11 @@ func (ec *executionContext) field_Action_messages_args(ctx context.Context, rawA
 func (ec *executionContext) field_Case_actions_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
-	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "includeArchived", ec.unmarshalOBoolean2ᚖbool)
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "archived", ec.unmarshalOBoolean2ᚖbool)
 	if err != nil {
 		return nil, err
 	}
-	args["includeArchived"] = arg0
+	args["archived"] = arg0
 	return args, nil
 }
 
@@ -5000,7 +5001,7 @@ func (ec *executionContext) _Case_actions(ctx context.Context, field graphql.Col
 		ec.fieldContext_Case_actions,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Case().Actions(ctx, obj, fc.Args["includeArchived"].(*bool))
+			return ec.resolvers.Case().Actions(ctx, obj, fc.Args["archived"].(*bool))
 		},
 		nil,
 		ec.marshalNAction2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionᚄ,
