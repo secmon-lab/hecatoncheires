@@ -36,7 +36,7 @@ export const GET_CASES = gql`
 `
 
 export const GET_CASE = gql`
-  query GetCase($workspaceId: String!, $id: Int!, $archivedActions: Boolean) {
+  query GetCase($workspaceId: String!, $id: Int!, $actionsFilter: ActionArchiveFilter) {
     case(workspaceId: $workspaceId, id: $id) {
       id
       title
@@ -68,7 +68,7 @@ export const GET_CASE = gql`
         fieldId
         value
       }
-      actions(archived: $archivedActions) {
+      actions(filter: $actionsFilter) {
         id
         title
         status

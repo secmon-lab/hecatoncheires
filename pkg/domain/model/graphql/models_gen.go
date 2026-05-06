@@ -325,6 +325,63 @@ type Workspace struct {
 	Name string `json:"name"`
 }
 
+type ActionArchiveFilter string
+
+const (
+	ActionArchiveFilterActive   ActionArchiveFilter = "ACTIVE"
+	ActionArchiveFilterArchived ActionArchiveFilter = "ARCHIVED"
+	ActionArchiveFilterAll      ActionArchiveFilter = "ALL"
+)
+
+var AllActionArchiveFilter = []ActionArchiveFilter{
+	ActionArchiveFilterActive,
+	ActionArchiveFilterArchived,
+	ActionArchiveFilterAll,
+}
+
+func (e ActionArchiveFilter) IsValid() bool {
+	switch e {
+	case ActionArchiveFilterActive, ActionArchiveFilterArchived, ActionArchiveFilterAll:
+		return true
+	}
+	return false
+}
+
+func (e ActionArchiveFilter) String() string {
+	return string(e)
+}
+
+func (e *ActionArchiveFilter) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = ActionArchiveFilter(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid ActionArchiveFilter", str)
+	}
+	return nil
+}
+
+func (e ActionArchiveFilter) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *ActionArchiveFilter) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e ActionArchiveFilter) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
+}
+
 type ActionEventKind string
 
 const (

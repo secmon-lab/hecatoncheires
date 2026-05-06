@@ -92,7 +92,7 @@ export default function CaseDetail() {
     variables: {
       workspaceId: currentWorkspace?.id,
       id: caseId,
-      archivedActions: actionView === 'archived',
+      actionsFilter: actionView === 'archived' ? 'ARCHIVED' : 'ACTIVE',
     },
     skip: !currentWorkspace || Number.isNaN(caseId),
   })
@@ -126,7 +126,7 @@ export default function CaseDetail() {
         variables: {
           workspaceId: currentWorkspace?.id,
           id: caseId,
-          archivedActions: actionView === 'archived',
+          actionsFilter: actionView === 'archived' ? 'ARCHIVED' : 'ACTIVE',
         },
       },
       { query: GET_CASES, variables: { workspaceId: currentWorkspace?.id, status: 'OPEN' } },

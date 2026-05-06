@@ -16,6 +16,7 @@ type DataLoaders struct {
 	ActionLoader                *ActionLoader
 	ActiveActionsByCaseLoader   *ActionsByCaseLoader
 	ArchivedActionsByCaseLoader *ActionsByCaseLoader
+	AllActionsByCaseLoader      *ActionsByCaseLoader
 	CaseLoader                  *CaseLoader
 }
 
@@ -27,7 +28,21 @@ func NewDataLoaders(repo interfaces.Repository) *DataLoaders {
 		ActionLoader:                NewActionLoader(repo),
 		ActiveActionsByCaseLoader:   NewActionsByCaseLoader(repo, interfaces.ActionArchiveScopeActiveOnly),
 		ArchivedActionsByCaseLoader: NewActionsByCaseLoader(repo, interfaces.ActionArchiveScopeArchivedOnly),
+		AllActionsByCaseLoader:      NewActionsByCaseLoader(repo, interfaces.ActionArchiveScopeAll),
 		CaseLoader:                  NewCaseLoader(repo),
+	}
+}
+
+// actionsByCaseLoaderForScope picks the right per-case dataloader for the
+// given archive scope.
+func (d *DataLoaders) actionsByCaseLoaderForScope(scope interfaces.ActionArchiveScope) *ActionsByCaseLoader {
+	switch scope {
+	case interfaces.ActionArchiveScopeArchivedOnly:
+		return d.ArchivedActionsByCaseLoader
+	case interfaces.ActionArchiveScopeAll:
+		return d.AllActionsByCaseLoader
+	default:
+		return d.ActiveActionsByCaseLoader
 	}
 }
 
