@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/m-mizutani/gt"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
-	"github.com/secmon-lab/hecatoncheires/pkg/service/github"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"

@@ -16,6 +16,7 @@ import (
 	"github.com/m-mizutani/gollem/trace"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
+	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
@@ -40,6 +41,7 @@ type AgentUseCase struct {
 	slackService slack.Service
 	slackSearch  slacktool.SearchService
 	notionTool   notiontool.Client
+	githubClient *githubtool.Client
 	llmClient    gollem.LLMClient
 	embedClient  interfaces.EmbedClient
 	historyRepo  gollem.HistoryRepository
@@ -53,8 +55,9 @@ type AgentUseCase struct {
 
 // NewAgentUseCase creates a new AgentUseCase instance.
 //
-// slackSearch and notionTool are optional; pass nil to omit the corresponding
-// agent tools (slack__search_messages, notion__search, notion__get_page).
+// slackSearch, notionTool, and githubClient are optional; pass nil to omit
+// the corresponding agent tools (slack__search_messages, notion__search,
+// notion__get_page, github__*).
 //
 // historyRepo and traceRepo are required: the agent session flow persists
 // gollem.History across mentions and writes a trace for each Execute. Pass
@@ -62,13 +65,14 @@ type AgentUseCase struct {
 //
 // actionUC is required: the core__create_action tool routes through it so all
 // Action create paths share the same usecase implementation.
-func NewAgentUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackSearch slacktool.SearchService, notionTool notiontool.Client, llmClient gollem.LLMClient, embedClient interfaces.EmbedClient, historyRepo gollem.HistoryRepository, traceRepo trace.Repository, actionUC *ActionUseCase) *AgentUseCase {
+func NewAgentUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackSearch slacktool.SearchService, notionTool notiontool.Client, githubClient *githubtool.Client, llmClient gollem.LLMClient, embedClient interfaces.EmbedClient, historyRepo gollem.HistoryRepository, traceRepo trace.Repository, actionUC *ActionUseCase) *AgentUseCase {
 	return &AgentUseCase{
 		repo:         repo,
 		registry:     registry,
 		slackService: slackService,
 		slackSearch:  slackSearch,
 		notionTool:   notionTool,
+		githubClient: githubClient,
 		llmClient:    llmClient,
 		embedClient:  embedClient,
 		historyRepo:  historyRepo,
@@ -201,11 +205,13 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 		Search: uc.slackSearch,
 	})
 	notionTools := notiontool.New(notiontool.Deps{Client: uc.notionTool})
+	githubTools := githubtool.New(uc.githubClient)
 
-	allTools := make([]gollem.Tool, 0, len(coreTools)+len(slackTools)+len(notionTools))
+	allTools := make([]gollem.Tool, 0, len(coreTools)+len(slackTools)+len(notionTools)+len(githubTools))
 	allTools = append(allTools, coreTools...)
 	allTools = append(allTools, slackTools...)
 	allTools = append(allTools, notionTools...)
+	allTools = append(allTools, githubTools...)
 
 	// Note: gollem's WithHistoryRepository follows a load-mutate-overwrite
 	// pattern (Load at session start, Save after every LLM turn). Two

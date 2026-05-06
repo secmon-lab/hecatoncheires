@@ -1,9 +1,9 @@
 package usecase
 
 import (
+	githubsvc "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	slackmodel "github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
-	githubsvc "github.com/secmon-lab/hecatoncheires/pkg/service/github"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 )
 

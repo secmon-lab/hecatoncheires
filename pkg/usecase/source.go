@@ -2,11 +2,13 @@ package usecase
 
 import (
 	"context"
+	"iter"
+	"time"
 
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
-	"github.com/secmon-lab/hecatoncheires/pkg/service/github"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 )
@@ -14,16 +16,29 @@ import (
 // ErrGitHubNotConfigured is returned when GitHub App is not configured
 var ErrGitHubNotConfigured = goerr.New("GitHub App is not configured")
 
+// githubAPI lists the GitHub client methods that SourceUseCase actually
+// invokes. Defining this here (rather than depending on a public interface
+// in pkg/agent/tool/github) keeps the GitHub client's public surface free of
+// interface bloat — the test seam lives where it is needed.
+//
+// *github.Client satisfies this interface implicitly.
+type githubAPI interface {
+	FetchRecentPullRequests(ctx context.Context, owner, repo string, since time.Time) iter.Seq2[*github.PullRequest, error]
+	FetchRecentIssues(ctx context.Context, owner, repo string, since time.Time) iter.Seq2[*github.Issue, error]
+	FetchUpdatedIssueComments(ctx context.Context, owner, repo string, since time.Time, excludeNumbers map[int]struct{}) iter.Seq2[*github.IssueWithComments, error]
+	ValidateRepository(ctx context.Context, owner, repo string) (*github.RepositoryValidation, error)
+}
+
 // SourceUseCase handles source-related business logic
 type SourceUseCase struct {
 	repo          interfaces.Repository
 	notion        notion.Service
 	slackService  slack.Service
-	githubService github.Service
+	githubService githubAPI
 }
 
 // NewSourceUseCase creates a new SourceUseCase instance
-func NewSourceUseCase(repo interfaces.Repository, notionService notion.Service, slackService slack.Service, githubService github.Service) *SourceUseCase {
+func NewSourceUseCase(repo interfaces.Repository, notionService notion.Service, slackService slack.Service, githubService githubAPI) *SourceUseCase {
 	return &SourceUseCase{
 		repo:          repo,
 		notion:        notionService,

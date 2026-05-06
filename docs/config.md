@@ -866,9 +866,9 @@ type = "url"
 
 ---
 
-## GitHub Source Integration
+## GitHub Integration
 
-Hecatoncheires can fetch Pull Requests, Issues, and comments from GitHub repositories as external data sources. This requires a GitHub App with appropriate permissions.
+Hecatoncheires uses a single GitHub App to power both the Source pipeline (PR/Issue ingestion) and the agent's GitHub tools (search, get_issue, get_pull_request, get_file, list_commits). Wiring up the App enables both at once — there is no separate flag for the agent tools.
 
 ### GitHub App Setup
 
@@ -880,7 +880,7 @@ Hecatoncheires can fetch Pull Requests, Issues, and comments from GitHub reposit
 
 ### Configuration
 
-All three flags (`--github-app-id`, `--github-app-installation-id`, `--github-app-private-key`) must be set to enable GitHub Source features. If any flag is missing, GitHub features are gracefully disabled and the application continues to run normally with other source types.
+All three flags (`--github-app-id`, `--github-app-installation-id`, `--github-app-private-key`) must be set to enable GitHub features (Source pipeline + agent tools). If any flag is missing, GitHub features are gracefully disabled and the application continues to run normally with other source types.
 
 ```bash
 hecatoncheires serve \
@@ -901,6 +901,20 @@ GitHub Sources are managed via the GraphQL API:
 - `validateGitHubRepo` - Validate access to a repository before adding it
 
 Repositories can be specified in `owner/repo` format or as full GitHub URLs (e.g., `https://github.com/owner/repo`).
+
+### Agent Tools
+
+When the GitHub App is configured, the Slack mention agent and the assist flow gain the following gollem tools:
+
+| Tool | Purpose |
+| --- | --- |
+| `github__search` | Search issues and pull requests using GitHub search syntax (`repo:`, `is:open`, `author:`, `label:`, etc.). Up to 50 hits per call. |
+| `github__get_issue` | Fetch a single issue (not PR) with its body, labels, and full comment thread. |
+| `github__get_pull_request` | Fetch a single PR with body, labels, comments, and reviews. Optional `include_files=true` adds the diff (per-file patches truncated at 20 KB). |
+| `github__get_file` | Fetch a file's content at any branch/tag/SHA. UTF-8 text only; binaries return `is_binary=true` with empty content. Capped at 1 MB. |
+| `github__list_commits` | List commits with optional `path`, `author`, `since`, `until` filters. Up to 50 commits per call. |
+
+The tools operate within whatever scope the GitHub App's installation grants — there is no per-repository allowlist on the application side.
 
 ---
 

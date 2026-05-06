@@ -3,11 +3,11 @@ package usecase
 import (
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/trace"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
-	"github.com/secmon-lab/hecatoncheires/pkg/service/github"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 )
@@ -20,7 +20,7 @@ type UseCases struct {
 	slackService      slack.Service
 	slackAdminService slack.AdminService
 	slackSearch       slacktool.SearchService
-	githubService     github.Service
+	githubClient      *github.Client
 	llmClient         gollem.LLMClient
 	embedClient       interfaces.EmbedClient
 	historyRepo       gollem.HistoryRepository
@@ -62,9 +62,9 @@ func WithBaseURL(url string) Option {
 	}
 }
 
-func WithGitHubService(svc github.Service) Option {
+func WithGitHubService(c *github.Client) Option {
 	return func(uc *UseCases) {
-		uc.githubService = svc
+		uc.githubClient = c
 	}
 }
 
@@ -137,7 +137,16 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 
 	uc.Case = NewCaseUseCase(repo, registry, uc.slackService, uc.slackAdminService, uc.baseURL)
 	uc.Action = NewActionUseCase(repo, registry, uc.slackService, uc.baseURL)
-	uc.Source = NewSourceUseCase(repo, uc.notion, uc.slackService, uc.githubService)
+
+	// Convert *github.Client to githubAPI interface, preserving nil-ness:
+	// passing a typed nil pointer through an interface parameter would make
+	// `iface == nil` evaluate false at the receiver, so we explicitly leave
+	// the interface untyped when no client is configured.
+	var githubSvc githubAPI
+	if uc.githubClient != nil {
+		githubSvc = uc.githubClient
+	}
+	uc.Source = NewSourceUseCase(repo, uc.notion, uc.slackService, githubSvc)
 
 	// Whenever Slack is wired, the LLM client must also be wired — Slack-driven
 	// flows (agent mention, mention-draft, assist) all require LLM by design.
@@ -156,11 +165,11 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 		// that only use Assist (the assist CLI) may omit them, in which
 		// case the Agent usecase is simply not constructed.
 		if uc.historyRepo != nil && uc.traceRepo != nil {
-			uc.Agent = NewAgentUseCase(repo, registry, uc.slackService, uc.slackSearch, uc.notionTool, uc.llmClient, uc.embedClient, uc.historyRepo, uc.traceRepo, uc.Action)
+			uc.Agent = NewAgentUseCase(repo, registry, uc.slackService, uc.slackSearch, uc.notionTool, uc.githubClient, uc.llmClient, uc.embedClient, uc.historyRepo, uc.traceRepo, uc.Action)
 		} else if uc.historyRepo != nil || uc.traceRepo != nil {
 			panic("usecase.New: WithHistoryRepository and WithTraceRepository must be paired")
 		}
-		uc.Assist = NewAssistUseCase(repo, registry, uc.slackService, uc.slackSearch, uc.notionTool, uc.llmClient, uc.embedClient, uc.Action)
+		uc.Assist = NewAssistUseCase(repo, registry, uc.slackService, uc.slackSearch, uc.notionTool, uc.githubClient, uc.llmClient, uc.embedClient, uc.Action)
 		uc.MentionDraft = NewMentionDraftUseCase(repo, registry, uc.slackService, NewDraftMaterializer(uc.llmClient))
 	}
 	uc.Slack = NewSlackUseCases(repo, registry, uc.Agent, uc.MentionDraft, uc.slackService)

@@ -4,7 +4,7 @@ import (
 	"log/slog"
 
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/secmon-lab/hecatoncheires/pkg/service/github"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	"github.com/urfave/cli/v3"
 )
 
@@ -52,17 +52,17 @@ func (g *GitHub) IsConfigured() bool {
 	return g.appID != 0 && g.installationID != 0 && g.privateKey != ""
 }
 
-// Configure creates a new GitHub Service from the configured flags.
+// Configure creates a new GitHub Client from the configured flags.
 // Returns nil if not all flags are configured (GitHub features will be disabled).
-func (g *GitHub) Configure() (github.Service, error) {
+func (g *GitHub) Configure() (*github.Client, error) {
 	if !g.IsConfigured() {
 		return nil, nil
 	}
 
-	svc, err := github.New(int64(g.appID), int64(g.installationID), g.privateKey)
+	client, err := github.NewClient(int64(g.appID), int64(g.installationID), g.privateKey)
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to create GitHub service")
+		return nil, goerr.Wrap(err, "failed to create GitHub client")
 	}
 
-	return svc, nil
+	return client, nil
 }
