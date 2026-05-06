@@ -2661,6 +2661,51 @@ func TestGraphQLHandler_ActionStepMutations(t *testing.T) {
 		gt.NoError(t, err).Required()
 		gt.Array(t, steps).Length(0)
 	})
+
+	t.Run("authenticated mutation attributes the step and ActionEvent to the user", func(t *testing.T) {
+		// Fresh action so the ActionEvent feed is isolated.
+		freshAction, err := repo.Action().Create(ctx, testWorkspaceID, &model.Action{
+			CaseID: c.ID,
+			Title:  "Attribution Action",
+			Status: types.ActionStatusTodo,
+		})
+		gt.NoError(t, err).Required()
+
+		const userID = "UATTRIBUTOR"
+		mutation := `
+			mutation($workspaceId: String!, $input: AddActionStepInput!) {
+				addActionStep(workspaceId: $workspaceId, input: $input) {
+					id
+				}
+			}
+		`
+		rec := executeGraphQLRequestWithAuth(t, handler, mutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"input": map[string]interface{}{
+				"actionId": freshAction.ID,
+				"title":    "attributed step",
+			},
+		}, userID)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+		var result struct {
+			AddActionStep struct {
+				ID string `json:"id"`
+			} `json:"addActionStep"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+
+		stored, err := repo.ActionStep().Get(ctx, testWorkspaceID, freshAction.ID, result.AddActionStep.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, stored.CreatedBy).Equal(userID)
+
+		events, _, err := repo.ActionEvent().List(ctx, testWorkspaceID, freshAction.ID, 10, "")
+		gt.NoError(t, err).Required()
+		// Newest first; the STEP_ADDED event must carry the user id.
+		gt.Number(t, len(events)).GreaterOrEqual(1).Required()
+		gt.Value(t, events[0].Kind).Equal(types.ActionEventStepAdded)
+		gt.Value(t, events[0].ActorID).Equal(userID)
+	})
 }
 
 func TestGraphQLHandler_ActionStepPrivateCaseAccessControl(t *testing.T) {

@@ -604,12 +604,25 @@ func (r *mutationResolver) PostActionSlackMessage(ctx context.Context, workspace
 	return toGraphQLAction(updated, workspaceID), nil
 }
 
+// resolveStepActor extracts the Slack-user actor from the auth token in
+// context, falling back to ActorKindSystem when there is no token (which
+// matches the GraphQL-via-CLI / agent pathways). Mirrors how UpdateAction
+// derives its actor — kept inline here instead of in a shared helper to
+// avoid pulling Auth concerns into a non-Action codepath.
+func resolveStepActor(ctx context.Context) usecase.ActorRef {
+	if token, tokenErr := auth.TokenFromContext(ctx); tokenErr == nil {
+		return usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: token.Sub}
+	}
+	return usecase.ActorRef{Kind: usecase.ActorKindSystem}
+}
+
 // AddActionStep is the resolver for the addActionStep field.
 func (r *mutationResolver) AddActionStep(ctx context.Context, workspaceID string, input graphql1.AddActionStepInput) (*graphql1.ActionStep, error) {
 	step, err := r.UseCases.ActionStep.Add(ctx, usecase.AddActionStepInput{
 		WorkspaceID: workspaceID,
 		ActionID:    int64(input.ActionID),
 		Title:       input.Title,
+		Actor:       resolveStepActor(ctx),
 	})
 	if err != nil {
 		return nil, err
@@ -624,6 +637,7 @@ func (r *mutationResolver) SetActionStepDone(ctx context.Context, workspaceID st
 		ActionID:    int64(input.ActionID),
 		StepID:      input.StepID,
 		Done:        input.Done,
+		Actor:       resolveStepActor(ctx),
 	})
 	if err != nil {
 		return nil, err
@@ -638,6 +652,7 @@ func (r *mutationResolver) RenameActionStep(ctx context.Context, workspaceID str
 		ActionID:    int64(input.ActionID),
 		StepID:      input.StepID,
 		Title:       input.Title,
+		Actor:       resolveStepActor(ctx),
 	})
 	if err != nil {
 		return nil, err
@@ -651,6 +666,7 @@ func (r *mutationResolver) DeleteActionStep(ctx context.Context, workspaceID str
 		WorkspaceID: workspaceID,
 		ActionID:    int64(input.ActionID),
 		StepID:      input.StepID,
+		Actor:       resolveStepActor(ctx),
 	}); err != nil {
 		return false, err
 	}
