@@ -357,7 +357,7 @@ func (uc *CaseUseCase) DeleteCase(ctx context.Context, workspaceID string, id in
 	// action (archived included) because the case itself is being removed,
 	// and orphaned action documents would otherwise leak. The repository's
 	// Delete is INTERNAL to this cascade — public callers archive instead.
-	actions, err := uc.repo.Action().GetByCase(ctx, workspaceID, id, interfaces.ActionListOptions{IncludeArchived: true})
+	actions, err := uc.repo.Action().GetByCase(ctx, workspaceID, id, interfaces.ActionListOptions{ArchiveScope: interfaces.ActionArchiveScopeAll})
 	if err != nil {
 		return goerr.Wrap(err, "failed to get actions for case", goerr.V(CaseIDKey, id))
 	}

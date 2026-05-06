@@ -142,10 +142,11 @@ type Case {
   slackChannelName: String
   slackChannelURL: String
   fields: [FieldValue!]!       # Resolved from case_field_values via DataLoader
-  # actions exposes the case's actions. Defaults to active (non-archived)
-  # actions; pass includeArchived=true to also include archived actions
-  # (used by the Case detail "Archived" view toggle).
-  actions(includeArchived: Boolean): [Action!]!
+  # actions exposes the case's actions. The `filter` argument selects which
+  # archive slice to return (ACTIVE / ARCHIVED / ALL); the default ACTIVE
+  # matches the historical default for sub-resolvers. Each slice goes
+  # through its own dataloader so callers can mix filters within a request.
+  actions(filter: ActionArchiveFilter = ACTIVE): [Action!]!
   slackMessages(limit: Int, cursor: String): SlackMessageConnection!
   createdAt: Time!
   updatedAt: Time!
@@ -181,6 +182,19 @@ enum ActionEventKind {
   ASSIGNEE_CHANGED
   ARCHIVED
   UNARCHIVED
+}
+
+# ActionArchiveFilter selects which archive slice an action list resolver
+# should return.
+enum ActionArchiveFilter {
+  # ACTIVE returns only non-archived actions. Default for every Action
+  # list resolver.
+  ACTIVE
+  # ARCHIVED returns only archived actions.
+  ARCHIVED
+  # ALL returns both active and archived actions. Intended for cleanup /
+  # batch operations; UI views should use ACTIVE or ARCHIVED.
+  ALL
 }
 
 # ActionEvent records a single change to an Action, surfaced in the
@@ -422,11 +436,12 @@ type Query {
   case(workspaceId: String!, id: Int!): Case
 
   # Actions
-  # `includeArchived` defaults to false so default views never accidentally
-  # surface archived actions.
-  actions(workspaceId: String!, includeArchived: Boolean): [Action!]!
+  # `filter` defaults to ACTIVE so default views never accidentally surface
+  # archived actions. Use ARCHIVED for the archive view and ALL for batch
+  # / cleanup operations that need both slices.
+  actions(workspaceId: String!, filter: ActionArchiveFilter = ACTIVE): [Action!]!
   action(workspaceId: String!, id: Int!): Action
-  actionsByCase(workspaceId: String!, caseID: Int!, includeArchived: Boolean): [Action!]!
+  actionsByCase(workspaceId: String!, caseID: Int!, filter: ActionArchiveFilter = ACTIVE): [Action!]!
   openCaseActions(workspaceId: String!): [Action!]!
 
   # Configuration

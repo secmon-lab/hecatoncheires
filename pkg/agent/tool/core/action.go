@@ -57,13 +57,13 @@ func (t *listActionsTool) Spec() gollem.ToolSpec {
 
 func (t *listActionsTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
 	tool.Update(ctx, "Listing actions...")
-	includeArchived := false
+	scope := interfaces.ActionArchiveScopeActiveOnly
 	if v, ok := args["include_archived"]; ok {
-		if b, ok := v.(bool); ok {
-			includeArchived = b
+		if b, ok := v.(bool); ok && b {
+			scope = interfaces.ActionArchiveScopeAll
 		}
 	}
-	actions, err := t.repo.Action().GetByCase(ctx, t.workspaceID, t.caseID, interfaces.ActionListOptions{IncludeArchived: includeArchived})
+	actions, err := t.repo.Action().GetByCase(ctx, t.workspaceID, t.caseID, interfaces.ActionListOptions{ArchiveScope: scope})
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to list actions",
 			goerr.V("workspaceID", t.workspaceID),

@@ -92,7 +92,7 @@ export default function CaseDetail() {
     variables: {
       workspaceId: currentWorkspace?.id,
       id: caseId,
-      includeArchivedActions: actionView === 'archived',
+      actionsFilter: actionView === 'archived' ? 'ARCHIVED' : 'ACTIVE',
     },
     skip: !currentWorkspace || Number.isNaN(caseId),
   })
@@ -126,7 +126,7 @@ export default function CaseDetail() {
         variables: {
           workspaceId: currentWorkspace?.id,
           id: caseId,
-          includeArchivedActions: actionView === 'archived',
+          actionsFilter: actionView === 'archived' ? 'ARCHIVED' : 'ACTIVE',
         },
       },
       { query: GET_CASES, variables: { workspaceId: currentWorkspace?.id, status: 'OPEN' } },
@@ -403,6 +403,16 @@ export default function CaseDetail() {
                 </>
               )}
               <span className="spacer" />
+              {actionView === 'open' && (
+                <Button
+                  size="sm"
+                  icon={<IconPlus size={12} />}
+                  onClick={() => setAddingAction(true)}
+                  data-testid="add-action-button"
+                >
+                  {t('btnAddAction')}
+                </Button>
+              )}
               <div
                 className="seg-toggle"
                 role="tablist"
@@ -430,16 +440,6 @@ export default function CaseDetail() {
                   {t('lblViewArchivedActions')}
                 </button>
               </div>
-              {actionView === 'open' && (
-                <Button
-                  size="sm"
-                  icon={<IconPlus size={12} />}
-                  onClick={() => setAddingAction(true)}
-                  data-testid="add-action-button"
-                >
-                  {t('btnAddAction')}
-                </Button>
-              )}
             </div>
 
             {totalActions > 0 && (() => {

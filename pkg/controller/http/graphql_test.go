@@ -647,7 +647,7 @@ func TestGraphQLHandler_DeleteCaseMutation(t *testing.T) {
 		gt.Array(t, resp.Errors).Length(0)
 
 		// Verify associated actions were also deleted (cascade includes archived)
-		actions, err := repo.Action().GetByCase(ctx, testWorkspaceID, createdCase.ID, interfaces.ActionListOptions{IncludeArchived: true})
+		actions, err := repo.Action().GetByCase(ctx, testWorkspaceID, createdCase.ID, interfaces.ActionListOptions{ArchiveScope: interfaces.ActionArchiveScopeAll})
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, actions).Length(0)
@@ -1157,7 +1157,7 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 		gt.Bool(t, stored.IsArchived()).False()
 	})
 
-	t.Run("actionsByCase respects includeArchived", func(t *testing.T) {
+	t.Run("actionsByCase respects archive filter", func(t *testing.T) {
 		// Set up: one active and one archived action
 		caseForArchiveQuery, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{Title: "archive query case"})
 		gt.NoError(t, err).Required()
@@ -1177,15 +1177,15 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		query := `
-			query($workspaceId: String!, $caseID: Int!, $includeArchived: Boolean) {
-				actionsByCase(workspaceId: $workspaceId, caseID: $caseID, includeArchived: $includeArchived) {
+			query($workspaceId: String!, $caseID: Int!, $filter: ActionArchiveFilter) {
+				actionsByCase(workspaceId: $workspaceId, caseID: $caseID, filter: $filter) {
 					id
 					archived
 				}
 			}
 		`
 
-		// Default: includeArchived omitted → only active
+		// Default: filter omitted → ACTIVE only
 		rec := executeGraphQLRequest(t, handler, query, map[string]interface{}{
 			"workspaceId": testWorkspaceID,
 			"caseID":      caseForArchiveQuery.ID,
@@ -1204,11 +1204,32 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 		gt.Array(t, defaultResult.ActionsByCase).Length(1).Required()
 		gt.Value(t, defaultResult.ActionsByCase[0].ID).Equal(int(active.ID))
 
-		// includeArchived=true → both
+		// filter=ARCHIVED → archived only
 		rec = executeGraphQLRequest(t, handler, query, map[string]interface{}{
-			"workspaceId":     testWorkspaceID,
-			"caseID":          caseForArchiveQuery.ID,
-			"includeArchived": true,
+			"workspaceId": testWorkspaceID,
+			"caseID":      caseForArchiveQuery.ID,
+			"filter":      "ARCHIVED",
+		})
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp = parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var archivedResult struct {
+			ActionsByCase []struct {
+				ID       int  `json:"id"`
+				Archived bool `json:"archived"`
+			} `json:"actionsByCase"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &archivedResult)).Required()
+		gt.Array(t, archivedResult.ActionsByCase).Length(1).Required()
+		gt.Value(t, archivedResult.ActionsByCase[0].ID).Equal(int(archived.ID))
+		gt.Bool(t, archivedResult.ActionsByCase[0].Archived).True()
+
+		// filter=ALL → both
+		rec = executeGraphQLRequest(t, handler, query, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"caseID":      caseForArchiveQuery.ID,
+			"filter":      "ALL",
 		})
 		gt.Value(t, rec.Code).Equal(http.StatusOK)
 		resp = parseGraphQLResponse(t, rec)

@@ -278,7 +278,7 @@ func TestCaseUseCase_DeleteCase(t *testing.T) {
 		gt.Value(t, err).NotNil()
 
 		// Verify actions are deleted
-		actions, err := actionUC.GetActionsByCase(ctx, testWorkspaceID, created.ID, interfaces.ActionListOptions{IncludeArchived: true})
+		actions, err := actionUC.GetActionsByCase(ctx, testWorkspaceID, created.ID, interfaces.ActionListOptions{ArchiveScope: interfaces.ActionArchiveScopeAll})
 		gt.NoError(t, err).Required()
 		gt.Array(t, actions).Length(0)
 	})

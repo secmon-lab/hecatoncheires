@@ -268,13 +268,19 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		gt.Array(t, got).Length(1).Required()
 		gt.Value(t, got[0].ID).Equal(active.ID)
 
-		// IncludeArchived=true returns both
-		gotAll, err := repo.Action().List(ctx, wsID, interfaces.ActionListOptions{IncludeArchived: true})
+		// ArchiveScopeAll returns both
+		gotAll, err := repo.Action().List(ctx, wsID, interfaces.ActionListOptions{ArchiveScope: interfaces.ActionArchiveScopeAll})
 		gt.NoError(t, err).Required()
 		gt.Array(t, gotAll).Length(2)
+
+		// ArchiveScopeArchivedOnly returns archived
+		gotArchived, err := repo.Action().List(ctx, wsID, interfaces.ActionListOptions{ArchiveScope: interfaces.ActionArchiveScopeArchivedOnly})
+		gt.NoError(t, err).Required()
+		gt.Array(t, gotArchived).Length(1).Required()
+		gt.Value(t, gotArchived[0].ID).Equal(archived.ID)
 	})
 
-	t.Run("GetByCase honours IncludeArchived option", func(t *testing.T) {
+	t.Run("GetByCase honours ArchiveScope option", func(t *testing.T) {
 		repo := newRepo(t)
 		ctx := context.Background()
 
@@ -307,12 +313,17 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		gt.Array(t, gotActive).Length(1).Required()
 		gt.Value(t, gotActive[0].ID).Equal(active.ID)
 
-		gotAll, err := repo.Action().GetByCase(ctx, wsID, c.ID, interfaces.ActionListOptions{IncludeArchived: true})
+		gotAll, err := repo.Action().GetByCase(ctx, wsID, c.ID, interfaces.ActionListOptions{ArchiveScope: interfaces.ActionArchiveScopeAll})
 		gt.NoError(t, err).Required()
 		gt.Array(t, gotAll).Length(2)
+
+		gotArchived, err := repo.Action().GetByCase(ctx, wsID, c.ID, interfaces.ActionListOptions{ArchiveScope: interfaces.ActionArchiveScopeArchivedOnly})
+		gt.NoError(t, err).Required()
+		gt.Array(t, gotArchived).Length(1).Required()
+		gt.Value(t, gotArchived[0].ID).Equal(archived.ID)
 	})
 
-	t.Run("GetByCases honours IncludeArchived option", func(t *testing.T) {
+	t.Run("GetByCases honours ArchiveScope option", func(t *testing.T) {
 		repo := newRepo(t)
 		ctx := context.Background()
 
@@ -350,11 +361,19 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		gt.Array(t, gotDefault[c1.ID]).Length(1)
 		gt.Array(t, gotDefault[c2.ID]).Length(0)
 
-		// IncludeArchived
-		gotAll, err := repo.Action().GetByCases(ctx, wsID, []int64{c1.ID, c2.ID}, interfaces.ActionListOptions{IncludeArchived: true})
+		// ArchiveScopeAll
+		gotAll, err := repo.Action().GetByCases(ctx, wsID, []int64{c1.ID, c2.ID}, interfaces.ActionListOptions{ArchiveScope: interfaces.ActionArchiveScopeAll})
 		gt.NoError(t, err).Required()
 		gt.Array(t, gotAll[c1.ID]).Length(2)
 		gt.Array(t, gotAll[c2.ID]).Length(1)
+
+		// ArchiveScopeArchivedOnly
+		gotArchived, err := repo.Action().GetByCases(ctx, wsID, []int64{c1.ID, c2.ID}, interfaces.ActionListOptions{ArchiveScope: interfaces.ActionArchiveScopeArchivedOnly})
+		gt.NoError(t, err).Required()
+		gt.Array(t, gotArchived[c1.ID]).Length(1).Required()
+		gt.Value(t, gotArchived[c1.ID][0].ID).Equal(c1archived.ID)
+		gt.Array(t, gotArchived[c2.ID]).Length(1).Required()
+		gt.Value(t, gotArchived[c2.ID][0].ID).Equal(c2archived.ID)
 	})
 
 	t.Run("Get returns archived actions as-is", func(t *testing.T) {

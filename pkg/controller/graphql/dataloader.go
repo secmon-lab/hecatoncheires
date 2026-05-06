@@ -11,21 +11,38 @@ import (
 
 // DataLoaders holds all the data loaders used in the GraphQL resolvers
 type DataLoaders struct {
-	repo                interfaces.Repository
-	SlackUserLoader     *SlackUserLoader
-	ActionLoader        *ActionLoader
-	ActionsByCaseLoader *ActionsByCaseLoader
-	CaseLoader          *CaseLoader
+	repo                        interfaces.Repository
+	SlackUserLoader             *SlackUserLoader
+	ActionLoader                *ActionLoader
+	ActiveActionsByCaseLoader   *ActionsByCaseLoader
+	ArchivedActionsByCaseLoader *ActionsByCaseLoader
+	AllActionsByCaseLoader      *ActionsByCaseLoader
+	CaseLoader                  *CaseLoader
 }
 
 // NewDataLoaders creates a new DataLoaders instance
 func NewDataLoaders(repo interfaces.Repository) *DataLoaders {
 	return &DataLoaders{
-		repo:                repo,
-		SlackUserLoader:     NewSlackUserLoader(repo),
-		ActionLoader:        NewActionLoader(repo),
-		ActionsByCaseLoader: NewActionsByCaseLoader(repo),
-		CaseLoader:          NewCaseLoader(repo),
+		repo:                        repo,
+		SlackUserLoader:             NewSlackUserLoader(repo),
+		ActionLoader:                NewActionLoader(repo),
+		ActiveActionsByCaseLoader:   NewActionsByCaseLoader(repo, interfaces.ActionArchiveScopeActiveOnly),
+		ArchivedActionsByCaseLoader: NewActionsByCaseLoader(repo, interfaces.ActionArchiveScopeArchivedOnly),
+		AllActionsByCaseLoader:      NewActionsByCaseLoader(repo, interfaces.ActionArchiveScopeAll),
+		CaseLoader:                  NewCaseLoader(repo),
+	}
+}
+
+// actionsByCaseLoaderForScope picks the right per-case dataloader for the
+// given archive scope.
+func (d *DataLoaders) actionsByCaseLoaderForScope(scope interfaces.ActionArchiveScope) *ActionsByCaseLoader {
+	switch scope {
+	case interfaces.ActionArchiveScopeArchivedOnly:
+		return d.ArchivedActionsByCaseLoader
+	case interfaces.ActionArchiveScopeAll:
+		return d.AllActionsByCaseLoader
+	default:
+		return d.ActiveActionsByCaseLoader
 	}
 }
 
@@ -118,20 +135,21 @@ func (l *ActionLoader) Load(ctx context.Context, workspaceID string, ids []int64
 	return actions, nil
 }
 
-// ActionsByCaseLoader loads actions by case ID
+// ActionsByCaseLoader loads actions by case ID for a fixed ArchiveScope.
+// Active and archived views are kept on separate loader instances so each
+// caches its own slice and the per-case dataloader pattern works for both.
 type ActionsByCaseLoader struct {
-	repo interfaces.Repository
+	repo  interfaces.Repository
+	scope interfaces.ActionArchiveScope
 }
 
-func NewActionsByCaseLoader(repo interfaces.Repository) *ActionsByCaseLoader {
-	return &ActionsByCaseLoader{repo: repo}
+func NewActionsByCaseLoader(repo interfaces.Repository, scope interfaces.ActionArchiveScope) *ActionsByCaseLoader {
+	return &ActionsByCaseLoader{repo: repo, scope: scope}
 }
 
-// Load returns the active (non-archived) actions for each case ID. The
-// archived view is fetched directly through the usecase from the resolver
-// because it's an opt-in toggle, not the default sub-resolver path.
+// Load returns the actions for each case ID under the loader's scope.
 func (l *ActionsByCaseLoader) Load(ctx context.Context, workspaceID string, caseIDs []int64) (map[int64][]*model.Action, error) {
-	actions, err := l.repo.Action().GetByCases(ctx, workspaceID, caseIDs, interfaces.ActionListOptions{})
+	actions, err := l.repo.Action().GetByCases(ctx, workspaceID, caseIDs, interfaces.ActionListOptions{ArchiveScope: l.scope})
 	if err != nil {
 		return nil, fmt.Errorf("failed to load actions by case: %w", err)
 	}

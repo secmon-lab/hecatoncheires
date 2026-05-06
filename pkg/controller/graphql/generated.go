@@ -118,7 +118,7 @@ type ComplexityRoot struct {
 
 	Case struct {
 		AccessDenied     func(childComplexity int) int
-		Actions          func(childComplexity int, includeArchived *bool) int
+		Actions          func(childComplexity int, filter *graphql1.ActionArchiveFilter) int
 		AssigneeIDs      func(childComplexity int) int
 		Assignees        func(childComplexity int) int
 		ChannelUserCount func(childComplexity int) int
@@ -255,8 +255,8 @@ type ComplexityRoot struct {
 
 	Query struct {
 		Action              func(childComplexity int, workspaceID string, id int) int
-		Actions             func(childComplexity int, workspaceID string, includeArchived *bool) int
-		ActionsByCase       func(childComplexity int, workspaceID string, caseID int, includeArchived *bool) int
+		Actions             func(childComplexity int, workspaceID string, filter *graphql1.ActionArchiveFilter) int
+		ActionsByCase       func(childComplexity int, workspaceID string, caseID int, filter *graphql1.ActionArchiveFilter) int
 		AssistLogs          func(childComplexity int, workspaceID string, caseID int, limit *int, offset *int) int
 		Case                func(childComplexity int, workspaceID string, id int) int
 		Cases               func(childComplexity int, workspaceID string, status *types.CaseStatus) int
@@ -360,7 +360,7 @@ type CaseResolver interface {
 	SlackChannelName(ctx context.Context, obj *graphql1.Case) (*string, error)
 	SlackChannelURL(ctx context.Context, obj *graphql1.Case) (*string, error)
 	Fields(ctx context.Context, obj *graphql1.Case) ([]*graphql1.FieldValue, error)
-	Actions(ctx context.Context, obj *graphql1.Case, includeArchived *bool) ([]*graphql1.Action, error)
+	Actions(ctx context.Context, obj *graphql1.Case, filter *graphql1.ActionArchiveFilter) ([]*graphql1.Action, error)
 	SlackMessages(ctx context.Context, obj *graphql1.Case, limit *int, cursor *string) (*graphql1.SlackMessageConnection, error)
 }
 type MutationResolver interface {
@@ -393,9 +393,9 @@ type QueryResolver interface {
 	Workspaces(ctx context.Context) ([]*graphql1.Workspace, error)
 	Cases(ctx context.Context, workspaceID string, status *types.CaseStatus) ([]*graphql1.Case, error)
 	Case(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error)
-	Actions(ctx context.Context, workspaceID string, includeArchived *bool) ([]*graphql1.Action, error)
+	Actions(ctx context.Context, workspaceID string, filter *graphql1.ActionArchiveFilter) ([]*graphql1.Action, error)
 	Action(ctx context.Context, workspaceID string, id int) (*graphql1.Action, error)
-	ActionsByCase(ctx context.Context, workspaceID string, caseID int, includeArchived *bool) ([]*graphql1.Action, error)
+	ActionsByCase(ctx context.Context, workspaceID string, caseID int, filter *graphql1.ActionArchiveFilter) ([]*graphql1.Action, error)
 	OpenCaseActions(ctx context.Context, workspaceID string) ([]*graphql1.Action, error)
 	FieldConfiguration(ctx context.Context, workspaceID string) (*graphql1.FieldConfiguration, error)
 	SlackUsers(ctx context.Context) ([]*graphql1.SlackUser, error)
@@ -722,7 +722,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Case.Actions(childComplexity, args["includeArchived"].(*bool)), true
+		return e.complexity.Case.Actions(childComplexity, args["filter"].(*graphql1.ActionArchiveFilter)), true
 	case "Case.assigneeIDs":
 		if e.complexity.Case.AssigneeIDs == nil {
 			break
@@ -1414,7 +1414,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Query.Actions(childComplexity, args["workspaceId"].(string), args["includeArchived"].(*bool)), true
+		return e.complexity.Query.Actions(childComplexity, args["workspaceId"].(string), args["filter"].(*graphql1.ActionArchiveFilter)), true
 	case "Query.actionsByCase":
 		if e.complexity.Query.ActionsByCase == nil {
 			break
@@ -1425,7 +1425,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.complexity.Query.ActionsByCase(childComplexity, args["workspaceId"].(string), args["caseID"].(int), args["includeArchived"].(*bool)), true
+		return e.complexity.Query.ActionsByCase(childComplexity, args["workspaceId"].(string), args["caseID"].(int), args["filter"].(*graphql1.ActionArchiveFilter)), true
 	case "Query.assistLogs":
 		if e.complexity.Query.AssistLogs == nil {
 			break
@@ -2048,10 +2048,11 @@ type Case {
   slackChannelName: String
   slackChannelURL: String
   fields: [FieldValue!]!       # Resolved from case_field_values via DataLoader
-  # actions exposes the case's actions. Defaults to active (non-archived)
-  # actions; pass includeArchived=true to also include archived actions
-  # (used by the Case detail "Archived" view toggle).
-  actions(includeArchived: Boolean): [Action!]!
+  # actions exposes the case's actions. The ` + "`" + `filter` + "`" + ` argument selects which
+  # archive slice to return (ACTIVE / ARCHIVED / ALL); the default ACTIVE
+  # matches the historical default for sub-resolvers. Each slice goes
+  # through its own dataloader so callers can mix filters within a request.
+  actions(filter: ActionArchiveFilter = ACTIVE): [Action!]!
   slackMessages(limit: Int, cursor: String): SlackMessageConnection!
   createdAt: Time!
   updatedAt: Time!
@@ -2087,6 +2088,19 @@ enum ActionEventKind {
   ASSIGNEE_CHANGED
   ARCHIVED
   UNARCHIVED
+}
+
+# ActionArchiveFilter selects which archive slice an action list resolver
+# should return.
+enum ActionArchiveFilter {
+  # ACTIVE returns only non-archived actions. Default for every Action
+  # list resolver.
+  ACTIVE
+  # ARCHIVED returns only archived actions.
+  ARCHIVED
+  # ALL returns both active and archived actions. Intended for cleanup /
+  # batch operations; UI views should use ACTIVE or ARCHIVED.
+  ALL
 }
 
 # ActionEvent records a single change to an Action, surfaced in the
@@ -2328,11 +2342,12 @@ type Query {
   case(workspaceId: String!, id: Int!): Case
 
   # Actions
-  # ` + "`" + `includeArchived` + "`" + ` defaults to false so default views never accidentally
-  # surface archived actions.
-  actions(workspaceId: String!, includeArchived: Boolean): [Action!]!
+  # ` + "`" + `filter` + "`" + ` defaults to ACTIVE so default views never accidentally surface
+  # archived actions. Use ARCHIVED for the archive view and ALL for batch
+  # / cleanup operations that need both slices.
+  actions(workspaceId: String!, filter: ActionArchiveFilter = ACTIVE): [Action!]!
   action(workspaceId: String!, id: Int!): Action
-  actionsByCase(workspaceId: String!, caseID: Int!, includeArchived: Boolean): [Action!]!
+  actionsByCase(workspaceId: String!, caseID: Int!, filter: ActionArchiveFilter = ACTIVE): [Action!]!
   openCaseActions(workspaceId: String!): [Action!]!
 
   # Configuration
@@ -2431,11 +2446,11 @@ func (ec *executionContext) field_Action_messages_args(ctx context.Context, rawA
 func (ec *executionContext) field_Case_actions_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
-	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "includeArchived", ec.unmarshalOBoolean2ᚖbool)
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "filter", ec.unmarshalOActionArchiveFilter2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionArchiveFilter)
 	if err != nil {
 		return nil, err
 	}
-	args["includeArchived"] = arg0
+	args["filter"] = arg0
 	return args, nil
 }
 
@@ -2852,11 +2867,11 @@ func (ec *executionContext) field_Query_actionsByCase_args(ctx context.Context, 
 		return nil, err
 	}
 	args["caseID"] = arg1
-	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "includeArchived", ec.unmarshalOBoolean2ᚖbool)
+	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "filter", ec.unmarshalOActionArchiveFilter2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionArchiveFilter)
 	if err != nil {
 		return nil, err
 	}
-	args["includeArchived"] = arg2
+	args["filter"] = arg2
 	return args, nil
 }
 
@@ -2868,11 +2883,11 @@ func (ec *executionContext) field_Query_actions_args(ctx context.Context, rawArg
 		return nil, err
 	}
 	args["workspaceId"] = arg0
-	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "includeArchived", ec.unmarshalOBoolean2ᚖbool)
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "filter", ec.unmarshalOActionArchiveFilter2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionArchiveFilter)
 	if err != nil {
 		return nil, err
 	}
-	args["includeArchived"] = arg1
+	args["filter"] = arg1
 	return args, nil
 }
 
@@ -5000,7 +5015,7 @@ func (ec *executionContext) _Case_actions(ctx context.Context, field graphql.Col
 		ec.fieldContext_Case_actions,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Case().Actions(ctx, obj, fc.Args["includeArchived"].(*bool))
+			return ec.resolvers.Case().Actions(ctx, obj, fc.Args["filter"].(*graphql1.ActionArchiveFilter))
 		},
 		nil,
 		ec.marshalNAction2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionᚄ,
@@ -8377,7 +8392,7 @@ func (ec *executionContext) _Query_actions(ctx context.Context, field graphql.Co
 		ec.fieldContext_Query_actions,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Query().Actions(ctx, fc.Args["workspaceId"].(string), fc.Args["includeArchived"].(*bool))
+			return ec.resolvers.Query().Actions(ctx, fc.Args["workspaceId"].(string), fc.Args["filter"].(*graphql1.ActionArchiveFilter))
 		},
 		nil,
 		ec.marshalNAction2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionᚄ,
@@ -8527,7 +8542,7 @@ func (ec *executionContext) _Query_actionsByCase(ctx context.Context, field grap
 		ec.fieldContext_Query_actionsByCase,
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.resolvers.Query().ActionsByCase(ctx, fc.Args["workspaceId"].(string), fc.Args["caseID"].(int), fc.Args["includeArchived"].(*bool))
+			return ec.resolvers.Query().ActionsByCase(ctx, fc.Args["workspaceId"].(string), fc.Args["caseID"].(int), fc.Args["filter"].(*graphql1.ActionArchiveFilter))
 		},
 		nil,
 		ec.marshalNAction2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionᚄ,
@@ -16963,6 +16978,22 @@ func (ec *executionContext) marshalOAction2ᚖgithubᚗcomᚋsecmonᚑlabᚋheca
 		return graphql.Null
 	}
 	return ec._Action(ctx, sel, v)
+}
+
+func (ec *executionContext) unmarshalOActionArchiveFilter2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionArchiveFilter(ctx context.Context, v any) (*graphql1.ActionArchiveFilter, error) {
+	if v == nil {
+		return nil, nil
+	}
+	var res = new(graphql1.ActionArchiveFilter)
+	err := res.UnmarshalGQL(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalOActionArchiveFilter2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionArchiveFilter(ctx context.Context, sel ast.SelectionSet, v *graphql1.ActionArchiveFilter) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	return v
 }
 
 func (ec *executionContext) unmarshalOBoolean2bool(ctx context.Context, v any) (bool, error) {

@@ -76,7 +76,7 @@ func (uc *UseCase) FixUnsentActions(ctx context.Context) (FixUnsentActionsReport
 		// Sweep archived actions too — an archived action with no Slack
 		// post is still a candidate for repair (operators can unarchive
 		// later and the message will be there).
-		actions, err := uc.repo.Action().List(ctx, workspaceID, interfaces.ActionListOptions{IncludeArchived: true})
+		actions, err := uc.repo.Action().List(ctx, workspaceID, interfaces.ActionListOptions{ArchiveScope: interfaces.ActionArchiveScopeAll})
 		if err != nil {
 			// Listing should not fail for normal operation; if it does,
 			// surface the whole-workspace error and move on so the rest

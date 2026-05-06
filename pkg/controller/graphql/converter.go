@@ -3,6 +3,7 @@ package graphql
 import (
 	"sort"
 
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	graphql1 "github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
@@ -163,6 +164,23 @@ func toDomainFieldValues(inputs []*graphql1.FieldValueInput) map[string]model.Fi
 		}
 	}
 	return result
+}
+
+// actionArchiveFilterToScope maps the optional GraphQL ActionArchiveFilter
+// to the domain ActionArchiveScope. nil maps to ActiveOnly to match the
+// schema-side default.
+func actionArchiveFilterToScope(f *graphql1.ActionArchiveFilter) interfaces.ActionArchiveScope {
+	if f == nil {
+		return interfaces.ActionArchiveScopeActiveOnly
+	}
+	switch *f {
+	case graphql1.ActionArchiveFilterArchived:
+		return interfaces.ActionArchiveScopeArchivedOnly
+	case graphql1.ActionArchiveFilterAll:
+		return interfaces.ActionArchiveScopeAll
+	default:
+		return interfaces.ActionArchiveScopeActiveOnly
+	}
 }
 
 // toGraphQLFieldType converts a domain FieldType to GraphQL FieldType

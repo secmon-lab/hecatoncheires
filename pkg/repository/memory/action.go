@@ -101,7 +101,7 @@ func (r *actionRepository) List(ctx context.Context, workspaceID string, opts in
 
 	actions := make([]*model.Action, 0, len(ws))
 	for _, action := range ws {
-		if !opts.IncludeArchived && action.IsArchived() {
+		if !opts.ArchiveScope.Allows(action.IsArchived()) {
 			continue
 		}
 		actions = append(actions, copyAction(action))
@@ -163,7 +163,7 @@ func (r *actionRepository) GetByCase(ctx context.Context, workspaceID string, ca
 		if action.CaseID != caseID {
 			continue
 		}
-		if !opts.IncludeArchived && action.IsArchived() {
+		if !opts.ArchiveScope.Allows(action.IsArchived()) {
 			continue
 		}
 		actions = append(actions, copyAction(action))
@@ -220,7 +220,7 @@ func (r *actionRepository) GetByCases(ctx context.Context, workspaceID string, c
 		if !caseIDMap[action.CaseID] {
 			continue
 		}
-		if !opts.IncludeArchived && action.IsArchived() {
+		if !opts.ArchiveScope.Allows(action.IsArchived()) {
 			continue
 		}
 		result[action.CaseID] = append(result[action.CaseID], copyAction(action))
