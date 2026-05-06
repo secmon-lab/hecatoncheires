@@ -159,8 +159,8 @@ describe('StepRow', () => {
         ariaDeleteLabel="delete"
       />,
     )
-    const checkbox = screen.getByTestId('action-step-checkbox-step-1') as HTMLInputElement
-    expect(checkbox.checked).toBe(true)
+    const checkbox = screen.getByTestId('action-step-checkbox-step-1')
+    expect(checkbox).toHaveAttribute('aria-checked', 'true')
 
     fireEvent.click(screen.getByTestId('action-step-delete-step-1'))
     expect(onDelete).toHaveBeenCalledTimes(1)

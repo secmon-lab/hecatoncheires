@@ -26,17 +26,16 @@ interface Props {
   actionId: number
 }
 
-// StepList renders the binary-state checklist for an Action. By design the
-// only data shown to the user is checkbox + title + (on hover) delete. All
-// other backend metadata (creator, doneBy, timestamps) is intentionally
-// hidden — the WebUI stays minimal; the LLM tool path can still see it.
+// 1:1 visual port of the design source under tmp/hecatoncheires
+// (screens-2.jsx). Layout, sizes, tokens, and progress-bar treatment are
+// reproduced directly; the metadata that the WebUI deliberately hides
+// (createdBy / doneBy / timestamps) stays out of the row even though
+// GraphQL can deliver it.
 export default function StepList({ workspaceId, actionId }: Props) {
   const { t } = useTranslation()
   const refetchVars = { workspaceId, id: actionId }
 
-  const { data } = useQuery(GET_ACTION_STEPS, {
-    variables: refetchVars,
-  })
+  const { data } = useQuery(GET_ACTION_STEPS, { variables: refetchVars })
 
   const steps: Step[] = data?.action?.steps ?? []
   const progress = data?.action?.stepProgress ?? { done: 0, total: 0 }
@@ -49,17 +48,6 @@ export default function StepList({ workspaceId, actionId }: Props) {
   const [setDone] = useMutation(SET_ACTION_STEP_DONE, refetchOpts)
   const [renameStep] = useMutation(RENAME_ACTION_STEP, refetchOpts)
   const [deleteStep] = useMutation(DELETE_ACTION_STEP, refetchOpts)
-
-  const [draft, setDraft] = useState('')
-
-  const submitNew = async () => {
-    const title = draft.trim()
-    if (title === '') return
-    setDraft('')
-    await addStep({
-      variables: { workspaceId, input: { actionId, title } },
-    })
-  }
 
   const handleToggle = async (step: Step) => {
     await setDone({
@@ -81,50 +69,52 @@ export default function StepList({ workspaceId, actionId }: Props) {
     })
   }
 
+  const handleAdd = async (title: string) => {
+    const trimmed = title.trim()
+    if (trimmed === '') return
+    await addStep({
+      variables: { workspaceId, input: { actionId, title: trimmed } },
+    })
+  }
+
+  const progressRatio = progress.total > 0 ? progress.done / progress.total : 0
+
   return (
-    <div data-testid="action-step-list">
+    <div className={styles.section} data-testid="action-step-list">
       <div className={styles.header}>
-        <span className={styles.headerTitle}>{t('sectionActionSteps')}</span>
+        <span className={styles.headerLabel}>{t('sectionActionSteps')}</span>
         {progress.total > 0 && (
-          <span className={styles.progressBadge} data-testid="action-step-progress">
+          <span className={styles.progressPill} data-testid="action-step-progress">
             {progress.done}/{progress.total}
           </span>
         )}
       </div>
 
-      <div className={styles.stepList}>
-        {steps.length === 0 ? (
-          <div className={styles.empty}>{t('emptyActionSteps')}</div>
-        ) : (
-          steps.map((step) => (
-            <StepRow
-              key={step.id}
-              step={step}
-              onToggle={() => handleToggle(step)}
-              onRename={(next) => handleRename(step, next)}
-              onDelete={() => handleDelete(step)}
-              ariaCheckboxLabel={t('ariaActionStepCheckbox')}
-              ariaDeleteLabel={t('ariaDeleteActionStep')}
-            />
-          ))
-        )}
-
-        <div className={styles.addRow}>
-          <input
-            className={styles.addInput}
-            type="text"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={commitOnEnter({
-              onCommit: () => {
-                void submitNew()
-              },
-            })}
-            placeholder={t('placeholderAddActionStep')}
-            data-testid="action-step-add-input"
-            aria-label={t('placeholderAddActionStep')}
+      {progress.total > 0 && (
+        <div className={styles.progressTrack} aria-hidden>
+          <div
+            className={styles.progressFill}
+            style={{ width: `${progressRatio * 100}%` }}
           />
         </div>
+      )}
+
+      <div className={styles.list}>
+        {steps.map((step) => (
+          <StepRow
+            key={step.id}
+            step={step}
+            onToggle={() => handleToggle(step)}
+            onRename={(next) => handleRename(step, next)}
+            onDelete={() => handleDelete(step)}
+            ariaCheckboxLabel={t('ariaActionStepCheckbox')}
+            ariaDeleteLabel={t('ariaDeleteActionStep')}
+          />
+        ))}
+        <AddStepRow
+          placeholder={t('placeholderAddActionStep')}
+          onSubmit={handleAdd}
+        />
       </div>
     </div>
   )
@@ -175,15 +165,24 @@ export function StepRow({ step, onToggle, onRename, onDelete, ariaCheckboxLabel,
 
   return (
     <div className={styles.row} data-testid={`action-step-row-${step.id}`}>
-      <input
-        type="checkbox"
-        checked={step.done}
-        onChange={() => {
+      <button
+        type="button"
+        role="checkbox"
+        aria-checked={step.done}
+        aria-label={ariaCheckboxLabel}
+        className={`${styles.checkbox} ${step.done ? styles.checkboxDone : ''}`}
+        onClick={(e) => {
+          e.stopPropagation()
           void onToggle()
         }}
-        aria-label={ariaCheckboxLabel}
         data-testid={`action-step-checkbox-${step.id}`}
-      />
+      >
+        {step.done && (
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+        )}
+      </button>
       {editing ? (
         <input
           ref={inputRef}
@@ -204,7 +203,7 @@ export function StepRow({ step, onToggle, onRename, onDelete, ariaCheckboxLabel,
       ) : (
         <button
           type="button"
-          className={`${styles.titleButton} ${step.done ? styles.titleDone : ''}`}
+          className={`${styles.title} ${step.done ? styles.titleDone : ''}`}
           onClick={() => setEditing(true)}
           data-testid={`action-step-title-${step.id}`}
         >
@@ -214,14 +213,100 @@ export function StepRow({ step, onToggle, onRename, onDelete, ariaCheckboxLabel,
       <button
         type="button"
         className={styles.deleteButton}
-        onClick={() => {
+        onClick={(e) => {
+          e.stopPropagation()
           void onDelete()
         }}
         aria-label={ariaDeleteLabel}
         data-testid={`action-step-delete-${step.id}`}
       >
-        ×
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <line x1="18" y1="6" x2="6" y2="18" />
+          <line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
       </button>
+    </div>
+  )
+}
+
+interface AddStepRowProps {
+  placeholder: string
+  onSubmit: (title: string) => Promise<void> | void
+}
+
+export function AddStepRow({ placeholder, onSubmit }: AddStepRowProps) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (editing) {
+      requestAnimationFrame(() => inputRef.current?.focus())
+    }
+  }, [editing])
+
+  const commit = async () => {
+    const next = draft.trim()
+    if (next === '') {
+      setEditing(false)
+      setDraft('')
+      return
+    }
+    setDraft('')
+    setEditing(false)
+    await onSubmit(next)
+  }
+
+  const cancel = () => {
+    setEditing(false)
+    setDraft('')
+  }
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        className={styles.addRow}
+        onClick={() => setEditing(true)}
+        data-testid="action-step-add-button"
+      >
+        <span className={styles.addPlus} aria-hidden>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+        </span>
+        <span className={styles.addPlaceholder}>{placeholder}</span>
+      </button>
+    )
+  }
+
+  return (
+    <div className={styles.addRow}>
+      <span className={styles.addPlus} aria-hidden>
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="12" y1="5" x2="12" y2="19" />
+          <line x1="5" y1="12" x2="19" y2="12" />
+        </svg>
+      </span>
+      <input
+        ref={inputRef}
+        className={styles.addInput}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        placeholder={placeholder}
+        aria-label={placeholder}
+        onKeyDown={commitOnEnter({
+          onCommit: () => {
+            void commit()
+          },
+          onCancel: cancel,
+        })}
+        onBlur={() => {
+          void commit()
+        }}
+        data-testid="action-step-add-input"
+      />
     </div>
   )
 }
