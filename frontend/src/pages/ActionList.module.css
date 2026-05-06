@@ -6,3 +6,13 @@
   height: calc(100vh - 230px);
   min-height: 480px;
 }
+
+.stepBadge {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  background: var(--bg-subtle);
+  padding: 0.125rem var(--spacing-sm);
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+  margin-left: var(--spacing-xs);
+}

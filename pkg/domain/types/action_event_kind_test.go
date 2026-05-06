@@ -19,6 +19,11 @@ func TestActionEventKind_IsValid(t *testing.T) {
 		{name: "assignee-changed", kind: types.ActionEventAssigneeChanged, want: true},
 		{name: "archived", kind: types.ActionEventArchived, want: true},
 		{name: "unarchived", kind: types.ActionEventUnarchived, want: true},
+		{name: "step-added", kind: types.ActionEventStepAdded, want: true},
+		{name: "step-removed", kind: types.ActionEventStepRemoved, want: true},
+		{name: "step-done", kind: types.ActionEventStepDone, want: true},
+		{name: "step-reopened", kind: types.ActionEventStepReopened, want: true},
+		{name: "step-title-changed", kind: types.ActionEventStepTitleChanged, want: true},
 		{name: "unknown", kind: types.ActionEventKind("UNKNOWN"), want: false},
 		{name: "empty", kind: types.ActionEventKind(""), want: false},
 	}

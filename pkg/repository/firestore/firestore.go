@@ -18,6 +18,7 @@ type Firestore struct {
 	caseMessage   *caseMessageRepository
 	actionMessage *actionMessageRepository
 	actionEvent   *actionEventRepository
+	actionStep    *actionStepRepository
 	assistLog     *firestoreAssistLogRepository
 	caseDraft     *caseDraftRepository
 	agentSession  *agentSessionRepository
@@ -50,6 +51,7 @@ func New(ctx context.Context, projectID, databaseID string) (*Firestore, error) 
 		caseMessage:   newCaseMessageRepository(client),
 		actionMessage: newActionMessageRepository(client),
 		actionEvent:   newActionEventRepository(client),
+		actionStep:    newActionStepRepository(client),
 		assistLog:     newFirestoreAssistLogRepository(client),
 		caseDraft:     newCaseDraftRepository(client),
 		agentSession:  newAgentSessionRepository(client),
@@ -88,6 +90,10 @@ func (f *Firestore) ActionMessage() interfaces.ActionMessageRepository {
 
 func (f *Firestore) ActionEvent() interfaces.ActionEventRepository {
 	return f.actionEvent
+}
+
+func (f *Firestore) ActionStep() interfaces.ActionStepRepository {
+	return f.actionStep
 }
 
 func (f *Firestore) AssistLog() interfaces.AssistLogRepository {

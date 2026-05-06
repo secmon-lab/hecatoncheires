@@ -30,6 +30,7 @@ interface ActionRow {
   status: string
   dueDate?: string | null
   createdAt: string
+  stepProgress?: { done: number; total: number }
 }
 
 function formatDue(iso?: string | null) {
@@ -196,6 +197,15 @@ export default function ActionList() {
                       ? <Avatar size="sm" name={a.assignee.name} realName={a.assignee.realName} imageUrl={a.assignee.imageUrl} />
                       : <span style={{ width: 20 }} />
                     }
+                    {a.stepProgress && a.stepProgress.total > 0 && (
+                      <span
+                        className={styles.stepBadge}
+                        data-testid="action-card-step-progress"
+                        title={`${a.stepProgress.done}/${a.stepProgress.total} steps done`}
+                      >
+                        {a.stepProgress.done}/{a.stepProgress.total}
+                      </span>
+                    )}
                     <span className="spacer" />
                     <span className="mono" style={{ fontSize: 11 }}>{formatDue(a.dueDate)}</span>
                   </div>

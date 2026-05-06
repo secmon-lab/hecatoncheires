@@ -16,6 +16,7 @@ type Repository interface {
 	CaseMessage() CaseMessageRepository
 	ActionMessage() ActionMessageRepository
 	ActionEvent() ActionEventRepository
+	ActionStep() ActionStepRepository
 	AssistLog() AssistLogRepository
 	CaseDraft() CaseDraftRepository
 	AgentSession() AgentSessionRepository

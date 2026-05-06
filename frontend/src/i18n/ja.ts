@@ -219,6 +219,18 @@ export const ja: Messages = {
   labelDueDate: '期限',
   caseLinkLabel: 'ケース #{id} · {title}',
 
+  // Action Steps
+  sectionActionSteps: 'ステップ',
+  placeholderAddActionStep: 'ステップを追加…',
+  ariaActionStepCheckbox: 'ステップを完了にする',
+  ariaDeleteActionStep: 'ステップを削除',
+  emptyActionSteps: 'ステップはまだありません。',
+  activityEventStepAdded: 'がステップを追加しました',
+  activityEventStepRemoved: 'がステップを削除しました',
+  activityEventStepDone: 'がステップを完了しました',
+  activityEventStepReopened: 'がステップを未完に戻しました',
+  activityEventStepRenamed: 'がステップ名を変更しました',
+
   // Sources
   titleSources: 'ソース',
   subtitleSources: 'リスク監視用の外部データソースを管理',

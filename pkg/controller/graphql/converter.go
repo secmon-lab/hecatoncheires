@@ -63,6 +63,29 @@ func toGraphQLActionEvent(e *model.ActionEvent) *graphql1.ActionEvent {
 	}
 }
 
+// toGraphQLActionStep converts a domain ActionStep to its GraphQL view.
+// Done is derived from DoneAt to keep the WebUI's archived/archivedAt
+// pattern uniform across the schema (single source of truth on the model
+// side, two convenience views on the wire).
+func toGraphQLActionStep(s *model.ActionStep) *graphql1.ActionStep {
+	var doneBy *string
+	if s.DoneBy != "" {
+		v := s.DoneBy
+		doneBy = &v
+	}
+	return &graphql1.ActionStep{
+		ID:        s.ID,
+		ActionID:  int(s.ActionID),
+		Title:     s.Title,
+		Done:      s.IsDone(),
+		DoneAt:    s.DoneAt,
+		DoneBy:    doneBy,
+		CreatedBy: s.CreatedBy,
+		CreatedAt: s.CreatedAt,
+		UpdatedAt: s.UpdatedAt,
+	}
+}
+
 // toGraphQLCase converts a domain Case to GraphQL Case
 func toGraphQLCase(c *model.Case, workspaceID string) *graphql1.Case {
 	// Ensure non-null list fields are never nil (schema: [String!]!)

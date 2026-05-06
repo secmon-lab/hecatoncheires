@@ -55,6 +55,11 @@ var messagesEN = [msgKeyCount]string{
 	MsgActionChangeArchived:           ":file_cabinet: %s archived action %q",
 	MsgActionChangeUnarchived:         ":outbox_tray: %s unarchived action %q",
 	MsgActionChangeActorSystem:        "system",
+	MsgActionStepAdded:                ":heavy_plus_sign: %s added step %q",
+	MsgActionStepRemoved:              ":heavy_minus_sign: %s removed step %q",
+	MsgActionStepDone:                 ":white_check_mark: %s completed step %q",
+	MsgActionStepReopened:             ":arrow_backward: %s reopened step %q",
+	MsgActionStepRenamed:              ":pencil2: %s renamed step %q -> %q",
 
 	// Agent
 	MsgAgentThinking:      "Thinking...",
@@ -154,6 +159,11 @@ var messagesJA = [msgKeyCount]string{
 	MsgActionChangeArchived:           ":file_cabinet: %s がアクション %q をアーカイブしました",
 	MsgActionChangeUnarchived:         ":outbox_tray: %s がアクション %q のアーカイブを解除しました",
 	MsgActionChangeActorSystem:        "システム",
+	MsgActionStepAdded:                ":heavy_plus_sign: %s がステップ %q を追加しました",
+	MsgActionStepRemoved:              ":heavy_minus_sign: %s がステップ %q を削除しました",
+	MsgActionStepDone:                 ":white_check_mark: %s がステップ %q を完了しました",
+	MsgActionStepReopened:             ":arrow_backward: %s がステップ %q を未完に戻しました",
+	MsgActionStepRenamed:              ":pencil2: %s がステップ %q を %q に変更しました",
 
 	// Agent
 	MsgAgentThinking:      "考え中...",

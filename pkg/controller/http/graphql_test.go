@@ -2481,3 +2481,289 @@ func TestGraphQLHandler_PrivateCaseAccessControl(t *testing.T) {
 		gt.Value(t, memberResult.AssistLogs.Items[0].Summary).Equal("Secret analysis")
 	})
 }
+
+func TestGraphQLHandler_ActionStepMutations(t *testing.T) {
+	repo := memory.New()
+	handler, err := setupGraphQLServer(repo)
+	gt.NoError(t, err).Required()
+	ctx := context.Background()
+
+	// Create a Case + Action that the steps will live under.
+	c, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+		Title: "Step E2E Case",
+	})
+	gt.NoError(t, err).Required()
+	action, err := repo.Action().Create(ctx, testWorkspaceID, &model.Action{
+		CaseID: c.ID,
+		Title:  "Step E2E Action",
+		Status: types.ActionStatusTodo,
+	})
+	gt.NoError(t, err).Required()
+
+	stepFields := `
+		id
+		actionID
+		title
+		done
+		doneAt
+	`
+
+	var stepID string
+	t.Run("addActionStep creates a step and exposes it via Action.steps", func(t *testing.T) {
+		mutation := `
+			mutation($workspaceId: String!, $input: AddActionStepInput!) {
+				addActionStep(workspaceId: $workspaceId, input: $input) {
+					` + stepFields + `
+				}
+			}
+		`
+		rec := executeGraphQLRequest(t, handler, mutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"input": map[string]interface{}{
+				"actionId": action.ID,
+				"title":    "first step",
+			},
+		})
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var result struct {
+			AddActionStep struct {
+				ID       string  `json:"id"`
+				ActionID int     `json:"actionID"`
+				Title    string  `json:"title"`
+				Done     bool    `json:"done"`
+				DoneAt   *string `json:"doneAt"`
+			} `json:"addActionStep"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+		gt.String(t, result.AddActionStep.ID).NotEqual("")
+		gt.Value(t, result.AddActionStep.Title).Equal("first step")
+		gt.Bool(t, result.AddActionStep.Done).False()
+		gt.Value(t, result.AddActionStep.ActionID).Equal(int(action.ID))
+		gt.Value(t, result.AddActionStep.DoneAt).Nil()
+		stepID = result.AddActionStep.ID
+
+		stored, err := repo.ActionStep().Get(ctx, testWorkspaceID, action.ID, stepID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, stored.Title).Equal("first step")
+	})
+
+	t.Run("Action.steps and stepProgress reflect the new step", func(t *testing.T) {
+		query := `
+			query($workspaceId: String!, $id: Int!) {
+				action(workspaceId: $workspaceId, id: $id) {
+					steps { id title done }
+					stepProgress { done total }
+				}
+			}
+		`
+		rec := executeGraphQLRequest(t, handler, query, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          action.ID,
+		})
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var result struct {
+			Action struct {
+				Steps []struct {
+					ID    string `json:"id"`
+					Title string `json:"title"`
+					Done  bool   `json:"done"`
+				} `json:"steps"`
+				StepProgress struct {
+					Done  int `json:"done"`
+					Total int `json:"total"`
+				} `json:"stepProgress"`
+			} `json:"action"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+		gt.Array(t, result.Action.Steps).Length(1).Required()
+		gt.Value(t, result.Action.Steps[0].ID).Equal(stepID)
+		gt.Value(t, result.Action.StepProgress.Done).Equal(0)
+		gt.Value(t, result.Action.StepProgress.Total).Equal(1)
+	})
+
+	t.Run("setActionStepDone toggles state and updates progress", func(t *testing.T) {
+		mutation := `
+			mutation($workspaceId: String!, $input: SetActionStepDoneInput!) {
+				setActionStepDone(workspaceId: $workspaceId, input: $input) {
+					id done doneAt
+				}
+			}
+		`
+		rec := executeGraphQLRequest(t, handler, mutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"input": map[string]interface{}{
+				"actionId": action.ID,
+				"stepId":   stepID,
+				"done":     true,
+			},
+		})
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+		var result struct {
+			SetActionStepDone struct {
+				ID     string  `json:"id"`
+				Done   bool    `json:"done"`
+				DoneAt *string `json:"doneAt"`
+			} `json:"setActionStepDone"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+		gt.Bool(t, result.SetActionStepDone.Done).True()
+		gt.Value(t, result.SetActionStepDone.DoneAt).NotNil()
+	})
+
+	t.Run("renameActionStep changes title", func(t *testing.T) {
+		mutation := `
+			mutation($workspaceId: String!, $input: RenameActionStepInput!) {
+				renameActionStep(workspaceId: $workspaceId, input: $input) {
+					id title
+				}
+			}
+		`
+		rec := executeGraphQLRequest(t, handler, mutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"input": map[string]interface{}{
+				"actionId": action.ID,
+				"stepId":   stepID,
+				"title":    "renamed step",
+			},
+		})
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		stored, err := repo.ActionStep().Get(ctx, testWorkspaceID, action.ID, stepID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, stored.Title).Equal("renamed step")
+	})
+
+	t.Run("deleteActionStep removes the step and progress goes to 0/0", func(t *testing.T) {
+		mutation := `
+			mutation($workspaceId: String!, $input: DeleteActionStepInput!) {
+				deleteActionStep(workspaceId: $workspaceId, input: $input)
+			}
+		`
+		rec := executeGraphQLRequest(t, handler, mutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"input": map[string]interface{}{
+				"actionId": action.ID,
+				"stepId":   stepID,
+			},
+		})
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		steps, err := repo.ActionStep().List(ctx, testWorkspaceID, action.ID)
+		gt.NoError(t, err).Required()
+		gt.Array(t, steps).Length(0)
+	})
+}
+
+func TestGraphQLHandler_ActionStepPrivateCaseAccessControl(t *testing.T) {
+	repo := memory.New()
+	handler, err := setupGraphQLServer(repo)
+	gt.NoError(t, err).Required()
+	ctx := context.Background()
+
+	const memberID = "UMEMBER"
+	const intruderID = "UINTRUDER"
+	c, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+		Title:          "Private Step Case",
+		IsPrivate:      true,
+		ChannelUserIDs: []string{memberID},
+	})
+	gt.NoError(t, err).Required()
+	action, err := repo.Action().Create(ctx, testWorkspaceID, &model.Action{
+		CaseID: c.ID,
+		Title:  "Private Step Action",
+		Status: types.ActionStatusTodo,
+	})
+	gt.NoError(t, err).Required()
+	gt.NoError(t, repo.ActionStep().Put(ctx, testWorkspaceID, &model.ActionStep{
+		ID:        "step-private-1",
+		ActionID:  action.ID,
+		Title:     "secret step",
+		CreatedBy: memberID,
+	})).Required()
+
+	query := `
+		query($workspaceId: String!, $id: Int!) {
+			action(workspaceId: $workspaceId, id: $id) {
+				steps { id title }
+				stepProgress { done total }
+			}
+		}
+	`
+
+	t.Run("non-member sees empty steps and 0/0 progress", func(t *testing.T) {
+		rec := executeGraphQLRequestWithAuth(t, handler, query, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          action.ID,
+		}, intruderID)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+		var result struct {
+			Action struct {
+				Steps []struct {
+					ID string `json:"id"`
+				} `json:"steps"`
+				StepProgress struct {
+					Done  int `json:"done"`
+					Total int `json:"total"`
+				} `json:"stepProgress"`
+			} `json:"action"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+		gt.Array(t, result.Action.Steps).Length(0)
+		gt.Value(t, result.Action.StepProgress.Done).Equal(0)
+		gt.Value(t, result.Action.StepProgress.Total).Equal(0)
+	})
+
+	t.Run("member sees the step and 0/1 progress", func(t *testing.T) {
+		rec := executeGraphQLRequestWithAuth(t, handler, query, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          action.ID,
+		}, memberID)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+		var result struct {
+			Action struct {
+				Steps []struct {
+					ID    string `json:"id"`
+					Title string `json:"title"`
+				} `json:"steps"`
+				StepProgress struct {
+					Done  int `json:"done"`
+					Total int `json:"total"`
+				} `json:"stepProgress"`
+			} `json:"action"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+		gt.Array(t, result.Action.Steps).Length(1).Required()
+		gt.Value(t, result.Action.Steps[0].ID).Equal("step-private-1")
+		gt.Value(t, result.Action.StepProgress.Total).Equal(1)
+	})
+
+	t.Run("non-member addActionStep is rejected", func(t *testing.T) {
+		mutation := `
+			mutation($workspaceId: String!, $input: AddActionStepInput!) {
+				addActionStep(workspaceId: $workspaceId, input: $input) {
+					id
+				}
+			}
+		`
+		rec := executeGraphQLRequestWithAuth(t, handler, mutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"input": map[string]interface{}{
+				"actionId": action.ID,
+				"title":    "intruder step",
+			},
+		}, intruderID)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Number(t, len(resp.Errors)).GreaterOrEqual(1)
+	})
+}

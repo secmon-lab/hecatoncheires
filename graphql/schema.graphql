@@ -173,6 +173,11 @@ type Action {
   updatedAt: Time!
   messages(limit: Int, cursor: String): SlackMessageConnection!
   events(limit: Int, cursor: String): ActionEventConnection!
+  # ActionStep listing under this Action, ordered by createdAt asc.
+  steps: [ActionStep!]!
+  # Aggregate progress over the Action's steps. Both fields are 0 when the
+  # caller cannot access the parent Case (private case + non-member).
+  stepProgress: ActionStepProgress!
 }
 
 enum ActionEventKind {
@@ -182,6 +187,35 @@ enum ActionEventKind {
   ASSIGNEE_CHANGED
   ARCHIVED
   UNARCHIVED
+  STEP_ADDED
+  STEP_REMOVED
+  STEP_DONE
+  STEP_REOPENED
+  STEP_TITLE_CHANGED
+}
+
+# ActionStep is a small, binary-state work item under an Action. Tracks
+# granular progress; surfaces in the Action detail UI and as a done/total
+# badge on Kanban cards. WebUI hides metadata other than checkbox + title.
+type ActionStep {
+  id: String!
+  actionID: Int!
+  title: String!
+  # done mirrors doneAt != null. Convenience for clients that only need the
+  # boolean; doneAt is the canonical source.
+  done: Boolean!
+  doneAt: Time
+  doneBy: String
+  doneByUser: SlackUser
+  createdBy: String!
+  createdByUser: SlackUser
+  createdAt: Time!
+  updatedAt: Time!
+}
+
+type ActionStepProgress {
+  done: Int!
+  total: Int!
 }
 
 # ActionArchiveFilter selects which archive slice an action list resolver
@@ -258,6 +292,28 @@ input UpdateActionInput {
   dueDate: Time
   clearDueDate: Boolean
   clearAssignee: Boolean
+}
+
+input AddActionStepInput {
+  actionId: Int!
+  title: String!
+}
+
+input SetActionStepDoneInput {
+  actionId: Int!
+  stepId: String!
+  done: Boolean!
+}
+
+input RenameActionStepInput {
+  actionId: Int!
+  stepId: String!
+  title: String!
+}
+
+input DeleteActionStepInput {
+  actionId: Int!
+  stepId: String!
 }
 
 # Slack User
@@ -484,6 +540,12 @@ type Mutation {
   # Errors if the action already has a Slack message timestamp or if the
   # parent Case has no Slack channel.
   postActionSlackMessage(workspaceId: String!, id: Int!): Action!
+
+  # Action Steps — binary-state sub-items under an Action.
+  addActionStep(workspaceId: String!, input: AddActionStepInput!): ActionStep!
+  setActionStepDone(workspaceId: String!, input: SetActionStepDoneInput!): ActionStep!
+  renameActionStep(workspaceId: String!, input: RenameActionStepInput!): ActionStep!
+  deleteActionStep(workspaceId: String!, input: DeleteActionStepInput!): Boolean!
 
   # Sources
   createNotionDBSource(workspaceId: String!, input: CreateNotionDBSourceInput!): Source!

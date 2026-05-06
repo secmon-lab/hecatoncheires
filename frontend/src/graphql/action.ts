@@ -25,6 +25,10 @@ const ACTION_FIELDS = `
   archivedAt
   createdAt
   updatedAt
+  stepProgress {
+    done
+    total
+  }
 `
 
 export const GET_ACTIONS = gql`

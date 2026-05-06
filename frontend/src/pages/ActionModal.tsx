@@ -16,6 +16,7 @@ import InlineSelect, { type InlineSelectOption } from '../components/inline/Inli
 import InlineUserSelect from '../components/inline/InlineUserSelect'
 import InlineDate from '../components/inline/InlineDate'
 import ActionActivity from '../components/ActionActivity'
+import StepList from '../components/StepList'
 
 interface ActionModalProps {
   actionId: number
@@ -249,7 +250,7 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
         <div className="muted">{t('loading')}</div>
       ) : (
         <>
-          <div style={{ marginBottom: 16 }}>
+          <div style={{ marginBottom: 'var(--spacing-lg)' }}>
             <InlineText
               value={action.title || ''}
               onSave={handleSaveTitle}
@@ -260,8 +261,8 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
             />
           </div>
 
-          <div className="row" style={{ gap: 18, fontSize: 13, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-            <div className="row" style={{ gap: 8, alignItems: 'center', minWidth: 0 }}>
+          <div className="row" style={{ gap: 'var(--spacing-lg)', fontSize: 13, marginBottom: 'var(--spacing-lg)', flexWrap: 'wrap', alignItems: 'center' }}>
+            <div className="row" style={{ gap: 'var(--spacing-sm)', alignItems: 'center', minWidth: 0 }}>
               <span className="soft">{t('labelStatus')}</span>
               <InlineSelect<string>
                 value={action.status as string}
@@ -285,7 +286,7 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
                 ))}
               </select>
             </div>
-            <div className="row" style={{ gap: 8, alignItems: 'center', minWidth: 280, flex: 1 }}>
+            <div className="row" style={{ gap: 'var(--spacing-sm)', alignItems: 'center', minWidth: 280, flex: 1 }}>
               <span className="soft">{t('labelAssignee')}</span>
               <InlineUserSelect
                 users={users}
@@ -298,7 +299,7 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
             </div>
           </div>
 
-          <div className="row" style={{ gap: 8, fontSize: 13, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div className="row" style={{ gap: 'var(--spacing-sm)', fontSize: 13, marginBottom: 'var(--spacing-lg)', alignItems: 'center', flexWrap: 'wrap' }}>
             <span className="soft">{t('labelDueDate')}</span>
             <div style={{ flex: 1, minWidth: 160, color: due?.urgent || due?.overdue ? 'var(--danger)' : undefined }}>
               <InlineDate
@@ -311,16 +312,22 @@ export default function ActionModal({ actionId, onClose }: ActionModalProps) {
             </div>
           </div>
 
-          <div className="field-label">{t('labelDescription')}</div>
-          <InlineLongText
-            value={action.description || ''}
-            onSave={handleSaveDescription}
-            ariaLabel={t('labelDescription')}
-            placeholder={t('placeholderAddDescription')}
-            testId="action-description"
-          />
+          <div style={{ marginBottom: 'var(--spacing-lg)' }}>
+            <div className="field-label">{t('labelDescription')}</div>
+            <InlineLongText
+              value={action.description || ''}
+              onSave={handleSaveDescription}
+              ariaLabel={t('labelDescription')}
+              placeholder={t('placeholderAddDescription')}
+              testId="action-description"
+            />
+          </div>
 
-          <div style={{ marginTop: 18 }}>
+          <div style={{ marginBottom: 'var(--spacing-lg)' }}>
+            <StepList workspaceId={currentWorkspace!.id} actionId={action.id} />
+          </div>
+
+          <div style={{ marginTop: 'var(--spacing-lg)' }}>
             <ActionActivity
               workspaceId={currentWorkspace!.id}
               actionId={action.id}

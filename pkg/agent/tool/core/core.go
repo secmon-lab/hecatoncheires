@@ -37,6 +37,18 @@ type ActionMutator interface {
 	UnarchiveAction(ctx context.Context, workspaceID string, actionID int64) (*model.Action, error)
 }
 
+// ActionStepMutator is the narrow surface of ActionStepUseCase that the
+// step mutation core tools depend on. The caller does not pass an actor;
+// the adapter pins it to ActorKindSystem so tool-driven changes are not
+// @-mentioning anyone.
+type ActionStepMutator interface {
+	List(ctx context.Context, workspaceID string, actionID int64) ([]*model.ActionStep, error)
+	Add(ctx context.Context, workspaceID string, actionID int64, title string) (*model.ActionStep, error)
+	SetDone(ctx context.Context, workspaceID string, actionID int64, stepID string, done bool) (*model.ActionStep, error)
+	Rename(ctx context.Context, workspaceID string, actionID int64, stepID string, title string) (*model.ActionStep, error)
+	Delete(ctx context.Context, workspaceID string, actionID int64, stepID string) error
+}
+
 // UpdateActionParams describes a partial Action update from the agent tool
 // path. nil pointer means "no change". Empty pointer plus its corresponding
 // Clear* flag is how the caller asks for an explicit clear (e.g. the user
@@ -63,6 +75,10 @@ type Deps struct {
 	// is nil rather than silently degrade to the legacy repository-direct
 	// path, which would skip Slack notifications and ActionEvent records.
 	ActionUC ActionMutator
+	// ActionStepUC routes the core__*_action_step tools through the unified
+	// ActionStepUseCase entry points. Required for the same reason as
+	// ActionUC; tools fail loudly when nil.
+	ActionStepUC ActionStepMutator
 }
 
 // New builds core tools for the agent mention use case: action management.
@@ -82,6 +98,11 @@ func New(deps Deps) []gollem.Tool {
 		&setActionAssigneeTool{actionUC: deps.ActionUC, workspaceID: deps.WorkspaceID},
 		&archiveActionTool{actionUC: deps.ActionUC, workspaceID: deps.WorkspaceID},
 		&unarchiveActionTool{actionUC: deps.ActionUC, workspaceID: deps.WorkspaceID},
+		&listActionStepsTool{stepUC: deps.ActionStepUC, workspaceID: deps.WorkspaceID},
+		&addActionStepTool{stepUC: deps.ActionStepUC, workspaceID: deps.WorkspaceID},
+		&setActionStepDoneTool{stepUC: deps.ActionStepUC, workspaceID: deps.WorkspaceID},
+		&renameActionStepTool{stepUC: deps.ActionStepUC, workspaceID: deps.WorkspaceID},
+		&deleteActionStepTool{stepUC: deps.ActionStepUC, workspaceID: deps.WorkspaceID},
 	}
 }
 
