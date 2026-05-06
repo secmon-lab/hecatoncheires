@@ -4,7 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/secmon-lab/hecatoncheires/pkg/service/github"
+	"github.com/m-mizutani/gt"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 )
 
 func TestPullRequestFields(t *testing.T) {
@@ -37,41 +38,30 @@ func TestPullRequestFields(t *testing.T) {
 		},
 	}
 
-	if pr.Number != 42 {
-		t.Errorf("expected Number 42, got %d", pr.Number)
-	}
-	if pr.Title != "Add feature X" {
-		t.Errorf("expected Title 'Add feature X', got %q", pr.Title)
-	}
-	if len(pr.Labels) != 2 {
-		t.Errorf("expected 2 labels, got %d", len(pr.Labels))
-	}
-	if len(pr.Comments) != 1 {
-		t.Errorf("expected 1 comment, got %d", len(pr.Comments))
-	}
-	if pr.Comments[0].Author != "bob" {
-		t.Errorf("expected comment author 'bob', got %q", pr.Comments[0].Author)
-	}
-	if len(pr.Reviews) != 1 {
-		t.Errorf("expected 1 review, got %d", len(pr.Reviews))
-	}
-	if pr.Reviews[0].State != "APPROVED" {
-		t.Errorf("expected review state 'APPROVED', got %q", pr.Reviews[0].State)
-	}
+	gt.Number(t, pr.Number).Equal(42)
+	gt.String(t, pr.Title).Equal("Add feature X")
+	gt.Array(t, pr.Labels).Length(2)
+	gt.Array(t, pr.Comments).Length(1).Required()
+	gt.String(t, pr.Comments[0].Author).Equal("bob")
+	gt.Array(t, pr.Reviews).Length(1).Required()
+	gt.String(t, pr.Reviews[0].State).Equal("APPROVED")
 }
 
 func TestIssueFields(t *testing.T) {
 	t.Parallel()
 
+	closed := time.Date(2025, 2, 5, 9, 0, 0, 0, time.UTC)
 	issue := &github.Issue{
 		Number:    10,
 		Title:     "Bug report",
 		Body:      "Something is broken",
 		Author:    "dave",
-		State:     "OPEN",
+		State:     "CLOSED",
 		URL:       "https://github.com/owner/repo/issues/10",
 		Labels:    []string{"bug"},
 		CreatedAt: time.Date(2025, 2, 1, 8, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2025, 2, 5, 9, 0, 0, 0, time.UTC),
+		ClosedAt:  &closed,
 		Comments: []github.Comment{
 			{
 				Author:    "eve",
@@ -81,15 +71,12 @@ func TestIssueFields(t *testing.T) {
 		},
 	}
 
-	if issue.Number != 10 {
-		t.Errorf("expected Number 10, got %d", issue.Number)
-	}
-	if issue.State != "OPEN" {
-		t.Errorf("expected State 'OPEN', got %q", issue.State)
-	}
-	if len(issue.Comments) != 1 {
-		t.Errorf("expected 1 comment, got %d", len(issue.Comments))
-	}
+	gt.Number(t, issue.Number).Equal(10)
+	gt.String(t, issue.State).Equal("CLOSED")
+	gt.Array(t, issue.Comments).Length(1)
+	gt.Value(t, issue.ClosedAt).NotNil().Required()
+	gt.Bool(t, issue.ClosedAt.Equal(closed)).True()
+	gt.Bool(t, issue.UpdatedAt.Equal(time.Date(2025, 2, 5, 9, 0, 0, 0, time.UTC))).True()
 }
 
 func TestIssueWithCommentsNewMarker(t *testing.T) {
@@ -121,7 +108,6 @@ func TestIssueWithCommentsNewMarker(t *testing.T) {
 		},
 	}
 
-	// Verify the Since field is used to distinguish new vs old comments
 	oldCount := 0
 	newCount := 0
 	for _, c := range iwc.Comments {
@@ -132,18 +118,13 @@ func TestIssueWithCommentsNewMarker(t *testing.T) {
 		}
 	}
 
-	if oldCount != 1 {
-		t.Errorf("expected 1 old comment, got %d", oldCount)
-	}
-	if newCount != 1 {
-		t.Errorf("expected 1 new comment, got %d", newCount)
-	}
+	gt.Number(t, oldCount).Equal(1)
+	gt.Number(t, newCount).Equal(1)
 }
 
 func TestRepositoryValidation(t *testing.T) {
 	t.Parallel()
 
-	// Test valid result
 	valid := &github.RepositoryValidation{
 		Valid:                true,
 		Owner:                "secmon-lab",
@@ -157,14 +138,9 @@ func TestRepositoryValidation(t *testing.T) {
 		CanFetchIssues:       true,
 	}
 
-	if !valid.Valid {
-		t.Error("expected Valid to be true")
-	}
-	if valid.FullName != "secmon-lab/hecatoncheires" {
-		t.Errorf("expected FullName 'secmon-lab/hecatoncheires', got %q", valid.FullName)
-	}
+	gt.Bool(t, valid.Valid).True()
+	gt.String(t, valid.FullName).Equal("secmon-lab/hecatoncheires")
 
-	// Test invalid result
 	invalid := &github.RepositoryValidation{
 		Valid:        false,
 		Owner:        "nonexistent",
@@ -172,10 +148,6 @@ func TestRepositoryValidation(t *testing.T) {
 		ErrorMessage: "repository not found",
 	}
 
-	if invalid.Valid {
-		t.Error("expected Valid to be false")
-	}
-	if invalid.ErrorMessage != "repository not found" {
-		t.Errorf("expected error message 'repository not found', got %q", invalid.ErrorMessage)
-	}
+	gt.Bool(t, invalid.Valid).False()
+	gt.String(t, invalid.ErrorMessage).Equal("repository not found")
 }

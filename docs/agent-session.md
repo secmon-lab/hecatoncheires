@@ -80,3 +80,25 @@ includes:
 - `trigger_mention_ts` — the Slack TS that triggered this turn
 
 Use these labels to slice traces in any downstream observability tool.
+
+## Available agent tools
+
+The mention agent loads tools from several namespaces. Each is gated on its
+own configuration; missing config silently disables that namespace's tools
+(no startup failure).
+
+| Namespace | Tools | Gate |
+| --- | --- | --- |
+| `core__*` | Action read/create/update/archive | Always on |
+| `slack__*` | Workspace search (read-only), bulk message fetch | Slack bot token; search additionally requires the User OAuth token with `search:read` |
+| `notion__*` | Page/database search, page Markdown fetch | `--notion-api-token` |
+| `github__*` | Issue/PR search, single Issue/PR fetch, file content, commit history | All three `--github-app-*` flags |
+
+The mention flow uses the **read-only** Slack tool set (no `post_message` —
+the trace UI handles outbound messages). The `assist` flow uses the full
+Slack tool set including `slack__post_message`.
+
+GitHub tools (`github__search`, `github__get_issue`, `github__get_pull_request`,
+`github__get_file`, `github__list_commits`) are described in detail in
+[docs/config.md](config.md#agent-tools). They share the same GitHub App
+installation as the Source pipeline.

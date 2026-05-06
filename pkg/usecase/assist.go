@@ -13,6 +13,7 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
+	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
@@ -41,6 +42,7 @@ type AssistUseCase struct {
 	slackService slack.Service
 	slackSearch  slacktool.SearchService
 	notionTool   notiontool.Client
+	githubClient *githubtool.Client
 	llmClient    gollem.LLMClient
 	embedClient  interfaces.EmbedClient
 	// actionUC routes core__create_action through the unified usecase entry
@@ -50,15 +52,17 @@ type AssistUseCase struct {
 }
 
 // NewAssistUseCase creates a new AssistUseCase.
-// slackSearch and notionTool are optional; pass nil to omit the corresponding tools.
-// actionUC is required: the core__create_action tool calls through it.
-func NewAssistUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackSearch slacktool.SearchService, notionTool notiontool.Client, llmClient gollem.LLMClient, embedClient interfaces.EmbedClient, actionUC *ActionUseCase) *AssistUseCase {
+// slackSearch, notionTool, and githubClient are optional; pass nil to omit the
+// corresponding tools. actionUC is required: the core__create_action tool
+// calls through it.
+func NewAssistUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackSearch slacktool.SearchService, notionTool notiontool.Client, githubClient *githubtool.Client, llmClient gollem.LLMClient, embedClient interfaces.EmbedClient, actionUC *ActionUseCase) *AssistUseCase {
 	return &AssistUseCase{
 		repo:         repo,
 		registry:     registry,
 		slackService: slackService,
 		slackSearch:  slackSearch,
 		notionTool:   notionTool,
+		githubClient: githubClient,
 		llmClient:    llmClient,
 		embedClient:  embedClient,
 		actionUC:     actionUC,
@@ -160,11 +164,13 @@ func (uc *AssistUseCase) processCase(ctx context.Context, entry *model.Workspace
 		ChannelID: c.SlackChannelID,
 	})
 	notionTools := notiontool.New(notiontool.Deps{Client: uc.notionTool})
+	githubTools := githubtool.New(uc.githubClient)
 
-	allTools := make([]gollem.Tool, 0, len(coreTools)+len(slackTools)+len(notionTools))
+	allTools := make([]gollem.Tool, 0, len(coreTools)+len(slackTools)+len(notionTools)+len(githubTools))
 	allTools = append(allTools, coreTools...)
 	allTools = append(allTools, slackTools...)
 	allTools = append(allTools, notionTools...)
+	allTools = append(allTools, githubTools...)
 
 	// Create and execute the agent
 	agent := gollem.New(uc.llmClient,
