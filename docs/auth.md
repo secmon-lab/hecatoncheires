@@ -37,7 +37,7 @@ The frontend automatically handles the login flow. When an unauthenticated user 
 
 1. The frontend's `AuthGuard` component detects unauthenticated state
 2. It displays a login page with a "Sign in with Slack" button
-3. Clicking the button redirects to `/api/auth/login`
+3. Clicking the button redirects to `/api/auth/login`, passing the original location (path + query + hash) as a `return_to` query parameter so the user can be brought back after authentication. See [Post-Login Redirect](#post-login-redirect-return_to) for details.
 4. The backend redirects to Slack for authentication
 
 ### 2. Authorization
@@ -49,7 +49,7 @@ The frontend automatically handles the login flow. When an unauthenticated user 
    - Exchanges the authorization code for user tokens
    - Creates a session token
    - Sets HTTPOnly cookies (`token_id` and `token_secret`)
-   - Redirects to `/` (home page)
+   - Redirects to the original `return_to` target if one was preserved, otherwise to `/` (home page)
 
 ### 3. Access Protected Resources
 
@@ -90,6 +90,46 @@ The backend:
 3. Returns success response
 
 The frontend then redirects to `/` and shows the login page.
+
+## Post-Login Redirect (`return_to`)
+
+When a user opens a deep link to a protected resource (e.g. `/ws/abc/cases/xyz`) without an active session, the system preserves that target across the OAuth roundtrip and brings the user back to it after they sign in.
+
+### How it works
+
+1. **Frontend (`LoginPage`)**: when the user clicks **Sign in with Slack**, the page builds `return_to` from `window.location.pathname + search + hash` and appends it to `/api/auth/login` (e.g. `/api/auth/login?return_to=%2Fws%2Fabc%2Fcases%2Fxyz`).
+2. **Backend (`/api/auth/login`)**: the handler validates `return_to` and, if accepted, stores the value in a separate `oauth_return_to` cookie. CSRF protection (`oauth_state`) is unchanged — the new cookie carries only the redirect target so the two responsibilities stay separate.
+3. **Backend (`/api/auth/callback`)**: after verifying the OAuth `state`, the handler reads `oauth_return_to`, re-validates it, and uses it as the post-login redirect target. The cookie is cleared whether or not its value was accepted.
+
+### Validation rules (open-redirect protection)
+
+`return_to` must be a same-origin relative path. The backend rejects values that:
+
+- are empty or longer than 2048 characters
+- do not start with `/`
+- start with `//` (protocol-relative URL → another host)
+- start with `/\` (backslash trick that some browsers normalise to `//`)
+- contain control characters (anything below `0x20` or `0x7f`)
+- parse as a URL with a non-empty scheme or host
+
+Rejection is silent: the OAuth flow proceeds and the user falls back to `/` after authentication. There is no error page, so probe attempts cannot fingerprint the validator.
+
+### Cookie
+
+| Cookie name | Path | HttpOnly | SameSite | Secure | MaxAge |
+|---|---|---|---|---|---|
+| `oauth_return_to` | `/` | yes | Lax | yes (when TLS) | 600s (10 min) |
+
+The cookie is cleared on every callback, even when the value fails revalidation, so a stale or tampered value never persists across attempts.
+
+### No-auth mode
+
+In no-auth mode the OAuth roundtrip is skipped, so there is no callback to read the cookie. The login handler honours `return_to` directly: a valid value becomes the redirect target, anything else falls back to `/`. The validator is identical to the OAuth path.
+
+### Notes
+
+- **Hash fragments (`#step-3`)** survive the roundtrip because the frontend URL-encodes them into the `return_to` *query value* (so they are transmitted as data, not as the request's fragment). The backend stores the encoded value verbatim and emits it back in the `Location` header on redirect; modern browsers carry the fragment to the final navigation.
+- **`return_to` is advisory, not authoritative**: it controls only where the browser lands after sign-in. Per-resource access control still happens at the GraphQL layer once the page loads.
 
 ## No-Auth Mode (Development)
 
