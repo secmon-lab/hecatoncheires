@@ -214,7 +214,7 @@ func TestAuthCallbackHandler(t *testing.T) {
 		gt.String(t, clears[0].Value).Equal("")
 	})
 
-	t.Run("missing oauth_return_to cookie redirects to /", func(t *testing.T) {
+	t.Run("missing oauth_return_to cookie redirects to / and still emits a clear", func(t *testing.T) {
 		uc := &fakeAuthUC{}
 		h := httpctrl.AuthCallbackHandlerForTest(uc)
 
@@ -223,7 +223,14 @@ func TestAuthCallbackHandler(t *testing.T) {
 
 		gt.Number(t, rec.Code).Equal(http.StatusTemporaryRedirect)
 		gt.String(t, rec.Header().Get("Location")).Equal("/")
-		gt.Value(t, firstCookie(rec, httpctrl.ReturnToCookieNameForTest)).Nil()
+
+		// The clear is emitted unconditionally so that any stale or
+		// duplicate cookie carried by the browser is wiped on every
+		// callback, not only when the server happened to read one.
+		clears := cookiesByName(rec, httpctrl.ReturnToCookieNameForTest)
+		gt.Array(t, clears).Length(1).Required()
+		gt.Number(t, clears[0].MaxAge).Equal(-1)
+		gt.String(t, clears[0].Value).Equal("")
 	})
 
 	t.Run("invalid oauth_return_to cookie redirects to / and still clears the cookie", func(t *testing.T) {

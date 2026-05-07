@@ -176,25 +176,23 @@ func authCallbackHandler(authUC AuthUseCase) http.HandlerFunc {
 		http.SetCookie(w, clearCookie)
 
 		// Resolve the post-login redirect target from the cookie set in
-		// authLoginHandler. The cookie is always cleared when present,
-		// even if its value fails revalidation, so a stale or tampered
-		// value never lingers across attempts.
+		// authLoginHandler, then unconditionally clear the cookie. Clearing
+		// it even when the request had no readable value defends against
+		// stale or duplicate Set-Cookie state lingering across attempts.
 		target := "/"
-		if rtCookie, err := r.Cookie(returnToCookieName); err == nil {
-			if validateReturnTo(rtCookie.Value) {
-				target = rtCookie.Value
-			}
-			clearReturnTo := &http.Cookie{
-				Name:     returnToCookieName,
-				Value:    "",
-				Path:     "/",
-				HttpOnly: true,
-				Secure:   r.TLS != nil,
-				SameSite: http.SameSiteLaxMode,
-				MaxAge:   -1,
-			}
-			http.SetCookie(w, clearReturnTo)
+		if rtCookie, err := r.Cookie(returnToCookieName); err == nil && validateReturnTo(rtCookie.Value) {
+			target = rtCookie.Value
 		}
+		clearReturnTo := &http.Cookie{
+			Name:     returnToCookieName,
+			Value:    "",
+			Path:     "/",
+			HttpOnly: true,
+			Secure:   r.TLS != nil,
+			SameSite: http.SameSiteLaxMode,
+			MaxAge:   -1,
+		}
+		http.SetCookie(w, clearReturnTo)
 
 		// Get authorization code
 		code := r.URL.Query().Get("code")
