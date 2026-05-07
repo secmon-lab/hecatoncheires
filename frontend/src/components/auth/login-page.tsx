@@ -5,7 +5,13 @@ export function LoginPage() {
   const { t } = useTranslation()
 
   const handleLogin = () => {
-    window.location.href = '/api/auth/login'
+    const here = window.location.pathname + window.location.search + window.location.hash
+    if (here && here !== '/') {
+      const params = new URLSearchParams({ return_to: here })
+      window.location.href = `/api/auth/login?${params.toString()}`
+    } else {
+      window.location.href = '/api/auth/login'
+    }
   }
 
   return (

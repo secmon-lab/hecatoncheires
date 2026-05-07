@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
@@ -13,6 +15,42 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
+
+// maxReturnToLength caps the post-login redirect target so a malicious
+// caller cannot stuff arbitrarily large values into the cookie.
+const maxReturnToLength = 2048
+
+// returnToCookieName is the cookie that carries the validated post-login
+// redirect target between authLoginHandler and authCallbackHandler.
+const returnToCookieName = "oauth_return_to"
+
+// validateReturnTo reports whether p is a safe same-origin relative path
+// suitable for use as a post-login redirect target. It rejects anything
+// that could redirect the browser off-origin: empty values, oversized
+// values, values not starting with "/", protocol-relative URLs ("//host"),
+// backslash tricks ("/\\..."), control characters, or values that
+// url.Parse interprets as having a scheme or host.
+func validateReturnTo(p string) bool {
+	if p == "" || len(p) > maxReturnToLength {
+		return false
+	}
+	if !strings.HasPrefix(p, "/") {
+		return false
+	}
+	if strings.HasPrefix(p, "//") || strings.HasPrefix(p, `/\`) {
+		return false
+	}
+	for _, r := range p {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	u, err := url.Parse(p)
+	if err != nil || u.Scheme != "" || u.Host != "" {
+		return false
+	}
+	return true
+}
 
 type AuthUseCase = usecase.AuthUseCaseInterface
 type slackService = slack.Service
@@ -53,9 +91,18 @@ func generateState() (string, error) {
 // authLoginHandler handles the OAuth login initiation
 func authLoginHandler(authUC AuthUseCase) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// For NoAuthn mode, redirect to home
+		returnTo := r.URL.Query().Get("return_to")
+		validReturnTo := validateReturnTo(returnTo)
+
+		// For NoAuthn mode, redirect straight to the requested target
+		// (or home as a fallback). The OAuth roundtrip is skipped, so
+		// there is no callback to read the return_to cookie.
 		if authUC.IsNoAuthn() {
-			http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+			target := "/"
+			if validReturnTo {
+				target = returnTo
+			}
+			http.Redirect(w, r, target, http.StatusTemporaryRedirect)
 			return
 		}
 
@@ -77,6 +124,22 @@ func authLoginHandler(authUC AuthUseCase) http.HandlerFunc {
 			MaxAge:   600, // 10 minutes
 		}
 		http.SetCookie(w, stateCookie)
+
+		// Persist the validated post-login redirect target in a separate
+		// cookie. Keeping it out of the OAuth state parameter avoids
+		// mixing CSRF-token responsibilities with redirect-target data.
+		if validReturnTo {
+			returnToCookie := &http.Cookie{
+				Name:     returnToCookieName,
+				Value:    returnTo,
+				Path:     "/",
+				HttpOnly: true,
+				Secure:   r.TLS != nil,
+				SameSite: http.SameSiteLaxMode,
+				MaxAge:   600, // 10 minutes, mirrors oauth_state
+			}
+			http.SetCookie(w, returnToCookie)
+		}
 
 		// Redirect to Slack OAuth
 		authURL := authUC.GetAuthURL(state)
@@ -111,6 +174,27 @@ func authCallbackHandler(authUC AuthUseCase) http.HandlerFunc {
 			MaxAge:   -1,
 		}
 		http.SetCookie(w, clearCookie)
+
+		// Resolve the post-login redirect target from the cookie set in
+		// authLoginHandler. The cookie is always cleared when present,
+		// even if its value fails revalidation, so a stale or tampered
+		// value never lingers across attempts.
+		target := "/"
+		if rtCookie, err := r.Cookie(returnToCookieName); err == nil {
+			if validateReturnTo(rtCookie.Value) {
+				target = rtCookie.Value
+			}
+			clearReturnTo := &http.Cookie{
+				Name:     returnToCookieName,
+				Value:    "",
+				Path:     "/",
+				HttpOnly: true,
+				Secure:   r.TLS != nil,
+				SameSite: http.SameSiteLaxMode,
+				MaxAge:   -1,
+			}
+			http.SetCookie(w, clearReturnTo)
+		}
 
 		// Get authorization code
 		code := r.URL.Query().Get("code")
@@ -150,8 +234,10 @@ func authCallbackHandler(authUC AuthUseCase) http.HandlerFunc {
 		http.SetCookie(w, tokenIDCookie)
 		http.SetCookie(w, tokenSecretCookie)
 
-		// Redirect to dashboard
-		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+		// Redirect to the original target (the resource the user was
+		// trying to reach when authentication was demanded), or "/" if
+		// no valid return_to cookie was present.
+		http.Redirect(w, r, target, http.StatusTemporaryRedirect)
 	}
 }
 
