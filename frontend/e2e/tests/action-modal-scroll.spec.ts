@@ -27,9 +27,16 @@ test.describe('Action modal scroll behavior', () => {
     await caseListPage.clickCaseByTitle('Modal Scroll Case');
     await caseDetailPage.waitForPageLoad();
 
+    // A long, multi-line description is included so the modal body is
+    // guaranteed to overflow the constrained viewport even though the rest of
+    // the action's metadata is minimal. Without this, the test would be flaky
+    // depending on activity log height.
+    const longDescription = Array.from({ length: 30 }, (_, i) => `line ${i + 1} of the long description used to force vertical overflow in the action modal body`).join('\n');
+
     await page.getByTestId('add-action-button').click();
     await actionFormPage.createAction({
       title: 'Scroll Test Action',
+      description: longDescription,
       caseTitle: 'Modal Scroll Case',
     });
 

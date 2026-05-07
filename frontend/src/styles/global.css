@@ -870,7 +870,9 @@ hr { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  overflow-x: hidden;
+  /* overflow-x: auto so unwrappable content (long URLs, IDs) stays reachable
+     instead of being silently clipped by the card's overflow:hidden. */
+  overflow-x: auto;
   padding: 18px 20px;
 }
 .modal-f {
