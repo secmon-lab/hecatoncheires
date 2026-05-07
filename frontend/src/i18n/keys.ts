@@ -217,6 +217,18 @@ export const msgKeys = {
   labelDueDate: 'labelDueDate',
   caseLinkLabel: 'caseLinkLabel',
 
+  // Action Steps
+  sectionActionSteps: 'sectionActionSteps',
+  placeholderAddActionStep: 'placeholderAddActionStep',
+  ariaActionStepCheckbox: 'ariaActionStepCheckbox',
+  ariaDeleteActionStep: 'ariaDeleteActionStep',
+  emptyActionSteps: 'emptyActionSteps',
+  activityEventStepAdded: 'activityEventStepAdded',
+  activityEventStepRemoved: 'activityEventStepRemoved',
+  activityEventStepDone: 'activityEventStepDone',
+  activityEventStepReopened: 'activityEventStepReopened',
+  activityEventStepRenamed: 'activityEventStepRenamed',
+
   // Sources
   titleSources: 'titleSources',
   subtitleSources: 'subtitleSources',

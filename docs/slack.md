@@ -183,6 +183,11 @@ When an action is created in Hecatoncheires, a notification message is automatic
    - **Completed**: Change the action status to COMPLETED
 4. After a button click, the Slack message is updated to reflect the new state
 
+In addition, ActionStep CRUD events (add / remove / done / reopen /
+rename) post a context-block thread reply to the Action's primary Slack
+message — see [docs/action-steps.md](./action-steps.md) for the full
+list of events and notification text.
+
 ### Interactivity Setup
 
 #### 1. Enable Interactivity

@@ -28,6 +28,7 @@ type UseCases struct {
 	baseURL           string
 	Case              *CaseUseCase
 	Action            *ActionUseCase
+	ActionStep        *ActionStepUseCase
 	Agent             *AgentUseCase
 	Auth              AuthUseCaseInterface
 	Slack             *SlackUseCases
@@ -137,6 +138,7 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 
 	uc.Case = NewCaseUseCase(repo, registry, uc.slackService, uc.slackAdminService, uc.baseURL)
 	uc.Action = NewActionUseCase(repo, registry, uc.slackService, uc.baseURL)
+	uc.ActionStep = NewActionStepUseCase(repo, uc.slackService)
 
 	// Convert *github.Client to githubAPI interface, preserving nil-ness:
 	// passing a typed nil pointer through an interface parameter would make
@@ -165,7 +167,7 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 		// that only use Assist (the assist CLI) may omit them, in which
 		// case the Agent usecase is simply not constructed.
 		if uc.historyRepo != nil && uc.traceRepo != nil {
-			uc.Agent = NewAgentUseCase(repo, registry, uc.slackService, uc.slackSearch, uc.notionTool, uc.githubClient, uc.llmClient, uc.embedClient, uc.historyRepo, uc.traceRepo, uc.Action)
+			uc.Agent = NewAgentUseCase(repo, registry, uc.slackService, uc.slackSearch, uc.notionTool, uc.githubClient, uc.llmClient, uc.embedClient, uc.historyRepo, uc.traceRepo, uc.Action, uc.ActionStep)
 		} else if uc.historyRepo != nil || uc.traceRepo != nil {
 			panic("usecase.New: WithHistoryRepository and WithTraceRepository must be paired")
 		}

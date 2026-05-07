@@ -17,6 +17,7 @@ type Memory struct {
 	caseMessage   *caseMessageRepository
 	actionMessage *actionMessageRepository
 	actionEvent   *actionEventRepository
+	actionStep    *actionStepRepository
 	assistLog     *assistLogRepository
 	caseDraft     *caseDraftRepository
 	agentSession  *agentSessionRepository
@@ -35,6 +36,7 @@ func New() *Memory {
 		caseMessage:   newCaseMessageRepository(),
 		actionMessage: newActionMessageRepository(),
 		actionEvent:   newActionEventRepository(),
+		actionStep:    newActionStepRepository(),
 		assistLog:     newAssistLogRepository(),
 		caseDraft:     newCaseDraftRepository(),
 		agentSession:  newAgentSessionRepository(),
@@ -71,6 +73,10 @@ func (m *Memory) ActionMessage() interfaces.ActionMessageRepository {
 
 func (m *Memory) ActionEvent() interfaces.ActionEventRepository {
 	return m.actionEvent
+}
+
+func (m *Memory) ActionStep() interfaces.ActionStepRepository {
+	return m.actionStep
 }
 
 func (m *Memory) AssistLog() interfaces.AssistLogRepository {

@@ -51,6 +51,9 @@ type AgentUseCase struct {
 	// creates aligned with GraphQL/Slack-modal creates (Slack post,
 	// ActionEvent records, etc.).
 	actionUC *ActionUseCase
+	// actionStepUC is the unified entry point for ActionStep mutations,
+	// following the same pattern as actionUC.
+	actionStepUC *ActionStepUseCase
 }
 
 // NewAgentUseCase creates a new AgentUseCase instance.
@@ -64,8 +67,9 @@ type AgentUseCase struct {
 // agentarchive.NewMemoryHistoryRepository / NewMemoryTraceRepository in tests.
 //
 // actionUC is required: the core__create_action tool routes through it so all
-// Action create paths share the same usecase implementation.
-func NewAgentUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackSearch slacktool.SearchService, notionTool notiontool.Client, githubClient *githubtool.Client, llmClient gollem.LLMClient, embedClient interfaces.EmbedClient, historyRepo gollem.HistoryRepository, traceRepo trace.Repository, actionUC *ActionUseCase) *AgentUseCase {
+// Action create paths share the same usecase implementation. actionStepUC
+// follows the same contract for the core__*_action_step tool family.
+func NewAgentUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackSearch slacktool.SearchService, notionTool notiontool.Client, githubClient *githubtool.Client, llmClient gollem.LLMClient, embedClient interfaces.EmbedClient, historyRepo gollem.HistoryRepository, traceRepo trace.Repository, actionUC *ActionUseCase, actionStepUC *ActionStepUseCase) *AgentUseCase {
 	return &AgentUseCase{
 		repo:         repo,
 		registry:     registry,
@@ -78,6 +82,7 @@ func NewAgentUseCase(repo interfaces.Repository, registry *model.WorkspaceRegist
 		historyRepo:  historyRepo,
 		traceRepo:    traceRepo,
 		actionUC:     actionUC,
+		actionStepUC: actionStepUC,
 	}
 }
 
@@ -189,11 +194,12 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 
 	// Build core tools (action) for this case.
 	coreTools := core.New(core.Deps{
-		Repo:        uc.repo,
-		WorkspaceID: entry.Workspace.ID,
-		CaseID:      foundCase.ID,
-		StatusSet:   entry.ActionStatusSet,
-		ActionUC:    NewActionToolAdapter(uc.actionUC),
+		Repo:         uc.repo,
+		WorkspaceID:  entry.Workspace.ID,
+		CaseID:       foundCase.ID,
+		StatusSet:    entry.ActionStatusSet,
+		ActionUC:     NewActionToolAdapter(uc.actionUC),
+		ActionStepUC: NewActionStepToolAdapter(uc.actionStepUC),
 	})
 
 	// Slack and Notion tools are independent packages. Each gates its own tools

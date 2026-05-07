@@ -5,8 +5,9 @@ import "errors"
 // Sentinel errors for use case layer
 var (
 	// Not found errors
-	ErrCaseNotFound   = errors.New("case not found")
-	ErrActionNotFound = errors.New("action not found")
+	ErrCaseNotFound       = errors.New("case not found")
+	ErrActionNotFound     = errors.New("action not found")
+	ErrActionStepNotFound = errors.New("action step not found")
 
 	// Status errors
 	ErrCaseAlreadyClosed = errors.New("case is already closed")
@@ -29,6 +30,7 @@ var (
 
 // Context keys for error values
 const (
-	CaseIDKey   = "case_id"
-	ActionIDKey = "action_id"
+	CaseIDKey       = "case_id"
+	ActionIDKey     = "action_id"
+	ActionStepIDKey = "action_step_id"
 )

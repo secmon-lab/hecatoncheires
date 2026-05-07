@@ -219,6 +219,18 @@ export const en: Messages = {
   labelDueDate: 'Due Date',
   caseLinkLabel: 'Case #{id} · {title}',
 
+  // Action Steps
+  sectionActionSteps: 'Steps',
+  placeholderAddActionStep: 'Add a step…',
+  ariaActionStepCheckbox: 'Mark step as done',
+  ariaDeleteActionStep: 'Delete step',
+  emptyActionSteps: 'No steps yet.',
+  activityEventStepAdded: 'added step',
+  activityEventStepRemoved: 'removed step',
+  activityEventStepDone: 'completed step',
+  activityEventStepReopened: 'reopened step',
+  activityEventStepRenamed: 'renamed step',
+
   // Sources
   titleSources: 'Sources',
   subtitleSources: 'Manage external data sources for risk monitoring',

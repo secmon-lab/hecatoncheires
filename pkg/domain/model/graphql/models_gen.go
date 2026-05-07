@@ -44,6 +44,30 @@ type ActionStatusDefinition struct {
 	Emoji       *string `json:"emoji,omitempty"`
 }
 
+type ActionStep struct {
+	ID            string     `json:"id"`
+	ActionID      int        `json:"actionID"`
+	Title         string     `json:"title"`
+	Done          bool       `json:"done"`
+	DoneAt        *time.Time `json:"doneAt,omitempty"`
+	DoneBy        *string    `json:"doneBy,omitempty"`
+	DoneByUser    *SlackUser `json:"doneByUser,omitempty"`
+	CreatedBy     string     `json:"createdBy"`
+	CreatedByUser *SlackUser `json:"createdByUser,omitempty"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
+}
+
+type ActionStepProgress struct {
+	Done  int `json:"done"`
+	Total int `json:"total"`
+}
+
+type AddActionStepInput struct {
+	ActionID int    `json:"actionId"`
+	Title    string `json:"title"`
+}
+
 type AssistLog struct {
 	ID        string    `json:"id"`
 	CaseID    int       `json:"caseId"`
@@ -112,6 +136,11 @@ type CreateSlackSourceInput struct {
 	Description *string  `json:"description,omitempty"`
 	ChannelIDs  []string `json:"channelIDs"`
 	Enabled     *bool    `json:"enabled,omitempty"`
+}
+
+type DeleteActionStepInput struct {
+	ActionID int    `json:"actionId"`
+	StepID   string `json:"stepId"`
 }
 
 type EntityLabels struct {
@@ -212,6 +241,18 @@ type NotionPageValidationResult struct {
 }
 
 type Query struct {
+}
+
+type RenameActionStepInput struct {
+	ActionID int    `json:"actionId"`
+	StepID   string `json:"stepId"`
+	Title    string `json:"title"`
+}
+
+type SetActionStepDoneInput struct {
+	ActionID int    `json:"actionId"`
+	StepID   string `json:"stepId"`
+	Done     bool   `json:"done"`
 }
 
 type SlackChannel struct {
@@ -385,12 +426,17 @@ func (e ActionArchiveFilter) MarshalJSON() ([]byte, error) {
 type ActionEventKind string
 
 const (
-	ActionEventKindCreated         ActionEventKind = "CREATED"
-	ActionEventKindTitleChanged    ActionEventKind = "TITLE_CHANGED"
-	ActionEventKindStatusChanged   ActionEventKind = "STATUS_CHANGED"
-	ActionEventKindAssigneeChanged ActionEventKind = "ASSIGNEE_CHANGED"
-	ActionEventKindArchived        ActionEventKind = "ARCHIVED"
-	ActionEventKindUnarchived      ActionEventKind = "UNARCHIVED"
+	ActionEventKindCreated          ActionEventKind = "CREATED"
+	ActionEventKindTitleChanged     ActionEventKind = "TITLE_CHANGED"
+	ActionEventKindStatusChanged    ActionEventKind = "STATUS_CHANGED"
+	ActionEventKindAssigneeChanged  ActionEventKind = "ASSIGNEE_CHANGED"
+	ActionEventKindArchived         ActionEventKind = "ARCHIVED"
+	ActionEventKindUnarchived       ActionEventKind = "UNARCHIVED"
+	ActionEventKindStepAdded        ActionEventKind = "STEP_ADDED"
+	ActionEventKindStepRemoved      ActionEventKind = "STEP_REMOVED"
+	ActionEventKindStepDone         ActionEventKind = "STEP_DONE"
+	ActionEventKindStepReopened     ActionEventKind = "STEP_REOPENED"
+	ActionEventKindStepTitleChanged ActionEventKind = "STEP_TITLE_CHANGED"
 )
 
 var AllActionEventKind = []ActionEventKind{
@@ -400,11 +446,16 @@ var AllActionEventKind = []ActionEventKind{
 	ActionEventKindAssigneeChanged,
 	ActionEventKindArchived,
 	ActionEventKindUnarchived,
+	ActionEventKindStepAdded,
+	ActionEventKindStepRemoved,
+	ActionEventKindStepDone,
+	ActionEventKindStepReopened,
+	ActionEventKindStepTitleChanged,
 }
 
 func (e ActionEventKind) IsValid() bool {
 	switch e {
-	case ActionEventKindCreated, ActionEventKindTitleChanged, ActionEventKindStatusChanged, ActionEventKindAssigneeChanged, ActionEventKindArchived, ActionEventKindUnarchived:
+	case ActionEventKindCreated, ActionEventKindTitleChanged, ActionEventKindStatusChanged, ActionEventKindAssigneeChanged, ActionEventKindArchived, ActionEventKindUnarchived, ActionEventKindStepAdded, ActionEventKindStepRemoved, ActionEventKindStepDone, ActionEventKindStepReopened, ActionEventKindStepTitleChanged:
 		return true
 	}
 	return false

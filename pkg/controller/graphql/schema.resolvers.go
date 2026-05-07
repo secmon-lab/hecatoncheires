@@ -130,6 +130,50 @@ func (r *actionResolver) Events(ctx context.Context, obj *graphql1.Action, limit
 	}, nil
 }
 
+// Steps is the resolver for the steps field.
+func (r *actionResolver) Steps(ctx context.Context, obj *graphql1.Action) ([]*graphql1.ActionStep, error) {
+	empty := []*graphql1.ActionStep{}
+
+	loaders := GetDataLoaders(ctx)
+	cases, err := loaders.CaseLoader.Load(ctx, obj.WorkspaceID, []int64{int64(obj.CaseID)})
+	if err != nil {
+		return nil, err
+	}
+	if len(cases) == 0 || cases[0].AccessDenied {
+		return empty, nil
+	}
+
+	steps, err := r.UseCases.ActionStep.List(ctx, obj.WorkspaceID, int64(obj.ID))
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to list action steps")
+	}
+	out := make([]*graphql1.ActionStep, 0, len(steps))
+	for _, s := range steps {
+		out = append(out, toGraphQLActionStep(s))
+	}
+	return out, nil
+}
+
+// StepProgress is the resolver for the stepProgress field.
+func (r *actionResolver) StepProgress(ctx context.Context, obj *graphql1.Action) (*graphql1.ActionStepProgress, error) {
+	zero := &graphql1.ActionStepProgress{Done: 0, Total: 0}
+
+	loaders := GetDataLoaders(ctx)
+	cases, err := loaders.CaseLoader.Load(ctx, obj.WorkspaceID, []int64{int64(obj.CaseID)})
+	if err != nil {
+		return nil, err
+	}
+	if len(cases) == 0 || cases[0].AccessDenied {
+		return zero, nil
+	}
+
+	done, total, err := r.UseCases.ActionStep.Progress(ctx, obj.WorkspaceID, int64(obj.ID))
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to compute action step progress")
+	}
+	return &graphql1.ActionStepProgress{Done: done, Total: total}, nil
+}
+
 // Actor is the resolver for the actor field.
 func (r *actionEventResolver) Actor(ctx context.Context, obj *graphql1.ActionEvent) (*graphql1.SlackUser, error) {
 	if obj.ActorID == "" {
@@ -558,6 +602,75 @@ func (r *mutationResolver) PostActionSlackMessage(ctx context.Context, workspace
 		return nil, err
 	}
 	return toGraphQLAction(updated, workspaceID), nil
+}
+
+// resolveStepActor extracts the Slack-user actor from the auth token in
+// context, falling back to ActorKindSystem when there is no token (which
+// matches the GraphQL-via-CLI / agent pathways). Mirrors how UpdateAction
+// derives its actor — kept inline here instead of in a shared helper to
+// avoid pulling Auth concerns into a non-Action codepath.
+func resolveStepActor(ctx context.Context) usecase.ActorRef {
+	if token, tokenErr := auth.TokenFromContext(ctx); tokenErr == nil {
+		return usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: token.Sub}
+	}
+	return usecase.ActorRef{Kind: usecase.ActorKindSystem}
+}
+
+// AddActionStep is the resolver for the addActionStep field.
+func (r *mutationResolver) AddActionStep(ctx context.Context, workspaceID string, input graphql1.AddActionStepInput) (*graphql1.ActionStep, error) {
+	step, err := r.UseCases.ActionStep.Add(ctx, usecase.AddActionStepInput{
+		WorkspaceID: workspaceID,
+		ActionID:    int64(input.ActionID),
+		Title:       input.Title,
+		Actor:       resolveStepActor(ctx),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLActionStep(step), nil
+}
+
+// SetActionStepDone is the resolver for the setActionStepDone field.
+func (r *mutationResolver) SetActionStepDone(ctx context.Context, workspaceID string, input graphql1.SetActionStepDoneInput) (*graphql1.ActionStep, error) {
+	step, err := r.UseCases.ActionStep.SetDone(ctx, usecase.SetActionStepDoneInput{
+		WorkspaceID: workspaceID,
+		ActionID:    int64(input.ActionID),
+		StepID:      input.StepID,
+		Done:        input.Done,
+		Actor:       resolveStepActor(ctx),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLActionStep(step), nil
+}
+
+// RenameActionStep is the resolver for the renameActionStep field.
+func (r *mutationResolver) RenameActionStep(ctx context.Context, workspaceID string, input graphql1.RenameActionStepInput) (*graphql1.ActionStep, error) {
+	step, err := r.UseCases.ActionStep.Rename(ctx, usecase.RenameActionStepInput{
+		WorkspaceID: workspaceID,
+		ActionID:    int64(input.ActionID),
+		StepID:      input.StepID,
+		Title:       input.Title,
+		Actor:       resolveStepActor(ctx),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLActionStep(step), nil
+}
+
+// DeleteActionStep is the resolver for the deleteActionStep field.
+func (r *mutationResolver) DeleteActionStep(ctx context.Context, workspaceID string, input graphql1.DeleteActionStepInput) (bool, error) {
+	if err := r.UseCases.ActionStep.Delete(ctx, usecase.DeleteActionStepInput{
+		WorkspaceID: workspaceID,
+		ActionID:    int64(input.ActionID),
+		StepID:      input.StepID,
+		Actor:       resolveStepActor(ctx),
+	}); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // CreateNotionDBSource is the resolver for the createNotionDBSource field.

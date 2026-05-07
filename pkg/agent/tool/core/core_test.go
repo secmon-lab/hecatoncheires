@@ -185,6 +185,9 @@ func (m *mockRepo) ActionMessage() interfaces.ActionMessageRepository {
 func (m *mockRepo) ActionEvent() interfaces.ActionEventRepository {
 	panic("unexpected call: ActionEvent()")
 }
+func (m *mockRepo) ActionStep() interfaces.ActionStepRepository {
+	panic("unexpected call: ActionStep()")
+}
 func (m *mockRepo) PutToken(ctx context.Context, token *auth.Token) error {
 	panic("unexpected call: PutToken()")
 }
@@ -228,7 +231,7 @@ func findTool(tools []gollem.Tool, name string) gollem.Tool {
 func TestNew_ReturnsAllTools(t *testing.T) {
 	repo := newMockRepo(nil)
 	tools := core.New(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: &mockActionMutator{}})
-	gt.Array(t, tools).Length(8)
+	gt.Array(t, tools).Length(13)
 
 	toolNames := make(map[string]bool)
 	for _, tl := range tools {
@@ -242,12 +245,17 @@ func TestNew_ReturnsAllTools(t *testing.T) {
 	gt.Value(t, toolNames["core__update_action"]).Equal(true)
 	gt.Value(t, toolNames["core__update_action_status"]).Equal(true)
 	gt.Value(t, toolNames["core__set_action_assignee"]).Equal(true)
+	gt.Value(t, toolNames["core__list_action_steps"]).Equal(true)
+	gt.Value(t, toolNames["core__add_action_step"]).Equal(true)
+	gt.Value(t, toolNames["core__set_action_step_done"]).Equal(true)
+	gt.Value(t, toolNames["core__rename_action_step"]).Equal(true)
+	gt.Value(t, toolNames["core__delete_action_step"]).Equal(true)
 }
 
 func TestNewForAssist_ReturnsSameTools(t *testing.T) {
 	repo := newMockRepo(nil)
 	tools := core.NewForAssist(core.Deps{Repo: repo, WorkspaceID: testWorkspaceID, CaseID: testCaseID, ActionUC: &mockActionMutator{}})
-	gt.Array(t, tools).Length(8)
+	gt.Array(t, tools).Length(13)
 }
 
 func TestListActionsTool(t *testing.T) {

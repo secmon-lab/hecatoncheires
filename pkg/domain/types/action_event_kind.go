@@ -6,12 +6,17 @@ package types
 type ActionEventKind string
 
 const (
-	ActionEventCreated         ActionEventKind = "CREATED"
-	ActionEventTitleChanged    ActionEventKind = "TITLE_CHANGED"
-	ActionEventStatusChanged   ActionEventKind = "STATUS_CHANGED"
-	ActionEventAssigneeChanged ActionEventKind = "ASSIGNEE_CHANGED"
-	ActionEventArchived        ActionEventKind = "ARCHIVED"
-	ActionEventUnarchived      ActionEventKind = "UNARCHIVED"
+	ActionEventCreated          ActionEventKind = "CREATED"
+	ActionEventTitleChanged     ActionEventKind = "TITLE_CHANGED"
+	ActionEventStatusChanged    ActionEventKind = "STATUS_CHANGED"
+	ActionEventAssigneeChanged  ActionEventKind = "ASSIGNEE_CHANGED"
+	ActionEventArchived         ActionEventKind = "ARCHIVED"
+	ActionEventUnarchived       ActionEventKind = "UNARCHIVED"
+	ActionEventStepAdded        ActionEventKind = "STEP_ADDED"
+	ActionEventStepRemoved      ActionEventKind = "STEP_REMOVED"
+	ActionEventStepDone         ActionEventKind = "STEP_DONE"
+	ActionEventStepReopened     ActionEventKind = "STEP_REOPENED"
+	ActionEventStepTitleChanged ActionEventKind = "STEP_TITLE_CHANGED"
 )
 
 func (k ActionEventKind) IsValid() bool {
@@ -21,7 +26,12 @@ func (k ActionEventKind) IsValid() bool {
 		ActionEventStatusChanged,
 		ActionEventAssigneeChanged,
 		ActionEventArchived,
-		ActionEventUnarchived:
+		ActionEventUnarchived,
+		ActionEventStepAdded,
+		ActionEventStepRemoved,
+		ActionEventStepDone,
+		ActionEventStepReopened,
+		ActionEventStepTitleChanged:
 		return true
 	}
 	return false
