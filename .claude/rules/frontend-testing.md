@@ -17,11 +17,18 @@ paths:
 
 ### Test Execution
 
-**MANDATORY: After any frontend code change, you MUST run both Vitest unit tests AND E2E tests.**
+**MANDATORY: After any frontend code change, you MUST run Vitest unit
+tests, ESLint, AND E2E tests.**
 
 - Run `pnpm test` in `frontend/` to execute Vitest unit tests
+- Run `pnpm lint` in `frontend/` to execute ESLint
 - Run `task test:e2e` to execute Playwright E2E tests
-- Both MUST pass before considering the task complete
+- All three MUST pass before considering the task complete
+
+The lint step is non-negotiable: it enforces the keyboard / IME handling
+policy (see `.claude/rules/frontend-keyboard-input.md`). Skipping it
+silently re-introduces the IME bug class this rule was created to
+prevent.
 
 ### Test File Locations (Unit Tests)
 

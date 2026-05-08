@@ -1,31 +1,42 @@
-import { ButtonHTMLAttributes, ReactNode } from 'react'
-import styles from './Button.module.css'
+import type { ButtonHTMLAttributes, ReactNode } from 'react'
+
+type Variant = 'primary' | 'secondary' | 'danger' | 'outline' | 'ghost'
+type Size = 'sm' | 'md' | 'lg'
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'secondary' | 'danger' | 'outline' | 'ghost'
-  size?: 'sm' | 'md' | 'lg'
+  variant?: Variant
+  size?: Size
   icon?: ReactNode
   children?: ReactNode
 }
 
+const variantClass: Record<Variant, string> = {
+  primary: 'primary',
+  secondary: '',
+  danger: 'danger',
+  outline: '',
+  ghost: 'ghost',
+}
+
 export default function Button({
-  variant = 'primary',
+  variant = 'secondary',
   size = 'md',
   icon,
   children,
   className = '',
-  ...props
+  type = 'button',
+  ...rest
 }: ButtonProps) {
-  const classNames = [
-    styles.button,
-    styles[variant],
-    styles[size],
-    className,
-  ].filter(Boolean).join(' ')
-
+  const classes = ['btn']
+  const v = variantClass[variant]
+  if (v) classes.push(v)
+  if (size === 'sm') classes.push('sm')
+  if (size === 'lg') classes.push('lg')
+  if (!children) classes.push('icon')
+  if (className) classes.push(className)
   return (
-    <button className={classNames} {...props}>
-      {icon && <span className={styles.icon}>{icon}</span>}
+    <button type={type} className={classes.join(' ')} {...rest}>
+      {icon}
       {children && <span>{children}</span>}
     </button>
   )

@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/m-mizutani/gt"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
-	"github.com/secmon-lab/hecatoncheires/pkg/service/github"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
@@ -72,6 +72,7 @@ type mockSlackService struct {
 	listUserGroupsFn         func(ctx context.Context) ([]slack.UserGroup, error)
 	getUserGroupMembersFn    func(ctx context.Context, groupID string) ([]string, error)
 	postEphemeralFn          func(ctx context.Context, channelID string, userID string, text string) error
+	postMessageFn            func(ctx context.Context, channelID string, blocks []goslack.Block, text string) (string, error)
 	invitedChannelID         string
 	invitedUserIDs           []string
 	bookmarkChannelID        string
@@ -80,6 +81,8 @@ type mockSlackService struct {
 	ephemeralChannelID       string
 	ephemeralUserID          string
 	ephemeralText            string
+	postedChannelIDs         []string
+	postedTexts              []string
 }
 
 func (m *mockSlackService) ListJoinedChannels(ctx context.Context, teamID string) ([]slack.Channel, error) {
@@ -171,6 +174,11 @@ func (m *mockSlackService) GetTeamURL(ctx context.Context) (string, error) {
 }
 
 func (m *mockSlackService) PostMessage(ctx context.Context, channelID string, blocks []goslack.Block, text string) (string, error) {
+	m.postedChannelIDs = append(m.postedChannelIDs, channelID)
+	m.postedTexts = append(m.postedTexts, text)
+	if m.postMessageFn != nil {
+		return m.postMessageFn(ctx, channelID, blocks, text)
+	}
 	return "1234567890.123456", nil
 }
 
@@ -221,6 +229,14 @@ func (m *mockSlackService) PostEphemeral(ctx context.Context, channelID string, 
 		return m.postEphemeralFn(ctx, channelID, userID, text)
 	}
 	return nil
+}
+
+func (m *mockSlackService) PostEphemeralBlocks(_ context.Context, _ string, _ string, _ []goslack.Block, _ string) (string, error) {
+	return "ts-eph", nil
+}
+
+func (m *mockSlackService) GetPermalink(_ context.Context, channelID string, ts string) (string, error) {
+	return "https://slack.test/" + channelID + "/" + ts, nil
 }
 
 func (m *mockSlackService) GetUserGroupMembers(ctx context.Context, groupID string) ([]string, error) {

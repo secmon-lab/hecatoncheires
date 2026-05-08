@@ -44,10 +44,32 @@ func (x *Slack) SetAuthAPIForTest(api *MockSlackAuthAPI) {
 	x.authAPI = api
 }
 
-// NewGeminiForTest creates a Gemini config for testing purposes
-func NewGeminiForTest(projectID, location string) *Gemini {
-	return &Gemini{
-		projectID: projectID,
-		location:  location,
+// NewLLMForTest creates an LLM config for testing purposes.
+func NewLLMForTest(provider, model, openaiAPIKey, claudeAPIKey, geminiProjectID, geminiLocation string) *LLM {
+	return &LLM{
+		provider:        provider,
+		model:           model,
+		openaiAPIKey:    openaiAPIKey,
+		claudeAPIKey:    claudeAPIKey,
+		geminiProjectID: geminiProjectID,
+		geminiLocation:  geminiLocation,
+	}
+}
+
+// NewEmbeddingForTest creates an Embedding config for testing purposes.
+func NewEmbeddingForTest(geminiProjectID, geminiLocation, model string) *Embedding {
+	return &Embedding{
+		geminiProjectID: geminiProjectID,
+		geminiLocation:  geminiLocation,
+		model:           model,
+	}
+}
+
+// NewSentryForTest creates a Sentry config for testing.
+func NewSentryForTest(dsn, environment, release string) *Sentry {
+	return &Sentry{
+		dsn:         dsn,
+		environment: environment,
+		release:     release,
 	}
 }

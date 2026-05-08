@@ -94,6 +94,13 @@ type Service interface {
 	// PostEphemeral posts an ephemeral message visible only to the specified user in a channel.
 	// Uses chat.postEphemeral API. The message does not persist across reloads or sessions.
 	PostEphemeral(ctx context.Context, channelID string, userID string, text string) error
+
+	// PostEphemeralBlocks posts an ephemeral Block Kit message visible only to the specified user.
+	// Returns the message timestamp for later updates via response_url or chat.update.
+	PostEphemeralBlocks(ctx context.Context, channelID string, userID string, blocks []slack.Block, text string) (string, error)
+
+	// GetPermalink retrieves the public permalink to a specific message.
+	GetPermalink(ctx context.Context, channelID string, messageTS string) (string, error)
 }
 
 // UserGroup represents a Slack user group

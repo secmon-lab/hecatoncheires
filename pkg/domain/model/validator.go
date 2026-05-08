@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -24,6 +25,18 @@ func NewFieldValidator(schema *config.FieldSchema) *FieldValidator {
 // ValidateCaseFields validates field values for a Case and returns enriched values with Type injected from config.
 // The input map is not modified; a new map is returned with Type set on each FieldValue.
 func (v *FieldValidator) ValidateCaseFields(fieldValues map[string]FieldValue) (map[string]FieldValue, error) {
+	return v.validateCaseFields(fieldValues, false)
+}
+
+// ValidateCaseFieldsPartial is the partial-update variant: only the supplied
+// field values are type-checked, and missing required fields do NOT fail.
+// Use this for UpdateCase where the caller may submit a subset of fields and
+// the remaining values are preserved untouched on the existing Case.
+func (v *FieldValidator) ValidateCaseFieldsPartial(fieldValues map[string]FieldValue) (map[string]FieldValue, error) {
+	return v.validateCaseFields(fieldValues, true)
+}
+
+func (v *FieldValidator) validateCaseFields(fieldValues map[string]FieldValue, partial bool) (map[string]FieldValue, error) {
 	// Build a map of field definitions by ID for quick lookup
 	fieldDefMap := make(map[string]config.FieldDefinition)
 	for _, fd := range v.schema.Fields {
@@ -51,6 +64,10 @@ func (v *FieldValidator) ValidateCaseFields(fieldValues map[string]FieldValue) (
 			return nil, goerr.Wrap(err, "field validation failed",
 				goerr.V(FieldIDKey, fieldID))
 		}
+	}
+
+	if partial {
+		return result, nil
 	}
 
 	// Check for missing required fields
@@ -105,9 +122,18 @@ func (v *FieldValidator) validateText(fieldDef config.FieldDefinition, fv FieldV
 
 // validateNumber validates a number field value
 func (v *FieldValidator) validateNumber(fieldDef config.FieldDefinition, fv FieldValue) error {
-	switch fv.Value.(type) {
+	switch x := fv.Value.(type) {
 	case float64, int, int64, int32:
 		return nil
+	case json.Number:
+		// gqlgen feeds Any-typed numeric inputs as json.Number; accept them
+		// after confirming they parse.
+		if _, err := x.Float64(); err == nil {
+			return nil
+		}
+		return goerr.Wrap(ErrInvalidFieldType, "value must be number",
+			goerr.V(ExpectedTypeKey, types.FieldTypeNumber),
+			goerr.V(ActualTypeKey, fmt.Sprintf("%T", fv.Value)))
 	default:
 		return goerr.Wrap(ErrInvalidFieldType, "value must be number",
 			goerr.V(ExpectedTypeKey, types.FieldTypeNumber),

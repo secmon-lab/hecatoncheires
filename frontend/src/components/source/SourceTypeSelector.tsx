@@ -1,9 +1,8 @@
-import { Database, FileText, GitBranch, MessageSquare } from 'lucide-react'
 import Modal from '../Modal'
 import Button from '../Button'
 import { useTranslation } from '../../i18n'
 import { SOURCE_TYPE } from '../../constants/source'
-import styles from './source.module.css'
+import { IconNotion, IconSlack, IconGitHub } from '../Icons'
 
 interface SourceTypeSelectorProps {
   isOpen: boolean
@@ -11,70 +10,67 @@ interface SourceTypeSelectorProps {
   onSelect: (type: string) => void
 }
 
-interface SourceTypeOption {
-  type: string
-  name: string
-  description: string
-  icon: React.ReactNode
-}
-
 export default function SourceTypeSelector({ isOpen, onClose, onSelect }: SourceTypeSelectorProps) {
   const { t } = useTranslation()
 
-  const sourceTypes: SourceTypeOption[] = [
+  const sourceTypes = [
     {
       type: SOURCE_TYPE.NOTION_DB,
       name: t('sourceTypeNotionDB'),
       description: t('descSourceNotionDB'),
-      icon: <Database size={24} />,
+      icon: <IconNotion size={22} />,
     },
     {
       type: SOURCE_TYPE.NOTION_PAGE,
       name: t('sourceTypeNotionPage'),
       description: t('descSourceNotionPage'),
-      icon: <FileText size={24} />,
+      icon: <IconNotion size={22} />,
     },
     {
       type: SOURCE_TYPE.SLACK,
       name: t('sourceTypeSlack'),
       description: t('descSourceSlack'),
-      icon: <MessageSquare size={24} />,
+      icon: <IconSlack size={22} />,
     },
     {
       type: SOURCE_TYPE.GITHUB,
       name: t('sourceTypeGitHub'),
       description: t('descSourceGitHub'),
-      icon: <GitBranch size={24} />,
+      icon: <IconGitHub size={22} />,
     },
   ]
-
-  const handleSelect = (type: string) => {
-    onSelect(type)
-  }
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
       title={t('titleSelectSourceType')}
+      width={640}
       footer={
-        <Button variant="outline" onClick={onClose}>
+        <Button variant="ghost" onClick={onClose}>
           {t('btnCancel')}
         </Button>
       }
     >
-      <div className={styles.typeList}>
-        {sourceTypes.map((sourceType) => (
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(2, 1fr)',
+          gap: 10,
+        }}
+      >
+        {sourceTypes.map((s) => (
           <button
-            key={sourceType.type}
-            className={styles.typeCard}
-            onClick={() => handleSelect(sourceType.type)}
+            key={s.type}
+            type="button"
+            className="source-card"
+            onClick={() => onSelect(s.type)}
+            style={{ textAlign: 'left', fontFamily: 'inherit', color: 'inherit' }}
+            data-testid={`source-type-${s.type}`}
           >
-            <div className={styles.typeIcon}>{sourceType.icon}</div>
-            <div className={styles.typeInfo}>
-              <h3 className={styles.typeName}>{sourceType.name}</h3>
-              <p className={styles.typeDescription}>{sourceType.description}</p>
-            </div>
+            <div className="ic">{s.icon}</div>
+            <h4>{s.name}</h4>
+            <p>{s.description}</p>
           </button>
         ))}
       </div>

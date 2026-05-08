@@ -8,32 +8,38 @@ import (
 type Repository = Memory
 
 type Memory struct {
-	caseRepo    *caseRepository
-	action      *actionRepository
-	tokens      *tokenStore
-	slack       *slackRepository
-	slackUser   *slackUserRepository
-	source      *sourceRepository
-	knowledge   *knowledgeRepository
-	caseMessage *caseMessageRepository
-	memoryStore *memoryRepository
-	assistLog   *assistLogRepository
+	caseRepo      *caseRepository
+	action        *actionRepository
+	tokens        *tokenStore
+	slack         *slackRepository
+	slackUser     *slackUserRepository
+	source        *sourceRepository
+	caseMessage   *caseMessageRepository
+	actionMessage *actionMessageRepository
+	actionEvent   *actionEventRepository
+	actionStep    *actionStepRepository
+	assistLog     *assistLogRepository
+	caseDraft     *caseDraftRepository
+	agentSession  *agentSessionRepository
 }
 
 var _ interfaces.Repository = &Memory{}
 
 func New() *Memory {
 	return &Memory{
-		caseRepo:    newCaseRepository(),
-		action:      newActionRepository(),
-		tokens:      newTokenStore(),
-		slack:       newSlackRepository(),
-		slackUser:   newSlackUserRepository(),
-		source:      newSourceRepository(),
-		knowledge:   newKnowledgeRepository(),
-		caseMessage: newCaseMessageRepository(),
-		memoryStore: newMemoryRepository(),
-		assistLog:   newAssistLogRepository(),
+		caseRepo:      newCaseRepository(),
+		action:        newActionRepository(),
+		tokens:        newTokenStore(),
+		slack:         newSlackRepository(),
+		slackUser:     newSlackUserRepository(),
+		source:        newSourceRepository(),
+		caseMessage:   newCaseMessageRepository(),
+		actionMessage: newActionMessageRepository(),
+		actionEvent:   newActionEventRepository(),
+		actionStep:    newActionStepRepository(),
+		assistLog:     newAssistLogRepository(),
+		caseDraft:     newCaseDraftRepository(),
+		agentSession:  newAgentSessionRepository(),
 	}
 }
 
@@ -57,20 +63,32 @@ func (m *Memory) Source() interfaces.SourceRepository {
 	return m.source
 }
 
-func (m *Memory) Knowledge() interfaces.KnowledgeRepository {
-	return m.knowledge
-}
-
 func (m *Memory) CaseMessage() interfaces.CaseMessageRepository {
 	return m.caseMessage
 }
 
-func (m *Memory) Memory() interfaces.MemoryRepository {
-	return m.memoryStore
+func (m *Memory) ActionMessage() interfaces.ActionMessageRepository {
+	return m.actionMessage
+}
+
+func (m *Memory) ActionEvent() interfaces.ActionEventRepository {
+	return m.actionEvent
+}
+
+func (m *Memory) ActionStep() interfaces.ActionStepRepository {
+	return m.actionStep
 }
 
 func (m *Memory) AssistLog() interfaces.AssistLogRepository {
 	return m.assistLog
+}
+
+func (m *Memory) CaseDraft() interfaces.CaseDraftRepository {
+	return m.caseDraft
+}
+
+func (m *Memory) AgentSession() interfaces.AgentSessionRepository {
+	return m.agentSession
 }
 
 func (m *Memory) Close() error {

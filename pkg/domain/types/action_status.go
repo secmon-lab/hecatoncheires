@@ -1,8 +1,11 @@
 package types
 
-import "fmt"
-
-// ActionStatus represents the status of an action in a case
+// ActionStatus is the persisted identifier of an Action status. The set of
+// allowed values is no longer fixed at the type layer: it is defined per
+// workspace via TOML configuration and resolved through
+// `pkg/domain/model.ActionStatusSet`. The legacy constants below are kept
+// only as the IDs of the default fallback set so that existing data written
+// before configurable statuses (`"BACKLOG"`, `"TODO"`, ...) keeps working.
 type ActionStatus string
 
 const (
@@ -13,59 +16,7 @@ const (
 	ActionStatusCompleted  ActionStatus = "COMPLETED"
 )
 
-// AllActionStatuses returns all valid action statuses
-func AllActionStatuses() []ActionStatus {
-	return []ActionStatus{
-		ActionStatusBacklog,
-		ActionStatusTodo,
-		ActionStatusInProgress,
-		ActionStatusBlocked,
-		ActionStatusCompleted,
-	}
-}
-
-// IsValid checks if the action status is valid
-func (s ActionStatus) IsValid() bool {
-	switch s {
-	case ActionStatusBacklog,
-		ActionStatusTodo,
-		ActionStatusInProgress,
-		ActionStatusBlocked,
-		ActionStatusCompleted:
-		return true
-	default:
-		return false
-	}
-}
-
-// String returns the string representation of the action status
+// String returns the underlying string value.
 func (s ActionStatus) String() string {
 	return string(s)
-}
-
-// Emoji returns the emoji associated with the action status
-func (s ActionStatus) Emoji() string {
-	switch s {
-	case ActionStatusBacklog:
-		return "\U0001F4CB" // 📋
-	case ActionStatusTodo:
-		return "\U0001F4CC" // 📌
-	case ActionStatusInProgress:
-		return "\u25B6\uFE0F" // ▶️
-	case ActionStatusBlocked:
-		return "\U0001F6D1" // 🛑
-	case ActionStatusCompleted:
-		return "\u2705" // ✅
-	default:
-		return "\u2753" // ❓
-	}
-}
-
-// ParseActionStatus parses a string into an ActionStatus
-func ParseActionStatus(s string) (ActionStatus, error) {
-	status := ActionStatus(s)
-	if !status.IsValid() {
-		return "", fmt.Errorf("invalid action status: %s", s)
-	}
-	return status, nil
 }

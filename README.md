@@ -37,8 +37,27 @@ Hecatoncheires is a flexible project and case management system that adapts to y
 ### Prerequisites
 
 - Go 1.21+
-- Node.js and pnpm (for frontend)
+- Node.js 18+ (for frontend)
+- Corepack-managed pnpm (see below; the version is pinned via the `packageManager` field in `frontend/package.json`)
 - Google Cloud Firestore
+
+#### pnpm via Corepack
+
+This repo pins the pnpm version in `frontend/package.json` (`packageManager` field).
+Enable Corepack once on your machine and it will automatically install the right pnpm:
+
+```bash
+corepack enable
+```
+
+Do NOT install pnpm globally with `npm install -g pnpm` — that bypasses the pin
+and is the most common cause of the lockfile being unexpectedly rewritten when
+you run e2e or build commands.
+
+If you intentionally want to update dependencies, run `pnpm install` inside
+`frontend/` on its own and commit the resulting `pnpm-lock.yaml` change.
+Day-to-day commands (build, e2e, etc.) use `--frozen-lockfile` and will fail
+fast if the lockfile is out of sync rather than silently rewriting it.
 
 ### Building
 
@@ -68,12 +87,13 @@ Hecatoncheires includes end-to-end tests using Playwright to verify the complete
 **Run E2E tests:**
 
 ```bash
-# Install dependencies and run tests
+# Install dependencies (only when you want to update them)
 cd frontend
 pnpm install
 pnpm run test:e2e
 
-# Or use the task command from the project root
+# Or use the task command from the project root. This runner installs with
+# --frozen-lockfile and will refuse to silently rewrite pnpm-lock.yaml.
 task test:e2e
 ```
 

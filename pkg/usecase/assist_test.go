@@ -25,12 +25,12 @@ func TestAssistUseCase_BuildAssistSystemPrompt(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		// Create actions with and without DueDate
-		actionUC := usecase.NewActionUseCase(repo, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
 		dueDate := time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC)
-		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Investigate logs", "Check auth logs", []string{"U001"}, "", types.ActionStatusInProgress, &dueDate)
+		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Investigate logs", "Check auth logs", "U001", "", types.ActionStatusInProgress, &dueDate)
 		gt.NoError(t, err).Required()
 
-		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Update firewall", "Block suspicious IP", []string{}, "", types.ActionStatusTodo, nil)
+		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Update firewall", "Block suspicious IP", "", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
 		// Create workspace entry with assist prompt
@@ -40,7 +40,7 @@ func TestAssistUseCase_BuildAssistSystemPrompt(t *testing.T) {
 			AssistPrompt: "Check deadlines and follow up on pending items.",
 		})
 
-		assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil)
+		assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil, nil, nil, nil, nil, nil)
 		entry, err := registry.Get(testWorkspaceID)
 		gt.NoError(t, err).Required()
 
@@ -70,7 +70,7 @@ func TestAssistUseCase_BuildAssistSystemPrompt(t *testing.T) {
 			AssistPrompt: "Monitor this case.",
 		})
 
-		assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil)
+		assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil, nil, nil, nil, nil, nil)
 		entry, err := registry.Get(testWorkspaceID)
 		gt.NoError(t, err).Required()
 
@@ -83,7 +83,7 @@ func TestAssistUseCase_BuildAssistSystemPrompt(t *testing.T) {
 		gt.Value(t, strings.Contains(prompt, "## Actions")).Equal(false)
 	})
 
-	t.Run("renders template with assist logs and memories", func(t *testing.T) {
+	t.Run("renders template with assist logs", func(t *testing.T) {
 		repo := memory.New()
 		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
@@ -102,22 +102,13 @@ func TestAssistUseCase_BuildAssistSystemPrompt(t *testing.T) {
 		_, err = repo.AssistLog().Create(ctx, testWorkspaceID, c.ID, assistLog)
 		gt.NoError(t, err).Required()
 
-		// Create a memory
-		mem := &model.Memory{
-			CaseID:    c.ID,
-			Claim:     "User prefers email notifications",
-			Embedding: make([]float32, 768),
-		}
-		_, err = repo.Memory().Create(ctx, testWorkspaceID, c.ID, mem)
-		gt.NoError(t, err).Required()
-
 		registry := model.NewWorkspaceRegistry()
 		registry.Register(&model.WorkspaceEntry{
 			Workspace:    model.Workspace{ID: testWorkspaceID, Name: "Test Workspace"},
 			AssistPrompt: "Assist this case.",
 		})
 
-		assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil)
+		assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil, nil, nil, nil, nil, nil)
 		entry, err := registry.Get(testWorkspaceID)
 		gt.NoError(t, err).Required()
 
@@ -128,7 +119,6 @@ func TestAssistUseCase_BuildAssistSystemPrompt(t *testing.T) {
 		gt.Value(t, strings.Contains(prompt, "Checked deadlines")).Equal(true)
 		gt.Value(t, strings.Contains(prompt, "Two actions were overdue")).Equal(true)
 		gt.Value(t, strings.Contains(prompt, "Follow up next week")).Equal(true)
-		gt.Value(t, strings.Contains(prompt, "User prefers email notifications")).Equal(true)
 	})
 }
 
@@ -148,7 +138,7 @@ func TestAssistUseCase_BuildAssistSystemPrompt_Language(t *testing.T) {
 			AssistLanguage: "Japanese",
 		})
 
-		assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil)
+		assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil, nil, nil, nil, nil, nil)
 		entry, err := registry.Get(testWorkspaceID)
 		gt.NoError(t, err).Required()
 
@@ -173,7 +163,7 @@ func TestAssistUseCase_BuildAssistSystemPrompt_Language(t *testing.T) {
 			AssistPrompt: "Check deadlines.",
 		})
 
-		assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil)
+		assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil, nil, nil, nil, nil, nil)
 		entry, err := registry.Get(testWorkspaceID)
 		gt.NoError(t, err).Required()
 
@@ -195,7 +185,7 @@ func TestAssistUseCase_RunAssist_SkipsWorkspaceWithoutAssistConfig(t *testing.T)
 		// AssistPrompt is empty - should be skipped
 	})
 
-	assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil)
+	assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil, nil, nil, nil, nil, nil)
 	err := assistUC.RunAssist(ctx, usecase.AssistOption{})
 	gt.NoError(t, err)
 }
@@ -206,7 +196,7 @@ func TestAssistUseCase_RunAssist_DefaultOptions(t *testing.T) {
 
 	// Empty registry - no workspaces to process
 	registry := model.NewWorkspaceRegistry()
-	assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil)
+	assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil, nil, nil, nil, nil, nil)
 
 	err := assistUC.RunAssist(ctx, usecase.AssistOption{})
 	gt.NoError(t, err)
@@ -224,7 +214,7 @@ func TestAssistUseCase_RunAssist_WorkspaceFilter(t *testing.T) {
 		Workspace: model.Workspace{ID: "ws-2", Name: "Workspace 2"},
 	})
 
-	assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil)
+	assistUC := usecase.NewAssistUseCase(repo, registry, nil, nil, nil, nil, nil, nil, nil)
 
 	// Filter to non-existent workspace should fail
 	err := assistUC.RunAssist(ctx, usecase.AssistOption{WorkspaceID: "ws-nonexistent"})

@@ -18,7 +18,8 @@ func cmdAssist() *cli.Command {
 	var messageCount int
 	var appCfg config.AppConfig
 	var repoCfg config.Repository
-	var geminiCfg config.Gemini
+	var llmCfg config.LLM
+	var embCfg config.Embedding
 
 	flags := []cli.Flag{
 		&cli.StringFlag{
@@ -52,7 +53,8 @@ func cmdAssist() *cli.Command {
 	// Add shared config flags
 	flags = append(flags, appCfg.Flags()...)
 	flags = append(flags, repoCfg.Flags()...)
-	flags = append(flags, geminiCfg.Flags()...)
+	flags = append(flags, llmCfg.Flags()...)
+	flags = append(flags, embCfg.Flags()...)
 
 	return &cli.Command{
 		Name:    "assist",
@@ -77,11 +79,25 @@ func cmdAssist() *cli.Command {
 				}
 			}()
 
-			// Initialize Gemini LLM client (required)
-			llmClient, err := geminiCfg.Configure(ctx)
-			if err != nil {
-				return goerr.Wrap(err, "failed to initialize Gemini client")
+			// Initialize LLM client (required)
+			if !llmCfg.IsEnabled() {
+				return goerr.New("--llm-provider is required for assist")
 			}
+			llmClient, err := llmCfg.NewClient(ctx)
+			if err != nil {
+				return goerr.Wrap(err, "failed to initialize LLM client")
+			}
+			logging.Default().Info("LLM client enabled", logAttrsToArgs(llmCfg.LogAttrs())...)
+
+			// Initialize Embedding client (required)
+			if !embCfg.IsEnabled() {
+				return goerr.New("--embedding-gemini-project-id is required for assist")
+			}
+			embedClient, err := embCfg.NewClient(ctx)
+			if err != nil {
+				return goerr.Wrap(err, "failed to initialize embedding client")
+			}
+			logging.Default().Info("Embedding client enabled", logAttrsToArgs(embCfg.LogAttrs())...)
 
 			// Initialize Slack service (required)
 			if slackBotToken == "" {
@@ -94,12 +110,9 @@ func cmdAssist() *cli.Command {
 
 			uc := usecase.New(repo, registry,
 				usecase.WithLLMClient(llmClient),
+				usecase.WithEmbedClient(embedClient),
 				usecase.WithSlackService(slackSvc),
 			)
-
-			if uc.Assist == nil {
-				return goerr.New("assist use case is not available (LLM client and Slack service are both required)")
-			}
 
 			logging.Default().Info("Starting assist",
 				"workspace", workspaceID,

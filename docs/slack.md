@@ -53,6 +53,8 @@ Slack OAuth is used for user authentication via OpenID Connect (OIDC). The syste
      - `openid` (required for OpenID Connect)
      - `profile` (to get user's name and basic info)
      - `email` (to get user's email address)
+     - `search:read` (optional — required only when the AI agent's `slack__search_messages` tool is enabled. The Slack `search.messages` API is User-token-only; bot tokens cannot call it. Configure `HECATONCHEIRES_SLACK_USER_OAUTH_TOKEN` and re-install the app after adding this scope.)
+     - `admin.conversations:write` (optional — required only for cross-workspace channel connect on Enterprise Grid; same User OAuth Token also drives `search:read` when both are needed)
 
    - **Bot Token Scopes**:
      - `bookmarks:write` (to add bookmarks to case channels)
@@ -180,6 +182,11 @@ When an action is created in Hecatoncheires, a notification message is automatic
    - **In Progress**: Change the action status to IN_PROGRESS
    - **Completed**: Change the action status to COMPLETED
 4. After a button click, the Slack message is updated to reflect the new state
+
+In addition, ActionStep CRUD events (add / remove / done / reopen /
+rename) post a context-block thread reply to the Action's primary Slack
+message — see [docs/action-steps.md](./action-steps.md) for the full
+list of events and notification text.
 
 ### Interactivity Setup
 
@@ -363,7 +370,7 @@ When a case is updated and its name changes:
 For private cases, additional behavior applies:
 
 - The Slack channel is created as a **private channel**, restricting visibility to invited members only
-- Channel member IDs are synced to the case and used for **access control** — only channel members can view the case, its actions, knowledges, and assist logs via the API and UI
+- Channel member IDs are synced to the case and used for **access control** — only channel members can view the case, its actions, and assist logs via the API and UI
 - Member sync happens automatically when `member_joined_channel` or `member_left_channel` events are received, or manually via the **Sync** button on the case detail page
 - Bot users are automatically filtered out from the stored member list
 
@@ -620,7 +627,7 @@ Follow these steps to set up both authentication and webhooks:
 
 2. **Configure OAuth** (see [Configure OAuth & Permissions](#2-configure-oauth--permissions))
    - Set redirect URL: `${BASE_URL}/api/auth/callback`
-   - Add user scopes: `openid`, `profile`, `email`
+   - Add user scopes: `openid`, `profile`, `email` (always); plus `search:read` when enabling the agent's Slack message search tool, and `admin.conversations:write` when enabling Enterprise Grid cross-workspace channel connect.
    - Add bot scopes: `bookmarks:write`, `channels:history`, `channels:manage`, `channels:read`, `chat:write`, `commands`, `files:read`, `groups:read`, `groups:write`, `team:read`, `usergroups:read`, `users:read`, `users:read.email`
 
 3. **Configure Events API** (see [Events API Setup](#events-api-setup))
@@ -988,10 +995,11 @@ slack_channels/{channelID}
 ### Future Features
 
 - GraphQL queries for message retrieval
-- Message search functionality
 - Threaded conversation display
 - User mention notifications
 - Message reactions support
+
+> **Note on agent message search**: workspace-wide Slack message search is implemented as the AI agent tool `slack__search_messages` (in `pkg/agent/tool/slack`) and uses the Slack `search.messages` API. That API is **User-token-only**, so a Slack User OAuth Token (`xoxp-...`) with the `search:read` scope is required. Configure it via `HECATONCHEIRES_SLACK_USER_OAUTH_TOKEN`. When the User OAuth Token is not configured, the search tool is silently omitted from the agent's tool set.
 
 ---
 
@@ -1027,13 +1035,17 @@ These scopes are required for the Bot User OAuth Token (`xoxb-...`):
 
 ### User Token Scopes
 
-These scopes are required for user authentication via OpenID Connect:
+These scopes apply to the User OAuth Token (`xoxp-...`):
 
-| Scope | Purpose | Code Location |
-|-------|---------|---------------|
-| `openid` | OpenID Connect authentication flow | `pkg/usecase/auth.go` |
-| `profile` | Access user's name | `pkg/usecase/auth.go` |
-| `email` | Access user's email address | `pkg/usecase/auth.go` |
+| Scope | Required for | Purpose | Code Location |
+|-------|--------------|---------|---------------|
+| `openid` | OIDC sign-in (always) | OpenID Connect authentication flow | `pkg/usecase/auth.go` |
+| `profile` | OIDC sign-in (always) | Access user's name | `pkg/usecase/auth.go` |
+| `email` | OIDC sign-in (always) | Access user's email address | `pkg/usecase/auth.go` |
+| `search:read` | Agent message search (optional) | `search.messages` — workspace-wide message search backing `slack__search_messages` agent tool | `pkg/agent/tool/slack/search_client.go` |
+| `admin.conversations:write` | Enterprise Grid cross-workspace channel connect (optional) | `admin.conversations.setTeams` — extends a channel to additional workspaces | `pkg/service/slack/admin_client.go` |
+
+> The OIDC sign-in scopes are configured on the per-user OAuth flow; the bot/admin/search scopes are configured under **OAuth & Permissions → User Token Scopes** and require an app re-install when added. The same User OAuth Token (`HECATONCHEIRES_SLACK_USER_OAUTH_TOKEN`) backs both the search and admin clients.
 
 ### Event Subscriptions
 

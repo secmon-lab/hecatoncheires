@@ -60,6 +60,26 @@ const (
 	MsgActionNew     // "New action: %s"
 	MsgActionUpdated // "Action updated: %s"
 
+	// Action interactive controls (Slack Block Kit)
+	MsgActionOpenInWeb
+	MsgActionStatusPlaceholder
+	MsgActionAssigneePlaceholder
+
+	// Action change notifications (Slack thread)
+	MsgActionChangeTitle              // ":pencil2: %s changed title: %q -> %q"
+	MsgActionChangeStatus             // ":arrows_counterclockwise: %s changed status: %s -> %s"
+	MsgActionChangeAssigneeAssigned   // ":bust_in_silhouette: %s assigned %s"
+	MsgActionChangeAssigneeUnassigned // ":bust_in_silhouette: %s unassigned %s"
+	MsgActionChangeAssigneeReplaced   // ":bust_in_silhouette: %s changed assignee: %s -> %s"
+	MsgActionChangeArchived           // ":file_cabinet: %s archived action %q"
+	MsgActionChangeUnarchived         // ":outbox_tray: %s unarchived action %q"
+	MsgActionChangeActorSystem        // "system"
+	MsgActionStepAdded                // ":heavy_plus_sign: %s added step %q"
+	MsgActionStepRemoved              // ":heavy_minus_sign: %s removed step %q"
+	MsgActionStepDone                 // ":white_check_mark: %s completed step %q"
+	MsgActionStepReopened             // ":arrow_backward: %s reopened step %q"
+	MsgActionStepRenamed              // ":pencil2: %s renamed step %q -> %q"
+
 	// Agent
 	MsgAgentThinking
 	MsgAgentAnalyzing
@@ -69,11 +89,6 @@ const (
 	MsgAgentOnIt
 	MsgAgentError
 	MsgAgentSessionInfo
-
-	// Knowledge
-	MsgKnowledgeHeader // "Knowledge: %s"
-	MsgKnowledgeSource
-	MsgKnowledgeLink
 
 	// Bookmark
 	MsgBookmarkOpenCase
@@ -91,11 +106,36 @@ const (
 	MsgFieldPrivateCase
 	MsgFieldPrivateCaseDesc
 
+	// Case assignees field
+	MsgFieldCaseAssignees
+
 	// Errors
 	MsgErrOpenDialog
 	MsgErrWorkspaceSelection
 	MsgErrCreateCase
 	MsgErrEditCase
+
+	// Command choice modal (case channel /cmd without subcommand)
+	MsgModalCommandChoiceTitle
+	MsgFieldCommandChoice
+	MsgChoiceUpdateCase
+	MsgChoiceCreateAction
+
+	// Action creation modal
+	MsgModalCreateActionTitle
+	MsgModalCreateActionSubmit
+	MsgFieldAction // "Action" label
+	MsgFieldActionTitle
+	MsgFieldActionTitlePlaceholder
+	MsgFieldActionDescription
+	MsgFieldActionDescPlaceholder
+	MsgFieldActionAssignee
+	MsgFieldActionStatusLabel
+	MsgFieldActionDueDate
+
+	// Errors related to commands
+	MsgErrUnknownSubcommand // "Unknown subcommand: %s. Available: update, action."
+	MsgErrCreateAction      // "Failed to create action. Please try again."
 
 	msgKeyCount // sentinel for validation
 )

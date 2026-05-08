@@ -1,4 +1,6 @@
+import Select from 'react-select'
 import { useTranslation } from '../../i18n'
+import { buildSelectStyles, portalProps } from '../selectStyles'
 import styles from './FieldComponents.module.css'
 
 interface SelectOption {
@@ -36,6 +38,8 @@ export default function SelectField({
 }: SelectFieldProps) {
   const { t } = useTranslation()
   const selectedOption = options.find((opt) => opt.id === value)
+  const rsOptions = options.map((o) => ({ value: o.id, label: o.name }))
+  const rsValue = selectedOption ? { value: selectedOption.id, label: selectedOption.name } : null
 
   return (
     <div className={styles.field}>
@@ -44,20 +48,19 @@ export default function SelectField({
         {required && <span className={styles.required}>*</span>}
       </label>
       {description && <p className={styles.description}>{description}</p>}
-      <select
-        id={fieldId}
-        className={`${styles.select} ${error ? styles.inputError : ''}`}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        disabled={disabled}
-      >
-        <option value="">{t('placeholderSelect')}</option>
-        {options.map((option) => (
-          <option key={option.id} value={option.id}>
-            {option.name}
-          </option>
-        ))}
-      </select>
+      <Select
+        inputId={fieldId}
+        aria-label={label}
+        options={rsOptions}
+        value={rsValue}
+        isDisabled={disabled}
+        isClearable={!required}
+        placeholder={t('placeholderSelect')}
+        classNamePrefix="rs"
+        {...portalProps}
+        styles={buildSelectStyles({ error: !!error })}
+        onChange={(opt: any) => onChange(opt ? opt.value : '')}
+      />
       {showMetadata && selectedOption?.metadata && (() => {
         const meta = typeof selectedOption.metadata === 'string'
           ? (() => { try { return JSON.parse(selectedOption.metadata) } catch { return null } })()

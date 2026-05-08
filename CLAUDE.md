@@ -18,6 +18,7 @@ Hecatoncheires is an AI-native project/case management platform built with Go an
 - `go build` - Build the main binary
 - `go test ./...` - Run all tests
 - `go test ./pkg/path/to/package` - Run tests for specific package
+- `task lint:frontend` - Run ESLint on the frontend (or `pnpm lint` inside `frontend/`)
 
 ### Code Generation
 - `go tool gqlgen generate` - Generate GraphQL resolvers and types from schema
@@ -34,6 +35,34 @@ Hecatoncheires is an AI-native project/case management platform built with Go an
 - **ALWAYS use `errors.Is(err, targetErr)` or `errors.As(err, &target)` for error type checking**
 - Error discrimination must be done by error types, not by parsing error messages
 - **Non-fatal errors (errors that don't require rollback or propagation) MUST be handled via `errutil.Handle(ctx, err, "description")`** — never use raw `logger.Error` or describe error handling as "log only". `errutil.Handle` is the project's standard mechanism for non-fatal error handling
+
+### Logging
+- **Never call `slog.Info()`, `slog.Error()`, `slog.Debug()`, `slog.Warn()` or other global slog logger functions directly.** Always obtain a logger via `logging.From(ctx)` from `pkg/utils/logging/`
+- Attribute constructors (`slog.String()`, `slog.Any()`, `slog.Int64()`, etc.) are fine — use them as-is
+
+### Resource Cleanup
+- **ALWAYS use `safe.Close(ctx, closer)` from `pkg/utils/safe`** to close `io.Closer` resources
+- **NEVER use `_ = x.Close()` or bare `x.Close()`** — use `safe.Close` instead for nil-safe, error-logged cleanup
+
+### Background Goroutines
+- Background goroutines launch via `pkg/utils/async.Dispatch` / `RunParallel`, never raw `go func(){...}()`. Those helpers wrap panic recovery, logger context propagation, and error reporting
+- Tests that exercise async tails must call `async.Wait()` before asserting on side effects — do not rely on `time.Sleep`
+
+### Implementation Completeness
+- **NEVER leave incomplete implementations, TODOs, or placeholder code**
+- **NEVER skip implementation because it's complex or lengthy**
+- **ALWAYS complete the full implementation in one go**
+- If a task seems too complex, break it down into smaller steps, but complete ALL steps
+- Long code is acceptable — incomplete code is NOT
+
+### Multi-Instance Safety (Stateless Design)
+- **The application is designed to run as multiple concurrent instances** (horizontal scaling). Any design that assumes single-instance will break in production
+- **NEVER hold cross-request state in process memory.** State that must survive across separate requests, goroutines that originated elsewhere, or instance boundaries MUST be persisted to a shared backend (Firestore / GCS / Pub/Sub)
+- **Allowed in-memory state**: only within a single continuous processing flow (e.g. variables within one HTTP request, one goroutine's local variables, one WebSocket connection's live buffer for the duration of that connection). As soon as the flow ends, the state must be gone or persisted
+- **Forbidden patterns**:
+  - In-memory registry/map keyed by ID that other requests look up (e.g. `map[SessionID]*Handler` at package level)
+  - Singleton caches of business data without a shared backend
+  - Cross-goroutine coordination via channels at package scope
 
 ### Testing Best Practices
 - ALWAYS write tests for ALL code you create. This is NON-NEGOTIABLE.
@@ -88,6 +117,11 @@ The application follows Domain-Driven Design (DDD) with clean architecture:
 - Development mode: Hot reload on port 5173
 - Production mode: Served from embedded files
 
+##### pnpm version & lockfile policy
+- The pnpm version is pinned in `frontend/package.json` (`packageManager` field). Use Corepack (`corepack enable`) so the local pnpm matches the pin; do NOT install pnpm globally
+- All non-interactive entry points (CI, `frontend/scripts/e2e.sh`, the Dockerfile) MUST install with `--frozen-lockfile`. Never invoke a bare `pnpm install` from a script — it silently rewrites `pnpm-lock.yaml` on version/peer drift
+- `pnpm-lock.yaml` is updated only by an explicit, manual `pnpm install` inside `frontend/`. If `--frozen-lockfile` fails, investigate the drift (pnpm version mismatch, deliberate `package.json` change) — do not just re-run with `pnpm install` to "fix" it
+
 ##### Frontend CSS Styling Guidelines
 **NEVER hardcode color values, spacing, or sizes in CSS files.** Always use CSS variables defined in `frontend/src/styles/global.css`.
 
@@ -121,6 +155,9 @@ border: 1px solid var(--border-default);
 padding: var(--spacing-md-lg) var(--spacing-md);
 right: 1.25rem;
 ```
+
+##### Keyboard & IME Input — MANDATORY
+**Any keyboard handler that triggers a destructive action on Enter (save, submit, mode change, navigation) MUST guard against IME composition** using `isImeComposing` from `frontend/src/utils/keyboard.ts`. CJK users press Enter to confirm IME conversions — un-guarded handlers silently corrupt their input. Never write `if (e.key === 'Enter') { ...side effect... }` without the guard. See `.claude/rules/frontend-keyboard-input.md` for full details.
 
 ##### Internationalization (i18n) — MANDATORY
 **All user-facing text in both frontend and backend MUST use the i18n system. Hardcoding strings is prohibited.**
@@ -185,7 +222,10 @@ The application is configured via CLI flags or environment variables:
 
 - `HECATONCHEIRES_ADDR` - HTTP server address (default: `:8080`)
 - `HECATONCHEIRES_GRAPHIQL` - Enable GraphiQL playground (default: `true`)
+- `HECATONCHEIRES_CLOUD_STORAGE_BUCKET` - Cloud Storage bucket for agent History/Trace persistence (required when Slack is wired). See `docs/agent-session.md`.
+- `HECATONCHEIRES_CLOUD_STORAGE_PREFIX` - Optional object key prefix within the Cloud Storage bucket
 - Logger configuration (format, level, output destination)
+- Sentry (optional) - `HECATONCHEIRES_SENTRY_DSN` enables Sentry error reporting via `errutil.Handle`. Companion vars: `HECATONCHEIRES_SENTRY_ENV`, `HECATONCHEIRES_SENTRY_RELEASE`. See `docs/config.md` § Observability (Sentry).
 
 ## Testing
 
@@ -222,7 +262,13 @@ When making changes, before finishing the task, always:
 - Run `golangci-lint run ./...` to check lint error
 - Run `gosec -exclude-generated -quiet ./...` to check security issue
 - Run `zenv go test ./...` to ensure ALL tests pass
-- If frontend files were changed: Run `pnpm test` in `frontend/` to execute Vitest unit tests
+- **NEVER run `go build` to verify code.** Use `go vet ./...` instead to check for compile errors
+- **MANDATORY whenever any file under `frontend/` changes**:
+  - Run `pnpm test` in `frontend/` to execute Vitest unit tests
+  - Run `pnpm lint` in `frontend/` to execute ESLint
+  - Both MUST pass before declaring the task complete. Do not skip lint
+    even for "trivial" changes — the keyboard / IME policy is enforced
+    here and silent regressions are exactly what lint is for
 - Verify test coverage for your changes - EVERY new function/method MUST be tested
 
 ### Language
@@ -233,6 +279,9 @@ All comment and character literal in source code must be in English
 
 - PR titles and descriptions (body) must be written in English
 - Commit messages must be written in English
+- **Commit messages must be a single line.** No body paragraphs. State the change in one sentence. Explanation goes in the PR description, not the commit
+- Follow Semantic Commit format: `<type>: <subject>` (types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `ci`, `style`, `perf`)
+- Keep PR titles short (under 70 characters); use the body for details
 
 ### Testing
 

@@ -43,7 +43,7 @@ func (uc *ActionUseCase) ListOpenCaseActions(ctx context.Context, workspaceID st
 		caseIDs[i] = c.ID
 	}
 
-	actionsByCase, err := uc.repo.Action().GetByCases(ctx, workspaceID, caseIDs)
+	actionsByCase, err := uc.repo.Action().GetByCases(ctx, workspaceID, caseIDs, interfaces.ActionListOptions{})
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to get actions for open cases")
 	}

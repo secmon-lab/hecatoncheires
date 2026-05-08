@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"text/template"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/pelletier/go-toml/v2"
@@ -15,12 +16,23 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-var fieldIDPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+// fieldIDPattern is the validation pattern for Field IDs and Option IDs.
+// It allows lowercase ASCII letters, digits, and underscores, and must start
+// with a letter. This restriction lets template authors reference values via
+// dot notation (e.g., {{.Fields.risk_level}}), which Go's text/template only
+// supports for valid Go identifiers.
+var fieldIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
+// workspaceIDPattern is the validation pattern for Workspace IDs.
+// Workspace IDs are used in Slack channel names and other infrastructure
+// identifiers, so the legacy hyphen-separated form is preserved.
+var workspaceIDPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 // WorkspaceBaseConfig represents the [workspace] section in a TOML config
 type WorkspaceBaseConfig struct {
-	ID   string `toml:"id"`
-	Name string `toml:"name"`
+	ID          string `toml:"id"`
+	Name        string `toml:"name"`
+	Description string `toml:"description"` // Human-readable description used to disambiguate workspaces (especially for AI-side workspace estimation)
 }
 
 // SlackInviteSection represents the [slack.invite] section in a TOML config
@@ -31,9 +43,10 @@ type SlackInviteSection struct {
 
 // SlackSection represents the [slack] section in a TOML config
 type SlackSection struct {
-	ChannelPrefix string             `toml:"channel_prefix"`
-	TeamID        string             `toml:"team_id"`
-	Invite        SlackInviteSection `toml:"invite"`
+	ChannelPrefix   string             `toml:"channel_prefix"`
+	TeamID          string             `toml:"team_id"`
+	Invite          SlackInviteSection `toml:"invite"`
+	WelcomeMessages []string           `toml:"welcome_messages"`
 }
 
 // CompileSection represents the [compile] section in a TOML config
@@ -56,20 +69,41 @@ type AppConfig struct {
 	Slack     SlackSection        `toml:"slack"`
 	Compile   CompileSection      `toml:"compile"`
 	Assist    AssistSection       `toml:"assist"`
+	Action    *ActionSection      `toml:"action"`
+}
+
+// ActionSection represents the [action] section in a TOML config.
+// When omitted (nil), the workspace inherits the default action status set.
+type ActionSection struct {
+	Initial string                  `toml:"initial"`
+	Closed  []string                `toml:"closed"`
+	Status  []ActionStatusConfigRow `toml:"status"`
+}
+
+// ActionStatusConfigRow represents a single [[action.status]] entry.
+type ActionStatusConfigRow struct {
+	ID          string `toml:"id"`
+	Name        string `toml:"name"`
+	Description string `toml:"description"`
+	Color       string `toml:"color"`
+	Emoji       string `toml:"emoji"`
 }
 
 // WorkspaceConfig represents a fully resolved workspace configuration
 type WorkspaceConfig struct {
-	ID                 string
-	Name               string
-	SlackChannelPrefix string
-	SlackTeamID        string
-	SlackInviteUsers   []string
-	SlackInviteGroups  []string
-	FieldSchema        *domainConfig.FieldSchema
-	CompilePrompt      string
-	AssistPrompt       string
-	AssistLanguage     string
+	ID                   string
+	Name                 string
+	Description          string
+	SlackChannelPrefix   string
+	SlackTeamID          string
+	SlackInviteUsers     []string
+	SlackInviteGroups    []string
+	SlackWelcomeMessages []string
+	FieldSchema          *domainConfig.FieldSchema
+	ActionStatusSet      *model.ActionStatusSet
+	CompilePrompt        string
+	AssistPrompt         string
+	AssistLanguage       string
 }
 
 // Labels represents entity display labels
@@ -91,7 +125,7 @@ type FieldOption struct {
 // Validate checks if the FieldOption is valid
 func (o *FieldOption) Validate(fieldID string) error {
 	if !fieldIDPattern.MatchString(o.ID) {
-		return goerr.Wrap(ErrInvalidFieldID, "option ID must match pattern ^[a-z0-9]+(-[a-z0-9]+)*$",
+		return goerr.Wrap(ErrInvalidFieldID, "option ID must match pattern ^[a-z][a-z0-9_]*$",
 			goerr.V(FieldIDKey, fieldID),
 			goerr.V(OptionIDKey, o.ID))
 	}
@@ -117,7 +151,7 @@ type FieldDefinition struct {
 func (f *FieldDefinition) Validate() error {
 	// Check field ID format
 	if !fieldIDPattern.MatchString(f.ID) {
-		return goerr.Wrap(ErrInvalidFieldID, "field ID must match pattern ^[a-z0-9]+(-[a-z0-9]+)*$",
+		return goerr.Wrap(ErrInvalidFieldID, "field ID must match pattern ^[a-z][a-z0-9_]*$",
 			goerr.V(FieldIDKey, f.ID))
 	}
 
@@ -179,7 +213,33 @@ func (a *AppConfig) Validate() error {
 		fieldIDs[field.ID] = true
 	}
 
+	// [action] is optional. When supplied, build the ActionStatusSet eagerly so
+	// schema errors surface at startup.
+	if _, err := a.resolveActionStatusSet(); err != nil {
+		return goerr.Wrap(err, "invalid [action] section")
+	}
+
 	return nil
+}
+
+// resolveActionStatusSet returns the ActionStatusSet implied by the [action]
+// section, or the default set when [action] is omitted.
+func (a *AppConfig) resolveActionStatusSet() (*model.ActionStatusSet, error) {
+	if a.Action == nil {
+		return model.DefaultActionStatusSet(), nil
+	}
+
+	defs := make([]model.ActionStatusDefinition, 0, len(a.Action.Status))
+	for _, row := range a.Action.Status {
+		defs = append(defs, model.ActionStatusDefinition{
+			ID:          row.ID,
+			Name:        row.Name,
+			Description: row.Description,
+			Color:       row.Color,
+			Emoji:       row.Emoji,
+		})
+	}
+	return model.NewActionStatusSet(a.Action.Initial, a.Action.Closed, defs)
 }
 
 // LoadFieldSchema loads the field schema configuration from a TOML file
@@ -296,7 +356,7 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 	}
 
 	// Validate workspace ID
-	if !fieldIDPattern.MatchString(wsID) || len(wsID) > 63 {
+	if !workspaceIDPattern.MatchString(wsID) || len(wsID) > 63 {
 		return nil, goerr.Wrap(ErrInvalidWorkspaceID,
 			"workspace ID must match ^[a-z0-9]+(-[a-z0-9]+)*$ and be at most 63 characters",
 			goerr.V(WorkspaceIDKey, wsID),
@@ -310,17 +370,39 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 		slackPrefix = wsID
 	}
 
+	// Validate welcome message templates eagerly so misconfigurations are
+	// caught at startup rather than at the first case creation.
+	for i, msg := range appCfg.Slack.WelcomeMessages {
+		if _, parseErr := template.New("welcome").Parse(msg); parseErr != nil {
+			return nil, goerr.Wrap(ErrInvalidWelcomeMessage,
+				"failed to parse Slack welcome message template",
+				goerr.V(ConfigPathKey, path),
+				goerr.V("index", i),
+				goerr.V("template", msg),
+				goerr.V("parse_error", parseErr.Error()),
+			)
+		}
+	}
+
+	statusSet, err := appCfg.resolveActionStatusSet()
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to resolve action status set", goerr.V(ConfigPathKey, path))
+	}
+
 	return &WorkspaceConfig{
-		ID:                 wsID,
-		Name:               wsName,
-		SlackChannelPrefix: slackPrefix,
-		SlackTeamID:        appCfg.Slack.TeamID,
-		SlackInviteUsers:   appCfg.Slack.Invite.Users,
-		SlackInviteGroups:  appCfg.Slack.Invite.Groups,
-		FieldSchema:        appCfg.ToDomainFieldSchema(),
-		CompilePrompt:      appCfg.Compile.Prompt,
-		AssistPrompt:       appCfg.Assist.Prompt,
-		AssistLanguage:     appCfg.Assist.Language,
+		ID:                   wsID,
+		Name:                 wsName,
+		Description:          appCfg.Workspace.Description,
+		SlackChannelPrefix:   slackPrefix,
+		SlackTeamID:          appCfg.Slack.TeamID,
+		SlackInviteUsers:     appCfg.Slack.Invite.Users,
+		SlackInviteGroups:    appCfg.Slack.Invite.Groups,
+		SlackWelcomeMessages: appCfg.Slack.WelcomeMessages,
+		FieldSchema:          appCfg.ToDomainFieldSchema(),
+		ActionStatusSet:      statusSet,
+		CompilePrompt:        appCfg.Compile.Prompt,
+		AssistPrompt:         appCfg.Assist.Prompt,
+		AssistLanguage:       appCfg.Assist.Language,
 	}, nil
 }
 
@@ -350,17 +432,20 @@ func (a *AppConfig) Configure(c *cli.Command) ([]*WorkspaceConfig, *model.Worksp
 	for _, wc := range workspaceConfigs {
 		registry.Register(&model.WorkspaceEntry{
 			Workspace: model.Workspace{
-				ID:   wc.ID,
-				Name: wc.Name,
+				ID:          wc.ID,
+				Name:        wc.Name,
+				Description: wc.Description,
 			},
-			FieldSchema:        wc.FieldSchema,
-			SlackChannelPrefix: wc.SlackChannelPrefix,
-			SlackTeamID:        wc.SlackTeamID,
-			SlackInviteUsers:   wc.SlackInviteUsers,
-			SlackInviteGroups:  wc.SlackInviteGroups,
-			CompilePrompt:      wc.CompilePrompt,
-			AssistPrompt:       wc.AssistPrompt,
-			AssistLanguage:     wc.AssistLanguage,
+			FieldSchema:          wc.FieldSchema,
+			ActionStatusSet:      wc.ActionStatusSet,
+			SlackChannelPrefix:   wc.SlackChannelPrefix,
+			SlackTeamID:          wc.SlackTeamID,
+			SlackInviteUsers:     wc.SlackInviteUsers,
+			SlackInviteGroups:    wc.SlackInviteGroups,
+			SlackWelcomeMessages: wc.SlackWelcomeMessages,
+			CompilePrompt:        wc.CompilePrompt,
+			AssistPrompt:         wc.AssistPrompt,
+			AssistLanguage:       wc.AssistLanguage,
 		})
 		logging.Default().Info("Registered workspace", "id", wc.ID, "name", wc.Name)
 	}

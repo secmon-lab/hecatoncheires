@@ -7,7 +7,6 @@ import Modal from '../Modal'
 import Button from '../Button'
 import ChannelSelector from './ChannelSelector'
 import { CREATE_SLACK_SOURCE, GET_SOURCES } from '../../graphql/source'
-import styles from './source.module.css'
 
 interface SlackFormProps {
   isOpen: boolean
@@ -38,7 +37,10 @@ export default function SlackForm({ isOpen, onClose }: SlackFormProps) {
   const [createSource, { loading: creating }] = useMutation(CREATE_SLACK_SOURCE, {
     update(cache, { data }) {
       if (!data?.createSlackSource) return
-      const existingData = cache.readQuery<{ sources: unknown[] }>({ query: GET_SOURCES, variables: { workspaceId: currentWorkspace!.id } })
+      const existingData = cache.readQuery<{ sources: unknown[] }>({
+        query: GET_SOURCES,
+        variables: { workspaceId: currentWorkspace!.id },
+      })
       if (existingData) {
         cache.writeQuery({
           query: GET_SOURCES,
@@ -53,7 +55,6 @@ export default function SlackForm({ isOpen, onClose }: SlackFormProps) {
       navigate(`/ws/${currentWorkspace!.id}/sources/${data.createSlackSource.id}`)
     },
     onError: (error) => {
-      console.error('Create source error:', error)
       setErrors((prev) => ({
         ...prev,
         form: error.message || t('errorCreateSource'),
@@ -62,9 +63,7 @@ export default function SlackForm({ isOpen, onClose }: SlackFormProps) {
   })
 
   useEffect(() => {
-    if (!isOpen) {
-      resetForm()
-    }
+    if (!isOpen) resetForm()
   }, [isOpen])
 
   const resetForm = () => {
@@ -77,26 +76,14 @@ export default function SlackForm({ isOpen, onClose }: SlackFormProps) {
 
   const validate = () => {
     const newErrors: FormErrors = {}
-
-    if (selectedChannels.length === 0) {
-      newErrors.channels = t('errorChannelsRequired')
-    }
-
-    if (!name.trim()) {
-      newErrors.name = t('errorNameRequired')
-    }
-
+    if (selectedChannels.length === 0) newErrors.channels = t('errorChannelsRequired')
+    if (!name.trim()) newErrors.name = t('errorNameRequired')
     setErrors(newErrors)
     return Object.keys(newErrors).length === 0
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-
-    if (!validate()) {
-      return
-    }
-
+  const handleSubmit = async () => {
+    if (!validate()) return
     await createSource({
       variables: {
         workspaceId: currentWorkspace!.id,
@@ -115,88 +102,82 @@ export default function SlackForm({ isOpen, onClose }: SlackFormProps) {
     onClose()
   }
 
-  const loading = creating
-
   return (
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
+      width={580}
       title={t('titleAddSlackSource')}
       footer={
         <>
-          <Button variant="outline" onClick={handleClose} disabled={loading}>
+          <Button variant="ghost" onClick={handleClose} disabled={creating}>
             {t('btnCancel')}
           </Button>
           <Button
             variant="primary"
             onClick={handleSubmit}
-            disabled={loading || selectedChannels.length === 0}
+            disabled={creating || selectedChannels.length === 0}
           >
-            {loading ? t('btnCreating') : t('btnCreateSource')}
+            {creating ? t('btnCreating') : t('btnCreateSource')}
           </Button>
         </>
       }
     >
-      <form onSubmit={handleSubmit} className={styles.form}>
-        {errors.form && <div className={styles.formError}>{errors.form}</div>}
-
-        <div className={styles.field}>
-          <label htmlFor="name" className={styles.label}>
-            {t('labelNameRequired')}
-          </label>
+      <div className="col" style={{ gap: 14 }}>
+        {errors.form && (
+          <div style={{
+            padding: '8px 10px', borderRadius: 6,
+            background: 'color-mix(in oklch, var(--danger) 10%, transparent)',
+            border: '1px solid color-mix(in oklch, var(--danger) 30%, transparent)',
+            color: 'var(--danger)', fontSize: 12,
+          }}>{errors.form}</div>
+        )}
+        <div>
+          <label htmlFor="slack-name" className="field-label">{t('labelNameRequired')}</label>
           <input
-            id="name"
-            type="text"
+            id="slack-name"
+            className="input"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className={`${styles.input} ${errors.name ? styles.inputError : ''}`}
             placeholder={t('placeholderSourceName')}
-            disabled={loading}
+            disabled={creating}
           />
-          {errors.name && <span className={styles.error}>{errors.name}</span>}
+          {errors.name && <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 4 }}>{errors.name}</div>}
         </div>
-
-        <div className={styles.field}>
-          <label className={styles.label}>{t('labelChannelsRequired')}</label>
+        <div>
+          <label className="field-label">{t('labelChannelsRequired')}</label>
           <ChannelSelector
             selectedChannels={selectedChannels}
             onChange={setSelectedChannels}
-            disabled={loading}
+            disabled={creating}
             error={errors.channels}
           />
-          <p className={styles.hint}>
+          <div className="soft" style={{ fontSize: 11.5, marginTop: 4 }}>
             {t('hintSlackChannels')}
-          </p>
+          </div>
         </div>
-
-        <div className={styles.field}>
-          <label htmlFor="description" className={styles.label}>
-            {t('labelDescription')}
-          </label>
+        <div>
+          <label htmlFor="slack-desc" className="field-label">{t('labelDescription')}</label>
           <textarea
-            id="description"
+            id="slack-desc"
+            className="textarea"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            className={styles.textarea}
             placeholder={t('placeholderSourceDescription')}
             rows={3}
-            disabled={loading}
+            disabled={creating}
           />
         </div>
-
-        <div className={styles.checkboxField}>
-          <label className={styles.checkboxLabel}>
-            <input
-              type="checkbox"
-              checked={enabled}
-              onChange={(e) => setEnabled(e.target.checked)}
-              className={styles.checkbox}
-              disabled={loading}
-            />
-            <span>{t('labelEnableSource')}</span>
-          </label>
-        </div>
-      </form>
+        <label className="row" style={{ gap: 8, fontSize: 13 }}>
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => setEnabled(e.target.checked)}
+            disabled={creating}
+          />
+          <span>{t('labelEnableSource')}</span>
+        </label>
+      </div>
     </Modal>
   )
 }

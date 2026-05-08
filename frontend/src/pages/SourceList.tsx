@@ -1,225 +1,163 @@
 import { useState } from 'react'
-import { useQuery } from '@apollo/client'
 import { useNavigate } from 'react-router-dom'
+import { useQuery } from '@apollo/client'
+import { GET_SOURCES } from '../graphql/source'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
-import { Plus, Database, FileText, GitBranch, MessageSquare, CheckCircle, XCircle } from 'lucide-react'
-import Table from '../components/Table'
 import Button from '../components/Button'
-import Chip from '../components/Chip'
+import { IconPlus, IconSlack, IconGitHub, IconNotion, IconDots } from '../components/Icons'
+import { Badge } from '../components/Primitives'
+import { FORM_STEP, SOURCE_TYPE, type FormStep } from '../constants/source'
 import SourceTypeSelector from '../components/source/SourceTypeSelector'
 import NotionDBForm from '../components/source/NotionDBForm'
 import NotionPageForm from '../components/source/NotionPageForm'
 import SlackForm from '../components/source/SlackForm'
 import GitHubForm from '../components/source/GitHubForm'
-import { GET_SOURCES } from '../graphql/source'
-import { SOURCE_TYPE, FORM_STEP, type FormStep } from '../constants/source'
-import styles from './SourceList.module.css'
-import type { ReactElement } from 'react'
 
-interface NotionDBConfig {
-  __typename: 'NotionDBConfig'
-  databaseID: string
-  databaseTitle: string
-  databaseURL: string
-}
-
-interface NotionPageConfig {
-  __typename: 'NotionPageConfig'
-  pageID: string
-  pageTitle: string
-  pageURL: string
-  recursive: boolean
-  maxDepth: number
-}
-
-interface SlackChannel {
-  id: string
-  name: string
-}
-
-interface SlackConfig {
-  __typename: 'SlackConfig'
-  channels: SlackChannel[]
-}
-
-interface GitHubRepository {
-  owner: string
-  repo: string
-}
-
-interface GitHubConfig {
-  __typename: 'GitHubConfig'
-  repositories: GitHubRepository[]
-}
-
-type SourceConfig = NotionDBConfig | NotionPageConfig | SlackConfig | GitHubConfig | null
-
-interface Source {
+interface SourceRow {
   id: string
   name: string
   sourceType: string
-  description: string
+  description?: string | null
   enabled: boolean
-  config: SourceConfig
   createdAt: string
   updatedAt: string
+  config?: any
+}
+
+function sourceIcon(type: string) {
+  if (type === SOURCE_TYPE.SLACK) return <IconSlack size={16} />
+  if (type === SOURCE_TYPE.GITHUB) return <IconGitHub size={16} />
+  return <IconNotion size={16} />
+}
+
+function sourceTypeLabel(type: string) {
+  switch (type) {
+    case SOURCE_TYPE.SLACK: return 'Slack'
+    case SOURCE_TYPE.GITHUB: return 'GitHub'
+    case SOURCE_TYPE.NOTION_DB: return 'Notion DB'
+    case SOURCE_TYPE.NOTION_PAGE: return 'Notion Page'
+    default: return type
+  }
+}
+
+function scopeText(s: SourceRow) {
+  if (!s.config) return ''
+  if (s.sourceType === SOURCE_TYPE.SLACK) {
+    const channels = s.config.channels?.map((c: any) => `#${c.name}`).join(', ')
+    return channels || ''
+  }
+  if (s.sourceType === SOURCE_TYPE.GITHUB) {
+    const repos = s.config.repositories?.map((r: any) => `${r.owner}/${r.repo}`).join(', ')
+    return repos || ''
+  }
+  if (s.sourceType === SOURCE_TYPE.NOTION_DB) return s.config.databaseTitle || s.config.databaseID || ''
+  if (s.sourceType === SOURCE_TYPE.NOTION_PAGE) return s.config.pageTitle || s.config.pageID || ''
+  return ''
+}
+
+function formatDate(iso: string) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  const yyyy = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${yyyy}/${mm}/${dd}`
 }
 
 export default function SourceList() {
-  const navigate = useNavigate()
   const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
-  const [formStep, setFormStep] = useState<FormStep>(FORM_STEP.CLOSED)
+  const navigate = useNavigate()
 
-  const { data, loading, error } = useQuery(GET_SOURCES, {
-    variables: { workspaceId: currentWorkspace!.id },
+  const [step, setStep] = useState<FormStep>(FORM_STEP.CLOSED)
+
+  const { data } = useQuery(GET_SOURCES, {
+    variables: { workspaceId: currentWorkspace?.id },
     skip: !currentWorkspace,
   })
 
-  const handleOpenForm = () => {
-    setFormStep(FORM_STEP.SELECT_TYPE)
+  const sources: SourceRow[] = data?.sources || []
+
+  const handleSelectType = (type: string) => {
+    if (type === SOURCE_TYPE.NOTION_DB)   setStep(FORM_STEP.NOTION_DB_FORM)
+    else if (type === SOURCE_TYPE.NOTION_PAGE) setStep(FORM_STEP.NOTION_PAGE_FORM)
+    else if (type === SOURCE_TYPE.SLACK)  setStep(FORM_STEP.SLACK_FORM)
+    else if (type === SOURCE_TYPE.GITHUB) setStep(FORM_STEP.GITHUB_FORM)
   }
-
-  const handleFormClose = () => {
-    setFormStep(FORM_STEP.CLOSED)
-  }
-
-  const handleTypeSelect = (type: string) => {
-    if (type === SOURCE_TYPE.NOTION_DB) {
-      setFormStep(FORM_STEP.NOTION_DB_FORM)
-    } else if (type === SOURCE_TYPE.NOTION_PAGE) {
-      setFormStep(FORM_STEP.NOTION_PAGE_FORM)
-    } else if (type === SOURCE_TYPE.SLACK) {
-      setFormStep(FORM_STEP.SLACK_FORM)
-    } else if (type === SOURCE_TYPE.GITHUB) {
-      setFormStep(FORM_STEP.GITHUB_FORM)
-    }
-  }
-
-  const handleRowClick = (source: Source) => {
-    navigate(`/ws/${currentWorkspace!.id}/sources/${source.id}`)
-  }
-
-  const renderSourceType = (sourceType: string): ReactElement => {
-    const typeLabels: Record<string, { label: string; icon: ReactElement }> = {
-      [SOURCE_TYPE.NOTION_DB]: { label: t('sourceTypeNotionDB'), icon: <Database size={14} /> },
-      [SOURCE_TYPE.NOTION_PAGE]: { label: t('sourceTypeNotionPage'), icon: <FileText size={14} /> },
-      [SOURCE_TYPE.SLACK]: { label: t('sourceTypeSlack'), icon: <MessageSquare size={14} /> },
-      [SOURCE_TYPE.GITHUB]: { label: t('sourceTypeGitHub'), icon: <GitBranch size={14} /> },
-    }
-    const typeInfo = typeLabels[sourceType] || { label: sourceType, icon: null }
-
-    return (
-      <div className={styles.sourceType}>
-        {typeInfo.icon}
-        <span>{typeInfo.label}</span>
-      </div>
-    )
-  }
-
-  const renderEnabled = (enabled: boolean): ReactElement => {
-    return enabled ? (
-      <Chip variant="status" colorIndex={0}>
-        <CheckCircle size={12} />
-        <span>{t('statusEnabled')}</span>
-      </Chip>
-    ) : (
-      <Chip variant="status" colorIndex={4}>
-        <XCircle size={12} />
-        <span>{t('statusDisabled')}</span>
-      </Chip>
-    )
-  }
-
-  const columns = [
-    {
-      header: t('headerName'),
-      accessor: 'name' as keyof Source,
-      width: '200px',
-    },
-    {
-      header: t('headerType'),
-      accessor: ((source: Source) => renderSourceType(source.sourceType)) as (row: Source) => ReactElement,
-      width: '120px',
-    },
-    {
-      header: t('headerDescription'),
-      accessor: 'description' as keyof Source,
-    },
-    {
-      header: t('labelStatus'),
-      accessor: ((source: Source) => renderEnabled(source.enabled)) as (row: Source) => ReactElement,
-      width: '100px',
-    },
-    {
-      header: t('labelCreated'),
-      accessor: ((source: Source) => new Date(source.createdAt).toLocaleDateString()) as (row: Source) => string,
-      width: '120px',
-    },
-  ]
-
-  if (loading) {
-    return (
-      <div className={styles.container}>
-        <div className={styles.loading}>{t('loading')}</div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className={styles.container}>
-        <div className={styles.error}>{t('errorPrefix')} {error.message}</div>
-      </div>
-    )
-  }
+  const close = () => setStep(FORM_STEP.CLOSED)
 
   return (
-    <div className={styles.container}>
-      <div className={styles.header}>
+    <div className="h-main-inner">
+      <div className="h-page-h">
         <div>
-          <h2 className={styles.title}>{t('titleSources')}</h2>
-          <p className={styles.subtitle}>{t('subtitleSources')}</p>
+          <h1>{t('titleSources')}</h1>
+          <div className="sub">{t('subtitleSources')}</div>
         </div>
-        <Button
-          variant="primary"
-          icon={<Plus size={20} />}
-          onClick={handleOpenForm}
-        >
-          {t('btnAddSource')}
-        </Button>
+        <div className="actions">
+          <Button variant="primary" icon={<IconPlus size={14} />} onClick={() => setStep(FORM_STEP.SELECT_TYPE)}>
+            New Source
+          </Button>
+        </div>
       </div>
 
-      <div className={styles.tableWrapper}>
-        <Table columns={columns} data={data?.sources || []} onRowClick={handleRowClick} />
+      <div className="card" style={{ overflow: 'hidden' }}>
+        <table className="h-table">
+          <thead>
+            <tr>
+              <th style={{ width: 36 }}></th>
+              <th>{t('headerName')}</th>
+              <th style={{ width: 120 }}>{t('labelType')}</th>
+              <th style={{ width: 110 }}>{t('labelStatus')}</th>
+              <th style={{ width: 130 }}>{t('headerCreated')}</th>
+              <th style={{ width: 38 }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {sources.length === 0 && (
+              <tr>
+                <td colSpan={6} style={{ padding: 32, textAlign: 'center', color: 'var(--fg-soft)' }}>
+                  {t('noDataAvailable')}
+                </td>
+              </tr>
+            )}
+            {sources.map((s) => (
+              <tr
+                key={s.id}
+                onClick={() => navigate(`/ws/${currentWorkspace!.id}/sources/${s.id}`)}
+                style={{ cursor: 'pointer' }}
+              >
+                <td>{sourceIcon(s.sourceType)}</td>
+                <td>
+                  <div style={{ fontWeight: 500 }}>{s.name}</div>
+                  {scopeText(s) && (
+                    <div className="soft" style={{ fontSize: 11.5, marginTop: 2 }}>{scopeText(s)}</div>
+                  )}
+                </td>
+                <td><Badge>{sourceTypeLabel(s.sourceType)}</Badge></td>
+                <td>{s.enabled ? <Badge kind="open">{t('statusEnabled')}</Badge> : <Badge>{t('statusDisabled')}</Badge>}</td>
+                <td className="mono soft" style={{ fontSize: 12 }}>{formatDate(s.createdAt)}</td>
+                <td>
+                  <button
+                    className="h-icon-btn"
+                    style={{ width: 24, height: 24 }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <IconDots size={14} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
 
-      <SourceTypeSelector
-        isOpen={formStep === FORM_STEP.SELECT_TYPE}
-        onClose={handleFormClose}
-        onSelect={handleTypeSelect}
-      />
-
-      <NotionDBForm
-        isOpen={formStep === FORM_STEP.NOTION_DB_FORM}
-        onClose={handleFormClose}
-      />
-
-      <NotionPageForm
-        isOpen={formStep === FORM_STEP.NOTION_PAGE_FORM}
-        onClose={handleFormClose}
-      />
-
-      <SlackForm
-        isOpen={formStep === FORM_STEP.SLACK_FORM}
-        onClose={handleFormClose}
-      />
-
-      <GitHubForm
-        isOpen={formStep === FORM_STEP.GITHUB_FORM}
-        onClose={handleFormClose}
-      />
+      <SourceTypeSelector isOpen={step === FORM_STEP.SELECT_TYPE} onClose={close} onSelect={handleSelectType} />
+      <NotionDBForm   isOpen={step === FORM_STEP.NOTION_DB_FORM}   onClose={close} />
+      <NotionPageForm isOpen={step === FORM_STEP.NOTION_PAGE_FORM} onClose={close} />
+      <SlackForm      isOpen={step === FORM_STEP.SLACK_FORM}       onClose={close} />
+      <GitHubForm     isOpen={step === FORM_STEP.GITHUB_FORM}      onClose={close} />
     </div>
   )
 }

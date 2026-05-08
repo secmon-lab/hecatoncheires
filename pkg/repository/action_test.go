@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
@@ -32,7 +33,7 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			CaseID:      c.ID,
 			Title:       "Investigate logs",
 			Description: "Check server logs for anomalies",
-			AssigneeIDs: []string{"U123"},
+			AssigneeID:  "U123",
 			Status:      types.ActionStatusTodo,
 		}
 
@@ -68,7 +69,7 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		}
 
 		// Retrieve actions for the case
-		actions, err := repo.Action().GetByCase(ctx, wsID, c.ID)
+		actions, err := repo.Action().GetByCase(ctx, wsID, c.ID, interfaces.ActionListOptions{})
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, actions).Length(3)
@@ -89,7 +90,7 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		})
 		gt.NoError(t, err).Required()
 
-		actions, err := repo.Action().GetByCase(ctx, wsID, c.ID)
+		actions, err := repo.Action().GetByCase(ctx, wsID, c.ID, interfaces.ActionListOptions{})
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, actions).Length(0)
@@ -131,7 +132,7 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		}
 
 		// Retrieve actions for both cases
-		actionsMap, err := repo.Action().GetByCases(ctx, wsID, []int64{case1.ID, case2.ID})
+		actionsMap, err := repo.Action().GetByCases(ctx, wsID, []int64{case1.ID, case2.ID}, interfaces.ActionListOptions{})
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, actionsMap[case1.ID]).Length(2)
@@ -190,6 +191,236 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		// Verify it's deleted
 		_, err = repo.Action().Get(ctx, wsID, created.ID)
 		gt.Value(t, err).NotNil()
+	})
+
+	t.Run("GetBySlackMessageTS returns matching action", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		c, err := repo.Case().Create(ctx, wsID, &model.Case{
+			Title: "Test Case",
+		})
+		gt.NoError(t, err).Required()
+
+		ts := "1700000000.000123"
+		created, err := repo.Action().Create(ctx, wsID, &model.Action{
+			CaseID:         c.ID,
+			Title:          "Has slack message",
+			Status:         types.ActionStatusTodo,
+			SlackMessageTS: ts,
+		})
+		gt.NoError(t, err).Required()
+
+		got, err := repo.Action().GetBySlackMessageTS(ctx, wsID, ts)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.ID).Equal(created.ID)
+		gt.Value(t, got.SlackMessageTS).Equal(ts)
+		gt.Value(t, got.Title).Equal("Has slack message")
+	})
+
+	t.Run("GetBySlackMessageTS returns ErrNotFound when no match", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		_, err := repo.Action().GetBySlackMessageTS(ctx, wsID, "9999999999.999999")
+		gt.Value(t, err).NotNil()
+	})
+
+	t.Run("GetBySlackMessageTS returns ErrNotFound for empty ts", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		_, err := repo.Action().GetBySlackMessageTS(ctx, wsID, "")
+		gt.Value(t, err).NotNil()
+	})
+
+	t.Run("List excludes archived actions by default", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		c, err := repo.Case().Create(ctx, wsID, &model.Case{
+			Title: "Archive list filter case",
+		})
+		gt.NoError(t, err).Required()
+
+		active, err := repo.Action().Create(ctx, wsID, &model.Action{
+			CaseID: c.ID,
+			Title:  "active",
+			Status: types.ActionStatusTodo,
+		})
+		gt.NoError(t, err).Required()
+
+		archived, err := repo.Action().Create(ctx, wsID, &model.Action{
+			CaseID: c.ID,
+			Title:  "archived",
+			Status: types.ActionStatusTodo,
+		})
+		gt.NoError(t, err).Required()
+
+		now := time.Now().UTC()
+		archived.ArchivedAt = &now
+		_, err = repo.Action().Update(ctx, wsID, archived)
+		gt.NoError(t, err).Required()
+
+		// Default: archived actions excluded
+		got, err := repo.Action().List(ctx, wsID, interfaces.ActionListOptions{})
+		gt.NoError(t, err).Required()
+		gt.Array(t, got).Length(1).Required()
+		gt.Value(t, got[0].ID).Equal(active.ID)
+
+		// ArchiveScopeAll returns both
+		gotAll, err := repo.Action().List(ctx, wsID, interfaces.ActionListOptions{ArchiveScope: interfaces.ActionArchiveScopeAll})
+		gt.NoError(t, err).Required()
+		gt.Array(t, gotAll).Length(2)
+
+		// ArchiveScopeArchivedOnly returns archived
+		gotArchived, err := repo.Action().List(ctx, wsID, interfaces.ActionListOptions{ArchiveScope: interfaces.ActionArchiveScopeArchivedOnly})
+		gt.NoError(t, err).Required()
+		gt.Array(t, gotArchived).Length(1).Required()
+		gt.Value(t, gotArchived[0].ID).Equal(archived.ID)
+	})
+
+	t.Run("GetByCase honours ArchiveScope option", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		c, err := repo.Case().Create(ctx, wsID, &model.Case{
+			Title: "Archive case filter",
+		})
+		gt.NoError(t, err).Required()
+
+		active, err := repo.Action().Create(ctx, wsID, &model.Action{
+			CaseID: c.ID,
+			Title:  "active",
+			Status: types.ActionStatusTodo,
+		})
+		gt.NoError(t, err).Required()
+
+		archived, err := repo.Action().Create(ctx, wsID, &model.Action{
+			CaseID: c.ID,
+			Title:  "archived",
+			Status: types.ActionStatusTodo,
+		})
+		gt.NoError(t, err).Required()
+
+		now := time.Now().UTC()
+		archived.ArchivedAt = &now
+		_, err = repo.Action().Update(ctx, wsID, archived)
+		gt.NoError(t, err).Required()
+
+		gotActive, err := repo.Action().GetByCase(ctx, wsID, c.ID, interfaces.ActionListOptions{})
+		gt.NoError(t, err).Required()
+		gt.Array(t, gotActive).Length(1).Required()
+		gt.Value(t, gotActive[0].ID).Equal(active.ID)
+
+		gotAll, err := repo.Action().GetByCase(ctx, wsID, c.ID, interfaces.ActionListOptions{ArchiveScope: interfaces.ActionArchiveScopeAll})
+		gt.NoError(t, err).Required()
+		gt.Array(t, gotAll).Length(2)
+
+		gotArchived, err := repo.Action().GetByCase(ctx, wsID, c.ID, interfaces.ActionListOptions{ArchiveScope: interfaces.ActionArchiveScopeArchivedOnly})
+		gt.NoError(t, err).Required()
+		gt.Array(t, gotArchived).Length(1).Required()
+		gt.Value(t, gotArchived[0].ID).Equal(archived.ID)
+	})
+
+	t.Run("GetByCases honours ArchiveScope option", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		c1, err := repo.Case().Create(ctx, wsID, &model.Case{Title: "Case A"})
+		gt.NoError(t, err).Required()
+		c2, err := repo.Case().Create(ctx, wsID, &model.Case{Title: "Case B"})
+		gt.NoError(t, err).Required()
+
+		// One active and one archived in c1; one archived in c2.
+		_, err = repo.Action().Create(ctx, wsID, &model.Action{
+			CaseID: c1.ID, Title: "c1-active", Status: types.ActionStatusTodo,
+		})
+		gt.NoError(t, err).Required()
+
+		c1archived, err := repo.Action().Create(ctx, wsID, &model.Action{
+			CaseID: c1.ID, Title: "c1-archived", Status: types.ActionStatusTodo,
+		})
+		gt.NoError(t, err).Required()
+		now := time.Now().UTC()
+		c1archived.ArchivedAt = &now
+		_, err = repo.Action().Update(ctx, wsID, c1archived)
+		gt.NoError(t, err).Required()
+
+		c2archived, err := repo.Action().Create(ctx, wsID, &model.Action{
+			CaseID: c2.ID, Title: "c2-archived", Status: types.ActionStatusTodo,
+		})
+		gt.NoError(t, err).Required()
+		c2archived.ArchivedAt = &now
+		_, err = repo.Action().Update(ctx, wsID, c2archived)
+		gt.NoError(t, err).Required()
+
+		// Default
+		gotDefault, err := repo.Action().GetByCases(ctx, wsID, []int64{c1.ID, c2.ID}, interfaces.ActionListOptions{})
+		gt.NoError(t, err).Required()
+		gt.Array(t, gotDefault[c1.ID]).Length(1)
+		gt.Array(t, gotDefault[c2.ID]).Length(0)
+
+		// ArchiveScopeAll
+		gotAll, err := repo.Action().GetByCases(ctx, wsID, []int64{c1.ID, c2.ID}, interfaces.ActionListOptions{ArchiveScope: interfaces.ActionArchiveScopeAll})
+		gt.NoError(t, err).Required()
+		gt.Array(t, gotAll[c1.ID]).Length(2)
+		gt.Array(t, gotAll[c2.ID]).Length(1)
+
+		// ArchiveScopeArchivedOnly
+		gotArchived, err := repo.Action().GetByCases(ctx, wsID, []int64{c1.ID, c2.ID}, interfaces.ActionListOptions{ArchiveScope: interfaces.ActionArchiveScopeArchivedOnly})
+		gt.NoError(t, err).Required()
+		gt.Array(t, gotArchived[c1.ID]).Length(1).Required()
+		gt.Value(t, gotArchived[c1.ID][0].ID).Equal(c1archived.ID)
+		gt.Array(t, gotArchived[c2.ID]).Length(1).Required()
+		gt.Value(t, gotArchived[c2.ID][0].ID).Equal(c2archived.ID)
+	})
+
+	t.Run("Get returns archived actions as-is", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		c, err := repo.Case().Create(ctx, wsID, &model.Case{Title: "case"})
+		gt.NoError(t, err).Required()
+
+		created, err := repo.Action().Create(ctx, wsID, &model.Action{
+			CaseID: c.ID, Title: "archived", Status: types.ActionStatusTodo,
+		})
+		gt.NoError(t, err).Required()
+
+		now := time.Now().UTC()
+		created.ArchivedAt = &now
+		_, err = repo.Action().Update(ctx, wsID, created)
+		gt.NoError(t, err).Required()
+
+		got, err := repo.Action().Get(ctx, wsID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.ID).Equal(created.ID)
+		gt.Value(t, got.ArchivedAt).NotNil()
+	})
+
+	t.Run("GetBySlackMessageTS returns archived action", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		c, err := repo.Case().Create(ctx, wsID, &model.Case{Title: "case"})
+		gt.NoError(t, err).Required()
+
+		ts := "1700000099.000999"
+		created, err := repo.Action().Create(ctx, wsID, &model.Action{
+			CaseID: c.ID, Title: "archived-with-slack", Status: types.ActionStatusTodo, SlackMessageTS: ts,
+		})
+		gt.NoError(t, err).Required()
+
+		now := time.Now().UTC()
+		created.ArchivedAt = &now
+		_, err = repo.Action().Update(ctx, wsID, created)
+		gt.NoError(t, err).Required()
+
+		got, err := repo.Action().GetBySlackMessageTS(ctx, wsID, ts)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.ID).Equal(created.ID)
+		gt.Value(t, got.ArchivedAt).NotNil()
 	})
 }
 

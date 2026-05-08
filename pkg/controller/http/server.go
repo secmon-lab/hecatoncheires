@@ -87,8 +87,11 @@ func New(gqlHandler http.Handler, opts ...Options) (*Server, error) {
 		opt(s)
 	}
 
-	// Middleware
+	// Middleware. Sentry sits right after RequestID so every request gets
+	// its own Sentry Hub on the context (no-op when Sentry is disabled).
+	// Repanic=true means panics still bubble up to chi's Recoverer.
 	r.Use(middleware.RequestID)
+	r.Use(errutil.SentryHTTPMiddleware)
 	r.Use(accessLogger)
 	r.Use(middleware.Recoverer)
 

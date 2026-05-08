@@ -1,329 +1,248 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery } from '@apollo/client'
 import Select from 'react-select'
-import Modal from '../components/Modal'
-import Button from '../components/Button'
-import { CREATE_ACTION, UPDATE_ACTION, GET_OPEN_CASE_ACTIONS } from '../graphql/action'
-import { GET_CASES } from '../graphql/case'
+import UserSelect from '../components/UserSelect'
+import { buildSelectStyles, portalProps } from '../components/selectStyles'
+import { CREATE_ACTION, UPDATE_ACTION, GET_ACTIONS, GET_ACTION, GET_OPEN_CASE_ACTIONS } from '../graphql/action'
+import { GET_CASE, GET_CASES } from '../graphql/case'
+import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
-import styles from './ActionForm.module.css'
+import { useActionStatuses } from '../hooks/useActionStatuses'
+import Modal from '../components/Modal'
+import Button from '../components/Button'
 
-interface Action {
+interface ActionItem {
   id: number
   caseID: number
   title: string
   description: string
-  assigneeIDs: string[]
-  assignees: Array<{ id: string; name: string; realName: string; imageUrl?: string }>
-  slackMessageTS: string
   status: string
-  dueDate?: string
+  assigneeID: string | null
+  dueDate?: string | null
 }
 
 interface ActionFormProps {
-  isOpen: boolean
+  action: ActionItem | null
+  defaultCaseID?: number
   onClose: () => void
-  action?: Action | null
-  initialCaseID?: number
 }
 
-interface FormErrors {
-  caseID?: string
-  title?: string
-}
-
-export default function ActionForm({ isOpen, onClose, action, initialCaseID }: ActionFormProps) {
+export default function ActionForm({ action, defaultCaseID, onClose }: ActionFormProps) {
   const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
-  const [caseID, setCaseID] = useState<number | null>(null)
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [assigneeIDs, setAssigneeIDs] = useState<string[]>([])
-  const [selectedAssignees, setSelectedAssignees] = useState<Array<{ value: string; label: string; image?: string }>>([])
-  const [status, setStatus] = useState('BACKLOG')
-  const [dueDate, setDueDate] = useState('')
-  const [errors, setErrors] = useState<FormErrors>({})
+  const { statuses, initialId, label } = useActionStatuses(currentWorkspace?.id)
+
+  const isEdit = action !== null
+
+  const [title, setTitle] = useState(action?.title || '')
+  const [description, setDescription] = useState(action?.description || '')
+  const [caseID, setCaseID] = useState<number | null>(action?.caseID ?? defaultCaseID ?? null)
+  const [status, setStatus] = useState(action?.status || initialId)
+  const [assigneeID, setAssigneeID] = useState<string | null>(action?.assigneeID ?? null)
+  const [errors, setErrors] = useState<Record<string, string>>({})
+
+  const { data: usersData } = useQuery(GET_SLACK_USERS)
+  const users = usersData?.slackUsers || []
+  const userOptions = users.map((u: any) => ({
+    value: u.id as string,
+    label: u.realName || u.name,
+    name: u.name,
+    realName: u.realName,
+    imageUrl: u.imageUrl,
+  }))
+  const selectedAssignee = userOptions.find((o: any) => o.value === assigneeID) || null
 
   const { data: casesData } = useQuery(GET_CASES, {
-    variables: { workspaceId: currentWorkspace!.id, status: 'OPEN' },
+    variables: { workspaceId: currentWorkspace?.id, status: 'OPEN' },
     skip: !currentWorkspace,
   })
-  const { data: usersData } = useQuery(GET_SLACK_USERS)
-  const [createAction, { loading: creating }] = useMutation(CREATE_ACTION, {
-    refetchQueries: [
-      { query: GET_OPEN_CASE_ACTIONS, variables: { workspaceId: currentWorkspace!.id } },
-    ],
-    onCompleted: () => {
-      onClose()
-      resetForm()
-    },
-    onError: (error) => {
-      console.error('Create error:', error)
-    },
+  const { data: configData } = useQuery(GET_FIELD_CONFIGURATION, {
+    variables: { workspaceId: currentWorkspace?.id },
+    skip: !currentWorkspace,
   })
+  const caseLabel = configData?.fieldConfiguration?.labels?.case || 'Case'
 
-  const [updateAction, { loading: updating }] = useMutation(UPDATE_ACTION, {
-    refetchQueries: [
-      { query: GET_OPEN_CASE_ACTIONS, variables: { workspaceId: currentWorkspace!.id } },
-    ],
-    onCompleted: () => {
-      onClose()
-      resetForm()
-    },
-    onError: (error) => {
-      console.error('Update error:', error)
-    },
-  })
-
-  useEffect(() => {
-    if (action) {
-      setCaseID(action.caseID)
-      setTitle(action.title)
-      setDescription(action.description)
-      setAssigneeIDs(action.assigneeIDs || [])
-      setSelectedAssignees(
-        (action.assignees || []).map((a) => ({
-          value: a.id,
-          label: a.realName || a.name,
-          image: a.imageUrl,
-        }))
-      )
-      setStatus(action.status || 'BACKLOG')
-      setDueDate(action.dueDate ? action.dueDate.split('T')[0] : '')
-    } else if (initialCaseID) {
-      setCaseID(initialCaseID)
-      resetForm(false)
-    } else {
-      resetForm()
-    }
-  }, [action, initialCaseID, isOpen])
-
-  const resetForm = (resetCaseID = true) => {
-    if (resetCaseID) {
-      setCaseID(null)
-    }
-    setTitle('')
-    setDescription('')
-    setAssigneeIDs([])
-    setSelectedAssignees([])
-    setStatus('BACKLOG')
-    setDueDate('')
-    setErrors({})
-  }
-
-  const validate = () => {
-    const newErrors: FormErrors = {}
-
-    if (!caseID) {
-      newErrors.caseID = t('errorCaseRequired')
-    }
-
-    if (!title.trim()) {
-      newErrors.title = t('errorTitleRequired')
-    }
-
-    setErrors(newErrors)
-    return Object.keys(newErrors).length === 0
-  }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-
-    if (!validate()) {
-      return
-    }
-
-    if (action) {
-      await updateAction({
-        variables: {
-          workspaceId: currentWorkspace!.id,
-          input: {
-            id: action.id,
-            caseID: caseID!,
-            title: title.trim(),
-            description: description.trim(),
-            assigneeIDs,
-            status,
-            dueDate: dueDate ? new Date(dueDate).toISOString() : undefined,
-            clearDueDate: !dueDate && !!action.dueDate,
-          },
-        },
-      })
-    } else {
-      await createAction({
-        variables: {
-          workspaceId: currentWorkspace!.id,
-          input: {
-            caseID: caseID!,
-            title: title.trim(),
-            description: description.trim(),
-            assigneeIDs,
-            status,
-            dueDate: dueDate ? new Date(dueDate).toISOString() : undefined,
-          },
-        },
-      })
-    }
-  }
-
-  const handleClose = () => {
-    resetForm()
-    onClose()
-  }
-
-  const loading = creating || updating
-
-  const caseOptions = (casesData?.cases || []).map((c: any) => ({
-    value: c.id,
-    label: `${c.title} (ID: ${c.id})`,
-  }))
-
-  const statusOptions = [
-    { value: 'BACKLOG', label: t('statusBacklog') },
-    { value: 'TODO', label: t('statusTodo') },
-    { value: 'IN_PROGRESS', label: t('statusInProgress') },
-    { value: 'BLOCKED', label: t('statusBlocked') },
-    { value: 'COMPLETED', label: t('statusCompleted') },
+  const createRefetch: any[] = [
+    { query: GET_ACTIONS, variables: { workspaceId: currentWorkspace?.id } },
+    { query: GET_OPEN_CASE_ACTIONS, variables: { workspaceId: currentWorkspace?.id } },
   ]
+  if (defaultCaseID) {
+    // CaseDetail defaults to the 'open' view (actionsFilter='ACTIVE');
+    // matching that exactly is what makes Apollo's refetchQueries actually
+    // refresh the page after mutating an action.
+    createRefetch.push({
+      query: GET_CASE,
+      variables: { workspaceId: currentWorkspace?.id, id: defaultCaseID, actionsFilter: 'ACTIVE' },
+    })
+  }
+  const [createAction, { loading: creating }] = useMutation(CREATE_ACTION, {
+    refetchQueries: createRefetch,
+  })
+  const updateRefetch: any[] = [
+    { query: GET_OPEN_CASE_ACTIONS, variables: { workspaceId: currentWorkspace?.id } },
+  ]
+  if (action) {
+    updateRefetch.push({
+      query: GET_ACTION,
+      variables: { workspaceId: currentWorkspace?.id, id: action.id },
+    })
+    updateRefetch.push({
+      query: GET_CASE,
+      variables: { workspaceId: currentWorkspace?.id, id: action.caseID, actionsFilter: 'ACTIVE' },
+    })
+  }
+  const [updateAction, { loading: updating }] = useMutation(UPDATE_ACTION, {
+    refetchQueries: updateRefetch,
+  })
+
+  const submit = async () => {
+    const errs: Record<string, string> = {}
+    if (!title.trim()) errs.title = t('errorTitleRequired')
+    if (!isEdit && !caseID) errs.caseID = t('errorCaseRequired')
+    if (Object.keys(errs).length > 0) { setErrors(errs); return }
+
+    try {
+      if (isEdit && action) {
+        const updateInput: Record<string, unknown> = { id: action.id, title, description, status }
+        if (assigneeID) {
+          updateInput.assigneeID = assigneeID
+        } else {
+          updateInput.clearAssignee = true
+        }
+        await updateAction({
+          variables: {
+            workspaceId: currentWorkspace!.id,
+            input: updateInput,
+          },
+        })
+      } else {
+        const createInput: Record<string, unknown> = { caseID: Number(caseID), title, description, status }
+        if (assigneeID) {
+          createInput.assigneeID = assigneeID
+        }
+        await createAction({
+          variables: {
+            workspaceId: currentWorkspace!.id,
+            input: createInput,
+          },
+        })
+      }
+      onClose()
+    } catch (e: any) {
+      console.error('Action mutation failed', e)
+      const msg = e?.graphQLErrors?.[0]?.message || e?.message || String(e)
+      setErrors({ submit: msg })
+    }
+  }
+
+  const submitting = creating || updating
+  const cases = casesData?.cases || []
+  const caseOptions = cases.map((c: any) => ({
+    value: c.id as number,
+    label: c.accessDenied ? `#${c.id}` : `#${c.id} ${c.title}`,
+  }))
+  const selectedCase = caseOptions.find((o: any) => o.value === caseID) || null
 
   return (
     <Modal
-      isOpen={isOpen}
-      onClose={handleClose}
-      title={action ? t('titleActionFormEdit') : t('titleActionFormNew')}
+      open
+      onClose={onClose}
+      width={560}
+      title={isEdit ? t('titleActionFormEdit') : t('titleActionFormNew')}
       footer={
         <>
-          <Button variant="outline" onClick={handleClose} disabled={loading}>
-            {t('btnCancel')}
-          </Button>
-          <Button variant="primary" onClick={handleSubmit} disabled={loading}>
-            {loading ? t('btnSaving') : t('btnSave')}
+          <Button variant="ghost" onClick={onClose}>{t('btnCancel')}</Button>
+          <Button variant="primary" onClick={submit} disabled={submitting}>
+            {submitting ? (isEdit ? t('btnSaving') : t('btnCreating')) : (isEdit ? t('btnSave') : t('btnCreate'))}
           </Button>
         </>
       }
     >
-      <form onSubmit={handleSubmit} className={styles.form}>
-        <div className={styles.field}>
-          <label htmlFor="caseID" className={styles.label}>
-            {t('labelCaseRequired', { caseLabel: t('navCases') })}
-          </label>
-          <Select
-            inputId="caseID"
-            value={caseOptions.find((opt: any) => opt.value === caseID)}
-            onChange={(selected) => setCaseID(selected?.value || null)}
-            options={caseOptions}
-            isDisabled={loading}
-            placeholder={t('placeholderSelectCase', { caseLabelLower: t('navCases').toLowerCase() })}
-          />
-          {errors.caseID && <span className={styles.error}>{errors.caseID}</span>}
-        </div>
-
-        <div className={styles.field}>
-          <label htmlFor="title" className={styles.label}>
-            {t('labelTitleRequired')}
-          </label>
+      <div className="col" style={{ gap: 14 }}>
+        {!isEdit && (
+          <div>
+            <label htmlFor="action-case" className="field-label">{t('labelCaseRequired', { caseLabel })}</label>
+            <Select
+              inputId="action-case"
+              aria-label={caseLabel}
+              options={caseOptions}
+              value={selectedCase}
+              onChange={(opt: any) => {
+                setCaseID(opt ? opt.value : null)
+                if (errors.caseID) setErrors((p) => { const n = { ...p }; delete n.caseID; return n })
+              }}
+              placeholder={t('placeholderSelectCase', { caseLabelLower: caseLabel.toLowerCase() })}
+              isClearable
+              classNamePrefix="rs"
+              {...portalProps}
+              styles={buildSelectStyles()}
+            />
+            {errors.caseID && <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 4 }}>{errors.caseID}</div>}
+          </div>
+        )}
+        <div>
+          <label htmlFor="title" className="field-label">{t('labelTitleRequired')}</label>
           <input
             id="title"
-            type="text"
+            className="input"
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className={`${styles.input} ${errors.title ? styles.inputError : ''}`}
+            onChange={(e) => { setTitle(e.target.value); if (errors.title) setErrors((p) => ({ ...p, title: '' })) }}
             placeholder={t('placeholderActionTitle')}
-            disabled={loading}
           />
-          {errors.title && <span className={styles.error}>{errors.title}</span>}
+          {errors.title && <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 4 }}>{errors.title}</div>}
         </div>
-
-        <div className={styles.field}>
-          <label htmlFor="description" className={styles.label}>
-            {t('labelDescription')}
-          </label>
+        <div>
+          <label htmlFor="description" className="field-label">{t('labelDescription')}</label>
           <textarea
             id="description"
+            className="textarea"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            className={styles.textarea}
             placeholder={t('placeholderActionDescription')}
-            rows={4}
-            disabled={loading}
           />
         </div>
-
-        <div className={styles.field}>
-          <label htmlFor="assigneeIDs" className={styles.label}>{t('labelAssignees')}</label>
-          <Select
-            inputId="assigneeIDs"
-            isMulti
+        <div>
+          <label htmlFor="action-assignee" className="field-label">{t('labelAssignee')}</label>
+          <UserSelect
+            inputId="action-assignee"
+            aria-label={t('labelAssignee')}
             isClearable
-            value={selectedAssignees}
-            onChange={(selected) => {
-              const selectedOptions = [...(selected || [])]
-              setSelectedAssignees(selectedOptions)
-              setAssigneeIDs(selectedOptions.map(s => s.value))
-            }}
-            options={(usersData?.slackUsers || []).map((user: { id: string; name: string; realName: string; imageUrl?: string }) => ({
-              value: user.id,
-              label: user.realName || user.name,
-              name: user.name,
-              realName: user.realName,
-              image: user.imageUrl,
-            }))}
-            isDisabled={loading}
-            placeholder={t('placeholderSelectAssignees')}
-            filterOption={(option, inputValue) => {
-              const search = inputValue.toLowerCase()
-              const data = option.data as unknown as { label: string; name: string; realName: string }
-              return (
-                data.label.toLowerCase().includes(search) ||
-                data.name.toLowerCase().includes(search) ||
-                data.realName.toLowerCase().includes(search)
-              )
-            }}
-            formatOptionLabel={(option: { value: string; label: string; image?: string }) => (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                {option.image && (
-                  <img
-                    src={option.image}
-                    alt={option.label}
-                    style={{ width: '24px', height: '24px', borderRadius: '50%' }}
-                  />
-                )}
-                <span>{option.label}</span>
-              </div>
-            )}
+            options={userOptions}
+            value={selectedAssignee}
+            onChange={(opt: any) => setAssigneeID(opt ? opt.value : null)}
+            placeholder={t('placeholderSelectAssignee')}
           />
         </div>
-
-        <div className={styles.field}>
-          <label htmlFor="status" className={styles.label}>
-            {t('labelStatusRequired')}
-          </label>
-          <Select
-            inputId="status"
-            value={statusOptions.find((opt) => opt.value === status)}
-            onChange={(selected) => setStatus(selected?.value || 'BACKLOG')}
-            options={statusOptions}
-            isDisabled={loading}
-          />
-        </div>
-
-        <div className={styles.field}>
-          <label htmlFor="dueDate" className={styles.label}>
-            {t('labelDueDate')}
-          </label>
-          <input
-            id="dueDate"
-            type="date"
-            value={dueDate}
-            onChange={(e) => setDueDate(e.target.value)}
-            className={styles.input}
-            disabled={loading}
-          />
-        </div>
-
-      </form>
+        {isEdit && (
+          <div>
+            <label htmlFor="action-status" className="field-label">{t('labelStatusRequired')}</label>
+            <select
+              id="action-status"
+              className="select"
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+            >
+              {statuses.map((s) => (
+                <option key={s.id} value={s.id}>{label(s.id)}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        {errors.submit && (
+          <div style={{
+            padding: '8px 10px',
+            borderRadius: 6,
+            background: 'color-mix(in oklch, var(--danger) 10%, transparent)',
+            border: '1px solid color-mix(in oklch, var(--danger) 30%, transparent)',
+            color: 'var(--danger)',
+            fontSize: 12,
+          }}>
+            {errors.submit}
+          </div>
+        )}
+      </div>
     </Modal>
   )
 }

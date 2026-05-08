@@ -12,10 +12,13 @@ Hecatoncheires is configured through a combination of a TOML configuration file 
 6. [Field Types](#field-types)
 7. [Options (for select / multi-select)](#options-for-select--multi-select)
 8. [Slack Section](#slack-section)
-9. [Compile Section](#compile-section)
-10. [Assist Section](#assist-section)
+9. [Assist Section](#assist-section)
+10. [Action Section](#action-section)
 11. [Validation Rules](#validation-rules)
 12. [Complete Example](#complete-example)
+13. [GitHub Source Integration](#github-source-integration)
+14. [Observability (Sentry)](#observability-sentry)
+15. [Diagnosis Command](#diagnosis-command)
 
 ---
 
@@ -55,10 +58,6 @@ options = [
 # Slack integration (optional)
 [slack]
 channel_prefix = "risk"
-
-# AI compile configuration (optional)
-[compile]
-prompt = "Extract key information from the source material."
 
 # AI assist configuration (optional)
 [assist]
@@ -108,6 +107,20 @@ The `serve` command (alias: `s`) starts the HTTP server.
 | `--github-app-id` | `HECATONCHEIRES_GITHUB_APP_ID` | - | No | GitHub App ID for GitHub Source integration |
 | `--github-app-installation-id` | `HECATONCHEIRES_GITHUB_APP_INSTALLATION_ID` | - | No | GitHub App Installation ID |
 | `--github-app-private-key` | `HECATONCHEIRES_GITHUB_APP_PRIVATE_KEY` | - | No | GitHub App private key (PEM string or file path) |
+| `--llm-provider` | `HECATONCHEIRES_LLM_PROVIDER` | - | No\*\*\*\* | LLM provider: `openai`, `claude`, or `gemini`. Empty disables AI features |
+| `--llm-model` | `HECATONCHEIRES_LLM_MODEL` | - | No | LLM model name (provider default if empty) |
+| `--llm-openai-api-key` | `HECATONCHEIRES_LLM_OPENAI_API_KEY` | - | No\*\*\*\* | OpenAI API key (required when `--llm-provider=openai`) |
+| `--llm-claude-api-key` | `HECATONCHEIRES_LLM_CLAUDE_API_KEY` | - | No\*\*\*\* | Anthropic Claude API key (used with direct Anthropic access) |
+| `--llm-gemini-project-id` | `HECATONCHEIRES_LLM_GEMINI_PROJECT_ID` | - | No\*\*\*\* | Google Cloud project ID (Gemini, or Claude via Vertex AI) |
+| `--llm-gemini-location` | `HECATONCHEIRES_LLM_GEMINI_LOCATION` | `global` | No | Google Cloud location for Gemini / Claude on Vertex AI |
+| `--embedding-gemini-project-id` | `HECATONCHEIRES_EMBEDDING_GEMINI_PROJECT_ID` | - | Cond. | Google Cloud project ID for the Gemini embedding client. Required whenever `--llm-provider` is set |
+| `--embedding-gemini-location` | `HECATONCHEIRES_EMBEDDING_GEMINI_LOCATION` | `global` | No | Google Cloud location for the Gemini embedding client |
+| `--embedding-model` | `HECATONCHEIRES_EMBEDDING_MODEL` | `gemini-embedding-2` | No | Gemini embedding model name |
+| `--cloud-storage-bucket` | `HECATONCHEIRES_CLOUD_STORAGE_BUCKET` | - | Yes\*\*\*\*\* | Cloud Storage bucket holding agent thread session History/Trace blobs. See [agent-session.md](./agent-session.md) |
+| `--cloud-storage-prefix` | `HECATONCHEIRES_CLOUD_STORAGE_PREFIX` | - | No | Optional object key prefix within the Cloud Storage bucket |
+| `--sentry-dsn` | `HECATONCHEIRES_SENTRY_DSN` | - | No | Sentry DSN. Setting a non-empty value enables Sentry error reporting via `errutil.Handle`. See [Observability (Sentry)](#observability-sentry) |
+| `--sentry-env` | `HECATONCHEIRES_SENTRY_ENV` | - | No | Sentry environment tag (e.g., `production`, `staging`) |
+| `--sentry-release` | `HECATONCHEIRES_SENTRY_RELEASE` | - | No | Sentry release identifier (e.g., commit SHA) |
 
 \* Required for OAuth mode. Alternatively, use `--no-auth` with `--slack-bot-token` for development.
 
@@ -115,20 +128,14 @@ The `serve` command (alias: `s`) starts the HTTP server.
 
 \*\*\* Required only to enable Slack webhook integration. Without this, webhook endpoints are not registered.
 
-### Compile Command Flags
+\*\*\*\* `--llm-provider` is optional for `serve` (AI features will be disabled if unset). When set, the matching provider credentials become required:
+- `openai` → `--llm-openai-api-key`
+- `claude` → either `--llm-claude-api-key` (direct Anthropic API) **or** `--llm-gemini-project-id` (Vertex AI). The two are mutually exclusive.
+- `gemini` → `--llm-gemini-project-id` and `--llm-gemini-location`
 
-The `compile` command (alias: `c`) extracts knowledge from external sources using LLM.
+The embedding client is configured separately from `--llm-provider` and is **required whenever LLM is enabled** (`--llm-provider` set on `serve`, or always for `assist`). It is reserved for upcoming similarity-search features; the wiring is preserved so callers can keep the same flags through the redesign. The default model is `gemini-embedding-2`; the dimension is fixed at 768. Application Default Credentials must be authorized for the project. Without `--llm-provider`, `serve` runs in a degraded mode that does not need the embedder either.
 
-| Flag | Env Var | Default | Required | Description |
-|------|---------|---------|----------|-------------|
-| `--notion-api-token` | `HECATONCHEIRES_NOTION_API_TOKEN` | - | Yes | Notion API token for Source integration |
-| `--since` | `HECATONCHEIRES_COMPILE_SINCE` | 24h ago | No | Process pages updated since this time (RFC3339 format) |
-| `--workspace` | `HECATONCHEIRES_COMPILE_WORKSPACE` | - | No | Target workspace ID (if empty, process all workspaces) |
-| `--base-url` | `HECATONCHEIRES_BASE_URL` | - | No | Base URL for the application |
-| `--slack-bot-token` | `HECATONCHEIRES_SLACK_BOT_TOKEN` | - | No | Slack Bot Token for sending notifications |
-| `--github-app-id` | `HECATONCHEIRES_GITHUB_APP_ID` | - | No | GitHub App ID for GitHub Source integration |
-| `--github-app-installation-id` | `HECATONCHEIRES_GITHUB_APP_INSTALLATION_ID` | - | No | GitHub App Installation ID |
-| `--github-app-private-key` | `HECATONCHEIRES_GITHUB_APP_PRIVATE_KEY` | - | No | GitHub App private key (PEM string or file path) |
+\*\*\*\*\* Required whenever `--slack-bot-token` is configured. The agent that responds to Slack mentions persists per-thread conversation History and execution Trace into the bucket so follow-up mentions can resume the session. The service account needs **Storage Object Admin** on the bucket.
 
 ### Migrate Command Flags
 
@@ -139,6 +146,51 @@ The `migrate` command (alias: `m`) manages Firestore indexes.
 | `--firestore-project-id` | `HECATONCHEIRES_FIRESTORE_PROJECT_ID` | - | Yes | Google Cloud Firestore project ID |
 | `--firestore-database-id` | `HECATONCHEIRES_FIRESTORE_DATABASE_ID` | `(default)` | No | Firestore database ID |
 | `--dry-run` | - | `false` | No | Preview migration changes without applying |
+
+### Diagnosis Command
+
+The `diagnosis` command groups one-shot data inspection / repair jobs. Each
+sub-subcommand is a self-contained job; the umbrella itself takes no flags.
+
+#### `diagnosis fix-unsent-action`
+
+Re-posts Slack messages for Actions whose initial Slack post never reached
+Slack. The job sweeps every workspace in the registry, finds Actions with an
+empty `SlackMessageTS`, and replays the post via the unified
+`ActionUseCase.PostSlackMessageToAction` entry point. Repeat runs are safe:
+already-posted Actions are skipped.
+
+```bash
+hecatoncheires diagnosis fix-unsent-action \
+  --config=./config.toml \
+  --slack-bot-token=xoxb-... \
+  --firestore-project-id=...
+```
+
+| Flag | Env Var | Default | Required | Description |
+|------|---------|---------|----------|-------------|
+| `--config` | `HECATONCHEIRES_CONFIG` | `./config.toml` | Yes | Workspace configuration file |
+| `--base-url` | `HECATONCHEIRES_BASE_URL` | - | No | Base URL used to render the action's WebUI link inside the Slack message |
+| `--default-lang` | `HECATONCHEIRES_DEFAULT_LANG` | `en` | No | Default language for the Slack message text (`en`, `ja`) |
+| `--slack-bot-token` | `HECATONCHEIRES_SLACK_BOT_TOKEN` | - | Yes | Slack Bot Token used to post the recovery messages |
+| `--firestore-project-id` | `HECATONCHEIRES_FIRESTORE_PROJECT_ID` | - | Cond. | Required when using the Firestore backend |
+| `--firestore-database-id` | `HECATONCHEIRES_FIRESTORE_DATABASE_ID` | `(default)` | No | Firestore database ID |
+| Sentry flags | see [Observability (Sentry)](#observability-sentry) | - | No | Same flags as `serve` for error reporting |
+
+The job logs a final summary line:
+
+```
+fix-unsent-action complete total=N fixed=X skipped=Y failed=Z
+```
+
+- `Total` — Actions found with an empty `SlackMessageTS`
+- `Fixed` — Successfully posted; timestamp persisted
+- `Skipped` — Documented skip conditions (parent Case has no Slack channel,
+  the Action was already posted by a concurrent run, or the row was deleted
+  during the sweep)
+- `Failed` — Unexpected errors. Each is reported via `errutil.Handle` so it
+  reaches the configured error sink (Sentry / log); the sweep continues
+  past failures so a single bad row never blocks the rest
 
 ### Authentication Modes
 
@@ -240,7 +292,7 @@ description = "Overall severity assessment"
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
-| `id` | string | **Yes** | Unique identifier. Must match `^[a-z0-9]+(-[a-z0-9]+)*$` |
+| `id` | string | **Yes** | Unique identifier. Must match `^[a-z][a-z0-9_]*$` |
 | `name` | string | **Yes** | Display name shown in the UI |
 | `type` | string | **Yes** | Field type (see [Field Types](#field-types)) |
 | `required` | boolean | No | Whether the field is required (default: `false`) |
@@ -248,20 +300,30 @@ description = "Overall severity assessment"
 
 ### Field ID Format
 
-Field IDs must be lowercase alphanumeric with optional hyphens:
+Field IDs must start with a lowercase letter and consist of lowercase letters,
+digits, and underscores:
 
-- Pattern: `^[a-z0-9]+(-[a-z0-9]+)*$`
+- Pattern: `^[a-z][a-z0-9_]*$`
 - Must be unique across all fields in the configuration
+
+> **Breaking change (Apr 2026)**: Field IDs and Option IDs no longer accept
+> hyphens (`-`). The new pattern aligns with Go identifier rules so that
+> Slack welcome message templates can reference custom field values via dot
+> notation (e.g., `{{.Fields.risk_level}}`). Existing deployments that store
+> hyphenated FieldIDs in Firestore must migrate the data themselves; the
+> application provides no automatic migration. Workspace IDs are unaffected
+> and continue to follow the legacy hyphen-separated format.
 
 | Example | Valid | Reason |
 |---------|-------|--------|
 | `category` | Yes | Simple lowercase |
-| `risk-level` | Yes | Hyphen-separated |
-| `my-field-123` | Yes | With numbers |
+| `risk_level` | Yes | Underscore-separated |
+| `my_field_123` | Yes | With numbers |
+| `risk-level` | **No** | Hyphens are no longer allowed |
 | `MyField` | **No** | Uppercase not allowed |
-| `category_id` | **No** | Underscores not allowed |
+| `1category` | **No** | Cannot start with a digit |
 | `field.name` | **No** | Dots not allowed |
-| `-leading` | **No** | Cannot start with hyphen |
+| `_leading` | **No** | Cannot start with underscore |
 
 ---
 
@@ -317,7 +379,7 @@ name = "Tags"
 type = "multi-select"
 options = [
   { id = "urgent", name = "Urgent" },
-  { id = "review-needed", name = "Review Needed" },
+  { id = "review_needed", name = "Review Needed" },
 ]
 ```
 
@@ -394,7 +456,7 @@ Fields of type `select` or `multi-select` must define at least one option using 
 | `color` | string | No | Color name or hex code (e.g., `red`, `#E53E3E`) |
 | `metadata` | table | No | Arbitrary key-value pairs |
 
-Option IDs must be unique within their parent field and follow the same format as field IDs (`^[a-z0-9]+(-[a-z0-9]+)*$`).
+Option IDs must be unique within their parent field and follow the same format as field IDs (`^[a-z][a-z0-9_]*$`).
 
 ### Metadata
 
@@ -463,35 +525,79 @@ groups = ["S0614TZR7", "@security-response"]
 
 **Required bot scope:** `usergroups:read` (in addition to existing scopes)
 
+### Welcome Messages (`welcome_messages`)
+
+After the Slack channel is created and initial members are invited, Hecatoncheires can post a sequence of welcome messages to the channel. Each entry is a Go [`text/template`](https://pkg.go.dev/text/template) string that is rendered against the newly created Case.
+
+```toml
+[slack]
+welcome_messages = [
+  "<@{{.Case.ReporterID}}> Created Case `{{.Case.Title}}`.",
+  """\
+:rotating_light: Highlights
+- Status: {{.Case.Status}}
+- Severity: {{.Fields.severity.name}} ({{.Fields.severity.id}})
+- Tags: {{range $i, $t := .Fields.tags.items}}{{if $i}}, {{end}}{{$t.name}}{{end}}
+- Reporter: <@{{.Case.ReporterID}}>
+- Assignees: {{range $i, $a := .Case.AssigneeIDs}}{{if $i}}, {{end}}<@{{$a}}>{{end}}
+- Detail: {{.URL}}""",
+]
+```
+
+**Behavior**
+
+- Messages are sent in the order they appear in the array, after channel creation, member invitation, and bookmark addition.
+- Templates are parsed at startup; an invalid template aborts the application start with a configuration error.
+- A template that produces an empty string at runtime is skipped (useful for conditional messages with `{{if ...}}...{{end}}`).
+- A failure to render or post a single message is logged via `errutil.Handle` and does **not** roll back case creation; subsequent messages still attempt to post.
+
+**Available template variables**
+
+| Variable | Type | Notes |
+|----------|------|-------|
+| `.Case.ID` | int64 | Case sequence number |
+| `.Case.Title` | string | Case title |
+| `.Case.Description` | string | Case description |
+| `.Case.Status` | CaseStatus | Normalized status string |
+| `.Case.ReporterID` | string | Slack user ID of the reporter |
+| `.Case.AssigneeIDs` | []string | Slack user IDs of assignees |
+| `.Case.SlackChannelID` | string | The freshly-created channel ID |
+| `.Case.IsPrivate` | bool | Whether the case is private |
+| `.Case.CreatedAt` | time.Time | Creation timestamp (UTC) |
+| `.Workspace.ID` | string | Workspace identifier |
+| `.Workspace.Name` | string | Workspace display name |
+| `.Fields` | map[string]map[string]any | Custom field values keyed by Field ID — each entry exposes `id` and `name` (and `items` for multi-select) |
+| `.URL` | string | Web UI Case URL when `--base-url` is configured (otherwise empty) |
+
+**Field value structure**
+
+Each Field is exposed as a sub-map with the following sub-keys:
+
+| Sub-key | Description |
+|---------|-------------|
+| `id` | Raw stored value. For `select`, the option ID. For `multi-select`, an array of option IDs. For `text`/`number`/`date`/`url`/`user`/`multi-user`, the raw stored value. |
+| `name` | Display name. For `select`/`multi-select`, the Option `name` from the schema (falls back to the ID when not found). For other field types, mirrors `id`. |
+| `items` | `multi-select` only. Slice of `{id, name}` maps for iteration in templates. |
+
+Examples:
+
+```text
+Severity: {{.Fields.severity.name}}                        ← "High"
+Severity ID: {{.Fields.severity.id}}                        ← "high"
+Tags: {{range $i, $t := .Fields.tags.items}}{{if $i}}, {{end}}{{$t.name}}{{end}}
+Note: {{.Fields.note.id}}                                   ← bare text value
+```
+
+Slack mrkdwn syntax such as `<@USER_ID>` and `<#CHANNEL_ID>` is rendered as-is and expanded by Slack at delivery time.
+
 ### Private Case Channels
 
 When a case is created with the **Private** flag enabled, the associated Slack channel is created as a **private channel** instead of a public one. This ensures that only invited members can view the channel content.
 
 Private cases also track channel membership:
-- Channel member IDs are stored on the case and used for access control — only channel members can view the case details, actions, knowledges, and assist logs associated with a private case.
+- Channel member IDs are stored on the case and used for access control — only channel members can view the case details, actions, and assist logs associated with a private case.
 - Members can be synced from the Slack channel via the **Sync** button on the case detail page or through the `syncCaseChannelUsers` GraphQL mutation.
 - Bot users are automatically filtered out from the member list.
-
----
-
-## Compile Section
-
-The `[compile]` section configures the AI-powered knowledge compilation feature. This section is optional.
-
-```toml
-[compile]
-prompt = "Extract key information from the source material and summarize it."
-```
-
-### Properties
-
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `prompt` | string | No | Custom prompt for the LLM when compiling knowledge from external sources |
-
-The `compile` command processes external data sources (Notion pages, GitHub PRs/Issues, etc.) to extract structured knowledge. The `prompt` field allows you to customize how the LLM should interpret and extract information from these sources.
-
-If omitted, the system uses a default prompt optimized for general knowledge extraction.
 
 ---
 
@@ -519,15 +625,38 @@ The `assist` command runs an AI agent that periodically reviews open cases and p
 ### Usage
 
 The assist feature requires:
-- Gemini LLM client configuration (via `--gemini-api-key`)
+- An LLM provider (via `--llm-provider` and the matching credential flags). Supported providers: `openai`, `claude` (direct Anthropic API or Vertex AI), `gemini`.
 - Slack Bot Token (via `--slack-bot-token`)
 
-Run the assist command:
+Run the assist command (Gemini on Vertex AI example):
 
 ```bash
 hecatoncheires assist \
   --slack-bot-token=xoxb-YOUR_BOT_TOKEN \
-  --gemini-api-key=YOUR_GEMINI_KEY \
+  --llm-provider=gemini \
+  --llm-gemini-project-id=YOUR_GCP_PROJECT \
+  --llm-gemini-location=global \
+  --workspace=risk
+```
+
+Or with OpenAI:
+
+```bash
+hecatoncheires assist \
+  --slack-bot-token=xoxb-YOUR_BOT_TOKEN \
+  --llm-provider=openai \
+  --llm-openai-api-key=sk-YOUR_OPENAI_KEY \
+  --workspace=risk
+```
+
+Or with Claude on Vertex AI:
+
+```bash
+hecatoncheires assist \
+  --slack-bot-token=xoxb-YOUR_BOT_TOKEN \
+  --llm-provider=claude \
+  --llm-gemini-project-id=YOUR_GCP_PROJECT \
+  --llm-gemini-location=us-east5 \
   --workspace=risk
 ```
 
@@ -536,6 +665,116 @@ The AI agent will:
 2. Analyze open cases in the specified workspace
 3. Execute the custom prompt to generate insights
 4. Post findings to the case's Slack channel
+
+### Agent tool registry (Slack mention & assist)
+
+The agent's available tools depend on which optional services are wired up.
+Tools are split across three packages: `pkg/agent/tool/core` (case domain
+state), `pkg/agent/tool/slack` (Slack-backed tools), and `pkg/agent/tool/notion`
+(Notion-backed tools). The table below lists what each one provides and which
+configuration enables it.
+
+| Tool | Enabled by | Purpose |
+|------|------------|---------|
+| `core__list_actions`, `core__get_action`, `core__create_action`, `core__update_action`, `core__update_action_status`, `core__set_action_assignee`, `core__archive_action`, `core__unarchive_action` | Always | Manage the case's action items. `core__list_actions` accepts an optional `include_archived` parameter (default `false`); archived actions are hidden from default views but retained for later restoration via `core__unarchive_action`. There is no destructive delete tool — the archive lifecycle replaces deletion. |
+| `slack__post_message` | Assist only (`HECATONCHEIRES_SLACK_BOT_TOKEN`) | Post a message to the case's Slack channel. |
+| `slack__get_messages` | `HECATONCHEIRES_SLACK_BOT_TOKEN` | Bulk fetch of one or more Slack messages and their thread context (max 10 per call, parallel, partial failure tolerated). |
+| `slack__search_messages` | `HECATONCHEIRES_SLACK_USER_OAUTH_TOKEN` with `search:read` scope | Workspace-wide Slack message search. See [docs/slack.md](slack.md#user-token-scopes). |
+| `notion__search`, `notion__get_page` | `HECATONCHEIRES_NOTION_API_TOKEN` | Notion title search and Markdown content retrieval. See [docs/notion.md](notion.md). |
+
+---
+
+## Action Section
+
+The `[action]` section is **optional**. When omitted, the workspace inherits a built-in default set of action statuses (`BACKLOG`, `TODO`, `IN_PROGRESS`, `BLOCKED`, `COMPLETED`) so that data written before configurable statuses keeps working unchanged. Define this section to tailor the action workflow to your team.
+
+```toml
+[action]
+initial = "queued"            # Required when [action] is present
+closed  = ["done", "cancelled"]   # Optional, defaults to []
+
+[[action.status]]
+id = "queued"
+name = "Queued"
+description = "Awaiting triage"
+color = "idle"                 # See "Color values" below
+emoji = "📋"
+
+[[action.status]]
+id = "doing"
+name = "Doing"
+color = "active"
+emoji = "▶️"
+
+[[action.status]]
+id = "done"
+name = "Done"
+color = "success"
+emoji = "✅"
+```
+
+### `[action]` keys
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `initial` | string | **Yes** | ID of the status assigned to newly created actions. Must match one of the `[[action.status]]` IDs. |
+| `closed` | string[] | No | IDs treated as "closed" for filtering / completion checks. Each ID must match a defined status. Defaults to `[]`. |
+
+### `[[action.status]]` keys
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `id` | string | **Yes** | Stable identifier. Must match `^[A-Za-z0-9]+([_-][A-Za-z0-9]+)*$` and be unique within the workspace. Stored in the database as the action's status. |
+| `name` | string | **Yes** | Display label. Write it in whichever language fits the workspace — there is no localization layer. |
+| `description` | string | No | Free-form description (currently unused in the UI; reserved for tooltips). |
+| `color` | string | No | UI color. See "Color values" below. Defaults to the neutral `idle` preset. |
+| `emoji` | string | No | Single emoji used in Slack messages and web UI badges. |
+
+### Color values
+
+The `color` field accepts **two and only two** kinds of value. Any other string fails validation at startup.
+
+#### 1. Semantic preset name (recommended)
+
+Each preset expresses the **kind** of state, not a specific named status. Pick the preset that matches your status's intent — preset names are matched case-insensitively.
+
+| Preset | Intended meaning | Suggested for statuses like |
+|--------|------------------|-----------------------------|
+| `idle` | Not started yet, queued, reserved | `backlog`, `queued`, `new` |
+| `active` | Work in progress, someone is on it | `in_progress`, `doing`, `wip` |
+| `waiting` | Waiting on someone else (review / external response / dependency) | `in_review`, `waiting_for_user`, `qa` |
+| `paused` | Intentionally on hold | `on_hold`, `parked` |
+| `attention` | Needs attention / something off-track | `needs_input`, `flagged` |
+| `blocked` | Cannot proceed; something is preventing progress | `blocked`, `dependency_failed` |
+| `success` | Completed in the desired way | `done`, `resolved`, `shipped` |
+| `neutral_done` | Closed without value judgment (won't fix, expired, withdrawn) | `cancelled`, `wont_fix`, `expired` |
+| `failure` | Closed in an undesired way (failed, rejected, abandoned) | `failed`, `rejected`, `lost` |
+
+Presets resolve to CSS variables (`--action-status-<preset>`) on the frontend and follow the active light/dark theme.
+
+#### 2. Hex color code
+
+When no preset captures what you need, supply an absolute color as `#RRGGBB` or `#RGB`. Example: `"#5EAEDC"`, `"#abc"`. Hex codes do **not** follow the theme, so pick a color that reads on both light and dark backgrounds.
+
+#### Not supported (will fail validation)
+
+- CSS variable references like `"var(--ok)"` — the supported entry point is the preset list above.
+- CSS color keywords like `"red"`, `"blue"`.
+- Function notations: `rgb(...)`, `rgba(...)`, `hsl(...)`, `oklch(...)`.
+- Any string that is neither a preset name nor `#RRGGBB`/`#RGB`.
+
+#### Examples
+
+| Value | Result |
+|-------|--------|
+| `"success"` | ✅ Preset, theme-aware green |
+| `"WAITING"` | ✅ Case-insensitive preset match |
+| `"#5EAEDC"` | ✅ Absolute hex |
+| `"#abc"` | ✅ Short hex |
+| (omitted) | ✅ Falls back to `idle` |
+| `"var(--ok)"` | ❌ Validation error |
+| `"red"` | ❌ Validation error |
+| `"rgb(255,0,0)"` | ❌ Validation error |
 
 ---
 
@@ -546,7 +785,7 @@ The configuration file is validated at startup. The following rules are enforced
 | Rule | Error |
 |------|-------|
 | Configuration file must exist at the specified path | `ErrConfigNotFound` |
-| All field IDs must match `^[a-z0-9]+(-[a-z0-9]+)*$` | `ErrInvalidFieldID` |
+| All field IDs must match `^[a-z][a-z0-9_]*$` | `ErrInvalidFieldID` |
 | All field names must be non-empty | `ErrMissingName` |
 | Field type must be one of the 8 supported types | `ErrInvalidFieldType` |
 | Field IDs must be unique across the entire configuration | `ErrDuplicateFieldID` |
@@ -554,6 +793,11 @@ The configuration file is validated at startup. The following rules are enforced
 | All option IDs must match the same pattern as field IDs | `ErrInvalidFieldID` |
 | All option names must be non-empty | `ErrMissingName` |
 | Option IDs must be unique within their parent field | `ErrDuplicateOptionID` |
+| Slack welcome message templates must parse | `ErrInvalidWelcomeMessage` |
+| Action status IDs must match `^[A-Za-z0-9]+([_-][A-Za-z0-9]+)*$`, be at most 32 characters, and be unique within the workspace | (action status validation) |
+| `[action] initial` must reference a defined `[[action.status]] id` | (action status validation) |
+| Each entry in `[action] closed` must reference a defined `[[action.status]] id` | (action status validation) |
+| `[[action.status]] color` must be a preset name or `#RRGGBB` / `#RGB` | (action status validation) |
 
 If any validation fails, the application exits with a descriptive error message including the field ID and context.
 
@@ -584,10 +828,6 @@ channel_prefix = "risk"
 users = ["U12345678"]
 groups = ["@security-response"]
 
-# AI compile configuration (optional)
-[compile]
-prompt = "Extract security risk information, focusing on likelihood, impact, and mitigation strategies."
-
 # AI assist configuration (optional)
 [assist]
 prompt = "Check action deadlines and follow up on pending items. Remind the team of overdue tasks."
@@ -600,8 +840,8 @@ name = "Category"
 type = "multi-select"
 required = true
 options = [
-  { id = "data-breach", name = "Data Breach", metadata = { description = "Risk of personal or confidential information leakage", color = "red" } },
-  { id = "system-failure", name = "System Failure", metadata = { description = "Risk of system or service downtime and failures", color = "orange" } },
+  { id = "data_breach", name = "Data Breach", metadata = { description = "Risk of personal or confidential information leakage", color = "red" } },
+  { id = "system_failure", name = "System Failure", metadata = { description = "Risk of system or service downtime and failures", color = "orange" } },
 ]
 
 # Likelihood field: select with scoring
@@ -617,7 +857,7 @@ options = [
 
 # Simple fields without options
 [[fields]]
-id = "specific-impact"
+id = "specific_impact"
 name = "Specific Impact"
 type = "text"
 
@@ -627,16 +867,16 @@ name = "Deadline"
 type = "date"
 
 [[fields]]
-id = "reference-url"
+id = "reference_url"
 name = "Reference URL"
 type = "url"
 ```
 
 ---
 
-## GitHub Source Integration
+## GitHub Integration
 
-Hecatoncheires can fetch Pull Requests, Issues, and comments from GitHub repositories as external data sources for knowledge extraction. This requires a GitHub App with appropriate permissions.
+Hecatoncheires uses a single GitHub App to power both the Source pipeline (PR/Issue ingestion) and the agent's GitHub tools (search, get_issue, get_pull_request, get_file, list_commits). Wiring up the App enables both at once — there is no separate flag for the agent tools.
 
 ### GitHub App Setup
 
@@ -648,7 +888,7 @@ Hecatoncheires can fetch Pull Requests, Issues, and comments from GitHub reposit
 
 ### Configuration
 
-All three flags (`--github-app-id`, `--github-app-installation-id`, `--github-app-private-key`) must be set to enable GitHub Source features. If any flag is missing, GitHub features are gracefully disabled and the application continues to run normally with other source types.
+All three flags (`--github-app-id`, `--github-app-installation-id`, `--github-app-private-key`) must be set to enable GitHub features (Source pipeline + agent tools). If any flag is missing, GitHub features are gracefully disabled and the application continues to run normally with other source types.
 
 ```bash
 hecatoncheires serve \
@@ -670,7 +910,63 @@ GitHub Sources are managed via the GraphQL API:
 
 Repositories can be specified in `owner/repo` format or as full GitHub URLs (e.g., `https://github.com/owner/repo`).
 
+### Agent Tools
+
+When the GitHub App is configured, the Slack mention agent and the assist flow gain the following gollem tools:
+
+| Tool | Purpose |
+| --- | --- |
+| `github__search` | Search issues and pull requests using GitHub search syntax (`repo:`, `is:open`, `author:`, `label:`, etc.). Up to 50 hits per call. |
+| `github__get_issue` | Fetch a single issue (not PR) with its body, labels, and full comment thread. |
+| `github__get_pull_request` | Fetch a single PR with body, labels, comments, and reviews. Optional `include_files=true` adds the diff (per-file patches truncated at 20 KB). |
+| `github__get_file` | Fetch a file's content at any branch/tag/SHA. UTF-8 text only; binaries return `is_binary=true` with empty content. Capped at 1 MB. |
+| `github__list_commits` | List commits with optional `path`, `author`, `since`, `until` filters. Up to 50 commits per call. |
+
+The tools operate within whatever scope the GitHub App's installation grants — there is no per-repository allowlist on the application side.
+
 ---
+
+## Observability (Sentry)
+
+The server can forward errors to [Sentry](https://sentry.io/) in addition to
+the structured log. Sentry is opt-in: leaving `HECATONCHEIRES_SENTRY_DSN`
+empty keeps the SDK uninitialized and the integration becomes a cheap no-op
+(one atomic flag check per error).
+
+### Environment variables
+
+| Env Var | Default | Description |
+|---------|---------|-------------|
+| `HECATONCHEIRES_SENTRY_DSN` | - | Sentry DSN. **Setting this enables Sentry.** |
+| `HECATONCHEIRES_SENTRY_ENV` | - | Environment tag (`production`, `staging`, etc.) |
+| `HECATONCHEIRES_SENTRY_RELEASE` | - | Release identifier — set to the commit SHA in CI |
+
+### What gets reported
+
+Every call to `errutil.Handle` (and the HTTP variant) feeds the error to
+Sentry's `CaptureException`. `goerr` values attached to the error appear as
+the **`goerr_values`** Sentry context, so structured fields such as
+`slack_error`, `query`, or `case_id` show up alongside the exception
+without per-call site changes.
+
+For HTTP requests, Sentry middleware sits right after `RequestID` so
+captures inside a handler automatically carry the request URL, method, and
+headers. Panics propagate through the middleware (`Repanic: true`) so chi's
+`Recoverer` still produces a `500` response after Sentry has captured the
+event.
+
+### Operational troubleshoot
+
+- **Slack `missing_scope` even after adding the scope**: re-install the
+  Slack App to the workspace. Adding scopes in the App Manifest does not
+  re-issue existing tokens; the `xoxp-...` you had before the change still
+  carries the old scope set. Re-install (Install App → Reinstall to
+  Workspace) and replace the token in `HECATONCHEIRES_SLACK_USER_OAUTH_TOKEN`.
+- **Confirming what scope Slack actually wants**: when a Slack call fails,
+  the wrapped error carries the `slack_error` / `slack_response_messages` /
+  `slack_response_warnings` fields. Both the structured log and the Sentry
+  `goerr_values` context include these — search for them to find the
+  Slack-side error code without parsing free-form error strings.
 
 ## See Also
 

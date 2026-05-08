@@ -1,63 +1,76 @@
-import { ReactNode, useEffect } from 'react'
-import { X } from 'lucide-react'
+import { useEffect, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { IconX } from './Icons'
 import { useTranslation } from '../i18n'
-import styles from './Modal.module.css'
 
 interface ModalProps {
-  isOpen: boolean
+  /** Either `open` or `isOpen` controls visibility. */
+  open?: boolean
+  isOpen?: boolean
   onClose: () => void
-  title: string
-  children: ReactNode
+  title?: ReactNode
+  width?: number
   footer?: ReactNode
+  children: ReactNode
 }
 
-export default function Modal({ isOpen, onClose, title, children, footer }: ModalProps) {
+export default function Modal({ open, isOpen, onClose, title, width = 540, footer, children }: ModalProps) {
+  const visible = open ?? isOpen ?? false
   const { t } = useTranslation()
 
   useEffect(() => {
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose()
-      }
+    if (!visible) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
     }
-
-    if (isOpen) {
-      document.addEventListener('keydown', handleEscape)
-      document.body.style.overflow = 'hidden'
-    }
-
+    document.addEventListener('keydown', onKey)
+    document.body.style.overflow = 'hidden'
     return () => {
-      document.removeEventListener('keydown', handleEscape)
-      document.body.style.overflow = 'unset'
+      document.removeEventListener('keydown', onKey)
+      document.body.style.overflow = ''
     }
-  }, [isOpen, onClose])
+  }, [visible, onClose])
 
-  if (!isOpen) return null
+  if (!visible) return null
 
-  return (
-    <div className={styles.backdrop} onClick={onClose}>
+  return createPortal(
+    <div
+      className="modal-stage modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      style={{ position: 'fixed', inset: 0, zIndex: 1000 }}
+      onClick={onClose}
+    >
       <div
-        className={styles.modal}
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
+        className="modal-card"
+        style={{ width }}
+        role="document"
         aria-labelledby="modal-title"
+        onClick={(e) => e.stopPropagation()}
       >
-        <div className={styles.header}>
-          <h2 id="modal-title" className={styles.title}>{title}</h2>
-          <button className={styles.closeButton} onClick={onClose} aria-label={t('ariaCloseModal')}>
-            <X size={20} />
-          </button>
-        </div>
-        <div className={styles.content}>
-          {children}
-        </div>
-        {footer && (
-          <div className={styles.footer}>
-            {footer}
+        {title && (
+          <div className="modal-h">
+            {typeof title === 'string' ? (
+              <h2 id="modal-title" style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>{title}</h2>
+            ) : (
+              title
+            )}
+            <span className="spacer" />
+            <button
+              type="button"
+              className="h-icon-btn"
+              onClick={onClose}
+              aria-label={t('btnClose') || 'Close'}
+              title={t('btnClose') || 'Close'}
+            >
+              <IconX size={15} />
+            </button>
           </div>
         )}
+        <div className="modal-b">{children}</div>
+        {footer && <div className="modal-f">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

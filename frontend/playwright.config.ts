@@ -15,11 +15,13 @@ export default defineConfig({
   // Fail the build on CI if you accidentally left test.only in the source code
   forbidOnly: !!process.env.CI,
 
-  // Retry on CI only
-  retries: process.env.CI ? 2 : 0,
+  // Retry on CI only. One retry catches genuine flakes without doubling
+  // the wall-clock cost when a real bug surfaces.
+  retries: process.env.CI ? 1 : 0,
 
-  // Opt out of parallel tests on CI
-  workers: process.env.CI ? 1 : undefined,
+  // GitHub-hosted Ubuntu runners have 4 vCPUs; running multiple workers in
+  // parallel keeps the CI test phase close to 1–1.5 minutes.
+  workers: process.env.CI ? 4 : undefined,
 
   // Reporter to use
   reporter: [

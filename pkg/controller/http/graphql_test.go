@@ -21,6 +21,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	domainConfig "github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
@@ -28,44 +29,14 @@ import (
 
 const testWorkspaceID = "test-ws"
 
-// setupGraphQLServerWithRegistry creates a test GraphQL server with workspace registry
-func setupGraphQLServerWithRegistry(repo interfaces.Repository, registry *model.WorkspaceRegistry) (http.Handler, error) {
-	uc := usecase.New(repo, registry)
-	resolver := gqlctrl.NewResolver(repo, uc)
-	srv := handler.NewDefaultServer(
-		gqlctrl.NewExecutableSchema(gqlctrl.Config{Resolvers: resolver}),
-	)
-	srv.SetErrorPresenter(func(ctx context.Context, err error) *gqlerror.Error {
-		gqlErr := graphql.DefaultErrorPresenter(ctx, err)
-		wrappedErr := goerr.Wrap(err, "GraphQL error")
-		logging.Default().Error("GraphQL error occurred", "error", wrappedErr)
-		return gqlErr
-	})
-	srv.SetRecoverFunc(func(ctx context.Context, panicValue interface{}) error {
-		var panicErr error
-		switch e := panicValue.(type) {
-		case error:
-			panicErr = e
-		case string:
-			panicErr = goerr.New(e)
-		default:
-			panicErr = goerr.New("panic occurred", goerr.V("panic", panicValue))
-		}
-		wrappedErr := goerr.Wrap(panicErr, "GraphQL panic")
-		logging.Default().Error("GraphQL panic occurred", "error", wrappedErr)
-		return wrappedErr
-	})
-	gqlHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		loaders := gqlctrl.NewDataLoaders(repo)
-		ctx := gqlctrl.WithDataLoaders(r.Context(), loaders)
-		srv.ServeHTTP(w, r.WithContext(ctx))
-	})
-	return httpctrl.New(gqlHandler)
-}
-
 // setupGraphQLServer creates a test GraphQL server with HTTP handler
 func setupGraphQLServer(repo interfaces.Repository) (http.Handler, error) {
-	uc := usecase.New(repo, nil)
+	return setupGraphQLServerWithRegistry(repo, nil)
+}
+
+// setupGraphQLServerWithRegistry creates a test GraphQL server backed by the given workspace registry
+func setupGraphQLServerWithRegistry(repo interfaces.Repository, registry *model.WorkspaceRegistry) (http.Handler, error) {
+	uc := usecase.New(repo, registry)
 	resolver := gqlctrl.NewResolver(repo, uc)
 	srv := handler.NewDefaultServer(
 		gqlctrl.NewExecutableSchema(gqlctrl.Config{Resolvers: resolver}),
@@ -681,8 +652,8 @@ func TestGraphQLHandler_DeleteCaseMutation(t *testing.T) {
 
 		gt.Array(t, resp.Errors).Length(0)
 
-		// Verify associated actions were also deleted
-		actions, err := repo.Action().GetByCase(ctx, testWorkspaceID, createdCase.ID)
+		// Verify associated actions were also deleted (cascade includes archived)
+		actions, err := repo.Action().GetByCase(ctx, testWorkspaceID, createdCase.ID, interfaces.ActionListOptions{ArchiveScope: interfaces.ActionArchiveScopeAll})
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, actions).Length(0)
@@ -853,206 +824,6 @@ func TestGraphQLHandler_FrontendCasesQuery(t *testing.T) {
 		// Check that the error message mentions the invalid field
 		if len(resp.Errors) > 0 {
 			gt.Value(t, resp.Errors[0].Message).Equal(`Cannot query field "fieldID" on type "FieldValue". Did you mean "fieldId"?`)
-		}
-	})
-}
-
-func TestGraphQLHandler_FrontendKnowledgesQuery(t *testing.T) {
-	repo := memory.New()
-	handler, err := setupGraphQLServer(repo)
-	gt.NoError(t, err).Required()
-
-	ctx := context.Background()
-
-	// Create a test case first
-	testCase := &model.Case{
-		Title:       "Test Case for Knowledge",
-		Description: "Case for knowledge testing",
-		AssigneeIDs: []string{"U001"},
-	}
-
-	createdCase, err := repo.Case().Create(ctx, testWorkspaceID, testCase)
-	gt.NoError(t, err).Required()
-
-	// Create test knowledge linked to the case
-	now := time.Now()
-	testKnowledge := &model.Knowledge{
-		ID:         model.NewKnowledgeID(),
-		CaseID:     createdCase.ID,
-		SourceID:   "source-001",
-		SourceURLs: []string{"https://example.com/source"},
-		Title:      "Test Knowledge Title",
-		Summary:    "Test knowledge summary",
-		SourcedAt:  now,
-		CreatedAt:  now,
-		UpdatedAt:  now,
-	}
-
-	createdKnowledge, err := repo.Knowledge().Create(ctx, testWorkspaceID, testKnowledge)
-	gt.NoError(t, err).Required()
-
-	t.Run("frontend GET_KNOWLEDGES query format", func(t *testing.T) {
-		// This mimics the query structure used by the frontend
-		query := `
-			query GetKnowledges($workspaceId: String!) {
-				knowledges(workspaceId: $workspaceId, limit: 100, offset: 0) {
-					items {
-						id
-						caseID
-						case {
-							id
-							title
-							description
-						}
-						sourceID
-						sourceURLs
-						title
-						summary
-						sourcedAt
-						createdAt
-						updatedAt
-					}
-					totalCount
-					hasMore
-				}
-			}
-		`
-
-		variables := map[string]interface{}{
-			"workspaceId": testWorkspaceID,
-		}
-
-		rec := executeGraphQLRequest(t, handler, query, variables)
-
-		gt.Value(t, rec.Code).Equal(http.StatusOK)
-
-		resp := parseGraphQLResponse(t, rec)
-
-		gt.Array(t, resp.Errors).Length(0)
-
-		gt.Value(t, resp.Data).NotNil().Required()
-
-		var result struct {
-			Knowledges struct {
-				Items []struct {
-					ID     string `json:"id"`
-					CaseID int    `json:"caseID"`
-					Case   *struct {
-						ID          int    `json:"id"`
-						Title       string `json:"title"`
-						Description string `json:"description"`
-					} `json:"case"`
-					SourceID   string   `json:"sourceID"`
-					SourceURLs []string `json:"sourceURLs"`
-					Title      string   `json:"title"`
-					Summary    string   `json:"summary"`
-				} `json:"items"`
-				TotalCount int  `json:"totalCount"`
-				HasMore    bool `json:"hasMore"`
-			} `json:"knowledges"`
-		}
-
-		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
-
-		gt.Array(t, result.Knowledges.Items).Length(1).Required()
-
-		k := result.Knowledges.Items[0]
-		gt.Value(t, k.ID).Equal(string(createdKnowledge.ID))
-		gt.Value(t, int64(k.CaseID)).Equal(createdCase.ID)
-		gt.Value(t, k.Title).Equal("Test Knowledge Title")
-		gt.Value(t, k.Case).NotNil()
-		if k.Case != nil {
-			gt.Value(t, int64(k.Case.ID)).Equal(createdCase.ID)
-			gt.Value(t, k.Case.Title).Equal("Test Case for Knowledge")
-		}
-	})
-
-	t.Run("frontend GET_KNOWLEDGE query format", func(t *testing.T) {
-		// This mimics the query structure used by the frontend for single knowledge
-		query := `
-			query GetKnowledge($workspaceId: String!, $id: String!) {
-				knowledge(workspaceId: $workspaceId, id: $id) {
-					id
-					caseID
-					case {
-						id
-						title
-						description
-					}
-					sourceID
-					sourceURLs
-					title
-					summary
-					sourcedAt
-					createdAt
-					updatedAt
-				}
-			}
-		`
-
-		variables := map[string]interface{}{
-			"workspaceId": testWorkspaceID,
-			"id":          string(createdKnowledge.ID),
-		}
-
-		rec := executeGraphQLRequest(t, handler, query, variables)
-
-		gt.Value(t, rec.Code).Equal(http.StatusOK)
-
-		resp := parseGraphQLResponse(t, rec)
-
-		gt.Array(t, resp.Errors).Length(0)
-
-		gt.Value(t, resp.Data).NotNil().Required()
-
-		var result struct {
-			Knowledge struct {
-				ID     string `json:"id"`
-				CaseID int    `json:"caseID"`
-				Case   *struct {
-					ID          int    `json:"id"`
-					Title       string `json:"title"`
-					Description string `json:"description"`
-				} `json:"case"`
-				Title string `json:"title"`
-			} `json:"knowledge"`
-		}
-
-		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
-
-		gt.Value(t, result.Knowledge.ID).Equal(string(createdKnowledge.ID))
-
-		gt.Value(t, int64(result.Knowledge.CaseID)).Equal(createdCase.ID)
-
-		gt.Value(t, result.Knowledge.Case).NotNil()
-	})
-
-	t.Run("verify riskID field does not exist", func(t *testing.T) {
-		// This should fail because riskID is not a valid field
-		query := `
-			query($workspaceId: String!) {
-				knowledges(workspaceId: $workspaceId, limit: 10, offset: 0) {
-					items {
-						id
-						riskID
-					}
-				}
-			}
-		`
-
-		variables := map[string]interface{}{
-			"workspaceId": testWorkspaceID,
-		}
-
-		rec := executeGraphQLRequest(t, handler, query, variables)
-
-		resp := parseGraphQLResponse(t, rec)
-
-		gt.Number(t, len(resp.Errors)).GreaterOrEqual(1)
-
-		// Check that the error message mentions the invalid field
-		if len(resp.Errors) > 0 {
-			gt.Value(t, resp.Errors[0].Message).Equal(`Cannot query field "riskID" on type "Knowledge". Did you mean "caseID"?`)
 		}
 	})
 }
@@ -1284,19 +1055,22 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 		gt.Value(t, updatedAction.Title).Equal("Updated Action Title")
 	})
 
-	t.Run("delete action", func(t *testing.T) {
-		// Create an action to delete
-		actionToDelete := &model.Action{
+	t.Run("archive and unarchive action", func(t *testing.T) {
+		// Create an action to archive
+		actionToArchive := &model.Action{
 			CaseID:      createdCase.ID,
-			Title:       "Action to Delete",
-			Description: "This action will be deleted",
+			Title:       "Action to Archive",
+			Description: "This action will be archived",
 		}
-		createdAction, err := repo.Action().Create(ctx, testWorkspaceID, actionToDelete)
+		createdAction, err := repo.Action().Create(ctx, testWorkspaceID, actionToArchive)
 		gt.NoError(t, err).Required()
 
-		mutation := `
+		archiveMutation := `
 			mutation($workspaceId: String!, $id: Int!) {
-				deleteAction(workspaceId: $workspaceId, id: $id)
+				archiveAction(workspaceId: $workspaceId, id: $id) {
+					id
+					archived
+				}
 			}
 		`
 
@@ -1305,27 +1079,208 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 			"id":          createdAction.ID,
 		}
 
-		rec := executeGraphQLRequest(t, handler, mutation, variables)
+		// Archive/Unarchive resolvers reject requests without an
+		// authenticated user, so we route through the auth-injecting
+		// helper. Using a test user ID is sufficient because the case
+		// created by the surrounding test is public.
+		const archiveTestUser = "U-archive-test"
+		rec := executeGraphQLRequestWithAuth(t, handler, archiveMutation, variables, archiveTestUser)
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+		gt.Value(t, resp.Data).NotNil().Required()
 
+		var archiveResult struct {
+			ArchiveAction struct {
+				ID       int  `json:"id"`
+				Archived bool `json:"archived"`
+			} `json:"archiveAction"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &archiveResult)).Required()
+		gt.Bool(t, archiveResult.ArchiveAction.Archived).True()
+
+		// The action document is preserved; ArchivedAt is set
+		stored, err := repo.Action().Get(ctx, testWorkspaceID, createdAction.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, stored.IsArchived()).True()
+
+		// Now unarchive
+		unarchiveMutation := `
+			mutation($workspaceId: String!, $id: Int!) {
+				unarchiveAction(workspaceId: $workspaceId, id: $id) {
+					id
+					archived
+				}
+			}
+		`
+
+		rec = executeGraphQLRequestWithAuth(t, handler, unarchiveMutation, variables, archiveTestUser)
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp = parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var unarchiveResult struct {
+			UnarchiveAction struct {
+				ID       int  `json:"id"`
+				Archived bool `json:"archived"`
+			} `json:"unarchiveAction"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &unarchiveResult)).Required()
+		gt.Bool(t, unarchiveResult.UnarchiveAction.Archived).False()
+
+		stored, err = repo.Action().Get(ctx, testWorkspaceID, createdAction.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, stored.IsArchived()).False()
+	})
+
+	t.Run("archive action without auth token returns error", func(t *testing.T) {
+		// Confirm the resolver hardening: a missing auth context must
+		// surface as a GraphQL error rather than silently falling back
+		// to ActorKindSystem.
+		actionForUnauthArchive := &model.Action{
+			CaseID:      createdCase.ID,
+			Title:       "Action to Archive Unauth",
+			Description: "Unauthenticated archive should fail",
+		}
+		created, err := repo.Action().Create(ctx, testWorkspaceID, actionForUnauthArchive)
+		gt.NoError(t, err).Required()
+
+		mutation := `
+			mutation($workspaceId: String!, $id: Int!) {
+				archiveAction(workspaceId: $workspaceId, id: $id) { id }
+			}
+		`
+		rec := executeGraphQLRequest(t, handler, mutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          created.ID,
+		})
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(1).Required()
+
+		stored, err := repo.Action().Get(ctx, testWorkspaceID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, stored.IsArchived()).False()
+	})
+
+	t.Run("actionsByCase respects archive filter", func(t *testing.T) {
+		// Set up: one active and one archived action
+		caseForArchiveQuery, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{Title: "archive query case"})
+		gt.NoError(t, err).Required()
+
+		active, err := repo.Action().Create(ctx, testWorkspaceID, &model.Action{
+			CaseID: caseForArchiveQuery.ID, Title: "active action", Status: types.ActionStatusTodo,
+		})
+		gt.NoError(t, err).Required()
+
+		archived, err := repo.Action().Create(ctx, testWorkspaceID, &model.Action{
+			CaseID: caseForArchiveQuery.ID, Title: "archived action", Status: types.ActionStatusTodo,
+		})
+		gt.NoError(t, err).Required()
+		now := time.Now().UTC()
+		archived.ArchivedAt = &now
+		_, err = repo.Action().Update(ctx, testWorkspaceID, archived)
+		gt.NoError(t, err).Required()
+
+		query := `
+			query($workspaceId: String!, $caseID: Int!, $filter: ActionArchiveFilter) {
+				actionsByCase(workspaceId: $workspaceId, caseID: $caseID, filter: $filter) {
+					id
+					archived
+				}
+			}
+		`
+
+		// Default: filter omitted → ACTIVE only
+		rec := executeGraphQLRequest(t, handler, query, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"caseID":      caseForArchiveQuery.ID,
+		})
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var defaultResult struct {
+			ActionsByCase []struct {
+				ID       int  `json:"id"`
+				Archived bool `json:"archived"`
+			} `json:"actionsByCase"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &defaultResult)).Required()
+		gt.Array(t, defaultResult.ActionsByCase).Length(1).Required()
+		gt.Value(t, defaultResult.ActionsByCase[0].ID).Equal(int(active.ID))
+
+		// filter=ARCHIVED → archived only
+		rec = executeGraphQLRequest(t, handler, query, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"caseID":      caseForArchiveQuery.ID,
+			"filter":      "ARCHIVED",
+		})
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp = parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var archivedResult struct {
+			ActionsByCase []struct {
+				ID       int  `json:"id"`
+				Archived bool `json:"archived"`
+			} `json:"actionsByCase"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &archivedResult)).Required()
+		gt.Array(t, archivedResult.ActionsByCase).Length(1).Required()
+		gt.Value(t, archivedResult.ActionsByCase[0].ID).Equal(int(archived.ID))
+		gt.Bool(t, archivedResult.ActionsByCase[0].Archived).True()
+
+		// filter=ALL → both
+		rec = executeGraphQLRequest(t, handler, query, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"caseID":      caseForArchiveQuery.ID,
+			"filter":      "ALL",
+		})
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp = parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var allResult struct {
+			ActionsByCase []struct {
+				ID       int  `json:"id"`
+				Archived bool `json:"archived"`
+			} `json:"actionsByCase"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &allResult)).Required()
+		gt.Array(t, allResult.ActionsByCase).Length(2)
+	})
+
+	t.Run("postActionSlackMessage surfaces usecase error", func(t *testing.T) {
+		// The test harness wires no Slack service; calling
+		// postActionSlackMessage exercises the resolver → usecase plumbing
+		// and verifies that the strict "slack not configured" error
+		// surfaces as a GraphQL error rather than a panic or silent OK.
+		actionForRepost := &model.Action{
+			CaseID:      createdCase.ID,
+			Title:       "Action to repost",
+			Description: "Initial Slack post never happened",
+		}
+		createdAction, err := repo.Action().Create(ctx, testWorkspaceID, actionForRepost)
+		gt.NoError(t, err).Required()
+
+		mutation := `
+			mutation($workspaceId: String!, $id: Int!) {
+				postActionSlackMessage(workspaceId: $workspaceId, id: $id) {
+					id
+				}
+			}
+		`
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          createdAction.ID,
+		}
+
+		rec := executeGraphQLRequest(t, handler, mutation, variables)
 		gt.Value(t, rec.Code).Equal(http.StatusOK)
 
 		resp := parseGraphQLResponse(t, rec)
-
-		gt.Array(t, resp.Errors).Length(0)
-
-		gt.Value(t, resp.Data).NotNil().Required()
-
-		var result struct {
-			DeleteAction bool `json:"deleteAction"`
-		}
-
-		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
-
-		gt.Bool(t, result.DeleteAction).True()
-
-		// Verify the action was actually deleted from repository
-		_, err = repo.Action().Get(ctx, testWorkspaceID, createdAction.ID)
-		gt.Value(t, err).NotNil()
+		gt.Number(t, len(resp.Errors)).GreaterOrEqual(1)
 	})
 }
 
@@ -2401,9 +2356,6 @@ func TestGraphQLHandler_PrivateCaseAccessControl(t *testing.T) {
 						id
 						title
 					}
-					knowledges {
-						id
-					}
 				}
 			}
 		`
@@ -2425,16 +2377,12 @@ func TestGraphQLHandler_PrivateCaseAccessControl(t *testing.T) {
 				Actions      []struct {
 					ID int `json:"id"`
 				} `json:"actions"`
-				Knowledges []struct {
-					ID int `json:"id"`
-				} `json:"knowledges"`
 			} `json:"case"`
 		}
 		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
 
 		gt.Value(t, result.Case.AccessDenied).Equal(true)
 		gt.Array(t, result.Case.Actions).Length(0)
-		gt.Array(t, result.Case.Knowledges).Length(0)
 	})
 
 	t.Run("without auth token private case is fully visible (backward compat)", func(t *testing.T) {
@@ -2472,61 +2420,6 @@ func TestGraphQLHandler_PrivateCaseAccessControl(t *testing.T) {
 
 		gt.Value(t, result.Case.Title).Equal("Private Case")
 		gt.Value(t, result.Case.AccessDenied).Equal(false)
-	})
-
-	t.Run("knowledge root query returns nil for non-member of private case", func(t *testing.T) {
-		// Create a knowledge linked to the private case
-		knowledge := &model.Knowledge{
-			CaseID:  createdPrivate.ID,
-			Title:   "Secret Knowledge",
-			Summary: "Secret summary",
-		}
-		createdKnowledge, err := repo.Knowledge().Create(ctx, testWorkspaceID, knowledge)
-		gt.NoError(t, err).Required()
-
-		query := `
-			query($workspaceId: String!, $id: String!) {
-				knowledge(workspaceId: $workspaceId, id: $id) {
-					id
-					title
-				}
-			}
-		`
-		variables := map[string]interface{}{
-			"workspaceId": testWorkspaceID,
-			"id":          string(createdKnowledge.ID),
-		}
-
-		// Non-member should get null
-		rec := executeGraphQLRequestWithAuth(t, handler, query, variables, "UOTHER")
-		gt.Value(t, rec.Code).Equal(http.StatusOK)
-		resp := parseGraphQLResponse(t, rec)
-		gt.Array(t, resp.Errors).Length(0)
-
-		var result struct {
-			Knowledge *struct {
-				ID    string `json:"id"`
-				Title string `json:"title"`
-			} `json:"knowledge"`
-		}
-		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
-		gt.Value(t, result.Knowledge == nil).Equal(true)
-
-		// Member should see it
-		rec = executeGraphQLRequestWithAuth(t, handler, query, variables, "UMEMBER")
-		gt.Value(t, rec.Code).Equal(http.StatusOK)
-		resp = parseGraphQLResponse(t, rec)
-		gt.Array(t, resp.Errors).Length(0)
-
-		var memberResult struct {
-			Knowledge *struct {
-				ID    string `json:"id"`
-				Title string `json:"title"`
-			} `json:"knowledge"`
-		}
-		gt.NoError(t, json.Unmarshal(resp.Data, &memberResult)).Required()
-		gt.Value(t, memberResult.Knowledge != nil).Equal(true)
-		gt.Value(t, memberResult.Knowledge.Title).Equal("Secret Knowledge")
 	})
 
 	t.Run("assistLogs root query returns empty for non-member of private case", func(t *testing.T) {
@@ -2592,6 +2485,337 @@ func TestGraphQLHandler_PrivateCaseAccessControl(t *testing.T) {
 		gt.NoError(t, json.Unmarshal(resp.Data, &memberResult)).Required()
 		gt.Number(t, len(memberResult.AssistLogs.Items)).GreaterOrEqual(1)
 		gt.Value(t, memberResult.AssistLogs.Items[0].Summary).Equal("Secret analysis")
+	})
+}
+
+func TestGraphQLHandler_ActionStepMutations(t *testing.T) {
+	repo := memory.New()
+	handler, err := setupGraphQLServer(repo)
+	gt.NoError(t, err).Required()
+	ctx := context.Background()
+
+	// Create a Case + Action that the steps will live under.
+	c, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+		Title: "Step E2E Case",
+	})
+	gt.NoError(t, err).Required()
+	action, err := repo.Action().Create(ctx, testWorkspaceID, &model.Action{
+		CaseID: c.ID,
+		Title:  "Step E2E Action",
+		Status: types.ActionStatusTodo,
+	})
+	gt.NoError(t, err).Required()
+
+	stepFields := `
+		id
+		actionID
+		title
+		done
+		doneAt
+	`
+
+	var stepID string
+	t.Run("addActionStep creates a step and exposes it via Action.steps", func(t *testing.T) {
+		mutation := `
+			mutation($workspaceId: String!, $input: AddActionStepInput!) {
+				addActionStep(workspaceId: $workspaceId, input: $input) {
+					` + stepFields + `
+				}
+			}
+		`
+		rec := executeGraphQLRequest(t, handler, mutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"input": map[string]interface{}{
+				"actionId": action.ID,
+				"title":    "first step",
+			},
+		})
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var result struct {
+			AddActionStep struct {
+				ID       string  `json:"id"`
+				ActionID int     `json:"actionID"`
+				Title    string  `json:"title"`
+				Done     bool    `json:"done"`
+				DoneAt   *string `json:"doneAt"`
+			} `json:"addActionStep"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+		gt.String(t, result.AddActionStep.ID).NotEqual("")
+		gt.Value(t, result.AddActionStep.Title).Equal("first step")
+		gt.Bool(t, result.AddActionStep.Done).False()
+		gt.Value(t, result.AddActionStep.ActionID).Equal(int(action.ID))
+		gt.Value(t, result.AddActionStep.DoneAt).Nil()
+		stepID = result.AddActionStep.ID
+
+		stored, err := repo.ActionStep().Get(ctx, testWorkspaceID, action.ID, stepID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, stored.Title).Equal("first step")
+	})
+
+	t.Run("Action.steps and stepProgress reflect the new step", func(t *testing.T) {
+		query := `
+			query($workspaceId: String!, $id: Int!) {
+				action(workspaceId: $workspaceId, id: $id) {
+					steps { id title done }
+					stepProgress { done total }
+				}
+			}
+		`
+		rec := executeGraphQLRequest(t, handler, query, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          action.ID,
+		})
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var result struct {
+			Action struct {
+				Steps []struct {
+					ID    string `json:"id"`
+					Title string `json:"title"`
+					Done  bool   `json:"done"`
+				} `json:"steps"`
+				StepProgress struct {
+					Done  int `json:"done"`
+					Total int `json:"total"`
+				} `json:"stepProgress"`
+			} `json:"action"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+		gt.Array(t, result.Action.Steps).Length(1).Required()
+		gt.Value(t, result.Action.Steps[0].ID).Equal(stepID)
+		gt.Value(t, result.Action.StepProgress.Done).Equal(0)
+		gt.Value(t, result.Action.StepProgress.Total).Equal(1)
+	})
+
+	t.Run("setActionStepDone toggles state and updates progress", func(t *testing.T) {
+		mutation := `
+			mutation($workspaceId: String!, $input: SetActionStepDoneInput!) {
+				setActionStepDone(workspaceId: $workspaceId, input: $input) {
+					id done doneAt
+				}
+			}
+		`
+		rec := executeGraphQLRequest(t, handler, mutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"input": map[string]interface{}{
+				"actionId": action.ID,
+				"stepId":   stepID,
+				"done":     true,
+			},
+		})
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+		var result struct {
+			SetActionStepDone struct {
+				ID     string  `json:"id"`
+				Done   bool    `json:"done"`
+				DoneAt *string `json:"doneAt"`
+			} `json:"setActionStepDone"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+		gt.Bool(t, result.SetActionStepDone.Done).True()
+		gt.Value(t, result.SetActionStepDone.DoneAt).NotNil()
+	})
+
+	t.Run("renameActionStep changes title", func(t *testing.T) {
+		mutation := `
+			mutation($workspaceId: String!, $input: RenameActionStepInput!) {
+				renameActionStep(workspaceId: $workspaceId, input: $input) {
+					id title
+				}
+			}
+		`
+		rec := executeGraphQLRequest(t, handler, mutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"input": map[string]interface{}{
+				"actionId": action.ID,
+				"stepId":   stepID,
+				"title":    "renamed step",
+			},
+		})
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		stored, err := repo.ActionStep().Get(ctx, testWorkspaceID, action.ID, stepID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, stored.Title).Equal("renamed step")
+	})
+
+	t.Run("deleteActionStep removes the step and progress goes to 0/0", func(t *testing.T) {
+		mutation := `
+			mutation($workspaceId: String!, $input: DeleteActionStepInput!) {
+				deleteActionStep(workspaceId: $workspaceId, input: $input)
+			}
+		`
+		rec := executeGraphQLRequest(t, handler, mutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"input": map[string]interface{}{
+				"actionId": action.ID,
+				"stepId":   stepID,
+			},
+		})
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		steps, err := repo.ActionStep().List(ctx, testWorkspaceID, action.ID)
+		gt.NoError(t, err).Required()
+		gt.Array(t, steps).Length(0)
+	})
+
+	t.Run("authenticated mutation attributes the step and ActionEvent to the user", func(t *testing.T) {
+		// Fresh action so the ActionEvent feed is isolated.
+		freshAction, err := repo.Action().Create(ctx, testWorkspaceID, &model.Action{
+			CaseID: c.ID,
+			Title:  "Attribution Action",
+			Status: types.ActionStatusTodo,
+		})
+		gt.NoError(t, err).Required()
+
+		const userID = "UATTRIBUTOR"
+		mutation := `
+			mutation($workspaceId: String!, $input: AddActionStepInput!) {
+				addActionStep(workspaceId: $workspaceId, input: $input) {
+					id
+				}
+			}
+		`
+		rec := executeGraphQLRequestWithAuth(t, handler, mutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"input": map[string]interface{}{
+				"actionId": freshAction.ID,
+				"title":    "attributed step",
+			},
+		}, userID)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+		var result struct {
+			AddActionStep struct {
+				ID string `json:"id"`
+			} `json:"addActionStep"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+
+		stored, err := repo.ActionStep().Get(ctx, testWorkspaceID, freshAction.ID, result.AddActionStep.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, stored.CreatedBy).Equal(userID)
+
+		events, _, err := repo.ActionEvent().List(ctx, testWorkspaceID, freshAction.ID, 10, "")
+		gt.NoError(t, err).Required()
+		// Newest first; the STEP_ADDED event must carry the user id.
+		gt.Number(t, len(events)).GreaterOrEqual(1).Required()
+		gt.Value(t, events[0].Kind).Equal(types.ActionEventStepAdded)
+		gt.Value(t, events[0].ActorID).Equal(userID)
+	})
+}
+
+func TestGraphQLHandler_ActionStepPrivateCaseAccessControl(t *testing.T) {
+	repo := memory.New()
+	handler, err := setupGraphQLServer(repo)
+	gt.NoError(t, err).Required()
+	ctx := context.Background()
+
+	const memberID = "UMEMBER"
+	const intruderID = "UINTRUDER"
+	c, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+		Title:          "Private Step Case",
+		IsPrivate:      true,
+		ChannelUserIDs: []string{memberID},
+	})
+	gt.NoError(t, err).Required()
+	action, err := repo.Action().Create(ctx, testWorkspaceID, &model.Action{
+		CaseID: c.ID,
+		Title:  "Private Step Action",
+		Status: types.ActionStatusTodo,
+	})
+	gt.NoError(t, err).Required()
+	gt.NoError(t, repo.ActionStep().Put(ctx, testWorkspaceID, &model.ActionStep{
+		ID:        "step-private-1",
+		ActionID:  action.ID,
+		Title:     "secret step",
+		CreatedBy: memberID,
+	})).Required()
+
+	query := `
+		query($workspaceId: String!, $id: Int!) {
+			action(workspaceId: $workspaceId, id: $id) {
+				steps { id title }
+				stepProgress { done total }
+			}
+		}
+	`
+
+	t.Run("non-member sees empty steps and 0/0 progress", func(t *testing.T) {
+		rec := executeGraphQLRequestWithAuth(t, handler, query, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          action.ID,
+		}, intruderID)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+		var result struct {
+			Action struct {
+				Steps []struct {
+					ID string `json:"id"`
+				} `json:"steps"`
+				StepProgress struct {
+					Done  int `json:"done"`
+					Total int `json:"total"`
+				} `json:"stepProgress"`
+			} `json:"action"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+		gt.Array(t, result.Action.Steps).Length(0)
+		gt.Value(t, result.Action.StepProgress.Done).Equal(0)
+		gt.Value(t, result.Action.StepProgress.Total).Equal(0)
+	})
+
+	t.Run("member sees the step and 0/1 progress", func(t *testing.T) {
+		rec := executeGraphQLRequestWithAuth(t, handler, query, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          action.ID,
+		}, memberID)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+		var result struct {
+			Action struct {
+				Steps []struct {
+					ID    string `json:"id"`
+					Title string `json:"title"`
+				} `json:"steps"`
+				StepProgress struct {
+					Done  int `json:"done"`
+					Total int `json:"total"`
+				} `json:"stepProgress"`
+			} `json:"action"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+		gt.Array(t, result.Action.Steps).Length(1).Required()
+		gt.Value(t, result.Action.Steps[0].ID).Equal("step-private-1")
+		gt.Value(t, result.Action.StepProgress.Total).Equal(1)
+	})
+
+	t.Run("non-member addActionStep is rejected", func(t *testing.T) {
+		mutation := `
+			mutation($workspaceId: String!, $input: AddActionStepInput!) {
+				addActionStep(workspaceId: $workspaceId, input: $input) {
+					id
+				}
+			}
+		`
+		rec := executeGraphQLRequestWithAuth(t, handler, mutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"input": map[string]interface{}{
+				"actionId": action.ID,
+				"title":    "intruder step",
+			},
+		}, intruderID)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Number(t, len(resp.Errors)).GreaterOrEqual(1)
 	})
 }
 

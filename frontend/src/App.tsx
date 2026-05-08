@@ -1,11 +1,8 @@
-import { Routes, Route } from 'react-router-dom'
+import { Navigate, Routes, Route } from 'react-router-dom'
 import Layout from './components/Layout'
-import Top from './pages/Top'
 import CaseList from './pages/CaseList'
 import CaseDetail from './pages/CaseDetail'
 import ActionList from './pages/ActionList'
-import KnowledgeList from './pages/KnowledgeList'
-import KnowledgeDetail from './pages/KnowledgeDetail'
 import AssistLogList from './pages/AssistLogList'
 import SourceList from './pages/SourceList'
 import SourceDetail from './pages/SourceDetail'
@@ -19,15 +16,13 @@ function App() {
       <Routes>
         <Route path="/" element={<WorkspaceSelector />} />
         <Route path="/ws/:workspaceId" element={<WorkspaceGuard><Layout /></WorkspaceGuard>}>
-          <Route index element={<Top />} />
+          <Route index element={<Navigate to="cases" replace />} />
           <Route path="cases" element={<CaseList />} />
           <Route path="cases/:id" element={<CaseDetail />} />
           <Route path="cases/:id/actions/:actionId" element={<CaseDetail />} />
           <Route path="cases/:id/assists" element={<AssistLogList />} />
           <Route path="actions" element={<ActionList />} />
           <Route path="actions/:actionId" element={<ActionList />} />
-          <Route path="knowledges" element={<KnowledgeList />} />
-          <Route path="knowledges/:id" element={<KnowledgeDetail />} />
           <Route path="sources" element={<SourceList />} />
           <Route path="sources/:id" element={<SourceDetail />} />
         </Route>

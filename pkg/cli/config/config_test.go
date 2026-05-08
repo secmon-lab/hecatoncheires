@@ -29,13 +29,13 @@ required = true
 description = "Classification of the case"
 
   [[fields.options]]
-  id = "data-breach"
+  id = "data_breach"
   name = "Data Breach"
   description = "Risk of data leakage"
   color = "#E53E3E"
 
   [[fields.options]]
-  id = "system-failure"
+  id = "system_failure"
   name = "System Failure"
   color = "#DD6B20"
 
@@ -47,7 +47,7 @@ required = true
 description = "Probability of occurrence"
 
   [[fields.options]]
-  id = "very-low"
+  id = "very_low"
   name = "Very Low"
   description = "Extremely unlikely to occur"
   [fields.options.metadata]
@@ -60,7 +60,7 @@ description = "Probability of occurrence"
   score = 4
 
 [[fields]]
-id = "specific-impact"
+id = "specific_impact"
 name = "Specific Impact"
 type = "text"
 required = false
@@ -85,13 +85,13 @@ type = "multi-user"
 required = false
 
 [[fields]]
-id = "due-date"
+id = "due_date"
 name = "Due Date"
 type = "date"
 required = false
 
 [[fields]]
-id = "reference-url"
+id = "reference_url"
 name = "Reference URL"
 type = "url"
 required = false
@@ -144,10 +144,20 @@ type = "text"
 			wantErr: config.ErrInvalidFieldID,
 		},
 		{
-			name: "invalid field ID format (underscore)",
+			name: "invalid field ID format (hyphen no longer allowed)",
 			content: `
 [[fields]]
-id = "category_id"
+id = "category-id"
+name = "Category"
+type = "text"
+`,
+			wantErr: config.ErrInvalidFieldID,
+		},
+		{
+			name: "invalid field ID format (leading digit)",
+			content: `
+[[fields]]
+id = "1category"
 name = "Category"
 type = "text"
 `,
@@ -202,11 +212,11 @@ name = "Category"
 type = "select"
 
   [[fields.options]]
-  id = "option-a"
+  id = "option_a"
   name = "Option A"
 
   [[fields.options]]
-  id = "option-a"
+  id = "option_a"
   name = "Duplicate"
 `,
 			wantErr: config.ErrDuplicateOptionID,
@@ -234,7 +244,7 @@ name = "Category"
 type = "select"
 
   [[fields.options]]
-  id = "option-a"
+  id = "option_a"
 `,
 			wantErr: config.ErrMissingName,
 		},
@@ -283,7 +293,7 @@ type = "multi-select"
 required = true
 
   [[fields.options]]
-  id = "data-breach"
+  id = "data_breach"
   name = "Data Breach"
   color = "#E53E3E"
   [fields.options.metadata]
@@ -317,7 +327,7 @@ required = true
 
 	// Check option details
 	option := field.Options[0]
-	gt.Value(t, option.ID).Equal("data-breach")
+	gt.Value(t, option.ID).Equal("data_breach")
 	gt.Value(t, option.Name).Equal("Data Breach")
 	gt.Value(t, option.Color).Equal("#E53E3E")
 
@@ -808,6 +818,86 @@ type = "text"
 	})
 }
 
+func TestLoadWorkspaceConfigs_SlackWelcomeMessages(t *testing.T) {
+	t.Run("parses welcome messages", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		content := `
+[workspace]
+id = "risk"
+name = "Risk Management"
+
+[slack]
+welcome_messages = [
+  "Hello {{.Case.Title}}",
+  "Reporter: <@{{.Case.ReporterID}}>",
+]
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`
+		err := os.WriteFile(configPath, []byte(content), 0644)
+		gt.NoError(t, err).Required()
+
+		configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1)
+		gt.Array(t, configs[0].SlackWelcomeMessages).Length(2)
+		gt.Value(t, configs[0].SlackWelcomeMessages[0]).Equal("Hello {{.Case.Title}}")
+		gt.Value(t, configs[0].SlackWelcomeMessages[1]).Equal("Reporter: <@{{.Case.ReporterID}}>")
+	})
+
+	t.Run("empty when omitted", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		content := `
+[workspace]
+id = "risk"
+name = "Risk Management"
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`
+		err := os.WriteFile(configPath, []byte(content), 0644)
+		gt.NoError(t, err).Required()
+
+		configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1)
+		gt.Array(t, configs[0].SlackWelcomeMessages).Length(0)
+	})
+
+	t.Run("rejects template with parse error", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		content := `
+[workspace]
+id = "risk"
+name = "Risk Management"
+
+[slack]
+welcome_messages = [
+  "Hello {{.Case.Title",
+]
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`
+		err := os.WriteFile(configPath, []byte(content), 0644)
+		gt.NoError(t, err).Required()
+
+		_, err = config.LoadWorkspaceConfigs([]string{configPath})
+		gt.Value(t, err).NotNil()
+		gt.Error(t, err).Is(config.ErrInvalidWelcomeMessage)
+	})
+}
+
 func TestLoadFieldSchema_DefaultLabels(t *testing.T) {
 	content := `
 [[fields]]
@@ -902,4 +992,167 @@ type = "text"
 		gt.Array(t, configs).Length(1)
 		gt.Value(t, configs[0].SlackTeamID).Equal("")
 	})
+}
+
+func TestLoadWorkspaceConfigs_ActionStatuses_Default(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+	content := `
+[workspace]
+id = "risk"
+name = "Risk"
+`
+	gt.NoError(t, os.WriteFile(configPath, []byte(content), 0644)).Required()
+
+	configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+	gt.NoError(t, err).Required()
+	gt.Array(t, configs).Length(1).Required()
+
+	set := configs[0].ActionStatusSet
+	gt.Value(t, set).NotNil().Required()
+	gt.Value(t, set.InitialID()).Equal("BACKLOG")
+	gt.Bool(t, set.IsClosed("COMPLETED")).True()
+	gt.Bool(t, set.IsClosed("BACKLOG")).False()
+}
+
+func TestLoadWorkspaceConfigs_ActionStatuses_Custom(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+	content := `
+[workspace]
+id = "ops"
+name = "Ops"
+
+[action]
+initial = "queued"
+closed = ["done", "abandoned"]
+
+[[action.status]]
+id = "queued"
+name = "Queued"
+color = "idle"
+emoji = "📋"
+
+[[action.status]]
+id = "working"
+name = "Working"
+color = "active"
+
+[[action.status]]
+id = "waiting_user"
+name = "Waiting on user"
+color = "waiting"
+
+[[action.status]]
+id = "done"
+name = "Done"
+color = "success"
+emoji = "✅"
+
+[[action.status]]
+id = "abandoned"
+name = "Abandoned"
+color = "neutral_done"
+`
+	gt.NoError(t, os.WriteFile(configPath, []byte(content), 0644)).Required()
+
+	configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+	gt.NoError(t, err).Required()
+	gt.Array(t, configs).Length(1).Required()
+
+	set := configs[0].ActionStatusSet
+	gt.Value(t, set).NotNil().Required()
+	gt.Value(t, set.InitialID()).Equal("queued")
+	gt.Value(t, set.ClosedIDs()).Equal([]string{"done", "abandoned"})
+	gt.Bool(t, set.IsValid("waiting_user")).True()
+	def, ok := set.Get("queued")
+	gt.Bool(t, ok).True()
+	gt.Value(t, def.Name).Equal("Queued")
+	gt.Value(t, def.Emoji).Equal("📋")
+}
+
+func TestLoadWorkspaceConfigs_ActionStatuses_InvalidColor(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+	content := `
+[workspace]
+id = "ops"
+
+[action]
+initial = "x"
+
+[[action.status]]
+id = "x"
+name = "X"
+color = "rainbow"
+`
+	gt.NoError(t, os.WriteFile(configPath, []byte(content), 0644)).Required()
+
+	_, err := config.LoadWorkspaceConfigs([]string{configPath})
+	gt.Error(t, err)
+}
+
+func TestLoadWorkspaceConfigs_ActionStatuses_InitialMissing(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+	content := `
+[workspace]
+id = "ops"
+
+[action]
+initial = "ghost"
+
+[[action.status]]
+id = "real"
+name = "Real"
+`
+	gt.NoError(t, os.WriteFile(configPath, []byte(content), 0644)).Required()
+
+	_, err := config.LoadWorkspaceConfigs([]string{configPath})
+	gt.Error(t, err)
+}
+
+func TestLoadWorkspaceConfigs_ActionStatuses_ClosedMissing(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+	content := `
+[workspace]
+id = "ops"
+
+[action]
+initial = "x"
+closed = ["ghost"]
+
+[[action.status]]
+id = "x"
+name = "X"
+`
+	gt.NoError(t, os.WriteFile(configPath, []byte(content), 0644)).Required()
+
+	_, err := config.LoadWorkspaceConfigs([]string{configPath})
+	gt.Error(t, err)
+}
+
+func TestLoadWorkspaceConfigs_ActionStatuses_DuplicateID(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+	content := `
+[workspace]
+id = "ops"
+
+[action]
+initial = "x"
+
+[[action.status]]
+id = "x"
+name = "X"
+
+[[action.status]]
+id = "x"
+name = "X again"
+`
+	gt.NoError(t, os.WriteFile(configPath, []byte(content), 0644)).Required()
+
+	_, err := config.LoadWorkspaceConfigs([]string{configPath})
+	gt.Error(t, err)
 }

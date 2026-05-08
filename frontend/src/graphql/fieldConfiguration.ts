@@ -22,6 +22,17 @@ export const GET_FIELD_CONFIGURATION = gql`
         title
         description
       }
+      actionConfig {
+        initial
+        closed
+        statuses {
+          id
+          name
+          description
+          color
+          emoji
+        }
+      }
     }
   }
 `

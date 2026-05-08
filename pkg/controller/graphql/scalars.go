@@ -57,7 +57,37 @@ func MarshalAny(v any) graphql.Marshaler {
 	})
 }
 
-// UnmarshalAny deserializes any JSON value
+// UnmarshalAny deserializes any JSON value. gqlgen feeds numeric inputs as
+// json.Number; downstream validators expect concrete numeric types, so we
+// promote json.Number to float64 (or int64 when integral) here. Recursive
+// for nested arrays/objects.
 func UnmarshalAny(v interface{}) (any, error) {
-	return v, nil
+	return convertJSONNumber(v), nil
+}
+
+func convertJSONNumber(v any) any {
+	switch x := v.(type) {
+	case json.Number:
+		if i, err := x.Int64(); err == nil {
+			return i
+		}
+		if f, err := x.Float64(); err == nil {
+			return f
+		}
+		return x.String()
+	case []any:
+		out := make([]any, len(x))
+		for i, e := range x {
+			out[i] = convertJSONNumber(e)
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, e := range x {
+			out[k] = convertJSONNumber(e)
+		}
+		return out
+	default:
+		return v
+	}
 }

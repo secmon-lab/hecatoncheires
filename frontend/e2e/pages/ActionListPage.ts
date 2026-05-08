@@ -14,7 +14,7 @@ export class ActionListPage extends BasePage {
 
   constructor(page: Page) {
     super(page);
-    this.pageTitle = page.locator('h2').filter({ hasText: /Action/ });
+    this.pageTitle = page.locator('main h1').filter({ hasText: /Action/ });
     this.newActionButton = page.locator('button').filter({ hasText: /New Action/ });
     this.kanbanBoard = page.getByTestId('kanban-board');
     this.loadingIndicator = page.locator('text=Loading...');
@@ -130,5 +130,15 @@ export class ActionListPage extends BasePage {
     if (await clearButton.isVisible()) {
       await clearButton.click();
     }
+  }
+
+  /**
+   * Drag a card by title to a target column. Uses Playwright's dragTo
+   * which dispatches HTML5 drag events that the kanban listens for.
+   */
+  async dragActionToColumn(title: string, targetColumnTitle: string): Promise<void> {
+    const card = this.getActionCardByTitle(title);
+    const target = this.page.getByTestId(`kanban-column-${this.getColumnSlug(targetColumnTitle)}`);
+    await card.dragTo(target);
   }
 }

@@ -24,6 +24,7 @@ export const GET_CASES = gql`
         imageUrl
       }
       slackChannelID
+      slackChannelName
       createdAt
       updatedAt
       fields {
@@ -35,7 +36,7 @@ export const GET_CASES = gql`
 `
 
 export const GET_CASE = gql`
-  query GetCase($workspaceId: String!, $id: Int!) {
+  query GetCase($workspaceId: String!, $id: Int!, $actionsFilter: ActionArchiveFilter) {
     case(workspaceId: $workspaceId, id: $id) {
       id
       title
@@ -67,25 +68,22 @@ export const GET_CASE = gql`
         fieldId
         value
       }
-      actions {
+      actions(filter: $actionsFilter) {
         id
         title
         status
-        assigneeIDs
-        assignees {
+        assigneeID
+        assignee {
           id
           name
           realName
           imageUrl
         }
         dueDate
+        archived
+        archivedAt
         createdAt
-      }
-      knowledges {
-        id
-        title
-        summary
-        sourcedAt
+        updatedAt
       }
     }
   }

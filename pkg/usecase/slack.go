@@ -21,14 +21,17 @@ type SlackUseCases struct {
 	registry     *model.WorkspaceRegistry
 	agent        *AgentUseCase
 	slackService slacksvc.Service
+	mentionDraft *MentionDraftUseCase
 }
 
-// NewSlackUseCases creates a new SlackUseCases instance
-func NewSlackUseCases(repo interfaces.Repository, registry *model.WorkspaceRegistry, agent *AgentUseCase, slackService slacksvc.Service) *SlackUseCases {
+// NewSlackUseCases creates a new SlackUseCases instance. agent and
+// mentionDraft are mandatory — Slack mention dispatch requires both.
+func NewSlackUseCases(repo interfaces.Repository, registry *model.WorkspaceRegistry, agent *AgentUseCase, mentionDraft *MentionDraftUseCase, slackService slacksvc.Service) *SlackUseCases {
 	return &SlackUseCases{
 		repo:         repo,
 		registry:     registry,
 		agent:        agent,
+		mentionDraft: mentionDraft,
 		slackService: slackService,
 	}
 }
@@ -80,15 +83,53 @@ func (uc *SlackUseCases) HandleSlackEvent(ctx context.Context, event *slackevent
 		return goerr.Wrap(err, "failed to handle slack message")
 	}
 
-	// Delegate app_mention events to AI agent
-	if _, ok := event.InnerEvent.Data.(*slackevents.AppMentionEvent); ok && uc.agent != nil {
-		if err := uc.agent.HandleAgentMention(ctx, msg); err != nil {
-			logger.Error("failed to handle agent mention", "error", err.Error())
-			// Don't return error; the message was saved successfully
+	// Dispatch app_mention events:
+	//   - In a channel already bound to a Case → existing AgentUseCase flow
+	//   - Otherwise → MentionDraftUseCase (Slack-mention case-draft flow)
+	//
+	// Both branches require Slack/LLM to be wired (agent and mentionDraft are
+	// constructed together with slackService in usecase.New). When Slack is
+	// not wired (e.g. unit tests that only exercise message storage), skip
+	// dispatch entirely.
+	if appMention, ok := event.InnerEvent.Data.(*slackevents.AppMentionEvent); ok {
+		if uc.isCaseBoundChannel(ctx, appMention.Channel) {
+			if uc.agent == nil {
+				return nil
+			}
+			if err := uc.agent.HandleAgentMention(ctx, msg); err != nil {
+				logger.Error("failed to handle agent mention", "error", err.Error())
+			}
+			return nil
+		}
+
+		if uc.mentionDraft == nil {
+			return nil
+		}
+		if err := uc.mentionDraft.HandleAppMention(ctx, appMention); err != nil {
+			logger.Error("failed to handle mention draft", "error", err.Error())
 		}
 	}
 
 	return nil
+}
+
+// isCaseBoundChannel reports whether the given channel ID is associated with
+// a Case in any registered workspace.
+func (uc *SlackUseCases) isCaseBoundChannel(ctx context.Context, channelID string) bool {
+	if channelID == "" || uc.registry == nil {
+		return false
+	}
+	for _, entry := range uc.registry.List() {
+		c, err := uc.repo.Case().GetBySlackChannelID(ctx, entry.Workspace.ID, channelID)
+		if err != nil {
+			errutil.Handle(ctx, err, "failed to look up case-bound channel during mention dispatch")
+			continue
+		}
+		if c != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // handleMembershipEvent processes member_joined_channel / member_left_channel events.
@@ -153,7 +194,16 @@ func (uc *SlackUseCases) HandleSlackMessage(ctx context.Context, msg *slack.Mess
 		return goerr.New("message is nil")
 	}
 
-	logger := logging.From(ctx)
+	// Drop our own bot's posts. These are the action change-notification
+	// context blocks we emit ourselves; the ActionEvent feed already
+	// records the same change, so re-ingesting them would double-count.
+	// Other bots (e.g., CI integrations) still pass through.
+	if uc.slackService != nil {
+		if botUserID, err := uc.slackService.GetBotUserID(ctx); err == nil && botUserID != "" && msg.UserID() == botUserID {
+			logging.From(ctx).Debug("skipping bot's own message", "user_id", msg.UserID())
+			return nil
+		}
+	}
 
 	// Save to channel-level collection (backward compatible)
 	if err := uc.repo.Slack().PutMessage(ctx, msg); err != nil {
@@ -180,11 +230,27 @@ func (uc *SlackUseCases) HandleSlackMessage(ctx context.Context, msg *slack.Mess
 					goerr.V("caseID", c.ID),
 				)
 			}
+
+			// If this message is a reply in an action's thread, also persist
+			// it under the action's slack_messages sub-collection so the WebUI
+			// can display the conversation.
+			if msg.ThreadTS() != "" && msg.ThreadTS() != msg.ID() {
+				action, actionErr := uc.repo.Action().GetBySlackMessageTS(ctx, entry.Workspace.ID, msg.ThreadTS())
+				if actionErr == nil && action != nil && action.CaseID == c.ID {
+					if err := uc.repo.ActionMessage().Put(ctx, entry.Workspace.ID, action.ID, msg); err != nil {
+						return goerr.Wrap(err, "failed to save message to action sub-collection",
+							goerr.V("channelID", msg.ChannelID()),
+							goerr.V("workspaceID", entry.Workspace.ID),
+							goerr.V("actionID", action.ID),
+						)
+					}
+				}
+			}
 			break
 		}
 	}
 
-	logger.Info("slack message saved",
+	logging.From(ctx).Info("slack message saved",
 		"messageID", msg.ID(),
 		"channelID", msg.ChannelID(),
 		"userID", msg.UserID(),

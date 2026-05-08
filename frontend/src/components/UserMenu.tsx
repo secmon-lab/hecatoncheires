@@ -1,107 +1,80 @@
-import { useState, useEffect, useRef } from 'react';
-import { User, LogOut, Globe } from 'lucide-react';
-import { useAuth } from '../contexts/auth-context';
-import { useTranslation, type Lang } from '../i18n';
-import styles from './UserMenu.module.css';
-
-interface UserInfo {
-  id: string;
-  name: string;
-  profile: {
-    image_48: string;
-  };
-}
+import { useEffect, useRef, useState } from 'react'
+import { useAuth } from '../contexts/auth-context'
+import { useTranslation } from '../i18n'
+import type { Lang } from '../i18n'
+import { Avatar } from './Primitives'
 
 export function UserMenu() {
-  const { user, logout } = useAuth();
-  const { t, lang, setLang } = useTranslation();
-  const [isOpen, setIsOpen] = useState(false);
-  const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const { user, logout } = useAuth()
+  const { t, lang, setLang } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    // Fetch user info if authenticated
-    if (user) {
-      fetch(`/api/auth/user-info?user=${user.sub}`, {
-        credentials: 'include',
-      })
-        .then((res) => res.json())
-        .then((data) => setUserInfo(data))
-        .catch((err) => console.error('Failed to fetch user info:', err));
+    if (!open) return
+    const onClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
     }
-  }, [user]);
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [open])
 
-  useEffect(() => {
-    // Close menu when clicking outside
-    function handleClickOutside(event: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    }
-
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }
-  }, [isOpen]);
-
-  const handleLogout = async () => {
-    await logout();
-  };
+  if (!user) return null
 
   return (
-    <div className={styles.userMenu} ref={menuRef}>
+    <div ref={ref} style={{ position: 'relative' }}>
       <button
-        className={styles.userButton}
-        onClick={() => setIsOpen(!isOpen)}
+        type="button"
+        className="h-icon-btn"
+        style={{ width: 30, height: 30, padding: 0 }}
+        onClick={() => setOpen((v) => !v)}
         aria-label={t('ariaUserMenu')}
       >
-        {userInfo?.profile.image_48 ? (
-          <img
-            src={userInfo.profile.image_48}
-            alt={user?.name || t('userFallbackName')}
-            className={styles.avatar}
-          />
-        ) : (
-          <div className={styles.avatarPlaceholder}>
-            <User size={20} />
-          </div>
-        )}
+        <Avatar size="sm" name={user.name} />
       </button>
-
-      {isOpen && (
-        <div className={styles.dropdown}>
-          <div className={styles.userInfo}>
-            <div className={styles.userName}>{user?.name || t('userFallbackName')}</div>
-            {user && (
-              <div className={styles.userEmail}>{user.email}</div>
-            )}
+      {open && (
+        <div
+          style={{
+            position: 'absolute', top: 'calc(100% + 6px)', right: 0,
+            minWidth: 220,
+            background: 'var(--bg-elev)', border: '1px solid var(--line)',
+            borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-lg)',
+            zIndex: 1001, overflow: 'hidden',
+          }}
+        >
+          <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--line)' }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)' }}>{user.name}</div>
+            <div style={{ fontSize: 11, color: 'var(--fg-muted)', marginTop: 2 }}>{user.email}</div>
           </div>
-          <div className={styles.divider} />
-          <div className={styles.langSection}>
-            <div className={styles.langLabel}>
-              <Globe size={16} />
-              <span>{t('labelLanguage')}</span>
-            </div>
-            <div className={styles.langOptions}>
+          <div style={{ padding: '8px 14px' }}>
+            <div style={{ fontSize: 11, color: 'var(--fg-soft)', marginBottom: 6 }}>Language</div>
+            <div className="seg" style={{ width: '100%' }}>
               {(['en', 'ja'] as Lang[]).map((l) => (
                 <button
                   key={l}
-                  className={`${styles.langOption} ${lang === l ? styles.langActive : ''}`}
+                  className={lang === l ? 'on' : ''}
+                  style={{ flex: 1 }}
                   onClick={() => setLang(l)}
                 >
-                  {l === 'en' ? t('langEnglish') : t('langJapanese')}
+                  {l.toUpperCase()}
                 </button>
               ))}
             </div>
           </div>
-          <div className={styles.divider} />
-          <button className={styles.menuItem} onClick={handleLogout}>
-            <LogOut size={16} />
-            <span>{t('btnLogout')}</span>
+          <button
+            type="button"
+            onClick={() => { setOpen(false); logout() }}
+            style={{
+              width: '100%', textAlign: 'left',
+              padding: '10px 14px', border: 'none', background: 'transparent',
+              color: 'var(--fg)', fontSize: 13, fontFamily: 'inherit',
+              cursor: 'pointer', borderTop: '1px solid var(--line)',
+            }}
+          >
+            {t('btnLogout')}
           </button>
         </div>
       )}
     </div>
-  );
+  )
 }

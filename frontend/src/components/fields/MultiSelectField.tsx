@@ -1,4 +1,6 @@
 import Select from 'react-select'
+import { useTranslation } from '../../i18n'
+import { buildSelectStyles, portalProps } from '../selectStyles'
 import styles from './FieldComponents.module.css'
 
 interface SelectOption {
@@ -31,6 +33,7 @@ export default function MultiSelectField({
   error,
   disabled = false,
 }: MultiSelectFieldProps) {
+  const { t } = useTranslation()
   const selectOptions = options.map((option) => ({
     value: option.id,
     label: option.name,
@@ -49,13 +52,17 @@ export default function MultiSelectField({
       {description && <p className={styles.description}>{description}</p>}
       <Select
         inputId={fieldId}
+        aria-label={label}
         options={selectOptions}
         value={selectedOptions}
         onChange={(options) => onChange(options?.map((opt) => opt.value) || [])}
         isMulti
         isClearable
         isDisabled={disabled}
-        placeholder="Select..."
+        placeholder={t('placeholderSelect')}
+        classNamePrefix="rs"
+        {...portalProps}
+        styles={buildSelectStyles({ error: !!error })}
       />
       {error && <span className={styles.error}>{error}</span>}
     </div>

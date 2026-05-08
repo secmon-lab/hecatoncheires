@@ -9,7 +9,6 @@ export class DashboardPage extends BasePage {
   private readonly pageTitle: Locator;
   private readonly casesLink: Locator;
   private readonly actionsLink: Locator;
-  private readonly knowledgeLink: Locator;
   private readonly sourcesLink: Locator;
 
   constructor(page: Page) {
@@ -18,7 +17,6 @@ export class DashboardPage extends BasePage {
     this.pageTitle = page.locator('text=Hecatoncheires').first();
     this.casesLink = page.locator('text=Cases').first();
     this.actionsLink = page.locator('text=Actions').first();
-    this.knowledgeLink = page.locator('text=Knowledges').first();
     this.sourcesLink = page.locator('text=Sources').first();
   }
 
@@ -54,14 +52,6 @@ export class DashboardPage extends BasePage {
    */
   async goToActions(): Promise<void> {
     await this.actionsLink.click();
-    await this.waitForNavigation();
-  }
-
-  /**
-   * Navigate to Knowledge page
-   */
-  async goToKnowledge(): Promise<void> {
-    await this.knowledgeLink.click();
     await this.waitForNavigation();
   }
 

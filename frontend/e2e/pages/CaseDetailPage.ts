@@ -8,7 +8,6 @@ export class CaseDetailPage extends BasePage {
   // Locators
   private readonly caseTitle: Locator;
   private readonly caseDescription: Locator;
-  private readonly editButton: Locator;
   private readonly deleteButton: Locator;
   private readonly backButton: Locator;
   private readonly loadingIndicator: Locator;
@@ -18,20 +17,20 @@ export class CaseDetailPage extends BasePage {
 
   constructor(page: Page) {
     super(page);
-    // Case title is the h1 element inside main content area
-    this.caseTitle = page.locator('main h1').first();
-    // Description is the paragraph with description class
-    this.caseDescription = page.locator('main p').first();
-    this.editButton = page.locator('button').filter({ hasText: /Edit/ }).first();
-    this.deleteButton = page.locator('button').filter({ hasText: /Delete/ }).first();
+    // Case title is the inline-editable text inside the h1 wrapper
+    this.caseTitle = page.getByTestId('case-title');
+    // Description is the inline-editable long-text component
+    this.caseDescription = page.getByTestId('case-description');
+    // Delete moved into a kebab/hamburger menu
+    this.deleteButton = page.getByTestId('case-delete-menu-item');
     this.backButton = page.locator('button, a').filter({ hasText: /Back/ }).first();
     this.loadingIndicator = page.locator('text=Loading...');
     // Slack channel link is now in the title row (an <a> tag starting with #)
     this.slackChannelLink = page.locator('a').filter({ hasText: /^#/ }).first();
-    // Fields section contains the 2-column grid of field items
-    this.fieldsSection = page.locator('h3').filter({ hasText: 'Fields' }).locator('..');
-    // Empty action state
-    this.emptyActionState = page.locator('p').filter({ hasText: 'No actions yet' }).first();
+    // The redesigned aside exposes a stable data-testid on the section.
+    this.fieldsSection = page.getByTestId('case-fields-inline');
+    // Empty action state title is now an h3 ("No actions yet") in the redesigned detail layout
+    this.emptyActionState = page.locator('h3').filter({ hasText: 'No actions yet' }).first();
   }
 
   /**
@@ -56,16 +55,33 @@ export class CaseDetailPage extends BasePage {
   }
 
   /**
-   * Click the edit button
+   * Inline-edit the case title (Linear-style: click → input → Enter).
    */
-  async clickEdit(): Promise<void> {
-    await this.editButton.click();
+  async setTitle(next: string): Promise<void> {
+    await this.caseTitle.click();
+    const input = this.page.getByTestId('case-title-input');
+    await input.waitFor({ state: 'visible', timeout: 3000 });
+    await input.fill(next);
+    await input.press('Enter');
   }
 
   /**
-   * Click the delete button
+   * Inline-edit the case description (click → textarea → Save).
+   */
+  async setDescription(next: string): Promise<void> {
+    await this.caseDescription.click();
+    const input = this.page.getByTestId('case-description-input');
+    await input.waitFor({ state: 'visible', timeout: 3000 });
+    await input.fill(next);
+    await this.page.getByTestId('case-description-save').click();
+  }
+
+  /**
+   * Click the delete button (opens the kebab menu first, then the delete item)
    */
   async clickDelete(): Promise<void> {
+    await this.page.getByTestId('case-menu-button').click();
+    await this.deleteButton.waitFor({ state: 'visible', timeout: 3000 });
     await this.deleteButton.click();
   }
 
@@ -103,8 +119,7 @@ export class CaseDetailPage extends BasePage {
    * Check if the Fields section is visible
    */
   async isFieldsSectionVisible(): Promise<boolean> {
-    const fieldsHeading = this.page.locator('h3').filter({ hasText: 'Fields' }).first();
-    return await fieldsHeading.isVisible();
+    return await this.fieldsSection.isVisible();
   }
 
   /**
@@ -256,7 +271,8 @@ export class CaseDetailPage extends BasePage {
    */
   async getChannelMembersSectionTitle(): Promise<string> {
     const section = this.page.getByTestId('channel-members-section');
-    const title = section.locator('h3').first();
+    // The redesigned aside renders the title as <span class="h-aside-title">…</span>
+    const title = section.locator('.h-aside-title').first();
     return (await title.textContent()) || '';
   }
 

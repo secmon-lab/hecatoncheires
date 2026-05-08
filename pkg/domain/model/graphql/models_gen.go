@@ -8,12 +8,64 @@ import (
 	"io"
 	"strconv"
 	"time"
-
-	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 )
 
 type SourceConfig interface {
 	IsSourceConfig()
+}
+
+type ActionConfig struct {
+	Initial  string                    `json:"initial"`
+	Closed   []string                  `json:"closed"`
+	Statuses []*ActionStatusDefinition `json:"statuses"`
+}
+
+type ActionEvent struct {
+	ID        string          `json:"id"`
+	ActionID  int             `json:"actionID"`
+	Kind      ActionEventKind `json:"kind"`
+	ActorID   string          `json:"actorID"`
+	Actor     *SlackUser      `json:"actor,omitempty"`
+	OldValue  string          `json:"oldValue"`
+	NewValue  string          `json:"newValue"`
+	CreatedAt time.Time       `json:"createdAt"`
+}
+
+type ActionEventConnection struct {
+	Items      []*ActionEvent `json:"items"`
+	NextCursor string         `json:"nextCursor"`
+}
+
+type ActionStatusDefinition struct {
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Description *string `json:"description,omitempty"`
+	Color       *string `json:"color,omitempty"`
+	Emoji       *string `json:"emoji,omitempty"`
+}
+
+type ActionStep struct {
+	ID            string     `json:"id"`
+	ActionID      int        `json:"actionID"`
+	Title         string     `json:"title"`
+	Done          bool       `json:"done"`
+	DoneAt        *time.Time `json:"doneAt,omitempty"`
+	DoneBy        *string    `json:"doneBy,omitempty"`
+	DoneByUser    *SlackUser `json:"doneByUser,omitempty"`
+	CreatedBy     string     `json:"createdBy"`
+	CreatedByUser *SlackUser `json:"createdByUser,omitempty"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
+}
+
+type ActionStepProgress struct {
+	Done  int `json:"done"`
+	Total int `json:"total"`
+}
+
+type AddActionStepInput struct {
+	ActionID int    `json:"actionId"`
+	Title    string `json:"title"`
 }
 
 type AssistLog struct {
@@ -39,13 +91,13 @@ type ChannelUserConnection struct {
 }
 
 type CreateActionInput struct {
-	CaseID         int                 `json:"caseID"`
-	Title          string              `json:"title"`
-	Description    *string             `json:"description,omitempty"`
-	AssigneeIDs    []string            `json:"assigneeIDs,omitempty"`
-	SlackMessageTs *string             `json:"slackMessageTS,omitempty"`
-	Status         *types.ActionStatus `json:"status,omitempty"`
-	DueDate        *time.Time          `json:"dueDate,omitempty"`
+	CaseID         int        `json:"caseID"`
+	Title          string     `json:"title"`
+	Description    *string    `json:"description,omitempty"`
+	AssigneeID     *string    `json:"assigneeID,omitempty"`
+	SlackMessageTs *string    `json:"slackMessageTS,omitempty"`
+	Status         *string    `json:"status,omitempty"`
+	DueDate        *time.Time `json:"dueDate,omitempty"`
 }
 
 type CreateCaseInput struct {
@@ -86,6 +138,11 @@ type CreateSlackSourceInput struct {
 	Enabled     *bool    `json:"enabled,omitempty"`
 }
 
+type DeleteActionStepInput struct {
+	ActionID int    `json:"actionId"`
+	StepID   string `json:"stepId"`
+}
+
 type EntityLabels struct {
 	Case        string `json:"case"`
 	Title       string `json:"title"`
@@ -93,8 +150,9 @@ type EntityLabels struct {
 }
 
 type FieldConfiguration struct {
-	Fields []*FieldDefinition `json:"fields"`
-	Labels *EntityLabels      `json:"labels"`
+	Fields       []*FieldDefinition `json:"fields"`
+	Labels       *EntityLabels      `json:"labels"`
+	ActionConfig *ActionConfig      `json:"actionConfig"`
 }
 
 type FieldDefinition struct {
@@ -149,12 +207,6 @@ type GitHubRepository struct {
 	Repo  string `json:"repo"`
 }
 
-type KnowledgeConnection struct {
-	Items      []*Knowledge `json:"items"`
-	TotalCount int          `json:"totalCount"`
-	HasMore    bool         `json:"hasMore"`
-}
-
 type Mutation struct {
 }
 
@@ -191,6 +243,18 @@ type NotionPageValidationResult struct {
 }
 
 type Query struct {
+}
+
+type RenameActionStepInput struct {
+	ActionID int    `json:"actionId"`
+	StepID   string `json:"stepId"`
+	Title    string `json:"title"`
+}
+
+type SetActionStepDoneInput struct {
+	ActionID int    `json:"actionId"`
+	StepID   string `json:"stepId"`
+	Done     bool   `json:"done"`
 }
 
 type SlackChannel struct {
@@ -256,20 +320,21 @@ type Source struct {
 }
 
 type UpdateActionInput struct {
-	ID             int                 `json:"id"`
-	CaseID         *int                `json:"caseID,omitempty"`
-	Title          *string             `json:"title,omitempty"`
-	Description    *string             `json:"description,omitempty"`
-	AssigneeIDs    []string            `json:"assigneeIDs,omitempty"`
-	SlackMessageTs *string             `json:"slackMessageTS,omitempty"`
-	Status         *types.ActionStatus `json:"status,omitempty"`
-	DueDate        *time.Time          `json:"dueDate,omitempty"`
-	ClearDueDate   *bool               `json:"clearDueDate,omitempty"`
+	ID             int        `json:"id"`
+	CaseID         *int       `json:"caseID,omitempty"`
+	Title          *string    `json:"title,omitempty"`
+	Description    *string    `json:"description,omitempty"`
+	AssigneeID     *string    `json:"assigneeID,omitempty"`
+	SlackMessageTs *string    `json:"slackMessageTS,omitempty"`
+	Status         *string    `json:"status,omitempty"`
+	DueDate        *time.Time `json:"dueDate,omitempty"`
+	ClearDueDate   *bool      `json:"clearDueDate,omitempty"`
+	ClearAssignee  *bool      `json:"clearAssignee,omitempty"`
 }
 
 type UpdateCaseInput struct {
 	ID          int                `json:"id"`
-	Title       string             `json:"title"`
+	Title       *string            `json:"title,omitempty"`
 	Description *string            `json:"description,omitempty"`
 	AssigneeIDs []string           `json:"assigneeIDs,omitempty"`
 	Fields      []*FieldValueInput `json:"fields,omitempty"`
@@ -301,6 +366,136 @@ type UpdateSourceInput struct {
 type Workspace struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+}
+
+type ActionArchiveFilter string
+
+const (
+	ActionArchiveFilterActive   ActionArchiveFilter = "ACTIVE"
+	ActionArchiveFilterArchived ActionArchiveFilter = "ARCHIVED"
+	ActionArchiveFilterAll      ActionArchiveFilter = "ALL"
+)
+
+var AllActionArchiveFilter = []ActionArchiveFilter{
+	ActionArchiveFilterActive,
+	ActionArchiveFilterArchived,
+	ActionArchiveFilterAll,
+}
+
+func (e ActionArchiveFilter) IsValid() bool {
+	switch e {
+	case ActionArchiveFilterActive, ActionArchiveFilterArchived, ActionArchiveFilterAll:
+		return true
+	}
+	return false
+}
+
+func (e ActionArchiveFilter) String() string {
+	return string(e)
+}
+
+func (e *ActionArchiveFilter) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = ActionArchiveFilter(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid ActionArchiveFilter", str)
+	}
+	return nil
+}
+
+func (e ActionArchiveFilter) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *ActionArchiveFilter) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e ActionArchiveFilter) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
+}
+
+type ActionEventKind string
+
+const (
+	ActionEventKindCreated          ActionEventKind = "CREATED"
+	ActionEventKindTitleChanged     ActionEventKind = "TITLE_CHANGED"
+	ActionEventKindStatusChanged    ActionEventKind = "STATUS_CHANGED"
+	ActionEventKindAssigneeChanged  ActionEventKind = "ASSIGNEE_CHANGED"
+	ActionEventKindArchived         ActionEventKind = "ARCHIVED"
+	ActionEventKindUnarchived       ActionEventKind = "UNARCHIVED"
+	ActionEventKindStepAdded        ActionEventKind = "STEP_ADDED"
+	ActionEventKindStepRemoved      ActionEventKind = "STEP_REMOVED"
+	ActionEventKindStepDone         ActionEventKind = "STEP_DONE"
+	ActionEventKindStepReopened     ActionEventKind = "STEP_REOPENED"
+	ActionEventKindStepTitleChanged ActionEventKind = "STEP_TITLE_CHANGED"
+)
+
+var AllActionEventKind = []ActionEventKind{
+	ActionEventKindCreated,
+	ActionEventKindTitleChanged,
+	ActionEventKindStatusChanged,
+	ActionEventKindAssigneeChanged,
+	ActionEventKindArchived,
+	ActionEventKindUnarchived,
+	ActionEventKindStepAdded,
+	ActionEventKindStepRemoved,
+	ActionEventKindStepDone,
+	ActionEventKindStepReopened,
+	ActionEventKindStepTitleChanged,
+}
+
+func (e ActionEventKind) IsValid() bool {
+	switch e {
+	case ActionEventKindCreated, ActionEventKindTitleChanged, ActionEventKindStatusChanged, ActionEventKindAssigneeChanged, ActionEventKindArchived, ActionEventKindUnarchived, ActionEventKindStepAdded, ActionEventKindStepRemoved, ActionEventKindStepDone, ActionEventKindStepReopened, ActionEventKindStepTitleChanged:
+		return true
+	}
+	return false
+}
+
+func (e ActionEventKind) String() string {
+	return string(e)
+}
+
+func (e *ActionEventKind) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = ActionEventKind(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid ActionEventKind", str)
+	}
+	return nil
+}
+
+func (e ActionEventKind) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *ActionEventKind) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e ActionEventKind) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
 }
 
 type FieldType string

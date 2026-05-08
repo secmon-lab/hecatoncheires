@@ -15,10 +15,11 @@ import (
 
 // SlackInteractionHandler handles Slack interactive component payloads (button clicks, modal submissions, etc.)
 type SlackInteractionHandler struct {
-	actionUC *usecase.ActionUseCase
-	agentUC  *usecase.AgentUseCase
-	slackUC  *usecase.SlackUseCases
-	caseUC   *usecase.CaseUseCase
+	actionUC       *usecase.ActionUseCase
+	agentUC        *usecase.AgentUseCase
+	slackUC        *usecase.SlackUseCases
+	caseUC         *usecase.CaseUseCase
+	mentionDraftUC *usecase.MentionDraftUseCase
 }
 
 // NewSlackInteractionHandler creates a new Slack interaction handler
@@ -33,6 +34,12 @@ func NewSlackInteractionHandler(actionUC *usecase.ActionUseCase, agentUC *usecas
 func (h *SlackInteractionHandler) WithSlackCommand(slackUC *usecase.SlackUseCases, caseUC *usecase.CaseUseCase) {
 	h.slackUC = slackUC
 	h.caseUC = caseUC
+}
+
+// WithMentionDraft wires the MentionDraftUseCase so this handler dispatches
+// the draft preview's button/select interactions and Edit modal submission.
+func (h *SlackInteractionHandler) WithMentionDraft(uc *usecase.MentionDraftUseCase) {
+	h.mentionDraftUC = uc
 }
 
 // ServeHTTP handles Slack interaction webhook requests
@@ -67,31 +74,63 @@ func (h *SlackInteractionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 
 	// Process each action in the callback
 	for _, action := range callback.ActionCallback.BlockActions {
+		a := action
+		cb := callback
 		// Only process our action IDs
-		switch action.ActionID {
-		case usecase.SlackActionIDAssign, usecase.SlackActionIDInProgress, usecase.SlackActionIDComplete:
-			// Parse the button value to get workspaceID and actionID
-			workspaceID, actionID, err := usecase.ParseSlackActionValue(action.Value)
+		switch a.ActionID {
+		case usecase.SlackActionIDStatusSelect:
+			workspaceID, actionID, status, err := usecase.ParseSlackStatusSelectValue(a.SelectedOption.Value)
 			if err != nil {
-				logger := logging.From(ctx)
-				logger.Warn("failed to parse Slack action value",
+				logging.From(ctx).Warn("failed to parse status_select value",
 					"error", err,
-					"value", action.Value,
+					"value", a.SelectedOption.Value,
 				)
 				continue
 			}
-
-			userID := callback.User.ID
-			if err := h.actionUC.HandleSlackInteraction(ctx, workspaceID, actionID, userID, action.ActionID); err != nil {
-				logger := logging.From(ctx)
-				logger.Error("failed to handle Slack interaction",
-					"error", err,
-					"action_id", action.ActionID,
-					"workspace_id", workspaceID,
-					"action_id_num", actionID,
-					"user_id", userID,
-				)
+			input := usecase.UpdateActionInput{
+				ID:        actionID,
+				Status:    &status,
+				SlackSync: usecase.SlackSyncFull,
+				Actor:     usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: cb.User.ID},
 			}
+			async.Dispatch(ctx, func(ctx context.Context) error {
+				if _, err := h.actionUC.UpdateAction(ctx, workspaceID, input); err != nil {
+					return goerr.Wrap(err, "failed to update action status from Slack",
+						goerr.V("workspace_id", workspaceID),
+						goerr.V("action_id", actionID))
+				}
+				return nil
+			})
+
+		case usecase.SlackActionIDAssigneeSelect:
+			workspaceID, actionID, err := usecase.ParseSlackAssigneeBlockID(a.BlockID)
+			if err != nil {
+				logging.From(ctx).Warn("failed to parse assignee block_id",
+					"error", err,
+					"block_id", a.BlockID,
+				)
+				continue
+			}
+			input := usecase.UpdateActionInput{
+				ID:                     actionID,
+				SlackSync:              usecase.SlackSyncFull,
+				Actor:                  usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: cb.User.ID},
+				RejectNonHumanAssignee: true,
+			}
+			if a.SelectedUser == "" {
+				input.ClearAssignee = true
+			} else {
+				selected := a.SelectedUser
+				input.AssigneeID = &selected
+			}
+			async.Dispatch(ctx, func(ctx context.Context) error {
+				if _, err := h.actionUC.UpdateAction(ctx, workspaceID, input); err != nil {
+					return goerr.Wrap(err, "failed to update action assignee from Slack",
+						goerr.V("workspace_id", workspaceID),
+						goerr.V("action_id", actionID))
+				}
+				return nil
+			})
 
 		case usecase.SlackAgentSessionActionsID:
 			if h.agentUC == nil || action.SelectedOption.Value == "" {
@@ -116,6 +155,29 @@ func (h *SlackInteractionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 					)
 				}
 			}
+
+		case usecase.ActionIDDraftSelectWS,
+			usecase.ActionIDDraftSubmit,
+			usecase.ActionIDDraftEdit,
+			usecase.ActionIDDraftCancel:
+			if h.mentionDraftUC == nil {
+				continue
+			}
+			a := action
+			cb := callback
+			async.Dispatch(ctx, func(ctx context.Context) error {
+				switch a.ActionID {
+				case usecase.ActionIDDraftSelectWS:
+					return h.mentionDraftUC.HandleSelectWorkspace(ctx, &cb, a)
+				case usecase.ActionIDDraftSubmit:
+					return h.mentionDraftUC.HandleSubmit(ctx, h.caseUC, &cb, a)
+				case usecase.ActionIDDraftEdit:
+					return h.mentionDraftUC.HandleEdit(ctx, &cb, a)
+				case usecase.ActionIDDraftCancel:
+					return h.mentionDraftUC.HandleCancel(ctx, &cb, a)
+				}
+				return nil
+			})
 
 		default:
 			// Unknown action ID, skip
@@ -158,6 +220,39 @@ func (h *SlackInteractionHandler) handleViewSubmission(w http.ResponseWriter, r 
 			logger.Error("failed to encode view submission response", "error", err)
 		}
 
+	case usecase.SlackCallbackIDCommandChoice:
+		// Command choice (edit case vs create action) → swap to chosen modal
+		view, err := h.slackUC.HandleCommandChoiceSubmit(r.Context(), callback)
+		if err != nil {
+			logger.Error("failed to handle command choice",
+				"error", err,
+			)
+			writeViewSubmissionError(ctx, w, usecase.SlackBlockIDCommandChoice, "Failed to process selection. Please try again.")
+			return
+		}
+		resp := slack.ViewSubmissionResponse{
+			ResponseAction: slack.RAUpdate,
+			View:           view,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			logger.Error("failed to encode view submission response", "error", err)
+		}
+
+	case usecase.SlackCallbackIDCreateAction:
+		// Action creation modal submission → close modal, run async.
+		w.WriteHeader(http.StatusOK)
+
+		if h.actionUC == nil {
+			return
+		}
+		async.Dispatch(ctx, func(ctx context.Context) error {
+			if err := h.slackUC.HandleActionCreationSubmit(ctx, h.actionUC, callback); err != nil {
+				return goerr.Wrap(err, "failed to handle action creation submit")
+			}
+			return nil
+		})
+
 	case usecase.SlackCallbackIDCreateCase:
 		// Return 200 immediately to close the modal, then process asynchronously
 		w.WriteHeader(http.StatusOK)
@@ -168,6 +263,20 @@ func (h *SlackInteractionHandler) handleViewSubmission(w http.ResponseWriter, r 
 			}
 			return nil
 		})
+
+	case usecase.SlackCallbackIDDraftEdit:
+		// Draft Edit modal submission → close modal and create case asynchronously.
+		w.WriteHeader(http.StatusOK)
+		if h.mentionDraftUC == nil {
+			return
+		}
+		async.Dispatch(ctx, func(ctx context.Context) error {
+			if err := h.mentionDraftUC.HandleEditSubmit(ctx, h.caseUC, callback); err != nil {
+				return goerr.Wrap(err, "failed to handle draft edit submit")
+			}
+			return nil
+		})
+		return
 
 	case usecase.SlackCallbackIDEditCase:
 		// Return 200 immediately to close the modal, then process asynchronously

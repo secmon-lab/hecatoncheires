@@ -3,12 +3,11 @@ import { useMutation } from '@apollo/client'
 import { useNavigate } from 'react-router-dom'
 import { useWorkspace } from '../../contexts/workspace-context'
 import { useTranslation } from '../../i18n'
-import { CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
 import Modal from '../Modal'
 import Button from '../Button'
+import { IconCheck, IconExt, IconWarn } from '../Icons'
 import { CREATE_NOTION_DB_SOURCE, VALIDATE_NOTION_DB, GET_SOURCES } from '../../graphql/source'
 import { parseNotionID } from '../../utils/notion'
-import styles from './source.module.css'
 
 interface NotionDBFormProps {
   isOpen: boolean
@@ -18,6 +17,7 @@ interface NotionDBFormProps {
 interface FormErrors {
   databaseID?: string
   name?: string
+  form?: string
 }
 
 interface ValidationResult {
@@ -44,12 +44,15 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
   const [createSource, { loading: creating }] = useMutation(CREATE_NOTION_DB_SOURCE, {
     update(cache, { data }) {
       if (!data?.createNotionDBSource) return
-      const existingData = cache.readQuery<{ sources: unknown[] }>({ query: GET_SOURCES, variables: { workspaceId: currentWorkspace!.id } })
-      if (existingData) {
+      const existing = cache.readQuery<{ sources: unknown[] }>({
+        query: GET_SOURCES,
+        variables: { workspaceId: currentWorkspace!.id },
+      })
+      if (existing) {
         cache.writeQuery({
           query: GET_SOURCES,
           variables: { workspaceId: currentWorkspace!.id },
-          data: { sources: [...existingData.sources, data.createNotionDBSource] },
+          data: { sources: [...existing.sources, data.createNotionDBSource] },
         })
       }
     },
@@ -59,15 +62,11 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
       navigate(`/ws/${currentWorkspace!.id}/sources/${data.createNotionDBSource.id}`)
     },
     onError: (error) => {
-      console.error('Create source error:', error)
+      setErrors((p) => ({ ...p, form: error.message || t('errorCreateSource') }))
     },
   })
 
-  useEffect(() => {
-    if (!isOpen) {
-      resetForm()
-    }
-  }, [isOpen])
+  useEffect(() => { if (!isOpen) resetForm() }, [isOpen])
 
   const resetForm = () => {
     setDatabaseID('')
@@ -79,82 +78,46 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
     setIsValidating(false)
   }
 
-  const handleDatabaseIDChange = (value: string) => {
-    setDatabaseID(value)
-    setValidationResult(null)
-  }
-
   const handleValidate = async () => {
-    if (!databaseID.trim()) {
-      setErrors({ databaseID: t('errorDatabaseIdRequired') })
-      return
-    }
-
-    const parsedID = parseNotionID(databaseID)
-    if (!parsedID) {
-      setErrors({ databaseID: t('errorInvalidDatabaseId') })
-      return
-    }
-
+    if (!databaseID.trim()) { setErrors({ databaseID: t('errorDatabaseIdRequired') }); return }
+    const parsed = parseNotionID(databaseID)
+    if (!parsed) { setErrors({ databaseID: t('errorInvalidDatabaseId') }); return }
     setErrors({})
     setIsValidating(true)
-
     try {
       const result = await validateNotionDB({
-        variables: { workspaceId: currentWorkspace!.id, databaseID: parsedID },
+        variables: { workspaceId: currentWorkspace!.id, databaseID: parsed },
       })
-
-      const validation: ValidationResult | null = result.data?.validateNotionDB ?? null
-      setValidationResult(validation)
-
-      if (validation?.valid && validation.databaseTitle && !name) {
-        setName(validation.databaseTitle)
-      }
-    } catch (error) {
-      console.error('Validation error:', error)
+      const v: ValidationResult | null = result.data?.validateNotionDB ?? null
+      setValidationResult(v)
+      if (v?.valid && v.databaseTitle && !name) setName(v.databaseTitle)
+    } catch {
       setValidationResult({
         valid: false,
         databaseTitle: null,
         databaseURL: null,
         errorMessage: t('errorValidateDatabase'),
       })
-    } finally {
-      setIsValidating(false)
-    }
+    } finally { setIsValidating(false) }
   }
 
   const validate = () => {
-    const newErrors: FormErrors = {}
-
-    if (!databaseID.trim()) {
-      newErrors.databaseID = t('errorDatabaseIdRequired')
-    }
-
-    if (!name.trim()) {
-      newErrors.name = t('errorNameRequired')
-    }
-
-    if (!validationResult?.valid) {
-      newErrors.databaseID = t('errorValidateDatabaseFirst')
-    }
-
-    setErrors(newErrors)
-    return Object.keys(newErrors).length === 0
+    const e: FormErrors = {}
+    if (!databaseID.trim()) e.databaseID = t('errorDatabaseIdRequired')
+    if (!name.trim()) e.name = t('errorNameRequired')
+    if (!validationResult?.valid) e.databaseID = t('errorValidateDatabaseFirst')
+    setErrors(e)
+    return Object.keys(e).length === 0
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-
-    if (!validate()) {
-      return
-    }
-
-    const parsedID = parseNotionID(databaseID)
+  const handleSubmit = async () => {
+    if (!validate()) return
+    const parsed = parseNotionID(databaseID)
     await createSource({
       variables: {
         workspaceId: currentWorkspace!.id,
         input: {
-          databaseID: parsedID ?? databaseID.trim(),
+          databaseID: parsed ?? databaseID.trim(),
           name: name.trim(),
           description: description.trim() || undefined,
           enabled,
@@ -163,143 +126,121 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
     })
   }
 
-  const handleClose = () => {
-    resetForm()
-    onClose()
-  }
-
-  const loading = creating
+  const handleClose = () => { resetForm(); onClose() }
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
+      width={600}
       title={t('titleAddNotionDbSource')}
       footer={
         <>
-          <Button variant="outline" onClick={handleClose} disabled={loading}>
-            {t('btnCancel')}
-          </Button>
+          <Button variant="ghost" onClick={handleClose} disabled={creating}>{t('btnCancel')}</Button>
           <Button
             variant="primary"
             onClick={handleSubmit}
-            disabled={loading || !validationResult?.valid}
+            disabled={creating || !validationResult?.valid}
           >
-            {loading ? t('btnCreating') : t('btnCreateSource')}
+            {creating ? t('btnCreating') : t('btnCreateSource')}
           </Button>
         </>
       }
     >
-      <form onSubmit={handleSubmit} className={styles.form}>
-        <div className={styles.field}>
-          <label htmlFor="databaseID" className={styles.label}>
-            {t('labelDatabaseIdRequired')}
-          </label>
-          <div className={styles.inputWithButton}>
+      <div className="col" style={{ gap: 14 }}>
+        {errors.form && (
+          <div style={{
+            padding: '8px 10px', borderRadius: 6,
+            background: 'color-mix(in oklch, var(--danger) 10%, transparent)',
+            border: '1px solid color-mix(in oklch, var(--danger) 30%, transparent)',
+            color: 'var(--danger)', fontSize: 12,
+          }}>{errors.form}</div>
+        )}
+        <div>
+          <label htmlFor="ndb-id" className="field-label">{t('labelDatabaseIdRequired')}</label>
+          <div className="row" style={{ gap: 6 }}>
             <input
-              id="databaseID"
-              type="text"
+              id="ndb-id"
+              className="input mono"
               value={databaseID}
-              onChange={(e) => handleDatabaseIDChange(e.target.value)}
-              className={`${styles.input} ${errors.databaseID ? styles.inputError : ''}`}
+              onChange={(e) => { setDatabaseID(e.target.value); setValidationResult(null) }}
               placeholder={t('placeholderNotionDbId')}
-              disabled={loading}
+              disabled={creating}
+              style={{ flex: 1 }}
             />
-            <Button
-              variant="outline"
-              onClick={handleValidate}
-              disabled={loading || isValidating || !databaseID.trim()}
-              type="button"
-            >
-              {isValidating ? (
-                <Loader2 size={16} className={styles.spinner} />
-              ) : (
-                t('btnValidate')
-              )}
+            <Button onClick={handleValidate} disabled={creating || isValidating || !databaseID.trim()}>
+              {isValidating ? '…' : t('btnValidate')}
             </Button>
           </div>
-          {errors.databaseID && <span className={styles.error}>{errors.databaseID}</span>}
-          <p className={styles.hint}>
-            {t('hintNotionDbId')}
-          </p>
+          {errors.databaseID && <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 4 }}>{errors.databaseID}</div>}
+          <div className="soft" style={{ fontSize: 11.5, marginTop: 4 }}>{t('hintNotionDbId')}</div>
         </div>
-
         {validationResult && (
-          <div className={validationResult.valid ? styles.validationSuccess : styles.validationError}>
-            {validationResult.valid ? (
-              <>
-                <CheckCircle size={20} />
-                <div className={styles.validationContent}>
-                  <span className={styles.validationTitle}>{t('validationDatabaseFound')}</span>
-                  <span className={styles.validationDetail}>{validationResult.databaseTitle}</span>
-                  {validationResult.databaseURL && (
-                    <a
-                      href={validationResult.databaseURL}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className={styles.validationLink}
-                    >
-                      {t('linkOpenNotion')}
-                    </a>
-                  )}
-                </div>
-              </>
-            ) : (
-              <>
-                <AlertCircle size={20} />
-                <div className={styles.validationContent}>
-                  <span className={styles.validationTitle}>{t('validationFailed')}</span>
-                  <span className={styles.validationDetail}>{validationResult.errorMessage}</span>
-                </div>
-              </>
+          <div style={{
+            padding: 10, borderRadius: 6, fontSize: 12,
+            background: validationResult.valid
+              ? 'color-mix(in oklch, var(--ok) 10%, transparent)'
+              : 'color-mix(in oklch, var(--danger) 10%, transparent)',
+            border: `1px solid color-mix(in oklch, ${validationResult.valid ? 'var(--ok)' : 'var(--danger)'} 30%, transparent)`,
+          }}>
+            <div className="row" style={{ gap: 8 }}>
+              <span style={{ color: validationResult.valid ? 'var(--ok)' : 'var(--danger)' }}>
+                {validationResult.valid ? <IconCheck size={13} /> : <IconWarn size={13} />}
+              </span>
+              <b>{validationResult.valid ? t('validationDatabaseFound') : t('validationFailed')}</b>
+              <span className="spacer" />
+              {validationResult.databaseURL && (
+                <a
+                  href={validationResult.databaseURL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: 'var(--accent)', fontSize: 11 }}
+                >
+                  {t('linkOpenNotion')}<IconExt size={10} style={{ verticalAlign: -1, marginLeft: 3 }} />
+                </a>
+              )}
+            </div>
+            {(validationResult.databaseTitle || validationResult.errorMessage) && (
+              <div className="soft" style={{ fontSize: 11, marginTop: 2 }}>
+                {validationResult.databaseTitle || validationResult.errorMessage}
+              </div>
             )}
           </div>
         )}
-
-        <div className={styles.field}>
-          <label htmlFor="name" className={styles.label}>
-            {t('labelNameRequired')}
-          </label>
+        <div>
+          <label htmlFor="ndb-name" className="field-label">{t('labelNameRequired')}</label>
           <input
-            id="name"
-            type="text"
+            id="ndb-name"
+            className="input"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className={`${styles.input} ${errors.name ? styles.inputError : ''}`}
             placeholder={t('placeholderSourceName')}
-            disabled={loading}
+            disabled={creating}
           />
-          {errors.name && <span className={styles.error}>{errors.name}</span>}
+          {errors.name && <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 4 }}>{errors.name}</div>}
         </div>
-
-        <div className={styles.field}>
-          <label htmlFor="description" className={styles.label}>
-            {t('labelDescription')}
-          </label>
+        <div>
+          <label htmlFor="ndb-desc" className="field-label">{t('labelDescription')}</label>
           <textarea
-            id="description"
+            id="ndb-desc"
+            className="textarea"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            className={styles.textarea}
             placeholder={t('placeholderSourceDescription')}
             rows={3}
-            disabled={loading}
+            disabled={creating}
           />
         </div>
-
-        <div className={styles.checkboxField}>
-          <label className={styles.checkboxLabel}>
-            <input
-              type="checkbox"
-              checked={enabled}
-              onChange={(e) => setEnabled(e.target.checked)}
-              className={styles.checkbox}
-              disabled={loading}
-            />
-            <span>{t('labelEnableSource')}</span>
-          </label>
-        </div>
-      </form>
+        <label className="row" style={{ gap: 8, fontSize: 13 }}>
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => setEnabled(e.target.checked)}
+            disabled={creating}
+          />
+          <span>{t('labelEnableSource')}</span>
+        </label>
+      </div>
     </Modal>
   )
 }

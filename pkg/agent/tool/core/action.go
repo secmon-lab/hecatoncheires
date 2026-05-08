@@ -16,17 +16,21 @@ import (
 // actionToMap converts an Action to a map for tool response
 func actionToMap(a *model.Action) map[string]any {
 	m := map[string]any{
-		"id":           a.ID,
-		"case_id":      a.CaseID,
-		"title":        a.Title,
-		"description":  a.Description,
-		"status":       a.Status.String(),
-		"assignee_ids": a.AssigneeIDs,
-		"created_at":   a.CreatedAt.String(),
-		"updated_at":   a.UpdatedAt.String(),
+		"id":          a.ID,
+		"case_id":     a.CaseID,
+		"title":       a.Title,
+		"description": a.Description,
+		"status":      a.Status.String(),
+		"assignee_id": a.AssigneeID,
+		"archived":    a.IsArchived(),
+		"created_at":  a.CreatedAt.String(),
+		"updated_at":  a.UpdatedAt.String(),
 	}
 	if a.DueDate != nil {
 		m["due_date"] = a.DueDate.Format(time.RFC3339)
+	}
+	if a.ArchivedAt != nil {
+		m["archived_at"] = a.ArchivedAt.Format(time.RFC3339)
 	}
 	return m
 }
@@ -41,14 +45,25 @@ type listActionsTool struct {
 func (t *listActionsTool) Spec() gollem.ToolSpec {
 	return gollem.ToolSpec{
 		Name:        "core__list_actions",
-		Description: "List all actions associated with the current case",
-		Parameters:  map[string]*gollem.Parameter{},
+		Description: "List all actions associated with the current case. By default archived actions are excluded; pass include_archived=true to include them.",
+		Parameters: map[string]*gollem.Parameter{
+			"include_archived": {
+				Type:        gollem.TypeBoolean,
+				Description: "When true, include archived actions in the result. Default false.",
+			},
+		},
 	}
 }
 
-func (t *listActionsTool) Run(ctx context.Context, _ map[string]any) (map[string]any, error) {
+func (t *listActionsTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
 	tool.Update(ctx, "Listing actions...")
-	actions, err := t.repo.Action().GetByCase(ctx, t.workspaceID, t.caseID)
+	scope := interfaces.ActionArchiveScopeActiveOnly
+	if v, ok := args["include_archived"]; ok {
+		if b, ok := v.(bool); ok && b {
+			scope = interfaces.ActionArchiveScopeAll
+		}
+	}
+	actions, err := t.repo.Action().GetByCase(ctx, t.workspaceID, t.caseID, interfaces.ActionListOptions{ArchiveScope: scope})
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to list actions",
 			goerr.V("workspaceID", t.workspaceID),
@@ -59,13 +74,17 @@ func (t *listActionsTool) Run(ctx context.Context, _ map[string]any) (map[string
 	items := make([]map[string]any, len(actions))
 	for i, a := range actions {
 		item := map[string]any{
-			"id":           a.ID,
-			"title":        a.Title,
-			"status":       a.Status.String(),
-			"assignee_ids": a.AssigneeIDs,
+			"id":          a.ID,
+			"title":       a.Title,
+			"status":      a.Status.String(),
+			"assignee_id": a.AssigneeID,
+			"archived":    a.IsArchived(),
 		}
 		if a.DueDate != nil {
 			item["due_date"] = a.DueDate.Format(time.RFC3339)
+		}
+		if a.ArchivedAt != nil {
+			item["archived_at"] = a.ArchivedAt.Format(time.RFC3339)
 		}
 		items[i] = item
 	}
@@ -93,7 +112,7 @@ func (t *getActionTool) Spec() gollem.ToolSpec {
 }
 
 func (t *getActionTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
-	actionID, err := extractInt64(args, "action_id")
+	actionID, err := tool.ExtractInt64(args, "action_id")
 	if err != nil {
 		return nil, err
 	}
@@ -112,11 +131,15 @@ func (t *getActionTool) Run(ctx context.Context, args map[string]any) (map[strin
 	return actionToMap(a), nil
 }
 
-// createActionTool creates a new action
+// createActionTool creates a new action through the unified ActionUseCase
+// entry point. Routing through the usecase (instead of poking the repository
+// directly) is what triggers the Slack channel post, ActionEvent recording,
+// and any future side-effects that CreateAction owns.
 type createActionTool struct {
-	repo        interfaces.Repository
+	actionUC    ActionMutator
 	workspaceID string
 	caseID      int64
+	statusSet   *model.ActionStatusSet
 }
 
 func (t *createActionTool) Spec() gollem.ToolSpec {
@@ -134,25 +157,16 @@ func (t *createActionTool) Spec() gollem.ToolSpec {
 				Description: "Detailed description of the action",
 				Required:    false,
 			},
-			"assignee_ids": {
-				Type:        gollem.TypeArray,
-				Description: "List of Slack user IDs to assign to this action",
+			"assignee_id": {
+				Type:        gollem.TypeString,
+				Description: "Slack user ID to assign to this action (omit or empty for unassigned)",
 				Required:    false,
-				Items: &gollem.Parameter{
-					Type: gollem.TypeString,
-				},
 			},
 			"status": {
 				Type:        gollem.TypeString,
-				Description: "Initial status of the action (default: TODO)",
+				Description: fmt.Sprintf("Initial status of the action (default: %s)", t.statusSet.InitialID()),
 				Required:    false,
-				Enum: []string{
-					types.ActionStatusBacklog.String(),
-					types.ActionStatusTodo.String(),
-					types.ActionStatusInProgress.String(),
-					types.ActionStatusBlocked.String(),
-					types.ActionStatusCompleted.String(),
-				},
+				Enum:        t.statusSet.IDs(),
 			},
 			"due_date": {
 				Type:        gollem.TypeString,
@@ -169,26 +183,28 @@ func (t *createActionTool) Run(ctx context.Context, args map[string]any) (map[st
 		return nil, fmt.Errorf("title is required")
 	}
 
-	description, _ := args["description"].(string)
-
-	status := types.ActionStatusTodo
-	if s, ok := args["status"].(string); ok && s != "" {
-		parsed, err := types.ParseActionStatus(s)
-		if err != nil {
-			return nil, fmt.Errorf("invalid status %q: must be one of BACKLOG, TODO, IN_PROGRESS, BLOCKED, COMPLETED", s)
-		}
-		status = parsed
+	if t.actionUC == nil {
+		return nil, goerr.New("create_action tool is not wired to an ActionUseCase",
+			goerr.V("workspaceID", t.workspaceID))
 	}
 
-	var assigneeIDs []string
-	if rawIDs, ok := args["assignee_ids"].([]any); ok {
-		for _, id := range rawIDs {
-			s, ok := id.(string)
-			if !ok {
-				return nil, fmt.Errorf("invalid item in assignee_ids: expected string user ID, got %T", id)
-			}
-			assigneeIDs = append(assigneeIDs, s)
+	description, _ := args["description"].(string)
+
+	status := types.ActionStatus(t.statusSet.InitialID())
+	if s, ok := args["status"].(string); ok && s != "" {
+		if !t.statusSet.IsValid(s) {
+			return nil, fmt.Errorf("invalid status %q: must be one of %v", s, t.statusSet.IDs())
 		}
+		status = types.ActionStatus(s)
+	}
+
+	var assigneeID string
+	if v, ok := args["assignee_id"]; ok {
+		s, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid assignee_id: expected string, got %T", v)
+		}
+		assigneeID = s
 	}
 
 	var dueDate *time.Time
@@ -201,16 +217,12 @@ func (t *createActionTool) Run(ctx context.Context, args map[string]any) (map[st
 	}
 
 	tool.Update(ctx, fmt.Sprintf("Creating action: %s", title))
-	action := &model.Action{
-		CaseID:      t.caseID,
-		Title:       title,
-		Description: description,
-		Status:      status,
-		AssigneeIDs: assigneeIDs,
-		DueDate:     dueDate,
-	}
 
-	created, err := t.repo.Action().Create(ctx, t.workspaceID, action)
+	// Route through the unified usecase entry point so that Slack posting,
+	// ActionEvent records, and any future side-effects fire identically to
+	// the GraphQL and Slack-modal create paths. Initial SlackMessageTS is
+	// empty; CreateAction itself fills it in once the channel post returns.
+	created, err := t.actionUC.CreateAction(ctx, t.workspaceID, t.caseID, title, description, assigneeID, "", status, dueDate)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to create action",
 			goerr.V("workspaceID", t.workspaceID),
@@ -220,16 +232,19 @@ func (t *createActionTool) Run(ctx context.Context, args map[string]any) (map[st
 	return actionToMap(created), nil
 }
 
-// updateActionTool updates the title, description, and/or assignees of an action
+// updateActionTool updates the title, description, and/or assignee of an
+// action through the unified ActionUseCase entry point. Routing through
+// the usecase (instead of poking the repository directly) is what triggers
+// the Slack message refresh, ActionEvent recording, and access checks.
 type updateActionTool struct {
-	repo        interfaces.Repository
+	actionUC    ActionMutator
 	workspaceID string
 }
 
 func (t *updateActionTool) Spec() gollem.ToolSpec {
 	return gollem.ToolSpec{
 		Name:        "core__update_action",
-		Description: "Update the title, description, and/or assignees of an existing action",
+		Description: "Update the title, description, and/or assignee of an existing action",
 		Parameters: map[string]*gollem.Parameter{
 			"action_id": {
 				Type:        gollem.TypeInteger,
@@ -246,13 +261,10 @@ func (t *updateActionTool) Spec() gollem.ToolSpec {
 				Description: "New description for the action (omit or empty string to keep current value)",
 				Required:    false,
 			},
-			"assignee_ids": {
-				Type:        gollem.TypeArray,
-				Description: "New list of Slack user IDs to assign to this action (replaces existing assignees; omit to keep current value)",
+			"assignee_id": {
+				Type:        gollem.TypeString,
+				Description: "New Slack user ID to assign (replaces existing). Set to empty string to clear the assignee. Omit to keep current value.",
 				Required:    false,
-				Items: &gollem.Parameter{
-					Type: gollem.TypeString,
-				},
 			},
 			"due_date": {
 				Type:        gollem.TypeString,
@@ -264,53 +276,55 @@ func (t *updateActionTool) Spec() gollem.ToolSpec {
 }
 
 func (t *updateActionTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
-	actionID, err := extractInt64(args, "action_id")
+	actionID, err := tool.ExtractInt64(args, "action_id")
 	if err != nil {
 		return nil, err
 	}
 
-	tool.Update(ctx, fmt.Sprintf("Updating action #%d...", actionID))
-	a, err := t.repo.Action().Get(ctx, t.workspaceID, actionID)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to get action for update",
-			goerr.V("workspaceID", t.workspaceID),
-			goerr.V("actionID", actionID),
-		)
-	}
-	if a == nil {
-		return nil, fmt.Errorf("action not found: id=%d", actionID)
+	if t.actionUC == nil {
+		return nil, goerr.New("update_action tool is not wired to an ActionUseCase",
+			goerr.V("workspaceID", t.workspaceID))
 	}
 
+	var params UpdateActionParams
+
+	// title: tool contract says omit-or-empty means "no change". Only a
+	// non-empty value is forwarded as a real edit.
 	if title, ok := args["title"].(string); ok && title != "" {
-		a.Title = title
+		params.Title = &title
 	}
+	// description: same rule as title.
 	if desc, ok := args["description"].(string); ok && desc != "" {
-		a.Description = desc
+		params.Description = &desc
 	}
-	if rawIDs, ok := args["assignee_ids"].([]any); ok {
-		assigneeIDs := make([]string, 0, len(rawIDs))
-		for _, id := range rawIDs {
-			s, ok := id.(string)
-			if !ok {
-				return nil, fmt.Errorf("invalid item in assignee_ids: expected string user ID, got %T", id)
-			}
-			assigneeIDs = append(assigneeIDs, s)
+	// assignee_id: present-but-empty is the explicit clear signal; a
+	// non-empty value reassigns. Absent key means no change.
+	if v, ok := args["assignee_id"]; ok {
+		s, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid assignee_id: expected string, got %T", v)
 		}
-		a.AssigneeIDs = assigneeIDs
+		if s == "" {
+			params.ClearAssignee = true
+		} else {
+			params.AssigneeID = &s
+		}
 	}
+	// due_date: present-but-empty clears, RFC3339 sets, absent leaves alone.
 	if dueDateStr, ok := args["due_date"].(string); ok {
 		if dueDateStr == "" {
-			a.DueDate = nil
+			params.ClearDueDate = true
 		} else {
 			parsed, err := time.Parse(time.RFC3339, dueDateStr)
 			if err != nil {
 				return nil, fmt.Errorf("invalid due_date format %q: expected RFC3339 (e.g. 2025-03-01T00:00:00Z)", dueDateStr)
 			}
-			a.DueDate = &parsed
+			params.DueDate = &parsed
 		}
 	}
 
-	updated, err := t.repo.Action().Update(ctx, t.workspaceID, a)
+	tool.Update(ctx, fmt.Sprintf("Updating action #%d...", actionID))
+	updated, err := t.actionUC.UpdateAction(ctx, t.workspaceID, actionID, params)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to update action",
 			goerr.V("workspaceID", t.workspaceID),
@@ -320,10 +334,12 @@ func (t *updateActionTool) Run(ctx context.Context, args map[string]any) (map[st
 	return actionToMap(updated), nil
 }
 
-// updateActionStatusTool updates the status of an action
+// updateActionStatusTool updates the status of an action through the
+// unified ActionUseCase entry point.
 type updateActionStatusTool struct {
-	repo        interfaces.Repository
+	actionUC    ActionMutator
 	workspaceID string
+	statusSet   *model.ActionStatusSet
 }
 
 func (t *updateActionStatusTool) Spec() gollem.ToolSpec {
@@ -340,44 +356,33 @@ func (t *updateActionStatusTool) Spec() gollem.ToolSpec {
 				Type:        gollem.TypeString,
 				Description: "New status for the action",
 				Required:    true,
-				Enum: []string{
-					types.ActionStatusBacklog.String(),
-					types.ActionStatusTodo.String(),
-					types.ActionStatusInProgress.String(),
-					types.ActionStatusBlocked.String(),
-					types.ActionStatusCompleted.String(),
-				},
+				Enum:        t.statusSet.IDs(),
 			},
 		},
 	}
 }
 
 func (t *updateActionStatusTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
-	actionID, err := extractInt64(args, "action_id")
+	actionID, err := tool.ExtractInt64(args, "action_id")
 	if err != nil {
 		return nil, err
 	}
 
 	statusStr, _ := args["status"].(string)
-	status, err := types.ParseActionStatus(statusStr)
-	if err != nil {
-		return nil, fmt.Errorf("invalid status %q: must be one of BACKLOG, TODO, IN_PROGRESS, BLOCKED, COMPLETED", statusStr)
+	if !t.statusSet.IsValid(statusStr) {
+		return nil, fmt.Errorf("invalid status %q: must be one of %v", statusStr, t.statusSet.IDs())
+	}
+	status := types.ActionStatus(statusStr)
+
+	if t.actionUC == nil {
+		return nil, goerr.New("update_action_status tool is not wired to an ActionUseCase",
+			goerr.V("workspaceID", t.workspaceID))
 	}
 
-	tool.Update(ctx, fmt.Sprintf("Updating action #%d status → %s", actionID, status))
-	a, err := t.repo.Action().Get(ctx, t.workspaceID, actionID)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to get action for status update",
-			goerr.V("workspaceID", t.workspaceID),
-			goerr.V("actionID", actionID),
-		)
-	}
-	if a == nil {
-		return nil, fmt.Errorf("action not found: id=%d", actionID)
-	}
-
-	a.Status = status
-	updated, err := t.repo.Action().Update(ctx, t.workspaceID, a)
+	tool.Update(ctx, fmt.Sprintf("Updating action #%d status -> %s", actionID, status))
+	updated, err := t.actionUC.UpdateAction(ctx, t.workspaceID, actionID, UpdateActionParams{
+		Status: &status,
+	})
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to update action status",
 			goerr.V("workspaceID", t.workspaceID),
@@ -387,16 +392,17 @@ func (t *updateActionStatusTool) Run(ctx context.Context, args map[string]any) (
 	return actionToMap(updated), nil
 }
 
-// addActionAssigneeTool adds an assignee to an action
-type addActionAssigneeTool struct {
-	repo        interfaces.Repository
+// setActionAssigneeTool sets (or clears) the assignee of an action through
+// the unified ActionUseCase entry point.
+type setActionAssigneeTool struct {
+	actionUC    ActionMutator
 	workspaceID string
 }
 
-func (t *addActionAssigneeTool) Spec() gollem.ToolSpec {
+func (t *setActionAssigneeTool) Spec() gollem.ToolSpec {
 	return gollem.ToolSpec{
-		Name:        "core__add_action_assignee",
-		Description: "Add an assignee to an action",
+		Name:        "core__set_action_assignee",
+		Description: "Set or clear the assignee of an action. Pass an empty string to clear.",
 		Parameters: map[string]*gollem.Parameter{
 			"action_id": {
 				Type:        gollem.TypeInteger,
@@ -405,47 +411,45 @@ func (t *addActionAssigneeTool) Spec() gollem.ToolSpec {
 			},
 			"assignee_id": {
 				Type:        gollem.TypeString,
-				Description: "Slack user ID of the assignee to add",
+				Description: "Slack user ID of the assignee. Empty string clears the assignee.",
 				Required:    true,
 			},
 		},
 	}
 }
 
-func (t *addActionAssigneeTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
-	actionID, err := extractInt64(args, "action_id")
+func (t *setActionAssigneeTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
+	actionID, err := tool.ExtractInt64(args, "action_id")
 	if err != nil {
 		return nil, err
 	}
 
-	assigneeID, _ := args["assignee_id"].(string)
-	if assigneeID == "" {
+	v, ok := args["assignee_id"]
+	if !ok {
 		return nil, fmt.Errorf("assignee_id is required")
 	}
+	assigneeID, ok := v.(string)
+	if !ok {
+		return nil, fmt.Errorf("assignee_id must be a string, got %T", v)
+	}
 
-	tool.Update(ctx, fmt.Sprintf("Adding assignee %s to action #%d", assigneeID, actionID))
-	a, err := t.repo.Action().Get(ctx, t.workspaceID, actionID)
+	if t.actionUC == nil {
+		return nil, goerr.New("set_action_assignee tool is not wired to an ActionUseCase",
+			goerr.V("workspaceID", t.workspaceID))
+	}
+
+	var params UpdateActionParams
+	if assigneeID == "" {
+		params.ClearAssignee = true
+		tool.Update(ctx, fmt.Sprintf("Clearing assignee on action #%d", actionID))
+	} else {
+		params.AssigneeID = &assigneeID
+		tool.Update(ctx, fmt.Sprintf("Setting assignee %s on action #%d", assigneeID, actionID))
+	}
+
+	updated, err := t.actionUC.UpdateAction(ctx, t.workspaceID, actionID, params)
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to get action for assignee addition",
-			goerr.V("workspaceID", t.workspaceID),
-			goerr.V("actionID", actionID),
-		)
-	}
-	if a == nil {
-		return nil, fmt.Errorf("action not found: id=%d", actionID)
-	}
-
-	// Avoid duplicate assignees
-	for _, id := range a.AssigneeIDs {
-		if id == assigneeID {
-			return actionToMap(a), nil
-		}
-	}
-
-	a.AssigneeIDs = append(a.AssigneeIDs, assigneeID)
-	updated, err := t.repo.Action().Update(ctx, t.workspaceID, a)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to add assignee to action",
+		return nil, goerr.Wrap(err, "failed to update action assignee",
 			goerr.V("workspaceID", t.workspaceID),
 			goerr.V("actionID", actionID),
 		)
@@ -453,65 +457,43 @@ func (t *addActionAssigneeTool) Run(ctx context.Context, args map[string]any) (m
 	return actionToMap(updated), nil
 }
 
-// removeActionAssigneeTool removes an assignee from an action
-type removeActionAssigneeTool struct {
-	repo        interfaces.Repository
+// archiveActionTool archives an action through the unified ActionUseCase entry
+// point. Archived actions disappear from default Kanban / Case detail views
+// but remain in storage so they can be unarchived later.
+type archiveActionTool struct {
+	actionUC    ActionMutator
 	workspaceID string
 }
 
-func (t *removeActionAssigneeTool) Spec() gollem.ToolSpec {
+func (t *archiveActionTool) Spec() gollem.ToolSpec {
 	return gollem.ToolSpec{
-		Name:        "core__remove_action_assignee",
-		Description: "Remove an assignee from an action",
+		Name:        "core__archive_action",
+		Description: "Archive an action so it disappears from active views. Archived actions can be unarchived later via core__unarchive_action.",
 		Parameters: map[string]*gollem.Parameter{
 			"action_id": {
 				Type:        gollem.TypeInteger,
-				Description: "The ID of the action",
-				Required:    true,
-			},
-			"assignee_id": {
-				Type:        gollem.TypeString,
-				Description: "Slack user ID of the assignee to remove",
+				Description: "The ID of the action to archive",
 				Required:    true,
 			},
 		},
 	}
 }
 
-func (t *removeActionAssigneeTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
-	actionID, err := extractInt64(args, "action_id")
+func (t *archiveActionTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
+	actionID, err := tool.ExtractInt64(args, "action_id")
 	if err != nil {
 		return nil, err
 	}
 
-	assigneeID, _ := args["assignee_id"].(string)
-	if assigneeID == "" {
-		return nil, fmt.Errorf("assignee_id is required")
+	if t.actionUC == nil {
+		return nil, goerr.New("archive_action tool is not wired to an ActionUseCase",
+			goerr.V("workspaceID", t.workspaceID))
 	}
 
-	tool.Update(ctx, fmt.Sprintf("Removing assignee %s from action #%d", assigneeID, actionID))
-	a, err := t.repo.Action().Get(ctx, t.workspaceID, actionID)
+	tool.Update(ctx, fmt.Sprintf("Archiving action #%d", actionID))
+	updated, err := t.actionUC.ArchiveAction(ctx, t.workspaceID, actionID)
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to get action for assignee removal",
-			goerr.V("workspaceID", t.workspaceID),
-			goerr.V("actionID", actionID),
-		)
-	}
-	if a == nil {
-		return nil, fmt.Errorf("action not found: id=%d", actionID)
-	}
-
-	filtered := a.AssigneeIDs[:0]
-	for _, id := range a.AssigneeIDs {
-		if id != assigneeID {
-			filtered = append(filtered, id)
-		}
-	}
-	a.AssigneeIDs = filtered
-
-	updated, err := t.repo.Action().Update(ctx, t.workspaceID, a)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to remove assignee from action",
+		return nil, goerr.Wrap(err, "failed to archive action",
 			goerr.V("workspaceID", t.workspaceID),
 			goerr.V("actionID", actionID),
 		)
@@ -519,20 +501,45 @@ func (t *removeActionAssigneeTool) Run(ctx context.Context, args map[string]any)
 	return actionToMap(updated), nil
 }
 
-// extractInt64 extracts an int64 value from args map, accepting int, int64, or float64
-func extractInt64(args map[string]any, key string) (int64, error) {
-	v, ok := args[key]
-	if !ok || v == nil {
-		return 0, fmt.Errorf("%s is required", key)
+// unarchiveActionTool restores a previously archived action through the
+// unified ActionUseCase entry point.
+type unarchiveActionTool struct {
+	actionUC    ActionMutator
+	workspaceID string
+}
+
+func (t *unarchiveActionTool) Spec() gollem.ToolSpec {
+	return gollem.ToolSpec{
+		Name:        "core__unarchive_action",
+		Description: "Restore a previously archived action back to active state.",
+		Parameters: map[string]*gollem.Parameter{
+			"action_id": {
+				Type:        gollem.TypeInteger,
+				Description: "The ID of the action to unarchive",
+				Required:    true,
+			},
+		},
 	}
-	switch n := v.(type) {
-	case int:
-		return int64(n), nil
-	case int64:
-		return n, nil
-	case float64:
-		return int64(n), nil
-	default:
-		return 0, fmt.Errorf("%s must be an integer, got %T", key, v)
+}
+
+func (t *unarchiveActionTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
+	actionID, err := tool.ExtractInt64(args, "action_id")
+	if err != nil {
+		return nil, err
 	}
+
+	if t.actionUC == nil {
+		return nil, goerr.New("unarchive_action tool is not wired to an ActionUseCase",
+			goerr.V("workspaceID", t.workspaceID))
+	}
+
+	tool.Update(ctx, fmt.Sprintf("Unarchiving action #%d", actionID))
+	updated, err := t.actionUC.UnarchiveAction(ctx, t.workspaceID, actionID)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to unarchive action",
+			goerr.V("workspaceID", t.workspaceID),
+			goerr.V("actionID", actionID),
+		)
+	}
+	return actionToMap(updated), nil
 }

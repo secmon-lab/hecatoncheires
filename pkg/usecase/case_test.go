@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/m-mizutani/gt"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
@@ -15,6 +16,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
+	goslack "github.com/slack-go/slack"
 )
 
 const testWorkspaceID = "test-ws"
@@ -173,7 +175,11 @@ func TestCaseUseCase_UpdateCase(t *testing.T) {
 		updatedFieldValues := map[string]model.FieldValue{
 			"priority": {FieldID: "priority", Value: "low"},
 		}
-		updated, err := uc.UpdateCase(ctx, testWorkspaceID, created.ID, "Updated Title", "Updated Description", []string{"U002"}, updatedFieldValues)
+		updatedTitle := "Updated Title"
+		updatedDesc := "Updated Description"
+		patch := usecase.CaseUpdate{Title: &updatedTitle, Description: &updatedDesc, Fields: updatedFieldValues}
+		patch.SetAssignees([]string{"U002"})
+		updated, err := uc.UpdateCase(ctx, testWorkspaceID, created.ID, patch)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, updated.Title).Equal("Updated Title")
@@ -186,12 +192,64 @@ func TestCaseUseCase_UpdateCase(t *testing.T) {
 		gt.Value(t, retrieved.FieldValues["priority"].Value).Equal("low")
 	})
 
+	t.Run("partial update preserves untouched title, description, assignees and merges fields", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UORIG"})
+
+		original := map[string]model.FieldValue{
+			"stage":    {FieldID: "stage", Value: "screen"},
+			"priority": {FieldID: "priority", Value: "low"},
+		}
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Original", "OrigDesc", []string{"U001"}, original, false, "", "")
+		gt.NoError(t, err).Required()
+
+		// Empty patch: nothing should change.
+		untouched, err := uc.UpdateCase(ctx, testWorkspaceID, created.ID, usecase.CaseUpdate{})
+		gt.NoError(t, err).Required()
+		gt.String(t, untouched.Title).Equal("Original")
+		gt.String(t, untouched.Description).Equal("OrigDesc")
+		gt.Array(t, untouched.AssigneeIDs).Length(1)
+		gt.Value(t, untouched.FieldValues["stage"].Value).Equal("screen")
+		gt.Value(t, untouched.FieldValues["priority"].Value).Equal("low")
+
+		// Update only one field — others (including required ones, if any)
+		// must not be touched and must not be re-validated.
+		updated, err := uc.UpdateCase(ctx, testWorkspaceID, created.ID, usecase.CaseUpdate{
+			Fields: map[string]model.FieldValue{
+				"priority": {FieldID: "priority", Value: "high"},
+			},
+		})
+		gt.NoError(t, err).Required()
+		gt.String(t, updated.Title).Equal("Original")
+		gt.String(t, updated.Description).Equal("OrigDesc")
+		gt.Array(t, updated.AssigneeIDs).Length(1)
+		gt.Value(t, updated.FieldValues["stage"].Value).Equal("screen")
+		gt.Value(t, updated.FieldValues["priority"].Value).Equal("high")
+
+		// Update assignees only — title/description/fields preserved.
+		patch := usecase.CaseUpdate{}
+		patch.SetAssignees([]string{"U002", "U003"})
+		assignUpd, err := uc.UpdateCase(ctx, testWorkspaceID, created.ID, patch)
+		gt.NoError(t, err).Required()
+		gt.String(t, assignUpd.Title).Equal("Original")
+		gt.Array(t, assignUpd.AssigneeIDs).Length(2)
+		gt.Value(t, assignUpd.FieldValues["stage"].Value).Equal("screen")
+
+		// Empty title is rejected.
+		empty := ""
+		_, err = uc.UpdateCase(ctx, testWorkspaceID, created.ID, usecase.CaseUpdate{Title: &empty})
+		gt.Value(t, err).NotNil()
+	})
+
 	t.Run("update non-existent case fails", func(t *testing.T) {
 		repo := memory.New()
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		_, err := uc.UpdateCase(ctx, testWorkspaceID, 999, "Title", "Description", []string{}, nil)
+		title := "Title"
+		desc := "Description"
+		_, err := uc.UpdateCase(ctx, testWorkspaceID, 999, usecase.CaseUpdate{Title: &title, Description: &desc})
 		gt.Value(t, err).NotNil()
 		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
 	})
@@ -201,7 +259,7 @@ func TestCaseUseCase_DeleteCase(t *testing.T) {
 	t.Run("delete case with actions", func(t *testing.T) {
 		repo := memory.New()
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		// Create case
@@ -209,7 +267,7 @@ func TestCaseUseCase_DeleteCase(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		// Create action for the case
-		_, err = actionUC.CreateAction(ctx, testWorkspaceID, created.ID, "Test Action", "Action Description", []string{}, "", types.ActionStatusTodo, nil)
+		_, err = actionUC.CreateAction(ctx, testWorkspaceID, created.ID, "Test Action", "Action Description", "", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
 		// Delete case
@@ -220,7 +278,7 @@ func TestCaseUseCase_DeleteCase(t *testing.T) {
 		gt.Value(t, err).NotNil()
 
 		// Verify actions are deleted
-		actions, err := actionUC.GetActionsByCase(ctx, testWorkspaceID, created.ID)
+		actions, err := actionUC.GetActionsByCase(ctx, testWorkspaceID, created.ID, interfaces.ActionListOptions{ArchiveScope: interfaces.ActionArchiveScopeAll})
 		gt.NoError(t, err).Required()
 		gt.Array(t, actions).Length(0)
 	})
@@ -615,6 +673,161 @@ func TestCaseUseCase_CreateCase_BookmarkAndMapping(t *testing.T) {
 
 }
 
+func TestCaseUseCase_CreateCase_WelcomeMessages(t *testing.T) {
+	newRegistry := func(messages []string) *model.WorkspaceRegistry {
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace:            model.Workspace{ID: testWorkspaceID, Name: "Test"},
+			SlackWelcomeMessages: messages,
+		})
+		return registry
+	}
+
+	t.Run("posts rendered messages in declared order", func(t *testing.T) {
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+		}
+		registry := newRegistry([]string{
+			"Hello {{.Case.Title}}",
+			"Reporter: <@{{.Case.ReporterID}}>",
+		})
+		uc := usecase.NewCaseUseCase(repo, registry, mock, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Phishing", "desc", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		gt.Array(t, mock.postedTexts).Length(2).Required()
+		gt.Value(t, mock.postedTexts[0]).Equal("Hello Phishing")
+		gt.Value(t, mock.postedTexts[1]).Equal("Reporter: <@UCREATOR>")
+		gt.Value(t, mock.postedChannelIDs[0]).Equal(created.SlackChannelID)
+		gt.Value(t, mock.postedChannelIDs[1]).Equal(created.SlackChannelID)
+	})
+
+	t.Run("template can reference custom Fields by ID and Name", func(t *testing.T) {
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+		}
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: testWorkspaceID, Name: "Test"},
+			FieldSchema: &config.FieldSchema{
+				Fields: []config.FieldDefinition{
+					{
+						ID:   "severity",
+						Name: "Severity",
+						Type: types.FieldTypeSelect,
+						Options: []config.FieldOption{
+							{ID: "high", Name: "High"},
+							{ID: "low", Name: "Low"},
+						},
+					},
+				},
+			},
+			SlackWelcomeMessages: []string{
+				"Severity: {{.Fields.severity.name}} ({{.Fields.severity.id}})",
+			},
+		})
+		uc := usecase.NewCaseUseCase(repo, registry, mock, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+
+		fieldValues := map[string]model.FieldValue{
+			"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "high"},
+		}
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "desc", []string{}, fieldValues, false, "", "")
+		gt.NoError(t, err).Required()
+
+		gt.Array(t, mock.postedTexts).Length(1).Required()
+		gt.Value(t, mock.postedTexts[0]).Equal("Severity: High (high)")
+	})
+
+	t.Run("URL is exposed when baseURL is set", func(t *testing.T) {
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+		}
+		registry := newRegistry([]string{
+			"Detail: {{.URL}}",
+		})
+		i18n.Init(i18n.LangEN)
+		uc := usecase.NewCaseUseCase(repo, registry, mock, nil, "https://example.com")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "desc", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		expectedURL := fmt.Sprintf("https://example.com/ws/%s/cases/%d", testWorkspaceID, created.ID)
+		gt.Array(t, mock.postedTexts).Length(1).Required()
+		gt.Value(t, mock.postedTexts[0]).Equal("Detail: " + expectedURL)
+	})
+
+	t.Run("send failure does not abort case creation", func(t *testing.T) {
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+			postMessageFn: func(_ context.Context, _ string, _ []goslack.Block, _ string) (string, error) {
+				return "", errors.New("post failed")
+			},
+		}
+		registry := newRegistry([]string{
+			"Hello",
+			"World",
+		})
+		uc := usecase.NewCaseUseCase(repo, registry, mock, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "desc", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+		gt.Value(t, created.SlackChannelID).NotEqual("")
+		// Both messages were attempted even though the first failed.
+		gt.Array(t, mock.postedTexts).Length(2)
+	})
+
+	t.Run("workspace without messages posts nothing", func(t *testing.T) {
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+		}
+		uc := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "desc", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+		gt.Array(t, mock.postedTexts).Length(0)
+	})
+
+	t.Run("private case still receives welcome messages", func(t *testing.T) {
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+		}
+		registry := newRegistry([]string{
+			"private welcome",
+		})
+		uc := usecase.NewCaseUseCase(repo, registry, mock, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "desc", []string{}, nil, true, "", "")
+		gt.NoError(t, err).Required()
+		gt.Array(t, mock.postedTexts).Length(1)
+		gt.Value(t, mock.postedTexts[0]).Equal("private welcome")
+	})
+}
+
 func TestCaseUseCase_PrivateCaseAccessControl(t *testing.T) {
 	t.Run("create private case sets IsPrivate flag", func(t *testing.T) {
 		repo := memory.New()
@@ -745,7 +958,11 @@ func TestCaseUseCase_PrivateCaseAccessControl(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		nonMemberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "USTRANGER"})
-		_, err = uc.UpdateCase(nonMemberCtx, testWorkspaceID, created.ID, "Hacked", "Hacked desc", []string{}, nil)
+		hackTitle := "Hacked"
+		hackDesc := "Hacked desc"
+		hackPatch := usecase.CaseUpdate{Title: &hackTitle, Description: &hackDesc}
+		hackPatch.SetAssignees([]string{})
+		_, err = uc.UpdateCase(nonMemberCtx, testWorkspaceID, created.ID, hackPatch)
 		gt.Value(t, err).NotNil()
 		gt.Error(t, err).Is(usecase.TestErrAccessDenied)
 	})
@@ -1121,7 +1338,11 @@ func TestCaseUseCase_ReporterID(t *testing.T) {
 
 		// Update with a different user context
 		ctxOther := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
-		updated, err := uc.UpdateCase(ctxOther, testWorkspaceID, created.ID, "Updated Title", "new desc", []string{"UOTHER"}, nil)
+		ut := "Updated Title"
+		ud := "new desc"
+		repPatch := usecase.CaseUpdate{Title: &ut, Description: &ud}
+		repPatch.SetAssignees([]string{"UOTHER"})
+		updated, err := uc.UpdateCase(ctxOther, testWorkspaceID, created.ID, repPatch)
 		gt.NoError(t, err).Required()
 		gt.String(t, updated.ReporterID).Equal("UREPORTER") // Reporter should NOT change
 	})

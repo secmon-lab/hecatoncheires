@@ -1,20 +1,17 @@
 package usecase
 
 import (
+	githubsvc "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	slackmodel "github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
-	githubsvc "github.com/secmon-lab/hecatoncheires/pkg/service/github"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 )
 
-// BuildThreadedMarkdown is exported for testing
-var BuildThreadedMarkdown = buildThreadedMarkdown
-
-// BuildSlackSourceURLs is exported for testing
-var BuildSlackSourceURLs = buildSlackSourceURLs
-
 // BuildAgentSystemPrompt is exported for testing
 var BuildAgentSystemPrompt = (*AgentUseCase).buildSystemPrompt
+
+// BuildTraceContextBlocksForTest is exported for testing
+var BuildTraceContextBlocksForTest = buildTraceContextBlocks
 
 // BuildAssistSystemPrompt is exported for testing
 var BuildAssistSystemPrompt = (*AssistUseCase).buildAssistSystemPrompt
@@ -24,19 +21,24 @@ type AssistPromptData = assistPromptData
 type AssistPromptAction = assistPromptAction
 type AssistPromptMessage = assistPromptMessage
 type AssistPromptAssistLog = assistPromptAssistLog
-type AssistPromptMemory = assistPromptMemory
-
-// BuildPRMarkdown is exported for testing
-var BuildPRMarkdown = buildPRMarkdown
-
-// BuildIssueMarkdown is exported for testing
-var BuildIssueMarkdown = buildIssueMarkdown
-
-// BuildUpdatedDiscussionMarkdown is exported for testing
-var BuildUpdatedDiscussionMarkdown = buildUpdatedDiscussionMarkdown
 
 // TestErrAccessDenied is exported for testing
 var TestErrAccessDenied = ErrAccessDenied
+
+// NewWelcomeRendererForTest is exported for testing
+var NewWelcomeRendererForTest = newWelcomeRenderer
+
+// BuildWelcomeFieldsForTest is exported for testing
+var BuildWelcomeFieldsForTest = buildWelcomeFields
+
+// WelcomeContextForTest is exported for testing
+type WelcomeContextForTest = welcomeContext
+
+// WelcomeRendererRenderForTest invokes the (unexported) Render method on a
+// welcomeRenderer for tests in the external package.
+func WelcomeRendererRenderForTest(r *welcomeRenderer, ctx welcomeContext) ([]string, error) {
+	return r.Render(ctx)
+}
 
 // Type aliases for testing
 type GitHubPullRequest = githubsvc.PullRequest

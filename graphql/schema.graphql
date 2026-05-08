@@ -46,6 +46,30 @@ type EntityLabels {
 type FieldConfiguration {
   fields: [FieldDefinition!]!
   labels: EntityLabels!
+  actionConfig: ActionConfig!
+}
+
+# ActionStatusDefinition describes a single action status configurable per
+# workspace in TOML. `name` is the display label written by the workspace
+# operator in whatever language they prefer. `color` is either a semantic
+# preset name or a #RRGGBB hex code. See the user-facing config docs for
+# the accepted preset list.
+type ActionStatusDefinition {
+  id: ID!
+  name: String!
+  description: String
+  color: String
+  emoji: String
+}
+
+# ActionConfig is the resolved per-workspace action status configuration.
+# `initial` is the id of the status assigned to newly created actions.
+# `closed` lists the status ids that are treated as closed for filtering /
+# completion checks. `statuses` is the full ordered list to render.
+type ActionConfig {
+  initial: ID!
+  closed: [ID!]!
+  statuses: [ActionStatusDefinition!]!
 }
 
 # Custom field value
@@ -120,19 +144,14 @@ type Case {
   slackChannelName: String
   slackChannelURL: String
   fields: [FieldValue!]!       # Resolved from case_field_values via DataLoader
-  actions: [Action!]!
-  knowledges: [Knowledge!]!
+  # actions exposes the case's actions. The `filter` argument selects which
+  # archive slice to return (ACTIVE / ARCHIVED / ALL); the default ACTIVE
+  # matches the historical default for sub-resolvers. Each slice goes
+  # through its own dataloader so callers can mix filters within a request.
+  actions(filter: ActionArchiveFilter = ACTIVE): [Action!]!
   slackMessages(limit: Int, cursor: String): SlackMessageConnection!
   createdAt: Time!
   updatedAt: Time!
-}
-
-enum ActionStatus {
-  BACKLOG
-  TODO
-  IN_PROGRESS
-  BLOCKED
-  COMPLETED
 }
 
 type Action {
@@ -141,13 +160,95 @@ type Action {
   case: Case
   title: String!
   description: String
-  assigneeIDs: [String!]!
-  assignees: [SlackUser!]!
+  assigneeID: String
+  assignee: SlackUser
   slackMessageTS: String
-  status: ActionStatus!
+  # Action status id. Validity is workspace-scoped: clients should resolve the
+  # display name / color / emoji from FieldConfiguration.actionConfig.
+  status: String!
   dueDate: Time
+  # archived is true when the action is in the archived state (i.e. hidden from
+  # default Kanban / Case detail views). Mirrors archivedAt != null.
+  archived: Boolean!
+  archivedAt: Time
   createdAt: Time!
   updatedAt: Time!
+  messages(limit: Int, cursor: String): SlackMessageConnection!
+  events(limit: Int, cursor: String): ActionEventConnection!
+  # ActionStep listing under this Action, ordered by createdAt asc.
+  steps: [ActionStep!]!
+  # Aggregate progress over the Action's steps. Both fields are 0 when the
+  # caller cannot access the parent Case (private case + non-member).
+  stepProgress: ActionStepProgress!
+}
+
+enum ActionEventKind {
+  CREATED
+  TITLE_CHANGED
+  STATUS_CHANGED
+  ASSIGNEE_CHANGED
+  ARCHIVED
+  UNARCHIVED
+  STEP_ADDED
+  STEP_REMOVED
+  STEP_DONE
+  STEP_REOPENED
+  STEP_TITLE_CHANGED
+}
+
+# ActionStep is a small, binary-state work item under an Action. Tracks
+# granular progress; surfaces in the Action detail UI and as a done/total
+# badge on Kanban cards. WebUI hides metadata other than checkbox + title.
+type ActionStep {
+  id: String!
+  actionID: Int!
+  title: String!
+  # done mirrors doneAt != null. Convenience for clients that only need the
+  # boolean; doneAt is the canonical source.
+  done: Boolean!
+  doneAt: Time
+  doneBy: String
+  doneByUser: SlackUser
+  createdBy: String!
+  createdByUser: SlackUser
+  createdAt: Time!
+  updatedAt: Time!
+}
+
+type ActionStepProgress {
+  done: Int!
+  total: Int!
+}
+
+# ActionArchiveFilter selects which archive slice an action list resolver
+# should return.
+enum ActionArchiveFilter {
+  # ACTIVE returns only non-archived actions. Default for every Action
+  # list resolver.
+  ACTIVE
+  # ARCHIVED returns only archived actions.
+  ARCHIVED
+  # ALL returns both active and archived actions. Intended for cleanup /
+  # batch operations; UI views should use ACTIVE or ARCHIVED.
+  ALL
+}
+
+# ActionEvent records a single change to an Action, surfaced in the
+# WebUI activity feed alongside thread messages.
+type ActionEvent {
+  id: String!
+  actionID: Int!
+  kind: ActionEventKind!
+  actorID: String!
+  actor: SlackUser
+  oldValue: String!
+  newValue: String!
+  createdAt: Time!
+}
+
+type ActionEventConnection {
+  items: [ActionEvent!]!
+  nextCursor: String!
 }
 
 # Inputs
@@ -161,7 +262,10 @@ input CreateCaseInput {
 
 input UpdateCaseInput {
   id: Int!
-  title: String!
+  # All fields below are optional. Omitted fields preserve their current value
+  # on the existing Case. This allows true partial updates from clients that
+  # only want to change one thing (e.g. inline edit of assignees).
+  title: String
   description: String
   assigneeIDs: [String!]
   fields: [FieldValueInput!]
@@ -171,9 +275,10 @@ input CreateActionInput {
   caseID: Int!
   title: String!
   description: String
-  assigneeIDs: [String!]
+  assigneeID: String
   slackMessageTS: String
-  status: ActionStatus
+  # Status id. Must match a status defined for the workspace.
+  status: String
   dueDate: Time
 }
 
@@ -182,11 +287,35 @@ input UpdateActionInput {
   caseID: Int
   title: String
   description: String
-  assigneeIDs: [String!]
+  assigneeID: String
   slackMessageTS: String
-  status: ActionStatus
+  # Status id. Must match a status defined for the workspace.
+  status: String
   dueDate: Time
   clearDueDate: Boolean
+  clearAssignee: Boolean
+}
+
+input AddActionStepInput {
+  actionId: Int!
+  title: String!
+}
+
+input SetActionStepDoneInput {
+  actionId: Int!
+  stepId: String!
+  done: Boolean!
+}
+
+input RenameActionStepInput {
+  actionId: Int!
+  stepId: String!
+  title: String!
+}
+
+input DeleteActionStepInput {
+  actionId: Int!
+  stepId: String!
 }
 
 # Slack User
@@ -195,26 +324,6 @@ type SlackUser {
   name: String!
   realName: String!
   imageUrl: String
-}
-
-# Knowledge
-type Knowledge {
-  id: String!
-  caseID: Int!
-  case: Case
-  sourceID: String!
-  sourceURLs: [String!]!
-  title: String!
-  summary: String!
-  sourcedAt: Time!
-  createdAt: Time!
-  updatedAt: Time!
-}
-
-type KnowledgeConnection {
-  items: [Knowledge!]!
-  totalCount: Int!
-  hasMore: Boolean!
 }
 
 # Source types
@@ -385,9 +494,12 @@ type Query {
   case(workspaceId: String!, id: Int!): Case
 
   # Actions
-  actions(workspaceId: String!): [Action!]!
+  # `filter` defaults to ACTIVE so default views never accidentally surface
+  # archived actions. Use ARCHIVED for the archive view and ALL for batch
+  # / cleanup operations that need both slices.
+  actions(workspaceId: String!, filter: ActionArchiveFilter = ACTIVE): [Action!]!
   action(workspaceId: String!, id: Int!): Action
-  actionsByCase(workspaceId: String!, caseID: Int!): [Action!]!
+  actionsByCase(workspaceId: String!, caseID: Int!, filter: ActionArchiveFilter = ACTIVE): [Action!]!
   openCaseActions(workspaceId: String!): [Action!]!
 
   # Configuration
@@ -401,10 +513,6 @@ type Query {
   sources(workspaceId: String!): [Source!]!
   source(workspaceId: String!, id: String!): Source
   validateGitHubRepo(workspaceId: String!, repository: String!): GitHubRepoValidationResult!
-
-  # Knowledge
-  knowledge(workspaceId: String!, id: String!): Knowledge
-  knowledges(workspaceId: String!, limit: Int, offset: Int): KnowledgeConnection!
 
   # Assist Logs
   assistLogs(workspaceId: String!, caseId: Int!, limit: Int, offset: Int): AssistLogConnection!
@@ -424,7 +532,22 @@ type Mutation {
   # Actions
   createAction(workspaceId: String!, input: CreateActionInput!): Action!
   updateAction(workspaceId: String!, input: UpdateActionInput!): Action!
-  deleteAction(workspaceId: String!, id: Int!): Boolean!
+  # Archive an action so it disappears from default Kanban / Case detail views.
+  # Archived actions remain in storage and can be restored via unarchiveAction.
+  archiveAction(workspaceId: String!, id: Int!): Action!
+  # Restore a previously archived action back to active state.
+  unarchiveAction(workspaceId: String!, id: Int!): Action!
+  # Posts the Slack message for an Action whose initial post was missed
+  # (legacy tool-created actions before the create paths were unified).
+  # Errors if the action already has a Slack message timestamp or if the
+  # parent Case has no Slack channel.
+  postActionSlackMessage(workspaceId: String!, id: Int!): Action!
+
+  # Action Steps — binary-state sub-items under an Action.
+  addActionStep(workspaceId: String!, input: AddActionStepInput!): ActionStep!
+  setActionStepDone(workspaceId: String!, input: SetActionStepDoneInput!): ActionStep!
+  renameActionStep(workspaceId: String!, input: RenameActionStepInput!): ActionStep!
+  deleteActionStep(workspaceId: String!, input: DeleteActionStepInput!): Boolean!
 
   # Sources
   createNotionDBSource(workspaceId: String!, input: CreateNotionDBSourceInput!): Source!

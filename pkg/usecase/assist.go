@@ -13,6 +13,9 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
+	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
+	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
+	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
@@ -20,7 +23,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
 
-//go:embed prompt/assist_system.md
+//go:embed prompts/assist_system.md
 var assistSystemPromptTmpl string
 
 var assistSystemPrompt = template.Must(template.New("assist_system").Parse(assistSystemPromptTmpl))
@@ -37,16 +40,32 @@ type AssistUseCase struct {
 	repo         interfaces.Repository
 	registry     *model.WorkspaceRegistry
 	slackService slack.Service
+	slackSearch  slacktool.SearchService
+	notionTool   notiontool.Client
+	githubClient *githubtool.Client
 	llmClient    gollem.LLMClient
+	embedClient  interfaces.EmbedClient
+	// actionUC routes core__create_action through the unified usecase entry
+	// point so assist-driven creates trigger the same Slack post and event
+	// records as GraphQL/Slack-modal creates.
+	actionUC *ActionUseCase
 }
 
-// NewAssistUseCase creates a new AssistUseCase
-func NewAssistUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, llmClient gollem.LLMClient) *AssistUseCase {
+// NewAssistUseCase creates a new AssistUseCase.
+// slackSearch, notionTool, and githubClient are optional; pass nil to omit the
+// corresponding tools. actionUC is required: the core__create_action tool
+// calls through it.
+func NewAssistUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackSearch slacktool.SearchService, notionTool notiontool.Client, githubClient *githubtool.Client, llmClient gollem.LLMClient, embedClient interfaces.EmbedClient, actionUC *ActionUseCase) *AssistUseCase {
 	return &AssistUseCase{
 		repo:         repo,
 		registry:     registry,
 		slackService: slackService,
+		slackSearch:  slackSearch,
+		notionTool:   notionTool,
+		githubClient: githubClient,
 		llmClient:    llmClient,
+		embedClient:  embedClient,
+		actionUC:     actionUC,
 	}
 }
 
@@ -130,13 +149,33 @@ func (uc *AssistUseCase) processCase(ctx context.Context, entry *model.Workspace
 		return goerr.Wrap(err, "failed to build system prompt")
 	}
 
-	// Build tools
-	coreTools := core.NewForAssist(uc.repo, wsID, c.ID, uc.llmClient, uc.slackService, c.SlackChannelID)
+	// Build tools — core (action) plus Slack (read-only + post_message)
+	// plus Notion when configured.
+	coreTools := core.NewForAssist(core.Deps{
+		Repo:        uc.repo,
+		WorkspaceID: wsID,
+		CaseID:      c.ID,
+		StatusSet:   entry.ActionStatusSet,
+		ActionUC:    NewActionToolAdapter(uc.actionUC),
+	})
+	slackTools := slacktool.NewForAssist(slacktool.Deps{
+		Bot:       uc.slackService,
+		Search:    uc.slackSearch,
+		ChannelID: c.SlackChannelID,
+	})
+	notionTools := notiontool.New(notiontool.Deps{Client: uc.notionTool})
+	githubTools := githubtool.New(uc.githubClient)
+
+	allTools := make([]gollem.Tool, 0, len(coreTools)+len(slackTools)+len(notionTools)+len(githubTools))
+	allTools = append(allTools, coreTools...)
+	allTools = append(allTools, slackTools...)
+	allTools = append(allTools, notionTools...)
+	allTools = append(allTools, githubTools...)
 
 	// Create and execute the agent
 	agent := gollem.New(uc.llmClient,
 		gollem.WithSystemPrompt(systemPrompt),
-		gollem.WithTools(coreTools...),
+		gollem.WithTools(allTools...),
 	)
 
 	resp, err := agent.Execute(ctx, gollem.Text(entry.AssistPrompt))
@@ -185,13 +224,6 @@ type assistPromptAssistLog struct {
 	NextSteps string
 }
 
-// assistPromptMemory represents a memory for the template
-type assistPromptMemory struct {
-	ID        string
-	Claim     string
-	CreatedAt string
-}
-
 // assistPromptData holds all data for the assist system prompt template
 type assistPromptData struct {
 	CurrentTime  string
@@ -200,7 +232,6 @@ type assistPromptData struct {
 	Actions      []assistPromptAction
 	Messages     []assistPromptMessage
 	AssistLogs   []assistPromptAssistLog
-	Memories     []assistPromptMemory
 	AssistPrompt string
 	Language     string
 }
@@ -230,11 +261,13 @@ func (uc *AssistUseCase) buildAssistSystemPrompt(ctx context.Context, entry *mod
 		}
 	}
 
-	// Fetch actions
-	actions, err := uc.repo.Action().GetByCase(ctx, wsID, c.ID)
+	// Fetch actions (archived actions are intentionally excluded — the
+	// assist prompt summarises the active state of a case)
+	actions, err := uc.repo.Action().GetByCase(ctx, wsID, c.ID, interfaces.ActionListOptions{})
 	if err != nil {
 		return "", goerr.Wrap(err, "failed to get actions for case")
 	}
+	statusSet := resolveActionStatusSet(uc.registry, wsID)
 	for _, a := range actions {
 		dueDate := ""
 		if a.DueDate != nil {
@@ -244,8 +277,8 @@ func (uc *AssistUseCase) buildAssistSystemPrompt(ctx context.Context, entry *mod
 			ID:          a.ID,
 			Title:       a.Title,
 			Status:      a.Status.String(),
-			StatusEmoji: a.Status.Emoji(),
-			Assignees:   strings.Join(a.AssigneeIDs, ", "),
+			StatusEmoji: statusSet.Emoji(string(a.Status)),
+			Assignees:   a.AssigneeID,
 			DueDate:     dueDate,
 		})
 	}
@@ -282,19 +315,6 @@ func (uc *AssistUseCase) buildAssistSystemPrompt(ctx context.Context, entry *mod
 			Actions:   l.Actions,
 			Reasoning: l.Reasoning,
 			NextSteps: l.NextSteps,
-		})
-	}
-
-	// Fetch memories
-	memories, err := uc.repo.Memory().List(ctx, wsID, c.ID)
-	if err != nil {
-		return "", goerr.Wrap(err, "failed to get memories")
-	}
-	for _, m := range memories {
-		data.Memories = append(data.Memories, assistPromptMemory{
-			ID:        string(m.ID),
-			Claim:     m.Claim,
-			CreatedAt: m.CreatedAt.Format(time.RFC3339),
 		})
 	}
 
@@ -371,7 +391,7 @@ All output for actions, reasoning, and next_steps MUST be in markdown format.
 Agent output:
 %s`, languageInstruction, agentOutput)
 
-	summaryResp, err := session.GenerateContent(ctx, gollem.Text(prompt))
+	summaryResp, err := session.Generate(ctx, []gollem.Input{gollem.Text(prompt)})
 	if err != nil {
 		return goerr.Wrap(err, "failed to generate assist log summary")
 	}

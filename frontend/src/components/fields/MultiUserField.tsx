@@ -1,4 +1,5 @@
 import Select from 'react-select'
+import { buildSelectStyles, portalProps } from '../selectStyles'
 import styles from './FieldComponents.module.css'
 
 interface User {
@@ -50,6 +51,7 @@ export default function MultiUserField({
       {description && <p className={styles.description}>{description}</p>}
       <Select
         inputId={fieldId}
+        aria-label={label}
         options={options}
         value={selectedOptions}
         onChange={(options) => onChange(options?.map((opt) => opt.value) || [])}
@@ -57,6 +59,9 @@ export default function MultiUserField({
         isClearable
         isDisabled={disabled}
         placeholder="Select users..."
+        classNamePrefix="rs"
+        {...portalProps}
+        styles={buildSelectStyles({ error: !!error })}
         filterOption={(option, inputValue) => {
           const search = inputValue.toLowerCase()
           const data = option.data

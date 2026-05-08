@@ -11,25 +11,38 @@ import (
 
 // DataLoaders holds all the data loaders used in the GraphQL resolvers
 type DataLoaders struct {
-	repo                   interfaces.Repository
-	SlackUserLoader        *SlackUserLoader
-	ActionLoader           *ActionLoader
-	ActionsByCaseLoader    *ActionsByCaseLoader
-	CaseLoader             *CaseLoader
-	KnowledgeLoader        *KnowledgeLoader
-	KnowledgesByCaseLoader *KnowledgesByCaseLoader
+	repo                        interfaces.Repository
+	SlackUserLoader             *SlackUserLoader
+	ActionLoader                *ActionLoader
+	ActiveActionsByCaseLoader   *ActionsByCaseLoader
+	ArchivedActionsByCaseLoader *ActionsByCaseLoader
+	AllActionsByCaseLoader      *ActionsByCaseLoader
+	CaseLoader                  *CaseLoader
 }
 
 // NewDataLoaders creates a new DataLoaders instance
 func NewDataLoaders(repo interfaces.Repository) *DataLoaders {
 	return &DataLoaders{
-		repo:                   repo,
-		SlackUserLoader:        NewSlackUserLoader(repo),
-		ActionLoader:           NewActionLoader(repo),
-		ActionsByCaseLoader:    NewActionsByCaseLoader(repo),
-		CaseLoader:             NewCaseLoader(repo),
-		KnowledgeLoader:        NewKnowledgeLoader(repo),
-		KnowledgesByCaseLoader: NewKnowledgesByCaseLoader(repo),
+		repo:                        repo,
+		SlackUserLoader:             NewSlackUserLoader(repo),
+		ActionLoader:                NewActionLoader(repo),
+		ActiveActionsByCaseLoader:   NewActionsByCaseLoader(repo, interfaces.ActionArchiveScopeActiveOnly),
+		ArchivedActionsByCaseLoader: NewActionsByCaseLoader(repo, interfaces.ActionArchiveScopeArchivedOnly),
+		AllActionsByCaseLoader:      NewActionsByCaseLoader(repo, interfaces.ActionArchiveScopeAll),
+		CaseLoader:                  NewCaseLoader(repo),
+	}
+}
+
+// actionsByCaseLoaderForScope picks the right per-case dataloader for the
+// given archive scope.
+func (d *DataLoaders) actionsByCaseLoaderForScope(scope interfaces.ActionArchiveScope) *ActionsByCaseLoader {
+	switch scope {
+	case interfaces.ActionArchiveScopeArchivedOnly:
+		return d.ArchivedActionsByCaseLoader
+	case interfaces.ActionArchiveScopeAll:
+		return d.AllActionsByCaseLoader
+	default:
+		return d.ActiveActionsByCaseLoader
 	}
 }
 
@@ -122,17 +135,21 @@ func (l *ActionLoader) Load(ctx context.Context, workspaceID string, ids []int64
 	return actions, nil
 }
 
-// ActionsByCaseLoader loads actions by case ID
+// ActionsByCaseLoader loads actions by case ID for a fixed ArchiveScope.
+// Active and archived views are kept on separate loader instances so each
+// caches its own slice and the per-case dataloader pattern works for both.
 type ActionsByCaseLoader struct {
-	repo interfaces.Repository
+	repo  interfaces.Repository
+	scope interfaces.ActionArchiveScope
 }
 
-func NewActionsByCaseLoader(repo interfaces.Repository) *ActionsByCaseLoader {
-	return &ActionsByCaseLoader{repo: repo}
+func NewActionsByCaseLoader(repo interfaces.Repository, scope interfaces.ActionArchiveScope) *ActionsByCaseLoader {
+	return &ActionsByCaseLoader{repo: repo, scope: scope}
 }
 
+// Load returns the actions for each case ID under the loader's scope.
 func (l *ActionsByCaseLoader) Load(ctx context.Context, workspaceID string, caseIDs []int64) (map[int64][]*model.Action, error) {
-	actions, err := l.repo.Action().GetByCases(ctx, workspaceID, caseIDs)
+	actions, err := l.repo.Action().GetByCases(ctx, workspaceID, caseIDs, interfaces.ActionListOptions{ArchiveScope: l.scope})
 	if err != nil {
 		return nil, fmt.Errorf("failed to load actions by case: %w", err)
 	}
@@ -160,44 +177,4 @@ func (l *CaseLoader) Load(ctx context.Context, workspaceID string, ids []int64) 
 	}
 
 	return cases, nil
-}
-
-// KnowledgeLoader loads knowledge by ID
-type KnowledgeLoader struct {
-	repo interfaces.Repository
-}
-
-func NewKnowledgeLoader(repo interfaces.Repository) *KnowledgeLoader {
-	return &KnowledgeLoader{repo: repo}
-}
-
-func (l *KnowledgeLoader) Load(ctx context.Context, workspaceID string, ids []model.KnowledgeID) ([]*model.Knowledge, error) {
-	knowledges := make([]*model.Knowledge, len(ids))
-	for i, id := range ids {
-		k, err := l.repo.Knowledge().Get(ctx, workspaceID, id)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load knowledge %s: %w", id, err)
-		}
-		knowledges[i] = k
-	}
-
-	return knowledges, nil
-}
-
-// KnowledgesByCaseLoader loads knowledges by case ID
-type KnowledgesByCaseLoader struct {
-	repo interfaces.Repository
-}
-
-func NewKnowledgesByCaseLoader(repo interfaces.Repository) *KnowledgesByCaseLoader {
-	return &KnowledgesByCaseLoader{repo: repo}
-}
-
-func (l *KnowledgesByCaseLoader) Load(ctx context.Context, workspaceID string, caseIDs []int64) (map[int64][]*model.Knowledge, error) {
-	knowledges, err := l.repo.Knowledge().ListByCaseIDs(ctx, workspaceID, caseIDs)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load knowledges by case: %w", err)
-	}
-
-	return knowledges, nil
 }

@@ -13,10 +13,13 @@ type Repository interface {
 	Slack() SlackRepository
 	SlackUser() SlackUserRepository
 	Source() SourceRepository
-	Knowledge() KnowledgeRepository
 	CaseMessage() CaseMessageRepository
-	Memory() MemoryRepository
+	ActionMessage() ActionMessageRepository
+	ActionEvent() ActionEventRepository
+	ActionStep() ActionStepRepository
 	AssistLog() AssistLogRepository
+	CaseDraft() CaseDraftRepository
+	AgentSession() AgentSessionRepository
 
 	// Auth methods
 	PutToken(ctx context.Context, token *auth.Token) error
