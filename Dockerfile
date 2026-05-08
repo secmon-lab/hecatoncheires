@@ -1,5 +1,5 @@
 # Frontend build stage
-FROM node:18-alpine AS build-frontend
+FROM node:18-alpine@sha256:8d6421d663b4c28fd3ebc498332f249011d118945588d0a35cb9bc4b8ca09d9e AS build-frontend
 WORKDIR /app/frontend
 
 # Enable Corepack. The actual pnpm version comes from the `packageManager`
@@ -16,7 +16,7 @@ COPY frontend/ ./
 RUN pnpm run build
 
 # Go build stage
-FROM golang:1.26.1-alpine AS build-go
+FROM golang:1.26.1-alpine@sha256:2389ebfa5b7f43eeafbd6be0c3700cc46690ef842ad962f6c5bd6be49ed82039 AS build-go
 ENV CGO_ENABLED=0
 ARG BUILD_VERSION
 
@@ -49,7 +49,7 @@ RUN --mount=type=cache,target=/root/.cache/go-mod \
     go build -mod=readonly -ldflags="-w -s -X main.version=${BUILD_VERSION}" -o hecatoncheires
 
 # Final stage
-FROM gcr.io/distroless/base:nonroot
+FROM gcr.io/distroless/base:nonroot@sha256:fb282f8ed3057f71dbfe3ea0f5fa7e961415dafe4761c23948a9d4628c6166fe
 USER nonroot
 COPY --from=build-go /app/hecatoncheires /hecatoncheires
 
