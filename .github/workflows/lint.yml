@@ -52,8 +52,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Enable Corepack
-        run: corepack enable
+      # Install pnpm BEFORE setup-node so the pinned version from
+      # frontend/package.json's packageManager field is used. Letting
+      # setup-node's `cache: pnpm` resolve pnpm via Corepack at the repo
+      # root grabs the latest tag, which has gone Node 22+-only and breaks
+      # this Node 20 runner.
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
