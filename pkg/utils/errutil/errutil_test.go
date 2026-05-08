@@ -226,6 +226,58 @@ func TestHandleHTTP_WritesStatusAndCaptures(t *testing.T) {
 	gt.Value(t, gv["user_id"]).Equal("U123")
 }
 
+func TestHandle_BenignTagSkipsSentryAndLogsAtInfo(t *testing.T) {
+	// Tagged-benign errors (missing cookie, expired token, etc.) must not
+	// page anyone via Sentry, but we still want a paper trail at Info so
+	// rate spikes are visible in logs.
+	tr := withSentry(t)
+	ctx, buf := capturingCtx(t)
+
+	err := goerr.New("token_id cookie missing",
+		goerr.V("path", "/api/auth/me"),
+		goerr.T(errutil.TagBenign),
+	)
+	errutil.Handle(ctx, err, "auth probe")
+
+	gt.Array(t, tr.Snapshot()).Length(0)
+
+	logged := buf.String()
+	gt.String(t, logged).Contains(`"level":"INFO"`)
+	gt.String(t, logged).Contains(`"path":"/api/auth/me"`)
+	gt.Bool(t, strings.Contains(logged, `"level":"ERROR"`)).False()
+}
+
+func TestHandle_BenignTagPropagatesThroughGoerrWrap(t *testing.T) {
+	// The tag is set deep in the usecase but the HTTP layer wraps further
+	// before calling Handle. goerr.HasTag walks the chain, so the demotion
+	// must still apply.
+	tr := withSentry(t)
+	ctx, buf := capturingCtx(t)
+
+	inner := goerr.New("not found", goerr.T(errutil.TagBenign))
+	outer := goerr.Wrap(inner, "failed to get token from repository")
+	errutil.Handle(ctx, outer, "auth probe wrapped")
+
+	gt.Array(t, tr.Snapshot()).Length(0)
+	gt.String(t, buf.String()).Contains(`"level":"INFO"`)
+}
+
+func TestHandleHTTP_BenignTagSkipsSentryButStillRespondsWithStatus(t *testing.T) {
+	// HandleHTTP must always write the HTTP status — the Sentry skip is
+	// orthogonal to the response. This guards against a regression where
+	// the early-return for benign also short-circuits the http.Error call.
+	tr := withSentry(t)
+	ctx, _ := capturingCtx(t)
+	rec := httptest.NewRecorder()
+
+	err := goerr.New("token expired", goerr.T(errutil.TagBenign))
+	errutil.HandleHTTP(ctx, rec, err, 401)
+
+	gt.Number(t, rec.Code).Equal(401)
+	gt.String(t, rec.Body.String()).Contains("token expired")
+	gt.Array(t, tr.Snapshot()).Length(0)
+}
+
 func TestHandleHTTP_NilErrorIsNoop(t *testing.T) {
 	tr := withSentry(t)
 	ctx, buf := capturingCtx(t)

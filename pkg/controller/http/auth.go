@@ -343,16 +343,18 @@ func authMeHandler(authUC AuthUseCase) http.HandlerFunc {
 			})
 			return
 		}
-		// Get tokens from cookies
+		// Get tokens from cookies. A missing cookie just means the user
+		// is unauthenticated (or hitting /api/auth/me before login), which
+		// is a normal flow — tag benign so the 401 does not page anyone.
 		tokenIDCookie, err := r.Cookie("token_id")
 		if err != nil {
-			errutil.HandleHTTP(r.Context(), w, err, http.StatusUnauthorized)
+			errutil.HandleHTTP(r.Context(), w, goerr.Wrap(err, "token_id cookie missing", goerr.T(errutil.TagBenign)), http.StatusUnauthorized)
 			return
 		}
 
 		tokenSecretCookie, err := r.Cookie("token_secret")
 		if err != nil {
-			errutil.HandleHTTP(r.Context(), w, err, http.StatusUnauthorized)
+			errutil.HandleHTTP(r.Context(), w, goerr.Wrap(err, "token_secret cookie missing", goerr.T(errutil.TagBenign)), http.StatusUnauthorized)
 			return
 		}
 
