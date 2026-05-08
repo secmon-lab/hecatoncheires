@@ -7,6 +7,7 @@ import (
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
 const (
@@ -59,25 +60,28 @@ func (uc *AuthUseCase) validateTokenWithCache(ctx context.Context, tokenID auth.
 	if token, ok := uc.cache.get(tokenID); ok {
 		// Verify secret matches
 		if token.Secret != tokenSecret {
-			return nil, goerr.New("invalid token secret")
+			return nil, goerr.New("invalid token secret", goerr.T(errutil.TagBenign))
 		}
 		// Check if token is expired
 		if token.IsExpired() {
 			uc.cache.remove(tokenID)
-			return nil, goerr.New("token expired")
+			return nil, goerr.New("token expired", goerr.T(errutil.TagBenign))
 		}
 		return token, nil
 	}
 
-	// Cache miss, get from repository
+	// Cache miss, get from repository. A missing token is the normal
+	// state for an unauthenticated visitor or a revoked / expired session,
+	// so the wrapped error is tagged benign — the deletion-failure branch
+	// below stays untagged because it is a real backend failure.
 	token, err := uc.repo.GetToken(ctx, tokenID)
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to get token from repository")
+		return nil, goerr.Wrap(err, "failed to get token from repository", goerr.T(errutil.TagBenign))
 	}
 
 	// Verify secret matches
 	if token.Secret != tokenSecret {
-		return nil, goerr.New("invalid token secret")
+		return nil, goerr.New("invalid token secret", goerr.T(errutil.TagBenign))
 	}
 
 	// Check if token is expired
@@ -85,7 +89,7 @@ func (uc *AuthUseCase) validateTokenWithCache(ctx context.Context, tokenID auth.
 		if err := uc.repo.DeleteToken(ctx, tokenID); err != nil {
 			return nil, goerr.Wrap(err, "failed to delete expired token", goerr.V("tokenID", tokenID))
 		}
-		return nil, goerr.New("token expired")
+		return nil, goerr.New("token expired", goerr.T(errutil.TagBenign))
 	}
 
 	// Cache the token
