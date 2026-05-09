@@ -144,8 +144,12 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 		}),
 	)
 	defer func() {
-		if err := recorder.Finish(turnCtx); err != nil {
-			errutil.Handle(turnCtx, err, "draft: persist agent trace")
+		// Use the parent ctx (not turnCtx) so the final trace flush
+		// still runs even when the turn was cancelled by lock loss /
+		// heartbeat staleness — that's exactly when the trace is most
+		// valuable for debugging.
+		if err := recorder.Finish(ctx); err != nil {
+			errutil.Handle(ctx, err, "draft: persist agent trace")
 		}
 	}()
 

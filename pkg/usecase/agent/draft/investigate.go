@@ -9,6 +9,7 @@ import (
 	"sync"
 	"text/template"
 	"time"
+	"unicode/utf8"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
@@ -99,7 +100,13 @@ func (uc *UseCase) runOneInvestigation(ctx context.Context, task planInvestigate
 
 	summary := strings.Join(resp.Texts, "\n")
 	if len(summary) > subAgentSummaryMaxBytes {
-		summary = summary[:subAgentSummaryMaxBytes] + "\n…[truncated]"
+		// Walk back to the nearest UTF-8 rune boundary so a multi-byte
+		// character (e.g. CJK) isn't sliced mid-codepoint.
+		cut := subAgentSummaryMaxBytes
+		for cut > 0 && !utf8.RuneStart(summary[cut]) {
+			cut--
+		}
+		summary = summary[:cut] + "\n…[truncated]"
 		h.Trace(ctx, fmt.Sprintf("⚠️ [%s] summary truncated to %d bytes", task.ID, subAgentSummaryMaxBytes))
 	}
 	h.Trace(ctx, fmt.Sprintf("✅ [%s] %s — done (%s, %d/%d inner loops)",
