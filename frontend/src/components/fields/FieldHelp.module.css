@@ -165,11 +165,11 @@
    Use a block-level anchor so the wrapped InlineFieldFrame (also block) keeps
    its natural width — an inline-block wrapper would shrink-wrap the trigger
    and cause wide text values to break per-character inside the kv-value
-   column. */
+   column. The anchor itself is non-focusable; focus events bubble up from
+   the inner trigger button (rendered inside InlineCustomField). */
 .tooltipAnchor {
   position: relative;
   display: block;
-  outline: none;
 }
 
 .tooltipHint {
@@ -183,6 +183,8 @@
   right: 0;
   width: 16.25rem;
   max-width: calc(100vw - 2.5rem);
+  max-height: 20rem;
+  overflow-y: auto;
   background: var(--bg-elev);
   border: 1px solid var(--line);
   border-radius: 6px;

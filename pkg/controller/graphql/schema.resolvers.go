@@ -915,7 +915,7 @@ func (r *queryResolver) FieldConfiguration(ctx context.Context, workspaceID stri
 			options[j] = &graphql1.FieldOption{
 				ID:          opt.ID,
 				Name:        opt.Name,
-				Description: &opt.Description,
+				Description: &field.Options[j].Description,
 				Metadata:    &metadataStr,
 			}
 		}

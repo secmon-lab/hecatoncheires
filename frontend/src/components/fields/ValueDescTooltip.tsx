@@ -30,7 +30,6 @@ export default function ValueDescTooltip({
       onMouseLeave={() => setOpen(false)}
       onFocus={() => setOpen(true)}
       onBlur={() => setOpen(false)}
-      tabIndex={0}
       data-testid={testId}
     >
       {children}
