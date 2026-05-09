@@ -3,10 +3,12 @@ package i18n
 import "fmt"
 
 func init() {
-	for lang, table := range map[Lang][msgKeyCount]string{
+	messages = map[Lang][msgKeyCount]string{
 		LangEN: messagesEN,
 		LangJA: messagesJA,
-	} {
+	}
+	defaultLang = LangEN
+	for lang, table := range messages {
 		for key := range MsgKey(msgKeyCount) {
 			if table[key] == "" {
 				panic(fmt.Sprintf("i18n: missing translation for lang=%s key=%d", lang, key))
@@ -70,6 +72,18 @@ var messagesEN = [msgKeyCount]string{
 	MsgAgentOnIt:          "On it...",
 	MsgAgentError:         "An error occurred while processing your request. Please try again later.",
 	MsgAgentSessionInfo:   "Session Info",
+	MsgKeyAgentBusy:       ":hourglass_flowing_sand: Already handling your previous request. I'll respond, then please mention me again if more is needed.",
+
+	// Draft (open-mode) trace lines
+	MsgDraftTracePlanning:                 "🤔 Planning…",
+	MsgDraftTracePlannerRetry:             "⚠️ Planner output rejected; retrying",
+	MsgDraftTracePlannerAction:            "→ %s — %s",
+	MsgDraftTracePhase:                    "🧭 %s",
+	MsgDraftTraceSubAgentStarting:         "🔍 [%s] %s — starting",
+	MsgDraftTraceSubAgentFailedPrompt:     "❌ [%s] %s — failed (%s, build prompt): %v",
+	MsgDraftTraceSubAgentFailed:           "❌ [%s] %s — failed (%s, %d/%d inner loops): %v",
+	MsgDraftTraceSubAgentSummaryTruncated: "⚠️ [%s] summary truncated to %d bytes",
+	MsgDraftTraceSubAgentDone:             "✅ [%s] %s — done (%s, %d/%d inner loops)",
 
 	// Bookmark
 	MsgBookmarkOpenCase: "Open Case",
@@ -174,6 +188,18 @@ var messagesJA = [msgKeyCount]string{
 	MsgAgentOnIt:          "対応中...",
 	MsgAgentError:         "リクエストの処理中にエラーが発生しました。しばらくしてから再試行してください。",
 	MsgAgentSessionInfo:   "セッション情報",
+	MsgKeyAgentBusy:       ":hourglass_flowing_sand: 直前のリクエストを処理中です。完了後にもう一度メンションしてください。",
+
+	// Draft (open-mode) trace lines
+	MsgDraftTracePlanning:                 "🤔 計画中…",
+	MsgDraftTracePlannerRetry:             "⚠️ 出力が拒否されました。再試行します",
+	MsgDraftTracePlannerAction:            "→ %s — %s",
+	MsgDraftTracePhase:                    "🧭 %s",
+	MsgDraftTraceSubAgentStarting:         "🔍 [%s] %s — 開始",
+	MsgDraftTraceSubAgentFailedPrompt:     "❌ [%s] %s — 失敗 (%s, プロンプト構築): %v",
+	MsgDraftTraceSubAgentFailed:           "❌ [%s] %s — 失敗 (%s, %d/%d 内部ループ): %v",
+	MsgDraftTraceSubAgentSummaryTruncated: "⚠️ [%s] サマリを %d バイトで切り詰めました",
+	MsgDraftTraceSubAgentDone:             "✅ [%s] %s — 完了 (%s, %d/%d 内部ループ)",
 
 	// Bookmark
 	MsgBookmarkOpenCase: "ケースを開く",

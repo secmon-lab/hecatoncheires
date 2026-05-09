@@ -38,7 +38,7 @@ func TestHandleCancel_DeletesDraftAndEphemeral(t *testing.T) {
 	repo := memory.New()
 	registry := newRegistryWithSchema("ws-1", "ws", &config.FieldSchema{})
 	slackMock := newCollectorOnlyMockSlack()
-	uc := usecase.NewMentionDraftUseCase(repo, registry, slackMock, usecase.NewDraftMaterializer(stubMaterializerLLM()))
+	uc := usecase.NewMentionDraftUseCase(repo, registry, slackMock, newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-1"))))
 
 	d := model.NewCaseDraft(time.Now().UTC(), "U1")
 	d.SelectedWorkspaceID = "ws-1"
@@ -84,12 +84,32 @@ func TestHandleSelectWorkspace_LocksFirstThenUpdates(t *testing.T) {
 	})
 
 	slackMock := newCollectorOnlyMockSlack()
-	uc := usecase.NewMentionDraftUseCase(repo, registry, slackMock, usecase.NewDraftMaterializer(stubMaterializerLLM()))
+	// stubPlannerLLM is keyed off the workspace_id baked into the JSON, so
+	// the test fixture must materialize for ws-B (the destination of the
+	// switch).
+	uc := usecase.NewMentionDraftUseCase(repo, registry, slackMock, newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-B"))))
 
+	const channelID = "C-WS"
+	const threadTS = "1700000010.000000"
 	d := model.NewCaseDraft(time.Now().UTC(), "U1")
 	d.SelectedWorkspaceID = "ws-A"
 	d.Materialization = &model.WorkspaceMaterialization{Title: "old", Description: "old desc"}
+	d.Source = model.DraftSource{ChannelID: channelID, ThreadTS: threadTS, MentionTS: threadTS}
+	d.EphemeralChannelID = channelID
+	d.EphemeralMessageTS = threadTS
 	gt.NoError(t, repo.CaseDraft().Save(context.Background(), d)).Required()
+
+	// Seed a Session for the thread; HandleSelectWorkspace looks it up to
+	// pass into draft.UseCase.RunTurn.
+	gt.NoError(t, repo.Session().Put(context.Background(), &model.Session{
+		ID:            "ssn-test",
+		ChannelID:     channelID,
+		ThreadTS:      threadTS,
+		CreatorUserID: "U1",
+		DraftID:       d.ID,
+		CreatedAt:     time.Now().UTC(),
+		UpdatedAt:     time.Now().UTC(),
+	})).Required()
 
 	respURL, captured := captureResponseURL(t)
 	cb := &goslack.InteractionCallback{
@@ -110,8 +130,11 @@ func TestHandleSelectWorkspace_LocksFirstThenUpdates(t *testing.T) {
 
 	gt.NoError(t, uc.HandleSelectWorkspace(context.Background(), cb, cb.ActionCallback.BlockActions[0])).Required()
 
-	// At least 2 POSTs to response_url: lock, then preview update.
-	gt.Number(t, len(*captured)).GreaterOrEqual(2)
+	// One response_url POST for the lock-state UI.
+	gt.Number(t, len(*captured)).GreaterOrEqual(1)
+	// The post-planner preview is rendered via slackService.UpdateMessage
+	// (chat.update against the ephemeral message TS).
+	gt.Number(t, len(slackMock.updateBlockPosts)).GreaterOrEqual(1)
 
 	got, err := repo.CaseDraft().Get(context.Background(), d.ID)
 	gt.NoError(t, err).Required()

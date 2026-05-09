@@ -1,10 +1,17 @@
 # Agent Thread Session
 
-The agent that responds to `@mention` in Case-bound Slack channels treats each
-Slack thread as a long-running **AgentSession**. The session ties a Slack
-thread to its Case (and Action, when applicable), persists the gollem
-conversation history so follow-up mentions can pick up where the previous
-turn left off, and writes a Trace blob for every turn for diagnostics.
+The agent that responds to `@mention` in Slack threads treats each thread as
+a long-running **Session** (`pkg/domain/model.Session`). The session ties a
+Slack thread to either a Case (case-bound mode, when the channel is bound to
+an existing Case) or to a draft-in-progress (open mode, when the bot is
+mentioned in an unbound channel). It persists the gollem conversation history
+so follow-up mentions can pick up where the previous turn left off, and
+writes a Trace blob for every turn for diagnostics.
+
+A per-thread **turn lock** (CAS-backed in Firestore, mutex-backed in memory)
+prevents two turns from running concurrently on the same thread. A heartbeat
+goroutine refreshes the lock every 10s; if the holder dies, the next caller
+reclaims the stale lock after the staleness window (default 30s).
 
 ## Lifecycle
 
@@ -42,18 +49,24 @@ Object layout under the bucket:
 {prefix}/v1/traces/{sessionID}/{traceID}.json
 ```
 
-- `sessionID` = `AgentSession.ID` (UUIDv7).
+- `sessionID` = `Session.ID` (UUIDv7).
 - `traceID` = the `ts` of the mention message that triggered the turn —
   one trace per mention.
 
 The `serve` command refuses to start when the bucket flag is unset.
 
 Session metadata (workspace, case, thread TS, action linkage, last mention
-TS) is stored in Firestore as a sub-collection of the Case:
+TS, turn-lock fields, optional draft binding) is stored in Firestore keyed
+by Slack channel + thread TS:
 
 ```
-workspaces/{wsID}/cases/{caseID}/agent_sessions/{threadTS}
+slack_channels/{channelID}/sessions/{threadTS}
 ```
+
+The same Session row is used by both modes — case-bound mention agent
+(`pkg/usecase/agent/casebound`) and open-mode draft agent
+(`pkg/usecase/agent/draft`). Mode is discriminated at lookup time:
+`Session.IsCaseBound()` returns true when `CaseID != 0`.
 
 No new Firestore composite indexes are required; lookups are direct
 document fetches.

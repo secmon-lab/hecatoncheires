@@ -1,21 +1,16 @@
 package usecase
 
 import (
-	"bytes"
 	"context"
-	_ "embed"
 	"fmt"
 	"strings"
 	"sync"
-	"text/template"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/trace"
-	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool"
-	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
@@ -24,36 +19,28 @@ import (
 	slackmodel "github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
+	agentcommon "github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/casebound"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	goslack "github.com/slack-go/slack" //nolint:depguard
 )
 
-//go:embed prompts/agent_system.md
-var agentSystemPromptTmpl string
-
-var agentSystemPrompt = template.Must(template.New("agent_system").Parse(agentSystemPromptTmpl))
-
-// AgentUseCase handles AI agent responses for Slack mentions
+// AgentUseCase is the Slack-side orchestrator for case-bound mention turns.
+// It resolves the request (bot user id, case lookup, conversation
+// snapshot, etc.) and hands off to the casebound runtime
+// (pkg/usecase/agent/casebound) which owns gollem invocation, system
+// prompt assembly, and the turn lock lifecycle.
 type AgentUseCase struct {
 	repo         interfaces.Repository
 	registry     *model.WorkspaceRegistry
 	slackService slack.Service
-	slackSearch  slacktool.SearchService
-	notionTool   notiontool.Client
-	githubClient *githubtool.Client
 	llmClient    gollem.LLMClient
 	embedClient  interfaces.EmbedClient
-	historyRepo  gollem.HistoryRepository
-	traceRepo    trace.Repository
-	// actionUC is the unified entry point for Action mutations. The
-	// core__create_action tool calls through this to keep tool-driven
-	// creates aligned with GraphQL/Slack-modal creates (Slack post,
-	// ActionEvent records, etc.).
-	actionUC *ActionUseCase
-	// actionStepUC is the unified entry point for ActionStep mutations,
-	// following the same pattern as actionUC.
-	actionStepUC *ActionStepUseCase
+
+	// casebound runs the case-bound gollem ReAct loop. It is non-nil
+	// whenever the LLM client is configured.
+	casebound *casebound.UseCase
 }
 
 // NewAgentUseCase creates a new AgentUseCase instance.
@@ -70,25 +57,49 @@ type AgentUseCase struct {
 // Action create paths share the same usecase implementation. actionStepUC
 // follows the same contract for the core__*_action_step tool family.
 func NewAgentUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackSearch slacktool.SearchService, notionTool notiontool.Client, githubClient *githubtool.Client, llmClient gollem.LLMClient, embedClient interfaces.EmbedClient, historyRepo gollem.HistoryRepository, traceRepo trace.Repository, actionUC *ActionUseCase, actionStepUC *ActionStepUseCase) *AgentUseCase {
-	return &AgentUseCase{
+	uc := &AgentUseCase{
 		repo:         repo,
 		registry:     registry,
 		slackService: slackService,
-		slackSearch:  slackSearch,
-		notionTool:   notionTool,
-		githubClient: githubClient,
 		llmClient:    llmClient,
 		embedClient:  embedClient,
-		historyRepo:  historyRepo,
-		traceRepo:    traceRepo,
-		actionUC:     actionUC,
-		actionStepUC: actionStepUC,
 	}
+	if llmClient != nil {
+		deps := &agentcommon.CommonDeps{
+			Repo:                repo,
+			Registry:            registry,
+			LLMClient:           llmClient,
+			HistoryRepo:         historyRepo,
+			TraceRepo:           traceRepo,
+			SlackBot:            slackService,
+			SlackSearch:         slackSearch,
+			NotionClient:        notionTool,
+			GitHubClient:        githubClient,
+			ActionUC:            NewActionToolAdapter(actionUC),
+			ActionStepUC:        NewActionStepToolAdapter(actionStepUC),
+			HeartbeatInterval:   agentcommon.DefaultHeartbeatInterval,
+			HeartbeatStaleAfter: agentcommon.DefaultHeartbeatStaleAfter,
+		}
+		cb, err := casebound.New(deps)
+		if err != nil {
+			// New only fails on missing deps which we guarded above, so
+			// surfacing here would indicate a wiring bug. Log loud and
+			// leave casebound nil; HandleAgentMention will short-circuit.
+			logging.Default().Error("failed to build casebound usecase", "error", err.Error())
+		} else {
+			uc.casebound = cb
+		}
+	}
+	return uc
 }
 
 // HandleAgentMention processes an app_mention event and responds with an AI agent
 func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.Message) error {
 	logger := logging.From(ctx)
+	if uc.casebound == nil {
+		logger.Debug("casebound usecase not configured; skipping agent mention")
+		return nil
+	}
 
 	// Detect user's language from Slack locale
 	ctx = contextWithSlackUserLang(ctx, uc.slackService, msg.UserID())
@@ -121,13 +132,13 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 		threadTS = msg.ID()
 	}
 
-	// Look up (or create) the AgentSession that ties this thread to the Case.
+	// Look up (or create) the Session that ties this thread to the Case.
 	session, err := uc.loadOrCreateSession(ctx, entry.Workspace.ID, foundCase.ID, msg.ChannelID(), threadTS)
 	if err != nil {
 		return goerr.Wrap(err, "failed to load or create agent session")
 	}
 
-	// Post the per-mention session start banner using the AgentSession.ID so
+	// Post the per-mention session start banner using the Session.ID so
 	// the overflow menu surfaces the persistent identifier.
 	if err := uc.postSessionStart(ctx, msg.ChannelID(), threadTS, session.ID); err != nil {
 		logger.Error("failed to post session start", "error", err.Error())
@@ -142,18 +153,15 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 		return goerr.Wrap(err, "failed to get actions for case")
 	}
 
-	// Build prompt + user input. For a fresh session we drop the full thread
-	// into the system prompt's Conversation Context section. For continuing
-	// sessions the gollem History already holds prior turns; we only need to
-	// surface unprocessed messages (everything in the thread newer than the
-	// previous mention TS, excluding the bot's own posts) as user input.
+	// Build delta vs. system snapshot of the conversation. The casebound
+	// runtime takes pre-fetched messages (Slack-independent shape).
 	systemMessages, deltaMessages, err := uc.partitionConversation(ctx, msg, session, botUserID)
 	if err != nil {
 		return goerr.Wrap(err, "failed to partition conversation")
 	}
+
 	// When this thread is bound to a specific Action, surface that action's
-	// detail instead of the case-wide action list (which would just be noise
-	// for an action-scoped conversation).
+	// detail instead of the case-wide action list.
 	var currentAction *model.Action
 	if session.ActionID != 0 {
 		for _, a := range actions {
@@ -163,154 +171,104 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 			}
 		}
 	}
-	systemPrompt := uc.buildSystemPrompt(foundCase, entry, msg.ChannelID(), time.Now().UTC(), currentAction, actions, systemMessages)
-	userInput := buildAgentUserInput(deltaMessages, msg)
 
 	// Slack-side trace banner (per-mention; not persisted).
 	traceMsg := uc.newTraceMessage(msg.ChannelID(), threadTS)
-	ctx = tool.WithUpdate(ctx, func(innerCtx context.Context, message string) {
-		traceMsg.update(innerCtx, message)
-	})
 
-	// Configure the gollem trace recorder for the durable trace artifact.
-	actionIDStr := ""
-	if session.ActionID != 0 {
-		actionIDStr = fmt.Sprintf("%d", session.ActionID)
-	}
-	recorder := trace.New(
-		trace.WithRepository(uc.traceRepo),
-		trace.WithTraceID(msg.ID()),
-		trace.WithMetadata(trace.TraceMetadata{
-			Labels: map[string]string{
-				agentSessionLabel:        session.ID,
-				agentWorkspaceIDLabel:    entry.Workspace.ID,
-				agentCaseIDLabel:         fmt.Sprintf("%d", foundCase.ID),
-				agentThreadTSLabel:       threadTS,
-				agentActionIDLabel:       actionIDStr,
-				agentTriggerMentionLabel: msg.ID(),
-			},
+	req := casebound.TurnRequest{
+		Session:        session,
+		ChannelID:      msg.ChannelID(),
+		ThreadTS:       threadTS,
+		MentionTS:      msg.ID(),
+		MentionText:    msg.Text(),
+		BotUserID:      botUserID,
+		Workspace:      entry,
+		Case:           foundCase,
+		Actions:        actions,
+		CurrentAction:  currentAction,
+		SystemMessages: toCaseboundMessages(systemMessages),
+		DeltaMessages:  toCaseboundMessages(deltaMessages),
+		TriggerTS:      msg.ID(),
+		Handler: casebound.HandlerFunc(func(innerCtx context.Context, line string) {
+			traceMsg.update(innerCtx, line)
 		}),
-	)
-
-	// Build core tools (action) for this case.
-	coreTools := core.New(core.Deps{
-		Repo:         uc.repo,
-		WorkspaceID:  entry.Workspace.ID,
-		CaseID:       foundCase.ID,
-		StatusSet:    entry.ActionStatusSet,
-		ActionUC:     NewActionToolAdapter(uc.actionUC),
-		ActionStepUC: NewActionStepToolAdapter(uc.actionStepUC),
-	})
-
-	// Slack and Notion tools are independent packages. Each gates its own tools
-	// on whether the relevant client/service is configured (nil → no tools).
-	// Mention flow uses the read-only Slack tool set (no post_message — the
-	// trace UI handles outbound messages).
-	slackTools := slacktool.NewReadOnly(slacktool.Deps{
-		Bot:    uc.slackService,
-		Search: uc.slackSearch,
-	})
-	notionTools := notiontool.New(notiontool.Deps{Client: uc.notionTool})
-	githubTools := githubtool.New(uc.githubClient)
-
-	allTools := make([]gollem.Tool, 0, len(coreTools)+len(slackTools)+len(notionTools)+len(githubTools))
-	allTools = append(allTools, coreTools...)
-	allTools = append(allTools, slackTools...)
-	allTools = append(allTools, notionTools...)
-	allTools = append(allTools, githubTools...)
-
-	// Note: gollem's WithHistoryRepository follows a load-mutate-overwrite
-	// pattern (Load at session start, Save after every LLM turn). Two
-	// concurrent mentions on the same thread would therefore race
-	// last-writer-wins on the persisted History. We accept that trade-off
-	// because Slack mentions on a single thread are effectively serial
-	// (humans typing) and adding GCS generation preconditions here would
-	// require deeper changes inside gollem itself.
-	agent := gollem.New(uc.llmClient,
-		gollem.WithSystemPrompt(systemPrompt),
-		gollem.WithTools(allTools...),
-		gollem.WithHistoryRepository(uc.historyRepo, session.ID),
-		gollem.WithTrace(recorder),
-		gollem.WithToolMiddleware(
-			func(next gollem.ToolHandler) gollem.ToolHandler {
-				return func(ctx context.Context, req *gollem.ToolExecRequest) (*gollem.ToolExecResponse, error) {
-					traceMsg.update(ctx, fmt.Sprintf("🔧 `%s`", req.Tool.Name))
-					resp, err := next(ctx, req)
-					if resp != nil && resp.Error != nil {
-						traceMsg.update(ctx, "❌ Error: "+resp.Error.Error())
-					}
-					return resp, err
-				}
-			},
-		),
-	)
-
-	resp, execErr := agent.Execute(ctx, gollem.Text(userInput))
-
-	// Persist the trace regardless of Execute outcome — partial traces are
-	// the most useful diagnostic for failures.
-	if finishErr := recorder.Finish(ctx); finishErr != nil {
-		errutil.Handle(ctx, finishErr, "failed to persist agent trace")
 	}
 
-	if execErr != nil {
+	result, runErr := uc.casebound.RunTurn(ctx, req)
+	if runErr != nil {
 		errMsg := "⚠️ " + i18n.T(ctx, i18n.MsgAgentError)
 		if _, postErr := uc.slackService.PostThreadReply(ctx, msg.ChannelID(), threadTS, errMsg); postErr != nil {
-			logger.Error("failed to post error message to Slack", "error", postErr.Error())
+			errutil.Handle(ctx, postErr, "post agent error reply")
 		}
-		return goerr.Wrap(execErr, "failed to execute agent")
+		return goerr.Wrap(runErr, "casebound run turn")
 	}
-
-	// Update the session record with the just-processed mention TS so the
-	// next mention only ingests messages strictly after this one.
-	session.LastMentionTS = msg.ID()
-	session.UpdatedAt = time.Now().UTC()
-	if err := uc.repo.AgentSession().Put(ctx, session); err != nil {
-		errutil.Handle(ctx, err, "failed to update agent session lastMentionTS")
+	switch result.Status {
+	case casebound.StatusBusy:
+		busyMsg := i18n.T(ctx, i18n.MsgKeyAgentBusy)
+		if _, postErr := uc.slackService.PostThreadReply(ctx, msg.ChannelID(), threadTS, busyMsg); postErr != nil {
+			errutil.Handle(ctx, postErr, "post busy notice")
+		}
+		return nil
+	case casebound.StatusIdempotent:
+		return nil
+	case casebound.StatusCompleted:
+		if err := traceMsg.finalize(ctx, result.FinalText); err != nil {
+			return goerr.Wrap(err, "failed to post final response")
+		}
+		return nil
+	default:
+		return goerr.New("unexpected casebound status", goerr.V("status", int(result.Status)))
 	}
-
-	finalText := strings.Join(resp.Texts, "\n")
-	if err := traceMsg.finalize(ctx, finalText); err != nil {
-		return goerr.Wrap(err, "failed to post final response")
-	}
-
-	return nil
 }
 
-// Trace metadata labels keyed off the SessionIDLabel exported by agentarchive.
-const (
-	agentSessionLabel        = "session_id"
-	agentWorkspaceIDLabel    = "workspace_id"
-	agentCaseIDLabel         = "case_id"
-	agentThreadTSLabel       = "thread_ts"
-	agentActionIDLabel       = "action_id"
-	agentTriggerMentionLabel = "trigger_mention_ts"
-)
+// toCaseboundMessages converts the Slack-service ConversationMessage shape
+// into the Slack-independent shape consumed by the casebound runtime.
+func toCaseboundMessages(in []slack.ConversationMessage) []casebound.ConversationMessage {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]casebound.ConversationMessage, len(in))
+	for i, m := range in {
+		out[i] = casebound.ConversationMessage{
+			UserID:    m.UserID,
+			UserName:  m.UserName,
+			Text:      m.Text,
+			Timestamp: m.Timestamp,
+		}
+	}
+	return out
+}
 
-// loadOrCreateSession returns the AgentSession for the given thread, creating
+// loadOrCreateSession returns the Session for the given thread, creating
 // (but not yet persisting) a fresh one when none exists. Persistence happens
 // at the end of HandleAgentMention so we only commit a session that
 // successfully started a turn.
-func (uc *AgentUseCase) loadOrCreateSession(ctx context.Context, workspaceID string, caseID int64, channelID, threadTS string) (*model.AgentSession, error) {
-	existing, err := uc.repo.AgentSession().Get(ctx, workspaceID, caseID, threadTS)
+func (uc *AgentUseCase) loadOrCreateSession(ctx context.Context, workspaceID string, caseID int64, channelID, threadTS string) (*model.Session, error) {
+	existing, err := uc.repo.Session().GetByThread(ctx, channelID, threadTS)
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to get agent session")
+		return nil, goerr.Wrap(err, "failed to get session")
 	}
 	if existing != nil {
 		return existing, nil
 	}
 
 	// New session: detect Action linkage by matching the thread parent TS
-	// against any registered action notification message.
+	// against any registered action notification message. Most threads
+	// have no associated action — tag ErrNotFound as benign so the lookup
+	// is visible at Info level without paging Sentry, while real backend
+	// failures still alert as ERROR.
 	var actionID int64
 	if action, err := uc.repo.Action().GetBySlackMessageTS(ctx, workspaceID, threadTS); err == nil && action != nil {
 		actionID = action.ID
 	} else if err != nil {
-		errutil.Handle(ctx, err, "failed to look up action by thread TS for new agent session")
+		if isRepoNotFound(err) {
+			err = goerr.Wrap(err, "no action linked to thread", goerr.T(errutil.TagBenign))
+		}
+		errutil.Handle(ctx, err, "failed to look up action by thread TS for new session")
 	}
 
 	now := time.Now().UTC()
-	return &model.AgentSession{
+	return &model.Session{
 		ID:          uuid.Must(uuid.NewV7()).String(),
 		WorkspaceID: workspaceID,
 		CaseID:      caseID,
@@ -333,7 +291,7 @@ func (uc *AgentUseCase) loadOrCreateSession(ctx context.Context, workspaceID str
 //
 // The current mention itself is intentionally not included in either bucket;
 // buildAgentUserInput appends it last.
-func (uc *AgentUseCase) partitionConversation(ctx context.Context, msg *slackmodel.Message, session *model.AgentSession, botUserID string) ([]slack.ConversationMessage, []slack.ConversationMessage, error) {
+func (uc *AgentUseCase) partitionConversation(ctx context.Context, msg *slackmodel.Message, session *model.Session, botUserID string) ([]slack.ConversationMessage, []slack.ConversationMessage, error) {
 	if session.LastMentionTS == "" {
 		// Fresh session: existing behavior — inline thread/channel context
 		// into the system prompt.
@@ -367,28 +325,6 @@ func (uc *AgentUseCase) partitionConversation(ctx context.Context, msg *slackmod
 		delta = append(delta, m)
 	}
 	return nil, delta, nil
-}
-
-// buildAgentUserInput assembles the user-facing text passed to gollem.
-// Unprocessed thread messages are prepended in chronological order with a
-// header so the agent can distinguish them from the new prompt. The current
-// mention text is always appended last.
-func buildAgentUserInput(delta []slack.ConversationMessage, msg *slackmodel.Message) string {
-	if len(delta) == 0 {
-		return msg.Text()
-	}
-	var b strings.Builder
-	b.WriteString("# Unprocessed thread messages since last mention\n")
-	for _, m := range delta {
-		name := m.UserName
-		if name == "" {
-			name = m.UserID
-		}
-		fmt.Fprintf(&b, "[%s] %s: %s\n", m.Timestamp, name, m.Text)
-	}
-	b.WriteString("\n# Current mention\n")
-	b.WriteString(msg.Text())
-	return b.String()
 }
 
 // compareSlackTS compares two Slack timestamps lexicographically. Slack TS
@@ -519,133 +455,6 @@ func (uc *AgentUseCase) collectContextMessages(ctx context.Context, msg *slackmo
 	// Channel mention: get recent messages (last 24 hours)
 	oldest := time.Now().Add(-24 * time.Hour)
 	return uc.slackService.GetConversationHistory(ctx, msg.ChannelID(), oldest, 100)
-}
-
-// buildSystemPrompt constructs the system prompt with case information and conversation context
-// promptField represents a case field for template rendering
-type promptField struct {
-	Name  string
-	Value any
-}
-
-// promptMessage represents a conversation message for template rendering
-type promptMessage struct {
-	Timestamp   string
-	DisplayName string
-	Text        string
-}
-
-// promptAction represents a single action in the case-wide action list
-// (rendered when the agent is NOT in an action-bound thread). It is kept
-// minimal — only ID and Title — because outside an action thread the LLM
-// only needs to know which actions exist; details are reachable via tools.
-type promptAction struct {
-	ID    int64
-	Title string
-}
-
-// promptCurrentAction represents the action that the current Slack thread
-// is bound to (when AgentSession.ActionID != 0). The full set of fields is
-// inlined so the LLM can answer questions about it without a tool call.
-type promptCurrentAction struct {
-	ID          int64
-	Title       string
-	Status      string
-	StatusEmoji string
-	Assignee    string // empty when unassigned; template renders "unassigned"
-	Description string
-	DueDate     string // empty when no due date set
-}
-
-// agentPromptData holds all data for the agent system prompt template
-type agentPromptData struct {
-	ChannelID     string
-	Now           string
-	Case          *model.Case
-	Fields        []promptField
-	CurrentAction *promptCurrentAction
-	Actions       []promptAction
-	Messages      []promptMessage
-}
-
-// buildSystemPrompt renders the agent system prompt.
-//
-// When currentAction is non-nil, the agent is responding inside a Slack
-// thread bound to that action (AgentSession.ActionID != 0). In that mode
-// the case-wide actions list is suppressed — only the current action's
-// detail is surfaced, to avoid drowning the LLM in unrelated work items.
-// Otherwise the case-wide actions list is rendered as a title-only summary.
-func (uc *AgentUseCase) buildSystemPrompt(c *model.Case, entry *model.WorkspaceEntry, channelID string, now time.Time, currentAction *model.Action, actions []*model.Action, messages []slack.ConversationMessage) string {
-	data := agentPromptData{
-		ChannelID: channelID,
-		Now:       now.UTC().Format(time.RFC3339),
-		Case:      c,
-	}
-
-	// Build field values with schema names
-	if entry != nil && entry.FieldSchema != nil && len(c.FieldValues) > 0 {
-		fieldNames := make(map[string]string)
-		for _, fd := range entry.FieldSchema.Fields {
-			fieldNames[fd.ID] = fd.Name
-		}
-
-		for fieldID, fv := range c.FieldValues {
-			name := fieldNames[fieldID]
-			if name == "" {
-				name = fieldID
-			}
-			data.Fields = append(data.Fields, promptField{Name: name, Value: fv.Value})
-		}
-	}
-
-	if currentAction != nil {
-		statusSet := model.DefaultActionStatusSet()
-		if entry != nil && entry.ActionStatusSet != nil {
-			statusSet = entry.ActionStatusSet
-		}
-		due := ""
-		if currentAction.DueDate != nil {
-			due = currentAction.DueDate.UTC().Format(time.RFC3339)
-		}
-		data.CurrentAction = &promptCurrentAction{
-			ID:          currentAction.ID,
-			Title:       currentAction.Title,
-			Status:      currentAction.Status.String(),
-			StatusEmoji: statusSet.Emoji(string(currentAction.Status)),
-			Assignee:    currentAction.AssigneeID,
-			Description: currentAction.Description,
-			DueDate:     due,
-		}
-	} else {
-		// Case-wide action list: title-only summary.
-		for _, a := range actions {
-			data.Actions = append(data.Actions, promptAction{
-				ID:    a.ID,
-				Title: a.Title,
-			})
-		}
-	}
-
-	// Build conversation messages
-	for _, msg := range messages {
-		displayName := msg.UserName
-		if displayName == "" {
-			displayName = msg.UserID
-		}
-		data.Messages = append(data.Messages, promptMessage{
-			Timestamp:   msg.Timestamp,
-			DisplayName: displayName,
-			Text:        msg.Text,
-		})
-	}
-
-	var buf bytes.Buffer
-	if err := agentSystemPrompt.Execute(&buf, data); err != nil {
-		// Template execution should not fail with valid data; log and return fallback
-		return fmt.Sprintf("You are an AI assistant. Case: %s", c.Title)
-	}
-
-	return buf.String()
 }
 
 // traceMessage manages a single updatable Slack message for showing agent progress using context blocks

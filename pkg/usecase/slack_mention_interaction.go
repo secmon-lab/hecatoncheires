@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/draft"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	goslack "github.com/slack-go/slack"
 )
@@ -31,31 +32,34 @@ type editMetadata struct {
 }
 
 // HandleSelectWorkspace runs when the user changes the workspace selector on
-// the preview ephemeral. It enforces the lock-first ordering described in
-// F4-3 to prevent double-submission.
+// the preview ephemeral. It re-routes the request through draft.UseCase.RunTurn
+// with a TriggerWSSwitch trigger; the planner re-materialises against the new
+// workspace's schema using the existing conversation history. The lock-first
+// ordering of F4-3 is preserved by setting InferenceInProgress before the turn
+// starts so concurrent interactions (Submit/Edit/Cancel) refuse.
 func (uc *MentionDraftUseCase) HandleSelectWorkspace(ctx context.Context, callback *goslack.InteractionCallback, action *goslack.BlockAction) error {
 	if callback == nil || action == nil {
 		return goerr.New("nil callback or action")
 	}
-	// The static_select carries the workspace ID in SelectedOption.Value.
-	// The draft ID is encoded into the selector block's BlockID as
-	// "<BlockIDDraftWSSelect>:<draftID>" by buildPreviewBlocks.
+	if uc.draftUC == nil {
+		return goerr.New("draft usecase is not configured")
+	}
 	draftID, ok := parseDraftIDFromSelectorBlockID(action.BlockID)
 	if !ok {
 		return goerr.New("workspace selector BlockID is missing draft ID",
 			goerr.V("block_id", action.BlockID))
 	}
-	draft, err := uc.repo.CaseDraft().Get(ctx, draftID)
+	d, err := uc.repo.CaseDraft().Get(ctx, draftID)
 	if err != nil {
 		return goerr.Wrap(err, "failed to load draft for workspace switch",
 			goerr.V("draft_id", draftID))
 	}
-	if draft == nil {
+	if d == nil {
 		return goerr.New("draft not found for workspace switch",
 			goerr.V("draft_id", draftID))
 	}
 
-	if draft.InferenceInProgress {
+	if d.InferenceInProgress {
 		uc.respondLocked(ctx, callback)
 		return nil
 	}
@@ -69,52 +73,96 @@ func (uc *MentionDraftUseCase) HandleSelectWorkspace(ctx context.Context, callba
 		return goerr.Wrap(err, "selected workspace not found")
 	}
 
-	// (1) Lock state first — must complete before AI inference begins.
+	// (1) Lock the preview UI immediately. The user sees a "materializing…"
+	// row while the planner runs.
 	lockBlocks, lockFallback := buildLockBlocks(entry.Workspace.Name)
 	if err := uc.respondReplaceOriginal(ctx, callback.ResponseURL, lockBlocks, lockFallback); err != nil {
 		return goerr.Wrap(err, "failed to render lock state on workspace switch")
 	}
 
-	// (2) Mark inference in progress so concurrent interactions can refuse.
-	if err := uc.repo.CaseDraft().SetMaterialization(ctx, draft.ID, newWorkspaceID, nil, true); err != nil {
+	// (2) Mark inference in progress so concurrent interactions refuse.
+	if err := uc.repo.CaseDraft().SetMaterialization(ctx, d.ID, newWorkspaceID, nil, true); err != nil {
 		return goerr.Wrap(err, "failed to mark inference in progress")
 	}
 
-	// (3) Run materialization for the new workspace's schema (retries internally).
-	candidates := uc.accessibleWorkspaces(callback.User.ID)
-	mat, err := uc.materializer.Materialize(ctx, draft, MaterializeContext{
-		Workspace:        entry,
-		EstimationReason: "user explicitly switched to this workspace via the preview selector",
-		OtherCandidates:  candidates,
-	})
+	// (3) Look up the existing Session for this thread.
+	session, err := uc.repo.Session().GetByThread(ctx, d.Source.ChannelID, d.EphemeralMessageTS)
 	if err != nil {
-		// Surface the failure to the user by replacing the locked ephemeral
-		// with an error message instead of leaving them stuck in the
-		// "processing…" state.
+		return goerr.Wrap(err, "failed to load session for ws-switch")
+	}
+	if session == nil {
+		// No session yet — fall back to thread TS from the draft source.
+		threadTS := d.Source.ThreadTS
+		if threadTS == "" {
+			threadTS = d.Source.MentionTS
+		}
+		session, err = uc.repo.Session().GetByThread(ctx, d.Source.ChannelID, threadTS)
+		if err != nil {
+			return goerr.Wrap(err, "failed to load session via thread TS")
+		}
+	}
+	if session == nil {
+		return goerr.New("no session found for ws-switch",
+			goerr.V("draft_id", string(d.ID)))
+	}
+
+	candidates := uc.accessibleWorkspaces(callback.User.ID)
+	threadTS := session.ThreadTS
+
+	// (4) Build host handler. The processingTS is empty for ws-switch — the
+	// preview is updated via response_url's chat.update path inside Materialize.
+	handler := newSlackDraftHandler(
+		uc.repo, uc.registry, uc.slackService,
+		d.Source.ChannelID, threadTS, "", callback.User.ID,
+		candidates, d.ID, d.EphemeralMessageTS,
+	)
+
+	// (5) Run the planner turn. TriggerTS is empty for this synthetic event
+	// — there is no Slack-side TS to dedup on. The lock layer treats an
+	// empty TriggerKey as "always proceed (or busy)", which is what we want
+	// for explicit user clicks.
+	userInput := "[system event] The user has switched the active workspace to " + entry.Workspace.ID + "."
+	result, runErr := uc.draftUC.RunTurn(ctx, draft.TurnRequest{
+		Session:          session,
+		UserInput:        userInput,
+		Trigger:          draft.TriggerWSSwitch,
+		TriggerTS:        "",
+		ActorUserID:      callback.User.ID,
+		EstimatedWS:      entry,
+		Candidates:       candidates,
+		EstimationReason: "user explicitly switched to this workspace via the preview selector",
+		ExistingDraft:    d,
+		Handler:          handler,
+	})
+	if runErr != nil {
 		errBlocks, errFallback := buildMaterializationErrorBlocks(entry.Workspace.Name)
 		if respErr := uc.respondReplaceOriginal(ctx, callback.ResponseURL, errBlocks, errFallback); respErr != nil {
 			errutil.Handle(ctx, goerr.Wrap(respErr, "failed to render materialization-failure block"),
 				"could not surface materialization failure to user")
 		}
-		// Clear the in-progress flag so the user can try switching again.
-		if clearErr := uc.repo.CaseDraft().SetMaterialization(ctx, draft.ID, draft.SelectedWorkspaceID, draft.Materialization, false); clearErr != nil {
-			errutil.Handle(ctx, clearErr, "failed to clear inference-in-progress flag after materialization failure")
+		// Best effort: clear the in-progress flag so the user can retry.
+		if clearErr := uc.repo.CaseDraft().SetMaterialization(ctx, d.ID, d.SelectedWorkspaceID, d.Materialization, false); clearErr != nil {
+			errutil.Handle(ctx, clearErr, "failed to clear inference-in-progress flag after ws-switch failure")
 		}
-		return goerr.Wrap(err, "failed to materialize for new workspace")
+		return goerr.Wrap(runErr, "ws-switch turn failed")
 	}
-
-	// (4) Persist the new materialization and clear the lock.
-	if err := uc.repo.CaseDraft().SetMaterialization(ctx, draft.ID, newWorkspaceID, mat, false); err != nil {
-		return goerr.Wrap(err, "failed to save new materialization")
-	}
-
-	// (5) Re-render the preview body.
-	draft.SelectedWorkspaceID = newWorkspaceID
-	draft.Materialization = mat
-	draft.InferenceInProgress = false
-	blocks, fallback := buildPreviewBlocks(draft, entry, candidates)
-	if err := uc.respondReplaceOriginal(ctx, callback.ResponseURL, blocks, fallback); err != nil {
-		return goerr.Wrap(err, "failed to render new preview after workspace switch")
+	switch result.Status {
+	case draft.StatusBusy, draft.StatusIdempotent:
+		// Locked / duplicate — the lock UI we already posted is the user
+		// signal; nothing more to do.
+		return nil
+	case draft.StatusFallback:
+		// Planner exhausted budget — render an error block so the user
+		// isn't stuck on the locked preview.
+		errBlocks, errFallback := buildMaterializationErrorBlocks(entry.Workspace.Name)
+		if respErr := uc.respondReplaceOriginal(ctx, callback.ResponseURL, errBlocks, errFallback); respErr != nil {
+			errutil.Handle(ctx, goerr.Wrap(respErr, "render fallback block on ws-switch"),
+				"could not surface ws-switch fallback to user")
+		}
+		if clearErr := uc.repo.CaseDraft().SetMaterialization(ctx, d.ID, d.SelectedWorkspaceID, d.Materialization, false); clearErr != nil {
+			errutil.Handle(ctx, clearErr, "failed to clear inference-in-progress flag after ws-switch fallback")
+		}
+		return nil
 	}
 	return nil
 }

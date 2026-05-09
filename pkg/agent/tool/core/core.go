@@ -112,3 +112,22 @@ func New(deps Deps) []gollem.Tool {
 func NewForAssist(deps Deps) []gollem.Tool {
 	return New(deps)
 }
+
+// NewReadOnly builds the read-only subset of the core tool family. This is
+// what investigation sub-agents (draft mode) get: list / get tools only,
+// no creation, no status mutation, no archival.
+//
+// ActionUC is not used and may be nil. ActionStepUC is consulted only for
+// list_action_steps (a read operation in mutator clothing); the step tool is
+// included only when the mutator is wired so we never crash a sub-agent that
+// has no step backend hooked up.
+func NewReadOnly(deps Deps) []gollem.Tool {
+	tools := []gollem.Tool{
+		&listActionsTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, caseID: deps.CaseID},
+		&getActionTool{repo: deps.Repo, workspaceID: deps.WorkspaceID},
+	}
+	if deps.ActionStepUC != nil {
+		tools = append(tools, &listActionStepsTool{stepUC: deps.ActionStepUC, workspaceID: deps.WorkspaceID})
+	}
+	return tools
+}

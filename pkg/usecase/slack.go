@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/m-mizutani/goerr/v2"
@@ -105,12 +106,85 @@ func (uc *SlackUseCases) HandleSlackEvent(ctx context.Context, event *slackevent
 		if uc.mentionDraft == nil {
 			return nil
 		}
+		ctx = uc.contextWithUserLang(ctx, appMention.User)
 		if err := uc.mentionDraft.HandleAppMention(ctx, appMention); err != nil {
 			logger.Error("failed to handle mention draft", "error", err.Error())
+		}
+		return nil
+	}
+
+	// Thread-reply route: F1-F8 filters (see docs/slack-mention-case-draft.md
+	// §dispatcher) decide whether a `message` event should resume an open-mode
+	// draft turn. App-mention duplicates land here too — F5 drops them so
+	// only the app_mention path runs.
+	if msgEv, ok := event.InnerEvent.Data.(*slackevents.MessageEvent); ok {
+		if uc.mentionDraft == nil {
+			return nil
+		}
+		if !uc.shouldResumeOnReply(ctx, msgEv) {
+			return nil
+		}
+		ctx = uc.contextWithUserLang(ctx, msgEv.User)
+		if err := uc.mentionDraft.HandleThreadReply(ctx, msgEv); err != nil {
+			logger.Error("failed to handle thread reply resume", "error", err.Error())
 		}
 	}
 
 	return nil
+}
+
+// shouldResumeOnReply applies the F1-F8 filter chain. Returns true when the
+// caller must invoke HandleThreadReply.
+func (uc *SlackUseCases) shouldResumeOnReply(ctx context.Context, ev *slackevents.MessageEvent) bool {
+	logger := logging.From(ctx)
+
+	// F1: SubType set — bot_message / message_changed / channel_join / etc.
+	if ev.SubType != "" {
+		return false
+	}
+	// F3: BotID set — defensive against bot posts that don't set SubType.
+	if ev.BotID != "" {
+		return false
+	}
+	// F4: top-level post or thread-parent post.
+	if ev.ThreadTimeStamp == "" || ev.ThreadTimeStamp == ev.TimeStamp {
+		return false
+	}
+	// F2 / F5: need bot user id.
+	botUserID, err := uc.slackService.GetBotUserID(ctx)
+	if err != nil {
+		errutil.Handle(ctx, err, "thread-reply filter: get bot user id failed")
+		return false
+	}
+	if ev.User == botUserID {
+		return false
+	}
+	if strings.Contains(ev.Text, "<@"+botUserID+">") {
+		return false
+	}
+	// F6: Session must exist for this thread.
+	session, err := uc.repo.Session().GetByThread(ctx, ev.Channel, ev.ThreadTimeStamp)
+	if err != nil {
+		errutil.Handle(ctx, err, "thread-reply filter: session lookup failed")
+		return false
+	}
+	if session == nil {
+		return false
+	}
+	// F7: case-bound sessions only resume on @mention.
+	if session.IsCaseBound() {
+		return false
+	}
+	// F8: open-mode session must have ended on post_question.
+	if !session.ResumeOnReply() {
+		return false
+	}
+	logger.Debug("thread reply will resume open-mode draft turn",
+		"channel_id", ev.Channel,
+		"thread_ts", ev.ThreadTimeStamp,
+		"session_id", session.ID,
+	)
+	return true
 }
 
 // isCaseBoundChannel reports whether the given channel ID is associated with

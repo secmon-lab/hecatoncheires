@@ -29,14 +29,20 @@ with workspace selector + Submit / Edit / Cancel buttons.
 2. **Message collection** —
    - In a thread: latest 64 thread messages.
    - Outside a thread: messages within the last 3 hours, capped at 64.
-3. **AI materialization** — `DraftMaterializer` is given the raw messages,
-   the user's mention text, and the selected workspace's `FieldSchema`. It
-   produces `Title`, `Description`, and a `custom_field_values` map covering
-   the schema. Fields the LLM cannot confidently fill are omitted; required
-   fields left empty surface during Submit (the user is routed to the Edit
-   modal to complete them).
-4. **Preview ephemeral** — posted via `chat.postEphemeral` with full
-   per-field display.
+3. **Planner-driven turn** — the open-mode `draft.UseCase` (in
+   `pkg/usecase/agent/draft`) acquires a per-thread turn lock on the
+   Session, then runs a planner LLM round-trip against the conversation
+   history. Each round, the planner picks one of four actions:
+   `investigate` (parallel sub-agent fan-out under read-only tool sets),
+   `post_message`, `post_question`, or `materialize`. The terminal action
+   for a normal mention is `materialize`, which produces `Title`,
+   `Description`, and a `custom_field_values` map for the selected
+   workspace's `FieldSchema`. Loop budgets (planner / sub-agent /
+   sub-agent inner) bound runaway turns; when exhausted, the planner
+   falls back to a `post_message` apology.
+4. **Preview thread reply** — once the planner emits `materialize`, the
+   `slackDraftHandler` (host adapter) updates the in-place "processing…"
+   message with the rendered preview blocks.
 5. **User actions** —
    - `Submit` → Case is created with the materialization and a thread reply
      with the new Case link is posted in the originating thread (or as a new
@@ -44,11 +50,11 @@ with workspace selector + Submit / Edit / Cancel buttons.
    - `Edit` → opens a dynamic modal whose blocks come from the workspace's
      `FieldSchema`; on submission, the Case is created from the modal values.
    - `Cancel` → ephemeral is deleted and the draft is removed.
-   - `Workspace selector` → the ephemeral is locked (context block "推論中…",
-     selector disabled, action buttons removed) **before** any AI call,
-     `InferenceInProgress` is set on the persisted draft as a server-side
-     guard, the LLM is re-run for the new workspace's schema, the draft's
-     materialization is overwritten, and the preview is re-rendered.
+   - `Workspace selector` → the preview is locked (`InferenceInProgress`
+     set on the persisted draft as a server-side guard) and the same
+     `draft.UseCase` is re-invoked with `TriggerWSSwitch`. The planner
+     re-materialises against the new workspace's schema using the
+     existing conversation history, and the preview is re-rendered.
 
 ## Storage
 
@@ -76,6 +82,24 @@ The flow uses these scopes in addition to existing ones:
 The bot must be a member of the channel where the mention happens, otherwise
 no `app_mention` event is delivered and message collection has no source.
 
+### Thread-reply resume (post_question)
+
+When the planner ends a turn on `post_question`, the user can answer either
+by `@mention`-ing the bot again or by replying in the same thread without
+a mention. The dispatcher subscribes to:
+
+- `app_mention` event (existing) — covers re-mention.
+- `message.channels` event (existing in public channels) — covers
+  no-mention reply in public channels.
+- `message.groups` event — required only if you want no-mention reply
+  resume to work in **private** channels. Adding this scope/subscription
+  triggers a Slack app re-install.
+
+The dispatcher then runs the F1-F8 filter chain (see `pkg/usecase/slack.go`
+`shouldResumeOnReply`) to drop bot/duplicate/un-tracked messages. F5
+(`<@botUserID>` substring check) ensures `app_mention` and
+`message.channels` duplicates do not trigger the planner twice.
+
 ## Recovery from a wrong workspace pick
 
 The estimation is intentionally cheap and may pick the wrong workspace. The
@@ -98,10 +122,14 @@ service are configured. No extra environment variables are required.
 
 ## Failure modes
 
-- **LLM unavailable** — the Materializer falls back to a deterministic payload
-  (`Title` = mention text excerpt, `Description` = transcript, no custom
-  fields). The user can still Edit the modal to fill in fields manually.
+- **LLM unavailable / planner budget exhausted** — the planner falls back
+  to a `post_message` apology asking the user to re-mention with more
+  context. The draft row is still persisted (without a materialisation)
+  so a subsequent ws-switch or thread reply can resume.
 - **Permalink fetch fails** — the affected message is included with an empty
   `Permalink`; the failure is logged via `errutil.Handle`.
 - **No accessible workspace** — an ephemeral error message is shown to the
   user and no draft is created.
+- **Concurrent turn on the same thread** — the per-thread turn lock
+  rejects the new trigger; the host posts the i18n busy notice and the
+  duplicate trigger is dropped (`StatusBusy` / `StatusIdempotent`).

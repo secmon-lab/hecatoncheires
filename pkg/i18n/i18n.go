@@ -89,6 +89,24 @@ const (
 	MsgAgentOnIt
 	MsgAgentError
 	MsgAgentSessionInfo
+	// MsgKeyAgentBusy is used when a new mention arrives while a previous
+	// turn on the same Slack thread is still running. The host posts this
+	// reply so the user knows the agent is occupied and will respond once
+	// the prior turn finishes.
+	MsgKeyAgentBusy
+
+	// Draft (open-mode) planner / sub-agent trace lines. These are rendered
+	// into the per-turn Slack progress message so the user can follow what
+	// the agent is doing.
+	MsgDraftTracePlanning                 // "🤔 Planning…"
+	MsgDraftTracePlannerRetry             // "⚠️ planner output rejected; retrying"
+	MsgDraftTracePlannerAction            // "→ %s — %s" (action, reasoning)
+	MsgDraftTracePhase                    // "🧭 %s" (planner.investigate.message)
+	MsgDraftTraceSubAgentStarting         // "🔍 [%s] %s — starting"
+	MsgDraftTraceSubAgentFailedPrompt     // "❌ [%s] %s — failed (%s, build prompt): %v"
+	MsgDraftTraceSubAgentFailed           // "❌ [%s] %s — failed (%s, %d/%d inner loops): %v"
+	MsgDraftTraceSubAgentSummaryTruncated // "⚠️ [%s] summary truncated to %d bytes"
+	MsgDraftTraceSubAgentDone             // "✅ [%s] %s — done (%s, %d/%d inner loops)"
 
 	// Bookmark
 	MsgBookmarkOpenCase
@@ -147,12 +165,12 @@ var (
 
 // Init initializes the global translator with the given default language.
 // Must be called once at startup before any T() calls.
+//
+// The translation tables themselves are populated by package init() in
+// messages.go — calling Init() only updates the default language fallback,
+// so T() is safe to call from tests without an explicit Init().
 func Init(lang Lang) {
 	defaultLang = lang
-	messages = map[Lang][msgKeyCount]string{
-		LangEN: messagesEN,
-		LangJA: messagesJA,
-	}
 }
 
 // T returns the translated string for the language in context.

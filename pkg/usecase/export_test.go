@@ -7,9 +7,6 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 )
 
-// BuildAgentSystemPrompt is exported for testing
-var BuildAgentSystemPrompt = (*AgentUseCase).buildSystemPrompt
-
 // BuildTraceContextBlocksForTest is exported for testing
 var BuildTraceContextBlocksForTest = buildTraceContextBlocks
 

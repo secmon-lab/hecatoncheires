@@ -356,205 +356,10 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 		gt.Array(t, slackMock.postedMessages).Length(0)
 	})
 
-	t.Run("system prompt includes case info and field values", func(t *testing.T) {
-		repo := memory.New()
-		slackMock := &agentTestSlackService{}
-		llmClient := &mockLLMClient{}
-
-		entry := &model.WorkspaceEntry{
-			Workspace: model.Workspace{ID: "ws-test", Name: "Test"},
-			FieldSchema: &config.FieldSchema{
-				Fields: []config.FieldDefinition{
-					{ID: "severity", Name: "Severity Level", Type: types.FieldTypeSelect},
-				},
-			},
-		}
-
-		c := &model.Case{
-			Title:       "Important Case",
-			Description: "This is very important",
-			Status:      types.CaseStatusOpen,
-			FieldValues: map[string]model.FieldValue{
-				"severity": {
-					FieldID: "severity",
-					Type:    types.FieldTypeSelect,
-					Value:   "high",
-				},
-			},
-		}
-
-		messages := []usecase.ConversationMessage{
-			{UserID: "U001", UserName: "alice", Text: "Hello", Timestamp: "1234567890.000001"},
-		}
-
-		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil, nil)
-		now := time.Date(2026, 5, 4, 12, 30, 0, 0, time.UTC)
-		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, "C0TEST", now, nil, nil, messages)
-
-		gt.Value(t, strings.Contains(prompt, "Important Case")).Equal(true)
-		gt.Value(t, strings.Contains(prompt, "This is very important")).Equal(true)
-		gt.Value(t, strings.Contains(prompt, "Severity Level")).Equal(true)
-		gt.Value(t, strings.Contains(prompt, "high")).Equal(true)
-		gt.Value(t, strings.Contains(prompt, "alice: Hello")).Equal(true)
-		gt.Value(t, strings.Contains(prompt, "Slack's mrkdwn format")).Equal(true)
-		gt.Value(t, strings.Contains(prompt, "Do NOT use Markdown headers")).Equal(true)
-	})
-
-	t.Run("system prompt includes channel ID and current time", func(t *testing.T) {
-		repo := memory.New()
-		slackMock := &agentTestSlackService{}
-		llmClient := &mockLLMClient{}
-
-		entry := &model.WorkspaceEntry{
-			Workspace: model.Workspace{ID: "ws-test", Name: "Test"},
-		}
-		c := &model.Case{
-			Title:  "Test Case",
-			Status: types.CaseStatusOpen,
-		}
-
-		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil, nil)
-		now := time.Date(2026, 5, 4, 12, 30, 45, 0, time.UTC)
-		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, "C0123ABC", now, nil, nil, nil)
-
-		gt.Value(t, strings.Contains(prompt, "## Slack Context")).Equal(true)
-		gt.Value(t, strings.Contains(prompt, "Channel ID: C0123ABC")).Equal(true)
-		gt.Value(t, strings.Contains(prompt, "## Current Time")).Equal(true)
-		gt.Value(t, strings.Contains(prompt, "2026-05-04T12:30:45Z")).Equal(true)
-	})
-}
-
-func TestAgentSystemPrompt_Actions(t *testing.T) {
-	fixedNow := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
-
-	t.Run("Actions list outside action thread is title-only", func(t *testing.T) {
-		repo := memory.New()
-		slackMock := &agentTestSlackService{}
-		llmClient := &mockLLMClient{}
-
-		entry := &model.WorkspaceEntry{
-			Workspace: model.Workspace{ID: "ws-test", Name: "Test"},
-		}
-		c := &model.Case{
-			Title:  "Test Case",
-			Status: types.CaseStatusOpen,
-		}
-		actions := []*model.Action{
-			{
-				ID:         1,
-				Title:      "Investigate the issue",
-				Status:     types.ActionStatusInProgress,
-				AssigneeID: "U001",
-			},
-			{
-				ID:     2,
-				Title:  "Write report",
-				Status: types.ActionStatusTodo,
-			},
-		}
-
-		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil, nil)
-		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, "C0TEST", fixedNow, nil, actions, nil)
-
-		gt.Value(t, strings.Contains(prompt, "## Actions")).Equal(true)
-		gt.Value(t, strings.Contains(prompt, "Investigate the issue")).Equal(true)
-		gt.Value(t, strings.Contains(prompt, "Write report")).Equal(true)
-		// Status / Assignee detail must NOT leak into the case-wide list.
-		gt.Value(t, strings.Contains(prompt, "U001")).Equal(false)
-		gt.Value(t, strings.Contains(prompt, "IN_PROGRESS")).Equal(false)
-		gt.Value(t, strings.Contains(prompt, "TODO")).Equal(false)
-		// And the Current Action section must be absent.
-		gt.Value(t, strings.Contains(prompt, "## Current Action")).Equal(false)
-	})
-
-	t.Run("prompt shows Current Action when in action thread", func(t *testing.T) {
-		repo := memory.New()
-		slackMock := &agentTestSlackService{}
-		llmClient := &mockLLMClient{}
-
-		entry := &model.WorkspaceEntry{
-			Workspace: model.Workspace{ID: "ws-test", Name: "Test"},
-		}
-		c := &model.Case{
-			Title:  "Test Case",
-			Status: types.CaseStatusOpen,
-		}
-		due := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
-		currentAction := &model.Action{
-			ID:          7,
-			Title:       "Patch the vulnerable library",
-			Description: "Bump dep to 1.2.3 and rerun integration tests.",
-			Status:      types.ActionStatusInProgress,
-			AssigneeID:  "U777",
-			DueDate:     &due,
-		}
-		// Sibling actions on the same case must NOT appear when the thread
-		// is bound to currentAction.
-		others := []*model.Action{
-			{ID: 8, Title: "Sibling action"},
-		}
-
-		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil, nil)
-		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, "C0TEST", fixedNow, currentAction, others, nil)
-
-		gt.Value(t, strings.Contains(prompt, "## Current Action")).Equal(true)
-		gt.Value(t, strings.Contains(prompt, "Patch the vulnerable library")).Equal(true)
-		gt.Value(t, strings.Contains(prompt, "IN_PROGRESS")).Equal(true)
-		gt.Value(t, strings.Contains(prompt, "Assignee: U777")).Equal(true)
-		gt.Value(t, strings.Contains(prompt, "Bump dep to 1.2.3")).Equal(true)
-		gt.Value(t, strings.Contains(prompt, "2026-06-01T09:00:00Z")).Equal(true)
-		// Case-wide actions must be suppressed in this mode.
-		gt.Value(t, strings.Contains(prompt, "## Actions")).Equal(false)
-		gt.Value(t, strings.Contains(prompt, "Sibling action")).Equal(false)
-	})
-
-	t.Run("Current Action without assignee renders unassigned", func(t *testing.T) {
-		repo := memory.New()
-		slackMock := &agentTestSlackService{}
-		llmClient := &mockLLMClient{}
-
-		entry := &model.WorkspaceEntry{
-			Workspace: model.Workspace{ID: "ws-test", Name: "Test"},
-		}
-		c := &model.Case{
-			Title:  "Test Case",
-			Status: types.CaseStatusOpen,
-		}
-		currentAction := &model.Action{
-			ID:     9,
-			Title:  "Triage",
-			Status: types.ActionStatusTodo,
-		}
-
-		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil, nil)
-		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, "C0TEST", fixedNow, currentAction, nil, nil)
-
-		gt.Value(t, strings.Contains(prompt, "Assignee: unassigned")).Equal(true)
-		// No Due line when DueDate is nil.
-		gt.Value(t, strings.Contains(prompt, "- Due:")).Equal(false)
-		// No Description section when Description is empty.
-		gt.Value(t, strings.Contains(prompt, "### Description")).Equal(false)
-	})
-
-	t.Run("actions section absent when empty", func(t *testing.T) {
-		repo := memory.New()
-		slackMock := &agentTestSlackService{}
-		llmClient := &mockLLMClient{}
-
-		entry := &model.WorkspaceEntry{
-			Workspace: model.Workspace{ID: "ws-test", Name: "Test"},
-		}
-		c := &model.Case{
-			Title:  "Test Case",
-			Status: types.CaseStatusOpen,
-		}
-
-		agentUC := usecase.NewAgentUseCase(repo, nil, slackMock, nil, nil, nil, llmClient, llmClient, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil, nil)
-		prompt := usecase.BuildAgentSystemPrompt(agentUC, c, entry, "C0TEST", fixedNow, nil, nil, nil)
-
-		gt.Value(t, strings.Contains(prompt, "## Actions")).Equal(false)
-		gt.Value(t, strings.Contains(prompt, "## Current Action")).Equal(false)
-	})
+	// Note: system prompt assembly tests (case info / field values / channel
+	// ID / actions / current action / due date / unassigned) live in
+	// pkg/usecase/agent/casebound/casebound_test.go now that buildSystemPrompt
+	// has moved into the casebound subpackage.
 }
 
 func TestParseAgentActionValue(t *testing.T) {
@@ -685,7 +490,7 @@ func TestLifecycle_AgentSession(t *testing.T) {
 	historyRepo := agentarchive.NewMemoryHistoryRepository()
 	traceRepo := agentarchive.NewMemoryTraceRepository()
 
-	created, err := repo.Case().Create(ctx, "ws-lifecycle", &model.Case{
+	_, err := repo.Case().Create(ctx, "ws-lifecycle", &model.Case{
 		Title:          "Thread session test",
 		Description:    "lifecycle",
 		Status:         types.CaseStatusOpen,
@@ -763,7 +568,7 @@ func TestLifecycle_AgentSession(t *testing.T) {
 	)
 	gt.NoError(t, uc.HandleAgentMention(ctx, first)).Required()
 
-	session1, err := repo.AgentSession().Get(ctx, "ws-lifecycle", created.ID, threadParent)
+	session1, err := repo.Session().GetByThread(ctx, "C-LIFE", threadParent)
 	gt.NoError(t, err).Required()
 	gt.Value(t, session1).NotNil().Required()
 	gt.Value(t, session1.LastMentionTS).Equal(firstMentionTS)
@@ -778,10 +583,11 @@ func TestLifecycle_AgentSession(t *testing.T) {
 	gt.Array(t, slackMock.postedMessages).Length(2)
 	gt.Value(t, slackMock.postedMessages[1].Text).Equal("ack")
 
-	// One trace persisted under the new session, keyed by mention TS.
+	// One trace persisted under the new session. TraceID is now the per-turn
+	// UUID v7 (TurnID), so we just assert there is a non-empty entry.
 	traces1 := traceRepo.TraceIDs(session1.ID)
 	gt.Array(t, traces1).Length(1)
-	gt.Value(t, traces1[0]).Equal(firstMentionTS)
+	gt.String(t, traces1[0]).NotEqual("")
 
 	// --- Second mention ----------------------------------------------------
 	stage = 1
@@ -799,7 +605,7 @@ func TestLifecycle_AgentSession(t *testing.T) {
 	)
 	gt.NoError(t, uc.HandleAgentMention(ctx, second)).Required()
 
-	session2, err := repo.AgentSession().Get(ctx, "ws-lifecycle", created.ID, threadParent)
+	session2, err := repo.Session().GetByThread(ctx, "C-LIFE", threadParent)
 	gt.NoError(t, err).Required()
 	gt.Value(t, session2).NotNil().Required()
 	gt.Value(t, session2.ID).Equal(session1.ID) // same session reused
@@ -808,15 +614,12 @@ func TestLifecycle_AgentSession(t *testing.T) {
 	// Two turns total in captured.
 	gt.Array(t, captured).Length(2)
 
-	// Two distinct traces persisted under the same session.
+	// Two distinct traces persisted under the same session — TurnID UUIDs.
 	traces2 := traceRepo.TraceIDs(session1.ID)
 	gt.Array(t, traces2).Length(2)
-	seen := map[string]bool{}
-	for _, id := range traces2 {
-		seen[id] = true
-	}
-	gt.Bool(t, seen[firstMentionTS]).True()
-	gt.Bool(t, seen[secondMentionTS]).True()
+	gt.String(t, traces2[0]).NotEqual("")
+	gt.String(t, traces2[1]).NotEqual("")
+	gt.String(t, traces2[0]).NotEqual(traces2[1])
 }
 
 // TestAgentUseCase_DeltaMessageInjection asserts the delta path explicitly:
@@ -843,7 +646,7 @@ func TestAgentUseCase_DeltaMessageInjection(t *testing.T) {
 		previousMention = "1700100005.000001"
 		newMention      = "1700100020.000001"
 	)
-	gt.NoError(t, repo.AgentSession().Put(ctx, &model.AgentSession{
+	gt.NoError(t, repo.Session().Put(ctx, &model.Session{
 		ID:            "session-delta",
 		WorkspaceID:   "ws-delta",
 		CaseID:        c.ID,
@@ -924,7 +727,7 @@ func TestAgentUseCase_DeltaMessageInjection(t *testing.T) {
 	}
 
 	// Session updated with the new mention TS.
-	updated, err := repo.AgentSession().Get(ctx, "ws-delta", c.ID, threadTS)
+	updated, err := repo.Session().GetByThread(ctx, "C-DELTA", threadTS)
 	gt.NoError(t, err).Required()
 	gt.Value(t, updated.LastMentionTS).Equal(newMention)
 }
@@ -978,7 +781,7 @@ func TestAgentUseCase_ActionLinkage(t *testing.T) {
 	)
 	gt.NoError(t, uc.HandleAgentMention(ctx, msg)).Required()
 
-	session, err := repo.AgentSession().Get(ctx, "ws-action", c.ID, actionThreadTS)
+	session, err := repo.Session().GetByThread(ctx, "C-ACT", actionThreadTS)
 	gt.NoError(t, err).Required()
 	gt.Value(t, session).NotNil().Required()
 	gt.Value(t, session.ActionID).Equal(createdAction.ID)

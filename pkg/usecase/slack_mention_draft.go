@@ -8,12 +8,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/draft"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	goslack "github.com/slack-go/slack"
@@ -29,15 +31,16 @@ var ErrNoAccessibleWorkspace = errors.New("no accessible workspace for user")
 var ErrInferenceInProgress = errors.New("draft inference in progress")
 
 // MentionDraftUseCase handles app_mention events that occur in channels NOT
-// bound to an existing Case. It collects surrounding context, asks the
-// Materializer to produce a workspace-specific Case payload, and presents an
-// ephemeral preview with workspace selector + Submit/Edit/Cancel buttons.
+// bound to an existing Case. It funnels each mention into draft.UseCase
+// (the open-mode planner / sub-agent runtime), passing a per-mention
+// slackDraftHandler that translates terminal actions and trace updates
+// into Slack messages.
 type MentionDraftUseCase struct {
 	repo         interfaces.Repository
 	registry     *model.WorkspaceRegistry
 	slackService slacksvc.Service
 	collector    *slacksvc.MessageCollector
-	materializer *DraftMaterializer
+	draftUC      *draft.UseCase
 }
 
 // NewMentionDraftUseCase constructs a MentionDraftUseCase.
@@ -45,7 +48,7 @@ func NewMentionDraftUseCase(
 	repo interfaces.Repository,
 	registry *model.WorkspaceRegistry,
 	slackService slacksvc.Service,
-	materializer *DraftMaterializer,
+	draftUC *draft.UseCase,
 ) *MentionDraftUseCase {
 	if slackService == nil {
 		return nil
@@ -55,19 +58,23 @@ func NewMentionDraftUseCase(
 		registry:     registry,
 		slackService: slackService,
 		collector:    slacksvc.NewMessageCollector(slackService),
-		materializer: materializer,
+		draftUC:      draftUC,
 	}
 }
 
-// HandleAppMention runs the full initial-mention flow: candidate workspace
-// resolution → message collection → draft persistence → AI materialization →
-// ephemeral preview post.
+// HandleAppMention runs the initial-mention flow: candidate workspace
+// resolution → message collection → draft persistence → planner-driven
+// turn (draft.UseCase.RunTurn). The slackDraftHandler renders the planner's
+// terminal action (post_message / post_question / materialize) into Slack.
 //
-// It is the caller's responsibility to ensure the channel is NOT bound to an
-// existing Case (the dispatch in SlackUseCases handles that branch).
+// It is the caller's responsibility to ensure the channel is NOT bound to
+// an existing Case (the dispatch in SlackUseCases handles that branch).
 func (uc *MentionDraftUseCase) HandleAppMention(ctx context.Context, ev *slackevents.AppMentionEvent) error {
 	if ev == nil {
 		return goerr.New("AppMentionEvent is nil")
+	}
+	if uc.draftUC == nil {
+		return goerr.New("draft usecase is not configured")
 	}
 	logger := logging.From(ctx)
 
@@ -116,81 +123,243 @@ func (uc *MentionDraftUseCase) HandleAppMention(ctx context.Context, ev *slackev
 		)
 	}
 
-	draft := model.NewCaseDraft(time.Now().UTC(), ev.User)
-	draft.MentionText = ev.Text
-	draft.RawMessages = msgs
-	draft.Source = model.DraftSource{
+	d := model.NewCaseDraft(time.Now().UTC(), ev.User)
+	d.MentionText = ev.Text
+	d.RawMessages = msgs
+	d.Source = model.DraftSource{
 		ChannelID: ev.Channel,
 		ThreadTS:  ev.ThreadTimeStamp,
 		MentionTS: ev.TimeStamp,
 	}
-	draft.SelectedWorkspaceID = estimated.Workspace.ID
-	draft.InferenceInProgress = true
+	d.SelectedWorkspaceID = estimated.Workspace.ID
+	d.InferenceInProgress = true
 
-	if err := uc.repo.CaseDraft().Save(ctx, draft); err != nil {
+	if err := uc.repo.CaseDraft().Save(ctx, d); err != nil {
 		uc.removeProcessingMessage(ctx, ev.Channel, processingTS)
 		return goerr.Wrap(err, "failed to save initial draft")
 	}
 
-	// Run AI inference (this is the longest leg of the flow). Materialize
-	// retries internally; if it still fails, surface the error to the user
-	// via a thread message so they aren't left silently waiting.
-	mat, err := uc.materializer.Materialize(ctx, draft, MaterializeContext{
-		Workspace:        estimated,
-		EstimationReason: estimationReason,
-		OtherCandidates:  candidates,
-	})
+	session, err := uc.loadOrCreateDraftSession(ctx, ev.Channel, threadTS, ev.User, d.ID)
 	if err != nil {
 		uc.removeProcessingMessage(ctx, ev.Channel, processingTS)
-		uc.notifyMaterializationFailed(ctx, ev, err)
-		return goerr.Wrap(err, "failed to materialize draft")
+		return goerr.Wrap(err, "load or create draft session")
 	}
 
-	if err := uc.repo.CaseDraft().SetMaterialization(ctx, draft.ID, estimated.Workspace.ID, mat, false); err != nil {
-		return goerr.Wrap(err, "failed to persist materialization")
+	handler := newSlackDraftHandler(
+		uc.repo, uc.registry, uc.slackService,
+		ev.Channel, threadTS, ev.TimeStamp, ev.User,
+		candidates, d.ID, processingTS,
+	)
+
+	userInput := buildDraftUserInput(d, ev.Text, estimated, candidates, estimationReason)
+
+	result, runErr := uc.draftUC.RunTurn(ctx, draft.TurnRequest{
+		Session:          session,
+		UserInput:        userInput,
+		Trigger:          draft.TriggerAppMention,
+		TriggerTS:        ev.TimeStamp,
+		ActorUserID:      ev.User,
+		EstimatedWS:      estimated,
+		Candidates:       candidates,
+		EstimationReason: estimationReason,
+		ExistingDraft:    d,
+		Handler:          handler,
+	})
+	if runErr != nil {
+		uc.removeProcessingMessage(ctx, ev.Channel, processingTS)
+		uc.notifyMaterializationFailed(ctx, ev, runErr)
+		return goerr.Wrap(runErr, "draft turn failed")
+	}
+	switch result.Status {
+	case draft.StatusBusy, draft.StatusIdempotent:
+		// Handler.PostBusy already posted the busy notice (StatusBusy);
+		// StatusIdempotent is silent. The processing placeholder may
+		// still be showing — replace it with the "ended" footer.
+		uc.removeProcessingMessage(ctx, ev.Channel, processingTS)
+	case draft.StatusFallback:
+		// Planner exhausted budget / hit an internal error before reaching
+		// a terminal action. Surface a system fallback message so the user
+		// is not left waiting on the processing placeholder.
+		uc.removeProcessingMessage(ctx, ev.Channel, processingTS)
+		uc.notifyDraftFallback(ctx, ev.Channel, threadTS, result.FallbackReason)
 	}
 
-	// Reload draft so that EphemeralChannelID/MessageTS gets persisted in one place
-	// after we know the ephemeral TS.
-	draft.Materialization = mat
-	draft.InferenceInProgress = false
-
-	blocks, fallback := buildPreviewBlocks(draft, estimated, candidates)
-
-	// If we successfully posted the processing placeholder, update it in
-	// place so the preview replaces "processing…" cleanly. Otherwise post a
-	// fresh thread message.
-	var ts string
-	if processingTS != "" {
-		if updErr := uc.slackService.UpdateMessage(ctx, ev.Channel, processingTS, blocks, fallback); updErr != nil {
-			errutil.Handle(ctx, goerr.Wrap(updErr, "failed to update processing message into preview"),
-				"falling back to fresh thread post")
-		} else {
-			ts = processingTS
-		}
-	}
-	if ts == "" {
-		newTS, err := uc.slackService.PostThreadMessage(ctx, ev.Channel, threadTS, blocks, fallback)
-		if err != nil {
-			return goerr.Wrap(err, "failed to post preview message",
-				goerr.V("channel_id", ev.Channel),
-				goerr.V("thread_ts", threadTS),
-			)
-		}
-		ts = newTS
-	}
-
-	draft.EphemeralChannelID = ev.Channel
-	draft.EphemeralMessageTS = ts
-	if err := uc.repo.CaseDraft().Save(ctx, draft); err != nil {
-		return goerr.Wrap(err, "failed to save draft with ephemeral ref")
-	}
-
-	logger.Info("case draft created from slack mention",
-		"draft_id", draft.ID,
+	logger.Info("case draft turn finished",
+		"draft_id", d.ID,
 		"workspace_id", estimated.Workspace.ID,
 		"channel_id", ev.Channel,
 		"user_id", ev.User,
+		"status", int(result.Status),
+		"ended_with", string(result.EndedWith),
+	)
+	return nil
+}
+
+// notifyDraftFallback posts a thread reply telling the user the planner
+// ran out of budget or hit an internal error. Best-effort; secondary
+// failures are funneled through errutil.Handle.
+func (uc *MentionDraftUseCase) notifyDraftFallback(ctx context.Context, channelID, threadTS, reason string) {
+	const text = ":warning: I couldn't reach a conclusion within the budget for this turn. Please mention me again with more context."
+	if _, err := uc.slackService.PostThreadReply(ctx, channelID, threadTS, text); err != nil {
+		errutil.Handle(ctx, goerr.Wrap(err, "post draft fallback reply",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+			goerr.V("fallback_reason", reason),
+		), "could not surface draft fallback to user")
+	}
+}
+
+// loadOrCreateDraftSession returns the Session for the given thread,
+// stamping the draft-specific fields (CreatorUserID, DraftID) when a fresh
+// session is created. An existing session simply has its DraftID updated
+// when the caller has just freshly created a draft.
+func (uc *MentionDraftUseCase) loadOrCreateDraftSession(ctx context.Context, channelID, threadTS, creatorUserID string, draftID model.CaseDraftID) (*model.Session, error) {
+	existing, err := uc.repo.Session().GetByThread(ctx, channelID, threadTS)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to get session")
+	}
+	if existing != nil {
+		existing.DraftID = draftID
+		if creatorUserID != "" && existing.CreatorUserID == "" {
+			existing.CreatorUserID = creatorUserID
+		}
+		return existing, nil
+	}
+
+	now := time.Now().UTC()
+	return &model.Session{
+		ID:            uuid.Must(uuid.NewV7()).String(),
+		ChannelID:     channelID,
+		ThreadTS:      threadTS,
+		CreatorUserID: creatorUserID,
+		DraftID:       draftID,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}, nil
+}
+
+// buildDraftUserInput assembles the planner's first user message. The
+// surrounding messages and workspace candidates are surfaced so the
+// planner can pick a sensible workspace and decide whether more
+// investigation is needed before materialising.
+func buildDraftUserInput(d *model.CaseDraft, mentionText string, estimated *model.WorkspaceEntry, candidates []*model.WorkspaceEntry, estimationReason string) string {
+	var b strings.Builder
+	b.WriteString("# User mention\n")
+	b.WriteString(mentionText)
+	b.WriteString("\n\n")
+
+	b.WriteString("# Estimated workspace\n")
+	if estimated != nil {
+		fmt.Fprintf(&b, "- id: %s\n- name: %s\n- reason: %s\n", estimated.Workspace.ID, fallbackText(estimated.Workspace.Name, estimated.Workspace.ID), estimationReason)
+	}
+	b.WriteString("\n")
+
+	if len(candidates) > 1 {
+		b.WriteString("# Other accessible workspaces\n")
+		for _, c := range candidates {
+			if estimated != nil && c.Workspace.ID == estimated.Workspace.ID {
+				continue
+			}
+			fmt.Fprintf(&b, "- id: %s — name: %s\n", c.Workspace.ID, fallbackText(c.Workspace.Name, c.Workspace.ID))
+		}
+		b.WriteString("\n")
+	}
+
+	if d != nil && len(d.RawMessages) > 0 {
+		b.WriteString("# Surrounding conversation (most recent first)\n")
+		for _, m := range d.RawMessages {
+			fmt.Fprintf(&b, "- [%s] %s: %s\n", m.TS, m.UserID, strings.ReplaceAll(m.Text, "\n", " "))
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// HandleThreadReply runs when the dispatcher's F1-F8 filter chain has
+// decided that a non-mention thread reply should resume the open-mode
+// draft turn. The Session's LastAction is post_question — the planner
+// will read the new user input from history and produce the next action.
+func (uc *MentionDraftUseCase) HandleThreadReply(ctx context.Context, ev *slackevents.MessageEvent) error {
+	if ev == nil {
+		return goerr.New("MessageEvent is nil")
+	}
+	if uc.draftUC == nil {
+		return goerr.New("draft usecase is not configured")
+	}
+	logger := logging.From(ctx)
+
+	threadTS := ev.ThreadTimeStamp
+	if threadTS == "" {
+		return goerr.New("thread reply has no thread_ts; dispatcher should have filtered")
+	}
+
+	session, err := uc.repo.Session().GetByThread(ctx, ev.Channel, threadTS)
+	if err != nil {
+		return goerr.Wrap(err, "load session for thread reply")
+	}
+	if session == nil {
+		// Defensive: dispatcher's F6 filter should have caught this.
+		return goerr.New("session vanished between dispatch and HandleThreadReply",
+			goerr.V("channel_id", ev.Channel),
+			goerr.V("thread_ts", threadTS),
+		)
+	}
+
+	// Locate draft for context. It may be missing if the user replied after
+	// the draft was canceled / submitted; in that case we still try the turn
+	// (planner can post a clarifying message) but with no draft state.
+	var d *model.CaseDraft
+	if session.DraftID != "" {
+		d, err = uc.repo.CaseDraft().Get(ctx, session.DraftID)
+		if err != nil {
+			errutil.Handle(ctx, err, "thread-reply: failed to load draft; continuing without it")
+		}
+	}
+
+	candidates := uc.accessibleWorkspaces(ev.User)
+	var estimated *model.WorkspaceEntry
+	if d != nil && d.SelectedWorkspaceID != "" {
+		if entry, getErr := uc.registry.Get(d.SelectedWorkspaceID); getErr == nil {
+			estimated = entry
+		}
+	}
+
+	// processingTS is empty — we don't post a placeholder for thread reply
+	// resume; the planner trace block will appear when needed.
+	var draftID model.CaseDraftID
+	if d != nil {
+		draftID = d.ID
+	}
+	handler := newSlackDraftHandler(
+		uc.repo, uc.registry, uc.slackService,
+		ev.Channel, threadTS, ev.TimeStamp, ev.User,
+		candidates, draftID, "",
+	)
+
+	result, runErr := uc.draftUC.RunTurn(ctx, draft.TurnRequest{
+		Session:       session,
+		UserInput:     ev.Text,
+		Trigger:       draft.TriggerThreadReply,
+		TriggerTS:     ev.TimeStamp,
+		ActorUserID:   ev.User,
+		EstimatedWS:   estimated,
+		Candidates:    candidates,
+		ExistingDraft: d,
+		Handler:       handler,
+	})
+	if runErr != nil {
+		return goerr.Wrap(runErr, "thread reply turn failed")
+	}
+	if result.Status == draft.StatusFallback {
+		uc.notifyDraftFallback(ctx, ev.Channel, threadTS, result.FallbackReason)
+	}
+
+	logger.Info("thread reply turn finished",
+		"channel_id", ev.Channel,
+		"thread_ts", threadTS,
+		"user_id", ev.User,
+		"status", int(result.Status),
+		"ended_with", string(result.EndedWith),
 	)
 	return nil
 }
