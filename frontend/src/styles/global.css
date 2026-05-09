@@ -58,7 +58,6 @@
 
   /* primary / accent */
   --color-primary:        var(--accent);
-  --color-primary-rgb:    var(--accent);
   --color-primary-shadow: var(--accent-soft);
 
   /* status */
@@ -73,13 +72,14 @@
   --touch-target-min: 40px;
   --transition-fast:  0.15s ease;
 
-  /* spacing aliases (theme-independent fixed scale) */
-  --spacing-xs:    4px;
-  --spacing-sm:    8px;
-  --spacing-md-sm: 12px;
+  /* spacing aliases — reference --sp-* scale for consistency.
+     14px is intentionally hardcoded as it has no equivalent in the scale. */
+  --spacing-xs:    var(--sp-1);
+  --spacing-sm:    var(--sp-2);
+  --spacing-md-sm: var(--sp-3);
   --spacing-md-lg: 14px;
-  --spacing-md:    16px;
-  --spacing-lg:    24px;
+  --spacing-md:    var(--sp-4);
+  --spacing-lg:    var(--sp-6);
 }
 
 /* density */
