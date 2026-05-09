@@ -7,7 +7,6 @@ type FieldOption struct {
 	ID          string
 	Name        string
 	Description string
-	Color       string         // Optional: hex color code
 	Metadata    map[string]any // Optional: arbitrary metadata (e.g., {"score": 4})
 }
 

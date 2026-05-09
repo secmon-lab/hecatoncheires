@@ -13,7 +13,7 @@ import {
 } from '../graphql/case'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
-import InlineCustomField from '../components/inline/InlineCustomField'
+import CustomFieldHelpRow from '../components/fields/CustomFieldHelpRow'
 import InlineText from '../components/inline/InlineText'
 import InlineLongText from '../components/inline/InlineLongText'
 import InlineUserSelect from '../components/inline/InlineUserSelect'
@@ -620,18 +620,15 @@ export default function CaseDetail() {
                 {fields.map((f: any) => {
                   const fv = c.fields?.find((x: any) => x.fieldId === f.id)
                   return (
-                    <div key={f.id} className="kv-row" data-testid={`case-field-${f.id}`}>
-                      <span className="kv-label">{f.name}</span>
-                      <span className="kv-value">
-                        <InlineCustomField
-                          field={f}
-                          value={fv?.value}
-                          users={slackUsers}
-                          disabled={updating}
-                          onSave={(v) => handleFieldChange(f.id, v)}
-                        />
-                      </span>
-                    </div>
+                    <CustomFieldHelpRow
+                      key={f.id}
+                      field={f}
+                      value={fv?.value}
+                      users={slackUsers}
+                      disabled={updating}
+                      onSave={(v) => handleFieldChange(f.id, v)}
+                      testId={`case-field-${f.id}`}
+                    />
                   )
                 })}
               </div>

@@ -147,13 +147,13 @@ options = [
 |---------------|----------------|----------|----------------------------------------------------------|
 | `id`          | string         | **Yes**  | Unique within the field. Same pattern as field ID        |
 | `name`        | string         | **Yes**  | Display name                                             |
-| `description` | string         | No       | Description text                                         |
-| `color`       | string         | No       | Color name or hex code (e.g., `"red"`, `"#E53E3E"`)     |
+| `description` | string         | No       | Human-readable description, surfaced in the UI's `(?)` help popover and option-hover tooltip |
 | `metadata`    | table          | No       | Arbitrary key-value pairs (string, number, or boolean)   |
 
-Metadata use cases:
+`description` is a first-class top-level property. Do **not** place description text under `metadata` — the UI reads it only from the top-level field.
+
+Metadata use cases (free-form):
 - Scoring: `metadata = { score = 5 }` for risk calculation
-- Categorization: `metadata = { description = "...", color = "red" }`
 - Workflow flags: `metadata = { escalation_required = true }`
 
 ### Validation rules
@@ -187,10 +187,11 @@ id = "category"
 name = "Category"
 type = "multi-select"
 required = true
+description = "Risk classification. Multiple values may apply."
 options = [
-  { id = "data-breach", name = "Data Breach", metadata = { description = "Risk of personal or confidential information leakage", color = "red" } },
-  { id = "system-failure", name = "System Failure", metadata = { description = "Risk of system or service downtime and failures", color = "orange" } },
-  { id = "compliance", name = "Compliance", metadata = { description = "Risk of regulatory or internal policy violations", color = "yellow" } },
+  { id = "data_breach", name = "Data Breach", description = "Risk of personal or confidential information leakage" },
+  { id = "system_failure", name = "System Failure", description = "Risk of system or service downtime and failures" },
+  { id = "compliance", name = "Compliance", description = "Risk of regulatory or internal policy violations" },
 ]
 
 [[fields]]
@@ -219,7 +220,7 @@ type = "date"
 required = false
 
 [[fields]]
-id = "reference-url"
+id = "reference_url"
 name = "Reference URL"
 type = "url"
 required = false

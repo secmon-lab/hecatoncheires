@@ -10,7 +10,7 @@ import InlineURL from './InlineURL'
 interface FieldOption {
   id: string
   name: string
-  color?: string
+  description?: string | null
 }
 
 interface FieldDefinition {
@@ -18,8 +18,8 @@ interface FieldDefinition {
   name: string
   type: string
   required?: boolean
-  description?: string
-  options?: FieldOption[]
+  description?: string | null
+  options?: FieldOption[] | null
 }
 
 interface Props {
@@ -81,7 +81,6 @@ export default function InlineCustomField({
       const opts = (field.options || []).map((o) => ({
         value: o.id,
         label: o.name,
-        color: o.color,
       }))
       return (
         <InlineSelect
@@ -101,7 +100,6 @@ export default function InlineCustomField({
       const opts = (field.options || []).map((o) => ({
         value: o.id,
         label: o.name,
-        color: o.color,
       }))
       return (
         <InlineMultiSelect

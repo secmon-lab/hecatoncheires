@@ -295,7 +295,7 @@ required = true
   [[fields.options]]
   id = "data_breach"
   name = "Data Breach"
-  color = "#E53E3E"
+  description = "Risk of personal or confidential information leakage"
   [fields.options.metadata]
   severity = "high"
   priority = 1
@@ -329,16 +329,16 @@ required = true
 	option := field.Options[0]
 	gt.Value(t, option.ID).Equal("data_breach")
 	gt.Value(t, option.Name).Equal("Data Breach")
-	gt.Value(t, option.Color).Equal("#E53E3E")
+	gt.Value(t, option.Description).Equal("Risk of personal or confidential information leakage")
 
-	// Check metadata
+	// Check metadata: severity / priority remain as free-form metadata.
 	gt.Value(t, option.Metadata).NotNil().Required()
-	if severity, ok := option.Metadata["severity"].(string); !ok || severity != "high" {
-		t.Errorf("Option.Metadata[severity] = %v, want high", option.Metadata["severity"])
-	}
-	if priority, ok := option.Metadata["priority"].(int64); !ok || priority != 1 {
-		t.Errorf("Option.Metadata[priority] = %v, want 1", option.Metadata["priority"])
-	}
+	severity, ok := option.Metadata["severity"].(string)
+	gt.Bool(t, ok).True()
+	gt.Value(t, severity).Equal("high")
+	priority, ok := option.Metadata["priority"].(int64)
+	gt.Bool(t, ok).True()
+	gt.Value(t, priority).Equal(int64(1))
 }
 
 func TestLoadWorkspaceConfigs_SingleFile(t *testing.T) {
@@ -1128,4 +1128,40 @@ name = "X again"
 
 	_, err := config.LoadWorkspaceConfigs([]string{configPath})
 	gt.Error(t, err)
+}
+
+// When the top-level description is omitted, the resulting field option has
+// an empty Description. Free-form metadata is preserved verbatim — it is the
+// caller's responsibility (TOML author) to put description at the top level.
+func TestToDomainFieldSchema_OptionWithoutDescription(t *testing.T) {
+	content := `
+[labels]
+case = "Risk"
+
+[[fields]]
+id = "category"
+name = "Category"
+type = "select"
+required = true
+
+  [[fields.options]]
+  id = "compliance"
+  name = "Compliance"
+  [fields.options.metadata]
+  score = 3
+`
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+	gt.NoError(t, os.WriteFile(configPath, []byte(content), 0644)).Required()
+
+	schema, err := config.LoadFieldSchema(configPath)
+	gt.NoError(t, err).Required()
+	gt.Array(t, schema.Fields).Length(1).Required()
+	gt.Array(t, schema.Fields[0].Options).Length(1).Required()
+	gt.Value(t, schema.Fields[0].Options[0].Description).Equal("")
+	// Metadata stays untouched.
+	score, ok := schema.Fields[0].Options[0].Metadata["score"].(int64)
+	gt.Bool(t, ok).True()
+	gt.Value(t, score).Equal(int64(3))
 }

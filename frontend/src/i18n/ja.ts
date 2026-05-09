@@ -372,4 +372,13 @@ export const ja: Messages = {
   langEnglish: 'English',
   langJapanese: '日本語',
   labelLanguage: '言語',
+
+  // Custom field help (description / option catalog)
+  fieldHelpAriaToggle: '{name} の説明を表示',
+  fieldHelpClose: '閉じる',
+  fieldHelpSelectedBadge: '選択中',
+  fieldHelpFooterHint: 'クリックで編集 · 説明はホバーで再表示',
+  fieldHelpOptionCount: '{count} options',
+  fieldHelpTypeSelect: 'Select',
+  fieldHelpTypeMultiSelect: 'Multi-select',
 }

@@ -604,18 +604,6 @@ func (r *mutationResolver) PostActionSlackMessage(ctx context.Context, workspace
 	return toGraphQLAction(updated, workspaceID), nil
 }
 
-// resolveStepActor extracts the Slack-user actor from the auth token in
-// context, falling back to ActorKindSystem when there is no token (which
-// matches the GraphQL-via-CLI / agent pathways). Mirrors how UpdateAction
-// derives its actor — kept inline here instead of in a shared helper to
-// avoid pulling Auth concerns into a non-Action codepath.
-func resolveStepActor(ctx context.Context) usecase.ActorRef {
-	if token, tokenErr := auth.TokenFromContext(ctx); tokenErr == nil {
-		return usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: token.Sub}
-	}
-	return usecase.ActorRef{Kind: usecase.ActorKindSystem}
-}
-
 // AddActionStep is the resolver for the addActionStep field.
 func (r *mutationResolver) AddActionStep(ctx context.Context, workspaceID string, input graphql1.AddActionStepInput) (*graphql1.ActionStep, error) {
 	step, err := r.UseCases.ActionStep.Add(ctx, usecase.AddActionStepInput{
@@ -917,10 +905,6 @@ func (r *queryResolver) FieldConfiguration(ctx context.Context, workspaceID stri
 	for i, field := range schema.Fields {
 		options := make([]*graphql1.FieldOption, len(field.Options))
 		for j, opt := range field.Options {
-			color := ""
-			if opt.Color != "" {
-				color = opt.Color
-			}
 			metadata := opt.Metadata
 			if metadata == nil {
 				metadata = make(map[string]any)
@@ -931,8 +915,7 @@ func (r *queryResolver) FieldConfiguration(ctx context.Context, workspaceID stri
 			options[j] = &graphql1.FieldOption{
 				ID:          opt.ID,
 				Name:        opt.Name,
-				Description: &opt.Description,
-				Color:       &color,
+				Description: &field.Options[j].Description,
 				Metadata:    &metadataStr,
 			}
 		}

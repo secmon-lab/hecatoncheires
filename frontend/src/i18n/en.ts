@@ -372,4 +372,13 @@ export const en: Messages = {
   langEnglish: 'English',
   langJapanese: '日本語',
   labelLanguage: 'Language',
+
+  // Custom field help (description / option catalog)
+  fieldHelpAriaToggle: 'Show description for {name}',
+  fieldHelpClose: 'Close',
+  fieldHelpSelectedBadge: 'Selected',
+  fieldHelpFooterHint: 'Click to edit · Hover values for descriptions',
+  fieldHelpOptionCount: '{count} options',
+  fieldHelpTypeSelect: 'Select',
+  fieldHelpTypeMultiSelect: 'Multi-select',
 }

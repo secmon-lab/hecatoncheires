@@ -1,0 +1,212 @@
+/* Help "?" button next to a field label. 14px circle that flips tone when
+   expanded. Uses only existing design tokens. */
+.helpBtn {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  margin: 0;
+  border-radius: 50%;
+  font-size: 9.5px;
+  font-weight: 700;
+  font-family: inherit;
+  line-height: 1;
+  color: var(--fg-soft);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  outline: none;
+}
+
+.helpBtn:hover {
+  color: var(--fg);
+  background: var(--bg-sunken);
+}
+
+.helpBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.helpBtnExpanded,
+.helpBtnExpanded:hover {
+  color: var(--bg-elev);
+  background: var(--fg-soft);
+  border-color: var(--fg-soft);
+}
+
+/* FieldCatalogPopover dialog body. Mounted inside InlinePopover (portal). */
+.catalog {
+  display: flex;
+  flex-direction: column;
+  width: 340px;
+  max-width: calc(100vw - 2.5rem);
+  text-align: left;
+}
+
+.catalogHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0.625rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-sunken);
+  flex: 0 0 auto;
+}
+
+.catalogTypeLabel {
+  font-size: 10px;
+  color: var(--fg-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+
+.catalogTitle {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.catalogClose {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--fg-soft);
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.catalogClose:hover {
+  color: var(--fg);
+}
+
+.catalogDesc {
+  padding: 0.625rem 0.75rem;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--fg-muted);
+  border-bottom: 1px solid var(--line);
+}
+
+.catalogBody {
+  overflow-y: auto;
+  max-height: 360px;
+}
+
+.catalogOption {
+  padding: 0.625rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+  border-left: 3px solid transparent;
+}
+
+.catalogOption:last-child {
+  border-bottom: none;
+}
+
+.catalogOptionSelected {
+  background: color-mix(in oklch, var(--accent) 5%, transparent);
+  border-left-color: var(--accent);
+  padding-left: calc(0.75rem - 3px);
+}
+
+.catalogOptionHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 3px;
+}
+
+.catalogOptionName {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.catalogOptionBadge {
+  font-size: 9.5px;
+  color: var(--accent);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: color-mix(in oklch, var(--accent) 12%, transparent);
+}
+
+.catalogOptionDesc {
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  line-height: 1.6;
+}
+
+.catalogFooter {
+  padding: 0.4375rem 0.75rem;
+  font-size: 10.5px;
+  color: var(--fg-soft);
+  border-top: 1px solid var(--line);
+  background: var(--bg-sunken);
+  display: flex;
+  justify-content: space-between;
+  flex: 0 0 auto;
+}
+
+/* ValueDescTooltip — shown on hover/focus over a SELECT/MULTI_SELECT value.
+   Use a block-level anchor so the wrapped InlineFieldFrame (also block) keeps
+   its natural width — an inline-block wrapper would shrink-wrap the trigger
+   and cause wide text values to break per-character inside the kv-value
+   column. The anchor itself is non-focusable; focus events bubble up from
+   the inner trigger button (rendered inside InlineCustomField). */
+.tooltipAnchor {
+  position: relative;
+  display: block;
+}
+
+.tooltipHint {
+  border-bottom: 1px dotted var(--line-strong);
+  cursor: help;
+}
+
+.tooltipBody {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 16.25rem;
+  max-width: calc(100vw - 2.5rem);
+  max-height: 20rem;
+  overflow-y: auto;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.5625rem 0.6875rem;
+  box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.12);
+  z-index: 50;
+  font-size: 11.5px;
+  line-height: 1.6;
+  pointer-events: none;
+  text-align: left;
+}
+
+.tooltipName {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 3px;
+  color: var(--fg);
+  font-size: 12px;
+}
+
+.tooltipDesc {
+  display: block;
+  color: var(--fg-muted);
+  white-space: pre-line;
+}

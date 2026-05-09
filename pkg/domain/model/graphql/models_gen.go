@@ -166,7 +166,6 @@ type FieldOption struct {
 	ID          string  `json:"id"`
 	Name        string  `json:"name"`
 	Description *string `json:"description,omitempty"`
-	Color       *string `json:"color,omitempty"`
 	Metadata    *string `json:"metadata,omitempty"`
 }
 
