@@ -77,7 +77,7 @@ export default function CustomFieldHelpRow({
                 users={users}
                 disabled={disabled}
                 onSave={onSave}
-                testId={testId ? `${testId}-field` : undefined}
+                testId={`field-${field.id}`}
               />
             ))
           : (
