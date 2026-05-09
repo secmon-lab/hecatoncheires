@@ -70,6 +70,7 @@ var messagesEN = [msgKeyCount]string{
 	MsgAgentOnIt:          "On it...",
 	MsgAgentError:         "An error occurred while processing your request. Please try again later.",
 	MsgAgentSessionInfo:   "Session Info",
+	MsgKeyAgentBusy:       ":hourglass_flowing_sand: Already handling your previous request. I'll respond, then please mention me again if more is needed.",
 
 	// Bookmark
 	MsgBookmarkOpenCase: "Open Case",
@@ -174,6 +175,7 @@ var messagesJA = [msgKeyCount]string{
 	MsgAgentOnIt:          "対応中...",
 	MsgAgentError:         "リクエストの処理中にエラーが発生しました。しばらくしてから再試行してください。",
 	MsgAgentSessionInfo:   "セッション情報",
+	MsgKeyAgentBusy:       ":hourglass_flowing_sand: 直前のリクエストを処理中です。完了後にもう一度メンションしてください。",
 
 	// Bookmark
 	MsgBookmarkOpenCase: "ケースを開く",

@@ -10,6 +10,9 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/draft"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
 
 type UseCases struct {
@@ -172,7 +175,34 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 			panic("usecase.New: WithHistoryRepository and WithTraceRepository must be paired")
 		}
 		uc.Assist = NewAssistUseCase(repo, registry, uc.slackService, uc.slackSearch, uc.notionTool, uc.githubClient, uc.llmClient, uc.embedClient, uc.Action)
-		uc.MentionDraft = NewMentionDraftUseCase(repo, registry, uc.slackService, NewDraftMaterializer(uc.llmClient))
+
+		// MentionDraft is wired only when the persistent History/Trace archive
+		// is configured — the planner runtime depends on both. Without them,
+		// the open-mode path is simply not constructed (the dispatcher will
+		// no-op for app_mention in unbound channels).
+		if uc.historyRepo != nil && uc.traceRepo != nil {
+			deps := &agent.CommonDeps{
+				Repo:                repo,
+				Registry:            registry,
+				LLMClient:           uc.llmClient,
+				HistoryRepo:         uc.historyRepo,
+				TraceRepo:           uc.traceRepo,
+				SlackBot:            uc.slackService,
+				SlackSearch:         uc.slackSearch,
+				NotionClient:        uc.notionTool,
+				GitHubClient:        uc.githubClient,
+				ActionUC:            NewActionToolAdapter(uc.Action),
+				ActionStepUC:        NewActionStepToolAdapter(uc.ActionStep),
+				HeartbeatInterval:   agent.DefaultHeartbeatInterval,
+				HeartbeatStaleAfter: agent.DefaultHeartbeatStaleAfter,
+			}
+			draftUC, err := draft.New(deps, 0, 0, 0)
+			if err != nil {
+				logging.Default().Error("failed to build draft usecase", "error", err.Error())
+			} else {
+				uc.MentionDraft = NewMentionDraftUseCase(repo, registry, uc.slackService, draftUC)
+			}
+		}
 	}
 	uc.Slack = NewSlackUseCases(repo, registry, uc.Agent, uc.MentionDraft, uc.slackService)
 

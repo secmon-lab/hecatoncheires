@@ -20,7 +20,7 @@ type Memory struct {
 	actionStep    *actionStepRepository
 	assistLog     *assistLogRepository
 	caseDraft     *caseDraftRepository
-	agentSession  *agentSessionRepository
+	session       *sessionRepository
 }
 
 var _ interfaces.Repository = &Memory{}
@@ -39,7 +39,7 @@ func New() *Memory {
 		actionStep:    newActionStepRepository(),
 		assistLog:     newAssistLogRepository(),
 		caseDraft:     newCaseDraftRepository(),
-		agentSession:  newAgentSessionRepository(),
+		session:       newSessionRepository(),
 	}
 }
 
@@ -87,8 +87,8 @@ func (m *Memory) CaseDraft() interfaces.CaseDraftRepository {
 	return m.caseDraft
 }
 
-func (m *Memory) AgentSession() interfaces.AgentSessionRepository {
-	return m.agentSession
+func (m *Memory) Session() interfaces.SessionRepository {
+	return m.session
 }
 
 func (m *Memory) Close() error {

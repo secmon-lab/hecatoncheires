@@ -89,6 +89,11 @@ const (
 	MsgAgentOnIt
 	MsgAgentError
 	MsgAgentSessionInfo
+	// MsgKeyAgentBusy is used when a new mention arrives while a previous
+	// turn on the same Slack thread is still running. The host posts this
+	// reply so the user knows the agent is occupied and will respond once
+	// the prior turn finishes.
+	MsgKeyAgentBusy
 
 	// Bookmark
 	MsgBookmarkOpenCase

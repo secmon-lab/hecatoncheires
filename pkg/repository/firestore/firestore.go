@@ -21,7 +21,7 @@ type Firestore struct {
 	actionStep    *actionStepRepository
 	assistLog     *firestoreAssistLogRepository
 	caseDraft     *caseDraftRepository
-	agentSession  *agentSessionRepository
+	session       *sessionRepository
 }
 
 var _ interfaces.Repository = &Firestore{}
@@ -54,7 +54,7 @@ func New(ctx context.Context, projectID, databaseID string) (*Firestore, error) 
 		actionStep:    newActionStepRepository(client),
 		assistLog:     newFirestoreAssistLogRepository(client),
 		caseDraft:     newCaseDraftRepository(client),
-		agentSession:  newAgentSessionRepository(client),
+		session:       newSessionRepository(client),
 	}
 
 	return f, nil
@@ -104,8 +104,8 @@ func (f *Firestore) CaseDraft() interfaces.CaseDraftRepository {
 	return f.caseDraft
 }
 
-func (f *Firestore) AgentSession() interfaces.AgentSessionRepository {
-	return f.agentSession
+func (f *Firestore) Session() interfaces.SessionRepository {
+	return f.session
 }
 
 func (f *Firestore) Close() error {

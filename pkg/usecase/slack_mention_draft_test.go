@@ -7,6 +7,7 @@ import (
 
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gt"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
@@ -14,25 +15,57 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/draft"
 	goslack "github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 )
 
-// stubMaterializerLLM returns a fixed materialization JSON regardless of input.
-func stubMaterializerLLM() gollem.LLMClient {
+// stubMaterializePlannerJSON returns a planner JSON object that immediately
+// terminates with action=materialize for the given workspace. Used by tests
+// that just want to drive the happy-path turn end-to-end.
+func stubMaterializePlannerJSON(workspaceID string) string {
+	return `{
+        "reasoning": "test fixture: materialize directly",
+        "action": "materialize",
+        "materialize": {
+            "workspace_id": "` + workspaceID + `",
+            "title": "AI suggested title",
+            "description": "AI suggested description",
+            "custom_field_values": {"severity": "high"}
+        }
+    }`
+}
+
+// stubPlannerLLM builds a gollem mock that returns the supplied JSON string
+// from every Generate call.
+func stubPlannerLLM(jsonResponse string) gollem.LLMClient {
 	return &mockLLMClient{
 		newSessionFn: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
 			return &mockLLMSession{
 				generateContentFn: func(_ context.Context, _ ...gollem.Input) (*gollem.Response, error) {
-					return &gollem.Response{Texts: []string{`{
-                        "title": "AI suggested title",
-                        "description": "AI suggested description",
-                        "custom_fields": {"severity": "high"}
-                    }`}}, nil
+					return &gollem.Response{Texts: []string{jsonResponse}}, nil
 				},
 			}, nil
 		},
 	}
+}
+
+// newDraftUC builds a draft.UseCase backed by the same memory repo so the
+// in-test slackDraftHandler can read and write the persisted state.
+func newDraftUC(t *testing.T, repo interfaces.Repository, llm gollem.LLMClient) *draft.UseCase {
+	t.Helper()
+	deps := &agent.CommonDeps{
+		Repo:                repo,
+		LLMClient:           llm,
+		HistoryRepo:         agentarchive.NewMemoryHistoryRepository(),
+		TraceRepo:           agentarchive.NewMemoryTraceRepository(),
+		HeartbeatInterval:   time.Second,
+		HeartbeatStaleAfter: 5 * time.Second,
+	}
+	uc, err := draft.New(deps, 8, 16, 20)
+	gt.NoError(t, err).Required()
+	return uc
 }
 
 func newRegistryWithSchema(workspaceID, workspaceName string, schema *config.FieldSchema) *model.WorkspaceRegistry {
@@ -53,7 +86,7 @@ func TestMentionDraftUseCase_HandleAppMention_HappyPath(t *testing.T) {
 	registry := newRegistryWithSchema("ws-only", "OnlyWS", schema)
 
 	slackMock := newCollectorOnlyMockSlack()
-	uc := usecase.NewMentionDraftUseCase(repo, registry, slackMock, usecase.NewDraftMaterializer(stubMaterializerLLM()))
+	uc := usecase.NewMentionDraftUseCase(repo, registry, slackMock, newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-only"))))
 	gt.Value(t, uc).NotNil().Required()
 
 	ev := &slackevents.AppMentionEvent{
@@ -78,7 +111,7 @@ func TestMentionDraftUseCase_HandleAppMention_NoWorkspace_PostsError(t *testing.
 	repo := memory.New()
 	registry := model.NewWorkspaceRegistry() // empty
 	slackMock := newCollectorOnlyMockSlack()
-	uc := usecase.NewMentionDraftUseCase(repo, registry, slackMock, usecase.NewDraftMaterializer(stubMaterializerLLM()))
+	uc := usecase.NewMentionDraftUseCase(repo, registry, slackMock, newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-only"))))
 
 	ev := &slackevents.AppMentionEvent{
 		Channel:   "C1",
@@ -100,7 +133,7 @@ func TestMentionDraftUseCase_HandleAppMention_NoWorkspace_PostsError(t *testing.
 func TestMentionDraftUseCase_NilSlackService(t *testing.T) {
 	repo := memory.New()
 	registry := newRegistryWithSchema("ws-1", "ws", &config.FieldSchema{})
-	uc := usecase.NewMentionDraftUseCase(repo, registry, nil, usecase.NewDraftMaterializer(stubMaterializerLLM()))
+	uc := usecase.NewMentionDraftUseCase(repo, registry, nil, newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-1"))))
 	gt.Value(t, uc).Nil()
 }
 
@@ -113,7 +146,7 @@ func TestSlackUseCases_AppMention_DispatchesToMentionDraft(t *testing.T) {
 	registry := newRegistryWithSchema("ws-1", "ws", schema)
 
 	slackMock := newCollectorOnlyMockSlack()
-	mentionDraft := usecase.NewMentionDraftUseCase(repo, registry, slackMock, usecase.NewDraftMaterializer(stubMaterializerLLM()))
+	mentionDraft := usecase.NewMentionDraftUseCase(repo, registry, slackMock, newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-1"))))
 
 	slackUC := usecase.NewSlackUseCases(repo, registry, nil, mentionDraft, slackMock)
 
@@ -150,8 +183,8 @@ func TestSlackUseCases_AppMention_CaseBoundChannelDoesNotInvokeDraft(t *testing.
 	gt.NoError(t, err).Required()
 
 	slackMock := newCollectorOnlyMockSlack()
-	llm := stubMaterializerLLM()
-	mentionDraft := usecase.NewMentionDraftUseCase(repo, registry, slackMock, usecase.NewDraftMaterializer(llm))
+	llm := stubPlannerLLM(stubMaterializePlannerJSON("ws-1"))
+	mentionDraft := usecase.NewMentionDraftUseCase(repo, registry, slackMock, newDraftUC(t, repo, llm))
 	agent := usecase.NewAgentUseCase(repo, registry, slackMock, nil, nil, nil, llm, llm, agentarchive.NewMemoryHistoryRepository(), agentarchive.NewMemoryTraceRepository(), nil, nil)
 	slackUC := usecase.NewSlackUseCases(repo, registry, agent, mentionDraft, slackMock)
 
@@ -174,6 +207,147 @@ func TestSlackUseCases_AppMention_CaseBoundChannelDoesNotInvokeDraft(t *testing.
 	for _, post := range slackMock.threadBlockPosts {
 		gt.Number(t, len(post.blocks)).LessOrEqual(1)
 	}
+}
+
+// --- thread-reply dispatcher (F1-F8) tests ---
+
+// dispatcherFixture wires a SlackUseCases for thread-reply tests with a
+// pre-seeded Session in the requested state.
+type dispatcherFixture struct {
+	uc        *usecase.SlackUseCases
+	repo      any // memory.New() — kept opaque so tests don't reach in
+	slackMock *collectorOnlyMockSlack
+}
+
+func newDispatcherWithOpenSession(t *testing.T, channelID, threadTS string, lastAction model.SessionEndReason) *dispatcherFixture {
+	t.Helper()
+	repo := memory.New()
+	registry := newRegistryWithSchema("ws-1", "ws", &config.FieldSchema{})
+	slackMock := newCollectorOnlyMockSlack()
+	mentionDraft := usecase.NewMentionDraftUseCase(repo, registry, slackMock,
+		newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-1"))))
+	slackUC := usecase.NewSlackUseCases(repo, registry, nil, mentionDraft, slackMock)
+
+	now := time.Now().UTC()
+	gt.NoError(t, repo.Session().Put(context.Background(), &model.Session{
+		ID:            "ssn-disp",
+		ChannelID:     channelID,
+		ThreadTS:      threadTS,
+		CreatorUserID: "U-CREATOR",
+		LastAction:    lastAction,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	})).Required()
+
+	return &dispatcherFixture{uc: slackUC, repo: repo, slackMock: slackMock}
+}
+
+func newMessageEvent(channel, user, text, ts, threadTS, subtype, botID string) *slackevents.EventsAPIEvent {
+	return &slackevents.EventsAPIEvent{
+		Type: slackevents.CallbackEvent,
+		InnerEvent: slackevents.EventsAPIInnerEvent{
+			Type: "message",
+			Data: &slackevents.MessageEvent{
+				Channel:         channel,
+				User:            user,
+				Text:            text,
+				TimeStamp:       ts,
+				ThreadTimeStamp: threadTS,
+				SubType:         subtype,
+				BotID:           botID,
+			},
+		},
+	}
+}
+
+func TestDispatcher_ThreadReply_F1_DropOnSubType(t *testing.T) {
+	f := newDispatcherWithOpenSession(t, "C-OPEN", "1700000010.000000", model.SessionEndedWithQuestion)
+	ev := newMessageEvent("C-OPEN", "U1", "hello", "1700000020.000000", "1700000010.000000", "message_changed", "")
+	gt.NoError(t, f.uc.HandleSlackEvent(context.Background(), ev)).Required()
+	// No turn fired → no thread blocks posted by handler.
+	gt.Number(t, len(f.slackMock.threadBlockPosts)).Equal(0)
+	gt.Number(t, len(f.slackMock.updateBlockPosts)).Equal(0)
+}
+
+func TestDispatcher_ThreadReply_F2_DropOnBotSelfPost(t *testing.T) {
+	f := newDispatcherWithOpenSession(t, "C-OPEN", "1700000010.000000", model.SessionEndedWithQuestion)
+	ev := newMessageEvent("C-OPEN", "BOT", "hi", "1700000020.000000", "1700000010.000000", "", "")
+	gt.NoError(t, f.uc.HandleSlackEvent(context.Background(), ev)).Required()
+	gt.Number(t, len(f.slackMock.threadBlockPosts)).Equal(0)
+}
+
+func TestDispatcher_ThreadReply_F3_DropOnBotID(t *testing.T) {
+	f := newDispatcherWithOpenSession(t, "C-OPEN", "1700000010.000000", model.SessionEndedWithQuestion)
+	ev := newMessageEvent("C-OPEN", "U1", "hi", "1700000020.000000", "1700000010.000000", "", "B999")
+	gt.NoError(t, f.uc.HandleSlackEvent(context.Background(), ev)).Required()
+	gt.Number(t, len(f.slackMock.threadBlockPosts)).Equal(0)
+}
+
+func TestDispatcher_ThreadReply_F4_DropOnTopLevel(t *testing.T) {
+	f := newDispatcherWithOpenSession(t, "C-OPEN", "1700000010.000000", model.SessionEndedWithQuestion)
+	// thread_ts == ts means the parent post itself; drop.
+	ev := newMessageEvent("C-OPEN", "U1", "hi", "1700000020.000000", "1700000020.000000", "", "")
+	gt.NoError(t, f.uc.HandleSlackEvent(context.Background(), ev)).Required()
+	gt.Number(t, len(f.slackMock.threadBlockPosts)).Equal(0)
+}
+
+func TestDispatcher_ThreadReply_F5_DropOnMention(t *testing.T) {
+	f := newDispatcherWithOpenSession(t, "C-OPEN", "1700000010.000000", model.SessionEndedWithQuestion)
+	ev := newMessageEvent("C-OPEN", "U1", "<@BOT> hi", "1700000020.000000", "1700000010.000000", "", "")
+	gt.NoError(t, f.uc.HandleSlackEvent(context.Background(), ev)).Required()
+	gt.Number(t, len(f.slackMock.threadBlockPosts)).Equal(0)
+}
+
+func TestDispatcher_ThreadReply_F6_DropOnNoSession(t *testing.T) {
+	repo := memory.New()
+	registry := newRegistryWithSchema("ws-1", "ws", &config.FieldSchema{})
+	slackMock := newCollectorOnlyMockSlack()
+	mentionDraft := usecase.NewMentionDraftUseCase(repo, registry, slackMock,
+		newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-1"))))
+	slackUC := usecase.NewSlackUseCases(repo, registry, nil, mentionDraft, slackMock)
+
+	ev := newMessageEvent("C-NEW", "U1", "hi", "1700000020.000000", "1700000010.000000", "", "")
+	gt.NoError(t, slackUC.HandleSlackEvent(context.Background(), ev)).Required()
+	gt.Number(t, len(slackMock.threadBlockPosts)).Equal(0)
+}
+
+func TestDispatcher_ThreadReply_F7_DropCaseBound(t *testing.T) {
+	repo := memory.New()
+	registry := newRegistryWithSchema("ws-1", "ws", &config.FieldSchema{})
+	slackMock := newCollectorOnlyMockSlack()
+	mentionDraft := usecase.NewMentionDraftUseCase(repo, registry, slackMock,
+		newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-1"))))
+	slackUC := usecase.NewSlackUseCases(repo, registry, nil, mentionDraft, slackMock)
+
+	now := time.Now().UTC()
+	gt.NoError(t, repo.Session().Put(context.Background(), &model.Session{
+		ID:         "ssn-cb",
+		ChannelID:  "C-CB",
+		ThreadTS:   "1700000010.000000",
+		CaseID:     42, // case-bound → F7 drop
+		LastAction: model.SessionEndedWithQuestion,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	})).Required()
+
+	ev := newMessageEvent("C-CB", "U1", "hi", "1700000020.000000", "1700000010.000000", "", "")
+	gt.NoError(t, slackUC.HandleSlackEvent(context.Background(), ev)).Required()
+	gt.Number(t, len(slackMock.threadBlockPosts)).Equal(0)
+}
+
+func TestDispatcher_ThreadReply_F8_DropOnNonQuestionEnd(t *testing.T) {
+	f := newDispatcherWithOpenSession(t, "C-OPEN", "1700000010.000000", model.SessionEndedWithMessage)
+	ev := newMessageEvent("C-OPEN", "U1", "hi", "1700000020.000000", "1700000010.000000", "", "")
+	gt.NoError(t, f.uc.HandleSlackEvent(context.Background(), ev)).Required()
+	gt.Number(t, len(f.slackMock.threadBlockPosts)).Equal(0)
+}
+
+func TestDispatcher_ThreadReply_HappyPath_ResumesTurn(t *testing.T) {
+	f := newDispatcherWithOpenSession(t, "C-OPEN", "1700000010.000000", model.SessionEndedWithQuestion)
+	ev := newMessageEvent("C-OPEN", "U1", "user follow-up answer", "1700000020.000000", "1700000010.000000", "", "")
+	gt.NoError(t, f.uc.HandleSlackEvent(context.Background(), ev)).Required()
+	// Planner stub returns materialize → handler posts blocks (preview).
+	gt.Number(t, len(f.slackMock.threadBlockPosts)+len(f.slackMock.updateBlockPosts)).GreaterOrEqual(1)
 }
 
 // --- collector-only mock slack service ---

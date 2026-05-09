@@ -203,8 +203,8 @@ func (m *mockRepo) AssistLog() interfaces.AssistLogRepository {
 func (m *mockRepo) CaseDraft() interfaces.CaseDraftRepository {
 	panic("unexpected call: CaseDraft()")
 }
-func (m *mockRepo) AgentSession() interfaces.AgentSessionRepository {
-	panic("unexpected call: AgentSession()")
+func (m *mockRepo) Session() interfaces.SessionRepository {
+	panic("unexpected call: Session()")
 }
 func (m *mockRepo) Close() error { return nil }
 

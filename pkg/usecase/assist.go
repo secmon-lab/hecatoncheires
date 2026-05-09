@@ -224,6 +224,12 @@ type assistPromptAssistLog struct {
 	NextSteps string
 }
 
+// promptField represents a case field for template rendering.
+type promptField struct {
+	Name  string
+	Value any
+}
+
 // assistPromptData holds all data for the assist system prompt template
 type assistPromptData struct {
 	CurrentTime  string

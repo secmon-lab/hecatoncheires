@@ -19,7 +19,7 @@ type Repository interface {
 	ActionStep() ActionStepRepository
 	AssistLog() AssistLogRepository
 	CaseDraft() CaseDraftRepository
-	AgentSession() AgentSessionRepository
+	Session() SessionRepository
 
 	// Auth methods
 	PutToken(ctx context.Context, token *auth.Token) error
