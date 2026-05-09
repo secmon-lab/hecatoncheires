@@ -30,6 +30,12 @@ export default function ValueDescTooltip({
       onMouseLeave={() => setOpen(false)}
       onFocus={() => setOpen(true)}
       onBlur={() => setOpen(false)}
+      // Close on pointerdown so the tooltip does not linger behind an
+      // InlineSelect picker the user opens by clicking the trigger. Without
+      // this the absolutely-positioned tooltip can overlap the next row in
+      // a kv-list and intercept layout-sensitive interactions (e.g. e2e
+      // clicks on the row below).
+      onPointerDown={() => setOpen(false)}
       data-testid={testId}
     >
       {children}
