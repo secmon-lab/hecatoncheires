@@ -151,6 +151,18 @@ func (uc *MentionDraftUseCase) HandleSelectWorkspace(ctx context.Context, callba
 		// Locked / duplicate — the lock UI we already posted is the user
 		// signal; nothing more to do.
 		return nil
+	case draft.StatusFallback:
+		// Planner exhausted budget — render an error block so the user
+		// isn't stuck on the locked preview.
+		errBlocks, errFallback := buildMaterializationErrorBlocks(entry.Workspace.Name)
+		if respErr := uc.respondReplaceOriginal(ctx, callback.ResponseURL, errBlocks, errFallback); respErr != nil {
+			errutil.Handle(ctx, goerr.Wrap(respErr, "render fallback block on ws-switch"),
+				"could not surface ws-switch fallback to user")
+		}
+		if clearErr := uc.repo.CaseDraft().SetMaterialization(ctx, d.ID, d.SelectedWorkspaceID, d.Materialization, false); clearErr != nil {
+			errutil.Handle(ctx, clearErr, "failed to clear inference-in-progress flag after ws-switch fallback")
+		}
+		return nil
 	}
 	return nil
 }

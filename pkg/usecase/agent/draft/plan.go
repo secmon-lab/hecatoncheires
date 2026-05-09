@@ -14,15 +14,15 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
 )
 
-// planAction enumerates the four terminal / continuation choices the planner
-// LLM can return in a single round.
+// planAction enumerates the three terminal / continuation choices the planner
+// LLM can return in a single round. `post_message` was retired in favour of
+// always asking via `question` when user input is required.
 type planAction string
 
 const (
-	actionInvestigate  planAction = "investigate"
-	actionPostMessage  planAction = "post_message"
-	actionPostQuestion planAction = "post_question"
-	actionMaterialize  planAction = "materialize"
+	actionInvestigate planAction = "investigate"
+	actionQuestion    planAction = "question"
+	actionMaterialize planAction = "materialize"
 )
 
 // plan is the structured response shape the planner LLM emits each round.
@@ -34,10 +34,9 @@ type plan struct {
 	Reasoning string     `json:"reasoning"`
 	Action    planAction `json:"action"`
 
-	Investigate  *planInvestigate `json:"investigate,omitempty"`
-	PostMessage  *planText        `json:"post_message,omitempty"`
-	PostQuestion *planQuestion    `json:"post_question,omitempty"`
-	Materialize  *planMaterialize `json:"materialize,omitempty"`
+	Investigate *planInvestigate `json:"investigate,omitempty"`
+	Question    *planQuestion    `json:"question,omitempty"`
+	Materialize *planMaterialize `json:"materialize,omitempty"`
 }
 
 // planInvestigate is the payload for action=investigate. Tasks are run in
@@ -62,16 +61,40 @@ type planInvestigateTask struct {
 	Tools              []string `json:"tools"`
 }
 
-// planText is a single string payload, used by post_message.
-type planText struct {
-	Text string `json:"text"`
+// planQuestion is the payload for action=question. The planner can pose
+// multiple questions in one turn — useful when several pieces of information
+// are missing so the user can answer them all in one round trip rather than
+// being asked one at a time.
+type planQuestion struct {
+	// Reason explains the information gap (single rationale shared across
+	// the items). Surfaced in the host's question UI.
+	Reason string `json:"reason"`
+	// Items is the ordered list of questions to ask in this turn. Must be
+	// non-empty.
+	Items []planQuestionItem `json:"items"`
 }
 
-// planQuestion is the payload for post_question.
-type planQuestion struct {
-	Text    string   `json:"text"`
-	Options []string `json:"options,omitempty"`
-	Reason  string   `json:"reason"`
+// planQuestionType discriminates how the host should render the answer
+// control. Both values require a non-empty Options list.
+type planQuestionType string
+
+const (
+	questionTypeSelect      planQuestionType = "select"
+	questionTypeMultiSelect planQuestionType = "multi_select"
+)
+
+// planQuestionItem is a single question within planQuestion.Items.
+type planQuestionItem struct {
+	// ID is unique within the items list. The host uses it to correlate
+	// answers back to the question on submission.
+	ID string `json:"id"`
+	// Text is the prompt presented to the user.
+	Text string `json:"text"`
+	// Type is the answer control type (`select` or `multi_select`).
+	Type planQuestionType `json:"type"`
+	// Options lists the allowed answer values. Required and must contain
+	// at least 2 entries for both `select` and `multi_select`.
+	Options []string `json:"options"`
 }
 
 // planMaterialize is the payload for materialize. Field values are passed as
@@ -90,6 +113,8 @@ type planMaterialize struct {
 const (
 	investigateMinTasks  = 1
 	investigateMaxTasks  = 5
+	questionMinItems     = 1
+	questionMaxItems     = 5
 	questionMinOptions   = 2
 	investigateMaxToolID = 4 // upper bound on Tools list length per task
 )
@@ -126,34 +151,23 @@ func validate(p *plan) error {
 		if p.Investigate == nil {
 			return goerr.New("investigate payload is required for action=investigate")
 		}
-		if p.PostMessage != nil || p.PostQuestion != nil || p.Materialize != nil {
+		if p.Question != nil || p.Materialize != nil {
 			return goerr.New("only the investigate payload may be set for action=investigate")
 		}
 		return validateInvestigate(p.Investigate)
-	case actionPostMessage:
-		if p.PostMessage == nil {
-			return goerr.New("post_message payload is required for action=post_message")
+	case actionQuestion:
+		if p.Question == nil {
+			return goerr.New("question payload is required for action=question")
 		}
-		if p.Investigate != nil || p.PostQuestion != nil || p.Materialize != nil {
-			return goerr.New("only the post_message payload may be set for action=post_message")
+		if p.Investigate != nil || p.Materialize != nil {
+			return goerr.New("only the question payload may be set for action=question")
 		}
-		if strings.TrimSpace(p.PostMessage.Text) == "" {
-			return goerr.New("post_message.text is required")
-		}
-		return nil
-	case actionPostQuestion:
-		if p.PostQuestion == nil {
-			return goerr.New("post_question payload is required for action=post_question")
-		}
-		if p.Investigate != nil || p.PostMessage != nil || p.Materialize != nil {
-			return goerr.New("only the post_question payload may be set for action=post_question")
-		}
-		return validateQuestion(p.PostQuestion)
+		return validateQuestion(p.Question)
 	case actionMaterialize:
 		if p.Materialize == nil {
 			return goerr.New("materialize payload is required for action=materialize")
 		}
-		if p.Investigate != nil || p.PostMessage != nil || p.PostQuestion != nil {
+		if p.Investigate != nil || p.Question != nil {
 			return goerr.New("only the materialize payload may be set for action=materialize")
 		}
 		return validateMaterialize(p.Materialize)
@@ -212,16 +226,51 @@ func validateInvestigate(inv *planInvestigate) error {
 }
 
 func validateQuestion(q *planQuestion) error {
-	if strings.TrimSpace(q.Text) == "" {
-		return goerr.New("post_question.text is required")
-	}
 	if strings.TrimSpace(q.Reason) == "" {
-		return goerr.New("post_question.reason is required")
+		return goerr.New("question.reason is required")
 	}
-	if len(q.Options) > 0 && len(q.Options) < questionMinOptions {
-		return goerr.New("post_question.options must contain at least 2 entries when present",
-			goerr.V("got", len(q.Options)),
+	if n := len(q.Items); n < questionMinItems || n > questionMaxItems {
+		return goerr.New("question.items count out of range",
+			goerr.V("got", n),
+			goerr.V("min", questionMinItems),
+			goerr.V("max", questionMaxItems),
 		)
+	}
+	seenID := make(map[string]struct{}, len(q.Items))
+	for i, it := range q.Items {
+		if strings.TrimSpace(it.ID) == "" {
+			return goerr.New("question.items[i].id is required", goerr.V("i", i))
+		}
+		if _, dup := seenID[it.ID]; dup {
+			return goerr.New("question.items[i].id is duplicated within plan", goerr.V("id", it.ID))
+		}
+		seenID[it.ID] = struct{}{}
+		if strings.TrimSpace(it.Text) == "" {
+			return goerr.New("question.items[i].text is required", goerr.V("id", it.ID))
+		}
+		switch it.Type {
+		case questionTypeSelect, questionTypeMultiSelect:
+			// ok
+		default:
+			return goerr.New("question.items[i].type must be select or multi_select",
+				goerr.V("id", it.ID), goerr.V("got", string(it.Type)))
+		}
+		if len(it.Options) < questionMinOptions {
+			return goerr.New("question.items[i].options must contain at least 2 entries",
+				goerr.V("id", it.ID), goerr.V("got", len(it.Options)))
+		}
+		seenOpt := make(map[string]struct{}, len(it.Options))
+		for j, opt := range it.Options {
+			if strings.TrimSpace(opt) == "" {
+				return goerr.New("question.items[i].options[j] must not be empty",
+					goerr.V("id", it.ID), goerr.V("j", j))
+			}
+			if _, dup := seenOpt[opt]; dup {
+				return goerr.New("question.items[i].options contains duplicate",
+					goerr.V("id", it.ID), goerr.V("opt", opt))
+			}
+			seenOpt[opt] = struct{}{}
+		}
 	}
 	return nil
 }
@@ -272,16 +321,29 @@ func planSchema() *gollem.Parameter {
 			},
 		},
 	}
-	postMessageProps := map[string]*gollem.Parameter{
-		"text": str("Plain Slack-friendly message body."),
-	}
-	postQuestionProps := map[string]*gollem.Parameter{
-		"text":   str("Question to ask the user, as a Slack reply."),
-		"reason": str("Why this question is necessary."),
+	questionItemProps := map[string]*gollem.Parameter{
+		"id":   str("Item-unique identifier (e.g. q-1)."),
+		"text": str("Question text shown to the user."),
+		"type": {
+			Type:        gollem.TypeString,
+			Description: "Answer control type.",
+			Enum:        []string{string(questionTypeSelect), string(questionTypeMultiSelect)},
+		},
 		"options": {
 			Type:        gollem.TypeArray,
-			Description: "Optional choice list. When present, must contain at least two entries.",
+			Description: "Allowed answer values. Must contain at least 2 entries.",
 			Items:       &gollem.Parameter{Type: gollem.TypeString},
+		},
+	}
+	questionProps := map[string]*gollem.Parameter{
+		"reason": str("Why these questions are necessary."),
+		"items": {
+			Type:        gollem.TypeArray,
+			Description: "Ordered list of questions for this turn (1-5).",
+			Items: &gollem.Parameter{
+				Type:       gollem.TypeObject,
+				Properties: questionItemProps,
+			},
 		},
 	}
 	materializeProps := map[string]*gollem.Parameter{
@@ -306,15 +368,13 @@ func planSchema() *gollem.Parameter {
 				Type: gollem.TypeString,
 				Enum: []string{
 					string(actionInvestigate),
-					string(actionPostMessage),
-					string(actionPostQuestion),
+					string(actionQuestion),
 					string(actionMaterialize),
 				},
 			},
-			"investigate":   {Type: gollem.TypeObject, Properties: investigateProps},
-			"post_message":  {Type: gollem.TypeObject, Properties: postMessageProps},
-			"post_question": {Type: gollem.TypeObject, Properties: postQuestionProps},
-			"materialize":   {Type: gollem.TypeObject, Properties: materializeProps},
+			"investigate": {Type: gollem.TypeObject, Properties: investigateProps},
+			"question":    {Type: gollem.TypeObject, Properties: questionProps},
+			"materialize": {Type: gollem.TypeObject, Properties: materializeProps},
 		},
 	}
 }

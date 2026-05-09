@@ -74,6 +74,24 @@ func TestNormalizeChannelName(t *testing.T) {
 			input: "",
 			want:  "",
 		},
+		{
+			// Slack rejects em dash with `invalid_name_specials`. The
+			// surrounding spaces become hyphens and the em dash itself is
+			// stripped, leaving two consecutive hyphens (which Slack accepts).
+			name:  "em dash stripped",
+			input: "Tanaka — Data or System Issue",
+			want:  "tanaka--data-or-system-issue",
+		},
+		{
+			name:  "en dash stripped",
+			input: "Tanaka – Data",
+			want:  "tanaka--data",
+		},
+		{
+			name:  "japanese brackets and middle dot stripped",
+			input: "「リスク」・管理",
+			want:  "リスク管理",
+		},
 	}
 
 	for _, tt := range tests {

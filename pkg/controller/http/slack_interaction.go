@@ -159,7 +159,8 @@ func (h *SlackInteractionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		case usecase.ActionIDDraftSelectWS,
 			usecase.ActionIDDraftSubmit,
 			usecase.ActionIDDraftEdit,
-			usecase.ActionIDDraftCancel:
+			usecase.ActionIDDraftCancel,
+			usecase.ActionIDDraftQuestionSubmit:
 			if h.mentionDraftUC == nil {
 				continue
 			}
@@ -175,6 +176,8 @@ func (h *SlackInteractionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 					return h.mentionDraftUC.HandleEdit(ctx, &cb, a)
 				case usecase.ActionIDDraftCancel:
 					return h.mentionDraftUC.HandleCancel(ctx, &cb, a)
+				case usecase.ActionIDDraftQuestionSubmit:
+					return h.mentionDraftUC.HandleQuestionSubmit(ctx, &cb, a)
 				}
 				return nil
 			})

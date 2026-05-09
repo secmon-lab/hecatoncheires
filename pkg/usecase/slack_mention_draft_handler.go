@@ -2,7 +2,6 @@ package usecase
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"sync"
 
@@ -70,32 +69,44 @@ func newSlackDraftHandler(
 	}
 }
 
-// PostMessage replies to the thread with a plain text message.
-func (h *slackDraftHandler) PostMessage(ctx context.Context, _ *model.Session, text string) error {
-	if _, err := h.slackService.PostThreadReply(ctx, h.channelID, h.threadTS, text); err != nil {
-		return goerr.Wrap(err, "post thread reply",
+// Question renders the planner's terminal question payload as a Block Kit
+// form posted to the thread. Each item becomes an InputBlock with either
+// radio_buttons (select) or checkboxes (multi_select), capped by a Submit
+// button at the bottom. The question payload is mirrored onto the Session
+// so the submit handler can label answers back against the original text
+// even after the planner advances and rebuilds the surrounding messages.
+func (h *slackDraftHandler) Question(ctx context.Context, ssn *model.Session, q draft.QuestionPayload) error {
+	// Mention the original requester in the form header so they get paged
+	// the moment we ask. We pull the user from the Session (not h.creatorUser
+	// alone) so resume-via-thread-reply paths surface the right person too.
+	requester := h.creatorUser
+	if ssn != nil && ssn.CreatorUserID != "" {
+		requester = ssn.CreatorUserID
+	}
+	blocks, fallback := buildDraftQuestionBlocks(q, h.draftID, requester)
+	ts, err := h.slackService.PostThreadMessage(ctx, h.channelID, h.threadTS, blocks, fallback)
+	if err != nil {
+		return goerr.Wrap(err, "post draft question form",
 			goerr.V("channel_id", h.channelID),
 			goerr.V("thread_ts", h.threadTS),
 		)
 	}
-	return nil
-}
 
-// PostQuestion replies with a question. Options, when present, are listed
-// inline as a bullet list — Slack interactive components for these are out
-// of scope for the first cut.
-func (h *slackDraftHandler) PostQuestion(ctx context.Context, ssn *model.Session, q draft.QuestionPayload) error {
-	body := q.Text
-	if len(q.Options) > 0 {
-		var b strings.Builder
-		b.WriteString(q.Text)
-		b.WriteString("\n")
-		for _, opt := range q.Options {
-			fmt.Fprintf(&b, "• %s\n", opt)
-		}
-		body = b.String()
+	pq := &model.PendingQuestion{
+		PostedChannelID: h.channelID,
+		PostedMessageTS: ts,
+		Reason:          q.Reason,
+		Items:           make([]model.PendingQuestionItem, len(q.Items)),
 	}
-	return h.PostMessage(ctx, ssn, body)
+	for i, it := range q.Items {
+		pq.Items[i] = model.PendingQuestionItem{
+			ID: it.ID, Text: it.Text,
+			Type:    string(it.Type),
+			Options: append([]string(nil), it.Options...),
+		}
+	}
+	ssn.PendingQuestion = pq
+	return nil
 }
 
 // Materialize is the meat of the draft handler. The planner has decided to

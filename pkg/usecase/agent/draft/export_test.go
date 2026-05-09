@@ -28,10 +28,9 @@ func RunOneInvestigationForTest(uc *UseCase, ctx context.Context, task planInves
 
 // Re-export internal constants used in test assertions.
 const (
-	ActionInvestigateForTest  = actionInvestigate
-	ActionPostMessageForTest  = actionPostMessage
-	ActionPostQuestionForTest = actionPostQuestion
-	ActionMaterializeForTest  = actionMaterialize
+	ActionInvestigateForTest = actionInvestigate
+	ActionQuestionForTest    = actionQuestion
+	ActionMaterializeForTest = actionMaterialize
 )
 
 const (
@@ -39,13 +38,22 @@ const (
 	InvestigationFailedForTest    = investigationFailed
 )
 
+const (
+	QuestionTypeSelectForTest      = questionTypeSelect
+	QuestionTypeMultiSelectForTest = questionTypeMultiSelect
+)
+
 // Type aliases for tests that need to construct internal shapes.
 type (
 	PlanForTest                = plan
 	PlanInvestigateForTest     = planInvestigate
 	PlanInvestigateTaskForTest = planInvestigateTask
-	PlanTextForTest            = planText
 	PlanQuestionForTest        = planQuestion
+	PlanQuestionItemForTest    = planQuestionItem
 	PlanMaterializeForTest     = planMaterialize
 	InvestigationResultForTest = investigationResult
 )
+
+// RenderPlannerPromptForTest exposes the prompt template render so tests
+// can assert on the workspace context injected into the system prompt.
+var RenderPlannerPromptForTest = renderPlannerPrompt

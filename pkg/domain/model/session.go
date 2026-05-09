@@ -62,8 +62,42 @@ type Session struct {
 	InterruptRequestedAt time.Time
 	InterruptByTriggerTS string
 
+	// PendingQuestion mirrors the planner's most recent question payload when
+	// LastAction == SessionEndedWithQuestion. It is the single source of
+	// truth for the Slack-side question form: rendering it, parsing the
+	// submission state back into typed answers, and rebuilding the read-only
+	// "answered" view after the user clicks Submit. Cleared on the next
+	// terminal action.
+	PendingQuestion *PendingQuestion
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// PendingQuestion is the persisted snapshot of a question turn while we wait
+// for the user's submission. It is set when the planner emits a `question`
+// terminal action and consumed when the Submit button fires.
+type PendingQuestion struct {
+	// PostedChannelID / PostedMessageTS locate the Slack message hosting the
+	// question form so the submit handler can update it in place into the
+	// read-only "answered" view.
+	PostedChannelID string
+	PostedMessageTS string
+	// Reason is the planner's single-rationale text shared across all items.
+	Reason string
+	// Items mirrors draft.QuestionPayload.Items at the time the question was
+	// posted. Stored here so the submit handler can label each answer back
+	// against the original question text and option list, even after the
+	// planner advances and the Slack message blocks have been rebuilt.
+	Items []PendingQuestionItem
+}
+
+// PendingQuestionItem is a single question's persisted snapshot.
+type PendingQuestionItem struct {
+	ID      string
+	Text    string
+	Type    string // "select" | "multi_select"
+	Options []string
 }
 
 // IsCaseBound reports whether this Session belongs to a case-bound thread.

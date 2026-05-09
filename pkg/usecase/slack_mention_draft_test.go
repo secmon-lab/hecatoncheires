@@ -3,7 +3,6 @@ package usecase_test
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -610,8 +609,11 @@ func TestLifecycle_DraftFlow_InvestigateQuestionResumeMaterialize(t *testing.T) 
 		// Round 2 (after observation): ask the user.
 		`{
             "reasoning": "still missing severity",
-            "action": "post_question",
-            "post_question": {"text": "What is the severity?", "options": ["low","high"], "reason": "need severity to fill the schema"}
+            "action": "question",
+            "question": {
+                "reason": "need severity to fill the schema",
+                "items": [{"id":"q-sev","text":"What is the severity?","type":"select","options":["low","high"]}]
+            }
         }`,
 		// Round 3 (after thread reply): materialize.
 		`{
@@ -635,22 +637,21 @@ func TestLifecycle_DraftFlow_InvestigateQuestionResumeMaterialize(t *testing.T) 
 		appMentionEvent(channelID, "U1", "<@BOT> case please", mentionTS))).Required()
 	async.Wait()
 
-	// post_question landed as a thread reply containing the question text.
-	var qReply string
-	for _, r := range h.slackMock.threadReplies {
-		if strings.Contains(r, "What is the severity?") {
-			qReply = r
-			break
-		}
-	}
-	gt.String(t, qReply).Contains("low").Contains("high")
-
 	// Session is persisted with LastAction = post_question so the dispatcher
-	// will treat the next thread reply as a resume signal.
+	// will treat the next thread reply as a resume signal. The pending
+	// question snapshot is the canonical record of what was asked — assert
+	// against it rather than parsing rendered Slack blocks.
 	ssn1, err := h.repo.Session().GetByThread(context.Background(), channelID, mentionTS)
 	gt.NoError(t, err).Required()
 	gt.Value(t, ssn1).NotNil().Required()
 	gt.Value(t, ssn1.LastAction).Equal(model.SessionEndedWithQuestion)
+	gt.Value(t, ssn1.PendingQuestion).NotNil().Required()
+	gt.Array(t, ssn1.PendingQuestion.Items).Length(1).Required()
+	gt.Value(t, ssn1.PendingQuestion.Items[0].ID).Equal("q-sev")
+	gt.String(t, ssn1.PendingQuestion.Items[0].Text).Contains("severity")
+	gt.Array(t, ssn1.PendingQuestion.Items[0].Options).Length(2)
+	gt.Value(t, ssn1.PendingQuestion.Items[0].Options[0]).Equal("low")
+	gt.Value(t, ssn1.PendingQuestion.Items[0].Options[1]).Equal("high")
 
 	// --- Turn 2: user replies in-thread without mentioning the bot.
 	reply := &slackevents.EventsAPIEvent{
@@ -679,6 +680,96 @@ func TestLifecycle_DraftFlow_InvestigateQuestionResumeMaterialize(t *testing.T) 
 	gt.Value(t, d).NotNil().Required()
 	gt.Value(t, d.Materialization).NotNil().Required()
 	gt.Value(t, d.Materialization.Title).Equal("Outage X")
+	gt.Value(t, d.Materialization.CustomFieldValues["severity"].Value).Equal("high")
+}
+
+// --- Scenario F: mention → question → Submit-button drives the resume ---
+func TestLifecycle_DraftFlow_QuestionFormSubmitResumesPlanner(t *testing.T) {
+	const channelID = "C-LIFE-F"
+	const mentionTS = "1700000010.000000"
+	const formTS = "ts-thread"
+	const submitTS = "1700000020.000000"
+	registry := newRegistryWithSchema("ws-1", "WS-1", schemaWithSeverity())
+
+	llm := newScriptedPlannerLLM(t, []string{
+		// Round 1 (mention): ask the user.
+		`{
+            "reasoning": "need severity to fill the schema",
+            "action": "question",
+            "question": {
+                "reason": "need severity",
+                "items": [{"id":"q-sev","text":"What is the severity?","type":"select","options":["low","high"]}]
+            }
+        }`,
+		// Round 2 (after Submit): materialize.
+		`{
+            "reasoning": "user said high",
+            "action": "materialize",
+            "materialize": {
+                "workspace_id": "ws-1",
+                "title": "Outage F",
+                "description": "Service degraded.",
+                "custom_field_values": {"severity": "high"}
+            }
+        }`,
+	}, nil)
+
+	h := newLifecycleHarness(t, registry, llm)
+
+	// --- Turn 1: mention → planner emits question.
+	gt.NoError(t, h.slackUC.HandleSlackEvent(context.Background(),
+		appMentionEvent(channelID, "U1", "<@BOT> case please", mentionTS))).Required()
+	async.Wait()
+
+	ssn1, err := h.repo.Session().GetByThread(context.Background(), channelID, mentionTS)
+	gt.NoError(t, err).Required()
+	gt.Value(t, ssn1).NotNil().Required()
+	gt.Value(t, ssn1.LastAction).Equal(model.SessionEndedWithQuestion)
+	gt.Value(t, ssn1.PendingQuestion).NotNil().Required()
+	gt.Value(t, ssn1.PendingQuestion.PostedMessageTS).Equal(formTS)
+
+	// --- Turn 2: user clicks Submit on the form.
+	cb := &goslack.InteractionCallback{
+		Type:    goslack.InteractionTypeBlockActions,
+		User:    goslack.User{ID: "U1"},
+		Channel: goslack.Channel{GroupConversation: goslack.GroupConversation{Conversation: goslack.Conversation{ID: channelID}}},
+		Message: goslack.Message{Msg: goslack.Msg{Timestamp: formTS, ThreadTimestamp: mentionTS}},
+		BlockActionState: &goslack.BlockActionStates{
+			Values: map[string]map[string]goslack.BlockAction{
+				usecase.BlockIDDraftQuestionItemPrefix + "q-sev": {
+					usecase.ActionIDDraftQuestionChoice: {
+						SelectedOption: goslack.OptionBlockObject{Value: "high"},
+					},
+				},
+			},
+		},
+		ActionCallback: goslack.ActionCallbacks{
+			BlockActions: []*goslack.BlockAction{
+				{ActionID: usecase.ActionIDDraftQuestionSubmit, Value: string(ssn1.DraftID)},
+			},
+		},
+	}
+	_ = submitTS // reserved for future per-submission ts attribution
+	gt.NoError(t, h.mentionDraft.HandleQuestionSubmit(context.Background(), cb,
+		cb.ActionCallback.BlockActions[0])).Required()
+	async.Wait()
+
+	// PendingQuestion is cleared and the planner advanced to materialize.
+	ssn2, err := h.repo.Session().GetByThread(context.Background(), channelID, mentionTS)
+	gt.NoError(t, err).Required()
+	gt.Value(t, ssn2.LastAction).Equal(model.SessionEndedWithMaterialize)
+	gt.Value(t, ssn2.PendingQuestion).Nil()
+
+	// Form was rewritten into the answered view (one UpdateMessage just for
+	// the form swap; further updates may follow from the materialize path).
+	gt.Number(t, len(h.slackMock.updateBlockPosts)).GreaterOrEqual(1)
+
+	// Materialization landed with the user's answer baked into custom fields.
+	d, err := h.repo.CaseDraft().Get(context.Background(), ssn2.DraftID)
+	gt.NoError(t, err).Required()
+	gt.Value(t, d).NotNil().Required()
+	gt.Value(t, d.Materialization).NotNil().Required()
+	gt.Value(t, d.Materialization.Title).Equal("Outage F")
 	gt.Value(t, d.Materialization.CustomFieldValues["severity"].Value).Equal("high")
 }
 
@@ -823,8 +914,13 @@ func TestLifecycle_DraftFlow_ParallelInvestigationsThenMaterialize(t *testing.T)
 	gt.Value(t, d.Materialization.CustomFieldValues["severity"].Value).Equal("high")
 }
 
-// --- Scenario D: post_message terminal → thread reply must NOT resume (F8) ---
-func TestLifecycle_DraftFlow_PostMessageEndsThenReplyIsDropped(t *testing.T) {
+// --- Scenario D: materialize terminal → thread reply must NOT resume (F8) ---
+//
+// Once the planner has produced a draft preview the conversation is over
+// from the agent's perspective; further thread chatter without an explicit
+// @mention should be ignored. Dispatcher F8 enforces this by checking
+// session.ResumeOnReply() (true only when LastAction == post_question).
+func TestLifecycle_DraftFlow_MaterializeEndsThenReplyIsDropped(t *testing.T) {
 	const channelID = "C-LIFE-D"
 	const mentionTS = "1700000040.000000"
 	const replyTS = "1700000050.000000"
@@ -836,9 +932,14 @@ func TestLifecycle_DraftFlow_PostMessageEndsThenReplyIsDropped(t *testing.T) {
 	// exhausts and the test fails.
 	llm := newScriptedPlannerLLM(t, []string{
 		`{
-            "reasoning": "no case needed",
-            "action": "post_message",
-            "post_message": {"text": "All good — nothing actionable here."}
+            "reasoning": "materialize directly",
+            "action": "materialize",
+            "materialize": {
+                "workspace_id": "ws-1",
+                "title": "Case D",
+                "description": "Done.",
+                "custom_field_values": {"severity": "low"}
+            }
         }`,
 	}, nil)
 
@@ -850,7 +951,7 @@ func TestLifecycle_DraftFlow_PostMessageEndsThenReplyIsDropped(t *testing.T) {
 
 	ssn, err := h.repo.Session().GetByThread(context.Background(), channelID, mentionTS)
 	gt.NoError(t, err).Required()
-	gt.Value(t, ssn.LastAction).Equal(model.SessionEndedWithMessage)
+	gt.Value(t, ssn.LastAction).Equal(model.SessionEndedWithMaterialize)
 
 	// Thread reply: F8 must drop. No additional LLM calls.
 	reply := &slackevents.EventsAPIEvent{
@@ -868,10 +969,10 @@ func TestLifecycle_DraftFlow_PostMessageEndsThenReplyIsDropped(t *testing.T) {
 	gt.NoError(t, h.slackUC.HandleSlackEvent(context.Background(), reply)).Required()
 	async.Wait()
 
-	// Session unchanged; LastAction still post_message.
+	// Session unchanged; LastAction still materialize.
 	ssn2, err := h.repo.Session().GetByThread(context.Background(), channelID, mentionTS)
 	gt.NoError(t, err).Required()
-	gt.Value(t, ssn2.LastAction).Equal(model.SessionEndedWithMessage)
+	gt.Value(t, ssn2.LastAction).Equal(model.SessionEndedWithMaterialize)
 }
 
 // --- Scenario E: mention → materialize → HandleSubmit creates the Case ---

@@ -25,20 +25,13 @@ import (
 // service mock.
 type hostStub struct {
 	mu             sync.Mutex
-	postedMessages []string
 	postedQuestion []draft.QuestionPayload
 	materialized   []draft.MaterializePayload
 	traceLines     []string
 	busyCalls      int
 }
 
-func (h *hostStub) PostMessage(_ context.Context, _ *model.Session, text string) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.postedMessages = append(h.postedMessages, text)
-	return nil
-}
-func (h *hostStub) PostQuestion(_ context.Context, _ *model.Session, q draft.QuestionPayload) error {
+func (h *hostStub) Question(_ context.Context, _ *model.Session, q draft.QuestionPayload) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.postedQuestion = append(h.postedQuestion, q)
@@ -118,17 +111,17 @@ func newOpenSession() *model.Session {
 	}
 }
 
-func TestRunTurn_PostMessageHappyPath(t *testing.T) {
+func TestRunTurn_QuestionHappyPath(t *testing.T) {
 	ctx := context.Background()
 	llm := newScriptedLLM([]string{
-		`{"reasoning":"already enough","action":"post_message","post_message":{"text":"Got it, thanks."}}`,
+		`{"reasoning":"need user input","action":"question","question":{"reason":"need workspace","items":[{"id":"q-ws","text":"Which workspace?","type":"select","options":["A","B"]}]}}`,
 	})
 	uc := mustDraft(t, llm, 8, 16)
 
 	host := &hostStub{}
 	res, err := uc.RunTurn(ctx, draft.TurnRequest{
 		Session:   newOpenSession(),
-		UserInput: "@bot just say hi",
+		UserInput: "@bot which workspace?",
 		Trigger:   draft.TriggerAppMention,
 		TriggerTS: "1700000001.000001",
 		Handler:   host,
@@ -137,11 +130,13 @@ func TestRunTurn_PostMessageHappyPath(t *testing.T) {
 	gt.NoError(t, err).Required()
 	gt.Value(t, res).NotNil().Required()
 	gt.Value(t, res.Status).Equal(draft.StatusCompleted)
-	gt.Value(t, res.EndedWith).Equal(model.SessionEndedWithMessage)
-	gt.Array(t, host.postedMessages).Length(1)
-	gt.String(t, host.postedMessages[0]).Equal("Got it, thanks.")
+	gt.Value(t, res.EndedWith).Equal(model.SessionEndedWithQuestion)
+	gt.Array(t, host.postedQuestion).Length(1).Required()
+	gt.Value(t, host.postedQuestion[0].Reason).Equal("need workspace")
+	gt.Array(t, host.postedQuestion[0].Items).Length(1).Required()
+	gt.Value(t, host.postedQuestion[0].Items[0].ID).Equal("q-ws")
+	gt.Value(t, host.postedQuestion[0].Items[0].Type).Equal(draft.QuestionItemSelect)
 	gt.Array(t, host.materialized).Length(0)
-	gt.Array(t, host.postedQuestion).Length(0)
 }
 
 func TestRunTurn_InvestigateThenMaterialize(t *testing.T) {
@@ -254,17 +249,18 @@ func TestRunTurn_PlannerBudgetExhaustionFallback(t *testing.T) {
 	})
 	async.Wait()
 	gt.NoError(t, err).Required()
-	gt.Value(t, res.Status).Equal(draft.StatusCompleted)
-	gt.Value(t, res.EndedWith).Equal(model.SessionEndedWithMessage)
-	// Fallback message went to the host.
-	gt.Array(t, host.postedMessages).Length(1).Required()
-	gt.String(t, host.postedMessages[0]).Contains("couldn't reach a conclusion")
+	// Budget exhausted → StatusFallback with non-empty reason. Runtime
+	// does NOT post anything itself; the host renders fallback copy.
+	gt.Value(t, res.Status).Equal(draft.StatusFallback)
+	gt.String(t, res.FallbackReason).NotEqual("")
+	gt.Array(t, host.materialized).Length(0)
+	gt.Array(t, host.postedQuestion).Length(0)
 }
 
 func TestRunTurn_BusyShortCircuits(t *testing.T) {
 	ctx := context.Background()
 	llm := newScriptedLLM([]string{
-		`{"reasoning":"x","action":"post_message","post_message":{"text":"first"}}`,
+		`{"reasoning":"x","action":"question","question":{"reason":"r","items":[{"id":"q","text":"?","type":"select","options":["a","b"]}]}}`,
 	})
 	deps := &agent.CommonDeps{
 		Repo:                memory.New(),
@@ -297,13 +293,13 @@ func TestRunTurn_BusyShortCircuits(t *testing.T) {
 	gt.NoError(t, err).Required()
 	gt.Value(t, res.Status).Equal(draft.StatusBusy)
 	gt.Number(t, host.busyCalls).Equal(1)
-	gt.Array(t, host.postedMessages).Length(0)
+	gt.Array(t, host.postedQuestion).Length(0)
 }
 
 func TestRunTurn_IdempotentRetryDropsSilently(t *testing.T) {
 	ctx := context.Background()
 	llm := newScriptedLLM([]string{
-		`{"reasoning":"x","action":"post_message","post_message":{"text":"first"}}`,
+		`{"reasoning":"x","action":"question","question":{"reason":"r","items":[{"id":"q","text":"?","type":"select","options":["a","b"]}]}}`,
 	})
 	deps := &agent.CommonDeps{
 		Repo:                memory.New(),
@@ -335,7 +331,7 @@ func TestRunTurn_IdempotentRetryDropsSilently(t *testing.T) {
 	gt.NoError(t, err).Required()
 	gt.Value(t, res.Status).Equal(draft.StatusIdempotent)
 	gt.Number(t, host.busyCalls).Equal(0)
-	gt.Array(t, host.postedMessages).Length(0)
+	gt.Array(t, host.postedQuestion).Length(0)
 }
 
 // combineScript wraps a scripted planner LLM and folds in sub-agent

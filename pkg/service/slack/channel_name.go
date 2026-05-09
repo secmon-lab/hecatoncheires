@@ -40,44 +40,27 @@ func NormalizeChannelName(name string) string {
 	result.Grow(len(name))
 
 	for _, r := range name {
-		// Allow: lowercase Latin letters, numbers, hyphens, underscores
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_':
+			// Allow: lowercase Latin letters, numbers, hyphens, underscores.
 			result.WriteRune(r)
-		} else if r >= 'A' && r <= 'Z' {
-			// Convert uppercase Latin letters to lowercase
+		case r >= 'A' && r <= 'Z':
+			// Convert uppercase Latin letters to lowercase.
 			result.WriteRune(unicode.ToLower(r))
-		} else if r > 127 {
-			// Allow all non-ASCII characters (Japanese, accented characters, etc.)
-			// except for specific prohibited ones
-			if !isProhibitedSymbol(r) {
-				result.WriteRune(r)
-			}
+		case r > 127 && (unicode.IsLetter(r) || unicode.IsDigit(r)):
+			// Allow non-ASCII *letters and digits* (Japanese kana/kanji,
+			// accented characters, etc.). Punctuation, dashes, brackets,
+			// quotes, separators, and symbols are intentionally stripped —
+			// Slack's chat.create rejects e.g. em dash (U+2014) / en dash
+			// (U+2013) / Japanese 「」、・ as `invalid_name_specials`,
+			// and unicode.IsLetter / IsDigit is the most reliable allowlist.
+			result.WriteRune(r)
 		}
-		// Prohibited: slashes, periods, commas, and other ASCII symbols (except hyphen and underscore)
+		// Everything else (ASCII symbols, Unicode punctuation / symbols /
+		// separators) is dropped silently.
 	}
 
 	return result.String()
-}
-
-// isProhibitedSymbol checks if a Unicode character is prohibited in Slack channel names
-func isProhibitedSymbol(r rune) bool {
-	// Prohibited characters: Japanese punctuation and special symbols
-	prohibitedRunes := []rune{
-		// Japanese punctuation
-		'。', '、',
-		// ASCII special characters
-		'!', '?', '/', '\\', '.', ',',
-		'@', '#', '$', '%', '^', '&', '*', '(', ')', '[', ']',
-		'{', '}', '<', '>', '|', '~', '`', '\'', '"', ';', ':',
-		'+', '=',
-	}
-
-	for _, prohibited := range prohibitedRunes {
-		if r == prohibited {
-			return true
-		}
-	}
-	return false
 }
 
 // GenerateRiskChannelName generates a Slack channel name for a risk

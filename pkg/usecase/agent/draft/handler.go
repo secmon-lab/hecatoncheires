@@ -16,7 +16,7 @@ const (
 	// TriggerAppMention — the user @-mentioned the bot.
 	TriggerAppMention Trigger = iota
 	// TriggerThreadReply — the user replied in the thread without a mention,
-	// while the prior turn ended on post_question.
+	// while the prior turn ended on action=question.
 	TriggerThreadReply
 	// TriggerWSSwitch — the user switched the active workspace via the
 	// preview UI, requiring a re-materialise on the existing draft.
@@ -27,13 +27,15 @@ const (
 // Slack-side side effects. The runtime never touches the Slack service
 // directly; the host implements this interface and renders the
 // terminal action / busy / trace into Slack messages.
+//
+// PostMessage was retired with the post_message planner action: when the
+// planner needs user input, it always uses Question instead. Internal
+// fallback (planner budget exhausted, internal errors) is signalled via
+// Result.Status=StatusFallback so the host can render whatever copy fits.
 type Handler interface {
-	// PostMessage renders the planner's terminal post_message text into a
-	// thread reply.
-	PostMessage(ctx context.Context, ssn *model.Session, text string) error
-	// PostQuestion renders the planner's terminal question; options are
-	// optional and render however the host prefers (buttons / list / plain).
-	PostQuestion(ctx context.Context, ssn *model.Session, q QuestionPayload) error
+	// Question renders the planner's terminal question payload. Items can
+	// be 1-5 with each item carrying a select / multi-select control.
+	Question(ctx context.Context, ssn *model.Session, q QuestionPayload) error
 	// Materialize persists / refreshes the CaseDraft for ssn with the given
 	// payload. The host validates against the workspace's FieldSchema.
 	Materialize(ctx context.Context, ssn *model.Session, m MaterializePayload) error
@@ -44,11 +46,37 @@ type Handler interface {
 	PostBusy(ctx context.Context, ssn *model.Session, info agent.BusyInfo) error
 }
 
-// QuestionPayload is the pure-domain shape passed to Handler.PostQuestion.
+// QuestionPayload is the pure-domain shape passed to Handler.Question.
 type QuestionPayload struct {
-	Text    string
+	// Reason explains the information gap (single rationale shared across
+	// all items).
+	Reason string
+	// Items is the ordered list of questions to ask in this turn. Always
+	// non-empty (validation guarantees ≥1).
+	Items []QuestionItem
+}
+
+// QuestionItemType is the host-rendering hint for a question item.
+type QuestionItemType string
+
+const (
+	// QuestionItemSelect is a single-choice picker.
+	QuestionItemSelect QuestionItemType = "select"
+	// QuestionItemMultiSelect is a multi-choice picker.
+	QuestionItemMultiSelect QuestionItemType = "multi_select"
+)
+
+// QuestionItem is one question within QuestionPayload.Items.
+type QuestionItem struct {
+	// ID uniquely identifies the question within the payload; the host
+	// uses it to correlate answers back when the user submits.
+	ID string
+	// Text is the prompt shown to the user.
+	Text string
+	// Type discriminates the answer control (select / multi_select).
+	Type QuestionItemType
+	// Options is the allowed answer set (always ≥2 entries).
 	Options []string
-	Reason  string
 }
 
 // MaterializePayload is the pure-domain shape passed to Handler.Materialize.
@@ -63,25 +91,17 @@ type MaterializePayload struct {
 // letting callers supply only the methods they care about. Missing entries
 // are treated as no-ops (or returning nil for methods that return error).
 type HandlerFuncs struct {
-	PostMessageFn  func(ctx context.Context, ssn *model.Session, text string) error
-	PostQuestionFn func(ctx context.Context, ssn *model.Session, q QuestionPayload) error
-	MaterializeFn  func(ctx context.Context, ssn *model.Session, m MaterializePayload) error
-	TraceFn        func(ctx context.Context, line string)
-	PostBusyFn     func(ctx context.Context, ssn *model.Session, info agent.BusyInfo) error
+	QuestionFn    func(ctx context.Context, ssn *model.Session, q QuestionPayload) error
+	MaterializeFn func(ctx context.Context, ssn *model.Session, m MaterializePayload) error
+	TraceFn       func(ctx context.Context, line string)
+	PostBusyFn    func(ctx context.Context, ssn *model.Session, info agent.BusyInfo) error
 }
 
-func (h HandlerFuncs) PostMessage(ctx context.Context, ssn *model.Session, text string) error {
-	if h.PostMessageFn == nil {
+func (h HandlerFuncs) Question(ctx context.Context, ssn *model.Session, q QuestionPayload) error {
+	if h.QuestionFn == nil {
 		return nil
 	}
-	return h.PostMessageFn(ctx, ssn, text)
-}
-
-func (h HandlerFuncs) PostQuestion(ctx context.Context, ssn *model.Session, q QuestionPayload) error {
-	if h.PostQuestionFn == nil {
-		return nil
-	}
-	return h.PostQuestionFn(ctx, ssn, q)
+	return h.QuestionFn(ctx, ssn, q)
 }
 
 func (h HandlerFuncs) Materialize(ctx context.Context, ssn *model.Session, m MaterializePayload) error {

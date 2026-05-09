@@ -106,6 +106,7 @@ func (uc *SlackUseCases) HandleSlackEvent(ctx context.Context, event *slackevent
 		if uc.mentionDraft == nil {
 			return nil
 		}
+		ctx = uc.contextWithUserLang(ctx, appMention.User)
 		if err := uc.mentionDraft.HandleAppMention(ctx, appMention); err != nil {
 			logger.Error("failed to handle mention draft", "error", err.Error())
 		}
@@ -123,6 +124,7 @@ func (uc *SlackUseCases) HandleSlackEvent(ctx context.Context, event *slackevent
 		if !uc.shouldResumeOnReply(ctx, msgEv) {
 			return nil
 		}
+		ctx = uc.contextWithUserLang(ctx, msgEv.User)
 		if err := uc.mentionDraft.HandleThreadReply(ctx, msgEv); err != nil {
 			logger.Error("failed to handle thread reply resume", "error", err.Error())
 		}

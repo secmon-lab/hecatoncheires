@@ -21,19 +21,16 @@ import (
 )
 
 // recordingHandler captures Trace lines so the test can assert on the
-// progress narrative. PostMessage / PostQuestion / Materialize / PostBusy
-// are unused here (investigate flow doesn't reach terminal actions) so
-// they fail the test if invoked.
+// progress narrative. Question / Materialize / PostBusy are unused here
+// (investigate flow doesn't reach terminal actions) so they fail the test
+// if invoked.
 type recordingHandler struct {
 	mu    sync.Mutex
 	lines []string
 }
 
-func (h *recordingHandler) PostMessage(_ context.Context, _ *model.Session, _ string) error {
-	return errors.New("unexpected PostMessage in investigate test")
-}
-func (h *recordingHandler) PostQuestion(_ context.Context, _ *model.Session, _ draft.QuestionPayload) error {
-	return errors.New("unexpected PostQuestion in investigate test")
+func (h *recordingHandler) Question(_ context.Context, _ *model.Session, _ draft.QuestionPayload) error {
+	return errors.New("unexpected Question in investigate test")
 }
 func (h *recordingHandler) Materialize(_ context.Context, _ *model.Session, _ draft.MaterializePayload) error {
 	return errors.New("unexpected Materialize in investigate test")

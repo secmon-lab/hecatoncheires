@@ -176,6 +176,12 @@ func (uc *MentionDraftUseCase) HandleAppMention(ctx context.Context, ev *slackev
 		// StatusIdempotent is silent. The processing placeholder may
 		// still be showing — replace it with the "ended" footer.
 		uc.removeProcessingMessage(ctx, ev.Channel, processingTS)
+	case draft.StatusFallback:
+		// Planner exhausted budget / hit an internal error before reaching
+		// a terminal action. Surface a system fallback message so the user
+		// is not left waiting on the processing placeholder.
+		uc.removeProcessingMessage(ctx, ev.Channel, processingTS)
+		uc.notifyDraftFallback(ctx, ev.Channel, threadTS, result.FallbackReason)
 	}
 
 	logger.Info("case draft turn finished",
@@ -187,6 +193,20 @@ func (uc *MentionDraftUseCase) HandleAppMention(ctx context.Context, ev *slackev
 		"ended_with", string(result.EndedWith),
 	)
 	return nil
+}
+
+// notifyDraftFallback posts a thread reply telling the user the planner
+// ran out of budget or hit an internal error. Best-effort; secondary
+// failures are funneled through errutil.Handle.
+func (uc *MentionDraftUseCase) notifyDraftFallback(ctx context.Context, channelID, threadTS, reason string) {
+	const text = ":warning: I couldn't reach a conclusion within the budget for this turn. Please mention me again with more context."
+	if _, err := uc.slackService.PostThreadReply(ctx, channelID, threadTS, text); err != nil {
+		errutil.Handle(ctx, goerr.Wrap(err, "post draft fallback reply",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", threadTS),
+			goerr.V("fallback_reason", reason),
+		), "could not surface draft fallback to user")
+	}
 }
 
 // loadOrCreateDraftSession returns the Session for the given thread,
@@ -329,6 +349,9 @@ func (uc *MentionDraftUseCase) HandleThreadReply(ctx context.Context, ev *slacke
 	})
 	if runErr != nil {
 		return goerr.Wrap(runErr, "thread reply turn failed")
+	}
+	if result.Status == draft.StatusFallback {
+		uc.notifyDraftFallback(ctx, ev.Channel, threadTS, result.FallbackReason)
 	}
 
 	logger.Info("thread reply turn finished",

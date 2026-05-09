@@ -34,33 +34,43 @@ func TestParseAndValidate_Investigate(t *testing.T) {
 	gt.Value(t, p.Investigate.Tasks[0].ID).Equal("inv-1")
 }
 
-func TestParseAndValidate_PostMessage(t *testing.T) {
-	raw := []byte(`{
-		"reasoning": "we already know enough",
-		"action": "post_message",
-		"post_message": { "text": "Here is the summary." }
-	}`)
-	p, err := draft.ParseAndValidateForTest(raw)
-	gt.NoError(t, err).Required()
-	gt.Value(t, p.Action).Equal(draft.ActionPostMessageForTest)
-	gt.Value(t, p.PostMessage).NotNil().Required()
-	gt.Value(t, p.PostMessage.Text).Equal("Here is the summary.")
-}
-
-func TestParseAndValidate_PostQuestion_WithOptions(t *testing.T) {
+func TestParseAndValidate_Question_SingleSelect(t *testing.T) {
 	raw := []byte(`{
 		"reasoning": "ask user to disambiguate",
-		"action": "post_question",
-		"post_question": {
-			"text": "Which workspace?",
+		"action": "question",
+		"question": {
 			"reason": "multiple workspaces match",
-			"options": ["A", "B"]
+			"items": [
+				{"id":"q-ws","text":"Which workspace?","type":"select","options":["A","B"]}
+			]
 		}
 	}`)
 	p, err := draft.ParseAndValidateForTest(raw)
 	gt.NoError(t, err).Required()
-	gt.Value(t, p.PostQuestion).NotNil().Required()
-	gt.Array(t, p.PostQuestion.Options).Length(2)
+	gt.Value(t, p.Action).Equal(draft.ActionQuestionForTest)
+	gt.Value(t, p.Question).NotNil().Required()
+	gt.Array(t, p.Question.Items).Length(1).Required()
+	gt.Value(t, p.Question.Items[0].ID).Equal("q-ws")
+	gt.Value(t, p.Question.Items[0].Type).Equal(draft.QuestionTypeSelectForTest)
+	gt.Array(t, p.Question.Items[0].Options).Length(2)
+}
+
+func TestParseAndValidate_Question_MultiSelectMultipleItems(t *testing.T) {
+	raw := []byte(`{
+		"reasoning": "two pieces of info missing",
+		"action": "question",
+		"question": {
+			"reason": "we need severity AND categories",
+			"items": [
+				{"id":"q-sev","text":"Severity?","type":"select","options":["low","high"]},
+				{"id":"q-cat","text":"Categories?","type":"multi_select","options":["network","auth","data"]}
+			]
+		}
+	}`)
+	p, err := draft.ParseAndValidateForTest(raw)
+	gt.NoError(t, err).Required()
+	gt.Array(t, p.Question.Items).Length(2).Required()
+	gt.Value(t, p.Question.Items[1].Type).Equal(draft.QuestionTypeMultiSelectForTest)
 }
 
 func TestParseAndValidate_Materialize(t *testing.T) {
@@ -87,19 +97,19 @@ func TestParseAndValidate_RejectsBadJSON(t *testing.T) {
 }
 
 func TestParseAndValidate_RejectsActionPayloadMismatch(t *testing.T) {
-	t.Run("investigate with post_message payload", func(t *testing.T) {
+	t.Run("investigate with question payload", func(t *testing.T) {
 		raw := []byte(`{
 			"reasoning": "x",
 			"action": "investigate",
-			"post_message": {"text": "hi"}
+			"question": {"reason":"r","items":[{"id":"q","text":"t","type":"select","options":["a","b"]}]}
 		}`)
 		_, err := draft.ParseAndValidateForTest(raw)
 		gt.Error(t, err)
 	})
-	t.Run("post_message but payload missing", func(t *testing.T) {
+	t.Run("question but payload missing", func(t *testing.T) {
 		raw := []byte(`{
 			"reasoning": "x",
-			"action": "post_message"
+			"action": "question"
 		}`)
 		_, err := draft.ParseAndValidateForTest(raw)
 		gt.Error(t, err)
@@ -107,8 +117,8 @@ func TestParseAndValidate_RejectsActionPayloadMismatch(t *testing.T) {
 	t.Run("multiple payloads set", func(t *testing.T) {
 		raw := []byte(`{
 			"reasoning": "x",
-			"action": "post_message",
-			"post_message": {"text": "hi"},
+			"action": "question",
+			"question": {"reason":"r","items":[{"id":"q","text":"t","type":"select","options":["a","b"]}]},
 			"materialize": {"workspace_id": "ws", "title": "t"}
 		}`)
 		_, err := draft.ParseAndValidateForTest(raw)
@@ -191,22 +201,31 @@ func TestParseAndValidate_RejectsEmptyToolsList(t *testing.T) {
 func TestParseAndValidate_RejectsQuestionOptionsTooFew(t *testing.T) {
 	raw := []byte(`{
 		"reasoning": "x",
-		"action": "post_question",
-		"post_question": {"text": "?", "reason": "y", "options": ["only"]}
+		"action": "question",
+		"question": {"reason":"y","items":[{"id":"q","text":"?","type":"select","options":["only"]}]}
 	}`)
 	_, err := draft.ParseAndValidateForTest(raw)
 	gt.Error(t, err)
 }
 
-func TestParseAndValidate_QuestionWithoutOptionsOK(t *testing.T) {
+func TestParseAndValidate_RejectsQuestionWithoutItems(t *testing.T) {
 	raw := []byte(`{
 		"reasoning": "x",
-		"action": "post_question",
-		"post_question": {"text": "?", "reason": "y"}
+		"action": "question",
+		"question": {"reason":"y","items":[]}
 	}`)
-	p, err := draft.ParseAndValidateForTest(raw)
-	gt.NoError(t, err).Required()
-	gt.Array(t, p.PostQuestion.Options).Length(0)
+	_, err := draft.ParseAndValidateForTest(raw)
+	gt.Error(t, err)
+}
+
+func TestParseAndValidate_RejectsQuestionUnknownType(t *testing.T) {
+	raw := []byte(`{
+		"reasoning": "x",
+		"action": "question",
+		"question": {"reason":"y","items":[{"id":"q","text":"?","type":"radio","options":["a","b"]}]}
+	}`)
+	_, err := draft.ParseAndValidateForTest(raw)
+	gt.Error(t, err)
 }
 
 func TestParseAndValidate_RejectsMaterializeMissingWorkspace(t *testing.T) {
@@ -225,10 +244,11 @@ func TestPlanSchema_Shape(t *testing.T) {
 	gt.Map(t, schema.Properties).HasKey("action")
 	gt.Map(t, schema.Properties).HasKey("reasoning")
 	gt.Map(t, schema.Properties).HasKey("investigate")
+	gt.Map(t, schema.Properties).HasKey("question")
 	gt.Map(t, schema.Properties).HasKey("materialize")
-	// action enum covers all four planActions.
+	// action enum covers the three planActions.
 	actionEnum := schema.Properties["action"].Enum
-	gt.Array(t, actionEnum).Length(4)
+	gt.Array(t, actionEnum).Length(3)
 }
 
 func TestFormatObservations_RendersStatusAndCriteria(t *testing.T) {

@@ -2,7 +2,6 @@ package draft
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 	"time"
 
@@ -18,9 +17,6 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
-
-//go:embed prompts/planner.md
-var plannerSystemPrompt string
 
 // TurnRequest is the input for one open-mode turn.
 type TurnRequest struct {
@@ -59,13 +55,12 @@ type TurnRequest struct {
 	Handler Handler
 }
 
-// Status discriminates the four terminal shapes RunTurn can return to the
-// host.
+// Status discriminates the terminal shapes RunTurn can return to the host.
 type Status int
 
 const (
-	// StatusCompleted means the turn ran end-to-end and (if applicable)
-	// the host has already been called with the terminal action.
+	// StatusCompleted means the turn ran end-to-end and the host has been
+	// called with a terminal action (Question or Materialize).
 	StatusCompleted Status = iota
 	// StatusBusy means another turn was running on this Session;
 	// Handler.PostBusy was invoked. The host should not re-post on the
@@ -74,6 +69,12 @@ const (
 	// StatusIdempotent means the trigger duplicates a turn already in
 	// flight (Slack event re-delivery). Drop silently.
 	StatusIdempotent
+	// StatusFallback means the planner exhausted its budget or hit an
+	// internal error before reaching a terminal action. The host should
+	// post a system fallback message (e.g. "I couldn't reach a conclusion;
+	// please mention me again with more context"). The runtime does NOT
+	// post anything itself in this case.
+	StatusFallback
 )
 
 // Result is the outcome of RunTurn.
@@ -82,6 +83,9 @@ type Result struct {
 	// EndedWith is the SessionEndReason recorded on Session when the turn
 	// hit a terminal action. Zero-valued for StatusBusy / StatusIdempotent.
 	EndedWith model.SessionEndReason
+	// FallbackReason describes why StatusFallback was returned (e.g.
+	// "planner budget exhausted"). Non-empty only when Status==Fallback.
+	FallbackReason string
 }
 
 // RunTurn drives one open-mode planner round-trip on the supplied Session.
@@ -158,6 +162,21 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 	}()
 
 	resolver := uc.buildToolSetResolver(req)
+	// Render the system prompt with the registered workspace list +
+	// per-workspace custom field schemas so the planner has the exact
+	// vocabulary to choose a workspace and fill its required fields.
+	systemPrompt, err := renderPlannerPrompt(uc.deps.Registry, plannerLanguageLabel(turnCtx))
+	if err != nil {
+		return nil, goerr.Wrap(err, "render planner prompt")
+	}
+	logging.From(turnCtx).Debug("draft turn started",
+		"session_id", req.Session.ID,
+		"turn_id", handle.OwnerID,
+		"trigger", triggerString(req.Trigger),
+		"user_input_len", len(req.UserInput),
+		"system_prompt_len", len(systemPrompt),
+		"workspace_count", workspaceRegistryCount(uc.deps.Registry),
+	)
 	// Build a fresh planner agent per round. We deliberately do not reuse a
 	// single agent across multiple Execute calls because gollem's loop
 	// budget is shared across calls within an agent, and we want each
@@ -165,7 +184,7 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 	// history from the repository each time, which is the correct semantic.
 	newPlannerAgent := func() *gollem.Agent {
 		return gollem.New(uc.deps.LLMClient,
-			gollem.WithSystemPrompt(plannerSystemPrompt),
+			gollem.WithSystemPrompt(systemPrompt),
 			gollem.WithHistoryRepository(uc.deps.HistoryRepo, req.Session.ID),
 			gollem.WithTrace(recorder),
 			gollem.WithContentType(gollem.ContentTypeJSON),
@@ -186,15 +205,34 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 		budget.PlannerUsed++
 		handler.Trace(turnCtx, i18n.T(turnCtx, i18n.MsgDraftTracePlanning))
 
+		roundStarted := time.Now()
 		resp, execErr := newPlannerAgent().Execute(turnCtx, gollem.Text(nextInput))
+		roundElapsed := time.Since(roundStarted).Round(time.Millisecond)
 		if execErr != nil {
 			return nil, goerr.Wrap(execErr, "planner execute",
 				goerr.V("planner_used", budget.PlannerUsed),
 				goerr.V("trigger_ts", req.TriggerTS),
+				goerr.V("elapsed", roundElapsed),
 			)
 		}
-		if len(resp.Texts) == 0 {
-			return nil, goerr.New("planner returned empty response")
+		var firstTextLen int
+		if len(resp.Texts) > 0 {
+			firstTextLen = len(resp.Texts[0])
+		}
+		logging.From(turnCtx).Debug("planner round completed",
+			"round", budget.PlannerUsed,
+			"elapsed", roundElapsed,
+			"texts_count", len(resp.Texts),
+			"first_text_len", firstTextLen,
+			"is_empty", resp.IsEmpty(),
+		)
+		if resp.IsEmpty() {
+			return nil, goerr.New("planner returned empty response",
+				goerr.V("round", budget.PlannerUsed),
+				goerr.V("elapsed", roundElapsed),
+				goerr.V("texts_count", len(resp.Texts)),
+				goerr.V("first_text_len", firstTextLen),
+			)
 		}
 		p, parseErr := parseAndValidate([]byte(resp.Texts[0]))
 		if parseErr != nil {
@@ -227,16 +265,18 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 			results := uc.runInvestigationsParallel(turnCtx, p.Investigate, handler, resolver)
 			nextInput = budget.FormatPrefix() + "\n\n" + formatObservationsAsUserTurn(p.Investigate, results)
 			continue
-		case actionPostMessage:
-			if err := handler.PostMessage(turnCtx, req.Session, p.PostMessage.Text); err != nil {
-				return nil, goerr.Wrap(err, "handler PostMessage")
+		case actionQuestion:
+			payload := QuestionPayload{Reason: p.Question.Reason}
+			payload.Items = make([]QuestionItem, len(p.Question.Items))
+			for i, it := range p.Question.Items {
+				payload.Items[i] = QuestionItem{
+					ID: it.ID, Text: it.Text,
+					Type:    QuestionItemType(it.Type),
+					Options: it.Options,
+				}
 			}
-			return uc.finalize(turnCtx, req.Session, model.SessionEndedWithMessage)
-		case actionPostQuestion:
-			if err := handler.PostQuestion(turnCtx, req.Session, QuestionPayload{
-				Text: p.PostQuestion.Text, Options: p.PostQuestion.Options, Reason: p.PostQuestion.Reason,
-			}); err != nil {
-				return nil, goerr.Wrap(err, "handler PostQuestion")
+			if err := handler.Question(turnCtx, req.Session, payload); err != nil {
+				return nil, goerr.Wrap(err, "handler Question")
 			}
 			return uc.finalize(turnCtx, req.Session, model.SessionEndedWithQuestion)
 		case actionMaterialize:
@@ -255,14 +295,14 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 	}
 }
 
-// fallback posts a "could not reach conclusion" message via the handler and
-// finalises the turn with SessionEndedWithMessage.
+// fallback returns a StatusFallback result so the host can render whatever
+// system message it likes (the runtime no longer has a PostMessage channel).
+// The session is NOT finalised with a SessionEndReason here: post_message
+// was retired, so the planner's only terminal actions are question /
+// materialize. Fallback is a runtime-internal failure mode.
 func (uc *UseCase) fallback(ctx context.Context, req TurnRequest, reason string) (*Result, error) {
 	logging.From(ctx).Warn("draft turn fallback", "reason", reason, "trigger_ts", req.TriggerTS)
-	if err := req.Handler.PostMessage(ctx, req.Session, fallbackMessage); err != nil {
-		errutil.Handle(ctx, err, "draft fallback PostMessage")
-	}
-	return uc.finalize(ctx, req.Session, model.SessionEndedWithMessage)
+	return &Result{Status: StatusFallback, FallbackReason: reason}, nil
 }
 
 // finalize stamps the session end reason and persists. LastMentionTS is
@@ -316,11 +356,6 @@ func validateTurnRequest(req *TurnRequest) error {
 	}
 	return nil
 }
-
-// fallbackMessage is the English literal posted when the planner budget is
-// exhausted without reaching a terminal action. Localised copy lives in
-// the i18n layer (MsgKeyAgentLoopFallback) and is used by the host.
-const fallbackMessage = ":warning: I couldn't reach a conclusion within the budget for this turn. Please mention me again with more context."
 
 // plannerPerCallLoopLimit is the gollem-side loop bound per Execute. The
 // planner has no tools, so the LLM should always finish in 1 iteration —
