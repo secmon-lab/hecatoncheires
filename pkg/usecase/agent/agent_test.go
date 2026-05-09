@@ -19,7 +19,6 @@ func minimalDeps(t *testing.T) *agent.CommonDeps {
 	t.Helper()
 	return &agent.CommonDeps{
 		Repo:                memory.New(),
-		InstanceID:          "test-instance",
 		HeartbeatInterval:   20 * time.Millisecond,
 		HeartbeatStaleAfter: 100 * time.Millisecond,
 	}
@@ -45,9 +44,12 @@ func TestStartTurn_AcquiresAndReleases(t *testing.T) {
 	gt.Bool(t, h.Acquired).True().Required()
 	gt.Bool(t, h.Idempotent).False()
 	gt.Value(t, h.BusyOwner).Nil()
-	gt.Value(t, h.OwnerID).Equal("test-instance:trig-1")
+	// OwnerID is now a fresh UUID v7 minted per turn (not a deterministic
+	// composite). Just assert it's non-empty and that the persisted owner
+	// matches what StartTurn returned.
+	gt.String(t, h.OwnerID).NotEqual("")
 	gt.Value(t, h.Session).NotNil().Required()
-	gt.Value(t, h.Session.TurnOwnerID).Equal("test-instance:trig-1")
+	gt.Value(t, h.Session.TurnOwnerID).Equal(h.OwnerID)
 	gt.Value(t, h.Ctx).NotNil()
 
 	h.Release(ctx)

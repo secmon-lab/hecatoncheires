@@ -136,7 +136,9 @@ func (r *sessionRepository) AcquireTurnLock(
 			return goerr.Wrap(err, "decode session")
 		}
 
-		if cur.TurnState == model.SessionTurnRunning && cur.TurnTriggerTS == triggerTS {
+		// Idempotent retry: same Slack-side trigger key as the live owner.
+		// The key must be non-empty (synthetic events pass "").
+		if cur.TurnState == model.SessionTurnRunning && triggerTS != "" && cur.TurnTriggerTS == triggerTS {
 			result = interfaces.AcquireResult{IdempotentRetry: true, Session: &cur}
 			return nil
 		}

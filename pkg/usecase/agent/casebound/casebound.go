@@ -149,7 +149,7 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 	}
 	recorder := trace.New(
 		trace.WithRepository(uc.deps.TraceRepo),
-		trace.WithTraceID(req.TriggerTS),
+		trace.WithTraceID(handle.OwnerID),
 		trace.WithMetadata(trace.TraceMetadata{
 			Labels: map[string]string{
 				labelSessionID:        req.Session.ID,

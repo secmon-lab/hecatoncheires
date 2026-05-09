@@ -25,9 +25,11 @@ type AcquireResult struct {
 	// Reclaimed is true when Acquired came from displacing a stale owner
 	// (TurnHeartbeatAt older than staleAfter). For trace logging only.
 	Reclaimed bool
-	// IdempotentRetry is true when the caller's triggerTS matches the
-	// existing turn's TurnTriggerTS — typically a duplicate Slack event.
-	// Acquired is false in this case; the caller should drop the trigger.
+	// IdempotentRetry is true when the caller's triggerTS is non-empty and
+	// matches the existing turn's TurnTriggerTS — typically a duplicate
+	// Slack event. Acquired is false in this case; the caller should drop
+	// the trigger. Synthetic triggers (ws-switch etc.) pass triggerTS="" so
+	// they never match and always proceed (or get Busy).
 	IdempotentRetry bool
 	// Session is the Session as observed after the operation. When Acquired
 	// is true, this reflects the running turn (with TurnOwnerID set to the

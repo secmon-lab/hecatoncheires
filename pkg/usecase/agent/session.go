@@ -81,13 +81,9 @@ func (d *CommonDeps) LoadOrCreateSession(ctx context.Context, in LoadOrCreateSes
 	}, nil
 }
 
-// makeOwnerID composes the per-turn owner identifier used by the lock layer.
-// It combines the agent UC instance ID (so reclaims can identify which pod
-// crashed) with the trigger TS (so the same pod can distinguish concurrent
-// turns it dispatched).
-func makeOwnerID(instanceID, triggerTS string) string {
-	if instanceID == "" {
-		return triggerTS
-	}
-	return instanceID + ":" + triggerTS
+// newTurnID returns a fresh UUID v7 for use as both the turn-lock owner
+// identifier and the trace ID. UUID v7 is timestamp-prefixed so traces sort
+// chronologically when listed.
+func newTurnID() string {
+	return uuid.Must(uuid.NewV7()).String()
 }

@@ -13,6 +13,7 @@ import (
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
@@ -127,10 +128,13 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 	turnCtx := handle.Ctx
 	req.Session = handle.Session
 
-	// Trace recorder for the durable trace artifact.
+	// Trace recorder for the durable trace artifact. Trace ID = TurnID
+	// (the UUID v7 minted by StartTurn) so traces are uniformly UUID-shaped
+	// regardless of trigger kind. The originating Slack TS is preserved as
+	// a metadata label.
 	recorder := trace.New(
 		trace.WithRepository(uc.deps.TraceRepo),
-		trace.WithTraceID(req.TriggerTS),
+		trace.WithTraceID(handle.OwnerID),
 		trace.WithMetadata(trace.TraceMetadata{
 			Labels: map[string]string{
 				labelSessionID:        req.Session.ID,
@@ -180,7 +184,7 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 			return uc.fallback(turnCtx, req, "planner budget exhausted")
 		}
 		budget.PlannerUsed++
-		handler.Trace(turnCtx, fmt.Sprintf("🤔 Planning [%d/%d]…", budget.PlannerUsed, budget.PlannerMax))
+		handler.Trace(turnCtx, i18n.T(turnCtx, i18n.MsgDraftTracePlanning))
 
 		resp, execErr := newPlannerAgent().Execute(turnCtx, gollem.Text(nextInput))
 		if execErr != nil {
@@ -194,12 +198,15 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 		}
 		p, parseErr := parseAndValidate([]byte(resp.Texts[0]))
 		if parseErr != nil {
-			// One retry with the validation error fed back as user input
-			// (so the LLM has a concrete instruction). Retry uses a
-			// budget slot too.
-			logging.From(turnCtx).Warn("planner output failed validation; retrying once",
+			// Retry with the validation error fed back as user input
+			// (so the LLM has a concrete instruction). Each retry
+			// consumes one planner slot. Surface the failure in the
+			// Slack trace so the user can see *why* successive Planning
+			// rounds are firing without progress.
+			logging.From(turnCtx).Warn("planner output failed validation; retrying",
 				"error", parseErr.Error(),
 			)
+			handler.Trace(turnCtx, i18n.T(turnCtx, i18n.MsgDraftTracePlannerRetry))
 			nextInput = budget.FormatPrefix() + "\n\nYour previous output failed validation: " + parseErr.Error() + ". Please re-emit a JSON object that matches the response schema."
 			continue
 		}
@@ -212,7 +219,7 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 			}
 		}
 
-		handler.Trace(turnCtx, fmt.Sprintf("→ %s — %s", p.Action, p.Reasoning))
+		handler.Trace(turnCtx, i18n.T(turnCtx, i18n.MsgDraftTracePlannerAction, string(p.Action), p.Reasoning))
 
 		switch p.Action {
 		case actionInvestigate:
@@ -302,9 +309,8 @@ func validateTurnRequest(req *TurnRequest) error {
 	if req.Session == nil {
 		return goerr.New("Session is required")
 	}
-	if req.TriggerTS == "" {
-		return goerr.New("TriggerTS is required")
-	}
+	// TriggerTS may be empty for synthetic triggers (ws-switch). The
+	// turn-lock layer treats empty TriggerKey as "no Slack-side dedup".
 	if req.Handler == nil {
 		return goerr.New("Handler is required")
 	}

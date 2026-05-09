@@ -46,11 +46,6 @@ type CommonDeps struct {
 	ActionUC     core.ActionMutator
 	ActionStepUC core.ActionStepMutator
 
-	// InstanceID identifies this agent UC instance for turn-lock owner IDs.
-	// Production wires it from hostname / pod uid. Tests can leave it empty
-	// (treated as "" in makeOwnerID, so triggerTS alone is the owner).
-	InstanceID string
-
 	// HeartbeatInterval / HeartbeatStaleAfter govern §5.3 turn-lock activity
 	// detection. Zero values fall back to DefaultHeartbeatInterval /
 	// DefaultHeartbeatStaleAfter.
@@ -126,7 +121,7 @@ type TurnHandle struct {
 //   - Idempotent=true → drop silently (no Slack post).
 //   - BusyOwner!=nil → host should PostBusy; do NOT run body.
 //   - error → goerr wrapped, surfaced to caller.
-func (d *CommonDeps) StartTurn(parent context.Context, ssn *model.Session, triggerTS string) (*TurnHandle, error) {
+func (d *CommonDeps) StartTurn(parent context.Context, ssn *model.Session, triggerKey string) (*TurnHandle, error) {
 	if d == nil {
 		return nil, goerr.New("CommonDeps is nil")
 	}
@@ -140,11 +135,14 @@ func (d *CommonDeps) StartTurn(parent context.Context, ssn *model.Session, trigg
 	if staleAfter <= 0 {
 		staleAfter = DefaultHeartbeatStaleAfter
 	}
-	ownerID := makeOwnerID(d.InstanceID, triggerTS)
+	// Each turn gets a fresh UUID v7 — used as both the turn-lock owner
+	// identifier and the trace ID. triggerKey (Slack TS or "" for synthetic)
+	// is passed through to the lock layer for Slack-side dedup only.
+	ownerID := newTurnID()
 
 	seed := func() *model.Session { return ssn }
 	res, err := d.Repo.Session().AcquireTurnLock(parent,
-		ssn.ChannelID, ssn.ThreadTS, triggerTS, ownerID, staleAfter, seed)
+		ssn.ChannelID, ssn.ThreadTS, triggerKey, ownerID, staleAfter, seed)
 	if err != nil {
 		return nil, goerr.Wrap(err, "acquire turn lock")
 	}

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
-	"fmt"
 	"strings"
 	"sync"
 	"text/template"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 )
@@ -33,7 +33,7 @@ func (uc *UseCase) runInvestigationsParallel(ctx context.Context, p *planInvesti
 		return nil
 	}
 	if p.Message != "" {
-		h.Trace(ctx, "🧭 "+p.Message)
+		h.Trace(ctx, i18n.T(ctx, i18n.MsgDraftTracePhase, p.Message))
 	}
 	results := make([]investigationResult, len(p.Tasks))
 	var wg sync.WaitGroup
@@ -57,13 +57,13 @@ func (uc *UseCase) runInvestigationsParallel(ctx context.Context, p *planInvesti
 // input.
 func (uc *UseCase) runOneInvestigation(ctx context.Context, task planInvestigateTask, h Handler, resolver *agent.ToolSetResolver) investigationResult {
 	started := time.Now()
-	h.Trace(ctx, fmt.Sprintf("🔍 [%s] %s — starting", task.ID, task.Title))
+	h.Trace(ctx, i18n.T(ctx, i18n.MsgDraftTraceSubAgentStarting, task.ID, task.Title))
 
 	tools := resolver.Resolve(task.Tools)
 	sysPrompt, err := buildSubAgentSystemPrompt(task)
 	if err != nil {
 		elapsed := time.Since(started).Round(time.Millisecond)
-		h.Trace(ctx, fmt.Sprintf("❌ [%s] %s — failed (%s, build prompt): %v", task.ID, task.Title, elapsed, err))
+		h.Trace(ctx, i18n.T(ctx, i18n.MsgDraftTraceSubAgentFailedPrompt, task.ID, task.Title, elapsed, err))
 		return investigationResult{
 			TaskID: task.ID, Title: task.Title,
 			AcceptanceCriteria: task.AcceptanceCriteria,
@@ -86,7 +86,7 @@ func (uc *UseCase) runOneInvestigation(ctx context.Context, task planInvestigate
 	used := counter.LLMCalls()
 
 	if execErr != nil {
-		h.Trace(ctx, fmt.Sprintf("❌ [%s] %s — failed (%s, %d/%d inner loops): %v",
+		h.Trace(ctx, i18n.T(ctx, i18n.MsgDraftTraceSubAgentFailed,
 			task.ID, task.Title, elapsed, used, uc.subAgentLoopMax, execErr))
 		return investigationResult{
 			TaskID: task.ID, Title: task.Title,
@@ -107,9 +107,9 @@ func (uc *UseCase) runOneInvestigation(ctx context.Context, task planInvestigate
 			cut--
 		}
 		summary = summary[:cut] + "\n…[truncated]"
-		h.Trace(ctx, fmt.Sprintf("⚠️ [%s] summary truncated to %d bytes", task.ID, subAgentSummaryMaxBytes))
+		h.Trace(ctx, i18n.T(ctx, i18n.MsgDraftTraceSubAgentSummaryTruncated, task.ID, subAgentSummaryMaxBytes))
 	}
-	h.Trace(ctx, fmt.Sprintf("✅ [%s] %s — done (%s, %d/%d inner loops)",
+	h.Trace(ctx, i18n.T(ctx, i18n.MsgDraftTraceSubAgentDone,
 		task.ID, task.Title, elapsed, used, uc.subAgentLoopMax))
 	return investigationResult{
 		TaskID: task.ID, Title: task.Title,

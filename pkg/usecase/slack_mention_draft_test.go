@@ -2,6 +2,9 @@ package usecase_test
 
 import (
 	"context"
+	"errors"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +20,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/draft"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 	goslack "github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 )
@@ -368,6 +372,7 @@ type collectorOnlyMockSlack struct {
 	ephemeralText       string
 	ephemeralBlockPosts []ephemeralBlockPost
 	threadTexts         []string
+	threadReplies       []string // texts posted via PostThreadReply
 	threadBlockPosts    []ephemeralBlockPost
 	updateBlockPosts    []ephemeralBlockPost
 }
@@ -442,8 +447,9 @@ func (m *collectorOnlyMockSlack) UpdateMessage(_ context.Context, channelID stri
 	})
 	return nil
 }
-func (m *collectorOnlyMockSlack) PostThreadReply(context.Context, string, string, string) (string, error) {
-	return "", nil
+func (m *collectorOnlyMockSlack) PostThreadReply(_ context.Context, _ string, _ string, text string) (string, error) {
+	m.threadReplies = append(m.threadReplies, text)
+	return "ts-reply", nil
 }
 func (m *collectorOnlyMockSlack) PostThreadMessage(_ context.Context, channelID string, _ string, blocks []goslack.Block, text string) (string, error) {
 	if len(blocks) > 0 {
@@ -469,4 +475,461 @@ func (m *collectorOnlyMockSlack) GetUserGroupMembers(context.Context, string) ([
 }
 func (m *collectorOnlyMockSlack) ListTeams(context.Context) ([]slacksvc.Team, error) {
 	return nil, nil
+}
+
+// --- Lifecycle (multi-turn integration) tests ---
+//
+// These tests drive the *whole* dispatcher path (HandleSlackEvent /
+// HandleSelectWorkspace / HandleSubmit) across multiple turns to catch
+// state-machine bugs that per-method tests cannot. They share three pieces
+// of infrastructure:
+//
+//  1. lifecycleHarness — assembles MentionDraftUseCase + SlackUseCases against
+//     a single memory repo, using a scripted LLM client.
+//  2. scriptedPlannerLLM — sequences planner JSON outputs, with optional
+//     keyed sub-agent canned summaries. Failing the test if more LLM calls
+//     happen than scripted catches budget regressions.
+//  3. mention/messageEvent helpers — produce real Slack event shapes so the
+//     dispatcher walks the same code path as production.
+
+// scriptedPlannerLLM returns a planner JSON entry per Generate call (in
+// order) and routes a configured set of inputs to canned sub-agent summaries.
+// Test scope: catches "planner called more times than expected" by failing
+// the test on overflow.
+type scriptedPlannerLLM struct {
+	t              *testing.T
+	plannerScript  []string
+	subAgentByDesc map[string]string
+	plannerCalls   atomic.Int32
+	subAgentCalls  atomic.Int32
+}
+
+func newScriptedPlannerLLM(t *testing.T, plannerScript []string, subAgentByDesc map[string]string) gollem.LLMClient {
+	t.Helper()
+	s := &scriptedPlannerLLM{
+		t:              t,
+		plannerScript:  plannerScript,
+		subAgentByDesc: subAgentByDesc,
+	}
+	return &mockLLMClient{
+		newSessionFn: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mockLLMSession{
+				generateContentFn: func(_ context.Context, input ...gollem.Input) (*gollem.Response, error) {
+					if len(input) > 0 {
+						if txt, ok := input[0].(gollem.Text); ok {
+							if canned, ok := s.subAgentByDesc[string(txt)]; ok {
+								s.subAgentCalls.Add(1)
+								return &gollem.Response{Texts: []string{canned}}, nil
+							}
+						}
+					}
+					n := int(s.plannerCalls.Add(1) - 1)
+					if n >= len(s.plannerScript) {
+						s.t.Errorf("planner script exhausted at call %d (only %d responses configured)", n+1, len(s.plannerScript))
+						return nil, errors.New("planner script exhausted")
+					}
+					return &gollem.Response{Texts: []string{s.plannerScript[n]}}, nil
+				},
+			}, nil
+		},
+	}
+}
+
+// lifecycleHarness wires the host-side usecases against a shared memory repo
+// and the supplied scripted LLM. Returns the SlackUseCases (the dispatcher)
+// and the MentionDraftUseCase (so tests can drive interaction handlers).
+type lifecycleHarness struct {
+	repo         interfaces.Repository
+	registry     *model.WorkspaceRegistry
+	slackMock    *collectorOnlyMockSlack
+	mentionDraft *usecase.MentionDraftUseCase
+	slackUC      *usecase.SlackUseCases
+	caseUC       *usecase.CaseUseCase
+}
+
+func newLifecycleHarness(t *testing.T, registry *model.WorkspaceRegistry, llm gollem.LLMClient) *lifecycleHarness {
+	t.Helper()
+	repo := memory.New()
+	slackMock := newCollectorOnlyMockSlack()
+	mentionDraft := usecase.NewMentionDraftUseCase(repo, registry, slackMock, newDraftUC(t, repo, llm))
+	caseUC := usecase.NewCaseUseCase(repo, registry, slackMock, nil, "")
+	slackUC := usecase.NewSlackUseCases(repo, registry, nil, mentionDraft, slackMock)
+	return &lifecycleHarness{
+		repo:         repo,
+		registry:     registry,
+		slackMock:    slackMock,
+		mentionDraft: mentionDraft,
+		slackUC:      slackUC,
+		caseUC:       caseUC,
+	}
+}
+
+func appMentionEvent(channel, user, text, ts string) *slackevents.EventsAPIEvent {
+	return &slackevents.EventsAPIEvent{
+		Type:   slackevents.CallbackEvent,
+		TeamID: "T1",
+		InnerEvent: slackevents.EventsAPIInnerEvent{
+			Type: "app_mention",
+			Data: &slackevents.AppMentionEvent{
+				Channel:   channel,
+				User:      user,
+				Text:      text,
+				TimeStamp: ts,
+			},
+		},
+	}
+}
+
+// schemaWithSeverity builds a single-field FieldSchema with a `severity`
+// select for use across lifecycle tests. Two option IDs (low/high) give
+// schema-validation assertions something to match against.
+func schemaWithSeverity() *config.FieldSchema {
+	return &config.FieldSchema{Fields: []config.FieldDefinition{
+		{ID: "severity", Type: types.FieldTypeSelect, Required: true,
+			Options: []config.FieldOption{{ID: "low", Name: "Low"}, {ID: "high", Name: "High"}}},
+	}}
+}
+
+// --- Scenario A: mention → investigate → post_question → thread reply → materialize ---
+func TestLifecycle_DraftFlow_InvestigateQuestionResumeMaterialize(t *testing.T) {
+	const channelID = "C-LIFE-A"
+	const mentionTS = "1700000010.000000"
+	const replyTS = "1700000020.000000"
+	registry := newRegistryWithSchema("ws-1", "WS-1", schemaWithSeverity())
+
+	llm := newScriptedPlannerLLM(t, []string{
+		// Round 1 (mention): investigate one task.
+		`{
+            "reasoning": "need surrounding context first",
+            "action": "investigate",
+            "investigate": {
+                "message": "Looking at the thread",
+                "tasks": [{"id":"inv-1","title":"thread scan","description":"scan thread","acceptance_criteria":"got summary","tools":["slack_ro"]}]
+            }
+        }`,
+		// Round 2 (after observation): ask the user.
+		`{
+            "reasoning": "still missing severity",
+            "action": "post_question",
+            "post_question": {"text": "What is the severity?", "options": ["low","high"], "reason": "need severity to fill the schema"}
+        }`,
+		// Round 3 (after thread reply): materialize.
+		`{
+            "reasoning": "user said high",
+            "action": "materialize",
+            "materialize": {
+                "workspace_id": "ws-1",
+                "title": "Outage X",
+                "description": "Service degraded since morning.",
+                "custom_field_values": {"severity": "high"}
+            }
+        }`,
+	}, map[string]string{
+		"scan thread": "summary: all messages mention an outage but never name a severity.",
+	})
+
+	h := newLifecycleHarness(t, registry, llm)
+
+	// --- Turn 1: app_mention drives investigate → post_question.
+	gt.NoError(t, h.slackUC.HandleSlackEvent(context.Background(),
+		appMentionEvent(channelID, "U1", "<@BOT> case please", mentionTS))).Required()
+	async.Wait()
+
+	// post_question landed as a thread reply containing the question text.
+	var qReply string
+	for _, r := range h.slackMock.threadReplies {
+		if strings.Contains(r, "What is the severity?") {
+			qReply = r
+			break
+		}
+	}
+	gt.String(t, qReply).Contains("low").Contains("high")
+
+	// Session is persisted with LastAction = post_question so the dispatcher
+	// will treat the next thread reply as a resume signal.
+	ssn1, err := h.repo.Session().GetByThread(context.Background(), channelID, mentionTS)
+	gt.NoError(t, err).Required()
+	gt.Value(t, ssn1).NotNil().Required()
+	gt.Value(t, ssn1.LastAction).Equal(model.SessionEndedWithQuestion)
+
+	// --- Turn 2: user replies in-thread without mentioning the bot.
+	reply := &slackevents.EventsAPIEvent{
+		Type: slackevents.CallbackEvent,
+		InnerEvent: slackevents.EventsAPIInnerEvent{
+			Type: "message",
+			Data: &slackevents.MessageEvent{
+				Channel: channelID, User: "U1",
+				Text:            "high",
+				TimeStamp:       replyTS,
+				ThreadTimeStamp: mentionTS,
+			},
+		},
+	}
+	gt.NoError(t, h.slackUC.HandleSlackEvent(context.Background(), reply)).Required()
+	async.Wait()
+
+	// Materialization persisted on the draft.
+	ssn2, err := h.repo.Session().GetByThread(context.Background(), channelID, mentionTS)
+	gt.NoError(t, err).Required()
+	gt.Value(t, ssn2.LastAction).Equal(model.SessionEndedWithMaterialize)
+	gt.Value(t, ssn2.DraftID).NotEqual(model.CaseDraftID(""))
+
+	d, err := h.repo.CaseDraft().Get(context.Background(), ssn2.DraftID)
+	gt.NoError(t, err).Required()
+	gt.Value(t, d).NotNil().Required()
+	gt.Value(t, d.Materialization).NotNil().Required()
+	gt.Value(t, d.Materialization.Title).Equal("Outage X")
+	gt.Value(t, d.Materialization.CustomFieldValues["severity"].Value).Equal("high")
+}
+
+// --- Scenario B: mention → materialize → ws-switch → re-materialize ---
+func TestLifecycle_DraftFlow_MaterializeThenWorkspaceSwitch(t *testing.T) {
+	const channelID = "C-LIFE-B"
+	const mentionTS = "1700000010.000000"
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: "ws-A", Name: "WS-A"}, FieldSchema: schemaWithSeverity(),
+	})
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: "ws-B", Name: "WS-B"},
+		FieldSchema: &config.FieldSchema{Fields: []config.FieldDefinition{
+			{ID: "team", Type: types.FieldTypeText, Required: true},
+		}},
+	})
+
+	llm := newScriptedPlannerLLM(t, []string{
+		// Turn 1 (mention) → materialize for ws-A.
+		`{
+            "reasoning": "first guess workspace",
+            "action": "materialize",
+            "materialize": {
+                "workspace_id": "ws-A",
+                "title": "Issue title",
+                "description": "Initial description",
+                "custom_field_values": {"severity": "low"}
+            }
+        }`,
+		// Turn 2 (ws-switch) → re-materialize for ws-B with team field.
+		`{
+            "reasoning": "rebuild for ws-B schema",
+            "action": "materialize",
+            "materialize": {
+                "workspace_id": "ws-B",
+                "title": "Issue title",
+                "description": "Initial description",
+                "custom_field_values": {"team": "platform"}
+            }
+        }`,
+	}, nil)
+
+	h := newLifecycleHarness(t, registry, llm)
+
+	// Turn 1: mention.
+	gt.NoError(t, h.slackUC.HandleSlackEvent(context.Background(),
+		appMentionEvent(channelID, "U1", "<@BOT> please", mentionTS))).Required()
+	async.Wait()
+
+	ssn, err := h.repo.Session().GetByThread(context.Background(), channelID, mentionTS)
+	gt.NoError(t, err).Required()
+	gt.Value(t, ssn).NotNil().Required()
+	d1, err := h.repo.CaseDraft().Get(context.Background(), ssn.DraftID)
+	gt.NoError(t, err).Required()
+	gt.Value(t, d1.SelectedWorkspaceID).Equal("ws-A")
+	gt.Value(t, d1.Materialization.CustomFieldValues["severity"].Value).Equal("low")
+
+	// Turn 2: workspace switch via the preview's static_select.
+	cb := &goslack.InteractionCallback{
+		Type:        goslack.InteractionTypeBlockActions,
+		ResponseURL: "http://example.invalid/responseurl",
+		User:        goslack.User{ID: "U1"},
+		ActionCallback: goslack.ActionCallbacks{
+			BlockActions: []*goslack.BlockAction{
+				{
+					ActionID:       usecase.ActionIDDraftSelectWS,
+					BlockID:        usecase.BlockIDDraftWSSelect + ":" + string(d1.ID),
+					Value:          string(d1.ID),
+					SelectedOption: goslack.OptionBlockObject{Value: "ws-B"},
+				},
+			},
+		},
+	}
+	// The handler POSTs to ResponseURL — we use a local httptest server so
+	// the lock-blocks render call succeeds (real HTTP would surface as a
+	// non-fatal errutil.Handle but doesn't block the planner turn).
+	respURL, _ := captureResponseURL(t)
+	cb.ResponseURL = respURL
+	wsErr := h.mentionDraft.HandleSelectWorkspace(context.Background(), cb, cb.ActionCallback.BlockActions[0])
+	async.Wait()
+	gt.NoError(t, wsErr).Required()
+
+	d2, err := h.repo.CaseDraft().Get(context.Background(), ssn.DraftID)
+	gt.NoError(t, err).Required()
+	gt.Value(t, d2.SelectedWorkspaceID).Equal("ws-B")
+	gt.Value(t, d2.Materialization).NotNil().Required()
+	gt.Value(t, d2.Materialization.CustomFieldValues["team"].Value).Equal("platform")
+	// The old severity field is no longer schema-relevant; the coercion
+	// drops fields outside the active schema.
+	_, hasSeverity := d2.Materialization.CustomFieldValues["severity"]
+	gt.Bool(t, hasSeverity).False()
+}
+
+// --- Scenario C: mention → 2 parallel investigations → materialize ---
+func TestLifecycle_DraftFlow_ParallelInvestigationsThenMaterialize(t *testing.T) {
+	const channelID = "C-LIFE-C"
+	const mentionTS = "1700000030.000000"
+	registry := newRegistryWithSchema("ws-1", "WS-1", schemaWithSeverity())
+
+	llm := newScriptedPlannerLLM(t, []string{
+		`{
+            "reasoning": "fan out two investigations",
+            "action": "investigate",
+            "investigate": {
+                "message": "Looking up two angles",
+                "tasks": [
+                    {"id":"inv-A","title":"thread","description":"scan thread A","acceptance_criteria":"a","tools":["slack_ro"]},
+                    {"id":"inv-B","title":"channel","description":"scan channel B","acceptance_criteria":"b","tools":["slack_ro"]}
+                ]
+            }
+        }`,
+		`{
+            "reasoning": "got both observations",
+            "action": "materialize",
+            "materialize": {
+                "workspace_id": "ws-1",
+                "title": "Combined finding",
+                "description": "From thread + channel.",
+                "custom_field_values": {"severity": "high"}
+            }
+        }`,
+	}, map[string]string{
+		"scan thread A":  "summary A: high signal",
+		"scan channel B": "summary B: confirms",
+	})
+
+	h := newLifecycleHarness(t, registry, llm)
+
+	gt.NoError(t, h.slackUC.HandleSlackEvent(context.Background(),
+		appMentionEvent(channelID, "U1", "<@BOT> please", mentionTS))).Required()
+	async.Wait()
+
+	ssn, err := h.repo.Session().GetByThread(context.Background(), channelID, mentionTS)
+	gt.NoError(t, err).Required()
+	gt.Value(t, ssn).NotNil().Required()
+	gt.Value(t, ssn.LastAction).Equal(model.SessionEndedWithMaterialize)
+
+	d, err := h.repo.CaseDraft().Get(context.Background(), ssn.DraftID)
+	gt.NoError(t, err).Required()
+	gt.Value(t, d.Materialization.Title).Equal("Combined finding")
+	gt.Value(t, d.Materialization.CustomFieldValues["severity"].Value).Equal("high")
+}
+
+// --- Scenario D: post_message terminal → thread reply must NOT resume (F8) ---
+func TestLifecycle_DraftFlow_PostMessageEndsThenReplyIsDropped(t *testing.T) {
+	const channelID = "C-LIFE-D"
+	const mentionTS = "1700000040.000000"
+	const replyTS = "1700000050.000000"
+	registry := newRegistryWithSchema("ws-1", "WS-1", schemaWithSeverity())
+
+	// Only ONE planner response is scripted. The dispatcher must drop the
+	// follow-up MessageEvent (F8: LastAction != post_question) so the
+	// planner is not re-invoked. If the dispatch leaks, the script
+	// exhausts and the test fails.
+	llm := newScriptedPlannerLLM(t, []string{
+		`{
+            "reasoning": "no case needed",
+            "action": "post_message",
+            "post_message": {"text": "All good — nothing actionable here."}
+        }`,
+	}, nil)
+
+	h := newLifecycleHarness(t, registry, llm)
+
+	gt.NoError(t, h.slackUC.HandleSlackEvent(context.Background(),
+		appMentionEvent(channelID, "U1", "<@BOT> hey", mentionTS))).Required()
+	async.Wait()
+
+	ssn, err := h.repo.Session().GetByThread(context.Background(), channelID, mentionTS)
+	gt.NoError(t, err).Required()
+	gt.Value(t, ssn.LastAction).Equal(model.SessionEndedWithMessage)
+
+	// Thread reply: F8 must drop. No additional LLM calls.
+	reply := &slackevents.EventsAPIEvent{
+		Type: slackevents.CallbackEvent,
+		InnerEvent: slackevents.EventsAPIInnerEvent{
+			Type: "message",
+			Data: &slackevents.MessageEvent{
+				Channel: channelID, User: "U1",
+				Text:            "are you sure?",
+				TimeStamp:       replyTS,
+				ThreadTimeStamp: mentionTS,
+			},
+		},
+	}
+	gt.NoError(t, h.slackUC.HandleSlackEvent(context.Background(), reply)).Required()
+	async.Wait()
+
+	// Session unchanged; LastAction still post_message.
+	ssn2, err := h.repo.Session().GetByThread(context.Background(), channelID, mentionTS)
+	gt.NoError(t, err).Required()
+	gt.Value(t, ssn2.LastAction).Equal(model.SessionEndedWithMessage)
+}
+
+// --- Scenario E: mention → materialize → HandleSubmit creates the Case ---
+func TestLifecycle_DraftFlow_MaterializeThenSubmitCreatesCase(t *testing.T) {
+	const channelID = "C-LIFE-E"
+	const mentionTS = "1700000060.000000"
+	registry := newRegistryWithSchema("ws-1", "WS-1", schemaWithSeverity())
+
+	llm := newScriptedPlannerLLM(t, []string{
+		`{
+            "reasoning": "materialize directly",
+            "action": "materialize",
+            "materialize": {
+                "workspace_id": "ws-1",
+                "title": "Quick incident",
+                "description": "Something broke briefly.",
+                "custom_field_values": {"severity": "high"}
+            }
+        }`,
+	}, nil)
+
+	h := newLifecycleHarness(t, registry, llm)
+
+	gt.NoError(t, h.slackUC.HandleSlackEvent(context.Background(),
+		appMentionEvent(channelID, "U-AUTHOR", "<@BOT> case", mentionTS))).Required()
+	async.Wait()
+
+	ssn, err := h.repo.Session().GetByThread(context.Background(), channelID, mentionTS)
+	gt.NoError(t, err).Required()
+	d, err := h.repo.CaseDraft().Get(context.Background(), ssn.DraftID)
+	gt.NoError(t, err).Required()
+
+	// Submit via the preview's button — drives CreateCase end-to-end.
+	respURL, _ := captureResponseURL(t)
+	cb := &goslack.InteractionCallback{
+		Type:        goslack.InteractionTypeBlockActions,
+		ResponseURL: respURL,
+		User:        goslack.User{ID: "U-AUTHOR"},
+		Team:        goslack.Team{ID: "T1"},
+		ActionCallback: goslack.ActionCallbacks{
+			BlockActions: []*goslack.BlockAction{
+				{ActionID: usecase.ActionIDDraftSubmit, Value: string(d.ID)},
+			},
+		},
+	}
+	gt.NoError(t, h.mentionDraft.HandleSubmit(context.Background(), h.caseUC, cb, cb.ActionCallback.BlockActions[0])).Required()
+	async.Wait()
+
+	// One case persisted with the materialized title and field value.
+	cases, err := h.repo.Case().List(context.Background(), "ws-1")
+	gt.NoError(t, err).Required()
+	gt.Array(t, cases).Length(1).Required()
+	gt.Value(t, cases[0].Title).Equal("Quick incident")
+	gt.Value(t, cases[0].FieldValues["severity"].Value).Equal("high")
+	gt.Array(t, cases[0].AssigneeIDs).Length(1).Required()
+	gt.Value(t, cases[0].AssigneeIDs[0]).Equal("U-AUTHOR")
+
+	// Draft is deleted after Submit.
+	_, err = h.repo.CaseDraft().Get(context.Background(), d.ID)
+	gt.Value(t, err).NotNil()
 }

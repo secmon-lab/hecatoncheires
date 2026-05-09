@@ -19,7 +19,6 @@ func TestStartTurn_HeartbeatRefreshes(t *testing.T) {
 	ctx := context.Background()
 	d := &agent.CommonDeps{
 		Repo:                memory.New(),
-		InstanceID:          "test",
 		HeartbeatInterval:   10 * time.Millisecond,
 		HeartbeatStaleAfter: 200 * time.Millisecond,
 	}
@@ -56,7 +55,6 @@ func TestStartTurn_HeartbeatCancelsOnOwnerMismatch(t *testing.T) {
 	ctx := context.Background()
 	d := &agent.CommonDeps{
 		Repo:                memory.New(),
-		InstanceID:          "test",
 		HeartbeatInterval:   5 * time.Millisecond,
 		HeartbeatStaleAfter: 50 * time.Millisecond,
 	}

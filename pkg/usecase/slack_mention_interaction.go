@@ -117,15 +117,16 @@ func (uc *MentionDraftUseCase) HandleSelectWorkspace(ctx context.Context, callba
 		candidates, d.ID, d.EphemeralMessageTS,
 	)
 
-	// (5) Run the planner turn. TriggerTS is a synthetic UUID since this is
-	// not a real Slack mention.
-	triggerTS := uuid.Must(uuid.NewV7()).String()
+	// (5) Run the planner turn. TriggerTS is empty for this synthetic event
+	// — there is no Slack-side TS to dedup on. The lock layer treats an
+	// empty TriggerKey as "always proceed (or busy)", which is what we want
+	// for explicit user clicks.
 	userInput := "[system event] The user has switched the active workspace to " + entry.Workspace.ID + "."
 	result, runErr := uc.draftUC.RunTurn(ctx, draft.TurnRequest{
 		Session:          session,
 		UserInput:        userInput,
 		Trigger:          draft.TriggerWSSwitch,
-		TriggerTS:        triggerTS,
+		TriggerTS:        "",
 		ActorUserID:      callback.User.ID,
 		EstimatedWS:      entry,
 		Candidates:       candidates,

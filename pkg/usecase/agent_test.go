@@ -583,10 +583,11 @@ func TestLifecycle_AgentSession(t *testing.T) {
 	gt.Array(t, slackMock.postedMessages).Length(2)
 	gt.Value(t, slackMock.postedMessages[1].Text).Equal("ack")
 
-	// One trace persisted under the new session, keyed by mention TS.
+	// One trace persisted under the new session. TraceID is now the per-turn
+	// UUID v7 (TurnID), so we just assert there is a non-empty entry.
 	traces1 := traceRepo.TraceIDs(session1.ID)
 	gt.Array(t, traces1).Length(1)
-	gt.Value(t, traces1[0]).Equal(firstMentionTS)
+	gt.String(t, traces1[0]).NotEqual("")
 
 	// --- Second mention ----------------------------------------------------
 	stage = 1
@@ -613,15 +614,12 @@ func TestLifecycle_AgentSession(t *testing.T) {
 	// Two turns total in captured.
 	gt.Array(t, captured).Length(2)
 
-	// Two distinct traces persisted under the same session.
+	// Two distinct traces persisted under the same session — TurnID UUIDs.
 	traces2 := traceRepo.TraceIDs(session1.ID)
 	gt.Array(t, traces2).Length(2)
-	seen := map[string]bool{}
-	for _, id := range traces2 {
-		seen[id] = true
-	}
-	gt.Bool(t, seen[firstMentionTS]).True()
-	gt.Bool(t, seen[secondMentionTS]).True()
+	gt.String(t, traces2[0]).NotEqual("")
+	gt.String(t, traces2[1]).NotEqual("")
+	gt.String(t, traces2[0]).NotEqual(traces2[1])
 }
 
 // TestAgentUseCase_DeltaMessageInjection asserts the delta path explicitly:

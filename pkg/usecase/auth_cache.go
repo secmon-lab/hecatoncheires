@@ -13,10 +13,10 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
-// isTokenNotFound reports whether err comes from the repository signalling
-// the token did not exist. Both backends define their own sentinel; the
-// codebase consistently checks both in this combined form.
-func isTokenNotFound(err error) bool {
+// isRepoNotFound reports whether err comes from a repository signalling that
+// the requested document did not exist. Both backends define their own
+// sentinel; the codebase consistently checks both in this combined form.
+func isRepoNotFound(err error) bool {
 	return errors.Is(err, memory.ErrNotFound) || errors.Is(err, firestore.ErrNotFound)
 }
 
@@ -88,7 +88,7 @@ func (uc *AuthUseCase) validateTokenWithCache(ctx context.Context, tokenID auth.
 	token, err := uc.repo.GetToken(ctx, tokenID)
 	if err != nil {
 		opts := []goerr.Option{}
-		if isTokenNotFound(err) {
+		if isRepoNotFound(err) {
 			opts = append(opts, goerr.T(errutil.TagBenign))
 		}
 		return nil, goerr.Wrap(err, "failed to get token from repository", opts...)

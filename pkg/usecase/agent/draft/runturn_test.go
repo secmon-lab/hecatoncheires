@@ -220,10 +220,11 @@ func TestRunTurn_InvestigateThenMaterialize(t *testing.T) {
 	gt.Value(t, host.materialized[0].Title).Equal("API outage")
 	gt.Value(t, host.materialized[0].CustomFieldValues["severity"]).Equal("high")
 
-	// Trace should mention both planning rounds and the investigation.
+	// Trace should mention planning rounds (one per round) and the
+	// investigation. Counts assert >= 2 planning lines were emitted across
+	// the two rounds.
 	traceJoined := strings.Join(host.traceLines, "\n")
-	gt.String(t, traceJoined).Contains("Planning [1/8]")
-	gt.String(t, traceJoined).Contains("Planning [2/8]")
+	gt.Number(t, strings.Count(traceJoined, "Planning")).GreaterOrEqual(2)
 	gt.String(t, traceJoined).Contains("Recent thread")
 	gt.String(t, traceJoined).Contains("inner loops")
 }

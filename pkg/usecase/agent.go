@@ -253,11 +253,17 @@ func (uc *AgentUseCase) loadOrCreateSession(ctx context.Context, workspaceID str
 	}
 
 	// New session: detect Action linkage by matching the thread parent TS
-	// against any registered action notification message.
+	// against any registered action notification message. Most threads
+	// have no associated action — tag ErrNotFound as benign so the lookup
+	// is visible at Info level without paging Sentry, while real backend
+	// failures still alert as ERROR.
 	var actionID int64
 	if action, err := uc.repo.Action().GetBySlackMessageTS(ctx, workspaceID, threadTS); err == nil && action != nil {
 		actionID = action.ID
 	} else if err != nil {
+		if isRepoNotFound(err) {
+			err = goerr.Wrap(err, "no action linked to thread", goerr.T(errutil.TagBenign))
+		}
 		errutil.Handle(ctx, err, "failed to look up action by thread TS for new session")
 	}
 

@@ -111,8 +111,11 @@ func (r *sessionRepository) AcquireTurnLock(
 		return interfaces.AcquireResult{Acquired: true, Session: &copied}, nil
 	}
 
-	// Idempotent retry: same trigger as the live owner — drop politely.
-	if cur.TurnState == model.SessionTurnRunning && cur.TurnTriggerTS == triggerTS {
+	// Idempotent retry: same Slack-side trigger key as the live owner —
+	// typically Slack re-delivering the same event. The trigger key must be
+	// non-empty (synthetic events like ws-switch pass "" so they always
+	// proceed instead of being absorbed by an unrelated prior turn).
+	if cur.TurnState == model.SessionTurnRunning && triggerTS != "" && cur.TurnTriggerTS == triggerTS {
 		copied := cur
 		return interfaces.AcquireResult{IdempotentRetry: true, Session: &copied}, nil
 	}
