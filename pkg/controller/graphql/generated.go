@@ -186,7 +186,6 @@ type ComplexityRoot struct {
 	}
 
 	FieldOption struct {
-		Color       func(childComplexity int) int
 		Description func(childComplexity int) int
 		ID          func(childComplexity int) int
 		Metadata    func(childComplexity int) int
@@ -1047,12 +1046,6 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.FieldDefinition.Type(childComplexity), true
 
-	case "FieldOption.color":
-		if e.complexity.FieldOption.Color == nil {
-			break
-		}
-
-		return e.complexity.FieldOption.Color(childComplexity), true
 	case "FieldOption.description":
 		if e.complexity.FieldOption.Description == nil {
 			break
@@ -2101,7 +2094,6 @@ type FieldOption {
   id: String!
   name: String!
   description: String
-  color: String
   metadata: JSON  # Arbitrary metadata (e.g., {"score": 4})
 }
 
@@ -6387,8 +6379,6 @@ func (ec *executionContext) fieldContext_FieldDefinition_options(_ context.Conte
 				return ec.fieldContext_FieldOption_name(ctx, field)
 			case "description":
 				return ec.fieldContext_FieldOption_description(ctx, field)
-			case "color":
-				return ec.fieldContext_FieldOption_color(ctx, field)
 			case "metadata":
 				return ec.fieldContext_FieldOption_metadata(ctx, field)
 			}
@@ -6473,35 +6463,6 @@ func (ec *executionContext) _FieldOption_description(ctx context.Context, field 
 }
 
 func (ec *executionContext) fieldContext_FieldOption_description(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
-	fc = &graphql.FieldContext{
-		Object:     "FieldOption",
-		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
-		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			return nil, errors.New("field of type String does not have child fields")
-		},
-	}
-	return fc, nil
-}
-
-func (ec *executionContext) _FieldOption_color(ctx context.Context, field graphql.CollectedField, obj *graphql1.FieldOption) (ret graphql.Marshaler) {
-	return graphql.ResolveField(
-		ctx,
-		ec.OperationContext,
-		field,
-		ec.fieldContext_FieldOption_color,
-		func(ctx context.Context) (any, error) {
-			return obj.Color, nil
-		},
-		nil,
-		ec.marshalOString2ᚖstring,
-		true,
-		false,
-	)
-}
-
-func (ec *executionContext) fieldContext_FieldOption_color(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "FieldOption",
 		Field:      field,
@@ -15049,8 +15010,6 @@ func (ec *executionContext) _FieldOption(ctx context.Context, sel ast.SelectionS
 			}
 		case "description":
 			out.Values[i] = ec._FieldOption_description(ctx, field, obj)
-		case "color":
-			out.Values[i] = ec._FieldOption_color(ctx, field, obj)
 		case "metadata":
 			out.Values[i] = ec._FieldOption_metadata(ctx, field, obj)
 		default:

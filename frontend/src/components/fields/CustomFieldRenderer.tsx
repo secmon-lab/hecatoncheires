@@ -11,7 +11,6 @@ interface FieldOption {
   id: string
   name: string
   description?: string
-  color?: string
   metadata?: Record<string, any>
 }
 

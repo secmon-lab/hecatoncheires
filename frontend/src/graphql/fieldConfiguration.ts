@@ -13,7 +13,6 @@ export const GET_FIELD_CONFIGURATION = gql`
           id
           name
           description
-          color
           metadata
         }
       }

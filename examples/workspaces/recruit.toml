@@ -27,13 +27,14 @@ id = "stage"
 name = "Stage"
 type = "select"
 required = true
+description = "Current stage of the hiring pipeline."
 options = [
-  { id = "screening", name = "Screening", metadata = { color = "blue" } },
-  { id = "first-interview", name = "First Interview", metadata = { color = "cyan" } },
-  { id = "technical-interview", name = "Technical Interview", metadata = { color = "yellow" } },
-  { id = "final-interview", name = "Final Interview", metadata = { color = "orange" } },
-  { id = "offer", name = "Offer", metadata = { color = "green" } },
-  { id = "rejected", name = "Rejected", metadata = { color = "red" } },
+  { id = "screening", name = "Screening", description = "Resume / portfolio review." },
+  { id = "first-interview", name = "First Interview", description = "Initial conversation with hiring manager." },
+  { id = "technical-interview", name = "Technical Interview", description = "Hands-on technical assessment." },
+  { id = "final-interview", name = "Final Interview", description = "Final round with leadership." },
+  { id = "offer", name = "Offer", description = "Offer extended; awaiting candidate decision." },
+  { id = "rejected", name = "Rejected", description = "Either side declined." },
 ]
 
 [[fields]]

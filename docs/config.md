@@ -446,11 +446,12 @@ Fields of type `select` or `multi-select` must define at least one option using 
 |----------|------|----------|-------------|
 | `id` | string | **Yes** | Unique identifier within the field. Same format as field ID |
 | `name` | string | **Yes** | Display name |
-| `description` | string | No | Description of this option |
-| `color` | string | No | Color name or hex code (e.g., `red`, `#E53E3E`) |
+| `description` | string | No | Description of this option (surfaced in the UI's `(?)` help popover and option-hover tooltip) |
 | `metadata` | table | No | Arbitrary key-value pairs |
 
 Option IDs must be unique within their parent field and follow the same format as field IDs (`^[a-z][a-z0-9_]*$`).
+
+`description` lives at the top level — it is a first-class part of the option contract, surfaced directly in the UI. The previous shape that placed `description` (or `color`) inside `metadata` is no longer supported; migrate to top-level `description`.
 
 ### Metadata
 
@@ -461,16 +462,18 @@ The `metadata` property allows attaching arbitrary key-value data to an option. 
 id = "severity"
 name = "Severity"
 type = "select"
+description = "Incident severity. Score (1–5) lives in metadata."
 options = [
-  { id = "critical", name = "Critical", metadata = { description = "Requires immediate executive attention", color = "red", score = 5, escalation_required = true } },
-  { id = "low", name = "Low", metadata = { description = "Minimal impact", score = 1 } },
+  { id = "critical", name = "Critical", description = "Requires immediate executive attention", metadata = { score = 5, escalation_required = true } },
+  { id = "low", name = "Low", description = "Minimal impact", metadata = { score = 1 } },
 ]
 ```
 
 Use cases for metadata:
 - **Scoring**: Attach numeric scores for risk calculation
-- **Categorization**: Add descriptions and colors for UI display
 - **Workflow**: Flag options that trigger specific behaviors
+
+For human-readable text shown in the UI, use top-level `description` — never store it under `metadata`.
 
 ---
 
@@ -825,26 +828,28 @@ groups = ["@security-response"]
 prompt = "Check action deadlines and follow up on pending items. Remind the team of overdue tasks."
 language = "Japanese"
 
-# Category field: multi-select with metadata
+# Category field: multi-select
 [[fields]]
 id = "category"
 name = "Category"
 type = "multi-select"
 required = true
+description = "Risk classification. Multiple values may apply."
 options = [
-  { id = "data_breach", name = "Data Breach", metadata = { description = "Risk of personal or confidential information leakage", color = "red" } },
-  { id = "system_failure", name = "System Failure", metadata = { description = "Risk of system or service downtime and failures", color = "orange" } },
+  { id = "data_breach", name = "Data Breach", description = "Risk of personal or confidential information leakage" },
+  { id = "system_failure", name = "System Failure", description = "Risk of system or service downtime and failures" },
 ]
 
-# Likelihood field: select with scoring
+# Likelihood field: select with scoring (score lives in metadata)
 [[fields]]
 id = "likelihood"
 name = "Likelihood"
 type = "select"
 required = true
+description = "How likely the risk is to materialise."
 options = [
-  { id = "low", name = "Low", metadata = { description = "Unlikely to occur (a few times per year)", score = 2 } },
-  { id = "high", name = "High", metadata = { description = "Likely to occur (about once per week)", score = 4 } },
+  { id = "low", name = "Low", description = "Unlikely to occur (a few times per year)", metadata = { score = 2 } },
+  { id = "high", name = "High", description = "Likely to occur (about once per week)", metadata = { score = 4 } },
 ]
 
 # Simple fields without options

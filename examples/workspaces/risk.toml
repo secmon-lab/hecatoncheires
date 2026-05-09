@@ -18,12 +18,13 @@ id = "category"
 name = "Category"
 type = "multi-select"
 required = true
+description = "Risk classification. Multiple values may apply; used as the aggregation axis for the quarterly risk report."
 options = [
-  { id = "data_breach", name = "Data Breach", metadata = { description = "Risk of personal or confidential information leakage", color = "red" } },
-  { id = "system_failure", name = "System Failure", metadata = { description = "Risk of system or service downtime and failures", color = "orange" } },
-  { id = "compliance", name = "Compliance", metadata = { description = "Risk of regulatory or internal policy violations", color = "yellow" } },
-  { id = "supply_chain", name = "Supply Chain", metadata = { description = "Risks related to external vendors and third-party services", color = "blue" } },
-  { id = "insider_threat", name = "Insider Threat", metadata = { description = "Intentional or unintentional threats from employees", color = "purple" } },
+  { id = "data_breach", name = "Data Breach", description = "Risk of personal or confidential information leakage" },
+  { id = "system_failure", name = "System Failure", description = "Risk of system or service downtime and failures" },
+  { id = "compliance", name = "Compliance", description = "Risk of regulatory or internal policy violations" },
+  { id = "supply_chain", name = "Supply Chain", description = "Risks related to external vendors and third-party services" },
+  { id = "insider_threat", name = "Insider Threat", description = "Intentional or unintentional threats from employees" },
 ]
 
 [[fields]]
@@ -31,12 +32,13 @@ id = "likelihood"
 name = "Likelihood"
 type = "select"
 required = true
+description = "How likely the risk is to materialise. Combined with impact (1–5 scale via metadata.score) into the risk matrix."
 options = [
-  { id = "very_low", name = "Very Low", metadata = { description = "Extremely unlikely to occur", score = 1 } },
-  { id = "low", name = "Low", metadata = { description = "Unlikely to occur", score = 2 } },
-  { id = "medium", name = "Medium", metadata = { description = "Moderately likely to occur", score = 3 } },
-  { id = "high", name = "High", metadata = { description = "Likely to occur", score = 4 } },
-  { id = "very_high", name = "Very High", metadata = { description = "Very likely to occur", score = 5 } },
+  { id = "very_low", name = "Very Low", description = "Extremely unlikely to occur", metadata = { score = 1 } },
+  { id = "low", name = "Low", description = "Unlikely to occur", metadata = { score = 2 } },
+  { id = "medium", name = "Medium", description = "Moderately likely to occur", metadata = { score = 3 } },
+  { id = "high", name = "High", description = "Likely to occur", metadata = { score = 4 } },
+  { id = "very_high", name = "Very High", description = "Very likely to occur", metadata = { score = 5 } },
 ]
 
 [[fields]]
@@ -44,12 +46,13 @@ id = "impact"
 name = "Impact"
 type = "select"
 required = true
+description = "Business consequence if the risk materialises. The 1–5 score (via metadata.score) is paired with likelihood."
 options = [
-  { id = "negligible", name = "Negligible", metadata = { description = "Little to no impact", score = 1 } },
-  { id = "minor", name = "Minor", metadata = { description = "Limited impact", score = 2 } },
-  { id = "moderate", name = "Moderate", metadata = { description = "Some business impact", score = 3 } },
-  { id = "major", name = "Major", metadata = { description = "Significant impact", score = 4 } },
-  { id = "critical", name = "Critical", metadata = { description = "Critical impact", score = 5 } },
+  { id = "negligible", name = "Negligible", description = "Little to no impact", metadata = { score = 1 } },
+  { id = "minor", name = "Minor", description = "Limited impact", metadata = { score = 2 } },
+  { id = "moderate", name = "Moderate", description = "Some business impact", metadata = { score = 3 } },
+  { id = "major", name = "Major", description = "Significant impact", metadata = { score = 4 } },
+  { id = "critical", name = "Critical", description = "Critical impact", metadata = { score = 5 } },
 ]
 
 [[fields]]

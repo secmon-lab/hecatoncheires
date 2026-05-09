@@ -116,7 +116,6 @@ type FieldOption struct {
 	ID          string         `toml:"id"`
 	Name        string         `toml:"name"`
 	Description string         `toml:"description"`
-	Color       string         `toml:"color"`
 	Metadata    map[string]any `toml:"metadata"`
 }
 
@@ -461,7 +460,6 @@ func (a *AppConfig) ToDomainFieldSchema() *domainConfig.FieldSchema {
 				ID:          opt.ID,
 				Name:        opt.Name,
 				Description: opt.Description,
-				Color:       opt.Color,
 				Metadata:    opt.Metadata,
 			}
 		}

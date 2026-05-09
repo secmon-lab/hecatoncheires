@@ -282,6 +282,7 @@ All comment and character literal in source code must be in English
 - **Commit messages must be a single line.** No body paragraphs. State the change in one sentence. Explanation goes in the PR description, not the commit
 - Follow Semantic Commit format: `<type>: <subject>` (types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `ci`, `style`, `perf`)
 - Keep PR titles short (under 70 characters); use the body for details
+- **Do NOT include `Co-Authored-By:` trailers in commit messages.** No AI/tool attribution lines. The commit body and PR body should also stay free of "Generated with Claude" style notes
 
 ### Testing
 

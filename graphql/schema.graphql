@@ -24,7 +24,6 @@ type FieldOption {
   id: String!
   name: String!
   description: String
-  color: String
   metadata: JSON  # Arbitrary metadata (e.g., {"score": 4})
 }
 

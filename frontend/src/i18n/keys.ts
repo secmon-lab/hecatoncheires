@@ -370,6 +370,15 @@ export const msgKeys = {
   langEnglish: 'langEnglish',
   langJapanese: 'langJapanese',
   labelLanguage: 'labelLanguage',
+
+  // Custom field help (description / option catalog)
+  fieldHelpAriaToggle: 'fieldHelpAriaToggle',
+  fieldHelpClose: 'fieldHelpClose',
+  fieldHelpSelectedBadge: 'fieldHelpSelectedBadge',
+  fieldHelpFooterHint: 'fieldHelpFooterHint',
+  fieldHelpOptionCount: 'fieldHelpOptionCount',
+  fieldHelpTypeSelect: 'fieldHelpTypeSelect',
+  fieldHelpTypeMultiSelect: 'fieldHelpTypeMultiSelect',
 } as const
 
 export type MsgKey = keyof typeof msgKeys

@@ -46,9 +46,16 @@ export default function InlineMultiSelect<V extends string = string>({
   }, [options, query])
 
   const toggle = async (val: V) => {
-    const next = values.includes(val)
-      ? values.filter((v) => v !== val)
-      : [...values, val]
+    // Drop stale entries that no longer exist in `options`. Custom-field
+    // configs (TOML) can change over time, leaving cases with option IDs that
+    // a fresh config no longer recognises. Re-sending such IDs causes the
+    // backend validator to reject the whole update; pruning them on toggle
+    // lets the user's intended edit go through and self-heals the field.
+    const known = new Set(options.map((o) => o.value))
+    const cleaned = values.filter((v) => known.has(v))
+    const next = cleaned.includes(val)
+      ? cleaned.filter((v) => v !== val)
+      : [...cleaned, val]
     await onSave(next)
   }
 

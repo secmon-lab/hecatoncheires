@@ -4,7 +4,6 @@ import { IconExt } from '../Icons'
 interface FieldOption {
   id: string
   name: string
-  color?: string
 }
 
 interface FieldDef {
@@ -65,16 +64,7 @@ export default function FieldDisplay({ field, value, users = [] }: Props) {
     case 'SELECT': {
       const opt = field.options?.find((o) => o.id === value)
       return (
-        <span style={{ fontSize: 13 }}>
-          <span
-            className="pip"
-            style={{
-              display: 'inline-block', width: 6, height: 6, borderRadius: '50%',
-              background: opt?.color || 'var(--accent)', marginRight: 6, verticalAlign: 'middle',
-            }}
-          />
-          {opt ? opt.name : String(value)}
-        </span>
+        <span style={{ fontSize: 13 }}>{opt ? opt.name : String(value)}</span>
       )
     }
 
