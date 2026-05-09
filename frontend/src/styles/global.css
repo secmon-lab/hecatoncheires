@@ -27,6 +27,59 @@
   --action-status-success:      oklch(0.65 0.14 150);
   --action-status-neutral-done: oklch(0.55 0.02 270);
   --action-status-failure:      oklch(0.5 0.16 25);
+
+  /* Compatibility aliases.
+     Some module CSS files (source/, fields/, auth/, pages/ActionList) were
+     authored against an external design-token vocabulary (--bg-paper,
+     --border-default, --color-primary, --spacing-*, ...) that this project
+     does not natively use. The canonical tokens here are --bg-elev / --line /
+     --accent / --sp-* / etc., which get redefined per [data-aesthetic][data-theme].
+     These aliases bridge the two vocabularies so module CSS resolves correctly
+     and remains theme-aware (the alias targets are themed; aliases inherit
+     through var() at use site). */
+
+  /* surfaces */
+  --bg-default: var(--bg);
+  --bg-paper:   var(--bg-elev);
+  --bg-subtle:  var(--bg-sunken);
+  --bg-muted:   var(--bg-sunken);
+
+  /* borders */
+  --border-default: var(--line);
+  --border-light:   var(--line);
+  --border-medium:  var(--line-strong);
+  --border-hover:   var(--line-strong);
+
+  /* text */
+  --text-heading: var(--fg);
+  --text-body:    var(--fg);
+  --text-label:   var(--fg-muted);
+  --text-muted:   var(--fg-muted);
+
+  /* primary / accent */
+  --color-primary:        var(--accent);
+  --color-primary-rgb:    var(--accent);
+  --color-primary-shadow: var(--accent-soft);
+
+  /* status */
+  --color-error:        var(--danger);
+  --color-error-dark:   var(--danger);
+  --color-error-shadow: color-mix(in oklch, var(--danger) 15%, transparent);
+  --color-success:      var(--ok);
+  --color-success-dark: var(--ok);
+
+  /* shadow / interactive */
+  --card-shadow:      var(--shadow);
+  --touch-target-min: 40px;
+  --transition-fast:  0.15s ease;
+
+  /* spacing aliases (theme-independent fixed scale) */
+  --spacing-xs:    4px;
+  --spacing-sm:    8px;
+  --spacing-md-sm: 12px;
+  --spacing-md-lg: 14px;
+  --spacing-md:    16px;
+  --spacing-lg:    24px;
 }
 
 /* density */
