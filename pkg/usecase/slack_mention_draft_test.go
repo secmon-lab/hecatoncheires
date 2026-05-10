@@ -3,6 +3,7 @@ package usecase_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -359,6 +360,11 @@ type ephemeralBlockPost struct {
 	channelID string
 	userID    string
 	blocks    []slackBlockSnapshot
+	// rawBlocks carries the actual Block Kit blocks the production code
+	// passed in. Most assertions only need the count (recorded in `blocks`)
+	// but tests that need to inspect rendered text/markdown can reach into
+	// rawBlocks. Filled by UpdateMessage / PostThreadMessage / etc.
+	rawBlocks []goslack.Block
 }
 
 // slackBlockSnapshot is intentionally opaque; we only check counts and
@@ -420,7 +426,10 @@ func (m *collectorOnlyMockSlack) ListUsers(context.Context, string) ([]*slacksvc
 	return nil, nil
 }
 func (m *collectorOnlyMockSlack) CreateChannel(context.Context, int64, string, string, bool, string) (string, error) {
-	return "", nil
+	// Return a deterministic synthetic channel ID so post-create assertions
+	// have something to recognise as a Slack channel mention. Tests that do
+	// not care about the value still see a non-empty string.
+	return "C-CREATED", nil
 }
 func (m *collectorOnlyMockSlack) GetConversationMembers(context.Context, string) ([]string, error) {
 	return nil, nil
@@ -443,6 +452,7 @@ func (m *collectorOnlyMockSlack) UpdateMessage(_ context.Context, channelID stri
 	m.updateBlockPosts = append(m.updateBlockPosts, ephemeralBlockPost{
 		channelID: channelID,
 		blocks:    snaps,
+		rawBlocks: append([]goslack.Block(nil), blocks...),
 	})
 	return nil
 }
@@ -1029,8 +1039,76 @@ func TestLifecycle_DraftFlow_MaterializeThenSubmitCreatesCase(t *testing.T) {
 	gt.Value(t, cases[0].FieldValues["severity"].Value).Equal("high")
 	gt.Array(t, cases[0].AssigneeIDs).Length(1).Required()
 	gt.Value(t, cases[0].AssigneeIDs[0]).Equal("U-AUTHOR")
+	gt.Value(t, cases[0].SlackChannelID).Equal("C-CREATED")
+
+	// The post-create chat.update replaces the preview with a single
+	// context block carrying a clickable mention of the case channel —
+	// not a full re-render of the case body.
+	gt.Number(t, len(h.slackMock.updateBlockPosts)).GreaterOrEqual(1).Required()
+	finalUpdate := h.slackMock.updateBlockPosts[len(h.slackMock.updateBlockPosts)-1]
+	gt.Array(t, finalUpdate.rawBlocks).Length(1).Required()
+	finalCtx, ok := finalUpdate.rawBlocks[0].(*goslack.ContextBlock)
+	gt.Bool(t, ok).True().Required()
+	gt.Array(t, finalCtx.ContextElements.Elements).Length(1).Required()
+	finalText, ok := finalCtx.ContextElements.Elements[0].(*goslack.TextBlockObject)
+	gt.Bool(t, ok).True().Required()
+	gt.Bool(t, strings.Contains(finalText.Text, "<#C-CREATED>")).True()
+	gt.Bool(t, strings.Contains(finalText.Text, "Quick incident")).True()
 
 	// Draft is deleted after Submit.
 	_, err = h.repo.CaseDraft().Get(context.Background(), d.ID)
 	gt.Value(t, err).NotNil()
+}
+
+// TestBuildCaseCreatedTailBlocks verifies that the post-create thread
+// message renders as a single context block carrying a Slack channel
+// mention that links the user to the case's dedicated channel.
+func TestBuildCaseCreatedTailBlocks(t *testing.T) {
+	t.Run("with SlackChannelID renders mrkdwn channel mention", func(t *testing.T) {
+		created := &model.Case{
+			ID:             42,
+			Title:          "Tanaka incident",
+			SlackChannelID: "C0123ABCD",
+		}
+		blocks, fallback := usecase.BuildCaseCreatedTailBlocksForTest(context.Background(), created)
+		gt.Array(t, blocks).Length(1).Required()
+		gt.String(t, fallback).Contains("42")
+		gt.String(t, fallback).Contains("Tanaka incident")
+
+		ctxBlock, ok := blocks[0].(*goslack.ContextBlock)
+		gt.Bool(t, ok).True().Required()
+		gt.Value(t, ctxBlock.Type).Equal(goslack.MBTContext)
+		gt.Array(t, ctxBlock.ContextElements.Elements).Length(1).Required()
+
+		text, ok := ctxBlock.ContextElements.Elements[0].(*goslack.TextBlockObject)
+		gt.Bool(t, ok).True().Required()
+		gt.Value(t, text.Type).Equal(goslack.MarkdownType)
+		gt.String(t, text.Text).Contains("<#C0123ABCD>")
+		gt.String(t, text.Text).Contains("42")
+		gt.String(t, text.Text).Contains("Tanaka incident")
+	})
+
+	t.Run("without SlackChannelID falls back to plain created line", func(t *testing.T) {
+		created := &model.Case{
+			ID:    7,
+			Title: "Solo incident",
+		}
+		blocks, _ := usecase.BuildCaseCreatedTailBlocksForTest(context.Background(), created)
+		gt.Array(t, blocks).Length(1).Required()
+
+		ctxBlock, ok := blocks[0].(*goslack.ContextBlock)
+		gt.Bool(t, ok).True().Required()
+		text, ok := ctxBlock.ContextElements.Elements[0].(*goslack.TextBlockObject)
+		gt.Bool(t, ok).True().Required()
+		gt.String(t, text.Text).Contains("7")
+		gt.String(t, text.Text).Contains("Solo incident")
+		// No channel mention when SlackChannelID is empty.
+		gt.Bool(t, strings.Contains(text.Text, "<#")).False()
+	})
+
+	t.Run("nil case returns no blocks and a fallback", func(t *testing.T) {
+		blocks, fallback := usecase.BuildCaseCreatedTailBlocksForTest(context.Background(), nil)
+		gt.Array(t, blocks).Length(0)
+		gt.String(t, fallback).NotEqual("")
+	})
 }

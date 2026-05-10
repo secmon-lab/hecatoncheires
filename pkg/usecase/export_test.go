@@ -10,6 +10,9 @@ import (
 // BuildTraceContextBlocksForTest is exported for testing
 var BuildTraceContextBlocksForTest = buildTraceContextBlocks
 
+// BuildCaseCreatedTailBlocksForTest is exported for testing
+var BuildCaseCreatedTailBlocksForTest = buildCaseCreatedTailBlocks
+
 // BuildAssistSystemPrompt is exported for testing
 var BuildAssistSystemPrompt = (*AssistUseCase).buildAssistSystemPrompt
 

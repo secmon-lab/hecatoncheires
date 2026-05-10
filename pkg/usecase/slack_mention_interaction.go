@@ -220,8 +220,7 @@ func (uc *MentionDraftUseCase) HandleSubmit(ctx context.Context, caseUC *CaseUse
 			goerr.V("workspace_id", draft.SelectedWorkspaceID))
 	}
 
-	entry, _ := uc.registry.Get(draft.SelectedWorkspaceID)
-	uc.updatePreviewWithCreated(ctx, draft.EphemeralChannelID, draft.EphemeralMessageTS, entry, created)
+	uc.updatePreviewWithCreated(ctx, draft.EphemeralChannelID, draft.EphemeralMessageTS, created)
 
 	if err := uc.repo.CaseDraft().Delete(ctx, draft.ID); err != nil {
 		errutil.Handle(ctx, err, "failed to delete draft after submit")
@@ -360,8 +359,7 @@ func (uc *MentionDraftUseCase) HandleEditSubmit(ctx context.Context, caseUC *Cas
 			goerr.V("draft_id", meta.DraftID))
 	}
 
-	entry, _ := uc.registry.Get(meta.WorkspaceID)
-	uc.updatePreviewWithCreated(ctx, meta.EphemeralChannelID, meta.EphemeralMessageTS, entry, created)
+	uc.updatePreviewWithCreated(ctx, meta.EphemeralChannelID, meta.EphemeralMessageTS, created)
 
 	if err := uc.repo.CaseDraft().Delete(ctx, draft.ID); err != nil {
 		errutil.Handle(ctx, err, "failed to delete draft after edit submit")
@@ -459,11 +457,11 @@ func postJSON(ctx context.Context, url string, body any) error {
 // replace_original is unreliable for thread replies, so we always use
 // chat.update against the channel/ts captured when the preview was first
 // posted by HandleAppMention.
-func (uc *MentionDraftUseCase) updatePreviewWithCreated(ctx context.Context, channelID, messageTS string, entry *model.WorkspaceEntry, created *model.Case) {
+func (uc *MentionDraftUseCase) updatePreviewWithCreated(ctx context.Context, channelID, messageTS string, created *model.Case) {
 	if channelID == "" || messageTS == "" || uc.slackService == nil {
 		return
 	}
-	blocks, fallback := buildCreatedBlocks(entry, created)
+	blocks, fallback := buildCaseCreatedTailBlocks(ctx, created)
 	if err := uc.slackService.UpdateMessage(ctx, channelID, messageTS, blocks, fallback); err != nil {
 		errutil.Handle(ctx, err, "failed to update preview message after case creation")
 	}
