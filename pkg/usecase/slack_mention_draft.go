@@ -14,6 +14,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/draft"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
@@ -583,36 +584,38 @@ func buildPreviewBlocks(
 	return blocks, fallback
 }
 
-// buildCreatedBlocks renders the post-create state in the same shape as the
-// preview, minus the workspace selector and action buttons, plus a final
-// "✅ Created" context line. The created Case's actual fields are used so the
-// rendered values reflect any edits made via the Edit modal.
-func buildCreatedBlocks(entry *model.WorkspaceEntry, created *model.Case) ([]goslack.Block, string) {
+// buildCaseCreatedTailBlocks renders the post-create state as a single
+// context block carrying the case number, title, and a clickable mention
+// of the case's Slack channel. This replaces the prior full preview-style
+// re-render: the case body is already viewable via the linked channel, so
+// the thread message just needs to point users at the new home.
+func buildCaseCreatedTailBlocks(ctx context.Context, created *model.Case) ([]goslack.Block, string) {
 	if created == nil {
 		return nil, "Case created"
 	}
-
-	blocks := []goslack.Block{
-		buildTitleAndDescriptionMarkdown("mention_created_body", created.Title, created.Description),
-		goslack.NewDividerBlock(),
+	// Title is interpolated into a markdown-bold (`*%s*`) slot in the i18n
+	// strings, so any literal `*` / `_` / `~` / `\`` would corrupt Slack
+	// formatting. Escape inline like buildTitleAndDescriptionMarkdown does.
+	// Also collapse whitespace and supply a placeholder when the title is
+	// blank so the rendered line never reads "Case #N ** has been created.".
+	title := strings.TrimSpace(created.Title)
+	if title == "" {
+		title = "(untitled)"
 	}
-
-	if entry != nil && entry.FieldSchema != nil {
-		blocks = append(blocks, buildFieldPairSections(entry.FieldSchema.Fields, created.FieldValues)...)
-	}
-
-	tail := fmt.Sprintf("✅ *Created* — Case #%d", created.ID)
+	escapedTitle := escapeMarkdownInline(title)
+	var line string
 	if created.SlackChannelID != "" {
-		tail = fmt.Sprintf("✅ *Created* — Case #%d in <#%s>", created.ID, created.SlackChannelID)
+		line = "✅ " + i18n.T(ctx, i18n.MsgCaseCreatedWithChannel, created.ID, escapedTitle, created.SlackChannelID)
+	} else {
+		line = "✅ " + i18n.T(ctx, i18n.MsgCaseCreated, created.ID, escapedTitle)
 	}
-	blocks = append(blocks,
+	blocks := []goslack.Block{
 		goslack.NewContextBlock(
 			"mention_draft_created_tail",
-			goslack.NewTextBlockObject(goslack.MarkdownType, tail, false, false),
+			goslack.NewTextBlockObject(goslack.MarkdownType, line, false, false),
 		),
-	)
-
-	fallback := fmt.Sprintf("Created case #%d: %s", created.ID, created.Title)
+	}
+	fallback := fmt.Sprintf("Created case #%d: %s", created.ID, title)
 	return blocks, fallback
 }
 

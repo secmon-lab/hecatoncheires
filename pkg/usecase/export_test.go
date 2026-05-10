@@ -28,6 +28,9 @@ func NewSlackDraftHandlerForTest(
 // BuildTraceContextBlocksForTest is exported for testing
 var BuildTraceContextBlocksForTest = buildTraceContextBlocks
 
+// BuildCaseCreatedTailBlocksForTest is exported for testing
+var BuildCaseCreatedTailBlocksForTest = buildCaseCreatedTailBlocks
+
 // BuildDraftUserInputForTest exposes the unexported buildDraftUserInput
 // so tests in the external usecase_test package can assert on the
 // planner's first-turn prompt content.
