@@ -720,8 +720,8 @@ type recordingSlackSearch struct {
 }
 
 type slackSearchInvocation struct {
-	Query string                    `json:"query"`
-	Opts  slacktool.SearchOptions   `json:"opts"`
+	Query string                  `json:"query"`
+	Opts  slacktool.SearchOptions `json:"opts"`
 }
 
 func (r *recordingSlackSearch) SearchMessages(ctx context.Context, query string, opts slacktool.SearchOptions) (*slacktool.SearchResult, error) {
@@ -749,8 +749,8 @@ type recordingNotionClient struct {
 }
 
 type notionSearchInvocation struct {
-	Query string                    `json:"query"`
-	Opts  notiontool.SearchOptions  `json:"opts"`
+	Query string                   `json:"query"`
+	Opts  notiontool.SearchOptions `json:"opts"`
 }
 
 type notionGetPageInvocation struct {
@@ -861,9 +861,10 @@ func runJudge(t *testing.T, ctx context.Context, llm gollem.LLMClient, traceRepo
 }
 
 // checkSubAgentCallCount enforces the requireXxxCalls contract:
-//   require == 0 → skip
-//   require > 0  → got >= require
-//   require == -1 → got == 0 (the tool must not have been called).
+//
+//	require == 0 → skip
+//	require > 0  → got >= require
+//	require == -1 → got == 0 (the tool must not have been called).
 func checkSubAgentCallCount(t *testing.T, label string, got, require int) {
 	t.Helper()
 	switch {
@@ -1687,14 +1688,14 @@ func TestRunTurn_RealLLM_PicksRightWorkspaceFromMany(t *testing.T) {
 // loader and treats the reply as a continuation of the same dialogue.
 //
 // We assert at every hop:
-//   1. Turn 1 ends in StatusCompleted / SessionEndedWithQuestion and
-//      records exactly one Question payload, no Materialize.
-//   2. Turn 2 ends in StatusCompleted / SessionEndedWithMaterialize on
-//      the correct workspace, with the impact field grading inside an
-//      allowed range.
-//   3. Both turns persisted their own trace; each trace contains at
-//      least one get_workspace call (the strengthened planner prompt
-//      requires it before any terminal action).
+//  1. Turn 1 ends in StatusCompleted / SessionEndedWithQuestion and
+//     records exactly one Question payload, no Materialize.
+//  2. Turn 2 ends in StatusCompleted / SessionEndedWithMaterialize on
+//     the correct workspace, with the impact field grading inside an
+//     allowed range.
+//  3. Both turns persisted their own trace; each trace contains at
+//     least one get_workspace call (the strengthened planner prompt
+//     requires it before any terminal action).
 func TestRunTurn_RealLLM_QuestionAnsweredThenMaterializes(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
