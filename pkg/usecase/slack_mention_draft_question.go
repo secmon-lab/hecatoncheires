@@ -29,6 +29,13 @@ const (
 	// element rendering the per-item free-form fallback. Same id across all
 	// items; per-item disambiguation is via block_id (item suffix `:other`).
 	ActionIDDraftQuestionOther = "mention_draft_question_other"
+	// ActionIDDraftQuestionFreeText is the action_id of the plain_text_input
+	// element rendering a `free_text` question item's primary control. The
+	// item has no select / checkbox companion; its single multiline input
+	// IS the answer surface, so a distinct action_id keeps the parser path
+	// clean from the per-item Other fallback used by the closed-list
+	// types.
+	ActionIDDraftQuestionFreeText = "mention_draft_question_free_text"
 	// BlockIDDraftQuestionActions is the block_id of the actions block
 	// hosting the Submit button. Distinct from the per-question input
 	// block_ids so dispatch can ignore it when matching answers.
@@ -43,9 +50,16 @@ const (
 	BlockIDDraftQuestionOtherSuffix = ":other"
 )
 
-// draftQuestionAnswer is the parsed per-item answer pair (selected option IDs
-// + free-form fallback). Either or both may be populated; both empty is the
-// "unanswered" signal.
+// draftQuestionAnswer is the parsed per-item answer.
+//
+// For `select` / `multi_select` items: Selections holds the chosen
+// option IDs and OtherText holds the user's free-form fallback (the
+// "Other (free text)" companion input).
+//
+// For `free_text` items: Selections is always empty and OtherText holds
+// the user's prose answer (the item's primary input). Treating the
+// prose as OtherText keeps the data model uniform; downstream code
+// reads it via the same field.
 type draftQuestionAnswer struct {
 	Selections []string
 	OtherText  string
@@ -75,6 +89,26 @@ func buildDraftQuestionBlocks(q draft.QuestionPayload, draftID model.CaseDraftID
 	blocks := []goslack.Block{header, goslack.NewDividerBlock()}
 
 	for _, item := range q.Items {
+		if item.Type == draft.QuestionItemFreeText {
+			// `free_text`: the item's only control is a multiline
+			// plain-text input. No closed-list companion, no Other
+			// fallback — the prose is the answer.
+			elem := goslack.NewPlainTextInputBlockElement(
+				goslack.NewTextBlockObject(goslack.PlainTextType, "Type your answer here…", false, false),
+				ActionIDDraftQuestionFreeText,
+			)
+			elem.Multiline = true
+			input := goslack.NewInputBlock(
+				BlockIDDraftQuestionItemPrefix+item.ID,
+				goslack.NewTextBlockObject(goslack.PlainTextType, item.Text, false, false),
+				nil,
+				elem,
+			)
+			input.Optional = true
+			blocks = append(blocks, input)
+			continue
+		}
+
 		opts := make([]*goslack.OptionBlockObject, 0, len(item.Options))
 		for _, optID := range item.Options {
 			opts = append(opts, goslack.NewOptionBlockObject(
@@ -152,11 +186,19 @@ func buildDraftQuestionAnsweredBlocks(pq *model.PendingQuestion, answers map[str
 		fmt.Fprintf(&b, "*%s*\n", escapeMarkdownInline(item.Text))
 		ans := answers[item.ID]
 		var parts []string
-		for _, p := range ans.Selections {
-			parts = append(parts, "`"+p+"`")
-		}
-		if other := strings.TrimSpace(ans.OtherText); other != "" {
-			parts = append(parts, "_"+escapeMarkdownInline(other)+"_")
+		if item.Type == string(draft.QuestionItemFreeText) {
+			// `free_text` items render the prose directly without
+			// the backtick "selection" framing used for closed lists.
+			if v := strings.TrimSpace(ans.OtherText); v != "" {
+				parts = append(parts, "_"+escapeMarkdownInline(v)+"_")
+			}
+		} else {
+			for _, p := range ans.Selections {
+				parts = append(parts, "`"+p+"`")
+			}
+			if other := strings.TrimSpace(ans.OtherText); other != "" {
+				parts = append(parts, "_"+escapeMarkdownInline(other)+"_")
+			}
 		}
 		if len(parts) == 0 {
 			b.WriteString("_(no answer)_")
@@ -211,16 +253,27 @@ func parseDraftQuestionAnswers(pq *model.PendingQuestion, state *goslack.BlockAc
 
 		choiceBlockID := BlockIDDraftQuestionItemPrefix + item.ID
 		if blk, ok := state.Values[choiceBlockID]; ok {
-			if act, ok := blk[ActionIDDraftQuestionChoice]; ok {
-				switch item.Type {
-				case string(draft.QuestionItemMultiSelect):
+			switch item.Type {
+			case string(draft.QuestionItemFreeText):
+				// `free_text`: the item's primary control is a single
+				// plain_text_input with our free-text action_id. Park
+				// the prose into OtherText so downstream code reads
+				// the answer through the same field as the
+				// closed-list "Other" fallback.
+				if act, ok := blk[ActionIDDraftQuestionFreeText]; ok {
+					ans.OtherText = act.Value
+				}
+			case string(draft.QuestionItemMultiSelect):
+				if act, ok := blk[ActionIDDraftQuestionChoice]; ok {
 					for _, opt := range act.SelectedOptions {
 						if opt.Value == "" {
 							continue
 						}
 						ans.Selections = append(ans.Selections, opt.Value)
 					}
-				default:
+				}
+			default:
+				if act, ok := blk[ActionIDDraftQuestionChoice]; ok {
 					if v := act.SelectedOption.Value; v != "" {
 						ans.Selections = []string{v}
 					}
@@ -228,10 +281,15 @@ func parseDraftQuestionAnswers(pq *model.PendingQuestion, state *goslack.BlockAc
 			}
 		}
 
-		otherBlockID := BlockIDDraftQuestionItemPrefix + item.ID + BlockIDDraftQuestionOtherSuffix
-		if blk, ok := state.Values[otherBlockID]; ok {
-			if act, ok := blk[ActionIDDraftQuestionOther]; ok {
-				ans.OtherText = act.Value
+		// Closed-list items also carry a per-item "Other (free text)"
+		// fallback in a sibling block. `free_text` items don't render
+		// that block, so the lookup is a harmless miss.
+		if item.Type != string(draft.QuestionItemFreeText) {
+			otherBlockID := BlockIDDraftQuestionItemPrefix + item.ID + BlockIDDraftQuestionOtherSuffix
+			if blk, ok := state.Values[otherBlockID]; ok {
+				if act, ok := blk[ActionIDDraftQuestionOther]; ok {
+					ans.OtherText = act.Value
+				}
 			}
 		}
 
@@ -245,7 +303,7 @@ func parseDraftQuestionAnswers(pq *model.PendingQuestion, state *goslack.BlockAc
 // formatDraftQuestionAnswers renders the user's answers as a markdown text
 // to feed back into the planner as the next-turn user input. Each item is
 // labelled with its question text so the planner sees a self-describing
-// dialogue line rather than opaque IDs. Free-text fallback is preserved
+// dialogue line rather than opaque IDs. Free-text content is preserved
 // verbatim — the planner needs the literal user copy to decide.
 func formatDraftQuestionAnswers(pq *model.PendingQuestion, answers map[string]draftQuestionAnswer) string {
 	var b strings.Builder
@@ -254,11 +312,20 @@ func formatDraftQuestionAnswers(pq *model.PendingQuestion, answers map[string]dr
 		fmt.Fprintf(&b, "## %s\n", item.Text)
 		ans := answers[item.ID]
 		var parts []string
-		if len(ans.Selections) > 0 {
-			parts = append(parts, "selected: "+strings.Join(ans.Selections, ", "))
-		}
-		if other := strings.TrimSpace(ans.OtherText); other != "" {
-			parts = append(parts, "other: "+other)
+		if item.Type == string(draft.QuestionItemFreeText) {
+			// `free_text` items have no closed-list companion, so the
+			// "selected:" / "other:" framing would be misleading.
+			// Surface the prose under a clear label.
+			if v := strings.TrimSpace(ans.OtherText); v != "" {
+				parts = append(parts, "answer: "+v)
+			}
+		} else {
+			if len(ans.Selections) > 0 {
+				parts = append(parts, "selected: "+strings.Join(ans.Selections, ", "))
+			}
+			if other := strings.TrimSpace(ans.OtherText); other != "" {
+				parts = append(parts, "other: "+other)
+			}
 		}
 		if len(parts) == 0 {
 			b.WriteString("(no answer)\n\n")
@@ -348,9 +415,8 @@ func (uc *MentionDraftUseCase) HandleQuestionSubmit(ctx context.Context, callbac
 	}
 
 	var (
-		d         *model.CaseDraft
-		draftID   model.CaseDraftID
-		estimated *model.WorkspaceEntry
+		d       *model.CaseDraft
+		draftID model.CaseDraftID
 	)
 	if session.DraftID != "" {
 		d, err = uc.repo.CaseDraft().Get(ctx, session.DraftID)
@@ -360,11 +426,6 @@ func (uc *MentionDraftUseCase) HandleQuestionSubmit(ctx context.Context, callbac
 	}
 	if d != nil {
 		draftID = d.ID
-		if d.SelectedWorkspaceID != "" && uc.registry != nil {
-			if entry, getErr := uc.registry.Get(d.SelectedWorkspaceID); getErr == nil {
-				estimated = entry
-			}
-		}
 	}
 	candidates := uc.accessibleWorkspaces(callback.User.ID)
 
@@ -381,8 +442,6 @@ func (uc *MentionDraftUseCase) HandleQuestionSubmit(ctx context.Context, callbac
 		Trigger:       draft.TriggerThreadReply,
 		TriggerTS:     messageTS,
 		ActorUserID:   callback.User.ID,
-		EstimatedWS:   estimated,
-		Candidates:    candidates,
 		ExistingDraft: d,
 		Handler:       handler,
 	})

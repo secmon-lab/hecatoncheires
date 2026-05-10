@@ -11,6 +11,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/wsmeta"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
@@ -41,14 +42,11 @@ type TurnRequest struct {
 	// sub-agent tools that need actor authorisation.
 	ActorUserID string
 
-	// EstimatedWS / Candidates / EstimationReason / ExistingDraft are
-	// pure-domain facts the host has already resolved; the planner uses
-	// them to make a sensible workspace choice without re-running the
-	// estimation logic.
-	EstimatedWS      *model.WorkspaceEntry
-	Candidates       []*model.WorkspaceEntry
-	EstimationReason string
-	ExistingDraft    *model.CaseDraft
+	// ExistingDraft is the prior draft persisted by the host (when this
+	// turn is resuming an existing draft, e.g. ws-switch or thread reply).
+	// The planner does not consume it directly — the host uses it to keep
+	// preview state coherent across turns.
+	ExistingDraft *model.CaseDraft
 
 	// Handler implements the host-side terminal action dispatchers and
 	// trace updates.
@@ -182,14 +180,27 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 	// budget is shared across calls within an agent, and we want each
 	// planner round to be a single, isolated LLM call. A new agent reloads
 	// history from the repository each time, which is the correct semantic.
-	newPlannerAgent := func() *gollem.Agent {
+	//
+	// The planner is tool-enabled: wsmeta exposes `list_workspaces` and
+	// `get_workspace` so the planner can pull a workspace's field schema
+	// and source list on demand instead of having the entire registry
+	// inlined into the system prompt. The response schema is still wired
+	// up — gollem applies it to the final assistant text, after the
+	// tool-call rounds settle.
+	plannerTools := wsmeta.New(wsmeta.Deps{
+		Registry:   uc.deps.Registry,
+		SourceRepo: uc.deps.Repo.Source(),
+	})
+	newPlannerAgent := func(roundKey string) *gollem.Agent {
 		return gollem.New(uc.deps.LLMClient,
 			gollem.WithSystemPrompt(systemPrompt),
+			gollem.WithTools(plannerTools...),
 			gollem.WithHistoryRepository(uc.deps.HistoryRepo, req.Session.ID),
 			gollem.WithTrace(recorder),
 			gollem.WithContentType(gollem.ContentTypeJSON),
 			gollem.WithResponseSchema(planSchema()),
 			gollem.WithLoopLimit(plannerPerCallLoopLimit),
+			gollem.WithContentBlockMiddleware(newPlannerProgressMiddleware(handler, roundKey)),
 		)
 	}
 
@@ -198,15 +209,29 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 	// First-round user input: budget prefix + caller-supplied text.
 	nextInput := budget.FormatPrefix() + "\n\n" + req.UserInput
 
+	// logicalRound counts the planner's *logical* rounds: a single planner
+	// attempt that may span multiple Execute calls if validation fails. All
+	// transient lines for one logical round (Planning…, retry, the
+	// re-Planning… that follows, the final action selection, plus
+	// per-iteration tool-call / thought lines from the middleware) share
+	// one Slack message and replace each other in place. A fresh logical
+	// round opens a new Slack message — that is the boundary the user
+	// sees as "this round is over, the next one started".
+	logicalRound := 0
+
 	for {
 		if !budget.CanPlannerCall() {
 			return uc.fallback(turnCtx, req, "planner budget exhausted")
 		}
+		if logicalRound == 0 {
+			logicalRound = 1
+		}
 		budget.PlannerUsed++
-		handler.Trace(turnCtx, i18n.T(turnCtx, i18n.MsgDraftTracePlanning))
+		roundKey := fmt.Sprintf("plan-%d", logicalRound)
+		handler.TraceRound(turnCtx, roundKey, i18n.T(turnCtx, i18n.MsgDraftTracePlanning))
 
 		roundStarted := time.Now()
-		resp, execErr := newPlannerAgent().Execute(turnCtx, gollem.Text(nextInput))
+		resp, execErr := newPlannerAgent(roundKey).Execute(turnCtx, gollem.Text(nextInput))
 		roundElapsed := time.Since(roundStarted).Round(time.Millisecond)
 		if execErr != nil {
 			return nil, goerr.Wrap(execErr, "planner execute",
@@ -240,11 +265,13 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 			// (so the LLM has a concrete instruction). Each retry
 			// consumes one planner slot. Surface the failure in the
 			// Slack trace so the user can see *why* successive Planning
-			// rounds are firing without progress.
+			// rounds are firing without progress. We stay on the same
+			// roundKey so the retry line replaces the prior planning
+			// content in place.
 			logging.From(turnCtx).Warn("planner output failed validation; retrying",
 				"error", parseErr.Error(),
 			)
-			handler.Trace(turnCtx, i18n.T(turnCtx, i18n.MsgDraftTracePlannerRetry))
+			handler.TraceRound(turnCtx, roundKey, i18n.T(turnCtx, i18n.MsgDraftTracePlannerRetry))
 			nextInput = budget.FormatPrefix() + "\n\nYour previous output failed validation: " + parseErr.Error() + ". Please re-emit a JSON object that matches the response schema."
 			continue
 		}
@@ -257,13 +284,18 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 			}
 		}
 
-		handler.Trace(turnCtx, i18n.T(turnCtx, i18n.MsgDraftTracePlannerAction, string(p.Action), p.Reasoning))
+		handler.TraceRound(turnCtx, roundKey, i18n.T(turnCtx, i18n.MsgDraftTracePlannerAction, string(p.Action), p.Reasoning))
 
 		switch p.Action {
 		case actionInvestigate:
 			budget.SubAgentUsed += len(p.Investigate.Tasks)
 			results := uc.runInvestigationsParallel(turnCtx, p.Investigate, handler, resolver)
 			nextInput = budget.FormatPrefix() + "\n\n" + formatObservationsAsUserTurn(p.Investigate, results)
+			// A fresh logical round begins after investigation
+			// observations come back — the next "🤔 Planning…"
+			// must open a new Slack message, not replace this
+			// round's "→ investigate — …" line.
+			logicalRound++
 			continue
 		case actionQuestion:
 			payload := QuestionPayload{Reason: p.Question.Reason}
@@ -320,16 +352,18 @@ func (uc *UseCase) finalize(ctx context.Context, ssn *model.Session, ended model
 // buildToolSetResolver composes a per-turn tool resolver. Note that core_ro
 // is the read-only subset (no mutation) — investigation sub-agents must
 // not change Case state while a turn is forming.
-func (uc *UseCase) buildToolSetResolver(req TurnRequest) *agent.ToolSetResolver {
+//
+// WorkspaceID is left empty for the draft mode: the host no longer pre-resolves
+// a workspace, so the resolver hands every sub-agent a workspace-agnostic
+// core_ro deps. Sub-agents that genuinely need a workspace context get it
+// via the planner's investigate task description (the planner has just
+// learnt the workspace identity from `get_workspace`).
+func (uc *UseCase) buildToolSetResolver(_ TurnRequest) *agent.ToolSetResolver {
 	d := uc.deps
-	wsID := ""
-	if req.EstimatedWS != nil {
-		wsID = req.EstimatedWS.Workspace.ID
-	}
 	return agent.NewToolSetResolver(agent.ToolSetDeps{
 		Core: core.Deps{
 			Repo:         d.Repo,
-			WorkspaceID:  wsID,
+			WorkspaceID:  "",
 			ActionUC:     d.ActionUC,
 			ActionStepUC: d.ActionStepUC,
 		},
@@ -358,9 +392,52 @@ func validateTurnRequest(req *TurnRequest) error {
 }
 
 // plannerPerCallLoopLimit is the gollem-side loop bound per Execute. The
-// planner has no tools, so the LLM should always finish in 1 iteration —
-// this limit is a safety net.
-const plannerPerCallLoopLimit = 4
+// planner is tool-enabled (wsmeta), so a single round legitimately consumes
+// a few iterations (e.g. tool call → tool response → final JSON). Set
+// generously so a planner that wants to call list_workspaces + get_workspace
+// before deciding still has room to emit the terminal JSON.
+const plannerPerCallLoopLimit = 8
+
+// plannerProgressMaxRunes bounds the LLM-message excerpt rendered into the
+// planner round message during a tool-use cycle. A single Slack context
+// line, so long thoughts collapse to this character budget.
+const plannerProgressMaxRunes = 80
+
+// newPlannerProgressMiddleware returns a gollem ContentBlockMiddleware that
+// surfaces per-iteration planner activity onto the planner round's Slack
+// message. Every LLM round, the middleware observes the response and
+// pushes either "🛠 Planning — calling <tool>" (when the response carries
+// a tool call) or "🤔 Planning — <excerpt>" (when only a thought is
+// available) to Handler.TraceRound under the supplied roundKey. Because
+// TraceRound replaces the round message in place, the user watches the
+// planner's tool-use cycle play out inside one updating context block
+// instead of accumulating a stack of separate trace posts.
+func newPlannerProgressMiddleware(h Handler, roundKey string) gollem.ContentBlockMiddleware {
+	return func(next gollem.ContentBlockHandler) gollem.ContentBlockHandler {
+		return func(ctx context.Context, req *gollem.ContentRequest) (*gollem.ContentResponse, error) {
+			resp, err := next(ctx, req)
+			if err != nil || resp == nil {
+				return resp, err
+			}
+			// Show the LLM's accompanying thought first so the round
+			// message keeps a useful line even when the response is
+			// text-only.
+			for _, txt := range resp.Texts {
+				excerpt := oneLineExcerpt(txt, plannerProgressMaxRunes)
+				if excerpt != "" {
+					h.TraceRound(ctx, roundKey, i18n.T(ctx, i18n.MsgDraftTracePlannerMessage, excerpt))
+					break
+				}
+			}
+			// A tool call is the more concrete thing to display —
+			// overwrite any thought line we just set.
+			if len(resp.FunctionCalls) > 0 && resp.FunctionCalls[0] != nil {
+				h.TraceRound(ctx, roundKey, i18n.T(ctx, i18n.MsgDraftTracePlannerTool, resp.FunctionCalls[0].Name))
+			}
+			return resp, nil
+		}
+	}
+}
 
 // triggerString stringifies a Trigger for trace metadata labels.
 func triggerString(t Trigger) string {

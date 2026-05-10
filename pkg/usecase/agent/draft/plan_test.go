@@ -55,6 +55,65 @@ func TestParseAndValidate_Question_SingleSelect(t *testing.T) {
 	gt.Array(t, p.Question.Items[0].Options).Length(2)
 }
 
+// TestParseAndValidate_Question_FreeTextNoOptions confirms that a
+// `free_text` item is accepted without any `options` field — the
+// last-resort prose-input shape is exempt from the ≥2 entries rule.
+func TestParseAndValidate_Question_FreeTextNoOptions(t *testing.T) {
+	raw := []byte(`{
+		"reasoning": "investigation produced nothing usable; the case substance is inherently prose",
+		"action": "question",
+		"question": {
+			"reason": "need a narrative summary",
+			"items": [
+				{"id":"q-summary","text":"What is the case about?","type":"free_text"}
+			]
+		}
+	}`)
+	p, err := draft.ParseAndValidateForTest(raw)
+	gt.NoError(t, err).Required()
+	gt.Array(t, p.Question.Items).Length(1).Required()
+	gt.Value(t, p.Question.Items[0].Type).Equal(draft.QuestionTypeFreeTextForTest)
+	gt.Array(t, p.Question.Items[0].Options).Length(0)
+}
+
+// TestParseAndValidate_Question_FreeTextIgnoresOptions confirms that
+// `options` supplied alongside a `free_text` item are tolerated (treated
+// as a hint and discarded by the host) rather than triggering a
+// validation failure.
+func TestParseAndValidate_Question_FreeTextIgnoresOptions(t *testing.T) {
+	raw := []byte(`{
+		"reasoning": "x",
+		"action": "question",
+		"question": {
+			"reason": "y",
+			"items": [
+				{"id":"q1","text":"prose?","type":"free_text","options":["this","that"]}
+			]
+		}
+	}`)
+	p, err := draft.ParseAndValidateForTest(raw)
+	gt.NoError(t, err).Required()
+	gt.Value(t, p.Question.Items[0].Type).Equal(draft.QuestionTypeFreeTextForTest)
+}
+
+// TestParseAndValidate_Question_RejectsSelectWithoutOptions guards the
+// closed-list contract: `select` / `multi_select` still require ≥2
+// options. The free_text exemption does not apply.
+func TestParseAndValidate_Question_RejectsSelectWithoutOptions(t *testing.T) {
+	raw := []byte(`{
+		"reasoning": "x",
+		"action": "question",
+		"question": {
+			"reason": "y",
+			"items": [
+				{"id":"q1","text":"choose","type":"select","options":["only-one"]}
+			]
+		}
+	}`)
+	_, err := draft.ParseAndValidateForTest(raw)
+	gt.Error(t, err)
+}
+
 func TestParseAndValidate_Question_MultiSelectMultipleItems(t *testing.T) {
 	raw := []byte(`{
 		"reasoning": "two pieces of info missing",

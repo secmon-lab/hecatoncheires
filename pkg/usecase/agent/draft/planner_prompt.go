@@ -4,13 +4,11 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
-	"strings"
 	"sync"
 	"text/template"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
-	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 )
 
@@ -35,9 +33,9 @@ func plannerPromptTemplate() (*template.Template, error) {
 }
 
 // plannerPromptInput is the typed input rendered into the planner prompt
-// template. It captures the workspace registry + each workspace's custom
-// field schema so the planner sees the exact set of valid field IDs and
-// option IDs while choosing a `materialize` payload.
+// template. The system prompt only carries the workspace identity tier
+// (id / name / description). Field schemas and source lists are not inlined
+// — the planner pulls them per-turn via the `get_workspace` tool.
 type plannerPromptInput struct {
 	// Language is the human-readable label of the locale the user-facing copy
 	// (`question.text`, `question.items[].text`, `materialize.title`,
@@ -49,21 +47,9 @@ type plannerPromptInput struct {
 }
 
 type plannerPromptWorkspace struct {
-	ID             string
-	Name           string
-	Description    string
-	RequiredFields []plannerPromptField
-	OptionalFields []plannerPromptField
-}
-
-type plannerPromptField struct {
 	ID          string
 	Name        string
 	Description string
-	Type        string
-	// OptionList is a pre-formatted comma-separated list of option IDs for
-	// select / multi-select fields. Empty for free-form types.
-	OptionList string
 }
 
 // renderPlannerPrompt builds the system prompt string. registry may be nil
@@ -88,8 +74,8 @@ func renderPlannerPrompt(registry *model.WorkspaceRegistry, language string) (st
 }
 
 // workspacePromptEntries flattens registry into the prompt-template-friendly
-// shape, splitting required and optional fields and pre-rendering option
-// lists. Returns nil when registry is nil or empty.
+// shape — only id / name / description. Returns nil when registry is nil or
+// empty so the template's "no workspaces" branch fires.
 func workspacePromptEntries(registry *model.WorkspaceRegistry) []plannerPromptWorkspace {
 	if registry == nil {
 		return nil
@@ -103,28 +89,11 @@ func workspacePromptEntries(registry *model.WorkspaceRegistry) []plannerPromptWo
 		if e == nil {
 			continue
 		}
-		ws := plannerPromptWorkspace{
+		out = append(out, plannerPromptWorkspace{
 			ID:          e.Workspace.ID,
 			Name:        e.Workspace.Name,
 			Description: e.Workspace.Description,
-		}
-		if e.FieldSchema != nil {
-			for _, fd := range e.FieldSchema.Fields {
-				pf := plannerPromptField{
-					ID:          fd.ID,
-					Name:        fd.Name,
-					Description: fd.Description,
-					Type:        string(fd.Type),
-					OptionList:  formatOptionList(fd),
-				}
-				if fd.Required {
-					ws.RequiredFields = append(ws.RequiredFields, pf)
-				} else {
-					ws.OptionalFields = append(ws.OptionalFields, pf)
-				}
-			}
-		}
-		out = append(out, ws)
+		})
 	}
 	return out
 }
@@ -155,22 +124,4 @@ func plannerLanguageLabel(ctx context.Context) string {
 	default:
 		return ""
 	}
-}
-
-// formatOptionList renders the field's allowed option IDs (with names when
-// present) as a comma-separated string, e.g. `low (Low), high (High)`. Empty
-// for free-form field types.
-func formatOptionList(fd config.FieldDefinition) string {
-	if len(fd.Options) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, len(fd.Options))
-	for _, opt := range fd.Options {
-		if opt.Name != "" && opt.Name != opt.ID {
-			parts = append(parts, opt.ID+" ("+opt.Name+")")
-		} else {
-			parts = append(parts, opt.ID)
-		}
-	}
-	return strings.Join(parts, ", ")
 }

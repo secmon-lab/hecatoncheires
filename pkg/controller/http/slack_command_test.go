@@ -40,6 +40,9 @@ func (m *mockSlackServiceForCommand) CreateChannel(_ context.Context, _ int64, _
 func (m *mockSlackServiceForCommand) GetConversationMembers(_ context.Context, _ string) ([]string, error) {
 	return nil, nil
 }
+func (m *mockSlackServiceForCommand) GetChannelInfo(_ context.Context, channelID string) (*slacksvc.ChannelInfo, error) {
+	return &slacksvc.ChannelInfo{ID: channelID}, nil
+}
 func (m *mockSlackServiceForCommand) RenameChannel(_ context.Context, _ string, _ int64, _ string, _ string) error {
 	return nil
 }

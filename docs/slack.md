@@ -1018,13 +1018,13 @@ These scopes are required for the Bot User OAuth Token (`xoxb-...`):
 | `channels:manage` | `conversations.rename` | Rename Slack channels when case name changes | `pkg/service/slack/client.go` |
 | `channels:manage` | `conversations.invite` | Invite users to case channels | `pkg/service/slack/client.go` |
 | `channels:read` | `conversations.list` | List public channels the bot has joined | `pkg/service/slack/client.go` |
-| `channels:read` | `conversations.info` | Get channel name and info (with caching) | `pkg/service/slack/client.go` |
+| `channels:read` | `conversations.info` | Get channel name and info (with caching); also drives the draft-mode planner's `# Channel context` prompt section (topic, purpose, privacy, member count) | `pkg/service/slack/client.go` |
 | `channels:read` | Events API | Receive `member_joined_channel` / `member_left_channel` events | `pkg/usecase/slack.go` |
 | `chat:write` | `chat.postMessage` | Post action notification messages to channels | `pkg/service/slack/client.go` |
 | `chat:write` | `chat.update` | Update action notification messages after button clicks | `pkg/service/slack/client.go` |
 | `commands` | Slash commands | Receive slash command invocations (e.g., case creation) | `pkg/controller/http/slack_command.go` |
 | `files:read` | Events API | Access file metadata attached to messages via `url_private` | Webhook handler |
-| `groups:read` | `conversations.info` | Read private channel info and receive membership events | `pkg/service/slack/client.go` |
+| `groups:read` | `conversations.info` | Read private channel info (topic, purpose, etc.) and receive membership events; also drives the draft-mode planner's channel-context prompt section for private channels | `pkg/service/slack/client.go` |
 | `groups:write` | `conversations.create` | Create private Slack channels for private cases | `pkg/service/slack/client.go` |
 | `team:read` | `auth.teams.list` | List workspaces for org-level Slack app support | `pkg/service/slack/client.go` |
 | `usergroups:read` | `usergroups.list` | List user groups for handle name resolution (auto-invite) | `pkg/service/slack/client.go` |

@@ -143,6 +143,14 @@ func (m *mockSlackService) GetConversationMembers(ctx context.Context, channelID
 	return nil, nil
 }
 
+func (m *mockSlackService) GetChannelInfo(_ context.Context, channelID string) (*slack.ChannelInfo, error) {
+	// Default to a minimal ChannelInfo so tests that exercise paths
+	// touching this method don't have to set a custom fixture. Tests
+	// that need a richer payload are expected to drive it through the
+	// production wiring rather than override here.
+	return &slack.ChannelInfo{ID: channelID, Name: "channel-" + channelID}, nil
+}
+
 func (m *mockSlackService) RenameChannel(ctx context.Context, channelID string, caseID int64, caseName string, prefix string) error {
 	if m.renameChannelFn != nil {
 		return m.renameChannelFn(ctx, channelID, caseID, caseName, prefix)
