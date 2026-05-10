@@ -593,11 +593,21 @@ func buildCaseCreatedTailBlocks(ctx context.Context, created *model.Case) ([]gos
 	if created == nil {
 		return nil, "Case created"
 	}
+	// Title is interpolated into a markdown-bold (`*%s*`) slot in the i18n
+	// strings, so any literal `*` / `_` / `~` / `\`` would corrupt Slack
+	// formatting. Escape inline like buildTitleAndDescriptionMarkdown does.
+	// Also collapse whitespace and supply a placeholder when the title is
+	// blank so the rendered line never reads "Case #N ** has been created.".
+	title := strings.TrimSpace(created.Title)
+	if title == "" {
+		title = "(untitled)"
+	}
+	escapedTitle := escapeMarkdownInline(title)
 	var line string
 	if created.SlackChannelID != "" {
-		line = "✅ " + i18n.T(ctx, i18n.MsgCaseCreatedWithChannel, created.ID, created.Title, created.SlackChannelID)
+		line = "✅ " + i18n.T(ctx, i18n.MsgCaseCreatedWithChannel, created.ID, escapedTitle, created.SlackChannelID)
 	} else {
-		line = "✅ " + i18n.T(ctx, i18n.MsgCaseCreated, created.ID, created.Title)
+		line = "✅ " + i18n.T(ctx, i18n.MsgCaseCreated, created.ID, escapedTitle)
 	}
 	blocks := []goslack.Block{
 		goslack.NewContextBlock(
@@ -605,7 +615,7 @@ func buildCaseCreatedTailBlocks(ctx context.Context, created *model.Case) ([]gos
 			goslack.NewTextBlockObject(goslack.MarkdownType, line, false, false),
 		),
 	}
-	fallback := fmt.Sprintf("Created case #%d: %s", created.ID, created.Title)
+	fallback := fmt.Sprintf("Created case #%d: %s", created.ID, title)
 	return blocks, fallback
 }
 

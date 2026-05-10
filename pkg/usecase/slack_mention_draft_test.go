@@ -1174,4 +1174,42 @@ func TestBuildCaseCreatedTailBlocks(t *testing.T) {
 		gt.Array(t, blocks).Length(0)
 		gt.String(t, fallback).NotEqual("")
 	})
+
+	t.Run("escapes markdown characters in title", func(t *testing.T) {
+		// Title contains characters (`*`, `_`, `~`, backtick) that would
+		// otherwise break the surrounding `*%s*` markdown slot.
+		created := &model.Case{
+			ID:             3,
+			Title:          "*bold* _italic_ ~strike~ `code`",
+			SlackChannelID: "C-X",
+		}
+		blocks, _ := usecase.BuildCaseCreatedTailBlocksForTest(context.Background(), created)
+		gt.Array(t, blocks).Length(1).Required()
+		ctxBlock, ok := blocks[0].(*goslack.ContextBlock)
+		gt.Bool(t, ok).True().Required()
+		text, ok := ctxBlock.ContextElements.Elements[0].(*goslack.TextBlockObject)
+		gt.Bool(t, ok).True().Required()
+		// Original markdown control chars are no longer present unescaped.
+		// (escapeMarkdownInline prefixes them with `\` or strips them; the
+		// exact escape form is its concern, but the raw characters must
+		// not survive in a way that produces nested bold/italic spans.)
+		gt.Bool(t, strings.Contains(text.Text, "*bold*")).False()
+		gt.Bool(t, strings.Contains(text.Text, "_italic_")).False()
+	})
+
+	t.Run("empty title falls back to (untitled) placeholder", func(t *testing.T) {
+		created := &model.Case{
+			ID:             4,
+			Title:          "   ",
+			SlackChannelID: "C-Y",
+		}
+		blocks, fallback := usecase.BuildCaseCreatedTailBlocksForTest(context.Background(), created)
+		gt.Array(t, blocks).Length(1).Required()
+		ctxBlock, ok := blocks[0].(*goslack.ContextBlock)
+		gt.Bool(t, ok).True().Required()
+		text, ok := ctxBlock.ContextElements.Elements[0].(*goslack.TextBlockObject)
+		gt.Bool(t, ok).True().Required()
+		gt.String(t, text.Text).Contains("(untitled)")
+		gt.String(t, fallback).Contains("(untitled)")
+	})
 }
