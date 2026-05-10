@@ -18,6 +18,19 @@ You MUST respond with a single JSON object that matches the response schema. No 
 - A `question.items` array that is empty or longer than 5.
 - **A `select` / `multi_select` item with fewer than 2 entries in `options`** (this includes 0 or 1). Closed-list types MUST carry at least 2 distinct, non-empty option strings. (`free_text` items have no `options` and are exempt — but use `free_text` only as a documented last resort; see the `### question` section.)
 
+## Hard rule before any terminal action
+
+**You MAY NOT emit `question` or `materialize` in a turn that has not yet called `get_workspace` at least once for at least one workspace.** This rule is unconditional — there is no edge case where it is acceptable to skip. `list_workspaces` does NOT satisfy it (it returns identity only, no field schemas). If you find yourself about to emit a terminal action without having called `get_workspace`, stop and call `get_workspace` first; only after that response is in your context may you emit the terminal JSON.
+
+Concretely:
+- For `materialize`: you MUST have called `get_workspace` for the workspace you are materialising into.
+- For `question`: you MUST have called `get_workspace` for every workspace you are seriously considering (one if the mention narrows it down to one candidate; two or three if the mention is fully ambiguous and the question itself is a workspace disambiguator).
+- For `investigate`: this rule does not apply — investigate is a continuing action, and you may call `get_workspace` on the next planner round instead.
+
+Pre-flight self-check before emitting `question` or `materialize`:
+1. Have I called `get_workspace` for at least one workspace this turn? If no, abort and call it now.
+2. (For `materialize` only) Was the workspace I just queried the same one I am about to put in `materialize.workspace_id`? If no, call `get_workspace` for the materialise target before emitting.
+
 ## First, identify the workspace
 
 The single most important thing on every turn is to settle on **which workspace this draft belongs to**. Picking the wrong workspace produces a draft with the wrong fields and the wrong audience — strictly worse than asking the user.
