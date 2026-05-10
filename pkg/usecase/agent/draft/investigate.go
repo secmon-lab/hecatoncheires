@@ -195,21 +195,14 @@ func newProgressMiddleware(h Handler, taskID, taskTitle string) gollem.ContentBl
 // characters, appending an ellipsis when truncation actually happened.
 // Returns an empty string for input that is empty after trimming so the
 // caller can short-circuit (the trace UI does not benefit from blank
-// updates).
+// updates). strings.Fields splits on any unicode whitespace (newlines,
+// tabs, runs of spaces) and drops empty tokens, so a single Join with
+// " " gives us the collapsed-on-one-line form in one pass.
 func oneLineExcerpt(s string, maxRunes int) string {
-	s = strings.TrimSpace(s)
+	s = strings.Join(strings.Fields(s), " ")
 	if s == "" {
 		return ""
 	}
-	// Replace newlines / tabs with single spaces so the line stays on
-	// one Slack context block row.
-	replacer := strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ", "\t", " ")
-	s = replacer.Replace(s)
-	// Collapse runs of spaces.
-	for strings.Contains(s, "  ") {
-		s = strings.ReplaceAll(s, "  ", " ")
-	}
-	s = strings.TrimSpace(s)
 	if maxRunes <= 0 {
 		return s
 	}

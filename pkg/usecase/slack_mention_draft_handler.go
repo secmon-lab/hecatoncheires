@@ -253,12 +253,14 @@ func (h *slackDraftHandler) Materialize(ctx context.Context, ssn *model.Session,
 // later content (task blocks, the question form, the preview) around.
 // Per-task transitions live in their own Slack messages (see
 // RegisterTasks / TraceTask).
+//
+// Trace does not touch any shared state on h, so it deliberately runs
+// outside processingMu — a slow Slack post must not block parallel
+// sub-agent TraceTask calls.
 func (h *slackDraftHandler) Trace(ctx context.Context, line string) {
 	if line == "" {
 		return
 	}
-	h.processingMu.Lock()
-	defer h.processingMu.Unlock()
 	blocks := buildTraceContextBlocks([]string{line})
 	if _, err := h.slackService.PostThreadMessage(ctx, h.channelID, h.threadTS, blocks, line); err != nil {
 		logging.From(ctx).Error("post draft trace message",
@@ -277,17 +279,26 @@ func (h *slackDraftHandler) Trace(ctx context.Context, line string) {
 // transitions surfaced by the planner middleware) into a single
 // self-updating context block, instead of stacking them as separate
 // thread replies.
+//
+// processingMu protects h.roundTS only; the Slack API call runs
+// outside the lock so a slow post / update never blocks parallel
+// sub-agent TraceTask updates. TraceRound is called from the planner
+// goroutine alone (planner main + middleware), so no two TraceRound
+// calls for the same roundKey can race against the post-then-store
+// gap below.
 func (h *slackDraftHandler) TraceRound(ctx context.Context, roundKey, line string) {
 	if roundKey == "" || line == "" {
 		return
 	}
 	h.processingMu.Lock()
-	defer h.processingMu.Unlock()
 	if h.roundTS == nil {
 		h.roundTS = make(map[string]string)
 	}
+	ts, exists := h.roundTS[roundKey]
+	h.processingMu.Unlock()
+
 	blocks := buildTraceContextBlocks([]string{line})
-	if ts, ok := h.roundTS[roundKey]; ok {
+	if exists {
 		if err := h.slackService.UpdateMessage(ctx, h.channelID, ts, blocks, line); err != nil {
 			errutil.Handle(ctx, goerr.Wrap(err, "update draft round trace",
 				goerr.V("round_key", roundKey),
@@ -296,7 +307,7 @@ func (h *slackDraftHandler) TraceRound(ctx context.Context, roundKey, line strin
 		}
 		return
 	}
-	ts, err := h.slackService.PostThreadMessage(ctx, h.channelID, h.threadTS, blocks, line)
+	newTS, err := h.slackService.PostThreadMessage(ctx, h.channelID, h.threadTS, blocks, line)
 	if err != nil {
 		errutil.Handle(ctx, goerr.Wrap(err, "post draft round trace",
 			goerr.V("round_key", roundKey),
@@ -305,7 +316,9 @@ func (h *slackDraftHandler) TraceRound(ctx context.Context, roundKey, line strin
 		), "draft handler: round trace post failed")
 		return
 	}
-	h.roundTS[roundKey] = ts
+	h.processingMu.Lock()
+	h.roundTS[roundKey] = newTS
+	h.processingMu.Unlock()
 }
 
 // RegisterTasks posts one fresh thread-reply message per task at the
@@ -316,25 +329,34 @@ func (h *slackDraftHandler) TraceRound(ctx context.Context, roundKey, line strin
 // position in the thread, even after the phase-trace message grows or
 // other tasks come and go below it. Calling with an empty slice is a
 // no-op.
+//
+// processingMu protects h.taskTS only; each Slack post runs outside
+// the lock so a slow Slack does not block parallel sub-agent
+// TraceTask updates. RegisterTasks is the host's contract from the
+// planner goroutine and runs to completion BEFORE any sub-agent is
+// spawned (see runInvestigationsParallel), so the post-then-store gap
+// below cannot race against TraceTask reads of taskTS.
 func (h *slackDraftHandler) RegisterTasks(ctx context.Context, tasks []draft.TaskInfo) {
 	if len(tasks) == 0 {
 		return
-	}
-	h.processingMu.Lock()
-	defer h.processingMu.Unlock()
-	if h.taskTS == nil {
-		h.taskTS = make(map[string]string, len(tasks))
 	}
 	logger := logging.From(ctx)
 	for _, ti := range tasks {
 		if ti.ID == "" {
 			continue
 		}
-		if _, exists := h.taskTS[ti.ID]; exists {
+		h.processingMu.Lock()
+		if h.taskTS == nil {
+			h.taskTS = make(map[string]string, len(tasks))
+		}
+		_, exists := h.taskTS[ti.ID]
+		h.processingMu.Unlock()
+		if exists {
 			// Re-registration is treated as a no-op; the existing
 			// task message keeps whatever state TraceTask last set.
 			continue
 		}
+
 		line := i18n.T(ctx, i18n.MsgDraftTraceTaskPending, ti.Title)
 		blocks := buildTraceContextBlocks([]string{line})
 		ts, err := h.slackService.PostThreadMessage(ctx, h.channelID, h.threadTS, blocks, line)
@@ -347,7 +369,9 @@ func (h *slackDraftHandler) RegisterTasks(ctx context.Context, tasks []draft.Tas
 			)
 			continue
 		}
+		h.processingMu.Lock()
 		h.taskTS[ti.ID] = ts
+		h.processingMu.Unlock()
 	}
 }
 
@@ -356,13 +380,20 @@ func (h *slackDraftHandler) RegisterTasks(ctx context.Context, tasks []draft.Tas
 // has no business posting fresh blocks (block creation is the parent's
 // contract via RegisterTasks), and a wrong ID typically means a bug we
 // want to fail quietly rather than spam Slack with orphan rows.
+//
+// processingMu protects only the taskTS lookup; the Slack
+// UpdateMessage call runs outside the lock so a slow Slack does not
+// block parallel sub-agents. Each task ID is owned by one sub-agent
+// goroutine, so successive TraceTask calls for the same ID are
+// already serialised by Go's goroutine semantics — there is no
+// in-flight reorder risk to guard against.
 func (h *slackDraftHandler) TraceTask(ctx context.Context, taskID, line string) {
 	if taskID == "" || line == "" {
 		return
 	}
 	h.processingMu.Lock()
-	defer h.processingMu.Unlock()
 	ts, ok := h.taskTS[taskID]
+	h.processingMu.Unlock()
 	if !ok {
 		return
 	}
