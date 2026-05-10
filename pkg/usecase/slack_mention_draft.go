@@ -103,15 +103,24 @@ func (uc *MentionDraftUseCase) HandleAppMention(ctx context.Context, ev *slackev
 		return uc.notifyNoWorkspace(ctx, ev)
 	}
 
-	estimated, estimationReason, err := uc.estimateWorkspace(ctx, candidates, ev.User)
-	if err != nil {
-		uc.removeProcessingMessage(ctx, ev.Channel, processingTS)
-		return goerr.Wrap(err, "failed to estimate workspace for mention")
-	}
-
 	mentionTime := parseSlackTS(ev.TimeStamp)
 
-	var msgs []model.DraftMessage
+	// Fetch channel descriptor (name, topic, purpose, privacy) so the
+	// planner has channel-level context, not just the mention text.
+	// Failure is non-fatal — fall back to nil and rely purely on the
+	// surrounding messages.
+	channelInfo, channelInfoErr := uc.slackService.GetChannelInfo(ctx, ev.Channel)
+	if channelInfoErr != nil {
+		errutil.Handle(ctx, goerr.Wrap(channelInfoErr, "fetch channel info for draft prompt",
+			goerr.V("channel_id", ev.Channel),
+		), "could not enrich draft prompt with channel info; continuing without it")
+		channelInfo = nil
+	}
+
+	var (
+		msgs []model.DraftMessage
+		err  error
+	)
 	if ev.ThreadTimeStamp != "" {
 		msgs, err = uc.collector.CollectThread(ctx, ev.Channel, ev.ThreadTimeStamp)
 	} else {
@@ -132,7 +141,10 @@ func (uc *MentionDraftUseCase) HandleAppMention(ctx context.Context, ev *slackev
 		ThreadTS:  ev.ThreadTimeStamp,
 		MentionTS: ev.TimeStamp,
 	}
-	d.SelectedWorkspaceID = estimated.Workspace.ID
+	// SelectedWorkspaceID is intentionally left empty: the planner picks the
+	// workspace via its `list_workspaces` / `get_workspace` tools and surfaces
+	// the choice through the materialise terminal action, where the host
+	// handler stamps the workspace onto the draft.
 	d.InferenceInProgress = true
 
 	if err := uc.repo.CaseDraft().Save(ctx, d); err != nil {
@@ -152,19 +164,16 @@ func (uc *MentionDraftUseCase) HandleAppMention(ctx context.Context, ev *slackev
 		candidates, d.ID, processingTS,
 	)
 
-	userInput := buildDraftUserInput(d, ev.Text, estimated, candidates, estimationReason)
+	userInput := buildDraftUserInput(d, ev.Text, channelInfo)
 
 	result, runErr := uc.draftUC.RunTurn(ctx, draft.TurnRequest{
-		Session:          session,
-		UserInput:        userInput,
-		Trigger:          draft.TriggerAppMention,
-		TriggerTS:        ev.TimeStamp,
-		ActorUserID:      ev.User,
-		EstimatedWS:      estimated,
-		Candidates:       candidates,
-		EstimationReason: estimationReason,
-		ExistingDraft:    d,
-		Handler:          handler,
+		Session:       session,
+		UserInput:     userInput,
+		Trigger:       draft.TriggerAppMention,
+		TriggerTS:     ev.TimeStamp,
+		ActorUserID:   ev.User,
+		ExistingDraft: d,
+		Handler:       handler,
 	})
 	if runErr != nil {
 		uc.removeProcessingMessage(ctx, ev.Channel, processingTS)
@@ -187,7 +196,6 @@ func (uc *MentionDraftUseCase) HandleAppMention(ctx context.Context, ev *slackev
 
 	logger.Info("case draft turn finished",
 		"draft_id", d.ID,
-		"workspace_id", estimated.Workspace.ID,
 		"channel_id", ev.Channel,
 		"user_id", ev.User,
 		"status", int(result.Status),
@@ -240,40 +248,88 @@ func (uc *MentionDraftUseCase) loadOrCreateDraftSession(ctx context.Context, cha
 }
 
 // buildDraftUserInput assembles the planner's first user message. The
-// surrounding messages and workspace candidates are surfaced so the
-// planner can pick a sensible workspace and decide whether more
-// investigation is needed before materialising.
-func buildDraftUserInput(d *model.CaseDraft, mentionText string, estimated *model.WorkspaceEntry, candidates []*model.WorkspaceEntry, estimationReason string) string {
+// system prompt already advertises every registered workspace's identity,
+// so this function only surfaces the mention text, the channel
+// descriptor (so the planner can read the channel name / topic /
+// purpose to anchor workspace and intent inference), and the surrounding
+// conversation. Workspace selection is the planner's job — driven by
+// the `list_workspaces` / `get_workspace` tools.
+//
+// channelInfo may be nil when the upstream `conversations.info` lookup
+// failed; in that case the section is omitted but the rest of the
+// prompt still renders.
+func buildDraftUserInput(d *model.CaseDraft, mentionText string, channelInfo *slacksvc.ChannelInfo) string {
 	var b strings.Builder
 	b.WriteString("# User mention\n")
 	b.WriteString(mentionText)
 	b.WriteString("\n\n")
 
-	b.WriteString("# Estimated workspace\n")
-	if estimated != nil {
-		fmt.Fprintf(&b, "- id: %s\n- name: %s\n- reason: %s\n", estimated.Workspace.ID, fallbackText(estimated.Workspace.Name, estimated.Workspace.ID), estimationReason)
-	}
-	b.WriteString("\n")
-
-	if len(candidates) > 1 {
-		b.WriteString("# Other accessible workspaces\n")
-		for _, c := range candidates {
-			if estimated != nil && c.Workspace.ID == estimated.Workspace.ID {
-				continue
-			}
-			fmt.Fprintf(&b, "- id: %s — name: %s\n", c.Workspace.ID, fallbackText(c.Workspace.Name, c.Workspace.ID))
-		}
-		b.WriteString("\n")
+	if section := formatChannelContext(channelInfo); section != "" {
+		b.WriteString(section)
 	}
 
 	if d != nil && len(d.RawMessages) > 0 {
-		b.WriteString("# Surrounding conversation (most recent first)\n")
+		b.WriteString("# Surrounding conversation (chronological, oldest first)\n")
 		for _, m := range d.RawMessages {
 			fmt.Fprintf(&b, "- [%s] %s: %s\n", m.TS, m.UserID, strings.ReplaceAll(m.Text, "\n", " "))
 		}
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+// formatChannelContext renders the "# Channel context" prompt section
+// from a ChannelInfo. Returns the empty string when ci is nil so the
+// caller can write the result unconditionally without a guard. The
+// section is intentionally compact — channel name / topic / purpose
+// carry the most signal for workspace inference; privacy / member
+// count / archive flag set the audience tone.
+func formatChannelContext(ci *slacksvc.ChannelInfo) string {
+	if ci == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("# Channel context\n")
+	if ci.Name != "" {
+		fmt.Fprintf(&b, "- name: #%s\n", ci.Name)
+	} else {
+		fmt.Fprintf(&b, "- id: %s\n", ci.ID)
+	}
+	if topic := strings.TrimSpace(ci.Topic); topic != "" {
+		fmt.Fprintf(&b, "- topic: %s\n", flattenLines(topic))
+	}
+	if purpose := strings.TrimSpace(ci.Purpose); purpose != "" {
+		fmt.Fprintf(&b, "- description: %s\n", flattenLines(purpose))
+	}
+	privacy := "public"
+	if ci.IsPrivate {
+		privacy = "private"
+	}
+	fmt.Fprintf(&b, "- privacy: %s\n", privacy)
+	if ci.IsShared {
+		b.WriteString("- shared: yes (cross-workspace / connected)\n")
+	}
+	if ci.IsArchived {
+		b.WriteString("- archived: yes\n")
+	}
+	if ci.NumMembers > 0 {
+		fmt.Fprintf(&b, "- members: %d\n", ci.NumMembers)
+	}
+	if ci.Creator != "" {
+		fmt.Fprintf(&b, "- creator: %s\n", ci.Creator)
+	}
+	if !ci.CreatedAt.IsZero() {
+		fmt.Fprintf(&b, "- created_at: %s\n", ci.CreatedAt.Format(time.RFC3339))
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// flattenLines collapses CR/LF/Tab into spaces so a multi-line topic /
+// purpose stays on one prompt row.
+func flattenLines(s string) string {
+	r := strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ", "\t", " ")
+	return strings.TrimSpace(r.Replace(s))
 }
 
 // HandleThreadReply runs when the dispatcher's F1-F8 filter chain has
@@ -318,12 +374,6 @@ func (uc *MentionDraftUseCase) HandleThreadReply(ctx context.Context, ev *slacke
 	}
 
 	candidates := uc.accessibleWorkspaces(ev.User)
-	var estimated *model.WorkspaceEntry
-	if d != nil && d.SelectedWorkspaceID != "" {
-		if entry, getErr := uc.registry.Get(d.SelectedWorkspaceID); getErr == nil {
-			estimated = entry
-		}
-	}
 
 	// processingTS is empty — we don't post a placeholder for thread reply
 	// resume; the planner trace block will appear when needed.
@@ -343,8 +393,6 @@ func (uc *MentionDraftUseCase) HandleThreadReply(ctx context.Context, ev *slacke
 		Trigger:       draft.TriggerThreadReply,
 		TriggerTS:     ev.TimeStamp,
 		ActorUserID:   ev.User,
-		EstimatedWS:   estimated,
-		Candidates:    candidates,
 		ExistingDraft: d,
 		Handler:       handler,
 	})
@@ -373,67 +421,6 @@ func (uc *MentionDraftUseCase) accessibleWorkspaces(_ string) []*model.Workspace
 		return nil
 	}
 	return uc.registry.List()
-}
-
-// estimateWorkspace picks one workspace from the candidates per F5 and
-// returns a short human-readable reason describing why that one was chosen
-// (this reason is also surfaced to the LLM via the prompt).
-//   - 0 candidates: caller handles upstream
-//   - 1 candidate: that one (self-evident)
-//   - >1: the user's most recent Case workspace within the past 30d (best
-//     effort: scans each candidate's Cases and picks the most recent reporter
-//     match), falling back to the first registered when no recent Case is
-//     found.
-func (uc *MentionDraftUseCase) estimateWorkspace(ctx context.Context, candidates []*model.WorkspaceEntry, userID string) (*model.WorkspaceEntry, string, error) {
-	switch len(candidates) {
-	case 0:
-		return nil, "", ErrNoAccessibleWorkspace
-	case 1:
-		return candidates[0], "only workspace this user has access to", nil
-	}
-
-	if recent, ok := uc.recentCaseWorkspace(ctx, candidates, userID); ok {
-		return recent, "user's most recent reporter activity within the past 30 days", nil
-	}
-	return candidates[0], "fallback to first registered workspace (no recent reporter activity found)", nil
-}
-
-const recentCaseLookback = 30 * 24 * time.Hour
-
-func (uc *MentionDraftUseCase) recentCaseWorkspace(ctx context.Context, candidates []*model.WorkspaceEntry, userID string) (*model.WorkspaceEntry, bool) {
-	logger := logging.From(ctx)
-	cutoff := time.Now().Add(-recentCaseLookback)
-
-	var (
-		bestEntry *model.WorkspaceEntry
-		bestTime  time.Time
-	)
-	for _, entry := range candidates {
-		cases, err := uc.repo.Case().List(ctx, entry.Workspace.ID)
-		if err != nil {
-			logger.Debug("Case().List failed; skipping workspace for recency check",
-				"workspace_id", entry.Workspace.ID,
-				"error", err,
-			)
-			continue
-		}
-		for _, c := range cases {
-			if c.ReporterID != userID {
-				continue
-			}
-			if c.CreatedAt.Before(cutoff) {
-				continue
-			}
-			if c.CreatedAt.After(bestTime) {
-				bestTime = c.CreatedAt
-				bestEntry = entry
-			}
-		}
-	}
-	if bestEntry == nil {
-		return nil, false
-	}
-	return bestEntry, true
 }
 
 func (uc *MentionDraftUseCase) notifyNoWorkspace(ctx context.Context, ev *slackevents.AppMentionEvent) error {

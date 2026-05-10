@@ -103,6 +103,10 @@ func (m *mockSlackService) GetConversationMembers(_ context.Context, _ string) (
 	return nil, nil
 }
 
+func (m *mockSlackService) GetChannelInfo(_ context.Context, channelID string) (*slack.ChannelInfo, error) {
+	return &slack.ChannelInfo{ID: channelID}, nil
+}
+
 func (m *mockSlackService) RenameChannel(ctx context.Context, channelID string, caseID int64, caseName string, prefix string) error {
 	return nil
 }

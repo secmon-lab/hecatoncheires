@@ -81,6 +81,61 @@ func newRegistryWithSchema(workspaceID, workspaceName string, schema *config.Fie
 	return r
 }
 
+// TestBuildDraftUserInput_ChannelContext locks the planner's first-turn
+// prompt content: mention text, channel descriptor (name / topic /
+// purpose / privacy), and surrounding conversation. This is the seam
+// where channel-level context is injected so the planner can anchor
+// workspace inference without spending a tool call on it.
+func TestBuildDraftUserInput_ChannelContext(t *testing.T) {
+	d := &model.CaseDraft{
+		RawMessages: []model.DraftMessage{
+			{TS: "1700000000.000100", UserID: "U001", Text: "first line"},
+			{TS: "1700000001.000100", UserID: "U002", Text: "second\nline"},
+		},
+	}
+	ci := &slacksvc.ChannelInfo{
+		ID:         "C-RISK",
+		Name:       "sec-risk-ops",
+		Topic:      "Daily ops for the security risk team",
+		Purpose:    "Triaging incoming risk reports\nand coordinating response",
+		IsPrivate:  true,
+		IsShared:   false,
+		IsArchived: false,
+		NumMembers: 17,
+		Creator:    "U999",
+	}
+
+	got := usecase.BuildDraftUserInputForTest(d, "@bot please draft a case for Tanaka's issue", ci)
+
+	gt.S(t, got).Contains("# User mention")
+	gt.S(t, got).Contains("please draft a case for Tanaka's issue")
+	gt.S(t, got).Contains("# Channel context")
+	gt.S(t, got).Contains("- name: #sec-risk-ops")
+	gt.S(t, got).Contains("- topic: Daily ops for the security risk team")
+	// Newlines inside topic / purpose are flattened to single spaces so
+	// the planner sees a single-row entry.
+	gt.S(t, got).Contains("- description: Triaging incoming risk reports and coordinating response")
+	gt.S(t, got).Contains("- privacy: private")
+	gt.S(t, got).Contains("- members: 17")
+	gt.S(t, got).Contains("- creator: U999")
+	gt.S(t, got).Contains("# Surrounding conversation (chronological, oldest first)")
+	gt.S(t, got).Contains("first line")
+	gt.S(t, got).Contains("second line") // newline collapsed
+}
+
+// TestBuildDraftUserInput_NilChannelInfoOmitsSection confirms the host
+// degrades gracefully when conversations.info fails: the planner still
+// gets the mention text and the surrounding conversation, just no
+// channel-level hints.
+func TestBuildDraftUserInput_NilChannelInfoOmitsSection(t *testing.T) {
+	d := &model.CaseDraft{}
+	got := usecase.BuildDraftUserInputForTest(d, "@bot something", nil)
+
+	gt.S(t, got).Contains("# User mention")
+	gt.S(t, got).Contains("@bot something")
+	gt.Bool(t, strings.Contains(got, "# Channel context")).False()
+}
+
 func TestMentionDraftUseCase_HandleAppMention_HappyPath(t *testing.T) {
 	repo := memory.New()
 	schema := &config.FieldSchema{Fields: []config.FieldDefinition{
@@ -433,6 +488,14 @@ func (m *collectorOnlyMockSlack) CreateChannel(context.Context, int64, string, s
 }
 func (m *collectorOnlyMockSlack) GetConversationMembers(context.Context, string) ([]string, error) {
 	return nil, nil
+}
+func (m *collectorOnlyMockSlack) GetChannelInfo(_ context.Context, channelID string) (*slacksvc.ChannelInfo, error) {
+	return &slacksvc.ChannelInfo{
+		ID:      channelID,
+		Name:    "draft-test",
+		Topic:   "drafting test cases",
+		Purpose: "fixture channel for the draft mention flow",
+	}, nil
 }
 func (m *collectorOnlyMockSlack) RenameChannel(context.Context, string, int64, string, string) error {
 	return nil

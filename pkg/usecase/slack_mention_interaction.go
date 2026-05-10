@@ -121,18 +121,19 @@ func (uc *MentionDraftUseCase) HandleSelectWorkspace(ctx context.Context, callba
 	// — there is no Slack-side TS to dedup on. The lock layer treats an
 	// empty TriggerKey as "always proceed (or busy)", which is what we want
 	// for explicit user clicks.
+	//
+	// The synthetic user input names the workspace explicitly so the planner
+	// resumes against the new workspace without re-running its own selection
+	// — matches the "Trigger context" branch in the planner prompt.
 	userInput := "[system event] The user has switched the active workspace to " + entry.Workspace.ID + "."
 	result, runErr := uc.draftUC.RunTurn(ctx, draft.TurnRequest{
-		Session:          session,
-		UserInput:        userInput,
-		Trigger:          draft.TriggerWSSwitch,
-		TriggerTS:        "",
-		ActorUserID:      callback.User.ID,
-		EstimatedWS:      entry,
-		Candidates:       candidates,
-		EstimationReason: "user explicitly switched to this workspace via the preview selector",
-		ExistingDraft:    d,
-		Handler:          handler,
+		Session:       session,
+		UserInput:     userInput,
+		Trigger:       draft.TriggerWSSwitch,
+		TriggerTS:     "",
+		ActorUserID:   callback.User.ID,
+		ExistingDraft: d,
+		Handler:       handler,
 	})
 	if runErr != nil {
 		errBlocks, errFallback := buildMaterializationErrorBlocks(entry.Workspace.Name)

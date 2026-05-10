@@ -98,15 +98,19 @@ const (
 	// Draft (open-mode) planner / sub-agent trace lines. These are rendered
 	// into the per-turn Slack progress message so the user can follow what
 	// the agent is doing.
-	MsgDraftTracePlanning                 // "🤔 Planning…"
-	MsgDraftTracePlannerRetry             // "⚠️ planner output rejected; retrying"
-	MsgDraftTracePlannerAction            // "→ %s — %s" (action, reasoning)
-	MsgDraftTracePhase                    // "🧭 %s" (planner.investigate.message)
-	MsgDraftTraceSubAgentStarting         // "🔍 [%s] %s — starting"
-	MsgDraftTraceSubAgentFailedPrompt     // "❌ [%s] %s — failed (%s, build prompt): %v"
-	MsgDraftTraceSubAgentFailed           // "❌ [%s] %s — failed (%s, %d/%d inner loops): %v"
-	MsgDraftTraceSubAgentSummaryTruncated // "⚠️ [%s] summary truncated to %d bytes"
-	MsgDraftTraceSubAgentDone             // "✅ [%s] %s — done (%s, %d/%d inner loops)"
+	MsgDraftTracePlanning           // "🤔 Planning…"
+	MsgDraftTracePlannerRetry       // "⚠️ planner output rejected; retrying"
+	MsgDraftTracePlannerAction      // "→ %s — %s" (action, reasoning)
+	MsgDraftTracePlannerTool        // "🛠 Planning — calling %s" (tool name)
+	MsgDraftTracePlannerMessage     // "🤔 Planning — %s" (one-line excerpt)
+	MsgDraftTracePhase              // "🧭 %s" (planner.investigate.message)
+	MsgDraftTraceTaskPending        // "⏳ Task: %s" (title) — block reserved before sub-agent starts
+	MsgDraftTraceTaskRunning        // "🔍 Task: %s — running…" (title) — initial state when sub-agent begins
+	MsgDraftTraceTaskRunningTool    // "🔍 Task: %s — 🛠 calling %s" (title, tool name) — fires per ToolRequestHook
+	MsgDraftTraceTaskRunningMessage // "🔍 Task: %s — %s" (title, one-line excerpt) — fires per MessageHook
+	MsgDraftTraceTaskDone           // "✅ Task: %s — done (%s, %d/%d inner loops)" (title, elapsed, used, max)
+	MsgDraftTraceTaskFailedPrompt   // "❌ Task: %s — failed (%s, build prompt): %v" (title, elapsed, err)
+	MsgDraftTraceTaskFailed         // "❌ Task: %s — failed (%s, %d/%d inner loops): %v" (title, elapsed, used, max, err)
 
 	// Bookmark
 	MsgBookmarkOpenCase

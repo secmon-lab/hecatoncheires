@@ -20,13 +20,16 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 )
 
-// recordingHandler captures Trace lines so the test can assert on the
-// progress narrative. Question / Materialize / PostBusy are unused here
-// (investigate flow doesn't reach terminal actions) so they fail the test
-// if invoked.
+// recordingHandler captures Trace lines (phase-level) and TraceTask
+// lines (per-task) so the test can assert on the progress narrative.
+// Question / Materialize / PostBusy are unused here (investigate flow
+// doesn't reach terminal actions) so they fail the test if invoked.
 type recordingHandler struct {
-	mu    sync.Mutex
-	lines []string
+	mu             sync.Mutex
+	lines          []string
+	registered     []draft.TaskInfo
+	taskLines      map[string][]string
+	taskLineLatest map[string]string
 }
 
 func (h *recordingHandler) Question(_ context.Context, _ *model.Session, _ draft.QuestionPayload) error {
@@ -40,6 +43,22 @@ func (h *recordingHandler) Trace(_ context.Context, line string) {
 	defer h.mu.Unlock()
 	h.lines = append(h.lines, line)
 }
+func (h *recordingHandler) TraceRound(_ context.Context, _, _ string) {}
+func (h *recordingHandler) RegisterTasks(_ context.Context, tasks []draft.TaskInfo) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.registered = append(h.registered, tasks...)
+}
+func (h *recordingHandler) TraceTask(_ context.Context, taskID, line string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.taskLines == nil {
+		h.taskLines = make(map[string][]string)
+		h.taskLineLatest = make(map[string]string)
+	}
+	h.taskLines[taskID] = append(h.taskLines[taskID], line)
+	h.taskLineLatest[taskID] = line
+}
 func (h *recordingHandler) PostBusy(_ context.Context, _ *model.Session, _ agent.BusyInfo) error {
 	return errors.New("unexpected PostBusy in investigate test")
 }
@@ -49,6 +68,28 @@ func (h *recordingHandler) Lines() []string {
 	defer h.mu.Unlock()
 	out := make([]string, len(h.lines))
 	copy(out, h.lines)
+	return out
+}
+
+func (h *recordingHandler) TaskLatest(taskID string) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.taskLineLatest[taskID]
+}
+
+func (h *recordingHandler) TaskHistory(taskID string) []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]string, len(h.taskLines[taskID]))
+	copy(out, h.taskLines[taskID])
+	return out
+}
+
+func (h *recordingHandler) RegisteredTasks() []draft.TaskInfo {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]draft.TaskInfo, len(h.registered))
+	copy(out, h.registered)
 	return out
 }
 
@@ -134,11 +175,16 @@ func TestRunOneInvestigation_Completed(t *testing.T) {
 	gt.Value(t, res.AcceptanceCriteria).Equal("Root cause identified.")
 	gt.Value(t, res.InnerLoopsMax).Equal(20)
 
-	lines := h.Lines()
-	// At minimum a "starting" and a "done" line.
-	gt.Bool(t, len(lines) >= 2).True()
-	gt.Bool(t, strings.Contains(lines[0], "starting")).True()
-	gt.Bool(t, strings.Contains(lines[len(lines)-1], "done")).True()
+	// Per-task line transitions are emitted via TraceTask, not Trace —
+	// runOneInvestigation pushes "running…" first, then any progress
+	// line(s) from the LLM hook, then a "done" line as the terminal
+	// state. The phase-level Trace channel is unused here because there
+	// is no plan.Message wrapping this single task.
+	history := h.TaskHistory("inv-1")
+	gt.Bool(t, len(history) >= 2).True()
+	gt.String(t, history[0]).Contains("running")
+	gt.String(t, h.TaskLatest("inv-1")).Contains("done")
+	gt.Array(t, h.Lines()).Length(0)
 }
 
 func TestRunOneInvestigation_FailedSurfaceErrorInTrace(t *testing.T) {
@@ -158,8 +204,7 @@ func TestRunOneInvestigation_FailedSurfaceErrorInTrace(t *testing.T) {
 	res := draft.RunOneInvestigationForTest(uc, ctx, task, h, resolver)
 	gt.Value(t, res.Status).Equal(draft.InvestigationFailedForTest)
 	gt.String(t, res.Error).Contains("upstream LLM 5xx")
-	last := lastLine(h.Lines())
-	gt.Bool(t, strings.Contains(last, "failed")).True()
+	gt.String(t, h.TaskLatest("inv-2")).Contains("failed")
 }
 
 func TestRunInvestigationsParallel_MixedSuccessAndFailure(t *testing.T) {
@@ -194,7 +239,7 @@ func TestRunInvestigationsParallel_MixedSuccessAndFailure(t *testing.T) {
 	gt.Value(t, byID["inv-2"].Status).Equal(draft.InvestigationFailedForTest)
 	gt.String(t, byID["inv-2"].Error).Equal("denied")
 
-	// Phase prelude is on the trace.
+	// Phase prelude is on the phase-level trace channel.
 	found := false
 	for _, line := range h.Lines() {
 		if strings.Contains(line, "Looking at A and B") {
@@ -203,11 +248,19 @@ func TestRunInvestigationsParallel_MixedSuccessAndFailure(t *testing.T) {
 		}
 	}
 	gt.Bool(t, found).True()
-}
 
-func lastLine(lines []string) string {
-	if len(lines) == 0 {
-		return ""
-	}
-	return lines[len(lines)-1]
+	// Both tasks were registered in the order they appeared in the
+	// plan, before any sub-agent goroutine started. This is the
+	// "blocks first, sub-agents second" contract from Handler docs.
+	registered := h.RegisteredTasks()
+	gt.Array(t, registered).Length(2).Required()
+	gt.Value(t, registered[0].ID).Equal("inv-1")
+	gt.Value(t, registered[0].Title).Equal("A")
+	gt.Value(t, registered[1].ID).Equal("inv-2")
+	gt.Value(t, registered[1].Title).Equal("B")
+
+	// And per-task lines transitioned independently to their terminal
+	// state (done vs failed).
+	gt.String(t, h.TaskLatest("inv-1")).Contains("done")
+	gt.String(t, h.TaskLatest("inv-2")).Contains("failed")
 }

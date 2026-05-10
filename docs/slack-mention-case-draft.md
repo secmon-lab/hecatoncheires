@@ -22,24 +22,63 @@ with workspace selector + Submit / Edit / Cancel buttons.
 
 ### Mention-Draft flow
 
-1. **Workspace estimation** — the user's accessible workspaces are fetched
-   (currently all registered workspaces). When more than one is accessible,
-   the workspace where they reported a Case most recently in the past 30 days
-   is preferred; otherwise the first registered workspace.
+1. **Accessible workspaces** — the user's accessible workspaces are fetched
+   (currently all registered workspaces). The host no longer pre-selects one;
+   the planner picks the workspace itself via the `list_workspaces` /
+   `get_workspace` tools (see step 3).
 2. **Message collection** —
    - In a thread: latest 64 thread messages.
    - Outside a thread: messages within the last 3 hours, capped at 64.
+   - The originating channel's descriptor (name, topic, purpose,
+     privacy, member count, archive / shared flags, creator, created
+     time) is fetched once via `conversations.info` and included as a
+     dedicated `# Channel context` block at the top of the planner's
+     first user message. This gives the planner a workspace-inference
+     anchor without spending a tool call on it. The lookup is
+     non-fatal: a failure is funneled through `errutil.Handle` and the
+     section is omitted; the rest of the prompt still renders.
 3. **Planner-driven turn** — the open-mode `draft.UseCase` (in
    `pkg/usecase/agent/draft`) acquires a per-thread turn lock on the
    Session, then runs a planner LLM round-trip against the conversation
-   history. Each round, the planner picks one of four actions:
+   history. The planner agent is **tool-enabled**: the system prompt
+   carries only the workspace identity tier (id / name / description), and
+   the planner pulls the field schema and source list per turn via the
+   `pkg/agent/tool/wsmeta` tools (`list_workspaces`, `get_workspace`).
+   Each round, the planner emits a JSON plan with one of three actions:
    `investigate` (parallel sub-agent fan-out under read-only tool sets),
-   `post_message`, `post_question`, or `materialize`. The terminal action
-   for a normal mention is `materialize`, which produces `Title`,
-   `Description`, and a `custom_field_values` map for the selected
-   workspace's `FieldSchema`. Loop budgets (planner / sub-agent /
-   sub-agent inner) bound runaway turns; when exhausted, the planner
-   falls back to a `post_message` apology.
+   `question`, or `materialize`. The terminal action for a normal mention
+   is `materialize`, which produces `Title`, `Description`, and a
+   `custom_field_values` map for the **planner-selected** workspace's
+   `FieldSchema`. Loop budgets (planner / sub-agent / sub-agent inner)
+   bound runaway turns; when exhausted, the runtime returns
+   `StatusFallback` and the host posts a system fallback message.
+
+   **Per-message trace UI** — every progress event renders as its own
+   Slack thread reply rather than as a row inside a single growing
+   context block. Concretely:
+
+   - **Phase trace** (planner round start, action selections, retry
+     notices, the `investigate.message` phase prelude) — each
+     `Handler.Trace` call posts a **fresh thread reply**. Lines never
+     accumulate inside a single message that grows over time.
+   - **Per-task trace** — when the planner picks `investigate`, the
+     runtime calls `Handler.RegisterTasks` once with all sub-agent
+     task IDs + titles BEFORE any sub-agent goroutine starts. The
+     host posts **one fresh thread reply per task** at that moment,
+     so each task block is anchored at its own position in the
+     thread. Sub-agents then update their own task message in place
+     via `Handler.TraceTask`; they never post fresh Slack messages.
+     Within each sub-agent, a gollem `ContentBlockMiddleware`
+     surfaces per-iteration progress: the middleware turns the
+     LLM's accompanying thought into a one-line excerpt, and
+     overrides it with `🛠 calling <tool>` when the same response
+     carries a tool call. Terminal `done` / `failed` lines replace
+     the running text once the sub-agent returns.
+
+   The initial `processing…` placeholder posted at mention time is
+   reserved for one specific transition: at `materialize`, that
+   message is updated in place with the rendered preview blocks. Trace
+   lines never reuse this TS.
 4. **Preview thread reply** — once the planner emits `materialize`, the
    `slackDraftHandler` (host adapter) updates the in-place "processing…"
    message with the rendered preview blocks.
@@ -102,12 +141,15 @@ The dispatcher then runs the F1-F8 filter chain (see `pkg/usecase/slack.go`
 
 ## Recovery from a wrong workspace pick
 
-The estimation is intentionally cheap and may pick the wrong workspace. The
-user can switch to the correct workspace **before** submitting, in which
-case the entire materialization is regenerated for the new schema. After
-Submit there is no built-in switch flow; the user closes the wrongly placed
-Case and re-runs the mention (the source material is in Slack, not in the
-deleted draft).
+The planner picks the workspace from the registered list and may still pick
+the wrong one when the conversation is ambiguous. The user can switch to the
+correct workspace **before** submitting, in which case the entire
+materialization is regenerated for the new schema (the synthetic
+`TriggerWSSwitch` user message names the new workspace explicitly so the
+planner re-materialises against it without re-running its own selection).
+After Submit there is no built-in switch flow; the user closes the wrongly
+placed Case and re-runs the mention (the source material is in Slack, not in
+the deleted draft).
 
 ## Configuration
 
@@ -122,10 +164,11 @@ service are configured. No extra environment variables are required.
 
 ## Failure modes
 
-- **LLM unavailable / planner budget exhausted** — the planner falls back
-  to a `post_message` apology asking the user to re-mention with more
-  context. The draft row is still persisted (without a materialisation)
-  so a subsequent ws-switch or thread reply can resume.
+- **LLM unavailable / planner budget exhausted** — the runtime returns
+  `StatusFallback` with a non-empty reason; the host renders a system
+  fallback message asking the user to re-mention with more context. The
+  draft row is still persisted (without a materialisation) so a subsequent
+  ws-switch or thread reply can resume.
 - **Permalink fetch fails** — the affected message is included with an empty
   `Permalink`; the failure is logged via `errutil.Handle`.
 - **No accessible workspace** — an ephemeral error message is shown to the

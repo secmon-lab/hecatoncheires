@@ -2,16 +2,39 @@ package usecase
 
 import (
 	githubsvc "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	slackmodel "github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/draft"
 )
+
+// NewSlackDraftHandlerForTest builds a slackDraftHandler with the
+// minimum dependencies required by the per-task trace tests. The Slack
+// service is the only side-effect surface; the rest is plumbing.
+func NewSlackDraftHandlerForTest(
+	repo interfaces.Repository,
+	registry *model.WorkspaceRegistry,
+	slackService slack.Service,
+	channelID, threadTS string,
+) draft.Handler {
+	return newSlackDraftHandler(
+		repo, registry, slackService,
+		channelID, threadTS, "1700000000.000001", "U-test",
+		nil, model.CaseDraftID("draft-test"), "",
+	)
+}
 
 // BuildTraceContextBlocksForTest is exported for testing
 var BuildTraceContextBlocksForTest = buildTraceContextBlocks
 
 // BuildCaseCreatedTailBlocksForTest is exported for testing
 var BuildCaseCreatedTailBlocksForTest = buildCaseCreatedTailBlocks
+
+// BuildDraftUserInputForTest exposes the unexported buildDraftUserInput
+// so tests in the external usecase_test package can assert on the
+// planner's first-turn prompt content.
+var BuildDraftUserInputForTest = buildDraftUserInput
 
 // BuildAssistSystemPrompt is exported for testing
 var BuildAssistSystemPrompt = (*AssistUseCase).buildAssistSystemPrompt

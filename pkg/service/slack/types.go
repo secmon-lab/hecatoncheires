@@ -37,6 +37,14 @@ type Service interface {
 	// Handles Slack API pagination internally
 	GetConversationMembers(ctx context.Context, channelID string) ([]string, error)
 
+	// GetChannelInfo retrieves a channel's identity, topic, purpose, and a
+	// few orientation hints (privacy, member count, archive flag). Backed
+	// by Slack's `conversations.info` endpoint; the same scopes that gate
+	// `channels:read` / `groups:read` cover this call. Used by the draft
+	// agent to give the planner enough channel-level context to pick the
+	// right workspace and frame the case correctly.
+	GetChannelInfo(ctx context.Context, channelID string) (*ChannelInfo, error)
+
 	// RenameChannel renames an existing Slack channel for a case
 	// The channel name is automatically generated from caseID, caseName, and the given prefix
 	RenameChannel(ctx context.Context, channelID string, caseID int64, caseName string, prefix string) error
@@ -114,6 +122,23 @@ type UserGroup struct {
 type Channel struct {
 	ID   string
 	Name string
+}
+
+// ChannelInfo is the rich channel descriptor returned by GetChannelInfo. It
+// trims the slack-go Channel down to the fields callers in this codebase
+// actually need (mostly LLM-context oriented), so consumers don't take a
+// transitive dep on the slack-go shape.
+type ChannelInfo struct {
+	ID         string
+	Name       string
+	Topic      string
+	Purpose    string
+	IsPrivate  bool
+	IsArchived bool
+	IsShared   bool // shared / connected / org-shared (any cross-workspace flavour)
+	NumMembers int
+	Creator    string    // Slack user ID of the channel creator
+	CreatedAt  time.Time // Channel creation time (UTC)
 }
 
 // ConversationMessage represents a message retrieved from Slack conversation history
