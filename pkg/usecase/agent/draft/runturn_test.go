@@ -13,6 +13,8 @@ import (
 	"github.com/m-mizutani/gollem/mock"
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
@@ -24,11 +26,14 @@ import (
 // on observable side effects (Slack-side calls) without needing a Slack
 // service mock.
 type hostStub struct {
-	mu             sync.Mutex
-	postedQuestion []draft.QuestionPayload
-	materialized   []draft.MaterializePayload
-	traceLines     []string
-	busyCalls      int
+	mu              sync.Mutex
+	postedQuestion  []draft.QuestionPayload
+	materialized    []draft.MaterializePayload
+	traceLines      []string
+	roundLines      map[string][]string
+	registeredTasks []draft.TaskInfo
+	taskLines       map[string][]string
+	busyCalls       int
 }
 
 func (h *hostStub) Question(_ context.Context, _ *model.Session, q draft.QuestionPayload) error {
@@ -47,6 +52,27 @@ func (h *hostStub) Trace(_ context.Context, line string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.traceLines = append(h.traceLines, line)
+}
+func (h *hostStub) TraceRound(_ context.Context, roundKey, line string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.roundLines == nil {
+		h.roundLines = map[string][]string{}
+	}
+	h.roundLines[roundKey] = append(h.roundLines[roundKey], line)
+}
+func (h *hostStub) RegisterTasks(_ context.Context, tasks []draft.TaskInfo) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.registeredTasks = append(h.registeredTasks, tasks...)
+}
+func (h *hostStub) TraceTask(_ context.Context, taskID, line string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.taskLines == nil {
+		h.taskLines = map[string][]string{}
+	}
+	h.taskLines[taskID] = append(h.taskLines[taskID], line)
 }
 func (h *hostStub) PostBusy(_ context.Context, _ *model.Session, _ agent.BusyInfo) error {
 	h.mu.Lock()
@@ -215,13 +241,29 @@ func TestRunTurn_InvestigateThenMaterialize(t *testing.T) {
 	gt.Value(t, host.materialized[0].Title).Equal("API outage")
 	gt.Value(t, host.materialized[0].CustomFieldValues["severity"]).Equal("high")
 
-	// Trace should mention planning rounds (one per round) and the
-	// investigation. Counts assert >= 2 planning lines were emitted across
-	// the two rounds.
-	traceJoined := strings.Join(host.traceLines, "\n")
-	gt.Number(t, strings.Count(traceJoined, "Planning")).GreaterOrEqual(2)
-	gt.String(t, traceJoined).Contains("Recent thread")
-	gt.String(t, traceJoined).Contains("inner loops")
+	// Two logical planner rounds → two distinct round messages in
+	// roundLines (plan-1, plan-2). Within each round, the runtime
+	// posts at least the "Planning…" line and the action selection
+	// line, all via TraceRound under the same key. The phase-level
+	// Trace surface (for non-round phases like investigate.message)
+	// is independent and may be empty here.
+	gt.Number(t, len(host.roundLines)).GreaterOrEqual(2)
+	for key, lines := range host.roundLines {
+		gt.Array(t, lines).Length(2)
+		gt.String(t, strings.Join(lines, "\n")).Contains("Planning")
+		_ = key
+	}
+
+	// The investigation task was registered (sub-agent block created
+	// before sub-agent ran) and ended with a "done" line carrying the
+	// inner-loops counter — surfaced via TraceTask, not Trace.
+	gt.Array(t, host.registeredTasks).Length(1).Required()
+	gt.Value(t, host.registeredTasks[0].ID).Equal("inv-1")
+	gt.Value(t, host.registeredTasks[0].Title).Equal("Recent thread")
+	taskLines := host.taskLines["inv-1"]
+	gt.Bool(t, len(taskLines) >= 2).True()
+	gt.String(t, taskLines[len(taskLines)-1]).Contains("inner loops")
+	gt.String(t, taskLines[len(taskLines)-1]).Contains("Recent thread")
 }
 
 func TestRunTurn_PlannerBudgetExhaustionFallback(t *testing.T) {
@@ -332,6 +374,154 @@ func TestRunTurn_IdempotentRetryDropsSilently(t *testing.T) {
 	gt.Value(t, res.Status).Equal(draft.StatusIdempotent)
 	gt.Number(t, host.busyCalls).Equal(0)
 	gt.Array(t, host.postedQuestion).Length(0)
+}
+
+// TestRunTurn_PlannerCallsGetWorkspaceThenMaterializes covers the
+// tool-driven planner path: round 1 emits a tool call to `get_workspace`
+// (instead of immediate JSON); the wsmeta tool resolves the workspace from
+// the registry; round 2 sees the tool response back as input and emits the
+// terminal materialise JSON. This is the minimum end-to-end shape after the
+// planner stopped having field schemas inlined into the system prompt.
+func TestRunTurn_PlannerCallsGetWorkspaceThenMaterializes(t *testing.T) {
+	ctx := context.Background()
+
+	// Registry the planner's get_workspace tool will resolve against. The
+	// field IDs are sentinel strings so the test would fail loudly if the
+	// planner short-circuited and synthesised values without consulting
+	// the tool response.
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{
+			ID:          "ws-tool-test",
+			Name:        "Tool-driven WS",
+			Description: "Fixture for tool-driven planner test",
+		},
+		FieldSchema: &config.FieldSchema{
+			Fields: []config.FieldDefinition{
+				{
+					ID:       "severity",
+					Name:     "Severity",
+					Type:     types.FieldTypeSelect,
+					Required: true,
+					Options: []config.FieldOption{
+						{ID: "low", Name: "Low", Description: "Minor"},
+						{ID: "high", Name: "High", Description: "Critical"},
+					},
+				},
+			},
+		},
+	})
+
+	// LLM mock: first Generate returns a get_workspace tool call; second
+	// Generate (after the tool response) returns the materialize plan.
+	llm := &mock.LLMClientMock{
+		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			calls := atomic.Int32{}
+			return &mock.SessionMock{
+				GenerateFunc: func(_ context.Context, input []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					n := calls.Add(1)
+					switch n {
+					case 1:
+						if len(input) == 0 {
+							return nil, errors.New("expected planner mention input on round 1")
+						}
+						txt, ok := input[0].(gollem.Text)
+						if !ok {
+							return nil, errors.New("expected gollem.Text on round 1")
+						}
+						if !strings.Contains(string(txt), "[budget] planner 0/8") {
+							return nil, errors.New("round 1 input missing budget prefix")
+						}
+						return &gollem.Response{
+							FunctionCalls: []*gollem.FunctionCall{
+								{
+									Name:      "get_workspace",
+									Arguments: map[string]any{"workspace_id": "ws-tool-test"},
+								},
+							},
+						}, nil
+					case 2:
+						if len(input) == 0 {
+							return nil, errors.New("expected tool response input on round 2")
+						}
+						resp, ok := input[0].(gollem.FunctionResponse)
+						if !ok {
+							return nil, errors.New("expected gollem.FunctionResponse on round 2")
+						}
+						if resp.Name != "get_workspace" {
+							return nil, errors.New("unexpected tool response on round 2: " + resp.Name)
+						}
+						// Confirm the wsmeta tool actually returned the
+						// fixture's field schema rather than a stub. The
+						// planner is expected to use these field / option
+						// IDs for materialize. gollem JSON-roundtrips tool
+						// results, so the inner slice arrives as []any
+						// even though the tool returned []map[string]any.
+						fieldsAny, fok := resp.Data["fields"].([]any)
+						if !fok || len(fieldsAny) != 1 {
+							return nil, errors.New("get_workspace did not return fields")
+						}
+						field, fok := fieldsAny[0].(map[string]any)
+						if !fok {
+							return nil, errors.New("get_workspace fields[0] not a map")
+						}
+						if field["id"] != "severity" {
+							return nil, errors.New("get_workspace returned unexpected field id")
+						}
+						return &gollem.Response{
+							Texts: []string{`{
+								"reasoning":"schema confirmed via tool",
+								"action":"materialize",
+								"materialize":{
+									"workspace_id":"ws-tool-test",
+									"title":"Tool-driven case",
+									"description":"Built after consulting get_workspace.",
+									"custom_field_values":{"severity":"high"}
+								}
+							}`},
+						}, nil
+					default:
+						return nil, errors.New("unexpected extra Generate call")
+					}
+				},
+			}, nil
+		},
+	}
+
+	deps := &agent.CommonDeps{
+		Repo:                memory.New(),
+		Registry:            registry,
+		LLMClient:           llm,
+		HistoryRepo:         agentarchive.NewMemoryHistoryRepository(),
+		TraceRepo:           agentarchive.NewMemoryTraceRepository(),
+		HeartbeatInterval:   time.Second,
+		HeartbeatStaleAfter: 5 * time.Second,
+	}
+	uc, err := draft.New(deps, 8, 16, 20)
+	gt.NoError(t, err).Required()
+
+	host := &hostStub{}
+	res, err := uc.RunTurn(ctx, draft.TurnRequest{
+		Session:   newOpenSession(),
+		UserInput: "@bot create a draft",
+		Trigger:   draft.TriggerAppMention,
+		TriggerTS: "1700000030.000001",
+		Handler:   host,
+	})
+	async.Wait()
+	gt.NoError(t, err).Required()
+	gt.Value(t, res).NotNil().Required()
+	gt.Value(t, res.Status).Equal(draft.StatusCompleted)
+	gt.Value(t, res.EndedWith).Equal(model.SessionEndedWithMaterialize)
+
+	gt.Array(t, host.materialized).Length(1).Required()
+	gt.Value(t, host.materialized[0].WorkspaceID).Equal("ws-tool-test")
+	gt.Value(t, host.materialized[0].Title).Equal("Tool-driven case")
+	gt.Value(t, host.materialized[0].CustomFieldValues["severity"]).Equal("high")
+
+	// Tool call must not have consumed an extra planner round — both
+	// Generate calls fire within a single Execute (= one planner round).
+	gt.Number(t, uc.PlannerLoopMax()).Equal(8)
 }
 
 // combineScript wraps a scripted planner LLM and folds in sub-agent

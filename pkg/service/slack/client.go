@@ -235,6 +235,37 @@ func (c *client) CreateChannel(ctx context.Context, caseID int64, caseName strin
 	return channel.ID, nil
 }
 
+// GetChannelInfo retrieves a channel descriptor (name, topic, purpose,
+// privacy, member count, archive flag) via Slack's `conversations.info`.
+// Cached fields like channel name are duplicated by GetChannelNames'
+// cache; this method intentionally returns a fresh full payload because
+// the LLM context build is a one-shot cost and topic / purpose change
+// over time without observable invalidation events.
+func (c *client) GetChannelInfo(ctx context.Context, channelID string) (*ChannelInfo, error) {
+	info, err := c.api.GetConversationInfoContext(ctx, &slack.GetConversationInfoInput{
+		ChannelID:         channelID,
+		IncludeNumMembers: true,
+	})
+	if err != nil {
+		return nil, goerr.Wrap(err, "get channel info", goerr.V("channel_id", channelID))
+	}
+	out := &ChannelInfo{
+		ID:         info.ID,
+		Name:       info.Name,
+		Topic:      info.Topic.Value,
+		Purpose:    info.Purpose.Value,
+		IsPrivate:  info.IsPrivate,
+		IsArchived: info.IsArchived,
+		IsShared:   info.IsShared || info.IsExtShared || info.IsOrgShared,
+		NumMembers: info.NumMembers,
+		Creator:    info.Creator,
+	}
+	if info.Created != 0 {
+		out.CreatedAt = time.Unix(int64(info.Created), 0).UTC()
+	}
+	return out, nil
+}
+
 // GetConversationMembers retrieves the list of user IDs in the given channel
 func (c *client) GetConversationMembers(ctx context.Context, channelID string) ([]string, error) {
 	var members []string

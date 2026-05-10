@@ -71,6 +71,9 @@ func (f *fakeSlackService) CreateChannel(context.Context, int64, string, string,
 func (f *fakeSlackService) GetConversationMembers(context.Context, string) ([]string, error) {
 	panic("unexpected GetConversationMembers")
 }
+func (f *fakeSlackService) GetChannelInfo(context.Context, string) (*slacksvc.ChannelInfo, error) {
+	panic("unexpected GetChannelInfo")
+}
 func (f *fakeSlackService) RenameChannel(context.Context, string, int64, string, string) error {
 	panic("unexpected RenameChannel")
 }

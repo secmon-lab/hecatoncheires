@@ -75,12 +75,17 @@ type planQuestion struct {
 }
 
 // planQuestionType discriminates how the host should render the answer
-// control. Both values require a non-empty Options list.
+// control. `select` and `multi_select` require a non-empty Options list
+// (≥2 entries); `free_text` is the last-resort prose-input shape and
+// the `Options` field is ignored. The planner is told to prefer the
+// closed-list types and to use `free_text` only after exhausting other
+// avenues — see prompts/planner.md for the policy.
 type planQuestionType string
 
 const (
 	questionTypeSelect      planQuestionType = "select"
 	questionTypeMultiSelect planQuestionType = "multi_select"
+	questionTypeFreeText    planQuestionType = "free_text"
 )
 
 // planQuestionItem is a single question within planQuestion.Items.
@@ -90,11 +95,12 @@ type planQuestionItem struct {
 	ID string `json:"id"`
 	// Text is the prompt presented to the user.
 	Text string `json:"text"`
-	// Type is the answer control type (`select` or `multi_select`).
+	// Type is the answer control type (`select`, `multi_select`, or
+	// `free_text`).
 	Type planQuestionType `json:"type"`
-	// Options lists the allowed answer values. Required and must contain
-	// at least 2 entries for both `select` and `multi_select`.
-	Options []string `json:"options"`
+	// Options lists the allowed answer values for `select` /
+	// `multi_select` (≥2 entries). Ignored for `free_text`.
+	Options []string `json:"options,omitempty"`
 }
 
 // planMaterialize is the payload for materialize. Field values are passed as
@@ -250,26 +256,30 @@ func validateQuestion(q *planQuestion) error {
 		}
 		switch it.Type {
 		case questionTypeSelect, questionTypeMultiSelect:
-			// ok
+			if len(it.Options) < questionMinOptions {
+				return goerr.New("question.items[i].options must contain at least 2 entries",
+					goerr.V("id", it.ID), goerr.V("got", len(it.Options)))
+			}
+			seenOpt := make(map[string]struct{}, len(it.Options))
+			for j, opt := range it.Options {
+				if strings.TrimSpace(opt) == "" {
+					return goerr.New("question.items[i].options[j] must not be empty",
+						goerr.V("id", it.ID), goerr.V("j", j))
+				}
+				if _, dup := seenOpt[opt]; dup {
+					return goerr.New("question.items[i].options contains duplicate",
+						goerr.V("id", it.ID), goerr.V("opt", opt))
+				}
+				seenOpt[opt] = struct{}{}
+			}
+		case questionTypeFreeText:
+			// Options are ignored for free_text — the host renders a
+			// plain text input, not a chooser. We do not require the
+			// field to be empty (the planner is allowed to leave it
+			// out or include it as a hint that we discard).
 		default:
-			return goerr.New("question.items[i].type must be select or multi_select",
+			return goerr.New("question.items[i].type must be select, multi_select, or free_text",
 				goerr.V("id", it.ID), goerr.V("got", string(it.Type)))
-		}
-		if len(it.Options) < questionMinOptions {
-			return goerr.New("question.items[i].options must contain at least 2 entries",
-				goerr.V("id", it.ID), goerr.V("got", len(it.Options)))
-		}
-		seenOpt := make(map[string]struct{}, len(it.Options))
-		for j, opt := range it.Options {
-			if strings.TrimSpace(opt) == "" {
-				return goerr.New("question.items[i].options[j] must not be empty",
-					goerr.V("id", it.ID), goerr.V("j", j))
-			}
-			if _, dup := seenOpt[opt]; dup {
-				return goerr.New("question.items[i].options contains duplicate",
-					goerr.V("id", it.ID), goerr.V("opt", opt))
-			}
-			seenOpt[opt] = struct{}{}
 		}
 	}
 	return nil
@@ -326,12 +336,16 @@ func planSchema() *gollem.Parameter {
 		"text": str("Question text shown to the user."),
 		"type": {
 			Type:        gollem.TypeString,
-			Description: "Answer control type.",
-			Enum:        []string{string(questionTypeSelect), string(questionTypeMultiSelect)},
+			Description: "Answer control type. Use free_text only as a last resort.",
+			Enum: []string{
+				string(questionTypeSelect),
+				string(questionTypeMultiSelect),
+				string(questionTypeFreeText),
+			},
 		},
 		"options": {
 			Type:        gollem.TypeArray,
-			Description: "Allowed answer values. Must contain at least 2 entries.",
+			Description: "Allowed answer values for select / multi_select (≥2 entries). Ignored for free_text.",
 			Items:       &gollem.Parameter{Type: gollem.TypeString},
 		},
 	}

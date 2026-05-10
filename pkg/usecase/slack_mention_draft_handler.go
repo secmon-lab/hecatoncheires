@@ -2,7 +2,6 @@ package usecase
 
 import (
 	"context"
-	"strings"
 	"sync"
 
 	"github.com/m-mizutani/goerr/v2"
@@ -36,12 +35,31 @@ type slackDraftHandler struct {
 	draftID     model.CaseDraftID
 	mentionTS   string
 
-	// processingMu guards the ts of the running progress message we
-	// update on each Trace tick. Concurrent sub-agent traces all funnel
-	// through Trace and we update the same Slack message in place.
+	// processingMu serialises trace writes so concurrent goroutines
+	// (sub-agent fan-out, planner main thread) cannot interleave Slack
+	// posts mid-event.
 	processingMu sync.Mutex
+	// processingTS is the TS of the initial "processing…" placeholder
+	// that HandleAppMention posts at mention time. It is NOT used as a
+	// rolling progress buffer; it is updated exactly once at
+	// Materialize, when the placeholder is replaced with the preview
+	// blocks. Phase-trace lines are posted as fresh thread replies
+	// (see Trace) and never touch this TS.
 	processingTS string
-	traceLines   []string
+	// taskTS holds the Slack message TS for each registered task. Each
+	// task is posted as its own thread reply so that subsequent
+	// per-task updates land in place — the message stays anchored at
+	// its registration position even as later phase-trace lines or
+	// other task messages are appended below.
+	taskTS map[string]string
+	// roundTS holds the Slack message TS reserved for each planner
+	// round (keyed by the runtime's roundKey, e.g. "plan-1"). The
+	// first TraceRound call for a key posts a fresh thread reply and
+	// stores the TS here; subsequent calls with the same key REPLACE
+	// that message in place via UpdateMessage, so the
+	// "Planning… → retry → Planning… → action" sequence collapses to
+	// one self-updating context block.
+	roundTS map[string]string
 }
 
 // newSlackDraftHandler builds a per-turn handler with the host context the
@@ -228,29 +246,133 @@ func (h *slackDraftHandler) Materialize(ctx context.Context, ssn *model.Session,
 	return nil
 }
 
-// Trace appends one progress line to a per-turn Slack context block message
-// and updates it in place. The first call posts a new message; subsequent
-// calls update.
+// Trace posts one phase-level progress line as a fresh thread reply.
+// Each call creates a new Slack message rather than appending to a
+// shared progress buffer, so the trace renders as a vertical timeline
+// in the thread — no single context block grows over time and shoves
+// later content (task blocks, the question form, the preview) around.
+// Per-task transitions live in their own Slack messages (see
+// RegisterTasks / TraceTask).
 func (h *slackDraftHandler) Trace(ctx context.Context, line string) {
+	if line == "" {
+		return
+	}
 	h.processingMu.Lock()
 	defer h.processingMu.Unlock()
+	blocks := buildTraceContextBlocks([]string{line})
+	if _, err := h.slackService.PostThreadMessage(ctx, h.channelID, h.threadTS, blocks, line); err != nil {
+		logging.From(ctx).Error("post draft trace message",
+			"error", err.Error(),
+			"channel_id", h.channelID,
+			"thread_ts", h.threadTS,
+		)
+	}
+}
 
-	h.traceLines = append(h.traceLines, line)
-	blocks := buildTraceContextBlocks(h.traceLines)
-	fallback := strings.Join(h.traceLines, "\n")
+// TraceRound posts a fresh thread reply on the first call for a given
+// roundKey, and replaces the prior content of that message in place on
+// every subsequent call with the same key. This collapses transient
+// state inside one planner round
+// ("Planning… → retry → Planning… → action", plus per-tool-call
+// transitions surfaced by the planner middleware) into a single
+// self-updating context block, instead of stacking them as separate
+// thread replies.
+func (h *slackDraftHandler) TraceRound(ctx context.Context, roundKey, line string) {
+	if roundKey == "" || line == "" {
+		return
+	}
+	h.processingMu.Lock()
+	defer h.processingMu.Unlock()
+	if h.roundTS == nil {
+		h.roundTS = make(map[string]string)
+	}
+	blocks := buildTraceContextBlocks([]string{line})
+	if ts, ok := h.roundTS[roundKey]; ok {
+		if err := h.slackService.UpdateMessage(ctx, h.channelID, ts, blocks, line); err != nil {
+			errutil.Handle(ctx, goerr.Wrap(err, "update draft round trace",
+				goerr.V("round_key", roundKey),
+				goerr.V("ts", ts),
+			), "draft handler: round trace update failed")
+		}
+		return
+	}
+	ts, err := h.slackService.PostThreadMessage(ctx, h.channelID, h.threadTS, blocks, line)
+	if err != nil {
+		errutil.Handle(ctx, goerr.Wrap(err, "post draft round trace",
+			goerr.V("round_key", roundKey),
+			goerr.V("channel_id", h.channelID),
+			goerr.V("thread_ts", h.threadTS),
+		), "draft handler: round trace post failed")
+		return
+	}
+	h.roundTS[roundKey] = ts
+}
+
+// RegisterTasks posts one fresh thread-reply message per task at the
+// moment the investigation tasks are about to start. The TS of each
+// post is remembered so subsequent TraceTask calls can update the
+// matching message in place. Posting per task (rather than appending to
+// a shared message) keeps the task block anchored at its original
+// position in the thread, even after the phase-trace message grows or
+// other tasks come and go below it. Calling with an empty slice is a
+// no-op.
+func (h *slackDraftHandler) RegisterTasks(ctx context.Context, tasks []draft.TaskInfo) {
+	if len(tasks) == 0 {
+		return
+	}
+	h.processingMu.Lock()
+	defer h.processingMu.Unlock()
+	if h.taskTS == nil {
+		h.taskTS = make(map[string]string, len(tasks))
+	}
 	logger := logging.From(ctx)
-
-	if h.processingTS == "" {
-		ts, err := h.slackService.PostThreadMessage(ctx, h.channelID, h.threadTS, blocks, fallback)
+	for _, ti := range tasks {
+		if ti.ID == "" {
+			continue
+		}
+		if _, exists := h.taskTS[ti.ID]; exists {
+			// Re-registration is treated as a no-op; the existing
+			// task message keeps whatever state TraceTask last set.
+			continue
+		}
+		line := i18n.T(ctx, i18n.MsgDraftTraceTaskPending, ti.Title)
+		blocks := buildTraceContextBlocks([]string{line})
+		ts, err := h.slackService.PostThreadMessage(ctx, h.channelID, h.threadTS, blocks, line)
 		if err != nil {
-			logger.Error("post draft trace message", "error", err.Error())
-			return
+			logger.Error("post draft task block",
+				"error", err.Error(),
+				"task_id", ti.ID,
+				"channel_id", h.channelID,
+				"thread_ts", h.threadTS,
+			)
+			continue
 		}
-		h.processingTS = ts
-	} else {
-		if err := h.slackService.UpdateMessage(ctx, h.channelID, h.processingTS, blocks, fallback); err != nil {
-			logger.Error("update draft trace message", "error", err.Error())
-		}
+		h.taskTS[ti.ID] = ts
+	}
+}
+
+// TraceTask updates the dedicated Slack message a previously-registered
+// task occupies. An unknown taskID is dropped silently — the sub-agent
+// has no business posting fresh blocks (block creation is the parent's
+// contract via RegisterTasks), and a wrong ID typically means a bug we
+// want to fail quietly rather than spam Slack with orphan rows.
+func (h *slackDraftHandler) TraceTask(ctx context.Context, taskID, line string) {
+	if taskID == "" || line == "" {
+		return
+	}
+	h.processingMu.Lock()
+	defer h.processingMu.Unlock()
+	ts, ok := h.taskTS[taskID]
+	if !ok {
+		return
+	}
+	blocks := buildTraceContextBlocks([]string{line})
+	if err := h.slackService.UpdateMessage(ctx, h.channelID, ts, blocks, line); err != nil {
+		logging.From(ctx).Error("update draft task block",
+			"error", err.Error(),
+			"task_id", taskID,
+			"ts", ts,
+		)
 	}
 }
 

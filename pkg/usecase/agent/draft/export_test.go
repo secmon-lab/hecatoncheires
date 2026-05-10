@@ -41,6 +41,7 @@ const (
 const (
 	QuestionTypeSelectForTest      = questionTypeSelect
 	QuestionTypeMultiSelectForTest = questionTypeMultiSelect
+	QuestionTypeFreeTextForTest    = questionTypeFreeText
 )
 
 // Type aliases for tests that need to construct internal shapes.
