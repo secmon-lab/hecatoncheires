@@ -672,28 +672,118 @@ func sanitiseFilename(s string) string {
 	return b.String()
 }
 
-// collectToolNames walks the trace tree and returns the ToolName for every
-// tool_exec span, in DFS order. Duplicates are preserved so tests can also
-// assert on call counts when needed.
-func collectToolNames(t *trace.Trace) []string {
+// recordedToolCall is one tool_exec entry pulled out of a gollem trace.
+// Args mirrors what the LLM passed in; the result/error fields are dropped
+// because tests assert on the agent's intent (what it called and with
+// what arguments), not on the canned data the fakes returned.
+type recordedToolCall struct {
+	Name string
+	Args map[string]any
+}
+
+// collectToolCalls walks the trace tree DFS and returns every tool_exec
+// span as a (name, args) pair, in invocation order.
+func collectToolCalls(t *trace.Trace) []recordedToolCall {
 	if t == nil || t.RootSpan == nil {
 		return nil
 	}
-	var names []string
+	var calls []recordedToolCall
 	var walk func(s *trace.Span)
 	walk = func(s *trace.Span) {
 		if s == nil {
 			return
 		}
 		if s.Kind == trace.SpanKindToolExec && s.ToolExec != nil {
-			names = append(names, s.ToolExec.ToolName)
+			calls = append(calls, recordedToolCall{
+				Name: s.ToolExec.ToolName,
+				Args: s.ToolExec.Args,
+			})
 		}
 		for _, c := range s.Children {
 			walk(c)
 		}
 	}
 	walk(t.RootSpan)
-	return names
+	return calls
+}
+
+// recordingSlackSearch wraps a SearchService and logs every SearchMessages
+// call so the test can assert on call count and on the queries the
+// sub-agent issued. Sub-agent tools live outside the planner's recorder
+// (sub-agents use a counter, not the trace.Repository), so this is the
+// only seam through which tests can observe sub-agent intent.
+type recordingSlackSearch struct {
+	inner slacktool.SearchService
+	mu    sync.Mutex
+	calls []slackSearchInvocation
+}
+
+type slackSearchInvocation struct {
+	Query string                    `json:"query"`
+	Opts  slacktool.SearchOptions   `json:"opts"`
+}
+
+func (r *recordingSlackSearch) SearchMessages(ctx context.Context, query string, opts slacktool.SearchOptions) (*slacktool.SearchResult, error) {
+	r.mu.Lock()
+	r.calls = append(r.calls, slackSearchInvocation{Query: query, Opts: opts})
+	r.mu.Unlock()
+	return r.inner.SearchMessages(ctx, query, opts)
+}
+
+func (r *recordingSlackSearch) snapshot() []slackSearchInvocation {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]slackSearchInvocation, len(r.calls))
+	copy(out, r.calls)
+	return out
+}
+
+// recordingNotionClient wraps a notiontool.Client and logs every Search /
+// GetPageMarkdown invocation, for the same reason as recordingSlackSearch.
+type recordingNotionClient struct {
+	inner       notiontool.Client
+	mu          sync.Mutex
+	searchCalls []notionSearchInvocation
+	pageCalls   []notionGetPageInvocation
+}
+
+type notionSearchInvocation struct {
+	Query string                    `json:"query"`
+	Opts  notiontool.SearchOptions  `json:"opts"`
+}
+
+type notionGetPageInvocation struct {
+	PageID string `json:"page_id"`
+}
+
+func (r *recordingNotionClient) Search(ctx context.Context, query string, opts notiontool.SearchOptions) (*notiontool.SearchResult, error) {
+	r.mu.Lock()
+	r.searchCalls = append(r.searchCalls, notionSearchInvocation{Query: query, Opts: opts})
+	r.mu.Unlock()
+	return r.inner.Search(ctx, query, opts)
+}
+
+func (r *recordingNotionClient) GetPageMarkdown(ctx context.Context, pageID string) (*notiontool.PageMarkdown, error) {
+	r.mu.Lock()
+	r.pageCalls = append(r.pageCalls, notionGetPageInvocation{PageID: pageID})
+	r.mu.Unlock()
+	return r.inner.GetPageMarkdown(ctx, pageID)
+}
+
+func (r *recordingNotionClient) searchSnapshot() []notionSearchInvocation {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]notionSearchInvocation, len(r.searchCalls))
+	copy(out, r.searchCalls)
+	return out
+}
+
+func (r *recordingNotionClient) pageSnapshot() []notionGetPageInvocation {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]notionGetPageInvocation, len(r.pageCalls))
+	copy(out, r.pageCalls)
+	return out
 }
 
 // judgeSystemPrompt drives the LLM judge that evaluates whether a planner
@@ -769,6 +859,78 @@ func runJudge(t *testing.T, ctx context.Context, llm gollem.LLMClient, traceRepo
 	return v
 }
 
+// checkSubAgentCallCount enforces the requireXxxCalls contract:
+//   require == 0 → skip
+//   require > 0  → got >= require
+//   require == -1 → got == 0 (the tool must not have been called).
+func checkSubAgentCallCount(t *testing.T, label string, got, require int) {
+	t.Helper()
+	switch {
+	case require == 0:
+		t.Logf("%s invocations: %d (no requirement)", label, got)
+	case require > 0:
+		t.Logf("%s invocations: %d (require ≥ %d)", label, got, require)
+		gt.Number(t, got).GreaterOrEqual(require)
+	case require == -1:
+		t.Logf("%s invocations: %d (require == 0)", label, got)
+		gt.Number(t, got).Equal(0)
+	}
+}
+
+// runSubAgentArgJudge asks the judge whether the recorded sub-agent calls'
+// arguments satisfy the criterion. A single judge invocation per tool
+// type is used (the criterion is applied to the full call set), keeping
+// LLM cost bounded regardless of how many times the sub-agent retried.
+func runSubAgentArgJudge(t *testing.T, ctx context.Context, llm gollem.LLMClient, traceRepo trace.Repository, label, criterion string, calls []any) {
+	t.Helper()
+	t.Logf("%s argument judge — recorded %d call(s)", label, len(calls))
+	if len(calls) == 0 {
+		// Skip — the count check below should already fail when calls
+		// are required. If they were optional, vacuous truth is fine.
+		return
+	}
+	observed, err := json.MarshalIndent(map[string]any{
+		"tool":  label,
+		"calls": calls,
+	}, "", "  ")
+	gt.NoError(t, err).Required()
+	verdict := runJudge(t, ctx, llm, traceRepo, criterion, string(observed))
+	t.Logf("sub-agent-arg judge for %s: matches=%v rationale=%q", label, verdict.Matches, verdict.Rationale)
+	gt.Bool(t, verdict.Matches).True()
+}
+
+func slackInvocationCount(r *recordingSlackSearch) int {
+	if r == nil {
+		return 0
+	}
+	return len(r.snapshot())
+}
+
+func notionSearchInvocationCount(r *recordingNotionClient) int {
+	if r == nil {
+		return 0
+	}
+	return len(r.searchSnapshot())
+}
+
+func notionPageInvocationCount(r *recordingNotionClient) int {
+	if r == nil {
+		return 0
+	}
+	return len(r.pageSnapshot())
+}
+
+// anySlice converts a typed slice to []any so it can be JSON-marshalled
+// inside a heterogeneous record. The judge prompt only sees the JSON, so
+// the boxed type is fine.
+func anySlice[T any](in []T) []any {
+	out := make([]any, len(in))
+	for i, v := range in {
+		out[i] = v
+	}
+	return out
+}
+
 // llmScenario captures everything a single real-LLM test case asserts on.
 // Structural fields (status / workspace ID / required tool calls) are
 // checked deterministically; the *Criterion fields are evaluated by the
@@ -801,6 +963,34 @@ type llmScenario struct {
 	// in the planner trace (e.g. "get_workspace"). Verified via tool_exec
 	// span names, so wsmeta tool calls are covered without further hooks.
 	requirePlannerTools []string
+
+	// allowedPlannerTools, when non-nil, asserts every planner-side
+	// tool_exec span name is a member. nil = skip the no-extras check.
+	// An empty slice means "no planner tool calls allowed at all".
+	allowedPlannerTools []string
+
+	// plannerToolArgCriteria provides a natural-language criterion per
+	// planner tool name. After the turn finishes, every recorded call
+	// to that tool is collected and a single judge call evaluates the
+	// full set of args against the criterion. Use this to express
+	// "workspace_id in get_workspace was always the chosen workspace"
+	// or similar arg-shape rules without locking to exact values.
+	plannerToolArgCriteria map[string]string
+
+	// requireSlackSearchCalls / requireNotionSearchCalls /
+	// requireNotionGetPageCalls assert minimum invocation counts on the
+	// sub-agent fakes (which runScenario wraps automatically). 0 means
+	// "do not check"; -1 means "must be exactly zero" (forbidden tool).
+	requireSlackSearchCalls   int
+	requireNotionSearchCalls  int
+	requireNotionGetPageCalls int
+
+	// Sub-agent argument criteria. Empty string = skip. The JSON dump
+	// of every recorded call (queries, opts, page IDs) is shown to the
+	// judge once with the criterion.
+	slackSearchArgCriterion   string
+	notionSearchArgCriterion  string
+	notionGetPageArgCriterion string
 
 	// requireInvestigation, when true, asserts that at least one
 	// investigate phase ran (RegisterTasks was called with ≥1 task) so
@@ -886,14 +1076,34 @@ func runScenario(t *testing.T, ctx context.Context, llm gollem.LLMClient, sc llm
 		gt.NoError(t, err).Required()
 	}
 
+	// Wrap the supplied fakes so every sub-agent tool call is observable
+	// from the outside. The planner trace does not capture sub-agent
+	// tools (they go through a separate counter), so this wrapper layer
+	// is the only seam through which tool-call assertions on the
+	// Slack / Notion side can be expressed.
+	var (
+		slackRec  *recordingSlackSearch
+		notionRec *recordingNotionClient
+	)
+	var slackForDeps slacktool.SearchService
+	var notionForDeps notiontool.Client
+	if sc.slackSearch != nil {
+		slackRec = &recordingSlackSearch{inner: sc.slackSearch}
+		slackForDeps = slackRec
+	}
+	if sc.notionClient != nil {
+		notionRec = &recordingNotionClient{inner: sc.notionClient}
+		notionForDeps = notionRec
+	}
+
 	deps := &agent.CommonDeps{
 		Repo:                repo,
 		Registry:            registry,
 		LLMClient:           llm,
 		HistoryRepo:         agentarchive.NewMemoryHistoryRepository(),
 		TraceRepo:           plannerRepo,
-		SlackSearch:         sc.slackSearch,
-		NotionClient:        sc.notionClient,
+		SlackSearch:         slackForDeps,
+		NotionClient:        notionForDeps,
 		HeartbeatInterval:   time.Second,
 		HeartbeatStaleAfter: 30 * time.Second,
 	}
@@ -930,10 +1140,76 @@ func runScenario(t *testing.T, ctx context.Context, llm gollem.LLMClient, sc llm
 	gt.Array(t, traceIDs).Length(1).Required()
 	plannerTrace := plannerMem.Load(ssn.ID, traceIDs[0])
 	gt.Value(t, plannerTrace).NotNil().Required()
-	toolNames := collectToolNames(plannerTrace)
+	plannerCalls := collectToolCalls(plannerTrace)
+	toolNames := make([]string, len(plannerCalls))
+	for i, c := range plannerCalls {
+		toolNames[i] = c.Name
+	}
 	t.Logf("planner tool calls: %v", toolNames)
+
+	// Required-tool check: each name in requirePlannerTools must appear
+	// at least once. Lets a test pin "the planner MUST consult
+	// get_workspace before materialising" without forbidding extras.
 	for _, want := range sc.requirePlannerTools {
 		gt.Array(t, toolNames).Has(want)
+	}
+
+	// Whitelist check: when allowedPlannerTools is non-nil, every
+	// recorded tool name must be a member. Catches regressions where
+	// the planner starts calling tools the test did not anticipate
+	// (e.g. a new wsmeta tool, or a leak from another resolver).
+	if sc.allowedPlannerTools != nil {
+		for _, name := range toolNames {
+			gt.Array(t, sc.allowedPlannerTools).Has(name)
+		}
+	}
+
+	// Argument-shape check via judge: for each tool listed in
+	// plannerToolArgCriteria, collect every call's args and ask the
+	// judge once whether the criterion holds across the set. The
+	// criterion is "given that the planner called this tool, the
+	// args were sane" — it is vacuously satisfied when the tool was
+	// not called. Use requirePlannerTools when the call itself is
+	// mandatory.
+	for toolName, criterion := range sc.plannerToolArgCriteria {
+		var callArgs []map[string]any
+		for _, c := range plannerCalls {
+			if c.Name == toolName {
+				callArgs = append(callArgs, c.Args)
+			}
+		}
+		t.Logf("planner tool %q args: %v", toolName, callArgs)
+		if len(callArgs) == 0 {
+			t.Logf("planner tool %q: no calls recorded — skipping arg judge", toolName)
+			continue
+		}
+		observed, err := json.MarshalIndent(map[string]any{
+			"tool":  toolName,
+			"calls": callArgs,
+		}, "", "  ")
+		gt.NoError(t, err).Required()
+		verdict := runJudge(t, ctx, llm, judgeRepo, criterion, string(observed))
+		t.Logf("planner-arg judge for %q: matches=%v rationale=%q", toolName, verdict.Matches, verdict.Rationale)
+		gt.Bool(t, verdict.Matches).True()
+	}
+
+	// Sub-agent fake invocation counts. requireXxxCalls semantics:
+	//   0  → no check (default)
+	//   N>0 → must be ≥ N
+	//   -1 → must be exactly 0 (sub-agent must NOT call this tool)
+	checkSubAgentCallCount(t, "slack search", slackInvocationCount(slackRec), sc.requireSlackSearchCalls)
+	checkSubAgentCallCount(t, "notion search", notionSearchInvocationCount(notionRec), sc.requireNotionSearchCalls)
+	checkSubAgentCallCount(t, "notion get_page", notionPageInvocationCount(notionRec), sc.requireNotionGetPageCalls)
+
+	// Sub-agent argument criteria via judge.
+	if sc.slackSearchArgCriterion != "" && slackRec != nil {
+		runSubAgentArgJudge(t, ctx, llm, judgeRepo, "slack search", sc.slackSearchArgCriterion, anySlice(slackRec.snapshot()))
+	}
+	if sc.notionSearchArgCriterion != "" && notionRec != nil {
+		runSubAgentArgJudge(t, ctx, llm, judgeRepo, "notion search", sc.notionSearchArgCriterion, anySlice(notionRec.searchSnapshot()))
+	}
+	if sc.notionGetPageArgCriterion != "" && notionRec != nil {
+		runSubAgentArgJudge(t, ctx, llm, judgeRepo, "notion get_page", sc.notionGetPageArgCriterion, anySlice(notionRec.pageSnapshot()))
 	}
 
 	if sc.requireInvestigation {
@@ -1057,6 +1333,18 @@ func TestRunTurn_RealLLM_VagueMentionAsksQuestion(t *testing.T) {
 		expectStatus:      draft.StatusCompleted,
 		expectAction:      model.SessionEndedWithQuestion,
 		questionCriterion: "The question (its `Reason` and `Items` text combined) asks the user to identify which workspace this case belongs to (Incident Response, Recruitment, or Risk Management), OR equivalently asks for the case scope or topic that would let the agent disambiguate the workspace. Every `select` or `multi_select` item must list at least 2 distinct, non-empty options.",
+		// Tool-call discipline: the planner MUST consult get_workspace
+		// at least once before emitting any terminal action (the
+		// updated planner prompt enforces this). No Slack / Notion
+		// fan-out is wired here and none should be called.
+		requirePlannerTools: []string{"get_workspace"},
+		allowedPlannerTools: []string{"list_workspaces", "get_workspace"},
+		plannerToolArgCriteria: map[string]string{
+			"get_workspace": "Every recorded call's workspace_id is one of the registered workspaces (ws-incident, ws-recruit, ws-risk) — no fabricated IDs.",
+		},
+		requireSlackSearchCalls:   -1,
+		requireNotionSearchCalls:  -1,
+		requireNotionGetPageCalls: -1,
 	})
 }
 
@@ -1104,6 +1392,16 @@ func TestRunTurn_RealLLM_ConcreteMentionMaterializes(t *testing.T) {
 		expectWorkspaceID:   "ws-incident",
 		requireFieldKeys:    []string{"severity"},
 		requirePlannerTools: []string{"get_workspace"},
+		// Tool-call discipline: only wsmeta. Sub-agent fan-out is
+		// unnecessary because the mention is fully self-contained and
+		// the planner is told not to investigate.
+		allowedPlannerTools: []string{"list_workspaces", "get_workspace"},
+		plannerToolArgCriteria: map[string]string{
+			"get_workspace": "Every recorded call's workspace_id is exactly 'ws-incident' — the planner must not be inspecting any other workspace, since that is the one the user explicitly named.",
+		},
+		requireSlackSearchCalls:   -1,
+		requireNotionSearchCalls:  -1,
+		requireNotionGetPageCalls: -1,
 	})
 }
 
@@ -1296,7 +1594,337 @@ func TestRunTurn_RealLLM_InfersFieldsFromSources(t *testing.T) {
 			"impact":     {"minor", "moderate", "major"},
 			"owner_team": {"security", "compliance"},
 		},
+		// Tool-call discipline. Planner-side: only wsmeta tools.
+		// Sub-agent side: at least one Slack search and at least one
+		// Notion search must fire (the agent has to actually consult
+		// the registered sources, not guess from the workspace
+		// description). Notion get_page is not strictly required —
+		// the search hit titles + canned page text are equivalent
+		// signal — so we leave it as ≥0.
+		allowedPlannerTools: []string{"list_workspaces", "get_workspace"},
+		plannerToolArgCriteria: map[string]string{
+			"get_workspace": "Every recorded call's workspace_id is 'ws-risk' — that is the only registered workspace in this scenario.",
+		},
+		requireSlackSearchCalls:  1,
+		requireNotionSearchCalls: 1,
+		slackSearchArgCriterion:  "At least one recorded query is semantically related to the case topic — i.e. it mentions Tanaka, absconding, 持ち逃げ, insider, or laptop. Empty queries or queries unrelated to the mention (e.g. random words) would fail this criterion.",
+		notionSearchArgCriterion: "At least one recorded query is semantically related to the case topic — i.e. it mentions Tanaka, absconding, 持ち逃げ, insider, risk register, or laptop.",
 	})
+}
+
+// TestRunTurn_RealLLM_PicksRightWorkspaceFromMany covers the workspace-
+// selection contract: when the registry advertises several workspaces with
+// distinct purposes, the planner must read the mention's substance and
+// pick the right one — without asking the user. The mention here is a
+// concrete production-database outage, so `ws-incident` is the obvious
+// answer and `ws-recruit` / `ws-risk` are distractors with their own
+// (very different) field schemas.
+//
+// We deliberately do NOT pre-specify the workspace ID in the mention — if
+// the agent matched on the literal string "ws-incident" instead of the
+// description, the test would not exercise selection. Field values are
+// constrained loosely (only severity must populate, and within a sensible
+// pair) so the test focuses on the workspace decision, not on field
+// inference.
+func TestRunTurn_RealLLM_PicksRightWorkspaceFromMany(t *testing.T) {
+	ctx := context.Background()
+	llm := newTestLLMClient(t, ctx)
+
+	workspaces := []*model.WorkspaceEntry{
+		{
+			Workspace: model.Workspace{
+				ID: "ws-incident", Name: "Incident Response",
+				Description: "Production incidents and outages, paged to oncall. Use this for service unavailability, latency regressions, failed deploys, and any operational event the SRE team would respond to in real time.",
+			},
+			FieldSchema: &config.FieldSchema{
+				Fields: []config.FieldDefinition{
+					{
+						ID: "severity", Name: "Severity",
+						Type: types.FieldTypeSelect, Required: true,
+						Options: []config.FieldOption{
+							{ID: "low", Name: "Low", Description: "Minor service disruption, internal-only."},
+							{ID: "medium", Name: "Medium", Description: "Partial outage with workaround in place."},
+							{ID: "high", Name: "High", Description: "Critical outage, oncall paged, customer-visible."},
+						},
+					},
+				},
+			},
+		},
+		{
+			Workspace: model.Workspace{
+				ID: "ws-recruit", Name: "Recruitment",
+				Description: "Hiring pipeline and candidate evaluations. Use this for candidate intake, interview-loop coordination, and offer decisions. NOT for production engineering issues.",
+			},
+			FieldSchema: &config.FieldSchema{
+				Fields: []config.FieldDefinition{
+					{
+						ID: "stage", Name: "Stage",
+						Type: types.FieldTypeSelect, Required: true,
+						Options: []config.FieldOption{
+							{ID: "screen", Name: "Screen", Description: "Initial CV screen."},
+							{ID: "onsite", Name: "Onsite", Description: "Onsite interview loop."},
+						},
+					},
+				},
+			},
+		},
+		{
+			Workspace: model.Workspace{
+				ID: "ws-risk", Name: "Risk Management",
+				Description: "Insider threats, compliance reviews, and policy violations. Use this for slow-burn risks the security/compliance teams need to track over time. NOT for live production outages.",
+			},
+			FieldSchema: &config.FieldSchema{
+				Fields: []config.FieldDefinition{
+					{
+						ID: "impact", Name: "Impact",
+						Type: types.FieldTypeSelect, Required: true,
+						Options: []config.FieldOption{
+							{ID: "minor", Name: "Minor", Description: "Limited blast radius."},
+							{ID: "major", Name: "Major", Description: "Org-wide impact."},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	runScenario(t, ctx, llm, llmScenario{
+		userInput: "@bot draft a case for the production database outage we had at 02:00 UTC last night. " +
+			"PostgreSQL primary failover took 8 minutes; pgbouncer retried, no data loss. Oncall was paged. " +
+			"Customer-visible 5xx for ~6 of those 8 minutes. Please materialise the draft directly with the appropriate workspace.",
+		trigger:             draft.TriggerAppMention,
+		workspaces:          workspaces,
+		expectStatus:        draft.StatusCompleted,
+		expectAction:        model.SessionEndedWithMaterialize,
+		expectWorkspaceID:   "ws-incident",
+		requireFieldKeys:    []string{"severity"},
+		requirePlannerTools: []string{"get_workspace"},
+		// 8 minutes of customer-visible 5xx with oncall paged is squarely
+		// "medium" or "high" — never "low". Allow both ends so the test
+		// tracks the workspace decision rather than the severity grading.
+		requireFieldOneOf: map[string][]string{
+			"severity": {"medium", "high"},
+		},
+		// Tool-call discipline. The picked workspace must be the
+		// production-incident one; the planner is allowed to probe
+		// other workspaces during disambiguation but the FINAL chosen
+		// workspace_id (verified above via expectWorkspaceID) and the
+		// trail of get_workspace calls should still be sane. The arg
+		// judge is asked to confirm every call landed on a registered
+		// workspace and that ws-incident appears among them — the
+		// latter being the proof the planner did, in fact, look up
+		// the workspace it eventually materialised against.
+		allowedPlannerTools: []string{"list_workspaces", "get_workspace"},
+		plannerToolArgCriteria: map[string]string{
+			"get_workspace": "Every recorded call's workspace_id is one of ws-incident, ws-recruit, ws-risk (the registered set), and at least one call is for ws-incident — the workspace that ultimately matched the production-database-outage mention.",
+		},
+		requireSlackSearchCalls:   -1,
+		requireNotionSearchCalls:  -1,
+		requireNotionGetPageCalls: -1,
+	})
+}
+
+// TestRunTurn_RealLLM_QuestionAnsweredThenMaterializes covers the
+// multi-turn flow: a vague first mention should land in `question`, and
+// then a follow-up `thread_reply` carrying the user's answers should let
+// the planner pick the correct workspace and materialise. The two turns
+// share one Session, one HistoryRepo, and one UseCase, so the second
+// turn's planner sees the prior question text via gollem's history
+// loader and treats the reply as a continuation of the same dialogue.
+//
+// We assert at every hop:
+//   1. Turn 1 ends in StatusCompleted / SessionEndedWithQuestion and
+//      records exactly one Question payload, no Materialize.
+//   2. Turn 2 ends in StatusCompleted / SessionEndedWithMaterialize on
+//      the correct workspace, with the impact field grading inside an
+//      allowed range.
+//   3. Both turns persisted their own trace; each trace contains at
+//      least one get_workspace call (the strengthened planner prompt
+//      requires it before any terminal action).
+func TestRunTurn_RealLLM_QuestionAnsweredThenMaterializes(t *testing.T) {
+	ctx := context.Background()
+	llm := newTestLLMClient(t, ctx)
+
+	workspaces := []*model.WorkspaceEntry{
+		{
+			Workspace: model.Workspace{
+				ID: "ws-incident", Name: "Incident Response",
+				Description: "Production incidents and outages, paged to oncall.",
+			},
+			FieldSchema: &config.FieldSchema{
+				Fields: []config.FieldDefinition{
+					{
+						ID: "severity", Name: "Severity",
+						Type: types.FieldTypeSelect, Required: true,
+						Options: []config.FieldOption{
+							{ID: "low", Name: "Low", Description: "Minor service disruption."},
+							{ID: "high", Name: "High", Description: "Critical outage."},
+						},
+					},
+				},
+			},
+		},
+		{
+			Workspace: model.Workspace{
+				ID: "ws-recruit", Name: "Recruitment",
+				Description: "Hiring pipeline and candidate evaluations.",
+			},
+			FieldSchema: &config.FieldSchema{
+				Fields: []config.FieldDefinition{
+					{
+						ID: "stage", Name: "Stage",
+						Type: types.FieldTypeSelect, Required: true,
+						Options: []config.FieldOption{
+							{ID: "screen", Name: "Screen", Description: "Initial CV screen."},
+							{ID: "onsite", Name: "Onsite", Description: "Onsite interview loop."},
+						},
+					},
+				},
+			},
+		},
+		{
+			Workspace: model.Workspace{
+				ID: "ws-risk", Name: "Risk Management",
+				Description: "Security risks, audit findings, and policy compliance.",
+			},
+			FieldSchema: &config.FieldSchema{
+				Fields: []config.FieldDefinition{
+					{
+						ID: "impact", Name: "Impact",
+						Type: types.FieldTypeSelect, Required: true,
+						Options: []config.FieldOption{
+							{ID: "minor", Name: "Minor", Description: "Limited blast radius, single team."},
+							{ID: "major", Name: "Major", Description: "Org-wide impact, executive visibility."},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	registry := model.NewWorkspaceRegistry()
+	for _, ws := range workspaces {
+		registry.Register(ws)
+	}
+
+	plannerRepo, plannerMem := newScenarioTraceRepo(t, "planner")
+
+	deps := &agent.CommonDeps{
+		Repo:                memory.New(),
+		Registry:            registry,
+		LLMClient:           llm,
+		HistoryRepo:         agentarchive.NewMemoryHistoryRepository(),
+		TraceRepo:           plannerRepo,
+		HeartbeatInterval:   time.Second,
+		HeartbeatStaleAfter: 30 * time.Second,
+	}
+	uc, err := draft.New(deps, 6, 8, 14)
+	gt.NoError(t, err).Required()
+
+	host := &hostStub{}
+	ssn := newOpenSession()
+
+	// ---- Turn 1: vague mention → planner asks the user. ----
+	now1 := time.Now()
+	turn1TS := fmt.Sprintf("turn1-%d.%06d", now1.Unix(), now1.Nanosecond()/1000)
+	res1, err := uc.RunTurn(ctx, draft.TurnRequest{
+		Session:   ssn,
+		UserInput: "@bot please draft a case for me",
+		Trigger:   draft.TriggerAppMention,
+		TriggerTS: turn1TS,
+		Handler:   host,
+	})
+	async.Wait()
+	gt.NoError(t, err).Required()
+	gt.Value(t, res1).NotNil().Required()
+	gt.Value(t, res1.Status).Equal(draft.StatusCompleted)
+	gt.Value(t, res1.EndedWith).Equal(model.SessionEndedWithQuestion)
+	gt.Array(t, host.postedQuestion).Length(1).Required()
+	gt.Array(t, host.materialized).Length(0)
+
+	q := host.postedQuestion[0]
+	t.Logf("turn 1 question:\n  reason: %s\n  items: %d", q.Reason, len(q.Items))
+	for _, it := range q.Items {
+		t.Logf("    [%s] %s (type=%s, opts=%v)", it.ID, it.Text, it.Type, it.Options)
+	}
+
+	// ---- Synthesise the user reply, mirroring formatDraftQuestionAnswers. ----
+	// We attach all answers to the first item's text — most planners ask the
+	// workspace question first — and pack the topic / impact framing into
+	// the free-text companion. Natural-language is enough; the planner
+	// reads the dialogue rather than parsing fixed slots.
+	var replyB strings.Builder
+	replyB.WriteString("# Answers to my prior questions\n\n")
+	for i, it := range q.Items {
+		fmt.Fprintf(&replyB, "## %s\n", it.Text)
+		switch i {
+		case 0:
+			replyB.WriteString("selected: Risk Management; other: This case belongs to the Risk Management workspace (ws-risk). " +
+				"Topic: Q1 audit follow-up — a major compliance finding around access control with org-wide impact. " +
+				"Title should be 'Q1 audit follow-up: access-control compliance gap'. " +
+				"Please materialise the draft on the Risk Management workspace now.\n\n")
+		default:
+			replyB.WriteString("answer: see the prior item — Q1 audit follow-up about an access-control compliance gap, org-wide impact, please proceed to materialise.\n\n")
+		}
+	}
+	reply := replyB.String()
+	t.Logf("turn 2 user reply:\n%s", reply)
+
+	// ---- Turn 2: thread reply → planner picks ws-risk and materialises. ----
+	now2 := time.Now()
+	turn2TS := fmt.Sprintf("turn2-%d.%06d", now2.Unix(), now2.Nanosecond()/1000)
+	res2, err := uc.RunTurn(ctx, draft.TurnRequest{
+		Session:   ssn,
+		UserInput: reply,
+		Trigger:   draft.TriggerThreadReply,
+		TriggerTS: turn2TS,
+		Handler:   host,
+	})
+	async.Wait()
+	gt.NoError(t, err).Required()
+	gt.Value(t, res2).NotNil().Required()
+	gt.Value(t, res2.Status).Equal(draft.StatusCompleted)
+	gt.Value(t, res2.EndedWith).Equal(model.SessionEndedWithMaterialize)
+
+	gt.Array(t, host.materialized).Length(1).Required()
+	m := host.materialized[0]
+	t.Logf("turn 2 materialise: workspace_id=%s title=%q field_values=%v",
+		m.WorkspaceID, m.Title, m.CustomFieldValues)
+	gt.Value(t, m.WorkspaceID).Equal("ws-risk")
+	gt.String(t, m.Title).NotEqual("")
+	gt.Map(t, m.CustomFieldValues).HasKey("impact")
+	impactRaw, ok := m.CustomFieldValues["impact"]
+	gt.Bool(t, ok).True().Required()
+	impact, isString := impactRaw.(string)
+	gt.Bool(t, isString).True().Required()
+	// User explicitly described the finding as "major" with org-wide
+	// impact, so "major" is the natural pick. Allow "minor" as well in
+	// case the planner is conservative — the test focuses on the
+	// multi-turn dialogue working at all, not on the exact grade.
+	gt.Array(t, []string{"minor", "major"}).Has(impact)
+
+	// ---- Trace assertions: both turns persisted, each has get_workspace. ----
+	traceIDs := plannerMem.TraceIDs(ssn.ID)
+	t.Logf("trace IDs: %v", traceIDs)
+	gt.Number(t, len(traceIDs)).GreaterOrEqual(2)
+	for _, tid := range traceIDs {
+		tr := plannerMem.Load(ssn.ID, tid)
+		gt.Value(t, tr).NotNil().Required()
+		var names []string
+		for _, c := range collectToolCalls(tr) {
+			names = append(names, c.Name)
+		}
+		t.Logf("trace %s tool calls: %v", tid, names)
+		// The strengthened planner prompt requires get_workspace
+		// before any terminal action, so each turn (which terminates
+		// in question or materialize) must show at least one call.
+		gt.Array(t, names).Has("get_workspace")
+		// And nothing outside the wsmeta surface should be called —
+		// no Slack / Notion deps are wired in this scenario.
+		for _, name := range names {
+			gt.Array(t, []string{"list_workspaces", "get_workspace"}).Has(name)
+		}
+	}
 }
 
 // combineScript wraps a scripted planner LLM and folds in sub-agent
