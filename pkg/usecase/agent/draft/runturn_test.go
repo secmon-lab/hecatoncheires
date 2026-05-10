@@ -1108,12 +1108,12 @@ func runScenario(t *testing.T, ctx context.Context, llm gollem.LLMClient, sc llm
 		HeartbeatInterval:   time.Second,
 		HeartbeatStaleAfter: 30 * time.Second,
 	}
-	// Bump sub-agent loop budget: real-LLM sub-agents may iterate
-	// through several search/get_page calls before they have enough
-	// context to summarise. The default 8 is fine for fully-mocked
-	// runs, but Scenario C exercises the full Slack + Notion fan-out
-	// and benefits from headroom.
-	uc, err := draft.New(deps, 6, 8, 14)
+	// Use the package defaults (8 planner rounds / 16 sub-agent slots /
+	// 20 inner loops). Real-LLM sub-agents may iterate through several
+	// search / get_page calls before they have enough context to
+	// summarise, and the production defaults are sized for that.
+	// Passing 0 lets draft.New apply the defaults explicitly.
+	uc, err := draft.New(deps, 0, 0, 0)
 	gt.NoError(t, err).Required()
 
 	host := &hostStub{}
@@ -1773,7 +1773,8 @@ func TestRunTurn_RealLLM_QuestionAnsweredThenMaterializes(t *testing.T) {
 		HeartbeatInterval:   time.Second,
 		HeartbeatStaleAfter: 30 * time.Second,
 	}
-	uc, err := draft.New(deps, 6, 8, 14)
+	// Use package defaults (8 / 16 / 20).
+	uc, err := draft.New(deps, 0, 0, 0)
 	gt.NoError(t, err).Required()
 
 	host := &hostStub{}
