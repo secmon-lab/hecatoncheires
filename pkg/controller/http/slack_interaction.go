@@ -14,6 +14,13 @@ import (
 )
 
 // SlackInteractionHandler handles Slack interactive component payloads (button clicks, modal submissions, etc.)
+//
+// All usecase dependencies are required at construction time; this handler is
+// only wired when Slack webhooks are enabled, and at that point every Slack
+// surface (action buttons, slash command modals, draft buttons) is in play.
+// Optional wiring previously left fields nil and forced every entry point to
+// guard against zero-value handlers — a fragile pattern that masked real wiring
+// regressions behind silent skips.
 type SlackInteractionHandler struct {
 	actionUC       *usecase.ActionUseCase
 	agentUC        *usecase.AgentUseCase
@@ -22,24 +29,22 @@ type SlackInteractionHandler struct {
 	mentionDraftUC *usecase.MentionDraftUseCase
 }
 
-// NewSlackInteractionHandler creates a new Slack interaction handler
-func NewSlackInteractionHandler(actionUC *usecase.ActionUseCase, agentUC *usecase.AgentUseCase) *SlackInteractionHandler {
+// NewSlackInteractionHandler creates a new Slack interaction handler.
+// Every dependency is mandatory.
+func NewSlackInteractionHandler(
+	actionUC *usecase.ActionUseCase,
+	agentUC *usecase.AgentUseCase,
+	slackUC *usecase.SlackUseCases,
+	caseUC *usecase.CaseUseCase,
+	mentionDraftUC *usecase.MentionDraftUseCase,
+) *SlackInteractionHandler {
 	return &SlackInteractionHandler{
-		actionUC: actionUC,
-		agentUC:  agentUC,
+		actionUC:       actionUC,
+		agentUC:        agentUC,
+		slackUC:        slackUC,
+		caseUC:         caseUC,
+		mentionDraftUC: mentionDraftUC,
 	}
-}
-
-// WithSlackCommand configures the handler to process slash command modal submissions
-func (h *SlackInteractionHandler) WithSlackCommand(slackUC *usecase.SlackUseCases, caseUC *usecase.CaseUseCase) {
-	h.slackUC = slackUC
-	h.caseUC = caseUC
-}
-
-// WithMentionDraft wires the MentionDraftUseCase so this handler dispatches
-// the draft preview's button/select interactions and Edit modal submission.
-func (h *SlackInteractionHandler) WithMentionDraft(uc *usecase.MentionDraftUseCase) {
-	h.mentionDraftUC = uc
 }
 
 // ServeHTTP handles Slack interaction webhook requests
@@ -133,7 +138,7 @@ func (h *SlackInteractionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 			})
 
 		case usecase.SlackAgentSessionActionsID:
-			if h.agentUC == nil || action.SelectedOption.Value == "" {
+			if action.SelectedOption.Value == "" {
 				continue
 			}
 			actionType, data, err := usecase.ParseAgentActionValue(action.SelectedOption.Value)
@@ -156,24 +161,27 @@ func (h *SlackInteractionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 				}
 			}
 
+		case usecase.ActionIDDraftEdit:
+			// trigger_id has a ~3 second TTL on Slack's side. Dispatching
+			// views.open through async.Dispatch risks racing the TTL when
+			// the goroutine is delayed by Firestore or other I/O, which
+			// surfaces as invalid_arguments from views.open. Run the
+			// trigger_id consuming path synchronously inside the 3-second
+			// interactivity ack window.
+			if err := h.mentionDraftUC.HandleEdit(ctx, &cb, a); err != nil {
+				errutil.Handle(ctx, err, "failed to handle draft edit interaction")
+			}
+
 		case usecase.ActionIDDraftSelectWS,
 			usecase.ActionIDDraftSubmit,
-			usecase.ActionIDDraftEdit,
 			usecase.ActionIDDraftCancel,
 			usecase.ActionIDDraftQuestionSubmit:
-			if h.mentionDraftUC == nil {
-				continue
-			}
-			a := action
-			cb := callback
 			async.Dispatch(ctx, func(ctx context.Context) error {
 				switch a.ActionID {
 				case usecase.ActionIDDraftSelectWS:
 					return h.mentionDraftUC.HandleSelectWorkspace(ctx, &cb, a)
 				case usecase.ActionIDDraftSubmit:
 					return h.mentionDraftUC.HandleSubmit(ctx, h.caseUC, &cb, a)
-				case usecase.ActionIDDraftEdit:
-					return h.mentionDraftUC.HandleEdit(ctx, &cb, a)
 				case usecase.ActionIDDraftCancel:
 					return h.mentionDraftUC.HandleCancel(ctx, &cb, a)
 				case usecase.ActionIDDraftQuestionSubmit:
@@ -195,11 +203,6 @@ func (h *SlackInteractionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 func (h *SlackInteractionHandler) handleViewSubmission(w http.ResponseWriter, r *http.Request, callback *slack.InteractionCallback) {
 	ctx := r.Context()
 	logger := logging.From(ctx)
-
-	if h.slackUC == nil || h.caseUC == nil {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
 
 	switch callback.View.CallbackID {
 	case usecase.SlackCallbackIDSelectWorkspace:
@@ -246,9 +249,6 @@ func (h *SlackInteractionHandler) handleViewSubmission(w http.ResponseWriter, r 
 		// Action creation modal submission → close modal, run async.
 		w.WriteHeader(http.StatusOK)
 
-		if h.actionUC == nil {
-			return
-		}
 		async.Dispatch(ctx, func(ctx context.Context) error {
 			if err := h.slackUC.HandleActionCreationSubmit(ctx, h.actionUC, callback); err != nil {
 				return goerr.Wrap(err, "failed to handle action creation submit")
@@ -270,9 +270,6 @@ func (h *SlackInteractionHandler) handleViewSubmission(w http.ResponseWriter, r 
 	case usecase.SlackCallbackIDDraftEdit:
 		// Draft Edit modal submission → close modal and create case asynchronously.
 		w.WriteHeader(http.StatusOK)
-		if h.mentionDraftUC == nil {
-			return
-		}
 		async.Dispatch(ctx, func(ctx context.Context) error {
 			if err := h.mentionDraftUC.HandleEditSubmit(ctx, h.caseUC, callback); err != nil {
 				return goerr.Wrap(err, "failed to handle draft edit submit")

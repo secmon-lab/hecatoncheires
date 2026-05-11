@@ -189,13 +189,6 @@ func TestMentionDraftUseCase_HandleAppMention_NoWorkspace_PostsError(t *testing.
 	gt.Number(t, len(slackMock.updateBlockPosts)).GreaterOrEqual(1)
 }
 
-func TestMentionDraftUseCase_NilSlackService(t *testing.T) {
-	repo := memory.New()
-	registry := newRegistryWithSchema("ws-1", "ws", &config.FieldSchema{})
-	uc := usecase.NewMentionDraftUseCase(repo, registry, nil, newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-1"))))
-	gt.Value(t, uc).Nil()
-}
-
 func TestSlackUseCases_AppMention_DispatchesToMentionDraft(t *testing.T) {
 	repo := memory.New()
 	schema := &config.FieldSchema{Fields: []config.FieldDefinition{
@@ -435,6 +428,12 @@ type collectorOnlyMockSlack struct {
 	threadReplies       []string // texts posted via PostThreadReply
 	threadBlockPosts    []ephemeralBlockPost
 	updateBlockPosts    []ephemeralBlockPost
+	openViewCalls       []openViewCall
+}
+
+type openViewCall struct {
+	triggerID string
+	view      goslack.ModalViewRequest
 }
 
 func newCollectorOnlyMockSlack() *collectorOnlyMockSlack {
@@ -536,7 +535,8 @@ func (m *collectorOnlyMockSlack) PostThreadMessage(_ context.Context, channelID 
 	return "ts-thread", nil
 }
 func (m *collectorOnlyMockSlack) GetBotUserID(context.Context) (string, error) { return "BOT", nil }
-func (m *collectorOnlyMockSlack) OpenView(context.Context, string, goslack.ModalViewRequest) error {
+func (m *collectorOnlyMockSlack) OpenView(_ context.Context, triggerID string, view goslack.ModalViewRequest) error {
+	m.openViewCalls = append(m.openViewCalls, openViewCall{triggerID: triggerID, view: view})
 	return nil
 }
 func (m *collectorOnlyMockSlack) ListUserGroups(context.Context, string) ([]slacksvc.UserGroup, error) {

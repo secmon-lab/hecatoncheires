@@ -143,3 +143,44 @@ func TestHandleSelectWorkspace_LocksFirstThenUpdates(t *testing.T) {
 	gt.Value(t, got.Materialization).NotNil().Required()
 	gt.Value(t, got.Materialization.Title).Equal("AI suggested title")
 }
+
+// TestHandleEdit_OpensModalWithTriggerID locks the contract that the Edit
+// button invokes views.open with the callback's trigger_id. The controller
+// runs HandleEdit synchronously so the trigger_id is consumed inside Slack's
+// ~3-second TTL window; dispatching this through async risks invalid_arguments
+// once the goroutine is delayed by Firestore latency.
+func TestHandleEdit_OpensModalWithTriggerID(t *testing.T) {
+	repo := memory.New()
+	schema := &config.FieldSchema{Fields: []config.FieldDefinition{
+		{ID: "severity", Type: types.FieldTypeSelect,
+			Options: []config.FieldOption{{ID: "low"}, {ID: "high"}}},
+	}}
+	registry := newRegistryWithSchema("ws-edit", "WS Edit", schema)
+	slackMock := newCollectorOnlyMockSlack()
+	uc := usecase.NewMentionDraftUseCase(repo, registry, slackMock, newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-edit"))))
+
+	d := model.NewCaseDraft(time.Now().UTC(), "U1")
+	d.SelectedWorkspaceID = "ws-edit"
+	d.Materialization = &model.WorkspaceMaterialization{Title: "draft title", Description: "draft desc"}
+	d.EphemeralChannelID = "C-EDIT"
+	d.EphemeralMessageTS = "1700000020.000000"
+	gt.NoError(t, repo.CaseDraft().Save(context.Background(), d)).Required()
+
+	cb := &goslack.InteractionCallback{
+		Type:      goslack.InteractionTypeBlockActions,
+		TriggerID: "test-trigger-id-abc",
+		User:      goslack.User{ID: "U1"},
+		ActionCallback: goslack.ActionCallbacks{
+			BlockActions: []*goslack.BlockAction{
+				{ActionID: usecase.ActionIDDraftEdit, Value: string(d.ID)},
+			},
+		},
+	}
+
+	gt.NoError(t, uc.HandleEdit(context.Background(), cb, cb.ActionCallback.BlockActions[0])).Required()
+
+	gt.Array(t, slackMock.openViewCalls).Length(1).Required()
+	gt.String(t, slackMock.openViewCalls[0].triggerID).Equal("test-trigger-id-abc")
+	gt.Value(t, slackMock.openViewCalls[0].view.Type).Equal(goslack.VTModal)
+	gt.String(t, string(slackMock.openViewCalls[0].view.PrivateMetadata)).Contains(string(d.ID))
+}
