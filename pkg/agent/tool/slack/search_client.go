@@ -207,18 +207,7 @@ func (c *searchClient) GetConversationReplies(ctx context.Context, channelID, th
 		return nil, goerr.Wrap(err, "failed to get conversation replies", opts...)
 	}
 
-	result := make([]slackservice.ConversationMessage, 0, len(msgs))
-	for _, msg := range msgs {
-		result = append(result, slackservice.ConversationMessage{
-			UserID:    msg.User,
-			UserName:  msg.Username,
-			Text:      msg.Text,
-			Timestamp: msg.Timestamp,
-			ThreadTS:  msg.ThreadTimestamp,
-		})
-	}
-
-	return result, nil
+	return toConversationMessages(msgs), nil
 }
 
 // GetConversationHistory fetches channel messages newer than oldest using the
@@ -248,8 +237,14 @@ func (c *searchClient) GetConversationHistory(ctx context.Context, channelID str
 		return nil, goerr.Wrap(err, "failed to get conversation history", opts...)
 	}
 
-	result := make([]slackservice.ConversationMessage, 0, len(resp.Messages))
-	for _, msg := range resp.Messages {
+	return toConversationMessages(resp.Messages), nil
+}
+
+// toConversationMessages converts slack-go messages to our ConversationMessage.
+// Used by both GetConversationReplies and GetConversationHistory.
+func toConversationMessages(msgs []slack.Message) []slackservice.ConversationMessage {
+	result := make([]slackservice.ConversationMessage, 0, len(msgs))
+	for _, msg := range msgs {
 		result = append(result, slackservice.ConversationMessage{
 			UserID:    msg.User,
 			UserName:  msg.Username,
@@ -258,6 +253,5 @@ func (c *searchClient) GetConversationHistory(ctx context.Context, channelID str
 			ThreadTS:  msg.ThreadTimestamp,
 		})
 	}
-
-	return result, nil
+	return result
 }
