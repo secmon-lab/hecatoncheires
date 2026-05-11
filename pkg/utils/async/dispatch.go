@@ -5,15 +5,18 @@ import (
 	"sync"
 
 	"github.com/m-mizutani/goerr/v2"
+
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
 
 var inflight sync.WaitGroup
 
 // Dispatch executes a handler function asynchronously in a new goroutine.
-// It creates a background context (preserving the logger) and handles errors
-// and panics. Pending dispatches are tracked by a package-level WaitGroup so
-// tests can synchronise on completion via Wait().
+// It creates a background context (preserving the logger) and routes any
+// handler error through errutil.Handle so it lands in Sentry as well as
+// the structured log. Pending dispatches are tracked by a package-level
+// WaitGroup so tests can synchronise on completion via Wait().
 func Dispatch(ctx context.Context, handler func(ctx context.Context) error) {
 	// Create a new background context but preserve logger
 	bgCtx := context.Background()
@@ -26,14 +29,12 @@ func Dispatch(ctx context.Context, handler func(ctx context.Context) error) {
 		defer inflight.Done()
 		defer func() {
 			if r := recover(); r != nil {
-				logger := logging.From(bgCtx)
-				logger.Error("panic in async handler", "panic", r)
+				errutil.Handle(bgCtx, goerr.New("panic in async handler", goerr.V("panic", r)), "async handler panicked")
 			}
 		}()
 
 		if err := handler(bgCtx); err != nil {
-			logger := logging.From(bgCtx)
-			logger.Error("async handler failed", "error", goerr.Unwrap(err))
+			errutil.Handle(bgCtx, err, "async handler failed")
 		}
 	}()
 }

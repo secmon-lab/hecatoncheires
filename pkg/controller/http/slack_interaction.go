@@ -156,24 +156,33 @@ func (h *SlackInteractionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 				}
 			}
 
+		case usecase.ActionIDDraftEdit:
+			// trigger_id has a ~3 second TTL on Slack's side. Dispatching
+			// views.open through async.Dispatch risks racing the TTL when
+			// the goroutine is delayed by Firestore or other I/O, which
+			// surfaces as invalid_arguments from views.open. Run the
+			// trigger_id consuming path synchronously inside the 3-second
+			// interactivity ack window.
+			if h.mentionDraftUC == nil {
+				continue
+			}
+			if err := h.mentionDraftUC.HandleEdit(ctx, &cb, a); err != nil {
+				errutil.Handle(ctx, err, "failed to handle draft edit interaction")
+			}
+
 		case usecase.ActionIDDraftSelectWS,
 			usecase.ActionIDDraftSubmit,
-			usecase.ActionIDDraftEdit,
 			usecase.ActionIDDraftCancel,
 			usecase.ActionIDDraftQuestionSubmit:
 			if h.mentionDraftUC == nil {
 				continue
 			}
-			a := action
-			cb := callback
 			async.Dispatch(ctx, func(ctx context.Context) error {
 				switch a.ActionID {
 				case usecase.ActionIDDraftSelectWS:
 					return h.mentionDraftUC.HandleSelectWorkspace(ctx, &cb, a)
 				case usecase.ActionIDDraftSubmit:
 					return h.mentionDraftUC.HandleSubmit(ctx, h.caseUC, &cb, a)
-				case usecase.ActionIDDraftEdit:
-					return h.mentionDraftUC.HandleEdit(ctx, &cb, a)
 				case usecase.ActionIDDraftCancel:
 					return h.mentionDraftUC.HandleCancel(ctx, &cb, a)
 				case usecase.ActionIDDraftQuestionSubmit:
