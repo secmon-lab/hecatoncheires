@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
@@ -291,5 +292,170 @@ func TestSearchMessages(t *testing.T) {
 		gt.Bool(t, hasNeeded).False()
 		_, hasProvided := values["slack_provided_scope"]
 		gt.Bool(t, hasProvided).False()
+	})
+}
+
+func TestNewMessageRetriever(t *testing.T) {
+	t.Run("returns error when token is empty", func(t *testing.T) {
+		_, err := slacktool.NewMessageRetriever("")
+		gt.Value(t, err).NotNil()
+	})
+
+	t.Run("creates retriever when token is provided", func(t *testing.T) {
+		svc, err := slacktool.NewMessageRetriever("xoxp-test")
+		gt.NoError(t, err).Required()
+		gt.Value(t, svc).NotNil()
+	})
+}
+
+func TestGetConversationReplies(t *testing.T) {
+	t.Run("converts API response into ConversationMessage slice", func(t *testing.T) {
+		var capturedToken, capturedChannel, capturedTS, capturedLimit string
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/conversations.replies", func(w http.ResponseWriter, r *http.Request) {
+			gt.NoError(t, r.ParseForm()).Required()
+			capturedToken = r.Form.Get("token")
+			capturedChannel = r.Form.Get("channel")
+			capturedTS = r.Form.Get("ts")
+			capturedLimit = r.Form.Get("limit")
+
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"messages": [
+					{"type": "message", "user": "U001", "username": "alice", "text": "hello", "ts": "1700000000.000100", "thread_ts": "1700000000.000100"},
+					{"type": "message", "user": "U002", "username": "bob", "text": "hi", "ts": "1700000001.000200", "thread_ts": "1700000000.000100"}
+				],
+				"has_more": false
+			}`))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		svc := slacktool.NewMessageRetrieverWithAPIURLForTest("xoxp-test", srv.URL+"/")
+
+		got, err := svc.GetConversationReplies(context.Background(), "C111", "1700000000.000100", 50)
+		gt.NoError(t, err).Required()
+
+		gt.String(t, capturedToken).Equal("xoxp-test")
+		gt.String(t, capturedChannel).Equal("C111")
+		gt.String(t, capturedTS).Equal("1700000000.000100")
+		gt.String(t, capturedLimit).Equal("50")
+
+		gt.Array(t, got).Length(2).Required()
+		gt.String(t, got[0].UserID).Equal("U001")
+		gt.String(t, got[0].UserName).Equal("alice")
+		gt.String(t, got[0].Text).Equal("hello")
+		gt.String(t, got[0].Timestamp).Equal("1700000000.000100")
+		gt.String(t, got[0].ThreadTS).Equal("1700000000.000100")
+		gt.String(t, got[1].UserID).Equal("U002")
+		gt.String(t, got[1].Text).Equal("hi")
+	})
+
+	t.Run("wraps error when API returns ok: false", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/conversations.replies", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok": false, "error": "channel_not_found"}`))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		svc := slacktool.NewMessageRetrieverWithAPIURLForTest("xoxp-test", srv.URL+"/")
+		_, err := svc.GetConversationReplies(context.Background(), "C404", "1700.0001", 20)
+		gt.Value(t, err).NotNil()
+
+		var ge *goerr.Error
+		gt.Bool(t, errors.As(err, &ge)).True().Required()
+		values := ge.Values()
+		gt.Value(t, values["channel_id"]).Equal("C404")
+		gt.Value(t, values["thread_ts"]).Equal("1700.0001")
+		gt.Value(t, values["limit"]).Equal(20)
+		gt.Value(t, values["slack_error"]).Equal("channel_not_found")
+	})
+
+	t.Run("not_in_channel error surfaces with slack_error attribute (private channel case)", func(t *testing.T) {
+		// User token can read public channels without membership, but private
+		// channels still return not_in_channel. This test pins that down.
+		mux := http.NewServeMux()
+		mux.HandleFunc("/conversations.replies", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok": false, "error": "not_in_channel"}`))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		svc := slacktool.NewMessageRetrieverWithAPIURLForTest("xoxp-test", srv.URL+"/")
+		_, err := svc.GetConversationReplies(context.Background(), "G_PRIVATE", "1700.0001", 20)
+		gt.Value(t, err).NotNil()
+
+		var ge *goerr.Error
+		gt.Bool(t, errors.As(err, &ge)).True().Required()
+		gt.Value(t, ge.Values()["slack_error"]).Equal("not_in_channel")
+		gt.String(t, err.Error()).Contains("not_in_channel")
+	})
+}
+
+func TestGetConversationHistory(t *testing.T) {
+	t.Run("converts API response and forwards oldest timestamp", func(t *testing.T) {
+		var capturedToken, capturedChannel, capturedOldest, capturedLimit string
+
+		mux := http.NewServeMux()
+		mux.HandleFunc("/conversations.history", func(w http.ResponseWriter, r *http.Request) {
+			gt.NoError(t, r.ParseForm()).Required()
+			capturedToken = r.Form.Get("token")
+			capturedChannel = r.Form.Get("channel")
+			capturedOldest = r.Form.Get("oldest")
+			capturedLimit = r.Form.Get("limit")
+
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"ok": true,
+				"messages": [
+					{"type": "message", "user": "U001", "username": "alice", "text": "newer", "ts": "1700000010.000100"}
+				],
+				"has_more": false
+			}`))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		svc := slacktool.NewMessageRetrieverWithAPIURLForTest("xoxp-test", srv.URL+"/")
+
+		oldest := time.Unix(1700000000, 0).UTC()
+		got, err := svc.GetConversationHistory(context.Background(), "C222", oldest, 10)
+		gt.NoError(t, err).Required()
+
+		gt.String(t, capturedToken).Equal("xoxp-test")
+		gt.String(t, capturedChannel).Equal("C222")
+		gt.String(t, capturedOldest).Equal("1700000000.000000")
+		gt.String(t, capturedLimit).Equal("10")
+
+		gt.Array(t, got).Length(1).Required()
+		gt.String(t, got[0].UserID).Equal("U001")
+		gt.String(t, got[0].Text).Equal("newer")
+		gt.String(t, got[0].Timestamp).Equal("1700000010.000100")
+	})
+
+	t.Run("wraps error when API returns ok: false", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/conversations.history", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok": false, "error": "missing_scope", "needed": "channels:history"}`))
+		})
+		srv := httptest.NewServer(mux)
+		defer srv.Close()
+
+		svc := slacktool.NewMessageRetrieverWithAPIURLForTest("xoxp-test", srv.URL+"/")
+		_, err := svc.GetConversationHistory(context.Background(), "C333", time.Unix(0, 0), 10)
+		gt.Value(t, err).NotNil()
+
+		var ge *goerr.Error
+		gt.Bool(t, errors.As(err, &ge)).True().Required()
+		values := ge.Values()
+		gt.Value(t, values["channel_id"]).Equal("C333")
+		gt.Value(t, values["slack_error"]).Equal("missing_scope")
+		gt.Value(t, values["slack_needed_scope"]).Equal("channels:history")
 	})
 }

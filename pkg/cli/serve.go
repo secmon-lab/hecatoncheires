@@ -323,10 +323,13 @@ func cmdServe() *cli.Command {
 				ucOpts = append(ucOpts, usecase.WithSlackService(slackSvc))
 				logging.Default().Info("Slack service enabled for Source integration")
 
-				// Initialize Slack Admin / Search services if User OAuth Token is provided.
-				// The same User OAuth Token backs both:
-				//   - admin.conversations.* (cross-workspace channel connect)
-				//   - search.messages       (agent message search; needs search:read scope)
+				// Initialize Slack Admin / Search / MessageRetriever services if a
+				// User OAuth Token is provided. The same User OAuth Token backs:
+				//   - admin.conversations.*    (cross-workspace channel connect)
+				//   - search.messages          (agent message search; search:read)
+				//   - conversations.replies /  (agent message fetch; channels:history,
+				//     conversations.history     lets the agent read public channels
+				//                               the bot has not joined)
 				if slackCfg.UserOAuthToken() != "" {
 					adminSvc, err := slack.NewAdminClient(slackCfg.UserOAuthToken())
 					if err != nil {
@@ -341,6 +344,13 @@ func cmdServe() *cli.Command {
 					}
 					ucOpts = append(ucOpts, usecase.WithSlackSearchService(searchSvc))
 					logging.Default().Info("Slack search service enabled for agent (requires search:read scope)")
+
+					retrieverSvc, err := slacktool.NewMessageRetriever(slackCfg.UserOAuthToken())
+					if err != nil {
+						return goerr.Wrap(err, "failed to initialize Slack message retriever")
+					}
+					ucOpts = append(ucOpts, usecase.WithSlackMessageRetriever(retrieverSvc))
+					logging.Default().Info("Slack message retriever enabled for agent (requires channels:history scope)")
 				}
 
 				// Detect org-level app and validate workspace team IDs

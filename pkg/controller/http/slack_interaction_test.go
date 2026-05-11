@@ -40,7 +40,11 @@ func newTestSlackHandler(
 		registry = model.NewWorkspaceRegistry()
 	}
 	slackStub := &mockSlackServiceForCommand{}
-	agentUC := usecase.NewAgentUseCase(repo, registry, nil, nil, nil, nil, nil, nil, nil, nil, actionUC, nil)
+	agentUC := usecase.NewAgentUseCase(usecase.AgentDeps{
+		Repo:     repo,
+		Registry: registry,
+		ActionUC: actionUC,
+	})
 	mentionDraftUC := usecase.NewMentionDraftUseCase(repo, registry, slackStub, nil)
 	if caseUC == nil {
 		caseUC = usecase.NewCaseUseCase(repo, registry, nil, nil, "")

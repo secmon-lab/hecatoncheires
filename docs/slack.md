@@ -54,6 +54,7 @@ Slack OAuth is used for user authentication via OpenID Connect (OIDC). The syste
      - `profile` (to get user's name and basic info)
      - `email` (to get user's email address)
      - `search:read` (optional — required only when the AI agent's `slack__search_messages` tool is enabled. The Slack `search.messages` API is User-token-only; bot tokens cannot call it. Configure `HECATONCHEIRES_SLACK_USER_OAUTH_TOKEN` and re-install the app after adding this scope.)
+     - `channels:history` (optional — recommended when the AI agent's `slack__get_messages` tool is enabled. When the User OAuth Token has this scope, `conversations.replies` / `conversations.history` are called with the User token, which lets the agent read public channels the bot has not been invited to. Without it, the tool falls back to the Bot token and returns `not_in_channel` for any public channel the bot is not a member of. Private channels still require Slack user membership regardless of token.)
      - `admin.conversations:write` (optional — required only for cross-workspace channel connect on Enterprise Grid; same User OAuth Token also drives `search:read` when both are needed)
 
    - **Bot Token Scopes**:
@@ -627,7 +628,7 @@ Follow these steps to set up both authentication and webhooks:
 
 2. **Configure OAuth** (see [Configure OAuth & Permissions](#2-configure-oauth--permissions))
    - Set redirect URL: `${BASE_URL}/api/auth/callback`
-   - Add user scopes: `openid`, `profile`, `email` (always); plus `search:read` when enabling the agent's Slack message search tool, and `admin.conversations:write` when enabling Enterprise Grid cross-workspace channel connect.
+   - Add user scopes: `openid`, `profile`, `email` (always); plus `search:read` when enabling the agent's Slack message search tool, `channels:history` when enabling `slack__get_messages` to read public channels without bot membership, and `admin.conversations:write` when enabling Enterprise Grid cross-workspace channel connect.
    - Add bot scopes: `bookmarks:write`, `channels:history`, `channels:manage`, `channels:read`, `chat:write`, `commands`, `files:read`, `groups:read`, `groups:write`, `team:read`, `usergroups:read`, `users:read`, `users:read.email`
 
 3. **Configure Events API** (see [Events API Setup](#events-api-setup))
@@ -1001,6 +1002,8 @@ slack_channels/{channelID}
 
 > **Note on agent message search**: workspace-wide Slack message search is implemented as the AI agent tool `slack__search_messages` (in `pkg/agent/tool/slack`) and uses the Slack `search.messages` API. That API is **User-token-only**, so a Slack User OAuth Token (`xoxp-...`) with the `search:read` scope is required. Configure it via `HECATONCHEIRES_SLACK_USER_OAUTH_TOKEN`. When the User OAuth Token is not configured, the search tool is silently omitted from the agent's tool set.
 
+> **Note on agent message retrieval (`slack__get_messages`)**: the agent's bulk message-fetch tool uses `conversations.replies` / `conversations.history`. Per the Slack API contract ("Only user tokens can access public channels they are not in"), Bot tokens can only read channels the bot has been invited to and return `not_in_channel` otherwise. When the same User OAuth Token also has the `channels:history` scope, the tool routes the call through the User token, which means **public** channels are readable even without bot membership. Private channels still require Slack user membership regardless of token; this scope does not change that. If `channels:history` is not granted on the User OAuth Token, the tool transparently falls back to the Bot token (existing behaviour).
+
 ---
 
 ## Permissions Reference
@@ -1043,6 +1046,7 @@ These scopes apply to the User OAuth Token (`xoxp-...`):
 | `profile` | OIDC sign-in (always) | Access user's name | `pkg/usecase/auth.go` |
 | `email` | OIDC sign-in (always) | Access user's email address | `pkg/usecase/auth.go` |
 | `search:read` | Agent message search (optional) | `search.messages` — workspace-wide message search backing `slack__search_messages` agent tool | `pkg/agent/tool/slack/search_client.go` |
+| `channels:history` | Agent message retrieval — public-channel reach without bot membership (optional) | `conversations.replies` / `conversations.history` — backing `slack__get_messages` agent tool. With this scope on the User token, public channels are readable without the bot being invited (Slack-side contract). Without it, the tool falls back to the Bot token and returns `not_in_channel` for non-member channels. Private channels still require Slack user membership. | `pkg/agent/tool/slack/search_client.go` |
 | `admin.conversations:write` | Enterprise Grid cross-workspace channel connect (optional) | `admin.conversations.setTeams` — extends a channel to additional workspaces | `pkg/service/slack/admin_client.go` |
 
 > The OIDC sign-in scopes are configured on the per-user OAuth flow; the bot/admin/search scopes are configured under **OAuth & Permissions → User Token Scopes** and require an app re-install when added. The same User OAuth Token (`HECATONCHEIRES_SLACK_USER_OAUTH_TOKEN`) backs both the search and admin clients.

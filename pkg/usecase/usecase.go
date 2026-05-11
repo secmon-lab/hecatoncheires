@@ -23,6 +23,7 @@ type UseCases struct {
 	slackService      slack.Service
 	slackAdminService slack.AdminService
 	slackSearch       slacktool.SearchService
+	slackRetriever    slacktool.MessageRetriever
 	githubClient      *github.Client
 	llmClient         gollem.LLMClient
 	embedClient       interfaces.EmbedClient
@@ -84,6 +85,18 @@ func WithSlackAdminService(svc slack.AdminService) Option {
 func WithSlackSearchService(svc slacktool.SearchService) Option {
 	return func(uc *UseCases) {
 		uc.slackSearch = svc
+	}
+}
+
+// WithSlackMessageRetriever configures the Slack User-token-backed message
+// retriever used by slack__get_messages. When set, conversations.replies /
+// conversations.history are called with the User token, which allows reading
+// public channels without bot membership. Requires the underlying User OAuth
+// Token to have the channels:history scope. nil keeps the existing Bot-token
+// path (which returns not_in_channel when the bot is not a channel member).
+func WithSlackMessageRetriever(svc slacktool.MessageRetriever) Option {
+	return func(uc *UseCases) {
+		uc.slackRetriever = svc
 	}
 }
 
@@ -170,11 +183,36 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 		// that only use Assist (the assist CLI) may omit them, in which
 		// case the Agent usecase is simply not constructed.
 		if uc.historyRepo != nil && uc.traceRepo != nil {
-			uc.Agent = NewAgentUseCase(repo, registry, uc.slackService, uc.slackSearch, uc.notionTool, uc.githubClient, uc.llmClient, uc.embedClient, uc.historyRepo, uc.traceRepo, uc.Action, uc.ActionStep)
+			uc.Agent = NewAgentUseCase(AgentDeps{
+				Repo:           repo,
+				Registry:       registry,
+				LLM:            uc.llmClient,
+				HistoryRepo:    uc.historyRepo,
+				TraceRepo:      uc.traceRepo,
+				ActionUC:       uc.Action,
+				ActionStepUC:   uc.ActionStep,
+				SlackService:   uc.slackService,
+				SlackSearch:    uc.slackSearch,
+				SlackRetriever: uc.slackRetriever,
+				NotionTool:     uc.notionTool,
+				GitHubClient:   uc.githubClient,
+				EmbedClient:    uc.embedClient,
+			})
 		} else if uc.historyRepo != nil || uc.traceRepo != nil {
 			panic("usecase.New: WithHistoryRepository and WithTraceRepository must be paired")
 		}
-		uc.Assist = NewAssistUseCase(repo, registry, uc.slackService, uc.slackSearch, uc.notionTool, uc.githubClient, uc.llmClient, uc.embedClient, uc.Action)
+		uc.Assist = NewAssistUseCase(AssistDeps{
+			Repo:           repo,
+			Registry:       registry,
+			LLM:            uc.llmClient,
+			ActionUC:       uc.Action,
+			SlackService:   uc.slackService,
+			SlackSearch:    uc.slackSearch,
+			SlackRetriever: uc.slackRetriever,
+			NotionTool:     uc.notionTool,
+			GitHubClient:   uc.githubClient,
+			EmbedClient:    uc.embedClient,
+		})
 
 		// MentionDraft is wired only when the persistent History/Trace archive
 		// is configured — the planner runtime depends on both. Without them,
@@ -189,6 +227,7 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 				TraceRepo:           uc.traceRepo,
 				SlackBot:            uc.slackService,
 				SlackSearch:         uc.slackSearch,
+				SlackRetriever:      uc.slackRetriever,
 				NotionClient:        uc.notionTool,
 				GitHubClient:        uc.githubClient,
 				ActionUC:            NewActionToolAdapter(uc.Action),

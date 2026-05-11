@@ -11,6 +11,17 @@ import (
 // targets the given API URL. The client is wrapped with the same scope-capturing
 // transport as the production client so tests exercise that code path too.
 func NewSearchClientWithAPIURLForTest(userToken, apiURL string) SearchService {
+	return newUserClientWithAPIURLForTest(userToken, apiURL)
+}
+
+// NewMessageRetrieverWithAPIURLForTest builds a MessageRetriever whose underlying
+// slack.Client targets the given API URL. Mirrors NewSearchClientWithAPIURLForTest
+// for the conversations.* methods.
+func NewMessageRetrieverWithAPIURLForTest(userToken, apiURL string) MessageRetriever {
+	return newUserClientWithAPIURLForTest(userToken, apiURL)
+}
+
+func newUserClientWithAPIURLForTest(userToken, apiURL string) *searchClient {
 	httpClient := &capturingHTTPClient{inner: &http.Client{}}
 	return &searchClient{
 		api: slack.New(userToken, slack.OptionAPIURL(apiURL), slack.OptionHTTPClient(httpClient)),

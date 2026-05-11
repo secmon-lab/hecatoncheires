@@ -35,10 +35,11 @@ type CommonDeps struct {
 
 	// Optional sub-agent service / client deps. nil → the corresponding tool
 	// set is empty.
-	SlackSearch  slacktool.SearchService
-	SlackBot     slacktool.BotService
-	NotionClient notiontool.Client
-	GitHubClient *githubtool.Client
+	SlackSearch    slacktool.SearchService
+	SlackBot       slacktool.BotService
+	SlackRetriever slacktool.MessageRetriever
+	NotionClient   notiontool.Client
+	GitHubClient   *githubtool.Client
 
 	// Action mutator interfaces, used by `core` toolset. Required for
 	// case-bound mode (which uses the full mutating tool set). Optional for

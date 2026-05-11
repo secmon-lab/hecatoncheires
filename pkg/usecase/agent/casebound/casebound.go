@@ -244,8 +244,9 @@ func (uc *UseCase) buildTools(req TurnRequest) []gollem.Tool {
 		ActionStepUC: d.ActionStepUC,
 	})
 	slackTools := slacktool.NewReadOnly(slacktool.Deps{
-		Bot:    d.SlackBot,
-		Search: d.SlackSearch,
+		Bot:       d.SlackBot,
+		Search:    d.SlackSearch,
+		Retriever: d.SlackRetriever,
 	})
 	notionTools := notiontool.New(notiontool.Deps{Client: d.NotionClient})
 	githubTools := githubtool.New(d.GitHubClient)
