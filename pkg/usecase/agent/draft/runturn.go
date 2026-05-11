@@ -368,8 +368,9 @@ func (uc *UseCase) buildToolSetResolver(_ TurnRequest) *agent.ToolSetResolver {
 			ActionStepUC: d.ActionStepUC,
 		},
 		Slack: slacktool.Deps{
-			Bot:    d.SlackBot,
-			Search: d.SlackSearch,
+			Bot:       d.SlackBot,
+			Search:    d.SlackSearch,
+			Retriever: d.SlackRetriever,
 		},
 		Notion: notiontool.Deps{Client: d.NotionClient},
 		GitHub: d.GitHubClient,

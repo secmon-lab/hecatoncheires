@@ -4,8 +4,9 @@
 //
 // Tools and the underlying clients live here (rather than in pkg/service/slack)
 // because their entire surface — including the User-token-backed search.messages
-// API — exists only for the agent. The bot-token-backed slack.Service from
-// pkg/service/slack is reused for chat.* / conversations.* operations.
+// and conversations.history / conversations.replies calls — exists only for the
+// agent. The bot-token-backed slack.Service from pkg/service/slack is reused
+// for chat.* operations and as a fallback when no User token is wired.
 package slacktool
 
 import (
@@ -30,6 +31,12 @@ type Deps struct {
 	// nil disables the workspace-wide message-search tool.
 	Search SearchService
 
+	// Retriever is the Slack User-token-backed message-retrieval client. When
+	// set, slack__get_messages uses it (User tokens can read public channels
+	// the bot has not joined). nil falls back to Bot, which requires the bot
+	// to be a channel member.
+	Retriever MessageRetriever
+
 	// ChannelID is the Slack channel the case is bound to and is used by the
 	// post-message tool. Empty disables it.
 	ChannelID string
@@ -44,7 +51,7 @@ func NewReadOnly(deps Deps) []gollem.Tool {
 		tools = append(tools, &searchMessagesTool{search: deps.Search})
 	}
 	if deps.Bot != nil {
-		tools = append(tools, &getMessagesTool{slack: deps.Bot})
+		tools = append(tools, &getMessagesTool{slack: deps.Bot, retriever: deps.Retriever})
 	}
 	return tools
 }

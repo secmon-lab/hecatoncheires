@@ -37,14 +37,15 @@ type AssistOption struct {
 
 // AssistUseCase handles periodic AI-powered case assistance
 type AssistUseCase struct {
-	repo         interfaces.Repository
-	registry     *model.WorkspaceRegistry
-	slackService slack.Service
-	slackSearch  slacktool.SearchService
-	notionTool   notiontool.Client
-	githubClient *githubtool.Client
-	llmClient    gollem.LLMClient
-	embedClient  interfaces.EmbedClient
+	repo           interfaces.Repository
+	registry       *model.WorkspaceRegistry
+	slackService   slack.Service
+	slackSearch    slacktool.SearchService
+	slackRetriever slacktool.MessageRetriever
+	notionTool     notiontool.Client
+	githubClient   *githubtool.Client
+	llmClient      gollem.LLMClient
+	embedClient    interfaces.EmbedClient
 	// actionUC routes core__create_action through the unified usecase entry
 	// point so assist-driven creates trigger the same Slack post and event
 	// records as GraphQL/Slack-modal creates.
@@ -52,20 +53,23 @@ type AssistUseCase struct {
 }
 
 // NewAssistUseCase creates a new AssistUseCase.
-// slackSearch, notionTool, and githubClient are optional; pass nil to omit the
-// corresponding tools. actionUC is required: the core__create_action tool
-// calls through it.
-func NewAssistUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackSearch slacktool.SearchService, notionTool notiontool.Client, githubClient *githubtool.Client, llmClient gollem.LLMClient, embedClient interfaces.EmbedClient, actionUC *ActionUseCase) *AssistUseCase {
+// slackSearch, slackRetriever, notionTool, and githubClient are optional; pass
+// nil to omit the corresponding tools / behaviours. slackRetriever, when
+// supplied, lets slack__get_messages read public channels without bot
+// membership via the User token. actionUC is required: the core__create_action
+// tool calls through it.
+func NewAssistUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackSearch slacktool.SearchService, slackRetriever slacktool.MessageRetriever, notionTool notiontool.Client, githubClient *githubtool.Client, llmClient gollem.LLMClient, embedClient interfaces.EmbedClient, actionUC *ActionUseCase) *AssistUseCase {
 	return &AssistUseCase{
-		repo:         repo,
-		registry:     registry,
-		slackService: slackService,
-		slackSearch:  slackSearch,
-		notionTool:   notionTool,
-		githubClient: githubClient,
-		llmClient:    llmClient,
-		embedClient:  embedClient,
-		actionUC:     actionUC,
+		repo:           repo,
+		registry:       registry,
+		slackService:   slackService,
+		slackSearch:    slackSearch,
+		slackRetriever: slackRetriever,
+		notionTool:     notionTool,
+		githubClient:   githubClient,
+		llmClient:      llmClient,
+		embedClient:    embedClient,
+		actionUC:       actionUC,
 	}
 }
 
@@ -161,6 +165,7 @@ func (uc *AssistUseCase) processCase(ctx context.Context, entry *model.Workspace
 	slackTools := slacktool.NewForAssist(slacktool.Deps{
 		Bot:       uc.slackService,
 		Search:    uc.slackSearch,
+		Retriever: uc.slackRetriever,
 		ChannelID: c.SlackChannelID,
 	})
 	notionTools := notiontool.New(notiontool.Deps{Client: uc.notionTool})

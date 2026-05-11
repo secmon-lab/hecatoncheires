@@ -45,9 +45,10 @@ type AgentUseCase struct {
 
 // NewAgentUseCase creates a new AgentUseCase instance.
 //
-// slackSearch, notionTool, and githubClient are optional; pass nil to omit
-// the corresponding agent tools (slack__search_messages, notion__search,
-// notion__get_page, github__*).
+// slackSearch, slackRetriever, notionTool, and githubClient are optional; pass
+// nil to omit the corresponding agent tools / behaviours. slackRetriever, when
+// supplied, switches slack__get_messages to a User-token-backed read path so
+// public channels can be fetched without bot membership.
 //
 // historyRepo and traceRepo are required: the agent session flow persists
 // gollem.History across mentions and writes a trace for each Execute. Pass
@@ -56,7 +57,7 @@ type AgentUseCase struct {
 // actionUC is required: the core__create_action tool routes through it so all
 // Action create paths share the same usecase implementation. actionStepUC
 // follows the same contract for the core__*_action_step tool family.
-func NewAgentUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackSearch slacktool.SearchService, notionTool notiontool.Client, githubClient *githubtool.Client, llmClient gollem.LLMClient, embedClient interfaces.EmbedClient, historyRepo gollem.HistoryRepository, traceRepo trace.Repository, actionUC *ActionUseCase, actionStepUC *ActionStepUseCase) *AgentUseCase {
+func NewAgentUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackSearch slacktool.SearchService, slackRetriever slacktool.MessageRetriever, notionTool notiontool.Client, githubClient *githubtool.Client, llmClient gollem.LLMClient, embedClient interfaces.EmbedClient, historyRepo gollem.HistoryRepository, traceRepo trace.Repository, actionUC *ActionUseCase, actionStepUC *ActionStepUseCase) *AgentUseCase {
 	uc := &AgentUseCase{
 		repo:         repo,
 		registry:     registry,
@@ -73,6 +74,7 @@ func NewAgentUseCase(repo interfaces.Repository, registry *model.WorkspaceRegist
 			TraceRepo:           traceRepo,
 			SlackBot:            slackService,
 			SlackSearch:         slackSearch,
+			SlackRetriever:      slackRetriever,
 			NotionClient:        notionTool,
 			GitHubClient:        githubClient,
 			ActionUC:            NewActionToolAdapter(actionUC),

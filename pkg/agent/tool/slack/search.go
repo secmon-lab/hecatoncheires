@@ -87,8 +87,14 @@ func (t *searchMessagesTool) Run(ctx context.Context, args map[string]any) (map[
 // getMessagesTool fetches multiple Slack messages and their thread context in
 // parallel. Each target is processed independently; partial failures are returned
 // per-target rather than aborting the whole call.
+//
+// When retriever is set, conversations.replies is called with the User token —
+// bot membership is not required for public channels. Otherwise the call falls
+// back to the Bot token via slack, which returns not_in_channel when the bot
+// is not a member.
 type getMessagesTool struct {
-	slack slackservice.Service
+	slack     slackservice.Service
+	retriever MessageRetriever
 }
 
 const (
@@ -237,7 +243,7 @@ func (t *getMessagesTool) fetchOne(ctx context.Context, tgt messageTarget, inclu
 	if !includeThread {
 		limit = 1
 	}
-	msgs, err := t.slack.GetConversationReplies(ctx, tgt.channelID, tgt.ts, limit)
+	msgs, err := t.fetchReplies(ctx, tgt.channelID, tgt.ts, limit)
 	if err != nil {
 		opts := []goerr.Option{
 			goerr.V("channel_id", tgt.channelID),
@@ -257,6 +263,16 @@ func (t *getMessagesTool) fetchOne(ctx context.Context, tgt messageTarget, inclu
 
 	out["messages"] = convertConversationMessages(msgs)
 	return out
+}
+
+// fetchReplies routes the conversations.replies call to the User-token client
+// when available (so public channels can be read without bot membership) and
+// falls back to the Bot-token client otherwise.
+func (t *getMessagesTool) fetchReplies(ctx context.Context, channelID, threadTS string, limit int) ([]slackservice.ConversationMessage, error) {
+	if t.retriever != nil {
+		return t.retriever.GetConversationReplies(ctx, channelID, threadTS, limit)
+	}
+	return t.slack.GetConversationReplies(ctx, channelID, threadTS, limit)
 }
 
 func convertConversationMessages(msgs []slackservice.ConversationMessage) []map[string]any {

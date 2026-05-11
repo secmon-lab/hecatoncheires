@@ -41,6 +41,19 @@ type fakeBotService struct {
 	postThreadReply func(ctx context.Context, channelID, threadTS, text string) (string, error)
 }
 
+// fakeMessageRetriever stubs slacktool.MessageRetriever. The embedded
+// interface is nil for the same panic-on-unexpected-call reason as
+// fakeBotService.
+type fakeMessageRetriever struct {
+	slacktool.MessageRetriever
+
+	getRepliesFn func(ctx context.Context, channelID, threadTS string, limit int) ([]slackservice.ConversationMessage, error)
+}
+
+func (f *fakeMessageRetriever) GetConversationReplies(ctx context.Context, channelID, threadTS string, limit int) ([]slackservice.ConversationMessage, error) {
+	return f.getRepliesFn(ctx, channelID, threadTS, limit)
+}
+
 func (f *fakeBotService) GetPermalink(ctx context.Context, channelID, ts string) (string, error) {
 	return f.getPermalinkFn(ctx, channelID, ts)
 }
@@ -168,6 +181,86 @@ func TestGetMessagesTool_PermalinkErrorRoutesThroughErrutilHandle(t *testing.T) 
 	gt.String(t, logged).Contains(`"msg":"slack get permalink failed"`)
 	gt.String(t, logged).Contains(`"channel_id":"C111"`)
 	gt.String(t, logged).Contains(`"slack_error":"channel_not_found"`)
+}
+
+func TestGetMessagesTool_PrefersRetrieverWhenSet(t *testing.T) {
+	// When a MessageRetriever (User token) is wired alongside the Bot, the tool
+	// must call retriever.GetConversationReplies, not bot.GetConversationReplies.
+	// This is the whole point of the User-token route: a bot that has not been
+	// invited to a public channel still gets messages back instead of
+	// not_in_channel.
+	retrieverCalled := 0
+	botRepliesCalled := 0
+	bot := &fakeBotService{
+		getPermalinkFn: func(_ context.Context, channelID, _ string) (string, error) {
+			return "https://example.slack.com/archives/" + channelID + "/p1", nil
+		},
+		getRepliesFn: func(_ context.Context, _, _ string, _ int) ([]slackservice.ConversationMessage, error) {
+			botRepliesCalled++
+			return nil, errors.New("bot replies must not be called when retriever is set")
+		},
+	}
+	retriever := &fakeMessageRetriever{
+		getRepliesFn: func(_ context.Context, channelID, threadTS string, limit int) ([]slackservice.ConversationMessage, error) {
+			retrieverCalled++
+			gt.String(t, channelID).Equal("C_PUB")
+			gt.String(t, threadTS).Equal("t1")
+			gt.Number(t, limit).Equal(20)
+			return []slackservice.ConversationMessage{{UserID: "U1", Text: "via user token", Timestamp: threadTS}}, nil
+		},
+	}
+	tools := slacktool.NewReadOnly(slacktool.Deps{Bot: bot, Retriever: retriever})
+
+	out, err := tools[0].Run(context.Background(), map[string]any{
+		"targets": []any{map[string]any{"channel_id": "C_PUB", "ts": "t1"}},
+	})
+	gt.NoError(t, err).Required()
+	gt.Number(t, retrieverCalled).Equal(1)
+	gt.Number(t, botRepliesCalled).Equal(0)
+
+	results, ok := out["results"].([]map[string]any)
+	gt.Bool(t, ok).True().Required()
+	gt.Array(t, results).Length(1).Required()
+	gt.Value(t, results[0]["channel_id"]).Equal("C_PUB")
+	msgs, ok := results[0]["messages"].([]map[string]any)
+	gt.Bool(t, ok).True().Required()
+	gt.Array(t, msgs).Length(1).Required()
+	gt.Value(t, msgs[0]["text"]).Equal("via user token")
+}
+
+func TestGetMessagesTool_FallsBackToBotWhenRetrieverNil(t *testing.T) {
+	// Backward-compat path: without a Retriever, the tool must still work via
+	// the Bot token (the old behaviour). public/private channels the bot has
+	// joined remain readable; channels it has not joined still fail with
+	// not_in_channel (Slack-side constraint, not our concern here).
+	botCalled := 0
+	bot := &fakeBotService{
+		getPermalinkFn: func(_ context.Context, channelID, _ string) (string, error) {
+			return "https://example.slack.com/archives/" + channelID + "/p1", nil
+		},
+		getRepliesFn: func(_ context.Context, channelID, threadTS string, limit int) ([]slackservice.ConversationMessage, error) {
+			botCalled++
+			gt.String(t, channelID).Equal("C_BOT_MEMBER")
+			gt.String(t, threadTS).Equal("t9")
+			gt.Number(t, limit).Equal(20)
+			return []slackservice.ConversationMessage{{UserID: "U9", Text: "via bot token", Timestamp: threadTS}}, nil
+		},
+	}
+	tools := slacktool.NewReadOnly(slacktool.Deps{Bot: bot})
+
+	out, err := tools[0].Run(context.Background(), map[string]any{
+		"targets": []any{map[string]any{"channel_id": "C_BOT_MEMBER", "ts": "t9"}},
+	})
+	gt.NoError(t, err).Required()
+	gt.Number(t, botCalled).Equal(1)
+
+	results, ok := out["results"].([]map[string]any)
+	gt.Bool(t, ok).True().Required()
+	gt.Array(t, results).Length(1).Required()
+	msgs, ok := results[0]["messages"].([]map[string]any)
+	gt.Bool(t, ok).True().Required()
+	gt.Array(t, msgs).Length(1).Required()
+	gt.Value(t, msgs[0]["text"]).Equal("via bot token")
 }
 
 func TestGetMessagesTool_PartialFailureLogsButReturnsResults(t *testing.T) {
