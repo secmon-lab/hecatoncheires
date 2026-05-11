@@ -51,7 +51,13 @@ func contextWithSlackUserLang(ctx context.Context, svc slacksvc.Service, userID 
 	user, err := svc.GetUserInfo(ctx, userID)
 	if err != nil || user == nil {
 		if err != nil {
-			logging.From(ctx).Warn("failed to get user locale for i18n", "error", err, "user_id", userID)
+			// Locale fetch failures are normal-flow: bot users, deleted users,
+			// transient Slack API hiccups. Tag as benign so the operator sees
+			// it in logs but Sentry stays quiet.
+			errutil.Handle(ctx, goerr.Wrap(err, "failed to get user locale for i18n",
+				goerr.V("user_id", userID),
+				goerr.T(errutil.TagBenign),
+			), "failed to get user locale for i18n")
 		}
 		return ctx
 	}
@@ -63,8 +69,6 @@ func contextWithSlackUserLang(ctx context.Context, svc slacksvc.Service, userID 
 
 // HandleSlackEvent processes Slack Events API events
 func (uc *SlackUseCases) HandleSlackEvent(ctx context.Context, event *slackevents.EventsAPIEvent) error {
-	logger := logging.From(ctx)
-
 	// Handle member_joined_channel / member_left_channel events
 	switch event.InnerEvent.Type {
 	case "member_joined_channel", "member_left_channel":
@@ -74,8 +78,13 @@ func (uc *SlackUseCases) HandleSlackEvent(ctx context.Context, event *slackevent
 	// Convert event to domain model
 	msg := slack.NewMessage(ctx, event)
 	if msg == nil {
-		// Unsupported event type, log warning but don't return error
-		logger.Warn("unsupported slack event type", "type", event.Type, "innerType", event.InnerEvent.Type)
+		// Unsupported event type: slack.NewMessage returned nil. This is an
+		// unexpected path — surface to Sentry so we notice schema drift or
+		// new event types we forgot to wire.
+		errutil.Handle(ctx, goerr.New("unsupported slack event type",
+			goerr.V("type", event.Type),
+			goerr.V("innerType", event.InnerEvent.Type),
+		), "unsupported slack event type")
 		return nil
 	}
 
@@ -98,7 +107,11 @@ func (uc *SlackUseCases) HandleSlackEvent(ctx context.Context, event *slackevent
 				return nil
 			}
 			if err := uc.agent.HandleAgentMention(ctx, msg); err != nil {
-				logger.Error("failed to handle agent mention", "error", err.Error())
+				errutil.Handle(ctx, goerr.Wrap(err, "failed to handle agent mention",
+					goerr.V("channel_id", msg.ChannelID()),
+					goerr.V("message_id", msg.ID()),
+					goerr.V("user_id", msg.UserID()),
+				), "failed to handle agent mention")
 			}
 			return nil
 		}
@@ -108,7 +121,11 @@ func (uc *SlackUseCases) HandleSlackEvent(ctx context.Context, event *slackevent
 		}
 		ctx = uc.contextWithUserLang(ctx, appMention.User)
 		if err := uc.mentionDraft.HandleAppMention(ctx, appMention); err != nil {
-			logger.Error("failed to handle mention draft", "error", err.Error())
+			errutil.Handle(ctx, goerr.Wrap(err, "failed to handle mention draft",
+				goerr.V("channel_id", appMention.Channel),
+				goerr.V("user_id", appMention.User),
+				goerr.V("event_ts", appMention.EventTimeStamp),
+			), "failed to handle mention draft")
 		}
 		return nil
 	}
@@ -126,7 +143,12 @@ func (uc *SlackUseCases) HandleSlackEvent(ctx context.Context, event *slackevent
 		}
 		ctx = uc.contextWithUserLang(ctx, msgEv.User)
 		if err := uc.mentionDraft.HandleThreadReply(ctx, msgEv); err != nil {
-			logger.Error("failed to handle thread reply resume", "error", err.Error())
+			errutil.Handle(ctx, goerr.Wrap(err, "failed to handle thread reply resume",
+				goerr.V("channel_id", msgEv.Channel),
+				goerr.V("thread_ts", msgEv.ThreadTimeStamp),
+				goerr.V("message_ts", msgEv.TimeStamp),
+				goerr.V("user_id", msgEv.User),
+			), "failed to handle thread reply resume")
 		}
 	}
 

@@ -9,7 +9,6 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
-	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/slack-go/slack"
 )
 
@@ -86,10 +85,7 @@ func (h *SlackInteractionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		case usecase.SlackActionIDStatusSelect:
 			workspaceID, actionID, status, err := usecase.ParseSlackStatusSelectValue(a.SelectedOption.Value)
 			if err != nil {
-				logging.From(ctx).Warn("failed to parse status_select value",
-					"error", err,
-					"value", a.SelectedOption.Value,
-				)
+				errutil.Handle(ctx, goerr.Wrap(err, "failed to parse status_select value", goerr.V("value", a.SelectedOption.Value)), "failed to parse status_select value")
 				continue
 			}
 			input := usecase.UpdateActionInput{
@@ -110,10 +106,7 @@ func (h *SlackInteractionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		case usecase.SlackActionIDAssigneeSelect:
 			workspaceID, actionID, err := usecase.ParseSlackAssigneeBlockID(a.BlockID)
 			if err != nil {
-				logging.From(ctx).Warn("failed to parse assignee block_id",
-					"error", err,
-					"block_id", a.BlockID,
-				)
+				errutil.Handle(ctx, goerr.Wrap(err, "failed to parse assignee block_id", goerr.V("block_id", a.BlockID)), "failed to parse assignee block_id")
 				continue
 			}
 			input := usecase.UpdateActionInput{
@@ -143,21 +136,13 @@ func (h *SlackInteractionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 			}
 			actionType, data, err := usecase.ParseAgentActionValue(action.SelectedOption.Value)
 			if err != nil {
-				logger := logging.From(ctx)
-				logger.Warn("failed to parse agent action value",
-					"error", err,
-					"value", action.SelectedOption.Value,
-				)
+				errutil.Handle(ctx, goerr.Wrap(err, "failed to parse agent action value", goerr.V("value", action.SelectedOption.Value)), "failed to parse agent action value")
 				continue
 			}
 			switch actionType {
 			case usecase.SlackAgentActionShowSessionInfo:
 				if err := h.agentUC.HandleSessionInfoRequest(ctx, callback.TriggerID, data); err != nil {
-					logger := logging.From(ctx)
-					logger.Error("failed to handle session info request",
-						"error", err,
-						"session_id", data,
-					)
+					errutil.Handle(ctx, goerr.Wrap(err, "failed to handle session info request", goerr.V("session_id", data)), "failed to handle session info request")
 				}
 			}
 
@@ -202,16 +187,13 @@ func (h *SlackInteractionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 // handleViewSubmission processes view_submission interaction callbacks
 func (h *SlackInteractionHandler) handleViewSubmission(w http.ResponseWriter, r *http.Request, callback *slack.InteractionCallback) {
 	ctx := r.Context()
-	logger := logging.From(ctx)
 
 	switch callback.View.CallbackID {
 	case usecase.SlackCallbackIDSelectWorkspace:
 		// Workspace selection → return updated view with case creation modal
 		view, err := h.slackUC.HandleWorkspaceSelectSubmit(r.Context(), callback)
 		if err != nil {
-			logger.Error("failed to handle workspace selection",
-				"error", err,
-			)
+			errutil.Handle(ctx, goerr.Wrap(err, "failed to handle workspace selection"), "failed to handle workspace selection")
 			writeViewSubmissionError(ctx, w, usecase.SlackBlockIDWorkspaceSelect, "Failed to process workspace selection. Please try again.")
 			return
 		}
@@ -223,16 +205,14 @@ func (h *SlackInteractionHandler) handleViewSubmission(w http.ResponseWriter, r 
 		}
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			logger.Error("failed to encode view submission response", "error", err)
+			errutil.Handle(ctx, goerr.Wrap(err, "failed to encode view submission response"), "failed to encode view submission response")
 		}
 
 	case usecase.SlackCallbackIDCommandChoice:
 		// Command choice (edit case vs create action) → swap to chosen modal
 		view, err := h.slackUC.HandleCommandChoiceSubmit(r.Context(), callback)
 		if err != nil {
-			logger.Error("failed to handle command choice",
-				"error", err,
-			)
+			errutil.Handle(ctx, goerr.Wrap(err, "failed to handle command choice"), "failed to handle command choice")
 			writeViewSubmissionError(ctx, w, usecase.SlackBlockIDCommandChoice, "Failed to process selection. Please try again.")
 			return
 		}
@@ -242,7 +222,7 @@ func (h *SlackInteractionHandler) handleViewSubmission(w http.ResponseWriter, r 
 		}
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			logger.Error("failed to encode view submission response", "error", err)
+			errutil.Handle(ctx, goerr.Wrap(err, "failed to encode view submission response"), "failed to encode view submission response")
 		}
 
 	case usecase.SlackCallbackIDCreateAction:
@@ -304,6 +284,6 @@ func writeViewSubmissionError(ctx context.Context, w http.ResponseWriter, blockI
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		logging.From(ctx).Error("failed to encode view submission error response", "error", err)
+		errutil.Handle(ctx, goerr.Wrap(err, "failed to encode view submission error response"), "failed to encode view submission error response")
 	}
 }

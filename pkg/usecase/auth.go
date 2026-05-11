@@ -13,7 +13,6 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
-	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/safe"
 )
 
@@ -151,11 +150,7 @@ func (uc *AuthUseCase) HandleCallback(ctx context.Context, code string) (*auth.T
 	// Create and store token
 	token := auth.NewToken(idToken.Sub, idToken.Email, idToken.Name)
 	if err := uc.repo.PutToken(ctx, token); err != nil {
-		logger := logging.From(ctx)
-		if data, jsonErr := json.Marshal(token); jsonErr == nil {
-			logger.Error("failed to save token", "error", err, "token", string(data))
-		}
-		return nil, goerr.Wrap(err, "failed to store token", goerr.V("token", token))
+		return nil, goerr.Wrap(err, "failed to store token")
 	}
 
 	return token, nil

@@ -9,6 +9,7 @@ import (
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/trace"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/urfave/cli/v3"
 )
 
@@ -72,8 +73,7 @@ func (s *Storage) Configure(ctx context.Context) (gollem.HistoryRepository, trac
 
 	cleanup := func() {
 		if err := client.Close(); err != nil {
-			// Cleanup is called from main; log via the package-level logger.
-			slog.Default().Error("failed to close Cloud Storage client", "error", err.Error())
+			errutil.Handle(context.Background(), goerr.Wrap(err, "failed to close Cloud Storage client"), "failed to close Cloud Storage client")
 		}
 	}
 	return historyRepo, traceRepo, cleanup, nil

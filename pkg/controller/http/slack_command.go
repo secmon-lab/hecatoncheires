@@ -4,8 +4,9 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
-	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
 // SlackCommandHandler handles Slack slash command requests
@@ -38,14 +39,12 @@ func (h *SlackCommandHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := h.slackUC.HandleSlashCommand(ctx, triggerID, userID, channelID, workspaceID, sourceTeamID, text); err != nil {
-		logger := logging.From(ctx)
-		logger.Error("failed to handle slash command",
-			"error", err,
-			"user_id", userID,
-			"channel_id", channelID,
-			"workspace_id", workspaceID,
-			"source_team_id", sourceTeamID,
-		)
+		errutil.Handle(ctx, goerr.Wrap(err, "failed to handle slash command",
+			goerr.V("user_id", userID),
+			goerr.V("channel_id", channelID),
+			goerr.V("workspace_id", workspaceID),
+			goerr.V("source_team_id", sourceTeamID),
+		), "failed to handle slash command")
 		// Return error text as ephemeral message to the user
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusOK)

@@ -13,7 +13,6 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
-	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/slack-go/slack"
 )
 
@@ -292,11 +291,12 @@ func (uc *SlackUseCases) HandleCaseCreationSubmit(ctx context.Context, caseUC *C
 		}
 
 		if _, err := uc.slackService.PostMessage(ctx, meta.ChannelID, nil, confirmText); err != nil {
-			// Log but don't fail; the case was already created
-			logging.From(ctx).Error("failed to post confirmation message",
-				"error", err,
-				"channel_id", meta.ChannelID,
-				"case_id", created.ID)
+			// Don't fail; the case was already created. Report to Sentry so
+			// the missing confirmation surfaces to the operator.
+			errutil.Handle(ctx, goerr.Wrap(err, "failed to post confirmation message",
+				goerr.V("channel_id", meta.ChannelID),
+				goerr.V("case_id", created.ID),
+			), "failed to post confirmation message")
 		}
 	}
 

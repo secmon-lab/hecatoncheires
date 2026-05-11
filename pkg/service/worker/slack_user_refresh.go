@@ -8,6 +8,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
 
@@ -65,8 +66,7 @@ func (w *SlackUserRefreshWorker) run(ctx context.Context) {
 
 	// Initial sync (runs in goroutine, does not block server startup)
 	if err := w.refresh(ctx); err != nil {
-		logging.Default().Error("Initial Slack user refresh failed (will retry next interval)",
-			"error", err.Error())
+		errutil.Handle(ctx, goerr.Wrap(err, "Initial Slack user refresh failed (will retry next interval)"), "Initial Slack user refresh failed")
 	}
 
 	ticker := time.NewTicker(w.interval)
@@ -76,9 +76,8 @@ func (w *SlackUserRefreshWorker) run(ctx context.Context) {
 		select {
 		case <-ticker.C:
 			if err := w.refresh(ctx); err != nil {
-				// Log error but continue worker
-				logging.Default().Error("Slack user refresh failed (will retry next interval)",
-					"error", err.Error())
+				// Continue worker; report so the operator can see repeated failures.
+				errutil.Handle(ctx, goerr.Wrap(err, "Slack user refresh failed (will retry next interval)"), "Slack user refresh failed")
 			}
 
 		case <-w.stopCh:
