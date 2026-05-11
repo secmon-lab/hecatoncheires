@@ -44,16 +44,16 @@ type MentionDraftUseCase struct {
 	draftUC      *draft.UseCase
 }
 
-// NewMentionDraftUseCase constructs a MentionDraftUseCase.
+// NewMentionDraftUseCase constructs a MentionDraftUseCase. All dependencies
+// are mandatory; callers that cannot supply a Slack service should refrain
+// from constructing this usecase (and the Slack interaction handler that
+// depends on it) entirely.
 func NewMentionDraftUseCase(
 	repo interfaces.Repository,
 	registry *model.WorkspaceRegistry,
 	slackService slacksvc.Service,
 	draftUC *draft.UseCase,
 ) *MentionDraftUseCase {
-	if slackService == nil {
-		return nil
-	}
 	return &MentionDraftUseCase{
 		repo:         repo,
 		registry:     registry,

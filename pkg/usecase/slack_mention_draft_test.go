@@ -189,13 +189,6 @@ func TestMentionDraftUseCase_HandleAppMention_NoWorkspace_PostsError(t *testing.
 	gt.Number(t, len(slackMock.updateBlockPosts)).GreaterOrEqual(1)
 }
 
-func TestMentionDraftUseCase_NilSlackService(t *testing.T) {
-	repo := memory.New()
-	registry := newRegistryWithSchema("ws-1", "ws", &config.FieldSchema{})
-	uc := usecase.NewMentionDraftUseCase(repo, registry, nil, newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-1"))))
-	gt.Value(t, uc).Nil()
-}
-
 func TestSlackUseCases_AppMention_DispatchesToMentionDraft(t *testing.T) {
 	repo := memory.New()
 	schema := &config.FieldSchema{Fields: []config.FieldDefinition{

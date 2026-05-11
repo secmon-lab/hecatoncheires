@@ -22,6 +22,35 @@ import (
 	goslack "github.com/slack-go/slack"
 )
 
+// newTestSlackHandler builds a SlackInteractionHandler with every dependency
+// non-nil. The handler's constructor refuses optional deps so tests must fill
+// every slot even when they exercise only one action path. Pass nil for the
+// usecases that the test does not steer; this helper builds stubs sharing the
+// supplied repository so the handler can construct without panicking.
+func newTestSlackHandler(
+	t *testing.T,
+	repo interfaces.Repository,
+	registry *model.WorkspaceRegistry,
+	actionUC *usecase.ActionUseCase,
+	slackUC *usecase.SlackUseCases,
+	caseUC *usecase.CaseUseCase,
+) *httpctrl.SlackInteractionHandler {
+	t.Helper()
+	if registry == nil {
+		registry = model.NewWorkspaceRegistry()
+	}
+	slackStub := &mockSlackServiceForCommand{}
+	agentUC := usecase.NewAgentUseCase(repo, registry, nil, nil, nil, nil, nil, nil, nil, nil, actionUC, nil)
+	mentionDraftUC := usecase.NewMentionDraftUseCase(repo, registry, slackStub, nil)
+	if caseUC == nil {
+		caseUC = usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+	}
+	if slackUC == nil {
+		slackUC = usecase.NewSlackUseCases(repo, registry, agentUC, mentionDraftUC, slackStub)
+	}
+	return httpctrl.NewSlackInteractionHandler(actionUC, agentUC, slackUC, caseUC, mentionDraftUC)
+}
+
 func TestSlackInteractionHandler(t *testing.T) {
 	setup := func(t *testing.T) (*usecase.ActionUseCase, *httpctrl.SlackInteractionHandler, int64) {
 		t.Helper()
@@ -42,7 +71,7 @@ func TestSlackInteractionHandler(t *testing.T) {
 		action, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Desc", "U001", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
-		handler := httpctrl.NewSlackInteractionHandler(actionUC, nil)
+		handler := newTestSlackHandler(t, repo, nil, actionUC, nil, caseUC)
 		return actionUC, handler, action.ID
 	}
 
@@ -66,7 +95,7 @@ func TestSlackInteractionHandler(t *testing.T) {
 		action, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Desc", "U001", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
-		handler := httpctrl.NewSlackInteractionHandler(actionUC, nil)
+		handler := newTestSlackHandler(t, repo, nil, actionUC, nil, caseUC)
 		return actionUC, handler, action.ID
 	}
 
@@ -319,11 +348,10 @@ func TestSlackInteractionHandler(t *testing.T) {
 }
 
 func TestSlackInteractionHandler_AgentSessionActions(t *testing.T) {
-	t.Run("handles show_session_info overflow option", func(t *testing.T) {
+	t.Run("skips agent session action when selected value is empty", func(t *testing.T) {
 		repo := memory.New()
 		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
-		// agentUC is nil here; the handler should handle this gracefully
-		handler := httpctrl.NewSlackInteractionHandler(actionUC, nil)
+		handler := newTestSlackHandler(t, repo, nil, actionUC, nil, nil)
 
 		callback := goslack.InteractionCallback{
 			Type: goslack.InteractionTypeBlockActions,
@@ -331,10 +359,8 @@ func TestSlackInteractionHandler_AgentSessionActions(t *testing.T) {
 			ActionCallback: goslack.ActionCallbacks{
 				BlockActions: []*goslack.BlockAction{
 					{
-						ActionID: usecase.SlackAgentSessionActionsID,
-						SelectedOption: goslack.OptionBlockObject{
-							Value: usecase.SlackAgentActionShowSessionInfo + ":test-session-uuid",
-						},
+						ActionID:       usecase.SlackAgentSessionActionsID,
+						SelectedOption: goslack.OptionBlockObject{Value: ""},
 					},
 				},
 			},
@@ -349,7 +375,6 @@ func TestSlackInteractionHandler_AgentSessionActions(t *testing.T) {
 		rec := httptest.NewRecorder()
 
 		handler.ServeHTTP(rec, req)
-		// Should return 200 even though agentUC is nil (logged error, not HTTP error)
 		gt.Value(t, rec.Code).Equal(http.StatusOK)
 	})
 }
@@ -365,8 +390,7 @@ func TestSlackInteractionHandler_ViewSubmission(t *testing.T) {
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, &mockSlackServiceForCommand{})
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 
-		handler := httpctrl.NewSlackInteractionHandler(actionUC, nil)
-		handler.WithSlackCommand(slackUC, caseUC)
+		handler := newTestSlackHandler(t, repo, registry, actionUC, slackUC, caseUC)
 
 		meta, _ := json.Marshal(map[string]string{"channel_id": "C001"})
 		callback := goslack.InteractionCallback{
@@ -419,8 +443,7 @@ func TestSlackInteractionHandler_ViewSubmission(t *testing.T) {
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, &mockSlackServiceForCommand{})
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 
-		handler := httpctrl.NewSlackInteractionHandler(actionUC, nil)
-		handler.WithSlackCommand(slackUC, caseUC)
+		handler := newTestSlackHandler(t, repo, registry, actionUC, slackUC, caseUC)
 
 		meta, _ := json.Marshal(map[string]string{
 			"workspace_id": "risk",
@@ -484,8 +507,7 @@ func TestSlackInteractionHandler_ViewSubmission(t *testing.T) {
 		created, err := caseUC.CreateCase(ctx, "risk", "Original Title", "Original desc", []string{}, nil, false, "", "")
 		gt.NoError(t, err).Required()
 
-		handler := httpctrl.NewSlackInteractionHandler(actionUC, nil)
-		handler.WithSlackCommand(slackUC, caseUC)
+		handler := newTestSlackHandler(t, repo, registry, actionUC, slackUC, caseUC)
 
 		meta, _ := json.Marshal(map[string]any{
 			"workspace_id": "risk",
@@ -549,8 +571,7 @@ func TestSlackInteractionHandler_ViewSubmission(t *testing.T) {
 		created, err := repo.Case().Create(t.Context(), "risk", &model.Case{Title: "Existing"})
 		gt.NoError(t, err).Required()
 
-		handler := httpctrl.NewSlackInteractionHandler(actionUC, nil)
-		handler.WithSlackCommand(slackUC, caseUC)
+		handler := newTestSlackHandler(t, repo, registry, actionUC, slackUC, caseUC)
 
 		meta, _ := json.Marshal(map[string]any{
 			"workspace_id": "risk",
@@ -611,8 +632,7 @@ func TestSlackInteractionHandler_ViewSubmission(t *testing.T) {
 		created, err := repo.Case().Create(t.Context(), "risk", &model.Case{Title: "Parent"})
 		gt.NoError(t, err).Required()
 
-		handler := httpctrl.NewSlackInteractionHandler(actionUC, nil)
-		handler.WithSlackCommand(slackUC, caseUC)
+		handler := newTestSlackHandler(t, repo, registry, actionUC, slackUC, caseUC)
 
 		meta, _ := json.Marshal(map[string]any{
 			"workspace_id": "risk",
@@ -660,16 +680,15 @@ func TestSlackInteractionHandler_ViewSubmission(t *testing.T) {
 		gt.Value(t, actions[0].Title).Equal("Async Action")
 	})
 
-	t.Run("view_submission with no slackUC configured returns 200", func(t *testing.T) {
+	t.Run("view_submission with unknown callback_id returns 200", func(t *testing.T) {
 		repo := memory.New()
 		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
-		handler := httpctrl.NewSlackInteractionHandler(actionUC, nil)
-		// slackUC not configured
+		handler := newTestSlackHandler(t, repo, nil, actionUC, nil, nil)
 
 		callback := goslack.InteractionCallback{
 			Type: goslack.InteractionTypeViewSubmission,
 			View: goslack.View{
-				CallbackID: usecase.SlackCallbackIDCreateCase,
+				CallbackID: "hc_unrecognised_callback_id",
 			},
 		}
 		payloadJSON, err := json.Marshal(callback)
