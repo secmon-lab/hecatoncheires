@@ -150,7 +150,9 @@ func (uc *AuthUseCase) HandleCallback(ctx context.Context, code string) (*auth.T
 	// Create and store token
 	token := auth.NewToken(idToken.Sub, idToken.Email, idToken.Name)
 	if err := uc.repo.PutToken(ctx, token); err != nil {
-		return nil, goerr.Wrap(err, "failed to store token")
+		// Attach the identifier (Slack user ID) only — Email/Name are PII
+		// and Secret is the actual auth secret, neither belongs in Sentry.
+		return nil, goerr.Wrap(err, "failed to store token", goerr.V("sub", token.Sub))
 	}
 
 	return token, nil
