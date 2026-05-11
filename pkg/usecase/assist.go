@@ -37,40 +37,41 @@ type AssistOption struct {
 
 // AssistUseCase handles periodic AI-powered case assistance
 type AssistUseCase struct {
-	repo           interfaces.Repository
-	registry       *model.WorkspaceRegistry
-	slackService   slack.Service
-	slackSearch    slacktool.SearchService
-	slackRetriever slacktool.MessageRetriever
-	notionTool     notiontool.Client
-	githubClient   *githubtool.Client
-	llmClient      gollem.LLMClient
-	embedClient    interfaces.EmbedClient
-	// actionUC routes core__create_action through the unified usecase entry
-	// point so assist-driven creates trigger the same Slack post and event
-	// records as GraphQL/Slack-modal creates.
-	actionUC *ActionUseCase
+	deps AssistDeps
 }
 
-// NewAssistUseCase creates a new AssistUseCase.
-// slackSearch, slackRetriever, notionTool, and githubClient are optional; pass
-// nil to omit the corresponding tools / behaviours. slackRetriever, when
-// supplied, lets slack__get_messages read public channels without bot
-// membership via the User token. actionUC is required: the core__create_action
-// tool calls through it.
-func NewAssistUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackSearch slacktool.SearchService, slackRetriever slacktool.MessageRetriever, notionTool notiontool.Client, githubClient *githubtool.Client, llmClient gollem.LLMClient, embedClient interfaces.EmbedClient, actionUC *ActionUseCase) *AssistUseCase {
-	return &AssistUseCase{
-		repo:           repo,
-		registry:       registry,
-		slackService:   slackService,
-		slackSearch:    slackSearch,
-		slackRetriever: slackRetriever,
-		notionTool:     notionTool,
-		githubClient:   githubClient,
-		llmClient:      llmClient,
-		embedClient:    embedClient,
-		actionUC:       actionUC,
-	}
+// AssistDeps groups the dependencies AssistUseCase needs. Required fields are
+// marked below; the rest can be left zero to disable the corresponding tool
+// or behaviour.
+//
+// SlackRetriever, when supplied, lets slack__get_messages read public channels
+// without bot membership via the User token (Slack contract: only user tokens
+// can access public channels they are not in).
+type AssistDeps struct {
+	Repo     interfaces.Repository    // required
+	Registry *model.WorkspaceRegistry // required
+	LLM      gollem.LLMClient         // required
+
+	// ActionUC routes core__create_action through the unified usecase entry
+	// point so assist-driven creates trigger the same Slack post and event
+	// records as GraphQL/Slack-modal creates. Required.
+	ActionUC *ActionUseCase
+
+	// Optional Slack tool clients. SlackService is the Bot-token client;
+	// SlackSearch and SlackRetriever sit on the User OAuth Token.
+	SlackService   slack.Service
+	SlackSearch    slacktool.SearchService
+	SlackRetriever slacktool.MessageRetriever
+
+	// Optional integrations.
+	NotionTool   notiontool.Client
+	GitHubClient *githubtool.Client
+	EmbedClient  interfaces.EmbedClient
+}
+
+// NewAssistUseCase creates a new AssistUseCase from a deps bundle. See AssistDeps.
+func NewAssistUseCase(deps AssistDeps) *AssistUseCase {
+	return &AssistUseCase{deps: deps}
 }
 
 // RunAssist iterates all workspaces and open cases, running the assist agent for each
@@ -84,11 +85,11 @@ func (uc *AssistUseCase) RunAssist(ctx context.Context, opts AssistOption) error
 		opts.MessageCount = 50
 	}
 
-	entries := uc.registry.List()
+	entries := uc.deps.Registry.List()
 
 	// Filter by workspace if specified
 	if opts.WorkspaceID != "" {
-		entry, err := uc.registry.Get(opts.WorkspaceID)
+		entry, err := uc.deps.Registry.Get(opts.WorkspaceID)
 		if err != nil {
 			return goerr.Wrap(err, "specified workspace not found",
 				goerr.V("workspaceID", opts.WorkspaceID),
@@ -117,7 +118,7 @@ func (uc *AssistUseCase) processWorkspace(ctx context.Context, entry *model.Work
 	wsID := entry.Workspace.ID
 
 	openStatus := types.CaseStatusOpen
-	cases, err := uc.repo.Case().List(ctx, wsID, interfaces.WithStatus(openStatus))
+	cases, err := uc.deps.Repo.Case().List(ctx, wsID, interfaces.WithStatus(openStatus))
 	if err != nil {
 		return goerr.Wrap(err, "failed to list open cases",
 			goerr.V("workspaceID", wsID),
@@ -156,20 +157,20 @@ func (uc *AssistUseCase) processCase(ctx context.Context, entry *model.Workspace
 	// Build tools — core (action) plus Slack (read-only + post_message)
 	// plus Notion when configured.
 	coreTools := core.NewForAssist(core.Deps{
-		Repo:        uc.repo,
+		Repo:        uc.deps.Repo,
 		WorkspaceID: wsID,
 		CaseID:      c.ID,
 		StatusSet:   entry.ActionStatusSet,
-		ActionUC:    NewActionToolAdapter(uc.actionUC),
+		ActionUC:    NewActionToolAdapter(uc.deps.ActionUC),
 	})
 	slackTools := slacktool.NewForAssist(slacktool.Deps{
-		Bot:       uc.slackService,
-		Search:    uc.slackSearch,
-		Retriever: uc.slackRetriever,
+		Bot:       uc.deps.SlackService,
+		Search:    uc.deps.SlackSearch,
+		Retriever: uc.deps.SlackRetriever,
 		ChannelID: c.SlackChannelID,
 	})
-	notionTools := notiontool.New(notiontool.Deps{Client: uc.notionTool})
-	githubTools := githubtool.New(uc.githubClient)
+	notionTools := notiontool.New(notiontool.Deps{Client: uc.deps.NotionTool})
+	githubTools := githubtool.New(uc.deps.GitHubClient)
 
 	allTools := make([]gollem.Tool, 0, len(coreTools)+len(slackTools)+len(notionTools)+len(githubTools))
 	allTools = append(allTools, coreTools...)
@@ -178,7 +179,7 @@ func (uc *AssistUseCase) processCase(ctx context.Context, entry *model.Workspace
 	allTools = append(allTools, githubTools...)
 
 	// Create and execute the agent
-	agent := gollem.New(uc.llmClient,
+	agent := gollem.New(uc.deps.LLM,
 		gollem.WithSystemPrompt(systemPrompt),
 		gollem.WithTools(allTools...),
 	)
@@ -274,11 +275,11 @@ func (uc *AssistUseCase) buildAssistSystemPrompt(ctx context.Context, entry *mod
 
 	// Fetch actions (archived actions are intentionally excluded — the
 	// assist prompt summarises the active state of a case)
-	actions, err := uc.repo.Action().GetByCase(ctx, wsID, c.ID, interfaces.ActionListOptions{})
+	actions, err := uc.deps.Repo.Action().GetByCase(ctx, wsID, c.ID, interfaces.ActionListOptions{})
 	if err != nil {
 		return "", goerr.Wrap(err, "failed to get actions for case")
 	}
-	statusSet := resolveActionStatusSet(uc.registry, wsID)
+	statusSet := resolveActionStatusSet(uc.deps.Registry, wsID)
 	for _, a := range actions {
 		dueDate := ""
 		if a.DueDate != nil {
@@ -295,7 +296,7 @@ func (uc *AssistUseCase) buildAssistSystemPrompt(ctx context.Context, entry *mod
 	}
 
 	// Fetch recent messages from CaseMessageRepository
-	msgs, _, err := uc.repo.CaseMessage().List(ctx, wsID, c.ID, opts.MessageCount, "")
+	msgs, _, err := uc.deps.Repo.CaseMessage().List(ctx, wsID, c.ID, opts.MessageCount, "")
 	if err != nil {
 		return "", goerr.Wrap(err, "failed to get case messages")
 	}
@@ -315,7 +316,7 @@ func (uc *AssistUseCase) buildAssistSystemPrompt(ctx context.Context, entry *mod
 	}
 
 	// Fetch recent assist logs
-	assistLogs, _, err := uc.repo.AssistLog().List(ctx, wsID, c.ID, opts.LogCount, 0)
+	assistLogs, _, err := uc.deps.Repo.AssistLog().List(ctx, wsID, c.ID, opts.LogCount, 0)
 	if err != nil {
 		return "", goerr.Wrap(err, "failed to get assist logs")
 	}
@@ -378,7 +379,7 @@ func (uc *AssistUseCase) saveAssistLog(ctx context.Context, wsID string, caseID 
 		},
 	}
 
-	session, err := uc.llmClient.NewSession(ctx,
+	session, err := uc.deps.LLM.NewSession(ctx,
 		gollem.WithSessionContentType(gollem.ContentTypeJSON),
 		gollem.WithSessionResponseSchema(schema),
 	)
@@ -426,7 +427,7 @@ Agent output:
 		NextSteps: summary.NextSteps,
 	}
 
-	if _, err := uc.repo.AssistLog().Create(ctx, wsID, caseID, log); err != nil {
+	if _, err := uc.deps.Repo.AssistLog().Create(ctx, wsID, caseID, log); err != nil {
 		return goerr.Wrap(err, "failed to save assist log")
 	}
 

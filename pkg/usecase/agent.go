@@ -32,57 +32,70 @@ import (
 // (pkg/usecase/agent/casebound) which owns gollem invocation, system
 // prompt assembly, and the turn lock lifecycle.
 type AgentUseCase struct {
-	repo         interfaces.Repository
-	registry     *model.WorkspaceRegistry
-	slackService slack.Service
-	llmClient    gollem.LLMClient
-	embedClient  interfaces.EmbedClient
+	deps AgentDeps
 
 	// casebound runs the case-bound gollem ReAct loop. It is non-nil
 	// whenever the LLM client is configured.
 	casebound *casebound.UseCase
 }
 
-// NewAgentUseCase creates a new AgentUseCase instance.
+// AgentDeps groups the dependencies AgentUseCase needs. Required fields are
+// marked below; optional ones can be left zero to disable the corresponding
+// tool or behaviour.
 //
-// slackSearch, slackRetriever, notionTool, and githubClient are optional; pass
-// nil to omit the corresponding agent tools / behaviours. slackRetriever, when
-// supplied, switches slack__get_messages to a User-token-backed read path so
-// public channels can be fetched without bot membership.
-//
-// historyRepo and traceRepo are required: the agent session flow persists
-// gollem.History across mentions and writes a trace for each Execute. Pass
-// agentarchive.NewMemoryHistoryRepository / NewMemoryTraceRepository in tests.
-//
-// actionUC is required: the core__create_action tool routes through it so all
-// Action create paths share the same usecase implementation. actionStepUC
-// follows the same contract for the core__*_action_step tool family.
-func NewAgentUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackSearch slacktool.SearchService, slackRetriever slacktool.MessageRetriever, notionTool notiontool.Client, githubClient *githubtool.Client, llmClient gollem.LLMClient, embedClient interfaces.EmbedClient, historyRepo gollem.HistoryRepository, traceRepo trace.Repository, actionUC *ActionUseCase, actionStepUC *ActionStepUseCase) *AgentUseCase {
-	uc := &AgentUseCase{
-		repo:         repo,
-		registry:     registry,
-		slackService: slackService,
-		llmClient:    llmClient,
-		embedClient:  embedClient,
-	}
-	if llmClient != nil {
-		deps := &agentcommon.CommonDeps{
-			Repo:                repo,
-			Registry:            registry,
-			LLMClient:           llmClient,
-			HistoryRepo:         historyRepo,
-			TraceRepo:           traceRepo,
-			SlackBot:            slackService,
-			SlackSearch:         slackSearch,
-			SlackRetriever:      slackRetriever,
-			NotionClient:        notionTool,
-			GitHubClient:        githubClient,
-			ActionUC:            NewActionToolAdapter(actionUC),
-			ActionStepUC:        NewActionStepToolAdapter(actionStepUC),
+// SlackRetriever, when supplied, switches slack__get_messages to a User-token-
+// backed read path so public channels can be fetched without bot membership.
+type AgentDeps struct {
+	Repo     interfaces.Repository    // required
+	Registry *model.WorkspaceRegistry // required
+	LLM      gollem.LLMClient         // required
+
+	// HistoryRepo and TraceRepo are required: the agent session flow persists
+	// gollem.History across mentions and writes a trace for each Execute. Pass
+	// agentarchive.NewMemoryHistoryRepository / NewMemoryTraceRepository in tests.
+	HistoryRepo gollem.HistoryRepository
+	TraceRepo   trace.Repository
+
+	// ActionUC is required: the core__create_action tool routes through it so
+	// all Action create paths share the same usecase implementation.
+	// ActionStepUC follows the same contract for the core__*_action_step
+	// tool family.
+	ActionUC     *ActionUseCase
+	ActionStepUC *ActionStepUseCase
+
+	// Optional Slack tool clients. SlackService is the Bot-token client;
+	// SlackSearch and SlackRetriever sit on the User OAuth Token.
+	SlackService   slack.Service
+	SlackSearch    slacktool.SearchService
+	SlackRetriever slacktool.MessageRetriever
+
+	// Optional integrations.
+	NotionTool   notiontool.Client
+	GitHubClient *githubtool.Client
+	EmbedClient  interfaces.EmbedClient
+}
+
+// NewAgentUseCase creates a new AgentUseCase from a deps bundle. See AgentDeps.
+func NewAgentUseCase(deps AgentDeps) *AgentUseCase {
+	uc := &AgentUseCase{deps: deps}
+	if deps.LLM != nil {
+		commonDeps := &agentcommon.CommonDeps{
+			Repo:                deps.Repo,
+			Registry:            deps.Registry,
+			LLMClient:           deps.LLM,
+			HistoryRepo:         deps.HistoryRepo,
+			TraceRepo:           deps.TraceRepo,
+			SlackBot:            deps.SlackService,
+			SlackSearch:         deps.SlackSearch,
+			SlackRetriever:      deps.SlackRetriever,
+			NotionClient:        deps.NotionTool,
+			GitHubClient:        deps.GitHubClient,
+			ActionUC:            NewActionToolAdapter(deps.ActionUC),
+			ActionStepUC:        NewActionStepToolAdapter(deps.ActionStepUC),
 			HeartbeatInterval:   agentcommon.DefaultHeartbeatInterval,
 			HeartbeatStaleAfter: agentcommon.DefaultHeartbeatStaleAfter,
 		}
-		cb, err := casebound.New(deps)
+		cb, err := casebound.New(commonDeps)
 		if err != nil {
 			// New only fails on missing deps which we guarded above, so
 			// surfacing here would indicate a wiring bug. Log loud and
@@ -104,10 +117,10 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 	}
 
 	// Detect user's language from Slack locale
-	ctx = contextWithSlackUserLang(ctx, uc.slackService, msg.UserID())
+	ctx = contextWithSlackUserLang(ctx, uc.deps.SlackService, msg.UserID())
 
 	// Skip if bot user ID matches the message sender (prevent infinite loop)
-	botUserID, err := uc.slackService.GetBotUserID(ctx)
+	botUserID, err := uc.deps.SlackService.GetBotUserID(ctx)
 	if err != nil {
 		return goerr.Wrap(err, "failed to get bot user ID")
 	}
@@ -150,7 +163,7 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 	// since the previous mention by direct GraphQL/UI edits. Archived
 	// actions are excluded so the agent's working set matches what the
 	// channel sees.
-	actions, err := uc.repo.Action().GetByCase(ctx, entry.Workspace.ID, foundCase.ID, interfaces.ActionListOptions{})
+	actions, err := uc.deps.Repo.Action().GetByCase(ctx, entry.Workspace.ID, foundCase.ID, interfaces.ActionListOptions{})
 	if err != nil {
 		return goerr.Wrap(err, "failed to get actions for case")
 	}
@@ -199,7 +212,7 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 	result, runErr := uc.casebound.RunTurn(ctx, req)
 	if runErr != nil {
 		errMsg := "⚠️ " + i18n.T(ctx, i18n.MsgAgentError)
-		if _, postErr := uc.slackService.PostThreadReply(ctx, msg.ChannelID(), threadTS, errMsg); postErr != nil {
+		if _, postErr := uc.deps.SlackService.PostThreadReply(ctx, msg.ChannelID(), threadTS, errMsg); postErr != nil {
 			errutil.Handle(ctx, postErr, "post agent error reply")
 		}
 		return goerr.Wrap(runErr, "casebound run turn")
@@ -207,7 +220,7 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 	switch result.Status {
 	case casebound.StatusBusy:
 		busyMsg := i18n.T(ctx, i18n.MsgKeyAgentBusy)
-		if _, postErr := uc.slackService.PostThreadReply(ctx, msg.ChannelID(), threadTS, busyMsg); postErr != nil {
+		if _, postErr := uc.deps.SlackService.PostThreadReply(ctx, msg.ChannelID(), threadTS, busyMsg); postErr != nil {
 			errutil.Handle(ctx, postErr, "post busy notice")
 		}
 		return nil
@@ -246,7 +259,7 @@ func toCaseboundMessages(in []slack.ConversationMessage) []casebound.Conversatio
 // at the end of HandleAgentMention so we only commit a session that
 // successfully started a turn.
 func (uc *AgentUseCase) loadOrCreateSession(ctx context.Context, workspaceID string, caseID int64, channelID, threadTS string) (*model.Session, error) {
-	existing, err := uc.repo.Session().GetByThread(ctx, channelID, threadTS)
+	existing, err := uc.deps.Repo.Session().GetByThread(ctx, channelID, threadTS)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to get session")
 	}
@@ -260,7 +273,7 @@ func (uc *AgentUseCase) loadOrCreateSession(ctx context.Context, workspaceID str
 	// is visible at Info level without paging Sentry, while real backend
 	// failures still alert as ERROR.
 	var actionID int64
-	if action, err := uc.repo.Action().GetBySlackMessageTS(ctx, workspaceID, threadTS); err == nil && action != nil {
+	if action, err := uc.deps.Repo.Action().GetBySlackMessageTS(ctx, workspaceID, threadTS); err == nil && action != nil {
 		actionID = action.ID
 	} else if err != nil {
 		if isRepoNotFound(err) {
@@ -309,7 +322,7 @@ func (uc *AgentUseCase) partitionConversation(ctx context.Context, msg *slackmod
 	// mention message itself). The limit is set to Slack's per-call maximum
 	// (1000) so a long quiet stretch between mentions doesn't silently drop
 	// "unprocessed" messages — pagination would only matter beyond that.
-	replies, err := uc.slackService.GetConversationReplies(ctx, msg.ChannelID(), session.ThreadTS, 1000)
+	replies, err := uc.deps.SlackService.GetConversationReplies(ctx, msg.ChannelID(), session.ThreadTS, 1000)
 	if err != nil {
 		return nil, nil, goerr.Wrap(err, "failed to fetch thread replies")
 	}
@@ -396,7 +409,7 @@ func (uc *AgentUseCase) postSessionStart(ctx context.Context, channelID, threadT
 			goslack.NewAccessory(overflow),
 		),
 	}
-	_, err := uc.slackService.PostThreadMessage(ctx, channelID, threadTS, blocks, label)
+	_, err := uc.deps.SlackService.PostThreadMessage(ctx, channelID, threadTS, blocks, label)
 	if err != nil {
 		return goerr.Wrap(err, "failed to post session start message")
 	}
@@ -419,7 +432,7 @@ func (uc *AgentUseCase) HandleSessionInfoRequest(ctx context.Context, triggerID,
 			},
 		},
 	}
-	if err := uc.slackService.OpenView(ctx, triggerID, view); err != nil {
+	if err := uc.deps.SlackService.OpenView(ctx, triggerID, view); err != nil {
 		return goerr.Wrap(err, "failed to open session info modal")
 	}
 	return nil
@@ -427,12 +440,12 @@ func (uc *AgentUseCase) HandleSessionInfoRequest(ctx context.Context, triggerID,
 
 // findCaseByChannel searches for a case associated with the given channel ID across all workspaces
 func (uc *AgentUseCase) findCaseByChannel(ctx context.Context, channelID string) (*model.Case, *model.WorkspaceEntry, error) {
-	if uc.registry == nil {
+	if uc.deps.Registry == nil {
 		return nil, nil, nil
 	}
 
-	for _, entry := range uc.registry.List() {
-		c, err := uc.repo.Case().GetBySlackChannelID(ctx, entry.Workspace.ID, channelID)
+	for _, entry := range uc.deps.Registry.List() {
+		c, err := uc.deps.Repo.Case().GetBySlackChannelID(ctx, entry.Workspace.ID, channelID)
 		if err != nil {
 			return nil, nil, goerr.Wrap(err, "failed to look up case by slack channel ID",
 				goerr.V("channelID", channelID),
@@ -451,12 +464,12 @@ func (uc *AgentUseCase) findCaseByChannel(ctx context.Context, channelID string)
 func (uc *AgentUseCase) collectContextMessages(ctx context.Context, msg *slackmodel.Message) ([]slack.ConversationMessage, error) {
 	if msg.ThreadTS() != "" {
 		// Thread mention: get thread replies
-		return uc.slackService.GetConversationReplies(ctx, msg.ChannelID(), msg.ThreadTS(), 100)
+		return uc.deps.SlackService.GetConversationReplies(ctx, msg.ChannelID(), msg.ThreadTS(), 100)
 	}
 
 	// Channel mention: get recent messages (last 24 hours)
 	oldest := time.Now().Add(-24 * time.Hour)
-	return uc.slackService.GetConversationHistory(ctx, msg.ChannelID(), oldest, 100)
+	return uc.deps.SlackService.GetConversationHistory(ctx, msg.ChannelID(), oldest, 100)
 }
 
 // traceMessage manages a single updatable Slack message for showing agent progress using context blocks
@@ -472,7 +485,7 @@ type traceMessage struct {
 // newTraceMessage creates a new traceMessage for posting agent progress updates
 func (uc *AgentUseCase) newTraceMessage(channelID, threadTS string) *traceMessage {
 	return &traceMessage{
-		slackService: uc.slackService,
+		slackService: uc.deps.SlackService,
 		channelID:    channelID,
 		threadTS:     threadTS,
 	}
