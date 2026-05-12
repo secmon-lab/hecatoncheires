@@ -184,6 +184,39 @@ describe('InlineLongText', () => {
     expect(screen.queryByTestId('d-preview')).toBeNull()
   })
 
+  it('opens rendered Markdown links in a new tab', () => {
+    renderWithI18n(
+      <InlineLongText
+        value="See [docs](https://example.com)."
+        onSave={vi.fn()}
+        ariaLabel="desc"
+        testId="d"
+        renderMarkdown
+      />,
+    )
+    const link = screen.getByTestId('d').querySelector('a')
+    expect(link).not.toBeNull()
+    expect(link?.getAttribute('href')).toBe('https://example.com')
+    expect(link?.getAttribute('target')).toBe('_blank')
+    expect(link?.getAttribute('rel')).toBe('noopener noreferrer')
+  })
+
+  it('marks the live preview pane as a labelled region', async () => {
+    renderWithI18n(
+      <InlineLongText
+        value="hello"
+        onSave={vi.fn()}
+        ariaLabel="desc"
+        testId="d"
+        renderMarkdown
+      />,
+    )
+    fireEvent.click(screen.getByTestId('d'))
+    const preview = await screen.findByTestId('d-preview')
+    expect(preview.getAttribute('role')).toBe('region')
+    expect(preview.getAttribute('aria-label')).toBeTruthy()
+  })
+
   it('grows the textarea to fit its content in markdown mode', async () => {
     const long = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join('\n')
     renderWithI18n(

@@ -1,9 +1,18 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { type Components } from 'react-markdown'
 import styles from './Inline.module.css'
 import Button from '../Button'
 import { useTranslation } from '../../i18n'
 import { commitOnEnter, activateOnEnterOrSpace } from '../../utils/keyboard'
+
+// Open Markdown links in a new tab so navigating an embedded link does
+// not throw away the user's in-progress editor state. `noopener` /
+// `noreferrer` are required when target is `_blank`.
+const markdownComponents: Components = {
+  a: ({ node: _node, ...props }) => (
+    <a {...props} target="_blank" rel="noopener noreferrer" />
+  ),
+}
 
 interface Props {
   value: string
@@ -56,7 +65,11 @@ export default function InlineLongText({
     const ta = taRef.current
     if (!ta) return
     ta.style.height = 'auto'
-    ta.style.height = `${ta.scrollHeight}px`
+    // `box-sizing: border-box` (see Inline.module.css) makes height
+    // include the 1px top + 1px bottom borders, but `scrollHeight` does
+    // not — without the +2, content that exactly fits would re-introduce
+    // a scrollbar / one-pixel jitter on every keystroke.
+    ta.style.height = `${ta.scrollHeight + 2}px`
   }, [draft, editing, renderMarkdown])
 
   const commit = async () => {
@@ -105,13 +118,14 @@ export default function InlineLongText({
           {renderMarkdown && (
             <div
               className={`${styles.editPreview} ${styles.longTextMarkdown} ${previewIsEmpty ? styles.placeholder : ''}`}
+              role="region"
               aria-label={t('labelPreview')}
               data-testid={testId ? `${testId}-preview` : undefined}
             >
               {previewIsEmpty ? (
                 t('labelPreviewEmpty')
               ) : (
-                <ReactMarkdown>{draft}</ReactMarkdown>
+                <ReactMarkdown components={markdownComponents}>{draft}</ReactMarkdown>
               )}
             </div>
           )}
@@ -170,7 +184,7 @@ export default function InlineLongText({
       {isEmpty ? (
         placeholder || '—'
       ) : showMarkdown ? (
-        <ReactMarkdown>{value}</ReactMarkdown>
+        <ReactMarkdown components={markdownComponents}>{value}</ReactMarkdown>
       ) : (
         value
       )}
