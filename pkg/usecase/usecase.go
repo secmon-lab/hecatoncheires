@@ -1,6 +1,9 @@
 package usecase
 
 import (
+	"context"
+
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/trace"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
@@ -12,7 +15,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/draft"
-	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
 type UseCases struct {
@@ -237,7 +240,7 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 			}
 			draftUC, err := draft.New(deps, 0, 0, 0)
 			if err != nil {
-				logging.Default().Error("failed to build draft usecase", "error", err.Error())
+				errutil.Handle(context.Background(), goerr.Wrap(err, "failed to build draft usecase"), "failed to build draft usecase")
 			} else {
 				uc.MentionDraft = NewMentionDraftUseCase(repo, registry, uc.slackService, draftUC)
 			}

@@ -255,7 +255,7 @@ func cmdServe() *cli.Command {
 			}
 			defer func() {
 				if err := repo.Close(); err != nil {
-					logging.Default().Error("failed to close repository", "error", err.Error())
+					errutil.Handle(ctx, goerr.Wrap(err, "failed to close repository"), "failed to close repository")
 				}
 			}()
 
@@ -470,12 +470,13 @@ func cmdServe() *cli.Command {
 				}
 
 				// Log full stack trace for diagnostics. Client-faulted errors
-				// are logged at warn (they're expected), server faults at error.
-				wrappedErr := goerr.Wrap(err, "GraphQL error")
+				// are expected normal flow (validation, not-found, etc.) and
+				// tagged benign so they don't page anyone; server faults are
+				// reported normally.
 				if isClientError(err) {
-					logging.Default().Warn("GraphQL request rejected", "error", wrappedErr)
+					errutil.Handle(ctx, goerr.Wrap(err, "GraphQL request rejected", goerr.T(errutil.TagBenign)), "GraphQL request rejected")
 				} else {
-					logging.Default().Error("GraphQL error occurred", "error", wrappedErr)
+					errutil.Handle(ctx, goerr.Wrap(err, "GraphQL error occurred"), "GraphQL error occurred")
 				}
 
 				return gqlErr
@@ -494,9 +495,9 @@ func cmdServe() *cli.Command {
 					panicErr = goerr.New("panic occurred", goerr.V("panic", panicValue))
 				}
 
-				// Wrap and log with stack trace
+				// Wrap and report with stack trace
 				wrappedErr := goerr.Wrap(panicErr, "GraphQL panic")
-				logging.Default().Error("GraphQL panic occurred", "error", wrappedErr)
+				errutil.Handle(ctx, wrappedErr, "GraphQL panic occurred")
 
 				return wrappedErr
 			})

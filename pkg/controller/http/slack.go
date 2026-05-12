@@ -78,8 +78,7 @@ func SlackSignatureMiddleware(signingSecret string) func(http.Handler) http.Hand
 			}
 			defer func() {
 				if err := r.Body.Close(); err != nil {
-					logger := logging.From(ctx)
-					logger.Error("failed to close request body", "error", err)
+					errutil.Handle(ctx, goerr.Wrap(err, "failed to close request body"), "failed to close request body")
 				}
 			}()
 
@@ -145,8 +144,7 @@ func (h *SlackWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusOK)
 		if _, err := w.Write([]byte(r.Challenge)); err != nil {
-			logger := logging.From(ctx)
-			logger.Error("failed to write challenge response", "error", err)
+			errutil.Handle(ctx, goerr.Wrap(err, "failed to write challenge response"), "failed to write challenge response")
 		}
 		return
 
@@ -170,9 +168,10 @@ func (h *SlackWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		})
 
 	default:
-		// Unknown event type, log and return 200
-		logger := logging.From(ctx)
-		logger.Warn("unknown slack event type", "type", eventsAPIEvent.Type)
+		// Unknown event type — surface to Sentry so Slack-side schema changes
+		// or unexpected payloads are noticed early. Still ack with 200 to
+		// satisfy Slack's retry contract.
+		errutil.Handle(ctx, goerr.New("unknown slack event type", goerr.V("type", eventsAPIEvent.Type)), "unknown slack event type")
 		w.WriteHeader(http.StatusOK)
 	}
 }

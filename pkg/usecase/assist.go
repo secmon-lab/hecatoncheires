@@ -20,6 +20,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
 
@@ -106,7 +107,7 @@ func (uc *AssistUseCase) RunAssist(ctx context.Context, opts AssistOption) error
 		}
 
 		if err := uc.processWorkspace(ctx, entry, opts); err != nil {
-			logger.Error("failed to process workspace", "workspaceID", wsID, "error", err.Error())
+			errutil.Handle(ctx, goerr.Wrap(err, "failed to process workspace", goerr.V("workspaceID", wsID)), "failed to process workspace")
 		}
 	}
 
@@ -129,12 +130,11 @@ func (uc *AssistUseCase) processWorkspace(ctx context.Context, entry *model.Work
 
 	for _, c := range cases {
 		if err := uc.processCase(ctx, entry, c, opts); err != nil {
-			logger.Error("failed to process case",
-				"workspaceID", wsID,
-				"caseID", c.ID,
-				"caseTitle", c.Title,
-				"error", err.Error(),
-			)
+			errutil.Handle(ctx, goerr.Wrap(err, "failed to process case",
+				goerr.V("workspaceID", wsID),
+				goerr.V("caseID", c.ID),
+				goerr.V("caseTitle", c.Title),
+			), "failed to process case")
 			// Continue processing remaining cases
 		}
 	}
@@ -193,11 +193,10 @@ func (uc *AssistUseCase) processCase(ctx context.Context, entry *model.Workspace
 
 	// Generate and save execution log
 	if err := uc.saveAssistLog(ctx, wsID, c.ID, entry.AssistLanguage, resp); err != nil {
-		logger.Error("failed to save assist log",
-			"workspaceID", wsID,
-			"caseID", c.ID,
-			"error", err.Error(),
-		)
+		errutil.Handle(ctx, goerr.Wrap(err, "failed to save assist log",
+			goerr.V("workspaceID", wsID),
+			goerr.V("caseID", c.ID),
+		), "failed to save assist log")
 	}
 
 	return nil

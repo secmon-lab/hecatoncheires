@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/urfave/cli/v3"
 )
@@ -131,7 +133,7 @@ func (x *Logger) Configure() (func(), error) {
 		output = f
 		closer = func() {
 			if err := f.Close(); err != nil {
-				slog.Error("Failed to close log file", "error", err)
+				errutil.Handle(context.Background(), goerr.Wrap(err, "failed to close log file"), "failed to close log file")
 			}
 		}
 	}

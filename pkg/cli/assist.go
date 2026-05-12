@@ -7,6 +7,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/urfave/cli/v3"
 )
@@ -75,7 +76,7 @@ func cmdAssist() *cli.Command {
 			}
 			defer func() {
 				if err := repo.Close(); err != nil {
-					logging.Default().Error("failed to close repository", "error", err.Error())
+					errutil.Handle(ctx, goerr.Wrap(err, "failed to close repository"), "failed to close repository")
 				}
 			}()
 

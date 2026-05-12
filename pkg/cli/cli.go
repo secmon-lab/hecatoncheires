@@ -3,7 +3,9 @@ package cli
 import (
 	"context"
 
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/urfave/cli/v3"
 )
@@ -43,7 +45,7 @@ func Run(ctx context.Context, args []string, version string) error {
 	}
 
 	if err := app.Run(ctx, args); err != nil {
-		logging.Default().Error("failed to run app", "error", err)
+		errutil.Handle(ctx, goerr.Wrap(err, "failed to run app"), "failed to run app")
 		return err
 	}
 

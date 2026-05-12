@@ -14,7 +14,6 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
-	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
 
 type CaseUseCase struct {
@@ -43,10 +42,9 @@ func NewCaseUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistr
 		for _, entry := range registry.List() {
 			renderer, err := newWelcomeRenderer(entry.SlackWelcomeMessages)
 			if err != nil {
-				logging.Default().Warn("failed to build welcome renderer; skipping welcome messages",
-					"workspaceID", entry.Workspace.ID,
-					"error", err.Error(),
-				)
+				errutil.Handle(context.Background(), goerr.Wrap(err, "failed to build welcome renderer; skipping welcome messages",
+					goerr.V("workspaceID", entry.Workspace.ID),
+				), "failed to build welcome renderer")
 				continue
 			}
 			uc.welcomeRenderers[entry.Workspace.ID] = renderer
@@ -571,7 +569,10 @@ func (uc *CaseUseCase) resolveGroupMembers(ctx context.Context, groups []string,
 				if id, ok := handleToID[handle]; ok {
 					groupIDs = append(groupIDs, id)
 				} else {
-					logging.From(ctx).Warn("user group handle not found", "handle", handle)
+					// Unknown handle: usually a workspace config typo or a
+					// handle that was renamed/deleted in Slack. Surface so
+					// the operator can fix the configuration.
+					errutil.Handle(ctx, goerr.New("user group handle not found", goerr.V("handle", handle)), "user group handle not found")
 				}
 			}
 		}
@@ -607,11 +608,11 @@ func filterHumanUsers(ctx context.Context, repo interfaces.Repository, userIDs [
 
 	known, err := repo.SlackUser().GetByIDs(ctx, slackUserIDs)
 	if err != nil {
-		// On error, return all IDs to avoid data loss; log for visibility
-		logging.From(ctx).Warn("failed to get slack users for bot filtering, returning all IDs",
-			"error", err,
-			"userIDs", userIDs,
-		)
+		// On error, return all IDs to avoid data loss; report so the
+		// degraded mode is visible.
+		errutil.Handle(ctx, goerr.Wrap(err, "failed to get slack users for bot filtering, returning all IDs",
+			goerr.V("userIDs", userIDs),
+		), "failed to get slack users for bot filtering")
 		return userIDs
 	}
 

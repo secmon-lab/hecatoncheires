@@ -263,11 +263,10 @@ func (h *slackDraftHandler) Trace(ctx context.Context, line string) {
 	}
 	blocks := buildTraceContextBlocks([]string{line})
 	if _, err := h.slackService.PostThreadMessage(ctx, h.channelID, h.threadTS, blocks, line); err != nil {
-		logging.From(ctx).Error("post draft trace message",
-			"error", err.Error(),
-			"channel_id", h.channelID,
-			"thread_ts", h.threadTS,
-		)
+		errutil.Handle(ctx, goerr.Wrap(err, "post draft trace message",
+			goerr.V("channel_id", h.channelID),
+			goerr.V("thread_ts", h.threadTS),
+		), "post draft trace message failed")
 	}
 }
 
@@ -340,7 +339,6 @@ func (h *slackDraftHandler) RegisterTasks(ctx context.Context, tasks []draft.Tas
 	if len(tasks) == 0 {
 		return
 	}
-	logger := logging.From(ctx)
 	for _, ti := range tasks {
 		if ti.ID == "" {
 			continue
@@ -361,12 +359,11 @@ func (h *slackDraftHandler) RegisterTasks(ctx context.Context, tasks []draft.Tas
 		blocks := buildTraceContextBlocks([]string{line})
 		ts, err := h.slackService.PostThreadMessage(ctx, h.channelID, h.threadTS, blocks, line)
 		if err != nil {
-			logger.Error("post draft task block",
-				"error", err.Error(),
-				"task_id", ti.ID,
-				"channel_id", h.channelID,
-				"thread_ts", h.threadTS,
-			)
+			errutil.Handle(ctx, goerr.Wrap(err, "post draft task block",
+				goerr.V("task_id", ti.ID),
+				goerr.V("channel_id", h.channelID),
+				goerr.V("thread_ts", h.threadTS),
+			), "post draft task block failed")
 			continue
 		}
 		h.processingMu.Lock()
@@ -399,11 +396,10 @@ func (h *slackDraftHandler) TraceTask(ctx context.Context, taskID, line string) 
 	}
 	blocks := buildTraceContextBlocks([]string{line})
 	if err := h.slackService.UpdateMessage(ctx, h.channelID, ts, blocks, line); err != nil {
-		logging.From(ctx).Error("update draft task block",
-			"error", err.Error(),
-			"task_id", taskID,
-			"ts", ts,
-		)
+		errutil.Handle(ctx, goerr.Wrap(err, "update draft task block",
+			goerr.V("task_id", taskID),
+			goerr.V("ts", ts),
+		), "update draft task block failed")
 	}
 }
 

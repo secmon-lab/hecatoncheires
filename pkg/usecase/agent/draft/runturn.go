@@ -268,9 +268,12 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 			// rounds are firing without progress. We stay on the same
 			// roundKey so the retry line replaces the prior planning
 			// content in place.
-			logging.From(turnCtx).Warn("planner output failed validation; retrying",
-				"error", parseErr.Error(),
-			)
+			// Validation failures are expected with LLM outputs and we
+			// retry inline; tag benign so the operator still sees the line
+			// in the logs but Sentry does not page on every LLM hiccup.
+			errutil.Handle(turnCtx, goerr.Wrap(parseErr, "planner output failed validation; retrying",
+				goerr.T(errutil.TagBenign),
+			), "planner output failed validation; retrying")
 			handler.TraceRound(turnCtx, roundKey, i18n.T(turnCtx, i18n.MsgDraftTracePlannerRetry))
 			nextInput = budget.FormatPrefix() + "\n\nYour previous output failed validation: " + parseErr.Error() + ". Please re-emit a JSON object that matches the response schema."
 			continue
@@ -333,7 +336,12 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 // was retired, so the planner's only terminal actions are question /
 // materialize. Fallback is a runtime-internal failure mode.
 func (uc *UseCase) fallback(ctx context.Context, req TurnRequest, reason string) (*Result, error) {
-	logging.From(ctx).Warn("draft turn fallback", "reason", reason, "trigger_ts", req.TriggerTS)
+	// Fallback is a runtime-internal failure mode — the planner reached a
+	// state we did not design for. Surface to Sentry so we can investigate.
+	errutil.Handle(ctx, goerr.New("draft turn fallback",
+		goerr.V("reason", reason),
+		goerr.V("trigger_ts", req.TriggerTS),
+	), "draft turn fallback")
 	return &Result{Status: StatusFallback, FallbackReason: reason}, nil
 }
 

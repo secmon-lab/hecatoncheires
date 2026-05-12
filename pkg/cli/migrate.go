@@ -5,6 +5,7 @@ import (
 
 	"github.com/m-mizutani/fireconf"
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/urfave/cli/v3"
 )
@@ -61,7 +62,7 @@ func cmdMigrate() *cli.Command {
 			}
 			defer func() {
 				if err := client.Close(); err != nil {
-					logger.Error("failed to close fireconf client", "error", err.Error())
+					errutil.Handle(ctx, goerr.Wrap(err, "failed to close fireconf client"), "failed to close fireconf client")
 				}
 			}()
 

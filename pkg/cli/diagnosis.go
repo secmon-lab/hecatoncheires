@@ -10,6 +10,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/diagnosis"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/urfave/cli/v3"
 )
@@ -89,7 +90,7 @@ func cmdFixUnsentAction() *cli.Command {
 			}
 			defer func() {
 				if closeErr := repo.Close(); closeErr != nil {
-					logger.Error("failed to close repository", slog.String("error", closeErr.Error()))
+					errutil.Handle(ctx, goerr.Wrap(closeErr, "failed to close repository"), "failed to close repository")
 				}
 			}()
 

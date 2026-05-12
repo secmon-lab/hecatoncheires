@@ -97,10 +97,11 @@ func NewAgentUseCase(deps AgentDeps) *AgentUseCase {
 		}
 		cb, err := casebound.New(commonDeps)
 		if err != nil {
-			// New only fails on missing deps which we guarded above, so
-			// surfacing here would indicate a wiring bug. Log loud and
-			// leave casebound nil; HandleAgentMention will short-circuit.
-			logging.Default().Error("failed to build casebound usecase", "error", err.Error())
+			// casebound.New only fails on missing deps that we already
+			// guarded above, so reaching here means a wiring bug. Surface
+			// to Sentry and leave casebound nil; HandleAgentMention will
+			// short-circuit.
+			errutil.Handle(context.Background(), goerr.Wrap(err, "failed to build casebound usecase"), "failed to build casebound usecase")
 		} else {
 			uc.casebound = cb
 		}
@@ -156,7 +157,11 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 	// Post the per-mention session start banner using the Session.ID so
 	// the overflow menu surfaces the persistent identifier.
 	if err := uc.postSessionStart(ctx, msg.ChannelID(), threadTS, session.ID); err != nil {
-		logger.Error("failed to post session start", "error", err.Error())
+		errutil.Handle(ctx, goerr.Wrap(err, "failed to post session start",
+			goerr.V("session_id", session.ID),
+			goerr.V("channel_id", msg.ChannelID()),
+			goerr.V("thread_ts", threadTS),
+		), "failed to post session start")
 	}
 
 	// Fetch case context (actions) every turn — these may have been mutated
@@ -522,7 +527,6 @@ func (tm *traceMessage) update(ctx context.Context, line string) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	logger := logging.From(ctx)
 	tm.lines = append(tm.lines, line)
 	blocks := tm.buildContextBlocks()
 	fallback := strings.Join(tm.lines, "\n")
@@ -530,13 +534,19 @@ func (tm *traceMessage) update(ctx context.Context, line string) {
 	if tm.messageTS == "" {
 		ts, err := tm.slackService.PostThreadMessage(ctx, tm.channelID, tm.threadTS, blocks, fallback)
 		if err != nil {
-			logger.Error("failed to post trace message", "error", err.Error())
+			errutil.Handle(ctx, goerr.Wrap(err, "failed to post trace message",
+				goerr.V("channel_id", tm.channelID),
+				goerr.V("thread_ts", tm.threadTS),
+			), "failed to post trace message")
 			return
 		}
 		tm.messageTS = ts
 	} else {
 		if err := tm.slackService.UpdateMessage(ctx, tm.channelID, tm.messageTS, blocks, fallback); err != nil {
-			logger.Error("failed to update trace message", "error", err.Error())
+			errutil.Handle(ctx, goerr.Wrap(err, "failed to update trace message",
+				goerr.V("channel_id", tm.channelID),
+				goerr.V("message_ts", tm.messageTS),
+			), "failed to update trace message")
 		}
 	}
 }
