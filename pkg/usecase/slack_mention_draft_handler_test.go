@@ -10,6 +10,7 @@ import (
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
+	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/draft"
 	goslack "github.com/slack-go/slack"
@@ -42,7 +43,7 @@ func (s *traceCapture) calls() []traceCall {
 	return out
 }
 
-func (s *traceCapture) PostThreadMessage(_ context.Context, channelID, _ string, blocks []goslack.Block, text string) (string, error) {
+func (s *traceCapture) PostThreadMessage(_ context.Context, channelID, _ string, blocks []goslack.Block, text string, _ ...slacksvc.PostThreadOption) (string, error) {
 	// Use a deterministic, monotonically-increasing TS per post so
 	// per-task vs. phase-trace messages can be distinguished by the
 	// test without relying on wall-clock timing.

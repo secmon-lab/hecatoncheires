@@ -70,7 +70,7 @@ func (m *mockSlackServiceForCommand) GetConversationHistory(_ context.Context, _
 func (m *mockSlackServiceForCommand) PostThreadReply(_ context.Context, _, _, _ string) (string, error) {
 	return "", nil
 }
-func (m *mockSlackServiceForCommand) PostThreadMessage(_ context.Context, _, _ string, _ []goslack.Block, _ string) (string, error) {
+func (m *mockSlackServiceForCommand) PostThreadMessage(_ context.Context, _, _ string, _ []goslack.Block, _ string, _ ...slacksvc.PostThreadOption) (string, error) {
 	return "", nil
 }
 func (m *mockSlackServiceForCommand) GetBotUserID(_ context.Context) (string, error) {

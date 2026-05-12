@@ -143,7 +143,7 @@ func (m *mockSlackService) PostThreadReply(ctx context.Context, channelID string
 	return "", nil
 }
 
-func (m *mockSlackService) PostThreadMessage(ctx context.Context, channelID string, threadTS string, blocks []goslack.Block, text string) (string, error) {
+func (m *mockSlackService) PostThreadMessage(ctx context.Context, channelID string, threadTS string, blocks []goslack.Block, text string, opts ...slack.PostThreadOption) (string, error) {
 	return "", nil
 }
 

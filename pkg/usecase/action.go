@@ -675,7 +675,23 @@ func (uc *ActionUseCase) postActionChangeNotification(ctx context.Context, works
 			goslack.NewTextBlockObject(goslack.MarkdownType, body, false, false),
 		),
 	}
-	if _, postErr := uc.slackService.PostThreadMessage(ctx, caseModel.SlackChannelID, after.SlackMessageTS, blocks, body); postErr != nil {
+
+	var kinds []types.ActionEventKind
+	if before.Title != after.Title {
+		kinds = append(kinds, types.ActionEventTitleChanged)
+	}
+	if before.Status != after.Status {
+		kinds = append(kinds, types.ActionEventStatusChanged)
+	}
+	if before.AssigneeID != after.AssigneeID {
+		kinds = append(kinds, types.ActionEventAssigneeChanged)
+	}
+	var opts []slack.PostThreadOption
+	if shouldBroadcastAnyActionEvent(kinds...) {
+		opts = append(opts, slack.WithBroadcastToChannel())
+	}
+
+	if _, postErr := uc.slackService.PostThreadMessage(ctx, caseModel.SlackChannelID, after.SlackMessageTS, blocks, body, opts...); postErr != nil {
 		errutil.Handle(ctx, postErr, "failed to post action change notification")
 	}
 }

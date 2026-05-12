@@ -184,10 +184,20 @@ When an action is created in Hecatoncheires, a notification message is automatic
    - **Completed**: Change the action status to COMPLETED
 4. After a button click, the Slack message is updated to reflect the new state
 
-In addition, ActionStep CRUD events (add / remove / done / reopen /
-rename) post a context-block thread reply to the Action's primary Slack
-message — see [docs/action-steps.md](./action-steps.md) for the full
-list of events and notification text.
+In addition, Action change events (status / assignee / title edits) and
+ActionStep CRUD events (add / remove / done / reopen / rename) post a
+context-block thread reply to the Action's primary Slack message — see
+[docs/action-steps.md](./action-steps.md) for the full list of step events
+and notification text.
+
+Status changes, assignee changes, and every Step CRUD event are additionally
+posted with `reply_broadcast=true` so they appear inside the Action's
+thread AND in the parent Case channel ("Also sent to #channel"). This lets
+channel watchers see progress on important transitions without expanding
+every thread. Title-only edits and `ARCHIVED` / `UNARCHIVED` events stay
+thread-only. The broadcast set is centralised in `broadcastableActionEvents`
+(`pkg/usecase/action_broadcast.go`); adding a kind there enables broadcasting
+from every notify path at once.
 
 ### Interactivity Setup
 

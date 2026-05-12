@@ -70,7 +70,7 @@ func (m *agentTestSlackService) PostThreadReply(ctx context.Context, channelID s
 	return "1234567890.trace01", nil
 }
 
-func (m *agentTestSlackService) PostThreadMessage(ctx context.Context, channelID string, threadTS string, blocks []goslack.Block, text string) (string, error) {
+func (m *agentTestSlackService) PostThreadMessage(ctx context.Context, channelID string, threadTS string, blocks []goslack.Block, text string, opts ...slack.PostThreadOption) (string, error) {
 	m.postedMessages = append(m.postedMessages, agentPostedMessage{
 		ChannelID: channelID,
 		ThreadTS:  threadTS,

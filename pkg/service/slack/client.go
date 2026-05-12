@@ -457,17 +457,24 @@ func (c *client) PostThreadReply(ctx context.Context, channelID string, threadTS
 	return ts, nil
 }
 
-// PostThreadMessage posts a Block Kit message as a thread reply and returns the message timestamp
-func (c *client) PostThreadMessage(ctx context.Context, channelID string, threadTS string, blocks []slack.Block, text string) (string, error) {
-	_, ts, err := c.api.PostMessageContext(ctx, channelID,
+// PostThreadMessage posts a Block Kit message as a thread reply and returns the message timestamp.
+// Optional PostThreadOption values (e.g. WithBroadcastToChannel) tweak the underlying chat.postMessage call.
+func (c *client) PostThreadMessage(ctx context.Context, channelID string, threadTS string, blocks []slack.Block, text string, opts ...PostThreadOption) (string, error) {
+	cfg := ApplyPostThreadOptions(opts...)
+	msgOpts := []slack.MsgOption{
 		slack.MsgOptionBlocks(blocks...),
 		slack.MsgOptionText(text, false),
 		slack.MsgOptionTS(threadTS),
-	)
+	}
+	if cfg.Broadcast {
+		msgOpts = append(msgOpts, slack.MsgOptionBroadcast())
+	}
+	_, ts, err := c.api.PostMessageContext(ctx, channelID, msgOpts...)
 	if err != nil {
 		return "", goerr.Wrap(err, "failed to post thread message",
 			goerr.V("channel_id", channelID),
-			goerr.V("thread_ts", threadTS))
+			goerr.V("thread_ts", threadTS),
+			goerr.V("broadcast", cfg.Broadcast))
 	}
 	return ts, nil
 }

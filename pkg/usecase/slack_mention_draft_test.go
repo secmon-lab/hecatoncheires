@@ -530,7 +530,7 @@ func (m *collectorOnlyMockSlack) PostThreadReply(_ context.Context, _ string, _ 
 	m.threadReplies = append(m.threadReplies, text)
 	return "ts-reply", nil
 }
-func (m *collectorOnlyMockSlack) PostThreadMessage(_ context.Context, channelID string, _ string, blocks []goslack.Block, text string) (string, error) {
+func (m *collectorOnlyMockSlack) PostThreadMessage(_ context.Context, channelID string, _ string, blocks []goslack.Block, text string, _ ...slacksvc.PostThreadOption) (string, error) {
 	if len(blocks) > 0 {
 		snaps := make([]slackBlockSnapshot, len(blocks))
 		m.threadBlockPosts = append(m.threadBlockPosts, ephemeralBlockPost{
