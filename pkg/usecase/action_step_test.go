@@ -11,6 +11,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
+	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	goslack "github.com/slack-go/slack"
 )
@@ -27,14 +28,17 @@ type stepSlackCall struct {
 	threadTS  string
 	text      string
 	blocks    []goslack.Block
+	broadcast bool
 }
 
-func (f *stepSlackFake) PostThreadMessage(ctx context.Context, channelID, threadTS string, blocks []goslack.Block, text string) (string, error) {
+func (f *stepSlackFake) PostThreadMessage(ctx context.Context, channelID, threadTS string, blocks []goslack.Block, text string, opts ...slacksvc.PostThreadOption) (string, error) {
+	cfg := slacksvc.ApplyPostThreadOptions(opts...)
 	f.calls = append(f.calls, stepSlackCall{
 		channelID: channelID,
 		threadTS:  threadTS,
 		text:      text,
 		blocks:    blocks,
+		broadcast: cfg.Broadcast,
 	})
 	return "thread-ts", nil
 }
@@ -127,6 +131,7 @@ func TestActionStepUseCase_Add(t *testing.T) {
 		gt.Value(t, f.slack.calls[0].threadTS).Equal(f.action.SlackMessageTS)
 		gt.String(t, f.slack.calls[0].text).Contains("collect logs")
 		gt.String(t, f.slack.calls[0].text).Contains("added step")
+		gt.Bool(t, f.slack.calls[0].broadcast).True()
 	})
 
 	t.Run("rejects empty title", func(t *testing.T) {
@@ -196,6 +201,7 @@ func TestActionStepUseCase_SetDone(t *testing.T) {
 		gt.Value(t, done.DoneBy).Equal(f.caseUserID)
 		gt.Array(t, f.slack.calls).Length(1).Required()
 		gt.String(t, f.slack.calls[0].text).Contains("completed step")
+		gt.Bool(t, f.slack.calls[0].broadcast).True()
 
 		f.slack.calls = nil
 		reopened, err := f.stepUC.SetDone(ctx, usecase.SetActionStepDoneInput{
@@ -207,6 +213,7 @@ func TestActionStepUseCase_SetDone(t *testing.T) {
 		gt.Value(t, reopened.DoneAt).Nil()
 		gt.Array(t, f.slack.calls).Length(1).Required()
 		gt.String(t, f.slack.calls[0].text).Contains("reopened step")
+		gt.Bool(t, f.slack.calls[0].broadcast).True()
 	})
 
 	t.Run("no-op when state is unchanged", func(t *testing.T) {
@@ -260,6 +267,7 @@ func TestActionStepUseCase_Rename(t *testing.T) {
 		gt.String(t, f.slack.calls[0].text).Contains("renamed step")
 		gt.String(t, f.slack.calls[0].text).Contains("original")
 		gt.String(t, f.slack.calls[0].text).Contains("updated")
+		gt.Bool(t, f.slack.calls[0].broadcast).True()
 	})
 
 	t.Run("no-op when title is unchanged after trim", func(t *testing.T) {
@@ -314,6 +322,7 @@ func TestActionStepUseCase_Delete(t *testing.T) {
 		gt.Array(t, f.slack.calls).Length(1).Required()
 		gt.String(t, f.slack.calls[0].text).Contains("removed step")
 		gt.String(t, f.slack.calls[0].text).Contains("to-delete")
+		gt.Bool(t, f.slack.calls[0].broadcast).True()
 	})
 
 	t.Run("missing step returns ErrActionStepNotFound", func(t *testing.T) {

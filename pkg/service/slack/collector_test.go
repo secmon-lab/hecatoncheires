@@ -95,7 +95,7 @@ func (f *fakeSlackService) UpdateMessage(context.Context, string, string, []gosl
 func (f *fakeSlackService) PostThreadReply(context.Context, string, string, string) (string, error) {
 	panic("unexpected PostThreadReply")
 }
-func (f *fakeSlackService) PostThreadMessage(context.Context, string, string, []goslack.Block, string) (string, error) {
+func (f *fakeSlackService) PostThreadMessage(context.Context, string, string, []goslack.Block, string, ...slacksvc.PostThreadOption) (string, error) {
 	panic("unexpected PostThreadMessage")
 }
 func (f *fakeSlackService) GetBotUserID(context.Context) (string, error) {

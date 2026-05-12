@@ -77,7 +77,8 @@ type Service interface {
 	PostThreadReply(ctx context.Context, channelID string, threadTS string, text string) (string, error)
 
 	// PostThreadMessage posts a Block Kit message as a thread reply and returns the message timestamp.
-	PostThreadMessage(ctx context.Context, channelID string, threadTS string, blocks []slack.Block, text string) (string, error)
+	// Accepts optional PostThreadOption values (e.g. WithBroadcastToChannel) to tweak posting behavior.
+	PostThreadMessage(ctx context.Context, channelID string, threadTS string, blocks []slack.Block, text string, opts ...PostThreadOption) (string, error)
 
 	// GetBotUserID retrieves the bot's own user ID via auth.test API.
 	// The result is cached permanently (sync.Once).
@@ -109,6 +110,35 @@ type Service interface {
 
 	// GetPermalink retrieves the public permalink to a specific message.
 	GetPermalink(ctx context.Context, channelID string, messageTS string) (string, error)
+}
+
+// PostThreadOptions captures the resolved configuration produced by applying
+// PostThreadOption values. It is exposed so test fakes / callers can apply the
+// options themselves and observe what was requested (Broadcast, etc).
+type PostThreadOptions struct {
+	Broadcast bool
+}
+
+// PostThreadOption tweaks how a threaded reply is posted via PostThreadMessage.
+// Use the With* constructors below; do not construct values manually.
+type PostThreadOption func(*PostThreadOptions)
+
+// ApplyPostThreadOptions walks the given options and returns the resulting
+// configuration. Used internally by the client and by test fakes that need
+// to observe what options were requested.
+func ApplyPostThreadOptions(opts ...PostThreadOption) PostThreadOptions {
+	var cfg PostThreadOptions
+	for _, o := range opts {
+		o(&cfg)
+	}
+	return cfg
+}
+
+// WithBroadcastToChannel makes the threaded reply also surface in the
+// parent channel ("Also sent to #channel" label), keeping the message
+// inside the thread while raising its visibility to all members.
+func WithBroadcastToChannel() PostThreadOption {
+	return func(o *PostThreadOptions) { o.Broadcast = true }
 }
 
 // UserGroup represents a Slack user group

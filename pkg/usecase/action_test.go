@@ -14,6 +14,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
+	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	goslack "github.com/slack-go/slack"
 )
@@ -703,19 +704,22 @@ func TestActionUseCase_PostSlackMessageToAction(t *testing.T) {
 // PostThreadMessage calls used by change-notification tests.
 type actionTestSlackMockExt struct {
 	actionTestSlackMock
-	postThreadCalled  bool
-	postThreadChannel string
-	postThreadTS      string
-	postThreadBlocks  []goslack.Block
-	postThreadText    string
+	postThreadCalled    bool
+	postThreadChannel   string
+	postThreadTS        string
+	postThreadBlocks    []goslack.Block
+	postThreadText      string
+	postThreadBroadcast bool
 }
 
-func (m *actionTestSlackMockExt) PostThreadMessage(ctx context.Context, channelID string, threadTS string, blocks []goslack.Block, text string) (string, error) {
+func (m *actionTestSlackMockExt) PostThreadMessage(ctx context.Context, channelID string, threadTS string, blocks []goslack.Block, text string, opts ...slacksvc.PostThreadOption) (string, error) {
+	cfg := slacksvc.ApplyPostThreadOptions(opts...)
 	m.postThreadCalled = true
 	m.postThreadChannel = channelID
 	m.postThreadTS = threadTS
 	m.postThreadBlocks = blocks
 	m.postThreadText = text
+	m.postThreadBroadcast = cfg.Broadcast
 	return "thread-reply-ts", nil
 }
 
@@ -948,6 +952,72 @@ func TestActionUseCase_UpdateAction_SlackSync(t *testing.T) {
 		for _, d := range diffs[1:] {
 			gt.Bool(t, d.CreatedAt.Equal(ts)).True()
 		}
+	})
+
+	t.Run("status change is broadcast to parent channel", func(t *testing.T) {
+		_, actionUC, mock, action := setup(t)
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		newStatus := types.ActionStatusInProgress
+		_, err := actionUC.UpdateAction(ctx, testWorkspaceID, usecase.UpdateActionInput{
+			ID:        action.ID,
+			Status:    &newStatus,
+			SlackSync: usecase.SlackSyncFull,
+			Actor:     usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: "UDOER"},
+		})
+		gt.NoError(t, err).Required()
+		gt.Bool(t, mock.postThreadCalled).True()
+		gt.Bool(t, mock.postThreadBroadcast).True()
+	})
+
+	t.Run("assignee change is broadcast to parent channel", func(t *testing.T) {
+		_, actionUC, mock, action := setup(t)
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		newAssignee := "U999"
+		_, err := actionUC.UpdateAction(ctx, testWorkspaceID, usecase.UpdateActionInput{
+			ID:         action.ID,
+			AssigneeID: &newAssignee,
+			SlackSync:  usecase.SlackSyncFull,
+			Actor:      usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: "UDOER"},
+		})
+		gt.NoError(t, err).Required()
+		gt.Bool(t, mock.postThreadCalled).True()
+		gt.Bool(t, mock.postThreadBroadcast).True()
+	})
+
+	t.Run("title-only change is not broadcast", func(t *testing.T) {
+		_, actionUC, mock, action := setup(t)
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		newTitle := "Renamed action"
+		_, err := actionUC.UpdateAction(ctx, testWorkspaceID, usecase.UpdateActionInput{
+			ID:        action.ID,
+			Title:     &newTitle,
+			SlackSync: usecase.SlackSyncFull,
+			Actor:     usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: "UDOER"},
+		})
+		gt.NoError(t, err).Required()
+		gt.Bool(t, mock.postThreadCalled).True()
+		gt.Bool(t, mock.postThreadBroadcast).False()
+	})
+
+	t.Run("mixed diff containing a broadcast kind is broadcast", func(t *testing.T) {
+		_, actionUC, mock, action := setup(t)
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		newTitle := "Renamed"
+		newStatus := types.ActionStatusInProgress
+		_, err := actionUC.UpdateAction(ctx, testWorkspaceID, usecase.UpdateActionInput{
+			ID:        action.ID,
+			Title:     &newTitle,
+			Status:    &newStatus,
+			SlackSync: usecase.SlackSyncFull,
+			Actor:     usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: "UDOER"},
+		})
+		gt.NoError(t, err).Required()
+		gt.Bool(t, mock.postThreadCalled).True()
+		gt.Bool(t, mock.postThreadBroadcast).True()
 	})
 }
 

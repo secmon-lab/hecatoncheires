@@ -351,7 +351,11 @@ func (uc *ActionStepUseCase) notifyStepEvent(ctx context.Context, action *model.
 			goslack.NewTextBlockObject(goslack.MarkdownType, msg, false, false),
 		),
 	}
-	if _, postErr := uc.slackService.PostThreadMessage(ctx, caseModel.SlackChannelID, action.SlackMessageTS, blocks, msg); postErr != nil {
+	var opts []slack.PostThreadOption
+	if shouldBroadcastActionEvent(kind) {
+		opts = append(opts, slack.WithBroadcastToChannel())
+	}
+	if _, postErr := uc.slackService.PostThreadMessage(ctx, caseModel.SlackChannelID, action.SlackMessageTS, blocks, msg, opts...); postErr != nil {
 		errutil.Handle(ctx, postErr, "failed to post action step notification")
 	}
 }

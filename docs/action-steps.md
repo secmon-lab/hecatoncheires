@@ -33,6 +33,13 @@ so the Action's Activity feed and the Slack thread stay aligned:
 | Step reverted to ongoing | `STEP_REOPENED`         | `:arrow_backward: {actor} reopened step "{title}"`  |
 | Step renamed           | `STEP_TITLE_CHANGED`      | `:pencil2: {actor} renamed step "{old}" -> "{new}"` |
 
+All Step lifecycle notifications are posted with `reply_broadcast=true`, so
+they appear inside the Action's thread AND surface in the parent Case channel
+as "Also sent to #channel". This keeps channel watchers aware of progress
+without forcing them to expand every Action thread. The set of broadcast
+events is centralised in `broadcastableActionEvents` (`pkg/usecase/action_broadcast.go`)
+— add a kind there to opt it into broadcasting from every notify path at once.
+
 Both the Activity record and the Slack post are best-effort: if either
 fails, the underlying Step CRUD still succeeds and the failure is reported
 through `errutil.Handle` (Sentry / structured log) rather than rolled back.

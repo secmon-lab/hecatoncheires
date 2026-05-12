@@ -63,6 +63,14 @@ func WelcomeRendererRenderForTest(r *welcomeRenderer, ctx welcomeContext) ([]str
 	return r.Render(ctx)
 }
 
+// ShouldBroadcastActionEventForTest exposes shouldBroadcastActionEvent
+// so external tests can verify the broadcast set membership.
+var ShouldBroadcastActionEventForTest = shouldBroadcastActionEvent
+
+// ShouldBroadcastAnyActionEventForTest exposes shouldBroadcastAnyActionEvent
+// so external tests can verify multi-kind broadcast judgement.
+var ShouldBroadcastAnyActionEventForTest = shouldBroadcastAnyActionEvent
+
 // Type aliases for testing
 type GitHubPullRequest = githubsvc.PullRequest
 type GitHubIssue = githubsvc.Issue
