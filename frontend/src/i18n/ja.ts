@@ -48,6 +48,8 @@ export const ja: Messages = {
   // Common labels
   labelTitle: 'タイトル',
   labelDescription: '説明',
+  labelPreview: 'プレビュー',
+  labelPreviewEmpty: 'プレビューする内容がありません',
   labelAssignees: '担当者',
   labelAssignee: '担当者',
   labelStatus: 'ステータス',

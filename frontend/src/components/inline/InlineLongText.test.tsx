@@ -97,4 +97,142 @@ describe('InlineLongText', () => {
     // Still in display mode — IME composition must not trigger edit activation.
     expect(screen.queryByTestId('d-input')).toBeNull()
   })
+
+  it('renders the value as Markdown when renderMarkdown is set', () => {
+    const md = '## Heading\n\n- one\n- **two**\n'
+    renderWithI18n(
+      <InlineLongText
+        value={md}
+        onSave={vi.fn()}
+        ariaLabel="desc"
+        testId="d"
+        renderMarkdown
+      />,
+    )
+    const display = screen.getByTestId('d')
+    // Heading and list items rendered as proper elements, not raw text.
+    expect(display.querySelector('h2')?.textContent).toBe('Heading')
+    expect(display.querySelectorAll('li')).toHaveLength(2)
+    expect(display.querySelector('strong')?.textContent).toBe('two')
+    // No raw markdown markers leak through.
+    expect(display.textContent).not.toContain('##')
+    expect(display.textContent).not.toContain('**')
+  })
+
+  it('still enters edit mode on click when renderMarkdown is set', async () => {
+    renderWithI18n(
+      <InlineLongText
+        value="## Title"
+        onSave={vi.fn()}
+        ariaLabel="desc"
+        testId="d"
+        renderMarkdown
+      />,
+    )
+    fireEvent.click(screen.getByTestId('d'))
+    // Editor shows the *raw* markdown source, not the rendered HTML.
+    const ta = (await screen.findByTestId('d-input')) as HTMLTextAreaElement
+    expect(ta.value).toBe('## Title')
+  })
+
+  it('shows placeholder (not rendered markdown) when value is empty', () => {
+    renderWithI18n(
+      <InlineLongText
+        value=""
+        onSave={vi.fn()}
+        ariaLabel="desc"
+        placeholder="Add desc"
+        testId="d"
+        renderMarkdown
+      />,
+    )
+    const display = screen.getByTestId('d')
+    expect(display).toHaveTextContent('Add desc')
+    expect(display.querySelector('h1, h2, h3, p')).toBeNull()
+  })
+
+  it('shows a live Markdown preview alongside the editor in markdown mode', async () => {
+    renderWithI18n(
+      <InlineLongText
+        value="## Old"
+        onSave={vi.fn()}
+        ariaLabel="desc"
+        testId="d"
+        renderMarkdown
+      />,
+    )
+    fireEvent.click(screen.getByTestId('d'))
+    const ta = (await screen.findByTestId('d-input')) as HTMLTextAreaElement
+    // Initial preview reflects the existing value.
+    const preview = screen.getByTestId('d-preview')
+    expect(preview.querySelector('h2')?.textContent).toBe('Old')
+
+    fireEvent.change(ta, { target: { value: '# New title\n\n- item' } })
+
+    await waitFor(() => {
+      expect(preview.querySelector('h1')?.textContent).toBe('New title')
+    })
+    expect(preview.querySelectorAll('li')).toHaveLength(1)
+  })
+
+  it('does NOT render a preview pane in plain-text mode', async () => {
+    renderWithI18n(
+      <InlineLongText value="hello" onSave={vi.fn()} ariaLabel="desc" testId="d" />,
+    )
+    fireEvent.click(screen.getByTestId('d'))
+    await screen.findByTestId('d-input')
+    expect(screen.queryByTestId('d-preview')).toBeNull()
+  })
+
+  it('opens rendered Markdown links in a new tab', () => {
+    renderWithI18n(
+      <InlineLongText
+        value="See [docs](https://example.com)."
+        onSave={vi.fn()}
+        ariaLabel="desc"
+        testId="d"
+        renderMarkdown
+      />,
+    )
+    const link = screen.getByTestId('d').querySelector('a')
+    expect(link).not.toBeNull()
+    expect(link?.getAttribute('href')).toBe('https://example.com')
+    expect(link?.getAttribute('target')).toBe('_blank')
+    expect(link?.getAttribute('rel')).toBe('noopener noreferrer')
+  })
+
+  it('marks the live preview pane as a labelled region', async () => {
+    renderWithI18n(
+      <InlineLongText
+        value="hello"
+        onSave={vi.fn()}
+        ariaLabel="desc"
+        testId="d"
+        renderMarkdown
+      />,
+    )
+    fireEvent.click(screen.getByTestId('d'))
+    const preview = await screen.findByTestId('d-preview')
+    expect(preview.getAttribute('role')).toBe('region')
+    expect(preview.getAttribute('aria-label')).toBeTruthy()
+  })
+
+  it('grows the textarea to fit its content in markdown mode', async () => {
+    const long = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join('\n')
+    renderWithI18n(
+      <InlineLongText
+        value={long}
+        onSave={vi.fn()}
+        ariaLabel="desc"
+        testId="d"
+        renderMarkdown
+      />,
+    )
+    fireEvent.click(screen.getByTestId('d'))
+    const ta = (await screen.findByTestId('d-input')) as HTMLTextAreaElement
+    // jsdom reports scrollHeight as 0, so we can't assert on real pixels.
+    // What we can assert: the auto-grow effect set an explicit inline
+    // height (instead of leaving it at the CSS default).
+    expect(ta.style.height).not.toBe('')
+  })
 })

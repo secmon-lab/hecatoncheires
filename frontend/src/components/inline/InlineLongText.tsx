@@ -1,8 +1,18 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import ReactMarkdown, { type Components } from 'react-markdown'
 import styles from './Inline.module.css'
 import Button from '../Button'
 import { useTranslation } from '../../i18n'
 import { commitOnEnter, activateOnEnterOrSpace } from '../../utils/keyboard'
+
+// Open Markdown links in a new tab so navigating an embedded link does
+// not throw away the user's in-progress editor state. `noopener` /
+// `noreferrer` are required when target is `_blank`.
+const markdownComponents: Components = {
+  a: ({ node: _node, ...props }) => (
+    <a {...props} target="_blank" rel="noopener noreferrer" />
+  ),
+}
 
 interface Props {
   value: string
@@ -11,6 +21,9 @@ interface Props {
   ariaLabel: string
   disabled?: boolean
   testId?: string
+  // When true, render the (read-only) value as Markdown. The textarea
+  // used in edit mode is unchanged — users still author plain Markdown.
+  renderMarkdown?: boolean
 }
 
 // Multi-line inline-editable text. Click to enter edit mode (textarea +
@@ -22,6 +35,7 @@ export default function InlineLongText({
   ariaLabel,
   disabled,
   testId,
+  renderMarkdown,
 }: Props) {
   const { t } = useTranslation()
   const [editing, setEditing] = useState(false)
@@ -42,6 +56,21 @@ export default function InlineLongText({
       })
     }
   }, [editing])
+
+  // For the Markdown-enabled long-text editor, auto-grow the textarea so
+  // entering edit mode never collapses a tall description back to the
+  // default min-height. (Plain-text mode keeps its original behavior.)
+  useLayoutEffect(() => {
+    if (!editing || !renderMarkdown) return
+    const ta = taRef.current
+    if (!ta) return
+    ta.style.height = 'auto'
+    // `box-sizing: border-box` (see Inline.module.css) makes height
+    // include the 1px top + 1px bottom borders, but `scrollHeight` does
+    // not — without the +2, content that exactly fits would re-introduce
+    // a scrollbar / one-pixel jitter on every keystroke.
+    ta.style.height = `${ta.scrollHeight + 2}px`
+  }, [draft, editing, renderMarkdown])
 
   const commit = async () => {
     if (draft === value) {
@@ -65,22 +94,42 @@ export default function InlineLongText({
   }
 
   if (editing) {
+    const textareaClass = renderMarkdown
+      ? `${styles.textarea} ${styles.textareaTall}`
+      : styles.textarea
+    const previewIsEmpty = draft.trim() === ''
     return (
       <div data-testid={testId ? `${testId}-editor` : undefined}>
-        <textarea
-          ref={taRef}
-          className={styles.textarea}
-          value={draft}
-          aria-label={ariaLabel}
-          disabled={saving}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={commitOnEnter({
-            onCommit: () => void commit(),
-            onCancel: cancel,
-            requireModifier: true,
-          })}
-          data-testid={testId ? `${testId}-input` : undefined}
-        />
+        <div className={renderMarkdown ? styles.editSplit : undefined}>
+          <textarea
+            ref={taRef}
+            className={textareaClass}
+            value={draft}
+            aria-label={ariaLabel}
+            disabled={saving}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={commitOnEnter({
+              onCommit: () => void commit(),
+              onCancel: cancel,
+              requireModifier: true,
+            })}
+            data-testid={testId ? `${testId}-input` : undefined}
+          />
+          {renderMarkdown && (
+            <div
+              className={`${styles.editPreview} ${styles.longTextMarkdown} ${previewIsEmpty ? styles.placeholder : ''}`}
+              role="region"
+              aria-label={t('labelPreview')}
+              data-testid={testId ? `${testId}-preview` : undefined}
+            >
+              {previewIsEmpty ? (
+                t('labelPreviewEmpty')
+              ) : (
+                <ReactMarkdown components={markdownComponents}>{draft}</ReactMarkdown>
+              )}
+            </div>
+          )}
+        </div>
         <div className={styles.editFooter}>
           <Button
             variant="ghost"
@@ -106,13 +155,22 @@ export default function InlineLongText({
   }
 
   const isEmpty = !value
+  const showMarkdown = renderMarkdown && !isEmpty
+  const classes = [
+    styles.longTextDisplay,
+    disabled ? styles.disabled : '',
+    isEmpty ? styles.placeholder : '',
+    showMarkdown ? styles.longTextMarkdown : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
   return (
     <div
       role="button"
       tabIndex={disabled ? -1 : 0}
       aria-label={ariaLabel}
       aria-disabled={disabled || undefined}
-      className={`${styles.longTextDisplay} ${disabled ? styles.disabled : ''} ${isEmpty ? styles.placeholder : ''}`}
+      className={classes}
       onClick={() => {
         if (!disabled) setEditing(true)
       }}
@@ -123,7 +181,13 @@ export default function InlineLongText({
       }
       data-testid={testId}
     >
-      {isEmpty ? placeholder || '—' : value}
+      {isEmpty ? (
+        placeholder || '—'
+      ) : showMarkdown ? (
+        <ReactMarkdown components={markdownComponents}>{value}</ReactMarkdown>
+      ) : (
+        value
+      )}
     </div>
   )
 }

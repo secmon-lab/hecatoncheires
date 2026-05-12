@@ -386,6 +386,7 @@ export default function CaseDetail() {
               placeholder={t('placeholderAddDescription')}
               disabled={updating}
               testId="case-description"
+              renderMarkdown
             />
           </section>
 

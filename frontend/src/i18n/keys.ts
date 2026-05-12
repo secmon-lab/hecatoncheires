@@ -46,6 +46,8 @@ export const msgKeys = {
   // Common labels
   labelTitle: 'labelTitle',
   labelDescription: 'labelDescription',
+  labelPreview: 'labelPreview',
+  labelPreviewEmpty: 'labelPreviewEmpty',
   labelAssignees: 'labelAssignees',
   labelAssignee: 'labelAssignee',
   labelStatus: 'labelStatus',

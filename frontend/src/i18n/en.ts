@@ -48,6 +48,8 @@ export const en: Messages = {
   // Common labels
   labelTitle: 'Title',
   labelDescription: 'Description',
+  labelPreview: 'Preview',
+  labelPreviewEmpty: 'Nothing to preview',
   labelAssignees: 'Assignees',
   labelAssignee: 'Assignee',
   labelStatus: 'Status',
