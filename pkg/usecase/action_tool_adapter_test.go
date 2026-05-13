@@ -92,7 +92,7 @@ func TestActionToolAdapter_UpdateAction(t *testing.T) {
 
 		// Reset Slack call tracking after the create-time post so the
 		// update-time assertions only see the adapter's own calls.
-		mock.updateMessageCalled = false
+		mock.updateWithAttachmentCalled = false
 		mock.postThreadCalled = false
 
 		return ctx, repo, mock, actionUC, action
@@ -113,7 +113,7 @@ func TestActionToolAdapter_UpdateAction(t *testing.T) {
 		// thread summary posted. If the adapter accidentally pinned
 		// SlackSyncSkip / SlackSyncMessageOnly we'd see one or both of
 		// these stay false.
-		gt.Bool(t, mock.updateMessageCalled).True()
+		gt.Bool(t, mock.updateWithAttachmentCalled).True()
 		gt.Bool(t, mock.postThreadCalled).True()
 	})
 

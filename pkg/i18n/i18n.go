@@ -56,9 +56,7 @@ const (
 	MsgActionInProgress
 	MsgActionCompleted
 	MsgActionNoAssign
-	MsgActionStatus  // "Status: %s"
-	MsgActionNew     // "New action: %s"
-	MsgActionUpdated // "Action updated: %s"
+	MsgActionStatus // "Status: %s"
 
 	// Action interactive controls (Slack Block Kit)
 	MsgActionOpenInWeb

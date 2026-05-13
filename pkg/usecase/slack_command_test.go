@@ -46,6 +46,18 @@ func (m *commandTestSlackService) PostMessage(_ context.Context, channelID strin
 	return "1234567890.123456", nil
 }
 
+// PostMessageWithAttachment funnels into the same recorder as PostMessage:
+// Action card posts go through this path now, and the slash-command tests
+// assert on "did Slack get *any* post for the action?" regardless of which
+// API method delivered it.
+func (m *commandTestSlackService) PostMessageWithAttachment(_ context.Context, channelID string, text string, _ goslack.Attachment) (string, error) {
+	m.postedMessages = append(m.postedMessages, commandTestPostedMessage{
+		ChannelID: channelID,
+		Text:      text,
+	})
+	return "1234567890.123456", nil
+}
+
 func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 	i18n.Init(i18n.LangEN)
 

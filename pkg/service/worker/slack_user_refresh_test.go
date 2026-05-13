@@ -131,6 +131,14 @@ func (m *mockSlackService) UpdateMessage(ctx context.Context, channelID string, 
 	return nil
 }
 
+func (m *mockSlackService) PostMessageWithAttachment(_ context.Context, _ string, _ string, _ goslack.Attachment) (string, error) {
+	return "1234567890.123456", nil
+}
+
+func (m *mockSlackService) UpdateMessageWithAttachment(_ context.Context, _ string, _ string, _ string, _ goslack.Attachment) error {
+	return nil
+}
+
 func (m *mockSlackService) GetConversationReplies(ctx context.Context, channelID string, threadTS string, limit int) ([]slack.ConversationMessage, error) {
 	return nil, nil
 }

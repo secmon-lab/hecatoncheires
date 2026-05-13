@@ -125,6 +125,49 @@ func TestNewActionStatusSet_errors(t *testing.T) {
 	})
 }
 
+func TestActionStatusDefinition_SlackColor(t *testing.T) {
+	t.Run("empty color returns empty", func(t *testing.T) {
+		def := model.ActionStatusDefinition{Color: ""}
+		gt.Equal(t, def.SlackColor(), "")
+	})
+
+	t.Run("six-digit hex passes through", func(t *testing.T) {
+		def := model.ActionStatusDefinition{Color: "#5EAEDC"}
+		gt.Equal(t, def.SlackColor(), "#5EAEDC")
+	})
+
+	t.Run("three-digit hex passes through", func(t *testing.T) {
+		def := model.ActionStatusDefinition{Color: "#abc"}
+		gt.Equal(t, def.SlackColor(), "#abc")
+	})
+
+	t.Run("preset name resolves to expected hex", func(t *testing.T) {
+		def := model.ActionStatusDefinition{Color: "active"}
+		gt.Equal(t, def.SlackColor(), "#3B82F6")
+	})
+
+	t.Run("preset name is case-insensitive", func(t *testing.T) {
+		def := model.ActionStatusDefinition{Color: "Success"}
+		gt.Equal(t, def.SlackColor(), "#22C55E")
+	})
+
+	t.Run("each declared preset resolves to a non-empty hex", func(t *testing.T) {
+		presets := []string{
+			"idle", "active", "waiting", "paused", "attention",
+			"blocked", "success", "neutral_done", "failure",
+		}
+		for _, p := range presets {
+			def := model.ActionStatusDefinition{Color: p}
+			gt.String(t, def.SlackColor()).NotEqual("")
+		}
+	})
+
+	t.Run("unknown value yields empty (graceful, no panic)", func(t *testing.T) {
+		def := model.ActionStatusDefinition{Color: "rainbow"}
+		gt.Equal(t, def.SlackColor(), "")
+	})
+}
+
 func TestDefaultActionStatusSet(t *testing.T) {
 	set := model.DefaultActionStatusSet()
 	gt.Equal(t, set.InitialID(), "BACKLOG")

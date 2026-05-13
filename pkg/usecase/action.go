@@ -27,6 +27,12 @@ const (
 	// block_id encodes (workspaceID, actionID), since users_select carries no
 	// `value` for the handler to recover them from.
 	slackActionAssigneeBlockIDPrefix = "hc_action_assignee_block"
+
+	// actionCardTitleEmoji is the fixed prefix emoji that signals "this row
+	// is an action card" in the parent Slack channel feed. The per-status
+	// emoji was removed from the title — status is communicated by the
+	// attachment side-bar color and by the Status select element instead.
+	actionCardTitleEmoji = "📌"
 )
 
 // SlackSyncMode controls how UpdateAction interacts with Slack.
@@ -260,9 +266,8 @@ func (uc *ActionUseCase) PostSlackMessageToAction(ctx context.Context, workspace
 // degrade) for the missing-channel case.
 func (uc *ActionUseCase) postSlackMessageForAction(ctx context.Context, workspaceID string, action *model.Action, caseModel *model.Case) (*model.Action, error) {
 	actionURL := uc.actionWebURL(workspaceID, action.CaseID, action.ID)
-	blocks := uc.buildActionMessageBlocks(ctx, workspaceID, action, actionURL)
-	fallbackText := i18n.T(ctx, i18n.MsgActionNew, action.Title)
-	ts, postErr := uc.slackService.PostMessage(ctx, caseModel.SlackChannelID, blocks, fallbackText)
+	text, att := uc.buildActionMessagePayload(ctx, workspaceID, action, actionURL)
+	ts, postErr := uc.slackService.PostMessageWithAttachment(ctx, caseModel.SlackChannelID, text, att)
 	if postErr != nil {
 		return action, goerr.Wrap(postErr, "failed to post Slack message for action",
 			goerr.V(ActionIDKey, action.ID),
@@ -621,9 +626,8 @@ func (uc *ActionUseCase) refreshSlackMessage(ctx context.Context, workspaceID st
 	}
 
 	actionURL := uc.actionWebURL(workspaceID, action.CaseID, action.ID)
-	blocks := uc.buildActionMessageBlocks(ctx, workspaceID, action, actionURL)
-	fallbackText := i18n.T(ctx, i18n.MsgActionUpdated, action.Title)
-	if updateErr := uc.slackService.UpdateMessage(ctx, caseModel.SlackChannelID, action.SlackMessageTS, blocks, fallbackText); updateErr != nil {
+	text, att := uc.buildActionMessagePayload(ctx, workspaceID, action, actionURL)
+	if updateErr := uc.slackService.UpdateMessageWithAttachment(ctx, caseModel.SlackChannelID, action.SlackMessageTS, text, att); updateErr != nil {
 		errutil.Handle(ctx, updateErr, "failed to update Slack message for action")
 	}
 }
@@ -755,50 +759,54 @@ func (uc *ActionUseCase) actionWebURL(workspaceID string, caseID, actionID int64
 	return fmt.Sprintf("%s/ws/%s/cases/%d/actions/%d", uc.baseURL, workspaceID, caseID, actionID)
 }
 
-// buildActionMessageBlocks constructs the Block Kit blocks for the action's
-// primary Slack message. Layout:
-//   - section: bold title that links to the WebUI (or plain title when no URL),
-//     so the user can jump to the action from the title itself.
-//   - section: optional description.
-//   - actions: status_select and assignee static_select side-by-side. Both
-//     elements carry value="{workspaceID}:{actionID}:{payload}" so the
-//     handler can recover identity from the callback. The assignee dropdown
-//     uses static_select instead of users_select so we can omit bots from
-//     the candidate list (Slack's users_select has no built-in bot filter).
-func (uc *ActionUseCase) buildActionMessageBlocks(ctx context.Context, workspaceID string, action *model.Action, actionURL string) []goslack.Block {
+// buildActionMessagePayload constructs the top-level `text` and the single
+// attachment that together form the Action card. The shape (top-level text
+// instead of top-level Block Kit) is what lets Slack render the parent
+// excerpt when a `reply_broadcast` thread reply is shown in the channel
+// view; with top-level `blocks`, Slack collapses that preview to a generic
+// "a thread" link.
+//
+// Layout:
+//   - top-level text: fixed prefix emoji + bold linked title (no "Action:"
+//     literal — the fixed emoji is the visual signal). This text doubles as
+//     the broadcast-preview source.
+//   - attachment.color: status-derived hex (resolved via
+//     ActionStatusDefinition.SlackColor); the side-bar gives status a glance-
+//     level read.
+//   - attachment.blocks: optional description Section, then one Actions block
+//     carrying the status_select and assignee_select. Both selects share a
+//     single Actions block; their block_id encodes (workspaceID, actionID).
+func (uc *ActionUseCase) buildActionMessagePayload(ctx context.Context, workspaceID string, action *model.Action, actionURL string) (string, goslack.Attachment) {
 	statusSet := uc.statusSet(workspaceID)
-	emoji := statusSet.Emoji(string(action.Status))
-	// "Action:" prefix labels the message in the channel feed so readers can
-	// tell at a glance that this row is an action card (vs. a case post or a
-	// thread reply).
-	titleText := fmt.Sprintf("*Action:* %s *%s*", emoji, action.Title)
+	titleText := fmt.Sprintf("%s *%s*", actionCardTitleEmoji, action.Title)
 	if actionURL != "" {
-		titleText = fmt.Sprintf("*Action:* %s *<%s|%s>*", emoji, actionURL, action.Title)
-	}
-	blocks := []goslack.Block{
-		goslack.NewSectionBlock(
-			goslack.NewTextBlockObject(goslack.MarkdownType, titleText, false, false),
-			nil, nil,
-		),
+		titleText = fmt.Sprintf("%s *<%s|%s>*", actionCardTitleEmoji, actionURL, action.Title)
 	}
 
+	var attBlocks []goslack.Block
 	if action.Description != "" {
-		blocks = append(blocks, goslack.NewSectionBlock(
+		attBlocks = append(attBlocks, goslack.NewSectionBlock(
 			goslack.NewTextBlockObject(goslack.MarkdownType, action.Description, false, false),
 			nil, nil,
 		))
 	}
-
 	statusSelect := buildStatusSelect(ctx, workspaceID, action, statusSet)
 	assigneeSelect := buildAssigneeSelect(ctx, action)
-	// One actions block carries both selects so they render side-by-side.
-	blocks = append(blocks, goslack.NewActionBlock(
+	attBlocks = append(attBlocks, goslack.NewActionBlock(
 		SlackActionAssigneeBlockID(workspaceID, action.ID),
 		statusSelect,
 		assigneeSelect,
 	))
 
-	return blocks
+	var color string
+	if def, ok := statusSet.Get(string(action.Status)); ok {
+		color = def.SlackColor()
+	}
+
+	return titleText, goslack.Attachment{
+		Color:  color,
+		Blocks: goslack.Blocks{BlockSet: attBlocks},
+	}
 }
 
 func buildStatusSelect(ctx context.Context, workspaceID string, action *model.Action, statusSet *model.ActionStatusSet) *goslack.SelectBlockElement {

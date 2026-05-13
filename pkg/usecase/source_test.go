@@ -194,6 +194,16 @@ func (m *mockSlackService) UpdateMessage(ctx context.Context, channelID string, 
 	return nil
 }
 
+func (m *mockSlackService) PostMessageWithAttachment(ctx context.Context, channelID string, text string, _ goslack.Attachment) (string, error) {
+	m.postedChannelIDs = append(m.postedChannelIDs, channelID)
+	m.postedTexts = append(m.postedTexts, text)
+	return "1234567890.123456", nil
+}
+
+func (m *mockSlackService) UpdateMessageWithAttachment(_ context.Context, _ string, _ string, _ string, _ goslack.Attachment) error {
+	return nil
+}
+
 func (m *mockSlackService) GetConversationReplies(ctx context.Context, channelID string, threadTS string, limit int) ([]slack.ConversationMessage, error) {
 	return nil, nil
 }

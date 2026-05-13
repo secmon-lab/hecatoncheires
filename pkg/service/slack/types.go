@@ -67,6 +67,19 @@ type Service interface {
 	// UpdateMessage updates an existing Block Kit message identified by channel and timestamp.
 	UpdateMessage(ctx context.Context, channelID string, timestamp string, blocks []slack.Block, text string) error
 
+	// PostMessageWithAttachment posts a message whose top-level `text` doubles
+	// as the visible body and as the Slack channel-view broadcast-preview
+	// source, plus one attachment carrying Block Kit content. Used by callers
+	// that need a thread `reply_broadcast` from this message to show a parent
+	// preview (top-level `blocks` collapses the preview to "a thread"). Regular
+	// Block Kit posts that do not need the preview should keep using
+	// PostMessage.
+	PostMessageWithAttachment(ctx context.Context, channelID string, text string, attachment slack.Attachment) (string, error)
+
+	// UpdateMessageWithAttachment is the update counterpart of
+	// PostMessageWithAttachment.
+	UpdateMessageWithAttachment(ctx context.Context, channelID string, timestamp string, text string, attachment slack.Attachment) error
+
 	// GetConversationReplies retrieves messages from a thread.
 	GetConversationReplies(ctx context.Context, channelID string, threadTS string, limit int) ([]ConversationMessage, error)
 

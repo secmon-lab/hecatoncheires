@@ -176,13 +176,12 @@ When an action is created in Hecatoncheires, a notification message is automatic
 
 ### How It Works
 
-1. When an action is created, if the associated case has a Slack channel, a Block Kit message is posted
-2. The message contains the action title, description, a link to the web UI, assignees, and interactive buttons
-3. Users can click buttons to:
-   - **Assign to me**: Add themselves as an assignee
-   - **In Progress**: Change the action status to IN_PROGRESS
-   - **Completed**: Change the action status to COMPLETED
-4. After a button click, the Slack message is updated to reflect the new state
+1. When an action is created, if the associated case has a Slack channel, an Action card is posted
+2. The Action card has the shape of "top-level text + one attachment carrying Block Kit content" rather than top-level Block Kit. This is required so that `reply_broadcast=true` thread replies (status / assignee / step events — see below) render the parent Action card excerpt in the channel view; top-level Block Kit collapses Slack's preview to a generic "a thread" link
+3. The top-level text is the title line: a fixed prefix emoji (📌) signals "this row is an Action card", followed by the bold linked title (e.g. `📌 *<webui-url|Investigate ubie-oss>*`). The "Action:" literal was dropped and the per-status emoji was removed from the title — status is communicated via the attachment side-bar color and the Status select element
+4. The attachment carries: an optional description Section block (only when the Action has a description), and an Actions block with Status and Assignee selects. The attachment `color` tracks the current status (`ActionStatusDefinition.SlackColor`, which maps preset names like `active` / `blocked` / `success` to hex), so the side-bar gives status a glance-level read
+5. Slack auto-appends "Added by {bot name}" as the attachment footer. This is Slack-side attribution and cannot be suppressed via API; treat it as part of the card layout
+6. Status / assignee changes from the web UI or Slack interactivity refresh the same message, so the title link, description, attachment color, and select state stay in sync
 
 In addition, Action change events (status / assignee / title edits) and
 ActionStep CRUD events (add / remove / done / reopen / rename) post a
@@ -237,15 +236,15 @@ The bot token must have the `chat:write` scope to post and update messages:
 
 ### Message Format
 
-The notification message includes:
+The Action card consists of:
 
-- **Header**: "Action: {emoji} {title}"
-- **Description**: Action description (if provided)
-- **Link**: Link to the action detail page
-- **Context**: Assignees (as @mentions) and current status
-- **Buttons**: "Assign to me", "In Progress", "Completed"
+- **Top-level text (title line)**: `📌 *<webui-url|Title>*` — fixed prefix emoji + bold linked title. This text is also what Slack picks up as the parent-message excerpt for broadcasted thread replies
+- **Attachment side-bar color**: hex value derived from the status definition's `Color` (preset name resolved via `ActionStatusDefinition.SlackColor`, or hex value passed through verbatim)
+- **Attachment Section block (optional)**: Action description, present only when the Action has a non-empty description
+- **Attachment Actions block**: Status select + Assignee select, side-by-side
+- **Attachment footer**: "Added by {bot name}" — Slack-injected attribution, not configurable
 
-The message is automatically updated when the action is modified (title, assignees, status, etc.) from the web UI or Slack buttons.
+The message is automatically updated when the Action is modified (title, assignees, status, description, etc.) from the web UI or Slack interactivity. The attachment color follows status transitions.
 
 ### Requirements
 

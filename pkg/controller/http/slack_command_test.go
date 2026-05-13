@@ -61,6 +61,12 @@ func (m *mockSlackServiceForCommand) PostMessage(_ context.Context, _ string, _ 
 func (m *mockSlackServiceForCommand) UpdateMessage(_ context.Context, _, _ string, _ []goslack.Block, _ string) error {
 	return nil
 }
+func (m *mockSlackServiceForCommand) PostMessageWithAttachment(_ context.Context, _ string, _ string, _ goslack.Attachment) (string, error) {
+	return "", nil
+}
+func (m *mockSlackServiceForCommand) UpdateMessageWithAttachment(_ context.Context, _, _ string, _ string, _ goslack.Attachment) error {
+	return nil
+}
 func (m *mockSlackServiceForCommand) GetConversationReplies(_ context.Context, _, _ string, _ int) ([]slacksvc.ConversationMessage, error) {
 	return nil, nil
 }

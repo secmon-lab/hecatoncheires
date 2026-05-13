@@ -86,6 +86,12 @@ func (f *fakeSlackService) AddBookmark(context.Context, string, string, string) 
 func (f *fakeSlackService) GetTeamURL(context.Context) (string, error) {
 	panic("unexpected GetTeamURL")
 }
+func (f *fakeSlackService) PostMessageWithAttachment(context.Context, string, string, goslack.Attachment) (string, error) {
+	panic("unexpected PostMessageWithAttachment")
+}
+func (f *fakeSlackService) UpdateMessageWithAttachment(context.Context, string, string, string, goslack.Attachment) error {
+	panic("unexpected UpdateMessageWithAttachment")
+}
 func (f *fakeSlackService) PostMessage(context.Context, string, []goslack.Block, string) (string, error) {
 	panic("unexpected PostMessage")
 }

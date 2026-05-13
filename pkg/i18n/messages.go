@@ -40,8 +40,6 @@ var messagesEN = [msgKeyCount]string{
 	MsgActionCompleted:  "Completed",
 	MsgActionNoAssign:   "No Assign",
 	MsgActionStatus:     "Status: %s",
-	MsgActionNew:        "New action: %s",
-	MsgActionUpdated:    "Action updated: %s",
 
 	// Action interactive controls
 	MsgActionOpenInWeb:           "Open in Web",
@@ -160,8 +158,6 @@ var messagesJA = [msgKeyCount]string{
 	MsgActionCompleted:  "完了",
 	MsgActionNoAssign:   "未割り当て",
 	MsgActionStatus:     "ステータス: %s",
-	MsgActionNew:        "新しいアクション: %s",
-	MsgActionUpdated:    "アクション更新: %s",
 
 	// Action interactive controls
 	MsgActionOpenInWeb:           "Web で開く",
