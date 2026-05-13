@@ -385,6 +385,37 @@ func (c *client) UpdateMessage(ctx context.Context, channelID string, timestamp 
 	return nil
 }
 
+// PostMessageWithAttachment posts a message with top-level text plus a single
+// attachment carrying Block Kit content. See the interface doc for why this
+// shape is used (broadcast preview rendering).
+func (c *client) PostMessageWithAttachment(ctx context.Context, channelID string, text string, attachment slack.Attachment) (string, error) {
+	_, ts, err := c.api.PostMessageContext(ctx, channelID,
+		slack.MsgOptionText(text, false),
+		slack.MsgOptionAttachments(attachment),
+	)
+	if err != nil {
+		return "", goerr.Wrap(err, "failed to post Slack message with attachment",
+			goerr.V("channel_id", channelID))
+	}
+	return ts, nil
+}
+
+// UpdateMessageWithAttachment updates a message previously posted via
+// PostMessageWithAttachment, preserving the top-level-text + single-attachment
+// shape so the broadcast-preview source stays intact across refreshes.
+func (c *client) UpdateMessageWithAttachment(ctx context.Context, channelID string, timestamp string, text string, attachment slack.Attachment) error {
+	_, _, _, err := c.api.UpdateMessageContext(ctx, channelID, timestamp,
+		slack.MsgOptionText(text, false),
+		slack.MsgOptionAttachments(attachment),
+	)
+	if err != nil {
+		return goerr.Wrap(err, "failed to update Slack message with attachment",
+			goerr.V("channel_id", channelID),
+			goerr.V("timestamp", timestamp))
+	}
+	return nil
+}
+
 // GetConversationReplies retrieves messages from a thread
 func (c *client) GetConversationReplies(ctx context.Context, channelID string, threadTS string, limit int) ([]ConversationMessage, error) {
 	params := &slack.GetConversationRepliesParameters{

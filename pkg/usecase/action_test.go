@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -399,7 +400,10 @@ func TestActionUseCase_GetActionsByCase(t *testing.T) {
 	})
 }
 
-// actionTestSlackMock tracks PostMessage and UpdateMessage calls for action tests
+// actionTestSlackMock tracks the Slack calls Action use-case makes.
+// Action card posts go through the *WithAttachment variants; the plain
+// PostMessage / UpdateMessage stubs remain so other tests sharing this
+// embedding still satisfy the Service interface.
 type actionTestSlackMock struct {
 	mockSlackService
 	postMessageCalled   bool
@@ -412,6 +416,16 @@ type actionTestSlackMock struct {
 	updateMessageTS     string
 	updateMessageBlocks []goslack.Block
 	updateMessageErr    error
+
+	postWithAttachmentCalled     bool
+	postWithAttachmentChannel    string
+	postWithAttachmentText       string
+	postWithAttachmentAttachment goslack.Attachment
+
+	updateWithAttachmentCalled     bool
+	updateWithAttachmentTS         string
+	updateWithAttachmentText       string
+	updateWithAttachmentAttachment goslack.Attachment
 }
 
 func (m *actionTestSlackMock) PostMessage(ctx context.Context, channelID string, blocks []goslack.Block, text string) (string, error) {
@@ -429,6 +443,25 @@ func (m *actionTestSlackMock) UpdateMessage(ctx context.Context, channelID strin
 	m.updateMessageCalled = true
 	m.updateMessageTS = timestamp
 	m.updateMessageBlocks = blocks
+	return m.updateMessageErr
+}
+
+func (m *actionTestSlackMock) PostMessageWithAttachment(ctx context.Context, channelID string, text string, attachment goslack.Attachment) (string, error) {
+	m.postWithAttachmentCalled = true
+	m.postWithAttachmentChannel = channelID
+	m.postWithAttachmentText = text
+	m.postWithAttachmentAttachment = attachment
+	if m.postMessageErr != nil {
+		return "", m.postMessageErr
+	}
+	return m.postMessageTS, nil
+}
+
+func (m *actionTestSlackMock) UpdateMessageWithAttachment(ctx context.Context, channelID string, timestamp string, text string, attachment goslack.Attachment) error {
+	m.updateWithAttachmentCalled = true
+	m.updateWithAttachmentTS = timestamp
+	m.updateWithAttachmentText = text
+	m.updateWithAttachmentAttachment = attachment
 	return m.updateMessageErr
 }
 
@@ -456,9 +489,18 @@ func TestActionUseCase_CreateAction_SlackNotification(t *testing.T) {
 		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Action Desc", "U001", "", types.ActionStatusTodo, nil)
 		gt.NoError(t, err).Required()
 
-		// Verify Slack message was posted
-		gt.Value(t, mock.postMessageCalled).Equal(true)
-		gt.Value(t, mock.postMessageChannel).Equal(c.SlackChannelID)
+		// Verify Slack message was posted via the attachment-shaped path
+		// so the channel-view broadcast preview will see the parent text.
+		gt.Value(t, mock.postWithAttachmentCalled).Equal(true)
+		gt.Value(t, mock.postWithAttachmentChannel).Equal(c.SlackChannelID)
+		// Title must carry the fixed action-card prefix emoji and the
+		// linked title; no "Action:" literal.
+		gt.String(t, mock.postWithAttachmentText).Contains("📌")
+		gt.String(t, mock.postWithAttachmentText).Contains("Test Action")
+		gt.String(t, mock.postWithAttachmentText).NotEqual("")
+		// The attachment must carry the Block Kit content (description +
+		// Actions block with selects).
+		gt.Array(t, mock.postWithAttachmentAttachment.Blocks.BlockSet).Length(2)
 
 		// Verify SlackMessageTS was saved
 		gt.Value(t, created.SlackMessageTS).Equal("1234567890.123456")
@@ -467,6 +509,37 @@ func TestActionUseCase_CreateAction_SlackNotification(t *testing.T) {
 		retrieved, err := actionUC.GetAction(ctx, testWorkspaceID, created.ID)
 		gt.NoError(t, err).Required()
 		gt.Value(t, retrieved.SlackMessageTS).Equal("1234567890.123456")
+	})
+
+	t.Run("escapes mrkdwn control characters in title", func(t *testing.T) {
+		// Slack mrkdwn treats `&` `<` `>` as control characters; `|` inside
+		// `<URL|label>` terminates the link label. User-supplied titles
+		// must therefore be escaped before they reach the top-level text
+		// or the link label, or Slack mis-renders / mis-parses the card.
+		repo := memory.New()
+		mock := &actionTestSlackMock{
+			mockSlackService: mockSlackService{
+				createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+					return fmt.Sprintf("C%d", caseID), nil
+				},
+			},
+			postMessageTS: "1234567890.123456",
+		}
+		caseUC := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, mock, "https://example.com")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		// Title with every problematic character.
+		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "a&b<c>d|e", "", "U001", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+
+		gt.String(t, mock.postWithAttachmentText).Contains("a&amp;b&lt;c&gt;d｜e")
+		// The raw forms must not survive into the text.
+		gt.String(t, mock.postWithAttachmentText).NotEqual("")
+		gt.Bool(t, strings.Contains(mock.postWithAttachmentText, "a&b<c>d|e")).False()
 	})
 
 	t.Run("does not post when case has no channel", func(t *testing.T) {
@@ -487,7 +560,7 @@ func TestActionUseCase_CreateAction_SlackNotification(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		// Slack message should NOT have been posted
-		gt.Value(t, mock.postMessageCalled).Equal(false)
+		gt.Value(t, mock.postWithAttachmentCalled).Equal(false)
 	})
 
 	t.Run("does not post when slack service is nil", func(t *testing.T) {
@@ -559,12 +632,12 @@ func TestActionUseCase_PostSlackMessageToAction(t *testing.T) {
 		gt.Value(t, raw.SlackMessageTS).Equal("")
 
 		// Reset mock so we observe only the PostSlackMessageToAction call.
-		mock.postMessageCalled = false
+		mock.postWithAttachmentCalled = false
 
 		updated, err := actionUC.PostSlackMessageToAction(ctx, testWorkspaceID, raw.ID)
 		gt.NoError(t, err).Required()
-		gt.Value(t, mock.postMessageCalled).Equal(true)
-		gt.Value(t, mock.postMessageChannel).Equal(c.SlackChannelID)
+		gt.Value(t, mock.postWithAttachmentCalled).Equal(true)
+		gt.Value(t, mock.postWithAttachmentChannel).Equal(c.SlackChannelID)
 		gt.Value(t, updated.SlackMessageTS).Equal("9999.123456")
 
 		retrieved, err := actionUC.GetAction(ctx, testWorkspaceID, raw.ID)
@@ -593,10 +666,10 @@ func TestActionUseCase_PostSlackMessageToAction(t *testing.T) {
 		gt.NoError(t, err).Required()
 		gt.Value(t, created.SlackMessageTS).NotEqual("")
 
-		mock.postMessageCalled = false
+		mock.postWithAttachmentCalled = false
 		_, err = actionUC.PostSlackMessageToAction(ctx, testWorkspaceID, created.ID)
 		gt.Error(t, err).Is(usecase.ErrSlackMessageAlreadyPosted)
-		gt.Value(t, mock.postMessageCalled).Equal(false)
+		gt.Value(t, mock.postWithAttachmentCalled).Equal(false)
 	})
 
 	t.Run("returns ErrCaseHasNoSlackChannel when parent has no channel", func(t *testing.T) {
@@ -621,7 +694,7 @@ func TestActionUseCase_PostSlackMessageToAction(t *testing.T) {
 
 		_, err = actionUC.PostSlackMessageToAction(ctx, testWorkspaceID, raw.ID)
 		gt.Error(t, err).Is(usecase.ErrCaseHasNoSlackChannel)
-		gt.Value(t, mock.postMessageCalled).Equal(false)
+		gt.Value(t, mock.postWithAttachmentCalled).Equal(false)
 	})
 
 	t.Run("returns ErrActionNotFound for unknown action", func(t *testing.T) {
@@ -662,7 +735,7 @@ func TestActionUseCase_PostSlackMessageToAction(t *testing.T) {
 		outsiderCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOUTSIDER"})
 		_, err = actionUC.PostSlackMessageToAction(outsiderCtx, testWorkspaceID, raw.ID)
 		gt.Error(t, err).Is(usecase.ErrAccessDenied)
-		gt.Value(t, mock.postMessageCalled).Equal(false)
+		gt.Value(t, mock.postWithAttachmentCalled).Equal(false)
 	})
 
 	t.Run("returns wrapped error when Slack PostMessage fails", func(t *testing.T) {
@@ -757,7 +830,7 @@ func TestActionUseCase_UpdateAction_SlackSync(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		// Reset call tracking after creation
-		mock.updateMessageCalled = false
+		mock.updateWithAttachmentCalled = false
 		mock.postThreadCalled = false
 		return repo, actionUC, mock, action
 	}
@@ -794,7 +867,11 @@ func TestActionUseCase_UpdateAction_SlackSync(t *testing.T) {
 		updated, err := repo.Action().Get(ctx, testWorkspaceID, action.ID)
 		gt.NoError(t, err).Required()
 		gt.Value(t, updated.Status).Equal(types.ActionStatusInProgress)
-		gt.Bool(t, mock.updateMessageCalled).True()
+		gt.Bool(t, mock.updateWithAttachmentCalled).True()
+		// Attachment color tracks the new status so the channel side-bar
+		// follows status transitions. Default IN_PROGRESS uses the
+		// "active" preset which resolves to a non-empty hex.
+		gt.String(t, mock.updateWithAttachmentAttachment.Color).NotEqual("")
 		// SlackSyncFull both refreshes the message AND posts a thread
 		// summary so channel watchers can see the change without opening
 		// the WebUI. The ingest path drops these context-block posts so
@@ -860,7 +937,7 @@ func TestActionUseCase_UpdateAction_SlackSync(t *testing.T) {
 			SlackSync: usecase.SlackSyncMessageOnly,
 		})
 		gt.NoError(t, err).Required()
-		gt.Bool(t, mock.updateMessageCalled).True()
+		gt.Bool(t, mock.updateWithAttachmentCalled).True()
 		gt.Bool(t, mock.postThreadCalled).False()
 
 		diffs := listChangeEvents(t, repo, ctx, action.ID)
@@ -878,7 +955,7 @@ func TestActionUseCase_UpdateAction_SlackSync(t *testing.T) {
 			SlackSync: usecase.SlackSyncSkip,
 		})
 		gt.NoError(t, err).Required()
-		gt.Bool(t, mock.updateMessageCalled).False()
+		gt.Bool(t, mock.updateWithAttachmentCalled).False()
 		gt.Bool(t, mock.postThreadCalled).False()
 
 		diffs := listChangeEvents(t, repo, ctx, action.ID)

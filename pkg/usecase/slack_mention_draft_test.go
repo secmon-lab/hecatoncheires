@@ -517,6 +517,12 @@ func (m *collectorOnlyMockSlack) GetTeamURL(context.Context) (string, error) { r
 func (m *collectorOnlyMockSlack) PostMessage(context.Context, string, []goslack.Block, string) (string, error) {
 	return "", nil
 }
+func (m *collectorOnlyMockSlack) PostMessageWithAttachment(context.Context, string, string, goslack.Attachment) (string, error) {
+	return "", nil
+}
+func (m *collectorOnlyMockSlack) UpdateMessageWithAttachment(context.Context, string, string, string, goslack.Attachment) error {
+	return nil
+}
 func (m *collectorOnlyMockSlack) UpdateMessage(_ context.Context, channelID string, _ string, blocks []goslack.Block, _ string) error {
 	snaps := make([]slackBlockSnapshot, len(blocks))
 	m.updateBlockPosts = append(m.updateBlockPosts, ephemeralBlockPost{

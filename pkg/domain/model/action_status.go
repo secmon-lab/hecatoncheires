@@ -51,6 +51,26 @@ func allActionStatusColorPresets() []ActionStatusColorPreset {
 
 var hexColorPattern = regexp.MustCompile(`^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$`)
 
+// actionStatusPresetHex maps semantic color presets to a hex value
+// suitable for surfaces that cannot interpret preset names (e.g. Slack
+// attachment `color`, which only accepts `good` / `warning` / `danger`
+// or `#RRGGBB`). The frontend resolves the same presets via CSS
+// variables (`--action-status-*` in `frontend/src/styles/global.css`)
+// — those values use `oklch()` and live independently; this hex table
+// is the visually-close Slack-side counterpart. If a preset is added,
+// extend this map too.
+var actionStatusPresetHex = map[ActionStatusColorPreset]string{
+	ActionStatusColorIdle:        "#9CA3AF",
+	ActionStatusColorActive:      "#3B82F6",
+	ActionStatusColorWaiting:     "#A78BFA",
+	ActionStatusColorPaused:      "#F59E0B",
+	ActionStatusColorAttention:   "#F97316",
+	ActionStatusColorBlocked:     "#EF4444",
+	ActionStatusColorSuccess:     "#22C55E",
+	ActionStatusColorNeutralDone: "#6B7280",
+	ActionStatusColorFailure:     "#DC2626",
+}
+
 // ActionStatusDefinition describes a single status definable per workspace.
 type ActionStatusDefinition struct {
 	ID          string
@@ -58,6 +78,24 @@ type ActionStatusDefinition struct {
 	Description string
 	Color       string // either a preset name (lowercase) or "#RRGGBB" / "#RGB"
 	Emoji       string
+}
+
+// SlackColor returns a Slack-compatible color string for this status
+// (the value used by `attachment.color`). Hex values stored in `Color`
+// pass through verbatim; preset names are resolved via
+// `actionStatusPresetHex`. Empty or unrecognized values return `""`,
+// which Slack treats as "no color bar".
+func (d ActionStatusDefinition) SlackColor() string {
+	if d.Color == "" {
+		return ""
+	}
+	if hexColorPattern.MatchString(d.Color) {
+		return d.Color
+	}
+	if hex, ok := actionStatusPresetHex[ActionStatusColorPreset(strings.ToLower(d.Color))]; ok {
+		return hex
+	}
+	return ""
 }
 
 // ActionStatusSet is the resolved per-workspace status configuration.
