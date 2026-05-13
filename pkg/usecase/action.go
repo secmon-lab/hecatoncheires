@@ -35,6 +35,19 @@ const (
 	actionCardTitleEmoji = "📌"
 )
 
+// slackTextEscaper escapes user-supplied strings before embedding them in
+// Slack mrkdwn / `text` fields. `&`, `<`, `>` are mrkdwn control characters
+// (require HTML entity form); `|` is the `<URL|label>` separator and Slack
+// does not honor backslash-escapes inside the label, so substitute a full-
+// width pipe instead. Reused for any field that flows into the Action card
+// title — kept private to this package until another caller needs it.
+var slackTextEscaper = strings.NewReplacer(
+	"&", "&amp;",
+	"<", "&lt;",
+	">", "&gt;",
+	"|", "｜",
+)
+
 // SlackSyncMode controls how UpdateAction interacts with Slack.
 type SlackSyncMode int
 
@@ -778,9 +791,16 @@ func (uc *ActionUseCase) actionWebURL(workspaceID string, caseID, actionID int64
 //     single Actions block; their block_id encodes (workspaceID, actionID).
 func (uc *ActionUseCase) buildActionMessagePayload(ctx context.Context, workspaceID string, action *model.Action, actionURL string) (string, goslack.Attachment) {
 	statusSet := uc.statusSet(workspaceID)
-	titleText := fmt.Sprintf("%s *%s*", actionCardTitleEmoji, action.Title)
+	// `&`, `<`, `>` are mrkdwn control characters and must be HTML-escaped
+	// or Slack swallows the title (or worse, treats user input as markup).
+	// `|` inside a `<URL|label>` is the label terminator; Slack does not
+	// support backslash-escaping it, so substitute the visually similar
+	// full-width pipe. This same escaped form is reused outside the link
+	// case for consistency.
+	escapedTitle := slackTextEscaper.Replace(action.Title)
+	titleText := fmt.Sprintf("%s *%s*", actionCardTitleEmoji, escapedTitle)
 	if actionURL != "" {
-		titleText = fmt.Sprintf("%s *<%s|%s>*", actionCardTitleEmoji, actionURL, action.Title)
+		titleText = fmt.Sprintf("%s *<%s|%s>*", actionCardTitleEmoji, actionURL, escapedTitle)
 	}
 
 	var attBlocks []goslack.Block

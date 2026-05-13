@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -508,6 +509,37 @@ func TestActionUseCase_CreateAction_SlackNotification(t *testing.T) {
 		retrieved, err := actionUC.GetAction(ctx, testWorkspaceID, created.ID)
 		gt.NoError(t, err).Required()
 		gt.Value(t, retrieved.SlackMessageTS).Equal("1234567890.123456")
+	})
+
+	t.Run("escapes mrkdwn control characters in title", func(t *testing.T) {
+		// Slack mrkdwn treats `&` `<` `>` as control characters; `|` inside
+		// `<URL|label>` terminates the link label. User-supplied titles
+		// must therefore be escaped before they reach the top-level text
+		// or the link label, or Slack mis-renders / mis-parses the card.
+		repo := memory.New()
+		mock := &actionTestSlackMock{
+			mockSlackService: mockSlackService{
+				createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+					return fmt.Sprintf("C%d", caseID), nil
+				},
+			},
+			postMessageTS: "1234567890.123456",
+		}
+		caseUC := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, mock, "https://example.com")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		// Title with every problematic character.
+		_, err = actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "a&b<c>d|e", "", "U001", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+
+		gt.String(t, mock.postWithAttachmentText).Contains("a&amp;b&lt;c&gt;d｜e")
+		// The raw forms must not survive into the text.
+		gt.String(t, mock.postWithAttachmentText).NotEqual("")
+		gt.Bool(t, strings.Contains(mock.postWithAttachmentText, "a&b<c>d|e")).False()
 	})
 
 	t.Run("does not post when case has no channel", func(t *testing.T) {
