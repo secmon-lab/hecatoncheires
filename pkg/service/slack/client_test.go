@@ -2,11 +2,15 @@ package slack_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"testing"
 
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
+	goslack "github.com/slack-go/slack"
 )
 
 func TestNew(t *testing.T) {
@@ -121,5 +125,47 @@ func TestIntegration(t *testing.T) {
 
 		gt.Value(t, user.ID).Equal(users[0].ID)
 		t.Logf("Got user info: %s (%s)", user.RealName, user.ID)
+	})
+}
+
+func TestWrapSlackViewError(t *testing.T) {
+	t.Run("plain error only carries the trigger_id", func(t *testing.T) {
+		base := errors.New("network blew up")
+		wrapped := slack.WrapSlackViewErrorForTest(base, "failed to open Slack modal view", "trig-1")
+
+		var ge *goerr.Error
+		gt.Bool(t, errors.As(wrapped, &ge)).True()
+		values := ge.Values()
+		gt.Value(t, values["trigger_id"]).Equal("trig-1")
+		// Plain errors must NOT pretend to surface Slack metadata.
+		_, hasSlackError := values["slack_error"]
+		gt.Bool(t, hasSlackError).False()
+	})
+
+	t.Run("SlackErrorResponse surfaces response metadata", func(t *testing.T) {
+		se := goslack.SlackErrorResponse{
+			Err: "invalid_arguments",
+			ResponseMetadata: goslack.ResponseMetadata{
+				Messages: []string{"[ERROR] failed to match schema [json-pointer:/view/blocks/1/element/initial_value]"},
+				Warnings: []string{"deprecated_block_kit"},
+			},
+		}
+		wrapped := slack.WrapSlackViewErrorForTest(fmt.Errorf("openView: %w", se), "failed to open Slack modal view", "trig-2")
+
+		var ge *goerr.Error
+		gt.Bool(t, errors.As(wrapped, &ge)).True()
+		values := ge.Values()
+		gt.Value(t, values["trigger_id"]).Equal("trig-2")
+		gt.Value(t, values["slack_error"]).Equal("invalid_arguments")
+
+		msgs, ok := values["slack_response_messages"].([]string)
+		gt.Bool(t, ok).True()
+		gt.Array(t, msgs).Length(1).Required()
+		gt.String(t, msgs[0]).Contains("json-pointer:/view/blocks/1/element/initial_value")
+
+		warns, ok := values["slack_response_warnings"].([]string)
+		gt.Bool(t, ok).True()
+		gt.Array(t, warns).Length(1).Required()
+		gt.String(t, warns[0]).Equal("deprecated_block_kit")
 	})
 }

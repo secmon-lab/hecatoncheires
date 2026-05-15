@@ -642,6 +642,8 @@ func (uc *SlackUseCases) buildCaseEditModal(ctx context.Context, workspaceID, ch
 		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgFieldTitlePlaceholder), false, false),
 		SlackActionIDCaseTitle,
 	)
+	// Title is not clamped here; the human-entered value is bounded by
+	// the form itself and stays well below Slack's 3000-rune ceiling.
 	titleElement.InitialValue = existingCase.Title
 
 	titleInput := slack.NewInputBlock(
@@ -658,7 +660,7 @@ func (uc *SlackUseCases) buildCaseEditModal(ctx context.Context, workspaceID, ch
 		Placeholder: slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgFieldDescPlaceholder), false, false),
 	}
 	if existingCase.Description != "" {
-		descElement.InitialValue = existingCase.Description
+		descElement.InitialValue = clampPlainText(existingCase.Description, true)
 	}
 
 	descInput := slack.NewInputBlock(
@@ -798,7 +800,7 @@ func buildFieldInputBlockWithValue(field config.FieldDefinition, fv *model.Field
 		}
 		if fv != nil {
 			if s, ok := fv.Value.(string); ok {
-				element.InitialValue = s
+				element.InitialValue = clampPlainText(s, false)
 			}
 		}
 		inputBlock = slack.NewInputBlock(blockID, label, nil, element)
@@ -880,7 +882,10 @@ func buildFieldInputBlockWithValue(field config.FieldDefinition, fv *model.Field
 			actionID,
 		)
 		if fv != nil {
-			if s, ok := fv.Value.(string); ok && s != "" {
+			if s, ok := fv.Value.(string); ok && isLikelySlackUserID(s) {
+				// Only forward values shaped like a Slack user ID — Slack
+				// rejects users_select.initial_user otherwise, taking the
+				// whole modal down with invalid_arguments.
 				element.InitialUser = s
 			}
 		}
@@ -893,7 +898,10 @@ func buildFieldInputBlockWithValue(field config.FieldDefinition, fv *model.Field
 			actionID,
 		)
 		if fv != nil {
-			users := fieldValueToStringSlice(fv.Value)
+			// Drop any value that does not look like a Slack user ID; one
+			// malformed entry would otherwise fail multi_users_select for
+			// the whole modal.
+			users := filterSlackUserIDs(fieldValueToStringSlice(fv.Value))
 			if len(users) > 0 {
 				element.InitialUsers = users
 			}
@@ -919,7 +927,7 @@ func buildFieldInputBlockWithValue(field config.FieldDefinition, fv *model.Field
 		}
 		if fv != nil {
 			if s, ok := fv.Value.(string); ok {
-				element.InitialValue = s
+				element.InitialValue = clampPlainText(s, false)
 			}
 		}
 		inputBlock = slack.NewInputBlock(blockID, label, nil, element)

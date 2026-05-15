@@ -171,6 +171,13 @@ Terminal. Produce a CaseDraft for the host to render in the preview UI. Provide 
 - For each select / multi-select value, the chosen option ID matches the user's intent based on the option's `description` (and `metadata` where helpful).
 - You are not still uncertain about a required field. If a required field's value is still a guess, prefer `question` over fabricating one.
 
+**Length and shape limits** (the host renders the draft into a Slack modal whose `plain_text_input` fields cap at 3000 characters; staying well under that keeps the Edit button safe even after the human adds more text):
+
+- `title`: keep it to **about 80 characters or fewer** (multibyte characters count as one). A noun phrase that fits on one line of a Slack card. No leading verbs, no trailing ellipsis.
+- `description`: Markdown is fine, but **never exceed 2,000 characters** (rune-counted, multibyte included). Summarise, do not paste raw log lines or entire conversation transcripts. When the source material is longer than that, distil the key facts and link to the original thread / ticket instead of inlining it.
+- Custom field text values are also rendered into a Slack `plain_text_input`, so keep each text field tight (a few hundred characters at most).
+- User-type fields (`user` / `multi_user`): the value MUST be a real Slack user ID — uppercase, starting with `U` (regular user) or `W` (Enterprise Grid user), e.g. `U01ABCDEF23`. Do NOT emit display names, email addresses, mention syntax (`<@U…>`), or guesses. If you cannot determine the Slack user ID, leave the field empty (even when it is required) and let the human pick the user via the Edit modal.
+
 Required fields you cannot infer may be left out — the host's preview UI will block submit until the user fills them. Do not fabricate a value just to satisfy "required".
 
 ## Budget

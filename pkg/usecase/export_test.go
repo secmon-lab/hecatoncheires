@@ -71,6 +71,31 @@ var ShouldBroadcastActionEventForTest = shouldBroadcastActionEvent
 // so external tests can verify multi-kind broadcast judgement.
 var ShouldBroadcastAnyActionEventForTest = shouldBroadcastAnyActionEvent
 
+// ClampPlainTextForTest exposes the unexported clampPlainText helper so
+// external tests can verify the Slack input-length contract.
+var ClampPlainTextForTest = clampPlainText
+
+// IsLikelySlackUserIDForTest exposes the unexported isLikelySlackUserID
+// helper so external tests can verify the user-ID syntactic gate.
+var IsLikelySlackUserIDForTest = isLikelySlackUserID
+
+// FilterSlackUserIDsForTest exposes the unexported filterSlackUserIDs
+// helper so external tests can verify the slice filtering behaviour.
+var FilterSlackUserIDsForTest = filterSlackUserIDs
+
+// SlackPlainTextMaxRunesForTest exposes the clamp ceiling for assertions.
+const SlackPlainTextMaxRunesForTest = slackPlainTextMaxRunes
+
+// ClampSuffixMultiLineForTest exposes the multiline truncation sentinel.
+const ClampSuffixMultiLineForTest = clampSuffixMultiLine
+
+// ClampSuffixSingleLineForTest exposes the single-line truncation sentinel.
+const ClampSuffixSingleLineForTest = clampSuffixSingleLine
+
+// BuildDraftEditModalForTest exposes buildDraftEditModal so external tests
+// can assert on the rendered Block Kit payload.
+var BuildDraftEditModalForTest = buildDraftEditModal
+
 // Type aliases for testing
 type GitHubPullRequest = githubsvc.PullRequest
 type GitHubIssue = githubsvc.Issue
