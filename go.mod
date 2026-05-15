@@ -22,7 +22,7 @@ require (
 	github.com/m-mizutani/masq v0.2.0
 	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/shurcooL/githubv4 v0.0.0-20260209031235-2402fdf4a9ed
-	github.com/slack-go/slack v0.17.3
+	github.com/slack-go/slack v0.23.1
 	github.com/urfave/cli/v3 v3.6.1
 	github.com/vektah/gqlparser/v2 v2.5.31
 	golang.org/x/sync v0.20.0
