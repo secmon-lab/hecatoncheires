@@ -2,6 +2,7 @@ package slack
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -514,10 +515,37 @@ func (c *client) PostThreadMessage(ctx context.Context, channelID string, thread
 func (c *client) OpenView(ctx context.Context, triggerID string, view slack.ModalViewRequest) error {
 	_, err := c.api.OpenViewContext(ctx, triggerID, view)
 	if err != nil {
-		return goerr.Wrap(err, "failed to open Slack modal view",
-			goerr.V("trigger_id", triggerID))
+		return wrapSlackViewError(err, "failed to open Slack modal view", triggerID)
 	}
 	return nil
+}
+
+// wrapSlackViewError wraps a views.* failure with the structured detail
+// Slack returns in response_metadata. The default goerr.Wrap path only
+// captures the top-level error code (e.g. "invalid_arguments"), so by the
+// time the failure reaches Sentry the JSON-pointer to the offending field
+// is gone. Pulling SlackErrorResponse out of the chain and attaching
+// response_metadata.messages / warnings makes the next occurrence
+// diagnosable without an API replay.
+func wrapSlackViewError(err error, msg, triggerID string) error {
+	opts := []goerr.Option{
+		goerr.V("trigger_id", triggerID),
+	}
+	var se slack.SlackErrorResponse
+	if errors.As(err, &se) {
+		opts = append(opts,
+			goerr.V("slack_error", se.Err),
+			goerr.V("slack_response_messages", se.ResponseMetadata.Messages),
+			goerr.V("slack_response_warnings", se.ResponseMetadata.Warnings),
+			// se.Errors carries the per-failure detail when Slack rejects
+			// a structured payload (e.g. apps.manifest, conversations.invite).
+			// For views.open the slice is usually empty, but on the rare
+			// occasion it is populated it pins the exact failing item, so
+			// surface it directly rather than only its length.
+			goerr.V("slack_response_errors", se.Errors),
+		)
+	}
+	return goerr.Wrap(err, msg, opts...)
 }
 
 // GetBotUserID retrieves the bot's own user ID via auth.test API.

@@ -30,6 +30,10 @@ func buildDraftEditModal(entry *model.WorkspaceEntry, mat *model.WorkspaceMateri
 
 	titleEl := goslack.NewPlainTextInputBlockElement(nil, actionIDDraftEditTitle)
 	if mat != nil && mat.Title != "" {
+		// Title is not clamped here: the planner is instructed to keep it
+		// under ~80 characters, and Slack's 3000-rune ceiling on
+		// initial_value is far above that, so a stray long title still
+		// renders without raising invalid_arguments.
 		titleEl.InitialValue = mat.Title
 	}
 	blocks = append(blocks, goslack.NewInputBlock(
@@ -42,7 +46,7 @@ func buildDraftEditModal(entry *model.WorkspaceEntry, mat *model.WorkspaceMateri
 	descEl := goslack.NewPlainTextInputBlockElement(nil, actionIDDraftEditDescription)
 	descEl.Multiline = true
 	if mat != nil && mat.Description != "" {
-		descEl.InitialValue = mat.Description
+		descEl.InitialValue = clampPlainText(mat.Description, true)
 	}
 	descBlock := goslack.NewInputBlock(
 		blockIDDraftEditDescription,

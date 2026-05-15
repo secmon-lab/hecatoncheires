@@ -22,6 +22,12 @@ func TestRenderPlannerPrompt_NoWorkspaces(t *testing.T) {
 	gt.S(t, got).Contains("list_workspaces")
 	gt.S(t, got).Contains("No workspaces are registered")
 	gt.S(t, got).Contains("**English**")
+	// Length / shape limits are part of the prompt contract — drift here
+	// re-opens the Slack `invalid_arguments` regression these caps prevent.
+	gt.S(t, got).Contains("Length and shape limits")
+	gt.S(t, got).Contains("about 80 characters or fewer")
+	gt.S(t, got).Contains("never exceed 2,000 characters")
+	gt.S(t, got).Contains("real Slack user ID")
 }
 
 func TestRenderPlannerPrompt_WorkspacesIdentityOnly(t *testing.T) {
