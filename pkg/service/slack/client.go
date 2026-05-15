@@ -537,7 +537,12 @@ func wrapSlackViewError(err error, msg, triggerID string) error {
 			goerr.V("slack_error", se.Err),
 			goerr.V("slack_response_messages", se.ResponseMetadata.Messages),
 			goerr.V("slack_response_warnings", se.ResponseMetadata.Warnings),
-			goerr.V("slack_response_errors_count", len(se.Errors)),
+			// se.Errors carries the per-failure detail when Slack rejects
+			// a structured payload (e.g. apps.manifest, conversations.invite).
+			// For views.open the slice is usually empty, but on the rare
+			// occasion it is populated it pins the exact failing item, so
+			// surface it directly rather than only its length.
+			goerr.V("slack_response_errors", se.Errors),
 		)
 	}
 	return goerr.Wrap(err, msg, opts...)

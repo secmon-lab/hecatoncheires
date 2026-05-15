@@ -143,8 +143,12 @@ func TestWrapSlackViewError(t *testing.T) {
 	})
 
 	t.Run("SlackErrorResponse surfaces response metadata", func(t *testing.T) {
+		errMsg := "validation error on element initial_value"
 		se := goslack.SlackErrorResponse{
 			Err: "invalid_arguments",
+			Errors: []goslack.SlackResponseErrors{
+				{Message: &errMsg},
+			},
 			ResponseMetadata: goslack.ResponseMetadata{
 				Messages: []string{"[ERROR] failed to match schema [json-pointer:/view/blocks/1/element/initial_value]"},
 				Warnings: []string{"deprecated_block_kit"},
@@ -167,5 +171,13 @@ func TestWrapSlackViewError(t *testing.T) {
 		gt.Bool(t, ok).True()
 		gt.Array(t, warns).Length(1).Required()
 		gt.String(t, warns[0]).Equal("deprecated_block_kit")
+
+		// The Errors slice itself is surfaced so the per-failure detail
+		// (e.g. apps.manifest field paths) reaches Sentry without a replay.
+		errs, ok := values["slack_response_errors"].([]goslack.SlackResponseErrors)
+		gt.Bool(t, ok).True()
+		gt.Array(t, errs).Length(1).Required()
+		gt.Value(t, errs[0].Message).NotNil()
+		gt.String(t, *errs[0].Message).Equal(errMsg)
 	})
 }
