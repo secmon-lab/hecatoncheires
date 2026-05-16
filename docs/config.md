@@ -102,6 +102,7 @@ The `serve` command (alias: `s`) starts the HTTP server.
 | `--slack-bot-token` | `HECATONCHEIRES_SLACK_BOT_TOKEN` | - | No\*\* | Slack Bot User OAuth Token (`xoxb-...`) |
 | `--slack-signing-secret` | `HECATONCHEIRES_SLACK_SIGNING_SECRET` | - | No\*\*\* | Slack signing secret for webhook verification |
 | `--slack-channel-prefix` | `HECATONCHEIRES_SLACK_CHANNEL_PREFIX` | `risk` | No | Prefix for auto-created Slack channel names |
+| `--slack-notification-slot-duration` | `HECATONCHEIRES_NOTIFICATION_SLOT_DURATION` | `1h` | No | Rolling window during which Action/Step change notifications are aggregated into a single editable channel message. Set `0` to disable aggregation (legacy `reply_broadcast` per event). See [slack-notifications.md](./slack-notifications.md) |
 | `--github-app-id` | `HECATONCHEIRES_GITHUB_APP_ID` | - | No | GitHub App ID for GitHub Source integration |
 | `--github-app-installation-id` | `HECATONCHEIRES_GITHUB_APP_INSTALLATION_ID` | - | No | GitHub App Installation ID |
 | `--github-app-private-key` | `HECATONCHEIRES_GITHUB_APP_PRIVATE_KEY` | - | No | GitHub App private key (PEM string or file path) |

@@ -92,7 +92,13 @@ func (f *fakeSlackService) PostMessageWithAttachment(context.Context, string, st
 func (f *fakeSlackService) UpdateMessageWithAttachment(context.Context, string, string, string, goslack.Attachment) error {
 	panic("unexpected UpdateMessageWithAttachment")
 }
-func (f *fakeSlackService) PostMessage(context.Context, string, []goslack.Block, string) (string, error) {
+func (f *fakeSlackService) PostMessageWithAttachments(context.Context, string, string, []goslack.Attachment, ...slacksvc.PostMessageOption) (string, error) {
+	panic("unexpected PostMessageWithAttachments")
+}
+func (f *fakeSlackService) UpdateMessageWithAttachments(context.Context, string, string, string, []goslack.Attachment) error {
+	panic("unexpected UpdateMessageWithAttachments")
+}
+func (f *fakeSlackService) PostMessage(context.Context, string, []goslack.Block, string, ...slacksvc.PostMessageOption) (string, error) {
 	panic("unexpected PostMessage")
 }
 func (f *fakeSlackService) UpdateMessage(context.Context, string, string, []goslack.Block, string) error {

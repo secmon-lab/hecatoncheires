@@ -60,7 +60,7 @@ func TestSlackInteractionHandler(t *testing.T) {
 		t.Helper()
 		repo := memory.New()
 		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "", nil)
 
 		// Register the seed assignee in the SlackUser DB so UpdateAction's
 		// bot-rejection guard accepts it.
@@ -85,7 +85,7 @@ func TestSlackInteractionHandler(t *testing.T) {
 		t.Helper()
 		repo := memory.New()
 		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "", nil)
 
 		gt.NoError(t, repo.SlackUser().SaveMany(t.Context(), []*model.SlackUser{
 			{ID: "U001", Name: "alice", RealName: "Alice"},
@@ -354,7 +354,7 @@ func TestSlackInteractionHandler(t *testing.T) {
 func TestSlackInteractionHandler_AgentSessionActions(t *testing.T) {
 	t.Run("skips agent session action when selected value is empty", func(t *testing.T) {
 		repo := memory.New()
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "", nil)
 		handler := newTestSlackHandler(t, repo, nil, actionUC, nil, nil)
 
 		callback := goslack.InteractionCallback{
@@ -390,7 +390,7 @@ func TestSlackInteractionHandler_ViewSubmission(t *testing.T) {
 		registry.Register(&model.WorkspaceEntry{
 			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
 		})
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "", nil)
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, &mockSlackServiceForCommand{})
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 
@@ -443,7 +443,7 @@ func TestSlackInteractionHandler_ViewSubmission(t *testing.T) {
 		registry.Register(&model.WorkspaceEntry{
 			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
 		})
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "", nil)
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, &mockSlackServiceForCommand{})
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 
@@ -502,7 +502,7 @@ func TestSlackInteractionHandler_ViewSubmission(t *testing.T) {
 		registry.Register(&model.WorkspaceEntry{
 			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
 		})
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "", nil)
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, &mockSlackServiceForCommand{})
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 
@@ -567,7 +567,7 @@ func TestSlackInteractionHandler_ViewSubmission(t *testing.T) {
 		registry.Register(&model.WorkspaceEntry{
 			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
 		})
-		actionUC := usecase.NewActionUseCase(repo, registry, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, registry, nil, "", nil)
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, &mockSlackServiceForCommand{})
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 
@@ -629,7 +629,7 @@ func TestSlackInteractionHandler_ViewSubmission(t *testing.T) {
 			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
 		})
 		mockSvc := &mockSlackServiceForCommand{}
-		actionUC := usecase.NewActionUseCase(repo, registry, mockSvc, "")
+		actionUC := usecase.NewActionUseCase(repo, registry, mockSvc, "", nil)
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, mockSvc)
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 
@@ -686,7 +686,7 @@ func TestSlackInteractionHandler_ViewSubmission(t *testing.T) {
 
 	t.Run("view_submission with unknown callback_id returns 200", func(t *testing.T) {
 		repo := memory.New()
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "", nil)
 		handler := newTestSlackHandler(t, repo, nil, actionUC, nil, nil)
 
 		callback := goslack.InteractionCallback{

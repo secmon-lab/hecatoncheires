@@ -59,8 +59,8 @@ func newStepTestFixture(t *testing.T, channelUserIDs []string, isPrivate bool) *
 	repo := memory.New()
 	slackFake := &stepSlackFake{}
 	caseUC := usecase.NewCaseUseCase(repo, nil, slackFake, nil, "")
-	actionUC := usecase.NewActionUseCase(repo, nil, slackFake, "")
-	stepUC := usecase.NewActionStepUseCase(repo, slackFake)
+	actionUC := usecase.NewActionUseCase(repo, nil, slackFake, "", nil)
+	stepUC := usecase.NewActionStepUseCase(repo, slackFake, nil)
 
 	caseUserID := "UCASEMEMBER"
 	ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: caseUserID})

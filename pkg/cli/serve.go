@@ -321,7 +321,10 @@ func cmdServe() *cli.Command {
 				}
 				slackSvc = svc
 				ucOpts = append(ucOpts, usecase.WithSlackService(slackSvc))
-				logging.Default().Info("Slack service enabled for Source integration")
+				ucOpts = append(ucOpts, usecase.WithNotificationSlotDuration(slackCfg.NotificationSlotDuration()))
+				logging.Default().Info("Slack service enabled for Source integration",
+					"notification_slot_duration", slackCfg.NotificationSlotDuration(),
+				)
 
 				// Initialize Slack Admin / Search / MessageRetriever services if a
 				// User OAuth Token is provided. The same User OAuth Token backs:

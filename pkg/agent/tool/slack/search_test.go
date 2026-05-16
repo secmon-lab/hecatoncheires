@@ -62,7 +62,7 @@ func (f *fakeBotService) GetConversationReplies(ctx context.Context, channelID, 
 	return f.getRepliesFn(ctx, channelID, threadTS, limit)
 }
 
-func (f *fakeBotService) PostMessage(ctx context.Context, channelID string, blocks []goslack.Block, text string) (string, error) {
+func (f *fakeBotService) PostMessage(ctx context.Context, channelID string, blocks []goslack.Block, text string, _ ...slackservice.PostMessageOption) (string, error) {
 	return f.postMessageFn(ctx, channelID, blocks, text)
 }
 

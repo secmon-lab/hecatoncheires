@@ -360,11 +360,19 @@ func (c *client) GetTeamURL(ctx context.Context) (string, error) {
 }
 
 // PostMessage posts a Block Kit message to a channel and returns the message timestamp
-func (c *client) PostMessage(ctx context.Context, channelID string, blocks []slack.Block, text string) (string, error) {
-	_, ts, err := c.api.PostMessageContext(ctx, channelID,
+func (c *client) PostMessage(ctx context.Context, channelID string, blocks []slack.Block, text string, opts ...PostMessageOption) (string, error) {
+	cfg := ApplyPostMessageOptions(opts...)
+	msgOpts := []slack.MsgOption{
 		slack.MsgOptionBlocks(blocks...),
 		slack.MsgOptionText(text, false),
-	)
+	}
+	if cfg.DisableLinkUnfurl {
+		msgOpts = append(msgOpts, slack.MsgOptionDisableLinkUnfurl())
+	}
+	if cfg.DisableMediaUnfurl {
+		msgOpts = append(msgOpts, slack.MsgOptionDisableMediaUnfurl())
+	}
+	_, ts, err := c.api.PostMessageContext(ctx, channelID, msgOpts...)
 	if err != nil {
 		return "", goerr.Wrap(err, "failed to post Slack message",
 			goerr.V("channel_id", channelID))
@@ -372,11 +380,21 @@ func (c *client) PostMessage(ctx context.Context, channelID string, blocks []sla
 	return ts, nil
 }
 
-// UpdateMessage updates an existing Block Kit message identified by channel and timestamp
+// UpdateMessage updates an existing Block Kit message identified by channel and timestamp.
+// It explicitly clears any attachments the message previously held. chat.update
+// only overrides fields actually included in the request, so without this Slack
+// would keep stale attachments from a prior shape (e.g. when migrating the slot
+// renderer from attachments-based to blocks-only). Callers that need to retain
+// attachments must use UpdateMessageWithAttachment(s) instead.
+//
+// Note: slack-go's MsgOptionAttachments treats a nil variadic as a no-op, so
+// the empty *non-nil* slice spread is required to actually marshal
+// "attachments=[]" on the wire.
 func (c *client) UpdateMessage(ctx context.Context, channelID string, timestamp string, blocks []slack.Block, text string) error {
 	_, _, _, err := c.api.UpdateMessageContext(ctx, channelID, timestamp,
 		slack.MsgOptionBlocks(blocks...),
 		slack.MsgOptionText(text, false),
+		slack.MsgOptionAttachments([]slack.Attachment{}...),
 	)
 	if err != nil {
 		return goerr.Wrap(err, "failed to update Slack message",
@@ -399,6 +417,49 @@ func (c *client) PostMessageWithAttachment(ctx context.Context, channelID string
 			goerr.V("channel_id", channelID))
 	}
 	return ts, nil
+}
+
+// PostMessageWithAttachments posts a message whose visible body lives entirely
+// inside the supplied attachments. The text parameter is the fallback used for
+// notification previews / clients without Block Kit rendering.
+func (c *client) PostMessageWithAttachments(ctx context.Context, channelID string, text string, attachments []slack.Attachment, opts ...PostMessageOption) (string, error) {
+	cfg := ApplyPostMessageOptions(opts...)
+	msgOpts := []slack.MsgOption{
+		slack.MsgOptionText(text, false),
+		slack.MsgOptionAttachments(attachments...),
+	}
+	if cfg.DisableLinkUnfurl {
+		msgOpts = append(msgOpts, slack.MsgOptionDisableLinkUnfurl())
+	}
+	if cfg.DisableMediaUnfurl {
+		msgOpts = append(msgOpts, slack.MsgOptionDisableMediaUnfurl())
+	}
+	_, ts, err := c.api.PostMessageContext(ctx, channelID, msgOpts...)
+	if err != nil {
+		return "", goerr.Wrap(err, "failed to post Slack message with attachments",
+			goerr.V("channel_id", channelID),
+			goerr.V("attachment_count", len(attachments)),
+		)
+	}
+	return ts, nil
+}
+
+// UpdateMessageWithAttachments updates an attachments-only message. Slack
+// replaces the attachments array wholesale, so callers must pass the full
+// desired set each call.
+func (c *client) UpdateMessageWithAttachments(ctx context.Context, channelID string, timestamp string, text string, attachments []slack.Attachment) error {
+	_, _, _, err := c.api.UpdateMessageContext(ctx, channelID, timestamp,
+		slack.MsgOptionText(text, false),
+		slack.MsgOptionAttachments(attachments...),
+	)
+	if err != nil {
+		return goerr.Wrap(err, "failed to update Slack message with attachments",
+			goerr.V("channel_id", channelID),
+			goerr.V("timestamp", timestamp),
+			goerr.V("attachment_count", len(attachments)),
+		)
+	}
+	return nil
 }
 
 // UpdateMessageWithAttachment updates a message previously posted via

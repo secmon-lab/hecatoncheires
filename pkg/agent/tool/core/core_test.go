@@ -206,6 +206,9 @@ func (m *mockRepo) CaseDraft() interfaces.CaseDraftRepository {
 func (m *mockRepo) Session() interfaces.SessionRepository {
 	panic("unexpected call: Session()")
 }
+func (m *mockRepo) NotificationSlot() interfaces.NotificationSlotRepository {
+	panic("unexpected call: NotificationSlot()")
+}
 func (m *mockRepo) Close() error { return nil }
 
 // newMockRepo builds a mockRepo with default no-op sub-repos

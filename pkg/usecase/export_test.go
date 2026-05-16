@@ -1,6 +1,9 @@
 package usecase
 
 import (
+	"context"
+	"time"
+
 	githubsvc "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
@@ -95,6 +98,41 @@ const ClampSuffixSingleLineForTest = clampSuffixSingleLine
 // BuildDraftEditModalForTest exposes buildDraftEditModal so external tests
 // can assert on the rendered Block Kit payload.
 var BuildDraftEditModalForTest = buildDraftEditModal
+
+// NotificationSlotCoordinatorForTest is the test-only alias for the
+// unexported notificationSlotCoordinator. External tests treat values of
+// this type as opaque and exercise behaviour through the *ForTest helpers
+// below.
+type NotificationSlotCoordinatorForTest = notificationSlotCoordinator
+
+// NewNotificationSlotCoordinatorForTest constructs a coordinator with an
+// injectable clock so the test can drive slot expiry deterministically.
+func NewNotificationSlotCoordinatorForTest(
+	repo interfaces.NotificationSlotRepository,
+	slackService slack.Service,
+	slotDuration time.Duration,
+	now func() time.Time,
+) *NotificationSlotCoordinatorForTest {
+	return newNotificationSlotCoordinator(repo, slackService, slotDuration, now)
+}
+
+// SlotEntryForTest is the test-facing alias for the coordinator's input
+// struct so external tests can describe events without reaching into the
+// unexported notification_slot.go internals.
+type SlotEntryForTest = slotEntry
+
+// EnqueueChannelLineForTest invokes the unexported enqueueChannelLine.
+func EnqueueChannelLineForTest(c *NotificationSlotCoordinatorForTest, ctx context.Context, channelID string, entry SlotEntryForTest) {
+	c.enqueueChannelLine(ctx, channelID, entry)
+}
+
+// NotificationSlotCoordinatorEnabledForTest exposes the enabled() probe.
+func NotificationSlotCoordinatorEnabledForTest(c *NotificationSlotCoordinatorForTest) bool {
+	return c.enabled()
+}
+
+// BuildSlotBlocksForTest exposes the Block Kit renderer for unit tests.
+var BuildSlotBlocksForTest = buildSlotBlocks
 
 // Type aliases for testing
 type GitHubPullRequest = githubsvc.PullRequest

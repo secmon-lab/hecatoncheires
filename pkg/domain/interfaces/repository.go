@@ -20,6 +20,7 @@ type Repository interface {
 	AssistLog() AssistLogRepository
 	CaseDraft() CaseDraftRepository
 	Session() SessionRepository
+	NotificationSlot() NotificationSlotRepository
 
 	// Auth methods
 	PutToken(ctx context.Context, token *auth.Token) error

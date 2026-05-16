@@ -259,7 +259,7 @@ func TestCaseUseCase_DeleteCase(t *testing.T) {
 	t.Run("delete case with actions", func(t *testing.T) {
 		repo := memory.New()
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "", nil)
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		// Create case

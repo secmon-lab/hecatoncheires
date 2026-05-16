@@ -22,6 +22,7 @@ type Firestore struct {
 	assistLog     *firestoreAssistLogRepository
 	caseDraft     *caseDraftRepository
 	session       *sessionRepository
+	notifySlot    *notificationSlotRepository
 }
 
 var _ interfaces.Repository = &Firestore{}
@@ -55,6 +56,7 @@ func New(ctx context.Context, projectID, databaseID string) (*Firestore, error) 
 		assistLog:     newFirestoreAssistLogRepository(client),
 		caseDraft:     newCaseDraftRepository(client),
 		session:       newSessionRepository(client),
+		notifySlot:    newNotificationSlotRepository(client),
 	}
 
 	return f, nil
@@ -106,6 +108,10 @@ func (f *Firestore) CaseDraft() interfaces.CaseDraftRepository {
 
 func (f *Firestore) Session() interfaces.SessionRepository {
 	return f.session
+}
+
+func (f *Firestore) NotificationSlot() interfaces.NotificationSlotRepository {
+	return f.notifySlot
 }
 
 func (f *Firestore) Close() error {

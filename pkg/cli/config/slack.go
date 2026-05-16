@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
@@ -26,12 +27,13 @@ type slackAuthAPI interface {
 }
 
 type Slack struct {
-	clientID       string
-	clientSecret   string
-	botToken       string
-	userOAuthToken string
-	signingSecret  string
-	noAuthUID      string
+	clientID                 string
+	clientSecret             string
+	botToken                 string
+	userOAuthToken           string
+	signingSecret            string
+	noAuthUID                string
+	notificationSlotDuration time.Duration
 
 	// Populated by DetectOrgLevel
 	isOrgLevel   bool
@@ -79,7 +81,20 @@ func (x *Slack) Flags() []cli.Flag {
 			Destination: &x.signingSecret,
 			Sources:     cli.EnvVars("HECATONCHEIRES_SLACK_SIGNING_SECRET"),
 		},
+		&cli.DurationFlag{
+			Name:        "slack-notification-slot-duration",
+			Usage:       "Rolling window length for aggregating Slack channel-side change notifications into a single editable message. Set to 0 to disable aggregation (legacy reply_broadcast per event).",
+			Category:    "Slack",
+			Value:       time.Hour,
+			Destination: &x.notificationSlotDuration,
+			Sources:     cli.EnvVars("HECATONCHEIRES_NOTIFICATION_SLOT_DURATION"),
+		},
 	}
+}
+
+// NotificationSlotDuration returns the configured aggregation window.
+func (x *Slack) NotificationSlotDuration() time.Duration {
+	return x.notificationSlotDuration
 }
 
 func (x Slack) LogValue() slog.Value {

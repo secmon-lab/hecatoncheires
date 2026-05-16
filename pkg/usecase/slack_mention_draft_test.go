@@ -514,11 +514,17 @@ func (m *collectorOnlyMockSlack) AddBookmark(context.Context, string, string, st
 	return nil
 }
 func (m *collectorOnlyMockSlack) GetTeamURL(context.Context) (string, error) { return "", nil }
-func (m *collectorOnlyMockSlack) PostMessage(context.Context, string, []goslack.Block, string) (string, error) {
+func (m *collectorOnlyMockSlack) PostMessage(context.Context, string, []goslack.Block, string, ...slacksvc.PostMessageOption) (string, error) {
 	return "", nil
 }
 func (m *collectorOnlyMockSlack) PostMessageWithAttachment(context.Context, string, string, goslack.Attachment) (string, error) {
 	return "", nil
+}
+func (m *collectorOnlyMockSlack) PostMessageWithAttachments(context.Context, string, string, []goslack.Attachment, ...slacksvc.PostMessageOption) (string, error) {
+	return "", nil
+}
+func (m *collectorOnlyMockSlack) UpdateMessageWithAttachments(context.Context, string, string, string, []goslack.Attachment) error {
+	return nil
 }
 func (m *collectorOnlyMockSlack) UpdateMessageWithAttachment(context.Context, string, string, string, goslack.Attachment) error {
 	return nil

@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"time"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
@@ -19,29 +20,30 @@ import (
 )
 
 type UseCases struct {
-	repo              interfaces.Repository
-	workspaceRegistry *model.WorkspaceRegistry
-	notion            notion.Service
-	notionTool        notiontool.Client
-	slackService      slack.Service
-	slackAdminService slack.AdminService
-	slackSearch       slacktool.SearchService
-	slackRetriever    slacktool.MessageRetriever
-	githubClient      *github.Client
-	llmClient         gollem.LLMClient
-	embedClient       interfaces.EmbedClient
-	historyRepo       gollem.HistoryRepository
-	traceRepo         trace.Repository
-	baseURL           string
-	Case              *CaseUseCase
-	Action            *ActionUseCase
-	ActionStep        *ActionStepUseCase
-	Agent             *AgentUseCase
-	Auth              AuthUseCaseInterface
-	Slack             *SlackUseCases
-	Source            *SourceUseCase
-	Assist            *AssistUseCase
-	MentionDraft      *MentionDraftUseCase
+	repo                     interfaces.Repository
+	workspaceRegistry        *model.WorkspaceRegistry
+	notion                   notion.Service
+	notionTool               notiontool.Client
+	slackService             slack.Service
+	slackAdminService        slack.AdminService
+	slackSearch              slacktool.SearchService
+	slackRetriever           slacktool.MessageRetriever
+	githubClient             *github.Client
+	llmClient                gollem.LLMClient
+	embedClient              interfaces.EmbedClient
+	historyRepo              gollem.HistoryRepository
+	traceRepo                trace.Repository
+	baseURL                  string
+	notificationSlotDuration time.Duration
+	Case                     *CaseUseCase
+	Action                   *ActionUseCase
+	ActionStep               *ActionStepUseCase
+	Agent                    *AgentUseCase
+	Auth                     AuthUseCaseInterface
+	Slack                    *SlackUseCases
+	Source                   *SourceUseCase
+	Assist                   *AssistUseCase
+	MentionDraft             *MentionDraftUseCase
 }
 
 type Option func(*UseCases)
@@ -145,6 +147,16 @@ func WithTraceRepository(repo trace.Repository) Option {
 	}
 }
 
+// WithNotificationSlotDuration sets the rolling window length used to
+// aggregate Slack channel-side change notifications into a single editable
+// message. Pass 0 (the default) to disable aggregation, restoring the legacy
+// per-event reply_broadcast path.
+func WithNotificationSlotDuration(d time.Duration) Option {
+	return func(uc *UseCases) {
+		uc.notificationSlotDuration = d
+	}
+}
+
 func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...Option) *UseCases {
 	uc := &UseCases{
 		repo:              repo,
@@ -156,8 +168,9 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 	}
 
 	uc.Case = NewCaseUseCase(repo, registry, uc.slackService, uc.slackAdminService, uc.baseURL)
-	uc.Action = NewActionUseCase(repo, registry, uc.slackService, uc.baseURL)
-	uc.ActionStep = NewActionStepUseCase(repo, uc.slackService)
+	slotCoord := newNotificationSlotCoordinator(repo.NotificationSlot(), uc.slackService, uc.notificationSlotDuration, nil)
+	uc.Action = NewActionUseCase(repo, registry, uc.slackService, uc.baseURL, slotCoord)
+	uc.ActionStep = NewActionStepUseCase(repo, uc.slackService, slotCoord)
 
 	// Convert *github.Client to githubAPI interface, preserving nil-ness:
 	// passing a typed nil pointer through an interface parameter would make
