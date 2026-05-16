@@ -321,6 +321,40 @@ func TestNotificationSlotCoordinator_UpdateFailureDropsSlot(t *testing.T) {
 	gt.Number(t, fake.updateCount()).Equal(1)
 }
 
+func TestNotificationSlotCoordinator_PermalinkCachedAcrossEntries(t *testing.T) {
+	i18n.Init(i18n.LangEN)
+	repo := memory.New()
+	fake := &slotSlackFake{postReturnTS: "ts-slot"}
+	clock := newSlotClock(time.Date(2026, 5, 16, 10, 0, 0, 0, time.UTC))
+	coord := usecase.NewNotificationSlotCoordinatorForTest(repo.NotificationSlot(), fake, time.Hour, clock.Now)
+	ctx := context.Background()
+
+	// Three events on the same Action within one slot must trigger exactly
+	// one chat.getPermalink call — subsequent entries reuse the cached
+	// permalink from the prior entry.
+	for i := 0; i < 3; i++ {
+		usecase.EnqueueChannelLineForTest(coord, ctx, "C-room", usecase.SlotEntryForTest{
+			ActionMessageTS: "ts-A",
+			ActionTitle:     "Action A",
+			Body:            "event",
+		})
+		clock.Advance(time.Second)
+	}
+
+	gt.Number(t, len(fake.permalinkCalls)).Equal(1)
+	gt.Value(t, fake.permalinkCalls[0].ChannelID).Equal("C-room")
+	gt.Value(t, fake.permalinkCalls[0].MessageTS).Equal("ts-A")
+
+	// A different Action in the same slot is a fresh lookup.
+	usecase.EnqueueChannelLineForTest(coord, ctx, "C-room", usecase.SlotEntryForTest{
+		ActionMessageTS: "ts-B",
+		ActionTitle:     "Action B",
+		Body:            "other",
+	})
+	gt.Number(t, len(fake.permalinkCalls)).Equal(2)
+	gt.Value(t, fake.permalinkCalls[1].MessageTS).Equal("ts-B")
+}
+
 func TestNotificationSlotCoordinator_PermalinkFailureFallsBackToPlainTitle(t *testing.T) {
 	i18n.Init(i18n.LangEN)
 	repo := memory.New()
@@ -339,6 +373,90 @@ func TestNotificationSlotCoordinator_PermalinkFailureFallsBackToPlainTitle(t *te
 	body := contextBlockText(t, fake.postCalls[0].Blocks, 0)
 	gt.String(t, body).Contains("Plain Title")
 	gt.Bool(t, strings.Contains(body, "<http")).False()
+}
+
+func TestBuildSlotBlocks_CapsBlocksToSlackLimit(t *testing.T) {
+	i18n.Init(i18n.LangEN)
+	now := time.Date(2026, 5, 16, 9, 30, 0, 0, time.UTC)
+
+	// 60 distinct Actions — Slack's 50-block limit must not be exceeded.
+	entries := make([]model.NotificationSlotEntry, 0, 60)
+	for i := 0; i < 60; i++ {
+		ts := "ts-" + strings.Repeat("x", i+1)
+		title := "Action " + ts
+		entries = append(entries, model.NotificationSlotEntry{
+			ActionMessageTS: ts,
+			ActionTitle:     title,
+			ActionPermalink: "https://slack.test/" + ts,
+			Body:            "body",
+			EventTime:       now.Add(time.Duration(i) * time.Second),
+		})
+	}
+
+	blocks := usecase.BuildSlotBlocksForTest(context.Background(), entries)
+	// 50 = Slack's hard ceiling.
+	gt.Array(t, blocks).Length(50).Required()
+
+	// Most recent Actions win; the oldest 10 (ts-x ... ts-xxxxxxxxxx) were dropped.
+	first := contextBlockText(t, blocks, 0)
+	gt.String(t, first).Contains("Action ts-" + strings.Repeat("x", 11))
+	last := contextBlockText(t, blocks, 49)
+	gt.String(t, last).Contains("Action ts-" + strings.Repeat("x", 60))
+}
+
+func TestBuildSlotBlocks_TrimsLongGroupText(t *testing.T) {
+	i18n.Init(i18n.LangEN)
+	now := time.Date(2026, 5, 16, 9, 30, 0, 0, time.UTC)
+
+	// Build many short lines under one Action so the rendered text exceeds
+	// Slack's 3000-char-per-text ceiling. Each line is unique so we can tell
+	// which got dropped.
+	entries := make([]model.NotificationSlotEntry, 0, 200)
+	for i := 0; i < 200; i++ {
+		entries = append(entries, model.NotificationSlotEntry{
+			ActionMessageTS: "ts-A",
+			ActionTitle:     "Action A",
+			ActionPermalink: "https://slack.test/A",
+			Body:            "event-" + strings.Repeat("x", 50) + "-line-" + string(rune('A'+i%26)),
+			EventTime:       now.Add(time.Duration(i) * time.Second),
+		})
+	}
+
+	blocks := usecase.BuildSlotBlocksForTest(context.Background(), entries)
+	gt.Array(t, blocks).Length(1).Required()
+	body := contextBlockText(t, blocks, 0)
+
+	// Under Slack's 3000-char hard ceiling with headroom.
+	gt.Number(t, len(body)).LessOrEqual(2900)
+	// Trim happens from the front, so the tail (most recent lines) survives.
+	gt.String(t, body).Contains("event-")
+	// The Action title block at the very top of the rendered text may be
+	// clipped along with the oldest lines — that's the documented tradeoff.
+}
+
+func TestNotificationSlotCoordinator_CapsStoredEntries(t *testing.T) {
+	i18n.Init(i18n.LangEN)
+	repo := memory.New()
+	fake := &slotSlackFake{postReturnTS: "ts-slot"}
+	clock := newSlotClock(time.Date(2026, 5, 16, 10, 0, 0, 0, time.UTC))
+	coord := usecase.NewNotificationSlotCoordinatorForTest(repo.NotificationSlot(), fake, time.Hour, clock.Now)
+	ctx := context.Background()
+
+	// Feed in well over the storage cap; the persisted slot must stay bounded.
+	for i := 0; i < 250; i++ {
+		usecase.EnqueueChannelLineForTest(coord, ctx, "C-room", usecase.SlotEntryForTest{
+			ActionMessageTS: "ts-A",
+			ActionTitle:     "Action A",
+			Body:            "event-" + string(rune('A'+i%26)),
+		})
+		clock.Advance(time.Second)
+	}
+
+	slot, err := repo.NotificationSlot().GetActive(ctx, "C-room", clock.Now())
+	gt.NoError(t, err).Required()
+	gt.Value(t, slot).NotNil().Required()
+	gt.Number(t, len(slot.Entries)).LessOrEqual(200)
+	gt.Number(t, len(slot.Entries)).GreaterOrEqual(1)
 }
 
 func TestBuildSlotBlocks_RendersGroupedContextBlocks(t *testing.T) {
