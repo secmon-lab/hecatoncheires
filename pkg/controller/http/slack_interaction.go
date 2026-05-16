@@ -184,6 +184,15 @@ func (h *SlackInteractionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 				return h.slackUC.HandleSaveAsDraftClick(ctx, h.caseUC, &cb)
 			})
 
+		case usecase.SlackActionIDCreateCase:
+			// Body-level Create button on the Case creation modal. Mirrors
+			// the view_submission path (HandleCaseCreationSubmit) but
+			// reaches the usecase via block_actions so it can sit next to
+			// the Save-as-Draft button in the modal body.
+			async.Dispatch(ctx, func(ctx context.Context) error {
+				return h.slackUC.HandleCreateCaseClick(ctx, h.caseUC, &cb)
+			})
+
 		default:
 			// Unknown action ID, skip
 			continue

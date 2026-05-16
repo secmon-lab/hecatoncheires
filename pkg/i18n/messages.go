@@ -140,6 +140,10 @@ var messagesEN = [msgKeyCount]string{
 	MsgDraftSavedModalTitle:     "Saved",
 	MsgDraftSavedModalBody:      "Saved as draft #%d. You can close this dialog.",
 	MsgDraftSaveFailedEphemeral: "Failed to save draft. Please try again.",
+
+	// Body Create button splash
+	MsgModalCaseCreatedTitle: "Created",
+	MsgModalCaseCreatedBody:  "Case created. You can close this dialog.",
 }
 
 var messagesJA = [msgKeyCount]string{
@@ -265,4 +269,8 @@ var messagesJA = [msgKeyCount]string{
 	MsgDraftSavedModalTitle:     "保存しました",
 	MsgDraftSavedModalBody:      "下書き #%d として保存しました。このダイアログは閉じて構いません。",
 	MsgDraftSaveFailedEphemeral: "下書きの保存に失敗しました。もう一度お試しください。",
+
+	// Body Create button splash
+	MsgModalCaseCreatedTitle: "作成しました",
+	MsgModalCaseCreatedBody:  "ケースを作成しました。このダイアログは閉じて構いません。",
 }

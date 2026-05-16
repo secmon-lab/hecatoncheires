@@ -164,6 +164,10 @@ const (
 	MsgDraftSavedModalBody      // Body text of the splash modal: "Saved as draft #%d." (%d = case ID)
 	MsgDraftSaveFailedEphemeral // Error ephemeral when Save as Draft fails server-side.
 
+	// Body-button "Create" splash (block_actions path)
+	MsgModalCaseCreatedTitle // Title of the splash modal shown after the body Create button.
+	MsgModalCaseCreatedBody  // Body text of the splash modal: "Case created. You can close this dialog."
+
 	msgKeyCount // sentinel for validation
 )
 

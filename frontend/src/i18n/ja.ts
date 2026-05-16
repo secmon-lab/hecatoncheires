@@ -388,7 +388,7 @@ export const ja: Messages = {
   navDrafts: 'ドラフト',
   draftsPageTitle: 'マイドラフト',
   draftsPageSubtitle: 'Slackで「下書きとして保存」したケースの一覧です。Submitで本物のケースに昇格、Discardで削除できます。',
-  draftsEmpty: 'まだドラフトはありません。Slackのケース作成モーダルで「下書きとして保存」を押すと、ここに途中保存できます。',
+  draftsEmpty: 'まだドラフトはありません。ケース作成フォーム（Slack または Web）で「ドラフトとして保存」を押すと、ここに途中保存できます。',
   draftsColumnTitle: 'タイトル',
   draftsColumnCreated: '作成日時',
   draftsColumnActions: '操作',
@@ -408,4 +408,6 @@ export const ja: Messages = {
   draftSubmitErrorMissingTitle: '送信にはタイトルが必須です。Slackからタイトルを追加してから戻ってきてください。',
   draftSubmitErrorGeneric: 'ドラフトの送信に失敗しました: {message}',
   draftDiscardErrorGeneric: 'ドラフトの破棄に失敗しました: {message}',
+  btnSaveAsDraft: 'ドラフトとして保存',
+  btnSavingDraft: 'ドラフト保存中…',
 }

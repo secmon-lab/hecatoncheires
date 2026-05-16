@@ -1,7 +1,9 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery } from '@apollo/client'
 import UserSelect from '../components/UserSelect'
 import { CREATE_CASE, UPDATE_CASE, GET_CASE, GET_CASES } from '../graphql/case'
+import { CREATE_DRAFT, GET_DRAFTS } from '../graphql/drafts'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import { useWorkspace } from '../contexts/workspace-context'
@@ -36,6 +38,7 @@ interface CaseFormProps {
 export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
   const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
+  const navigate = useNavigate()
 
   const isEdit = caseItem !== null
   const [title, setTitle] = useState(caseItem?.title || '')
@@ -63,6 +66,9 @@ export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
     refetchQueries: caseItem
       ? [{ query: GET_CASE, variables: { workspaceId: currentWorkspace?.id, id: caseItem.id, actionsFilter: 'ACTIVE' } }]
       : [],
+  })
+  const [createDraft, { loading: savingDraft }] = useMutation(CREATE_DRAFT, {
+    refetchQueries: [{ query: GET_DRAFTS, variables: { workspaceId: currentWorkspace?.id } }],
   })
 
   const fields = configData?.fieldConfiguration?.fields || []
@@ -128,6 +134,41 @@ export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
     }
   }
 
+  // Drafts skip the title / required-field validation that handleSubmit
+  // applies — a half-finished entry is exactly what the drafts list is
+  // for. The eventual SubmitDraft (from DraftDetail) re-runs full
+  // validation before promoting to OPEN.
+  const handleSaveAsDraft = async () => {
+    if (!currentWorkspace) return
+    const fieldArr = sanitizeFieldValues(
+      Object.entries(fieldValues)
+        .filter(([, v]) => v !== undefined && v !== null && v !== '')
+        .map(([fieldId, value]) => ({ fieldId, value })),
+      fields,
+    )
+
+    try {
+      await createDraft({
+        variables: {
+          workspaceId: currentWorkspace.id,
+          input: {
+            title: title || null,
+            description: description || null,
+            isPrivate,
+            assigneeIDs,
+            fields: fieldArr,
+          },
+        },
+      })
+      onClose()
+      navigate(`/ws/${currentWorkspace.id}/drafts`)
+    } catch (e: any) {
+      console.error('Save-as-draft mutation failed', e)
+      const msg = e?.graphQLErrors?.[0]?.message || e?.message || String(e)
+      setErrors({ submit: msg })
+    }
+  }
+
   const userOptions = users.map((u) => ({
     value: u.id,
     label: u.realName || u.name,
@@ -138,6 +179,7 @@ export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
   const selectedAssignees = userOptions.filter((o) => assigneeIDs.includes(o.value))
 
   const submitting = creating || updating
+  const busy = submitting || savingDraft
 
   return (
     <Modal
@@ -148,10 +190,20 @@ export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>{t('btnCancel')}</Button>
+          {!isEdit && (
+            <Button
+              variant="ghost"
+              onClick={handleSaveAsDraft}
+              disabled={busy}
+              data-testid="case-save-as-draft-button"
+            >
+              {savingDraft ? t('btnSavingDraft') : t('btnSaveAsDraft')}
+            </Button>
+          )}
           <Button
             variant="primary"
             onClick={handleSubmit}
-            disabled={submitting}
+            disabled={busy}
             data-testid="case-submit-button"
           >
             {submitting ? (isEdit ? t('btnSaving') : t('btnCreating')) : (isEdit ? t('btnSave') : t('btnCreate'))}
@@ -205,7 +257,7 @@ export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
                   onChange={handleFieldChange}
                   users={users}
                   error={errors[f.id]}
-                  disabled={submitting}
+                  disabled={busy}
                 />
               ))}
             </div>

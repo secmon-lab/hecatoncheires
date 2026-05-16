@@ -472,6 +472,31 @@ func (r *mutationResolver) SyncCaseChannelUsers(ctx context.Context, workspaceID
 	return toGraphQLCase(updated, workspaceID), nil
 }
 
+// CreateDraft is the resolver for the createDraft field.
+func (r *mutationResolver) CreateDraft(ctx context.Context, workspaceID string, input graphql1.CreateDraftInput) (*graphql1.Case, error) {
+	assigneeIDs := input.AssigneeIDs
+	if assigneeIDs == nil {
+		assigneeIDs = []string{}
+	}
+	fieldValues := toDomainFieldValues(input.Fields)
+
+	title := ""
+	if input.Title != nil {
+		title = *input.Title
+	}
+	description := ""
+	if input.Description != nil {
+		description = *input.Description
+	}
+	isPrivate := input.IsPrivate != nil && *input.IsPrivate
+
+	created, err := r.UseCases.Case.CreateDraft(ctx, workspaceID, title, description, assigneeIDs, fieldValues, isPrivate)
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLCase(created, workspaceID), nil
+}
+
 // SubmitDraft is the resolver for the submitDraft field.
 func (r *mutationResolver) SubmitDraft(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error) {
 	submitted, err := r.UseCases.Case.SubmitDraft(ctx, workspaceID, int64(id))

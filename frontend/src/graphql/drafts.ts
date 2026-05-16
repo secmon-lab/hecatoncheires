@@ -45,6 +45,20 @@ export const GET_DRAFT = gql`
   }
 `
 
+// CREATE_DRAFT persists the in-flight case form payload as a DRAFT case.
+// Mirror of CREATE_CASE but every field is optional, so the user can save
+// a half-finished form. The server enforces title presence at SubmitDraft
+// time, not here.
+export const CREATE_DRAFT = gql`
+  mutation CreateDraft($workspaceId: String!, $input: CreateDraftInput!) {
+    createDraft(workspaceId: $workspaceId, input: $input) {
+      id
+      title
+      status
+    }
+  }
+`
+
 export const SUBMIT_DRAFT = gql`
   mutation SubmitDraft($workspaceId: String!, $id: Int!) {
     submitDraft(workspaceId: $workspaceId, id: $id) {

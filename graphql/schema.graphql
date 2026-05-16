@@ -264,6 +264,18 @@ input CreateCaseInput {
   isPrivate: Boolean
 }
 
+# CreateDraftInput mirrors CreateCaseInput but every field is optional —
+# drafts are by definition in-progress and the user may save with an empty
+# title, no assignees, etc. The eventual SubmitDraft is what enforces a
+# non-empty title before promoting the case to OPEN.
+input CreateDraftInput {
+  title: String
+  description: String
+  assigneeIDs: [String!]
+  fields: [FieldValueInput!]
+  isPrivate: Boolean
+}
+
 input UpdateCaseInput {
   id: Int!
   # All fields below are optional. Omitted fields preserve their current value
@@ -538,6 +550,11 @@ type Mutation {
   closeCase(workspaceId: String!, id: Int!): Case!
   reopenCase(workspaceId: String!, id: Int!): Case!
   syncCaseChannelUsers(workspaceId: String!, id: Int!): Case!
+
+  # Persist the supplied form payload as a DRAFT case. No Slack channel
+  # is created and no notifications fire; the resulting case is visible
+  # only to its reporter until SubmitDraft promotes it to OPEN.
+  createDraft(workspaceId: String!, input: CreateDraftInput!): Case!
 
   # Promote a draft case to OPEN, running the same activation side effects
   # (Slack channel, invites, etc.) as a fresh createCase. Only the draft's

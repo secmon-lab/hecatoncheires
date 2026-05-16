@@ -159,3 +159,24 @@ func buildSaveAsDraftSplashView(ctx context.Context, caseID int64) slack.ModalVi
 		},
 	}
 }
+
+// buildCaseCreatedSplashView mirrors buildSaveAsDraftSplashView but for the
+// body-level "Create" button. We can't read the freshly-created case ID
+// off the InteractionCallback (the channel post / ephemeral path handles
+// the human-facing case-number announcement), so the splash itself stays
+// generic.
+func buildCaseCreatedSplashView(ctx context.Context) slack.ModalViewRequest {
+	body := slack.NewSectionBlock(
+		slack.NewTextBlockObject(slack.MarkdownType, i18n.T(ctx, i18n.MsgModalCaseCreatedBody), false, false),
+		nil,
+		nil,
+	)
+	return slack.ModalViewRequest{
+		Type:  slack.VTModal,
+		Title: slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgModalCaseCreatedTitle), false, false),
+		Close: slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgModalCreateCaseCancel), false, false),
+		Blocks: slack.Blocks{
+			BlockSet: []slack.Block{body},
+		},
+	}
+}

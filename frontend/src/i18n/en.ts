@@ -388,7 +388,7 @@ export const en: Messages = {
   navDrafts: 'Drafts',
   draftsPageTitle: 'My Drafts',
   draftsPageSubtitle: 'Cases saved as drafts from Slack. Submit to promote to a real case, or discard to delete.',
-  draftsEmpty: 'No drafts yet. Use "Save as draft" on the Slack case creation modal to keep a half-finished entry here.',
+  draftsEmpty: 'No drafts yet. Press "Save as draft" on the case creation form (Slack or Web) to keep a half-finished entry here.',
   draftsColumnTitle: 'Title',
   draftsColumnCreated: 'Created',
   draftsColumnActions: 'Actions',
@@ -408,4 +408,6 @@ export const en: Messages = {
   draftSubmitErrorMissingTitle: 'A title is required before submitting. Use Slack to add one, then return here.',
   draftSubmitErrorGeneric: 'Failed to submit draft: {message}',
   draftDiscardErrorGeneric: 'Failed to discard draft: {message}',
+  btnSaveAsDraft: 'Save as draft',
+  btnSavingDraft: 'Saving draft...',
 }
