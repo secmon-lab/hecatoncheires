@@ -23,12 +23,17 @@ import (
 type ActionStepUseCase struct {
 	repo         interfaces.Repository
 	slackService slack.Service
+	slotCoord    *notificationSlotCoordinator
 }
 
-func NewActionStepUseCase(repo interfaces.Repository, slackService slack.Service) *ActionStepUseCase {
+// NewActionStepUseCase constructs the ActionStepUseCase. slotCoord may be
+// nil; when nil (or its slotDuration is non-positive), step change
+// notifications fall back to the legacy reply_broadcast path.
+func NewActionStepUseCase(repo interfaces.Repository, slackService slack.Service, slotCoord *notificationSlotCoordinator) *ActionStepUseCase {
 	return &ActionStepUseCase{
 		repo:         repo,
 		slackService: slackService,
+		slotCoord:    slotCoord,
 	}
 }
 
@@ -351,12 +356,23 @@ func (uc *ActionStepUseCase) notifyStepEvent(ctx context.Context, action *model.
 			goslack.NewTextBlockObject(goslack.MarkdownType, msg, false, false),
 		),
 	}
+	broadcast := shouldBroadcastActionEvent(kind)
+	aggregate := broadcast && uc.slotCoord.enabled()
+
 	var opts []slack.PostThreadOption
-	if shouldBroadcastActionEvent(kind) {
+	if broadcast && !aggregate {
 		opts = append(opts, slack.WithBroadcastToChannel())
 	}
 	if _, postErr := uc.slackService.PostThreadMessage(ctx, caseModel.SlackChannelID, action.SlackMessageTS, blocks, msg, opts...); postErr != nil {
 		errutil.Handle(ctx, postErr, "failed to post action step notification")
+		return
+	}
+	if aggregate {
+		uc.slotCoord.enqueueChannelLine(ctx, caseModel.SlackChannelID, slotEntry{
+			ActionMessageTS: action.SlackMessageTS,
+			ActionTitle:     action.Title,
+			Body:            msg,
+		})
 	}
 }
 

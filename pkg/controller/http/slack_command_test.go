@@ -55,7 +55,7 @@ func (m *mockSlackServiceForCommand) AddBookmark(_ context.Context, _, _, _ stri
 func (m *mockSlackServiceForCommand) GetTeamURL(_ context.Context) (string, error) {
 	return "", nil
 }
-func (m *mockSlackServiceForCommand) PostMessage(_ context.Context, _ string, _ []goslack.Block, _ string) (string, error) {
+func (m *mockSlackServiceForCommand) PostMessage(_ context.Context, _ string, _ []goslack.Block, _ string, _ ...slacksvc.PostMessageOption) (string, error) {
 	return "", nil
 }
 func (m *mockSlackServiceForCommand) UpdateMessage(_ context.Context, _, _ string, _ []goslack.Block, _ string) error {
@@ -65,6 +65,12 @@ func (m *mockSlackServiceForCommand) PostMessageWithAttachment(_ context.Context
 	return "", nil
 }
 func (m *mockSlackServiceForCommand) UpdateMessageWithAttachment(_ context.Context, _, _ string, _ string, _ goslack.Attachment) error {
+	return nil
+}
+func (m *mockSlackServiceForCommand) PostMessageWithAttachments(_ context.Context, _ string, _ string, _ []goslack.Attachment, _ ...slacksvc.PostMessageOption) (string, error) {
+	return "", nil
+}
+func (m *mockSlackServiceForCommand) UpdateMessageWithAttachments(_ context.Context, _ string, _ string, _ string, _ []goslack.Attachment) error {
 	return nil
 }
 func (m *mockSlackServiceForCommand) GetConversationReplies(_ context.Context, _, _ string, _ int) ([]slacksvc.ConversationMessage, error) {

@@ -107,7 +107,10 @@ func cmdFixUnsentAction() *cli.Command {
 				return goerr.Wrap(err, "failed to initialize slack service")
 			}
 
-			actionUC := usecase.NewActionUseCase(repo, registry, slackSvc, baseURL)
+			// Diagnosis sweep does not aggregate channel notifications;
+			// leave the slot coordinator unset so the legacy broadcast path
+			// applies to any per-action thread post it triggers.
+			actionUC := usecase.NewActionUseCase(repo, registry, slackSvc, baseURL, nil)
 			diagUC := diagnosis.New(repo, registry, actionUC)
 
 			report, err := diagUC.FixUnsentActions(ctx)

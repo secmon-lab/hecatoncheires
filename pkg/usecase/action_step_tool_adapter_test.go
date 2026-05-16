@@ -17,7 +17,7 @@ func TestActionStepToolAdapter_PinsSystemActor(t *testing.T) {
 	i18n.Init(i18n.LangEN)
 
 	f := newStepTestFixture(t, nil, false)
-	stepUC := usecase.NewActionStepUseCase(f.repo, nil)
+	stepUC := usecase.NewActionStepUseCase(f.repo, nil, nil)
 	adapter := usecase.NewActionStepToolAdapter(stepUC)
 	gt.Value(t, adapter).NotNil()
 

@@ -21,6 +21,7 @@ type Memory struct {
 	assistLog     *assistLogRepository
 	caseDraft     *caseDraftRepository
 	session       *sessionRepository
+	notifySlot    *notificationSlotRepository
 }
 
 var _ interfaces.Repository = &Memory{}
@@ -40,6 +41,7 @@ func New() *Memory {
 		assistLog:     newAssistLogRepository(),
 		caseDraft:     newCaseDraftRepository(),
 		session:       newSessionRepository(),
+		notifySlot:    newNotificationSlotRepository(),
 	}
 }
 
@@ -89,6 +91,10 @@ func (m *Memory) CaseDraft() interfaces.CaseDraftRepository {
 
 func (m *Memory) Session() interfaces.SessionRepository {
 	return m.session
+}
+
+func (m *Memory) NotificationSlot() interfaces.NotificationSlotRepository {
+	return m.notifySlot
 }
 
 func (m *Memory) Close() error {

@@ -107,14 +107,19 @@ type ActionUseCase struct {
 	registry     *model.WorkspaceRegistry
 	slackService slack.Service
 	baseURL      string
+	slotCoord    *notificationSlotCoordinator
 }
 
-func NewActionUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, baseURL string) *ActionUseCase {
+// NewActionUseCase constructs the ActionUseCase. slotCoord may be nil; when
+// nil (or when its slotDuration is non-positive), channel-side change
+// notifications fall back to the legacy reply_broadcast path on each post.
+func NewActionUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, baseURL string, slotCoord *notificationSlotCoordinator) *ActionUseCase {
 	return &ActionUseCase{
 		repo:         repo,
 		registry:     registry,
 		slackService: slackService,
 		baseURL:      baseURL,
+		slotCoord:    slotCoord,
 	}
 }
 
@@ -703,13 +708,24 @@ func (uc *ActionUseCase) postActionChangeNotification(ctx context.Context, works
 	if before.AssigneeID != after.AssigneeID {
 		kinds = append(kinds, types.ActionEventAssigneeChanged)
 	}
+	broadcast := shouldBroadcastAnyActionEvent(kinds...)
+	aggregate := broadcast && uc.slotCoord.enabled()
+
 	var opts []slack.PostThreadOption
-	if shouldBroadcastAnyActionEvent(kinds...) {
+	if broadcast && !aggregate {
 		opts = append(opts, slack.WithBroadcastToChannel())
 	}
 
 	if _, postErr := uc.slackService.PostThreadMessage(ctx, caseModel.SlackChannelID, after.SlackMessageTS, blocks, body, opts...); postErr != nil {
 		errutil.Handle(ctx, postErr, "failed to post action change notification")
+		return
+	}
+	if aggregate {
+		uc.slotCoord.enqueueChannelLine(ctx, caseModel.SlackChannelID, slotEntry{
+			ActionMessageTS: after.SlackMessageTS,
+			ActionTitle:     after.Title,
+			Body:            body,
+		})
 	}
 }
 

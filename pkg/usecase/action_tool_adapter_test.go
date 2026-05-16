@@ -28,7 +28,7 @@ func TestNewActionToolAdapter(t *testing.T) {
 
 	t.Run("returns non-nil adapter when usecase is provided", func(t *testing.T) {
 		repo := memory.New()
-		uc := usecase.NewActionUseCase(repo, nil, nil, "")
+		uc := usecase.NewActionUseCase(repo, nil, nil, "", nil)
 		gt.Value(t, usecase.NewActionToolAdapter(uc)).NotNil()
 	})
 }
@@ -37,7 +37,7 @@ func TestActionToolAdapter_CreateAction(t *testing.T) {
 	t.Run("delegates to ActionUseCase.CreateAction", func(t *testing.T) {
 		repo := memory.New()
 		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "", nil)
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
@@ -75,7 +75,7 @@ func TestActionToolAdapter_UpdateAction(t *testing.T) {
 			},
 		}
 		caseUC := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
-		actionUC := usecase.NewActionUseCase(repo, nil, mock, "https://example.com")
+		actionUC := usecase.NewActionUseCase(repo, nil, mock, "https://example.com", nil)
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		gt.NoError(t, repo.SlackUser().SaveMany(ctx, []*model.SlackUser{

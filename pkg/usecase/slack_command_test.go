@@ -38,7 +38,7 @@ func (m *commandTestSlackService) OpenView(_ context.Context, triggerID string, 
 	return nil
 }
 
-func (m *commandTestSlackService) PostMessage(_ context.Context, channelID string, _ []goslack.Block, text string) (string, error) {
+func (m *commandTestSlackService) PostMessage(_ context.Context, channelID string, _ []goslack.Block, text string, _ ...slack.PostMessageOption) (string, error) {
 	m.postedMessages = append(m.postedMessages, commandTestPostedMessage{
 		ChannelID: channelID,
 		Text:      text,
@@ -1487,7 +1487,7 @@ func TestSlackUseCases_HandleActionCreationSubmit(t *testing.T) {
 
 		slackMock := &commandTestSlackService{}
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
-		actionUC := usecase.NewActionUseCase(repo, registry, slackMock, "")
+		actionUC := usecase.NewActionUseCase(repo, registry, slackMock, "", nil)
 
 		meta, _ := json.Marshal(map[string]any{
 			"workspace_id": "risk",
@@ -1557,7 +1557,7 @@ func TestSlackUseCases_HandleActionCreationSubmit(t *testing.T) {
 
 		slackMock := &commandTestSlackService{}
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
-		actionUC := usecase.NewActionUseCase(repo, registry, slackMock, "")
+		actionUC := usecase.NewActionUseCase(repo, registry, slackMock, "", nil)
 
 		meta, _ := json.Marshal(map[string]any{
 			"workspace_id": "risk",
