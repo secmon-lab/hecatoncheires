@@ -78,7 +78,17 @@ func (uc *SlackUseCases) HandleSaveAsDraftClick(ctx context.Context, caseUC *Cas
 
 	fieldValuesMap := extractFieldValues(blockValues)
 
-	created, err := caseUC.CreateDraft(ctx, meta.WorkspaceID, title, description, nil, fieldValuesMap, isPrivate)
+	// Auto-assign the clicker, matching the regular Submit path
+	// (HandleCaseCreationSubmit), so the case behaves identically once it
+	// is promoted to OPEN — the clicker becomes a channel member via the
+	// assignee invite during activation, even on Slack workspaces where
+	// the reporter-side invite isn't enough (e.g. when ReporterID is
+	// missing from a downstream caller). Keeping the two paths symmetric
+	// here avoids subtly different membership outcomes between "Submit"
+	// and "Save as Draft → Submit".
+	assigneeIDs := []string{callback.User.ID}
+
+	created, err := caseUC.CreateDraft(ctx, meta.WorkspaceID, title, description, assigneeIDs, fieldValuesMap, isPrivate)
 	if err != nil {
 		uc.notifySaveDraftFailure(ctx, meta.ChannelID, callback.User.ID)
 		return goerr.Wrap(err, "failed to save draft",

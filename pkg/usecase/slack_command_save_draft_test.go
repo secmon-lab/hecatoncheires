@@ -116,6 +116,11 @@ func TestSlackUseCases_HandleSaveAsDraftClick(t *testing.T) {
 		gt.Value(t, drafts[0].Description).Equal("draft body")
 		gt.Value(t, drafts[0].IsPrivate).Equal(true)
 		gt.Value(t, drafts[0].ReporterID).Equal("UREPORTER")
+		// Save-as-Draft auto-assigns the clicker, mirroring the regular
+		// Submit path's behaviour, so the eventual case has the user as
+		// an assignee (and therefore a channel member after activation).
+		gt.Number(t, len(drafts[0].AssigneeIDs)).Equal(1)
+		gt.Value(t, drafts[0].AssigneeIDs[0]).Equal("UREPORTER")
 
 		// Modal was replaced with the splash view.
 		gt.Number(t, len(slackMock.updateViewCalls)).Equal(1)

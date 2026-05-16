@@ -114,7 +114,19 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 		return created, nil
 	}
 
-	return uc.activateCase(ctx, workspaceID, created, sourceTeamID)
+	activated, actErr := uc.activateCase(ctx, workspaceID, created, sourceTeamID)
+	if actErr != nil {
+		// CreateCase's rollback policy: discard the half-formed case so the
+		// whole call appears atomic. SubmitDraft uses a different policy
+		// (status flip back to DRAFT) — see its implementation.
+		if delErr := uc.repo.Case().Delete(ctx, workspaceID, created.ID); delErr != nil {
+			return nil, goerr.Wrap(actErr, "case activation failed and rollback delete also failed",
+				goerr.V("rollback_error", delErr),
+				goerr.V(CaseIDKey, created.ID))
+		}
+		return nil, actErr
+	}
+	return activated, nil
 }
 
 // CreateDraft persists a case in status=DRAFT — i.e. an "in-progress" entry
@@ -212,8 +224,15 @@ func (uc *CaseUseCase) persistCase(ctx context.Context, workspaceID string, in p
 // connect, invites, bookmark, welcome messages, and channel-member sync.
 // Returns the updated case (with SlackChannelID / ChannelUserIDs filled in).
 //
-// On Slack channel creation failure the just-persisted case is rolled back
-// so the caller observes "creation failed" rather than a partial case.
+// activateCase is intentionally non-destructive: on Slack channel creation
+// failure it returns the error without touching the persisted case. The
+// caller decides the rollback policy:
+//
+//   - CreateCase rolls back by deleting the just-persisted case so the
+//     entire "create" call appears atomic to the user.
+//   - SubmitDraft rolls back by flipping the case status back to DRAFT
+//     so the user does not lose work they had saved.
+//
 // Activation is a no-op when no Slack service is configured.
 func (uc *CaseUseCase) activateCase(ctx context.Context, workspaceID string, c *model.Case, sourceTeamID string) (*model.Case, error) {
 	if uc.slackService == nil {
@@ -224,12 +243,6 @@ func (uc *CaseUseCase) activateCase(ctx context.Context, workspaceID string, c *
 	teamID := uc.slackTeamIDForWorkspace(workspaceID)
 	channelID, err := uc.slackService.CreateChannel(ctx, c.ID, c.Title, prefix, c.IsPrivate, teamID)
 	if err != nil {
-		// Rollback: delete case.
-		if delErr := uc.repo.Case().Delete(ctx, workspaceID, c.ID); delErr != nil {
-			return nil, goerr.Wrap(err, "failed to create Slack channel for case, and also failed to roll back case creation",
-				goerr.V("rollback_error", delErr),
-				goerr.V(CaseIDKey, c.ID))
-		}
 		return nil, goerr.Wrap(err, "failed to create Slack channel for case", goerr.V(CaseIDKey, c.ID))
 	}
 
@@ -624,15 +637,21 @@ func (uc *CaseUseCase) SubmitDraft(ctx context.Context, workspaceID string, id i
 
 	activated, actErr := uc.activateCase(ctx, workspaceID, updated, "")
 	if actErr != nil {
-		// activateCase already rolls back the case on Slack failure (Delete).
-		// If the rollback path fired, the case is gone; otherwise we need to
-		// flip the status back to DRAFT so the user can retry from the same
-		// entry rather than starting over.
+		// SubmitDraft's rollback policy is "preserve the saved work": flip
+		// the status back to DRAFT and keep the row so the user can retry.
+		// activateCase is now non-destructive, so the case row is still
+		// there waiting to be patched.
 		if rolled, getErr := uc.repo.Case().Get(ctx, workspaceID, id); getErr == nil {
 			rolled.Status = types.CaseStatusDraft
 			if _, undoErr := uc.repo.Case().Update(ctx, workspaceID, rolled); undoErr != nil {
-				errutil.Handle(ctx, undoErr, "failed to roll status back to draft after activation failure")
+				errutil.Handle(ctx, goerr.Wrap(undoErr, "failed to roll status back to draft after activation failure",
+					goerr.V(CaseIDKey, id),
+				), "failed to roll status back to draft after activation failure")
 			}
+		} else {
+			errutil.Handle(ctx, goerr.Wrap(getErr, "draft case missing during rollback",
+				goerr.V(CaseIDKey, id),
+			), "draft case missing during rollback")
 		}
 		return nil, actErr
 	}

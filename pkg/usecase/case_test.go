@@ -1823,9 +1823,10 @@ func TestCaseUseCase_SubmitDraft(t *testing.T) {
 
 	t.Run("rolls back to DRAFT when activation fails", func(t *testing.T) {
 		repo := memory.New()
-		// CreateChannel returns error → activation fails → case is deleted
-		// by activateCase rollback path. We then verify the draft is gone
-		// (which is the documented rollback behaviour).
+		// CreateChannel returns error → activation fails. SubmitDraft's
+		// rollback policy preserves the user's work: the case row stays,
+		// status reverts to DRAFT, and the user can retry from the same
+		// entry rather than starting over.
 		mock := &mockSlackService{
 			createChannelFn: func(_ context.Context, _ int64, _ string, _ string) (string, error) {
 				return "", errors.New("channel creation rejected")
@@ -1840,12 +1841,12 @@ func TestCaseUseCase_SubmitDraft(t *testing.T) {
 		_, err = uc.SubmitDraft(ctx, testWorkspaceID, draft.ID)
 		gt.Error(t, err)
 
-		// activateCase's rollback path deletes the case wholesale on channel
-		// failure; the user must re-create the draft to retry. This locks in
-		// today's behaviour — see the comment in SubmitDraft about the
-		// in-place draft fallback for non-rollback activation failures.
-		_, getErr := repo.Case().Get(context.Background(), testWorkspaceID, draft.ID)
-		gt.Error(t, getErr)
+		// Persisted case row survives; status is flipped back to DRAFT.
+		stored, getErr := repo.Case().Get(context.Background(), testWorkspaceID, draft.ID)
+		gt.NoError(t, getErr).Required()
+		gt.Value(t, stored.Status).Equal(types.CaseStatusDraft)
+		gt.Value(t, stored.Title).Equal("Will Fail")
+		gt.Value(t, stored.Description).Equal("Body")
 	})
 
 	t.Run("already-submitted case cannot be submitted again", func(t *testing.T) {
