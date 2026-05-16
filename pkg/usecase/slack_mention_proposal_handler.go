@@ -20,7 +20,7 @@ import (
 // slackDraftHandler implements draft.Handler for the host (Slack)-side of
 // the open-mode mention flow. It is per-mention: HandleAppMention builds a
 // fresh slackDraftHandler, hands it to draft.UseCase.RunTurn, and discards
-// it on return. State that needs to outlast the turn (CaseDraft, Session)
+// it on return. State that needs to outlast the turn (CaseProposal, Session)
 // is persisted via repo.
 type slackDraftHandler struct {
 	repo         interfaces.Repository
@@ -32,7 +32,7 @@ type slackDraftHandler struct {
 	threadTS    string
 	candidates  []*model.WorkspaceEntry
 	creatorUser string
-	draftID     model.CaseDraftID
+	proposalID  model.CaseProposalID
 	mentionTS   string
 
 	// processingMu serialises trace writes so concurrent goroutines
@@ -70,7 +70,7 @@ func newSlackDraftHandler(
 	slackService slacksvc.Service,
 	channelID, threadTS, mentionTS, creatorUser string,
 	candidates []*model.WorkspaceEntry,
-	draftID model.CaseDraftID,
+	proposalID model.CaseProposalID,
 	processingTS string,
 ) *slackDraftHandler {
 	return &slackDraftHandler{
@@ -81,7 +81,7 @@ func newSlackDraftHandler(
 		threadTS:     threadTS,
 		candidates:   candidates,
 		creatorUser:  creatorUser,
-		draftID:      draftID,
+		proposalID:   proposalID,
 		mentionTS:    mentionTS,
 		processingTS: processingTS,
 	}
@@ -101,7 +101,7 @@ func (h *slackDraftHandler) Question(ctx context.Context, ssn *model.Session, q 
 	if ssn != nil && ssn.CreatorUserID != "" {
 		requester = ssn.CreatorUserID
 	}
-	blocks, fallback := buildDraftQuestionBlocks(q, h.draftID, requester)
+	blocks, fallback := buildProposalQuestionBlocks(q, h.proposalID, requester)
 	ts, err := h.slackService.PostThreadMessage(ctx, h.channelID, h.threadTS, blocks, fallback)
 	if err != nil {
 		return goerr.Wrap(err, "post draft question form",
@@ -128,7 +128,7 @@ func (h *slackDraftHandler) Question(ctx context.Context, ssn *model.Session, q 
 }
 
 // Materialize is the meat of the draft handler. The planner has decided to
-// produce a CaseDraft preview; we validate the workspace, build the
+// produce a CaseProposal preview; we validate the workspace, build the
 // WorkspaceMaterialization (coercing planner JSON to typed FieldValues),
 // persist via SetMaterialization, and post (or update in place) the preview
 // Block Kit.
@@ -178,21 +178,21 @@ func (h *slackDraftHandler) Materialize(ctx context.Context, ssn *model.Session,
 
 	// Persist with InferenceInProgress=false — the inference (planner +
 	// sub-agents) has just completed for this materialize call.
-	if err := h.repo.CaseDraft().SetMaterialization(ctx, h.draftID, m.WorkspaceID, mat, false); err != nil {
+	if err := h.repo.CaseProposal().SetMaterialization(ctx, h.proposalID, m.WorkspaceID, mat, false); err != nil {
 		return goerr.Wrap(err, "persist materialization",
-			goerr.V("draft_id", string(h.draftID)),
+			goerr.V("proposal_id", string(h.proposalID)),
 			goerr.V("workspace_id", m.WorkspaceID),
 		)
 	}
 
 	// Reload draft so the preview reflects the just-persisted state and
 	// holds any prior fields that should survive (RawMessages, etc.).
-	d, err := h.repo.CaseDraft().Get(ctx, h.draftID)
+	d, err := h.repo.CaseProposal().Get(ctx, h.proposalID)
 	if err != nil {
 		return goerr.Wrap(err, "reload draft after materialize")
 	}
 	if d == nil {
-		return goerr.New("draft missing after materialize", goerr.V("draft_id", string(h.draftID)))
+		return goerr.New("draft missing after materialize", goerr.V("proposal_id", string(h.proposalID)))
 	}
 
 	blocks, fallback := buildPreviewBlocks(d, entry, h.candidates)
@@ -227,19 +227,19 @@ func (h *slackDraftHandler) Materialize(ctx context.Context, ssn *model.Session,
 	// can locate the message for in-place updates.
 	d.EphemeralChannelID = h.channelID
 	d.EphemeralMessageTS = ts
-	if err := h.repo.CaseDraft().Save(ctx, d); err != nil {
+	if err := h.repo.CaseProposal().Save(ctx, d); err != nil {
 		return goerr.Wrap(err, "save draft with ephemeral ref")
 	}
 
-	// Persist the DraftID on the Session so future thread replies / WS
+	// Persist the ProposalID on the Session so future thread replies / WS
 	// switches can look up the draft from the session row.
-	ssn.DraftID = h.draftID
+	ssn.ProposalID = h.proposalID
 	if err := h.repo.Session().Put(ctx, ssn); err != nil {
 		errutil.Handle(ctx, err, "save session with draft id")
 	}
 
 	logger.Info("draft materialized via planner",
-		"draft_id", string(h.draftID),
+		"proposal_id", string(h.proposalID),
 		"workspace_id", m.WorkspaceID,
 		"channel_id", h.channelID,
 	)
@@ -355,7 +355,7 @@ func (h *slackDraftHandler) RegisterTasks(ctx context.Context, tasks []draft.Tas
 			continue
 		}
 
-		line := i18n.T(ctx, i18n.MsgDraftTraceTaskPending, ti.Title)
+		line := i18n.T(ctx, i18n.MsgProposalTraceTaskPending, ti.Title)
 		blocks := buildTraceContextBlocks([]string{line})
 		ts, err := h.slackService.PostThreadMessage(ctx, h.channelID, h.threadTS, blocks, line)
 		if err != nil {

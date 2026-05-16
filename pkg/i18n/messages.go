@@ -73,19 +73,19 @@ var messagesEN = [msgKeyCount]string{
 	MsgKeyAgentBusy:       ":hourglass_flowing_sand: Already handling your previous request. I'll respond, then please mention me again if more is needed.",
 
 	// Draft (open-mode) trace lines
-	MsgDraftTracePlanning:           "🤔 Planning…",
-	MsgDraftTracePlannerRetry:       "⚠️ Planner output rejected; retrying",
-	MsgDraftTracePlannerAction:      "→ %s — %s",
-	MsgDraftTracePlannerTool:        "🛠 Planning — calling %s",
-	MsgDraftTracePlannerMessage:     "🤔 Planning — %s",
-	MsgDraftTracePhase:              "🧭 %s",
-	MsgDraftTraceTaskPending:        "⏳ Task: %s",
-	MsgDraftTraceTaskRunning:        "🔍 Task: %s — running…",
-	MsgDraftTraceTaskRunningTool:    "🔍 Task: %s — 🛠 calling %s",
-	MsgDraftTraceTaskRunningMessage: "🔍 Task: %s — %s",
-	MsgDraftTraceTaskDone:           "✅ Task: %s — done (%s, %d/%d inner loops)",
-	MsgDraftTraceTaskFailedPrompt:   "❌ Task: %s — failed (%s, build prompt): %v",
-	MsgDraftTraceTaskFailed:         "❌ Task: %s — failed (%s, %d/%d inner loops): %v",
+	MsgProposalTracePlanning:           "🤔 Planning…",
+	MsgProposalTracePlannerRetry:       "⚠️ Planner output rejected; retrying",
+	MsgProposalTracePlannerAction:      "→ %s — %s",
+	MsgProposalTracePlannerTool:        "🛠 Planning — calling %s",
+	MsgProposalTracePlannerMessage:     "🤔 Planning — %s",
+	MsgProposalTracePhase:              "🧭 %s",
+	MsgProposalTraceTaskPending:        "⏳ Task: %s",
+	MsgProposalTraceTaskRunning:        "🔍 Task: %s — running…",
+	MsgProposalTraceTaskRunningTool:    "🔍 Task: %s — 🛠 calling %s",
+	MsgProposalTraceTaskRunningMessage: "🔍 Task: %s — %s",
+	MsgProposalTraceTaskDone:           "✅ Task: %s — done (%s, %d/%d inner loops)",
+	MsgProposalTraceTaskFailedPrompt:   "❌ Task: %s — failed (%s, build prompt): %v",
+	MsgProposalTraceTaskFailed:         "❌ Task: %s — failed (%s, %d/%d inner loops): %v",
 
 	// Bookmark
 	MsgBookmarkOpenCase: "Open Case",
@@ -133,6 +133,13 @@ var messagesEN = [msgKeyCount]string{
 	// Errors related to commands
 	MsgErrUnknownSubcommand: "Unknown subcommand: %q. Available: `update`, `action`.",
 	MsgErrCreateAction:      "Failed to create action. Please try again.",
+
+	// Save-as-Draft
+	MsgDraftSaveAsButton:        "Save as draft",
+	MsgDraftSavedEphemeral:      "Saved as draft #%d. Open the Drafts page on the web to continue.",
+	MsgDraftSavedModalTitle:     "Saved",
+	MsgDraftSavedModalBody:      "Saved as draft #%d. You can close this dialog.",
+	MsgDraftSaveFailedEphemeral: "Failed to save draft. Please try again.",
 }
 
 var messagesJA = [msgKeyCount]string{
@@ -191,19 +198,19 @@ var messagesJA = [msgKeyCount]string{
 	MsgKeyAgentBusy:       ":hourglass_flowing_sand: 直前のリクエストを処理中です。完了後にもう一度メンションしてください。",
 
 	// Draft (open-mode) trace lines
-	MsgDraftTracePlanning:           "🤔 計画中…",
-	MsgDraftTracePlannerRetry:       "⚠️ 出力が拒否されました。再試行します",
-	MsgDraftTracePlannerAction:      "→ %s — %s",
-	MsgDraftTracePlannerTool:        "🛠 計画中 — %s 呼び出し中",
-	MsgDraftTracePlannerMessage:     "🤔 計画中 — %s",
-	MsgDraftTracePhase:              "🧭 %s",
-	MsgDraftTraceTaskPending:        "⏳ タスク: %s",
-	MsgDraftTraceTaskRunning:        "🔍 タスク: %s — 実行中…",
-	MsgDraftTraceTaskRunningTool:    "🔍 タスク: %s — 🛠 %s 呼び出し中",
-	MsgDraftTraceTaskRunningMessage: "🔍 タスク: %s — %s",
-	MsgDraftTraceTaskDone:           "✅ タスク: %s — 完了 (%s, %d/%d 内部ループ)",
-	MsgDraftTraceTaskFailedPrompt:   "❌ タスク: %s — 失敗 (%s, プロンプト構築): %v",
-	MsgDraftTraceTaskFailed:         "❌ タスク: %s — 失敗 (%s, %d/%d 内部ループ): %v",
+	MsgProposalTracePlanning:           "🤔 計画中…",
+	MsgProposalTracePlannerRetry:       "⚠️ 出力が拒否されました。再試行します",
+	MsgProposalTracePlannerAction:      "→ %s — %s",
+	MsgProposalTracePlannerTool:        "🛠 計画中 — %s 呼び出し中",
+	MsgProposalTracePlannerMessage:     "🤔 計画中 — %s",
+	MsgProposalTracePhase:              "🧭 %s",
+	MsgProposalTraceTaskPending:        "⏳ タスク: %s",
+	MsgProposalTraceTaskRunning:        "🔍 タスク: %s — 実行中…",
+	MsgProposalTraceTaskRunningTool:    "🔍 タスク: %s — 🛠 %s 呼び出し中",
+	MsgProposalTraceTaskRunningMessage: "🔍 タスク: %s — %s",
+	MsgProposalTraceTaskDone:           "✅ タスク: %s — 完了 (%s, %d/%d 内部ループ)",
+	MsgProposalTraceTaskFailedPrompt:   "❌ タスク: %s — 失敗 (%s, プロンプト構築): %v",
+	MsgProposalTraceTaskFailed:         "❌ タスク: %s — 失敗 (%s, %d/%d 内部ループ): %v",
 
 	// Bookmark
 	MsgBookmarkOpenCase: "ケースを開く",
@@ -251,4 +258,11 @@ var messagesJA = [msgKeyCount]string{
 	// Errors related to commands
 	MsgErrUnknownSubcommand: "不明なサブコマンドです: %q。利用可能: `update`, `action`。",
 	MsgErrCreateAction:      "アクションの作成に失敗しました。もう一度お試しください。",
+
+	// Save-as-Draft
+	MsgDraftSaveAsButton:        "下書きとして保存",
+	MsgDraftSavedEphemeral:      "下書き #%d として保存しました。続きはWebのDraftsページから編集できます。",
+	MsgDraftSavedModalTitle:     "保存しました",
+	MsgDraftSavedModalBody:      "下書き #%d として保存しました。このダイアログは閉じて構いません。",
+	MsgDraftSaveFailedEphemeral: "下書きの保存に失敗しました。もう一度お試しください。",
 }

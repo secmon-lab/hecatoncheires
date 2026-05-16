@@ -90,14 +90,83 @@ func (uc *CaseUseCase) slackChannelPrefixForWorkspace(workspaceID string) string
 	return entry.SlackChannelPrefix
 }
 
+// CreateCase persists a brand-new case in status=OPEN and runs the full
+// activation side effects (Slack channel, invites, welcome, etc.). It is the
+// public entry point used by createCase mutation and by the slash-command
+// "submit" flow; both share identical post-persistence behaviour.
 func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue, isPrivate bool, sourceTeamID string, requestKey string) (*model.Case, error) {
-	if title == "" {
+	created, err := uc.persistCase(ctx, workspaceID, persistCaseInput{
+		Title:       title,
+		Description: description,
+		Status:      types.CaseStatusOpen,
+		AssigneeIDs: assigneeIDs,
+		IsPrivate:   isPrivate,
+		FieldValues: fieldValues,
+		RequestKey:  requestKey,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// `persistCase` returns early when an existing requestKey matched; that
+	// case is already active and must not be re-activated.
+	if created.Status != types.CaseStatusOpen || created.SlackChannelID != "" {
+		return created, nil
+	}
+
+	return uc.activateCase(ctx, workspaceID, created, sourceTeamID)
+}
+
+// CreateDraft persists a case in status=DRAFT — i.e. an "in-progress" entry
+// saved from the Slack creation modal's Save as Draft button. None of the
+// activation side effects (Slack channel, invites, welcome, etc.) run; those
+// fire only when the draft is later promoted via SubmitDraft.
+//
+// The reporter (auth-context Slack user) becomes the draft owner; the
+// returned case carries the assigned ID so the caller can echo it back to
+// the user.
+func (uc *CaseUseCase) CreateDraft(ctx context.Context, workspaceID string, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue, isPrivate bool) (*model.Case, error) {
+	// Title is intentionally optional for drafts: half-written entries are
+	// the whole point. We still validate field values to keep the draft
+	// usable on Submit without surprise validation failures.
+	return uc.persistCase(ctx, workspaceID, persistCaseInput{
+		Title:       title,
+		Description: description,
+		Status:      types.CaseStatusDraft,
+		AssigneeIDs: assigneeIDs,
+		IsPrivate:   isPrivate,
+		FieldValues: fieldValues,
+	})
+}
+
+// persistCaseInput is the shared input for persistCase, used by both the
+// "create open case" and "create draft" flows.
+type persistCaseInput struct {
+	Title       string
+	Description string
+	Status      types.CaseStatus
+	AssigneeIDs []string
+	IsPrivate   bool
+	FieldValues map[string]model.FieldValue
+	RequestKey  string
+}
+
+// persistCase performs request-key deduplication, field validation, and
+// repository write. It does NOT run any activation side effects — callers
+// must invoke activateCase separately when those should fire.
+func (uc *CaseUseCase) persistCase(ctx context.Context, workspaceID string, in persistCaseInput) (*model.Case, error) {
+	// Title is required for OPEN cases (the human flow needs a meaningful
+	// listing entry); drafts may be saved with an empty title so a partial
+	// entry can be picked up later.
+	if !in.Status.IsDraft() && in.Title == "" {
 		return nil, goerr.New("case title is required")
 	}
 
-	// Check request key: if a case with this key already exists, return it
-	if requestKey != "" {
-		existing, err := uc.repo.Case().GetByRequestKey(ctx, workspaceID, requestKey)
+	// Check request key: if a case with this key already exists, return it.
+	// RequestKey deduplication applies only to non-draft submissions; drafts
+	// do not currently carry a request key.
+	if in.RequestKey != "" {
+		existing, err := uc.repo.Case().GetByRequestKey(ctx, workspaceID, in.RequestKey)
 		if err != nil {
 			errutil.Handle(ctx, err, "failed to check request key key")
 		} else if existing != nil {
@@ -105,116 +174,122 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 		}
 	}
 
-	// Validate and enrich custom fields with Type from config
+	// Validate and enrich custom fields with Type from config.
 	if validator := uc.fieldValidatorForWorkspace(workspaceID); validator != nil {
-		enriched, err := validator.ValidateCaseFields(fieldValues)
+		enriched, err := validator.ValidateCaseFields(in.FieldValues)
 		if err != nil {
 			return nil, goerr.Wrap(err, "field validation failed")
 		}
-		fieldValues = enriched
+		in.FieldValues = enriched
 	}
 
-	// Set reporter from auth context (immutable after creation)
+	// Set reporter from auth context (immutable after creation).
 	var reporterID string
 	if token, tokenErr := auth.TokenFromContext(ctx); tokenErr == nil {
 		reporterID = token.Sub
 	}
 
-	// Create case with embedded field values
 	caseModel := &model.Case{
-		Title:       title,
-		Description: description,
-		Status:      types.CaseStatusOpen,
+		Title:       in.Title,
+		Description: in.Description,
+		Status:      in.Status,
 		ReporterID:  reporterID,
-		AssigneeIDs: assigneeIDs,
-		IsPrivate:   isPrivate,
-		FieldValues: fieldValues,
-		RequestKey:  requestKey,
+		AssigneeIDs: in.AssigneeIDs,
+		IsPrivate:   in.IsPrivate,
+		FieldValues: in.FieldValues,
+		RequestKey:  in.RequestKey,
 	}
 
 	created, err := uc.repo.Case().Create(ctx, workspaceID, caseModel)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to create case")
 	}
+	return created, nil
+}
 
-	// Create Slack channel if service is available
-	if uc.slackService != nil {
-		prefix := uc.slackChannelPrefixForWorkspace(workspaceID)
-		teamID := uc.slackTeamIDForWorkspace(workspaceID)
-		channelID, err := uc.slackService.CreateChannel(ctx, created.ID, created.Title, prefix, isPrivate, teamID)
-		if err != nil {
-			// Rollback: delete case
-			if delErr := uc.repo.Case().Delete(ctx, workspaceID, created.ID); delErr != nil {
-				return nil, goerr.Wrap(err, "failed to create Slack channel for case, and also failed to roll back case creation",
-					goerr.V("rollback_error", delErr),
-					goerr.V(CaseIDKey, created.ID))
-			}
-			return nil, goerr.Wrap(err, "failed to create Slack channel for case", goerr.V(CaseIDKey, created.ID))
-		}
-
-		// Connect channel to the source workspace if it differs from the configured team
-		if sourceTeamID != "" && sourceTeamID != teamID {
-			if uc.slackAdminService != nil {
-				if connectErr := uc.slackAdminService.ConnectChannelToWorkspace(ctx, channelID, []string{teamID, sourceTeamID}); connectErr != nil {
-					errutil.Handle(ctx, connectErr, "failed to connect channel to source workspace")
-				}
-			}
-		}
-
-		// Invite creator, assignees, and auto-invite users to the channel
-		usersToInvite := make([]string, 0, len(assigneeIDs)+1)
-		if token, tokenErr := auth.TokenFromContext(ctx); tokenErr == nil {
-			usersToInvite = append(usersToInvite, token.Sub)
-		}
-		usersToInvite = append(usersToInvite, assigneeIDs...)
-
-		// Add auto-invite users from workspace config
-		autoInviteUsers := uc.resolveAutoInviteUsers(ctx, workspaceID)
-		usersToInvite = append(usersToInvite, autoInviteUsers...)
-		usersToInvite = uniqueStrings(usersToInvite)
-
-		if len(usersToInvite) > 0 {
-			if inviteErr := uc.slackService.InviteUsersToChannel(ctx, channelID, usersToInvite); inviteErr != nil {
-				errutil.Handle(ctx, inviteErr, "failed to invite users to Slack channel")
-			}
-		}
-
-		// Add bookmark to the Slack channel linking to the case WebUI
-		caseURL := ""
-		if uc.baseURL != "" {
-			caseURL = fmt.Sprintf("%s/ws/%s/cases/%d", uc.baseURL, workspaceID, created.ID)
-			if bookmarkErr := uc.slackService.AddBookmark(ctx, channelID, i18n.T(ctx, i18n.MsgBookmarkOpenCase), caseURL); bookmarkErr != nil {
-				errutil.Handle(ctx, bookmarkErr, "failed to add bookmark to Slack channel")
-			}
-		}
-
-		// Post welcome messages defined in workspace configuration. The Case
-		// passed to the renderer carries the freshly-assigned channel ID so
-		// that templates can reference it.
-		created.SlackChannelID = channelID
-		uc.postWelcomeMessages(ctx, workspaceID, created, channelID, caseURL)
-
-		// Sync channel members (for both private and public cases)
-		var channelUserIDs []string
-		members, membersErr := uc.slackService.GetConversationMembers(ctx, channelID)
-		if membersErr != nil {
-			errutil.Handle(ctx, membersErr, "failed to get channel members during case creation")
-		} else {
-			channelUserIDs = filterHumanUsers(ctx, uc.repo, members)
-		}
-
-		// Update case with channel ID and members
-		created.ChannelUserIDs = channelUserIDs
-		updated, err := uc.repo.Case().Update(ctx, workspaceID, created)
-		if err != nil {
-			return nil, goerr.Wrap(err, "failed to update case with Slack channel ID",
-				goerr.V("orphaned_channel_id", channelID),
-				goerr.V(CaseIDKey, created.ID))
-		}
-		return updated, nil
+// activateCase runs all post-persistence side effects required to bring an
+// OPEN case to life: Slack channel creation, optional cross-workspace
+// connect, invites, bookmark, welcome messages, and channel-member sync.
+// Returns the updated case (with SlackChannelID / ChannelUserIDs filled in).
+//
+// On Slack channel creation failure the just-persisted case is rolled back
+// so the caller observes "creation failed" rather than a partial case.
+// Activation is a no-op when no Slack service is configured.
+func (uc *CaseUseCase) activateCase(ctx context.Context, workspaceID string, c *model.Case, sourceTeamID string) (*model.Case, error) {
+	if uc.slackService == nil {
+		return c, nil
 	}
 
-	return created, nil
+	prefix := uc.slackChannelPrefixForWorkspace(workspaceID)
+	teamID := uc.slackTeamIDForWorkspace(workspaceID)
+	channelID, err := uc.slackService.CreateChannel(ctx, c.ID, c.Title, prefix, c.IsPrivate, teamID)
+	if err != nil {
+		// Rollback: delete case.
+		if delErr := uc.repo.Case().Delete(ctx, workspaceID, c.ID); delErr != nil {
+			return nil, goerr.Wrap(err, "failed to create Slack channel for case, and also failed to roll back case creation",
+				goerr.V("rollback_error", delErr),
+				goerr.V(CaseIDKey, c.ID))
+		}
+		return nil, goerr.Wrap(err, "failed to create Slack channel for case", goerr.V(CaseIDKey, c.ID))
+	}
+
+	// Connect channel to the source workspace if it differs from the configured team.
+	if sourceTeamID != "" && sourceTeamID != teamID {
+		if uc.slackAdminService != nil {
+			if connectErr := uc.slackAdminService.ConnectChannelToWorkspace(ctx, channelID, []string{teamID, sourceTeamID}); connectErr != nil {
+				errutil.Handle(ctx, connectErr, "failed to connect channel to source workspace")
+			}
+		}
+	}
+
+	// Invite reporter, assignees, and auto-invite users to the channel.
+	usersToInvite := make([]string, 0, len(c.AssigneeIDs)+1)
+	if c.ReporterID != "" {
+		usersToInvite = append(usersToInvite, c.ReporterID)
+	}
+	usersToInvite = append(usersToInvite, c.AssigneeIDs...)
+	autoInviteUsers := uc.resolveAutoInviteUsers(ctx, workspaceID)
+	usersToInvite = append(usersToInvite, autoInviteUsers...)
+	usersToInvite = uniqueStrings(usersToInvite)
+
+	if len(usersToInvite) > 0 {
+		if inviteErr := uc.slackService.InviteUsersToChannel(ctx, channelID, usersToInvite); inviteErr != nil {
+			errutil.Handle(ctx, inviteErr, "failed to invite users to Slack channel")
+		}
+	}
+
+	// Add bookmark to the Slack channel linking to the case WebUI.
+	caseURL := ""
+	if uc.baseURL != "" {
+		caseURL = fmt.Sprintf("%s/ws/%s/cases/%d", uc.baseURL, workspaceID, c.ID)
+		if bookmarkErr := uc.slackService.AddBookmark(ctx, channelID, i18n.T(ctx, i18n.MsgBookmarkOpenCase), caseURL); bookmarkErr != nil {
+			errutil.Handle(ctx, bookmarkErr, "failed to add bookmark to Slack channel")
+		}
+	}
+
+	// Post welcome messages defined in workspace configuration. The Case
+	// passed to the renderer carries the freshly-assigned channel ID so
+	// templates can reference it.
+	c.SlackChannelID = channelID
+	uc.postWelcomeMessages(ctx, workspaceID, c, channelID, caseURL)
+
+	// Sync channel members (for both private and public cases).
+	var channelUserIDs []string
+	members, membersErr := uc.slackService.GetConversationMembers(ctx, channelID)
+	if membersErr != nil {
+		errutil.Handle(ctx, membersErr, "failed to get channel members during case creation")
+	} else {
+		channelUserIDs = filterHumanUsers(ctx, uc.repo, members)
+	}
+
+	c.ChannelUserIDs = channelUserIDs
+	updated, err := uc.repo.Case().Update(ctx, workspaceID, c)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to update case with Slack channel ID",
+			goerr.V("orphaned_channel_id", channelID),
+			goerr.V(CaseIDKey, c.ID))
+	}
+	return updated, nil
 }
 
 // CaseUpdate represents a partial update to a Case. Each pointer/slice is
@@ -382,8 +457,17 @@ func (uc *CaseUseCase) GetCase(ctx context.Context, workspaceID string, id int64
 		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
 	}
 
-	// Access control for private cases
+	// Drafts are reporter-only. When the auth context is present, only the
+	// reporter may see (or even discover) their own draft; for anyone else
+	// the case is reported as not found. Without an auth context (system /
+	// bot calls) we fall through to the normal access path so internal
+	// flows that work with full models keep functioning.
 	token, tokenErr := auth.TokenFromContext(ctx)
+	if caseModel.IsDraft() && tokenErr == nil && caseModel.ReporterID != token.Sub {
+		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
+	}
+
+	// Access control for private cases
 	if tokenErr == nil && !model.IsCaseAccessible(caseModel, token.Sub) {
 		return model.RestrictCase(caseModel), nil
 	}
@@ -429,6 +513,9 @@ func (uc *CaseUseCase) CloseCase(ctx context.Context, workspaceID string, id int
 	}
 
 	status := existing.Status.Normalize()
+	if status == types.CaseStatusDraft {
+		return nil, goerr.Wrap(ErrCaseIsDraft, "draft case cannot be closed", goerr.V(CaseIDKey, id))
+	}
 	if status == types.CaseStatusClosed {
 		return nil, goerr.Wrap(ErrCaseAlreadyClosed, "case is already closed", goerr.V(CaseIDKey, id))
 	}
@@ -456,6 +543,9 @@ func (uc *CaseUseCase) ReopenCase(ctx context.Context, workspaceID string, id in
 	}
 
 	status := existing.Status.Normalize()
+	if status == types.CaseStatusDraft {
+		return nil, goerr.Wrap(ErrCaseIsDraft, "draft case cannot be reopened", goerr.V(CaseIDKey, id))
+	}
 	if status == types.CaseStatusOpen {
 		return nil, goerr.Wrap(ErrCaseAlreadyOpen, "case is already open", goerr.V(CaseIDKey, id))
 	}
@@ -467,6 +557,101 @@ func (uc *CaseUseCase) ReopenCase(ctx context.Context, workspaceID string, id in
 	}
 
 	return updated, nil
+}
+
+// ListDrafts returns the auth-context user's own drafts in the workspace.
+// Drafts are author-scoped; callers without an auth token receive an empty
+// list (drafts cannot be browsed anonymously / from a bot context).
+func (uc *CaseUseCase) ListDrafts(ctx context.Context, workspaceID string) ([]*model.Case, error) {
+	token, tokenErr := auth.TokenFromContext(ctx)
+	if tokenErr != nil {
+		return []*model.Case{}, nil
+	}
+	drafts, err := uc.repo.Case().ListDrafts(ctx, workspaceID, token.Sub)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to list drafts")
+	}
+	return drafts, nil
+}
+
+// GetDraft returns a single draft case to its reporter. Other users see
+// ErrCaseNotFound (drafts must never leak existence to non-reporters);
+// non-draft cases return ErrCaseNotDraft so callers cannot reuse the draft
+// resolver to peek at submitted cases.
+func (uc *CaseUseCase) GetDraft(ctx context.Context, workspaceID string, id int64) (*model.Case, error) {
+	c, err := uc.repo.Case().Get(ctx, workspaceID, id)
+	if err != nil {
+		return nil, goerr.Wrap(ErrCaseNotFound, "draft not found", goerr.V(CaseIDKey, id))
+	}
+	if !c.IsDraft() {
+		return nil, goerr.Wrap(ErrCaseNotDraft, "case is not a draft", goerr.V(CaseIDKey, id))
+	}
+
+	token, tokenErr := auth.TokenFromContext(ctx)
+	if tokenErr != nil || c.ReporterID != token.Sub {
+		// Hide existence from non-reporters.
+		return nil, goerr.Wrap(ErrCaseNotFound, "draft not found", goerr.V(CaseIDKey, id))
+	}
+	return c, nil
+}
+
+// SubmitDraft promotes a draft case to OPEN and triggers the same activation
+// side effects (Slack channel, invites, welcome, etc.) as a fresh CreateCase.
+// Only the draft's reporter may submit it. If activation fails, the draft is
+// kept in DRAFT so the user can retry without losing the saved entry.
+func (uc *CaseUseCase) SubmitDraft(ctx context.Context, workspaceID string, id int64) (*model.Case, error) {
+	c, err := uc.GetDraft(ctx, workspaceID, id)
+	if err != nil {
+		return nil, err
+	}
+
+	// Drafts cannot be Submitted with an empty title — Slack channel naming
+	// and listing both need at least a few chars. The Save as Draft path
+	// allowed empty titles for partial entries; require one on Submit.
+	if c.Title == "" {
+		return nil, goerr.New("draft title is required before submit",
+			goerr.V(CaseIDKey, id))
+	}
+
+	if err := c.SubmitDraft(); err != nil {
+		return nil, goerr.Wrap(err, "cannot submit draft", goerr.V(CaseIDKey, id))
+	}
+
+	updated, err := uc.repo.Case().Update(ctx, workspaceID, c)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to flip draft to open", goerr.V(CaseIDKey, id))
+	}
+
+	activated, actErr := uc.activateCase(ctx, workspaceID, updated, "")
+	if actErr != nil {
+		// activateCase already rolls back the case on Slack failure (Delete).
+		// If the rollback path fired, the case is gone; otherwise we need to
+		// flip the status back to DRAFT so the user can retry from the same
+		// entry rather than starting over.
+		if rolled, getErr := uc.repo.Case().Get(ctx, workspaceID, id); getErr == nil {
+			rolled.Status = types.CaseStatusDraft
+			if _, undoErr := uc.repo.Case().Update(ctx, workspaceID, rolled); undoErr != nil {
+				errutil.Handle(ctx, undoErr, "failed to roll status back to draft after activation failure")
+			}
+		}
+		return nil, actErr
+	}
+	return activated, nil
+}
+
+// DiscardDraft permanently deletes the caller's draft. Non-draft cases are
+// rejected so callers cannot pivot this method into a "delete any case I
+// reported" shortcut.
+func (uc *CaseUseCase) DiscardDraft(ctx context.Context, workspaceID string, id int64) error {
+	// Reuse GetDraft for the reporter-only / draft-only checks.
+	c, err := uc.GetDraft(ctx, workspaceID, id)
+	if err != nil {
+		return err
+	}
+	if err := uc.repo.Case().Delete(ctx, workspaceID, c.ID); err != nil {
+		return goerr.Wrap(err, "failed to discard draft", goerr.V(CaseIDKey, id))
+	}
+	return nil
 }
 
 // SyncCaseChannelUsers synchronizes channel members from Slack API to the case

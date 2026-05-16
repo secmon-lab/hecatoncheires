@@ -24,7 +24,7 @@ func NewSlackDraftHandlerForTest(
 	return newSlackDraftHandler(
 		repo, registry, slackService,
 		channelID, threadTS, "1700000000.000001", "U-test",
-		nil, model.CaseDraftID("draft-test"), "",
+		nil, model.CaseProposalID("draft-test"), "",
 	)
 }
 
@@ -34,10 +34,10 @@ var BuildTraceContextBlocksForTest = buildTraceContextBlocks
 // BuildCaseCreatedTailBlocksForTest is exported for testing
 var BuildCaseCreatedTailBlocksForTest = buildCaseCreatedTailBlocks
 
-// BuildDraftUserInputForTest exposes the unexported buildDraftUserInput
+// BuildProposalUserInputForTest exposes the unexported buildProposalUserInput
 // so tests in the external usecase_test package can assert on the
 // planner's first-turn prompt content.
-var BuildDraftUserInputForTest = buildDraftUserInput
+var BuildProposalUserInputForTest = buildProposalUserInput
 
 // BuildAssistSystemPrompt is exported for testing
 var BuildAssistSystemPrompt = (*AssistUseCase).buildAssistSystemPrompt

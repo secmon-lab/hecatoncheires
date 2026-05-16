@@ -12,6 +12,13 @@ var (
 	// Status errors
 	ErrCaseAlreadyClosed = errors.New("case is already closed")
 	ErrCaseAlreadyOpen   = errors.New("case is already open")
+	// ErrCaseIsDraft is returned when a status-transition operation (close /
+	// reopen) is invoked on a case that is still in DRAFT. Drafts only leave
+	// DRAFT via SubmitDraft (→ OPEN) or DiscardDraft (delete).
+	ErrCaseIsDraft = errors.New("case is in draft state")
+	// ErrCaseNotDraft is returned by draft-specific operations (Submit /
+	// Discard) when the targeted case is not in DRAFT.
+	ErrCaseNotDraft = errors.New("case is not a draft")
 
 	// Action Slack-post state errors
 	ErrSlackMessageAlreadyPosted = errors.New("action already has a Slack message")

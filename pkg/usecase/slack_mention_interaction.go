@@ -24,7 +24,7 @@ const SlackCallbackIDDraftEdit = "mention_draft_edit_modal"
 // editMetadata is serialized into the modal's PrivateMetadata so we can recover
 // the originating draft on view_submission.
 type editMetadata struct {
-	DraftID            string `json:"draft_id"`
+	ProposalID         string `json:"proposal_id"`
 	WorkspaceID        string `json:"workspace_id"`
 	EphemeralChannelID string `json:"ephemeral_channel_id"`
 	EphemeralMessageTS string `json:"ephemeral_message_ts"`
@@ -37,26 +37,26 @@ type editMetadata struct {
 // workspace's schema using the existing conversation history. The lock-first
 // ordering of F4-3 is preserved by setting InferenceInProgress before the turn
 // starts so concurrent interactions (Submit/Edit/Cancel) refuse.
-func (uc *MentionDraftUseCase) HandleSelectWorkspace(ctx context.Context, callback *goslack.InteractionCallback, action *goslack.BlockAction) error {
+func (uc *MentionProposalUseCase) HandleSelectWorkspace(ctx context.Context, callback *goslack.InteractionCallback, action *goslack.BlockAction) error {
 	if callback == nil || action == nil {
 		return goerr.New("nil callback or action")
 	}
 	if uc.draftUC == nil {
 		return goerr.New("draft usecase is not configured")
 	}
-	draftID, ok := parseDraftIDFromSelectorBlockID(action.BlockID)
+	proposalID, ok := parseProposalIDFromSelectorBlockID(action.BlockID)
 	if !ok {
 		return goerr.New("workspace selector BlockID is missing draft ID",
 			goerr.V("block_id", action.BlockID))
 	}
-	d, err := uc.repo.CaseDraft().Get(ctx, draftID)
+	d, err := uc.repo.CaseProposal().Get(ctx, proposalID)
 	if err != nil {
 		return goerr.Wrap(err, "failed to load draft for workspace switch",
-			goerr.V("draft_id", draftID))
+			goerr.V("proposal_id", proposalID))
 	}
 	if d == nil {
 		return goerr.New("draft not found for workspace switch",
-			goerr.V("draft_id", draftID))
+			goerr.V("proposal_id", proposalID))
 	}
 
 	if d.InferenceInProgress {
@@ -81,7 +81,7 @@ func (uc *MentionDraftUseCase) HandleSelectWorkspace(ctx context.Context, callba
 	}
 
 	// (2) Mark inference in progress so concurrent interactions refuse.
-	if err := uc.repo.CaseDraft().SetMaterialization(ctx, d.ID, newWorkspaceID, nil, true); err != nil {
+	if err := uc.repo.CaseProposal().SetMaterialization(ctx, d.ID, newWorkspaceID, nil, true); err != nil {
 		return goerr.Wrap(err, "failed to mark inference in progress")
 	}
 
@@ -103,7 +103,7 @@ func (uc *MentionDraftUseCase) HandleSelectWorkspace(ctx context.Context, callba
 	}
 	if session == nil {
 		return goerr.New("no session found for ws-switch",
-			goerr.V("draft_id", string(d.ID)))
+			goerr.V("proposal_id", string(d.ID)))
 	}
 
 	candidates := uc.accessibleWorkspaces(callback.User.ID)
@@ -127,13 +127,13 @@ func (uc *MentionDraftUseCase) HandleSelectWorkspace(ctx context.Context, callba
 	// — matches the "Trigger context" branch in the planner prompt.
 	userInput := "[system event] The user has switched the active workspace to " + entry.Workspace.ID + "."
 	result, runErr := uc.draftUC.RunTurn(ctx, draft.TurnRequest{
-		Session:       session,
-		UserInput:     userInput,
-		Trigger:       draft.TriggerWSSwitch,
-		TriggerTS:     "",
-		ActorUserID:   callback.User.ID,
-		ExistingDraft: d,
-		Handler:       handler,
+		Session:          session,
+		UserInput:        userInput,
+		Trigger:          draft.TriggerWSSwitch,
+		TriggerTS:        "",
+		ActorUserID:      callback.User.ID,
+		ExistingProposal: d,
+		Handler:          handler,
 	})
 	if runErr != nil {
 		errBlocks, errFallback := buildMaterializationErrorBlocks(entry.Workspace.Name)
@@ -142,7 +142,7 @@ func (uc *MentionDraftUseCase) HandleSelectWorkspace(ctx context.Context, callba
 				"could not surface materialization failure to user")
 		}
 		// Best effort: clear the in-progress flag so the user can retry.
-		if clearErr := uc.repo.CaseDraft().SetMaterialization(ctx, d.ID, d.SelectedWorkspaceID, d.Materialization, false); clearErr != nil {
+		if clearErr := uc.repo.CaseProposal().SetMaterialization(ctx, d.ID, d.SelectedWorkspaceID, d.Materialization, false); clearErr != nil {
 			errutil.Handle(ctx, clearErr, "failed to clear inference-in-progress flag after ws-switch failure")
 		}
 		return goerr.Wrap(runErr, "ws-switch turn failed")
@@ -160,7 +160,7 @@ func (uc *MentionDraftUseCase) HandleSelectWorkspace(ctx context.Context, callba
 			errutil.Handle(ctx, goerr.Wrap(respErr, "render fallback block on ws-switch"),
 				"could not surface ws-switch fallback to user")
 		}
-		if clearErr := uc.repo.CaseDraft().SetMaterialization(ctx, d.ID, d.SelectedWorkspaceID, d.Materialization, false); clearErr != nil {
+		if clearErr := uc.repo.CaseProposal().SetMaterialization(ctx, d.ID, d.SelectedWorkspaceID, d.Materialization, false); clearErr != nil {
 			errutil.Handle(ctx, clearErr, "failed to clear inference-in-progress flag after ws-switch fallback")
 		}
 		return nil
@@ -170,7 +170,7 @@ func (uc *MentionDraftUseCase) HandleSelectWorkspace(ctx context.Context, callba
 
 // HandleSubmit creates the Case using the current materialization and posts
 // the completion notification.
-func (uc *MentionDraftUseCase) HandleSubmit(ctx context.Context, caseUC *CaseUseCase, callback *goslack.InteractionCallback, action *goslack.BlockAction) error {
+func (uc *MentionProposalUseCase) HandleSubmit(ctx context.Context, caseUC *CaseUseCase, callback *goslack.InteractionCallback, action *goslack.BlockAction) error {
 	if callback == nil || action == nil {
 		return goerr.New("nil callback or action")
 	}
@@ -187,7 +187,7 @@ func (uc *MentionDraftUseCase) HandleSubmit(ctx context.Context, caseUC *CaseUse
 		return nil
 	}
 	if draft.Materialization == nil {
-		return goerr.New("draft has no materialization to submit", goerr.V("draft_id", draft.ID))
+		return goerr.New("draft has no materialization to submit", goerr.V("proposal_id", draft.ID))
 	}
 
 	// Brief lock during creation to prevent double-submit.
@@ -217,20 +217,20 @@ func (uc *MentionDraftUseCase) HandleSubmit(ctx context.Context, caseUC *CaseUse
 			_ = uc.respondReplaceOriginal(ctx, callback.ResponseURL, blocks, fallback+" (creation failed; please use Edit to fill required fields)")
 		}
 		return goerr.Wrap(err, "failed to create case from draft",
-			goerr.V("draft_id", draft.ID),
+			goerr.V("proposal_id", draft.ID),
 			goerr.V("workspace_id", draft.SelectedWorkspaceID))
 	}
 
 	uc.updatePreviewWithCreated(ctx, draft.EphemeralChannelID, draft.EphemeralMessageTS, created)
 
-	if err := uc.repo.CaseDraft().Delete(ctx, draft.ID); err != nil {
+	if err := uc.repo.CaseProposal().Delete(ctx, draft.ID); err != nil {
 		errutil.Handle(ctx, err, "failed to delete draft after submit")
 	}
 	return nil
 }
 
 // HandleEdit opens the dynamic Edit modal for the currently-selected workspace.
-func (uc *MentionDraftUseCase) HandleEdit(ctx context.Context, callback *goslack.InteractionCallback, action *goslack.BlockAction) error {
+func (uc *MentionProposalUseCase) HandleEdit(ctx context.Context, callback *goslack.InteractionCallback, action *goslack.BlockAction) error {
 	if callback == nil || action == nil {
 		return goerr.New("nil callback or action")
 	}
@@ -249,7 +249,7 @@ func (uc *MentionDraftUseCase) HandleEdit(ctx context.Context, callback *goslack
 	}
 
 	meta := editMetadata{
-		DraftID:            string(draft.ID),
+		ProposalID:         string(draft.ID),
 		WorkspaceID:        draft.SelectedWorkspaceID,
 		EphemeralChannelID: draft.EphemeralChannelID,
 		EphemeralMessageTS: draft.EphemeralMessageTS,
@@ -272,7 +272,7 @@ func (uc *MentionDraftUseCase) HandleEdit(ctx context.Context, callback *goslack
 // every ActionBlock is stripped (workspace selector + buttons live in the
 // same ActionBlock now, both go), and a "Canceled" tail is appended. The
 // underlying draft is deleted from the repository.
-func (uc *MentionDraftUseCase) HandleCancel(ctx context.Context, callback *goslack.InteractionCallback, _ *goslack.BlockAction) error {
+func (uc *MentionProposalUseCase) HandleCancel(ctx context.Context, callback *goslack.InteractionCallback, _ *goslack.BlockAction) error {
 	if callback == nil {
 		return goerr.New("nil callback")
 	}
@@ -285,7 +285,7 @@ func (uc *MentionDraftUseCase) HandleCancel(ctx context.Context, callback *gosla
 	if err := uc.appendCanceledTail(ctx, callback, draft.EphemeralChannelID, draft.EphemeralMessageTS); err != nil {
 		errutil.Handle(ctx, err, "failed to render canceled tail")
 	}
-	if err := uc.repo.CaseDraft().Delete(ctx, draft.ID); err != nil {
+	if err := uc.repo.CaseProposal().Delete(ctx, draft.ID); err != nil {
 		errutil.Handle(ctx, err, "failed to delete draft on cancel")
 	}
 	return nil
@@ -296,7 +296,7 @@ func (uc *MentionDraftUseCase) HandleCancel(ctx context.Context, callback *gosla
 // appends a "Canceled" context block at the end. Updates the original
 // thread message via chat.update; response_url's replace_original is
 // unreliable for thread replies (returns 500 in some flows).
-func (uc *MentionDraftUseCase) appendCanceledTail(ctx context.Context, callback *goslack.InteractionCallback, channelID, messageTS string) error {
+func (uc *MentionProposalUseCase) appendCanceledTail(ctx context.Context, callback *goslack.InteractionCallback, channelID, messageTS string) error {
 	original := callback.Message.Blocks.BlockSet
 	kept := make([]goslack.Block, 0, len(original))
 	for _, b := range original {
@@ -320,7 +320,7 @@ func (uc *MentionDraftUseCase) appendCanceledTail(ctx context.Context, callback 
 }
 
 // HandleEditSubmit processes the view_submission for the Edit modal.
-func (uc *MentionDraftUseCase) HandleEditSubmit(ctx context.Context, caseUC *CaseUseCase, callback *goslack.InteractionCallback) error {
+func (uc *MentionProposalUseCase) HandleEditSubmit(ctx context.Context, caseUC *CaseUseCase, callback *goslack.InteractionCallback) error {
 	if callback == nil {
 		return goerr.New("nil callback")
 	}
@@ -333,9 +333,9 @@ func (uc *MentionDraftUseCase) HandleEditSubmit(ctx context.Context, caseUC *Cas
 		return goerr.Wrap(err, "failed to parse edit metadata")
 	}
 
-	draft, err := uc.repo.CaseDraft().Get(ctx, model.CaseDraftID(meta.DraftID))
+	draft, err := uc.repo.CaseProposal().Get(ctx, model.CaseProposalID(meta.ProposalID))
 	if err != nil {
-		return goerr.Wrap(err, "draft not found for edit submit", goerr.V("draft_id", meta.DraftID))
+		return goerr.Wrap(err, "draft not found for edit submit", goerr.V("proposal_id", meta.ProposalID))
 	}
 
 	blockValues := callback.View.State.Values
@@ -357,12 +357,12 @@ func (uc *MentionDraftUseCase) HandleEditSubmit(ctx context.Context, caseUC *Cas
 	)
 	if err != nil {
 		return goerr.Wrap(err, "failed to create case from edit modal",
-			goerr.V("draft_id", meta.DraftID))
+			goerr.V("proposal_id", meta.ProposalID))
 	}
 
 	uc.updatePreviewWithCreated(ctx, meta.EphemeralChannelID, meta.EphemeralMessageTS, created)
 
-	if err := uc.repo.CaseDraft().Delete(ctx, draft.ID); err != nil {
+	if err := uc.repo.CaseProposal().Delete(ctx, draft.ID); err != nil {
 		errutil.Handle(ctx, err, "failed to delete draft after edit submit")
 	}
 	return nil
@@ -372,12 +372,12 @@ func (uc *MentionDraftUseCase) HandleEditSubmit(ctx context.Context, caseUC *Cas
 
 // locateDraftFromCallback finds the draft associated with a button-based
 // interaction (Submit/Edit/Cancel). Each button carries draft.ID in
-// action.Value. For the workspace static_select, use parseDraftIDFromSelectorBlockID
+// action.Value. For the workspace static_select, use parseProposalIDFromSelectorBlockID
 // against the selector's BlockID instead.
-func (uc *MentionDraftUseCase) locateDraftFromCallback(ctx context.Context, callback *goslack.InteractionCallback) (*model.CaseDraft, error) {
+func (uc *MentionProposalUseCase) locateDraftFromCallback(ctx context.Context, callback *goslack.InteractionCallback) (*model.CaseProposal, error) {
 	for _, a := range callback.ActionCallback.BlockActions {
 		if a.Value != "" {
-			if d, err := uc.repo.CaseDraft().Get(ctx, model.CaseDraftID(a.Value)); err == nil {
+			if d, err := uc.repo.CaseProposal().Get(ctx, model.CaseProposalID(a.Value)); err == nil {
 				return d, nil
 			}
 		}
@@ -385,10 +385,10 @@ func (uc *MentionDraftUseCase) locateDraftFromCallback(ctx context.Context, call
 	return nil, goerr.New("could not resolve draft from interaction callback")
 }
 
-// parseDraftIDFromSelectorBlockID parses the draft ID encoded into the
+// parseProposalIDFromSelectorBlockID parses the draft ID encoded into the
 // workspace selector's BlockID by buildPreviewBlocks (format:
-// "<BlockIDDraftWSSelect>:<draftID>").
-func parseDraftIDFromSelectorBlockID(blockID string) (model.CaseDraftID, bool) {
+// "<BlockIDDraftWSSelect>:<proposalID>").
+func parseProposalIDFromSelectorBlockID(blockID string) (model.CaseProposalID, bool) {
 	prefix := BlockIDDraftWSSelect + ":"
 	if !strings.HasPrefix(blockID, prefix) {
 		return "", false
@@ -397,14 +397,14 @@ func parseDraftIDFromSelectorBlockID(blockID string) (model.CaseDraftID, bool) {
 	if id == "" {
 		return "", false
 	}
-	return model.CaseDraftID(id), true
+	return model.CaseProposalID(id), true
 }
 
 // respondReplaceOriginal POSTs to the interaction's response_url to replace
 // the original message with new blocks. Works for both regular thread
 // messages and ephemerals; we no longer post ephemerals, but the API path
 // is the same.
-func (uc *MentionDraftUseCase) respondReplaceOriginal(ctx context.Context, responseURL string, blocks []goslack.Block, fallback string) error {
+func (uc *MentionProposalUseCase) respondReplaceOriginal(ctx context.Context, responseURL string, blocks []goslack.Block, fallback string) error {
 	if responseURL == "" {
 		return goerr.New("response_url is empty")
 	}
@@ -416,7 +416,7 @@ func (uc *MentionDraftUseCase) respondReplaceOriginal(ctx context.Context, respo
 	return postJSON(ctx, responseURL, body)
 }
 
-func (uc *MentionDraftUseCase) respondLocked(ctx context.Context, callback *goslack.InteractionCallback) {
+func (uc *MentionProposalUseCase) respondLocked(ctx context.Context, callback *goslack.InteractionCallback) {
 	body := map[string]any{
 		"replace_original": false,
 		"response_type":    "ephemeral",
@@ -458,7 +458,7 @@ func postJSON(ctx context.Context, url string, body any) error {
 // replace_original is unreliable for thread replies, so we always use
 // chat.update against the channel/ts captured when the preview was first
 // posted by HandleAppMention.
-func (uc *MentionDraftUseCase) updatePreviewWithCreated(ctx context.Context, channelID, messageTS string, created *model.Case) {
+func (uc *MentionProposalUseCase) updatePreviewWithCreated(ctx context.Context, channelID, messageTS string, created *model.Case) {
 	if channelID == "" || messageTS == "" || uc.slackService == nil {
 		return
 	}

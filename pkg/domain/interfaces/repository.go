@@ -18,7 +18,7 @@ type Repository interface {
 	ActionEvent() ActionEventRepository
 	ActionStep() ActionStepRepository
 	AssistLog() AssistLogRepository
-	CaseDraft() CaseDraftRepository
+	CaseProposal() CaseProposalRepository
 	Session() SessionRepository
 	NotificationSlot() NotificationSlotRepository
 

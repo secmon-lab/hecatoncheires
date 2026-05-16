@@ -14,6 +14,11 @@ func TestCaseStatus_IsValid(t *testing.T) {
 		want   bool
 	}{
 		{
+			name:   "valid draft",
+			status: types.CaseStatusDraft,
+			want:   true,
+		},
+		{
 			name:   "valid open",
 			status: types.CaseStatusOpen,
 			want:   true,
@@ -53,6 +58,12 @@ func TestParseCaseStatus(t *testing.T) {
 		want    types.CaseStatus
 		wantErr bool
 	}{
+		{
+			name:    "valid draft",
+			input:   "DRAFT",
+			want:    types.CaseStatusDraft,
+			wantErr: false,
+		},
 		{
 			name:    "valid open",
 			input:   "OPEN",
@@ -94,7 +105,7 @@ func TestParseCaseStatus(t *testing.T) {
 
 func TestAllCaseStatuses(t *testing.T) {
 	statuses := types.AllCaseStatuses()
-	gt.A(t, statuses).Length(2)
+	gt.A(t, statuses).Length(3)
 
 	for _, status := range statuses {
 		gt.B(t, status.IsValid()).
@@ -107,17 +118,27 @@ func TestAllCaseStatuses(t *testing.T) {
 		statusMap[status] = true
 	}
 
+	gt.B(t, statusMap[types.CaseStatusDraft]).True()
 	gt.B(t, statusMap[types.CaseStatusOpen]).True()
 	gt.B(t, statusMap[types.CaseStatusClosed]).True()
 }
 
 func TestCaseStatus_Normalize(t *testing.T) {
 	gt.V(t, types.CaseStatus("").Normalize()).Equal(types.CaseStatusOpen)
+	gt.V(t, types.CaseStatusDraft.Normalize()).Equal(types.CaseStatusDraft)
 	gt.V(t, types.CaseStatusOpen.Normalize()).Equal(types.CaseStatusOpen)
 	gt.V(t, types.CaseStatusClosed.Normalize()).Equal(types.CaseStatusClosed)
 }
 
+func TestCaseStatus_IsDraft(t *testing.T) {
+	gt.B(t, types.CaseStatusDraft.IsDraft()).True()
+	gt.B(t, types.CaseStatusOpen.IsDraft()).False()
+	gt.B(t, types.CaseStatusClosed.IsDraft()).False()
+	gt.B(t, types.CaseStatus("").IsDraft()).False()
+}
+
 func TestCaseStatus_String(t *testing.T) {
+	gt.S(t, types.CaseStatusDraft.String()).Equal("DRAFT")
 	gt.S(t, types.CaseStatusOpen.String()).Equal("OPEN")
 	gt.S(t, types.CaseStatusClosed.String()).Equal("CLOSED")
 }

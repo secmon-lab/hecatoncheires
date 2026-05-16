@@ -472,6 +472,23 @@ func (r *mutationResolver) SyncCaseChannelUsers(ctx context.Context, workspaceID
 	return toGraphQLCase(updated, workspaceID), nil
 }
 
+// SubmitDraft is the resolver for the submitDraft field.
+func (r *mutationResolver) SubmitDraft(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error) {
+	submitted, err := r.UseCases.Case.SubmitDraft(ctx, workspaceID, int64(id))
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLCase(submitted, workspaceID), nil
+}
+
+// DiscardDraft is the resolver for the discardDraft field.
+func (r *mutationResolver) DiscardDraft(ctx context.Context, workspaceID string, id int) (bool, error) {
+	if err := r.UseCases.Case.DiscardDraft(ctx, workspaceID, int64(id)); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // CreateAction is the resolver for the createAction field.
 func (r *mutationResolver) CreateAction(ctx context.Context, workspaceID string, input graphql1.CreateActionInput) (*graphql1.Action, error) {
 	assigneeID := ""
@@ -838,6 +855,19 @@ func (r *queryResolver) Case(ctx context.Context, workspaceID string, id int) (*
 	}
 
 	return toGraphQLCase(c, workspaceID), nil
+}
+
+// Drafts is the resolver for the drafts field.
+func (r *queryResolver) Drafts(ctx context.Context, workspaceID string) ([]*graphql1.Case, error) {
+	drafts, err := r.UseCases.Case.ListDrafts(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*graphql1.Case, len(drafts))
+	for i, c := range drafts {
+		result[i] = toGraphQLCase(c, workspaceID)
+	}
+	return result, nil
 }
 
 // Actions is the resolver for the actions field.

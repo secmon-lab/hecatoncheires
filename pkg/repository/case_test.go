@@ -684,6 +684,129 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.NoError(t, err).Required()
 		gt.Value(t, found).Nil()
 	})
+
+	t.Run("List excludes drafts by default", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		open1, err := repo.Case().Create(ctx, wsID, &model.Case{
+			Title:  "Open Visible",
+			Status: types.CaseStatusOpen,
+		})
+		gt.NoError(t, err).Required()
+
+		_, err = repo.Case().Create(ctx, wsID, &model.Case{
+			Title:      "Draft Hidden",
+			Status:     types.CaseStatusDraft,
+			ReporterID: "U-author",
+		})
+		gt.NoError(t, err).Required()
+
+		closed, err := repo.Case().Create(ctx, wsID, &model.Case{
+			Title:  "Closed Visible",
+			Status: types.CaseStatusClosed,
+		})
+		gt.NoError(t, err).Required()
+
+		cases, err := repo.Case().List(ctx, wsID)
+		gt.NoError(t, err).Required()
+		gt.Number(t, len(cases)).Equal(2)
+
+		seen := map[int64]bool{}
+		for _, c := range cases {
+			seen[c.ID] = true
+			gt.Bool(t, c.IsDraft()).False()
+		}
+		gt.Bool(t, seen[open1.ID]).True()
+		gt.Bool(t, seen[closed.ID]).True()
+	})
+
+	t.Run("List with WithStatus(DRAFT) returns drafts", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		_, err := repo.Case().Create(ctx, wsID, &model.Case{
+			Title:  "Open A",
+			Status: types.CaseStatusOpen,
+		})
+		gt.NoError(t, err).Required()
+
+		draft, err := repo.Case().Create(ctx, wsID, &model.Case{
+			Title:      "Draft A",
+			Status:     types.CaseStatusDraft,
+			ReporterID: "U-author",
+		})
+		gt.NoError(t, err).Required()
+
+		got, err := repo.Case().List(ctx, wsID, interfaces.WithStatus(types.CaseStatusDraft))
+		gt.NoError(t, err).Required()
+		gt.Number(t, len(got)).Equal(1)
+		gt.Value(t, got[0].ID).Equal(draft.ID)
+		gt.Value(t, got[0].Title).Equal("Draft A")
+	})
+
+	t.Run("ListDrafts returns only the requested reporter's drafts", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		mineA, err := repo.Case().Create(ctx, wsID, &model.Case{
+			Title:      "Mine A",
+			Status:     types.CaseStatusDraft,
+			ReporterID: "U-mine",
+		})
+		gt.NoError(t, err).Required()
+
+		mineB, err := repo.Case().Create(ctx, wsID, &model.Case{
+			Title:      "Mine B",
+			Status:     types.CaseStatusDraft,
+			ReporterID: "U-mine",
+		})
+		gt.NoError(t, err).Required()
+
+		_, err = repo.Case().Create(ctx, wsID, &model.Case{
+			Title:      "Theirs",
+			Status:     types.CaseStatusDraft,
+			ReporterID: "U-other",
+		})
+		gt.NoError(t, err).Required()
+
+		// Non-draft cases (even by the same reporter) must NOT appear.
+		_, err = repo.Case().Create(ctx, wsID, &model.Case{
+			Title:      "Mine but open",
+			Status:     types.CaseStatusOpen,
+			ReporterID: "U-mine",
+		})
+		gt.NoError(t, err).Required()
+
+		mine, err := repo.Case().ListDrafts(ctx, wsID, "U-mine")
+		gt.NoError(t, err).Required()
+		gt.Number(t, len(mine)).Equal(2)
+
+		ids := map[int64]bool{}
+		for _, c := range mine {
+			ids[c.ID] = true
+			gt.Value(t, c.Status).Equal(types.CaseStatusDraft)
+			gt.Value(t, c.ReporterID).Equal("U-mine")
+		}
+		gt.Bool(t, ids[mineA.ID]).True()
+		gt.Bool(t, ids[mineB.ID]).True()
+	})
+
+	t.Run("ListDrafts returns empty when reporter has no drafts", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		_, err := repo.Case().Create(ctx, wsID, &model.Case{
+			Title:      "Other reporter",
+			Status:     types.CaseStatusDraft,
+			ReporterID: "U-other",
+		})
+		gt.NoError(t, err).Required()
+
+		drafts, err := repo.Case().ListDrafts(ctx, wsID, "U-nobody")
+		gt.NoError(t, err).Required()
+		gt.Number(t, len(drafts)).Equal(0)
+	})
 }
 
 func TestCaseRepository_Memory(t *testing.T) {

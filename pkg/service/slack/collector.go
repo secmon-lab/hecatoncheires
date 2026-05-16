@@ -56,7 +56,7 @@ const threadFetchHardCap = 1000
 // threadTS is the parent message timestamp of the thread. Both the thread's
 // parent and replies are included. Messages are returned in chronological
 // (oldest-first) order.
-func (c *MessageCollector) CollectThread(ctx context.Context, channelID, threadTS string) ([]model.DraftMessage, error) {
+func (c *MessageCollector) CollectThread(ctx context.Context, channelID, threadTS string) ([]model.ProposalMessage, error) {
 	msgs, err := c.svc.GetConversationReplies(ctx, channelID, threadTS, threadFetchHardCap)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to fetch thread replies",
@@ -74,7 +74,7 @@ func (c *MessageCollector) CollectThread(ctx context.Context, channelID, threadT
 // CollectChannelRecent fetches up to MaxCollectedMessages messages from the
 // channel's main timeline that were posted within ChannelLookbackWindow before
 // the mention. Returned messages are in chronological (oldest-first) order.
-func (c *MessageCollector) CollectChannelRecent(ctx context.Context, channelID string, mentionTime time.Time) ([]model.DraftMessage, error) {
+func (c *MessageCollector) CollectChannelRecent(ctx context.Context, channelID string, mentionTime time.Time) ([]model.ProposalMessage, error) {
 	oldest := mentionTime.Add(-ChannelLookbackWindow)
 
 	msgs, err := c.svc.GetConversationHistory(ctx, channelID, oldest, MaxCollectedMessages)
@@ -97,8 +97,8 @@ func (c *MessageCollector) CollectChannelRecent(ctx context.Context, channelID s
 	return c.resolveAndConvert(ctx, channelID, msgs)
 }
 
-func (c *MessageCollector) resolveAndConvert(ctx context.Context, channelID string, msgs []ConversationMessage) ([]model.DraftMessage, error) {
-	out := make([]model.DraftMessage, 0, len(msgs))
+func (c *MessageCollector) resolveAndConvert(ctx context.Context, channelID string, msgs []ConversationMessage) ([]model.ProposalMessage, error) {
+	out := make([]model.ProposalMessage, 0, len(msgs))
 	for _, m := range msgs {
 		link, err := c.svc.GetPermalink(ctx, channelID, m.Timestamp)
 		if err != nil {
@@ -111,7 +111,7 @@ func (c *MessageCollector) resolveAndConvert(ctx context.Context, channelID stri
 			), "permalink fetch failed during draft collection")
 			link = ""
 		}
-		out = append(out, model.DraftMessage{
+		out = append(out, model.ProposalMessage{
 			UserID:    m.UserID,
 			Text:      m.Text,
 			TS:        m.Timestamp,

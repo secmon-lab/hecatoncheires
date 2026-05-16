@@ -43,7 +43,7 @@ type UseCases struct {
 	Slack                    *SlackUseCases
 	Source                   *SourceUseCase
 	Assist                   *AssistUseCase
-	MentionDraft             *MentionDraftUseCase
+	MentionProposal          *MentionProposalUseCase
 }
 
 type Option func(*UseCases)
@@ -230,7 +230,7 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 			EmbedClient:    uc.embedClient,
 		})
 
-		// MentionDraft is wired only when the persistent History/Trace archive
+		// MentionProposal is wired only when the persistent History/Trace archive
 		// is configured — the planner runtime depends on both. Without them,
 		// the open-mode path is simply not constructed (the dispatcher will
 		// no-op for app_mention in unbound channels).
@@ -255,11 +255,11 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 			if err != nil {
 				errutil.Handle(context.Background(), goerr.Wrap(err, "failed to build draft usecase"), "failed to build draft usecase")
 			} else {
-				uc.MentionDraft = NewMentionDraftUseCase(repo, registry, uc.slackService, draftUC)
+				uc.MentionProposal = NewMentionProposalUseCase(repo, registry, uc.slackService, draftUC)
 			}
 		}
 	}
-	uc.Slack = NewSlackUseCases(repo, registry, uc.Agent, uc.MentionDraft, uc.slackService)
+	uc.Slack = NewSlackUseCases(repo, registry, uc.Agent, uc.MentionProposal, uc.slackService)
 
 	return uc
 }

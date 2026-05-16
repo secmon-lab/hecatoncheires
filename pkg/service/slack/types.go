@@ -113,6 +113,13 @@ type Service interface {
 	// OpenView opens a modal view in Slack using the provided trigger ID.
 	OpenView(ctx context.Context, triggerID string, view slack.ModalViewRequest) error
 
+	// UpdateView replaces the contents of an already-open modal identified by
+	// the external_id stored on the view (callers must include external_id
+	// in the request). Used to swap a modal in place from a block_actions
+	// handler (e.g. "Save as Draft" → "Saved" splash) without needing a
+	// fresh trigger_id.
+	UpdateView(ctx context.Context, view slack.ModalViewRequest, externalID, hash, viewID string) error
+
 	// ListUserGroups retrieves all user groups in the workspace.
 	// If teamID is non-empty, only groups in that workspace are returned (for org-level apps).
 	// If teamID is empty, behaves the same as before (single-workspace mode).

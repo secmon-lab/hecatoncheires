@@ -19,7 +19,7 @@ type Memory struct {
 	actionEvent   *actionEventRepository
 	actionStep    *actionStepRepository
 	assistLog     *assistLogRepository
-	caseDraft     *caseDraftRepository
+	caseProposal  *caseProposalRepository
 	session       *sessionRepository
 	notifySlot    *notificationSlotRepository
 }
@@ -39,7 +39,7 @@ func New() *Memory {
 		actionEvent:   newActionEventRepository(),
 		actionStep:    newActionStepRepository(),
 		assistLog:     newAssistLogRepository(),
-		caseDraft:     newCaseDraftRepository(),
+		caseProposal:  newCaseProposalRepository(),
 		session:       newSessionRepository(),
 		notifySlot:    newNotificationSlotRepository(),
 	}
@@ -85,8 +85,8 @@ func (m *Memory) AssistLog() interfaces.AssistLogRepository {
 	return m.assistLog
 }
 
-func (m *Memory) CaseDraft() interfaces.CaseDraftRepository {
-	return m.caseDraft
+func (m *Memory) CaseProposal() interfaces.CaseProposalRepository {
+	return m.caseProposal
 }
 
 func (m *Memory) Session() interfaces.SessionRepository {

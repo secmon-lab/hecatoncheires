@@ -536,7 +536,7 @@ func cmdServe() *cli.Command {
 
 				// Add Slack interaction handler (shares signing secret with webhook)
 				slackInteractionHandler := httpctrl.NewSlackInteractionHandler(
-					uc.Action, uc.Agent, uc.Slack, uc.Case, uc.MentionDraft,
+					uc.Action, uc.Agent, uc.Slack, uc.Case, uc.MentionProposal,
 				)
 
 				// Add slash command handler

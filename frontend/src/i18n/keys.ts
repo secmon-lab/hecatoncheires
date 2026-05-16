@@ -381,6 +381,31 @@ export const msgKeys = {
   fieldHelpOptionCount: 'fieldHelpOptionCount',
   fieldHelpTypeSelect: 'fieldHelpTypeSelect',
   fieldHelpTypeMultiSelect: 'fieldHelpTypeMultiSelect',
+
+  // Drafts (Save-as-Draft from Slack creation modal → reviewed on the web)
+  navDrafts: 'navDrafts',
+  draftsPageTitle: 'draftsPageTitle',
+  draftsPageSubtitle: 'draftsPageSubtitle',
+  draftsEmpty: 'draftsEmpty',
+  draftsColumnTitle: 'draftsColumnTitle',
+  draftsColumnCreated: 'draftsColumnCreated',
+  draftsColumnActions: 'draftsColumnActions',
+  draftsUntitled: 'draftsUntitled',
+  draftDetailHeading: 'draftDetailHeading',
+  draftDetailTitleLabel: 'draftDetailTitleLabel',
+  draftDetailDescriptionLabel: 'draftDetailDescriptionLabel',
+  draftDetailPrivateLabel: 'draftDetailPrivateLabel',
+  draftDetailPrivateOn: 'draftDetailPrivateOn',
+  draftDetailPrivateOff: 'draftDetailPrivateOff',
+  draftDetailNoDescription: 'draftDetailNoDescription',
+  draftDetailFieldsHeading: 'draftDetailFieldsHeading',
+  draftSubmitButton: 'draftSubmitButton',
+  draftDiscardButton: 'draftDiscardButton',
+  draftDiscardConfirm: 'draftDiscardConfirm',
+  draftSubmitToastSuccess: 'draftSubmitToastSuccess',
+  draftSubmitErrorMissingTitle: 'draftSubmitErrorMissingTitle',
+  draftSubmitErrorGeneric: 'draftSubmitErrorGeneric',
+  draftDiscardErrorGeneric: 'draftDiscardErrorGeneric',
 } as const
 
 export type MsgKey = keyof typeof msgKeys

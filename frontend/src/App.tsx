@@ -6,6 +6,8 @@ import ActionList from './pages/ActionList'
 import AssistLogList from './pages/AssistLogList'
 import SourceList from './pages/SourceList'
 import SourceDetail from './pages/SourceDetail'
+import DraftList from './pages/DraftList'
+import DraftDetail from './pages/DraftDetail'
 import WorkspaceSelector from './pages/WorkspaceSelector'
 import WorkspaceGuard from './components/WorkspaceGuard'
 import { AuthGuard } from './components/auth/auth-guard'
@@ -23,6 +25,8 @@ function App() {
           <Route path="cases/:id/assists" element={<AssistLogList />} />
           <Route path="actions" element={<ActionList />} />
           <Route path="actions/:actionId" element={<ActionList />} />
+          <Route path="drafts" element={<DraftList />} />
+          <Route path="drafts/:id" element={<DraftDetail />} />
           <Route path="sources" element={<SourceList />} />
           <Route path="sources/:id" element={<SourceDetail />} />
         </Route>

@@ -1,6 +1,6 @@
 // Package draft contains the open-mode (case-draft) agent runtime: a
 // plan/execute loop that coordinates a planner LLM and parallel sub-agent
-// investigations to produce a CaseDraft for the host (Slack) to render.
+// investigations to produce a CaseProposal for the host (Slack) to render.
 // The plan schema and parsing live in this file.
 package draft
 

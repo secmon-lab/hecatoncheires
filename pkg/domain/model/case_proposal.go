@@ -11,36 +11,36 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 )
 
-// CaseDraftID is a UUID-based identifier for CaseDraft
-type CaseDraftID string
+// CaseProposalID is a UUID-based identifier for CaseProposal
+type CaseProposalID string
 
-// NewCaseDraftID generates a new UUID v4 CaseDraftID
-func NewCaseDraftID() CaseDraftID {
-	return CaseDraftID(uuid.New().String())
+// NewCaseProposalID generates a new UUID v4 CaseProposalID
+func NewCaseProposalID() CaseProposalID {
+	return CaseProposalID(uuid.New().String())
 }
 
 // String returns the string representation
-func (id CaseDraftID) String() string {
+func (id CaseProposalID) String() string {
 	return string(id)
 }
 
-// CaseDraftTTL is the lifetime of a draft after creation.
-const CaseDraftTTL = 24 * time.Hour
+// CaseProposalTTL is the lifetime of a draft after creation.
+const CaseProposalTTL = 24 * time.Hour
 
-// CaseDraft holds the workspace-agnostic source material plus the current
+// CaseProposal holds the workspace-agnostic source material plus the current
 // (single) AI-materialized Case payload for the currently-selected workspace.
 // Switching workspace re-runs the Materializer and overwrites Materialization;
 // no per-workspace cache is kept (intentional simplification).
-type CaseDraft struct {
-	ID        CaseDraftID
+type CaseProposal struct {
+	ID        CaseProposalID
 	CreatedBy string // Slack user ID who triggered the mention
 	CreatedAt time.Time
 	ExpiresAt time.Time
 
 	// (a) Source — workspace-agnostic, immutable after creation
-	RawMessages []DraftMessage
+	RawMessages []ProposalMessage
 	MentionText string
-	Source      DraftSource
+	Source      ProposalSource
 
 	// (b) Current AI materialization (overwritten on workspace switch)
 	SelectedWorkspaceID string
@@ -57,16 +57,16 @@ type CaseDraft struct {
 	EphemeralMessageTS string
 }
 
-// DraftMessage is a single Slack message captured for context.
-type DraftMessage struct {
+// ProposalMessage is a single Slack message captured for context.
+type ProposalMessage struct {
 	UserID    string
 	Text      string
 	TS        string
 	Permalink string
 }
 
-// DraftSource describes where the mention happened.
-type DraftSource struct {
+// ProposalSource describes where the mention happened.
+type ProposalSource struct {
 	TeamID    string
 	ChannelID string
 	ThreadTS  string // empty when the mention was not in a thread
@@ -82,20 +82,20 @@ type WorkspaceMaterialization struct {
 	CustomFieldValues map[string]FieldValue // key = FieldID defined in workspace's FieldSchema
 }
 
-// NewCaseDraft constructs a fresh draft with a new ID, current timestamps,
+// NewCaseProposal constructs a fresh draft with a new ID, current timestamps,
 // and a default 24h expiry. Caller must populate Source / RawMessages /
 // MentionText / SelectedWorkspaceID before saving.
-func NewCaseDraft(now time.Time, createdBy string) *CaseDraft {
-	return &CaseDraft{
-		ID:        NewCaseDraftID(),
+func NewCaseProposal(now time.Time, createdBy string) *CaseProposal {
+	return &CaseProposal{
+		ID:        NewCaseProposalID(),
 		CreatedBy: createdBy,
 		CreatedAt: now,
-		ExpiresAt: now.Add(CaseDraftTTL),
+		ExpiresAt: now.Add(CaseProposalTTL),
 	}
 }
 
 // IsExpired reports whether the draft is past its ExpiresAt.
-func (d *CaseDraft) IsExpired(now time.Time) bool {
+func (d *CaseProposal) IsExpired(now time.Time) bool {
 	return !now.Before(d.ExpiresAt)
 }
 

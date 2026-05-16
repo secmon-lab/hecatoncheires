@@ -69,6 +69,13 @@ const (
 	// Prefix for custom field block/action IDs
 	slackFieldBlockPrefix  = "hc_field_block_"
 	slackFieldActionPrefix = "hc_field_action_"
+
+	// Save-as-Draft button surfaced inside the Case creation modal. Sits in
+	// an action block (block_actions interaction) rather than the modal
+	// footer so it can coexist with Submit; the handler dispatches the
+	// stored form state to CaseUseCase.CreateDraft.
+	SlackBlockIDSaveAsDraftActions = "hc_save_draft_block"
+	SlackActionIDSaveAsDraft       = "hc_save_draft_btn"
 )
 
 // commandMetadata is stored in modal private_metadata as JSON
@@ -383,6 +390,16 @@ func (uc *SlackUseCases) buildCaseCreationModal(ctx context.Context, workspaceID
 			}
 		}
 	}
+
+	// Save-as-Draft side button. Sits inside the modal body (Slack only
+	// renders one footer Submit button) so it visually accompanies Submit
+	// without competing for the primary action slot.
+	saveAsDraftBtn := slack.NewButtonBlockElement(
+		SlackActionIDSaveAsDraft,
+		"", // value is unused; the handler reads view.State for all fields.
+		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgDraftSaveAsButton), false, false),
+	)
+	blocks = append(blocks, slack.NewActionBlock(SlackBlockIDSaveAsDraftActions, saveAsDraftBtn))
 
 	return slack.ModalViewRequest{
 		Type:            slack.VTModal,

@@ -18,22 +18,22 @@ import (
 
 // SlackUseCases handles Slack-related business logic
 type SlackUseCases struct {
-	repo         interfaces.Repository
-	registry     *model.WorkspaceRegistry
-	agent        *AgentUseCase
-	slackService slacksvc.Service
-	mentionDraft *MentionDraftUseCase
+	repo            interfaces.Repository
+	registry        *model.WorkspaceRegistry
+	agent           *AgentUseCase
+	slackService    slacksvc.Service
+	mentionProposal *MentionProposalUseCase
 }
 
 // NewSlackUseCases creates a new SlackUseCases instance. agent and
-// mentionDraft are mandatory — Slack mention dispatch requires both.
-func NewSlackUseCases(repo interfaces.Repository, registry *model.WorkspaceRegistry, agent *AgentUseCase, mentionDraft *MentionDraftUseCase, slackService slacksvc.Service) *SlackUseCases {
+// mentionProposal are mandatory — Slack mention dispatch requires both.
+func NewSlackUseCases(repo interfaces.Repository, registry *model.WorkspaceRegistry, agent *AgentUseCase, mentionProposal *MentionProposalUseCase, slackService slacksvc.Service) *SlackUseCases {
 	return &SlackUseCases{
-		repo:         repo,
-		registry:     registry,
-		agent:        agent,
-		mentionDraft: mentionDraft,
-		slackService: slackService,
+		repo:            repo,
+		registry:        registry,
+		agent:           agent,
+		mentionProposal: mentionProposal,
+		slackService:    slackService,
 	}
 }
 
@@ -95,9 +95,9 @@ func (uc *SlackUseCases) HandleSlackEvent(ctx context.Context, event *slackevent
 
 	// Dispatch app_mention events:
 	//   - In a channel already bound to a Case → existing AgentUseCase flow
-	//   - Otherwise → MentionDraftUseCase (Slack-mention case-draft flow)
+	//   - Otherwise → MentionProposalUseCase (Slack-mention case-draft flow)
 	//
-	// Both branches require Slack/LLM to be wired (agent and mentionDraft are
+	// Both branches require Slack/LLM to be wired (agent and mentionProposal are
 	// constructed together with slackService in usecase.New). When Slack is
 	// not wired (e.g. unit tests that only exercise message storage), skip
 	// dispatch entirely.
@@ -116,11 +116,11 @@ func (uc *SlackUseCases) HandleSlackEvent(ctx context.Context, event *slackevent
 			return nil
 		}
 
-		if uc.mentionDraft == nil {
+		if uc.mentionProposal == nil {
 			return nil
 		}
 		ctx = uc.contextWithUserLang(ctx, appMention.User)
-		if err := uc.mentionDraft.HandleAppMention(ctx, appMention); err != nil {
+		if err := uc.mentionProposal.HandleAppMention(ctx, appMention); err != nil {
 			errutil.Handle(ctx, goerr.Wrap(err, "failed to handle mention draft",
 				goerr.V("channel_id", appMention.Channel),
 				goerr.V("user_id", appMention.User),
@@ -135,14 +135,14 @@ func (uc *SlackUseCases) HandleSlackEvent(ctx context.Context, event *slackevent
 	// draft turn. App-mention duplicates land here too — F5 drops them so
 	// only the app_mention path runs.
 	if msgEv, ok := event.InnerEvent.Data.(*slackevents.MessageEvent); ok {
-		if uc.mentionDraft == nil {
+		if uc.mentionProposal == nil {
 			return nil
 		}
 		if !uc.shouldResumeOnReply(ctx, msgEv) {
 			return nil
 		}
 		ctx = uc.contextWithUserLang(ctx, msgEv.User)
-		if err := uc.mentionDraft.HandleThreadReply(ctx, msgEv); err != nil {
+		if err := uc.mentionProposal.HandleThreadReply(ctx, msgEv); err != nil {
 			errutil.Handle(ctx, goerr.Wrap(err, "failed to handle thread reply resume",
 				goerr.V("channel_id", msgEv.Channel),
 				goerr.V("thread_ts", msgEv.ThreadTimeStamp),

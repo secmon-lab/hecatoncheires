@@ -60,7 +60,7 @@ func runSessionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interface
 			CaseID:        42,
 			ActionID:      7,
 			CreatorUserID: "U1",
-			DraftID:       model.CaseDraftID("draft-1"),
+			ProposalID:    model.CaseProposalID("draft-1"),
 			CreatedAt:     now,
 			UpdatedAt:     now,
 		}
@@ -79,7 +79,7 @@ func runSessionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interface
 		gt.Value(t, got.CaseID).Equal(int64(42))
 		gt.Value(t, got.ActionID).Equal(int64(7))
 		gt.Value(t, got.CreatorUserID).Equal("U1")
-		gt.Value(t, got.DraftID).Equal(model.CaseDraftID("draft-1"))
+		gt.Value(t, got.ProposalID).Equal(model.CaseProposalID("draft-1"))
 		gt.Bool(t, got.CreatedAt.Equal(now)).True()
 		gt.Bool(t, got.UpdatedAt.Equal(now)).True()
 	})

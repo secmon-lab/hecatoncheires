@@ -42,11 +42,11 @@ type TurnRequest struct {
 	// sub-agent tools that need actor authorisation.
 	ActorUserID string
 
-	// ExistingDraft is the prior draft persisted by the host (when this
+	// ExistingProposal is the prior draft persisted by the host (when this
 	// turn is resuming an existing draft, e.g. ws-switch or thread reply).
 	// The planner does not consume it directly — the host uses it to keep
 	// preview state coherent across turns.
-	ExistingDraft *model.CaseDraft
+	ExistingProposal *model.CaseProposal
 
 	// Handler implements the host-side terminal action dispatchers and
 	// trace updates.
@@ -228,7 +228,7 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 		}
 		budget.PlannerUsed++
 		roundKey := fmt.Sprintf("plan-%d", logicalRound)
-		handler.TraceRound(turnCtx, roundKey, i18n.T(turnCtx, i18n.MsgDraftTracePlanning))
+		handler.TraceRound(turnCtx, roundKey, i18n.T(turnCtx, i18n.MsgProposalTracePlanning))
 
 		roundStarted := time.Now()
 		resp, execErr := newPlannerAgent(roundKey).Execute(turnCtx, gollem.Text(nextInput))
@@ -274,7 +274,7 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 			errutil.Handle(turnCtx, goerr.Wrap(parseErr, "planner output failed validation; retrying",
 				goerr.T(errutil.TagBenign),
 			), "planner output failed validation; retrying")
-			handler.TraceRound(turnCtx, roundKey, i18n.T(turnCtx, i18n.MsgDraftTracePlannerRetry))
+			handler.TraceRound(turnCtx, roundKey, i18n.T(turnCtx, i18n.MsgProposalTracePlannerRetry))
 			nextInput = budget.FormatPrefix() + "\n\nYour previous output failed validation: " + parseErr.Error() + ". Please re-emit a JSON object that matches the response schema."
 			continue
 		}
@@ -287,7 +287,7 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 			}
 		}
 
-		handler.TraceRound(turnCtx, roundKey, i18n.T(turnCtx, i18n.MsgDraftTracePlannerAction, string(p.Action), p.Reasoning))
+		handler.TraceRound(turnCtx, roundKey, i18n.T(turnCtx, i18n.MsgProposalTracePlannerAction, string(p.Action), p.Reasoning))
 
 		switch p.Action {
 		case actionInvestigate:
@@ -434,14 +434,14 @@ func newPlannerProgressMiddleware(h Handler, roundKey string) gollem.ContentBloc
 			for _, txt := range resp.Texts {
 				excerpt := oneLineExcerpt(txt, plannerProgressMaxRunes)
 				if excerpt != "" {
-					h.TraceRound(ctx, roundKey, i18n.T(ctx, i18n.MsgDraftTracePlannerMessage, excerpt))
+					h.TraceRound(ctx, roundKey, i18n.T(ctx, i18n.MsgProposalTracePlannerMessage, excerpt))
 					break
 				}
 			}
 			// A tool call is the more concrete thing to display —
 			// overwrite any thought line we just set.
 			if len(resp.FunctionCalls) > 0 && resp.FunctionCalls[0] != nil {
-				h.TraceRound(ctx, roundKey, i18n.T(ctx, i18n.MsgDraftTracePlannerTool, resp.FunctionCalls[0].Name))
+				h.TraceRound(ctx, roundKey, i18n.T(ctx, i18n.MsgProposalTracePlannerTool, resp.FunctionCalls[0].Name))
 			}
 			return resp, nil
 		}

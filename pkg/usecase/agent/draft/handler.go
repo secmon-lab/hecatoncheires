@@ -36,7 +36,7 @@ type Handler interface {
 	// Question renders the planner's terminal question payload. Items can
 	// be 1-5 with each item carrying a select / multi-select control.
 	Question(ctx context.Context, ssn *model.Session, q QuestionPayload) error
-	// Materialize persists / refreshes the CaseDraft for ssn with the given
+	// Materialize persists / refreshes the CaseProposal for ssn with the given
 	// payload. The host validates against the workspace's FieldSchema.
 	Materialize(ctx context.Context, ssn *model.Session, m MaterializePayload) error
 	// Trace appends one progress line to the host's per-turn trace UI.
