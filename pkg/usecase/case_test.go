@@ -1658,6 +1658,39 @@ func TestCaseUseCase_CreateDraft(t *testing.T) {
 		gt.Value(t, got.Status).Equal(types.CaseStatusDraft)
 		gt.Value(t, got.Title).Equal("")
 	})
+
+	t.Run("create draft skips required-field check", func(t *testing.T) {
+		// Draft is by definition half-finished, so required fields that the
+		// regular CreateCase path would reject must NOT block Save as Draft.
+		// SubmitDraft is what enforces the full schema later.
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: testWorkspaceID, Name: "Test"},
+			FieldSchema: &config.FieldSchema{
+				Fields: []config.FieldDefinition{
+					{
+						ID:       "category",
+						Name:     "Category",
+						Type:     types.FieldTypeSelect,
+						Required: true,
+						Options: []config.FieldOption{
+							{ID: "a", Name: "A"},
+							{ID: "b", Name: "B"},
+						},
+					},
+				},
+			},
+		})
+		uc := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UAUTHOR"})
+
+		// No "category" supplied — required field missing.
+		got, err := uc.CreateDraft(ctx, testWorkspaceID, "Half", "", nil, nil, false)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.Status).Equal(types.CaseStatusDraft)
+		gt.Number(t, len(got.FieldValues)).Equal(0)
+	})
 }
 
 func TestCaseUseCase_ListDrafts(t *testing.T) {
@@ -1819,6 +1852,46 @@ func TestCaseUseCase_SubmitDraft(t *testing.T) {
 		otherCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
 		_, err = uc.SubmitDraft(otherCtx, testWorkspaceID, draft.ID)
 		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
+	})
+
+	t.Run("rejects submit when required field is still missing", func(t *testing.T) {
+		// CreateDraft skipped the required check, but SubmitDraft must enforce
+		// it before flipping the case to OPEN — otherwise an incomplete draft
+		// would slip past the workspace schema.
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: testWorkspaceID, Name: "Test"},
+			FieldSchema: &config.FieldSchema{
+				Fields: []config.FieldDefinition{
+					{
+						ID:       "category",
+						Name:     "Category",
+						Type:     types.FieldTypeSelect,
+						Required: true,
+						Options: []config.FieldOption{
+							{ID: "a", Name: "A"},
+							{ID: "b", Name: "B"},
+						},
+					},
+				},
+			},
+		})
+		uc := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UAUTHOR"})
+
+		draft, err := uc.CreateDraft(ctx, testWorkspaceID, "Has Title", "", nil, nil, false)
+		gt.NoError(t, err).Required()
+
+		_, err = uc.SubmitDraft(ctx, testWorkspaceID, draft.ID)
+		gt.Error(t, err).Is(model.ErrMissingRequired)
+
+		// The draft survives the failed submit so the user can fill in the
+		// missing field and retry.
+		stored, err := repo.Case().Get(context.Background(), testWorkspaceID, draft.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, stored.Status).Equal(types.CaseStatusDraft)
+		gt.Value(t, stored.Title).Equal("Has Title")
 	})
 
 	t.Run("rolls back to DRAFT when activation fails", func(t *testing.T) {

@@ -70,15 +70,13 @@ const (
 	slackFieldBlockPrefix  = "hc_field_block_"
 	slackFieldActionPrefix = "hc_field_action_"
 
-	// Save-as-Draft / Create buttons surfaced inside the Case creation modal.
-	// They share a single trailing action block so the two options are
-	// rendered side by side. block_actions handlers dispatch the stored
-	// form state to CaseUseCase.CreateDraft / CreateCase respectively.
-	// The footer Submit (labelled "Create") is kept as a keyboard-friendly
-	// alternative that converges on the same usecase as SlackActionIDCreateCase.
+	// Save-as-Draft button surfaced inside the Case creation modal, sitting
+	// visually between the footer's Cancel (left) and Create (right). The
+	// block_actions handler dispatches the stored form state to
+	// CaseUseCase.CreateDraft. The footer Submit ("Create") is the regular
+	// case-creation entry and is handled by HandleCaseCreationSubmit.
 	SlackBlockIDSaveAsDraftActions = "hc_save_draft_block"
 	SlackActionIDSaveAsDraft       = "hc_save_draft_btn"
-	SlackActionIDCreateCase        = "hc_create_case_btn"
 )
 
 // commandMetadata is stored in modal private_metadata as JSON
@@ -229,38 +227,9 @@ func (uc *SlackUseCases) HandleWorkspaceSelectSubmit(ctx context.Context, callba
 
 // HandleCaseCreationSubmit processes the case creation modal submission
 // (view_submission path — i.e. the footer Submit button or Enter on an
-// input). The body-level Create button enters via HandleCreateCaseClick;
-// both paths share createCaseFromModalCallback.
+// input). The body-level "Save as draft" button enters via
+// HandleSaveAsDraftClick and goes through a different flow.
 func (uc *SlackUseCases) HandleCaseCreationSubmit(ctx context.Context, caseUC *CaseUseCase, callback *slack.InteractionCallback) error {
-	return uc.createCaseFromModalCallback(ctx, caseUC, callback)
-}
-
-// HandleCreateCaseClick processes the body-level "Create" button on the
-// case creation modal (block_actions path). It is intentionally the same
-// flow as HandleCaseCreationSubmit so users get identical behaviour from
-// either entry point.
-func (uc *SlackUseCases) HandleCreateCaseClick(ctx context.Context, caseUC *CaseUseCase, callback *slack.InteractionCallback) error {
-	if caseUC == nil {
-		return goerr.New("case usecase is not available")
-	}
-	if err := uc.createCaseFromModalCallback(ctx, caseUC, callback); err != nil {
-		return err
-	}
-	// Acknowledge the click visually by replacing the modal contents with
-	// a small splash; view_submission already closes the modal, but a
-	// block_actions click leaves it open by default.
-	if uc.slackService != nil && callback.View.ID != "" {
-		splash := buildCaseCreatedSplashView(ctx)
-		if updateErr := uc.slackService.UpdateView(ctx, splash, "", "", callback.View.ID); updateErr != nil {
-			errutil.Handle(ctx, goerr.Wrap(updateErr, "failed to update modal after Create click",
-				goerr.V("view_id", callback.View.ID),
-			), "failed to update modal after Create click")
-		}
-	}
-	return nil
-}
-
-func (uc *SlackUseCases) createCaseFromModalCallback(ctx context.Context, caseUC *CaseUseCase, callback *slack.InteractionCallback) error {
 	ctx = uc.contextWithUserLang(ctx, callback.User.ID)
 
 	// Extract fields from view state
@@ -425,24 +394,16 @@ func (uc *SlackUseCases) buildCaseCreationModal(ctx context.Context, workspaceID
 		}
 	}
 
-	// Bottom action row: Save-as-Draft (default style) sits next to a
-	// primary-styled Create button. Slack only allows one Submit in the
-	// modal footer, so we drop both action options into the body's last
-	// action block to place them side by side. The footer Submit is kept
-	// (labelled "Create") so keyboard / Enter submissions still work and
-	// converge on the same usecase as the body's Create button.
+	// "Save as draft" sits in the body at the bottom — visually between the
+	// footer's Cancel (left) and Create (right). The footer's Submit button
+	// is the canonical Create path (Enter submits the modal); the body button
+	// only carries the alternative save-as-draft action via block_actions.
 	saveAsDraftBtn := slack.NewButtonBlockElement(
 		SlackActionIDSaveAsDraft,
 		"", // value is unused; the handler reads view.State for all fields.
 		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgDraftSaveAsButton), false, false),
 	)
-	createBtn := slack.NewButtonBlockElement(
-		SlackActionIDCreateCase,
-		"",
-		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgModalCreateCaseSubmit), false, false),
-	)
-	createBtn.Style = slack.StylePrimary
-	blocks = append(blocks, slack.NewActionBlock(SlackBlockIDSaveAsDraftActions, saveAsDraftBtn, createBtn))
+	blocks = append(blocks, slack.NewActionBlock(SlackBlockIDSaveAsDraftActions, saveAsDraftBtn))
 
 	return slack.ModalViewRequest{
 		Type:            slack.VTModal,

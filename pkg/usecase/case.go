@@ -186,9 +186,19 @@ func (uc *CaseUseCase) persistCase(ctx context.Context, workspaceID string, in p
 		}
 	}
 
-	// Validate and enrich custom fields with Type from config.
+	// Validate and enrich custom fields with Type from config. Drafts use
+	// the partial validator: supplied fields are type-checked, but missing
+	// required fields do NOT fail — half-finished entries are the whole
+	// point of the draft state. The full required-field check runs again
+	// in SubmitDraft before promoting the case to OPEN.
 	if validator := uc.fieldValidatorForWorkspace(workspaceID); validator != nil {
-		enriched, err := validator.ValidateCaseFields(in.FieldValues)
+		var enriched map[string]model.FieldValue
+		var err error
+		if in.Status.IsDraft() {
+			enriched, err = validator.ValidateCaseFieldsPartial(in.FieldValues)
+		} else {
+			enriched, err = validator.ValidateCaseFields(in.FieldValues)
+		}
 		if err != nil {
 			return nil, goerr.Wrap(err, "field validation failed")
 		}
@@ -624,6 +634,19 @@ func (uc *CaseUseCase) SubmitDraft(ctx context.Context, workspaceID string, id i
 	if c.Title == "" {
 		return nil, goerr.New("draft title is required before submit",
 			goerr.V(CaseIDKey, id))
+	}
+
+	// Re-run strict field validation now that the draft is being promoted
+	// to OPEN — Save as Draft skipped the required-field check, so this is
+	// the first time the workspace's full schema is enforced. Bail out
+	// before flipping the status so the user can finish filling required
+	// fields on the draft entry and resubmit.
+	if validator := uc.fieldValidatorForWorkspace(workspaceID); validator != nil {
+		enriched, err := validator.ValidateCaseFields(c.FieldValues)
+		if err != nil {
+			return nil, goerr.Wrap(err, "field validation failed on submit", goerr.V(CaseIDKey, id))
+		}
+		c.FieldValues = enriched
 	}
 
 	if err := c.SubmitDraft(); err != nil {

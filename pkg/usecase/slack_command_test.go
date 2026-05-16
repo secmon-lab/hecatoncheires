@@ -120,9 +120,12 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		}
 		gt.Bool(t, found).True()
 
-		// Bottom action block must surface both Save-as-Draft and Create
-		// buttons so the user has them side by side.
-		var saveAsDraftFound, createFound bool
+		// Bottom action block surfaces the Save-as-Draft button only. The
+		// Create action stays in the modal footer (Submit), so the body
+		// button must NOT duplicate it — otherwise the user would see two
+		// Create buttons.
+		var saveAsDraftFound bool
+		var bodyButtonCount int
 		for _, block := range slackMock.openViewRequest.Blocks.BlockSet {
 			actionBlock, ok := block.(*goslack.ActionBlock)
 			if !ok || actionBlock.BlockID != usecase.SlackBlockIDSaveAsDraftActions {
@@ -133,20 +136,14 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 				if !ok {
 					continue
 				}
-				switch btn.ActionID {
-				case usecase.SlackActionIDSaveAsDraft:
+				bodyButtonCount++
+				if btn.ActionID == usecase.SlackActionIDSaveAsDraft {
 					saveAsDraftFound = true
-				case usecase.SlackActionIDCreateCase:
-					createFound = true
-					// The Create button should stand out as the primary
-					// action; the explicit style is what gives users
-					// the visual cue that it's the default.
-					gt.Value(t, btn.Style).Equal(goslack.StylePrimary)
 				}
 			}
 		}
 		gt.Bool(t, saveAsDraftFound).True()
-		gt.Bool(t, createFound).True()
+		gt.Number(t, bodyButtonCount).Equal(1)
 	})
 
 	t.Run("workspace specified but invalid returns error", func(t *testing.T) {
@@ -604,73 +601,6 @@ func TestSlackUseCases_HandleCaseCreationSubmit(t *testing.T) {
 
 		err := slackUC.HandleCaseCreationSubmit(context.Background(), caseUC, callback)
 		gt.Value(t, err).NotNil()
-	})
-}
-
-func TestSlackUseCases_HandleCreateCaseClick(t *testing.T) {
-	i18n.Init(i18n.LangEN)
-
-	t.Run("body Create button funnels through the same flow as Submit", func(t *testing.T) {
-		repo := memory.New()
-		registry := model.NewWorkspaceRegistry()
-		registry.Register(&model.WorkspaceEntry{
-			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
-		})
-
-		slackMock := &saveDraftMockSlack{}
-		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
-		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
-
-		meta, _ := json.Marshal(map[string]string{
-			"workspace_id": "risk",
-			"channel_id":   "C001",
-		})
-		callback := &goslack.InteractionCallback{
-			Type: goslack.InteractionTypeBlockActions,
-			User: goslack.User{ID: "U001"},
-			View: goslack.View{
-				ID:              "V-CREATE-1",
-				PrivateMetadata: string(meta),
-				State: &goslack.ViewState{
-					Values: map[string]map[string]goslack.BlockAction{
-						"hc_case_title_block": {
-							"hc_case_title": {Value: "From body button"},
-						},
-						"hc_case_desc_block": {
-							"hc_case_desc": {Value: "click-driven"},
-						},
-					},
-				},
-			},
-		}
-
-		err := slackUC.HandleCreateCaseClick(context.Background(), caseUC, callback)
-		gt.NoError(t, err).Required()
-
-		// Confirmation message posted to the originating channel.
-		gt.Array(t, slackMock.postedMessages).Length(1)
-		gt.Value(t, slackMock.postedMessages[0].ChannelID).Equal("C001")
-		gt.String(t, slackMock.postedMessages[0].Text).Contains("From body button")
-
-		// Modal was swapped for the "Created" splash so the user has a
-		// visible acknowledgement (block_actions clicks don't auto-close
-		// the modal like view_submission does).
-		gt.Number(t, len(slackMock.updateViewCalls)).Equal(1)
-		gt.Value(t, slackMock.updateViewCalls[0].viewID).Equal("V-CREATE-1")
-	})
-
-	t.Run("nil caseUC produces a configuration error", func(t *testing.T) {
-		slackMock := &saveDraftMockSlack{}
-		slackUC := usecase.NewSlackUseCases(memory.New(), model.NewWorkspaceRegistry(), nil, nil, slackMock)
-		callback := &goslack.InteractionCallback{
-			User: goslack.User{ID: "U001"},
-			View: goslack.View{
-				PrivateMetadata: "{}",
-				State:           &goslack.ViewState{Values: map[string]map[string]goslack.BlockAction{}},
-			},
-		}
-		err := slackUC.HandleCreateCaseClick(context.Background(), nil, callback)
-		gt.Error(t, err)
 	})
 }
 
