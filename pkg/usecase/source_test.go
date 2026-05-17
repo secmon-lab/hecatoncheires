@@ -385,6 +385,327 @@ func TestSourceUseCase_CreateNotionDBSource(t *testing.T) {
 	})
 }
 
+func TestSourceUseCase_UpdateNotionDBSource(t *testing.T) {
+	t.Run("updates name, description and enabled without touching DB ID", func(t *testing.T) {
+		repo := memory.New()
+		notionSvc := &sourceTestNotionService{}
+		uc := usecase.NewSourceUseCase(repo, notionSvc, nil, nil)
+		ctx := context.Background()
+
+		source := &model.Source{
+			Name:        "Original",
+			Description: "Original desc",
+			SourceType:  model.SourceTypeNotionDB,
+			Enabled:     true,
+			NotionDBConfig: &model.NotionDBConfig{
+				DatabaseID:    "11111111111111111111111111111111",
+				DatabaseTitle: "Original DB",
+				DatabaseURL:   "https://notion.so/original",
+			},
+		}
+		created, err := repo.Source().Create(ctx, testWorkspaceID, source)
+		gt.NoError(t, err).Required()
+
+		newName := "Updated"
+		newDesc := "Updated desc"
+		newEnabled := false
+		input := usecase.UpdateNotionDBSourceInput{
+			ID:          created.ID,
+			Name:        &newName,
+			Description: &newDesc,
+			Enabled:     &newEnabled,
+		}
+
+		updated, err := uc.UpdateNotionDBSource(ctx, testWorkspaceID, input)
+		gt.NoError(t, err).Required()
+
+		gt.Value(t, updated.Name).Equal("Updated")
+		gt.Value(t, updated.Description).Equal("Updated desc")
+		gt.Value(t, updated.Enabled).Equal(false)
+		gt.Value(t, updated.NotionDBConfig).NotNil().Required()
+		gt.Value(t, updated.NotionDBConfig.DatabaseID).Equal("11111111111111111111111111111111")
+		gt.Value(t, updated.NotionDBConfig.DatabaseTitle).Equal("Original DB")
+		gt.Value(t, updated.NotionDBConfig.DatabaseURL).Equal("https://notion.so/original")
+	})
+
+	t.Run("changing databaseID re-validates and refreshes title/URL", func(t *testing.T) {
+		repo := memory.New()
+		notionSvc := &sourceTestNotionService{
+			getDatabaseMetadataFn: func(ctx context.Context, dbID string) (*notion.DatabaseMetadata, error) {
+				return &notion.DatabaseMetadata{
+					ID:    dbID,
+					Title: "Refreshed DB",
+					URL:   "https://notion.so/refreshed",
+				}, nil
+			},
+		}
+		uc := usecase.NewSourceUseCase(repo, notionSvc, nil, nil)
+		ctx := context.Background()
+
+		source := &model.Source{
+			Name:       "Source",
+			SourceType: model.SourceTypeNotionDB,
+			Enabled:    true,
+			NotionDBConfig: &model.NotionDBConfig{
+				DatabaseID:    "11111111111111111111111111111111",
+				DatabaseTitle: "Old",
+				DatabaseURL:   "https://notion.so/old",
+			},
+		}
+		created, err := repo.Source().Create(ctx, testWorkspaceID, source)
+		gt.NoError(t, err).Required()
+
+		newDB := "22222222222222222222222222222222"
+		input := usecase.UpdateNotionDBSourceInput{
+			ID:         created.ID,
+			DatabaseID: &newDB,
+		}
+
+		updated, err := uc.UpdateNotionDBSource(ctx, testWorkspaceID, input)
+		gt.NoError(t, err).Required()
+
+		// ParseNotionID normalizes to dash-separated UUID form
+		normalized := "22222222-2222-2222-2222-222222222222"
+		gt.Value(t, updated.NotionDBConfig).NotNil().Required()
+		gt.Value(t, updated.NotionDBConfig.DatabaseID).Equal(normalized)
+		gt.Value(t, updated.NotionDBConfig.DatabaseTitle).Equal("Refreshed DB")
+		gt.Value(t, updated.NotionDBConfig.DatabaseURL).Equal("https://notion.so/refreshed")
+	})
+
+	t.Run("rejects invalid database ID", func(t *testing.T) {
+		repo := memory.New()
+		notionSvc := &sourceTestNotionService{}
+		uc := usecase.NewSourceUseCase(repo, notionSvc, nil, nil)
+		ctx := context.Background()
+
+		source := &model.Source{
+			Name:       "Source",
+			SourceType: model.SourceTypeNotionDB,
+			Enabled:    true,
+			NotionDBConfig: &model.NotionDBConfig{
+				DatabaseID: "11111111111111111111111111111111",
+			},
+		}
+		created, err := repo.Source().Create(ctx, testWorkspaceID, source)
+		gt.NoError(t, err).Required()
+
+		bad := "not-a-valid-notion-id"
+		_, err = uc.UpdateNotionDBSource(ctx, testWorkspaceID, usecase.UpdateNotionDBSourceInput{
+			ID:         created.ID,
+			DatabaseID: &bad,
+		})
+		gt.Value(t, err).NotNil()
+	})
+
+	t.Run("fails for non-NotionDB source", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewSourceUseCase(repo, &sourceTestNotionService{}, nil, nil)
+		ctx := context.Background()
+
+		source := &model.Source{
+			Name:       "Slack Source",
+			SourceType: model.SourceTypeSlack,
+			Enabled:    true,
+		}
+		created, err := repo.Source().Create(ctx, testWorkspaceID, source)
+		gt.NoError(t, err).Required()
+
+		newName := "Renamed"
+		_, err = uc.UpdateNotionDBSource(ctx, testWorkspaceID, usecase.UpdateNotionDBSourceInput{
+			ID:   created.ID,
+			Name: &newName,
+		})
+		gt.Value(t, err).NotNil()
+	})
+
+	t.Run("fails with empty ID", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewSourceUseCase(repo, &sourceTestNotionService{}, nil, nil)
+		ctx := context.Background()
+
+		_, err := uc.UpdateNotionDBSource(ctx, testWorkspaceID, usecase.UpdateNotionDBSourceInput{
+			ID: "",
+		})
+		gt.Value(t, err).NotNil()
+	})
+}
+
+func TestSourceUseCase_UpdateNotionPageSource(t *testing.T) {
+	t.Run("updates name/description/enabled without touching page ID", func(t *testing.T) {
+		repo := memory.New()
+		notionSvc := &sourceTestNotionService{}
+		uc := usecase.NewSourceUseCase(repo, notionSvc, nil, nil)
+		ctx := context.Background()
+
+		source := &model.Source{
+			Name:        "Original",
+			Description: "Original desc",
+			SourceType:  model.SourceTypeNotionPage,
+			Enabled:     true,
+			NotionPageConfig: &model.NotionPageConfig{
+				PageID:    "11111111111111111111111111111111",
+				PageTitle: "Original Page",
+				PageURL:   "https://notion.so/page-original",
+				Recursive: false,
+				MaxDepth:  0,
+			},
+		}
+		created, err := repo.Source().Create(ctx, testWorkspaceID, source)
+		gt.NoError(t, err).Required()
+
+		newName := "Updated"
+		newDesc := "Updated desc"
+		newEnabled := false
+		updated, err := uc.UpdateNotionPageSource(ctx, testWorkspaceID, usecase.UpdateNotionPageSourceInput{
+			ID:          created.ID,
+			Name:        &newName,
+			Description: &newDesc,
+			Enabled:     &newEnabled,
+		})
+		gt.NoError(t, err).Required()
+
+		gt.Value(t, updated.Name).Equal("Updated")
+		gt.Value(t, updated.Description).Equal("Updated desc")
+		gt.Value(t, updated.Enabled).Equal(false)
+		gt.Value(t, updated.NotionPageConfig).NotNil().Required()
+		gt.Value(t, updated.NotionPageConfig.PageID).Equal("11111111111111111111111111111111")
+		gt.Value(t, updated.NotionPageConfig.PageTitle).Equal("Original Page")
+	})
+
+	t.Run("updates recursive and maxDepth independently of pageID", func(t *testing.T) {
+		repo := memory.New()
+		notionSvc := &sourceTestNotionService{}
+		uc := usecase.NewSourceUseCase(repo, notionSvc, nil, nil)
+		ctx := context.Background()
+
+		source := &model.Source{
+			Name:       "Source",
+			SourceType: model.SourceTypeNotionPage,
+			Enabled:    true,
+			NotionPageConfig: &model.NotionPageConfig{
+				PageID:    "11111111111111111111111111111111",
+				PageTitle: "Original",
+				PageURL:   "https://notion.so/p",
+				Recursive: false,
+				MaxDepth:  0,
+			},
+		}
+		created, err := repo.Source().Create(ctx, testWorkspaceID, source)
+		gt.NoError(t, err).Required()
+
+		newRecursive := true
+		newMaxDepth := 3
+		updated, err := uc.UpdateNotionPageSource(ctx, testWorkspaceID, usecase.UpdateNotionPageSourceInput{
+			ID:        created.ID,
+			Recursive: &newRecursive,
+			MaxDepth:  &newMaxDepth,
+		})
+		gt.NoError(t, err).Required()
+
+		gt.Value(t, updated.NotionPageConfig.Recursive).Equal(true)
+		gt.Value(t, updated.NotionPageConfig.MaxDepth).Equal(3)
+		gt.Value(t, updated.NotionPageConfig.PageID).Equal("11111111111111111111111111111111")
+		gt.Value(t, updated.NotionPageConfig.PageTitle).Equal("Original")
+	})
+
+	t.Run("changing pageID re-validates and refreshes title/URL", func(t *testing.T) {
+		repo := memory.New()
+		notionSvc := &sourceTestNotionService{
+			getPageMetadataFn: func(ctx context.Context, pageID string) (*notion.PageMetadata, error) {
+				return &notion.PageMetadata{
+					ID:    pageID,
+					Title: "Refreshed Page",
+					URL:   "https://notion.so/refreshed-page",
+				}, nil
+			},
+		}
+		uc := usecase.NewSourceUseCase(repo, notionSvc, nil, nil)
+		ctx := context.Background()
+
+		source := &model.Source{
+			Name:       "Source",
+			SourceType: model.SourceTypeNotionPage,
+			Enabled:    true,
+			NotionPageConfig: &model.NotionPageConfig{
+				PageID:    "11111111111111111111111111111111",
+				PageTitle: "Old",
+				PageURL:   "https://notion.so/old-page",
+			},
+		}
+		created, err := repo.Source().Create(ctx, testWorkspaceID, source)
+		gt.NoError(t, err).Required()
+
+		newPage := "22222222222222222222222222222222"
+		updated, err := uc.UpdateNotionPageSource(ctx, testWorkspaceID, usecase.UpdateNotionPageSourceInput{
+			ID:     created.ID,
+			PageID: &newPage,
+		})
+		gt.NoError(t, err).Required()
+
+		// ParseNotionID normalizes to dash-separated UUID form
+		normalized := "22222222-2222-2222-2222-222222222222"
+		gt.Value(t, updated.NotionPageConfig.PageID).Equal(normalized)
+		gt.Value(t, updated.NotionPageConfig.PageTitle).Equal("Refreshed Page")
+		gt.Value(t, updated.NotionPageConfig.PageURL).Equal("https://notion.so/refreshed-page")
+	})
+
+	t.Run("rejects invalid page ID", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewSourceUseCase(repo, &sourceTestNotionService{}, nil, nil)
+		ctx := context.Background()
+
+		source := &model.Source{
+			Name:       "Source",
+			SourceType: model.SourceTypeNotionPage,
+			Enabled:    true,
+			NotionPageConfig: &model.NotionPageConfig{
+				PageID: "11111111111111111111111111111111",
+			},
+		}
+		created, err := repo.Source().Create(ctx, testWorkspaceID, source)
+		gt.NoError(t, err).Required()
+
+		bad := "not-a-valid-notion-id"
+		_, err = uc.UpdateNotionPageSource(ctx, testWorkspaceID, usecase.UpdateNotionPageSourceInput{
+			ID:     created.ID,
+			PageID: &bad,
+		})
+		gt.Value(t, err).NotNil()
+	})
+
+	t.Run("fails for non-NotionPage source", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewSourceUseCase(repo, &sourceTestNotionService{}, nil, nil)
+		ctx := context.Background()
+
+		source := &model.Source{
+			Name:       "Slack Source",
+			SourceType: model.SourceTypeSlack,
+			Enabled:    true,
+		}
+		created, err := repo.Source().Create(ctx, testWorkspaceID, source)
+		gt.NoError(t, err).Required()
+
+		newName := "Renamed"
+		_, err = uc.UpdateNotionPageSource(ctx, testWorkspaceID, usecase.UpdateNotionPageSourceInput{
+			ID:   created.ID,
+			Name: &newName,
+		})
+		gt.Value(t, err).NotNil()
+	})
+
+	t.Run("fails with empty ID", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewSourceUseCase(repo, &sourceTestNotionService{}, nil, nil)
+		ctx := context.Background()
+
+		_, err := uc.UpdateNotionPageSource(ctx, testWorkspaceID, usecase.UpdateNotionPageSourceInput{
+			ID: "",
+		})
+		gt.Value(t, err).NotNil()
+	})
+}
+
 func TestSourceUseCase_UpdateSource(t *testing.T) {
 	t.Run("updates source fields", func(t *testing.T) {
 		repo := memory.New()

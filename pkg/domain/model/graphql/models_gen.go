@@ -360,6 +360,24 @@ type UpdateGitHubSourceInput struct {
 	Enabled      *bool    `json:"enabled,omitempty"`
 }
 
+type UpdateNotionDBSourceInput struct {
+	ID          string  `json:"id"`
+	Name        *string `json:"name,omitempty"`
+	Description *string `json:"description,omitempty"`
+	DatabaseID  *string `json:"databaseID,omitempty"`
+	Enabled     *bool   `json:"enabled,omitempty"`
+}
+
+type UpdateNotionPageSourceInput struct {
+	ID          string  `json:"id"`
+	Name        *string `json:"name,omitempty"`
+	Description *string `json:"description,omitempty"`
+	PageID      *string `json:"pageID,omitempty"`
+	Enabled     *bool   `json:"enabled,omitempty"`
+	Recursive   *bool   `json:"recursive,omitempty"`
+	MaxDepth    *int    `json:"maxDepth,omitempty"`
+}
+
 type UpdateSlackSourceInput struct {
 	ID          string   `json:"id"`
 	Name        *string  `json:"name,omitempty"`

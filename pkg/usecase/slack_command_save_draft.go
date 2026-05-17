@@ -159,4 +159,3 @@ func buildSaveAsDraftSplashView(ctx context.Context, caseID int64) slack.ModalVi
 		},
 	}
 }
-

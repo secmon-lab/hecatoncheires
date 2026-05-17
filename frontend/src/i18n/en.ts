@@ -256,6 +256,7 @@ export const en: Messages = {
   placeholderSourceDescription: 'Enter source description (optional)',
   errorNameRequired: 'Name is required',
   errorCreateSource: 'Failed to create source. Please try again.',
+  errorUpdateSource: 'Failed to update source. Please try again.',
   linkViewSource: 'View Source',
 
   // Source delete dialog

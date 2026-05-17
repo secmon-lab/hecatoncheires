@@ -3,7 +3,7 @@
 export const SOURCE_TYPE = {
   NOTION_DB: 'NOTION_DB',
   NOTION_PAGE: 'NOTION_PAGE',
-  SLACK: 'Slack',
+  SLACK: 'SLACK',
   GITHUB: 'GITHUB',
 } as const
 

@@ -6,8 +6,11 @@ import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
 import Button from '../components/Button'
 import { IconChevLeft, IconSlack, IconGitHub, IconNotion, IconExt } from '../components/Icons'
-import { Badge } from '../components/Primitives'
 import SourceDeleteDialog from '../components/source/SourceDeleteDialog'
+import SlackForm from '../components/source/SlackForm'
+import GitHubForm from '../components/source/GitHubForm'
+import NotionDBForm from '../components/source/NotionDBForm'
+import NotionPageForm from '../components/source/NotionPageForm'
 import { SOURCE_TYPE } from '../constants/source'
 
 function formatDate(iso: string) {
@@ -29,6 +32,7 @@ export default function SourceDetail() {
   const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
   const [showDelete, setShowDelete] = useState(false)
+  const [showEdit, setShowEdit] = useState(false)
 
   const { data, loading } = useQuery(GET_SOURCE, {
     variables: { workspaceId: currentWorkspace?.id, id },
@@ -60,7 +64,7 @@ export default function SourceDetail() {
           {t('btnBack')}
         </Button>
         <span className="spacer" />
-        <Button size="sm" onClick={toggleEnabled}>{s.enabled ? t('statusEnabled') : t('statusDisabled')}</Button>
+        <Button size="sm" onClick={() => setShowEdit(true)}>{t('btnEdit')}</Button>
         <Button size="sm" variant="danger" onClick={() => setShowDelete(true)}>{t('btnDelete')}</Button>
       </div>
 
@@ -75,7 +79,54 @@ export default function SourceDetail() {
               {s.sourceType.replace('_', ' ')}{s.description ? ` · ${s.description}` : ''}
             </div>
           </div>
-          {s.enabled ? <Badge kind="open">{t('statusEnabled')}</Badge> : <Badge>{t('statusDisabled')}</Badge>}
+          <button
+            type="button"
+            onClick={toggleEnabled}
+            aria-pressed={s.enabled}
+            aria-label={s.enabled ? t('statusEnabled') : t('statusDisabled')}
+            title={s.enabled ? t('statusEnabled') : t('statusDisabled')}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              cursor: 'pointer',
+              color: 'inherit',
+            }}
+          >
+            <span
+              style={{
+                width: 32,
+                height: 18,
+                borderRadius: 9,
+                background: s.enabled ? 'var(--ok)' : 'var(--bg-sunken)',
+                border: '1px solid var(--line-strong)',
+                position: 'relative',
+                transition: 'background 120ms ease',
+                flexShrink: 0,
+                display: 'inline-block',
+              }}
+            >
+              <span
+                style={{
+                  position: 'absolute',
+                  top: 1,
+                  left: s.enabled ? 15 : 1,
+                  width: 14,
+                  height: 14,
+                  borderRadius: '50%',
+                  background: 'var(--bg-elev)',
+                  boxShadow: 'var(--shadow-sm)',
+                  transition: 'left 120ms ease',
+                }}
+              />
+            </span>
+            <span style={{ fontSize: 12, fontWeight: 500, color: s.enabled ? 'var(--ok)' : 'var(--fg-soft)' }}>
+              {s.enabled ? t('statusEnabled') : t('statusDisabled')}
+            </span>
+          </button>
         </div>
         <hr />
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 16 }}>
@@ -133,6 +184,39 @@ export default function SourceDetail() {
           navigate(`/ws/${currentWorkspace!.id}/sources`)
         }}
       />
+
+      {s.sourceType === SOURCE_TYPE.SLACK && (
+        <SlackForm
+          isOpen={showEdit}
+          onClose={() => setShowEdit(false)}
+          mode="edit"
+          source={{ id: s.id, name: s.name, description: s.description ?? null, config: s.config }}
+        />
+      )}
+      {s.sourceType === SOURCE_TYPE.GITHUB && (
+        <GitHubForm
+          isOpen={showEdit}
+          onClose={() => setShowEdit(false)}
+          mode="edit"
+          source={{ id: s.id, name: s.name, description: s.description ?? null, config: s.config }}
+        />
+      )}
+      {s.sourceType === SOURCE_TYPE.NOTION_DB && (
+        <NotionDBForm
+          isOpen={showEdit}
+          onClose={() => setShowEdit(false)}
+          mode="edit"
+          source={{ id: s.id, name: s.name, description: s.description ?? null, config: s.config }}
+        />
+      )}
+      {s.sourceType === SOURCE_TYPE.NOTION_PAGE && (
+        <NotionPageForm
+          isOpen={showEdit}
+          onClose={() => setShowEdit(false)}
+          mode="edit"
+          source={{ id: s.id, name: s.name, description: s.description ?? null, config: s.config }}
+        />
+      )}
     </div>
   )
 }

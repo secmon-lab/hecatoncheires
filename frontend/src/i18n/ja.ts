@@ -256,6 +256,7 @@ export const ja: Messages = {
   placeholderSourceDescription: 'ソースの説明を入力（任意）',
   errorNameRequired: '名前は必須です',
   errorCreateSource: 'ソースの作成に失敗しました。もう一度お試しください。',
+  errorUpdateSource: 'ソースの更新に失敗しました。もう一度お試しください。',
   linkViewSource: 'ソースを表示',
 
   // Source delete dialog

@@ -6,12 +6,24 @@ import { useTranslation } from '../../i18n'
 import Modal from '../Modal'
 import Button from '../Button'
 import { IconCheck, IconExt, IconWarn } from '../Icons'
-import { CREATE_NOTION_DB_SOURCE, VALIDATE_NOTION_DB, GET_SOURCES } from '../../graphql/source'
+import {
+  CREATE_NOTION_DB_SOURCE,
+  UPDATE_NOTION_DB_SOURCE,
+  VALIDATE_NOTION_DB,
+  GET_SOURCE,
+  GET_SOURCES,
+} from '../../graphql/source'
 import { parseNotionID } from '../../utils/notion'
+import {
+  initialNotionDBValidation,
+  type NotionDBSourceForEdit,
+} from './sourceFormHelpers'
 
 interface NotionDBFormProps {
   isOpen: boolean
   onClose: () => void
+  mode?: 'create' | 'edit'
+  source?: NotionDBSourceForEdit
 }
 
 interface FormErrors {
@@ -27,19 +39,32 @@ interface ValidationResult {
   errorMessage: string | null
 }
 
-export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
+export default function NotionDBForm({ isOpen, onClose, mode = 'create', source }: NotionDBFormProps) {
   const navigate = useNavigate()
   const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
-  const [databaseID, setDatabaseID] = useState('')
-  const [name, setName] = useState('')
-  const [description, setDescription] = useState('')
+  const isEdit = mode === 'edit'
+
+  const originalDatabaseID = isEdit && source?.config?.databaseID ? source.config.databaseID : ''
+
+  const [databaseID, setDatabaseID] = useState(originalDatabaseID)
+  const [name, setName] = useState(isEdit && source ? source.name : '')
+  const [description, setDescription] = useState(isEdit && source ? source.description ?? '' : '')
   const [enabled, setEnabled] = useState(true)
   const [errors, setErrors] = useState<FormErrors>({})
-  const [validationResult, setValidationResult] = useState<ValidationResult | null>(null)
+  const [validationResult, setValidationResult] = useState<ValidationResult | null>(
+    isEdit ? initialNotionDBValidation(source) : null,
+  )
   const [isValidating, setIsValidating] = useState(false)
 
   const [validateNotionDB] = useMutation(VALIDATE_NOTION_DB)
+
+  const refetchAfterEdit = isEdit && source
+    ? [
+        { query: GET_SOURCE, variables: { workspaceId: currentWorkspace?.id, id: source.id } },
+        { query: GET_SOURCES, variables: { workspaceId: currentWorkspace?.id } },
+      ]
+    : undefined
 
   const [createSource, { loading: creating }] = useMutation(CREATE_NOTION_DB_SOURCE, {
     update(cache, { data }) {
@@ -66,7 +91,30 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
     },
   })
 
-  useEffect(() => { if (!isOpen) resetForm() }, [isOpen])
+  const [updateSource, { loading: updating }] = useMutation(UPDATE_NOTION_DB_SOURCE, {
+    refetchQueries: refetchAfterEdit,
+    onCompleted: () => {
+      onClose()
+    },
+    onError: (error) => {
+      setErrors((p) => ({ ...p, form: error.message || t('errorUpdateSource') }))
+    },
+  })
+
+  useEffect(() => {
+    if (!isOpen) return
+    if (isEdit && source) {
+      setDatabaseID(source.config?.databaseID ?? '')
+      setName(source.name)
+      setDescription(source.description ?? '')
+      setEnabled(true)
+      setErrors({})
+      setValidationResult(initialNotionDBValidation(source))
+      setIsValidating(false)
+    } else if (!isEdit) {
+      resetForm()
+    }
+  }, [isOpen, isEdit, source?.id])
 
   const resetForm = () => {
     setDatabaseID('')
@@ -112,37 +160,63 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
 
   const handleSubmit = async () => {
     if (!validate()) return
-    const parsed = parseNotionID(databaseID)
-    await createSource({
-      variables: {
-        workspaceId: currentWorkspace!.id,
-        input: {
-          databaseID: parsed ?? databaseID.trim(),
-          name: name.trim(),
-          description: description.trim() || undefined,
-          enabled,
+    const parsed = parseNotionID(databaseID) ?? databaseID.trim()
+    if (isEdit && source) {
+      const input: Record<string, unknown> = {
+        id: source.id,
+        name: name.trim(),
+        description: description.trim(),
+      }
+      // Only send databaseID when it actually changed; otherwise the backend
+      // would needlessly re-fetch metadata from Notion.
+      const normalizedOriginal = parseNotionID(originalDatabaseID) ?? originalDatabaseID
+      if (parsed !== normalizedOriginal) {
+        input.databaseID = parsed
+      }
+      await updateSource({
+        variables: {
+          workspaceId: currentWorkspace!.id,
+          input,
         },
-      },
-    })
+      })
+    } else {
+      await createSource({
+        variables: {
+          workspaceId: currentWorkspace!.id,
+          input: {
+            databaseID: parsed,
+            name: name.trim(),
+            description: description.trim() || undefined,
+            enabled,
+          },
+        },
+      })
+    }
   }
 
-  const handleClose = () => { resetForm(); onClose() }
+  const handleClose = () => { if (!isEdit) resetForm(); onClose() }
+
+  const loading = creating || updating
+  const title = isEdit ? `${t('titleEditSource')} · NOTION DB` : t('titleAddNotionDbSource')
+  const submitLabel = isEdit
+    ? loading ? t('btnSaving') : t('btnSave')
+    : loading ? t('btnCreating') : t('btnCreateSource')
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
       width={600}
-      title={t('titleAddNotionDbSource')}
+      title={title}
       footer={
         <>
-          <Button variant="ghost" onClick={handleClose} disabled={creating}>{t('btnCancel')}</Button>
+          <Button variant="ghost" onClick={handleClose} disabled={loading}>{t('btnCancel')}</Button>
           <Button
             variant="primary"
             onClick={handleSubmit}
-            disabled={creating || !validationResult?.valid}
+            disabled={loading || !validationResult?.valid || !name.trim()}
           >
-            {creating ? t('btnCreating') : t('btnCreateSource')}
+            {submitLabel}
           </Button>
         </>
       }
@@ -157,6 +231,30 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
           }}>{errors.form}</div>
         )}
         <div>
+          <label htmlFor="ndb-name" className="field-label">{t('labelNameRequired')}</label>
+          <input
+            id="ndb-name"
+            className="input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={t('placeholderSourceName')}
+            disabled={loading}
+          />
+          {errors.name && <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 4 }}>{errors.name}</div>}
+        </div>
+        <div>
+          <label htmlFor="ndb-desc" className="field-label">{t('labelDescription')}</label>
+          <textarea
+            id="ndb-desc"
+            className="textarea"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder={t('placeholderSourceDescription')}
+            rows={3}
+            disabled={loading}
+          />
+        </div>
+        <div>
           <label htmlFor="ndb-id" className="field-label">{t('labelDatabaseIdRequired')}</label>
           <div className="row" style={{ gap: 6 }}>
             <input
@@ -165,10 +263,10 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
               value={databaseID}
               onChange={(e) => { setDatabaseID(e.target.value); setValidationResult(null) }}
               placeholder={t('placeholderNotionDbId')}
-              disabled={creating}
+              disabled={loading}
               style={{ flex: 1 }}
             />
-            <Button onClick={handleValidate} disabled={creating || isValidating || !databaseID.trim()}>
+            <Button onClick={handleValidate} disabled={loading || isValidating || !databaseID.trim()}>
               {isValidating ? '…' : t('btnValidate')}
             </Button>
           </div>
@@ -207,39 +305,17 @@ export default function NotionDBForm({ isOpen, onClose }: NotionDBFormProps) {
             )}
           </div>
         )}
-        <div>
-          <label htmlFor="ndb-name" className="field-label">{t('labelNameRequired')}</label>
-          <input
-            id="ndb-name"
-            className="input"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder={t('placeholderSourceName')}
-            disabled={creating}
-          />
-          {errors.name && <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 4 }}>{errors.name}</div>}
-        </div>
-        <div>
-          <label htmlFor="ndb-desc" className="field-label">{t('labelDescription')}</label>
-          <textarea
-            id="ndb-desc"
-            className="textarea"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder={t('placeholderSourceDescription')}
-            rows={3}
-            disabled={creating}
-          />
-        </div>
-        <label className="row" style={{ gap: 8, fontSize: 13 }}>
-          <input
-            type="checkbox"
-            checked={enabled}
-            onChange={(e) => setEnabled(e.target.checked)}
-            disabled={creating}
-          />
-          <span>{t('labelEnableSource')}</span>
-        </label>
+        {!isEdit && (
+          <label className="row" style={{ gap: 8, fontSize: 13 }}>
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => setEnabled(e.target.checked)}
+              disabled={loading}
+            />
+            <span>{t('labelEnableSource')}</span>
+          </label>
+        )}
       </div>
     </Modal>
   )

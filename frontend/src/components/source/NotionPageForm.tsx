@@ -6,12 +6,24 @@ import { useTranslation } from '../../i18n'
 import Modal from '../Modal'
 import Button from '../Button'
 import { IconCheck, IconExt, IconWarn } from '../Icons'
-import { CREATE_NOTION_PAGE_SOURCE, VALIDATE_NOTION_PAGE, GET_SOURCES } from '../../graphql/source'
+import {
+  CREATE_NOTION_PAGE_SOURCE,
+  UPDATE_NOTION_PAGE_SOURCE,
+  VALIDATE_NOTION_PAGE,
+  GET_SOURCE,
+  GET_SOURCES,
+} from '../../graphql/source'
 import { parseNotionID } from '../../utils/notion'
+import {
+  initialNotionPageValidation,
+  type NotionPageSourceForEdit,
+} from './sourceFormHelpers'
 
 interface NotionPageFormProps {
   isOpen: boolean
   onClose: () => void
+  mode?: 'create' | 'edit'
+  source?: NotionPageSourceForEdit
 }
 
 interface FormErrors {
@@ -27,21 +39,36 @@ interface ValidationResult {
   errorMessage: string | null
 }
 
-export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps) {
+export default function NotionPageForm({ isOpen, onClose, mode = 'create', source }: NotionPageFormProps) {
   const navigate = useNavigate()
   const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
-  const [pageID, setPageID] = useState('')
-  const [name, setName] = useState('')
-  const [description, setDescription] = useState('')
+  const isEdit = mode === 'edit'
+
+  const originalPageID = isEdit && source?.config?.pageID ? source.config.pageID : ''
+  const originalRecursive = isEdit && source?.config ? Boolean(source.config.recursive) : false
+  const originalMaxDepth = isEdit && source?.config?.maxDepth ? source.config.maxDepth : 4
+
+  const [pageID, setPageID] = useState(originalPageID)
+  const [name, setName] = useState(isEdit && source ? source.name : '')
+  const [description, setDescription] = useState(isEdit && source ? source.description ?? '' : '')
   const [enabled, setEnabled] = useState(true)
-  const [recursive, setRecursive] = useState(false)
-  const [maxDepth, setMaxDepth] = useState(4)
+  const [recursive, setRecursive] = useState(originalRecursive)
+  const [maxDepth, setMaxDepth] = useState(originalMaxDepth)
   const [errors, setErrors] = useState<FormErrors>({})
-  const [validationResult, setValidationResult] = useState<ValidationResult | null>(null)
+  const [validationResult, setValidationResult] = useState<ValidationResult | null>(
+    isEdit ? initialNotionPageValidation(source) : null,
+  )
   const [isValidating, setIsValidating] = useState(false)
 
   const [validateNotionPage] = useMutation(VALIDATE_NOTION_PAGE)
+
+  const refetchAfterEdit = isEdit && source
+    ? [
+        { query: GET_SOURCE, variables: { workspaceId: currentWorkspace?.id, id: source.id } },
+        { query: GET_SOURCES, variables: { workspaceId: currentWorkspace?.id } },
+      ]
+    : undefined
 
   const [createSource, { loading: creating }] = useMutation(CREATE_NOTION_PAGE_SOURCE, {
     update(cache, { data }) {
@@ -68,7 +95,32 @@ export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps)
     },
   })
 
-  useEffect(() => { if (!isOpen) resetForm() }, [isOpen])
+  const [updateSource, { loading: updating }] = useMutation(UPDATE_NOTION_PAGE_SOURCE, {
+    refetchQueries: refetchAfterEdit,
+    onCompleted: () => {
+      onClose()
+    },
+    onError: (error) => {
+      setErrors((p) => ({ ...p, form: error.message || t('errorUpdateSource') }))
+    },
+  })
+
+  useEffect(() => {
+    if (!isOpen) return
+    if (isEdit && source) {
+      setPageID(source.config?.pageID ?? '')
+      setName(source.name)
+      setDescription(source.description ?? '')
+      setEnabled(true)
+      setRecursive(Boolean(source.config?.recursive))
+      setMaxDepth(source.config?.maxDepth ?? 4)
+      setErrors({})
+      setValidationResult(initialNotionPageValidation(source))
+      setIsValidating(false)
+    } else if (!isEdit) {
+      resetForm()
+    }
+  }, [isOpen, isEdit, source?.id])
 
   const resetForm = () => {
     setPageID('')
@@ -116,39 +168,65 @@ export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps)
 
   const handleSubmit = async () => {
     if (!validate()) return
-    const parsed = parseNotionID(pageID)
-    await createSource({
-      variables: {
-        workspaceId: currentWorkspace!.id,
-        input: {
-          pageID: parsed ?? pageID.trim(),
-          name: name.trim(),
-          description: description.trim() || undefined,
-          enabled,
-          recursive,
-          maxDepth: recursive ? maxDepth : 0,
+    const parsed = parseNotionID(pageID) ?? pageID.trim()
+    if (isEdit && source) {
+      const input: Record<string, unknown> = {
+        id: source.id,
+        name: name.trim(),
+        description: description.trim(),
+        recursive,
+        maxDepth: recursive ? maxDepth : 0,
+      }
+      const normalizedOriginal = parseNotionID(originalPageID) ?? originalPageID
+      if (parsed !== normalizedOriginal) {
+        input.pageID = parsed
+      }
+      await updateSource({
+        variables: {
+          workspaceId: currentWorkspace!.id,
+          input,
         },
-      },
-    })
+      })
+    } else {
+      await createSource({
+        variables: {
+          workspaceId: currentWorkspace!.id,
+          input: {
+            pageID: parsed,
+            name: name.trim(),
+            description: description.trim() || undefined,
+            enabled,
+            recursive,
+            maxDepth: recursive ? maxDepth : 0,
+          },
+        },
+      })
+    }
   }
 
-  const handleClose = () => { resetForm(); onClose() }
+  const handleClose = () => { if (!isEdit) resetForm(); onClose() }
+
+  const loading = creating || updating
+  const title = isEdit ? `${t('titleEditSource')} · NOTION PAGE` : t('titleAddNotionPageSource')
+  const submitLabel = isEdit
+    ? loading ? t('btnSaving') : t('btnSave')
+    : loading ? t('btnCreating') : t('btnCreateSource')
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
       width={600}
-      title={t('titleAddNotionPageSource')}
+      title={title}
       footer={
         <>
-          <Button variant="ghost" onClick={handleClose} disabled={creating}>{t('btnCancel')}</Button>
+          <Button variant="ghost" onClick={handleClose} disabled={loading}>{t('btnCancel')}</Button>
           <Button
             variant="primary"
             onClick={handleSubmit}
-            disabled={creating || !validationResult?.valid}
+            disabled={loading || !validationResult?.valid || !name.trim()}
           >
-            {creating ? t('btnCreating') : t('btnCreateSource')}
+            {submitLabel}
           </Button>
         </>
       }
@@ -163,6 +241,30 @@ export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps)
           }}>{errors.form}</div>
         )}
         <div>
+          <label htmlFor="np-name" className="field-label">{t('labelNameRequired')}</label>
+          <input
+            id="np-name"
+            className="input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={t('placeholderSourceName')}
+            disabled={loading}
+          />
+          {errors.name && <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 4 }}>{errors.name}</div>}
+        </div>
+        <div>
+          <label htmlFor="np-desc" className="field-label">{t('labelDescription')}</label>
+          <textarea
+            id="np-desc"
+            className="textarea"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder={t('placeholderSourceDescription')}
+            rows={3}
+            disabled={loading}
+          />
+        </div>
+        <div>
           <label htmlFor="np-id" className="field-label">{t('labelPageIdRequired')}</label>
           <div className="row" style={{ gap: 6 }}>
             <input
@@ -171,10 +273,10 @@ export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps)
               value={pageID}
               onChange={(e) => { setPageID(e.target.value); setValidationResult(null) }}
               placeholder={t('placeholderNotionPageId')}
-              disabled={creating}
+              disabled={loading}
               style={{ flex: 1 }}
             />
-            <Button onClick={handleValidate} disabled={creating || isValidating || !pageID.trim()}>
+            <Button onClick={handleValidate} disabled={loading || isValidating || !pageID.trim()}>
               {isValidating ? '…' : t('btnValidate')}
             </Button>
           </div>
@@ -213,36 +315,12 @@ export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps)
             )}
           </div>
         )}
-        <div>
-          <label htmlFor="np-name" className="field-label">{t('labelNameRequired')}</label>
-          <input
-            id="np-name"
-            className="input"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder={t('placeholderSourceName')}
-            disabled={creating}
-          />
-          {errors.name && <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 4 }}>{errors.name}</div>}
-        </div>
-        <div>
-          <label htmlFor="np-desc" className="field-label">{t('labelDescription')}</label>
-          <textarea
-            id="np-desc"
-            className="textarea"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder={t('placeholderSourceDescription')}
-            rows={3}
-            disabled={creating}
-          />
-        </div>
         <label className="row" style={{ gap: 8, fontSize: 13 }}>
           <input
             type="checkbox"
             checked={recursive}
             onChange={(e) => setRecursive(e.target.checked)}
-            disabled={creating}
+            disabled={loading}
           />
           <span>{t('labelIncludeChildPages')}</span>
         </label>
@@ -256,21 +334,23 @@ export default function NotionPageForm({ isOpen, onClose }: NotionPageFormProps)
               value={maxDepth}
               onChange={(e) => setMaxDepth(Math.max(0, parseInt(e.target.value, 10) || 0))}
               className="input"
-              disabled={creating}
+              disabled={loading}
               style={{ width: 100 }}
             />
             <div className="soft" style={{ fontSize: 11.5, marginTop: 4 }}>{t('hintMaxDepth')}</div>
           </div>
         )}
-        <label className="row" style={{ gap: 8, fontSize: 13 }}>
-          <input
-            type="checkbox"
-            checked={enabled}
-            onChange={(e) => setEnabled(e.target.checked)}
-            disabled={creating}
-          />
-          <span>{t('labelEnableSource')}</span>
-        </label>
+        {!isEdit && (
+          <label className="row" style={{ gap: 8, fontSize: 13 }}>
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => setEnabled(e.target.checked)}
+              disabled={loading}
+            />
+            <span>{t('labelEnableSource')}</span>
+          </label>
+        )}
       </div>
     </Modal>
   )
