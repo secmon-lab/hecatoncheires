@@ -19,11 +19,18 @@ describe('displayName', () => {
     expect(displayName({ name: '  alice  ', realName: '' })).toBe('alice')
   })
 
-  it('returns empty string when both name and realName are missing or blank', () => {
+  it('falls back to id when both realName and name are missing or blank', () => {
+    expect(displayName({ id: 'U001', name: '', realName: '' })).toBe('U001')
+    expect(displayName({ id: 'U001', name: '  ', realName: '  ' })).toBe('U001')
+    expect(displayName({ id: 'U001', name: null, realName: null })).toBe('U001')
+    expect(displayName({ id: '  U001  ' })).toBe('U001')
+  })
+
+  it('returns empty string when id, name, and realName are all missing or blank', () => {
     expect(displayName({})).toBe('')
-    expect(displayName({ name: '', realName: '' })).toBe('')
-    expect(displayName({ name: '  ', realName: '  ' })).toBe('')
-    expect(displayName({ name: null, realName: null })).toBe('')
+    expect(displayName({ id: '', name: '', realName: '' })).toBe('')
+    expect(displayName({ id: '  ', name: '  ', realName: '  ' })).toBe('')
+    expect(displayName({ id: null, name: null, realName: null })).toBe('')
   })
 
   it('returns empty string for null / undefined input', () => {
