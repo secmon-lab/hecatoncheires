@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import { useQuery } from '@apollo/client'
 import { useNavigate } from 'react-router-dom'
 import { GET_CASES } from '../graphql/case'
+import { GET_DRAFTS } from '../graphql/drafts'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
@@ -40,7 +41,7 @@ interface CaseUser {
 interface CaseRow {
   id: number
   title: string
-  status: 'OPEN' | 'CLOSED'
+  status: 'OPEN' | 'CLOSED' | 'DRAFT'
   isPrivate: boolean
   accessDenied: boolean
   reporter?: CaseUser | null
@@ -119,7 +120,7 @@ export default function CaseList() {
   const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
 
-  const [statusFilter, setStatusFilter] = useState<'OPEN' | 'CLOSED' | 'ALL'>('OPEN')
+  const [statusFilter, setStatusFilter] = useState<'OPEN' | 'CLOSED' | 'ALL' | 'DRAFT'>('OPEN')
   const [searchText, setSearchText] = useState('')
   const [page, setPage] = useState(0)
   const [isFormOpen, setIsFormOpen] = useState(false)
@@ -160,6 +161,12 @@ export default function CaseList() {
     variables: { workspaceId: currentWorkspace?.id, status: 'CLOSED' },
     skip: !currentWorkspace,
   })
+  // Drafts are workspace-wide on the server; this query drives both the
+  // Drafts tab and the sidebar / header count.
+  const { data: draftData } = useQuery(GET_DRAFTS, {
+    variables: { workspaceId: currentWorkspace?.id },
+    skip: !currentWorkspace,
+  })
   const { data: configData } = useQuery(GET_FIELD_CONFIGURATION, {
     variables: { workspaceId: currentWorkspace?.id },
     skip: !currentWorkspace,
@@ -167,12 +174,14 @@ export default function CaseList() {
 
   const openCount = openData?.cases?.length ?? 0
   const closedCount = closedData?.cases?.length ?? 0
+  const draftCount = draftData?.drafts?.length ?? 0
 
   const cases: CaseRow[] = useMemo(() => {
     if (statusFilter === 'OPEN') return openData?.cases || []
     if (statusFilter === 'CLOSED') return closedData?.cases || []
+    if (statusFilter === 'DRAFT') return draftData?.drafts || []
     return [...(openData?.cases || []), ...(closedData?.cases || [])]
-  }, [statusFilter, openData, closedData])
+  }, [statusFilter, openData, closedData, draftData])
 
   const filtered = useMemo(() => {
     if (!searchText.trim()) return cases
@@ -200,7 +209,7 @@ export default function CaseList() {
     if (!col.custom) {
       switch (col.key) {
         case 'status':
-          return <StatusBadge status={c.status} labelOpen={t('statusOpen')} labelClosed={t('statusClosed')} />
+          return <StatusBadge status={c.status} labelOpen={t('statusOpen')} labelClosed={t('statusClosed')} labelDraft={t('tabDrafts')} />
         case 'assignees':
           return c.assignees && c.assignees.length > 0 ? <AvatarStack users={c.assignees} /> : <span className="soft">—</span>
         case 'reporter':
@@ -301,6 +310,14 @@ export default function CaseList() {
             <span style={{ marginLeft: 6, opacity: 0.7 }}>{closedCount}</span>
           </button>
           <button
+            className={statusFilter === 'DRAFT' ? 'on' : ''}
+            onClick={() => { setStatusFilter('DRAFT'); setPage(0) }}
+            data-testid="status-tab-draft"
+          >
+            {t('tabDrafts')}
+            <span style={{ marginLeft: 6, opacity: 0.7 }}>{draftCount}</span>
+          </button>
+          <button
             className={statusFilter === 'ALL' ? 'on' : ''}
             onClick={() => { setStatusFilter('ALL'); setPage(0) }}
           >
@@ -348,6 +365,8 @@ export default function CaseList() {
                 key={c.id}
                 onClick={() => {
                   if (c.accessDenied) return
+                  // Drafts share the regular case detail page — Submit /
+                  // Discard surface there based on status.
                   navigate(`/ws/${currentWorkspace!.id}/cases/${c.id}`)
                 }}
                 style={{ cursor: c.accessDenied ? 'default' : 'pointer' }}

@@ -140,6 +140,7 @@ export const ja: Messages = {
   btnNewCase: '新規 {caseLabel}',
   tabOpen: 'オープン',
   tabClosed: 'クローズ',
+  tabDrafts: 'ドラフト',
   placeholderSearch: '検索...',
   titleCaseFormNew: '新規 {caseLabel}',
   titleCaseFormEdit: '{caseLabel} を編集',
@@ -383,4 +384,15 @@ export const ja: Messages = {
   fieldHelpOptionCount: '{count} options',
   fieldHelpTypeSelect: 'Select',
   fieldHelpTypeMultiSelect: 'Multi-select',
+
+  // Drafts (ケース一覧 / 詳細ページ内に表示)
+  draftSubmitButton: 'Submit',
+  draftDiscardButton: 'Discard',
+  draftDiscardConfirm: 'このドラフトを破棄しますか？取り消せません。',
+  draftSubmitErrorMissingTitle: '送信にはタイトルが必須です。上のタイトルを入力してから再度お試しください。',
+  draftSubmitErrorGeneric: 'ドラフトの送信に失敗しました: {message}',
+  draftDiscardErrorGeneric: 'ドラフトの破棄に失敗しました: {message}',
+  btnSaveAsDraft: 'ドラフトとして保存',
+  btnSavingDraft: 'ドラフト保存中…',
+  btnSubmittingDraft: '送信中…',
 }

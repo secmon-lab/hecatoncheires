@@ -200,8 +200,8 @@ func (m *mockRepo) DeleteToken(ctx context.Context, tokenID auth.TokenID) error 
 func (m *mockRepo) AssistLog() interfaces.AssistLogRepository {
 	panic("unexpected call: AssistLog()")
 }
-func (m *mockRepo) CaseDraft() interfaces.CaseDraftRepository {
-	panic("unexpected call: CaseDraft()")
+func (m *mockRepo) CaseProposal() interfaces.CaseProposalRepository {
+	panic("unexpected call: CaseProposal()")
 }
 func (m *mockRepo) Session() interfaces.SessionRepository {
 	panic("unexpected call: Session()")

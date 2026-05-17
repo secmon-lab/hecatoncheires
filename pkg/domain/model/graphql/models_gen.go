@@ -108,6 +108,14 @@ type CreateCaseInput struct {
 	IsPrivate   *bool              `json:"isPrivate,omitempty"`
 }
 
+type CreateDraftInput struct {
+	Title       *string            `json:"title,omitempty"`
+	Description *string            `json:"description,omitempty"`
+	AssigneeIDs []string           `json:"assigneeIDs,omitempty"`
+	Fields      []*FieldValueInput `json:"fields,omitempty"`
+	IsPrivate   *bool              `json:"isPrivate,omitempty"`
+}
+
 type CreateGitHubSourceInput struct {
 	Name         *string  `json:"name,omitempty"`
 	Description  *string  `json:"description,omitempty"`
@@ -314,6 +322,13 @@ type Source struct {
 	Config      SourceConfig `json:"config"`
 	CreatedAt   time.Time    `json:"createdAt"`
 	UpdatedAt   time.Time    `json:"updatedAt"`
+}
+
+type SubmitDraftInput struct {
+	Title       *string            `json:"title,omitempty"`
+	Description *string            `json:"description,omitempty"`
+	AssigneeIDs []string           `json:"assigneeIDs,omitempty"`
+	Fields      []*FieldValueInput `json:"fields,omitempty"`
 }
 
 type UpdateActionInput struct {

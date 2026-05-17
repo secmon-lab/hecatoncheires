@@ -226,6 +226,7 @@ type ComplexityRoot struct {
 		CloseCase              func(childComplexity int, workspaceID string, id int) int
 		CreateAction           func(childComplexity int, workspaceID string, input graphql1.CreateActionInput) int
 		CreateCase             func(childComplexity int, workspaceID string, input graphql1.CreateCaseInput) int
+		CreateDraft            func(childComplexity int, workspaceID string, input graphql1.CreateDraftInput) int
 		CreateGitHubSource     func(childComplexity int, workspaceID string, input graphql1.CreateGitHubSourceInput) int
 		CreateNotionDBSource   func(childComplexity int, workspaceID string, input graphql1.CreateNotionDBSourceInput) int
 		CreateNotionPageSource func(childComplexity int, workspaceID string, input graphql1.CreateNotionPageSourceInput) int
@@ -233,11 +234,13 @@ type ComplexityRoot struct {
 		DeleteActionStep       func(childComplexity int, workspaceID string, input graphql1.DeleteActionStepInput) int
 		DeleteCase             func(childComplexity int, workspaceID string, id int) int
 		DeleteSource           func(childComplexity int, workspaceID string, id string) int
+		DiscardDraft           func(childComplexity int, workspaceID string, id int) int
 		Noop                   func(childComplexity int) int
 		PostActionSlackMessage func(childComplexity int, workspaceID string, id int) int
 		RenameActionStep       func(childComplexity int, workspaceID string, input graphql1.RenameActionStepInput) int
 		ReopenCase             func(childComplexity int, workspaceID string, id int) int
 		SetActionStepDone      func(childComplexity int, workspaceID string, input graphql1.SetActionStepDoneInput) int
+		SubmitDraft            func(childComplexity int, workspaceID string, id int, input *graphql1.SubmitDraftInput) int
 		SyncCaseChannelUsers   func(childComplexity int, workspaceID string, id int) int
 		UnarchiveAction        func(childComplexity int, workspaceID string, id int) int
 		UpdateAction           func(childComplexity int, workspaceID string, input graphql1.UpdateActionInput) int
@@ -284,6 +287,7 @@ type ComplexityRoot struct {
 		AssistLogs          func(childComplexity int, workspaceID string, caseID int, limit *int, offset *int) int
 		Case                func(childComplexity int, workspaceID string, id int) int
 		Cases               func(childComplexity int, workspaceID string, status *types.CaseStatus) int
+		Drafts              func(childComplexity int, workspaceID string) int
 		FieldConfiguration  func(childComplexity int, workspaceID string) int
 		Health              func(childComplexity int) int
 		OpenCaseActions     func(childComplexity int, workspaceID string) int
@@ -397,6 +401,9 @@ type MutationResolver interface {
 	CloseCase(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error)
 	ReopenCase(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error)
 	SyncCaseChannelUsers(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error)
+	CreateDraft(ctx context.Context, workspaceID string, input graphql1.CreateDraftInput) (*graphql1.Case, error)
+	SubmitDraft(ctx context.Context, workspaceID string, id int, input *graphql1.SubmitDraftInput) (*graphql1.Case, error)
+	DiscardDraft(ctx context.Context, workspaceID string, id int) (bool, error)
 	CreateAction(ctx context.Context, workspaceID string, input graphql1.CreateActionInput) (*graphql1.Action, error)
 	UpdateAction(ctx context.Context, workspaceID string, input graphql1.UpdateActionInput) (*graphql1.Action, error)
 	ArchiveAction(ctx context.Context, workspaceID string, id int) (*graphql1.Action, error)
@@ -423,6 +430,7 @@ type QueryResolver interface {
 	Workspaces(ctx context.Context) ([]*graphql1.Workspace, error)
 	Cases(ctx context.Context, workspaceID string, status *types.CaseStatus) ([]*graphql1.Case, error)
 	Case(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error)
+	Drafts(ctx context.Context, workspaceID string) ([]*graphql1.Case, error)
 	Actions(ctx context.Context, workspaceID string, filter *graphql1.ActionArchiveFilter) ([]*graphql1.Action, error)
 	Action(ctx context.Context, workspaceID string, id int) (*graphql1.Action, error)
 	ActionsByCase(ctx context.Context, workspaceID string, caseID int, filter *graphql1.ActionArchiveFilter) ([]*graphql1.Action, error)
@@ -1226,6 +1234,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.CreateCase(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.CreateCaseInput)), true
+	case "Mutation.createDraft":
+		if e.complexity.Mutation.CreateDraft == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_createDraft_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.CreateDraft(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.CreateDraftInput)), true
 	case "Mutation.createGitHubSource":
 		if e.complexity.Mutation.CreateGitHubSource == nil {
 			break
@@ -1303,6 +1322,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.DeleteSource(childComplexity, args["workspaceId"].(string), args["id"].(string)), true
+	case "Mutation.discardDraft":
+		if e.complexity.Mutation.DiscardDraft == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_discardDraft_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.DiscardDraft(childComplexity, args["workspaceId"].(string), args["id"].(int)), true
 	case "Mutation.noop":
 		if e.complexity.Mutation.Noop == nil {
 			break
@@ -1353,6 +1383,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.SetActionStepDone(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.SetActionStepDoneInput)), true
+	case "Mutation.submitDraft":
+		if e.complexity.Mutation.SubmitDraft == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_submitDraft_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.SubmitDraft(childComplexity, args["workspaceId"].(string), args["id"].(int), args["input"].(*graphql1.SubmitDraftInput)), true
 	case "Mutation.syncCaseChannelUsers":
 		if e.complexity.Mutation.SyncCaseChannelUsers == nil {
 			break
@@ -1619,6 +1660,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Query.Cases(childComplexity, args["workspaceId"].(string), args["status"].(*types.CaseStatus)), true
+	case "Query.drafts":
+		if e.complexity.Query.Drafts == nil {
+			break
+		}
+
+		args, err := ec.field_Query_drafts_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Query.Drafts(childComplexity, args["workspaceId"].(string)), true
 	case "Query.fieldConfiguration":
 		if e.complexity.Query.FieldConfiguration == nil {
 			break
@@ -1958,6 +2010,7 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 		ec.unmarshalInputAddActionStepInput,
 		ec.unmarshalInputCreateActionInput,
 		ec.unmarshalInputCreateCaseInput,
+		ec.unmarshalInputCreateDraftInput,
 		ec.unmarshalInputCreateGitHubSourceInput,
 		ec.unmarshalInputCreateNotionDBSourceInput,
 		ec.unmarshalInputCreateNotionPageSourceInput,
@@ -1966,6 +2019,7 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 		ec.unmarshalInputFieldValueInput,
 		ec.unmarshalInputRenameActionStepInput,
 		ec.unmarshalInputSetActionStepDoneInput,
+		ec.unmarshalInputSubmitDraftInput,
 		ec.unmarshalInputUpdateActionInput,
 		ec.unmarshalInputUpdateCaseInput,
 		ec.unmarshalInputUpdateGitHubSourceInput,
@@ -2181,7 +2235,14 @@ type SlackMessageConnection {
   nextCursor: String!
 }
 
+# CaseStatus is the lifecycle state of a Case.
+# Lifecycle: DRAFT → OPEN → CLOSED (CLOSED can return to OPEN via reopenCase).
+# DRAFT is reserved for entries saved through Slack's "Save as Draft" button
+# on the case-creation modal; drafts are visible only to their reporter,
+# excluded from the default ` + "`" + `cases` + "`" + ` listing, and surfaced through the
+# dedicated ` + "`" + `drafts` + "`" + ` query.
 enum CaseStatus {
+  DRAFT
   OPEN
   CLOSED
 }
@@ -2327,11 +2388,35 @@ input CreateCaseInput {
   isPrivate: Boolean
 }
 
+# CreateDraftInput mirrors CreateCaseInput but every field is optional —
+# drafts are by definition in-progress and the user may save with an empty
+# title, no assignees, etc. The eventual SubmitDraft is what enforces a
+# non-empty title before promoting the case to OPEN.
+input CreateDraftInput {
+  title: String
+  description: String
+  assigneeIDs: [String!]
+  fields: [FieldValueInput!]
+  isPrivate: Boolean
+}
+
 input UpdateCaseInput {
   id: Int!
   # All fields below are optional. Omitted fields preserve their current value
   # on the existing Case. This allows true partial updates from clients that
   # only want to change one thing (e.g. inline edit of assignees).
+  title: String
+  description: String
+  assigneeIDs: [String!]
+  fields: [FieldValueInput!]
+}
+
+# SubmitDraftInput carries the last-minute edits that the user wants to
+# apply *atomically* before the draft is promoted to OPEN. Pre-submit edit
+# and promote-to-OPEN are one business operation, so they go through one
+# usecase call — splitting them across an updateCase + submitDraft pair
+# at the client risks leaving an inconsistent draft behind on failure.
+input SubmitDraftInput {
   title: String
   description: String
   assigneeIDs: [String!]
@@ -2560,6 +2645,12 @@ type Query {
   cases(workspaceId: String!, status: CaseStatus): [Case!]!
   case(workspaceId: String!, id: Int!): Case
 
+  # Drafts authored by the current user in this workspace. Draft cases are
+  # only visible to their reporter and never appear in the general ` + "`" + `cases` + "`" + `
+  # listing; the dedicated query keeps that author-scoped path explicit and
+  # avoids piggybacking on the more general filter.
+  drafts(workspaceId: String!): [Case!]!
+
   # Actions
   # ` + "`" + `filter` + "`" + ` defaults to ACTIVE so default views never accidentally surface
   # archived actions. Use ARCHIVED for the archive view and ALL for batch
@@ -2595,6 +2686,22 @@ type Mutation {
   closeCase(workspaceId: String!, id: Int!): Case!
   reopenCase(workspaceId: String!, id: Int!): Case!
   syncCaseChannelUsers(workspaceId: String!, id: Int!): Case!
+
+  # Persist the supplied form payload as a DRAFT case. No Slack channel
+  # is created and no notifications fire; the resulting case is visible
+  # only to its reporter until SubmitDraft promotes it to OPEN.
+  createDraft(workspaceId: String!, input: CreateDraftInput!): Case!
+
+  # Promote a draft case to OPEN, running the same activation side effects
+  # (Slack channel, invites, etc.) as a fresh createCase. The optional
+  # ` + "`" + `input` + "`" + ` lets the caller apply last-minute edits atomically in the same
+  # transaction; without it the existing draft state is promoted as-is.
+  submitDraft(workspaceId: String!, id: Int!, input: SubmitDraftInput): Case!
+
+  # Permanently delete the caller's own draft case. Discarding does NOT
+  # apply to non-draft cases (deleteCase is the path for those); the mutation
+  # errors if the target is OPEN/CLOSED.
+  discardDraft(workspaceId: String!, id: Int!): Boolean!
 
   # Actions
   createAction(workspaceId: String!, input: CreateActionInput!): Action!
@@ -2796,6 +2903,22 @@ func (ec *executionContext) field_Mutation_createCase_args(ctx context.Context, 
 	return args, nil
 }
 
+func (ec *executionContext) field_Mutation_createDraft_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNCreateDraftInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateDraftInput)
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg1
+	return args, nil
+}
+
 func (ec *executionContext) field_Mutation_createGitHubSource_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -2908,6 +3031,22 @@ func (ec *executionContext) field_Mutation_deleteSource_args(ctx context.Context
 	return args, nil
 }
 
+func (ec *executionContext) field_Mutation_discardDraft_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg1
+	return args, nil
+}
+
 func (ec *executionContext) field_Mutation_postActionSlackMessage_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -2969,6 +3108,27 @@ func (ec *executionContext) field_Mutation_setActionStepDone_args(ctx context.Co
 		return nil, err
 	}
 	args["input"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_submitDraft_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg1
+	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalOSubmitDraftInput2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSubmitDraftInput)
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg2
 	return args, nil
 }
 
@@ -3235,6 +3395,17 @@ func (ec *executionContext) field_Query_cases_args(ctx context.Context, rawArgs 
 		return nil, err
 	}
 	args["status"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Query_drafts_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
 	return args, nil
 }
 
@@ -7459,6 +7630,213 @@ func (ec *executionContext) fieldContext_Mutation_syncCaseChannelUsers(ctx conte
 	return fc, nil
 }
 
+func (ec *executionContext) _Mutation_createDraft(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_createDraft,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().CreateDraft(ctx, fc.Args["workspaceId"].(string), fc.Args["input"].(graphql1.CreateDraftInput))
+		},
+		nil,
+		ec.marshalNCase2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCase,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_createDraft(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Case_id(ctx, field)
+			case "title":
+				return ec.fieldContext_Case_title(ctx, field)
+			case "description":
+				return ec.fieldContext_Case_description(ctx, field)
+			case "status":
+				return ec.fieldContext_Case_status(ctx, field)
+			case "isPrivate":
+				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "accessDenied":
+				return ec.fieldContext_Case_accessDenied(ctx, field)
+			case "channelUserCount":
+				return ec.fieldContext_Case_channelUserCount(ctx, field)
+			case "channelUsers":
+				return ec.fieldContext_Case_channelUsers(ctx, field)
+			case "reporterID":
+				return ec.fieldContext_Case_reporterID(ctx, field)
+			case "reporter":
+				return ec.fieldContext_Case_reporter(ctx, field)
+			case "assigneeIDs":
+				return ec.fieldContext_Case_assigneeIDs(ctx, field)
+			case "assignees":
+				return ec.fieldContext_Case_assignees(ctx, field)
+			case "slackChannelID":
+				return ec.fieldContext_Case_slackChannelID(ctx, field)
+			case "slackChannelName":
+				return ec.fieldContext_Case_slackChannelName(ctx, field)
+			case "slackChannelURL":
+				return ec.fieldContext_Case_slackChannelURL(ctx, field)
+			case "fields":
+				return ec.fieldContext_Case_fields(ctx, field)
+			case "actions":
+				return ec.fieldContext_Case_actions(ctx, field)
+			case "slackMessages":
+				return ec.fieldContext_Case_slackMessages(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Case_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Case_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Case", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_createDraft_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_submitDraft(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_submitDraft,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().SubmitDraft(ctx, fc.Args["workspaceId"].(string), fc.Args["id"].(int), fc.Args["input"].(*graphql1.SubmitDraftInput))
+		},
+		nil,
+		ec.marshalNCase2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCase,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_submitDraft(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Case_id(ctx, field)
+			case "title":
+				return ec.fieldContext_Case_title(ctx, field)
+			case "description":
+				return ec.fieldContext_Case_description(ctx, field)
+			case "status":
+				return ec.fieldContext_Case_status(ctx, field)
+			case "isPrivate":
+				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "accessDenied":
+				return ec.fieldContext_Case_accessDenied(ctx, field)
+			case "channelUserCount":
+				return ec.fieldContext_Case_channelUserCount(ctx, field)
+			case "channelUsers":
+				return ec.fieldContext_Case_channelUsers(ctx, field)
+			case "reporterID":
+				return ec.fieldContext_Case_reporterID(ctx, field)
+			case "reporter":
+				return ec.fieldContext_Case_reporter(ctx, field)
+			case "assigneeIDs":
+				return ec.fieldContext_Case_assigneeIDs(ctx, field)
+			case "assignees":
+				return ec.fieldContext_Case_assignees(ctx, field)
+			case "slackChannelID":
+				return ec.fieldContext_Case_slackChannelID(ctx, field)
+			case "slackChannelName":
+				return ec.fieldContext_Case_slackChannelName(ctx, field)
+			case "slackChannelURL":
+				return ec.fieldContext_Case_slackChannelURL(ctx, field)
+			case "fields":
+				return ec.fieldContext_Case_fields(ctx, field)
+			case "actions":
+				return ec.fieldContext_Case_actions(ctx, field)
+			case "slackMessages":
+				return ec.fieldContext_Case_slackMessages(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Case_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Case_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Case", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_submitDraft_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_discardDraft(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_discardDraft,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().DiscardDraft(ctx, fc.Args["workspaceId"].(string), fc.Args["id"].(int))
+		},
+		nil,
+		ec.marshalNBoolean2bool,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_discardDraft(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_discardDraft_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Mutation_createAction(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -9381,6 +9759,89 @@ func (ec *executionContext) fieldContext_Query_case(ctx context.Context, field g
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Query_case_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_drafts(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Query_drafts,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Query().Drafts(ctx, fc.Args["workspaceId"].(string))
+		},
+		nil,
+		ec.marshalNCase2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCaseᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Query_drafts(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Case_id(ctx, field)
+			case "title":
+				return ec.fieldContext_Case_title(ctx, field)
+			case "description":
+				return ec.fieldContext_Case_description(ctx, field)
+			case "status":
+				return ec.fieldContext_Case_status(ctx, field)
+			case "isPrivate":
+				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "accessDenied":
+				return ec.fieldContext_Case_accessDenied(ctx, field)
+			case "channelUserCount":
+				return ec.fieldContext_Case_channelUserCount(ctx, field)
+			case "channelUsers":
+				return ec.fieldContext_Case_channelUsers(ctx, field)
+			case "reporterID":
+				return ec.fieldContext_Case_reporterID(ctx, field)
+			case "reporter":
+				return ec.fieldContext_Case_reporter(ctx, field)
+			case "assigneeIDs":
+				return ec.fieldContext_Case_assigneeIDs(ctx, field)
+			case "assignees":
+				return ec.fieldContext_Case_assignees(ctx, field)
+			case "slackChannelID":
+				return ec.fieldContext_Case_slackChannelID(ctx, field)
+			case "slackChannelName":
+				return ec.fieldContext_Case_slackChannelName(ctx, field)
+			case "slackChannelURL":
+				return ec.fieldContext_Case_slackChannelURL(ctx, field)
+			case "fields":
+				return ec.fieldContext_Case_fields(ctx, field)
+			case "actions":
+				return ec.fieldContext_Case_actions(ctx, field)
+			case "slackMessages":
+				return ec.fieldContext_Case_slackMessages(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Case_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Case_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Case", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_drafts_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -12916,6 +13377,61 @@ func (ec *executionContext) unmarshalInputCreateCaseInput(ctx context.Context, o
 	return it, nil
 }
 
+func (ec *executionContext) unmarshalInputCreateDraftInput(ctx context.Context, obj any) (graphql1.CreateDraftInput, error) {
+	var it graphql1.CreateDraftInput
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"title", "description", "assigneeIDs", "fields", "isPrivate"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "title":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("title"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Title = data
+		case "description":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("description"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Description = data
+		case "assigneeIDs":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("assigneeIDs"))
+			data, err := ec.unmarshalOString2ᚕstringᚄ(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.AssigneeIDs = data
+		case "fields":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("fields"))
+			data, err := ec.unmarshalOFieldValueInput2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐFieldValueInputᚄ(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Fields = data
+		case "isPrivate":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("isPrivate"))
+			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.IsPrivate = data
+		}
+	}
+
+	return it, nil
+}
+
 func (ec *executionContext) unmarshalInputCreateGitHubSourceInput(ctx context.Context, obj any) (graphql1.CreateGitHubSourceInput, error) {
 	var it graphql1.CreateGitHubSourceInput
 	asMap := map[string]any{}
@@ -13266,6 +13782,54 @@ func (ec *executionContext) unmarshalInputSetActionStepDoneInput(ctx context.Con
 				return it, err
 			}
 			it.Done = data
+		}
+	}
+
+	return it, nil
+}
+
+func (ec *executionContext) unmarshalInputSubmitDraftInput(ctx context.Context, obj any) (graphql1.SubmitDraftInput, error) {
+	var it graphql1.SubmitDraftInput
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"title", "description", "assigneeIDs", "fields"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "title":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("title"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Title = data
+		case "description":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("description"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Description = data
+		case "assigneeIDs":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("assigneeIDs"))
+			data, err := ec.unmarshalOString2ᚕstringᚄ(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.AssigneeIDs = data
+		case "fields":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("fields"))
+			data, err := ec.unmarshalOFieldValueInput2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐFieldValueInputᚄ(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Fields = data
 		}
 	}
 
@@ -15292,6 +15856,27 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
+		case "createDraft":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_createDraft(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "submitDraft":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_submitDraft(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "discardDraft":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_discardDraft(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
 		case "createAction":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_createAction(ctx, field)
@@ -15763,6 +16348,28 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 					}
 				}()
 				res = ec._Query_case(ctx, field)
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "drafts":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_drafts(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
 				return res
 			}
 
@@ -17343,6 +17950,11 @@ func (ec *executionContext) unmarshalNCreateCaseInput2githubᚗcomᚋsecmonᚑla
 	return res, graphql.ErrorOnPath(ctx, err)
 }
 
+func (ec *executionContext) unmarshalNCreateDraftInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateDraftInput(ctx context.Context, v any) (graphql1.CreateDraftInput, error) {
+	res, err := ec.unmarshalInputCreateDraftInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
 func (ec *executionContext) unmarshalNCreateGitHubSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateGitHubSourceInput(ctx context.Context, v any) (graphql1.CreateGitHubSourceInput, error) {
 	res, err := ec.unmarshalInputCreateGitHubSourceInput(ctx, v)
 	return res, graphql.ErrorOnPath(ctx, err)
@@ -18711,6 +19323,14 @@ func (ec *executionContext) marshalOString2ᚖstring(ctx context.Context, sel as
 	_ = ctx
 	res := graphql.MarshalString(*v)
 	return res
+}
+
+func (ec *executionContext) unmarshalOSubmitDraftInput2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSubmitDraftInput(ctx context.Context, v any) (*graphql1.SubmitDraftInput, error) {
+	if v == nil {
+		return nil, nil
+	}
+	res, err := ec.unmarshalInputSubmitDraftInput(ctx, v)
+	return &res, graphql.ErrorOnPath(ctx, err)
 }
 
 func (ec *executionContext) unmarshalOTime2ᚖtimeᚐTime(ctx context.Context, v any) (*time.Time, error) {

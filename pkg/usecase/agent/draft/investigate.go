@@ -43,7 +43,7 @@ func (uc *UseCase) runInvestigationsParallel(ctx context.Context, p *planInvesti
 		return nil
 	}
 	if p.Message != "" {
-		h.Trace(ctx, i18n.T(ctx, i18n.MsgDraftTracePhase, p.Message))
+		h.Trace(ctx, i18n.T(ctx, i18n.MsgProposalTracePhase, p.Message))
 	}
 
 	if len(p.Tasks) == 0 {
@@ -78,13 +78,13 @@ func (uc *UseCase) runInvestigationsParallel(ctx context.Context, p *planInvesti
 // sees concrete activity instead of a static "running…" placeholder.
 func (uc *UseCase) runOneInvestigation(ctx context.Context, task planInvestigateTask, h Handler, resolver *agent.ToolSetResolver) investigationResult {
 	started := time.Now()
-	h.TraceTask(ctx, task.ID, i18n.T(ctx, i18n.MsgDraftTraceTaskRunning, task.Title))
+	h.TraceTask(ctx, task.ID, i18n.T(ctx, i18n.MsgProposalTraceTaskRunning, task.Title))
 
 	tools := resolver.Resolve(task.Tools)
 	sysPrompt, err := buildSubAgentSystemPrompt(task)
 	if err != nil {
 		elapsed := time.Since(started).Round(time.Millisecond)
-		h.TraceTask(ctx, task.ID, i18n.T(ctx, i18n.MsgDraftTraceTaskFailedPrompt, task.Title, elapsed, err))
+		h.TraceTask(ctx, task.ID, i18n.T(ctx, i18n.MsgProposalTraceTaskFailedPrompt, task.Title, elapsed, err))
 		return investigationResult{
 			TaskID: task.ID, Title: task.Title,
 			AcceptanceCriteria: task.AcceptanceCriteria,
@@ -109,7 +109,7 @@ func (uc *UseCase) runOneInvestigation(ctx context.Context, task planInvestigate
 	used := counter.LLMCalls()
 
 	if execErr != nil {
-		h.TraceTask(ctx, task.ID, i18n.T(ctx, i18n.MsgDraftTraceTaskFailed,
+		h.TraceTask(ctx, task.ID, i18n.T(ctx, i18n.MsgProposalTraceTaskFailed,
 			task.Title, elapsed, used, uc.subAgentLoopMax, execErr))
 		return investigationResult{
 			TaskID: task.ID, Title: task.Title,
@@ -131,7 +131,7 @@ func (uc *UseCase) runOneInvestigation(ctx context.Context, task planInvestigate
 		}
 		summary = summary[:cut] + "\n…[truncated]"
 	}
-	h.TraceTask(ctx, task.ID, i18n.T(ctx, i18n.MsgDraftTraceTaskDone,
+	h.TraceTask(ctx, task.ID, i18n.T(ctx, i18n.MsgProposalTraceTaskDone,
 		task.Title, elapsed, used, uc.subAgentLoopMax))
 	return investigationResult{
 		TaskID: task.ID, Title: task.Title,
@@ -177,14 +177,14 @@ func newProgressMiddleware(h Handler, taskID, taskTitle string) gollem.ContentBl
 			for _, txt := range resp.Texts {
 				excerpt := oneLineExcerpt(txt, taskProgressMaxRunes)
 				if excerpt != "" {
-					h.TraceTask(ctx, taskID, i18n.T(ctx, i18n.MsgDraftTraceTaskRunningMessage, taskTitle, excerpt))
+					h.TraceTask(ctx, taskID, i18n.T(ctx, i18n.MsgProposalTraceTaskRunningMessage, taskTitle, excerpt))
 					break
 				}
 			}
 			// If the LLM is also asking to call a tool, that is the most
 			// informative thing to show — overwrite the message line.
 			if len(resp.FunctionCalls) > 0 && resp.FunctionCalls[0] != nil {
-				h.TraceTask(ctx, taskID, i18n.T(ctx, i18n.MsgDraftTraceTaskRunningTool, taskTitle, resp.FunctionCalls[0].Name))
+				h.TraceTask(ctx, taskID, i18n.T(ctx, i18n.MsgProposalTraceTaskRunningTool, taskTitle, resp.FunctionCalls[0].Name))
 			}
 			return resp, nil
 		}

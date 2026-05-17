@@ -91,6 +91,9 @@ func (m *mockSlackServiceForCommand) GetBotUserID(_ context.Context) (string, er
 func (m *mockSlackServiceForCommand) OpenView(_ context.Context, _ string, _ goslack.ModalViewRequest) error {
 	return nil
 }
+func (m *mockSlackServiceForCommand) UpdateView(_ context.Context, _ goslack.ModalViewRequest, _, _, _ string) error {
+	return nil
+}
 func (m *mockSlackServiceForCommand) ListUserGroups(_ context.Context, _ string) ([]slacksvc.UserGroup, error) {
 	return nil, nil
 }

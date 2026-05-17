@@ -111,7 +111,14 @@ type SlackMessageConnection {
   nextCursor: String!
 }
 
+# CaseStatus is the lifecycle state of a Case.
+# Lifecycle: DRAFT → OPEN → CLOSED (CLOSED can return to OPEN via reopenCase).
+# DRAFT is reserved for entries saved through Slack's "Save as Draft" button
+# on the case-creation modal; drafts are visible only to their reporter,
+# excluded from the default `cases` listing, and surfaced through the
+# dedicated `drafts` query.
 enum CaseStatus {
+  DRAFT
   OPEN
   CLOSED
 }
@@ -257,11 +264,35 @@ input CreateCaseInput {
   isPrivate: Boolean
 }
 
+# CreateDraftInput mirrors CreateCaseInput but every field is optional —
+# drafts are by definition in-progress and the user may save with an empty
+# title, no assignees, etc. The eventual SubmitDraft is what enforces a
+# non-empty title before promoting the case to OPEN.
+input CreateDraftInput {
+  title: String
+  description: String
+  assigneeIDs: [String!]
+  fields: [FieldValueInput!]
+  isPrivate: Boolean
+}
+
 input UpdateCaseInput {
   id: Int!
   # All fields below are optional. Omitted fields preserve their current value
   # on the existing Case. This allows true partial updates from clients that
   # only want to change one thing (e.g. inline edit of assignees).
+  title: String
+  description: String
+  assigneeIDs: [String!]
+  fields: [FieldValueInput!]
+}
+
+# SubmitDraftInput carries the last-minute edits that the user wants to
+# apply *atomically* before the draft is promoted to OPEN. Pre-submit edit
+# and promote-to-OPEN are one business operation, so they go through one
+# usecase call — splitting them across an updateCase + submitDraft pair
+# at the client risks leaving an inconsistent draft behind on failure.
+input SubmitDraftInput {
   title: String
   description: String
   assigneeIDs: [String!]
@@ -490,6 +521,12 @@ type Query {
   cases(workspaceId: String!, status: CaseStatus): [Case!]!
   case(workspaceId: String!, id: Int!): Case
 
+  # Drafts authored by the current user in this workspace. Draft cases are
+  # only visible to their reporter and never appear in the general `cases`
+  # listing; the dedicated query keeps that author-scoped path explicit and
+  # avoids piggybacking on the more general filter.
+  drafts(workspaceId: String!): [Case!]!
+
   # Actions
   # `filter` defaults to ACTIVE so default views never accidentally surface
   # archived actions. Use ARCHIVED for the archive view and ALL for batch
@@ -525,6 +562,22 @@ type Mutation {
   closeCase(workspaceId: String!, id: Int!): Case!
   reopenCase(workspaceId: String!, id: Int!): Case!
   syncCaseChannelUsers(workspaceId: String!, id: Int!): Case!
+
+  # Persist the supplied form payload as a DRAFT case. No Slack channel
+  # is created and no notifications fire; the resulting case is visible
+  # only to its reporter until SubmitDraft promotes it to OPEN.
+  createDraft(workspaceId: String!, input: CreateDraftInput!): Case!
+
+  # Promote a draft case to OPEN, running the same activation side effects
+  # (Slack channel, invites, etc.) as a fresh createCase. The optional
+  # `input` lets the caller apply last-minute edits atomically in the same
+  # transaction; without it the existing draft state is promoted as-is.
+  submitDraft(workspaceId: String!, id: Int!, input: SubmitDraftInput): Case!
+
+  # Permanently delete the caller's own draft case. Discarding does NOT
+  # apply to non-draft cases (deleteCase is the path for those); the mutation
+  # errors if the target is OPEN/CLOSED.
+  discardDraft(workspaceId: String!, id: Int!): Boolean!
 
   # Actions
   createAction(workspaceId: String!, input: CreateActionInput!): Action!

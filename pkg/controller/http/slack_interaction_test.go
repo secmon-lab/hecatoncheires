@@ -45,14 +45,14 @@ func newTestSlackHandler(
 		Registry: registry,
 		ActionUC: actionUC,
 	})
-	mentionDraftUC := usecase.NewMentionDraftUseCase(repo, registry, slackStub, nil)
+	mentionProposalUC := usecase.NewMentionProposalUseCase(repo, registry, slackStub, nil)
 	if caseUC == nil {
 		caseUC = usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 	}
 	if slackUC == nil {
-		slackUC = usecase.NewSlackUseCases(repo, registry, agentUC, mentionDraftUC, slackStub)
+		slackUC = usecase.NewSlackUseCases(repo, registry, agentUC, mentionProposalUC, slackStub)
 	}
-	return httpctrl.NewSlackInteractionHandler(actionUC, agentUC, slackUC, caseUC, mentionDraftUC)
+	return httpctrl.NewSlackInteractionHandler(actionUC, agentUC, slackUC, caseUC, mentionProposalUC)
 }
 
 func TestSlackInteractionHandler(t *testing.T) {

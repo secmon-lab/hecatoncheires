@@ -128,6 +128,13 @@ func (r *caseRepository) List(ctx context.Context, workspaceID string, opts ...i
 	query := r.casesCollection(workspaceID).Query
 	if statusFilter := cfg.Status(); statusFilter != nil {
 		query = query.Where("Status", "==", string(*statusFilter))
+	} else {
+		// Default listings never include drafts. An `in` filter on Status
+		// uses a single-field index — no composite index is required.
+		query = query.Where("Status", "in", []string{
+			string(types.CaseStatusOpen),
+			string(types.CaseStatusClosed),
+		})
 	}
 
 	iter := query.Documents(ctx)
@@ -152,6 +159,35 @@ func (r *caseRepository) List(ctx context.Context, workspaceID string, opts ...i
 	}
 
 	return cases, nil
+}
+
+func (r *caseRepository) ListDrafts(ctx context.Context, workspaceID string) ([]*model.Case, error) {
+	// Single-field index on Status only; private-draft access control is
+	// applied by the usecase layer, not by extra Where clauses (which would
+	// require a composite index).
+	iter := r.casesCollection(workspaceID).
+		Where("Status", "==", string(types.CaseStatusDraft)).
+		Documents(ctx)
+	defer iter.Stop()
+
+	drafts := make([]*model.Case, 0)
+	for {
+		docSnap, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to iterate drafts")
+		}
+
+		var c model.Case
+		if err := docSnap.DataTo(&c); err != nil {
+			return nil, goerr.Wrap(err, "failed to decode draft", goerr.V("doc_id", docSnap.Ref.ID))
+		}
+		drafts = append(drafts, &c)
+	}
+
+	return drafts, nil
 }
 
 func (r *caseRepository) Update(ctx context.Context, workspaceID string, c *model.Case) (*model.Case, error) {

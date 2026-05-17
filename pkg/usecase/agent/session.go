@@ -28,7 +28,7 @@ type LoadOrCreateSessionInput struct {
 
 	// Open-mode fields. Zero values when case-bound.
 	CreatorUserID string
-	DraftID       model.CaseDraftID
+	ProposalID    model.CaseProposalID
 }
 
 // LoadOrCreateSession fetches the Session for (ChannelID, ThreadTS) or
@@ -75,7 +75,7 @@ func (d *CommonDeps) LoadOrCreateSession(ctx context.Context, in LoadOrCreateSes
 		CaseID:        in.CaseID,
 		ActionID:      actionID,
 		CreatorUserID: in.CreatorUserID,
-		DraftID:       in.DraftID,
+		ProposalID:    in.ProposalID,
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}, nil

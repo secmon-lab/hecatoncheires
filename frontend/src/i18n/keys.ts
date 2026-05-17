@@ -138,6 +138,7 @@ export const msgKeys = {
   btnNewCase: 'btnNewCase',
   tabOpen: 'tabOpen',
   tabClosed: 'tabClosed',
+  tabDrafts: 'tabDrafts',
   placeholderSearch: 'placeholderSearch',
   titleCaseFormNew: 'titleCaseFormNew',
   titleCaseFormEdit: 'titleCaseFormEdit',
@@ -381,6 +382,17 @@ export const msgKeys = {
   fieldHelpOptionCount: 'fieldHelpOptionCount',
   fieldHelpTypeSelect: 'fieldHelpTypeSelect',
   fieldHelpTypeMultiSelect: 'fieldHelpTypeMultiSelect',
+
+  // Drafts (Save-as-Draft surfaced inside the Case detail / list pages)
+  draftSubmitButton: 'draftSubmitButton',
+  draftDiscardButton: 'draftDiscardButton',
+  draftDiscardConfirm: 'draftDiscardConfirm',
+  draftSubmitErrorMissingTitle: 'draftSubmitErrorMissingTitle',
+  draftSubmitErrorGeneric: 'draftSubmitErrorGeneric',
+  draftDiscardErrorGeneric: 'draftDiscardErrorGeneric',
+  btnSaveAsDraft: 'btnSaveAsDraft',
+  btnSavingDraft: 'btnSavingDraft',
+  btnSubmittingDraft: 'btnSubmittingDraft',
 } as const
 
 export type MsgKey = keyof typeof msgKeys

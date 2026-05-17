@@ -311,4 +311,50 @@ export class CaseDetailPage extends BasePage {
     const members = await section.locator('[class*="memberItem"]').all();
     return members.length;
   }
+
+  /**
+   * Click the Edit button shown when the case is in DRAFT status. Opens
+   * the CaseForm modal pre-populated with the draft's current values.
+   */
+  async clickEditDraft(): Promise<void> {
+    await this.page.getByTestId('edit-draft-button').click();
+    await this.page.locator('h2').filter({ hasText: /Edit Case/ }).waitFor({ state: 'visible', timeout: 5000 });
+  }
+
+  /**
+   * Click the Discard button shown in draft mode and confirm the
+   * browser-native dialog.
+   */
+  async clickDiscardDraft(): Promise<void> {
+    this.page.once('dialog', (d) => d.accept());
+    const responsePromise = this.page.waitForResponse(
+      (resp) => resp.url().includes('/graphql') && resp.status() === 200,
+    );
+    await this.page.getByTestId('discard-draft-button').click();
+    await responsePromise;
+  }
+
+  /**
+   * True when the page is showing draft-mode header controls
+   * (Edit/Discard) rather than Close/Reopen.
+   */
+  async isDraftHeader(): Promise<boolean> {
+    return await this.page.getByTestId('edit-draft-button').isVisible();
+  }
+
+  /**
+   * True when the DRAFT badge is visible in the title row.
+   */
+  async isDraftBadgeVisible(): Promise<boolean> {
+    return await this.page.getByTestId('draft-badge').isVisible();
+  }
+
+  /**
+   * True when the Related Actions section is rendered. Drafts hide it
+   * entirely (no slack channel, no actions yet).
+   */
+  async isRelatedActionsSectionVisible(): Promise<boolean> {
+    return await this.page.locator('h3').filter({ hasText: 'No actions yet' }).first().isVisible()
+      .catch(() => false);
+  }
 }

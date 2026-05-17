@@ -17,20 +17,20 @@ import (
 
 func runCaseDraftRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.Repository) {
 	t.Run("Save and Get", func(t *testing.T) {
-		repo := newRepo(t).CaseDraft()
+		repo := newRepo(t).CaseProposal()
 		ctx := context.Background()
 
 		now := time.Now().UTC()
-		d := model.NewCaseDraft(now, "U_creator")
+		d := model.NewCaseProposal(now, "U_creator")
 		d.MentionText = "please look at this"
 		d.SelectedWorkspaceID = "ws-1"
-		d.Source = model.DraftSource{
+		d.Source = model.ProposalSource{
 			TeamID:    "T1",
 			ChannelID: "C1",
 			ThreadTS:  "1700000000.000100",
 			MentionTS: "1700000001.000200",
 		}
-		d.RawMessages = []model.DraftMessage{
+		d.RawMessages = []model.ProposalMessage{
 			{UserID: "U1", Text: "hi", TS: "1700000000.000001", Permalink: "https://slack/p1"},
 			{UserID: "U2", Text: "yo", TS: "1700000000.000002", Permalink: "https://slack/p2"},
 		}
@@ -62,19 +62,19 @@ func runCaseDraftRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 	})
 
 	t.Run("Get not found", func(t *testing.T) {
-		repo := newRepo(t).CaseDraft()
+		repo := newRepo(t).CaseProposal()
 		ctx := context.Background()
 
-		_, err := repo.Get(ctx, model.NewCaseDraftID())
+		_, err := repo.Get(ctx, model.NewCaseProposalID())
 		gt.Value(t, err).NotNil().Required()
 		gt.Bool(t, errors.Is(err, firestore.ErrNotFound) || errors.Is(err, memory.ErrNotFound)).True()
 	})
 
 	t.Run("SetMaterialization sets and overwrites", func(t *testing.T) {
-		repo := newRepo(t).CaseDraft()
+		repo := newRepo(t).CaseProposal()
 		ctx := context.Background()
 
-		d := model.NewCaseDraft(time.Now().UTC(), "U_x")
+		d := model.NewCaseProposal(time.Now().UTC(), "U_x")
 		d.SelectedWorkspaceID = "ws-A"
 		gt.NoError(t, repo.Save(ctx, d)).Required()
 
@@ -132,19 +132,19 @@ func runCaseDraftRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 	})
 
 	t.Run("SetMaterialization not found", func(t *testing.T) {
-		repo := newRepo(t).CaseDraft()
+		repo := newRepo(t).CaseProposal()
 		ctx := context.Background()
 
-		err := repo.SetMaterialization(ctx, model.NewCaseDraftID(), "ws", nil, false)
+		err := repo.SetMaterialization(ctx, model.NewCaseProposalID(), "ws", nil, false)
 		gt.Value(t, err).NotNil().Required()
 		gt.Bool(t, errors.Is(err, firestore.ErrNotFound) || errors.Is(err, memory.ErrNotFound)).True()
 	})
 
 	t.Run("Delete", func(t *testing.T) {
-		repo := newRepo(t).CaseDraft()
+		repo := newRepo(t).CaseProposal()
 		ctx := context.Background()
 
-		d := model.NewCaseDraft(time.Now().UTC(), "U_d")
+		d := model.NewCaseProposal(time.Now().UTC(), "U_d")
 		gt.NoError(t, repo.Save(ctx, d)).Required()
 
 		gt.NoError(t, repo.Delete(ctx, d.ID)).Required()
@@ -159,13 +159,13 @@ func runCaseDraftRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 	})
 
 	t.Run("Expired draft is treated as not found", func(t *testing.T) {
-		repo := newRepo(t).CaseDraft()
+		repo := newRepo(t).CaseProposal()
 		ctx := context.Background()
 
 		// Create a draft with an already-past ExpiresAt.
-		past := time.Now().UTC().Add(-2 * model.CaseDraftTTL)
-		d := &model.CaseDraft{
-			ID:        model.NewCaseDraftID(),
+		past := time.Now().UTC().Add(-2 * model.CaseProposalTTL)
+		d := &model.CaseProposal{
+			ID:        model.NewCaseProposalID(),
 			CreatedBy: "U_old",
 			CreatedAt: past,
 			ExpiresAt: past.Add(time.Hour), // still in the past
@@ -178,10 +178,10 @@ func runCaseDraftRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 	})
 
 	t.Run("Save with empty ID rejected", func(t *testing.T) {
-		repo := newRepo(t).CaseDraft()
+		repo := newRepo(t).CaseProposal()
 		ctx := context.Background()
 
-		bad := &model.CaseDraft{CreatedBy: "U", CreatedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(time.Hour)}
+		bad := &model.CaseProposal{CreatedBy: "U", CreatedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(time.Hour)}
 		err := repo.Save(ctx, bad)
 		gt.Value(t, err).NotNil().Required()
 	})

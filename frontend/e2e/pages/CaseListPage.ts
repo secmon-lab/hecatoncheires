@@ -224,14 +224,28 @@ export class CaseListPage extends BasePage {
   }
 
   /**
-   * Click a status tab
+   * Click a status tab. "Draft" surfaces the workspace-wide drafts list
+   * that lives under the same Case list page (no separate /drafts route).
    */
-  async clickStatusTab(status: 'Open' | 'Closed'): Promise<void> {
+  async clickStatusTab(status: 'Open' | 'Closed' | 'Draft'): Promise<void> {
     if (status === 'Open') {
       await this.page.getByTestId('status-tab-open').click();
-    } else {
+    } else if (status === 'Closed') {
       await this.page.getByTestId('status-tab-closed').click();
+    } else {
+      await this.page.getByTestId('status-tab-draft').click();
     }
     await this.waitForTableLoad();
+  }
+
+  /**
+   * Returns the visible count next to the Drafts tab label.
+   */
+  async getDraftsTabCount(): Promise<number> {
+    const tab = this.page.getByTestId('status-tab-draft');
+    await tab.waitFor({ state: 'visible', timeout: 5000 });
+    const text = (await tab.textContent()) || '';
+    const m = text.match(/(\d+)/);
+    return m ? Number(m[1]) : 0;
   }
 }

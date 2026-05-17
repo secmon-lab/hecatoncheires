@@ -171,6 +171,10 @@ func (m *mockSlackService) OpenView(ctx context.Context, triggerID string, view 
 	return nil
 }
 
+func (m *mockSlackService) UpdateView(_ context.Context, _ goslack.ModalViewRequest, _, _, _ string) error {
+	return nil
+}
+
 func (m *mockSlackService) ListUserGroups(ctx context.Context, teamID string) ([]slack.UserGroup, error) {
 	return nil, nil
 }

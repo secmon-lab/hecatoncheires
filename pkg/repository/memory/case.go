@@ -134,16 +134,41 @@ func (r *caseRepository) List(ctx context.Context, workspaceID string, opts ...i
 
 	cases := make([]*model.Case, 0, len(ws))
 	for _, c := range ws {
-		// Apply status filter
+		// Apply status filter. When no filter is set, exclude drafts so the
+		// default listing never leaks unsubmitted entries; callers that want
+		// drafts must go through ListDrafts (author-scoped) or pass
+		// WithStatus(CaseStatusDraft) explicitly.
 		if statusFilter := cfg.Status(); statusFilter != nil {
 			if c.Status.Normalize() != *statusFilter {
 				continue
 			}
+		} else if c.IsDraft() {
+			continue
 		}
 		cases = append(cases, copyCase(c))
 	}
 
 	return cases, nil
+}
+
+func (r *caseRepository) ListDrafts(ctx context.Context, workspaceID string) ([]*model.Case, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ws, exists := r.cases[workspaceID]
+	if !exists {
+		return []*model.Case{}, nil
+	}
+
+	drafts := make([]*model.Case, 0)
+	for _, c := range ws {
+		if !c.IsDraft() {
+			continue
+		}
+		drafts = append(drafts, copyCase(c))
+	}
+
+	return drafts, nil
 }
 
 func (r *caseRepository) Update(ctx context.Context, workspaceID string, c *model.Case) (*model.Case, error) {

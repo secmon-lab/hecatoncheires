@@ -65,6 +65,7 @@ type mockSlackService struct {
 	getUserInfoFn            func(ctx context.Context, userID string) (*slack.User, error)
 	listUsersFn              func(ctx context.Context) ([]*slack.User, error)
 	createChannelFn          func(ctx context.Context, caseID int64, caseName string, prefix string) (string, error)
+	updateViewFn             func(ctx context.Context, view goslack.ModalViewRequest, externalID, hash, viewID string) error
 	renameChannelFn          func(ctx context.Context, channelID string, caseID int64, caseName string, prefix string) error
 	inviteUsersToChannelFn   func(ctx context.Context, channelID string, userIDs []string) error
 	addBookmarkFn            func(ctx context.Context, channelID, title, link string) error
@@ -235,6 +236,13 @@ func (m *mockSlackService) GetBotUserID(ctx context.Context) (string, error) {
 }
 
 func (m *mockSlackService) OpenView(ctx context.Context, triggerID string, view goslack.ModalViewRequest) error {
+	return nil
+}
+
+func (m *mockSlackService) UpdateView(ctx context.Context, view goslack.ModalViewRequest, externalID, hash, viewID string) error {
+	if m.updateViewFn != nil {
+		return m.updateViewFn(ctx, view, externalID, hash, viewID)
+	}
 	return nil
 }
 

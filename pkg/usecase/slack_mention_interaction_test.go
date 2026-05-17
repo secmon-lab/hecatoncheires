@@ -38,11 +38,11 @@ func TestHandleCancel_DeletesDraftAndEphemeral(t *testing.T) {
 	repo := memory.New()
 	registry := newRegistryWithSchema("ws-1", "ws", &config.FieldSchema{})
 	slackMock := newCollectorOnlyMockSlack()
-	uc := usecase.NewMentionDraftUseCase(repo, registry, slackMock, newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-1"))))
+	uc := usecase.NewMentionProposalUseCase(repo, registry, slackMock, newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-1"))))
 
-	d := model.NewCaseDraft(time.Now().UTC(), "U1")
+	d := model.NewCaseProposal(time.Now().UTC(), "U1")
 	d.SelectedWorkspaceID = "ws-1"
-	gt.NoError(t, repo.CaseDraft().Save(context.Background(), d)).Required()
+	gt.NoError(t, repo.CaseProposal().Save(context.Background(), d)).Required()
 
 	respURL, captured := captureResponseURL(t)
 	cb := &goslack.InteractionCallback{
@@ -57,7 +57,7 @@ func TestHandleCancel_DeletesDraftAndEphemeral(t *testing.T) {
 
 	gt.NoError(t, uc.HandleCancel(context.Background(), cb, cb.ActionCallback.BlockActions[0])).Required()
 
-	_, err := repo.CaseDraft().Get(context.Background(), d.ID)
+	_, err := repo.CaseProposal().Get(context.Background(), d.ID)
 	gt.Value(t, err).NotNil().Required()
 
 	gt.Number(t, len(*captured)).GreaterOrEqual(1)
@@ -87,17 +87,17 @@ func TestHandleSelectWorkspace_LocksFirstThenUpdates(t *testing.T) {
 	// stubPlannerLLM is keyed off the workspace_id baked into the JSON, so
 	// the test fixture must materialize for ws-B (the destination of the
 	// switch).
-	uc := usecase.NewMentionDraftUseCase(repo, registry, slackMock, newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-B"))))
+	uc := usecase.NewMentionProposalUseCase(repo, registry, slackMock, newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-B"))))
 
 	const channelID = "C-WS"
 	const threadTS = "1700000010.000000"
-	d := model.NewCaseDraft(time.Now().UTC(), "U1")
+	d := model.NewCaseProposal(time.Now().UTC(), "U1")
 	d.SelectedWorkspaceID = "ws-A"
 	d.Materialization = &model.WorkspaceMaterialization{Title: "old", Description: "old desc"}
-	d.Source = model.DraftSource{ChannelID: channelID, ThreadTS: threadTS, MentionTS: threadTS}
+	d.Source = model.ProposalSource{ChannelID: channelID, ThreadTS: threadTS, MentionTS: threadTS}
 	d.EphemeralChannelID = channelID
 	d.EphemeralMessageTS = threadTS
-	gt.NoError(t, repo.CaseDraft().Save(context.Background(), d)).Required()
+	gt.NoError(t, repo.CaseProposal().Save(context.Background(), d)).Required()
 
 	// Seed a Session for the thread; HandleSelectWorkspace looks it up to
 	// pass into draft.UseCase.RunTurn.
@@ -106,7 +106,7 @@ func TestHandleSelectWorkspace_LocksFirstThenUpdates(t *testing.T) {
 		ChannelID:     channelID,
 		ThreadTS:      threadTS,
 		CreatorUserID: "U1",
-		DraftID:       d.ID,
+		ProposalID:    d.ID,
 		CreatedAt:     time.Now().UTC(),
 		UpdatedAt:     time.Now().UTC(),
 	})).Required()
@@ -136,7 +136,7 @@ func TestHandleSelectWorkspace_LocksFirstThenUpdates(t *testing.T) {
 	// (chat.update against the ephemeral message TS).
 	gt.Number(t, len(slackMock.updateBlockPosts)).GreaterOrEqual(1)
 
-	got, err := repo.CaseDraft().Get(context.Background(), d.ID)
+	got, err := repo.CaseProposal().Get(context.Background(), d.ID)
 	gt.NoError(t, err).Required()
 	gt.Value(t, got.SelectedWorkspaceID).Equal("ws-B")
 	gt.Bool(t, got.InferenceInProgress).False()
@@ -157,14 +157,14 @@ func TestHandleEdit_OpensModalWithTriggerID(t *testing.T) {
 	}}
 	registry := newRegistryWithSchema("ws-edit", "WS Edit", schema)
 	slackMock := newCollectorOnlyMockSlack()
-	uc := usecase.NewMentionDraftUseCase(repo, registry, slackMock, newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-edit"))))
+	uc := usecase.NewMentionProposalUseCase(repo, registry, slackMock, newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-edit"))))
 
-	d := model.NewCaseDraft(time.Now().UTC(), "U1")
+	d := model.NewCaseProposal(time.Now().UTC(), "U1")
 	d.SelectedWorkspaceID = "ws-edit"
 	d.Materialization = &model.WorkspaceMaterialization{Title: "draft title", Description: "draft desc"}
 	d.EphemeralChannelID = "C-EDIT"
 	d.EphemeralMessageTS = "1700000020.000000"
-	gt.NoError(t, repo.CaseDraft().Save(context.Background(), d)).Required()
+	gt.NoError(t, repo.CaseProposal().Save(context.Background(), d)).Required()
 
 	cb := &goslack.InteractionCallback{
 		Type:      goslack.InteractionTypeBlockActions,

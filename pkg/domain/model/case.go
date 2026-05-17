@@ -3,10 +3,22 @@ package model
 import (
 	"time"
 
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 )
 
-// Case represents a generic case/project entity
+// ErrCaseNotDraft is returned when an operation requires a case to be in
+// DRAFT status but the case is already submitted (OPEN/CLOSED) or otherwise
+// not a draft.
+var ErrCaseNotDraft = goerr.New("case is not a draft")
+
+// Case represents a generic case/project entity.
+//
+// Lifecycle (see types.CaseStatus): DRAFT → OPEN → CLOSED. A case in DRAFT is
+// an "in-progress" entry saved from the Slack creation modal's Save as Draft
+// button; it is visible only to its reporter and triggers none of the
+// channel-binding / notification side effects of a real Case until SubmitDraft
+// promotes it to OPEN.
 type Case struct {
 	ID             int64
 	Title          string
@@ -22,6 +34,26 @@ type Case struct {
 	RequestKey     string                // UUID for preventing duplicate case creation from Slack modals
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+}
+
+// IsDraft reports whether this Case is currently in the unsubmitted draft state.
+func (c *Case) IsDraft() bool {
+	return c != nil && c.Status.IsDraft()
+}
+
+// SubmitDraft transitions the case from DRAFT to OPEN in place. Returns an
+// error if the case is not in DRAFT (callers must not silently no-op when
+// promoting an already-submitted case). Persistence and any post-promotion
+// side effects are the caller's responsibility.
+func (c *Case) SubmitDraft() error {
+	if c == nil {
+		return ErrCaseNotDraft
+	}
+	if !c.Status.IsDraft() {
+		return ErrCaseNotDraft
+	}
+	c.Status = types.CaseStatusOpen
+	return nil
 }
 
 // IsCaseAccessible checks if a user has access to a case.

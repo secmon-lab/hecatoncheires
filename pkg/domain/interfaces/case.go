@@ -15,8 +15,17 @@ type CaseRepository interface {
 	// Get retrieves a case by ID
 	Get(ctx context.Context, workspaceID string, id int64) (*model.Case, error)
 
-	// List retrieves cases with optional filtering
+	// List retrieves cases with optional filtering.
+	// Cases in DRAFT status are excluded by default; use ListDrafts to read
+	// drafts. Passing WithStatus(CaseStatusDraft) honours the filter, but
+	// callers should generally rely on ListDrafts for the draft-author view.
 	List(ctx context.Context, workspaceID string, opts ...ListCaseOption) ([]*model.Case, error)
+
+	// ListDrafts retrieves all cases in DRAFT status across the workspace.
+	// Drafts are surfaced workspace-wide so any team member can pick up an
+	// in-progress entry; the usecase layer applies private-draft access
+	// control (private drafts are visible only to their reporter).
+	ListDrafts(ctx context.Context, workspaceID string) ([]*model.Case, error)
 
 	// Update updates an existing case
 	Update(ctx context.Context, workspaceID string, c *model.Case) (*model.Case, error)

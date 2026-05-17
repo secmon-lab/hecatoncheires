@@ -69,6 +69,14 @@ const (
 	// Prefix for custom field block/action IDs
 	slackFieldBlockPrefix  = "hc_field_block_"
 	slackFieldActionPrefix = "hc_field_action_"
+
+	// Save-as-Draft button surfaced inside the Case creation modal, sitting
+	// visually between the footer's Cancel (left) and Create (right). The
+	// block_actions handler dispatches the stored form state to
+	// CaseUseCase.CreateDraft. The footer Submit ("Create") is the regular
+	// case-creation entry and is handled by HandleCaseCreationSubmit.
+	SlackBlockIDSaveAsDraftActions = "hc_save_draft_block"
+	SlackActionIDSaveAsDraft       = "hc_save_draft_btn"
 )
 
 // commandMetadata is stored in modal private_metadata as JSON
@@ -217,8 +225,10 @@ func (uc *SlackUseCases) HandleWorkspaceSelectSubmit(ctx context.Context, callba
 	return &view, nil
 }
 
-// HandleCaseCreationSubmit processes the case creation modal submission.
-// It creates a case using CaseUseCase and posts a confirmation message.
+// HandleCaseCreationSubmit processes the case creation modal submission
+// (view_submission path — i.e. the footer Submit button or Enter on an
+// input). The body-level "Save as draft" button enters via
+// HandleSaveAsDraftClick and goes through a different flow.
 func (uc *SlackUseCases) HandleCaseCreationSubmit(ctx context.Context, caseUC *CaseUseCase, callback *slack.InteractionCallback) error {
 	ctx = uc.contextWithUserLang(ctx, callback.User.ID)
 
@@ -383,6 +393,17 @@ func (uc *SlackUseCases) buildCaseCreationModal(ctx context.Context, workspaceID
 			}
 		}
 	}
+
+	// "Save as draft" sits in the body at the bottom — visually between the
+	// footer's Cancel (left) and Create (right). The footer's Submit button
+	// is the canonical Create path (Enter submits the modal); the body button
+	// only carries the alternative save-as-draft action via block_actions.
+	saveAsDraftBtn := slack.NewButtonBlockElement(
+		SlackActionIDSaveAsDraft,
+		"", // value is unused; the handler reads view.State for all fields.
+		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgDraftSaveAsButton), false, false),
+	)
+	blocks = append(blocks, slack.NewActionBlock(SlackBlockIDSaveAsDraftActions, saveAsDraftBtn))
 
 	return slack.ModalViewRequest{
 		Type:            slack.VTModal,

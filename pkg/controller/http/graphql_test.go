@@ -2812,3 +2812,274 @@ func TestGraphQLHandler_ActionStepPrivateCaseAccessControl(t *testing.T) {
 		gt.Number(t, len(resp.Errors)).GreaterOrEqual(1)
 	})
 }
+
+func TestGraphQLHandler_DraftsLifecycle(t *testing.T) {
+	const (
+		reporterID = "U-REPORTER"
+		strangerID = "U-STRANGER"
+	)
+
+	t.Run("save → list → submit promotes to OPEN", func(t *testing.T) {
+		repo := memory.New()
+		handler, err := setupGraphQLServer(repo)
+		gt.NoError(t, err).Required()
+
+		// Persist a draft via the repository (representing the Slack
+		// Save-as-Draft outcome — the equivalent of CaseUseCase.CreateDraft
+		// with the reporter wired up by the Slack handler).
+		ctx := context.Background()
+		draft, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+			Title:      "Half written",
+			Status:     types.CaseStatusDraft,
+			ReporterID: reporterID,
+		})
+		gt.NoError(t, err).Required()
+
+		// drafts query as the reporter returns the draft.
+		draftsQuery := `
+			query($workspaceId: String!) {
+				drafts(workspaceId: $workspaceId) {
+					id
+					title
+					status
+				}
+			}
+		`
+		rec := executeGraphQLRequestWithAuth(t, handler, draftsQuery, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+		}, reporterID)
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var listResult struct {
+			Drafts []struct {
+				ID     int    `json:"id"`
+				Title  string `json:"title"`
+				Status string `json:"status"`
+			} `json:"drafts"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &listResult)).Required()
+		gt.Array(t, listResult.Drafts).Length(1).Required()
+		gt.Value(t, int64(listResult.Drafts[0].ID)).Equal(draft.ID)
+		gt.Value(t, listResult.Drafts[0].Status).Equal("DRAFT")
+
+		// Stranger sees the public draft too — drafts are workspace-wide
+		// readable so any team member can pick up an in-progress entry.
+		strangerRec := executeGraphQLRequestWithAuth(t, handler, draftsQuery, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+		}, strangerID)
+		strangerResp := parseGraphQLResponse(t, strangerRec)
+		gt.Array(t, strangerResp.Errors).Length(0)
+		var strangerResult struct {
+			Drafts []struct {
+				ID int `json:"id"`
+			} `json:"drafts"`
+		}
+		gt.NoError(t, json.Unmarshal(strangerResp.Data, &strangerResult)).Required()
+		gt.Array(t, strangerResult.Drafts).Length(1).Required()
+		gt.Value(t, int64(strangerResult.Drafts[0].ID)).Equal(draft.ID)
+
+		// Stranger CAN fetch the public draft via the `case` query — only
+		// private drafts are hidden from non-reporters.
+		caseQuery := `
+			query($workspaceId: String!, $id: Int!) {
+				case(workspaceId: $workspaceId, id: $id) {
+					id
+					title
+					status
+				}
+			}
+		`
+		caseRec := executeGraphQLRequestWithAuth(t, handler, caseQuery, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          int(draft.ID),
+		}, strangerID)
+		caseResp := parseGraphQLResponse(t, caseRec)
+		gt.Array(t, caseResp.Errors).Length(0)
+		var caseResult struct {
+			Case struct {
+				ID     int    `json:"id"`
+				Title  string `json:"title"`
+				Status string `json:"status"`
+			} `json:"case"`
+		}
+		gt.NoError(t, json.Unmarshal(caseResp.Data, &caseResult)).Required()
+		gt.Value(t, int64(caseResult.Case.ID)).Equal(draft.ID)
+		gt.Value(t, caseResult.Case.Status).Equal("DRAFT")
+
+		// Reporter submits → Case is promoted to OPEN. Submit requires a
+		// non-empty title, which we provided above.
+		submitMutation := `
+			mutation($workspaceId: String!, $id: Int!) {
+				submitDraft(workspaceId: $workspaceId, id: $id) {
+					id
+					title
+					status
+				}
+			}
+		`
+		submitRec := executeGraphQLRequestWithAuth(t, handler, submitMutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          int(draft.ID),
+		}, reporterID)
+		submitResp := parseGraphQLResponse(t, submitRec)
+		gt.Array(t, submitResp.Errors).Length(0)
+		var submitResult struct {
+			SubmitDraft struct {
+				ID     int    `json:"id"`
+				Title  string `json:"title"`
+				Status string `json:"status"`
+			} `json:"submitDraft"`
+		}
+		gt.NoError(t, json.Unmarshal(submitResp.Data, &submitResult)).Required()
+		gt.Value(t, int64(submitResult.SubmitDraft.ID)).Equal(draft.ID)
+		gt.Value(t, submitResult.SubmitDraft.Status).Equal("OPEN")
+
+		// After submit, drafts query returns empty for the same reporter.
+		rec2 := executeGraphQLRequestWithAuth(t, handler, draftsQuery, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+		}, reporterID)
+		resp2 := parseGraphQLResponse(t, rec2)
+		var listAfter struct {
+			Drafts []struct {
+				ID int `json:"id"`
+			} `json:"drafts"`
+		}
+		gt.NoError(t, json.Unmarshal(resp2.Data, &listAfter)).Required()
+		gt.Array(t, listAfter.Drafts).Length(0)
+
+		// Promoted case now appears in the regular cases listing.
+		casesRec := executeGraphQLRequestWithAuth(t, handler, `
+			query($workspaceId: String!) {
+				cases(workspaceId: $workspaceId) {
+					id
+					status
+				}
+			}`, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+		}, reporterID)
+		casesResp := parseGraphQLResponse(t, casesRec)
+		gt.Array(t, casesResp.Errors).Length(0)
+		var casesResult struct {
+			Cases []struct {
+				ID     int    `json:"id"`
+				Status string `json:"status"`
+			} `json:"cases"`
+		}
+		gt.NoError(t, json.Unmarshal(casesResp.Data, &casesResult)).Required()
+		gt.Array(t, casesResult.Cases).Length(1).Required()
+		gt.Value(t, int64(casesResult.Cases[0].ID)).Equal(draft.ID)
+		gt.Value(t, casesResult.Cases[0].Status).Equal("OPEN")
+	})
+
+	t.Run("discardDraft deletes a private draft for the reporter only", func(t *testing.T) {
+		// Public drafts are workspace-shared so any teammate can act on
+		// them; the access-control story only kicks in for private drafts.
+		// We exercise the strict path here.
+		repo := memory.New()
+		handler, err := setupGraphQLServer(repo)
+		gt.NoError(t, err).Required()
+
+		ctx := context.Background()
+		draft, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+			Title:      "To discard",
+			Status:     types.CaseStatusDraft,
+			ReporterID: reporterID,
+			IsPrivate:  true,
+		})
+		gt.NoError(t, err).Required()
+
+		discardMutation := `
+			mutation($workspaceId: String!, $id: Int!) {
+				discardDraft(workspaceId: $workspaceId, id: $id)
+			}
+		`
+		// Stranger cannot discard a private draft (looks like "not found").
+		strangerRec := executeGraphQLRequestWithAuth(t, handler, discardMutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          int(draft.ID),
+		}, strangerID)
+		strangerResp := parseGraphQLResponse(t, strangerRec)
+		gt.Number(t, len(strangerResp.Errors)).GreaterOrEqual(1)
+
+		// Reporter can.
+		rec := executeGraphQLRequestWithAuth(t, handler, discardMutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          int(draft.ID),
+		}, reporterID)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+		var discardResult struct {
+			DiscardDraft bool `json:"discardDraft"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &discardResult)).Required()
+		gt.Bool(t, discardResult.DiscardDraft).True()
+
+		// Draft is gone.
+		_, getErr := repo.Case().Get(ctx, testWorkspaceID, draft.ID)
+		gt.Error(t, getErr)
+	})
+
+	t.Run("discardDraft on a public draft works for any teammate", func(t *testing.T) {
+		repo := memory.New()
+		handler, err := setupGraphQLServer(repo)
+		gt.NoError(t, err).Required()
+
+		ctx := context.Background()
+		draft, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+			Title:      "Shared cleanup",
+			Status:     types.CaseStatusDraft,
+			ReporterID: reporterID,
+		})
+		gt.NoError(t, err).Required()
+
+		discardMutation := `
+			mutation($workspaceId: String!, $id: Int!) {
+				discardDraft(workspaceId: $workspaceId, id: $id)
+			}
+		`
+		rec := executeGraphQLRequestWithAuth(t, handler, discardMutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          int(draft.ID),
+		}, strangerID)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+		var discardResult struct {
+			DiscardDraft bool `json:"discardDraft"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &discardResult)).Required()
+		gt.Bool(t, discardResult.DiscardDraft).True()
+
+		_, getErr := repo.Case().Get(ctx, testWorkspaceID, draft.ID)
+		gt.Error(t, getErr)
+	})
+
+	t.Run("submitDraft on an OPEN case errors", func(t *testing.T) {
+		repo := memory.New()
+		handler, err := setupGraphQLServer(repo)
+		gt.NoError(t, err).Required()
+
+		ctx := context.Background()
+		open, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+			Title:      "Already open",
+			Status:     types.CaseStatusOpen,
+			ReporterID: reporterID,
+		})
+		gt.NoError(t, err).Required()
+
+		submitMutation := `
+			mutation($workspaceId: String!, $id: Int!) {
+				submitDraft(workspaceId: $workspaceId, id: $id) {
+					id
+				}
+			}
+		`
+		rec := executeGraphQLRequestWithAuth(t, handler, submitMutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          int(open.ID),
+		}, reporterID)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Number(t, len(resp.Errors)).GreaterOrEqual(1)
+	})
+}

@@ -92,6 +92,10 @@ func (m *agentTestSlackService) OpenView(ctx context.Context, triggerID string, 
 	return nil
 }
 
+func (m *agentTestSlackService) UpdateView(_ context.Context, _ goslack.ModalViewRequest, _, _, _ string) error {
+	return nil
+}
+
 func (m *agentTestSlackService) PostEphemeral(_ context.Context, _ string, _ string, _ string) error {
 	return nil
 }

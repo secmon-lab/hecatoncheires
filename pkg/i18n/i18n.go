@@ -96,19 +96,19 @@ const (
 	// Draft (open-mode) planner / sub-agent trace lines. These are rendered
 	// into the per-turn Slack progress message so the user can follow what
 	// the agent is doing.
-	MsgDraftTracePlanning           // "🤔 Planning…"
-	MsgDraftTracePlannerRetry       // "⚠️ planner output rejected; retrying"
-	MsgDraftTracePlannerAction      // "→ %s — %s" (action, reasoning)
-	MsgDraftTracePlannerTool        // "🛠 Planning — calling %s" (tool name)
-	MsgDraftTracePlannerMessage     // "🤔 Planning — %s" (one-line excerpt)
-	MsgDraftTracePhase              // "🧭 %s" (planner.investigate.message)
-	MsgDraftTraceTaskPending        // "⏳ Task: %s" (title) — block reserved before sub-agent starts
-	MsgDraftTraceTaskRunning        // "🔍 Task: %s — running…" (title) — initial state when sub-agent begins
-	MsgDraftTraceTaskRunningTool    // "🔍 Task: %s — 🛠 calling %s" (title, tool name) — fires per ToolRequestHook
-	MsgDraftTraceTaskRunningMessage // "🔍 Task: %s — %s" (title, one-line excerpt) — fires per MessageHook
-	MsgDraftTraceTaskDone           // "✅ Task: %s — done (%s, %d/%d inner loops)" (title, elapsed, used, max)
-	MsgDraftTraceTaskFailedPrompt   // "❌ Task: %s — failed (%s, build prompt): %v" (title, elapsed, err)
-	MsgDraftTraceTaskFailed         // "❌ Task: %s — failed (%s, %d/%d inner loops): %v" (title, elapsed, used, max, err)
+	MsgProposalTracePlanning           // "🤔 Planning…"
+	MsgProposalTracePlannerRetry       // "⚠️ planner output rejected; retrying"
+	MsgProposalTracePlannerAction      // "→ %s — %s" (action, reasoning)
+	MsgProposalTracePlannerTool        // "🛠 Planning — calling %s" (tool name)
+	MsgProposalTracePlannerMessage     // "🤔 Planning — %s" (one-line excerpt)
+	MsgProposalTracePhase              // "🧭 %s" (planner.investigate.message)
+	MsgProposalTraceTaskPending        // "⏳ Task: %s" (title) — block reserved before sub-agent starts
+	MsgProposalTraceTaskRunning        // "🔍 Task: %s — running…" (title) — initial state when sub-agent begins
+	MsgProposalTraceTaskRunningTool    // "🔍 Task: %s — 🛠 calling %s" (title, tool name) — fires per ToolRequestHook
+	MsgProposalTraceTaskRunningMessage // "🔍 Task: %s — %s" (title, one-line excerpt) — fires per MessageHook
+	MsgProposalTraceTaskDone           // "✅ Task: %s — done (%s, %d/%d inner loops)" (title, elapsed, used, max)
+	MsgProposalTraceTaskFailedPrompt   // "❌ Task: %s — failed (%s, build prompt): %v" (title, elapsed, err)
+	MsgProposalTraceTaskFailed         // "❌ Task: %s — failed (%s, %d/%d inner loops): %v" (title, elapsed, used, max, err)
 
 	// Bookmark
 	MsgBookmarkOpenCase
@@ -156,6 +156,13 @@ const (
 	// Errors related to commands
 	MsgErrUnknownSubcommand // "Unknown subcommand: %s. Available: update, action."
 	MsgErrCreateAction      // "Failed to create action. Please try again."
+
+	// Save-as-Draft (Case creation modal)
+	MsgDraftSaveAsButton        // Button label "Save as draft"
+	MsgDraftSavedEphemeral      // "Saved as draft #%d. Open the Drafts page on the web to continue." (%d = case ID)
+	MsgDraftSavedModalTitle     // Title of the splash modal shown after Save as Draft.
+	MsgDraftSavedModalBody      // Body text of the splash modal: "Saved as draft #%d." (%d = case ID)
+	MsgDraftSaveFailedEphemeral // Error ephemeral when Save as Draft fails server-side.
 
 	msgKeyCount // sentinel for validation
 )

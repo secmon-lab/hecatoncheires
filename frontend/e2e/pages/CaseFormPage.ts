@@ -11,6 +11,8 @@ export class CaseFormPage extends BasePage {
   private readonly submitButton: Locator;
   private readonly cancelButton: Locator;
   private readonly closeButton: Locator;
+  private readonly saveAsDraftButton: Locator;
+  private readonly draftOverwriteButton: Locator;
 
   constructor(page: Page) {
     super(page);
@@ -19,6 +21,45 @@ export class CaseFormPage extends BasePage {
     this.submitButton = page.getByTestId('case-submit-button');
     this.cancelButton = page.locator('button').filter({ hasText: /Cancel/ }).first();
     this.closeButton = page.locator('button').first(); // X button
+    this.saveAsDraftButton = page.getByTestId('case-save-as-draft-button');
+    this.draftOverwriteButton = page.getByTestId('draft-save-button');
+  }
+
+  /**
+   * Click the "Save as draft" button on the New-case form to persist a
+   * brand-new DRAFT case. Closes the modal once the mutation completes.
+   */
+  async clickSaveAsDraft(): Promise<void> {
+    await this.saveAsDraftButton.click();
+    await this.page.locator('h2').filter({ hasText: /New Case|Edit Case/ }).waitFor({ state: 'hidden', timeout: 10000 });
+  }
+
+  /**
+   * Click the "Save as draft" overwrite button shown when editing an
+   * existing DRAFT case. Persists the in-modal edits without promoting.
+   */
+  async clickDraftOverwrite(): Promise<void> {
+    await this.draftOverwriteButton.click();
+    await this.page.locator('h2').filter({ hasText: /Edit Case/ }).waitFor({ state: 'hidden', timeout: 10000 });
+  }
+
+  /**
+   * Click the primary Submit button when editing a DRAFT — this is the
+   * atomic edit-and-promote path (UpdateCase + SubmitDraft combined into
+   * one usecase call on the backend).
+   */
+  async submitDraftPromote(): Promise<void> {
+    await this.submitButton.click();
+    await this.page.locator('h2').filter({ hasText: /Edit Case/ }).waitFor({ state: 'hidden', timeout: 10000 });
+  }
+
+  /**
+   * True when the form currently shows the "Save as draft" + "Submit"
+   * pair used for editing a DRAFT case (rather than the regular Save
+   * button used for editing an OPEN case).
+   */
+  async isDraftEditMode(): Promise<boolean> {
+    return await this.draftOverwriteButton.isVisible();
   }
 
   /**

@@ -581,6 +581,19 @@ func (c *client) OpenView(ctx context.Context, triggerID string, view slack.Moda
 	return nil
 }
 
+// UpdateView replaces an already-open modal in place. The caller may pass
+// viewID (returned when the modal was opened) or externalID (set on the
+// view at open time); either one is sufficient to address the modal. hash
+// is optional — non-empty hashes let Slack reject the update if the user
+// has interacted with the view in the meantime.
+func (c *client) UpdateView(ctx context.Context, view slack.ModalViewRequest, externalID, hash, viewID string) error {
+	_, err := c.api.UpdateViewContext(ctx, view, externalID, hash, viewID)
+	if err != nil {
+		return wrapSlackViewError(err, "failed to update Slack modal view", viewID)
+	}
+	return nil
+}
+
 // wrapSlackViewError wraps a views.* failure with the structured detail
 // Slack returns in response_metadata. The default goerr.Wrap path only
 // captures the top-level error code (e.g. "invalid_arguments"), so by the

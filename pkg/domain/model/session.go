@@ -46,7 +46,7 @@ type Session struct {
 
 	// Open-mode metadata — zero values when case-bound.
 	CreatorUserID string
-	DraftID       CaseDraftID
+	ProposalID    CaseProposalID
 
 	// Turn lock fields. Maintained by SessionRepository.AcquireTurnLock /
 	// Heartbeat / ReleaseTurnLock. Heartbeat staleness (TurnHeartbeatAt vs now)

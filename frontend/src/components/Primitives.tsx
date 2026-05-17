@@ -97,14 +97,16 @@ export function Badge({ kind = 'neutral', dot = true, children }: BadgeProps) {
 }
 
 interface StatusBadgeProps {
-  status: 'OPEN' | 'CLOSED' | string
+  status: 'OPEN' | 'CLOSED' | 'DRAFT' | string
   labelOpen?: string
   labelClosed?: string
+  labelDraft?: string
 }
 
-export function StatusBadge({ status, labelOpen = 'Open', labelClosed = 'Closed' }: StatusBadgeProps) {
+export function StatusBadge({ status, labelOpen = 'Open', labelClosed = 'Closed', labelDraft = 'Draft' }: StatusBadgeProps) {
   if (status === 'OPEN') return <Badge kind="open">{labelOpen}</Badge>
   if (status === 'CLOSED') return <Badge kind="closed">{labelClosed}</Badge>
+  if (status === 'DRAFT') return <Badge>{labelDraft}</Badge>
   return <Badge>{status}</Badge>
 }
 

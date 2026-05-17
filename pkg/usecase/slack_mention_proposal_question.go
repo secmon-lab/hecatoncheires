@@ -71,7 +71,7 @@ func (a draftQuestionAnswer) IsEmpty() bool {
 	return len(a.Selections) == 0 && strings.TrimSpace(a.OtherText) == ""
 }
 
-// buildDraftQuestionBlocks renders the planner's question payload as a
+// buildProposalQuestionBlocks renders the planner's question payload as a
 // Block Kit form: a header (reason) prefixed by an @mention of the
 // requester so they get paged immediately, one input section per question
 // item (radio_buttons for select / checkboxes for multi_select), a
@@ -80,7 +80,7 @@ func (a draftQuestionAnswer) IsEmpty() bool {
 // can re-enter the draft flow. requesterUserID is the Slack user id of
 // the person who originally @-mentioned the bot; pass empty to suppress
 // the mention (used in tests / synthetic flows).
-func buildDraftQuestionBlocks(q draft.QuestionPayload, draftID model.CaseDraftID, requesterUserID string) ([]goslack.Block, string) {
+func buildProposalQuestionBlocks(q draft.QuestionPayload, proposalID model.CaseProposalID, requesterUserID string) ([]goslack.Block, string) {
 	header := goslack.NewSectionBlock(
 		goslack.NewTextBlockObject(goslack.MarkdownType,
 			questionHeaderText(q.Reason, requesterUserID), false, false),
@@ -156,7 +156,7 @@ func buildDraftQuestionBlocks(q draft.QuestionPayload, draftID model.CaseDraftID
 
 	submit := goslack.NewButtonBlockElement(
 		ActionIDDraftQuestionSubmit,
-		string(draftID),
+		string(proposalID),
 		goslack.NewTextBlockObject(goslack.PlainTextType, "Submit", false, false),
 	)
 	submit.Style = goslack.StylePrimary
@@ -167,7 +167,7 @@ func buildDraftQuestionBlocks(q draft.QuestionPayload, draftID model.CaseDraftID
 }
 
 // buildDraftQuestionAnsweredBlocks renders the read-only counterpart of
-// buildDraftQuestionBlocks for use after a successful Submit. The header is
+// buildProposalQuestionBlocks for use after a successful Submit. The header is
 // preserved, each question is paired with the user's selections plus any
 // free-text fallback, and the Submit button is dropped — the message
 // becomes a permanent record of the Q&A in the thread.
@@ -357,7 +357,7 @@ func missingDraftQuestionItems(pq *model.PendingQuestion, answers map[string]dra
 // resumes the planner with the formatted answers as the next-turn user
 // input. Validation failures re-render the form with an inline error so
 // the user can fix and resubmit.
-func (uc *MentionDraftUseCase) HandleQuestionSubmit(ctx context.Context, callback *goslack.InteractionCallback, action *goslack.BlockAction) error {
+func (uc *MentionProposalUseCase) HandleQuestionSubmit(ctx context.Context, callback *goslack.InteractionCallback, action *goslack.BlockAction) error {
 	if uc.draftUC == nil {
 		return goerr.New("draft usecase is not configured")
 	}
@@ -415,35 +415,35 @@ func (uc *MentionDraftUseCase) HandleQuestionSubmit(ctx context.Context, callbac
 	}
 
 	var (
-		d       *model.CaseDraft
-		draftID model.CaseDraftID
+		d          *model.CaseProposal
+		proposalID model.CaseProposalID
 	)
-	if session.DraftID != "" {
-		d, err = uc.repo.CaseDraft().Get(ctx, session.DraftID)
+	if session.ProposalID != "" {
+		d, err = uc.repo.CaseProposal().Get(ctx, session.ProposalID)
 		if err != nil {
 			errutil.Handle(ctx, err, "thread-reply: failed to load draft; continuing without it")
 		}
 	}
 	if d != nil {
-		draftID = d.ID
+		proposalID = d.ID
 	}
 	candidates := uc.accessibleWorkspaces(callback.User.ID)
 
 	handler := newSlackDraftHandler(
 		uc.repo, uc.registry, uc.slackService,
 		channelID, threadTS, messageTS, callback.User.ID,
-		candidates, draftID, "",
+		candidates, proposalID, "",
 	)
 
 	userInput := formatDraftQuestionAnswers(pq, answers)
 	result, runErr := uc.draftUC.RunTurn(ctx, draft.TurnRequest{
-		Session:       session,
-		UserInput:     userInput,
-		Trigger:       draft.TriggerThreadReply,
-		TriggerTS:     messageTS,
-		ActorUserID:   callback.User.ID,
-		ExistingDraft: d,
-		Handler:       handler,
+		Session:          session,
+		UserInput:        userInput,
+		Trigger:          draft.TriggerThreadReply,
+		TriggerTS:        messageTS,
+		ActorUserID:      callback.User.ID,
+		ExistingProposal: d,
+		Handler:          handler,
 	})
 	if runErr != nil {
 		return goerr.Wrap(runErr, "draft question submit turn failed")
@@ -464,7 +464,7 @@ func (uc *MentionDraftUseCase) HandleQuestionSubmit(ctx context.Context, callbac
 
 // markQuestionStale rewrites the form message into a single context line
 // when the underlying session/pending state has gone away. Best-effort.
-func (uc *MentionDraftUseCase) markQuestionStale(ctx context.Context, channelID, messageTS string) {
+func (uc *MentionProposalUseCase) markQuestionStale(ctx context.Context, channelID, messageTS string) {
 	if messageTS == "" {
 		return
 	}
@@ -484,8 +484,8 @@ func (uc *MentionDraftUseCase) markQuestionStale(ctx context.Context, channelID,
 // unchanged elements when the message id is reused). requesterUserID is
 // re-mentioned in the header so the original requester gets paged again
 // to finish answering.
-func (uc *MentionDraftUseCase) repostQuestionWithError(ctx context.Context, channelID, messageTS, requesterUserID string, pq *model.PendingQuestion, answers map[string]draftQuestionAnswer, missing []string) {
-	blocks, fallback := buildDraftQuestionBlocks(draft.QuestionPayload{
+func (uc *MentionProposalUseCase) repostQuestionWithError(ctx context.Context, channelID, messageTS, requesterUserID string, pq *model.PendingQuestion, answers map[string]draftQuestionAnswer, missing []string) {
+	blocks, fallback := buildProposalQuestionBlocks(draft.QuestionPayload{
 		Reason: pq.Reason,
 		Items:  pendingItemsToDraftItems(pq.Items),
 	}, "", requesterUserID)
@@ -512,7 +512,7 @@ func (uc *MentionDraftUseCase) repostQuestionWithError(ctx context.Context, chan
 	_ = answers
 }
 
-// pendingItemsToDraftItems is a thin shim to reuse buildDraftQuestionBlocks
+// pendingItemsToDraftItems is a thin shim to reuse buildProposalQuestionBlocks
 // for the re-render path without leaking model.PendingQuestionItem into the
 // draft package.
 func pendingItemsToDraftItems(in []model.PendingQuestionItem) []draft.QuestionItem {

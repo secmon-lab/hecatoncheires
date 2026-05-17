@@ -106,8 +106,8 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		gt.Bool(t, slackMock.openViewCalled).True()
-		// Title + Description + Private checkbox = 3 blocks
-		gt.Number(t, len(slackMock.openViewRequest.Blocks.BlockSet)).Equal(3)
+		// Title + Description + Private checkbox + Save-as-Draft action block = 4 blocks
+		gt.Number(t, len(slackMock.openViewRequest.Blocks.BlockSet)).Equal(4)
 
 		found := false
 		for _, block := range slackMock.openViewRequest.Blocks.BlockSet {
@@ -119,6 +119,31 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 			}
 		}
 		gt.Bool(t, found).True()
+
+		// Bottom action block surfaces the Save-as-Draft button only. The
+		// Create action stays in the modal footer (Submit), so the body
+		// button must NOT duplicate it — otherwise the user would see two
+		// Create buttons.
+		var saveAsDraftFound bool
+		var bodyButtonCount int
+		for _, block := range slackMock.openViewRequest.Blocks.BlockSet {
+			actionBlock, ok := block.(*goslack.ActionBlock)
+			if !ok || actionBlock.BlockID != usecase.SlackBlockIDSaveAsDraftActions {
+				continue
+			}
+			for _, el := range actionBlock.Elements.ElementSet {
+				btn, ok := el.(*goslack.ButtonBlockElement)
+				if !ok {
+					continue
+				}
+				bodyButtonCount++
+				if btn.ActionID == usecase.SlackActionIDSaveAsDraft {
+					saveAsDraftFound = true
+				}
+			}
+		}
+		gt.Bool(t, saveAsDraftFound).True()
+		gt.Number(t, bodyButtonCount).Equal(1)
 	})
 
 	t.Run("workspace specified but invalid returns error", func(t *testing.T) {
@@ -198,8 +223,8 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		gt.Bool(t, slackMock.openViewCalled).True()
-		// Title + Description + Private checkbox + 3 custom fields = 6 blocks
-		gt.Number(t, len(slackMock.openViewRequest.Blocks.BlockSet)).Equal(6)
+		// Title + Description + Private checkbox + 3 custom fields + Save-as-Draft action block = 7 blocks
+		gt.Number(t, len(slackMock.openViewRequest.Blocks.BlockSet)).Equal(7)
 	})
 
 	t.Run("no workspace specified with multiple workspaces opens workspace select modal", func(t *testing.T) {

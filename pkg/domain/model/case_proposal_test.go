@@ -183,31 +183,31 @@ func hasIssue(issues []model.MaterializationValidationIssue, fieldID, code strin
 
 func TestNewCaseDraft(t *testing.T) {
 	now := time.Now().UTC()
-	d := model.NewCaseDraft(now, "U123")
+	d := model.NewCaseProposal(now, "U123")
 
-	gt.Value(t, d.ID).NotEqual(model.CaseDraftID(""))
+	gt.Value(t, d.ID).NotEqual(model.CaseProposalID(""))
 	gt.Value(t, d.CreatedBy).Equal("U123")
 	gt.Bool(t, d.CreatedAt.Equal(now)).True()
-	gt.Bool(t, d.ExpiresAt.Equal(now.Add(model.CaseDraftTTL))).True()
+	gt.Bool(t, d.ExpiresAt.Equal(now.Add(model.CaseProposalTTL))).True()
 	gt.Value(t, d.Materialization).Nil()
 	gt.Bool(t, d.InferenceInProgress).False()
 }
 
 func TestCaseDraftIsExpired(t *testing.T) {
 	now := time.Now().UTC()
-	d := model.NewCaseDraft(now, "U1")
+	d := model.NewCaseProposal(now, "U1")
 
 	gt.Bool(t, d.IsExpired(now)).False()
-	gt.Bool(t, d.IsExpired(now.Add(model.CaseDraftTTL-time.Second))).False()
-	gt.Bool(t, d.IsExpired(now.Add(model.CaseDraftTTL))).True()
-	gt.Bool(t, d.IsExpired(now.Add(model.CaseDraftTTL+time.Hour))).True()
+	gt.Bool(t, d.IsExpired(now.Add(model.CaseProposalTTL-time.Second))).False()
+	gt.Bool(t, d.IsExpired(now.Add(model.CaseProposalTTL))).True()
+	gt.Bool(t, d.IsExpired(now.Add(model.CaseProposalTTL+time.Hour))).True()
 }
 
 func TestNewCaseDraftIDUnique(t *testing.T) {
-	seen := make(map[model.CaseDraftID]struct{})
+	seen := make(map[model.CaseProposalID]struct{})
 	for range 1000 {
-		id := model.NewCaseDraftID()
-		gt.Value(t, id).NotEqual(model.CaseDraftID(""))
+		id := model.NewCaseProposalID()
+		gt.Value(t, id).NotEqual(model.CaseProposalID(""))
 		_, dup := seen[id]
 		gt.Bool(t, dup).False()
 		seen[id] = struct{}{}

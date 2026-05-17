@@ -116,6 +116,9 @@ func (f *fakeSlackService) GetBotUserID(context.Context) (string, error) {
 func (f *fakeSlackService) OpenView(context.Context, string, goslack.ModalViewRequest) error {
 	panic("unexpected OpenView")
 }
+func (f *fakeSlackService) UpdateView(context.Context, goslack.ModalViewRequest, string, string, string) error {
+	panic("unexpected UpdateView")
+}
 func (f *fakeSlackService) ListUserGroups(context.Context, string) ([]slacksvc.UserGroup, error) {
 	panic("unexpected ListUserGroups")
 }

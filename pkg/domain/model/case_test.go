@@ -1,9 +1,11 @@
 package model_test
 
 import (
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 )
@@ -137,4 +139,49 @@ func TestRestrictCase(t *testing.T) {
 	if original.Title != "Sensitive Title" {
 		t.Error("Original case should not be modified")
 	}
+}
+
+func TestCase_IsDraft(t *testing.T) {
+	gt.Bool(t, (&model.Case{Status: types.CaseStatusDraft}).IsDraft()).True()
+	gt.Bool(t, (&model.Case{Status: types.CaseStatusOpen}).IsDraft()).False()
+	gt.Bool(t, (&model.Case{Status: types.CaseStatusClosed}).IsDraft()).False()
+	gt.Bool(t, (&model.Case{Status: types.CaseStatus("")}).IsDraft()).False()
+
+	// Nil receiver is safe and reports false; this guards against accidental
+	// nil dereference in higher layers that route Case lookups through
+	// IsDraft as a guard.
+	var nilCase *model.Case
+	gt.Bool(t, nilCase.IsDraft()).False()
+}
+
+func TestCase_SubmitDraft(t *testing.T) {
+	t.Run("draft transitions to open", func(t *testing.T) {
+		c := &model.Case{Status: types.CaseStatusDraft}
+		gt.NoError(t, c.SubmitDraft()).Required()
+		gt.Value(t, c.Status).Equal(types.CaseStatusOpen)
+	})
+
+	t.Run("open case cannot be re-submitted", func(t *testing.T) {
+		c := &model.Case{Status: types.CaseStatusOpen}
+		err := c.SubmitDraft()
+		gt.Error(t, err)
+		gt.Bool(t, errors.Is(err, model.ErrCaseNotDraft)).True()
+		// Status must stay unchanged.
+		gt.Value(t, c.Status).Equal(types.CaseStatusOpen)
+	})
+
+	t.Run("closed case cannot be submitted", func(t *testing.T) {
+		c := &model.Case{Status: types.CaseStatusClosed}
+		err := c.SubmitDraft()
+		gt.Error(t, err)
+		gt.Bool(t, errors.Is(err, model.ErrCaseNotDraft)).True()
+		gt.Value(t, c.Status).Equal(types.CaseStatusClosed)
+	})
+
+	t.Run("nil receiver returns error", func(t *testing.T) {
+		var nilCase *model.Case
+		err := nilCase.SubmitDraft()
+		gt.Error(t, err)
+		gt.Bool(t, errors.Is(err, model.ErrCaseNotDraft)).True()
+	})
 }

@@ -11,6 +11,7 @@ import {
   SYNC_CASE_CHANNEL_USERS,
   GET_CASES,
 } from '../graphql/case'
+import { DISCARD_DRAFT, GET_DRAFTS } from '../graphql/drafts'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import CustomFieldHelpRow from '../components/fields/CustomFieldHelpRow'
@@ -41,6 +42,7 @@ import { Avatar, PrivateBadge, StatusBadge } from '../components/Primitives'
 import CaseDeleteDialog from './CaseDeleteDialog'
 import ActionForm from './ActionForm'
 import ActionModal from './ActionModal'
+import CaseForm from './CaseForm'
 import styles from './CaseDetail.module.css'
 
 interface User {
@@ -87,6 +89,7 @@ export default function CaseDetail() {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [memberFilter, setMemberFilter] = useState('')
+  const [draftEditOpen, setDraftEditOpen] = useState(false)
 
   const { data, loading, error } = useQuery(GET_CASE, {
     variables: {
@@ -144,6 +147,11 @@ export default function CaseDetail() {
       { query: GET_CASES, variables: { workspaceId: currentWorkspace?.id, status: 'CLOSED' } },
     ],
   })
+  const [discardDraft, { loading: discardingDraft }] = useMutation(DISCARD_DRAFT, {
+    refetchQueries: [{ query: GET_DRAFTS, variables: { workspaceId: currentWorkspace?.id } }],
+    awaitRefetchQueries: true,
+  })
+  const [draftError, setDraftError] = useState<string | null>(null)
   const { data: slackUsersData } = useQuery(GET_SLACK_USERS)
   const slackUsers = slackUsersData?.slackUsers || []
 
@@ -184,6 +192,17 @@ export default function CaseDetail() {
   }
   const handleSync = async () => {
     await syncMembers({ variables: { workspaceId: currentWorkspace!.id, id: caseId } })
+  }
+  const handleDiscardDraft = async () => {
+    setDraftError(null)
+    if (!window.confirm(t('draftDiscardConfirm'))) return
+    try {
+      await discardDraft({ variables: { workspaceId: currentWorkspace!.id, id: caseId } })
+      navigate(`/ws/${currentWorkspace!.id}/cases`)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setDraftError(t('draftDiscardErrorGeneric', { message: msg }))
+    }
   }
   const handleAssigneesChange = async (ids: string[]) => {
     await updateCase({
@@ -256,7 +275,28 @@ export default function CaseDetail() {
         >
           {t('btnWatch')}
         </Button>
-        {c.status === 'OPEN' ? (
+        {c.status === 'DRAFT' ? (
+          <>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={handleDiscardDraft}
+              disabled={discardingDraft}
+              data-testid="discard-draft-button"
+            >
+              {t('draftDiscardButton')}
+            </Button>
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() => setDraftEditOpen(true)}
+              disabled={discardingDraft}
+              data-testid="edit-draft-button"
+            >
+              {t('btnEdit')}
+            </Button>
+          </>
+        ) : c.status === 'OPEN' ? (
           <Button
             size="sm"
             variant="danger"
@@ -326,6 +366,11 @@ export default function CaseDetail() {
           />
         </h1>
         <div className="h-detail-badges">
+          {c.status === 'DRAFT' && (
+            <span data-testid="draft-badge">
+              <StatusBadge status="DRAFT" labelDraft={t('tabDrafts')} />
+            </span>
+          )}
           {isPrivate && <span data-testid="private-badge"><PrivateBadge label={t('badgePrivate')} /></span>}
         </div>
       </div>
@@ -358,8 +403,10 @@ export default function CaseDetail() {
         )}
       </div>
 
-      {/* private banner */}
-      {isPrivate && (
+      {/* private banner — only relevant once the case is linked to a Slack
+          channel; drafts have no channel yet and would render an empty
+          msgPrivateBanner. */}
+      {isPrivate && slackChannelID && (
         <div className="h-banner warn" data-testid="case-private-banner">
           <IconLock size={13} sw={2} />
           <span className="h-banner-text">
@@ -368,6 +415,17 @@ export default function CaseDetail() {
               count: String(channelUserCount || 0),
             })}
           </span>
+        </div>
+      )}
+
+      {draftError && (
+        <div
+          role="alert"
+          className="card"
+          style={{ padding: 12, marginBottom: 16, color: 'var(--color-error)' }}
+          data-testid="draft-action-error"
+        >
+          {draftError}
         </div>
       )}
 
@@ -390,6 +448,11 @@ export default function CaseDetail() {
             />
           </section>
 
+          {/* Related Actions only exist for activated cases. Drafts have
+              no actions, no Slack channel, no async tail — hide the
+              entire section so the page stays focused on filling in the
+              draft before submission. */}
+          {c.status !== 'DRAFT' && (
           <section className="h-section">
             <div className="h-section-h">
               <span className="h-section-title">{t('sectionRelatedActions')}</span>
@@ -566,6 +629,7 @@ export default function CaseDetail() {
               </div>
             )}
           </section>
+          )}
 
         </div>
 
@@ -721,6 +785,27 @@ export default function CaseDetail() {
           deleting={deleting}
           onCancel={() => setConfirmDelete(false)}
           onConfirm={handleDelete}
+        />
+      )}
+
+      {draftEditOpen && (
+        <CaseForm
+          caseItem={{
+            id: c.id,
+            title: c.title,
+            description: c.description ?? '',
+            isPrivate: !!c.isPrivate,
+            assigneeIDs: c.assigneeIDs ?? [],
+            fields: (c.fields ?? []).map((f: any) => ({ fieldId: f.fieldId, value: f.value })),
+            status: 'DRAFT',
+          }}
+          onClose={() => setDraftEditOpen(false)}
+          onSubmitted={() => {
+            // After successful Submit the page already auto-refreshes via
+            // the refetched GET_CASE; close the modal so the user sees
+            // the freshly OPEN case detail.
+            setDraftEditOpen(false)
+          }}
         />
       )}
     </div>

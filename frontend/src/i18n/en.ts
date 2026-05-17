@@ -140,6 +140,7 @@ export const en: Messages = {
   btnNewCase: 'New {caseLabel}',
   tabOpen: 'Open',
   tabClosed: 'Closed',
+  tabDrafts: 'Drafts',
   placeholderSearch: 'Search...',
   titleCaseFormNew: 'New {caseLabel}',
   titleCaseFormEdit: 'Edit {caseLabel}',
@@ -383,4 +384,15 @@ export const en: Messages = {
   fieldHelpOptionCount: '{count} options',
   fieldHelpTypeSelect: 'Select',
   fieldHelpTypeMultiSelect: 'Multi-select',
+
+  // Drafts (surfaced inside the Case list / detail pages)
+  draftSubmitButton: 'Submit',
+  draftDiscardButton: 'Discard',
+  draftDiscardConfirm: 'Discard this draft? This cannot be undone.',
+  draftSubmitErrorMissingTitle: 'A title is required before submitting. Fill in the title above and try again.',
+  draftSubmitErrorGeneric: 'Failed to submit draft: {message}',
+  draftDiscardErrorGeneric: 'Failed to discard draft: {message}',
+  btnSaveAsDraft: 'Save as draft',
+  btnSavingDraft: 'Saving draft...',
+  btnSubmittingDraft: 'Submitting...',
 }

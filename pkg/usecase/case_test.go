@@ -138,6 +138,70 @@ func TestCaseUseCase_CreateCase(t *testing.T) {
 	})
 }
 
+func TestCaseUseCase_UpdateCase_Drafts(t *testing.T) {
+	t.Run("teammate can edit a public draft", func(t *testing.T) {
+		// Public drafts are workspace-shared, so any teammate can iterate
+		// on them via UpdateCase — including clearing the title back to
+		// empty (the in-progress state is the whole point of DRAFT).
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+
+		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
+		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Half written", "old body", nil, nil, false)
+		gt.NoError(t, err).Required()
+
+		peerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UPEER"})
+		var patch usecase.CaseUpdate
+		empty := ""
+		newBody := "rewritten by teammate"
+		patch.Title = &empty
+		patch.Description = &newBody
+
+		updated, err := uc.UpdateCase(peerCtx, testWorkspaceID, draft.ID, patch)
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.Title).Equal("")
+		gt.Value(t, updated.Description).Equal("rewritten by teammate")
+		gt.Value(t, updated.Status).Equal(types.CaseStatusDraft)
+	})
+
+	t.Run("non-reporter cannot edit a private draft", func(t *testing.T) {
+		// Private drafts stay reporter-only — the ChannelUserIDs check
+		// can't help yet (no channel), so UpdateCase falls back to the
+		// reporter ID directly.
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+
+		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
+		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Hidden", "", nil, nil, true)
+		gt.NoError(t, err).Required()
+
+		peerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UPEER"})
+		var patch usecase.CaseUpdate
+		newTitle := "stolen"
+		patch.Title = &newTitle
+		_, err = uc.UpdateCase(peerCtx, testWorkspaceID, draft.ID, patch)
+		gt.Error(t, err).Is(usecase.TestErrAccessDenied)
+	})
+
+	t.Run("OPEN case still rejects empty title", func(t *testing.T) {
+		// The empty-title gate only relaxes for drafts; once promoted to
+		// OPEN, blanking the title would break Slack channel naming and
+		// the listing UI.
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
+		open, err := uc.CreateCase(ctx, testWorkspaceID, "Live", "", nil, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		var patch usecase.CaseUpdate
+		empty := ""
+		patch.Title = &empty
+		_, err = uc.UpdateCase(ctx, testWorkspaceID, open.ID, patch)
+		gt.Error(t, err)
+	})
+}
+
 func TestCaseUseCase_UpdateCase(t *testing.T) {
 	t.Run("update case with valid fields", func(t *testing.T) {
 		repo := memory.New()
@@ -429,6 +493,27 @@ func TestCaseUseCase_CloseCase(t *testing.T) {
 		gt.Value(t, err).NotNil()
 		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
 	})
+
+	t.Run("close a draft case fails", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		created, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+			Title:      "Some draft",
+			Status:     types.CaseStatusDraft,
+			ReporterID: "UTESTUSER",
+		})
+		gt.NoError(t, err).Required()
+
+		_, err = uc.CloseCase(ctx, testWorkspaceID, created.ID)
+		gt.Error(t, err).Is(usecase.ErrCaseIsDraft)
+
+		// Status must remain DRAFT.
+		got, err := repo.Case().Get(ctx, testWorkspaceID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.Status).Equal(types.CaseStatusDraft)
+	})
 }
 
 func TestCaseUseCase_ReopenCase(t *testing.T) {
@@ -471,6 +556,27 @@ func TestCaseUseCase_ReopenCase(t *testing.T) {
 		_, err := uc.ReopenCase(ctx, testWorkspaceID, 999)
 		gt.Value(t, err).NotNil()
 		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
+	})
+
+	t.Run("reopen a draft case fails", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		created, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+			Title:      "Some draft",
+			Status:     types.CaseStatusDraft,
+			ReporterID: "UTESTUSER",
+		})
+		gt.NoError(t, err).Required()
+
+		_, err = uc.ReopenCase(ctx, testWorkspaceID, created.ID)
+		gt.Error(t, err).Is(usecase.ErrCaseIsDraft)
+
+		// Status must remain DRAFT.
+		got, err := repo.Case().Get(ctx, testWorkspaceID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.Status).Equal(types.CaseStatusDraft)
 	})
 }
 
@@ -1569,5 +1675,605 @@ func TestCaseUseCase_CreateCase_DuplicateRequestKey(t *testing.T) {
 		gt.Value(t, case1.ID).NotEqual(case2.ID)
 		gt.Value(t, case1.Title).Equal("Case A")
 		gt.Value(t, case2.Title).Equal("Case B")
+	})
+}
+
+func TestCaseUseCase_CreateDraft(t *testing.T) {
+	t.Run("create draft without side effects", func(t *testing.T) {
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+		}
+		uc := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UAUTHOR"})
+
+		got, err := uc.CreateDraft(ctx, testWorkspaceID, "Half-written", "Desc", []string{"UASSIGN"}, nil, true)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.Status).Equal(types.CaseStatusDraft)
+		gt.Value(t, got.Title).Equal("Half-written")
+		gt.Value(t, got.Description).Equal("Desc")
+		gt.Value(t, got.ReporterID).Equal("UAUTHOR")
+		gt.Value(t, got.IsPrivate).Equal(true)
+		gt.Number(t, len(got.AssigneeIDs)).Equal(1)
+		gt.Value(t, got.AssigneeIDs[0]).Equal("UASSIGN")
+		gt.Value(t, got.SlackChannelID).Equal("")
+
+		// Slack channel creation MUST NOT have fired.
+		gt.String(t, mock.invitedChannelID).Equal("")
+		gt.Array(t, mock.invitedUserIDs).Length(0)
+
+		// Persisted state matches what was returned.
+		stored, err := repo.Case().Get(context.Background(), testWorkspaceID, got.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, stored.Status).Equal(types.CaseStatusDraft)
+		gt.Value(t, stored.Title).Equal("Half-written")
+		gt.Value(t, stored.ReporterID).Equal("UAUTHOR")
+	})
+
+	t.Run("create draft with empty title is allowed", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UAUTHOR"})
+
+		got, err := uc.CreateDraft(ctx, testWorkspaceID, "", "Just a body", nil, nil, false)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.Status).Equal(types.CaseStatusDraft)
+		gt.Value(t, got.Title).Equal("")
+	})
+
+	t.Run("create draft skips required-field check", func(t *testing.T) {
+		// Draft is by definition half-finished, so required fields that the
+		// regular CreateCase path would reject must NOT block Save as Draft.
+		// SubmitDraft is what enforces the full schema later.
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: testWorkspaceID, Name: "Test"},
+			FieldSchema: &config.FieldSchema{
+				Fields: []config.FieldDefinition{
+					{
+						ID:       "category",
+						Name:     "Category",
+						Type:     types.FieldTypeSelect,
+						Required: true,
+						Options: []config.FieldOption{
+							{ID: "a", Name: "A"},
+							{ID: "b", Name: "B"},
+						},
+					},
+				},
+			},
+		})
+		uc := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UAUTHOR"})
+
+		// No "category" supplied — required field missing.
+		got, err := uc.CreateDraft(ctx, testWorkspaceID, "Half", "", nil, nil, false)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.Status).Equal(types.CaseStatusDraft)
+		gt.Number(t, len(got.FieldValues)).Equal(0)
+	})
+}
+
+func TestCaseUseCase_ListDrafts(t *testing.T) {
+	t.Run("returns every draft in the workspace regardless of reporter", func(t *testing.T) {
+		// Drafts are surfaced workspace-wide so anyone on the team can pick
+		// up an in-progress entry — reporter scoping was intentionally
+		// removed once the feature graduated past the original Slack-only
+		// design.
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+
+		mineCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
+		mineA, err := uc.CreateDraft(mineCtx, testWorkspaceID, "Mine A", "", nil, nil, false)
+		gt.NoError(t, err).Required()
+		mineB, err := uc.CreateDraft(mineCtx, testWorkspaceID, "Mine B", "", nil, nil, false)
+		gt.NoError(t, err).Required()
+
+		otherCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
+		theirs, err := uc.CreateDraft(otherCtx, testWorkspaceID, "Theirs", "", nil, nil, false)
+		gt.NoError(t, err).Required()
+
+		// Open case by UMINE — must NOT appear in drafts.
+		_, err = uc.CreateCase(mineCtx, testWorkspaceID, "Submitted", "", nil, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		got, err := uc.ListDrafts(mineCtx, testWorkspaceID)
+		gt.NoError(t, err).Required()
+		gt.Number(t, len(got)).Equal(3)
+		ids := map[int64]bool{}
+		for _, c := range got {
+			ids[c.ID] = true
+			gt.Value(t, c.Status).Equal(types.CaseStatusDraft)
+		}
+		gt.Bool(t, ids[mineA.ID]).True()
+		gt.Bool(t, ids[mineB.ID]).True()
+		gt.Bool(t, ids[theirs.ID]).True()
+	})
+
+	t.Run("private drafts stay reporter-only", func(t *testing.T) {
+		// A draft has no Slack channel yet, so the usual ChannelUserIDs-based
+		// access control locks everyone out of private drafts. To keep the
+		// reporter from losing access to their own private entry while still
+		// hiding it from teammates, ListDrafts filters private drafts by
+		// reporter ID directly.
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+
+		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOWNER"})
+		privateDraft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Secret", "", nil, nil, true)
+		gt.NoError(t, err).Required()
+		publicDraft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Public", "", nil, nil, false)
+		gt.NoError(t, err).Required()
+
+		// The owner sees both their public and their private draft.
+		mine, err := uc.ListDrafts(ownerCtx, testWorkspaceID)
+		gt.NoError(t, err).Required()
+		gt.Number(t, len(mine)).Equal(2)
+
+		// A different teammate sees the public one but NOT the private one.
+		otherCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UPEER"})
+		theirs, err := uc.ListDrafts(otherCtx, testWorkspaceID)
+		gt.NoError(t, err).Required()
+		gt.Number(t, len(theirs)).Equal(1)
+		gt.Value(t, theirs[0].ID).Equal(publicDraft.ID)
+
+		// Sanity: the private draft still exists in the repo — it's just
+		// hidden from the peer at the usecase layer.
+		stored, err := repo.Case().Get(context.Background(), testWorkspaceID, privateDraft.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, stored.IsPrivate).Equal(true)
+	})
+
+	t.Run("no auth token surfaces public drafts only", func(t *testing.T) {
+		// Bot / system contexts still get the workspace's public drafts —
+		// hiding everything would mask legitimate background work — but
+		// private drafts are filtered out (no reporter to match).
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+
+		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOWNER"})
+		_, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Public draft", "", nil, nil, false)
+		gt.NoError(t, err).Required()
+		_, err = uc.CreateDraft(ownerCtx, testWorkspaceID, "Private draft", "", nil, nil, true)
+		gt.NoError(t, err).Required()
+
+		got, err := uc.ListDrafts(context.Background(), testWorkspaceID)
+		gt.NoError(t, err).Required()
+		gt.Number(t, len(got)).Equal(1)
+		gt.Value(t, got[0].Title).Equal("Public draft")
+	})
+}
+
+func TestCaseUseCase_GetDraft(t *testing.T) {
+	t.Run("reporter retrieves their own draft", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
+
+		created, err := uc.CreateDraft(ctx, testWorkspaceID, "Mine", "Body", nil, nil, false)
+		gt.NoError(t, err).Required()
+
+		got, err := uc.GetDraft(ctx, testWorkspaceID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.ID).Equal(created.ID)
+		gt.Value(t, got.Title).Equal("Mine")
+	})
+
+	t.Run("non-reporter can read a public draft", func(t *testing.T) {
+		// Public drafts surface across the workspace so any teammate can
+		// review an in-progress entry. The reporter check is only enforced
+		// at the mutation layer (SubmitDraft / DiscardDraft).
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+
+		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
+		created, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Shared", "", nil, nil, false)
+		gt.NoError(t, err).Required()
+
+		otherCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
+		got, err := uc.GetDraft(otherCtx, testWorkspaceID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.ID).Equal(created.ID)
+		gt.Value(t, got.Title).Equal("Shared")
+	})
+
+	t.Run("non-reporter cannot read a private draft", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+
+		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
+		created, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Hidden", "", nil, nil, true)
+		gt.NoError(t, err).Required()
+
+		otherCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
+		_, err = uc.GetDraft(otherCtx, testWorkspaceID, created.ID)
+		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
+	})
+
+	t.Run("non-draft case returns ErrCaseNotDraft", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
+
+		open, err := uc.CreateCase(ctx, testWorkspaceID, "Open Case", "", nil, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		_, err = uc.GetDraft(ctx, testWorkspaceID, open.ID)
+		gt.Error(t, err).Is(usecase.ErrCaseNotDraft)
+	})
+
+	t.Run("unknown id returns ErrCaseNotFound", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
+
+		_, err := uc.GetDraft(ctx, testWorkspaceID, 999)
+		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
+	})
+}
+
+func TestCaseUseCase_SubmitDraft(t *testing.T) {
+	t.Run("promotes draft and runs activation side effects", func(t *testing.T) {
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+		}
+		uc := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UAUTHOR"})
+
+		draft, err := uc.CreateDraft(ctx, testWorkspaceID, "Will Submit", "Body", []string{"UASSIGN"}, nil, false)
+		gt.NoError(t, err).Required()
+		gt.Value(t, draft.Status).Equal(types.CaseStatusDraft)
+
+		submitted, err := uc.SubmitDraft(ctx, testWorkspaceID, draft.ID, nil)
+		gt.NoError(t, err).Required()
+		gt.Value(t, submitted.Status).Equal(types.CaseStatusOpen)
+		gt.Value(t, submitted.ID).Equal(draft.ID)
+		gt.Value(t, submitted.SlackChannelID).Equal(fmt.Sprintf("C%d", draft.ID))
+
+		// Reporter + assignee both invited during activation.
+		gt.Array(t, mock.invitedUserIDs).Length(2)
+		gt.Value(t, mock.invitedUserIDs[0]).Equal("UAUTHOR")
+		gt.Value(t, mock.invitedUserIDs[1]).Equal("UASSIGN")
+
+		// Persisted state matches.
+		stored, err := repo.Case().Get(context.Background(), testWorkspaceID, draft.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, stored.Status).Equal(types.CaseStatusOpen)
+		gt.Value(t, stored.SlackChannelID).Equal(fmt.Sprintf("C%d", draft.ID))
+	})
+
+	t.Run("submit-with-patch applies edits and still invites reporter", func(t *testing.T) {
+		// Architecturally important: "save final edits and submit" is one
+		// business operation, so it runs through a single SubmitDraft call.
+		// We patch the title, swap assignees, and verify the resulting
+		// channel invite list still includes the original reporter (UAUTHOR)
+		// even though the patch did not name them.
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+		}
+		uc := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UAUTHOR"})
+
+		draft, err := uc.CreateDraft(ctx, testWorkspaceID, "Half-written", "old body", []string{"UOLD"}, nil, false)
+		gt.NoError(t, err).Required()
+
+		newTitle := "Final title"
+		newBody := "polished body"
+		var patch usecase.CaseUpdate
+		patch.Title = &newTitle
+		patch.Description = &newBody
+		patch.SetAssignees([]string{"UNEW"})
+
+		submitted, err := uc.SubmitDraft(ctx, testWorkspaceID, draft.ID, &patch)
+		gt.NoError(t, err).Required()
+		gt.Value(t, submitted.Status).Equal(types.CaseStatusOpen)
+		gt.Value(t, submitted.Title).Equal("Final title")
+		gt.Value(t, submitted.Description).Equal("polished body")
+		gt.Value(t, submitted.ReporterID).Equal("UAUTHOR")
+
+		// Channel invites: reporter (UAUTHOR) + new assignee (UNEW).
+		// The pre-edit assignee (UOLD) has been replaced.
+		gt.Array(t, mock.invitedUserIDs).Length(2)
+		gt.Value(t, mock.invitedUserIDs[0]).Equal("UAUTHOR")
+		gt.Value(t, mock.invitedUserIDs[1]).Equal("UNEW")
+
+		// The persisted case reflects the patch — i.e. the same value the
+		// channel was activated against, not a stale draft snapshot.
+		stored, err := repo.Case().Get(context.Background(), testWorkspaceID, draft.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, stored.Title).Equal("Final title")
+		gt.Value(t, stored.Description).Equal("polished body")
+		gt.Number(t, len(stored.AssigneeIDs)).Equal(1)
+		gt.Value(t, stored.AssigneeIDs[0]).Equal("UNEW")
+	})
+
+	t.Run("requires title to submit", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UAUTHOR"})
+
+		draft, err := uc.CreateDraft(ctx, testWorkspaceID, "", "Body only", nil, nil, false)
+		gt.NoError(t, err).Required()
+
+		_, err = uc.SubmitDraft(ctx, testWorkspaceID, draft.ID, nil)
+		gt.Error(t, err)
+
+		stored, err := repo.Case().Get(context.Background(), testWorkspaceID, draft.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, stored.Status).Equal(types.CaseStatusDraft)
+	})
+
+	t.Run("submitter (actor) is invited even when different from reporter", func(t *testing.T) {
+		// When Bob promotes Alice's draft, both end up in the case channel:
+		// Alice via ReporterID and Bob via the auth-context user that
+		// triggered activateCase. Without this guarantee, the user who
+		// hits Submit on the Web side would find themselves locked out of
+		// the freshly-OPEN case channel.
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+		}
+		uc := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
+
+		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UALICE"})
+		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Public draft", "", nil, nil, false)
+		gt.NoError(t, err).Required()
+
+		submitterCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UBOB"})
+		submitted, err := uc.SubmitDraft(submitterCtx, testWorkspaceID, draft.ID, nil)
+		gt.NoError(t, err).Required()
+		gt.Value(t, submitted.Status).Equal(types.CaseStatusOpen)
+		// Reporter is preserved — promotion doesn't reassign ownership.
+		gt.Value(t, submitted.ReporterID).Equal("UALICE")
+
+		// Channel invite list contains both the reporter (UALICE) and the
+		// submitter (UBOB). Ordering: reporter, actor, assignees.
+		gt.Array(t, mock.invitedUserIDs).Length(2)
+		gt.Value(t, mock.invitedUserIDs[0]).Equal("UALICE")
+		gt.Value(t, mock.invitedUserIDs[1]).Equal("UBOB")
+	})
+
+	t.Run("any teammate can submit a public draft", func(t *testing.T) {
+		// Drafts are team-shared — once a teammate visits a public draft
+		// they can promote it to OPEN. The original reporter stays
+		// recorded on the case, and channel activation invites them as
+		// usual. Private drafts stay reporter-only because non-reporters
+		// can't even see them.
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+		}
+		uc := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
+
+		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
+		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Shared", "", nil, nil, false)
+		gt.NoError(t, err).Required()
+
+		otherCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
+		submitted, err := uc.SubmitDraft(otherCtx, testWorkspaceID, draft.ID, nil)
+		gt.NoError(t, err).Required()
+		gt.Value(t, submitted.Status).Equal(types.CaseStatusOpen)
+		gt.Value(t, submitted.ReporterID).Equal("UMINE")
+	})
+
+	t.Run("non-reporter cannot submit a private draft", func(t *testing.T) {
+		// Private drafts are invisible to non-reporters, so SubmitDraft
+		// reaches them as ErrCaseNotFound from GetDraft (same code path
+		// as "draft does not exist").
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+
+		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
+		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Secret", "", nil, nil, true)
+		gt.NoError(t, err).Required()
+
+		otherCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
+		_, err = uc.SubmitDraft(otherCtx, testWorkspaceID, draft.ID, nil)
+		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
+	})
+
+	t.Run("rejects submit when required field is still missing", func(t *testing.T) {
+		// CreateDraft skipped the required check, but SubmitDraft must enforce
+		// it before flipping the case to OPEN — otherwise an incomplete draft
+		// would slip past the workspace schema.
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: testWorkspaceID, Name: "Test"},
+			FieldSchema: &config.FieldSchema{
+				Fields: []config.FieldDefinition{
+					{
+						ID:       "category",
+						Name:     "Category",
+						Type:     types.FieldTypeSelect,
+						Required: true,
+						Options: []config.FieldOption{
+							{ID: "a", Name: "A"},
+							{ID: "b", Name: "B"},
+						},
+					},
+				},
+			},
+		})
+		uc := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UAUTHOR"})
+
+		draft, err := uc.CreateDraft(ctx, testWorkspaceID, "Has Title", "", nil, nil, false)
+		gt.NoError(t, err).Required()
+
+		_, err = uc.SubmitDraft(ctx, testWorkspaceID, draft.ID, nil)
+		gt.Error(t, err).Is(usecase.ErrMissingRequiredOnSubmit)
+		// The error message must name the missing field so the UI can
+		// point the user at it directly (rather than the legacy opaque
+		// "required field is missing").
+		gt.String(t, err.Error()).Contains("Category")
+
+		// The draft survives the failed submit so the user can fill in the
+		// missing field and retry.
+		stored, err := repo.Case().Get(context.Background(), testWorkspaceID, draft.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, stored.Status).Equal(types.CaseStatusDraft)
+		gt.Value(t, stored.Title).Equal("Has Title")
+	})
+
+	t.Run("rolls back to DRAFT when activation fails", func(t *testing.T) {
+		repo := memory.New()
+		// CreateChannel returns error → activation fails. SubmitDraft's
+		// rollback policy preserves the user's work: the case row stays,
+		// status reverts to DRAFT, and the user can retry from the same
+		// entry rather than starting over.
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, _ int64, _ string, _ string) (string, error) {
+				return "", errors.New("channel creation rejected")
+			},
+		}
+		uc := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UAUTHOR"})
+
+		draft, err := uc.CreateDraft(ctx, testWorkspaceID, "Will Fail", "Body", nil, nil, false)
+		gt.NoError(t, err).Required()
+
+		_, err = uc.SubmitDraft(ctx, testWorkspaceID, draft.ID, nil)
+		gt.Error(t, err)
+
+		// Persisted case row survives; status is flipped back to DRAFT.
+		stored, getErr := repo.Case().Get(context.Background(), testWorkspaceID, draft.ID)
+		gt.NoError(t, getErr).Required()
+		gt.Value(t, stored.Status).Equal(types.CaseStatusDraft)
+		gt.Value(t, stored.Title).Equal("Will Fail")
+		gt.Value(t, stored.Description).Equal("Body")
+	})
+
+	t.Run("already-submitted case cannot be submitted again", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UAUTHOR"})
+
+		open, err := uc.CreateCase(ctx, testWorkspaceID, "Already Open", "", nil, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		_, err = uc.SubmitDraft(ctx, testWorkspaceID, open.ID, nil)
+		gt.Error(t, err).Is(usecase.ErrCaseNotDraft)
+	})
+}
+
+func TestCaseUseCase_DiscardDraft(t *testing.T) {
+	t.Run("reporter discards own draft", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
+
+		draft, err := uc.CreateDraft(ctx, testWorkspaceID, "Discard Me", "", nil, nil, false)
+		gt.NoError(t, err).Required()
+
+		err = uc.DiscardDraft(ctx, testWorkspaceID, draft.ID)
+		gt.NoError(t, err).Required()
+
+		_, getErr := repo.Case().Get(context.Background(), testWorkspaceID, draft.ID)
+		gt.Error(t, getErr)
+	})
+
+	t.Run("any teammate can discard a public draft", func(t *testing.T) {
+		// Public drafts are workspace-shared so any teammate can clean one
+		// up. Private drafts remain reporter-only because GetDraft hides
+		// them from everyone else (covered in the next case).
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+
+		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
+		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Shared", "", nil, nil, false)
+		gt.NoError(t, err).Required()
+
+		otherCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
+		gt.NoError(t, uc.DiscardDraft(otherCtx, testWorkspaceID, draft.ID)).Required()
+
+		_, getErr := repo.Case().Get(context.Background(), testWorkspaceID, draft.ID)
+		gt.Error(t, getErr)
+	})
+
+	t.Run("non-reporter cannot discard a private draft", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+
+		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
+		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Hidden", "", nil, nil, true)
+		gt.NoError(t, err).Required()
+
+		otherCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
+		err = uc.DiscardDraft(otherCtx, testWorkspaceID, draft.ID)
+		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
+
+		// Draft must still exist after the failed discard.
+		stored, getErr := repo.Case().Get(context.Background(), testWorkspaceID, draft.ID)
+		gt.NoError(t, getErr).Required()
+		gt.Value(t, stored.Status).Equal(types.CaseStatusDraft)
+	})
+
+	t.Run("non-draft case is rejected", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
+
+		open, err := uc.CreateCase(ctx, testWorkspaceID, "Open", "", nil, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		err = uc.DiscardDraft(ctx, testWorkspaceID, open.ID)
+		gt.Error(t, err).Is(usecase.ErrCaseNotDraft)
+	})
+}
+
+func TestCaseUseCase_GetCase_DraftVisibility(t *testing.T) {
+	t.Run("public draft is readable by anyone in the workspace", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+
+		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
+		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Public draft", "", nil, nil, false)
+		gt.NoError(t, err).Required()
+
+		// Reporter sees their draft.
+		got, err := uc.GetCase(ownerCtx, testWorkspaceID, draft.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.ID).Equal(draft.ID)
+
+		// Stranger also sees the public draft (workspace-wide visibility).
+		otherCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
+		got, err = uc.GetCase(otherCtx, testWorkspaceID, draft.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.ID).Equal(draft.ID)
+	})
+
+	t.Run("private draft stays hidden from non-reporters", func(t *testing.T) {
+		// Private drafts have no Slack channel yet, so the normal
+		// ChannelUserIDs-based check would lock out the reporter too.
+		// GetCase falls back to a reporter check for private drafts in
+		// DRAFT status.
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+
+		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
+		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Secret", "", nil, nil, true)
+		gt.NoError(t, err).Required()
+
+		got, err := uc.GetCase(ownerCtx, testWorkspaceID, draft.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.ID).Equal(draft.ID)
+
+		otherCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
+		_, err = uc.GetCase(otherCtx, testWorkspaceID, draft.ID)
+		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
 	})
 }

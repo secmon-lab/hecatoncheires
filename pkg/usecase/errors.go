@@ -12,6 +12,18 @@ var (
 	// Status errors
 	ErrCaseAlreadyClosed = errors.New("case is already closed")
 	ErrCaseAlreadyOpen   = errors.New("case is already open")
+	// ErrCaseIsDraft is returned when a status-transition operation (close /
+	// reopen) is invoked on a case that is still in DRAFT. Drafts only leave
+	// DRAFT via SubmitDraft (→ OPEN) or DiscardDraft (delete).
+	ErrCaseIsDraft = errors.New("case is in draft state")
+	// ErrCaseNotDraft is returned by draft-specific operations (Submit /
+	// Discard) when the targeted case is not in DRAFT.
+	ErrCaseNotDraft = errors.New("case is not a draft")
+	// ErrMissingRequiredOnSubmit is returned by SubmitDraft when the draft
+	// is missing one or more required custom fields. The wrapping goerr
+	// carries the field IDs and human-friendly names so the frontend can
+	// point the user at exactly which inputs to fill.
+	ErrMissingRequiredOnSubmit = errors.New("draft is missing required fields")
 
 	// Action Slack-post state errors
 	ErrSlackMessageAlreadyPosted = errors.New("action already has a Slack message")
