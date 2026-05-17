@@ -480,18 +480,18 @@ func (uc *CaseUseCase) GetCase(ctx context.Context, workspaceID string, id int64
 		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
 	}
 
-	// Drafts are reporter-only. When the auth context is present, only the
-	// reporter may see (or even discover) their own draft; for anyone else
-	// the case is reported as not found. Without an auth context (system /
-	// bot calls) we fall through to the normal access path so internal
-	// flows that work with full models keep functioning.
 	token, tokenErr := auth.TokenFromContext(ctx)
-	if caseModel.IsDraft() && tokenErr == nil && caseModel.ReporterID != token.Sub {
+
+	// Private drafts have no Slack channel yet, so the usual
+	// ChannelUserIDs-based access check would lock out the reporter too.
+	// For private drafts we restrict visibility to the reporter; public
+	// drafts behave like any other case (workspace-wide listing).
+	if caseModel.IsDraft() && caseModel.IsPrivate && tokenErr == nil && caseModel.ReporterID != token.Sub {
 		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
 	}
 
-	// Access control for private cases
-	if tokenErr == nil && !model.IsCaseAccessible(caseModel, token.Sub) {
+	// Access control for non-draft private cases.
+	if tokenErr == nil && !caseModel.IsDraft() && !model.IsCaseAccessible(caseModel, token.Sub) {
 		return model.RestrictCase(caseModel), nil
 	}
 
@@ -582,25 +582,40 @@ func (uc *CaseUseCase) ReopenCase(ctx context.Context, workspaceID string, id in
 	return updated, nil
 }
 
-// ListDrafts returns the auth-context user's own drafts in the workspace.
-// Drafts are author-scoped; callers without an auth token receive an empty
-// list (drafts cannot be browsed anonymously / from a bot context).
+// ListDrafts returns every draft case in the workspace. Drafts are
+// workspace-wide so any team member can pick one up; private drafts are
+// the exception and remain visible only to their reporter (a draft has
+// no Slack channel yet, so the usual IsCaseAccessible check via
+// ChannelUserIDs would lock everyone out — we use ReporterID instead).
 func (uc *CaseUseCase) ListDrafts(ctx context.Context, workspaceID string) ([]*model.Case, error) {
-	token, tokenErr := auth.TokenFromContext(ctx)
-	if tokenErr != nil {
-		return []*model.Case{}, nil
-	}
-	drafts, err := uc.repo.Case().ListDrafts(ctx, workspaceID, token.Sub)
+	drafts, err := uc.repo.Case().ListDrafts(ctx, workspaceID)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to list drafts")
 	}
-	return drafts, nil
+
+	// Apply private-draft access control. Callers without an auth token
+	// (bots / system contexts) only see public drafts.
+	var requesterID string
+	if token, tokenErr := auth.TokenFromContext(ctx); tokenErr == nil {
+		requesterID = token.Sub
+	}
+
+	visible := make([]*model.Case, 0, len(drafts))
+	for _, d := range drafts {
+		if d.IsPrivate && d.ReporterID != requesterID {
+			continue
+		}
+		visible = append(visible, d)
+	}
+	return visible, nil
 }
 
-// GetDraft returns a single draft case to its reporter. Other users see
-// ErrCaseNotFound (drafts must never leak existence to non-reporters);
-// non-draft cases return ErrCaseNotDraft so callers cannot reuse the draft
-// resolver to peek at submitted cases.
+// GetDraft returns a single draft case. Public drafts are visible
+// workspace-wide so any team member can preview an in-progress entry;
+// private drafts remain reporter-only (the usual ChannelUserIDs check
+// can't help yet — the draft has no Slack channel). Non-draft cases
+// return ErrCaseNotDraft so callers cannot reuse the draft resolver to
+// peek at submitted cases.
 func (uc *CaseUseCase) GetDraft(ctx context.Context, workspaceID string, id int64) (*model.Case, error) {
 	c, err := uc.repo.Case().Get(ctx, workspaceID, id)
 	if err != nil {
@@ -610,10 +625,28 @@ func (uc *CaseUseCase) GetDraft(ctx context.Context, workspaceID string, id int6
 		return nil, goerr.Wrap(ErrCaseNotDraft, "case is not a draft", goerr.V(CaseIDKey, id))
 	}
 
+	if c.IsPrivate {
+		token, tokenErr := auth.TokenFromContext(ctx)
+		if tokenErr != nil || c.ReporterID != token.Sub {
+			return nil, goerr.Wrap(ErrCaseNotFound, "draft not found", goerr.V(CaseIDKey, id))
+		}
+	}
+	return c, nil
+}
+
+// assertDraftReporter loads the draft via GetDraft (which already filters
+// private drafts) and additionally verifies the auth-context user is the
+// draft's reporter. Used by SubmitDraft / DiscardDraft so mutating actions
+// stay owner-only even when the draft is publicly readable.
+func (uc *CaseUseCase) assertDraftReporter(ctx context.Context, workspaceID string, id int64) (*model.Case, error) {
+	c, err := uc.GetDraft(ctx, workspaceID, id)
+	if err != nil {
+		return nil, err
+	}
 	token, tokenErr := auth.TokenFromContext(ctx)
 	if tokenErr != nil || c.ReporterID != token.Sub {
-		// Hide existence from non-reporters.
-		return nil, goerr.Wrap(ErrCaseNotFound, "draft not found", goerr.V(CaseIDKey, id))
+		return nil, goerr.Wrap(ErrAccessDenied, "only the draft's reporter may act on it",
+			goerr.V(CaseIDKey, id))
 	}
 	return c, nil
 }
@@ -623,7 +656,7 @@ func (uc *CaseUseCase) GetDraft(ctx context.Context, workspaceID string, id int6
 // Only the draft's reporter may submit it. If activation fails, the draft is
 // kept in DRAFT so the user can retry without losing the saved entry.
 func (uc *CaseUseCase) SubmitDraft(ctx context.Context, workspaceID string, id int64) (*model.Case, error) {
-	c, err := uc.GetDraft(ctx, workspaceID, id)
+	c, err := uc.assertDraftReporter(ctx, workspaceID, id)
 	if err != nil {
 		return nil, err
 	}
@@ -681,12 +714,12 @@ func (uc *CaseUseCase) SubmitDraft(ctx context.Context, workspaceID string, id i
 	return activated, nil
 }
 
-// DiscardDraft permanently deletes the caller's draft. Non-draft cases are
-// rejected so callers cannot pivot this method into a "delete any case I
-// reported" shortcut.
+// DiscardDraft permanently deletes the caller's draft. Only the draft's
+// reporter may discard it (drafts are publicly readable but owner-only
+// for mutating actions). Non-draft cases are rejected so callers cannot
+// pivot this method into a "delete any case I reported" shortcut.
 func (uc *CaseUseCase) DiscardDraft(ctx context.Context, workspaceID string, id int64) error {
-	// Reuse GetDraft for the reporter-only / draft-only checks.
-	c, err := uc.GetDraft(ctx, workspaceID, id)
+	c, err := uc.assertDraftReporter(ctx, workspaceID, id)
 	if err != nil {
 		return err
 	}

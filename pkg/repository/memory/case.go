@@ -151,7 +151,7 @@ func (r *caseRepository) List(ctx context.Context, workspaceID string, opts ...i
 	return cases, nil
 }
 
-func (r *caseRepository) ListDrafts(ctx context.Context, workspaceID, reporterID string) ([]*model.Case, error) {
+func (r *caseRepository) ListDrafts(ctx context.Context, workspaceID string) ([]*model.Case, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -163,9 +163,6 @@ func (r *caseRepository) ListDrafts(ctx context.Context, workspaceID, reporterID
 	drafts := make([]*model.Case, 0)
 	for _, c := range ws {
 		if !c.IsDraft() {
-			continue
-		}
-		if c.ReporterID != reporterID {
 			continue
 		}
 		drafts = append(drafts, copyCase(c))

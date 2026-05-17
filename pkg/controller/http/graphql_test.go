@@ -2864,7 +2864,8 @@ func TestGraphQLHandler_DraftsLifecycle(t *testing.T) {
 		gt.Value(t, int64(listResult.Drafts[0].ID)).Equal(draft.ID)
 		gt.Value(t, listResult.Drafts[0].Status).Equal("DRAFT")
 
-		// Stranger sees no drafts.
+		// Stranger sees the public draft too — drafts are workspace-wide
+		// readable so any team member can pick up an in-progress entry.
 		strangerRec := executeGraphQLRequestWithAuth(t, handler, draftsQuery, map[string]interface{}{
 			"workspaceId": testWorkspaceID,
 		}, strangerID)
@@ -2876,15 +2877,17 @@ func TestGraphQLHandler_DraftsLifecycle(t *testing.T) {
 			} `json:"drafts"`
 		}
 		gt.NoError(t, json.Unmarshal(strangerResp.Data, &strangerResult)).Required()
-		gt.Array(t, strangerResult.Drafts).Length(0)
+		gt.Array(t, strangerResult.Drafts).Length(1).Required()
+		gt.Value(t, int64(strangerResult.Drafts[0].ID)).Equal(draft.ID)
 
-		// Stranger cannot fetch the draft via the `case` query — it must
-		// appear as not found, not as a hidden record.
+		// Stranger CAN fetch the public draft via the `case` query — only
+		// private drafts are hidden from non-reporters.
 		caseQuery := `
 			query($workspaceId: String!, $id: Int!) {
 				case(workspaceId: $workspaceId, id: $id) {
 					id
 					title
+					status
 				}
 			}
 		`
@@ -2893,7 +2896,17 @@ func TestGraphQLHandler_DraftsLifecycle(t *testing.T) {
 			"id":          int(draft.ID),
 		}, strangerID)
 		caseResp := parseGraphQLResponse(t, caseRec)
-		gt.Number(t, len(caseResp.Errors)).GreaterOrEqual(1)
+		gt.Array(t, caseResp.Errors).Length(0)
+		var caseResult struct {
+			Case struct {
+				ID     int    `json:"id"`
+				Title  string `json:"title"`
+				Status string `json:"status"`
+			} `json:"case"`
+		}
+		gt.NoError(t, json.Unmarshal(caseResp.Data, &caseResult)).Required()
+		gt.Value(t, int64(caseResult.Case.ID)).Equal(draft.ID)
+		gt.Value(t, caseResult.Case.Status).Equal("DRAFT")
 
 		// Reporter submits → Case is promoted to OPEN. Submit requires a
 		// non-empty title, which we provided above.

@@ -108,7 +108,7 @@ func TestSlackUseCases_HandleSaveAsDraftClick(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		// Exactly one draft is persisted, owned by the reporter.
-		drafts, err := repo.Case().ListDrafts(context.Background(), "ws-1", "UREPORTER")
+		drafts, err := repo.Case().ListDrafts(context.Background(), "ws-1")
 		gt.NoError(t, err).Required()
 		gt.Number(t, len(drafts)).Equal(1)
 		gt.Value(t, drafts[0].Status).Equal(types.CaseStatusDraft)
@@ -148,7 +148,7 @@ func TestSlackUseCases_HandleSaveAsDraftClick(t *testing.T) {
 		err := slackUC.HandleSaveAsDraftClick(context.Background(), caseUC, cb)
 		gt.NoError(t, err).Required()
 
-		drafts, err := repo.Case().ListDrafts(context.Background(), "ws-1", "UREPORTER")
+		drafts, err := repo.Case().ListDrafts(context.Background(), "ws-1")
 		gt.NoError(t, err).Required()
 		gt.Number(t, len(drafts)).Equal(1)
 		gt.Value(t, drafts[0].Title).Equal("")
@@ -164,7 +164,7 @@ func TestSlackUseCases_HandleSaveAsDraftClick(t *testing.T) {
 		err := slackUC.HandleSaveAsDraftClick(context.Background(), nil, cb)
 		gt.Error(t, err)
 
-		drafts, listErr := repo.Case().ListDrafts(context.Background(), "ws-1", "UREPORTER")
+		drafts, listErr := repo.Case().ListDrafts(context.Background(), "ws-1")
 		gt.NoError(t, listErr).Required()
 		gt.Number(t, len(drafts)).Equal(0)
 	})
@@ -216,7 +216,7 @@ func TestSlackUseCases_HandleSaveAsDraftClick(t *testing.T) {
 		// Draft must be saved regardless of the ephemeral hiccup.
 		gt.NoError(t, err).Required()
 
-		drafts, err := repo.Case().ListDrafts(context.Background(), "ws-1", "UREPORTER")
+		drafts, err := repo.Case().ListDrafts(context.Background(), "ws-1")
 		gt.NoError(t, err).Required()
 		gt.Number(t, len(drafts)).Equal(1)
 	})

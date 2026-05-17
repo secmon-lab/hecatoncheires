@@ -161,10 +161,10 @@ func (r *caseRepository) List(ctx context.Context, workspaceID string, opts ...i
 	return cases, nil
 }
 
-func (r *caseRepository) ListDrafts(ctx context.Context, workspaceID, reporterID string) ([]*model.Case, error) {
-	// Filter on Status only at the Firestore layer (single-field index) and
-	// match the author client-side; drafts per author should be small, and
-	// adding ReporterID to the Where would force a composite index.
+func (r *caseRepository) ListDrafts(ctx context.Context, workspaceID string) ([]*model.Case, error) {
+	// Single-field index on Status only; private-draft access control is
+	// applied by the usecase layer, not by extra Where clauses (which would
+	// require a composite index).
 	iter := r.casesCollection(workspaceID).
 		Where("Status", "==", string(types.CaseStatusDraft)).
 		Documents(ctx)
@@ -183,9 +183,6 @@ func (r *caseRepository) ListDrafts(ctx context.Context, workspaceID, reporterID
 		var c model.Case
 		if err := docSnap.DataTo(&c); err != nil {
 			return nil, goerr.Wrap(err, "failed to decode draft", goerr.V("doc_id", docSnap.Ref.ID))
-		}
-		if c.ReporterID != reporterID {
-			continue
 		}
 		drafts = append(drafts, &c)
 	}

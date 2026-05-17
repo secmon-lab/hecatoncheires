@@ -140,6 +140,7 @@ export const ja: Messages = {
   btnNewCase: '新規 {caseLabel}',
   tabOpen: 'オープン',
   tabClosed: 'クローズ',
+  tabDrafts: 'ドラフト',
   placeholderSearch: '検索...',
   titleCaseFormNew: '新規 {caseLabel}',
   titleCaseFormEdit: '{caseLabel} を編集',

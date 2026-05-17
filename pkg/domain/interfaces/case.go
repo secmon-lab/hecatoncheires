@@ -21,10 +21,11 @@ type CaseRepository interface {
 	// callers should generally rely on ListDrafts for the draft-author view.
 	List(ctx context.Context, workspaceID string, opts ...ListCaseOption) ([]*model.Case, error)
 
-	// ListDrafts retrieves cases in DRAFT status authored by the given reporter
-	// (Slack user ID). Drafts are author-scoped: each reporter sees only
-	// their own drafts.
-	ListDrafts(ctx context.Context, workspaceID, reporterID string) ([]*model.Case, error)
+	// ListDrafts retrieves all cases in DRAFT status across the workspace.
+	// Drafts are surfaced workspace-wide so any team member can pick up an
+	// in-progress entry; the usecase layer applies private-draft access
+	// control (private drafts are visible only to their reporter).
+	ListDrafts(ctx context.Context, workspaceID string) ([]*model.Case, error)
 
 	// Update updates an existing case
 	Update(ctx context.Context, workspaceID string, c *model.Case) (*model.Case, error)

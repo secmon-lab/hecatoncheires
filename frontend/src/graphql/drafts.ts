@@ -1,8 +1,11 @@
 import { gql } from '@apollo/client'
 
-// GET_DRAFTS returns the auth-context user's own draft cases in the given
-// workspace. Server-side scoping is enforced — the query carries no
-// reporter argument because every caller is already authenticated.
+// GET_DRAFTS returns every draft case in the workspace. Drafts are
+// workspace-wide so the list isn't filtered by reporter; private drafts
+// are the only exception (the server hides them from non-reporters).
+//
+// Shape mirrors GET_CASES closely so the Case List page can reuse its
+// row renderer when the Drafts tab is active.
 export const GET_DRAFTS = gql`
   query GetDrafts($workspaceId: String!) {
     drafts(workspaceId: $workspaceId) {
@@ -11,7 +14,23 @@ export const GET_DRAFTS = gql`
       description
       status
       isPrivate
+      accessDenied
       reporterID
+      reporter {
+        id
+        name
+        realName
+        imageUrl
+      }
+      assigneeIDs
+      assignees {
+        id
+        name
+        realName
+        imageUrl
+      }
+      slackChannelID
+      slackChannelName
       createdAt
       updatedAt
       fields {

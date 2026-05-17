@@ -138,6 +138,7 @@ export const msgKeys = {
   btnNewCase: 'btnNewCase',
   tabOpen: 'tabOpen',
   tabClosed: 'tabClosed',
+  tabDrafts: 'tabDrafts',
   placeholderSearch: 'placeholderSearch',
   titleCaseFormNew: 'titleCaseFormNew',
   titleCaseFormEdit: 'titleCaseFormEdit',

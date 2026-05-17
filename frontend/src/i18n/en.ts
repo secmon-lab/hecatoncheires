@@ -140,6 +140,7 @@ export const en: Messages = {
   btnNewCase: 'New {caseLabel}',
   tabOpen: 'Open',
   tabClosed: 'Closed',
+  tabDrafts: 'Drafts',
   placeholderSearch: 'Search...',
   titleCaseFormNew: 'New {caseLabel}',
   titleCaseFormEdit: 'Edit {caseLabel}',

@@ -745,7 +745,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.Value(t, got[0].Title).Equal("Draft A")
 	})
 
-	t.Run("ListDrafts returns only the requested reporter's drafts", func(t *testing.T) {
+	t.Run("ListDrafts returns every draft in the workspace regardless of reporter", func(t *testing.T) {
 		repo := newRepo(t)
 		ctx := context.Background()
 
@@ -763,7 +763,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		})
 		gt.NoError(t, err).Required()
 
-		_, err = repo.Case().Create(ctx, wsID, &model.Case{
+		theirs, err := repo.Case().Create(ctx, wsID, &model.Case{
 			Title:      "Theirs",
 			Status:     types.CaseStatusDraft,
 			ReporterID: "U-other",
@@ -778,32 +778,32 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		})
 		gt.NoError(t, err).Required()
 
-		mine, err := repo.Case().ListDrafts(ctx, wsID, "U-mine")
+		all, err := repo.Case().ListDrafts(ctx, wsID)
 		gt.NoError(t, err).Required()
-		gt.Number(t, len(mine)).Equal(2)
+		gt.Number(t, len(all)).Equal(3)
 
 		ids := map[int64]bool{}
-		for _, c := range mine {
+		for _, c := range all {
 			ids[c.ID] = true
 			gt.Value(t, c.Status).Equal(types.CaseStatusDraft)
-			gt.Value(t, c.ReporterID).Equal("U-mine")
 		}
 		gt.Bool(t, ids[mineA.ID]).True()
 		gt.Bool(t, ids[mineB.ID]).True()
+		gt.Bool(t, ids[theirs.ID]).True()
 	})
 
-	t.Run("ListDrafts returns empty when reporter has no drafts", func(t *testing.T) {
+	t.Run("ListDrafts returns empty when no drafts exist", func(t *testing.T) {
 		repo := newRepo(t)
 		ctx := context.Background()
 
 		_, err := repo.Case().Create(ctx, wsID, &model.Case{
-			Title:      "Other reporter",
-			Status:     types.CaseStatusDraft,
+			Title:      "An open case",
+			Status:     types.CaseStatusOpen,
 			ReporterID: "U-other",
 		})
 		gt.NoError(t, err).Required()
 
-		drafts, err := repo.Case().ListDrafts(ctx, wsID, "U-nobody")
+		drafts, err := repo.Case().ListDrafts(ctx, wsID)
 		gt.NoError(t, err).Required()
 		gt.Number(t, len(drafts)).Equal(0)
 	})
