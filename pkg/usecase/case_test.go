@@ -138,6 +138,70 @@ func TestCaseUseCase_CreateCase(t *testing.T) {
 	})
 }
 
+func TestCaseUseCase_UpdateCase_Drafts(t *testing.T) {
+	t.Run("teammate can edit a public draft", func(t *testing.T) {
+		// Public drafts are workspace-shared, so any teammate can iterate
+		// on them via UpdateCase — including clearing the title back to
+		// empty (the in-progress state is the whole point of DRAFT).
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+
+		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
+		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Half written", "old body", nil, nil, false)
+		gt.NoError(t, err).Required()
+
+		peerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UPEER"})
+		var patch usecase.CaseUpdate
+		empty := ""
+		newBody := "rewritten by teammate"
+		patch.Title = &empty
+		patch.Description = &newBody
+
+		updated, err := uc.UpdateCase(peerCtx, testWorkspaceID, draft.ID, patch)
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.Title).Equal("")
+		gt.Value(t, updated.Description).Equal("rewritten by teammate")
+		gt.Value(t, updated.Status).Equal(types.CaseStatusDraft)
+	})
+
+	t.Run("non-reporter cannot edit a private draft", func(t *testing.T) {
+		// Private drafts stay reporter-only — the ChannelUserIDs check
+		// can't help yet (no channel), so UpdateCase falls back to the
+		// reporter ID directly.
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+
+		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
+		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Hidden", "", nil, nil, true)
+		gt.NoError(t, err).Required()
+
+		peerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UPEER"})
+		var patch usecase.CaseUpdate
+		newTitle := "stolen"
+		patch.Title = &newTitle
+		_, err = uc.UpdateCase(peerCtx, testWorkspaceID, draft.ID, patch)
+		gt.Error(t, err).Is(usecase.TestErrAccessDenied)
+	})
+
+	t.Run("OPEN case still rejects empty title", func(t *testing.T) {
+		// The empty-title gate only relaxes for drafts; once promoted to
+		// OPEN, blanking the title would break Slack channel naming and
+		// the listing UI.
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
+		open, err := uc.CreateCase(ctx, testWorkspaceID, "Live", "", nil, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		var patch usecase.CaseUpdate
+		empty := ""
+		patch.Title = &empty
+		_, err = uc.UpdateCase(ctx, testWorkspaceID, open.ID, patch)
+		gt.Error(t, err)
+	})
+}
+
 func TestCaseUseCase_UpdateCase(t *testing.T) {
 	t.Run("update case with valid fields", func(t *testing.T) {
 		repo := memory.New()
@@ -1900,20 +1964,45 @@ func TestCaseUseCase_SubmitDraft(t *testing.T) {
 		gt.Value(t, stored.Status).Equal(types.CaseStatusDraft)
 	})
 
-	t.Run("non-reporter cannot submit even a public draft", func(t *testing.T) {
-		// Public drafts are visible to the whole team but Submit still
-		// requires reporter ownership — drafts are owner-only for any
-		// mutating action.
+	t.Run("any teammate can submit a public draft", func(t *testing.T) {
+		// Drafts are team-shared — once a teammate visits a public draft
+		// they can promote it to OPEN. The original reporter stays
+		// recorded on the case, and channel activation invites them as
+		// usual. Private drafts stay reporter-only because non-reporters
+		// can't even see them.
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+		}
+		uc := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
+
+		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
+		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Shared", "", nil, nil, false)
+		gt.NoError(t, err).Required()
+
+		otherCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
+		submitted, err := uc.SubmitDraft(otherCtx, testWorkspaceID, draft.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, submitted.Status).Equal(types.CaseStatusOpen)
+		gt.Value(t, submitted.ReporterID).Equal("UMINE")
+	})
+
+	t.Run("non-reporter cannot submit a private draft", func(t *testing.T) {
+		// Private drafts are invisible to non-reporters, so SubmitDraft
+		// reaches them as ErrCaseNotFound from GetDraft (same code path
+		// as "draft does not exist").
 		repo := memory.New()
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 
 		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
-		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Mine", "", nil, nil, false)
+		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Secret", "", nil, nil, true)
 		gt.NoError(t, err).Required()
 
 		otherCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
 		_, err = uc.SubmitDraft(otherCtx, testWorkspaceID, draft.ID)
-		gt.Error(t, err).Is(usecase.TestErrAccessDenied)
+		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
 	})
 
 	t.Run("rejects submit when required field is still missing", func(t *testing.T) {
@@ -2013,20 +2102,35 @@ func TestCaseUseCase_DiscardDraft(t *testing.T) {
 		gt.Error(t, getErr)
 	})
 
-	t.Run("non-reporter cannot discard a public draft", func(t *testing.T) {
-		// Discard, like Submit, is reporter-only — even when the draft is
-		// publicly readable. Without this guard a teammate could delete
-		// someone else's in-progress entry just because they can see it.
+	t.Run("any teammate can discard a public draft", func(t *testing.T) {
+		// Public drafts are workspace-shared so any teammate can clean one
+		// up. Private drafts remain reporter-only because GetDraft hides
+		// them from everyone else (covered in the next case).
 		repo := memory.New()
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 
 		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
-		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Mine", "", nil, nil, false)
+		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Shared", "", nil, nil, false)
+		gt.NoError(t, err).Required()
+
+		otherCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
+		gt.NoError(t, uc.DiscardDraft(otherCtx, testWorkspaceID, draft.ID)).Required()
+
+		_, getErr := repo.Case().Get(context.Background(), testWorkspaceID, draft.ID)
+		gt.Error(t, getErr)
+	})
+
+	t.Run("non-reporter cannot discard a private draft", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+
+		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
+		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Hidden", "", nil, nil, true)
 		gt.NoError(t, err).Required()
 
 		otherCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
 		err = uc.DiscardDraft(otherCtx, testWorkspaceID, draft.ID)
-		gt.Error(t, err).Is(usecase.TestErrAccessDenied)
+		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
 
 		// Draft must still exist after the failed discard.
 		stored, getErr := repo.Case().Get(context.Background(), testWorkspaceID, draft.ID)

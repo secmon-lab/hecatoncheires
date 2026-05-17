@@ -135,9 +135,9 @@ export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
   }
 
   // Drafts skip the title / required-field validation that handleSubmit
-  // applies — a half-finished entry is exactly what the drafts list is
-  // for. The eventual SubmitDraft (from DraftDetail) re-runs full
-  // validation before promoting to OPEN.
+  // applies — a half-finished entry is exactly what the drafts tab is
+  // for. The eventual SubmitDraft (from the Case detail page) re-runs
+  // full validation before promoting to OPEN.
   const handleSaveAsDraft = async () => {
     if (!currentWorkspace) return
     const fieldArr = sanitizeFieldValues(
@@ -161,7 +161,8 @@ export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
         },
       })
       onClose()
-      navigate(`/ws/${currentWorkspace.id}/drafts`)
+      // The Drafts tab on the Case list page surfaces newly saved drafts.
+      navigate(`/ws/${currentWorkspace.id}/cases`)
     } catch (e: any) {
       console.error('Save-as-draft mutation failed', e)
       const msg = e?.graphQLErrors?.[0]?.message || e?.message || String(e)

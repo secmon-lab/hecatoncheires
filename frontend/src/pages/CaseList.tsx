@@ -161,8 +161,8 @@ export default function CaseList() {
     variables: { workspaceId: currentWorkspace?.id, status: 'CLOSED' },
     skip: !currentWorkspace,
   })
-  // Drafts are workspace-wide on the server; the same query feeds both
-  // this tab and the dedicated /drafts page.
+  // Drafts are workspace-wide on the server; this query drives both the
+  // Drafts tab and the sidebar / header count.
   const { data: draftData } = useQuery(GET_DRAFTS, {
     variables: { workspaceId: currentWorkspace?.id },
     skip: !currentWorkspace,
@@ -365,11 +365,9 @@ export default function CaseList() {
                 key={c.id}
                 onClick={() => {
                   if (c.accessDenied) return
-                  // Drafts have a dedicated detail route with Submit /
-                  // Discard controls; promoted cases land on the regular
-                  // case detail page.
-                  const path = c.status === 'DRAFT' ? 'drafts' : 'cases'
-                  navigate(`/ws/${currentWorkspace!.id}/${path}/${c.id}`)
+                  // Drafts share the regular case detail page — Submit /
+                  // Discard surface there based on status.
+                  navigate(`/ws/${currentWorkspace!.id}/cases/${c.id}`)
                 }}
                 style={{ cursor: c.accessDenied ? 'default' : 'pointer' }}
               >

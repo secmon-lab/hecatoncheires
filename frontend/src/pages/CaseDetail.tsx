@@ -11,6 +11,7 @@ import {
   SYNC_CASE_CHANNEL_USERS,
   GET_CASES,
 } from '../graphql/case'
+import { SUBMIT_DRAFT, DISCARD_DRAFT, GET_DRAFTS } from '../graphql/drafts'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import CustomFieldHelpRow from '../components/fields/CustomFieldHelpRow'
@@ -144,6 +145,22 @@ export default function CaseDetail() {
       { query: GET_CASES, variables: { workspaceId: currentWorkspace?.id, status: 'CLOSED' } },
     ],
   })
+  const draftRefetchOptions = useMemo(
+    () => [
+      { query: GET_DRAFTS, variables: { workspaceId: currentWorkspace?.id } },
+      { query: GET_CASES, variables: { workspaceId: currentWorkspace?.id, status: 'OPEN' } },
+    ],
+    [currentWorkspace?.id],
+  )
+  const [submitDraft, { loading: submittingDraft }] = useMutation(SUBMIT_DRAFT, {
+    refetchQueries: draftRefetchOptions,
+    awaitRefetchQueries: true,
+  })
+  const [discardDraft, { loading: discardingDraft }] = useMutation(DISCARD_DRAFT, {
+    refetchQueries: [{ query: GET_DRAFTS, variables: { workspaceId: currentWorkspace?.id } }],
+    awaitRefetchQueries: true,
+  })
+  const [draftError, setDraftError] = useState<string | null>(null)
   const { data: slackUsersData } = useQuery(GET_SLACK_USERS)
   const slackUsers = slackUsersData?.slackUsers || []
 
@@ -184,6 +201,33 @@ export default function CaseDetail() {
   }
   const handleSync = async () => {
     await syncMembers({ variables: { workspaceId: currentWorkspace!.id, id: caseId } })
+  }
+  const handleSubmitDraft = async () => {
+    setDraftError(null)
+    if (!c.title || c.title.trim() === '') {
+      setDraftError(t('draftSubmitErrorMissingTitle'))
+      return
+    }
+    try {
+      await submitDraft({ variables: { workspaceId: currentWorkspace!.id, id: caseId } })
+      // Stay on /cases/:id — once promoted, the same page now renders the
+      // OPEN case (Close button, Slack channel link, etc.). No navigation
+      // needed.
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setDraftError(t('draftSubmitErrorGeneric', { message: msg }))
+    }
+  }
+  const handleDiscardDraft = async () => {
+    setDraftError(null)
+    if (!window.confirm(t('draftDiscardConfirm'))) return
+    try {
+      await discardDraft({ variables: { workspaceId: currentWorkspace!.id, id: caseId } })
+      navigate(`/ws/${currentWorkspace!.id}/cases`)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setDraftError(t('draftDiscardErrorGeneric', { message: msg }))
+    }
   }
   const handleAssigneesChange = async (ids: string[]) => {
     await updateCase({
@@ -256,7 +300,29 @@ export default function CaseDetail() {
         >
           {t('btnWatch')}
         </Button>
-        {c.status === 'OPEN' ? (
+        {c.status === 'DRAFT' ? (
+          <>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={handleDiscardDraft}
+              disabled={submittingDraft || discardingDraft}
+              data-testid="discard-draft-button"
+            >
+              {t('draftDiscardButton')}
+            </Button>
+            <Button
+              size="sm"
+              variant="primary"
+              icon={<IconCheck size={13} />}
+              onClick={handleSubmitDraft}
+              disabled={submittingDraft || discardingDraft}
+              data-testid="submit-draft-button"
+            >
+              {t('draftSubmitButton')}
+            </Button>
+          </>
+        ) : c.status === 'OPEN' ? (
           <Button
             size="sm"
             variant="danger"
@@ -326,6 +392,11 @@ export default function CaseDetail() {
           />
         </h1>
         <div className="h-detail-badges">
+          {c.status === 'DRAFT' && (
+            <span data-testid="draft-badge">
+              <StatusBadge status="DRAFT" labelDraft={t('tabDrafts')} />
+            </span>
+          )}
           {isPrivate && <span data-testid="private-badge"><PrivateBadge label={t('badgePrivate')} /></span>}
         </div>
       </div>
@@ -358,8 +429,10 @@ export default function CaseDetail() {
         )}
       </div>
 
-      {/* private banner */}
-      {isPrivate && (
+      {/* private banner — only relevant once the case is linked to a Slack
+          channel; drafts have no channel yet and would render an empty
+          msgPrivateBanner. */}
+      {isPrivate && slackChannelID && (
         <div className="h-banner warn" data-testid="case-private-banner">
           <IconLock size={13} sw={2} />
           <span className="h-banner-text">
@@ -368,6 +441,17 @@ export default function CaseDetail() {
               count: String(channelUserCount || 0),
             })}
           </span>
+        </div>
+      )}
+
+      {draftError && (
+        <div
+          role="alert"
+          className="card"
+          style={{ padding: 12, marginBottom: 16, color: 'var(--color-error)' }}
+          data-testid="draft-action-error"
+        >
+          {draftError}
         </div>
       )}
 

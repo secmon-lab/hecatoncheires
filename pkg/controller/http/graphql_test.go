@@ -2973,7 +2973,10 @@ func TestGraphQLHandler_DraftsLifecycle(t *testing.T) {
 		gt.Value(t, casesResult.Cases[0].Status).Equal("OPEN")
 	})
 
-	t.Run("discardDraft deletes the case for the reporter only", func(t *testing.T) {
+	t.Run("discardDraft deletes a private draft for the reporter only", func(t *testing.T) {
+		// Public drafts are workspace-shared so any teammate can act on
+		// them; the access-control story only kicks in for private drafts.
+		// We exercise the strict path here.
 		repo := memory.New()
 		handler, err := setupGraphQLServer(repo)
 		gt.NoError(t, err).Required()
@@ -2983,6 +2986,7 @@ func TestGraphQLHandler_DraftsLifecycle(t *testing.T) {
 			Title:      "To discard",
 			Status:     types.CaseStatusDraft,
 			ReporterID: reporterID,
+			IsPrivate:  true,
 		})
 		gt.NoError(t, err).Required()
 
@@ -2991,7 +2995,7 @@ func TestGraphQLHandler_DraftsLifecycle(t *testing.T) {
 				discardDraft(workspaceId: $workspaceId, id: $id)
 			}
 		`
-		// Stranger cannot discard.
+		// Stranger cannot discard a private draft (looks like "not found").
 		strangerRec := executeGraphQLRequestWithAuth(t, handler, discardMutation, map[string]interface{}{
 			"workspaceId": testWorkspaceID,
 			"id":          int(draft.ID),
@@ -3013,6 +3017,40 @@ func TestGraphQLHandler_DraftsLifecycle(t *testing.T) {
 		gt.Bool(t, discardResult.DiscardDraft).True()
 
 		// Draft is gone.
+		_, getErr := repo.Case().Get(ctx, testWorkspaceID, draft.ID)
+		gt.Error(t, getErr)
+	})
+
+	t.Run("discardDraft on a public draft works for any teammate", func(t *testing.T) {
+		repo := memory.New()
+		handler, err := setupGraphQLServer(repo)
+		gt.NoError(t, err).Required()
+
+		ctx := context.Background()
+		draft, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+			Title:      "Shared cleanup",
+			Status:     types.CaseStatusDraft,
+			ReporterID: reporterID,
+		})
+		gt.NoError(t, err).Required()
+
+		discardMutation := `
+			mutation($workspaceId: String!, $id: Int!) {
+				discardDraft(workspaceId: $workspaceId, id: $id)
+			}
+		`
+		rec := executeGraphQLRequestWithAuth(t, handler, discardMutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          int(draft.ID),
+		}, strangerID)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+		var discardResult struct {
+			DiscardDraft bool `json:"discardDraft"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &discardResult)).Required()
+		gt.Bool(t, discardResult.DiscardDraft).True()
+
 		_, getErr := repo.Case().Get(ctx, testWorkspaceID, draft.ID)
 		gt.Error(t, getErr)
 	})
