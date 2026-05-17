@@ -19,6 +19,11 @@ var (
 	// ErrCaseNotDraft is returned by draft-specific operations (Submit /
 	// Discard) when the targeted case is not in DRAFT.
 	ErrCaseNotDraft = errors.New("case is not a draft")
+	// ErrMissingRequiredOnSubmit is returned by SubmitDraft when the draft
+	// is missing one or more required custom fields. The wrapping goerr
+	// carries the field IDs and human-friendly names so the frontend can
+	// point the user at exactly which inputs to fill.
+	ErrMissingRequiredOnSubmit = errors.New("draft is missing required fields")
 
 	// Action Slack-post state errors
 	ErrSlackMessageAlreadyPosted = errors.New("action already has a Slack message")

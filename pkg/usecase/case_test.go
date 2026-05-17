@@ -2035,7 +2035,11 @@ func TestCaseUseCase_SubmitDraft(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		_, err = uc.SubmitDraft(ctx, testWorkspaceID, draft.ID)
-		gt.Error(t, err).Is(model.ErrMissingRequired)
+		gt.Error(t, err).Is(usecase.ErrMissingRequiredOnSubmit)
+		// The error message must name the missing field so the UI can
+		// point the user at it directly (rather than the legacy opaque
+		// "required field is missing").
+		gt.String(t, err.Error()).Contains("Category")
 
 		// The draft survives the failed submit so the user can fill in the
 		// missing field and retry.

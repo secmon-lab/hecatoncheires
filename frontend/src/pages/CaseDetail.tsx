@@ -474,6 +474,11 @@ export default function CaseDetail() {
             />
           </section>
 
+          {/* Related Actions only exist for activated cases. Drafts have
+              no actions, no Slack channel, no async tail — hide the
+              entire section so the page stays focused on filling in the
+              draft before submission. */}
+          {c.status !== 'DRAFT' && (
           <section className="h-section">
             <div className="h-section-h">
               <span className="h-section-title">{t('sectionRelatedActions')}</span>
@@ -650,6 +655,7 @@ export default function CaseDetail() {
               </div>
             )}
           </section>
+          )}
 
         </div>
 

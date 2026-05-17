@@ -65,6 +65,21 @@ func (uc *CaseUseCase) fieldValidatorForWorkspace(workspaceID string) *model.Fie
 	return model.NewFieldValidator(entry.FieldSchema)
 }
 
+// fieldSchemaForWorkspace returns the configured FieldSchema for the
+// workspace, or nil when none is registered. Used when callers need the
+// raw definitions (e.g. enumerating required fields) rather than a
+// validator wrapper.
+func (uc *CaseUseCase) fieldSchemaForWorkspace(workspaceID string) *config.FieldSchema {
+	if uc.workspaceRegistry == nil {
+		return nil
+	}
+	entry, err := uc.workspaceRegistry.Get(workspaceID)
+	if err != nil {
+		return nil
+	}
+	return entry.FieldSchema
+}
+
 func (uc *CaseUseCase) slackTeamIDForWorkspace(workspaceID string) string {
 	if uc.workspaceRegistry == nil {
 		return ""
@@ -674,13 +689,42 @@ func (uc *CaseUseCase) SubmitDraft(ctx context.Context, workspaceID string, id i
 	// to OPEN — Save as Draft skipped the required-field check, so this is
 	// the first time the workspace's full schema is enforced. Bail out
 	// before flipping the status so the user can finish filling required
-	// fields on the draft entry and resubmit.
-	if validator := uc.fieldValidatorForWorkspace(workspaceID); validator != nil {
-		enriched, err := validator.ValidateCaseFields(c.FieldValues)
-		if err != nil {
-			return nil, goerr.Wrap(err, "field validation failed on submit", goerr.V(CaseIDKey, id))
+	// fields on the draft entry and resubmit. We collect *every* missing
+	// required field so the UI can list them in one message instead of
+	// surfacing them one redirect at a time.
+	if schema := uc.fieldSchemaForWorkspace(workspaceID); schema != nil {
+		var missingNames []string
+		var missingIDs []string
+		for _, fd := range schema.Fields {
+			if !fd.Required {
+				continue
+			}
+			if _, ok := c.FieldValues[fd.ID]; ok {
+				continue
+			}
+			missingIDs = append(missingIDs, fd.ID)
+			name := fd.Name
+			if name == "" {
+				name = fd.ID
+			}
+			missingNames = append(missingNames, name)
 		}
-		c.FieldValues = enriched
+		if len(missingNames) > 0 {
+			return nil, goerr.Wrap(ErrMissingRequiredOnSubmit,
+				fmt.Sprintf("required field(s) not filled: %s", strings.Join(missingNames, ", ")),
+				goerr.V(CaseIDKey, id),
+				goerr.V("missing_field_ids", missingIDs),
+				goerr.V("missing_field_names", missingNames),
+			)
+		}
+		// Type-check whatever the user *did* fill.
+		if validator := uc.fieldValidatorForWorkspace(workspaceID); validator != nil {
+			enriched, err := validator.ValidateCaseFieldsPartial(c.FieldValues)
+			if err != nil {
+				return nil, goerr.Wrap(err, "field validation failed on submit", goerr.V(CaseIDKey, id))
+			}
+			c.FieldValues = enriched
+		}
 	}
 
 	if err := c.SubmitDraft(); err != nil {
