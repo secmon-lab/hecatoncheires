@@ -150,18 +150,17 @@ func parseAndValidate(raw []byte) (*plan, error) {
 }
 
 // extractJSONObject returns the slice of raw containing a single
-// top-level JSON object. If raw is already a clean JSON object it is
-// returned unchanged. Otherwise we strip a ```json fence (or bare ```
-// fence) and fall back to "first `{` to its matching `}`" scanning so
-// prose around the object does not break the decoder.
+// top-level JSON object. We strip a ```json fence (or bare ``` fence)
+// if present and then scan for the first balanced `{ … }` region. The
+// scanner is the single source of truth for "which substring is the
+// object" — an earlier first-and-last-char fast path silently returned
+// the whole input for pathological cases like `{"a":1} {"b":2}` and
+// pushed the json.Unmarshal failure downstream instead of letting the
+// scanner extract just the first object.
 func extractJSONObject(raw []byte) []byte {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 {
 		return raw
-	}
-	// Already a clean JSON object — fast path.
-	if trimmed[0] == '{' && trimmed[len(trimmed)-1] == '}' {
-		return trimmed
 	}
 	// Strip an opening ```json / ``` fence and the closing ``` if
 	// present.
@@ -175,12 +174,9 @@ func extractJSONObject(raw []byte) []byte {
 			body = bytes.TrimSpace(body[:end])
 		}
 		trimmed = body
-		if len(trimmed) > 0 && trimmed[0] == '{' && trimmed[len(trimmed)-1] == '}' {
-			return trimmed
-		}
 	}
-	// Last-ditch: scan for the first balanced { … } region. We honour
-	// string boundaries so a `}` inside a JSON string doesn't fool us.
+	// Scan for the first balanced { … } region. We honour string
+	// boundaries so a `}` inside a JSON string doesn't fool us.
 	start := bytes.IndexByte(trimmed, '{')
 	if start < 0 {
 		return raw

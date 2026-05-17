@@ -396,6 +396,17 @@ func TestExtractJSONObject(t *testing.T) {
 			in:   `prefix {"reasoning":"a \"quoted\" word"}`,
 			want: `{"reasoning":"a \"quoted\" word"}`,
 		},
+		{
+			// Pins the removal of the first-and-last-char fast path
+			// (gemini-code-assist PR #112 review). A previous
+			// implementation returned this entire string because the
+			// trimmed input started with `{` and ended with `}` —
+			// json.Unmarshal then failed with "extra data after value".
+			// The scanner must return only the first object.
+			name: "multiple top-level objects keep only the first",
+			in:   `{"action":"investigate"} {"action":"materialize"}`,
+			want: `{"action":"investigate"}`,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

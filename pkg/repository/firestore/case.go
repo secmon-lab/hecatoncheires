@@ -295,16 +295,40 @@ func (r *caseRepository) CountFieldValues(ctx context.Context, workspaceID strin
 	// once and counts valid entries in Go using the model's
 	// IsValueInSet logic — which already handles the `[]interface{}`
 	// vs `[]string` shape mismatch the Firestore decoder produces.
+	//
+	// Two micro-optimisations keep per-document cost low so the O(N)
+	// scan does not become a wire-bandwidth or CPU hot path:
+	//   1. `Select(fieldTypePath, fieldValuePath)` so Firestore only
+	//      returns the two map entries the count needs — not the entire
+	//      case document.
+	//   2. The receiver of `DataTo` is a minimal local struct that
+	//      decodes only `FieldValues`. Decoding the full `model.Case`
+	//      pulls in title / description / assignees / channel members
+	//      that the count does not look at.
+	// (Document-count scaling is still O(workspace size); analytical
+	// counts that need true O(1) would have to relax the firestore.md
+	// composite-index ban, which is a project-policy decision.)
 	col := r.casesCollection(workspaceID)
 	fieldTypePath := fmt.Sprintf("FieldValues.%s.Type", fieldID)
+	fieldValuePath := fmt.Sprintf("FieldValues.%s.Value", fieldID)
 
 	validSet := make(map[string]bool, len(validValues))
 	for _, v := range validValues {
 		validSet[v] = true
 	}
 
-	iter := col.Where(fieldTypePath, "==", string(fieldType)).Documents(ctx)
+	iter := col.
+		Where(fieldTypePath, "==", string(fieldType)).
+		Select(fieldTypePath, fieldValuePath).
+		Documents(ctx)
 	defer iter.Stop()
+
+	// fieldValuesOnly is a minimal projection target so DataTo does not
+	// allocate the full Case. The map only carries the entries the
+	// Select() above requested.
+	type fieldValuesOnly struct {
+		FieldValues map[string]model.FieldValue
+	}
 
 	var totalCount, validCount int64
 	for {
@@ -317,12 +341,12 @@ func (r *caseRepository) CountFieldValues(ctx context.Context, workspaceID strin
 				goerr.V("field_id", fieldID))
 		}
 
-		var c model.Case
-		if err := doc.DataTo(&c); err != nil {
+		var partial fieldValuesOnly
+		if err := doc.DataTo(&partial); err != nil {
 			return 0, 0, goerr.Wrap(err, "failed to decode case for field-value count",
 				goerr.V("field_id", fieldID))
 		}
-		fv, ok := c.FieldValues[fieldID]
+		fv, ok := partial.FieldValues[fieldID]
 		if !ok || fv.Type != fieldType {
 			continue
 		}
