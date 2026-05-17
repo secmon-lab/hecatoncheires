@@ -343,10 +343,13 @@ export class CaseDetailPage extends BasePage {
   }
 
   /**
-   * True when the DRAFT badge is visible in the title row.
+   * True when the aside Status pill shows Draft. The dedicated title-row
+   * chip was removed; the side panel is now the single source for the
+   * status indicator.
    */
   async isDraftBadgeVisible(): Promise<boolean> {
-    return await this.page.getByTestId('draft-badge').isVisible();
+    const text = await this.page.getByTestId('aside-status-display').innerText().catch(() => '');
+    return /draft/i.test(text);
   }
 
   /**

@@ -351,88 +351,73 @@ export default function CaseDetail() {
         </div>
       </div>
 
-      {/* title row */}
-      <div className="h-detail-h">
-        <span className="h-detail-id">#{c.id}</span>
-        <h1 style={{ flex: 1, margin: 0 }}>
-          <InlineText
-            value={c.title}
-            onSave={handleTitleChange}
-            ariaLabel={t('labelTitle')}
-            variant="title"
-            placeholder={t('placeholderAddTitle')}
-            disabled={updating}
-            testId="case-title"
-          />
-        </h1>
-        <div className="h-detail-badges">
-          {c.status === 'DRAFT' && (
-            <span data-testid="draft-badge">
-              <StatusBadge status="DRAFT" labelDraft={t('tabDrafts')} />
-            </span>
-          )}
-          {isPrivate && <span data-testid="private-badge"><PrivateBadge label={t('badgePrivate')} /></span>}
-        </div>
-      </div>
-
-      {/* sub-meta */}
-      <div className="h-detail-meta">
-        <span>
-          <IconCalendar size={11} style={{ marginRight: 4, verticalAlign: '-2px' }} />
-          {t('labelCreatedTimestamp')} <span className="mono" data-testid="created-timestamp-value">{formatTimestamp(c.createdAt)}</span>
-        </span>
-        <span>
-          {t('labelUpdatedTimestamp')} <span className="mono" data-testid="updated-timestamp-value">{formatTimestamp(c.updatedAt)}</span>
-        </span>
-        {c.reporter && (
-          <span>
-            {t('labelBy')} <span className="name">{c.reporter.realName || c.reporter.name}</span>
-          </span>
-        )}
-        <span className="spacer" />
-        {slackChannelID && (
-          <a
-            className="slack-link"
-            href={slackChannelURL || `slack://channel?id=${slackChannelID}`}
-            target="_blank"
-            rel="noreferrer noopener"
-          >
-            <IconSlack size={11} />#{slackChannelName || slackChannelID}
-            <IconExt size={10} />
-          </a>
-        )}
-      </div>
-
-      {/* private banner — only relevant once the case is linked to a Slack
-          channel; drafts have no channel yet and would render an empty
-          msgPrivateBanner. */}
-      {isPrivate && slackChannelID && (
-        <div className="h-banner warn" data-testid="case-private-banner">
-          <IconLock size={13} sw={2} />
-          <span className="h-banner-text">
-            {t('msgPrivateBanner', {
-              channel: slackChannelName || slackChannelID,
-              count: String(channelUserCount || 0),
-            })}
-          </span>
-        </div>
-      )}
-
-      {draftError && (
-        <div
-          role="alert"
-          className="card"
-          style={{ padding: 12, marginBottom: 16, color: 'var(--color-error)' }}
-          data-testid="draft-action-error"
-        >
-          {draftError}
-        </div>
-      )}
-
       {/* main grid */}
       <div className="h-detail-grid">
         {/* left column */}
         <div>
+          {/* title row */}
+          <div className="h-detail-h">
+            <span className="h-detail-id">#{c.id}</span>
+            <h1>
+              <InlineText
+                value={c.title}
+                onSave={handleTitleChange}
+                ariaLabel={t('labelTitle')}
+                variant="title"
+                placeholder={t('placeholderAddTitle')}
+                disabled={updating}
+                testId="case-title"
+              />
+            </h1>
+            {isPrivate && (
+              <div className="h-detail-badges">
+                <span data-testid="private-badge"><PrivateBadge label={t('badgePrivate')} /></span>
+              </div>
+            )}
+          </div>
+
+          {/* sub-meta */}
+          <div className="h-detail-meta">
+            <span>
+              <IconCalendar size={11} style={{ marginRight: 4, verticalAlign: '-2px' }} />
+              {t('labelCreatedTimestamp')} <span className="mono" data-testid="created-timestamp-value">{formatTimestamp(c.createdAt)}</span>
+            </span>
+            <span>
+              {t('labelUpdatedTimestamp')} <span className="mono" data-testid="updated-timestamp-value">{formatTimestamp(c.updatedAt)}</span>
+            </span>
+            {c.reporter && (
+              <span>
+                {t('labelBy')} <span className="name">{c.reporter.realName || c.reporter.name}</span>
+              </span>
+            )}
+          </div>
+
+          {/* private banner — only relevant once the case is linked to a Slack
+              channel; drafts have no channel yet and would render an empty
+              msgPrivateBanner. */}
+          {isPrivate && slackChannelID && (
+            <div className="h-banner warn" data-testid="case-private-banner">
+              <IconLock size={13} sw={2} />
+              <span className="h-banner-text">
+                {t('msgPrivateBanner', {
+                  channel: slackChannelName || slackChannelID,
+                  count: String(channelUserCount || 0),
+                })}
+              </span>
+            </div>
+          )}
+
+          {draftError && (
+            <div
+              role="alert"
+              className="card"
+              style={{ padding: 12, marginBottom: 16, color: 'var(--color-error)' }}
+              data-testid="draft-action-error"
+            >
+              {draftError}
+            </div>
+          )}
+
           <section className="h-section h-detail-body">
             <div className="h-section-h">
               <span className="h-section-title">{t('labelDescription')}</span>
@@ -635,6 +620,20 @@ export default function CaseDetail() {
 
         {/* right column / sidebar */}
         <aside className="h-aside">
+          {slackChannelID && (
+            <section className="h-aside-section h-aside-section-slack">
+              <a
+                className="slack-link"
+                href={slackChannelURL || `slack://channel?id=${slackChannelID}`}
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                <IconSlack size={11} />#{slackChannelName || slackChannelID}
+                <IconExt size={10} />
+              </a>
+            </section>
+          )}
+
           <section className="h-aside-section">
             <div className="h-aside-h">
               <span className="h-aside-title">{t('labelStatus')}</span>
