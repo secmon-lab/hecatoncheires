@@ -664,15 +664,22 @@ export default function CaseDetail() {
             />
           </section>
 
-          {c.reporter && (
-            <section className="h-aside-section">
+          {(c.reporter || c.reporterID) && (
+            <section className="h-aside-section" data-testid="case-reporter-section">
               <div className="h-aside-h">
                 <span className="h-aside-title">{t('labelReporter')}</span>
               </div>
-              <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-                <Avatar size="sm" name={c.reporter.name} realName={c.reporter.realName} imageUrl={c.reporter.imageUrl} />
-                <span style={{ fontSize: 13 }}>{displayName(c.reporter)}</span>
-              </div>
+              {c.reporter ? (
+                <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                  <Avatar size="sm" name={c.reporter.name} realName={c.reporter.realName} imageUrl={c.reporter.imageUrl} />
+                  <span style={{ fontSize: 13 }}>{displayName(c.reporter)}</span>
+                </div>
+              ) : (
+                <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                  <Avatar size="sm" name={c.reporterID || ''} realName={c.reporterID || ''} />
+                  <span className="mono soft" style={{ fontSize: 12 }}>{c.reporterID}</span>
+                </div>
+              )}
             </section>
           )}
 

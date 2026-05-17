@@ -10,6 +10,11 @@ import (
 // in the external draft_test package.
 var ParseAndValidateForTest = parseAndValidate
 
+// ExtractJSONObjectForTest exposes the JSON extraction helper so the
+// test suite can pin its tolerance to LLM noise (prose prefixes,
+// ```json fences) without going through a full parseAndValidate call.
+var ExtractJSONObjectForTest = extractJSONObject
+
 // PlanSchemaForTest exposes the unexported planSchema constructor for tests.
 var PlanSchemaForTest = planSchema
 

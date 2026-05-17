@@ -3,7 +3,6 @@ package memory
 import (
 	"context"
 	"sync"
-	"time"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
@@ -91,13 +90,10 @@ func (r *sourceRepository) Create(ctx context.Context, workspaceID string, sourc
 
 	r.ensureWorkspace(workspaceID)
 
-	now := time.Now().UTC()
 	created := copySource(source)
 	if created.ID == "" {
 		created.ID = model.NewSourceID()
 	}
-	created.CreatedAt = now
-	created.UpdatedAt = now
 
 	r.sources[workspaceID][created.ID] = created
 	return copySource(created), nil
@@ -146,15 +142,11 @@ func (r *sourceRepository) Update(ctx context.Context, workspaceID string, sourc
 		return nil, goerr.Wrap(ErrNotFound, "source not found", goerr.V("id", source.ID))
 	}
 
-	existing, exists := ws[source.ID]
-	if !exists {
+	if _, exists := ws[source.ID]; !exists {
 		return nil, goerr.Wrap(ErrNotFound, "source not found", goerr.V("id", source.ID))
 	}
 
 	updated := copySource(source)
-	updated.CreatedAt = existing.CreatedAt
-	updated.UpdatedAt = time.Now().UTC()
-
 	r.sources[workspaceID][updated.ID] = updated
 	return copySource(updated), nil
 }

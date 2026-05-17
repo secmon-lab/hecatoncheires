@@ -4,10 +4,22 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	graphql1 "github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/slackid"
 )
+
+// ErrSlackUserNotInRepo is reported when SlackUserLoader is asked to
+// resolve a user ID that the SlackUser repository has no record of.
+// Surfacing it (instead of silently dropping the ID) makes "the Reporter
+// column is suddenly empty" investigations 5 minutes instead of 5 hours
+// — the empty cell now has a paired Sentry event / log line naming the
+// missing ID, and the field-level GraphQL error tells the client that
+// the resolver actually failed, not that the data is genuinely absent.
+var ErrSlackUserNotInRepo = goerr.New("slack user not found in repository")
 
 // DataLoaders holds all the data loaders used in the GraphQL resolvers
 type DataLoaders struct {
@@ -74,25 +86,36 @@ func NewSlackUserLoader(repo interfaces.Repository) *SlackUserLoader {
 }
 
 func (l *SlackUserLoader) Load(ctx context.Context, ids []string) ([]*graphql1.SlackUser, error) {
-	// Convert []string to []model.SlackUserID
-	userIDs := make([]model.SlackUserID, len(ids))
+	// Normalise inbound IDs so legacy composite "Uxxx-Txxx" sub claims
+	// persisted before the auth-side fix still resolve against the
+	// SlackUser repository (keyed on the bare "Uxxx" / "Wxxx" form).
+	// We dedupe by the normalised key so a single batch hits the repo
+	// once per real user.
+	normalizedSet := make(map[model.SlackUserID]struct{}, len(ids))
+	resolvedIDs := make([]model.SlackUserID, len(ids))
 	for i, id := range ids {
-		userIDs[i] = model.SlackUserID(id)
+		n := model.SlackUserID(slackid.Normalize(id))
+		resolvedIDs[i] = n
+		normalizedSet[n] = struct{}{}
+	}
+	uniqueIDs := make([]model.SlackUserID, 0, len(normalizedSet))
+	for id := range normalizedSet {
+		uniqueIDs = append(uniqueIDs, id)
 	}
 
-	users, err := l.repo.SlackUser().GetByIDs(ctx, userIDs)
+	users, err := l.repo.SlackUser().GetByIDs(ctx, uniqueIDs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load slack users: %w", err)
 	}
 
-	userMap := make(map[string]*graphql1.SlackUser)
+	userMap := make(map[model.SlackUserID]*graphql1.SlackUser)
 	for _, user := range users {
 		imageURL := user.ImageURL
 		var imageURLPtr *string
 		if imageURL != "" {
 			imageURLPtr = &imageURL
 		}
-		userMap[string(user.ID)] = &graphql1.SlackUser{
+		userMap[user.ID] = &graphql1.SlackUser{
 			ID:       string(user.ID),
 			Name:     user.Name,
 			RealName: user.RealName,
@@ -100,11 +123,33 @@ func (l *SlackUserLoader) Load(ctx context.Context, ids []string) ([]*graphql1.S
 		}
 	}
 
-	// Filter out nil entries for IDs that don't exist in the repository.
-	// The GraphQL schema declares assignees as [SlackUser!]! (non-null elements),
-	// so returning nil elements would cause a marshaling error.
-	result := make([]*graphql1.SlackUser, 0, len(ids))
-	for _, id := range ids {
+	// Detect missing IDs and report them as a non-fatal error so the
+	// "Slack user repo never got synced" failure mode stops being
+	// invisible. We still return successfully-resolved users for the
+	// rest of the batch — the schema declares assignees as
+	// [SlackUser!]! (non-null elements), so emitting nil elements would
+	// blow up GraphQL marshalling for the whole list.
+	missing := make([]string, 0)
+	seen := make(map[model.SlackUserID]struct{}, len(uniqueIDs))
+	for _, id := range uniqueIDs {
+		if _, ok := userMap[id]; ok {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		missing = append(missing, string(id))
+	}
+	if len(missing) > 0 {
+		errutil.Handle(ctx, goerr.Wrap(ErrSlackUserNotInRepo,
+			"slack user lookup missed repository entries",
+			goerr.V("missing_ids", missing),
+		), "slack user lookup")
+	}
+
+	result := make([]*graphql1.SlackUser, 0, len(resolvedIDs))
+	for _, id := range resolvedIDs {
 		if user, ok := userMap[id]; ok {
 			result = append(result, user)
 		}

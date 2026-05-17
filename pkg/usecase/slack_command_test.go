@@ -403,6 +403,14 @@ func TestSlackUseCases_HandleCaseCreationSubmit(t *testing.T) {
 		gt.Array(t, cases).Length(1)
 		gt.Value(t, cases[0].Title).Equal("Test Case Title")
 		gt.Value(t, cases[0].Description).Equal("Test description")
+		// The slash-command path does not pass through the Web auth
+		// middleware, so HandleCaseCreationSubmit MUST inject the
+		// callback user as the auth-context Token before reaching
+		// persistCase. Asserting on the persisted ReporterID is what
+		// catches a regression where that injection is missing —
+		// without this, the case lands with an empty reporter and the
+		// UI silently shows an empty Reporter cell.
+		gt.Value(t, cases[0].ReporterID).Equal("U001")
 	})
 
 	t.Run("creates case with custom field values", func(t *testing.T) {
@@ -624,6 +632,7 @@ func TestSlackUseCases_HandleSlashCommand_EditCase(t *testing.T) {
 
 		// Create a case linked to a channel
 		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
 			Title:       "Existing Case",
 			Description: "Existing description",
 			FieldValues: map[string]model.FieldValue{
@@ -688,6 +697,7 @@ func TestSlackUseCases_HandleSlashCommand_EditCase(t *testing.T) {
 
 		// Create a private case
 		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
 			Title:          "Private Case",
 			IsPrivate:      true,
 			ChannelUserIDs: []string{"U-MEMBER"},
@@ -718,6 +728,7 @@ func TestSlackUseCases_HandleSlashCommand_EditCase(t *testing.T) {
 		})
 
 		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
 			Title: "WS Case",
 		})
 		gt.NoError(t, err).Required()
@@ -756,6 +767,7 @@ func TestSlackUseCases_HandleCaseEditSubmit(t *testing.T) {
 
 		// Create an existing case
 		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
 			Title:       "Original Title",
 			Description: "Original description",
 			AssigneeIDs: []string{"U-ASSIGNEE"},
@@ -827,6 +839,7 @@ func TestSlackUseCases_HandleCaseEditSubmit(t *testing.T) {
 			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
 		})
 		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
 			Title:       "Original",
 			AssigneeIDs: []string{"U-OLD-A", "U-OLD-B"},
 		})
@@ -879,6 +892,7 @@ func TestSlackUseCases_HandleCaseEditSubmit(t *testing.T) {
 			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
 		})
 		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
 			Title:       "Original",
 			AssigneeIDs: []string{"U-OLD"},
 		})
@@ -932,7 +946,7 @@ func TestSlackUseCases_HandleCaseEditSubmit(t *testing.T) {
 				},
 			},
 		})
-		created, err := repo.Case().Create(context.Background(), "incident", &model.Case{Title: "T"})
+		created, err := repo.Case().Create(context.Background(), "incident", &model.Case{ReporterID: "U-TEST-DEFAULT", Title: "T"})
 		gt.NoError(t, err).Required()
 
 		slackMock := &commandTestSlackService{}
@@ -1022,6 +1036,7 @@ func TestBuildFieldInputBlockWithValue(t *testing.T) {
 		})
 
 		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
 			Title: "Test",
 			FieldValues: map[string]model.FieldValue{
 				"notes": {FieldID: "notes", Type: types.FieldTypeText, Value: "initial text"},
@@ -1057,6 +1072,7 @@ func TestBuildFieldInputBlockWithValue(t *testing.T) {
 		})
 
 		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
 			Title: "Test",
 			FieldValues: map[string]model.FieldValue{
 				"due": {FieldID: "due", Type: types.FieldTypeDate, Value: "2026-01-15"},
@@ -1090,6 +1106,7 @@ func TestBuildFieldInputBlockWithValue(t *testing.T) {
 		})
 
 		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
 			Title: "No Fields",
 		})
 		gt.NoError(t, err).Required()
@@ -1121,6 +1138,7 @@ func TestSlackUseCases_HandleSlashCommand_Subcommands(t *testing.T) {
 			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
 		})
 		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
 			Title: "Existing Case",
 		})
 		gt.NoError(t, err).Required()
@@ -1226,6 +1244,7 @@ func TestSlackUseCases_HandleSlashCommand_Subcommands(t *testing.T) {
 			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
 		})
 		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
 			Title:          "Private Case",
 			IsPrivate:      true,
 			ChannelUserIDs: []string{"U-MEMBER"},
@@ -1254,6 +1273,7 @@ func TestLifecycle_CommandChoiceToCaseEdit(t *testing.T) {
 		Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
 	})
 	created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
+		ReporterID:     "U-TEST-DEFAULT",
 		Title:       "Original Title",
 		Description: "Original Desc",
 		AssigneeIDs: []string{"U-OLD"},
@@ -1337,6 +1357,7 @@ func TestSlackUseCases_HandleCommandChoiceSubmit(t *testing.T) {
 			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
 		})
 		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
 			Title: "Existing Case",
 		})
 		gt.NoError(t, err).Required()
@@ -1414,6 +1435,7 @@ func TestSlackUseCases_HandleCommandChoiceSubmit(t *testing.T) {
 			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
 		})
 		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
 			Title:          "Private",
 			IsPrivate:      true,
 			ChannelUserIDs: []string{"U-MEMBER"},
@@ -1503,6 +1525,7 @@ func TestSlackUseCases_HandleActionCreationSubmit(t *testing.T) {
 		// Create the parent case linked to a channel so CreateAction's Slack
 		// notification can find a target.
 		caseRecord, err := repo.Case().Create(context.Background(), "risk", &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
 			Title: "Parent Case",
 		})
 		gt.NoError(t, err).Required()
@@ -1577,7 +1600,7 @@ func TestSlackUseCases_HandleActionCreationSubmit(t *testing.T) {
 		registry.Register(&model.WorkspaceEntry{
 			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
 		})
-		caseRecord, err := repo.Case().Create(context.Background(), "risk", &model.Case{Title: "Parent"})
+		caseRecord, err := repo.Case().Create(context.Background(), "risk", &model.Case{ReporterID: "U-TEST-DEFAULT", Title: "Parent"})
 		gt.NoError(t, err).Required()
 
 		slackMock := &commandTestSlackService{}

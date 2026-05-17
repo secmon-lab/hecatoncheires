@@ -45,6 +45,7 @@ interface CaseRow {
   status: 'OPEN' | 'CLOSED' | 'DRAFT'
   isPrivate: boolean
   accessDenied: boolean
+  reporterID?: string | null
   reporter?: CaseUser | null
   assignees: CaseUser[]
   slackChannelID: string
@@ -61,7 +62,7 @@ const BUILTIN_COLUMNS = [
   { key: 'slack', labelKey: 'headerSlack' as const, width: 110 },
 ] as const
 
-const DEFAULT_VISIBLE = ['status', 'assignees', 'created', 'slack']
+const DEFAULT_VISIBLE = ['status', 'assignees', 'reporter', 'created', 'slack']
 
 function formatDate(iso: string) {
   if (!iso) return '—'
@@ -214,12 +215,23 @@ export default function CaseList() {
         case 'assignees':
           return <AssigneeNamesStack users={c.assignees ?? []} testId="case-row-assignees" />
         case 'reporter':
-          return c.reporter ? (
-            <div className="row" style={{ gap: 6, fontSize: 12 }}>
-              <Avatar size="sm" name={c.reporter.name} realName={c.reporter.realName} imageUrl={c.reporter.imageUrl} />
-              <span className="truncate" style={{ maxWidth: 100 }}>{displayName(c.reporter)}</span>
-            </div>
-          ) : <span className="soft">—</span>
+          if (c.reporter) {
+            return (
+              <div className="row" style={{ gap: 6, fontSize: 12 }}>
+                <Avatar size="sm" name={c.reporter.name} realName={c.reporter.realName} imageUrl={c.reporter.imageUrl} />
+                <span className="truncate" style={{ maxWidth: 100 }}>{displayName(c.reporter)}</span>
+              </div>
+            )
+          }
+          if (c.reporterID) {
+            return (
+              <div className="row" style={{ gap: 6, fontSize: 12 }}>
+                <Avatar size="sm" name={c.reporterID} realName={c.reporterID} />
+                <span className="truncate mono soft" style={{ maxWidth: 100, fontSize: 11 }}>{c.reporterID}</span>
+              </div>
+            )
+          }
+          return <span className="soft">—</span>
         case 'created':
           return <span className="mono soft" style={{ fontSize: 12 }}>{formatDate(c.createdAt)}</span>
         case 'slack':

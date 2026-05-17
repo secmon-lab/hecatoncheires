@@ -184,3 +184,108 @@ func TestHandleEdit_OpensModalWithTriggerID(t *testing.T) {
 	gt.Value(t, slackMock.openViewCalls[0].view.Type).Equal(goslack.VTModal)
 	gt.String(t, string(slackMock.openViewCalls[0].view.PrivateMetadata)).Contains(string(d.ID))
 }
+
+// TestHandleSubmit_RecordsReporter pins the reporter-recording contract
+// for the preview "Submit" button on the Slack mention draft. Slack
+// interactivity callbacks do not go through the Web auth middleware, so
+// the handler MUST inject callback.User.ID as the auth-context Token
+// before reaching CaseUseCase.CreateCase — otherwise the case lands
+// with an empty ReporterID and the Cases page shows an empty Reporter
+// column for every Slack-originated case. The original bug was
+// exactly that: no test covered persisted ReporterID for this entry
+// point.
+func TestHandleSubmit_RecordsReporter(t *testing.T) {
+	const reporterID = "U-MENTION-SUBMIT"
+	repo := memory.New()
+	registry := newRegistryWithSchema("ws-submit", "WS Submit", &config.FieldSchema{})
+	slackMock := newCollectorOnlyMockSlack()
+	mentionUC := usecase.NewMentionProposalUseCase(repo, registry, slackMock, newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-submit"))))
+	caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+
+	d := model.NewCaseProposal(time.Now().UTC(), reporterID)
+	d.SelectedWorkspaceID = "ws-submit"
+	d.Materialization = &model.WorkspaceMaterialization{
+		Title:       "Submitted from mention",
+		Description: "body",
+	}
+	d.EphemeralChannelID = "C-SUBMIT"
+	d.EphemeralMessageTS = "1700000020.000000"
+	gt.NoError(t, repo.CaseProposal().Save(context.Background(), d)).Required()
+
+	respURL, _ := captureResponseURL(t)
+	cb := &goslack.InteractionCallback{
+		Type:        goslack.InteractionTypeBlockActions,
+		ResponseURL: respURL,
+		User:        goslack.User{ID: reporterID},
+		Team:        goslack.Team{ID: "T-WS"},
+		ActionCallback: goslack.ActionCallbacks{
+			BlockActions: []*goslack.BlockAction{
+				{ActionID: usecase.ActionIDDraftSubmit, Value: string(d.ID)},
+			},
+		},
+	}
+
+	gt.NoError(t, mentionUC.HandleSubmit(context.Background(), caseUC, cb, cb.ActionCallback.BlockActions[0])).Required()
+
+	cases, err := repo.Case().List(context.Background(), "ws-submit")
+	gt.NoError(t, err).Required()
+	gt.Array(t, cases).Length(1).Required()
+	gt.Value(t, cases[0].ReporterID).Equal(reporterID)
+	gt.Value(t, cases[0].Title).Equal("Submitted from mention")
+}
+
+// TestHandleEditSubmit_RecordsReporter is the modal-submission twin of
+// TestHandleSubmit_RecordsReporter. The mention-draft Edit modal also
+// calls CaseUseCase.CreateCase from a Slack interactivity callback, so
+// it shares the "no Web auth middleware → empty ReporterID" failure
+// mode and needs the same explicit auth-context injection.
+func TestHandleEditSubmit_RecordsReporter(t *testing.T) {
+	const reporterID = "U-MENTION-EDIT-SUBMIT"
+	repo := memory.New()
+	registry := newRegistryWithSchema("ws-edit-submit", "WS Edit Submit", &config.FieldSchema{})
+	slackMock := newCollectorOnlyMockSlack()
+	mentionUC := usecase.NewMentionProposalUseCase(repo, registry, slackMock, newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-edit-submit"))))
+	caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+
+	d := model.NewCaseProposal(time.Now().UTC(), reporterID)
+	d.SelectedWorkspaceID = "ws-edit-submit"
+	d.Materialization = &model.WorkspaceMaterialization{Title: "Initial title", Description: "Initial body"}
+	d.EphemeralChannelID = "C-EDIT-SUBMIT"
+	d.EphemeralMessageTS = "1700000030.000000"
+	gt.NoError(t, repo.CaseProposal().Save(context.Background(), d)).Required()
+
+	meta, _ := json.Marshal(map[string]string{
+		"workspace_id":         "ws-edit-submit",
+		"proposal_id":          string(d.ID),
+		"ephemeral_channel_id": d.EphemeralChannelID,
+		"ephemeral_message_ts": d.EphemeralMessageTS,
+	})
+
+	cb := &goslack.InteractionCallback{
+		Type: goslack.InteractionTypeViewSubmission,
+		User: goslack.User{ID: reporterID},
+		Team: goslack.Team{ID: "T-WS"},
+		View: goslack.View{
+			CallbackID:      usecase.SlackCallbackIDDraftEdit,
+			PrivateMetadata: string(meta),
+			State: &goslack.ViewState{
+				Values: map[string]map[string]goslack.BlockAction{
+					usecase.BlockIDDraftEditTitleForTest: {
+						usecase.ActionIDDraftEditTitleForTest: {Value: "Edited title"},
+					},
+					usecase.BlockIDDraftEditDescriptionForTest: {
+						usecase.ActionIDDraftEditDescriptionForTest: {Value: "Edited body"},
+					},
+				},
+			},
+		},
+	}
+
+	gt.NoError(t, mentionUC.HandleEditSubmit(context.Background(), caseUC, cb)).Required()
+
+	cases, err := repo.Case().List(context.Background(), "ws-edit-submit")
+	gt.NoError(t, err).Required()
+	gt.Array(t, cases).Length(1).Required()
+	gt.Value(t, cases[0].ReporterID).Equal(reporterID)
+	gt.Value(t, cases[0].Title).Equal("Edited title")
+}

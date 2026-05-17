@@ -284,7 +284,43 @@ All comment and character literal in source code must be in English
 - Keep PR titles short (under 70 characters); use the body for details
 - **Do NOT include `Co-Authored-By:` trailers in commit messages.** No AI/tool attribution lines. The commit body and PR body should also stay free of "Generated with Claude" style notes
 
-### Testing
+### Repository Write Discipline (NON-NEGOTIABLE)
+
+Background: a Firestore `caseRepository.Create` was rebuilding the
+persisted struct field-by-field and silently dropped `ReporterID`
+when that field was later added to `model.Case`. Every Slack-
+originated case lost its reporter; the UI showed empty Reporter
+cells indistinguishable from "no reporter recorded". The bug
+survived because (a) the memory repo round-tripped via a full
+struct copy and (b) the Firestore tests skipped without
+`FIRESTORE_PROJECT_ID`. See `.claude/rules/architecture.md` →
+"Repository write contract" for the full rules.
+
+The shortlist:
+
+- **NO field-by-field copy** inside a repository. The shape of
+  `Create` is `Validate → assign storage ID on the caller's
+  pointer → Set(ctx, x) → return x`. The shape of `Update` is
+  `Validate → existence check → Set(ctx, x) → return x`. Nothing
+  is rebuilt.
+- **NO mirror "doc" types, NO `firestore:"..."` struct tags, NO
+  converter functions** (`toXxxDoc` / `fromXxxDoc`). Persist
+  `*model.X` directly via `Set(ctx, x)` and `DataTo(&x)`.
+- **`time.Now()` does not belong in repository writes.** The
+  caller (usecase) owns CreatedAt / UpdatedAt. Repos that stamp
+  timestamps force every caller through one clock and override
+  whatever the caller passed in.
+- **Every persisted model needs `Validate()`** enforcing required
+  identity fields (ReporterID, CreatorID, etc.). Repositories
+  MUST call it before every write so a handler bug that forgot to
+  inject the reporter fails loudly at the first write.
+
+### Repository Tests
+
+The Firestore implementation MUST be exercised — not skipped —
+because the memory repo's full struct copy hides bugs that only
+appear on the Firestore Create path. Run the Firestore tests
+against the emulator in CI and locally.
 
 - Test files should have `package {name}_test`. Do not use same package name
 - Test file name convention is: `xyz.go` → `xyz_test.go`. Other test file names (e.g., `xyz_e2e_test.go`) are not allowed.
@@ -295,7 +331,7 @@ All comment and character literal in source code must be in English
 - Repository Tests Best Practices:
   - Always use random IDs (e.g., using `time.Now().UnixNano()`) to avoid test conflicts
   - Never use hardcoded IDs like "msg-001", "user-001" as they cause test failures when running in parallel
-  - Always verify ALL fields of returned values, not just checking for nil/existence
+  - **Round-trip every persisted field exhaustively.** A Create test that asserts only `Title` and `ID` cannot catch a repo that drops `ReporterID`; the round-trip must read every field back through `Get` and assert each one.
   - Compare expected values properly - don't just check if something exists, verify it matches what was saved
   - For timestamp comparisons, use tolerance (e.g., `< time.Second`) to account for storage precision
 - Test Skip Policy:

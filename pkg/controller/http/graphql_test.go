@@ -180,12 +180,18 @@ func TestGraphQLHandler_CasesQuery(t *testing.T) {
 
 		// Create test cases
 		case1 := &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title:       "Test Case 1",
 			Description: "Test case description 1",
 			AssigneeIDs: []string{"U001", "U002"},
 		}
 
 		case2 := &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title:       "Test Case 2",
 			Description: "Test case description 2",
 			AssigneeIDs: []string{"U003"},
@@ -265,6 +271,9 @@ func TestGraphQLHandler_CaseQuery(t *testing.T) {
 	ctx := context.Background()
 
 	testCase := &model.Case{
+		ReporterID:     "U-TEST-DEFAULT",
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
 		Title:       "Test Case for Query",
 		Description: "Test case description for single query",
 		AssigneeIDs: []string{"U123"},
@@ -368,7 +377,11 @@ func TestGraphQLHandler_CreateCaseMutation(t *testing.T) {
 			},
 		}
 
-		rec := executeGraphQLRequest(t, handler, mutation, variables)
+		// Authenticated request — Case.Validate now requires every
+		// persisted case to carry a ReporterID, and the only path
+		// that fills it in production is the auth-context Token
+		// injected by the Web auth middleware.
+		rec := executeGraphQLRequestWithAuth(t, handler, mutation, variables, "U-CREATE-CASE-REPORTER")
 
 		gt.Value(t, rec.Code).Equal(http.StatusOK)
 
@@ -439,6 +452,9 @@ func TestGraphQLHandler_UpdateCaseMutation(t *testing.T) {
 
 	// Create a case first
 	caseToUpdate := &model.Case{
+		ReporterID:     "U-TEST-DEFAULT",
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
 		Title:       "Original Title",
 		Description: "Original Description",
 		AssigneeIDs: []string{"U001"},
@@ -541,6 +557,9 @@ func TestGraphQLHandler_DeleteCaseMutation(t *testing.T) {
 	t.Run("delete existing case", func(t *testing.T) {
 		// Create a case to delete
 		caseToDelete := &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title:       "Case to Delete",
 			Description: "This case will be deleted",
 		}
@@ -603,6 +622,9 @@ func TestGraphQLHandler_DeleteCaseMutation(t *testing.T) {
 	t.Run("delete case also deletes associated actions", func(t *testing.T) {
 		// Create a case
 		caseWithActions := &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title:       "Case with Actions",
 			Description: "This case has actions",
 		}
@@ -663,6 +685,9 @@ func TestGraphQLHandler_FrontendCasesQuery(t *testing.T) {
 
 	// Create test case with all fields
 	testCase := &model.Case{
+		ReporterID:     "U-TEST-DEFAULT",
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
 		Title:          "Frontend Test Case",
 		Description:    "Test case for frontend query",
 		AssigneeIDs:    []string{"U001"},
@@ -895,6 +920,9 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 
 	// Create a case for actions to belong to
 	testCase := &model.Case{
+		ReporterID:     "U-TEST-DEFAULT",
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
 		Title:       "Test Case for Actions",
 		Description: "Case for action tests",
 	}
@@ -1159,7 +1187,7 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 
 	t.Run("actionsByCase respects archive filter", func(t *testing.T) {
 		// Set up: one active and one archived action
-		caseForArchiveQuery, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{Title: "archive query case"})
+		caseForArchiveQuery, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{ReporterID: "U-TEST-DEFAULT", Title: "archive query case", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()})
 		gt.NoError(t, err).Required()
 
 		active, err := repo.Action().Create(ctx, testWorkspaceID, &model.Action{
@@ -1942,6 +1970,9 @@ func TestGraphQLHandler_ActionsByCaseQuery(t *testing.T) {
 
 	// Create a case
 	testCase := &model.Case{
+		ReporterID:     "U-TEST-DEFAULT",
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
 		Title:       "Case with Multiple Actions",
 		Description: "Testing actions query",
 	}
@@ -2068,6 +2099,9 @@ func TestGraphQLHandler_PrivateCaseAccessControl(t *testing.T) {
 
 	// Create a private case with specific channel users
 	privateCase := &model.Case{
+		ReporterID:     "U-TEST-DEFAULT",
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
 		Title:          "Private Case",
 		Description:    "Secret information",
 		IsPrivate:      true,
@@ -2079,6 +2113,9 @@ func TestGraphQLHandler_PrivateCaseAccessControl(t *testing.T) {
 
 	// Create a public case for comparison
 	publicCase := &model.Case{
+		ReporterID:     "U-TEST-DEFAULT",
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
 		Title:       "Public Case",
 		Description: "Public information",
 		AssigneeIDs: []string{},
@@ -2490,6 +2527,9 @@ func TestGraphQLHandler_ActionStepMutations(t *testing.T) {
 
 	// Create a Case + Action that the steps will live under.
 	c, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+		ReporterID:     "U-TEST-DEFAULT",
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
 		Title: "Step E2E Case",
 	})
 	gt.NoError(t, err).Required()
@@ -2717,6 +2757,9 @@ func TestGraphQLHandler_ActionStepPrivateCaseAccessControl(t *testing.T) {
 	const memberID = "UMEMBER"
 	const intruderID = "UINTRUDER"
 	c, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+		ReporterID:     "U-TEST-DEFAULT",
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
 		Title:          "Private Step Case",
 		IsPrivate:      true,
 		ChannelUserIDs: []string{memberID},
@@ -2832,6 +2875,8 @@ func TestGraphQLHandler_DraftsLifecycle(t *testing.T) {
 			Title:      "Half written",
 			Status:     types.CaseStatusDraft,
 			ReporterID: reporterID,
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
 		})
 		gt.NoError(t, err).Required()
 
@@ -2986,6 +3031,8 @@ func TestGraphQLHandler_DraftsLifecycle(t *testing.T) {
 			Title:      "To discard",
 			Status:     types.CaseStatusDraft,
 			ReporterID: reporterID,
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
 			IsPrivate:  true,
 		})
 		gt.NoError(t, err).Required()
@@ -3031,6 +3078,8 @@ func TestGraphQLHandler_DraftsLifecycle(t *testing.T) {
 			Title:      "Shared cleanup",
 			Status:     types.CaseStatusDraft,
 			ReporterID: reporterID,
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
 		})
 		gt.NoError(t, err).Required()
 
@@ -3065,6 +3114,8 @@ func TestGraphQLHandler_DraftsLifecycle(t *testing.T) {
 			Title:      "Already open",
 			Status:     types.CaseStatusOpen,
 			ReporterID: reporterID,
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
 		})
 		gt.NoError(t, err).Required()
 
@@ -3082,4 +3133,380 @@ func TestGraphQLHandler_DraftsLifecycle(t *testing.T) {
 		resp := parseGraphQLResponse(t, rec)
 		gt.Number(t, len(resp.Errors)).GreaterOrEqual(1)
 	})
+}
+
+// setupGraphQLServerWithAuth mirrors setupGraphQLServer but wires the
+// real authMiddleware in front of the GraphQL endpoint so tests can
+// exercise the full HTTP-to-resolver auth-context plumbing (cookie /
+// no-auth shortcut → ContextWithToken → resolver's TokenFromContext).
+// Tests that pre-inject auth via executeGraphQLRequestWithAuth bypass
+// this path and therefore cannot catch regressions in the middleware
+// chain itself.
+func setupGraphQLServerWithAuth(repo interfaces.Repository, authUC usecase.AuthUseCaseInterface) (http.Handler, error) {
+	uc := usecase.New(repo, nil)
+	resolver := gqlctrl.NewResolver(repo, uc)
+	srv := handler.NewDefaultServer(
+		gqlctrl.NewExecutableSchema(gqlctrl.Config{Resolvers: resolver}),
+	)
+	gqlHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		loaders := gqlctrl.NewDataLoaders(repo)
+		ctx := gqlctrl.WithDataLoaders(r.Context(), loaders)
+		srv.ServeHTTP(w, r.WithContext(ctx))
+	})
+	return httpctrl.New(gqlHandler, httpctrl.WithAuth(authUC))
+}
+
+// TestGraphQLHandler_CreateDraftReporterFromNoAuthnMiddleware pins the
+// reporter-recording flow when the application runs in no-auth mode —
+// i.e. the developer-mode shortcut where every request resolves to a
+// pre-configured user via NoAuthnUseCase.ValidateToken. The Drafts
+// page's "Reporter" column comes out empty if any one of the following
+// silently fails:
+//
+//   - authMiddleware does not invoke ValidateToken in the no-auth shortcut
+//   - NoAuthnUseCase.ValidateToken is constructed with an empty Sub
+//   - persistCase does not read Sub off the auth-context Token
+//   - the GraphQL converter strips ReporterID
+//   - the drafts query resolver does not return ReporterID
+//
+// Going through the real HTTP entry point (no executeGraphQLRequestWithAuth
+// shortcut) is what makes this test catch all of the above together.
+func TestGraphQLHandler_CreateDraftReporterFromNoAuthnMiddleware(t *testing.T) {
+	const reporterID = "U-NOAUTHN-SUB"
+
+	repo := memory.New()
+	authUC := usecase.NewNoAuthnUseCase(repo, reporterID, "noauth@example.com", "No Auth User")
+	handler, err := setupGraphQLServerWithAuth(repo, authUC)
+	gt.NoError(t, err).Required()
+
+	createMutation := `
+		mutation($workspaceId: String!, $input: CreateDraftInput!) {
+			createDraft(workspaceId: $workspaceId, input: $input) {
+				id
+				reporterID
+			}
+		}
+	`
+	body, err := json.Marshal(graphQLRequest{
+		Query: createMutation,
+		Variables: map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"input": map[string]interface{}{
+				"title":       "Reporter via no-auth middleware",
+				"description": "draft body",
+			},
+		},
+	})
+	gt.NoError(t, err).Required()
+
+	req := httptest.NewRequest(http.MethodPost, "/graphql", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	gt.Value(t, rec.Code).Equal(http.StatusOK).Required()
+
+	resp := parseGraphQLResponse(t, rec)
+	gt.Array(t, resp.Errors).Length(0).Required()
+
+	var created struct {
+		CreateDraft struct {
+			ID         int     `json:"id"`
+			ReporterID *string `json:"reporterID"`
+		} `json:"createDraft"`
+	}
+	gt.NoError(t, json.Unmarshal(resp.Data, &created)).Required()
+	gt.Value(t, created.CreateDraft.ReporterID).NotNil().Required()
+	gt.Value(t, *created.CreateDraft.ReporterID).Equal(reporterID)
+
+	persisted, err := repo.Case().Get(context.Background(), testWorkspaceID, int64(created.CreateDraft.ID))
+	gt.NoError(t, err).Required()
+	gt.Value(t, persisted.ReporterID).Equal(reporterID)
+}
+
+// TestGraphQLHandler_CreateDraftRecordsReporter pins the end-to-end
+// reporter-recording contract for the createDraft mutation. The reporter
+// is what populates the "Reporter" column on the Drafts page, and the
+// only way it gets there is via the auth-context Token that the HTTP
+// auth middleware injects on its way through the GraphQL request. This
+// test goes through the public HTTP entry point exactly the way a
+// browser does so a regression in any layer along the way — middleware,
+// resolver, usecase, repository, GraphQL converter, drafts query
+// resolver — is caught here instead of silently shipping a Drafts page
+// with empty Reporter cells.
+func TestGraphQLHandler_CreateDraftRecordsReporter(t *testing.T) {
+	const reporterID = "U-CREATEDRAFT-REPORTER"
+
+	repo := memory.New()
+	handler, err := setupGraphQLServer(repo)
+	gt.NoError(t, err).Required()
+
+	createMutation := `
+		mutation($workspaceId: String!, $input: CreateDraftInput!) {
+			createDraft(workspaceId: $workspaceId, input: $input) {
+				id
+				reporterID
+			}
+		}
+	`
+	rec := executeGraphQLRequestWithAuth(t, handler, createMutation, map[string]interface{}{
+		"workspaceId": testWorkspaceID,
+		"input": map[string]interface{}{
+			"title":       "Reporter capture test",
+			"description": "draft body",
+		},
+	}, reporterID)
+	resp := parseGraphQLResponse(t, rec)
+	gt.Array(t, resp.Errors).Length(0).Required()
+
+	var created struct {
+		CreateDraft struct {
+			ID         int     `json:"id"`
+			ReporterID *string `json:"reporterID"`
+		} `json:"createDraft"`
+	}
+	gt.NoError(t, json.Unmarshal(resp.Data, &created)).Required()
+	gt.Value(t, created.CreateDraft.ReporterID).NotNil().Required()
+	gt.Value(t, *created.CreateDraft.ReporterID).Equal(reporterID)
+
+	// Persistence is part of the contract: read the draft straight back
+	// out of the repository and assert the ReporterID actually landed in
+	// storage (not merely echoed in the mutation response).
+	persisted, err := repo.Case().Get(context.Background(), testWorkspaceID, int64(created.CreateDraft.ID))
+	gt.NoError(t, err).Required()
+	gt.Value(t, persisted.ReporterID).Equal(reporterID)
+
+	// And the drafts query — the path the UI actually uses — must
+	// surface the same reporterID back to the client. This is what
+	// the Drafts page reads to render the Reporter column.
+	listQuery := `
+		query($workspaceId: String!) {
+			drafts(workspaceId: $workspaceId) {
+				id
+				reporterID
+			}
+		}
+	`
+	listRec := executeGraphQLRequestWithAuth(t, handler, listQuery, map[string]interface{}{
+		"workspaceId": testWorkspaceID,
+	}, reporterID)
+	listResp := parseGraphQLResponse(t, listRec)
+	gt.Array(t, listResp.Errors).Length(0).Required()
+
+	var listResult struct {
+		Drafts []struct {
+			ID         int     `json:"id"`
+			ReporterID *string `json:"reporterID"`
+		} `json:"drafts"`
+	}
+	gt.NoError(t, json.Unmarshal(listResp.Data, &listResult)).Required()
+	gt.Array(t, listResult.Drafts).Length(1).Required()
+	gt.Value(t, listResult.Drafts[0].ReporterID).NotNil().Required()
+	gt.Value(t, *listResult.Drafts[0].ReporterID).Equal(reporterID)
+}
+
+// TestGraphQLHandler_DraftsReporterResolvesToSlackUser pins the exact
+// shape the Drafts page actually queries — `reporter { id name realName
+// imageUrl }` — and asserts that the SlackUser dataloader resolves the
+// nested object end-to-end. Earlier tests only verified the raw
+// `reporterID` field, which would still come back even if the
+// SlackUserLoader silently returned nil; that was exactly the
+// regression mode behind the empty-Reporter-column bug. By driving the
+// same field set the UI uses, plus the normalisation path for legacy
+// "Uxxx-Txxx" composite IDs, this test fails the way the production UI
+// fails instead of silently passing.
+func TestGraphQLHandler_DraftsReporterResolvesToSlackUser(t *testing.T) {
+	const (
+		bareReporterID      = "UBAREDRAFT"
+		compositeReporterID = "ULEGACYDRAFT-TWORKSPACE"
+	)
+
+	repo := memory.New()
+	ctx := context.Background()
+
+	// The SlackUser repository keys on the bare user ID. Both the
+	// modern (bare) and legacy (composite) reporters should resolve to
+	// the same entry once the dataloader normalises the composite form.
+	gt.NoError(t, repo.SlackUser().SaveMany(ctx, []*model.SlackUser{
+		{ID: "UBAREDRAFT", Name: "alice", RealName: "Alice"},
+		{ID: "ULEGACYDRAFT", Name: "bob", RealName: "Bob"},
+	})).Required()
+
+	// Two drafts: one persisted with the bare reporter ID (the modern
+	// flow), one with the composite OIDC sub form (data persisted
+	// before the auth-side normalisation fix).
+	bareDraft, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+		Title:      "Bare reporter draft",
+		Status:     types.CaseStatusDraft,
+		ReporterID: bareReporterID,
+		CreatedAt:  time.Now().UTC(),
+		UpdatedAt:  time.Now().UTC(),
+	})
+	gt.NoError(t, err).Required()
+	legacyDraft, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+		Title:      "Legacy composite reporter draft",
+		Status:     types.CaseStatusDraft,
+		ReporterID: compositeReporterID,
+		CreatedAt:  time.Now().UTC(),
+		UpdatedAt:  time.Now().UTC(),
+	})
+	gt.NoError(t, err).Required()
+
+	handler, err := setupGraphQLServer(repo)
+	gt.NoError(t, err).Required()
+
+	// Same field set as frontend/src/graphql/drafts.ts so a regression in
+	// the SlackUserLoader, dataloader plumbing, or reporter resolver
+	// surfaces here exactly as it would in the browser.
+	query := `
+		query($workspaceId: String!) {
+			drafts(workspaceId: $workspaceId) {
+				id
+				reporterID
+				reporter {
+					id
+					name
+					realName
+					imageUrl
+				}
+			}
+		}
+	`
+	rec := executeGraphQLRequestWithAuth(t, handler, query, map[string]interface{}{
+		"workspaceId": testWorkspaceID,
+	}, bareReporterID)
+	resp := parseGraphQLResponse(t, rec)
+	gt.Array(t, resp.Errors).Length(0).Required()
+
+	type slackUserPayload struct {
+		ID       string  `json:"id"`
+		Name     string  `json:"name"`
+		RealName string  `json:"realName"`
+		ImageURL *string `json:"imageUrl"`
+	}
+	var result struct {
+		Drafts []struct {
+			ID         int               `json:"id"`
+			ReporterID *string           `json:"reporterID"`
+			Reporter   *slackUserPayload `json:"reporter"`
+		} `json:"drafts"`
+	}
+	gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+	gt.Array(t, result.Drafts).Length(2).Required()
+
+	byID := make(map[int64]struct {
+		ReporterID *string
+		Reporter   *slackUserPayload
+	}, len(result.Drafts))
+	for _, d := range result.Drafts {
+		byID[int64(d.ID)] = struct {
+			ReporterID *string
+			Reporter   *slackUserPayload
+		}{ReporterID: d.ReporterID, Reporter: d.Reporter}
+	}
+
+	bare, ok := byID[bareDraft.ID]
+	gt.Bool(t, ok).True().Required()
+	gt.Value(t, bare.ReporterID).NotNil().Required()
+	gt.Value(t, *bare.ReporterID).Equal(bareReporterID)
+	gt.Value(t, bare.Reporter).NotNil().Required()
+	gt.Value(t, bare.Reporter.ID).Equal("UBAREDRAFT")
+	gt.Value(t, bare.Reporter.RealName).Equal("Alice")
+
+	legacy, ok := byID[legacyDraft.ID]
+	gt.Bool(t, ok).True().Required()
+	gt.Value(t, legacy.ReporterID).NotNil().Required()
+	// The reporterID echoes the raw persisted value (composite form)
+	// — the converter does not rewrite stored data.
+	gt.Value(t, *legacy.ReporterID).Equal(compositeReporterID)
+	// But the nested reporter object MUST still resolve via the
+	// dataloader's normalisation path. If this assertion fails the
+	// Drafts page shows an empty Reporter cell for every legacy draft.
+	gt.Value(t, legacy.Reporter).NotNil().Required()
+	gt.Value(t, legacy.Reporter.ID).Equal("ULEGACYDRAFT")
+	gt.Value(t, legacy.Reporter.RealName).Equal("Bob")
+}
+
+// TestGraphQLHandler_DraftsReporterMissingSurfacesError pins the
+// reverse contract of DraftsReporterResolvesToSlackUser: when the
+// ReporterID is recorded but the SlackUser repository has no entry for
+// it, the GraphQL response must carry a field-level error pointing at
+// `drafts[].reporter`. The earlier silent-nil behaviour made the
+// Drafts page show an empty Reporter cell that was visually
+// indistinguishable from "no reporter recorded" — and there was no
+// way for the client (or ops) to tell which it was. The empty cell is
+// now paired with both an errutil.Handle report (logs + Sentry) and a
+// GraphQL `errors[]` entry, so the bug class can never silently ship
+// again.
+func TestGraphQLHandler_DraftsReporterMissingSurfacesError(t *testing.T) {
+	const reporterID = "UORPHANREPORTER"
+
+	repo := memory.New()
+	ctx := context.Background()
+
+	// Persist a draft whose ReporterID has NO corresponding SlackUser
+	// entry — the exact production failure mode (repo never synced or
+	// stale workspace).
+	_, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+		Title:      "Reporter is orphaned",
+		Status:     types.CaseStatusDraft,
+		ReporterID: reporterID,
+	})
+	gt.NoError(t, err).Required()
+
+	handler, err := setupGraphQLServer(repo)
+	gt.NoError(t, err).Required()
+
+	query := `
+		query($workspaceId: String!) {
+			drafts(workspaceId: $workspaceId) {
+				id
+				reporterID
+				reporter {
+					id
+					realName
+				}
+			}
+		}
+	`
+	rec := executeGraphQLRequestWithAuth(t, handler, query, map[string]interface{}{
+		"workspaceId": testWorkspaceID,
+	}, reporterID)
+	resp := parseGraphQLResponse(t, rec)
+
+	// At least one error must be surfaced naming the reporter path so
+	// the client can render a meaningful state instead of an empty
+	// cell. Reporter is nullable in the schema, so the rest of the
+	// drafts list still comes back populated — that's the whole point.
+	gt.Number(t, len(resp.Errors)).GreaterOrEqual(1).Required()
+	var found bool
+	for _, e := range resp.Errors {
+		for _, p := range e.Path {
+			if s, ok := p.(string); ok && s == "reporter" {
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+	gt.Bool(t, found).True()
+
+	// reporterID is still echoed back since the converter does not
+	// touch storage — the failure is in the resolver, not the data.
+	var result struct {
+		Drafts []struct {
+			ID         int     `json:"id"`
+			ReporterID *string `json:"reporterID"`
+			Reporter   *struct {
+				ID       string `json:"id"`
+				RealName string `json:"realName"`
+			} `json:"reporter"`
+		} `json:"drafts"`
+	}
+	gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+	gt.Array(t, result.Drafts).Length(1).Required()
+	gt.Value(t, result.Drafts[0].ReporterID).NotNil().Required()
+	gt.Value(t, *result.Drafts[0].ReporterID).Equal(reporterID)
+	gt.Value(t, result.Drafts[0].Reporter).Nil()
 }

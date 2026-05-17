@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
@@ -226,6 +227,7 @@ func (uc *CaseUseCase) persistCase(ctx context.Context, workspaceID string, in p
 		reporterID = token.Sub
 	}
 
+	now := time.Now().UTC()
 	caseModel := &model.Case{
 		Title:       in.Title,
 		Description: in.Description,
@@ -235,6 +237,8 @@ func (uc *CaseUseCase) persistCase(ctx context.Context, workspaceID string, in p
 		IsPrivate:   in.IsPrivate,
 		FieldValues: in.FieldValues,
 		RequestKey:  in.RequestKey,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 
 	created, err := uc.repo.Case().Create(ctx, workspaceID, caseModel)
@@ -333,6 +337,7 @@ func (uc *CaseUseCase) activateCase(ctx context.Context, workspaceID string, c *
 	}
 
 	c.ChannelUserIDs = channelUserIDs
+	c.UpdatedAt = time.Now().UTC()
 	updated, err := uc.repo.Case().Update(ctx, workspaceID, c)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to update case with Slack channel ID",
@@ -465,6 +470,7 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, workspaceID string, id in
 		ChannelUserIDs: existingCase.ChannelUserIDs,
 		FieldValues:    fieldValues,
 		CreatedAt:      existingCase.CreatedAt,
+		UpdatedAt:      time.Now().UTC(),
 	}
 
 	updated, err := uc.repo.Case().Update(ctx, workspaceID, caseModel)
@@ -584,6 +590,7 @@ func (uc *CaseUseCase) CloseCase(ctx context.Context, workspaceID string, id int
 	}
 
 	existing.Status = types.CaseStatusClosed
+	existing.UpdatedAt = time.Now().UTC()
 	updated, err := uc.repo.Case().Update(ctx, workspaceID, existing)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to close case", goerr.V(CaseIDKey, id))
@@ -614,6 +621,7 @@ func (uc *CaseUseCase) ReopenCase(ctx context.Context, workspaceID string, id in
 	}
 
 	existing.Status = types.CaseStatusOpen
+	existing.UpdatedAt = time.Now().UTC()
 	updated, err := uc.repo.Case().Update(ctx, workspaceID, existing)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to reopen case", goerr.V(CaseIDKey, id))
@@ -730,6 +738,7 @@ func (uc *CaseUseCase) SubmitDraft(ctx context.Context, workspaceID string, id i
 			}
 			c.FieldValues = merged
 		}
+		c.UpdatedAt = time.Now().UTC()
 		persistedPatch, pErr := uc.repo.Case().Update(ctx, workspaceID, c)
 		if pErr != nil {
 			return nil, goerr.Wrap(pErr, "failed to persist pre-submit edits", goerr.V(CaseIDKey, id))
@@ -783,6 +792,7 @@ func (uc *CaseUseCase) SubmitDraft(ctx context.Context, workspaceID string, id i
 		return nil, goerr.Wrap(err, "cannot submit draft", goerr.V(CaseIDKey, id))
 	}
 
+	c.UpdatedAt = time.Now().UTC()
 	updated, err := uc.repo.Case().Update(ctx, workspaceID, c)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to flip draft to open", goerr.V(CaseIDKey, id))
@@ -796,6 +806,7 @@ func (uc *CaseUseCase) SubmitDraft(ctx context.Context, workspaceID string, id i
 		// there waiting to be patched.
 		if rolled, getErr := uc.repo.Case().Get(ctx, workspaceID, id); getErr == nil {
 			rolled.Status = types.CaseStatusDraft
+			rolled.UpdatedAt = time.Now().UTC()
 			if _, undoErr := uc.repo.Case().Update(ctx, workspaceID, rolled); undoErr != nil {
 				errutil.Handle(ctx, goerr.Wrap(undoErr, "failed to roll status back to draft after activation failure",
 					goerr.V(CaseIDKey, id),
@@ -857,6 +868,7 @@ func (uc *CaseUseCase) SyncCaseChannelUsers(ctx context.Context, workspaceID str
 	}
 
 	existing.ChannelUserIDs = filterHumanUsers(ctx, uc.repo, members)
+	existing.UpdatedAt = time.Now().UTC()
 	updated, err := uc.repo.Case().Update(ctx, workspaceID, existing)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to update case with channel members",

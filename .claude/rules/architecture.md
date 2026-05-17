@@ -164,6 +164,72 @@ validation sync, then internally `async.Dispatch` the heavy tail.
   blocks) and calls the third-party SDK. It does not load entities,
   does not consult the registry.
 
+### Repository write contract (NON-NEGOTIABLE)
+
+This subsection encodes the lesson from a real bug where the
+Firestore `caseRepository.Create` was rebuilding the persisted
+`*model.Case` via a field-by-field struct literal — and silently
+dropped `ReporterID` (which had been added to the domain model
+later). Every case persisted via Firestore lost its reporter, the
+GraphQL `reporter` resolver returned nil, and the Cases page showed
+empty Reporter cells indistinguishable from "no reporter recorded".
+No test caught it because the memory repo round-tripped fine and the
+Firestore tests skipped without `FIRESTORE_PROJECT_ID`.
+
+The rules below exist to make that class of bug structurally
+impossible:
+
+- **NEVER copy `*model.X` field-by-field inside a repository.**
+  Forbidden patterns include:
+  - `created := &model.X{ID: ..., Title: x.Title, …}` — when a new
+    field is added to `model.X`, this literal silently drops it.
+  - Mirror "doc" struct types (`type caseDoc struct { … }`) paired
+    with `toDoc(*model.X)` / `fromDoc(*doc) *model.X` converter
+    functions. CLAUDE.md (`firestore.md`) already prohibits these
+    for Firestore specifically; the broader principle applies to
+    every backend.
+  - `firestore:"..."` struct tags. Same reason — they encode a
+    separate wire schema that drifts from the model.
+- **The legal shape of `Create`** is: validate (`model.X.Validate()`)
+  → assign the storage-side ID directly on the caller's pointer
+  (`x.ID = nextID`) → `Set(ctx, x)` → `return x, nil`. Nothing
+  else gets copied or rebuilt.
+- **The legal shape of `Update`** is: validate → existence check →
+  `Set(ctx, x)` → `return x, nil`. The caller's pointer is the
+  source of truth for every field, including timestamps.
+- **`time.Now()` does not belong in repository write methods.**
+  Timestamp policy (CreatedAt on insert, UpdatedAt on every write)
+  is business state and belongs in the usecase that owns the
+  entity. A repo that stamps timestamps is forcing every caller
+  through one clock and silently overrides the value the caller
+  passed in. (Backends that need a server-side write timestamp for
+  ordering may keep an internal field — that is separate from the
+  domain CreatedAt / UpdatedAt.)
+- **The `Validate()` method on each persisted model is mandatory
+  invariant enforcement.** Repositories MUST call it before every
+  write. Required identity fields (ReporterID, CreatorID, etc.)
+  belong in `Validate` so that a usecase / handler bug that
+  forgets to inject the reporter (e.g. a Slack interactivity
+  callback that skipped `auth.ContextWithToken`) fails loudly at
+  the first write instead of silently producing unattributable
+  data.
+- **Every persisted model needs a repository-level round-trip test
+  that creates with all fields populated and reads each one back
+  exhaustively.** Tests that only assert `Title` and `ID` cannot
+  catch a Firestore Create that drops `ReporterID`. The check
+  belongs in the shared `runXxxRepositoryTest` helper so memory
+  and Firestore are compared apples-to-apples.
+
+### Repository test environment requirement
+
+The Firestore implementation MUST be exercised, not skipped. A
+build that skips Firestore tests because `FIRESTORE_PROJECT_ID` is
+unset gives a false green: the memory repo round-trips models via
+`copyCase` (full struct copy), so a field dropped only on the
+Firestore Create path never surfaces. Run the Firestore tests
+against the Firestore emulator in CI and locally — the same shared
+helper produces identical assertions across both implementations.
+
 ## domain (`pkg/domain/`)
 
 Pure types, interfaces, and validation. No I/O, no logging, no

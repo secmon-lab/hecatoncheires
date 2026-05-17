@@ -3,7 +3,6 @@ package firestore
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"cloud.google.com/go/firestore"
 	pb "cloud.google.com/go/firestore/apiv1/firestorepb"
@@ -11,41 +10,6 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"google.golang.org/api/iterator"
 )
-
-// assistLogDoc is the Firestore document representation of model.AssistLog.
-type assistLogDoc struct {
-	ID        model.AssistLogID `firestore:"ID"`
-	CaseID    int64             `firestore:"CaseID"`
-	Summary   string            `firestore:"Summary"`
-	Actions   string            `firestore:"Actions"`
-	Reasoning string            `firestore:"Reasoning"`
-	NextSteps string            `firestore:"NextSteps"`
-	CreatedAt time.Time         `firestore:"CreatedAt"`
-}
-
-func toAssistLogDoc(l *model.AssistLog) *assistLogDoc {
-	return &assistLogDoc{
-		ID:        l.ID,
-		CaseID:    l.CaseID,
-		Summary:   l.Summary,
-		Actions:   l.Actions,
-		Reasoning: l.Reasoning,
-		NextSteps: l.NextSteps,
-		CreatedAt: l.CreatedAt,
-	}
-}
-
-func fromAssistLogDoc(d *assistLogDoc) *model.AssistLog {
-	return &model.AssistLog{
-		ID:        d.ID,
-		CaseID:    d.CaseID,
-		Summary:   d.Summary,
-		Actions:   d.Actions,
-		Reasoning: d.Reasoning,
-		NextSteps: d.NextSteps,
-		CreatedAt: d.CreatedAt,
-	}
-}
 
 type firestoreAssistLogRepository struct {
 	client *firestore.Client
@@ -64,14 +28,16 @@ func (r *firestoreAssistLogRepository) assistsCollection(workspaceID string, cas
 }
 
 func (r *firestoreAssistLogRepository) Create(ctx context.Context, workspaceID string, caseID int64, log *model.AssistLog) (*model.AssistLog, error) {
+	// No struct-tag mirror, no converter — model.AssistLog is
+	// persisted verbatim, the only way to guarantee that fields
+	// added later to the domain model don't silently drop on write.
 	if log.ID == "" {
 		log.ID = model.NewAssistLogID()
 	}
 	log.CaseID = caseID
-	log.CreatedAt = time.Now().UTC()
 
 	docRef := r.assistsCollection(workspaceID, caseID).Doc(string(log.ID))
-	if _, err := docRef.Set(ctx, toAssistLogDoc(log)); err != nil {
+	if _, err := docRef.Set(ctx, log); err != nil {
 		return nil, goerr.Wrap(err, "failed to create assist log")
 	}
 
@@ -114,12 +80,12 @@ func (r *firestoreAssistLogRepository) List(ctx context.Context, workspaceID str
 			return nil, 0, goerr.Wrap(err, "failed to iterate assist logs")
 		}
 
-		var d assistLogDoc
-		if err := doc.DataTo(&d); err != nil {
+		var log model.AssistLog
+		if err := doc.DataTo(&log); err != nil {
 			return nil, 0, goerr.Wrap(err, "failed to unmarshal assist log")
 		}
 
-		logs = append(logs, fromAssistLogDoc(&d))
+		logs = append(logs, &log)
 	}
 
 	return logs, totalCount, nil

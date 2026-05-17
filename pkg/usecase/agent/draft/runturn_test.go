@@ -1268,7 +1268,11 @@ func runScenario(t *testing.T, ctx context.Context, llm gollem.LLMClient, sc llm
 // could resolve, the planner's only way to disambiguate the workspace is
 // to ask — verified by an LLM judge over the question payload.
 func TestRunTurn_RealLLM_VagueMentionAsksQuestion(t *testing.T) {
-	t.Parallel()
+	// Real-LLM tests intentionally run serially: parallel execution
+	// fans out concurrent LLM calls that compete for the same rate
+	// limit / quota window, which surfaces as intermittent decode-
+	// retry exhaustion and "expected tool call X, recorded none"
+	// flakes that have nothing to do with the code under test.
 	ctx := context.Background()
 	llm := newTestLLMClient(t, ctx)
 
@@ -1365,7 +1369,7 @@ func TestRunTurn_RealLLM_VagueMentionAsksQuestion(t *testing.T) {
 // the planner asks the user (postedQuestion non-empty) or picks an
 // option outside the allowed range.
 func TestRunTurn_RealLLM_InfersFieldsFromSources(t *testing.T) {
-	t.Parallel()
+	// Serial — see TestRunTurn_RealLLM_VagueMentionAsksQuestion.
 	ctx := context.Background()
 	llm := newTestLLMClient(t, ctx)
 
@@ -1580,7 +1584,7 @@ func TestRunTurn_RealLLM_InfersFieldsFromSources(t *testing.T) {
 // and within a sensible pair) so the test focuses on the workspace
 // decision, not on field inference (which Scenario C handles).
 func TestRunTurn_RealLLM_PicksRightWorkspaceFromMany(t *testing.T) {
-	t.Parallel()
+	// Serial — see TestRunTurn_RealLLM_VagueMentionAsksQuestion.
 	ctx := context.Background()
 	llm := newTestLLMClient(t, ctx)
 
@@ -1697,7 +1701,7 @@ func TestRunTurn_RealLLM_PicksRightWorkspaceFromMany(t *testing.T) {
 //     least one get_workspace call (the strengthened planner prompt
 //     requires it before any terminal action).
 func TestRunTurn_RealLLM_QuestionAnsweredThenMaterializes(t *testing.T) {
-	t.Parallel()
+	// Serial — see TestRunTurn_RealLLM_VagueMentionAsksQuestion.
 	ctx := context.Background()
 	llm := newTestLLMClient(t, ctx)
 

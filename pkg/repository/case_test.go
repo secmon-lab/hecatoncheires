@@ -18,13 +18,15 @@ import (
 func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.Repository) {
 	t.Helper()
 
-	const wsID = "test-ws"
-
 	t.Run("Create creates case with auto-increment ID", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		case1 := &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title:       "SQL Injection Risk",
 			Description: "Database vulnerable to SQL injection",
 			AssigneeIDs: []string{"U123", "U456"},
@@ -42,6 +44,9 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 		// Create second case to test auto-increment
 		case2 := &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title:       "XSS Risk",
 			Description: "Cross-site scripting vulnerability",
 		}
@@ -54,9 +59,13 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("Get retrieves existing case", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title:       "CSRF Risk",
 			Description: "Cross-site request forgery",
 			AssigneeIDs: []string{"U789"},
@@ -76,6 +85,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("Get returns error for non-existent case", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		_, err := repo.Case().Get(ctx, wsID, time.Now().UnixNano())
@@ -84,18 +94,25 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("Update updates existing case", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title:       "Original Title",
 			Description: "Original Description",
 		})
 		gt.NoError(t, err).Required()
 
 		// Update the case
+		originalUpdatedAt := created.UpdatedAt
+		time.Sleep(time.Millisecond)
 		created.Title = "Updated Title"
 		created.Description = "Updated Description"
 		created.AssigneeIDs = []string{"U111", "U222"}
+		created.UpdatedAt = time.Now().UTC()
 
 		updated, err := repo.Case().Update(ctx, wsID, created)
 		gt.NoError(t, err).Required()
@@ -104,14 +121,18 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.Value(t, updated.Title).Equal("Updated Title")
 		gt.Value(t, updated.Description).Equal("Updated Description")
 		gt.Array(t, updated.AssigneeIDs).Length(2)
-		gt.Bool(t, updated.UpdatedAt.Before(created.UpdatedAt) || updated.UpdatedAt.Equal(created.UpdatedAt)).False()
+		gt.Bool(t, updated.UpdatedAt.Before(originalUpdatedAt) || updated.UpdatedAt.Equal(originalUpdatedAt)).False()
 	})
 
 	t.Run("Delete deletes existing case", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title: "To be deleted",
 		})
 		gt.NoError(t, err).Required()
@@ -126,6 +147,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("Create and Get with FieldValues", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		fieldValues := map[string]model.FieldValue{
@@ -136,6 +158,9 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		}
 
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title:       "Case with fields",
 			Description: "Testing field values",
 			FieldValues: fieldValues,
@@ -165,9 +190,13 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("Create with nil FieldValues", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title:       "Case without fields",
 			FieldValues: nil,
 		})
@@ -182,9 +211,13 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("Create with empty FieldValues", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title:       "Case with empty fields",
 			FieldValues: map[string]model.FieldValue{},
 		})
@@ -198,9 +231,13 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("Update preserves and modifies FieldValues", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title: "Case to update fields",
 			FieldValues: map[string]model.FieldValue{
 				"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "low"},
@@ -230,10 +267,14 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("FieldValues deep copy isolation", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		tags := []string{"tag1", "tag2"}
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title: "Deep copy test",
 			FieldValues: map[string]model.FieldValue{
 				"tags": {FieldID: "tags", Type: types.FieldTypeMultiSelect, Value: tags},
@@ -244,12 +285,20 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		// Mutate the original slice
 		tags[0] = "mutated"
 
-		// Retrieve and verify the stored value is not affected
+		// Retrieve and verify the stored value is not affected.
+		//
+		// The two backends return different concrete slice types here:
+		// memory stores the original `[]string` slice, while firestore
+		// round-trips through `firestore.DataTo` and reconstitutes the
+		// generic `Value any` as `[]interface{}`. The wire-format contract
+		// on `FieldValue.Value` is "iterable of strings" (see
+		// FieldValue.IsValueInSet which switches on both shapes), so the
+		// test asserts on the iterable-of-strings invariant, not on the
+		// concrete slice type.
 		retrieved, err := repo.Case().Get(ctx, wsID, created.ID)
 		gt.NoError(t, err).Required()
 
-		storedTags, ok := retrieved.FieldValues["tags"].Value.([]string)
-		gt.Bool(t, ok).True()
+		storedTags := toStringSlice(t, retrieved.FieldValues["tags"].Value)
 		gt.Value(t, storedTags[0]).Equal("tag1")
 
 		// Also verify that mutating the retrieved value doesn't affect the store
@@ -258,16 +307,19 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		retrieved2, err := repo.Case().Get(ctx, wsID, created.ID)
 		gt.NoError(t, err).Required()
 
-		storedTags2, ok := retrieved2.FieldValues["tags"].Value.([]string)
-		gt.Bool(t, ok).True()
+		storedTags2 := toStringSlice(t, retrieved2.FieldValues["tags"].Value)
 		gt.Value(t, storedTags2[0]).Equal("tag1")
 	})
 
 	t.Run("Delete removes case with FieldValues", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title: "Case to delete",
 			FieldValues: map[string]model.FieldValue{
 				"priority": {FieldID: "priority", Type: types.FieldTypeSelect, Value: "high"},
@@ -284,9 +336,13 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("GetBySlackChannelID returns matching case", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title:          "Case with channel",
 			SlackChannelID: "C-TEST-CHANNEL",
 		})
@@ -307,6 +363,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("GetBySlackChannelID returns nil for non-existent channel", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		found, err := repo.Case().GetBySlackChannelID(ctx, wsID, "C-NONEXISTENT")
@@ -325,12 +382,14 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("CountFieldValues counts total and valid select values", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		// Create 3 cases with select field: 2 valid, 1 invalid
 		for _, severity := range []string{"high", "medium", "invalid-opt"} {
 			_, err := repo.Case().Create(ctx, wsID, &model.Case{
-				Title: "Case " + severity,
+				ReporterID: "U-TEST-DEFAULT",
+				Title:      "Case " + severity,
 				FieldValues: map[string]model.FieldValue{
 					"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: severity},
 				},
@@ -348,6 +407,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("CountFieldValues returns zero for empty workspace", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		total, valid, err := repo.Case().CountFieldValues(
@@ -360,10 +420,14 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("CountFieldValues ignores different field types", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		// Create a case with text field (not select)
 		_, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title: "Text case",
 			FieldValues: map[string]model.FieldValue{
 				"severity": {FieldID: "severity", Type: types.FieldTypeText, Value: "high"},
@@ -381,9 +445,13 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("CountFieldValues counts multi-select values", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		_, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title: "Valid tags",
 			FieldValues: map[string]model.FieldValue{
 				"tags": {FieldID: "tags", Type: types.FieldTypeMultiSelect, Value: []string{"network", "malware"}},
@@ -392,6 +460,9 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.NoError(t, err).Required()
 
 		_, err = repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title: "Invalid tags",
 			FieldValues: map[string]model.FieldValue{
 				"tags": {FieldID: "tags", Type: types.FieldTypeMultiSelect, Value: []string{"network", "bogus"}},
@@ -409,9 +480,13 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("FindCaseWithInvalidFieldValue returns invalid case", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		_, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title: "Valid case",
 			FieldValues: map[string]model.FieldValue{
 				"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "high"},
@@ -420,6 +495,9 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.NoError(t, err).Required()
 
 		_, err = repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title: "Invalid case",
 			FieldValues: map[string]model.FieldValue{
 				"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "deleted-option"},
@@ -441,9 +519,13 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("FindCaseWithInvalidFieldValue returns nil when all valid", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		_, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title: "Valid case",
 			FieldValues: map[string]model.FieldValue{
 				"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "high"},
@@ -460,9 +542,13 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("FindCaseWithInvalidFieldValue detects invalid multi-select", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		_, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title: "Bad multi-select",
 			FieldValues: map[string]model.FieldValue{
 				"tags": {FieldID: "tags", Type: types.FieldTypeMultiSelect, Value: []string{"network", "removed-tag"}},
@@ -480,6 +566,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("FindCaseWithInvalidFieldValue returns nil for empty workspace", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		found, err := repo.Case().FindCaseWithInvalidFieldValue(
@@ -491,11 +578,15 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("List retrieves all cases", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		// Create multiple cases
 		for i := 0; i < 3; i++ {
 			_, err := repo.Case().Create(ctx, wsID, &model.Case{
+				ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 				Title:       "Case " + string(rune('A'+i)),
 				Description: "Description " + string(rune('A'+i)),
 			})
@@ -510,16 +601,23 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("List with status filter returns only matching cases", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		// Create open cases
 		_, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title:  "Open Case 1",
 			Status: types.CaseStatusOpen,
 		})
 		gt.NoError(t, err).Required()
 
 		_, err = repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title:  "Open Case 2",
 			Status: types.CaseStatusOpen,
 		})
@@ -527,6 +625,9 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 		// Create closed case
 		_, err = repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title:  "Closed Case 1",
 			Status: types.CaseStatusClosed,
 		})
@@ -555,9 +656,13 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("Create and Get preserves status", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title:  "Status Test",
 			Status: types.CaseStatusClosed,
 		})
@@ -570,9 +675,13 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("Update preserves status change", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title:  "Status Update Test",
 			Status: types.CaseStatusOpen,
 		})
@@ -590,6 +699,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("Create and retrieve case with ReporterID", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
@@ -606,23 +716,26 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.String(t, retrieved.ReporterID).Equal("UREPORTER123")
 	})
 
-	t.Run("Create case without ReporterID", func(t *testing.T) {
+	t.Run("Create case without ReporterID is rejected by validation", func(t *testing.T) {
+		// Repositories now enforce model.Case.Validate at the write
+		// boundary. Persisting a case without a reporter would render
+		// the Cases / Drafts UI's Reporter column permanently empty
+		// for that row — the only way the reporter ever lands is via
+		// the auth-context Token at create time, so a missing value
+		// here is always a usecase / handler bug. Refuse it.
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
-		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+		_, err := repo.Case().Create(ctx, wsID, &model.Case{
 			Title: "No Reporter",
 		})
-		gt.NoError(t, err).Required()
-		gt.String(t, created.ReporterID).Equal("")
-
-		retrieved, err := repo.Case().Get(ctx, wsID, created.ID)
-		gt.NoError(t, err).Required()
-		gt.String(t, retrieved.ReporterID).Equal("")
+		gt.Error(t, err).Is(model.ErrCaseMissingReporter)
 	})
 
 	t.Run("Update preserves ReporterID", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
@@ -643,10 +756,14 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("GetByRequestKey returns case with matching key", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		requestKey := fmt.Sprintf("test-key-%d", time.Now().UnixNano())
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title:      "Idempotent Case",
 			RequestKey: requestKey,
 		})
@@ -662,6 +779,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("GetByRequestKey returns nil for non-existent key", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		found, err := repo.Case().GetByRequestKey(ctx, wsID, "non-existent-key")
@@ -671,10 +789,14 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("GetByRequestKey does not match cases with empty key", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		// Create a case without request key
 		_, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title: "No Key Case",
 		})
 		gt.NoError(t, err).Required()
@@ -687,9 +809,13 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("List excludes drafts by default", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		open1, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title:  "Open Visible",
 			Status: types.CaseStatusOpen,
 		})
@@ -703,6 +829,9 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.NoError(t, err).Required()
 
 		closed, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title:  "Closed Visible",
 			Status: types.CaseStatusClosed,
 		})
@@ -723,9 +852,13 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("List with WithStatus(DRAFT) returns drafts", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		_, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 			Title:  "Open A",
 			Status: types.CaseStatusOpen,
 		})
@@ -747,6 +880,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("ListDrafts returns every draft in the workspace regardless of reporter", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		mineA, err := repo.Case().Create(ctx, wsID, &model.Case{
@@ -794,6 +928,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 	t.Run("ListDrafts returns empty when no drafts exist", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		_, err := repo.Case().Create(ctx, wsID, &model.Case{
@@ -816,14 +951,58 @@ func TestCaseRepository_Memory(t *testing.T) {
 }
 
 func TestCaseRepository_Firestore(t *testing.T) {
-	projectID := os.Getenv("FIRESTORE_PROJECT_ID")
+	runCaseRepositoryTest(t, newFirestoreRepository)
+}
+
+// newFirestoreRepository constructs a Firestore-backed
+// interfaces.Repository for tests, skipping the calling test when the
+// emulator / project env vars are not configured. This is the single
+// place that reads TEST_FIRESTORE_PROJECT_ID / TEST_FIRESTORE_DATABASE_ID
+// — every TestXxxRepository_Firestore in this package must call it
+// instead of inlining its own env-check + firestore.New (any divergence
+// here re-creates the "half the Firestore tests silently skip" failure
+// mode that hid the ReporterID drop bug).
+func newFirestoreRepository(t *testing.T) interfaces.Repository {
+	t.Helper()
+
+	projectID := os.Getenv("TEST_FIRESTORE_PROJECT_ID")
 	if projectID == "" {
-		t.Skip("FIRESTORE_PROJECT_ID not set")
+		t.Skip("TEST_FIRESTORE_PROJECT_ID not set")
+	}
+	databaseID := os.Getenv("TEST_FIRESTORE_DATABASE_ID")
+	if databaseID == "" {
+		t.Skip("TEST_FIRESTORE_DATABASE_ID not set")
 	}
 
-	runCaseRepositoryTest(t, func(t *testing.T) interfaces.Repository {
-		repo, err := firestore.New(context.Background(), projectID, "")
-		gt.NoError(t, err).Required()
-		return repo
+	repo, err := firestore.New(context.Background(), projectID, databaseID)
+	gt.NoError(t, err).Required()
+	t.Cleanup(func() {
+		gt.NoError(t, repo.Close())
 	})
+	return repo
+}
+
+// toStringSlice coerces a FieldValue.Value loaded from either backend into
+// a `[]string` for assertion. Memory stores the original `[]string`;
+// Firestore round-trips through `DataTo` and returns `[]interface{}`. Both
+// shapes are part of the FieldValue.Value contract — see
+// model.FieldValue.IsValueInSet which switches on both — so tests
+// asserting on multi-select values must normalize first.
+func toStringSlice(t *testing.T, v any) []string {
+	t.Helper()
+	switch s := v.(type) {
+	case []string:
+		return s
+	case []interface{}:
+		out := make([]string, len(s))
+		for i, elem := range s {
+			str, ok := elem.(string)
+			gt.Bool(t, ok).True()
+			out[i] = str
+		}
+		return out
+	default:
+		t.Fatalf("FieldValue.Value is not a string slice: %T", v)
+		return nil
+	}
 }

@@ -267,6 +267,7 @@ func (uc *SlackUseCases) handleMembershipEvent(ctx context.Context, event *slack
 		}
 
 		c.ChannelUserIDs = filterHumanUsers(ctx, uc.repo, members)
+		c.UpdatedAt = time.Now().UTC()
 		if _, err := uc.repo.Case().Update(ctx, entry.Workspace.ID, c); err != nil {
 			errutil.Handle(ctx, err, "failed to update case channel user IDs")
 			return nil

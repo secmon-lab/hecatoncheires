@@ -572,7 +572,7 @@ func TestSlackInteractionHandler_ViewSubmission(t *testing.T) {
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 
 		// Seed a case so HandleCommandChoiceSubmit can resolve it.
-		created, err := repo.Case().Create(t.Context(), "risk", &model.Case{Title: "Existing"})
+		created, err := repo.Case().Create(t.Context(), "risk", &model.Case{ReporterID: "U-TEST-DEFAULT", Title: "Existing"})
 		gt.NoError(t, err).Required()
 
 		handler := newTestSlackHandler(t, repo, registry, actionUC, slackUC, caseUC)
@@ -633,7 +633,7 @@ func TestSlackInteractionHandler_ViewSubmission(t *testing.T) {
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, mockSvc)
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 
-		created, err := repo.Case().Create(t.Context(), "risk", &model.Case{Title: "Parent"})
+		created, err := repo.Case().Create(t.Context(), "risk", &model.Case{ReporterID: "U-TEST-DEFAULT", Title: "Parent"})
 		gt.NoError(t, err).Required()
 
 		handler := newTestSlackHandler(t, repo, registry, actionUC, slackUC, caseUC)

@@ -7,6 +7,7 @@ import (
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/slack-go/slack"
@@ -140,11 +141,17 @@ func (x *Slack) Configure(ctx context.Context, repo interfaces.Repository, baseU
 				return nil, goerr.Wrap(err, "failed to validate Slack user", goerr.V("uid", x.noAuthUID))
 			}
 
+			if err := seedNoAuthnSlackUser(ctx, repo, userInfo.ID, userInfo.Email, userInfo.Name); err != nil {
+				return nil, err
+			}
 			return usecase.NewNoAuthnUseCase(repo, userInfo.ID, userInfo.Email, userInfo.Name), nil
 		}
 
 		// If bot token is not available, use a default user for testing
 		logging.Default().Warn("Running in no-auth mode without Slack bot token - using default test user", "user_id", x.noAuthUID)
+		if err := seedNoAuthnSlackUser(ctx, repo, x.noAuthUID, "test@example.com", "Test User"); err != nil {
+			return nil, err
+		}
 		return usecase.NewNoAuthnUseCase(repo, x.noAuthUID, "test@example.com", "Test User"), nil
 	}
 
@@ -161,7 +168,35 @@ func (x *Slack) Configure(ctx context.Context, repo interfaces.Repository, baseU
 
 	// Use a default test user
 	defaultUserID := "U_DEFAULT_TEST"
+	if err := seedNoAuthnSlackUser(ctx, repo, defaultUserID, "test@example.com", "Test User"); err != nil {
+		return nil, err
+	}
 	return usecase.NewNoAuthnUseCase(repo, defaultUserID, "test@example.com", "Test User"), nil
+}
+
+// seedNoAuthnSlackUser persists a SlackUser entry for the no-auth user so
+// the GraphQL `reporter` resolver (and other SlackUserLoader callers) can
+// always resolve the configured Sub. Without this seed, every case
+// created in no-auth mode triggers a "slack user not found in repository"
+// field-level GraphQL error (the protection added alongside the
+// ReporterID fix), which surfaces as a failed Create on the frontend.
+// SaveMany is upsert-style so re-seeding on every Configure call is safe.
+func seedNoAuthnSlackUser(ctx context.Context, repo interfaces.Repository, sub, email, name string) error {
+	if sub == "" {
+		return nil
+	}
+	user := &model.SlackUser{
+		ID:        model.SlackUserID(sub),
+		Name:      name,
+		RealName:  name,
+		Email:     email,
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := repo.SlackUser().SaveMany(ctx, []*model.SlackUser{user}); err != nil {
+		return goerr.Wrap(err, "failed to seed no-auth Slack user",
+			goerr.V("sub", sub))
+	}
+	return nil
 }
 
 // GetSlackUserInfo retrieves user information from Slack API

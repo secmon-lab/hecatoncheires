@@ -169,6 +169,7 @@ func (uc *ActionUseCase) CreateAction(ctx context.Context, workspaceID string, c
 			goerr.V("workspace_id", workspaceID))
 	}
 
+	now := time.Now().UTC()
 	action := &model.Action{
 		CaseID:         caseID,
 		Title:          title,
@@ -177,6 +178,8 @@ func (uc *ActionUseCase) CreateAction(ctx context.Context, workspaceID string, c
 		SlackMessageTS: slackMessageTS,
 		Status:         status,
 		DueDate:        dueDate,
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}
 
 	created, err := uc.repo.Action().Create(ctx, workspaceID, action)
@@ -295,6 +298,7 @@ func (uc *ActionUseCase) postSlackMessageForAction(ctx context.Context, workspac
 		return action, nil
 	}
 	action.SlackMessageTS = ts
+	action.UpdatedAt = time.Now().UTC()
 	updated, updateErr := uc.repo.Action().Update(ctx, workspaceID, action)
 	if updateErr != nil {
 		return action, goerr.Wrap(updateErr, "failed to persist Slack message timestamp",
@@ -412,6 +416,7 @@ func (uc *ActionUseCase) UpdateAction(ctx context.Context, workspaceID string, i
 		action.DueDate = in.DueDate
 	}
 
+	action.UpdatedAt = time.Now().UTC()
 	updated, err := uc.repo.Action().Update(ctx, workspaceID, action)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to update action", goerr.V(ActionIDKey, in.ID))
@@ -457,6 +462,7 @@ func (uc *ActionUseCase) ArchiveAction(ctx context.Context, workspaceID string, 
 
 	now := time.Now().UTC()
 	existing.ArchivedAt = &now
+	existing.UpdatedAt = now
 	updated, err := uc.repo.Action().Update(ctx, workspaceID, existing)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to archive action", goerr.V(ActionIDKey, id))
@@ -478,6 +484,7 @@ func (uc *ActionUseCase) UnarchiveAction(ctx context.Context, workspaceID string
 	}
 
 	existing.ArchivedAt = nil
+	existing.UpdatedAt = time.Now().UTC()
 	updated, err := uc.repo.Action().Update(ctx, workspaceID, existing)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to unarchive action", goerr.V(ActionIDKey, id))

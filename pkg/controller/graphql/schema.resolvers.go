@@ -265,7 +265,18 @@ func (r *caseResolver) Reporter(ctx context.Context, obj *graphql1.Case) (*graph
 		return nil, err
 	}
 	if len(users) == 0 {
-		return nil, nil
+		// A reporter ID with no corresponding SlackUser is a real
+		// failure mode (repo never synced, ID drifted, etc.) — return
+		// a field-level GraphQL error so the client sees the failure
+		// and the empty Reporter cell is no longer indistinguishable
+		// from "no reporter recorded". dataloader.go already reports
+		// the missing ID via errutil.Handle for ops visibility; this
+		// error makes the same failure visible to the UI.
+		return nil, goerr.Wrap(ErrSlackUserNotInRepo,
+			"reporter lookup failed",
+			goerr.V("reporter_id", *obj.ReporterID),
+			goerr.V("case_id", obj.ID),
+		)
 	}
 	return users[0], nil
 }

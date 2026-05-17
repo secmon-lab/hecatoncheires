@@ -82,3 +82,50 @@ func TestRenderPlannerPrompt_LanguageSuppressed(t *testing.T) {
 	gt.NoError(t, err).Required()
 	gt.Bool(t, strings.Contains(got, "## Language")).False()
 }
+
+// TestRenderPlannerPrompt_InvestigateBeforeMaterializeRule pins the
+// "Investigate-before-materialize when sources advertise relevant
+// context" rule. The rule exists because real-LLM runs were
+// emitting `materialize` with guessed field values even when the
+// workspace's get_workspace response advertised matching Slack /
+// Notion sources (and sometimes when the user explicitly asked for
+// the sources to be consulted). Dropping this rule re-opens that
+// failure mode and TestRunTurn_RealLLM_InfersFieldsFromSources
+// starts flaking again.
+func TestRenderPlannerPrompt_InvestigateBeforeMaterializeRule(t *testing.T) {
+	got, err := draft.RenderPlannerPromptForTest(nil, "English")
+	gt.NoError(t, err).Required()
+	gt.S(t, got).Contains("Investigate-before-materialize when sources advertise relevant context")
+	gt.S(t, got).Contains("you **MUST** emit at least one `investigate` round")
+	gt.S(t, got).Contains("`slack_ro`")
+	gt.S(t, got).Contains("`notion`")
+	gt.S(t, got).Contains("`github`")
+}
+
+// TestRenderPlannerPrompt_ListWorkspacesDoesNotCount pins the
+// reinforced wording that prevents the planner from skipping
+// get_workspace by calling list_workspaces alone and going straight
+// to a terminal action. Real-LLM runs were taking exactly that
+// shortcut and emitting `question` after only `list_workspaces`,
+// which fails TestRunTurn_RealLLM_VagueMentionAsksQuestion's
+// requirePlannerTools=["get_workspace"] check.
+func TestRenderPlannerPrompt_ListWorkspacesDoesNotCount(t *testing.T) {
+	got, err := draft.RenderPlannerPromptForTest(nil, "English")
+	gt.NoError(t, err).Required()
+	gt.S(t, got).Contains("`list_workspaces` does **NOT** count")
+	gt.S(t, got).Contains("`list_workspaces` does NOT count toward this check")
+}
+
+// TestRenderPlannerPrompt_ListWorkspacesDiscouraged pins the "do not
+// call list_workspaces in normal operation" guidance. Real-LLM runs
+// were calling list_workspaces alone and then jumping to a terminal
+// action; discouraging the call up front (instead of only after-the-
+// fact rejecting via the Hard rule) shrinks the surface area where
+// that mistake can occur.
+func TestRenderPlannerPrompt_ListWorkspacesDiscouraged(t *testing.T) {
+	got, err := draft.RenderPlannerPromptForTest(nil, "English")
+	gt.NoError(t, err).Required()
+	gt.S(t, got).Contains("**Do not call this in normal operation.**")
+	gt.S(t, got).Contains("**This is the tool you should be calling on round 0.**")
+	gt.S(t, got).Contains("Concrete counter-example of what NOT to do")
+}

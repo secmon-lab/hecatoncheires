@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/draft"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	goslack "github.com/slack-go/slack"
@@ -196,9 +197,15 @@ func (uc *MentionProposalUseCase) HandleSubmit(ctx context.Context, caseUC *Case
 		errutil.Handle(ctx, err, "failed to render submitting state")
 	}
 
+	// Slack interactivity does not pass through the Web auth middleware
+	// that normally seeds the persistCase reporter fallback, so inject
+	// the clicker as the auth-context Token explicitly. Without this
+	// line, every Slack-originated case lands with an empty ReporterID
+	// and the Drafts / Cases UI renders an empty Reporter cell.
 	mat := draft.Materialization
+	createCtx := auth.ContextWithToken(ctx, &auth.Token{Sub: callback.User.ID})
 	created, err := caseUC.CreateCase(
-		ctx,
+		createCtx,
 		draft.SelectedWorkspaceID,
 		mat.Title,
 		mat.Description,
@@ -344,8 +351,13 @@ func (uc *MentionProposalUseCase) HandleEditSubmit(ctx context.Context, caseUC *
 	description := readPlainInput(blockValues, blockIDDraftEditDescription, actionIDDraftEditDescription)
 	fieldValues := extractFieldValues(blockValues)
 
+	// Same auth-context injection as the preview-submit path above —
+	// the modal submission is also a Slack interactivity callback with
+	// no Web auth Token in context, so persistCase has nowhere to read
+	// the reporter from unless we set it here.
+	createCtx := auth.ContextWithToken(ctx, &auth.Token{Sub: callback.User.ID})
 	created, err := caseUC.CreateCase(
-		ctx,
+		createCtx,
 		meta.WorkspaceID,
 		title,
 		description,

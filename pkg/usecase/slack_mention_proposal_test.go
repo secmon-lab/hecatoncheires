@@ -228,6 +228,7 @@ func TestSlackUseCases_AppMention_CaseBoundChannelDoesNotInvokeProposal(t *testi
 
 	// Pre-create a Case whose Slack channel matches the mention channel.
 	_, err := repo.Case().Create(ctx, "ws-1", &model.Case{
+		ReporterID:     "U-TEST-DEFAULT",
 		Title:          "existing",
 		Status:         types.CaseStatusOpen,
 		SlackChannelID: "C-CASE",

@@ -3,14 +3,12 @@ package repository_test
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
-	"github.com/secmon-lab/hecatoncheires/pkg/repository/firestore"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 )
 
@@ -202,14 +200,5 @@ func TestNotificationSlotRepository_Memory(t *testing.T) {
 }
 
 func TestNotificationSlotRepository_Firestore(t *testing.T) {
-	projectID := os.Getenv("FIRESTORE_PROJECT_ID")
-	if projectID == "" {
-		t.Skip("FIRESTORE_PROJECT_ID not set")
-	}
-
-	runNotificationSlotRepositoryTest(t, func(t *testing.T) interfaces.Repository {
-		repo, err := firestore.New(context.Background(), projectID, "")
-		gt.NoError(t, err).Required()
-		return repo
-	})
+	runNotificationSlotRepositoryTest(t, newFirestoreRepository)
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
@@ -272,8 +273,16 @@ func (uc *SlackUseCases) HandleCaseCreationSubmit(ctx context.Context, caseUC *C
 
 	userID := callback.User.ID
 
+	// Slash-command originated Create Case does not pass through the
+	// Web auth middleware, so persistCase has no Token to read the
+	// reporter from. Inject the clicker as the auth-context Token here
+	// — same pattern as HandleSaveAsDraftClick — otherwise the created
+	// case lands with an empty ReporterID and the UI shows an empty
+	// Reporter cell.
+	createCtx := auth.ContextWithToken(ctx, &auth.Token{Sub: userID})
+
 	// Create case using existing CaseUseCase
-	created, err := caseUC.CreateCase(ctx, meta.WorkspaceID, title, description, []string{userID}, fieldValues, isPrivate, meta.SourceTeamID, meta.RequestKey)
+	created, err := caseUC.CreateCase(createCtx, meta.WorkspaceID, title, description, []string{userID}, fieldValues, isPrivate, meta.SourceTeamID, meta.RequestKey)
 	if err != nil {
 		return goerr.Wrap(err, "failed to create case via slash command",
 			goerr.V("workspace_id", meta.WorkspaceID),
