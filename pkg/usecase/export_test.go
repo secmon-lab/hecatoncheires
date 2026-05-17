@@ -51,6 +51,11 @@ type AssistPromptAssistLog = assistPromptAssistLog
 // TestErrAccessDenied is exported for testing
 var TestErrAccessDenied = ErrAccessDenied
 
+// NormalizeSlackUserSubForTest exposes the OIDC sub-claim normaliser so
+// auth_test.go can pin the bug fix where the composite "Uxxx-Txxx" sub
+// claim was previously stored verbatim and broke channel invites.
+var NormalizeSlackUserSubForTest = normalizeSlackUserSub
+
 // NewWelcomeRendererForTest is exported for testing
 var NewWelcomeRendererForTest = newWelcomeRenderer
 

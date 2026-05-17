@@ -280,10 +280,22 @@ func (uc *CaseUseCase) activateCase(ctx context.Context, workspaceID string, c *
 		}
 	}
 
-	// Invite reporter, assignees, and auto-invite users to the channel.
-	usersToInvite := make([]string, 0, len(c.AssigneeIDs)+1)
+	// Invite reporter, the actor (= auth-context user that triggered the
+	// activation), assignees, and auto-invite users to the channel.
+	//
+	// The "actor" inclusion is what keeps the SubmitDraft path symmetric
+	// with CreateCase: when Alice creates a draft and Bob promotes it,
+	// the reporter (Alice) and the submitter (Bob) both need to be in
+	// the channel — otherwise Bob, who just kicked off the case from
+	// Web, would end up unable to follow it in Slack. For CreateCase the
+	// actor and reporter are usually the same person, so the extra
+	// append simply dedupes through uniqueStrings below.
+	usersToInvite := make([]string, 0, len(c.AssigneeIDs)+2)
 	if c.ReporterID != "" {
 		usersToInvite = append(usersToInvite, c.ReporterID)
+	}
+	if token, tokenErr := auth.TokenFromContext(ctx); tokenErr == nil && token.Sub != "" {
+		usersToInvite = append(usersToInvite, token.Sub)
 	}
 	usersToInvite = append(usersToInvite, c.AssigneeIDs...)
 	autoInviteUsers := uc.resolveAutoInviteUsers(ctx, workspaceID)

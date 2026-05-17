@@ -2012,6 +2012,38 @@ func TestCaseUseCase_SubmitDraft(t *testing.T) {
 		gt.Value(t, stored.Status).Equal(types.CaseStatusDraft)
 	})
 
+	t.Run("submitter (actor) is invited even when different from reporter", func(t *testing.T) {
+		// When Bob promotes Alice's draft, both end up in the case channel:
+		// Alice via ReporterID and Bob via the auth-context user that
+		// triggered activateCase. Without this guarantee, the user who
+		// hits Submit on the Web side would find themselves locked out of
+		// the freshly-OPEN case channel.
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+		}
+		uc := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
+
+		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UALICE"})
+		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Public draft", "", nil, nil, false)
+		gt.NoError(t, err).Required()
+
+		submitterCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UBOB"})
+		submitted, err := uc.SubmitDraft(submitterCtx, testWorkspaceID, draft.ID, nil)
+		gt.NoError(t, err).Required()
+		gt.Value(t, submitted.Status).Equal(types.CaseStatusOpen)
+		// Reporter is preserved — promotion doesn't reassign ownership.
+		gt.Value(t, submitted.ReporterID).Equal("UALICE")
+
+		// Channel invite list contains both the reporter (UALICE) and the
+		// submitter (UBOB). Ordering: reporter, actor, assignees.
+		gt.Array(t, mock.invitedUserIDs).Length(2)
+		gt.Value(t, mock.invitedUserIDs[0]).Equal("UALICE")
+		gt.Value(t, mock.invitedUserIDs[1]).Equal("UBOB")
+	})
+
 	t.Run("any teammate can submit a public draft", func(t *testing.T) {
 		// Drafts are team-shared — once a teammate visits a public draft
 		// they can promote it to OPEN. The original reporter stays
