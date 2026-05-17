@@ -1027,7 +1027,7 @@ html[data-theme="dark"] { color-scheme: dark; }
 /* ---------- case detail page ---------- */
 .h-detail-h {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 14px;
   margin-bottom: 8px;
 }
@@ -1035,11 +1035,11 @@ html[data-theme="dark"] { color-scheme: dark; }
   color: var(--fg-soft);
   font-family: var(--font-mono);
   font-size: 13px;
-  margin-top: 8px;
   flex-shrink: 0;
 }
 .h-detail-h h1 {
   flex: 1;
+  min-width: 0;
   margin: 0;
   font-size: 22px;
   font-weight: 600;
@@ -1051,7 +1051,6 @@ html[data-theme="dark"] { color-scheme: dark; }
   display: flex;
   gap: 6px;
   flex-shrink: 0;
-  margin-top: 4px;
   align-items: center;
 }
 
@@ -1288,6 +1287,9 @@ html[data-theme="dark"] { color-scheme: dark; }
 .h-aside-section:first-child {
   border-top: none;
   padding-top: 0;
+}
+.h-aside-section-slack {
+  align-items: flex-start;
 }
 .h-aside-h { display: flex; align-items: center; gap: 10px; }
 .h-aside-h .h-aside-title {
