@@ -14,12 +14,13 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jomei/notionapi v1.13.3
 	github.com/lestrrat-go/jwx/v2 v2.1.6
-	github.com/m-mizutani/clog v0.1.0
+	github.com/m-mizutani/clog v0.2.1
 	github.com/m-mizutani/fireconf v0.3.0
 	github.com/m-mizutani/goerr/v2 v2.0.1
 	github.com/m-mizutani/gollem v0.24.4-0.20260510002946-5511f9a2d66f
 	github.com/m-mizutani/gt v0.2.1
 	github.com/m-mizutani/masq v0.2.0
+	github.com/mattn/go-isatty v0.0.22
 	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/shurcooL/githubv4 v0.0.0-20260209031235-2402fdf4a9ed
 	github.com/slack-go/slack v0.23.1
@@ -114,7 +115,6 @@ require (
 	github.com/m-mizutani/jsonex v0.0.1 // indirect
 	github.com/matryer/moq v0.5.2 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
-	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/mitchellh/hashstructure/v2 v2.0.2 // indirect
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect

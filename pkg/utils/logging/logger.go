@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"sync"
 
 	"github.com/fatih/color"
 	"github.com/m-mizutani/clog"
-	"github.com/m-mizutani/goerr/v2"
+	"github.com/m-mizutani/clog/hooks"
 	"github.com/m-mizutani/masq"
+	"github.com/mattn/go-isatty"
 )
 
 type Format int
@@ -36,21 +38,15 @@ func Quiet() {
 	loggerMutex.Unlock()
 }
 
-func goerrNoStacktrace(_ []string, attr slog.Attr) *clog.HandleAttr {
-	if goErr, ok := attr.Value.Any().(*goerr.Error); ok {
-		var attrs []any
-		for k, v := range goErr.Values() {
-			attrs = append(attrs, slog.Any(k, v))
-		}
-		attrs = append(attrs, slog.Any("cause", goErr.Error()))
-		newAttr := slog.Group(attr.Key, attrs...)
-
-		return &clog.HandleAttr{
-			NewAttr: &newAttr,
-		}
+// isTerminal reports whether w is a TTY so clog can emit ANSI colors only
+// when output won't be captured by a pipe or file.
+func isTerminal(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
 	}
-
-	return nil
+	fd := f.Fd()
+	return isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd)
 }
 
 func New(w io.Writer, level slog.Level, format Format, stacktrace bool) *slog.Logger {
@@ -60,10 +56,11 @@ func New(w io.Writer, level slog.Level, format Format, stacktrace bool) *slog.Lo
 		masq.WithFieldName("Authorization"),
 	)
 
-	attrHook := clog.GoerrHook
-	if !stacktrace {
-		attrHook = goerrNoStacktrace
+	var goerrOpts []hooks.GoErrOption
+	if stacktrace {
+		goerrOpts = append(goerrOpts, hooks.WithStackTrace(true))
 	}
+	attrHook := hooks.GoErr(goerrOpts...)
 
 	var handler slog.Handler
 	switch format {
@@ -73,6 +70,7 @@ func New(w io.Writer, level slog.Level, format Format, stacktrace bool) *slog.Lo
 			clog.WithLevel(level),
 			clog.WithReplaceAttr(filter),
 			clog.WithAttrHook(attrHook),
+			clog.WithColor(isTerminal(w)),
 			clog.WithColorMap(&clog.ColorMap{
 				Level: map[slog.Level]*color.Color{
 					slog.LevelDebug: color.New(color.FgGreen, color.Bold),
