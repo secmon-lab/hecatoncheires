@@ -71,13 +71,20 @@ const (
 	slackFieldBlockPrefix  = "hc_field_block_"
 	slackFieldActionPrefix = "hc_field_action_"
 
-	// Save-as-Draft button surfaced inside the Case creation modal, sitting
-	// visually between the footer's Cancel (left) and Create (right). The
-	// block_actions handler dispatches the stored form state to
-	// CaseUseCase.CreateDraft. The footer Submit ("Create") is the regular
-	// case-creation entry and is handled by HandleCaseCreationSubmit.
+	// Save-as-Draft is now offered as a "Draft mode" checkbox inside
+	// the Case creation modal's Options group rather than as a separate
+	// body-level button. These legacy block/action IDs are kept so the
+	// dispatcher can still route any in-flight callbacks emitted before
+	// the layout change to HandleSaveAsDraftClick.
 	SlackBlockIDSaveAsDraftActions = "hc_save_draft_block"
 	SlackActionIDSaveAsDraft       = "hc_save_draft_btn"
+
+	// Option values inside the "Options" checkbox group on the case
+	// creation modal. They share the same checkbox group (carried under
+	// SlackBlockIDCasePrivate / SlackActionIDCasePrivate) and are
+	// distinguished only by their option value.
+	caseOptionValuePrivate = "private"
+	caseOptionValueDraft   = "draft"
 )
 
 // commandMetadata is stored in modal private_metadata as JSON
@@ -228,8 +235,11 @@ func (uc *SlackUseCases) HandleWorkspaceSelectSubmit(ctx context.Context, callba
 
 // HandleCaseCreationSubmit processes the case creation modal submission
 // (view_submission path — i.e. the footer Submit button or Enter on an
-// input). The body-level "Save as draft" button enters via
-// HandleSaveAsDraftClick and goes through a different flow.
+// input). The Options checkbox group governs two flags: "private" gates
+// channel-member-only access; "draft" diverts the request to
+// CaseUseCase.CreateDraft so the entry is persisted in status=DRAFT
+// without creating a Slack channel until the user later submits the
+// draft from the web UI.
 func (uc *SlackUseCases) HandleCaseCreationSubmit(ctx context.Context, caseUC *CaseUseCase, callback *slack.InteractionCallback) error {
 	ctx = uc.contextWithUserLang(ctx, callback.User.ID)
 
@@ -259,17 +269,7 @@ func (uc *SlackUseCases) HandleCaseCreationSubmit(ctx context.Context, caseUC *C
 	// Extract custom field values from the view state
 	fieldValues := extractFieldValues(blockValues)
 
-	isPrivate := false
-	if privateBlock, ok := blockValues[SlackBlockIDCasePrivate]; ok {
-		if privateAction, ok := privateBlock[SlackActionIDCasePrivate]; ok {
-			for _, opt := range privateAction.SelectedOptions {
-				if opt.Value == "private" {
-					isPrivate = true
-					break
-				}
-			}
-		}
-	}
+	isPrivate, isDraft := readCaseOptionFlags(blockValues)
 
 	userID := callback.User.ID
 
@@ -278,8 +278,14 @@ func (uc *SlackUseCases) HandleCaseCreationSubmit(ctx context.Context, caseUC *C
 	// reporter from. Inject the clicker as the auth-context Token here
 	// — same pattern as HandleSaveAsDraftClick — otherwise the created
 	// case lands with an empty ReporterID and the UI shows an empty
-	// Reporter cell.
+	// Reporter cell. The draft path inside createDraftFromSubmit also
+	// expects the auth Sub to be set so CreateDraft can attribute
+	// ownership; injecting once here covers both branches below.
 	createCtx := auth.ContextWithToken(ctx, &auth.Token{Sub: userID})
+
+	if isDraft {
+		return uc.createDraftFromSubmit(createCtx, caseUC, callback, meta, title, description, fieldValues, isPrivate)
+	}
 
 	// Create case using existing CaseUseCase
 	created, err := caseUC.CreateCase(createCtx, meta.WorkspaceID, title, description, []string{userID}, fieldValues, isPrivate, meta.SourceTeamID, meta.RequestKey)
@@ -314,12 +320,137 @@ func (uc *SlackUseCases) HandleCaseCreationSubmit(ctx context.Context, caseUC *C
 			// the missing confirmation surfaces to the operator.
 			errutil.Handle(ctx, goerr.Wrap(err, "failed to post confirmation message",
 				goerr.V("channel_id", meta.ChannelID),
-				goerr.V("case_id", created.ID),
+				goerr.V(CaseIDKey, created.ID),
 			), "failed to post confirmation message")
 		}
 	}
 
 	return nil
+}
+
+// readCaseOptionFlags pulls the (private, draft) booleans out of the
+// case creation modal's Options checkbox group. Both flags share the
+// same checkbox group element keyed by SlackBlockIDCasePrivate /
+// SlackActionIDCasePrivate (legacy IDs kept stable to ride along with
+// any in-flight callbacks), and are distinguished only by their option
+// value strings.
+func readCaseOptionFlags(blockValues map[string]map[string]slack.BlockAction) (isPrivate, isDraft bool) {
+	optBlock, ok := blockValues[SlackBlockIDCasePrivate]
+	if !ok {
+		return false, false
+	}
+	optAction, ok := optBlock[SlackActionIDCasePrivate]
+	if !ok {
+		return false, false
+	}
+	for _, opt := range optAction.SelectedOptions {
+		switch opt.Value {
+		case caseOptionValuePrivate:
+			isPrivate = true
+		case caseOptionValueDraft:
+			isDraft = true
+		}
+	}
+	return isPrivate, isDraft
+}
+
+// createDraftFromSubmit is the view_submission counterpart to the
+// legacy HandleSaveAsDraftClick: it persists the in-progress form
+// state as a status=DRAFT case and posts an ephemeral receipt. The
+// modal is closed automatically by Slack after we return nil from
+// view_submission, so no UpdateView dance is needed.
+//
+// As with HandleSaveAsDraftClick, the auth context is rewritten to
+// carry the clicking user as the token Sub — drafts are author-scoped
+// and the downstream usecase reads the auth subject to set ownership.
+func (uc *SlackUseCases) createDraftFromSubmit(
+	ctx context.Context,
+	caseUC *CaseUseCase,
+	callback *slack.InteractionCallback,
+	meta commandMetadata,
+	title, description string,
+	fieldValues map[string]model.FieldValue,
+	isPrivate bool,
+) error {
+	userID := callback.User.ID
+	ctx = auth.ContextWithToken(ctx, &auth.Token{Sub: userID})
+
+	created, err := caseUC.CreateDraft(ctx, meta.WorkspaceID, title, description, []string{userID}, fieldValues, isPrivate)
+	if err != nil {
+		uc.notifyDraftSubmitFailure(ctx, meta.ChannelID, userID)
+		return goerr.Wrap(err, "failed to save draft via slash command",
+			goerr.V("workspace_id", meta.WorkspaceID),
+			goerr.V("user_id", userID))
+	}
+
+	if meta.ChannelID != "" && uc.slackService != nil {
+		msg := buildDraftSavedEphemeralText(ctx, caseUC, meta.WorkspaceID, created.ID, created.Title)
+		if err := uc.slackService.PostEphemeral(ctx, meta.ChannelID, userID, msg); err != nil {
+			errutil.Handle(ctx, goerr.Wrap(err, "failed to post draft-saved ephemeral",
+				goerr.V("channel_id", meta.ChannelID),
+				goerr.V("user_id", userID),
+				goerr.V(CaseIDKey, created.ID),
+			), "failed to post draft-saved ephemeral")
+		}
+	}
+
+	return nil
+}
+
+// buildDraftSavedEphemeralText renders the ephemeral receipt that
+// follows a successful CreateDraft. When the application has a web
+// baseURL configured, the message embeds a Slack-mrkdwn link straight
+// to the draft's detail page so the user can jump there in one click;
+// the draft's title doubles as the link label so the receipt reads
+// like a natural sentence. If the user saved the draft without a
+// title (drafts allow that), we fall back to a generic "open the
+// draft on the web" label. Without a configured baseURL we drop the
+// link entirely and emit the plain receipt.
+func buildDraftSavedEphemeralText(ctx context.Context, caseUC *CaseUseCase, workspaceID string, caseID int64, title string) string {
+	if caseUC != nil {
+		if url := caseUC.draftURL(workspaceID, caseID); url != "" {
+			label := strings.TrimSpace(title)
+			if label == "" {
+				label = i18n.T(ctx, i18n.MsgDraftLinkFallbackLabel)
+			}
+			return i18n.T(ctx, i18n.MsgDraftSavedEphemeralWithLink, caseID, url, escapeSlackLinkLabel(label))
+		}
+	}
+	return i18n.T(ctx, i18n.MsgDraftSavedEphemeral, caseID)
+}
+
+// escapeSlackLinkLabel neutralises the four characters that break
+// Slack mrkdwn's `<URL|label>` syntax when they appear inside the
+// label half. `&`, `<`, `>` are entity-escaped per Slack's docs; `|`
+// (the URL/label separator) has no entity form inside link syntax, so
+// we substitute a visually similar slash. Newlines are flattened to
+// keep the link on a single line.
+func escapeSlackLinkLabel(s string) string {
+	r := strings.NewReplacer(
+		"&", "&amp;",
+		"<", "&lt;",
+		">", "&gt;",
+		"|", "/",
+		"\n", " ",
+		"\r", " ",
+	)
+	return r.Replace(s)
+}
+
+// notifyDraftSubmitFailure best-efforts an ephemeral apology when
+// the view-submission draft path fails to persist. Errors here are
+// non-fatal (we still propagate the underlying CreateDraft failure).
+func (uc *SlackUseCases) notifyDraftSubmitFailure(ctx context.Context, channelID, userID string) {
+	if channelID == "" || uc.slackService == nil {
+		return
+	}
+	msg := i18n.T(ctx, i18n.MsgDraftSaveFailedEphemeral)
+	if err := uc.slackService.PostEphemeral(ctx, channelID, userID, msg); err != nil {
+		errutil.Handle(ctx, goerr.Wrap(err, "failed to post draft-save-failed ephemeral",
+			goerr.V("channel_id", channelID),
+			goerr.V("user_id", userID),
+		), "failed to post draft-save-failed ephemeral")
+	}
 }
 
 // openCaseCreationModal opens the case creation modal directly
@@ -374,24 +505,39 @@ func (uc *SlackUseCases) buildCaseCreationModal(ctx context.Context, workspaceID
 	)
 	descInput.Optional = true
 
+	// The "Options" checkbox group bundles independent case-level
+	// modifiers. Today it carries two flags:
+	//   - "private": restrict the case to channel members (existing semantics).
+	//   - "draft":   save as a draft instead of opening the case immediately.
+	//
+	// Both flags travel through the same view_submission payload, and
+	// HandleCaseCreationSubmit branches on the draft flag to choose
+	// between CaseUseCase.CreateDraft and CaseUseCase.CreateCase. The
+	// block ID stays as SlackBlockIDCasePrivate for backward
+	// compatibility with any in-flight callbacks.
 	privateOption := slack.NewOptionBlockObject(
-		"private",
+		caseOptionValuePrivate,
 		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgFieldPrivateCase), false, false),
 		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgFieldPrivateCaseDesc), false, false),
 	)
-	privateCheckbox := slack.NewCheckboxGroupsBlockElement(SlackActionIDCasePrivate, privateOption)
-	privateInput := slack.NewInputBlock(
-		SlackBlockIDCasePrivate,
-		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgFieldPrivateCase), false, false),
-		nil,
-		privateCheckbox,
+	draftOption := slack.NewOptionBlockObject(
+		caseOptionValueDraft,
+		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgFieldDraftMode), false, false),
+		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgFieldDraftModeDesc), false, false),
 	)
-	privateInput.Optional = true
+	optionsCheckbox := slack.NewCheckboxGroupsBlockElement(SlackActionIDCasePrivate, privateOption, draftOption)
+	optionsInput := slack.NewInputBlock(
+		SlackBlockIDCasePrivate,
+		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgFieldCaseOptions), false, false),
+		nil,
+		optionsCheckbox,
+	)
+	optionsInput.Optional = true
 
 	blocks := []slack.Block{
 		titleInput,
 		descInput,
-		privateInput,
+		optionsInput,
 	}
 
 	// Add custom field inputs from workspace schema
@@ -403,16 +549,11 @@ func (uc *SlackUseCases) buildCaseCreationModal(ctx context.Context, workspaceID
 		}
 	}
 
-	// "Save as draft" sits in the body at the bottom — visually between the
-	// footer's Cancel (left) and Create (right). The footer's Submit button
-	// is the canonical Create path (Enter submits the modal); the body button
-	// only carries the alternative save-as-draft action via block_actions.
-	saveAsDraftBtn := slack.NewButtonBlockElement(
-		SlackActionIDSaveAsDraft,
-		"", // value is unused; the handler reads view.State for all fields.
-		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgDraftSaveAsButton), false, false),
-	)
-	blocks = append(blocks, slack.NewActionBlock(SlackBlockIDSaveAsDraftActions, saveAsDraftBtn))
+	// The body-level "Save as draft" button has been removed: drafts
+	// are now created by ticking the "Draft mode" checkbox in the
+	// Options group above and pressing the footer's Create button.
+	// HandleCaseCreationSubmit dispatches to CreateDraft when that
+	// flag is set on the view_submission payload.
 
 	return slack.ModalViewRequest{
 		Type:            slack.VTModal,

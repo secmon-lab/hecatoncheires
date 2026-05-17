@@ -3,6 +3,7 @@ package usecase_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/m-mizutani/gt"
@@ -106,44 +107,42 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		gt.Bool(t, slackMock.openViewCalled).True()
-		// Title + Description + Private checkbox + Save-as-Draft action block = 4 blocks
-		gt.Number(t, len(slackMock.openViewRequest.Blocks.BlockSet)).Equal(4)
+		// Title + Description + Options (checkbox group with private + draft) = 3 blocks.
+		// The Save-as-Draft body button was removed; drafts now come from
+		// the "Draft mode" option inside the Options group.
+		gt.Number(t, len(slackMock.openViewRequest.Blocks.BlockSet)).Equal(3)
 
-		found := false
+		var optionsBlock *goslack.InputBlock
 		for _, block := range slackMock.openViewRequest.Blocks.BlockSet {
-			if inputBlock, ok := block.(*goslack.InputBlock); ok {
-				if inputBlock.BlockID == usecase.SlackBlockIDCasePrivate {
-					found = true
-					break
-				}
-			}
-		}
-		gt.Bool(t, found).True()
-
-		// Bottom action block surfaces the Save-as-Draft button only. The
-		// Create action stays in the modal footer (Submit), so the body
-		// button must NOT duplicate it — otherwise the user would see two
-		// Create buttons.
-		var saveAsDraftFound bool
-		var bodyButtonCount int
-		for _, block := range slackMock.openViewRequest.Blocks.BlockSet {
-			actionBlock, ok := block.(*goslack.ActionBlock)
-			if !ok || actionBlock.BlockID != usecase.SlackBlockIDSaveAsDraftActions {
+			inputBlock, ok := block.(*goslack.InputBlock)
+			if !ok || inputBlock.BlockID != usecase.SlackBlockIDCasePrivate {
 				continue
 			}
-			for _, el := range actionBlock.Elements.ElementSet {
-				btn, ok := el.(*goslack.ButtonBlockElement)
-				if !ok {
-					continue
-				}
-				bodyButtonCount++
-				if btn.ActionID == usecase.SlackActionIDSaveAsDraft {
-					saveAsDraftFound = true
-				}
+			optionsBlock = inputBlock
+		}
+		gt.Value(t, optionsBlock).NotNil().Required()
+
+		// The checkbox group carries two options in order: Private case,
+		// Draft mode. Both share the same checkbox group element (keyed
+		// by the legacy SlackBlockIDCasePrivate / SlackActionIDCasePrivate
+		// constants); the values are distinguished only by their option
+		// value strings.
+		checkboxGroup, ok := optionsBlock.Element.(*goslack.CheckboxGroupsBlockElement)
+		gt.Bool(t, ok).True()
+		gt.Value(t, checkboxGroup.ActionID).Equal(usecase.SlackActionIDCasePrivate)
+		gt.Array(t, checkboxGroup.Options).Length(2).Required()
+		gt.Value(t, checkboxGroup.Options[0].Value).Equal("private")
+		gt.Value(t, checkboxGroup.Options[1].Value).Equal("draft")
+
+		// No body-level Save-as-Draft button remains on the modal.
+		for _, block := range slackMock.openViewRequest.Blocks.BlockSet {
+			if actionBlock, ok := block.(*goslack.ActionBlock); ok {
+				gt.Value(t, actionBlock.BlockID).NotEqual(usecase.SlackBlockIDSaveAsDraftActions)
+			}
+			if sec, ok := block.(*goslack.SectionBlock); ok {
+				gt.Value(t, sec.BlockID).NotEqual(usecase.SlackBlockIDSaveAsDraftActions)
 			}
 		}
-		gt.Bool(t, saveAsDraftFound).True()
-		gt.Number(t, bodyButtonCount).Equal(1)
 	})
 
 	t.Run("workspace specified but invalid returns error", func(t *testing.T) {
@@ -223,8 +222,8 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		gt.Bool(t, slackMock.openViewCalled).True()
-		// Title + Description + Private checkbox + 3 custom fields + Save-as-Draft action block = 7 blocks
-		gt.Number(t, len(slackMock.openViewRequest.Blocks.BlockSet)).Equal(7)
+		// Title + Description + Options + 3 custom fields = 6 blocks.
+		gt.Number(t, len(slackMock.openViewRequest.Blocks.BlockSet)).Equal(6)
 	})
 
 	t.Run("no workspace specified with multiple workspaces opens workspace select modal", func(t *testing.T) {
@@ -609,6 +608,281 @@ func TestSlackUseCases_HandleCaseCreationSubmit(t *testing.T) {
 
 		err := slackUC.HandleCaseCreationSubmit(context.Background(), caseUC, callback)
 		gt.Value(t, err).NotNil()
+	})
+
+	t.Run("Draft mode option diverts submission to CreateDraft", func(t *testing.T) {
+		// Ticking the "Draft mode" checkbox in the Options group must
+		// route the submit through CreateDraft instead of CreateCase,
+		// so the resulting record lands in status=DRAFT and no Slack
+		// channel is created. The user-facing receipt is the ephemeral
+		// posted to the originating channel; verify both the persisted
+		// state and the ephemeral.
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
+		})
+
+		slackMock := &commandTestSlackService{}
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
+		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+
+		meta, _ := json.Marshal(map[string]string{
+			"workspace_id": "risk",
+			"channel_id":   "C001",
+		})
+		callback := &goslack.InteractionCallback{
+			User: goslack.User{ID: "UREPORTER"},
+			View: goslack.View{
+				PrivateMetadata: string(meta),
+				State: &goslack.ViewState{
+					Values: map[string]map[string]goslack.BlockAction{
+						"hc_case_title_block": {
+							"hc_case_title": {Value: "Draft Case Title"},
+						},
+						"hc_case_desc_block": {
+							"hc_case_desc": {Value: "in progress"},
+						},
+						usecase.SlackBlockIDCasePrivate: {
+							usecase.SlackActionIDCasePrivate: {
+								SelectedOptions: []goslack.OptionBlockObject{
+									{Value: "draft"},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		err := slackUC.HandleCaseCreationSubmit(context.Background(), caseUC, callback)
+		gt.NoError(t, err).Required()
+
+		// Exactly one draft persisted; no OPEN case.
+		drafts, err := repo.Case().ListDrafts(context.Background(), "risk")
+		gt.NoError(t, err).Required()
+		gt.Array(t, drafts).Length(1).Required()
+		gt.Value(t, drafts[0].Status).Equal(types.CaseStatusDraft)
+		gt.Value(t, drafts[0].Title).Equal("Draft Case Title")
+		gt.Value(t, drafts[0].Description).Equal("in progress")
+		gt.Value(t, drafts[0].ReporterID).Equal("UREPORTER")
+		gt.Value(t, drafts[0].IsPrivate).Equal(false)
+		// The legacy CreateCase path would have created a Slack channel
+		// or at least called PostMessage; the draft path posts only an
+		// ephemeral to the originating channel, never a channel message.
+		gt.Number(t, len(slackMock.postedMessages)).Equal(0)
+		// Without a web baseURL the ephemeral falls back to the plain
+		// "Open the Drafts page on the web" message, with no link.
+		gt.Value(t, slackMock.ephemeralChannelID).Equal("C001")
+		gt.String(t, slackMock.ephemeralText).Contains("draft #1")
+		gt.Bool(t, strings.Contains(slackMock.ephemeralText, "|")).False()
+	})
+
+	t.Run("Draft mode ephemeral uses the draft title as the link label", func(t *testing.T) {
+		// When the CaseUseCase has a baseURL configured and the user
+		// gave the draft a title, the ephemeral receipt must surface
+		// the title as the clickable link label so the message reads
+		// like "Saved as draft #1: <URL|Linked Draft>" instead of a
+		// generic "Open the draft on the web" placeholder. We assert
+		// on the Slack mrkdwn link syntax to avoid coupling to the
+		// surrounding translation text.
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
+		})
+
+		slackMock := &commandTestSlackService{}
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
+		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "https://example.test")
+
+		meta, _ := json.Marshal(map[string]string{
+			"workspace_id": "risk",
+			"channel_id":   "C001",
+		})
+		callback := &goslack.InteractionCallback{
+			User: goslack.User{ID: "UREPORTER"},
+			View: goslack.View{
+				PrivateMetadata: string(meta),
+				State: &goslack.ViewState{
+					Values: map[string]map[string]goslack.BlockAction{
+						"hc_case_title_block": {
+							"hc_case_title": {Value: "Linked Draft"},
+						},
+						"hc_case_desc_block": {
+							"hc_case_desc": {Value: ""},
+						},
+						usecase.SlackBlockIDCasePrivate: {
+							usecase.SlackActionIDCasePrivate: {
+								SelectedOptions: []goslack.OptionBlockObject{
+									{Value: "draft"},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		err := slackUC.HandleCaseCreationSubmit(context.Background(), caseUC, callback)
+		gt.NoError(t, err).Required()
+
+		gt.String(t, slackMock.ephemeralText).Contains("<https://example.test/ws/risk/drafts/1|Linked Draft>")
+	})
+
+	t.Run("Draft mode link label falls back to placeholder when title is empty", func(t *testing.T) {
+		// If the user submitted Draft mode without entering a title
+		// (drafts allow that), the link label has nothing meaningful
+		// to display, so it falls back to the localised
+		// MsgDraftLinkFallbackLabel string. We verify the label is a
+		// non-empty value distinct from the literal title.
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
+		})
+
+		slackMock := &commandTestSlackService{}
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
+		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "https://example.test")
+
+		meta, _ := json.Marshal(map[string]string{
+			"workspace_id": "risk",
+			"channel_id":   "C001",
+		})
+		callback := &goslack.InteractionCallback{
+			User: goslack.User{ID: "UREPORTER"},
+			View: goslack.View{
+				PrivateMetadata: string(meta),
+				State: &goslack.ViewState{
+					Values: map[string]map[string]goslack.BlockAction{
+						"hc_case_title_block": {
+							"hc_case_title": {Value: ""},
+						},
+						"hc_case_desc_block": {
+							"hc_case_desc": {Value: ""},
+						},
+						usecase.SlackBlockIDCasePrivate: {
+							usecase.SlackActionIDCasePrivate: {
+								SelectedOptions: []goslack.OptionBlockObject{
+									{Value: "draft"},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		err := slackUC.HandleCaseCreationSubmit(context.Background(), caseUC, callback)
+		gt.NoError(t, err).Required()
+
+		// Link is present, but with the fallback label (anything other
+		// than an empty string between the pipe and the closing `>`).
+		gt.String(t, slackMock.ephemeralText).Contains("<https://example.test/ws/risk/drafts/1|")
+		// Specifically: the link does not collapse to an empty label.
+		gt.Bool(t, strings.Contains(slackMock.ephemeralText, "|>")).False()
+	})
+
+	t.Run("Draft mode link label escapes Slack mrkdwn metacharacters in the title", func(t *testing.T) {
+		// `<`, `>`, `&`, and `|` inside the title would otherwise break
+		// the `<URL|label>` link syntax. The escape helper must
+		// neutralise them so the rendered link stays well-formed.
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
+		})
+
+		slackMock := &commandTestSlackService{}
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
+		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "https://example.test")
+
+		meta, _ := json.Marshal(map[string]string{
+			"workspace_id": "risk",
+			"channel_id":   "C001",
+		})
+		callback := &goslack.InteractionCallback{
+			User: goslack.User{ID: "UREPORTER"},
+			View: goslack.View{
+				PrivateMetadata: string(meta),
+				State: &goslack.ViewState{
+					Values: map[string]map[string]goslack.BlockAction{
+						"hc_case_title_block": {
+							"hc_case_title": {Value: "<bad>&pipe|here"},
+						},
+						"hc_case_desc_block": {
+							"hc_case_desc": {Value: ""},
+						},
+						usecase.SlackBlockIDCasePrivate: {
+							usecase.SlackActionIDCasePrivate: {
+								SelectedOptions: []goslack.OptionBlockObject{
+									{Value: "draft"},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		err := slackUC.HandleCaseCreationSubmit(context.Background(), caseUC, callback)
+		gt.NoError(t, err).Required()
+
+		// The label must be the escaped form, not the raw title.
+		gt.String(t, slackMock.ephemeralText).Contains("&lt;bad&gt;&amp;pipe/here")
+		// And the raw `<`/`>` from the title must not leak through.
+		gt.Bool(t, strings.Contains(slackMock.ephemeralText, "<bad>")).False()
+	})
+
+	t.Run("Draft mode + Private case yields a private draft", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
+		})
+
+		slackMock := &commandTestSlackService{}
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
+		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+
+		meta, _ := json.Marshal(map[string]string{
+			"workspace_id": "risk",
+			"channel_id":   "C001",
+		})
+		callback := &goslack.InteractionCallback{
+			User: goslack.User{ID: "UREPORTER"},
+			View: goslack.View{
+				PrivateMetadata: string(meta),
+				State: &goslack.ViewState{
+					Values: map[string]map[string]goslack.BlockAction{
+						"hc_case_title_block": {
+							"hc_case_title": {Value: "Private Draft"},
+						},
+						"hc_case_desc_block": {
+							"hc_case_desc": {Value: ""},
+						},
+						usecase.SlackBlockIDCasePrivate: {
+							usecase.SlackActionIDCasePrivate: {
+								SelectedOptions: []goslack.OptionBlockObject{
+									{Value: "private"},
+									{Value: "draft"},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		err := slackUC.HandleCaseCreationSubmit(context.Background(), caseUC, callback)
+		gt.NoError(t, err).Required()
+
+		drafts, err := repo.Case().ListDrafts(context.Background(), "risk")
+		gt.NoError(t, err).Required()
+		gt.Array(t, drafts).Length(1).Required()
+		gt.Value(t, drafts[0].IsPrivate).Equal(true)
+		gt.Value(t, drafts[0].Status).Equal(types.CaseStatusDraft)
 	})
 }
 

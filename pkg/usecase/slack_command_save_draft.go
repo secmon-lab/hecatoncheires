@@ -109,9 +109,11 @@ func (uc *SlackUseCases) HandleSaveAsDraftClick(ctx context.Context, caseUC *Cas
 	}
 
 	// Ephemeral receipt so the user gets feedback in their original channel
-	// even if the splash modal is dismissed before they read it.
+	// even if the splash modal is dismissed before they read it. When a
+	// web baseURL is configured, the receipt embeds a one-click link to
+	// the draft's detail page.
 	if meta.ChannelID != "" {
-		msg := i18n.T(ctx, i18n.MsgDraftSavedEphemeral, created.ID)
+		msg := buildDraftSavedEphemeralText(ctx, caseUC, meta.WorkspaceID, created.ID, created.Title)
 		if epErr := uc.slackService.PostEphemeral(ctx, meta.ChannelID, callback.User.ID, msg); epErr != nil {
 			errutil.Handle(ctx, goerr.Wrap(epErr, "failed to post Save-as-Draft ephemeral",
 				goerr.V("channel_id", meta.ChannelID),

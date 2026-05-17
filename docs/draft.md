@@ -29,19 +29,31 @@ Cases follow a simple linear lifecycle:
 
 ## Slack: Save as Draft
 
-The `/cmd` creation modal carries a **Save as draft** button alongside
-the modal's Submit. Clicking it:
+The `/cmd` creation modal exposes a **Draft mode** checkbox inside
+the **Options** group, next to the existing **Private case** checkbox.
+When the user ticks **Draft mode** and presses the modal's footer
+**Create** button:
 
-1. ACKs the block_actions interaction immediately.
-2. Asynchronously persists the modal's current state as a Case with
-   `status: DRAFT`, reporter set to the clicking Slack user.
-3. Swaps the modal in place with a small "Saved" splash so the user
-   sees an unambiguous confirmation.
-4. Posts an ephemeral message in the originating channel pointing to
-   the web Drafts page (`/ws/{wsId}/drafts`).
+1. Slack delivers the view_submission to `HandleCaseCreationSubmit`.
+2. The handler detects the `draft` option in the Options checkbox
+   group and routes the request through
+   `CaseUseCase.CreateDraft` instead of `CaseUseCase.CreateCase`.
+3. The case is persisted with `status: DRAFT`, reporter set to the
+   submitting Slack user, and no Slack channel is created.
+4. An ephemeral message is posted in the originating channel
+   pointing to the web Drafts page (`/ws/{wsId}/drafts`).
+5. Slack auto-closes the modal as usual for view_submission.
 
-No new slash command is added — Save as Draft is just a button on the
-existing modal.
+Choosing not to tick **Draft mode** runs the standard `CreateCase`
+path (channel created, invites posted, bookmark added, welcome
+message rendered). The two flags are independent: ticking both
+**Private case** and **Draft mode** yields a private draft.
+
+No new slash command is added, and there is no longer a separate
+**Save as draft** button in the modal body — the legacy block_actions
+handler (`HandleSaveAsDraftClick`) is kept for backward compatibility
+with any in-flight callbacks emitted before the layout change but is
+no longer surfaced through the modal.
 
 ## Web: Drafts page
 
