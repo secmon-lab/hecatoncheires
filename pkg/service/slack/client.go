@@ -1,6 +1,7 @@
 package slack
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -11,6 +12,16 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/slack-go/slack"
 )
+
+// resolveDisplayName picks the most user-friendly label Slack exposes for a
+// user. Slack-go's `User.RealName` is the legacy top-level real-name field
+// and is rarely what people actually see in Slack clients; the human-set
+// "Display name" lives on `Profile.DisplayName`, with the profile-level
+// real name as the standard fallback Slack itself uses when display name
+// is blank.
+func resolveDisplayName(u slack.User) string {
+	return cmp.Or(u.Profile.DisplayName, u.Profile.RealName, u.RealName)
+}
 
 const (
 	// DefaultCacheTTL is the default TTL for channel name cache
@@ -181,7 +192,7 @@ func (c *client) GetUserInfo(ctx context.Context, userID string) (*User, error) 
 	return &User{
 		ID:       user.ID,
 		Name:     user.Name,
-		RealName: user.RealName,
+		RealName: resolveDisplayName(*user),
 		Email:    user.Profile.Email,
 		ImageURL: user.Profile.Image48,
 		Locale:   user.Locale,
@@ -210,7 +221,7 @@ func (c *client) ListUsers(ctx context.Context, teamID string) ([]*User, error) 
 		result = append(result, &User{
 			ID:       u.ID,
 			Name:     u.Name,
-			RealName: u.RealName,
+			RealName: resolveDisplayName(u),
 			Email:    u.Profile.Email,
 			ImageURL: u.Profile.Image48,
 		})

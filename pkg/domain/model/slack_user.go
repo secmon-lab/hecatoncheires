@@ -8,8 +8,8 @@ type SlackUserID string
 // SlackUser represents a Slack workspace user stored in the database
 type SlackUser struct {
 	ID        SlackUserID
-	Name      string    // Slack username (e.g., "john.doe")
-	RealName  string    // Display name (e.g., "John Doe")
+	Name      string    // Slack username / handle (e.g., "john.doe")
+	RealName  string    // User-facing display name (Profile.DisplayName, with Profile.RealName / RealName as fallback). Field is named "RealName" for legacy reasons.
 	Email     string    // Email address (for future features)
 	ImageURL  string    // Avatar URL (empty string = no image)
 	UpdatedAt time.Time // Last synchronized from Slack

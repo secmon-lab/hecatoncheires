@@ -12,6 +12,7 @@ import { useTranslation } from '../i18n'
 import { useActionStatuses } from '../hooks/useActionStatuses'
 import Modal from '../components/Modal'
 import Button from '../components/Button'
+import { displayName } from '../utils/user'
 
 interface ActionItem {
   id: number
@@ -47,7 +48,7 @@ export default function ActionForm({ action, defaultCaseID, onClose }: ActionFor
   const users = usersData?.slackUsers || []
   const userOptions = users.map((u: any) => ({
     value: u.id as string,
-    label: u.realName || u.name,
+    label: displayName(u),
     name: u.name,
     realName: u.realName,
     imageUrl: u.imageUrl,

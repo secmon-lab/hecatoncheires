@@ -5,6 +5,7 @@ import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import { useTranslation, type MsgKey } from '../i18n'
 import { useActionStatuses } from '../hooks/useActionStatuses'
 import { actionStatusColorStyle } from '../utils/actionStatusStyle'
+import { displayName } from '../utils/user'
 import Button from './Button'
 
 type EventKind =
@@ -262,7 +263,7 @@ export default function ActionActivity({ workspaceId, actionId, pageSize = 20, s
     const byImage = new Map<string, string>()
     const byInitial = new Map<string, string>()
     for (const u of usersQuery.data?.slackUsers ?? []) {
-      const display = u.realName || u.name || u.id
+      const display = displayName(u) || u.id
       byName.set(u.id, display)
       byInitial.set(u.id, initialOf(display))
       if (u.imageUrl) byImage.set(u.id, u.imageUrl)
@@ -476,7 +477,7 @@ function EventRow({ event, userIndex, t, statusLabel, statusColor }: {
   statusColor: (id: string) => string
 }) {
   const actorName = event.actorID
-    ? (event.actor?.realName || event.actor?.name || userIndex.byName.get(event.actorID) || event.actorID)
+    ? (displayName(event.actor) || userIndex.byName.get(event.actorID) || event.actorID)
     : t('activityActorSystem')
 
   return (

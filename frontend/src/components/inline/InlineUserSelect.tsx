@@ -5,6 +5,7 @@ import styles from './Inline.module.css'
 import { Avatar, AvatarStack } from '../Primitives'
 import { IconCheck } from '../Icons'
 import { useTranslation } from '../../i18n'
+import { displayName } from '../../utils/user'
 
 export interface UserItem {
   id: string
@@ -96,7 +97,7 @@ export default function InlineUserSelect(props: Props) {
               imageUrl={selectedUsers[0].imageUrl}
             />
             <span className={styles.triggerLabel}>
-              {selectedUsers[0].realName || selectedUsers[0].name}
+              {displayName(selectedUsers[0])}
             </span>
           </>
         ) : (
@@ -133,7 +134,7 @@ export default function InlineUserSelect(props: Props) {
                 data-testid={testId ? `${testId}-option-${u.id}` : undefined}
               >
                 <Avatar size="sm" name={u.name} realName={u.realName} imageUrl={u.imageUrl} />
-                <span className={styles.optionLabel}>{u.realName || u.name}</span>
+                <span className={styles.optionLabel}>{displayName(u)}</span>
                 {active && <IconCheck size={12} className={styles.optionCheck} />}
               </button>
             )

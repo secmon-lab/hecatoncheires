@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react'
 import { IconLock, IconSlack } from './Icons'
+import { displayName } from '../utils/user'
 
 /* ─── Avatar ─── */
 type AvatarSize = '' | 'sm' | 'lg' | 'xl'
@@ -73,6 +74,41 @@ export function AvatarStack({ users, max = 3, size = 'sm' }: AvatarStackProps) {
         >
           +{overflow}
         </span>
+      )}
+    </div>
+  )
+}
+
+interface AssigneeNamesStackProps {
+  users: Array<{ id: string; name?: string | null; realName?: string | null; imageUrl?: string | null }>
+  max?: number
+  maxLabelWidth?: number
+  testId?: string
+}
+
+export function AssigneeNamesStack({
+  users,
+  max = 3,
+  maxLabelWidth = 100,
+  testId,
+}: AssigneeNamesStackProps) {
+  if (!users || users.length === 0) return <span className="soft">—</span>
+  const visible = users.slice(0, max)
+  const overflow = users.length - visible.length
+  return (
+    <div
+      className="col"
+      style={{ gap: 2, alignItems: 'flex-start' }}
+      data-testid={testId}
+    >
+      {visible.map((u) => (
+        <div key={u.id} className="row" style={{ gap: 6, fontSize: 12 }}>
+          <Avatar size="sm" name={u.name} realName={u.realName} imageUrl={u.imageUrl} />
+          <span className="truncate" style={{ maxWidth: maxLabelWidth }}>{displayName(u)}</span>
+        </div>
+      ))}
+      {overflow > 0 && (
+        <span className="soft" style={{ fontSize: 11 }}>+{overflow}</span>
       )}
     </div>
   )

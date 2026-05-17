@@ -23,6 +23,7 @@ import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
 import { useActionStatuses } from '../hooks/useActionStatuses'
 import { actionStatusColorStyle } from '../utils/actionStatusStyle'
+import { displayName } from '../utils/user'
 import Button from '../components/Button'
 import Modal from '../components/Modal'
 import {
@@ -387,7 +388,7 @@ export default function CaseDetail() {
             </span>
             {c.reporter && (
               <span>
-                {t('labelBy')} <span className="name">{c.reporter.realName || c.reporter.name}</span>
+                {t('labelBy')} <span className="name">{displayName(c.reporter)}</span>
               </span>
             )}
           </div>
@@ -505,7 +506,7 @@ export default function CaseDetail() {
                   return
                 }
                 if (!assigneeMap.has(a.assignee.id)) {
-                  assigneeMap.set(a.assignee.id, { value: a.assignee.id, label: a.assignee.realName || a.assignee.name })
+                  assigneeMap.set(a.assignee.id, { value: a.assignee.id, label: displayName(a.assignee) })
                 }
               })
               const assigneeOpts: Array<{ value: string; label: string }> = []
@@ -670,7 +671,7 @@ export default function CaseDetail() {
               </div>
               <div className="row" style={{ gap: 8, alignItems: 'center' }}>
                 <Avatar size="sm" name={c.reporter.name} realName={c.reporter.realName} imageUrl={c.reporter.imageUrl} />
-                <span style={{ fontSize: 13 }}>{c.reporter.realName || c.reporter.name}</span>
+                <span style={{ fontSize: 13 }}>{displayName(c.reporter)}</span>
               </div>
             </section>
           )}
@@ -731,7 +732,7 @@ export default function CaseDetail() {
                 {members.map((m) => (
                   <div key={m.id} className={styles.memberItem}>
                     <Avatar size="sm" name={m.name} realName={m.realName} imageUrl={m.imageUrl} />
-                    <span className={`name truncate ${styles.name}`}>{m.realName}</span>
+                    <span className={`name truncate ${styles.name}`}>{displayName(m)}</span>
                   </div>
                 ))}
               </div>
