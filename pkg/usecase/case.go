@@ -838,6 +838,16 @@ func (uc *CaseUseCase) DiscardDraft(ctx context.Context, workspaceID string, id 
 	return nil
 }
 
+// draftURL returns the web-UI URL for a specific draft, or an empty
+// string when no baseURL has been configured. The URL format mirrors
+// what the React app's router expects for the draft detail page.
+func (uc *CaseUseCase) draftURL(workspaceID string, caseID int64) string {
+	if uc.baseURL == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s/ws/%s/drafts/%d", uc.baseURL, workspaceID, caseID)
+}
+
 // SyncCaseChannelUsers synchronizes channel members from Slack API to the case
 func (uc *CaseUseCase) SyncCaseChannelUsers(ctx context.Context, workspaceID string, caseID int64) (*model.Case, error) {
 	existing, err := uc.repo.Case().Get(ctx, workspaceID, caseID)

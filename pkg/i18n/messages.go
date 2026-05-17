@@ -103,6 +103,11 @@ var messagesEN = [msgKeyCount]string{
 	MsgFieldPrivateCase:     "Private case",
 	MsgFieldPrivateCaseDesc: "Only channel members can access this case",
 
+	// Case-creation Options group
+	MsgFieldCaseOptions:   "Options",
+	MsgFieldDraftMode:     "Draft mode",
+	MsgFieldDraftModeDesc: "Save as a draft instead of opening the case immediately. No Slack channel is created until the draft is submitted.",
+
 	// Case assignees
 	MsgFieldCaseAssignees: "Assignees",
 
@@ -135,11 +140,13 @@ var messagesEN = [msgKeyCount]string{
 	MsgErrCreateAction:      "Failed to create action. Please try again.",
 
 	// Save-as-Draft
-	MsgDraftSaveAsButton:        "Save as draft",
-	MsgDraftSavedEphemeral:      "Saved as draft #%d. Open the Drafts page on the web to continue.",
-	MsgDraftSavedModalTitle:     "Saved",
-	MsgDraftSavedModalBody:      "Saved as draft #%d. You can close this dialog.",
-	MsgDraftSaveFailedEphemeral: "Failed to save draft. Please try again.",
+	MsgDraftSaveAsButton:           "Save as draft",
+	MsgDraftSavedEphemeral:         "Saved as draft #%d. Open the Drafts page on the web to continue.",
+	MsgDraftSavedEphemeralWithLink: "Saved as draft #%d. <%s|%s>",
+	MsgDraftLinkFallbackLabel:      "Open the draft on the web",
+	MsgDraftSavedModalTitle:        "Saved",
+	MsgDraftSavedModalBody:         "Saved as draft #%d. You can close this dialog.",
+	MsgDraftSaveFailedEphemeral:    "Failed to save draft. Please try again.",
 }
 
 var messagesJA = [msgKeyCount]string{
@@ -228,6 +235,11 @@ var messagesJA = [msgKeyCount]string{
 	MsgFieldPrivateCase:     "プライベートケース",
 	MsgFieldPrivateCaseDesc: "チャンネルメンバーのみアクセスできます",
 
+	// Case-creation Options group
+	MsgFieldCaseOptions:   "オプション",
+	MsgFieldDraftMode:     "下書きモード",
+	MsgFieldDraftModeDesc: "ケースを即時公開せず、下書きとして保存します。下書きを送信するまで Slack チャンネルは作成されません。",
+
 	// Case assignees
 	MsgFieldCaseAssignees: "担当者",
 
@@ -260,9 +272,11 @@ var messagesJA = [msgKeyCount]string{
 	MsgErrCreateAction:      "アクションの作成に失敗しました。もう一度お試しください。",
 
 	// Save-as-Draft
-	MsgDraftSaveAsButton:        "下書きとして保存",
-	MsgDraftSavedEphemeral:      "下書き #%d として保存しました。続きはWebのDraftsページから編集できます。",
-	MsgDraftSavedModalTitle:     "保存しました",
-	MsgDraftSavedModalBody:      "下書き #%d として保存しました。このダイアログは閉じて構いません。",
-	MsgDraftSaveFailedEphemeral: "下書きの保存に失敗しました。もう一度お試しください。",
+	MsgDraftSaveAsButton:           "下書きとして保存",
+	MsgDraftSavedEphemeral:         "下書き #%d として保存しました。続きはWebのDraftsページから編集できます。",
+	MsgDraftSavedEphemeralWithLink: "下書き #%d として保存しました: <%s|%s>",
+	MsgDraftLinkFallbackLabel:      "Webの下書きページを開く",
+	MsgDraftSavedModalTitle:        "保存しました",
+	MsgDraftSavedModalBody:         "下書き #%d として保存しました。このダイアログは閉じて構いません。",
+	MsgDraftSaveFailedEphemeral:    "下書きの保存に失敗しました。もう一度お試しください。",
 }

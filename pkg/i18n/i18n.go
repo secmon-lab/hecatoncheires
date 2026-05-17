@@ -126,6 +126,12 @@ const (
 	MsgFieldPrivateCase
 	MsgFieldPrivateCaseDesc
 
+	// Case-creation "Options" checkbox group (parent label and
+	// the additional Draft-mode option that sits alongside Private)
+	MsgFieldCaseOptions   // Block label "Options"
+	MsgFieldDraftMode     // Option label "Draft mode"
+	MsgFieldDraftModeDesc // Description for the Draft mode option
+
 	// Case assignees field
 	MsgFieldCaseAssignees
 
@@ -158,11 +164,13 @@ const (
 	MsgErrCreateAction      // "Failed to create action. Please try again."
 
 	// Save-as-Draft (Case creation modal)
-	MsgDraftSaveAsButton        // Button label "Save as draft"
-	MsgDraftSavedEphemeral      // "Saved as draft #%d. Open the Drafts page on the web to continue." (%d = case ID)
-	MsgDraftSavedModalTitle     // Title of the splash modal shown after Save as Draft.
-	MsgDraftSavedModalBody      // Body text of the splash modal: "Saved as draft #%d." (%d = case ID)
-	MsgDraftSaveFailedEphemeral // Error ephemeral when Save as Draft fails server-side.
+	MsgDraftSaveAsButton           // Button label "Save as draft"
+	MsgDraftSavedEphemeral         // "Saved as draft #%d. Open the Drafts page on the web to continue." (%d = case ID). Used when no web URL is configured.
+	MsgDraftSavedEphemeralWithLink // "Saved as draft #%d. <%s|%s> to continue." (%d = case ID, %s = draft URL, %s = link label). Preferred when baseURL is set.
+	MsgDraftLinkFallbackLabel      // Link label used when the draft has no title; e.g. "Open the draft on the web"
+	MsgDraftSavedModalTitle        // Title of the splash modal shown after Save as Draft.
+	MsgDraftSavedModalBody         // Body text of the splash modal: "Saved as draft #%d." (%d = case ID)
+	MsgDraftSaveFailedEphemeral    // Error ephemeral when Save as Draft fails server-side.
 
 	msgKeyCount // sentinel for validation
 )
