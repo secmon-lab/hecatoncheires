@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"sync"
 
 	"github.com/fatih/color"
@@ -39,9 +38,10 @@ func Quiet() {
 }
 
 // isTerminal reports whether w is a TTY so clog can emit ANSI colors only
-// when output won't be captured by a pipe or file.
+// when output won't be captured by a pipe or file. Any writer that exposes
+// Fd() uintptr (e.g. *os.File or thin wrappers around it) is supported.
 func isTerminal(w io.Writer) bool {
-	f, ok := w.(*os.File)
+	f, ok := w.(interface{ Fd() uintptr })
 	if !ok {
 		return false
 	}
@@ -56,11 +56,7 @@ func New(w io.Writer, level slog.Level, format Format, stacktrace bool) *slog.Lo
 		masq.WithFieldName("Authorization"),
 	)
 
-	var goerrOpts []hooks.GoErrOption
-	if stacktrace {
-		goerrOpts = append(goerrOpts, hooks.WithStackTrace(true))
-	}
-	attrHook := hooks.GoErr(goerrOpts...)
+	attrHook := hooks.GoErr(hooks.WithStackTrace(stacktrace))
 
 	var handler slog.Handler
 	switch format {
