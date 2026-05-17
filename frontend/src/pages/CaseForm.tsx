@@ -13,6 +13,7 @@ import Button from '../components/Button'
 import CustomFieldRenderer from '../components/fields/CustomFieldRenderer'
 import { IconLock } from '../components/Icons'
 import { sanitizeFieldValues } from '../utils/sanitizeFieldValues'
+import { displayName } from '../utils/user'
 
 interface User {
   id: string
@@ -245,7 +246,7 @@ export default function CaseForm({ caseItem, onClose, onSubmitted }: CaseFormPro
 
   const userOptions = users.map((u) => ({
     value: u.id,
-    label: u.realName || u.name,
+    label: displayName(u),
     name: u.name,
     realName: u.realName,
     imageUrl: u.imageUrl,

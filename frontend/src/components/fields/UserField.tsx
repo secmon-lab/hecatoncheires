@@ -1,6 +1,7 @@
 import Select from 'react-select'
 import { buildSelectStyles, portalProps } from '../selectStyles'
 import styles from './FieldComponents.module.css'
+import { displayName } from '../../utils/user'
 
 interface User {
   id: string
@@ -34,7 +35,7 @@ export default function UserField({
 }: UserFieldProps) {
   const options = users.map((user) => ({
     value: user.id,
-    label: user.realName || user.name,
+    label: displayName(user),
     name: user.name,
     realName: user.realName,
     image: user.imageUrl,

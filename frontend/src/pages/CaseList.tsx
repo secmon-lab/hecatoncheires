@@ -16,8 +16,9 @@ import {
   IconDots,
   IconSettings,
 } from '../components/Icons'
-import { Avatar, AvatarStack, StatusBadge, SlackLink } from '../components/Primitives'
+import { Avatar, AssigneeNamesStack, StatusBadge, SlackLink } from '../components/Primitives'
 import CaseForm from './CaseForm'
+import { displayName } from '../utils/user'
 
 const PAGE_SIZE = 20
 
@@ -211,12 +212,12 @@ export default function CaseList() {
         case 'status':
           return <StatusBadge status={c.status} labelOpen={t('statusOpen')} labelClosed={t('statusClosed')} labelDraft={t('tabDrafts')} />
         case 'assignees':
-          return c.assignees && c.assignees.length > 0 ? <AvatarStack users={c.assignees} /> : <span className="soft">—</span>
+          return <AssigneeNamesStack users={c.assignees ?? []} testId="case-row-assignees" />
         case 'reporter':
           return c.reporter ? (
             <div className="row" style={{ gap: 6, fontSize: 12 }}>
               <Avatar size="sm" name={c.reporter.name} realName={c.reporter.realName} imageUrl={c.reporter.imageUrl} />
-              <span className="truncate" style={{ maxWidth: 100 }}>{c.reporter.realName}</span>
+              <span className="truncate" style={{ maxWidth: 100 }}>{displayName(c.reporter)}</span>
             </div>
           ) : <span className="soft">—</span>
         case 'created':

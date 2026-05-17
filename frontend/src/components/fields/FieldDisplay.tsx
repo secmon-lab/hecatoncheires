@@ -1,5 +1,6 @@
 import { Avatar } from '../Primitives'
 import { IconExt } from '../Icons'
+import { displayName } from '../../utils/user'
 
 interface FieldOption {
   id: string
@@ -100,7 +101,7 @@ export default function FieldDisplay({ field, value, users = [] }: Props) {
       return (
         <div className="row" style={{ gap: 6, alignItems: 'center' }}>
           <Avatar size="sm" name={u.name} realName={u.realName} imageUrl={u.imageUrl} />
-          <span style={{ fontSize: 13 }}>{u.realName || u.name}</span>
+          <span style={{ fontSize: 13 }}>{displayName(u)}</span>
         </div>
       )
     }
@@ -116,7 +117,7 @@ export default function FieldDisplay({ field, value, users = [] }: Props) {
           {found.map((u) => (
             <div key={u.id} className="row" style={{ gap: 6, alignItems: 'center' }}>
               <Avatar size="sm" name={u.name} realName={u.realName} imageUrl={u.imageUrl} />
-              <span style={{ fontSize: 13 }}>{u.realName || u.name}</span>
+              <span style={{ fontSize: 13 }}>{displayName(u)}</span>
             </div>
           ))}
         </div>
