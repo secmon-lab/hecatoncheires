@@ -790,6 +790,26 @@ func (r *mutationResolver) UpdateGitHubSource(ctx context.Context, workspaceID s
 	return toGraphQLSource(updated)
 }
 
+// UpdateNotionDBSource is the resolver for the updateNotionDBSource field.
+func (r *mutationResolver) UpdateNotionDBSource(ctx context.Context, workspaceID string, input graphql1.UpdateNotionDBSourceInput) (*graphql1.Source, error) {
+	updated, err := r.UseCases.Source.UpdateNotionDBSource(ctx, workspaceID, toUseCaseUpdateNotionDBSourceInput(input))
+	if err != nil {
+		return nil, err
+	}
+
+	return toGraphQLSource(updated)
+}
+
+// UpdateNotionPageSource is the resolver for the updateNotionPageSource field.
+func (r *mutationResolver) UpdateNotionPageSource(ctx context.Context, workspaceID string, input graphql1.UpdateNotionPageSourceInput) (*graphql1.Source, error) {
+	updated, err := r.UseCases.Source.UpdateNotionPageSource(ctx, workspaceID, toUseCaseUpdateNotionPageSourceInput(input))
+	if err != nil {
+		return nil, err
+	}
+
+	return toGraphQLSource(updated)
+}
+
 // DeleteSource is the resolver for the deleteSource field.
 func (r *mutationResolver) DeleteSource(ctx context.Context, workspaceID string, id string) (bool, error) {
 	if err := r.UseCases.Source.DeleteSource(ctx, workspaceID, model.SourceID(id)); err != nil {

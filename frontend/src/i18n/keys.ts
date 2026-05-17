@@ -254,6 +254,7 @@ export const msgKeys = {
   placeholderSourceDescription: 'placeholderSourceDescription',
   errorNameRequired: 'errorNameRequired',
   errorCreateSource: 'errorCreateSource',
+  errorUpdateSource: 'errorUpdateSource',
   linkViewSource: 'linkViewSource',
 
   // Source delete dialog

@@ -102,6 +102,75 @@ func (uc *SourceUseCase) CreateNotionDBSource(ctx context.Context, workspaceID s
 	return created, nil
 }
 
+// UpdateNotionDBSourceInput represents input for updating a Notion DB source.
+// DatabaseID is a pointer so that callers can distinguish "no change" (nil)
+// from an explicit value. When DatabaseID is non-nil, the new value is
+// re-validated against the Notion API and the cached title/URL are refreshed.
+type UpdateNotionDBSourceInput struct {
+	ID          model.SourceID
+	Name        *string
+	Description *string
+	DatabaseID  *string
+	Enabled     *bool
+}
+
+// UpdateNotionDBSource updates a Notion DB source.
+func (uc *SourceUseCase) UpdateNotionDBSource(ctx context.Context, workspaceID string, input UpdateNotionDBSourceInput) (*model.Source, error) {
+	if input.ID == "" {
+		return nil, goerr.New("source ID is required")
+	}
+
+	existing, err := uc.repo.Source().Get(ctx, workspaceID, input.ID)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to get source")
+	}
+
+	if existing.SourceType != model.SourceTypeNotionDB {
+		return nil, goerr.New("source is not a Notion DB source", goerr.V("sourceType", existing.SourceType))
+	}
+
+	if input.Name != nil {
+		existing.Name = *input.Name
+	}
+	if input.Description != nil {
+		existing.Description = *input.Description
+	}
+	if input.Enabled != nil {
+		existing.Enabled = *input.Enabled
+	}
+
+	if input.DatabaseID != nil {
+		dbID, err := model.ParseNotionID(*input.DatabaseID)
+		if err != nil {
+			return nil, goerr.Wrap(err, "invalid database ID or URL",
+				goerr.V("input", *input.DatabaseID))
+		}
+
+		var dbTitle, dbURL string
+		if uc.notion != nil {
+			metadata, err := uc.notion.GetDatabaseMetadata(ctx, dbID)
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to validate Notion database")
+			}
+			dbTitle = metadata.Title
+			dbURL = metadata.URL
+		}
+
+		existing.NotionDBConfig = &model.NotionDBConfig{
+			DatabaseID:    dbID,
+			DatabaseTitle: dbTitle,
+			DatabaseURL:   dbURL,
+		}
+	}
+
+	updated, err := uc.repo.Source().Update(ctx, workspaceID, existing)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to update source")
+	}
+
+	return updated, nil
+}
+
 // CreateNotionPageSourceInput represents input for creating a Notion Page source
 type CreateNotionPageSourceInput struct {
 	Name        string
@@ -159,6 +228,87 @@ func (uc *SourceUseCase) CreateNotionPageSource(ctx context.Context, workspaceID
 	}
 
 	return created, nil
+}
+
+// UpdateNotionPageSourceInput represents input for updating a Notion Page source.
+// PageID is a pointer so that callers can distinguish "no change" (nil) from an
+// explicit value. When PageID is non-nil the new value is re-validated against
+// the Notion API and the cached title/URL are refreshed. Recursive and MaxDepth
+// are updated independently of PageID changes.
+type UpdateNotionPageSourceInput struct {
+	ID          model.SourceID
+	Name        *string
+	Description *string
+	PageID      *string
+	Enabled     *bool
+	Recursive   *bool
+	MaxDepth    *int
+}
+
+// UpdateNotionPageSource updates a Notion Page source.
+func (uc *SourceUseCase) UpdateNotionPageSource(ctx context.Context, workspaceID string, input UpdateNotionPageSourceInput) (*model.Source, error) {
+	if input.ID == "" {
+		return nil, goerr.New("source ID is required")
+	}
+
+	existing, err := uc.repo.Source().Get(ctx, workspaceID, input.ID)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to get source")
+	}
+
+	if existing.SourceType != model.SourceTypeNotionPage {
+		return nil, goerr.New("source is not a Notion Page source", goerr.V("sourceType", existing.SourceType))
+	}
+
+	if input.Name != nil {
+		existing.Name = *input.Name
+	}
+	if input.Description != nil {
+		existing.Description = *input.Description
+	}
+	if input.Enabled != nil {
+		existing.Enabled = *input.Enabled
+	}
+
+	if existing.NotionPageConfig == nil {
+		existing.NotionPageConfig = &model.NotionPageConfig{}
+	}
+
+	if input.PageID != nil {
+		pageID, err := model.ParseNotionID(*input.PageID)
+		if err != nil {
+			return nil, goerr.Wrap(err, "invalid page ID or URL",
+				goerr.V("input", *input.PageID))
+		}
+
+		var pageTitle, pageURL string
+		if uc.notion != nil {
+			metadata, err := uc.notion.GetPageMetadata(ctx, pageID)
+			if err != nil {
+				return nil, goerr.Wrap(err, "failed to validate Notion page")
+			}
+			pageTitle = metadata.Title
+			pageURL = metadata.URL
+		}
+
+		existing.NotionPageConfig.PageID = pageID
+		existing.NotionPageConfig.PageTitle = pageTitle
+		existing.NotionPageConfig.PageURL = pageURL
+	}
+
+	if input.Recursive != nil {
+		existing.NotionPageConfig.Recursive = *input.Recursive
+	}
+	if input.MaxDepth != nil {
+		existing.NotionPageConfig.MaxDepth = *input.MaxDepth
+	}
+
+	updated, err := uc.repo.Source().Update(ctx, workspaceID, existing)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to update source")
+	}
+
+	return updated, nil
 }
 
 // NotionPageValidationResult represents the result of Notion page validation

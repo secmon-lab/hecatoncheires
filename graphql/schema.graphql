@@ -443,10 +443,28 @@ input CreateNotionDBSourceInput {
   enabled: Boolean
 }
 
+input UpdateNotionDBSourceInput {
+  id: String!
+  name: String
+  description: String
+  databaseID: String
+  enabled: Boolean
+}
+
 input CreateNotionPageSourceInput {
   name: String
   description: String
   pageID: String!
+  enabled: Boolean
+  recursive: Boolean
+  maxDepth: Int
+}
+
+input UpdateNotionPageSourceInput {
+  id: String!
+  name: String
+  description: String
+  pageID: String
   enabled: Boolean
   recursive: Boolean
   maxDepth: Int
@@ -607,6 +625,8 @@ type Mutation {
   updateSource(workspaceId: String!, input: UpdateSourceInput!): Source!
   updateSlackSource(workspaceId: String!, input: UpdateSlackSourceInput!): Source!
   updateGitHubSource(workspaceId: String!, input: UpdateGitHubSourceInput!): Source!
+  updateNotionDBSource(workspaceId: String!, input: UpdateNotionDBSourceInput!): Source!
+  updateNotionPageSource(workspaceId: String!, input: UpdateNotionPageSourceInput!): Source!
   deleteSource(workspaceId: String!, id: String!): Boolean!
   validateNotionDB(workspaceId: String!, databaseID: String!): NotionDBValidationResult!
   validateNotionPage(workspaceId: String!, pageID: String!): NotionPageValidationResult!

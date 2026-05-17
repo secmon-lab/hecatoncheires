@@ -207,3 +207,27 @@ func toUseCaseUpdateGitHubSourceInput(input graphql1.UpdateGitHubSourceInput) us
 		Enabled:      input.Enabled,
 	}
 }
+
+// toUseCaseUpdateNotionDBSourceInput converts GraphQL input to UseCase input
+func toUseCaseUpdateNotionDBSourceInput(input graphql1.UpdateNotionDBSourceInput) usecase.UpdateNotionDBSourceInput {
+	return usecase.UpdateNotionDBSourceInput{
+		ID:          model.SourceID(input.ID),
+		Name:        input.Name,
+		Description: input.Description,
+		DatabaseID:  input.DatabaseID,
+		Enabled:     input.Enabled,
+	}
+}
+
+// toUseCaseUpdateNotionPageSourceInput converts GraphQL input to UseCase input
+func toUseCaseUpdateNotionPageSourceInput(input graphql1.UpdateNotionPageSourceInput) usecase.UpdateNotionPageSourceInput {
+	return usecase.UpdateNotionPageSourceInput{
+		ID:          model.SourceID(input.ID),
+		Name:        input.Name,
+		Description: input.Description,
+		PageID:      input.PageID,
+		Enabled:     input.Enabled,
+		Recursive:   input.Recursive,
+		MaxDepth:    input.MaxDepth,
+	}
+}

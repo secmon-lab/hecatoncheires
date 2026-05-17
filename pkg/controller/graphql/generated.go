@@ -246,6 +246,8 @@ type ComplexityRoot struct {
 		UpdateAction           func(childComplexity int, workspaceID string, input graphql1.UpdateActionInput) int
 		UpdateCase             func(childComplexity int, workspaceID string, input graphql1.UpdateCaseInput) int
 		UpdateGitHubSource     func(childComplexity int, workspaceID string, input graphql1.UpdateGitHubSourceInput) int
+		UpdateNotionDBSource   func(childComplexity int, workspaceID string, input graphql1.UpdateNotionDBSourceInput) int
+		UpdateNotionPageSource func(childComplexity int, workspaceID string, input graphql1.UpdateNotionPageSourceInput) int
 		UpdateSlackSource      func(childComplexity int, workspaceID string, input graphql1.UpdateSlackSourceInput) int
 		UpdateSource           func(childComplexity int, workspaceID string, input graphql1.UpdateSourceInput) int
 		ValidateNotionDb       func(childComplexity int, workspaceID string, databaseID string) int
@@ -420,6 +422,8 @@ type MutationResolver interface {
 	UpdateSource(ctx context.Context, workspaceID string, input graphql1.UpdateSourceInput) (*graphql1.Source, error)
 	UpdateSlackSource(ctx context.Context, workspaceID string, input graphql1.UpdateSlackSourceInput) (*graphql1.Source, error)
 	UpdateGitHubSource(ctx context.Context, workspaceID string, input graphql1.UpdateGitHubSourceInput) (*graphql1.Source, error)
+	UpdateNotionDBSource(ctx context.Context, workspaceID string, input graphql1.UpdateNotionDBSourceInput) (*graphql1.Source, error)
+	UpdateNotionPageSource(ctx context.Context, workspaceID string, input graphql1.UpdateNotionPageSourceInput) (*graphql1.Source, error)
 	DeleteSource(ctx context.Context, workspaceID string, id string) (bool, error)
 	ValidateNotionDb(ctx context.Context, workspaceID string, databaseID string) (*graphql1.NotionDBValidationResult, error)
 	ValidateNotionPage(ctx context.Context, workspaceID string, pageID string) (*graphql1.NotionPageValidationResult, error)
@@ -1449,6 +1453,28 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.UpdateGitHubSource(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.UpdateGitHubSourceInput)), true
+	case "Mutation.updateNotionDBSource":
+		if e.complexity.Mutation.UpdateNotionDBSource == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_updateNotionDBSource_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.UpdateNotionDBSource(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.UpdateNotionDBSourceInput)), true
+	case "Mutation.updateNotionPageSource":
+		if e.complexity.Mutation.UpdateNotionPageSource == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_updateNotionPageSource_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.UpdateNotionPageSource(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.UpdateNotionPageSourceInput)), true
 	case "Mutation.updateSlackSource":
 		if e.complexity.Mutation.UpdateSlackSource == nil {
 			break
@@ -2023,6 +2049,8 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 		ec.unmarshalInputUpdateActionInput,
 		ec.unmarshalInputUpdateCaseInput,
 		ec.unmarshalInputUpdateGitHubSourceInput,
+		ec.unmarshalInputUpdateNotionDBSourceInput,
+		ec.unmarshalInputUpdateNotionPageSourceInput,
 		ec.unmarshalInputUpdateSlackSourceInput,
 		ec.unmarshalInputUpdateSourceInput,
 	)
@@ -2567,10 +2595,28 @@ input CreateNotionDBSourceInput {
   enabled: Boolean
 }
 
+input UpdateNotionDBSourceInput {
+  id: String!
+  name: String
+  description: String
+  databaseID: String
+  enabled: Boolean
+}
+
 input CreateNotionPageSourceInput {
   name: String
   description: String
   pageID: String!
+  enabled: Boolean
+  recursive: Boolean
+  maxDepth: Int
+}
+
+input UpdateNotionPageSourceInput {
+  id: String!
+  name: String
+  description: String
+  pageID: String
   enabled: Boolean
   recursive: Boolean
   maxDepth: Int
@@ -2731,6 +2777,8 @@ type Mutation {
   updateSource(workspaceId: String!, input: UpdateSourceInput!): Source!
   updateSlackSource(workspaceId: String!, input: UpdateSlackSourceInput!): Source!
   updateGitHubSource(workspaceId: String!, input: UpdateGitHubSourceInput!): Source!
+  updateNotionDBSource(workspaceId: String!, input: UpdateNotionDBSourceInput!): Source!
+  updateNotionPageSource(workspaceId: String!, input: UpdateNotionPageSourceInput!): Source!
   deleteSource(workspaceId: String!, id: String!): Boolean!
   validateNotionDB(workspaceId: String!, databaseID: String!): NotionDBValidationResult!
   validateNotionPage(workspaceId: String!, pageID: String!): NotionPageValidationResult!
@@ -3205,6 +3253,38 @@ func (ec *executionContext) field_Mutation_updateGitHubSource_args(ctx context.C
 	}
 	args["workspaceId"] = arg0
 	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNUpdateGitHubSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateGitHubSourceInput)
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_updateNotionDBSource_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNUpdateNotionDBSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateNotionDBSourceInput)
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_updateNotionPageSource_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNUpdateNotionPageSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateNotionPageSourceInput)
 	if err != nil {
 		return nil, err
 	}
@@ -8881,6 +8961,124 @@ func (ec *executionContext) fieldContext_Mutation_updateGitHubSource(ctx context
 	return fc, nil
 }
 
+func (ec *executionContext) _Mutation_updateNotionDBSource(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_updateNotionDBSource,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().UpdateNotionDBSource(ctx, fc.Args["workspaceId"].(string), fc.Args["input"].(graphql1.UpdateNotionDBSourceInput))
+		},
+		nil,
+		ec.marshalNSource2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSource,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_updateNotionDBSource(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Source_id(ctx, field)
+			case "name":
+				return ec.fieldContext_Source_name(ctx, field)
+			case "sourceType":
+				return ec.fieldContext_Source_sourceType(ctx, field)
+			case "description":
+				return ec.fieldContext_Source_description(ctx, field)
+			case "enabled":
+				return ec.fieldContext_Source_enabled(ctx, field)
+			case "config":
+				return ec.fieldContext_Source_config(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Source_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Source_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Source", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_updateNotionDBSource_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_updateNotionPageSource(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_updateNotionPageSource,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().UpdateNotionPageSource(ctx, fc.Args["workspaceId"].(string), fc.Args["input"].(graphql1.UpdateNotionPageSourceInput))
+		},
+		nil,
+		ec.marshalNSource2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSource,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_updateNotionPageSource(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Source_id(ctx, field)
+			case "name":
+				return ec.fieldContext_Source_name(ctx, field)
+			case "sourceType":
+				return ec.fieldContext_Source_sourceType(ctx, field)
+			case "description":
+				return ec.fieldContext_Source_description(ctx, field)
+			case "enabled":
+				return ec.fieldContext_Source_enabled(ctx, field)
+			case "config":
+				return ec.fieldContext_Source_config(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Source_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Source_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Source", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_updateNotionPageSource_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Mutation_deleteSource(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -14036,6 +14234,130 @@ func (ec *executionContext) unmarshalInputUpdateGitHubSourceInput(ctx context.Co
 	return it, nil
 }
 
+func (ec *executionContext) unmarshalInputUpdateNotionDBSourceInput(ctx context.Context, obj any) (graphql1.UpdateNotionDBSourceInput, error) {
+	var it graphql1.UpdateNotionDBSourceInput
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"id", "name", "description", "databaseID", "enabled"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "id":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("id"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ID = data
+		case "name":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("name"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Name = data
+		case "description":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("description"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Description = data
+		case "databaseID":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("databaseID"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.DatabaseID = data
+		case "enabled":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("enabled"))
+			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Enabled = data
+		}
+	}
+
+	return it, nil
+}
+
+func (ec *executionContext) unmarshalInputUpdateNotionPageSourceInput(ctx context.Context, obj any) (graphql1.UpdateNotionPageSourceInput, error) {
+	var it graphql1.UpdateNotionPageSourceInput
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"id", "name", "description", "pageID", "enabled", "recursive", "maxDepth"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "id":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("id"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ID = data
+		case "name":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("name"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Name = data
+		case "description":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("description"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Description = data
+		case "pageID":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("pageID"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.PageID = data
+		case "enabled":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("enabled"))
+			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Enabled = data
+		case "recursive":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("recursive"))
+			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Recursive = data
+		case "maxDepth":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("maxDepth"))
+			data, err := ec.unmarshalOInt2ᚖint(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.MaxDepth = data
+		}
+	}
+
+	return it, nil
+}
+
 func (ec *executionContext) unmarshalInputUpdateSlackSourceInput(ctx context.Context, obj any) (graphql1.UpdateSlackSourceInput, error) {
 	var it graphql1.UpdateSlackSourceInput
 	asMap := map[string]any{}
@@ -15985,6 +16307,20 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 		case "updateGitHubSource":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_updateGitHubSource(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "updateNotionDBSource":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_updateNotionDBSource(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "updateNotionPageSource":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_updateNotionPageSource(ctx, field)
 			})
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
@@ -18741,6 +19077,16 @@ func (ec *executionContext) unmarshalNUpdateCaseInput2githubᚗcomᚋsecmonᚑla
 
 func (ec *executionContext) unmarshalNUpdateGitHubSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateGitHubSourceInput(ctx context.Context, v any) (graphql1.UpdateGitHubSourceInput, error) {
 	res, err := ec.unmarshalInputUpdateGitHubSourceInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) unmarshalNUpdateNotionDBSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateNotionDBSourceInput(ctx context.Context, v any) (graphql1.UpdateNotionDBSourceInput, error) {
+	res, err := ec.unmarshalInputUpdateNotionDBSourceInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) unmarshalNUpdateNotionPageSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateNotionPageSourceInput(ctx context.Context, v any) (graphql1.UpdateNotionPageSourceInput, error) {
+	res, err := ec.unmarshalInputUpdateNotionPageSourceInput(ctx, v)
 	return res, graphql.ErrorOnPath(ctx, err)
 }
 

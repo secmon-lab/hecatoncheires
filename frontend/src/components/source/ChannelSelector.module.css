@@ -3,6 +3,10 @@
   display: flex;
   flex-direction: column;
   gap: var(--spacing-sm);
+  /* Force a stacking context so the dropdown reliably paints above
+     sibling elements outside the selector (hints, labels, etc.). */
+  isolation: isolate;
+  z-index: 1;
 }
 
 .selector {
@@ -119,6 +123,7 @@
   gap: var(--spacing-sm);
   padding: var(--spacing-sm) var(--spacing-md);
   border-bottom: 1px solid var(--border-light);
+  background: var(--bg-paper);
 }
 
 .searchIcon {
@@ -142,6 +147,7 @@
 .channelList {
   overflow-y: auto;
   max-height: 15rem;
+  background: var(--bg-paper);
 }
 
 .channelItem {

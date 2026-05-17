@@ -98,10 +98,28 @@ export const CREATE_NOTION_DB_SOURCE = gql`
   }
 `
 
+export const UPDATE_NOTION_DB_SOURCE = gql`
+  ${SOURCE_FIELDS}
+  mutation UpdateNotionDBSource($workspaceId: String!, $input: UpdateNotionDBSourceInput!) {
+    updateNotionDBSource(workspaceId: $workspaceId, input: $input) {
+      ...SourceFields
+    }
+  }
+`
+
 export const CREATE_NOTION_PAGE_SOURCE = gql`
   ${SOURCE_FIELDS}
   mutation CreateNotionPageSource($workspaceId: String!, $input: CreateNotionPageSourceInput!) {
     createNotionPageSource(workspaceId: $workspaceId, input: $input) {
+      ...SourceFields
+    }
+  }
+`
+
+export const UPDATE_NOTION_PAGE_SOURCE = gql`
+  ${SOURCE_FIELDS}
+  mutation UpdateNotionPageSource($workspaceId: String!, $input: UpdateNotionPageSourceInput!) {
+    updateNotionPageSource(workspaceId: $workspaceId, input: $input) {
       ...SourceFields
     }
   }
