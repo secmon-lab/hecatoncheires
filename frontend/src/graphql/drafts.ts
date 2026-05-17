@@ -78,9 +78,15 @@ export const CREATE_DRAFT = gql`
   }
 `
 
+// SUBMIT_DRAFT atomically applies any last-minute edits (`input`) and
+// promotes the draft to OPEN. Passing the same payload that the case
+// creation form collects keeps "save final edits and submit" a single
+// business operation — the backend sees both halves at once, so
+// required-field validation, channel creation, and invites all run
+// against the same canonical state.
 export const SUBMIT_DRAFT = gql`
-  mutation SubmitDraft($workspaceId: String!, $id: Int!) {
-    submitDraft(workspaceId: $workspaceId, id: $id) {
+  mutation SubmitDraft($workspaceId: String!, $id: Int!, $input: SubmitDraftInput) {
+    submitDraft(workspaceId: $workspaceId, id: $id, input: $input) {
       id
       title
       status

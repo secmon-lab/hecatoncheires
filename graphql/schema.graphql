@@ -287,6 +287,18 @@ input UpdateCaseInput {
   fields: [FieldValueInput!]
 }
 
+# SubmitDraftInput carries the last-minute edits that the user wants to
+# apply *atomically* before the draft is promoted to OPEN. Pre-submit edit
+# and promote-to-OPEN are one business operation, so they go through one
+# usecase call — splitting them across an updateCase + submitDraft pair
+# at the client risks leaving an inconsistent draft behind on failure.
+input SubmitDraftInput {
+  title: String
+  description: String
+  assigneeIDs: [String!]
+  fields: [FieldValueInput!]
+}
+
 input CreateActionInput {
   caseID: Int!
   title: String!
@@ -557,9 +569,10 @@ type Mutation {
   createDraft(workspaceId: String!, input: CreateDraftInput!): Case!
 
   # Promote a draft case to OPEN, running the same activation side effects
-  # (Slack channel, invites, etc.) as a fresh createCase. Only the draft's
-  # reporter may submit it.
-  submitDraft(workspaceId: String!, id: Int!): Case!
+  # (Slack channel, invites, etc.) as a fresh createCase. The optional
+  # `input` lets the caller apply last-minute edits atomically in the same
+  # transaction; without it the existing draft state is promoted as-is.
+  submitDraft(workspaceId: String!, id: Int!, input: SubmitDraftInput): Case!
 
   # Permanently delete the caller's own draft case. Discarding does NOT
   # apply to non-draft cases (deleteCase is the path for those); the mutation

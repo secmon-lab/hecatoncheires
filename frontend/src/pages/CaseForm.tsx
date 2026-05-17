@@ -131,20 +131,21 @@ export default function CaseForm({ caseItem, onClose, onSubmitted }: CaseFormPro
 
     try {
       if (isDraftEdit && caseItem) {
-        await updateCase({
+        // Single mutation: edits + promote run inside one usecase call so
+        // required-field validation and channel-activation see the same
+        // payload. Splitting these across two roundtrips would let a
+        // failed promotion leave an already-edited DRAFT behind.
+        await submitDraft({
           variables: {
             workspaceId: currentWorkspace!.id,
+            id: caseItem.id,
             input: {
-              id: caseItem.id,
               title,
               description,
               assigneeIDs,
               fields: fieldArr,
             },
           },
-        })
-        await submitDraft({
-          variables: { workspaceId: currentWorkspace!.id, id: caseItem.id },
         })
         onSubmitted?.()
         onClose()

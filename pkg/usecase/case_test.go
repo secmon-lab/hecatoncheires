@@ -1930,7 +1930,7 @@ func TestCaseUseCase_SubmitDraft(t *testing.T) {
 		gt.NoError(t, err).Required()
 		gt.Value(t, draft.Status).Equal(types.CaseStatusDraft)
 
-		submitted, err := uc.SubmitDraft(ctx, testWorkspaceID, draft.ID)
+		submitted, err := uc.SubmitDraft(ctx, testWorkspaceID, draft.ID, nil)
 		gt.NoError(t, err).Required()
 		gt.Value(t, submitted.Status).Equal(types.CaseStatusOpen)
 		gt.Value(t, submitted.ID).Equal(draft.ID)
@@ -1948,6 +1948,54 @@ func TestCaseUseCase_SubmitDraft(t *testing.T) {
 		gt.Value(t, stored.SlackChannelID).Equal(fmt.Sprintf("C%d", draft.ID))
 	})
 
+	t.Run("submit-with-patch applies edits and still invites reporter", func(t *testing.T) {
+		// Architecturally important: "save final edits and submit" is one
+		// business operation, so it runs through a single SubmitDraft call.
+		// We patch the title, swap assignees, and verify the resulting
+		// channel invite list still includes the original reporter (UAUTHOR)
+		// even though the patch did not name them.
+		repo := memory.New()
+		mock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+		}
+		uc := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UAUTHOR"})
+
+		draft, err := uc.CreateDraft(ctx, testWorkspaceID, "Half-written", "old body", []string{"UOLD"}, nil, false)
+		gt.NoError(t, err).Required()
+
+		newTitle := "Final title"
+		newBody := "polished body"
+		var patch usecase.CaseUpdate
+		patch.Title = &newTitle
+		patch.Description = &newBody
+		patch.SetAssignees([]string{"UNEW"})
+
+		submitted, err := uc.SubmitDraft(ctx, testWorkspaceID, draft.ID, &patch)
+		gt.NoError(t, err).Required()
+		gt.Value(t, submitted.Status).Equal(types.CaseStatusOpen)
+		gt.Value(t, submitted.Title).Equal("Final title")
+		gt.Value(t, submitted.Description).Equal("polished body")
+		gt.Value(t, submitted.ReporterID).Equal("UAUTHOR")
+
+		// Channel invites: reporter (UAUTHOR) + new assignee (UNEW).
+		// The pre-edit assignee (UOLD) has been replaced.
+		gt.Array(t, mock.invitedUserIDs).Length(2)
+		gt.Value(t, mock.invitedUserIDs[0]).Equal("UAUTHOR")
+		gt.Value(t, mock.invitedUserIDs[1]).Equal("UNEW")
+
+		// The persisted case reflects the patch — i.e. the same value the
+		// channel was activated against, not a stale draft snapshot.
+		stored, err := repo.Case().Get(context.Background(), testWorkspaceID, draft.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, stored.Title).Equal("Final title")
+		gt.Value(t, stored.Description).Equal("polished body")
+		gt.Number(t, len(stored.AssigneeIDs)).Equal(1)
+		gt.Value(t, stored.AssigneeIDs[0]).Equal("UNEW")
+	})
+
 	t.Run("requires title to submit", func(t *testing.T) {
 		repo := memory.New()
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
@@ -1956,7 +2004,7 @@ func TestCaseUseCase_SubmitDraft(t *testing.T) {
 		draft, err := uc.CreateDraft(ctx, testWorkspaceID, "", "Body only", nil, nil, false)
 		gt.NoError(t, err).Required()
 
-		_, err = uc.SubmitDraft(ctx, testWorkspaceID, draft.ID)
+		_, err = uc.SubmitDraft(ctx, testWorkspaceID, draft.ID, nil)
 		gt.Error(t, err)
 
 		stored, err := repo.Case().Get(context.Background(), testWorkspaceID, draft.ID)
@@ -1983,7 +2031,7 @@ func TestCaseUseCase_SubmitDraft(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		otherCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
-		submitted, err := uc.SubmitDraft(otherCtx, testWorkspaceID, draft.ID)
+		submitted, err := uc.SubmitDraft(otherCtx, testWorkspaceID, draft.ID, nil)
 		gt.NoError(t, err).Required()
 		gt.Value(t, submitted.Status).Equal(types.CaseStatusOpen)
 		gt.Value(t, submitted.ReporterID).Equal("UMINE")
@@ -2001,7 +2049,7 @@ func TestCaseUseCase_SubmitDraft(t *testing.T) {
 		gt.NoError(t, err).Required()
 
 		otherCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
-		_, err = uc.SubmitDraft(otherCtx, testWorkspaceID, draft.ID)
+		_, err = uc.SubmitDraft(otherCtx, testWorkspaceID, draft.ID, nil)
 		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
 	})
 
@@ -2034,7 +2082,7 @@ func TestCaseUseCase_SubmitDraft(t *testing.T) {
 		draft, err := uc.CreateDraft(ctx, testWorkspaceID, "Has Title", "", nil, nil, false)
 		gt.NoError(t, err).Required()
 
-		_, err = uc.SubmitDraft(ctx, testWorkspaceID, draft.ID)
+		_, err = uc.SubmitDraft(ctx, testWorkspaceID, draft.ID, nil)
 		gt.Error(t, err).Is(usecase.ErrMissingRequiredOnSubmit)
 		// The error message must name the missing field so the UI can
 		// point the user at it directly (rather than the legacy opaque
@@ -2066,7 +2114,7 @@ func TestCaseUseCase_SubmitDraft(t *testing.T) {
 		draft, err := uc.CreateDraft(ctx, testWorkspaceID, "Will Fail", "Body", nil, nil, false)
 		gt.NoError(t, err).Required()
 
-		_, err = uc.SubmitDraft(ctx, testWorkspaceID, draft.ID)
+		_, err = uc.SubmitDraft(ctx, testWorkspaceID, draft.ID, nil)
 		gt.Error(t, err)
 
 		// Persisted case row survives; status is flipped back to DRAFT.
@@ -2085,7 +2133,7 @@ func TestCaseUseCase_SubmitDraft(t *testing.T) {
 		open, err := uc.CreateCase(ctx, testWorkspaceID, "Already Open", "", nil, nil, false, "", "")
 		gt.NoError(t, err).Required()
 
-		_, err = uc.SubmitDraft(ctx, testWorkspaceID, open.ID)
+		_, err = uc.SubmitDraft(ctx, testWorkspaceID, open.ID, nil)
 		gt.Error(t, err).Is(usecase.ErrCaseNotDraft)
 	})
 }

@@ -324,6 +324,13 @@ type Source struct {
 	UpdatedAt   time.Time    `json:"updatedAt"`
 }
 
+type SubmitDraftInput struct {
+	Title       *string            `json:"title,omitempty"`
+	Description *string            `json:"description,omitempty"`
+	AssigneeIDs []string           `json:"assigneeIDs,omitempty"`
+	Fields      []*FieldValueInput `json:"fields,omitempty"`
+}
+
 type UpdateActionInput struct {
 	ID             int        `json:"id"`
 	CaseID         *int       `json:"caseID,omitempty"`

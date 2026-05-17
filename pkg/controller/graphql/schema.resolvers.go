@@ -498,8 +498,25 @@ func (r *mutationResolver) CreateDraft(ctx context.Context, workspaceID string, 
 }
 
 // SubmitDraft is the resolver for the submitDraft field.
-func (r *mutationResolver) SubmitDraft(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error) {
-	submitted, err := r.UseCases.Case.SubmitDraft(ctx, workspaceID, int64(id))
+func (r *mutationResolver) SubmitDraft(ctx context.Context, workspaceID string, id int, input *graphql1.SubmitDraftInput) (*graphql1.Case, error) {
+	var patch *usecase.CaseUpdate
+	if input != nil {
+		p := usecase.CaseUpdate{}
+		if input.Title != nil {
+			p.Title = input.Title
+		}
+		if input.Description != nil {
+			p.Description = input.Description
+		}
+		if input.AssigneeIDs != nil {
+			p.SetAssignees(input.AssigneeIDs)
+		}
+		if input.Fields != nil {
+			p.Fields = toDomainFieldValues(input.Fields)
+		}
+		patch = &p
+	}
+	submitted, err := r.UseCases.Case.SubmitDraft(ctx, workspaceID, int64(id), patch)
 	if err != nil {
 		return nil, err
 	}

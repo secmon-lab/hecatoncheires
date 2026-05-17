@@ -669,12 +669,60 @@ func (uc *CaseUseCase) GetDraft(ctx context.Context, workspaceID string, id int6
 
 // SubmitDraft promotes a draft case to OPEN and triggers the same activation
 // side effects (Slack channel, invites, welcome, etc.) as a fresh CreateCase.
-// Only the draft's reporter may submit it. If activation fails, the draft is
-// kept in DRAFT so the user can retry without losing the saved entry.
-func (uc *CaseUseCase) SubmitDraft(ctx context.Context, workspaceID string, id int64) (*model.Case, error) {
+// The optional `patch` carries last-minute edits the caller wants to apply
+// atomically before the promotion — passing them to this single usecase
+// method (rather than separate UpdateCase + SubmitDraft calls from the
+// controller) keeps the "save final edits and submit" business operation
+// atomic: required-field validation, channel creation, and invites all see
+// the same set of values, and a failure path leaves the draft consistent.
+//
+// If activation fails the draft is kept in DRAFT so the user can retry
+// without losing the saved entry.
+func (uc *CaseUseCase) SubmitDraft(ctx context.Context, workspaceID string, id int64, patch *CaseUpdate) (*model.Case, error) {
 	c, err := uc.GetDraft(ctx, workspaceID, id)
 	if err != nil {
 		return nil, err
+	}
+
+	// Apply pre-submit edits in memory and persist them before strict
+	// validation runs. We route through repo.Case().Update directly rather
+	// than UpdateCase() so the activation path further down sees the
+	// freshly-stored case (and so private-draft / draft-empty-title quirks
+	// stay scoped to SubmitDraft instead of leaking into the generic
+	// UpdateCase contract).
+	if patch != nil {
+		if patch.Title != nil {
+			c.Title = *patch.Title
+		}
+		if patch.Description != nil {
+			c.Description = *patch.Description
+		}
+		if patch.hasAssign {
+			c.AssigneeIDs = patch.AssigneeIDs
+		}
+		if patch.Fields != nil {
+			validated := patch.Fields
+			if validator := uc.fieldValidatorForWorkspace(workspaceID); validator != nil {
+				enriched, vErr := validator.ValidateCaseFieldsPartial(validated)
+				if vErr != nil {
+					return nil, goerr.Wrap(vErr, "field validation failed", goerr.V(CaseIDKey, id))
+				}
+				validated = enriched
+			}
+			merged := make(map[string]model.FieldValue, len(c.FieldValues)+len(validated))
+			for k, v := range c.FieldValues {
+				merged[k] = v
+			}
+			for k, v := range validated {
+				merged[k] = v
+			}
+			c.FieldValues = merged
+		}
+		persistedPatch, pErr := uc.repo.Case().Update(ctx, workspaceID, c)
+		if pErr != nil {
+			return nil, goerr.Wrap(pErr, "failed to persist pre-submit edits", goerr.V(CaseIDKey, id))
+		}
+		c = persistedPatch
 	}
 
 	// Drafts cannot be Submitted with an empty title — Slack channel naming
@@ -716,14 +764,6 @@ func (uc *CaseUseCase) SubmitDraft(ctx context.Context, workspaceID string, id i
 				goerr.V("missing_field_ids", missingIDs),
 				goerr.V("missing_field_names", missingNames),
 			)
-		}
-		// Type-check whatever the user *did* fill.
-		if validator := uc.fieldValidatorForWorkspace(workspaceID); validator != nil {
-			enriched, err := validator.ValidateCaseFieldsPartial(c.FieldValues)
-			if err != nil {
-				return nil, goerr.Wrap(err, "field validation failed on submit", goerr.V(CaseIDKey, id))
-			}
-			c.FieldValues = enriched
 		}
 	}
 
