@@ -3,14 +3,12 @@ package repository_test
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
-	"github.com/secmon-lab/hecatoncheires/pkg/repository/firestore"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 )
 
@@ -416,28 +414,6 @@ func TestMemorySlackRepository(t *testing.T) {
 	})
 }
 
-func newFirestoreSlackRepository(t *testing.T) interfaces.Repository {
-	t.Helper()
-
-	projectID := os.Getenv("TEST_FIRESTORE_PROJECT_ID")
-	if projectID == "" {
-		t.Skip("TEST_FIRESTORE_PROJECT_ID not set")
-	}
-
-	databaseID := os.Getenv("TEST_FIRESTORE_DATABASE_ID")
-	if databaseID == "" {
-		t.Skip("TEST_FIRESTORE_DATABASE_ID not set")
-	}
-
-	ctx := context.Background()
-	repo, err := firestore.New(ctx, projectID, databaseID)
-	gt.NoError(t, err).Required()
-	t.Cleanup(func() {
-		gt.NoError(t, repo.Close())
-	})
-	return repo
-}
-
 func TestFirestoreSlackRepository(t *testing.T) {
-	runSlackRepositoryTest(t, newFirestoreSlackRepository)
+	runSlackRepositoryTest(t, newFirestoreRepository)
 }

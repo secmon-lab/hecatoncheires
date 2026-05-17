@@ -5,6 +5,7 @@
 package draft
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -130,15 +131,92 @@ const (
 // allowlist, etc.). Returns a typed error wrapping the underlying cause for
 // the retry path; the planner driver feeds err.Error() back as user input
 // when retrying.
+//
+// The decode step is tolerant of LLM noise: real-LLM runs occasionally
+// emit a brief prose preamble ("I'll respond with…") or wrap the JSON
+// in ```json``` fences before the object. We strip both and re-try
+// before giving up, so a single sloppy turn doesn't burn a retry slot
+// when the structured content is actually valid.
 func parseAndValidate(raw []byte) (*plan, error) {
+	body := extractJSONObject(raw)
 	var p plan
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := json.Unmarshal(body, &p); err != nil {
 		return nil, goerr.Wrap(err, "decode plan json")
 	}
 	if err := validate(&p); err != nil {
 		return nil, err
 	}
 	return &p, nil
+}
+
+// extractJSONObject returns the slice of raw containing a single
+// top-level JSON object. If raw is already a clean JSON object it is
+// returned unchanged. Otherwise we strip a ```json fence (or bare ```
+// fence) and fall back to "first `{` to its matching `}`" scanning so
+// prose around the object does not break the decoder.
+func extractJSONObject(raw []byte) []byte {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return raw
+	}
+	// Already a clean JSON object — fast path.
+	if trimmed[0] == '{' && trimmed[len(trimmed)-1] == '}' {
+		return trimmed
+	}
+	// Strip an opening ```json / ``` fence and the closing ``` if
+	// present.
+	if bytes.HasPrefix(trimmed, []byte("```")) {
+		body := trimmed[3:]
+		if rest, ok := bytes.CutPrefix(body, []byte("json")); ok {
+			body = rest
+		}
+		body = bytes.TrimLeft(body, "\r\n")
+		if end := bytes.LastIndex(body, []byte("```")); end >= 0 {
+			body = bytes.TrimSpace(body[:end])
+		}
+		trimmed = body
+		if len(trimmed) > 0 && trimmed[0] == '{' && trimmed[len(trimmed)-1] == '}' {
+			return trimmed
+		}
+	}
+	// Last-ditch: scan for the first balanced { … } region. We honour
+	// string boundaries so a `}` inside a JSON string doesn't fool us.
+	start := bytes.IndexByte(trimmed, '{')
+	if start < 0 {
+		return raw
+	}
+	depth := 0
+	inString := false
+	escaped := false
+	for i := start; i < len(trimmed); i++ {
+		c := trimmed[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if c == '\\' {
+				escaped = true
+				continue
+			}
+			if c == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return trimmed[start : i+1]
+			}
+		}
+	}
+	return raw
 }
 
 // validate enforces the plan invariants. Surfaced to callers (and looped

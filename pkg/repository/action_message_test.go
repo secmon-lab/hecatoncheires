@@ -3,14 +3,12 @@ package repository_test
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
-	"github.com/secmon-lab/hecatoncheires/pkg/repository/firestore"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 )
 
@@ -170,17 +168,5 @@ func TestActionMessageRepository_Memory(t *testing.T) {
 }
 
 func TestActionMessageRepository_Firestore(t *testing.T) {
-	projectID := os.Getenv("FIRESTORE_PROJECT_ID")
-	if projectID == "" {
-		t.Skip("FIRESTORE_PROJECT_ID not set")
-	}
-
-	runActionMessageRepositoryTest(t, func(t *testing.T) interfaces.Repository {
-		repo, err := firestore.New(context.Background(), projectID, "")
-		gt.NoError(t, err).Required()
-		t.Cleanup(func() {
-			gt.NoError(t, repo.Close())
-		})
-		return repo
-	})
+	runActionMessageRepositoryTest(t, newFirestoreRepository)
 }

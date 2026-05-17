@@ -2,7 +2,6 @@ package firestore
 
 import (
 	"context"
-	"time"
 
 	"cloud.google.com/go/firestore"
 	"github.com/m-mizutani/goerr/v2"
@@ -27,12 +26,9 @@ func (r *sourceRepository) sourcesCollection(workspaceID string) *firestore.Coll
 }
 
 func (r *sourceRepository) Create(ctx context.Context, workspaceID string, source *model.Source) (*model.Source, error) {
-	now := time.Now().UTC()
 	if source.ID == "" {
 		source.ID = model.NewSourceID()
 	}
-	source.CreatedAt = now
-	source.UpdatedAt = now
 
 	docRef := r.sourcesCollection(workspaceID).Doc(string(source.ID))
 	if _, err := docRef.Set(ctx, source); err != nil {
@@ -87,30 +83,18 @@ func (r *sourceRepository) List(ctx context.Context, workspaceID string) ([]*mod
 
 func (r *sourceRepository) Update(ctx context.Context, workspaceID string, source *model.Source) (*model.Source, error) {
 	docRef := r.sourcesCollection(workspaceID).Doc(string(source.ID))
-	now := time.Now().UTC()
 
-	var updatedSource *model.Source
 	err := r.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
-		doc, err := tx.Get(docRef)
-		if err != nil {
+		if _, err := tx.Get(docRef); err != nil {
 			if status.Code(err) == codes.NotFound {
 				return goerr.Wrap(ErrNotFound, "source not found", goerr.V("id", source.ID))
 			}
 			return goerr.Wrap(err, "failed to get source in transaction", goerr.V("id", source.ID))
 		}
 
-		var existing model.Source
-		if err := doc.DataTo(&existing); err != nil {
-			return goerr.Wrap(err, "failed to unmarshal source in transaction", goerr.V("id", source.ID))
-		}
-
-		source.CreatedAt = existing.CreatedAt
-		source.UpdatedAt = now
-
 		if err := tx.Set(docRef, source); err != nil {
 			return goerr.Wrap(err, "failed to update source in transaction", goerr.V("id", source.ID))
 		}
-		updatedSource = source
 		return nil
 	})
 
@@ -118,7 +102,7 @@ func (r *sourceRepository) Update(ctx context.Context, workspaceID string, sourc
 		return nil, err
 	}
 
-	return updatedSource, nil
+	return source, nil
 }
 
 func (r *sourceRepository) Delete(ctx context.Context, workspaceID string, id model.SourceID) error {

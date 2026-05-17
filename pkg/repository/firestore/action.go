@@ -3,7 +3,6 @@ package firestore
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"cloud.google.com/go/firestore"
 	"github.com/m-mizutani/goerr/v2"
@@ -76,29 +75,19 @@ func (r *actionRepository) Create(ctx context.Context, workspaceID string, actio
 		return nil, goerr.Wrap(err, "failed to get next ID")
 	}
 
-	now := time.Now().UTC()
-	created := &model.Action{
-		ID:             nextID,
-		CaseID:         action.CaseID,
-		Title:          action.Title,
-		Description:    action.Description,
-		AssigneeID:     action.AssigneeID,
-		SlackMessageTS: action.SlackMessageTS,
-		Status:         action.Status,
-		DueDate:        action.DueDate,
-		ArchivedAt:     action.ArchivedAt,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+	// Mutate the storage-side ID directly on the caller's struct so the
+	// model is persisted verbatim. NEVER rebuild via a field-by-field
+	// struct literal — that pattern silently drops fields added later
+	// to model.Action and was the root cause of the empty-reporter bug
+	// on the Case side.
+	action.ID = nextID
+
+	docID := fmt.Sprintf("%d", action.ID)
+	if _, err := r.actionsCollection(workspaceID).Doc(docID).Set(ctx, action); err != nil {
+		return nil, goerr.Wrap(err, "failed to create action", goerr.V("id", action.ID))
 	}
 
-	docID := fmt.Sprintf("%d", created.ID)
-
-	_, err = r.actionsCollection(workspaceID).Doc(docID).Set(ctx, created)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to create action", goerr.V("id", created.ID))
-	}
-
-	return created, nil
+	return action, nil
 }
 
 func (r *actionRepository) Get(ctx context.Context, workspaceID string, id int64) (*model.Action, error) {
@@ -152,36 +141,18 @@ func (r *actionRepository) Update(ctx context.Context, workspaceID string, actio
 	docID := fmt.Sprintf("%d", action.ID)
 	docRef := r.actionsCollection(workspaceID).Doc(docID)
 
-	// Check if document exists
-	_, err := docRef.Get(ctx)
-	if err != nil {
+	if _, err := docRef.Get(ctx); err != nil {
 		if status.Code(err) == codes.NotFound {
 			return nil, goerr.Wrap(ErrNotFound, "action not found", goerr.V("id", action.ID))
 		}
 		return nil, goerr.Wrap(err, "failed to check action existence", goerr.V("id", action.ID))
 	}
 
-	// Update with new timestamp
-	updated := &model.Action{
-		ID:             action.ID,
-		CaseID:         action.CaseID,
-		Title:          action.Title,
-		Description:    action.Description,
-		AssigneeID:     action.AssigneeID,
-		SlackMessageTS: action.SlackMessageTS,
-		Status:         action.Status,
-		DueDate:        action.DueDate,
-		ArchivedAt:     action.ArchivedAt,
-		CreatedAt:      action.CreatedAt,
-		UpdatedAt:      time.Now().UTC(),
-	}
-
-	_, err = docRef.Set(ctx, updated)
-	if err != nil {
+	if _, err := docRef.Set(ctx, action); err != nil {
 		return nil, goerr.Wrap(err, "failed to update action", goerr.V("id", action.ID))
 	}
 
-	return updated, nil
+	return action, nil
 }
 
 func (r *actionRepository) Delete(ctx context.Context, workspaceID string, id int64) error {

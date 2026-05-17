@@ -424,6 +424,7 @@ Agent output:
 		Actions:   summary.Actions,
 		Reasoning: summary.Reasoning,
 		NextSteps: summary.NextSteps,
+		CreatedAt: time.Now().UTC(),
 	}
 
 	if _, err := uc.deps.Repo.AssistLog().Create(ctx, wsID, caseID, log); err != nil {

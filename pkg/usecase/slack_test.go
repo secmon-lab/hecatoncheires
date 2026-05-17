@@ -163,6 +163,7 @@ func TestSlackUseCases_HandleSlackMessage(t *testing.T) {
 
 		// Create a case with SlackChannelID
 		created, err := repo.Case().Create(ctx, "ws-test", &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
 			Title:          "Test Case",
 			SlackChannelID: "C-MAPPED",
 		})
@@ -215,6 +216,7 @@ func TestSlackUseCases_HandleSlackMessage(t *testing.T) {
 		ctx := context.Background()
 
 		caseRec, err := repo.Case().Create(ctx, "ws-test", &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
 			Title:          "Test Case",
 			SlackChannelID: "C-ACTION",
 		})
@@ -266,6 +268,7 @@ func TestSlackUseCases_HandleSlackMessage(t *testing.T) {
 		ctx := context.Background()
 
 		caseRec, err := repo.Case().Create(ctx, "ws-test", &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
 			Title:          "Test Case",
 			SlackChannelID: "C-ACTION-2",
 		})
@@ -343,6 +346,7 @@ func TestSlackUseCases_HandleMembershipEvent(t *testing.T) {
 
 		// Create a case with a Slack channel
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
 			Title:          "Membership Test Case",
 			SlackChannelID: "C-MEMBERSHIP-JOIN",
 		})
@@ -407,6 +411,7 @@ func TestSlackUseCases_HandleMembershipEvent(t *testing.T) {
 
 		// Create a case with a Slack channel and initial members
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
 			Title:          "Membership Leave Test",
 			SlackChannelID: "C-MEMBERSHIP-LEFT",
 			ChannelUserIDs: []string{"U100", "U200"},

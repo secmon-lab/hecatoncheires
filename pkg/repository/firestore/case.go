@@ -3,10 +3,8 @@ package firestore
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"cloud.google.com/go/firestore"
-	pb "cloud.google.com/go/firestore/apiv1/firestorepb"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
@@ -73,35 +71,31 @@ func (r *caseRepository) getNextID(ctx context.Context, workspaceID string) (int
 }
 
 func (r *caseRepository) Create(ctx context.Context, workspaceID string, c *model.Case) (*model.Case, error) {
+	// Validate at the persistence boundary — the only safe place to
+	// catch an unattributable write before it lands in storage. The
+	// caller (usecase) is responsible for everything else, including
+	// CreatedAt / UpdatedAt; the repository assigns the storage-side
+	// ID directly onto the caller's struct and persists the model
+	// verbatim. NEVER rebuild via a field-by-field struct literal
+	// or value-copy — those patterns silently drop any field added
+	// to model.Case without an exhaustive search of every repo
+	// Create / Update site.
+	if err := c.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "case validation failed before create")
+	}
+
 	nextID, err := r.getNextID(ctx, workspaceID)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to get next ID")
 	}
+	c.ID = nextID
 
-	now := time.Now().UTC()
-	created := &model.Case{
-		ID:             nextID,
-		Title:          c.Title,
-		Description:    c.Description,
-		Status:         c.Status,
-		AssigneeIDs:    c.AssigneeIDs,
-		SlackChannelID: c.SlackChannelID,
-		IsPrivate:      c.IsPrivate,
-		ChannelUserIDs: c.ChannelUserIDs,
-		FieldValues:    c.FieldValues,
-		RequestKey:     c.RequestKey,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+	docID := fmt.Sprintf("%d", c.ID)
+	if _, err := r.casesCollection(workspaceID).Doc(docID).Set(ctx, c); err != nil {
+		return nil, goerr.Wrap(err, "failed to create case", goerr.V("id", c.ID))
 	}
 
-	docID := fmt.Sprintf("%d", created.ID)
-
-	_, err = r.casesCollection(workspaceID).Doc(docID).Set(ctx, created)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to create case", goerr.V("id", created.ID))
-	}
-
-	return created, nil
+	return c, nil
 }
 
 func (r *caseRepository) Get(ctx context.Context, workspaceID string, id int64) (*model.Case, error) {
@@ -131,7 +125,12 @@ func (r *caseRepository) List(ctx context.Context, workspaceID string, opts ...i
 	} else {
 		// Default listings never include drafts. An `in` filter on Status
 		// uses a single-field index — no composite index is required.
+		// The empty string is included because legacy Firestore documents
+		// predate the DRAFT status and stored an empty Status that
+		// CaseStatus.Normalize() resolves to OPEN; excluding it here
+		// would silently hide those rows from the default Cases view.
 		query = query.Where("Status", "in", []string{
+			"",
 			string(types.CaseStatusOpen),
 			string(types.CaseStatusClosed),
 		})
@@ -191,41 +190,25 @@ func (r *caseRepository) ListDrafts(ctx context.Context, workspaceID string) ([]
 }
 
 func (r *caseRepository) Update(ctx context.Context, workspaceID string, c *model.Case) (*model.Case, error) {
+	if err := c.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "case validation failed before update")
+	}
+
 	docID := fmt.Sprintf("%d", c.ID)
 	docRef := r.casesCollection(workspaceID).Doc(docID)
 
-	// Check if document exists
-	_, err := docRef.Get(ctx)
-	if err != nil {
+	if _, err := docRef.Get(ctx); err != nil {
 		if status.Code(err) == codes.NotFound {
 			return nil, goerr.Wrap(ErrNotFound, "case not found", goerr.V("id", c.ID))
 		}
 		return nil, goerr.Wrap(err, "failed to check case existence", goerr.V("id", c.ID))
 	}
 
-	// Update with new timestamp
-	updated := &model.Case{
-		ID:             c.ID,
-		Title:          c.Title,
-		Description:    c.Description,
-		Status:         c.Status,
-		ReporterID:     c.ReporterID,
-		AssigneeIDs:    c.AssigneeIDs,
-		SlackChannelID: c.SlackChannelID,
-		IsPrivate:      c.IsPrivate,
-		ChannelUserIDs: c.ChannelUserIDs,
-		FieldValues:    c.FieldValues,
-		RequestKey:     c.RequestKey,
-		CreatedAt:      c.CreatedAt,
-		UpdatedAt:      time.Now().UTC(),
-	}
-
-	_, err = docRef.Set(ctx, updated)
-	if err != nil {
+	if _, err := docRef.Set(ctx, c); err != nil {
 		return nil, goerr.Wrap(err, "failed to update case", goerr.V("id", c.ID))
 	}
 
-	return updated, nil
+	return c, nil
 }
 
 func (r *caseRepository) Delete(ctx context.Context, workspaceID string, id int64) error {
@@ -300,58 +283,53 @@ func (r *caseRepository) GetByRequestKey(ctx context.Context, workspaceID string
 }
 
 func (r *caseRepository) CountFieldValues(ctx context.Context, workspaceID string, fieldID string, fieldType types.FieldType, validValues []string) (int64, int64, error) {
+	// Earlier this method ran two independent aggregation queries — one
+	// counting documents whose `FieldValues.<id>.Type == fieldType`, the
+	// other counting documents whose `FieldValues.<id>.Value` was in the
+	// validValues list. The second query did not constrain Type, so a
+	// text-typed field whose value collided with a valid select option
+	// was counted as `valid` even though the corresponding `total` did
+	// not include it. Adding a composite index to chain
+	// `Where("Type", "==").Where("Value", "in")` is forbidden by
+	// firestore.md, so the repo now iterates the type-filtered documents
+	// once and counts valid entries in Go using the model's
+	// IsValueInSet logic — which already handles the `[]interface{}`
+	// vs `[]string` shape mismatch the Firestore decoder produces.
 	col := r.casesCollection(workspaceID)
 	fieldTypePath := fmt.Sprintf("FieldValues.%s.Type", fieldID)
-	fieldValuePath := fmt.Sprintf("FieldValues.%s.Value", fieldID)
 
-	// Count total cases with this field type (aggregation, no document data transfer)
-	totalQuery := col.Where(fieldTypePath, "==", string(fieldType))
-	totalResult, err := totalQuery.NewAggregationQuery().WithCount("total").Get(ctx)
-	if err != nil {
-		return 0, 0, goerr.Wrap(err, "failed to count total field values",
-			goerr.V("field_id", fieldID))
+	validSet := make(map[string]bool, len(validValues))
+	for _, v := range validValues {
+		validSet[v] = true
 	}
-	totalVal, ok := totalResult["total"]
-	if !ok {
-		return 0, 0, goerr.New("missing total count in aggregation result",
-			goerr.V("field_id", fieldID))
-	}
-	totalPB, ok := totalVal.(*pb.Value)
-	if !ok {
-		return 0, 0, goerr.New("unexpected total count type",
-			goerr.V("field_id", fieldID), goerr.V("type", fmt.Sprintf("%T", totalVal)))
-	}
-	totalCount := totalPB.GetIntegerValue()
 
-	// Count valid values using chunked "in" queries (max 10 per query)
-	var validCount int64
-	for i := 0; i < len(validValues); i += 10 {
-		end := i + 10
-		if end > len(validValues) {
-			end = len(validValues)
+	iter := col.Where(fieldTypePath, "==", string(fieldType)).Documents(ctx)
+	defer iter.Stop()
+
+	var totalCount, validCount int64
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
 		}
-		chunk := validValues[i:end]
-
-		chunkIface := make([]interface{}, len(chunk))
-		for j, v := range chunk {
-			chunkIface[j] = v
-		}
-
-		chunkQuery := col.Where(fieldValuePath, "in", chunkIface)
-		chunkResult, err := chunkQuery.NewAggregationQuery().WithCount("c").Get(ctx)
 		if err != nil {
-			return 0, 0, goerr.Wrap(err, "failed to count valid field values",
+			return 0, 0, goerr.Wrap(err, "failed to iterate cases for field-value count",
 				goerr.V("field_id", fieldID))
 		}
-		cv, ok := chunkResult["c"]
-		if !ok {
+
+		var c model.Case
+		if err := doc.DataTo(&c); err != nil {
+			return 0, 0, goerr.Wrap(err, "failed to decode case for field-value count",
+				goerr.V("field_id", fieldID))
+		}
+		fv, ok := c.FieldValues[fieldID]
+		if !ok || fv.Type != fieldType {
 			continue
 		}
-		cvPB, ok := cv.(*pb.Value)
-		if !ok {
-			continue
+		totalCount++
+		if fv.IsValueInSet(fieldType, validSet) {
+			validCount++
 		}
-		validCount += cvPB.GetIntegerValue()
 	}
 
 	return totalCount, validCount, nil

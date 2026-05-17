@@ -82,6 +82,7 @@ func (uc *SourceUseCase) CreateNotionDBSource(ctx context.Context, workspaceID s
 		name = "Notion Database"
 	}
 
+	now := time.Now().UTC()
 	source := &model.Source{
 		Name:        name,
 		SourceType:  model.SourceTypeNotionDB,
@@ -92,6 +93,8 @@ func (uc *SourceUseCase) CreateNotionDBSource(ctx context.Context, workspaceID s
 			DatabaseTitle: dbTitle,
 			DatabaseURL:   dbURL,
 		},
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 
 	created, err := uc.repo.Source().Create(ctx, workspaceID, source)
@@ -163,6 +166,7 @@ func (uc *SourceUseCase) UpdateNotionDBSource(ctx context.Context, workspaceID s
 		}
 	}
 
+	existing.UpdatedAt = time.Now().UTC()
 	updated, err := uc.repo.Source().Update(ctx, workspaceID, existing)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to update source")
@@ -208,6 +212,7 @@ func (uc *SourceUseCase) CreateNotionPageSource(ctx context.Context, workspaceID
 		name = "Notion Page"
 	}
 
+	now := time.Now().UTC()
 	source := &model.Source{
 		Name:        name,
 		SourceType:  model.SourceTypeNotionPage,
@@ -220,6 +225,8 @@ func (uc *SourceUseCase) CreateNotionPageSource(ctx context.Context, workspaceID
 			Recursive: input.Recursive,
 			MaxDepth:  input.MaxDepth,
 		},
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 
 	created, err := uc.repo.Source().Create(ctx, workspaceID, source)
@@ -303,6 +310,7 @@ func (uc *SourceUseCase) UpdateNotionPageSource(ctx context.Context, workspaceID
 		existing.NotionPageConfig.MaxDepth = *input.MaxDepth
 	}
 
+	existing.UpdatedAt = time.Now().UTC()
 	updated, err := uc.repo.Source().Update(ctx, workspaceID, existing)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to update source")
@@ -381,6 +389,7 @@ func (uc *SourceUseCase) UpdateSource(ctx context.Context, workspaceID string, i
 		existing.Enabled = *input.Enabled
 	}
 
+	existing.UpdatedAt = time.Now().UTC()
 	updated, err := uc.repo.Source().Update(ctx, workspaceID, existing)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to update source")
@@ -520,6 +529,7 @@ func (uc *SourceUseCase) CreateSlackSource(ctx context.Context, workspaceID stri
 		name = "Slack Source"
 	}
 
+	now := time.Now().UTC()
 	source := &model.Source{
 		Name:        name,
 		SourceType:  model.SourceTypeSlack,
@@ -528,6 +538,8 @@ func (uc *SourceUseCase) CreateSlackSource(ctx context.Context, workspaceID stri
 		SlackConfig: &model.SlackConfig{
 			Channels: channels,
 		},
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 
 	created, err := uc.repo.Source().Create(ctx, workspaceID, source)
@@ -604,6 +616,7 @@ func (uc *SourceUseCase) UpdateSlackSource(ctx context.Context, workspaceID stri
 		}
 	}
 
+	existing.UpdatedAt = time.Now().UTC()
 	updated, err := uc.repo.Source().Update(ctx, workspaceID, existing)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to update source")
@@ -671,6 +684,7 @@ func (uc *SourceUseCase) CreateGitHubSource(ctx context.Context, workspaceID str
 		name = "GitHub Source"
 	}
 
+	now := time.Now().UTC()
 	source := &model.Source{
 		Name:        name,
 		SourceType:  model.SourceTypeGitHub,
@@ -679,6 +693,8 @@ func (uc *SourceUseCase) CreateGitHubSource(ctx context.Context, workspaceID str
 		GitHubConfig: &model.GitHubConfig{
 			Repositories: repos,
 		},
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 
 	created, err := uc.repo.Source().Create(ctx, workspaceID, source)
@@ -737,6 +753,7 @@ func (uc *SourceUseCase) UpdateGitHubSource(ctx context.Context, workspaceID str
 		}
 	}
 
+	existing.UpdatedAt = time.Now().UTC()
 	updated, err := uc.repo.Source().Update(ctx, workspaceID, existing)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to update source")

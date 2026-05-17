@@ -14,6 +14,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/safe"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/slackid"
 )
 
 type AuthUseCase struct {
@@ -285,53 +286,10 @@ func (uc *AuthUseCase) decodeIDToken(ctx context.Context, idToken string) (*Slac
 	// otherwise reporter / actor IDs persisted from the Web side fail
 	// silently when Slack rejects them on InviteUsersToChannel.
 	return &SlackIDToken{
-		Sub:   normalizeSlackUserSub(subStr),
+		Sub:   slackid.Normalize(subStr),
 		Email: emailStr,
 		Name:  nameStr,
 	}, nil
-}
-
-// normalizeSlackUserSub extracts the Slack user ID portion (Uxxx or Wxxx)
-// from an OIDC sub claim. Slack returns the sub as a hyphen-separated
-// composite of the user ID and the team ID — in practice either form
-// ("Uxxx-Txxx" or "Txxx-Uxxx") may appear depending on the workspace
-// configuration / enterprise-grid setup, so we pick the first hyphen-
-// separated chunk that looks like a user identifier. If no chunk matches
-// we fall back to the raw value so a strange future sub format does not
-// silently strip identity information.
-func normalizeSlackUserSub(sub string) string {
-	if sub == "" {
-		return sub
-	}
-	for _, part := range strings.Split(sub, "-") {
-		if isSlackUserID(part) {
-			return part
-		}
-	}
-	return sub
-}
-
-// isSlackUserID reports whether s looks like a Slack user ID (a single
-// "U" or "W" prefix followed by alphanumeric characters). Used by
-// normalizeSlackUserSub to spot the user-id chunk inside a composite
-// OIDC sub claim without depending on positional assumptions.
-func isSlackUserID(s string) bool {
-	if len(s) < 2 {
-		return false
-	}
-	if s[0] != 'U' && s[0] != 'W' {
-		return false
-	}
-	for i := 1; i < len(s); i++ {
-		c := s[i]
-		isDigit := c >= '0' && c <= '9'
-		isUpper := c >= 'A' && c <= 'Z'
-		isLower := c >= 'a' && c <= 'z'
-		if !isDigit && !isUpper && !isLower {
-			return false
-		}
-	}
-	return true
 }
 
 // ValidateToken validates the token and returns user info

@@ -4,7 +4,6 @@ import (
 	"context"
 	"sort"
 	"sync"
-	"time"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 )
@@ -49,7 +48,6 @@ func (r *assistLogRepository) Create(ctx context.Context, workspaceID string, ca
 		created.ID = model.NewAssistLogID()
 	}
 	created.CaseID = caseID
-	created.CreatedAt = time.Now().UTC()
 
 	r.entries[key] = append(r.entries[key], created)
 	return copyAssistLog(created), nil

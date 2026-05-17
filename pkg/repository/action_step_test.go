@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -202,17 +201,5 @@ func TestActionStepRepository_Memory(t *testing.T) {
 }
 
 func TestActionStepRepository_Firestore(t *testing.T) {
-	projectID := os.Getenv("FIRESTORE_PROJECT_ID")
-	if projectID == "" {
-		t.Skip("FIRESTORE_PROJECT_ID not set")
-	}
-
-	runActionStepRepositoryTest(t, func(t *testing.T) interfaces.Repository {
-		repo, err := repofirestore.New(context.Background(), projectID, "")
-		gt.NoError(t, err).Required()
-		t.Cleanup(func() {
-			gt.NoError(t, repo.Close())
-		})
-		return repo
-	}, repofirestore.ErrNotFound)
+	runActionStepRepositoryTest(t, newFirestoreRepository, repofirestore.ErrNotFound)
 }

@@ -3,7 +3,6 @@ package repository_test
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -12,7 +11,6 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
-	"github.com/secmon-lab/hecatoncheires/pkg/repository/firestore"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 )
 
@@ -167,17 +165,5 @@ func TestActionEventRepository_Memory(t *testing.T) {
 }
 
 func TestActionEventRepository_Firestore(t *testing.T) {
-	projectID := os.Getenv("FIRESTORE_PROJECT_ID")
-	if projectID == "" {
-		t.Skip("FIRESTORE_PROJECT_ID not set")
-	}
-
-	runActionEventRepositoryTest(t, func(t *testing.T) interfaces.Repository {
-		repo, err := firestore.New(context.Background(), projectID, "")
-		gt.NoError(t, err).Required()
-		t.Cleanup(func() {
-			gt.NoError(t, repo.Close())
-		})
-		return repo
-	})
+	runActionEventRepositoryTest(t, newFirestoreRepository)
 }

@@ -176,6 +176,7 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 
 		// Create a case with a Slack channel
 		_, err := repo.Case().Create(ctx, "ws-test", &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
 			Title:          "Security Incident",
 			Description:    "A test security incident",
 			Status:         types.CaseStatusOpen,
@@ -243,6 +244,7 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 		ctx := context.Background()
 
 		_, err := repo.Case().Create(ctx, "ws-test", &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
 			Title:          "Bug Report",
 			Description:    "A test bug",
 			Status:         types.CaseStatusOpen,
@@ -346,6 +348,7 @@ func TestAgentUseCase_HandleAgentMention(t *testing.T) {
 		ctx := context.Background()
 
 		_, err := repo.Case().Create(ctx, "ws-test", &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
 			Title:          "Test Case",
 			SlackChannelID: "C-AGENT-003",
 		})
@@ -534,6 +537,7 @@ func TestLifecycle_AgentSession(t *testing.T) {
 	traceRepo := agentarchive.NewMemoryTraceRepository()
 
 	_, err := repo.Case().Create(ctx, "ws-lifecycle", &model.Case{
+		ReporterID:     "U-TEST-DEFAULT",
 		Title:          "Thread session test",
 		Description:    "lifecycle",
 		Status:         types.CaseStatusOpen,
@@ -684,6 +688,7 @@ func TestAgentUseCase_DeltaMessageInjection(t *testing.T) {
 	traceRepo := agentarchive.NewMemoryTraceRepository()
 
 	c, err := repo.Case().Create(ctx, "ws-delta", &model.Case{
+		ReporterID:     "U-TEST-DEFAULT",
 		Title:          "Delta test",
 		Status:         types.CaseStatusOpen,
 		SlackChannelID: "C-DELTA",
@@ -801,6 +806,7 @@ func TestAgentUseCase_ActionLinkage(t *testing.T) {
 	traceRepo := agentarchive.NewMemoryTraceRepository()
 
 	c, err := repo.Case().Create(ctx, "ws-action", &model.Case{
+		ReporterID:     "U-TEST-DEFAULT",
 		Title:          "Action linkage",
 		Status:         types.CaseStatusOpen,
 		SlackChannelID: "C-ACT",

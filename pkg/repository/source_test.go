@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -36,7 +35,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			},
 		}
 
-		created, err := repo.Source().Create(ctx, wsID, source)
+		created, err := repo.Source().Create(ctx, wsID, touchSource(source, nil))
 		gt.NoError(t, err).Required()
 
 		gt.String(t, string(created.ID)).NotEqual("")
@@ -65,7 +64,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			Enabled:     true,
 		}
 
-		created, err := repo.Source().Create(ctx, wsID, source)
+		created, err := repo.Source().Create(ctx, wsID, touchSource(source, nil))
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, created.ID).Equal(customID)
@@ -87,7 +86,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			},
 		}
 
-		created, err := repo.Source().Create(ctx, wsID, source)
+		created, err := repo.Source().Create(ctx, wsID, touchSource(source, nil))
 		gt.NoError(t, err).Required()
 
 		retrieved, err := repo.Source().Get(ctx, wsID, created.ID)
@@ -124,18 +123,18 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		gt.NoError(t, err).Required()
 		gt.Array(t, sources).Length(0)
 
-		source1, err := repo.Source().Create(ctx, listWsID, &model.Source{
+		source1, err := repo.Source().Create(ctx, listWsID, touchSource(&model.Source{
 			Name:       "Source 1",
 			SourceType: model.SourceTypeNotionDB,
 			Enabled:    true,
-		})
+		}, nil))
 		gt.NoError(t, err).Required()
 
-		source2, err := repo.Source().Create(ctx, listWsID, &model.Source{
+		source2, err := repo.Source().Create(ctx, listWsID, touchSource(&model.Source{
 			Name:       "Source 2",
 			SourceType: model.SourceTypeNotionDB,
 			Enabled:    false,
-		})
+		}, nil))
 		gt.NoError(t, err).Required()
 
 		sources, err = repo.Source().List(ctx, listWsID)
@@ -160,7 +159,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		created, err := repo.Source().Create(ctx, wsID, &model.Source{
+		created, err := repo.Source().Create(ctx, wsID, touchSource(&model.Source{
 			Name:        "Original Name",
 			SourceType:  model.SourceTypeNotionDB,
 			Description: "Original Description",
@@ -170,12 +169,12 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 				DatabaseTitle: "Original Title",
 				DatabaseURL:   "https://notion.so/original",
 			},
-		})
+		}, nil))
 		gt.NoError(t, err).Required()
 
 		time.Sleep(10 * time.Millisecond)
 
-		updated, err := repo.Source().Update(ctx, wsID, &model.Source{
+		updated, err := repo.Source().Update(ctx, wsID, touchSource(&model.Source{
 			ID:          created.ID,
 			Name:        "Updated Name",
 			SourceType:  model.SourceTypeNotionDB,
@@ -186,7 +185,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 				DatabaseTitle: "Updated Title",
 				DatabaseURL:   "https://notion.so/updated",
 			},
-		})
+		}, created))
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, updated.ID).Equal(created.ID)
@@ -207,13 +206,13 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		_, err := repo.Source().Update(ctx, wsID, &model.Source{
+		_, err := repo.Source().Update(ctx, wsID, touchSource(&model.Source{
 			ID:          "non-existent-id",
 			Name:        "Non-existent",
 			SourceType:  model.SourceTypeNotionDB,
 			Description: "Should fail",
 			Enabled:     true,
-		})
+		}, nil))
 		gt.Value(t, err).NotNil()
 		gt.Bool(t, errors.Is(err, memory.ErrNotFound) || errors.Is(err, firestore.ErrNotFound)).True()
 	})
@@ -222,11 +221,11 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		created, err := repo.Source().Create(ctx, wsID, &model.Source{
+		created, err := repo.Source().Create(ctx, wsID, touchSource(&model.Source{
 			Name:       "To Be Deleted",
 			SourceType: model.SourceTypeNotionDB,
 			Enabled:    true,
-		})
+		}, nil))
 		gt.NoError(t, err).Required()
 
 		err = repo.Source().Delete(ctx, wsID, created.ID)
@@ -258,7 +257,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			NotionDBConfig: nil,
 		}
 
-		created, err := repo.Source().Create(ctx, wsID, source)
+		created, err := repo.Source().Create(ctx, wsID, touchSource(source, nil))
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, created.NotionDBConfig).Nil()
@@ -286,7 +285,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			},
 		}
 
-		created, err := repo.Source().Create(ctx, wsID, source)
+		created, err := repo.Source().Create(ctx, wsID, touchSource(source, nil))
 		gt.NoError(t, err).Required()
 
 		gt.String(t, string(created.ID)).NotEqual("")
@@ -316,7 +315,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			},
 		}
 
-		created, err := repo.Source().Create(ctx, wsID, source)
+		created, err := repo.Source().Create(ctx, wsID, touchSource(source, nil))
 		gt.NoError(t, err).Required()
 
 		retrieved, err := repo.Source().Get(ctx, wsID, created.ID)
@@ -332,7 +331,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		created, err := repo.Source().Create(ctx, wsID, &model.Source{
+		created, err := repo.Source().Create(ctx, wsID, touchSource(&model.Source{
 			Name:        "Slack Source for Update",
 			SourceType:  model.SourceTypeSlack,
 			Description: "Original",
@@ -342,12 +341,12 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 					{ID: "C00000001", Name: "original-channel"},
 				},
 			},
-		})
+		}, nil))
 		gt.NoError(t, err).Required()
 
 		time.Sleep(10 * time.Millisecond)
 
-		updated, err := repo.Source().Update(ctx, wsID, &model.Source{
+		updated, err := repo.Source().Update(ctx, wsID, touchSource(&model.Source{
 			ID:          created.ID,
 			Name:        "Updated Slack Source",
 			SourceType:  model.SourceTypeSlack,
@@ -359,7 +358,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 					{ID: "C00000003", Name: "updated-channel-2"},
 				},
 			},
-		})
+		}, created))
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, updated.SlackConfig).NotNil().Required()
@@ -382,7 +381,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			},
 		}
 
-		created, err := repo.Source().Create(ctx, wsID, source)
+		created, err := repo.Source().Create(ctx, wsID, touchSource(source, nil))
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, created.SlackConfig).NotNil().Required()
@@ -412,7 +411,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			},
 		}
 
-		created, err := repo.Source().Create(ctx, wsID, source)
+		created, err := repo.Source().Create(ctx, wsID, touchSource(source, nil))
 		gt.NoError(t, err).Required()
 
 		gt.String(t, string(created.ID)).NotEqual("")
@@ -442,7 +441,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			},
 		}
 
-		created, err := repo.Source().Create(ctx, wsID, source)
+		created, err := repo.Source().Create(ctx, wsID, touchSource(source, nil))
 		gt.NoError(t, err).Required()
 
 		retrieved, err := repo.Source().Get(ctx, wsID, created.ID)
@@ -458,7 +457,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		created, err := repo.Source().Create(ctx, wsID, &model.Source{
+		created, err := repo.Source().Create(ctx, wsID, touchSource(&model.Source{
 			Name:        "GitHub Source for Update",
 			SourceType:  model.SourceTypeGitHub,
 			Description: "Original",
@@ -468,12 +467,12 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 					{Owner: "original-org", Repo: "original-repo"},
 				},
 			},
-		})
+		}, nil))
 		gt.NoError(t, err).Required()
 
 		time.Sleep(10 * time.Millisecond)
 
-		updated, err := repo.Source().Update(ctx, wsID, &model.Source{
+		updated, err := repo.Source().Update(ctx, wsID, touchSource(&model.Source{
 			ID:          created.ID,
 			Name:        "Updated GitHub Source",
 			SourceType:  model.SourceTypeGitHub,
@@ -485,7 +484,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 					{Owner: "new-org", Repo: "new-repo-2"},
 				},
 			},
-		})
+		}, created))
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, updated.GitHubConfig).NotNil().Required()
@@ -515,7 +514,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			},
 		}
 
-		created, err := repo.Source().Create(ctx, wsID, source)
+		created, err := repo.Source().Create(ctx, wsID, touchSource(source, nil))
 		gt.NoError(t, err).Required()
 
 		gt.String(t, string(created.ID)).NotEqual("")
@@ -547,7 +546,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			},
 		}
 
-		created, err := repo.Source().Create(ctx, wsID, source)
+		created, err := repo.Source().Create(ctx, wsID, touchSource(source, nil))
 		gt.NoError(t, err).Required()
 
 		retrieved, err := repo.Source().Get(ctx, wsID, created.ID)
@@ -565,7 +564,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		repo := newRepo(t)
 		ctx := context.Background()
 
-		created, err := repo.Source().Create(ctx, wsID, &model.Source{
+		created, err := repo.Source().Create(ctx, wsID, touchSource(&model.Source{
 			Name:        "Notion Page for Update",
 			SourceType:  model.SourceTypeNotionPage,
 			Description: "Original",
@@ -577,12 +576,12 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 				Recursive: false,
 				MaxDepth:  0,
 			},
-		})
+		}, nil))
 		gt.NoError(t, err).Required()
 
 		time.Sleep(10 * time.Millisecond)
 
-		updated, err := repo.Source().Update(ctx, wsID, &model.Source{
+		updated, err := repo.Source().Update(ctx, wsID, touchSource(&model.Source{
 			ID:          created.ID,
 			Name:        "Updated Notion Page",
 			SourceType:  model.SourceTypeNotionPage,
@@ -595,7 +594,7 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 				Recursive: true,
 				MaxDepth:  2,
 			},
-		})
+		}, created))
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, updated.NotionPageConfig).NotNil().Required()
@@ -608,26 +607,25 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 	})
 }
 
-func newFirestoreSourceRepository(t *testing.T) interfaces.Repository {
-	t.Helper()
-
-	projectID := os.Getenv("TEST_FIRESTORE_PROJECT_ID")
-	if projectID == "" {
-		t.Skip("TEST_FIRESTORE_PROJECT_ID not set")
+// touchSource stamps the timestamps the source repo no longer owns
+// (see architecture.md → repository write contract). Tests are the
+// callers in repo-level tests, so they take the role that production
+// usecases play in the real call path:
+//   - For a Create-style fixture (`existing == nil`) both CreatedAt and
+//     UpdatedAt are set to now.
+//   - For an Update-style fixture (`existing != nil`) CreatedAt is
+//     carried forward from the previously-created source and only
+//     UpdatedAt advances, matching the usecase pattern where Update
+//     gets an existing entity, mutates fields, and bumps UpdatedAt.
+func touchSource(s *model.Source, existing *model.Source) *model.Source {
+	now := time.Now().UTC()
+	if existing != nil {
+		s.CreatedAt = existing.CreatedAt
+	} else {
+		s.CreatedAt = now
 	}
-
-	databaseID := os.Getenv("TEST_FIRESTORE_DATABASE_ID")
-	if databaseID == "" {
-		t.Skip("TEST_FIRESTORE_DATABASE_ID not set")
-	}
-
-	ctx := context.Background()
-	repo, err := firestore.New(ctx, projectID, databaseID)
-	gt.NoError(t, err).Required()
-	t.Cleanup(func() {
-		gt.NoError(t, repo.Close())
-	})
-	return repo
+	s.UpdatedAt = now
+	return s
 }
 
 func TestMemorySourceRepository(t *testing.T) {
@@ -637,5 +635,5 @@ func TestMemorySourceRepository(t *testing.T) {
 }
 
 func TestFirestoreSourceRepository(t *testing.T) {
-	runSourceRepositoryTest(t, newFirestoreSourceRepository)
+	runSourceRepositoryTest(t, newFirestoreRepository)
 }

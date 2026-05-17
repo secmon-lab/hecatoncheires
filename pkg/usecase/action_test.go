@@ -1283,6 +1283,7 @@ func TestActionUseCase_PrivateCaseAccessControl(t *testing.T) {
 
 		// Create private case directly via repo with specific members
 		privateCase := &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
 			Title:          "Private Case",
 			Description:    "Secret",
 			IsPrivate:      true,
@@ -1309,6 +1310,7 @@ func TestActionUseCase_PrivateCaseAccessControl(t *testing.T) {
 		nonMemberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
 
 		privateCase := &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
 			Title:          "Private Case",
 			Description:    "Secret",
 			IsPrivate:      true,
@@ -1342,6 +1344,7 @@ func TestActionUseCase_PrivateCaseAccessControl(t *testing.T) {
 		bgCtx := context.Background()
 
 		privateCase := &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
 			Title:          "Private Case",
 			Description:    "Secret",
 			IsPrivate:      true,
@@ -1405,6 +1408,7 @@ func TestActionUseCase_PrivateCaseAccessControl(t *testing.T) {
 		nonMemberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
 
 		privateCase := &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
 			Title:          "Private Case",
 			Description:    "Secret",
 			IsPrivate:      true,
@@ -1438,6 +1442,7 @@ func TestActionUseCase_PrivateCaseAccessControl(t *testing.T) {
 
 		// Create private case with action (directly via repo)
 		privateCase := &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
 			Title:          "Private Case",
 			Description:    "Secret",
 			IsPrivate:      true,
@@ -1468,6 +1473,7 @@ func TestActionUseCase_PrivateCaseAccessControl(t *testing.T) {
 		nonMemberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
 
 		privateCase := &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
 			Title:          "Private Case",
 			Description:    "Secret",
 			IsPrivate:      true,

@@ -346,3 +346,86 @@ func TestFormatObservations_FailedHasErrorBlock(t *testing.T) {
 	gt.String(t, got).Contains("**Status**: failed")
 	gt.String(t, got).Contains("**Error**: rate limited")
 }
+
+// TestExtractJSONObject pins the LLM-noise tolerance added to
+// parseAndValidate's decode path. Each case represents a real shape
+// observed (or plausibly observable) in real-LLM planner output —
+// clean object, ```json``` fence, bare ``` fence, prose preamble,
+// nested braces inside string values. A regression here would
+// re-introduce the "decode plan json: invalid character 'I' looking
+// for beginning of value" flake that previously made the realLLM
+// suite intermittently fail on a single sloppy turn.
+func TestExtractJSONObject(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "clean object is returned unchanged",
+			in:   `{"action":"investigate"}`,
+			want: `{"action":"investigate"}`,
+		},
+		{
+			name: "object with surrounding whitespace is trimmed",
+			in:   "  \n {\"action\":\"question\"}\n  ",
+			want: `{"action":"question"}`,
+		},
+		{
+			name: "object wrapped in json code fence is unwrapped",
+			in:   "```json\n{\"action\":\"materialize\"}\n```",
+			want: `{"action":"materialize"}`,
+		},
+		{
+			name: "object wrapped in bare code fence is unwrapped",
+			in:   "```\n{\"action\":\"materialize\"}\n```",
+			want: `{"action":"materialize"}`,
+		},
+		{
+			name: "prose prefix before object is stripped",
+			in:   `I'll respond with: {"action":"investigate","reasoning":"ok"}`,
+			want: `{"action":"investigate","reasoning":"ok"}`,
+		},
+		{
+			name: "object containing braces inside a string value is preserved",
+			in:   `{"reasoning":"contains } and { in text","action":"question"}`,
+			want: `{"reasoning":"contains } and { in text","action":"question"}`,
+		},
+		{
+			name: "object with escaped quote in string is preserved",
+			in:   `prefix {"reasoning":"a \"quoted\" word"}`,
+			want: `{"reasoning":"a \"quoted\" word"}`,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := draft.ExtractJSONObjectForTest([]byte(c.in))
+			gt.String(t, string(got)).Equal(c.want)
+		})
+	}
+}
+
+// TestParseAndValidate_TolerantOfPreamble verifies the integration:
+// a real planner output that starts with a prose preamble should
+// still parse and validate, not fall through to the retry path.
+func TestParseAndValidate_TolerantOfPreamble(t *testing.T) {
+	raw := []byte(`I'll respond with: {
+		"reasoning": "need more context",
+		"action": "investigate",
+		"investigate": {
+			"message": "looking",
+			"tasks": [
+				{
+					"id": "inv-1",
+					"title": "Recent thread",
+					"description": "Read the parent thread.",
+					"acceptance_criteria": "Recent ten messages summarised.",
+					"tools": ["slack_ro"]
+				}
+			]
+		}
+	}`)
+	p, err := draft.ParseAndValidateForTest(raw)
+	gt.NoError(t, err).Required()
+	gt.Value(t, p.Action).Equal(draft.ActionInvestigateForTest)
+}

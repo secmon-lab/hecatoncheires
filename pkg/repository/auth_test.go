@@ -3,7 +3,6 @@ package repository_test
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
@@ -107,27 +106,5 @@ func TestMemoryRepository(t *testing.T) {
 }
 
 func TestFirestoreRepository(t *testing.T) {
-	runAuthRepositoryTest(t, func(t *testing.T) interfaces.Repository {
-		t.Helper()
-
-		projectID := os.Getenv("TEST_FIRESTORE_PROJECT_ID")
-		if projectID == "" {
-			t.Skip("TEST_FIRESTORE_PROJECT_ID not set")
-		}
-
-		databaseID := os.Getenv("TEST_FIRESTORE_DATABASE_ID")
-		if databaseID == "" {
-			t.Skip("TEST_FIRESTORE_DATABASE_ID not set")
-		}
-
-		ctx := context.Background()
-		repo, err := firestore.New(ctx, projectID, databaseID)
-		gt.NoError(t, err).Required()
-
-		t.Cleanup(func() {
-			gt.NoError(t, repo.Close())
-		})
-
-		return repo
-	})
+	runAuthRepositoryTest(t, newFirestoreRepository)
 }

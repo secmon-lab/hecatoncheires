@@ -12,6 +12,16 @@ import (
 // not a draft.
 var ErrCaseNotDraft = goerr.New("case is not a draft")
 
+// ErrCaseMissingReporter is returned by Case.Validate when a case is
+// about to be persisted without a reporter. Every persisted case —
+// DRAFT, OPEN, or CLOSED — must name a reporter; cases originate from
+// some authenticated user (Web cookie, Slack interactivity callback,
+// no-auth dev-mode token) and losing that identity later means the
+// Cases / Drafts UI shows an empty Reporter column and Slack invites
+// have nobody to add as the channel creator. Repositories MUST call
+// Validate() before write so this failure mode never reaches storage.
+var ErrCaseMissingReporter = goerr.New("case has no reporter")
+
 // Case represents a generic case/project entity.
 //
 // Lifecycle (see types.CaseStatus): DRAFT → OPEN → CLOSED. A case in DRAFT is
@@ -39,6 +49,26 @@ type Case struct {
 // IsDraft reports whether this Case is currently in the unsubmitted draft state.
 func (c *Case) IsDraft() bool {
 	return c != nil && c.Status.IsDraft()
+}
+
+// Validate checks the invariants every persisted Case must satisfy.
+// Repositories MUST call this before Create / Update so an empty
+// ReporterID (the canonical failure mode where a Slack-side handler
+// forgot to inject auth.ContextWithToken before calling CreateCase /
+// CreateDraft) is caught at the persistence boundary instead of
+// silently shipping an unattributable case.
+func (c *Case) Validate() error {
+	if c == nil {
+		return goerr.New("case is nil")
+	}
+	if c.ReporterID == "" {
+		return goerr.Wrap(ErrCaseMissingReporter,
+			"case is missing ReporterID",
+			goerr.V("title", c.Title),
+			goerr.V("status", c.Status),
+		)
+	}
+	return nil
 }
 
 // SubmitDraft transitions the case from DRAFT to OPEN in place. Returns an

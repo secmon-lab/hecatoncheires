@@ -957,6 +957,7 @@ func TestCaseUseCase_PrivateCaseAccessControl(t *testing.T) {
 
 		// Create case directly in repo with IsPrivate and ChannelUserIDs
 		caseModel := &model.Case{
+			ReporterID: "U-TEST-DEFAULT",
 			Title:          "Private Case",
 			Description:    "Secret desc",
 			Status:         types.CaseStatusOpen,
@@ -981,6 +982,7 @@ func TestCaseUseCase_PrivateCaseAccessControl(t *testing.T) {
 		// Create case as a different user
 		adminCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UADMIN"})
 		caseModel := &model.Case{
+			ReporterID: "U-TEST-DEFAULT",
 			Title:          "Private Case",
 			Description:    "Secret desc",
 			Status:         types.CaseStatusOpen,
@@ -1012,6 +1014,7 @@ func TestCaseUseCase_PrivateCaseAccessControl(t *testing.T) {
 
 		// Create private case with UMEMBER as member
 		privCase := &model.Case{
+			ReporterID: "U-TEST-DEFAULT",
 			Title:          "Private Visible",
 			Description:    "Visible to member",
 			Status:         types.CaseStatusOpen,
@@ -1023,6 +1026,7 @@ func TestCaseUseCase_PrivateCaseAccessControl(t *testing.T) {
 
 		// Create private case without UMEMBER
 		privCase2 := &model.Case{
+			ReporterID: "U-TEST-DEFAULT",
 			Title:          "Private Hidden",
 			Description:    "Not visible",
 			Status:         types.CaseStatusOpen,
@@ -1054,6 +1058,7 @@ func TestCaseUseCase_PrivateCaseAccessControl(t *testing.T) {
 
 		adminCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UADMIN"})
 		caseModel := &model.Case{
+			ReporterID: "U-TEST-DEFAULT",
 			Title:          "Private Case",
 			Description:    "Secret",
 			Status:         types.CaseStatusOpen,
@@ -1079,6 +1084,7 @@ func TestCaseUseCase_PrivateCaseAccessControl(t *testing.T) {
 
 		adminCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UADMIN"})
 		caseModel := &model.Case{
+			ReporterID: "U-TEST-DEFAULT",
 			Title:          "Private Case",
 			Description:    "Secret",
 			Status:         types.CaseStatusOpen,
@@ -1100,6 +1106,7 @@ func TestCaseUseCase_PrivateCaseAccessControl(t *testing.T) {
 
 		adminCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UADMIN"})
 		caseModel := &model.Case{
+			ReporterID: "U-TEST-DEFAULT",
 			Title:          "Private Case",
 			Description:    "Secret",
 			Status:         types.CaseStatusOpen,
@@ -1136,6 +1143,7 @@ func TestCaseUseCase_PrivateCaseAccessControl(t *testing.T) {
 
 		// Create a case that simulates existing data (IsPrivate=false, ChannelUserIDs=nil)
 		caseModel := &model.Case{
+			ReporterID: "U-TEST-DEFAULT",
 			Title:       "Legacy Case",
 			Description: "Old case",
 			Status:      types.CaseStatusOpen,
@@ -1423,14 +1431,19 @@ func TestCaseUseCase_ReporterID(t *testing.T) {
 		gt.String(t, created.ReporterID).Equal("UREPORTER")
 	})
 
-	t.Run("create case without auth token leaves reporter empty", func(t *testing.T) {
+	t.Run("create case without auth token is rejected", func(t *testing.T) {
+		// Before the persistence-boundary validation was added, the
+		// usecase silently persisted an unattributable case when the
+		// caller had no auth.Token in context (Slack interactivity
+		// handler forgot to inject, NoAuthn mode misconfigured, etc).
+		// Now Case.Validate refuses the write — callers must arrange
+		// for an auth-context Token to exist before reaching CreateCase.
 		repo := memory.New()
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := context.Background()
 
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "No Reporter", "desc", []string{}, nil, false, "", "")
-		gt.NoError(t, err).Required()
-		gt.String(t, created.ReporterID).Equal("")
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "No Reporter", "desc", []string{}, nil, false, "", "")
+		gt.Error(t, err).Is(model.ErrCaseMissingReporter)
 	})
 
 	t.Run("update case preserves reporter", func(t *testing.T) {

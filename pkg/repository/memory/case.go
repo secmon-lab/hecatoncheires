@@ -3,7 +3,6 @@ package memory
 import (
 	"context"
 	"sync"
-	"time"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
@@ -88,16 +87,22 @@ func copyCase(c *model.Case) *model.Case {
 }
 
 func (r *caseRepository) Create(ctx context.Context, workspaceID string, c *model.Case) (*model.Case, error) {
+	// Validate at the persistence boundary so a usecase / handler bug
+	// that forgets to inject the reporter (e.g. Slack interactivity
+	// callback without auth.ContextWithToken) fails loudly the first
+	// time it runs — instead of silently writing a case the UI cannot
+	// attribute to anyone.
+	if err := c.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "case validation failed before create")
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	r.ensureWorkspace(workspaceID)
 
-	now := time.Now().UTC()
 	created := copyCase(c)
 	created.ID = r.nextID[workspaceID]
-	created.CreatedAt = now
-	created.UpdatedAt = now
 	r.nextID[workspaceID]++
 
 	r.cases[workspaceID][created.ID] = created
@@ -180,15 +185,11 @@ func (r *caseRepository) Update(ctx context.Context, workspaceID string, c *mode
 		return nil, goerr.Wrap(ErrNotFound, "case not found", goerr.V("id", c.ID))
 	}
 
-	existing, exists := ws[c.ID]
-	if !exists {
+	if _, exists := ws[c.ID]; !exists {
 		return nil, goerr.Wrap(ErrNotFound, "case not found", goerr.V("id", c.ID))
 	}
 
 	updated := copyCase(c)
-	updated.CreatedAt = existing.CreatedAt
-	updated.UpdatedAt = time.Now().UTC()
-
 	r.cases[workspaceID][updated.ID] = updated
 	return copyCase(updated), nil
 }

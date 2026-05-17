@@ -2,7 +2,7 @@ package repository_test
 
 import (
 	"context"
-	"os"
+	"fmt"
 	"testing"
 	"time"
 
@@ -10,22 +10,23 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
-	"github.com/secmon-lab/hecatoncheires/pkg/repository/firestore"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 )
 
 func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.Repository) {
 	t.Helper()
 
-	const wsID = "test-ws"
-
 	t.Run("Create creates action with auto-increment ID", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		// Create a case first
 		c, err := repo.Case().Create(ctx, wsID, &model.Case{
-			Title: "Test Case",
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      "Test Case",
 		})
 		gt.NoError(t, err).Required()
 
@@ -35,6 +36,8 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			Description: "Check server logs for anomalies",
 			AssigneeID:  "U123",
 			Status:      types.ActionStatusTodo,
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
 		}
 
 		created1, err := repo.Action().Create(ctx, wsID, action1)
@@ -49,10 +52,14 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 
 	t.Run("GetByCase retrieves actions for a case", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		// Create a case
 		c, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
 			Title: "Test Case for GetByCase",
 		})
 		gt.NoError(t, err).Required()
@@ -82,10 +89,14 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 
 	t.Run("GetByCase returns empty for case with no actions", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		// Create a case without actions
 		c, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
 			Title: "Empty Case",
 		})
 		gt.NoError(t, err).Required()
@@ -98,15 +109,22 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 
 	t.Run("GetByCases retrieves actions for multiple cases", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		// Create cases
 		case1, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
 			Title: "Case 1",
 		})
 		gt.NoError(t, err).Required()
 
 		case2, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
 			Title: "Case 2",
 		})
 		gt.NoError(t, err).Required()
@@ -141,11 +159,15 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 
 	t.Run("Update updates existing action", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		// Create a case
 		c, err := repo.Case().Create(ctx, wsID, &model.Case{
-			Title: "Test Case",
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      "Test Case",
 		})
 		gt.NoError(t, err).Required()
 
@@ -170,11 +192,15 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 
 	t.Run("Delete deletes existing action", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		// Create a case
 		c, err := repo.Case().Create(ctx, wsID, &model.Case{
-			Title: "Test Case",
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      "Test Case",
 		})
 		gt.NoError(t, err).Required()
 
@@ -195,10 +221,14 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 
 	t.Run("GetBySlackMessageTS returns matching action", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		c, err := repo.Case().Create(ctx, wsID, &model.Case{
-			Title: "Test Case",
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      "Test Case",
 		})
 		gt.NoError(t, err).Required()
 
@@ -220,6 +250,7 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 
 	t.Run("GetBySlackMessageTS returns ErrNotFound when no match", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		_, err := repo.Action().GetBySlackMessageTS(ctx, wsID, "9999999999.999999")
@@ -228,6 +259,7 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 
 	t.Run("GetBySlackMessageTS returns ErrNotFound for empty ts", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		_, err := repo.Action().GetBySlackMessageTS(ctx, wsID, "")
@@ -236,9 +268,13 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 
 	t.Run("List excludes archived actions by default", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		c, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
 			Title: "Archive list filter case",
 		})
 		gt.NoError(t, err).Required()
@@ -282,9 +318,13 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 
 	t.Run("GetByCase honours ArchiveScope option", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
 		c, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
 			Title: "Archive case filter",
 		})
 		gt.NoError(t, err).Required()
@@ -325,11 +365,12 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 
 	t.Run("GetByCases honours ArchiveScope option", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
-		c1, err := repo.Case().Create(ctx, wsID, &model.Case{Title: "Case A"})
+		c1, err := repo.Case().Create(ctx, wsID, &model.Case{ReporterID: "U-TEST-DEFAULT", Title: "Case A", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()})
 		gt.NoError(t, err).Required()
-		c2, err := repo.Case().Create(ctx, wsID, &model.Case{Title: "Case B"})
+		c2, err := repo.Case().Create(ctx, wsID, &model.Case{ReporterID: "U-TEST-DEFAULT", Title: "Case B", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()})
 		gt.NoError(t, err).Required()
 
 		// One active and one archived in c1; one archived in c2.
@@ -378,9 +419,10 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 
 	t.Run("Get returns archived actions as-is", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
-		c, err := repo.Case().Create(ctx, wsID, &model.Case{Title: "case"})
+		c, err := repo.Case().Create(ctx, wsID, &model.Case{ReporterID: "U-TEST-DEFAULT", Title: "case", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()})
 		gt.NoError(t, err).Required()
 
 		created, err := repo.Action().Create(ctx, wsID, &model.Action{
@@ -401,9 +443,10 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 
 	t.Run("GetBySlackMessageTS returns archived action", func(t *testing.T) {
 		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
-		c, err := repo.Case().Create(ctx, wsID, &model.Case{Title: "case"})
+		c, err := repo.Case().Create(ctx, wsID, &model.Case{ReporterID: "U-TEST-DEFAULT", Title: "case", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()})
 		gt.NoError(t, err).Required()
 
 		ts := "1700000099.000999"
@@ -431,14 +474,5 @@ func TestActionRepository_Memory(t *testing.T) {
 }
 
 func TestActionRepository_Firestore(t *testing.T) {
-	projectID := os.Getenv("FIRESTORE_PROJECT_ID")
-	if projectID == "" {
-		t.Skip("FIRESTORE_PROJECT_ID not set")
-	}
-
-	runActionRepositoryTest(t, func(t *testing.T) interfaces.Repository {
-		repo, err := firestore.New(context.Background(), projectID, "")
-		gt.NoError(t, err).Required()
-		return repo
-	})
+	runActionRepositoryTest(t, newFirestoreRepository)
 }

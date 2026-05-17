@@ -3,7 +3,6 @@ package memory
 import (
 	"context"
 	"sync"
-	"time"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
@@ -62,11 +61,8 @@ func (r *actionRepository) Create(ctx context.Context, workspaceID string, actio
 
 	r.ensureWorkspace(workspaceID)
 
-	now := time.Now().UTC()
 	created := copyAction(action)
 	created.ID = r.nextID[workspaceID]
-	created.CreatedAt = now
-	created.UpdatedAt = now
 	r.nextID[workspaceID]++
 
 	r.actions[workspaceID][created.ID] = created
@@ -119,15 +115,11 @@ func (r *actionRepository) Update(ctx context.Context, workspaceID string, actio
 		return nil, goerr.Wrap(ErrNotFound, "action not found", goerr.V("id", action.ID))
 	}
 
-	existing, exists := ws[action.ID]
-	if !exists {
+	if _, exists := ws[action.ID]; !exists {
 		return nil, goerr.Wrap(ErrNotFound, "action not found", goerr.V("id", action.ID))
 	}
 
 	updated := copyAction(action)
-	updated.CreatedAt = existing.CreatedAt
-	updated.UpdatedAt = time.Now().UTC()
-
 	r.actions[workspaceID][updated.ID] = updated
 	return copyAction(updated), nil
 }

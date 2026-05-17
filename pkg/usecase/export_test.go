@@ -51,11 +51,6 @@ type AssistPromptAssistLog = assistPromptAssistLog
 // TestErrAccessDenied is exported for testing
 var TestErrAccessDenied = ErrAccessDenied
 
-// NormalizeSlackUserSubForTest exposes the OIDC sub-claim normaliser so
-// auth_test.go can pin the bug fix where the composite "Uxxx-Txxx" sub
-// claim was previously stored verbatim and broke channel invites.
-var NormalizeSlackUserSubForTest = normalizeSlackUserSub
-
 // NewWelcomeRendererForTest is exported for testing
 var NewWelcomeRendererForTest = newWelcomeRenderer
 
@@ -103,6 +98,16 @@ const ClampSuffixSingleLineForTest = clampSuffixSingleLine
 // BuildDraftEditModalForTest exposes buildDraftEditModal so external tests
 // can assert on the rendered Block Kit payload.
 var BuildDraftEditModalForTest = buildDraftEditModal
+
+// Mention-draft Edit modal block / action IDs exposed for tests that
+// build the view_submission callback directly (e.g. the reporter
+// recording test for HandleEditSubmit).
+const (
+	BlockIDDraftEditTitleForTest        = blockIDDraftEditTitle
+	ActionIDDraftEditTitleForTest       = actionIDDraftEditTitle
+	BlockIDDraftEditDescriptionForTest  = blockIDDraftEditDescription
+	ActionIDDraftEditDescriptionForTest = actionIDDraftEditDescription
+)
 
 // NotificationSlotCoordinatorForTest is the test-only alias for the
 // unexported notificationSlotCoordinator. External tests treat values of
