@@ -16,7 +16,7 @@ describe('AssigneeNamesStack', () => {
     expect(container.textContent).toBe('—')
   })
 
-  it('renders avatar + display name for a single assignee', () => {
+  it('renders avatar + display name (carried by realName) for a single assignee', () => {
     render(
       <AssigneeNamesStack
         users={[u('U1', 'alice', 'Alice Smith')]}
@@ -25,8 +25,8 @@ describe('AssigneeNamesStack', () => {
     )
     const stack = screen.getByTestId('row-assignees')
     expect(stack).toBeInTheDocument()
-    expect(stack).toHaveTextContent('alice')
-    expect(stack).not.toHaveTextContent('Alice Smith')
+    expect(stack).toHaveTextContent('Alice Smith')
+    expect(stack).not.toHaveTextContent('alice')
   })
 
   it('renders all visible assignees vertically up to the max', () => {
@@ -41,9 +41,9 @@ describe('AssigneeNamesStack', () => {
       />,
     )
     const stack = screen.getByTestId('row-assignees')
-    expect(stack.textContent).toContain('alice')
-    expect(stack.textContent).toContain('bob')
-    expect(stack.textContent).toContain('charlie')
+    expect(stack.textContent).toContain('Alice Smith')
+    expect(stack.textContent).toContain('Bob Jones')
+    expect(stack.textContent).toContain('Charlie Brown')
     expect(stack.textContent).not.toMatch(/\+\d+/)
   })
 
@@ -62,21 +62,21 @@ describe('AssigneeNamesStack', () => {
       />,
     )
     const stack = screen.getByTestId('row-assignees')
-    expect(stack.textContent).toContain('alice')
-    expect(stack.textContent).toContain('bob')
-    expect(stack.textContent).toContain('charlie')
-    expect(stack.textContent).not.toContain('dave')
-    expect(stack.textContent).not.toContain('eve')
+    expect(stack.textContent).toContain('Alice Smith')
+    expect(stack.textContent).toContain('Bob Jones')
+    expect(stack.textContent).toContain('Charlie Brown')
+    expect(stack.textContent).not.toContain('Dave Wilson')
+    expect(stack.textContent).not.toContain('Eve Adams')
     expect(stack.textContent).toContain('+2')
   })
 
-  it('falls back to realName when display name is blank', () => {
+  it('falls back to the Slack handle when realName is blank', () => {
     render(
       <AssigneeNamesStack
-        users={[u('U1', '', 'Alice Smith')]}
+        users={[u('U1', 'alice', '')]}
         testId="row-assignees"
       />,
     )
-    expect(screen.getByTestId('row-assignees')).toHaveTextContent('Alice Smith')
+    expect(screen.getByTestId('row-assignees')).toHaveTextContent('alice')
   })
 })

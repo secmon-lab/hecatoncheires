@@ -20,7 +20,7 @@ function avatarHue(seed: string) {
 }
 
 export function Avatar({ name, realName, imageUrl, size = '', title }: AvatarProps) {
-  const display = (name || realName || '?').trim() || '?'
+  const display = (realName || name || '?').trim() || '?'
   const initial = display.slice(0, 1).toUpperCase()
   const cls = size ? `h-avatar ${size}` : 'h-avatar'
 

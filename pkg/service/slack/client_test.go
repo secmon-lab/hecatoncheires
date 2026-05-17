@@ -181,3 +181,53 @@ func TestWrapSlackViewError(t *testing.T) {
 		gt.String(t, *errs[0].Message).Equal(errMsg)
 	})
 }
+
+func TestResolveDisplayName(t *testing.T) {
+	t.Run("prefers Profile.DisplayName when present", func(t *testing.T) {
+		u := goslack.User{
+			Name:     "alice",
+			RealName: "Alice The Real",
+			Profile: goslack.UserProfile{
+				DisplayName: "Alice In Wonderland",
+				RealName:    "Alice Profile Real",
+			},
+		}
+		gt.String(t, slack.ResolveDisplayNameForTest(u)).Equal("Alice In Wonderland")
+	})
+
+	t.Run("falls back to Profile.RealName when DisplayName is empty", func(t *testing.T) {
+		u := goslack.User{
+			Name:     "alice",
+			RealName: "Alice The Real",
+			Profile: goslack.UserProfile{
+				DisplayName: "",
+				RealName:    "Alice Profile Real",
+			},
+		}
+		gt.String(t, slack.ResolveDisplayNameForTest(u)).Equal("Alice Profile Real")
+	})
+
+	t.Run("falls back to top-level RealName when both profile fields are empty", func(t *testing.T) {
+		u := goslack.User{
+			Name:     "alice",
+			RealName: "Alice The Real",
+			Profile: goslack.UserProfile{
+				DisplayName: "",
+				RealName:    "",
+			},
+		}
+		gt.String(t, slack.ResolveDisplayNameForTest(u)).Equal("Alice The Real")
+	})
+
+	t.Run("returns empty string when every name field is empty", func(t *testing.T) {
+		u := goslack.User{
+			Name:     "alice",
+			RealName: "",
+			Profile: goslack.UserProfile{
+				DisplayName: "",
+				RealName:    "",
+			},
+		}
+		gt.String(t, slack.ResolveDisplayNameForTest(u)).Equal("")
+	})
+}
