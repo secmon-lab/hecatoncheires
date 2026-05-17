@@ -392,6 +392,7 @@ export const msgKeys = {
   draftDiscardErrorGeneric: 'draftDiscardErrorGeneric',
   btnSaveAsDraft: 'btnSaveAsDraft',
   btnSavingDraft: 'btnSavingDraft',
+  btnSubmittingDraft: 'btnSubmittingDraft',
 } as const
 
 export type MsgKey = keyof typeof msgKeys

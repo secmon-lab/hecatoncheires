@@ -11,7 +11,7 @@ import {
   SYNC_CASE_CHANNEL_USERS,
   GET_CASES,
 } from '../graphql/case'
-import { SUBMIT_DRAFT, DISCARD_DRAFT, GET_DRAFTS } from '../graphql/drafts'
+import { DISCARD_DRAFT, GET_DRAFTS } from '../graphql/drafts'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import CustomFieldHelpRow from '../components/fields/CustomFieldHelpRow'
@@ -42,6 +42,7 @@ import { Avatar, PrivateBadge, StatusBadge } from '../components/Primitives'
 import CaseDeleteDialog from './CaseDeleteDialog'
 import ActionForm from './ActionForm'
 import ActionModal from './ActionModal'
+import CaseForm from './CaseForm'
 import styles from './CaseDetail.module.css'
 
 interface User {
@@ -88,6 +89,7 @@ export default function CaseDetail() {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [memberFilter, setMemberFilter] = useState('')
+  const [draftEditOpen, setDraftEditOpen] = useState(false)
 
   const { data, loading, error } = useQuery(GET_CASE, {
     variables: {
@@ -145,17 +147,6 @@ export default function CaseDetail() {
       { query: GET_CASES, variables: { workspaceId: currentWorkspace?.id, status: 'CLOSED' } },
     ],
   })
-  const draftRefetchOptions = useMemo(
-    () => [
-      { query: GET_DRAFTS, variables: { workspaceId: currentWorkspace?.id } },
-      { query: GET_CASES, variables: { workspaceId: currentWorkspace?.id, status: 'OPEN' } },
-    ],
-    [currentWorkspace?.id],
-  )
-  const [submitDraft, { loading: submittingDraft }] = useMutation(SUBMIT_DRAFT, {
-    refetchQueries: draftRefetchOptions,
-    awaitRefetchQueries: true,
-  })
   const [discardDraft, { loading: discardingDraft }] = useMutation(DISCARD_DRAFT, {
     refetchQueries: [{ query: GET_DRAFTS, variables: { workspaceId: currentWorkspace?.id } }],
     awaitRefetchQueries: true,
@@ -201,22 +192,6 @@ export default function CaseDetail() {
   }
   const handleSync = async () => {
     await syncMembers({ variables: { workspaceId: currentWorkspace!.id, id: caseId } })
-  }
-  const handleSubmitDraft = async () => {
-    setDraftError(null)
-    if (!c.title || c.title.trim() === '') {
-      setDraftError(t('draftSubmitErrorMissingTitle'))
-      return
-    }
-    try {
-      await submitDraft({ variables: { workspaceId: currentWorkspace!.id, id: caseId } })
-      // Stay on /cases/:id — once promoted, the same page now renders the
-      // OPEN case (Close button, Slack channel link, etc.). No navigation
-      // needed.
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      setDraftError(t('draftSubmitErrorGeneric', { message: msg }))
-    }
   }
   const handleDiscardDraft = async () => {
     setDraftError(null)
@@ -306,7 +281,7 @@ export default function CaseDetail() {
               size="sm"
               variant="ghost"
               onClick={handleDiscardDraft}
-              disabled={submittingDraft || discardingDraft}
+              disabled={discardingDraft}
               data-testid="discard-draft-button"
             >
               {t('draftDiscardButton')}
@@ -314,12 +289,11 @@ export default function CaseDetail() {
             <Button
               size="sm"
               variant="primary"
-              icon={<IconCheck size={13} />}
-              onClick={handleSubmitDraft}
-              disabled={submittingDraft || discardingDraft}
-              data-testid="submit-draft-button"
+              onClick={() => setDraftEditOpen(true)}
+              disabled={discardingDraft}
+              data-testid="edit-draft-button"
             >
-              {t('draftSubmitButton')}
+              {t('btnEdit')}
             </Button>
           </>
         ) : c.status === 'OPEN' ? (
@@ -811,6 +785,27 @@ export default function CaseDetail() {
           deleting={deleting}
           onCancel={() => setConfirmDelete(false)}
           onConfirm={handleDelete}
+        />
+      )}
+
+      {draftEditOpen && (
+        <CaseForm
+          caseItem={{
+            id: c.id,
+            title: c.title,
+            description: c.description ?? '',
+            isPrivate: !!c.isPrivate,
+            assigneeIDs: c.assigneeIDs ?? [],
+            fields: (c.fields ?? []).map((f: any) => ({ fieldId: f.fieldId, value: f.value })),
+            status: 'DRAFT',
+          }}
+          onClose={() => setDraftEditOpen(false)}
+          onSubmitted={() => {
+            // After successful Submit the page already auto-refreshes via
+            // the refetched GET_CASE; close the modal so the user sees
+            // the freshly OPEN case detail.
+            setDraftEditOpen(false)
+          }}
         />
       )}
     </div>

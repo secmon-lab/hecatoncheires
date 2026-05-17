@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery } from '@apollo/client'
 import UserSelect from '../components/UserSelect'
 import { CREATE_CASE, UPDATE_CASE, GET_CASE, GET_CASES } from '../graphql/case'
-import { CREATE_DRAFT, GET_DRAFTS } from '../graphql/drafts'
+import { CREATE_DRAFT, SUBMIT_DRAFT, GET_DRAFTS } from '../graphql/drafts'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import { useWorkspace } from '../contexts/workspace-context'
@@ -28,19 +28,27 @@ interface CaseItem {
   isPrivate: boolean
   assigneeIDs: string[]
   fields: Array<{ fieldId: string; value: any }>
+  // Drives the footer button set. `'DRAFT'` switches to the Save / Submit
+  // pair (overwrite draft vs. promote to OPEN). Missing/undefined keeps
+  // the regular Edit-an-existing-OPEN-case behaviour.
+  status?: 'DRAFT' | 'OPEN' | 'CLOSED'
 }
 
 interface CaseFormProps {
   caseItem: CaseItem | null
   onClose: () => void
+  // Called after a successful Submit-from-draft promotion. CaseDetail
+  // uses this to drop its draft-edit modal once the case is OPEN.
+  onSubmitted?: () => void
 }
 
-export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
+export default function CaseForm({ caseItem, onClose, onSubmitted }: CaseFormProps) {
   const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
   const navigate = useNavigate()
 
   const isEdit = caseItem !== null
+  const isDraftEdit = isEdit && caseItem?.status === 'DRAFT'
   const [title, setTitle] = useState(caseItem?.title || '')
   const [description, setDescription] = useState(caseItem?.description || '')
   const [isPrivate, setIsPrivate] = useState(caseItem?.isPrivate ?? false)
@@ -64,11 +72,26 @@ export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
   })
   const [updateCase, { loading: updating }] = useMutation(UPDATE_CASE, {
     refetchQueries: caseItem
-      ? [{ query: GET_CASE, variables: { workspaceId: currentWorkspace?.id, id: caseItem.id, actionsFilter: 'ACTIVE' } }]
+      ? [
+          { query: GET_CASE, variables: { workspaceId: currentWorkspace?.id, id: caseItem.id, actionsFilter: 'ACTIVE' } },
+          // The Drafts tab on Case List needs to reflect title / field
+          // edits made through the modal.
+          ...(isDraftEdit ? [{ query: GET_DRAFTS, variables: { workspaceId: currentWorkspace?.id } }] : []),
+        ]
       : [],
   })
   const [createDraft, { loading: savingDraft }] = useMutation(CREATE_DRAFT, {
     refetchQueries: [{ query: GET_DRAFTS, variables: { workspaceId: currentWorkspace?.id } }],
+  })
+  const [submitDraft, { loading: submittingDraft }] = useMutation(SUBMIT_DRAFT, {
+    refetchQueries: caseItem
+      ? [
+          { query: GET_DRAFTS, variables: { workspaceId: currentWorkspace?.id } },
+          { query: GET_CASE, variables: { workspaceId: currentWorkspace?.id, id: caseItem.id, actionsFilter: 'ACTIVE' } },
+          { query: GET_CASES, variables: { workspaceId: currentWorkspace?.id, status: 'OPEN' } },
+        ]
+      : [],
+    awaitRefetchQueries: true,
   })
 
   const fields = configData?.fieldConfiguration?.fields || []
@@ -81,6 +104,19 @@ export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
     }
   }
 
+  const collectFieldArr = () =>
+    sanitizeFieldValues(
+      Object.entries(fieldValues)
+        .filter(([, v]) => v !== undefined && v !== null && v !== '')
+        .map(([fieldId, value]) => ({ fieldId, value })),
+      fields,
+    )
+
+  // handleSubmit drives the primary action: Create (new), Save (edit
+  // existing OPEN/CLOSED case), or Submit (promote a DRAFT to OPEN).
+  // For Submit-from-DRAFT the modal first saves the latest edits via
+  // UpdateCase, then calls SubmitDraft so the backend sees the freshly
+  // edited data when re-running its required-field check.
   const handleSubmit = async () => {
     const errs: Record<string, string> = {}
     if (!title.trim()) errs.title = t('errorTitleRequired')
@@ -91,15 +127,10 @@ export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
     })
     if (Object.keys(errs).length > 0) { setErrors(errs); return }
 
-    const fieldArr = sanitizeFieldValues(
-      Object.entries(fieldValues)
-        .filter(([, v]) => v !== undefined && v !== null && v !== '')
-        .map(([fieldId, value]) => ({ fieldId, value })),
-      fields,
-    )
+    const fieldArr = collectFieldArr()
 
     try {
-      if (isEdit && caseItem) {
+      if (isDraftEdit && caseItem) {
         await updateCase({
           variables: {
             workspaceId: currentWorkspace!.id,
@@ -112,6 +143,25 @@ export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
             },
           },
         })
+        await submitDraft({
+          variables: { workspaceId: currentWorkspace!.id, id: caseItem.id },
+        })
+        onSubmitted?.()
+        onClose()
+      } else if (isEdit && caseItem) {
+        await updateCase({
+          variables: {
+            workspaceId: currentWorkspace!.id,
+            input: {
+              id: caseItem.id,
+              title,
+              description,
+              assigneeIDs,
+              fields: fieldArr,
+            },
+          },
+        })
+        onClose()
       } else {
         await createCase({
           variables: {
@@ -125,8 +175,8 @@ export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
             },
           },
         })
+        onClose()
       }
-      onClose()
     } catch (e: any) {
       console.error('Case mutation failed', e)
       const msg = e?.graphQLErrors?.[0]?.message || e?.message || String(e)
@@ -134,19 +184,41 @@ export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
     }
   }
 
-  // Drafts skip the title / required-field validation that handleSubmit
-  // applies — a half-finished entry is exactly what the drafts tab is
-  // for. The eventual SubmitDraft (from the Case detail page) re-runs
-  // full validation before promoting to OPEN.
+  // handleSaveDraftOverwrite persists the in-modal edits back onto an
+  // existing DRAFT without promoting it — required-field validation is
+  // skipped because half-finished entries are exactly the point of the
+  // DRAFT state.
+  const handleSaveDraftOverwrite = async () => {
+    if (!isDraftEdit || !caseItem || !currentWorkspace) return
+    const fieldArr = collectFieldArr()
+    try {
+      await updateCase({
+        variables: {
+          workspaceId: currentWorkspace.id,
+          input: {
+            id: caseItem.id,
+            title,
+            description,
+            assigneeIDs,
+            fields: fieldArr,
+          },
+        },
+      })
+      onClose()
+    } catch (e: any) {
+      console.error('Draft overwrite failed', e)
+      const msg = e?.graphQLErrors?.[0]?.message || e?.message || String(e)
+      setErrors({ submit: msg })
+    }
+  }
+
+  // handleSaveAsDraft creates a brand-new DRAFT from the in-flight form
+  // state. Used only on the "New case" path; the draft-edit path goes
+  // through handleSaveDraftOverwrite instead so the existing case row
+  // is mutated in place.
   const handleSaveAsDraft = async () => {
     if (!currentWorkspace) return
-    const fieldArr = sanitizeFieldValues(
-      Object.entries(fieldValues)
-        .filter(([, v]) => v !== undefined && v !== null && v !== '')
-        .map(([fieldId, value]) => ({ fieldId, value })),
-      fields,
-    )
-
+    const fieldArr = collectFieldArr()
     try {
       await createDraft({
         variables: {
@@ -180,7 +252,17 @@ export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
   const selectedAssignees = userOptions.filter((o) => assigneeIDs.includes(o.value))
 
   const submitting = creating || updating
-  const busy = submitting || savingDraft
+  const busy = submitting || savingDraft || submittingDraft
+
+  const primaryLabel = (() => {
+    if (isDraftEdit) {
+      return submittingDraft || updating ? t('btnSubmittingDraft') : t('draftSubmitButton')
+    }
+    if (isEdit) {
+      return submitting ? t('btnSaving') : t('btnSave')
+    }
+    return submitting ? t('btnCreating') : t('btnCreate')
+  })()
 
   return (
     <Modal
@@ -201,13 +283,23 @@ export default function CaseForm({ caseItem, onClose }: CaseFormProps) {
               {savingDraft ? t('btnSavingDraft') : t('btnSaveAsDraft')}
             </Button>
           )}
+          {isDraftEdit && (
+            <Button
+              variant="ghost"
+              onClick={handleSaveDraftOverwrite}
+              disabled={busy}
+              data-testid="draft-save-button"
+            >
+              {updating && !submittingDraft ? t('btnSavingDraft') : t('btnSaveAsDraft')}
+            </Button>
+          )}
           <Button
             variant="primary"
             onClick={handleSubmit}
             disabled={busy}
             data-testid="case-submit-button"
           >
-            {submitting ? (isEdit ? t('btnSaving') : t('btnCreating')) : (isEdit ? t('btnSave') : t('btnCreate'))}
+            {primaryLabel}
           </Button>
         </>
       }

@@ -394,4 +394,5 @@ export const ja: Messages = {
   draftDiscardErrorGeneric: 'ドラフトの破棄に失敗しました: {message}',
   btnSaveAsDraft: 'ドラフトとして保存',
   btnSavingDraft: 'ドラフト保存中…',
+  btnSubmittingDraft: '送信中…',
 }

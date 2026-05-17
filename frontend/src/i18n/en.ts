@@ -394,4 +394,5 @@ export const en: Messages = {
   draftDiscardErrorGeneric: 'Failed to discard draft: {message}',
   btnSaveAsDraft: 'Save as draft',
   btnSavingDraft: 'Saving draft...',
+  btnSubmittingDraft: 'Submitting...',
 }
