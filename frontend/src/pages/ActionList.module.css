@@ -16,3 +16,53 @@
   font-variant-numeric: tabular-nums;
   margin-left: var(--spacing-xs);
 }
+
+.caseFilterChip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: 0.75rem;
+  color: var(--text-body);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  padding: 0.1875rem var(--spacing-sm);
+  line-height: 1.2;
+}
+
+.caseFilterChipClose {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.125rem;
+  height: 1.125rem;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.caseFilterChipClose:hover {
+  background: var(--bg-muted);
+  color: var(--text-body);
+}
+
+.caseLinkButton {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  cursor: pointer;
+  width: fit-content;
+}
+.caseLinkButton:hover {
+  text-decoration: underline;
+}
+.caseLinkButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: 2px;
+}

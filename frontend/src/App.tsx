@@ -31,6 +31,8 @@ function App() {
           <Route path="cases/:id/assists" element={<AssistLogList />} />
           <Route path="actions" element={<ActionList />} />
           <Route path="actions/:actionId" element={<ActionList />} />
+          <Route path="actions/case/:caseId" element={<ActionList />} />
+          <Route path="actions/case/:caseId/:actionId" element={<ActionList />} />
           {/* Drafts live inside the regular Case list/detail pages; the
               Drafts tab in CaseList filters by status and individual draft
               cases open at /cases/:id like any other case. */}
