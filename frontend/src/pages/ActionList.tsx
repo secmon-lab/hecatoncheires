@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@apollo/client'
-import { GET_OPEN_CASE_ACTIONS, UPDATE_ACTION } from '../graphql/action'
+import { GET_ACTIONS_BY_CASE, GET_OPEN_CASE_ACTIONS, UPDATE_ACTION } from '../graphql/action'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
@@ -75,9 +75,13 @@ export default function ActionList() {
     return filterCaseId != null ? `${rootUrl}/case/${filterCaseId}` : rootUrl
   }, [rootUrl, filterCaseId])
 
-  const { data } = useQuery(GET_OPEN_CASE_ACTIONS, {
+  const { data: openData } = useQuery(GET_OPEN_CASE_ACTIONS, {
     variables: { workspaceId: currentWorkspace?.id },
-    skip: !currentWorkspace,
+    skip: !currentWorkspace || filterCaseId != null,
+  })
+  const { data: byCaseData } = useQuery(GET_ACTIONS_BY_CASE, {
+    variables: { workspaceId: currentWorkspace?.id, caseID: filterCaseId ?? 0 },
+    skip: !currentWorkspace || filterCaseId == null,
   })
   const { data: configData } = useQuery(GET_FIELD_CONFIGURATION, {
     variables: { workspaceId: currentWorkspace?.id },
@@ -85,27 +89,30 @@ export default function ActionList() {
   })
   const caseLabel = configData?.fieldConfiguration?.labels?.case || 'Case'
   const [updateAction] = useMutation(UPDATE_ACTION, {
-    refetchQueries: [{ query: GET_OPEN_CASE_ACTIONS, variables: { workspaceId: currentWorkspace?.id } }],
+    refetchQueries: [
+      filterCaseId != null
+        ? { query: GET_ACTIONS_BY_CASE, variables: { workspaceId: currentWorkspace?.id, caseID: filterCaseId } }
+        : { query: GET_OPEN_CASE_ACTIONS, variables: { workspaceId: currentWorkspace?.id } },
+    ],
   })
 
-  const actions: ActionRow[] = data?.openCaseActions || []
-  const caseScoped = useMemo(() => {
-    if (filterCaseId == null) return actions
-    return actions.filter((a) => a.caseID === filterCaseId)
-  }, [actions, filterCaseId])
+  const actions: ActionRow[] = useMemo(() => {
+    if (filterCaseId != null) return byCaseData?.actionsByCase || []
+    return openData?.openCaseActions || []
+  }, [filterCaseId, byCaseData, openData])
   const filteredCase = useMemo(() => {
     if (filterCaseId == null) return null
-    return caseScoped.find((a) => a.case)?.case ?? null
-  }, [caseScoped, filterCaseId])
+    return actions.find((a) => a.case)?.case ?? null
+  }, [actions, filterCaseId])
   const filtered = useMemo(() => {
-    if (!search.trim()) return caseScoped
+    if (!search.trim()) return actions
     const q = search.toLowerCase()
-    return caseScoped.filter((a) =>
+    return actions.filter((a) =>
       a.title.toLowerCase().includes(q) ||
       (a.description || '').toLowerCase().includes(q) ||
       (a.case?.title || '').toLowerCase().includes(q),
     )
-  }, [caseScoped, search])
+  }, [actions, search])
 
   const grouped = useMemo(() => {
     const map: Record<string, ActionRow[]> = {}
@@ -138,7 +145,7 @@ export default function ActionList() {
     }
   }
 
-  const openCount = caseScoped.filter((a) => !isClosed(a.status)).length
+  const openCount = actions.filter((a) => !isClosed(a.status)).length
 
   return (
     <div className="h-main-inner" style={{ display: 'flex', flexDirection: 'column' }}>

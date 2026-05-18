@@ -4,7 +4,7 @@ import '@testing-library/jest-dom/vitest'
 import { MockedProvider } from '@apollo/client/testing'
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { I18nProvider } from '../i18n'
-import { GET_OPEN_CASE_ACTIONS } from '../graphql/action'
+import { GET_ACTIONS_BY_CASE, GET_OPEN_CASE_ACTIONS } from '../graphql/action'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import ActionList from './ActionList'
 
@@ -84,18 +84,30 @@ const actionRow = (
   stepProgress: { __typename: 'StepProgress', done: 0, total: 0 },
 })
 
-const actionsMock = {
+const allOpenActions = [
+  actionRow(101, 3, 'GitHub incident', 'Build detection pipeline'),
+  actionRow(102, 3, 'GitHub incident', 'Update WIF policy', 'TODO'),
+  actionRow(103, 4, 'Other case', 'Unrelated action'),
+]
+
+const openActionsMock = {
   request: {
     query: GET_OPEN_CASE_ACTIONS,
     variables: { workspaceId: 'risk' },
   },
   result: {
+    data: { openCaseActions: allOpenActions },
+  },
+}
+
+const actionsByCase3Mock = {
+  request: {
+    query: GET_ACTIONS_BY_CASE,
+    variables: { workspaceId: 'risk', caseID: 3 },
+  },
+  result: {
     data: {
-      openCaseActions: [
-        actionRow(101, 3, 'GitHub incident', 'Build detection pipeline'),
-        actionRow(102, 3, 'GitHub incident', 'Update WIF policy', 'TODO'),
-        actionRow(103, 4, 'Other case', 'Unrelated action'),
-      ],
+      actionsByCase: allOpenActions.filter((a) => a.caseID === 3),
     },
   },
 }
@@ -110,7 +122,7 @@ function LocationProbe() {
 function renderAt(path: string, configMock = fieldConfigMock) {
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <MockedProvider mocks={[configMock, actionsMock]}>
+      <MockedProvider mocks={[configMock, openActionsMock, actionsByCase3Mock]}>
         <I18nProvider defaultLang="en">
           <Routes>
             <Route path="/ws/:workspaceId/actions" element={<ActionList />} />

@@ -151,3 +151,11 @@ export const GET_OPEN_CASE_ACTIONS = gql`
     }
   }
 `
+
+export const GET_ACTIONS_BY_CASE = gql`
+  query GetActionsByCase($workspaceId: String!, $caseID: Int!) {
+    actionsByCase(workspaceId: $workspaceId, caseID: $caseID) {
+      ${ACTION_FIELDS}
+    }
+  }
+`
