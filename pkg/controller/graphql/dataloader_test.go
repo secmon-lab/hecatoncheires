@@ -120,8 +120,6 @@ func TestSlackUser_BatchCollapse(t *testing.T) {
 
 	// Enqueue 20 single-ID Load calls concurrently the same way gqlgen
 	// would when 20 case rows each resolve their reporter in parallel.
-	thunks := make([]func() (*graphql1SlackUser, error), len(ids))
-	_ = thunks
 	results := make([]string, len(ids))
 	errsCh := make(chan error, len(ids))
 	doneCh := make(chan struct{}, len(ids))
@@ -151,11 +149,6 @@ func TestSlackUser_BatchCollapse(t *testing.T) {
 
 	gt.Number(t, counter.calls.Load()).Equal(int32(1))
 }
-
-// graphql1SlackUser is a type alias kept local to the test file so the
-// goroutine result slice's type stays readable without importing the
-// generated GraphQL types here.
-type graphql1SlackUser = model.SlackUser
 
 // slackUserCallCounter wraps an interfaces.SlackUserRepository and
 // counts how many times GetByIDs is invoked. Anchors the N+1
