@@ -221,6 +221,10 @@ export const ja: Messages = {
   placeholderAddStatus: 'ステータスを選択...',
   labelDueDate: '期限',
   caseLinkLabel: 'ケース #{id} · {title}',
+  filterByCase: 'ケース: #{id} {title}',
+  filterByCaseUnknown: 'ケース: #{id}',
+  ariaFilterByCase: 'ケース #{id} で絞り込み',
+  ariaClearCaseFilter: 'ケース絞り込みを解除',
 
   // Action Steps
   sectionActionSteps: 'ステップ',

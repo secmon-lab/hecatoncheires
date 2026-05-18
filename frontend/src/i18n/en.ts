@@ -221,6 +221,10 @@ export const en: Messages = {
   placeholderAddStatus: 'Set status...',
   labelDueDate: 'Due Date',
   caseLinkLabel: 'Case #{id} · {title}',
+  filterByCase: 'Case: #{id} {title}',
+  filterByCaseUnknown: 'Case: #{id}',
+  ariaFilterByCase: 'Filter by case #{id}',
+  ariaClearCaseFilter: 'Clear case filter',
 
   // Action Steps
   sectionActionSteps: 'Steps',

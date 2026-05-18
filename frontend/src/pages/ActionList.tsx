@@ -13,8 +13,10 @@ import Button from '../components/Button'
 import {
   IconPlus,
   IconSearch,
+  IconX,
 } from '../components/Icons'
 import { Avatar } from '../components/Primitives'
+import { activateOnEnterOrSpace } from '../utils/keyboard'
 import ActionForm from './ActionForm'
 import ActionModal from './ActionModal'
 import styles from './ActionList.module.css'
@@ -47,7 +49,7 @@ function formatDue(iso?: string | null) {
 
 export default function ActionList() {
   const navigate = useNavigate()
-  const { actionId } = useParams<{ actionId?: string }>()
+  const { actionId, caseId } = useParams<{ actionId?: string; caseId?: string }>()
   const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
 
@@ -56,6 +58,18 @@ export default function ActionList() {
   const [draggingId, setDraggingId] = useState<number | null>(null)
   const [dragOverCol, setDragOverCol] = useState<string | null>(null)
   const { statuses, isClosed, label } = useActionStatuses(currentWorkspace?.id)
+
+  const filterCaseId = useMemo(() => {
+    if (!caseId) return null
+    const n = Number(caseId)
+    return Number.isFinite(n) && n > 0 ? n : null
+  }, [caseId])
+
+  const baseUrl = useMemo(() => {
+    if (!currentWorkspace) return ''
+    const base = `/ws/${currentWorkspace.id}/actions`
+    return filterCaseId != null ? `${base}/case/${filterCaseId}` : base
+  }, [currentWorkspace, filterCaseId])
 
   const { data } = useQuery(GET_OPEN_CASE_ACTIONS, {
     variables: { workspaceId: currentWorkspace?.id },
@@ -66,15 +80,23 @@ export default function ActionList() {
   })
 
   const actions: ActionRow[] = data?.openCaseActions || []
+  const caseScoped = useMemo(() => {
+    if (filterCaseId == null) return actions
+    return actions.filter((a) => a.caseID === filterCaseId)
+  }, [actions, filterCaseId])
+  const filteredCase = useMemo(() => {
+    if (filterCaseId == null) return null
+    return caseScoped.find((a) => a.case)?.case ?? null
+  }, [caseScoped, filterCaseId])
   const filtered = useMemo(() => {
-    if (!search.trim()) return actions
+    if (!search.trim()) return caseScoped
     const q = search.toLowerCase()
-    return actions.filter((a) =>
+    return caseScoped.filter((a) =>
       a.title.toLowerCase().includes(q) ||
       (a.description || '').toLowerCase().includes(q) ||
       (a.case?.title || '').toLowerCase().includes(q),
     )
-  }, [actions, search])
+  }, [caseScoped, search])
 
   const grouped = useMemo(() => {
     const map: Record<string, ActionRow[]> = {}
@@ -107,7 +129,7 @@ export default function ActionList() {
     }
   }
 
-  const openCount = actions.filter((a) => !isClosed(a.status)).length
+  const openCount = caseScoped.filter((a) => !isClosed(a.status)).length
 
   return (
     <div className="h-main-inner" style={{ display: 'flex', flexDirection: 'column' }}>
@@ -147,6 +169,27 @@ export default function ActionList() {
             {t('btnClear')}
           </Button>
         )}
+        {filterCaseId != null && (
+          <span
+            className={styles.caseFilterChip}
+            data-testid="action-case-filter-chip"
+          >
+            <span>
+              {filteredCase
+                ? t('filterByCase', { id: String(filterCaseId), title: filteredCase.title })
+                : t('filterByCaseUnknown', { id: String(filterCaseId) })}
+            </span>
+            <button
+              type="button"
+              className={styles.caseFilterChipClose}
+              aria-label={t('ariaClearCaseFilter')}
+              data-testid="action-case-filter-clear"
+              onClick={() => navigate(`/ws/${currentWorkspace!.id}/actions`)}
+            >
+              <IconX size={11} />
+            </button>
+          </span>
+        )}
       </div>
 
       <div
@@ -172,45 +215,62 @@ export default function ActionList() {
               <span className="count">{(grouped[col.id] ?? []).length}</span>
             </div>
             <div className="kan-list">
-              {(grouped[col.id] ?? []).map((a) => (
-                <button
-                  key={a.id}
-                  type="button"
-                  className="kan-card"
-                  data-testid="action-card"
-                  draggable
-                  onDragStart={(e) => {
-                    setDraggingId(a.id)
-                    e.dataTransfer.effectAllowed = 'move'
-                    e.dataTransfer.setData('text/plain', String(a.id))
-                  }}
-                  onDragEnd={() => { setDraggingId(null); setDragOverCol(null) }}
-                  onClick={() => navigate(`/ws/${currentWorkspace!.id}/actions/${a.id}`)}
-                  style={{ textAlign: 'left', opacity: draggingId === a.id ? 0.4 : 1, cursor: draggingId === a.id ? 'grabbing' : 'grab' }}
-                >
-                  {a.case && (
-                    <span className="case-link">#{a.case.id} {a.case.title}</span>
-                  )}
-                  <span className={`title ${styles.titleText}`}>{a.title}</span>
-                  <div className="meta">
-                    {a.assignee
-                      ? <Avatar size="sm" name={a.assignee.name} realName={a.assignee.realName} imageUrl={a.assignee.imageUrl} />
-                      : <span style={{ width: 20 }} />
-                    }
-                    {a.stepProgress && a.stepProgress.total > 0 && (
-                      <span
-                        className={styles.stepBadge}
-                        data-testid="action-card-step-progress"
-                        title={`${a.stepProgress.done}/${a.stepProgress.total} steps done`}
+              {(grouped[col.id] ?? []).map((a) => {
+                const openModal = () => navigate(`${baseUrl}/${a.id}`)
+                return (
+                  <div
+                    key={a.id}
+                    role="button"
+                    tabIndex={0}
+                    className="kan-card"
+                    data-testid="action-card"
+                    draggable
+                    onDragStart={(e) => {
+                      setDraggingId(a.id)
+                      e.dataTransfer.effectAllowed = 'move'
+                      e.dataTransfer.setData('text/plain', String(a.id))
+                    }}
+                    onDragEnd={() => { setDraggingId(null); setDragOverCol(null) }}
+                    onClick={openModal}
+                    onKeyDown={activateOnEnterOrSpace(openModal)}
+                    style={{ textAlign: 'left', opacity: draggingId === a.id ? 0.4 : 1, cursor: draggingId === a.id ? 'grabbing' : 'grab' }}
+                  >
+                    {a.case && (
+                      <button
+                        type="button"
+                        className={`case-link ${styles.caseLinkButton}`}
+                        data-testid="action-card-case-link"
+                        aria-label={t('ariaFilterByCase', { id: String(a.case.id) })}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (filterCaseId === a.case!.id) return
+                          navigate(`/ws/${currentWorkspace!.id}/actions/case/${a.case!.id}`)
+                        }}
                       >
-                        {a.stepProgress.done}/{a.stepProgress.total}
-                      </span>
+                        #{a.case.id} {a.case.title}
+                      </button>
                     )}
-                    <span className="spacer" />
-                    <span className="mono" style={{ fontSize: 11 }}>{formatDue(a.dueDate)}</span>
+                    <span className={`title ${styles.titleText}`}>{a.title}</span>
+                    <div className="meta">
+                      {a.assignee
+                        ? <Avatar size="sm" name={a.assignee.name} realName={a.assignee.realName} imageUrl={a.assignee.imageUrl} />
+                        : <span style={{ width: 20 }} />
+                      }
+                      {a.stepProgress && a.stepProgress.total > 0 && (
+                        <span
+                          className={styles.stepBadge}
+                          data-testid="action-card-step-progress"
+                          title={`${a.stepProgress.done}/${a.stepProgress.total} steps done`}
+                        >
+                          {a.stepProgress.done}/{a.stepProgress.total}
+                        </span>
+                      )}
+                      <span className="spacer" />
+                      <span className="mono" style={{ fontSize: 11 }}>{formatDue(a.dueDate)}</span>
+                    </div>
                   </div>
-                </button>
-              ))}
+                )
+              })}
             </div>
           </div>
         ))}
@@ -223,7 +283,7 @@ export default function ActionList() {
       {detailActionId && (
         <ActionModal
           actionId={detailActionId}
-          onClose={() => navigate(`/ws/${currentWorkspace!.id}/actions`)}
+          onClose={() => navigate(baseUrl)}
         />
       )}
     </div>

@@ -219,6 +219,10 @@ export const msgKeys = {
   placeholderAddStatus: 'placeholderAddStatus',
   labelDueDate: 'labelDueDate',
   caseLinkLabel: 'caseLinkLabel',
+  filterByCase: 'filterByCase',
+  filterByCaseUnknown: 'filterByCaseUnknown',
+  ariaFilterByCase: 'ariaFilterByCase',
+  ariaClearCaseFilter: 'ariaClearCaseFilter',
 
   // Action Steps
   sectionActionSteps: 'sectionActionSteps',
