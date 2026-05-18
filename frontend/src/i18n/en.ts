@@ -50,6 +50,7 @@ export const en: Messages = {
   labelDescription: 'Description',
   labelPreview: 'Preview',
   labelPreviewEmpty: 'Nothing to preview',
+  tabWrite: 'Write',
   labelAssignees: 'Assignees',
   labelAssignee: 'Assignee',
   labelStatus: 'Status',
