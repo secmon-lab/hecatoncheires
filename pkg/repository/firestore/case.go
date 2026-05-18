@@ -80,7 +80,7 @@ func (r *caseRepository) Create(ctx context.Context, workspaceID string, c *mode
 	// or value-copy — those patterns silently drop any field added
 	// to model.Case without an exhaustive search of every repo
 	// Create / Update site.
-	if err := c.Validate(); err != nil {
+	if err := c.ValidateNew(); err != nil {
 		return nil, goerr.Wrap(err, "case validation failed before create")
 	}
 

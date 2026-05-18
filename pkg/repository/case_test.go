@@ -820,6 +820,33 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.Error(t, err).Is(model.ErrCaseMissingReporter)
 	})
 
+	t.Run("Update case without ReporterID is allowed for legacy data", func(t *testing.T) {
+		// Legacy cases created before reporter validation was added may have
+		// empty ReporterID. Update must succeed for these so membership sync
+		// and other field updates do not fail on old data.
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			Title:      "Legacy Case",
+			ReporterID: "UREPORTER_LEGACY",
+		})
+		gt.NoError(t, err).Required()
+
+		// Simulate legacy case by clearing ReporterID in memory before Update.
+		created.ReporterID = ""
+		created.ChannelUserIDs = []string{"UMEMBER1", "UMEMBER2"}
+		updated, err := repo.Case().Update(ctx, wsID, created)
+		gt.NoError(t, err).Required()
+		gt.Array(t, updated.ChannelUserIDs).Length(2)
+
+		retrieved, err := repo.Case().Get(ctx, wsID, updated.ID)
+		gt.NoError(t, err).Required()
+		gt.String(t, retrieved.ReporterID).Equal("")
+		gt.Array(t, retrieved.ChannelUserIDs).Length(2)
+	})
+
 	t.Run("Update preserves ReporterID", func(t *testing.T) {
 		repo := newRepo(t)
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())

@@ -51,15 +51,24 @@ func (c *Case) IsDraft() bool {
 	return c != nil && c.Status.IsDraft()
 }
 
-// Validate checks the invariants every persisted Case must satisfy.
-// Repositories MUST call this before Create / Update so an empty
-// ReporterID (the canonical failure mode where a Slack-side handler
-// forgot to inject auth.ContextWithToken before calling CreateCase /
-// CreateDraft) is caught at the persistence boundary instead of
-// silently shipping an unattributable case.
+// Validate checks the basic invariants every persisted Case must satisfy.
+// Repositories MUST call this before every write. For new cases (Create),
+// call ValidateNew instead, which additionally enforces ReporterID.
 func (c *Case) Validate() error {
 	if c == nil {
 		return goerr.New("case is nil")
+	}
+	return nil
+}
+
+// ValidateNew checks the invariants that must hold for a newly created Case,
+// including ReporterID which is required at creation time. Repositories MUST
+// call this instead of Validate for Create operations so an empty ReporterID
+// (the canonical failure mode where a Slack handler forgot to inject
+// auth.ContextWithToken) is caught at the persistence boundary.
+func (c *Case) ValidateNew() error {
+	if err := c.Validate(); err != nil {
+		return err
 	}
 	if c.ReporterID == "" {
 		return goerr.Wrap(ErrCaseMissingReporter,
