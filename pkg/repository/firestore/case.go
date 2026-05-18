@@ -116,6 +116,37 @@ func (r *caseRepository) Get(ctx context.Context, workspaceID string, id int64) 
 	return &c, nil
 }
 
+func (r *caseRepository) GetByIDs(ctx context.Context, workspaceID string, ids []int64) (map[int64]*model.Case, error) {
+	result := make(map[int64]*model.Case, len(ids))
+	if len(ids) == 0 {
+		return result, nil
+	}
+
+	col := r.casesCollection(workspaceID)
+	refs := make([]*firestore.DocumentRef, len(ids))
+	for i, id := range ids {
+		refs[i] = col.Doc(fmt.Sprintf("%d", id))
+	}
+
+	snaps, err := r.client.GetAll(ctx, refs)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to batch get cases", goerr.V("ids", ids))
+	}
+
+	for _, snap := range snaps {
+		if !snap.Exists() {
+			continue
+		}
+		var c model.Case
+		if err := snap.DataTo(&c); err != nil {
+			return nil, goerr.Wrap(err, "failed to decode case", goerr.V("doc_id", snap.Ref.ID))
+		}
+		result[c.ID] = &c
+	}
+
+	return result, nil
+}
+
 func (r *caseRepository) List(ctx context.Context, workspaceID string, opts ...interfaces.ListCaseOption) ([]*model.Case, error) {
 	cfg := interfaces.BuildListCaseConfig(opts...)
 

@@ -86,6 +86,25 @@ func (r *actionRepository) Get(ctx context.Context, workspaceID string, id int64
 	return copyAction(action), nil
 }
 
+func (r *actionRepository) GetByIDs(ctx context.Context, workspaceID string, ids []int64) (map[int64]*model.Action, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make(map[int64]*model.Action, len(ids))
+	ws, exists := r.actions[workspaceID]
+	if !exists {
+		return result, nil
+	}
+
+	for _, id := range ids {
+		if a, ok := ws[id]; ok {
+			result[id] = copyAction(a)
+		}
+	}
+
+	return result, nil
+}
+
 func (r *actionRepository) List(ctx context.Context, workspaceID string, opts interfaces.ActionListOptions) ([]*model.Action, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

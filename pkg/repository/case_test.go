@@ -92,6 +92,93 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.Value(t, err).NotNil()
 	})
 
+	t.Run("GetByIDs returns cases for matching IDs", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		c1, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
+			CreatedAt:      time.Now().UTC(),
+			UpdatedAt:      time.Now().UTC(),
+			Title:          "Case One",
+			Description:    "First case",
+			AssigneeIDs:    []string{"U111"},
+			SlackChannelID: "C111",
+		})
+		gt.NoError(t, err).Required()
+
+		c2, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
+			CreatedAt:      time.Now().UTC(),
+			UpdatedAt:      time.Now().UTC(),
+			Title:          "Case Two",
+			Description:    "Second case",
+			AssigneeIDs:    []string{"U222", "U333"},
+			SlackChannelID: "C222",
+		})
+		gt.NoError(t, err).Required()
+
+		c3, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
+			Title:       "Case Three",
+			Description: "Third case",
+		})
+		gt.NoError(t, err).Required()
+
+		// Request a mix of existing and missing IDs. Missing IDs must
+		// be silently absent from the returned map — they are not
+		// errors at the repository layer.
+		missingID := c3.ID + 999_999
+		got, err := repo.Case().GetByIDs(ctx, wsID, []int64{c1.ID, c3.ID, missingID, c2.ID})
+		gt.NoError(t, err).Required()
+		gt.Map(t, got).HasKey(c1.ID)
+		gt.Map(t, got).HasKey(c2.ID)
+		gt.Map(t, got).HasKey(c3.ID)
+		gt.Number(t, len(got)).Equal(3)
+
+		gotC1 := got[c1.ID]
+		gt.Value(t, gotC1.Title).Equal(c1.Title)
+		gt.Value(t, gotC1.Description).Equal(c1.Description)
+		gt.Value(t, gotC1.SlackChannelID).Equal(c1.SlackChannelID)
+		gt.Array(t, gotC1.AssigneeIDs).Length(1)
+		gt.Value(t, gotC1.AssigneeIDs[0]).Equal("U111")
+
+		gotC2 := got[c2.ID]
+		gt.Value(t, gotC2.Title).Equal(c2.Title)
+		gt.Array(t, gotC2.AssigneeIDs).Length(2)
+		gt.Value(t, gotC2.AssigneeIDs[0]).Equal("U222")
+		gt.Value(t, gotC2.AssigneeIDs[1]).Equal("U333")
+
+		gotC3 := got[c3.ID]
+		gt.Value(t, gotC3.Title).Equal(c3.Title)
+
+		_, ok := got[missingID]
+		gt.Bool(t, ok).False()
+	})
+
+	t.Run("GetByIDs returns empty map for empty ID slice", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		got, err := repo.Case().GetByIDs(ctx, wsID, []int64{})
+		gt.NoError(t, err).Required()
+		gt.Number(t, len(got)).Equal(0)
+	})
+
+	t.Run("GetByIDs returns empty map for unknown workspace", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		got, err := repo.Case().GetByIDs(ctx, wsID, []int64{1, 2, 3})
+		gt.NoError(t, err).Required()
+		gt.Number(t, len(got)).Equal(0)
+	})
+
 	t.Run("Update updates existing case", func(t *testing.T) {
 		repo := newRepo(t)
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
@@ -130,10 +217,10 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		ctx := context.Background()
 
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID:  "U-TEST-DEFAULT",
-			CreatedAt:   time.Now().UTC(),
-			UpdatedAt:   time.Now().UTC(),
-			Title: "To be deleted",
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      "To be deleted",
 		})
 		gt.NoError(t, err).Required()
 
@@ -235,10 +322,10 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		ctx := context.Background()
 
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID:  "U-TEST-DEFAULT",
-			CreatedAt:   time.Now().UTC(),
-			UpdatedAt:   time.Now().UTC(),
-			Title: "Case to update fields",
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      "Case to update fields",
 			FieldValues: map[string]model.FieldValue{
 				"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "low"},
 			},
@@ -272,10 +359,10 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 		tags := []string{"tag1", "tag2"}
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID:  "U-TEST-DEFAULT",
-			CreatedAt:   time.Now().UTC(),
-			UpdatedAt:   time.Now().UTC(),
-			Title: "Deep copy test",
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      "Deep copy test",
 			FieldValues: map[string]model.FieldValue{
 				"tags": {FieldID: "tags", Type: types.FieldTypeMultiSelect, Value: tags},
 			},
@@ -317,10 +404,10 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		ctx := context.Background()
 
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID:  "U-TEST-DEFAULT",
-			CreatedAt:   time.Now().UTC(),
-			UpdatedAt:   time.Now().UTC(),
-			Title: "Case to delete",
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      "Case to delete",
 			FieldValues: map[string]model.FieldValue{
 				"priority": {FieldID: "priority", Type: types.FieldTypeSelect, Value: "high"},
 			},
@@ -340,9 +427,9 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		ctx := context.Background()
 
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID:  "U-TEST-DEFAULT",
-			CreatedAt:   time.Now().UTC(),
-			UpdatedAt:   time.Now().UTC(),
+			ReporterID:     "U-TEST-DEFAULT",
+			CreatedAt:      time.Now().UTC(),
+			UpdatedAt:      time.Now().UTC(),
 			Title:          "Case with channel",
 			SlackChannelID: "C-TEST-CHANNEL",
 		})
@@ -425,10 +512,10 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 		// Create a case with text field (not select)
 		_, err := repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID:  "U-TEST-DEFAULT",
-			CreatedAt:   time.Now().UTC(),
-			UpdatedAt:   time.Now().UTC(),
-			Title: "Text case",
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      "Text case",
 			FieldValues: map[string]model.FieldValue{
 				"severity": {FieldID: "severity", Type: types.FieldTypeText, Value: "high"},
 			},
@@ -449,10 +536,10 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		ctx := context.Background()
 
 		_, err := repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID:  "U-TEST-DEFAULT",
-			CreatedAt:   time.Now().UTC(),
-			UpdatedAt:   time.Now().UTC(),
-			Title: "Valid tags",
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      "Valid tags",
 			FieldValues: map[string]model.FieldValue{
 				"tags": {FieldID: "tags", Type: types.FieldTypeMultiSelect, Value: []string{"network", "malware"}},
 			},
@@ -460,10 +547,10 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.NoError(t, err).Required()
 
 		_, err = repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID:  "U-TEST-DEFAULT",
-			CreatedAt:   time.Now().UTC(),
-			UpdatedAt:   time.Now().UTC(),
-			Title: "Invalid tags",
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      "Invalid tags",
 			FieldValues: map[string]model.FieldValue{
 				"tags": {FieldID: "tags", Type: types.FieldTypeMultiSelect, Value: []string{"network", "bogus"}},
 			},
@@ -484,10 +571,10 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		ctx := context.Background()
 
 		_, err := repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID:  "U-TEST-DEFAULT",
-			CreatedAt:   time.Now().UTC(),
-			UpdatedAt:   time.Now().UTC(),
-			Title: "Valid case",
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      "Valid case",
 			FieldValues: map[string]model.FieldValue{
 				"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "high"},
 			},
@@ -495,10 +582,10 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.NoError(t, err).Required()
 
 		_, err = repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID:  "U-TEST-DEFAULT",
-			CreatedAt:   time.Now().UTC(),
-			UpdatedAt:   time.Now().UTC(),
-			Title: "Invalid case",
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      "Invalid case",
 			FieldValues: map[string]model.FieldValue{
 				"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "deleted-option"},
 			},
@@ -523,10 +610,10 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		ctx := context.Background()
 
 		_, err := repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID:  "U-TEST-DEFAULT",
-			CreatedAt:   time.Now().UTC(),
-			UpdatedAt:   time.Now().UTC(),
-			Title: "Valid case",
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      "Valid case",
 			FieldValues: map[string]model.FieldValue{
 				"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "high"},
 			},
@@ -546,10 +633,10 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		ctx := context.Background()
 
 		_, err := repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID:  "U-TEST-DEFAULT",
-			CreatedAt:   time.Now().UTC(),
-			UpdatedAt:   time.Now().UTC(),
-			Title: "Bad multi-select",
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      "Bad multi-select",
 			FieldValues: map[string]model.FieldValue{
 				"tags": {FieldID: "tags", Type: types.FieldTypeMultiSelect, Value: []string{"network", "removed-tag"}},
 			},
@@ -585,8 +672,8 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		for i := 0; i < 3; i++ {
 			_, err := repo.Case().Create(ctx, wsID, &model.Case{
 				ReporterID:  "U-TEST-DEFAULT",
-			CreatedAt:   time.Now().UTC(),
-			UpdatedAt:   time.Now().UTC(),
+				CreatedAt:   time.Now().UTC(),
+				UpdatedAt:   time.Now().UTC(),
 				Title:       "Case " + string(rune('A'+i)),
 				Description: "Description " + string(rune('A'+i)),
 			})
@@ -606,30 +693,30 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 		// Create open cases
 		_, err := repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID:  "U-TEST-DEFAULT",
-			CreatedAt:   time.Now().UTC(),
-			UpdatedAt:   time.Now().UTC(),
-			Title:  "Open Case 1",
-			Status: types.CaseStatusOpen,
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      "Open Case 1",
+			Status:     types.CaseStatusOpen,
 		})
 		gt.NoError(t, err).Required()
 
 		_, err = repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID:  "U-TEST-DEFAULT",
-			CreatedAt:   time.Now().UTC(),
-			UpdatedAt:   time.Now().UTC(),
-			Title:  "Open Case 2",
-			Status: types.CaseStatusOpen,
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      "Open Case 2",
+			Status:     types.CaseStatusOpen,
 		})
 		gt.NoError(t, err).Required()
 
 		// Create closed case
 		_, err = repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID:  "U-TEST-DEFAULT",
-			CreatedAt:   time.Now().UTC(),
-			UpdatedAt:   time.Now().UTC(),
-			Title:  "Closed Case 1",
-			Status: types.CaseStatusClosed,
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      "Closed Case 1",
+			Status:     types.CaseStatusClosed,
 		})
 		gt.NoError(t, err).Required()
 
@@ -660,11 +747,11 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		ctx := context.Background()
 
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID:  "U-TEST-DEFAULT",
-			CreatedAt:   time.Now().UTC(),
-			UpdatedAt:   time.Now().UTC(),
-			Title:  "Status Test",
-			Status: types.CaseStatusClosed,
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      "Status Test",
+			Status:     types.CaseStatusClosed,
 		})
 		gt.NoError(t, err).Required()
 
@@ -679,11 +766,11 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		ctx := context.Background()
 
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID:  "U-TEST-DEFAULT",
-			CreatedAt:   time.Now().UTC(),
-			UpdatedAt:   time.Now().UTC(),
-			Title:  "Status Update Test",
-			Status: types.CaseStatusOpen,
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      "Status Update Test",
+			Status:     types.CaseStatusOpen,
 		})
 		gt.NoError(t, err).Required()
 
@@ -761,9 +848,9 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 		requestKey := fmt.Sprintf("test-key-%d", time.Now().UnixNano())
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID:  "U-TEST-DEFAULT",
-			CreatedAt:   time.Now().UTC(),
-			UpdatedAt:   time.Now().UTC(),
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
 			Title:      "Idempotent Case",
 			RequestKey: requestKey,
 		})
@@ -794,10 +881,10 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 		// Create a case without request key
 		_, err := repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID:  "U-TEST-DEFAULT",
-			CreatedAt:   time.Now().UTC(),
-			UpdatedAt:   time.Now().UTC(),
-			Title: "No Key Case",
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      "No Key Case",
 		})
 		gt.NoError(t, err).Required()
 
@@ -813,11 +900,11 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		ctx := context.Background()
 
 		open1, err := repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID:  "U-TEST-DEFAULT",
-			CreatedAt:   time.Now().UTC(),
-			UpdatedAt:   time.Now().UTC(),
-			Title:  "Open Visible",
-			Status: types.CaseStatusOpen,
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      "Open Visible",
+			Status:     types.CaseStatusOpen,
 		})
 		gt.NoError(t, err).Required()
 
@@ -829,11 +916,11 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.NoError(t, err).Required()
 
 		closed, err := repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID:  "U-TEST-DEFAULT",
-			CreatedAt:   time.Now().UTC(),
-			UpdatedAt:   time.Now().UTC(),
-			Title:  "Closed Visible",
-			Status: types.CaseStatusClosed,
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      "Closed Visible",
+			Status:     types.CaseStatusClosed,
 		})
 		gt.NoError(t, err).Required()
 
@@ -856,11 +943,11 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		ctx := context.Background()
 
 		_, err := repo.Case().Create(ctx, wsID, &model.Case{
-			ReporterID:  "U-TEST-DEFAULT",
-			CreatedAt:   time.Now().UTC(),
-			UpdatedAt:   time.Now().UTC(),
-			Title:  "Open A",
-			Status: types.CaseStatusOpen,
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      "Open A",
+			Status:     types.CaseStatusOpen,
 		})
 		gt.NoError(t, err).Required()
 

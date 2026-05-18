@@ -47,6 +47,14 @@ type ActionRepository interface {
 	// callers can inspect history; UI/agent layers must enforce visibility.
 	Get(ctx context.Context, workspaceID string, id int64) (*model.Action, error)
 
+	// GetByIDs retrieves multiple actions by IDs in a single batch.
+	// Returns a map keyed by action ID containing only the actions that
+	// were found; missing IDs are silently absent from the result map.
+	// Archived actions are included for the same reason Get returns
+	// them: the GraphQL Action loader is used from sub-resolvers that
+	// already need history visibility.
+	GetByIDs(ctx context.Context, workspaceID string, ids []int64) (map[int64]*model.Action, error)
+
 	// List retrieves all actions filtered by opts.ArchiveScope.
 	List(ctx context.Context, workspaceID string, opts ActionListOptions) ([]*model.Action, error)
 
