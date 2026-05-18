@@ -92,7 +92,7 @@ func (r *caseRepository) Create(ctx context.Context, workspaceID string, c *mode
 	// callback without auth.ContextWithToken) fails loudly the first
 	// time it runs — instead of silently writing a case the UI cannot
 	// attribute to anyone.
-	if err := c.Validate(); err != nil {
+	if err := c.ValidateNew(); err != nil {
 		return nil, goerr.Wrap(err, "case validation failed before create")
 	}
 
@@ -196,6 +196,10 @@ func (r *caseRepository) ListDrafts(ctx context.Context, workspaceID string) ([]
 }
 
 func (r *caseRepository) Update(ctx context.Context, workspaceID string, c *model.Case) (*model.Case, error) {
+	if err := c.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "case validation failed before update")
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

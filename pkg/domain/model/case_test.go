@@ -154,6 +154,42 @@ func TestCase_IsDraft(t *testing.T) {
 	gt.Bool(t, nilCase.IsDraft()).False()
 }
 
+func TestCase_Validate(t *testing.T) {
+	t.Run("nil case returns error", func(t *testing.T) {
+		var c *model.Case
+		gt.Error(t, c.Validate())
+	})
+
+	t.Run("case without ReporterID passes Validate", func(t *testing.T) {
+		c := &model.Case{Title: "No Reporter"}
+		gt.NoError(t, c.Validate())
+	})
+
+	t.Run("case with ReporterID passes Validate", func(t *testing.T) {
+		c := &model.Case{Title: "Has Reporter", ReporterID: "UREPORTER123"}
+		gt.NoError(t, c.Validate())
+	})
+}
+
+func TestCase_ValidateNew(t *testing.T) {
+	t.Run("nil case returns error", func(t *testing.T) {
+		var c *model.Case
+		gt.Error(t, c.ValidateNew())
+	})
+
+	t.Run("case without ReporterID fails ValidateNew", func(t *testing.T) {
+		c := &model.Case{Title: "No Reporter"}
+		err := c.ValidateNew()
+		gt.Error(t, err)
+		gt.Bool(t, errors.Is(err, model.ErrCaseMissingReporter)).True()
+	})
+
+	t.Run("case with ReporterID passes ValidateNew", func(t *testing.T) {
+		c := &model.Case{Title: "Has Reporter", ReporterID: "UREPORTER123"}
+		gt.NoError(t, c.ValidateNew())
+	})
+}
+
 func TestCase_SubmitDraft(t *testing.T) {
 	t.Run("draft transitions to open", func(t *testing.T) {
 		c := &model.Case{Status: types.CaseStatusDraft}
