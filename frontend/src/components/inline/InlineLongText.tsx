@@ -41,27 +41,34 @@ export default function InlineLongText({
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(value)
   const [saving, setSaving] = useState(false)
+  const [activeTab, setActiveTab] = useState<'write' | 'preview'>('write')
   const taRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     if (!editing) setDraft(value)
   }, [value, editing])
 
+  // Reset to Write tab whenever entering edit mode.
   useEffect(() => {
-    if (editing) {
-      requestAnimationFrame(() => {
-        taRef.current?.focus()
-        const len = taRef.current?.value.length ?? 0
-        taRef.current?.setSelectionRange(len, len)
-      })
-    }
+    if (editing) setActiveTab('write')
   }, [editing])
+
+  // Focus the textarea when entering edit mode or switching back to Write tab.
+  useEffect(() => {
+    if (!editing) return
+    if (renderMarkdown && activeTab !== 'write') return
+    requestAnimationFrame(() => {
+      taRef.current?.focus()
+      const len = taRef.current?.value.length ?? 0
+      taRef.current?.setSelectionRange(len, len)
+    })
+  }, [editing, activeTab, renderMarkdown])
 
   // For the Markdown-enabled long-text editor, auto-grow the textarea so
   // entering edit mode never collapses a tall description back to the
   // default min-height. (Plain-text mode keeps its original behavior.)
   useLayoutEffect(() => {
-    if (!editing || !renderMarkdown) return
+    if (!editing || !renderMarkdown || activeTab !== 'write') return
     const ta = taRef.current
     if (!ta) return
     ta.style.height = 'auto'
@@ -70,7 +77,7 @@ export default function InlineLongText({
     // not — without the +2, content that exactly fits would re-introduce
     // a scrollbar / one-pixel jitter on every keystroke.
     ta.style.height = `${ta.scrollHeight + 2}px`
-  }, [draft, editing, renderMarkdown])
+  }, [draft, editing, renderMarkdown, activeTab])
 
   const commit = async () => {
     if (draft === value) {
@@ -98,24 +105,67 @@ export default function InlineLongText({
       ? `${styles.textarea} ${styles.textareaTall}`
       : styles.textarea
     const previewIsEmpty = draft.trim() === ''
-    return (
-      <div data-testid={testId ? `${testId}-editor` : undefined}>
-        <div className={renderMarkdown ? styles.editSplit : undefined}>
-          <textarea
-            ref={taRef}
-            className={textareaClass}
-            value={draft}
-            aria-label={ariaLabel}
-            disabled={saving}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={commitOnEnter({
-              onCommit: () => void commit(),
-              onCancel: cancel,
-              requireModifier: true,
-            })}
-            data-testid={testId ? `${testId}-input` : undefined}
-          />
-          {renderMarkdown && (
+
+    const editFooter = (
+      <div className={styles.editFooter}>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={cancel}
+          disabled={saving}
+          data-testid={testId ? `${testId}-cancel` : undefined}
+        >
+          {t('btnCancel')}
+        </Button>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={() => void commit()}
+          disabled={saving}
+          data-testid={testId ? `${testId}-save` : undefined}
+        >
+          {saving ? t('btnSaving') : t('btnSave')}
+        </Button>
+      </div>
+    )
+
+    if (renderMarkdown) {
+      return (
+        <div data-testid={testId ? `${testId}-editor` : undefined}>
+          <div className={styles.editorTabs}>
+            <button
+              type="button"
+              className={`${styles.tab} ${activeTab === 'write' ? styles.tabActive : ''}`}
+              onClick={() => setActiveTab('write')}
+              data-testid={testId ? `${testId}-tab-write` : undefined}
+            >
+              {t('tabWrite')}
+            </button>
+            <button
+              type="button"
+              className={`${styles.tab} ${activeTab === 'preview' ? styles.tabActive : ''}`}
+              onClick={() => setActiveTab('preview')}
+              data-testid={testId ? `${testId}-tab-preview` : undefined}
+            >
+              {t('labelPreview')}
+            </button>
+          </div>
+          {activeTab === 'write' ? (
+            <textarea
+              ref={taRef}
+              className={textareaClass}
+              value={draft}
+              aria-label={ariaLabel}
+              disabled={saving}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={commitOnEnter({
+                onCommit: () => void commit(),
+                onCancel: cancel,
+                requireModifier: true,
+              })}
+              data-testid={testId ? `${testId}-input` : undefined}
+            />
+          ) : (
             <div
               className={`${styles.editPreview} ${styles.longTextMarkdown} ${previewIsEmpty ? styles.placeholder : ''}`}
               role="region"
@@ -129,27 +179,28 @@ export default function InlineLongText({
               )}
             </div>
           )}
+          {editFooter}
         </div>
-        <div className={styles.editFooter}>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={cancel}
-            disabled={saving}
-            data-testid={testId ? `${testId}-cancel` : undefined}
-          >
-            {t('btnCancel')}
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => void commit()}
-            disabled={saving}
-            data-testid={testId ? `${testId}-save` : undefined}
-          >
-            {saving ? t('btnSaving') : t('btnSave')}
-          </Button>
-        </div>
+      )
+    }
+
+    return (
+      <div data-testid={testId ? `${testId}-editor` : undefined}>
+        <textarea
+          ref={taRef}
+          className={textareaClass}
+          value={draft}
+          aria-label={ariaLabel}
+          disabled={saving}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={commitOnEnter({
+            onCommit: () => void commit(),
+            onCancel: cancel,
+            requireModifier: true,
+          })}
+          data-testid={testId ? `${testId}-input` : undefined}
+        />
+        {editFooter}
       </div>
     )
   }

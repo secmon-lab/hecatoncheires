@@ -48,6 +48,7 @@ export const msgKeys = {
   labelDescription: 'labelDescription',
   labelPreview: 'labelPreview',
   labelPreviewEmpty: 'labelPreviewEmpty',
+  tabWrite: 'tabWrite',
   labelAssignees: 'labelAssignees',
   labelAssignee: 'labelAssignee',
   labelStatus: 'labelStatus',

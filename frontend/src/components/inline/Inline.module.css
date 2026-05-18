@@ -102,28 +102,43 @@
 
 /* Markdown-enabled long-text editor: start with a generous height so
    entering edit mode on a tall description does not collapse the area,
-   and `overflow: hidden` lets the auto-grow effect take over. The
-   surrounding split layout keeps the preview pane visible. */
+   and `overflow: hidden` lets the auto-grow effect take over. */
 .textareaTall {
   min-height: 240px;
   overflow: hidden;
   resize: none;
 }
 
-/* Two-column edit layout: textarea on the left, live preview on the
-   right. Stacks vertically on narrower viewports so the editor remains
-   usable on Slack-side panels and mobile widths. */
-.editSplit {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 12px;
-  align-items: stretch;
+/* GitHub-style tab bar for the markdown editor. */
+.editorTabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: var(--spacing-sm);
 }
 
-@media (max-width: 720px) {
-  .editSplit {
-    grid-template-columns: minmax(0, 1fr);
-  }
+.tab {
+  padding: var(--spacing-xs) var(--spacing-md-sm);
+  font-size: 13px;
+  font-family: inherit;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+  color: var(--fg-muted);
+  border-radius: 4px 4px 0 0;
+  line-height: 1.5;
+}
+
+.tab:hover {
+  color: var(--fg);
+}
+
+.tabActive {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+  font-weight: 500;
 }
 
 .editPreview {

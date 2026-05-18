@@ -151,7 +151,7 @@ describe('InlineLongText', () => {
     expect(display.querySelector('h1, h2, h3, p')).toBeNull()
   })
 
-  it('shows a live Markdown preview alongside the editor in markdown mode', async () => {
+  it('shows Markdown preview when Preview tab is clicked', async () => {
     renderWithI18n(
       <InlineLongText
         value="## Old"
@@ -162,17 +162,25 @@ describe('InlineLongText', () => {
       />,
     )
     fireEvent.click(screen.getByTestId('d'))
-    const ta = (await screen.findByTestId('d-input')) as HTMLTextAreaElement
-    // Initial preview reflects the existing value.
+    // Write tab is active by default — textarea visible, preview not yet.
+    await screen.findByTestId('d-input')
+    expect(screen.queryByTestId('d-preview')).toBeNull()
+
+    // Switch to Preview tab.
+    fireEvent.click(screen.getByTestId('d-tab-preview'))
     const preview = screen.getByTestId('d-preview')
     expect(preview.querySelector('h2')?.textContent).toBe('Old')
 
+    // Switch back to Write, change the content, then re-check Preview.
+    fireEvent.click(screen.getByTestId('d-tab-write'))
+    const ta = screen.getByTestId('d-input') as HTMLTextAreaElement
     fireEvent.change(ta, { target: { value: '# New title\n\n- item' } })
 
+    fireEvent.click(screen.getByTestId('d-tab-preview'))
     await waitFor(() => {
-      expect(preview.querySelector('h1')?.textContent).toBe('New title')
+      expect(screen.getByTestId('d-preview').querySelector('h1')?.textContent).toBe('New title')
     })
-    expect(preview.querySelectorAll('li')).toHaveLength(1)
+    expect(screen.getByTestId('d-preview').querySelectorAll('li')).toHaveLength(1)
   })
 
   it('does NOT render a preview pane in plain-text mode', async () => {
@@ -201,7 +209,7 @@ describe('InlineLongText', () => {
     expect(link?.getAttribute('rel')).toBe('noopener noreferrer')
   })
 
-  it('marks the live preview pane as a labelled region', async () => {
+  it('marks the preview pane as a labelled region', async () => {
     renderWithI18n(
       <InlineLongText
         value="hello"
@@ -212,6 +220,8 @@ describe('InlineLongText', () => {
       />,
     )
     fireEvent.click(screen.getByTestId('d'))
+    // Switch to Preview tab to reveal the pane.
+    fireEvent.click(screen.getByTestId('d-tab-preview'))
     const preview = await screen.findByTestId('d-preview')
     expect(preview.getAttribute('role')).toBe('region')
     expect(preview.getAttribute('aria-label')).toBeTruthy()
