@@ -106,6 +106,15 @@ export default function InlineLongText({
       : styles.textarea
     const previewIsEmpty = draft.trim() === ''
 
+    // Placing the keyboard handler on the container (not the textarea) keeps
+    // Cmd+Enter / Escape working even when the Preview tab is active and the
+    // textarea is unmounted. Events from child elements bubble up naturally.
+    const keyHandler = commitOnEnter({
+      onCommit: () => void commit(),
+      onCancel: cancel,
+      requireModifier: true,
+    })
+
     const editFooter = (
       <div className={styles.editFooter}>
         <Button
@@ -131,10 +140,15 @@ export default function InlineLongText({
 
     if (renderMarkdown) {
       return (
-        <div data-testid={testId ? `${testId}-editor` : undefined}>
-          <div className={styles.editorTabs}>
+        <div
+          data-testid={testId ? `${testId}-editor` : undefined}
+          onKeyDown={keyHandler}
+        >
+          <div className={styles.editorTabs} role="tablist">
             <button
               type="button"
+              role="tab"
+              aria-selected={activeTab === 'write'}
               className={`${styles.tab} ${activeTab === 'write' ? styles.tabActive : ''}`}
               onClick={() => setActiveTab('write')}
               data-testid={testId ? `${testId}-tab-write` : undefined}
@@ -143,6 +157,8 @@ export default function InlineLongText({
             </button>
             <button
               type="button"
+              role="tab"
+              aria-selected={activeTab === 'preview'}
               className={`${styles.tab} ${activeTab === 'preview' ? styles.tabActive : ''}`}
               onClick={() => setActiveTab('preview')}
               data-testid={testId ? `${testId}-tab-preview` : undefined}
@@ -158,17 +174,12 @@ export default function InlineLongText({
               aria-label={ariaLabel}
               disabled={saving}
               onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={commitOnEnter({
-                onCommit: () => void commit(),
-                onCancel: cancel,
-                requireModifier: true,
-              })}
               data-testid={testId ? `${testId}-input` : undefined}
             />
           ) : (
             <div
               className={`${styles.editPreview} ${styles.longTextMarkdown} ${previewIsEmpty ? styles.placeholder : ''}`}
-              role="region"
+              role="tabpanel"
               aria-label={t('labelPreview')}
               data-testid={testId ? `${testId}-preview` : undefined}
             >
@@ -185,7 +196,10 @@ export default function InlineLongText({
     }
 
     return (
-      <div data-testid={testId ? `${testId}-editor` : undefined}>
+      <div
+        data-testid={testId ? `${testId}-editor` : undefined}
+        onKeyDown={keyHandler}
+      >
         <textarea
           ref={taRef}
           className={textareaClass}
@@ -193,11 +207,6 @@ export default function InlineLongText({
           aria-label={ariaLabel}
           disabled={saving}
           onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={commitOnEnter({
-            onCommit: () => void commit(),
-            onCancel: cancel,
-            requireModifier: true,
-          })}
           data-testid={testId ? `${testId}-input` : undefined}
         />
         {editFooter}

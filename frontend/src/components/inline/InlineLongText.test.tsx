@@ -209,7 +209,7 @@ describe('InlineLongText', () => {
     expect(link?.getAttribute('rel')).toBe('noopener noreferrer')
   })
 
-  it('marks the preview pane as a labelled region', async () => {
+  it('marks the preview pane as a tabpanel with a label', async () => {
     renderWithI18n(
       <InlineLongText
         value="hello"
@@ -223,8 +223,31 @@ describe('InlineLongText', () => {
     // Switch to Preview tab to reveal the pane.
     fireEvent.click(screen.getByTestId('d-tab-preview'))
     const preview = await screen.findByTestId('d-preview')
-    expect(preview.getAttribute('role')).toBe('region')
+    expect(preview.getAttribute('role')).toBe('tabpanel')
     expect(preview.getAttribute('aria-label')).toBeTruthy()
+  })
+
+  it('tab buttons carry ARIA tab roles and aria-selected state', async () => {
+    renderWithI18n(
+      <InlineLongText
+        value="hello"
+        onSave={vi.fn()}
+        ariaLabel="desc"
+        testId="d"
+        renderMarkdown
+      />,
+    )
+    fireEvent.click(screen.getByTestId('d'))
+    const writeTab = screen.getByTestId('d-tab-write')
+    const previewTab = screen.getByTestId('d-tab-preview')
+    expect(writeTab.getAttribute('role')).toBe('tab')
+    expect(previewTab.getAttribute('role')).toBe('tab')
+    expect(writeTab.getAttribute('aria-selected')).toBe('true')
+    expect(previewTab.getAttribute('aria-selected')).toBe('false')
+
+    fireEvent.click(previewTab)
+    expect(writeTab.getAttribute('aria-selected')).toBe('false')
+    expect(previewTab.getAttribute('aria-selected')).toBe('true')
   })
 
   it('grows the textarea to fit its content in markdown mode', async () => {
