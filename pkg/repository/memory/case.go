@@ -126,6 +126,25 @@ func (r *caseRepository) Get(ctx context.Context, workspaceID string, id int64) 
 	return copyCase(c), nil
 }
 
+func (r *caseRepository) GetByIDs(ctx context.Context, workspaceID string, ids []int64) (map[int64]*model.Case, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	result := make(map[int64]*model.Case, len(ids))
+	ws, exists := r.cases[workspaceID]
+	if !exists {
+		return result, nil
+	}
+
+	for _, id := range ids {
+		if c, ok := ws[id]; ok {
+			result[id] = copyCase(c)
+		}
+	}
+
+	return result, nil
+}
+
 func (r *caseRepository) List(ctx context.Context, workspaceID string, opts ...interfaces.ListCaseOption) ([]*model.Case, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

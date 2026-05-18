@@ -63,7 +63,7 @@ func setupGraphQLServer(repo interfaces.Repository) (http.Handler, error) {
 
 	// Wrap with dataloader middleware (same as serve.go)
 	gqlHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		loaders := gqlctrl.NewDataLoaders(repo)
+		loaders := gqlctrl.NewDataLoaders(repo, nil)
 		ctx := gqlctrl.WithDataLoaders(r.Context(), loaders)
 		srv.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -271,9 +271,9 @@ func TestGraphQLHandler_CaseQuery(t *testing.T) {
 	ctx := context.Background()
 
 	testCase := &model.Case{
-		ReporterID:     "U-TEST-DEFAULT",
-		CreatedAt:      time.Now().UTC(),
-		UpdatedAt:      time.Now().UTC(),
+		ReporterID:  "U-TEST-DEFAULT",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
 		Title:       "Test Case for Query",
 		Description: "Test case description for single query",
 		AssigneeIDs: []string{"U123"},
@@ -452,9 +452,9 @@ func TestGraphQLHandler_UpdateCaseMutation(t *testing.T) {
 
 	// Create a case first
 	caseToUpdate := &model.Case{
-		ReporterID:     "U-TEST-DEFAULT",
-		CreatedAt:      time.Now().UTC(),
-		UpdatedAt:      time.Now().UTC(),
+		ReporterID:  "U-TEST-DEFAULT",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
 		Title:       "Original Title",
 		Description: "Original Description",
 		AssigneeIDs: []string{"U001"},
@@ -920,9 +920,9 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 
 	// Create a case for actions to belong to
 	testCase := &model.Case{
-		ReporterID:     "U-TEST-DEFAULT",
-		CreatedAt:      time.Now().UTC(),
-		UpdatedAt:      time.Now().UTC(),
+		ReporterID:  "U-TEST-DEFAULT",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
 		Title:       "Test Case for Actions",
 		Description: "Case for action tests",
 	}
@@ -1970,9 +1970,9 @@ func TestGraphQLHandler_ActionsByCaseQuery(t *testing.T) {
 
 	// Create a case
 	testCase := &model.Case{
-		ReporterID:     "U-TEST-DEFAULT",
-		CreatedAt:      time.Now().UTC(),
-		UpdatedAt:      time.Now().UTC(),
+		ReporterID:  "U-TEST-DEFAULT",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
 		Title:       "Case with Multiple Actions",
 		Description: "Testing actions query",
 	}
@@ -2113,9 +2113,9 @@ func TestGraphQLHandler_PrivateCaseAccessControl(t *testing.T) {
 
 	// Create a public case for comparison
 	publicCase := &model.Case{
-		ReporterID:     "U-TEST-DEFAULT",
-		CreatedAt:      time.Now().UTC(),
-		UpdatedAt:      time.Now().UTC(),
+		ReporterID:  "U-TEST-DEFAULT",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
 		Title:       "Public Case",
 		Description: "Public information",
 		AssigneeIDs: []string{},
@@ -2527,10 +2527,10 @@ func TestGraphQLHandler_ActionStepMutations(t *testing.T) {
 
 	// Create a Case + Action that the steps will live under.
 	c, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
-		ReporterID:     "U-TEST-DEFAULT",
-		CreatedAt:      time.Now().UTC(),
-		UpdatedAt:      time.Now().UTC(),
-		Title: "Step E2E Case",
+		ReporterID: "U-TEST-DEFAULT",
+		CreatedAt:  time.Now().UTC(),
+		UpdatedAt:  time.Now().UTC(),
+		Title:      "Step E2E Case",
 	})
 	gt.NoError(t, err).Required()
 	action, err := repo.Action().Create(ctx, testWorkspaceID, &model.Action{
@@ -3149,7 +3149,7 @@ func setupGraphQLServerWithAuth(repo interfaces.Repository, authUC usecase.AuthU
 		gqlctrl.NewExecutableSchema(gqlctrl.Config{Resolvers: resolver}),
 	)
 	gqlHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		loaders := gqlctrl.NewDataLoaders(repo)
+		loaders := gqlctrl.NewDataLoaders(repo, nil)
 		ctx := gqlctrl.WithDataLoaders(r.Context(), loaders)
 		srv.ServeHTTP(w, r.WithContext(ctx))
 	})

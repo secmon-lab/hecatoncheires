@@ -50,6 +50,74 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		gt.Bool(t, created1.CreatedAt.IsZero()).False()
 	})
 
+	t.Run("GetByIDs returns actions for matching IDs", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		c, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      "Case for GetByIDs",
+		})
+		gt.NoError(t, err).Required()
+
+		a1, err := repo.Action().Create(ctx, wsID, &model.Action{
+			CaseID:      c.ID,
+			Title:       "First",
+			Description: "First action",
+			AssigneeID:  "U111",
+			Status:      types.ActionStatusTodo,
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
+		})
+		gt.NoError(t, err).Required()
+
+		a2, err := repo.Action().Create(ctx, wsID, &model.Action{
+			CaseID:      c.ID,
+			Title:       "Second",
+			Description: "Second action",
+			AssigneeID:  "U222",
+			Status:      types.ActionStatusInProgress,
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
+		})
+		gt.NoError(t, err).Required()
+
+		// Mix in a non-existent ID — must be silently absent, not an error.
+		missingID := a2.ID + 999_999
+		got, err := repo.Action().GetByIDs(ctx, wsID, []int64{a1.ID, missingID, a2.ID})
+		gt.NoError(t, err).Required()
+		gt.Map(t, got).HasKey(a1.ID)
+		gt.Map(t, got).HasKey(a2.ID)
+		gt.Number(t, len(got)).Equal(2)
+
+		gotA1 := got[a1.ID]
+		gt.Value(t, gotA1.Title).Equal(a1.Title)
+		gt.Value(t, gotA1.Description).Equal(a1.Description)
+		gt.Value(t, gotA1.AssigneeID).Equal(a1.AssigneeID)
+		gt.Value(t, gotA1.Status).Equal(a1.Status)
+		gt.Value(t, gotA1.CaseID).Equal(c.ID)
+
+		gotA2 := got[a2.ID]
+		gt.Value(t, gotA2.Title).Equal(a2.Title)
+		gt.Value(t, gotA2.Status).Equal(a2.Status)
+
+		_, ok := got[missingID]
+		gt.Bool(t, ok).False()
+	})
+
+	t.Run("GetByIDs returns empty map for empty ID slice", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		got, err := repo.Action().GetByIDs(ctx, wsID, []int64{})
+		gt.NoError(t, err).Required()
+		gt.Number(t, len(got)).Equal(0)
+	})
+
 	t.Run("GetByCase retrieves actions for a case", func(t *testing.T) {
 		repo := newRepo(t)
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
@@ -60,7 +128,7 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			ReporterID: "U-TEST-DEFAULT",
 			CreatedAt:  time.Now().UTC(),
 			UpdatedAt:  time.Now().UTC(),
-			Title: "Test Case for GetByCase",
+			Title:      "Test Case for GetByCase",
 		})
 		gt.NoError(t, err).Required()
 
@@ -97,7 +165,7 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			ReporterID: "U-TEST-DEFAULT",
 			CreatedAt:  time.Now().UTC(),
 			UpdatedAt:  time.Now().UTC(),
-			Title: "Empty Case",
+			Title:      "Empty Case",
 		})
 		gt.NoError(t, err).Required()
 
@@ -117,7 +185,7 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			ReporterID: "U-TEST-DEFAULT",
 			CreatedAt:  time.Now().UTC(),
 			UpdatedAt:  time.Now().UTC(),
-			Title: "Case 1",
+			Title:      "Case 1",
 		})
 		gt.NoError(t, err).Required()
 
@@ -125,7 +193,7 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			ReporterID: "U-TEST-DEFAULT",
 			CreatedAt:  time.Now().UTC(),
 			UpdatedAt:  time.Now().UTC(),
-			Title: "Case 2",
+			Title:      "Case 2",
 		})
 		gt.NoError(t, err).Required()
 
@@ -275,7 +343,7 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			ReporterID: "U-TEST-DEFAULT",
 			CreatedAt:  time.Now().UTC(),
 			UpdatedAt:  time.Now().UTC(),
-			Title: "Archive list filter case",
+			Title:      "Archive list filter case",
 		})
 		gt.NoError(t, err).Required()
 
@@ -325,7 +393,7 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 			ReporterID: "U-TEST-DEFAULT",
 			CreatedAt:  time.Now().UTC(),
 			UpdatedAt:  time.Now().UTC(),
-			Title: "Archive case filter",
+			Title:      "Archive case filter",
 		})
 		gt.NoError(t, err).Required()
 

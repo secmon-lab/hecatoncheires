@@ -15,6 +15,15 @@ type CaseRepository interface {
 	// Get retrieves a case by ID
 	Get(ctx context.Context, workspaceID string, id int64) (*model.Case, error)
 
+	// GetByIDs retrieves multiple cases by IDs in a single batch.
+	// Returns a map keyed by case ID containing only the cases that
+	// were found; missing IDs are silently absent from the result map
+	// (callers must distinguish "missing" from "found"). This is the
+	// batch fetch hook used by the GraphQL DataLoader to collapse
+	// per-row Reporter / Assignees lookups into one repository call
+	// per request.
+	GetByIDs(ctx context.Context, workspaceID string, ids []int64) (map[int64]*model.Case, error)
+
 	// List retrieves cases with optional filtering.
 	// Cases in DRAFT status are excluded by default; use ListDrafts to read
 	// drafts. Passing WithStatus(CaseStatusDraft) honours the filter, but

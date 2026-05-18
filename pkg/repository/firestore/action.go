@@ -108,6 +108,37 @@ func (r *actionRepository) Get(ctx context.Context, workspaceID string, id int64
 	return &a, nil
 }
 
+func (r *actionRepository) GetByIDs(ctx context.Context, workspaceID string, ids []int64) (map[int64]*model.Action, error) {
+	result := make(map[int64]*model.Action, len(ids))
+	if len(ids) == 0 {
+		return result, nil
+	}
+
+	col := r.actionsCollection(workspaceID)
+	refs := make([]*firestore.DocumentRef, len(ids))
+	for i, id := range ids {
+		refs[i] = col.Doc(fmt.Sprintf("%d", id))
+	}
+
+	snaps, err := r.client.GetAll(ctx, refs)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to batch get actions", goerr.V("ids", ids))
+	}
+
+	for _, snap := range snaps {
+		if !snap.Exists() {
+			continue
+		}
+		var a model.Action
+		if err := snap.DataTo(&a); err != nil {
+			return nil, goerr.Wrap(err, "failed to decode action", goerr.V("doc_id", snap.Ref.ID))
+		}
+		result[a.ID] = &a
+	}
+
+	return result, nil
+}
+
 func (r *actionRepository) List(ctx context.Context, workspaceID string, opts interfaces.ActionListOptions) ([]*model.Action, error) {
 	iter := r.actionsCollection(workspaceID).Documents(ctx)
 	defer iter.Stop()

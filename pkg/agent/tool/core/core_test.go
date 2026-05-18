@@ -159,6 +159,14 @@ func (m *mockActionRepo) GetByCases(ctx context.Context, workspaceID string, cas
 	return nil, nil
 }
 
+func (m *mockActionRepo) GetByIDs(ctx context.Context, workspaceID string, ids []int64) (map[int64]*model.Action, error) {
+	// Tests in this file do not exercise batch get; the agent tools
+	// resolve actions one at a time through Get. Returning an empty
+	// map keeps the interface contract satisfied without forcing every
+	// existing test to wire up a getByIDsFn.
+	return map[int64]*model.Action{}, nil
+}
+
 func (m *mockActionRepo) GetBySlackMessageTS(ctx context.Context, workspaceID string, ts string) (*model.Action, error) {
 	return nil, nil
 }

@@ -505,10 +505,13 @@ func cmdServe() *cli.Command {
 				return wrappedErr
 			})
 
-			// Wrap with dataloader middleware (request-scoped)
+			// Wrap with dataloader middleware (request-scoped). A fresh
+			// set of loaders per request is non-negotiable - the
+			// internal cache must not survive across users, and
+			// dataloader/v7's batching window only collapses calls
+			// inside one Load(...) tick anyway.
 			gqlHandlerBase := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// Create new DataLoaders for each request
-				loaders := gqlctrl.NewDataLoaders(repo)
+				loaders := gqlctrl.NewDataLoaders(repo, slackSvc)
 				ctx := gqlctrl.WithDataLoaders(r.Context(), loaders)
 				srv.ServeHTTP(w, r.WithContext(ctx))
 			})

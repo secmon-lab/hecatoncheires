@@ -22,14 +22,14 @@ import (
 // Case is the resolver for the case field.
 func (r *actionResolver) Case(ctx context.Context, obj *graphql1.Action) (*graphql1.Case, error) {
 	loaders := GetDataLoaders(ctx)
-	cases, err := loaders.CaseLoader.Load(ctx, obj.WorkspaceID, []int64{int64(obj.CaseID)})
+	c, err := loaders.Case.Load(ctx, MakeCaseKey(obj.WorkspaceID, int64(obj.CaseID)))()
 	if err != nil {
 		return nil, err
 	}
-	if len(cases) == 0 {
+	if c == nil {
 		return nil, nil
 	}
-	return toGraphQLCase(cases[0], obj.WorkspaceID), nil
+	return toGraphQLCase(c, obj.WorkspaceID), nil
 }
 
 // Assignee is the resolver for the assignee field.
@@ -38,14 +38,14 @@ func (r *actionResolver) Assignee(ctx context.Context, obj *graphql1.Action) (*g
 		return nil, nil
 	}
 	loaders := GetDataLoaders(ctx)
-	users, err := loaders.SlackUserLoader.Load(ctx, []string{*obj.AssigneeID})
+	user, err := loaders.SlackUser.Load(ctx, *obj.AssigneeID)()
 	if err != nil {
 		return nil, err
 	}
-	if len(users) == 0 {
-		return nil, nil
-	}
-	return users[0], nil
+	// Missing assignee resolves to a nullable field on the Action - the
+	// schema permits null here so we don't escalate to a field error
+	// the way Case.Reporter does.
+	return user, nil
 }
 
 // Messages is the resolver for the messages field.
@@ -58,11 +58,11 @@ func (r *actionResolver) Messages(ctx context.Context, obj *graphql1.Action, lim
 	// Inherit access control from the parent Case: if the requester cannot
 	// see the case, they cannot see the action's thread messages either.
 	loaders := GetDataLoaders(ctx)
-	cases, err := loaders.CaseLoader.Load(ctx, obj.WorkspaceID, []int64{int64(obj.CaseID)})
+	c, err := loaders.Case.Load(ctx, MakeCaseKey(obj.WorkspaceID, int64(obj.CaseID)))()
 	if err != nil {
 		return nil, err
 	}
-	if len(cases) == 0 || cases[0].AccessDenied {
+	if c == nil || c.AccessDenied {
 		return empty, nil
 	}
 
@@ -98,11 +98,11 @@ func (r *actionResolver) Events(ctx context.Context, obj *graphql1.Action, limit
 	}
 
 	loaders := GetDataLoaders(ctx)
-	cases, err := loaders.CaseLoader.Load(ctx, obj.WorkspaceID, []int64{int64(obj.CaseID)})
+	c, err := loaders.Case.Load(ctx, MakeCaseKey(obj.WorkspaceID, int64(obj.CaseID)))()
 	if err != nil {
 		return nil, err
 	}
-	if len(cases) == 0 || cases[0].AccessDenied {
+	if c == nil || c.AccessDenied {
 		return empty, nil
 	}
 
@@ -135,11 +135,11 @@ func (r *actionResolver) Steps(ctx context.Context, obj *graphql1.Action) ([]*gr
 	empty := []*graphql1.ActionStep{}
 
 	loaders := GetDataLoaders(ctx)
-	cases, err := loaders.CaseLoader.Load(ctx, obj.WorkspaceID, []int64{int64(obj.CaseID)})
+	c, err := loaders.Case.Load(ctx, MakeCaseKey(obj.WorkspaceID, int64(obj.CaseID)))()
 	if err != nil {
 		return nil, err
 	}
-	if len(cases) == 0 || cases[0].AccessDenied {
+	if c == nil || c.AccessDenied {
 		return empty, nil
 	}
 
@@ -159,11 +159,11 @@ func (r *actionResolver) StepProgress(ctx context.Context, obj *graphql1.Action)
 	zero := &graphql1.ActionStepProgress{Done: 0, Total: 0}
 
 	loaders := GetDataLoaders(ctx)
-	cases, err := loaders.CaseLoader.Load(ctx, obj.WorkspaceID, []int64{int64(obj.CaseID)})
+	c, err := loaders.Case.Load(ctx, MakeCaseKey(obj.WorkspaceID, int64(obj.CaseID)))()
 	if err != nil {
 		return nil, err
 	}
-	if len(cases) == 0 || cases[0].AccessDenied {
+	if c == nil || c.AccessDenied {
 		return zero, nil
 	}
 
@@ -180,14 +180,11 @@ func (r *actionEventResolver) Actor(ctx context.Context, obj *graphql1.ActionEve
 		return nil, nil
 	}
 	loaders := GetDataLoaders(ctx)
-	users, err := loaders.SlackUserLoader.Load(ctx, []string{obj.ActorID})
+	user, err := loaders.SlackUser.Load(ctx, obj.ActorID)()
 	if err != nil {
 		return nil, err
 	}
-	if len(users) == 0 {
-		return nil, nil
-	}
-	return users[0], nil
+	return user, nil
 }
 
 // ChannelUserCount is the resolver for the channelUserCount field.
@@ -205,11 +202,22 @@ func (r *caseResolver) ChannelUsers(ctx context.Context, obj *graphql1.Case, lim
 		}, nil
 	}
 
-	// Resolve all channel user IDs to SlackUser via DataLoader (DB cache, no Slack API)
+	// Resolve all channel user IDs to SlackUser via DataLoader (DB cache,
+	// no Slack API). LoadMany returns one Result per key; nil entries
+	// (missing repository rows) are filtered so the [SlackUser!]!
+	// schema contract is honoured.
 	loaders := GetDataLoaders(ctx)
-	allUsers, err := loaders.SlackUserLoader.Load(ctx, obj.ChannelUserIDs)
-	if err != nil {
-		return nil, err
+	loaded, errs := loaders.SlackUser.LoadMany(ctx, obj.ChannelUserIDs)()
+	for _, e := range errs {
+		if e != nil {
+			return nil, e
+		}
+	}
+	allUsers := make([]*graphql1.SlackUser, 0, len(loaded))
+	for _, u := range loaded {
+		if u != nil {
+			allUsers = append(allUsers, u)
+		}
 	}
 
 	// Apply name filter if specified
@@ -260,13 +268,13 @@ func (r *caseResolver) Reporter(ctx context.Context, obj *graphql1.Case) (*graph
 		return nil, nil
 	}
 	loaders := GetDataLoaders(ctx)
-	users, err := loaders.SlackUserLoader.Load(ctx, []string{*obj.ReporterID})
+	user, err := loaders.SlackUser.Load(ctx, *obj.ReporterID)()
 	if err != nil {
 		return nil, err
 	}
-	if len(users) == 0 {
+	if user == nil {
 		// A reporter ID with no corresponding SlackUser is a real
-		// failure mode (repo never synced, ID drifted, etc.) — return
+		// failure mode (repo never synced, ID drifted, etc.) - return
 		// a field-level GraphQL error so the client sees the failure
 		// and the empty Reporter cell is no longer indistinguishable
 		// from "no reporter recorded". dataloader.go already reports
@@ -278,7 +286,7 @@ func (r *caseResolver) Reporter(ctx context.Context, obj *graphql1.Case) (*graph
 			goerr.V("case_id", obj.ID),
 		)
 	}
-	return users[0], nil
+	return user, nil
 }
 
 // Assignees is the resolver for the assignees field.
@@ -287,7 +295,23 @@ func (r *caseResolver) Assignees(ctx context.Context, obj *graphql1.Case) ([]*gr
 		return []*graphql1.SlackUser{}, nil
 	}
 	loaders := GetDataLoaders(ctx)
-	return loaders.SlackUserLoader.Load(ctx, obj.AssigneeIDs)
+	loaded, errs := loaders.SlackUser.LoadMany(ctx, obj.AssigneeIDs)()
+	for _, e := range errs {
+		if e != nil {
+			return nil, e
+		}
+	}
+	// Drop nil entries: the schema declares assignees as
+	// [SlackUser!]!, so nil elements would blow up GraphQL
+	// marshalling for the whole list. The missing IDs were already
+	// reported via errutil.Handle inside the batch function.
+	result := make([]*graphql1.SlackUser, 0, len(loaded))
+	for _, u := range loaded {
+		if u != nil {
+			result = append(result, u)
+		}
+	}
+	return result, nil
 }
 
 // SlackChannelName is the resolver for the slackChannelName field.
@@ -295,19 +319,8 @@ func (r *caseResolver) SlackChannelName(ctx context.Context, obj *graphql1.Case)
 	if obj.SlackChannelID == nil || *obj.SlackChannelID == "" {
 		return nil, nil
 	}
-	slackSvc := r.UseCases.SlackService()
-	if slackSvc == nil {
-		return nil, nil
-	}
-	names, err := slackSvc.GetChannelNames(ctx, []string{*obj.SlackChannelID})
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to get Slack channel name",
-			goerr.V("channel_id", *obj.SlackChannelID))
-	}
-	if name, ok := names[*obj.SlackChannelID]; ok {
-		return &name, nil
-	}
-	return nil, nil
+	loaders := GetDataLoaders(ctx)
+	return loaders.SlackChannelName.Load(ctx, *obj.SlackChannelID)()
 }
 
 // SlackChannelURL is the resolver for the slackChannelURL field.
@@ -347,14 +360,10 @@ func (r *caseResolver) Actions(ctx context.Context, obj *graphql1.Case, filter *
 
 	scope := actionArchiveFilterToScope(filter)
 	loaders := GetDataLoaders(ctx)
-	loader := loaders.actionsByCaseLoaderForScope(scope)
-	actionsMap, err := loader.Load(ctx, obj.WorkspaceID, []int64{int64(obj.ID)})
+	loader := loaders.ActionsByCaseLoaderForScope(scope)
+	actions, err := loader.Load(ctx, MakeActionsByCaseKey(obj.WorkspaceID, int64(obj.ID)))()
 	if err != nil {
 		return nil, err
-	}
-	actions, ok := actionsMap[int64(obj.ID)]
-	if !ok {
-		return []*graphql1.Action{}, nil
 	}
 
 	// Convert domain Actions to GraphQL Actions
