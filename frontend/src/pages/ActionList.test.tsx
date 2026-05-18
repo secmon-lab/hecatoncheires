@@ -107,10 +107,10 @@ function LocationProbe() {
   return null
 }
 
-function renderAt(path: string) {
+function renderAt(path: string, configMock = fieldConfigMock) {
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <MockedProvider mocks={[fieldConfigMock, actionsMock]}>
+      <MockedProvider mocks={[configMock, actionsMock]}>
         <I18nProvider defaultLang="en">
           <Routes>
             <Route path="/ws/:workspaceId/actions" element={<ActionList />} />
@@ -181,6 +181,25 @@ describe('ActionList case filter', () => {
       expect(screen.getAllByTestId('action-card')).toHaveLength(3)
     })
     expect(screen.queryByTestId('action-case-filter-chip')).not.toBeInTheDocument()
+  })
+
+  it('uses the workspace-configured case label in the filter chip', async () => {
+    const customConfig = {
+      ...fieldConfigMock,
+      result: {
+        data: {
+          fieldConfiguration: {
+            ...fieldConfigMock.result.data.fieldConfiguration,
+            labels: { __typename: 'FieldLabels', case: 'Risk' },
+          },
+        },
+      },
+    }
+    renderAt('/ws/risk/actions/case/3', customConfig)
+    const chip = await screen.findByTestId('action-case-filter-chip')
+    await waitFor(() => {
+      expect(chip).toHaveTextContent('Risk: #3 GitHub incident')
+    })
   })
 
   it('combines text search with case filter (AND)', async () => {

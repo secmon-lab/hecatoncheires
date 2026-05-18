@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@apollo/client'
 import { GET_OPEN_CASE_ACTIONS, UPDATE_ACTION } from '../graphql/action'
+import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
 import { useActionStatuses } from '../hooks/useActionStatuses'
@@ -78,6 +79,11 @@ export default function ActionList() {
     variables: { workspaceId: currentWorkspace?.id },
     skip: !currentWorkspace,
   })
+  const { data: configData } = useQuery(GET_FIELD_CONFIGURATION, {
+    variables: { workspaceId: currentWorkspace?.id },
+    skip: !currentWorkspace,
+  })
+  const caseLabel = configData?.fieldConfiguration?.labels?.case || 'Case'
   const [updateAction] = useMutation(UPDATE_ACTION, {
     refetchQueries: [{ query: GET_OPEN_CASE_ACTIONS, variables: { workspaceId: currentWorkspace?.id } }],
   })
@@ -179,13 +185,13 @@ export default function ActionList() {
           >
             <span>
               {filteredCase
-                ? t('filterByCase', { id: String(filterCaseId), title: filteredCase.title })
-                : t('filterByCaseUnknown', { id: String(filterCaseId) })}
+                ? t('filterByCase', { caseLabel, id: String(filterCaseId), title: filteredCase.title })
+                : t('filterByCaseUnknown', { caseLabel, id: String(filterCaseId) })}
             </span>
             <button
               type="button"
               className={styles.caseFilterChipClose}
-              aria-label={t('ariaClearCaseFilter')}
+              aria-label={t('ariaClearCaseFilter', { caseLabel })}
               data-testid="action-case-filter-clear"
               onClick={() => navigate(rootUrl)}
             >
@@ -243,7 +249,7 @@ export default function ActionList() {
                         type="button"
                         className={`case-link ${styles.caseLinkButton}`}
                         data-testid="action-card-case-link"
-                        aria-label={t('ariaFilterByCase', { id: String(a.case.id) })}
+                        aria-label={t('ariaFilterByCase', { caseLabel, id: String(a.case.id) })}
                         onClick={(e) => {
                           e.stopPropagation()
                           if (filterCaseId === a.case!.id) return
