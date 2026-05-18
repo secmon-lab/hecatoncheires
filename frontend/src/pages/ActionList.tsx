@@ -65,11 +65,14 @@ export default function ActionList() {
     return Number.isFinite(n) && n > 0 ? n : null
   }, [caseId])
 
+  const rootUrl = useMemo(() => {
+    return currentWorkspace ? `/ws/${currentWorkspace.id}/actions` : ''
+  }, [currentWorkspace])
+
   const baseUrl = useMemo(() => {
-    if (!currentWorkspace) return ''
-    const base = `/ws/${currentWorkspace.id}/actions`
-    return filterCaseId != null ? `${base}/case/${filterCaseId}` : base
-  }, [currentWorkspace, filterCaseId])
+    if (!rootUrl) return ''
+    return filterCaseId != null ? `${rootUrl}/case/${filterCaseId}` : rootUrl
+  }, [rootUrl, filterCaseId])
 
   const { data } = useQuery(GET_OPEN_CASE_ACTIONS, {
     variables: { workspaceId: currentWorkspace?.id },
@@ -184,7 +187,7 @@ export default function ActionList() {
               className={styles.caseFilterChipClose}
               aria-label={t('ariaClearCaseFilter')}
               data-testid="action-case-filter-clear"
-              onClick={() => navigate(`/ws/${currentWorkspace!.id}/actions`)}
+              onClick={() => navigate(rootUrl)}
             >
               <IconX size={11} />
             </button>
@@ -244,7 +247,7 @@ export default function ActionList() {
                         onClick={(e) => {
                           e.stopPropagation()
                           if (filterCaseId === a.case!.id) return
-                          navigate(`/ws/${currentWorkspace!.id}/actions/case/${a.case!.id}`)
+                          navigate(`${rootUrl}/case/${a.case!.id}`)
                         }}
                       >
                         #{a.case.id} {a.case.title}
