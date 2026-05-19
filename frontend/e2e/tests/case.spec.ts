@@ -229,12 +229,16 @@ test.describe('Case Management', () => {
     const caseListPage = new CaseListPage(page);
     const caseFormPage = new CaseFormPage(page);
 
-    // Create multiple cases
+    // Use a unique prefix so this test stays robust when the backend
+    // already holds cases from other tests / workers — the list view is
+    // paginated and a generic "Case N" title could fall off page 1 once
+    // enough unrelated rows exist (root cause of an earlier flaky run).
+    const prefix = `Listed-${Date.now()}`;
     const caseCount = 3;
     for (let i = 1; i <= caseCount; i++) {
       await caseListPage.clickNewCaseButton();
       await caseFormPage.createCase({
-        title: `Case ${i}`,
+        title: `${prefix} ${i}`,
         description: `Description for case ${i}`,
         customFields: {
           category: 'task',
@@ -246,9 +250,12 @@ test.describe('Case Management', () => {
     await page.reload();
     await caseListPage.waitForTableLoad();
 
-    // Verify all cases are listed
+    // Verify all cases are listed. Filter by exact title every time so
+    // pagination cannot hide the row.
     for (let i = 1; i <= caseCount; i++) {
-      const exists = await caseListPage.caseExists(`Case ${i}`);
+      const title = `${prefix} ${i}`;
+      await caseListPage.fillSearchFilter(title);
+      const exists = await caseListPage.caseExists(title);
       expect(exists).toBeTruthy();
     }
   });
