@@ -453,6 +453,15 @@ export default function CaseDetail() {
                 </>
               )}
               <span className="spacer" />
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={<IconExt size={11} />}
+                onClick={() => navigate(`/ws/${currentWorkspace!.id}/actions/case/${c.id}`)}
+                data-testid="case-open-in-actions"
+              >
+                {t('linkOpenInActionList')}
+              </Button>
               {actionView === 'open' && (
                 <Button
                   size="sm"
