@@ -222,10 +222,14 @@ export const ja: Messages = {
   placeholderAddStatus: 'ステータスを選択...',
   labelDueDate: '期限',
   caseLinkLabel: 'ケース #{id} · {title}',
-  filterByCase: '{caseLabel}: #{id} {title}',
-  filterByCaseUnknown: '{caseLabel}: #{id}',
   ariaFilterByCase: '{caseLabel} #{id} で絞り込み',
-  ariaClearCaseFilter: '{caseLabel}絞り込みを解除',
+  labelCaseFilter: '{caseLabel}',
+  filterAllCases: 'すべての{caseLabel}',
+  placeholderSearchCases: 'ID・タイトルで検索…',
+  emptyCaseSearch: '該当なし',
+  ariaSelectCaseFilter: '{caseLabel}でアクションを絞り込み',
+  ariaSearchCases: '{caseLabel}を検索',
+  linkOpenInActionList: 'アクション一覧で見る',
 
   // Action Steps
   sectionActionSteps: 'ステップ',

@@ -222,10 +222,14 @@ export const en: Messages = {
   placeholderAddStatus: 'Set status...',
   labelDueDate: 'Due Date',
   caseLinkLabel: 'Case #{id} · {title}',
-  filterByCase: '{caseLabel}: #{id} {title}',
-  filterByCaseUnknown: '{caseLabel}: #{id}',
   ariaFilterByCase: 'Filter by {caseLabel} #{id}',
-  ariaClearCaseFilter: 'Clear {caseLabel} filter',
+  labelCaseFilter: '{caseLabel}',
+  filterAllCases: 'All {caseLabel}',
+  placeholderSearchCases: 'Search by ID or title…',
+  emptyCaseSearch: 'No matches',
+  ariaSelectCaseFilter: 'Filter actions by {caseLabel}',
+  ariaSearchCases: 'Search {caseLabel}',
+  linkOpenInActionList: 'Open in action list',
 
   // Action Steps
   sectionActionSteps: 'Steps',

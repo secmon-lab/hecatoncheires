@@ -220,10 +220,14 @@ export const msgKeys = {
   placeholderAddStatus: 'placeholderAddStatus',
   labelDueDate: 'labelDueDate',
   caseLinkLabel: 'caseLinkLabel',
-  filterByCase: 'filterByCase',
-  filterByCaseUnknown: 'filterByCaseUnknown',
   ariaFilterByCase: 'ariaFilterByCase',
-  ariaClearCaseFilter: 'ariaClearCaseFilter',
+  labelCaseFilter: 'labelCaseFilter',
+  filterAllCases: 'filterAllCases',
+  placeholderSearchCases: 'placeholderSearchCases',
+  emptyCaseSearch: 'emptyCaseSearch',
+  ariaSelectCaseFilter: 'ariaSelectCaseFilter',
+  ariaSearchCases: 'ariaSearchCases',
+  linkOpenInActionList: 'linkOpenInActionList',
 
   // Action Steps
   sectionActionSteps: 'sectionActionSteps',

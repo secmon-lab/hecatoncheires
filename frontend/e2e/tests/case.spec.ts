@@ -103,6 +103,46 @@ test.describe('Case Management', () => {
     expect(description).toContain('Updated description');
   });
 
+  test('should navigate from case detail to the filtered action list', async ({ page }) => {
+    const caseListPage = new CaseListPage(page);
+    const caseFormPage = new CaseFormPage(page);
+    const caseDetailPage = new CaseDetailPage(page);
+
+    // Create a case to land on its detail page.
+    await caseListPage.clickNewCaseButton();
+    await caseFormPage.createCase({
+      title: 'Case With Action Link',
+      description: 'Cross-link to action list',
+      customFields: {
+        category: 'bug',
+      },
+    });
+
+    await caseListPage.waitForTableLoad();
+    await caseListPage.fillSearchFilter('Case With Action Link');
+    await caseListPage.clickCaseByTitle('Case With Action Link');
+    await caseDetailPage.waitForPageLoad();
+
+    // The "Open in action list" link must be visible on the OPEN case.
+    const linkVisible = await caseDetailPage.isOpenInActionsLinkVisible();
+    expect(linkVisible).toBeTruthy();
+
+    // Capture the numeric case id straight from the URL so the assertion
+    // doesn't rely on the synthetic order the API hands back.
+    const detailMatch = page.url().match(/\/cases\/(\d+)/);
+    expect(detailMatch).not.toBeNull();
+    const caseId = detailMatch![1];
+
+    await caseDetailPage.clickOpenInActions();
+    expect(page.url()).toContain(`/actions/case/${caseId}`);
+
+    // The action-list page should mark this case as the active filter on
+    // the new searchable dropdown.
+    const trigger = page.getByTestId('action-case-filter-trigger');
+    await trigger.waitFor({ state: 'visible', timeout: 5000 });
+    await expect(trigger).toContainText(`#${caseId}`);
+  });
+
   test('should not display Slack channel button when slackChannelID is empty', async ({ page }) => {
     const caseListPage = new CaseListPage(page);
     const caseFormPage = new CaseFormPage(page);
@@ -189,12 +229,16 @@ test.describe('Case Management', () => {
     const caseListPage = new CaseListPage(page);
     const caseFormPage = new CaseFormPage(page);
 
-    // Create multiple cases
+    // Use a unique prefix so this test stays robust when the backend
+    // already holds cases from other tests / workers — the list view is
+    // paginated and a generic "Case N" title could fall off page 1 once
+    // enough unrelated rows exist (root cause of an earlier flaky run).
+    const prefix = `Listed-${Date.now()}`;
     const caseCount = 3;
     for (let i = 1; i <= caseCount; i++) {
       await caseListPage.clickNewCaseButton();
       await caseFormPage.createCase({
-        title: `Case ${i}`,
+        title: `${prefix} ${i}`,
         description: `Description for case ${i}`,
         customFields: {
           category: 'task',
@@ -206,9 +250,12 @@ test.describe('Case Management', () => {
     await page.reload();
     await caseListPage.waitForTableLoad();
 
-    // Verify all cases are listed
+    // Verify all cases are listed. Filter by exact title every time so
+    // pagination cannot hide the row.
     for (let i = 1; i <= caseCount; i++) {
-      const exists = await caseListPage.caseExists(`Case ${i}`);
+      const title = `${prefix} ${i}`;
+      await caseListPage.fillSearchFilter(title);
+      const exists = await caseListPage.caseExists(title);
       expect(exists).toBeTruthy();
     }
   });

@@ -360,4 +360,22 @@ export class CaseDetailPage extends BasePage {
     return await this.page.locator('h3').filter({ hasText: 'No actions yet' }).first().isVisible()
       .catch(() => false);
   }
+
+  /**
+   * True when the "Open in action list" link is visible in the Related
+   * Actions section header. The link is hidden for DRAFT cases because
+   * the entire section is hidden in that state.
+   */
+  async isOpenInActionsLinkVisible(): Promise<boolean> {
+    return await this.page.getByTestId('case-open-in-actions').isVisible().catch(() => false);
+  }
+
+  /**
+   * Click the "Open in action list" link in the Related Actions section
+   * header. Resolves once the URL has switched to the actions list page.
+   */
+  async clickOpenInActions(): Promise<void> {
+    await this.page.getByTestId('case-open-in-actions').click();
+    await this.page.waitForURL(/\/actions\/case\/\d+/, { timeout: 5000 });
+  }
 }

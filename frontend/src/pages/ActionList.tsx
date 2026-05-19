@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@apollo/client'
 import { GET_ACTIONS_BY_CASE, GET_OPEN_CASE_ACTIONS, UPDATE_ACTION } from '../graphql/action'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
+import { GET_CASES } from '../graphql/case'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
 import { useActionStatuses } from '../hooks/useActionStatuses'
@@ -14,9 +15,9 @@ import Button from '../components/Button'
 import {
   IconPlus,
   IconSearch,
-  IconX,
 } from '../components/Icons'
 import { Avatar } from '../components/Primitives'
+import CaseFilterSelect from '../components/CaseFilterSelect'
 import { activateOnEnterOrSpace } from '../utils/keyboard'
 import ActionForm from './ActionForm'
 import ActionModal from './ActionModal'
@@ -87,6 +88,10 @@ export default function ActionList() {
     variables: { workspaceId: currentWorkspace?.id },
     skip: !currentWorkspace,
   })
+  const { data: casesData } = useQuery(GET_CASES, {
+    variables: { workspaceId: currentWorkspace?.id, status: 'OPEN' },
+    skip: !currentWorkspace,
+  })
   const caseLabel = configData?.fieldConfiguration?.labels?.case || 'Case'
   const [updateAction] = useMutation(UPDATE_ACTION, {
     refetchQueries: [
@@ -100,10 +105,27 @@ export default function ActionList() {
     if (filterCaseId != null) return byCaseData?.actionsByCase || []
     return openData?.openCaseActions || []
   }, [filterCaseId, byCaseData, openData])
-  const filteredCase = useMemo(() => {
+
+  const openCases = useMemo(
+    () =>
+      (casesData?.cases ?? []).map((c: { id: number; title: string }) => ({
+        id: c.id,
+        title: c.title,
+      })),
+    [casesData],
+  )
+
+  // Cases not present in the OPEN list (e.g. CLOSED / DRAFT cases the user
+  // landed on via a direct URL) still need to render in the dropdown so the
+  // selected value isn't "All". Fall back to the case info attached to the
+  // first action returned by GET_ACTIONS_BY_CASE.
+  const extraOption = useMemo(() => {
     if (filterCaseId == null) return null
-    return actions.find((a) => a.case)?.case ?? null
-  }, [actions, filterCaseId])
+    if (openCases.some((c: { id: number }) => c.id === filterCaseId)) return null
+    const fromActions = actions.find((a) => a.case)?.case
+    if (fromActions) return { id: fromActions.id, title: fromActions.title }
+    return { id: filterCaseId, title: '' }
+  }, [filterCaseId, openCases, actions])
   const filtered = useMemo(() => {
     if (!search.trim()) return actions
     const q = search.toLowerCase()
@@ -161,7 +183,24 @@ export default function ActionList() {
         </div>
       </div>
 
-      <div className="row" style={{ marginBottom: 12, gap: 12, flexWrap: 'wrap' }}>
+      <div className="row" style={{ marginBottom: 12, gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <CaseFilterSelect
+          cases={openCases}
+          selectedCaseId={filterCaseId}
+          onSelect={(id) => {
+            if (!rootUrl) return
+            if (id == null) navigate(rootUrl)
+            else navigate(`${rootUrl}/case/${id}`)
+          }}
+          caseLabel={t('labelCaseFilter', { caseLabel })}
+          allLabel={t('filterAllCases', { caseLabel })}
+          searchPlaceholder={t('placeholderSearchCases')}
+          emptyLabel={t('emptyCaseSearch')}
+          triggerAriaLabel={t('ariaSelectCaseFilter', { caseLabel })}
+          searchAriaLabel={t('ariaSearchCases', { caseLabel })}
+          extraOption={extraOption}
+          testId="action-case-filter"
+        />
         <div className="h-search" style={{ width: 280, marginLeft: 0 }}>
           <IconSearch size={13} />
           <input
@@ -184,27 +223,6 @@ export default function ActionList() {
           >
             {t('btnClear')}
           </Button>
-        )}
-        {filterCaseId != null && (
-          <span
-            className={styles.caseFilterChip}
-            data-testid="action-case-filter-chip"
-          >
-            <span>
-              {filteredCase
-                ? t('filterByCase', { caseLabel, id: String(filterCaseId), title: filteredCase.title })
-                : t('filterByCaseUnknown', { caseLabel, id: String(filterCaseId) })}
-            </span>
-            <button
-              type="button"
-              className={styles.caseFilterChipClose}
-              aria-label={t('ariaClearCaseFilter', { caseLabel })}
-              data-testid="action-case-filter-clear"
-              onClick={() => navigate(rootUrl)}
-            >
-              <IconX size={11} />
-            </button>
-          </span>
         )}
       </div>
 
