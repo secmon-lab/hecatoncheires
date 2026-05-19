@@ -124,7 +124,7 @@ export default function ActionList() {
     if (openCases.some((c: { id: number }) => c.id === filterCaseId)) return null
     const fromActions = actions.find((a) => a.case)?.case
     if (fromActions) return { id: fromActions.id, title: fromActions.title }
-    return { id: filterCaseId, title: `#${filterCaseId}` }
+    return { id: filterCaseId, title: '' }
   }, [filterCaseId, openCases, actions])
   const filtered = useMemo(() => {
     if (!search.trim()) return actions

@@ -77,6 +77,20 @@ describe('CaseFilterSelect', () => {
     expect(onSelect).toHaveBeenCalledWith(null)
   })
 
+  it('renders only "#id" on the trigger when the selected case has an empty title', () => {
+    render(
+      <CaseFilterSelect
+        {...baseProps}
+        cases={[]}
+        selectedCaseId={42}
+        onSelect={() => {}}
+        extraOption={{ id: 42, title: '' }}
+      />,
+    )
+    // No trailing space, no duplicated "#id #id".
+    expect(screen.getByTestId('case-filter-trigger')).toHaveTextContent('Case#42')
+  })
+
   it('shows an extraOption that is not in the main list', () => {
     const onSelect = vi.fn()
     render(

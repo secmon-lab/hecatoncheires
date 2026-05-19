@@ -149,7 +149,7 @@ export default function CaseFilterSelect({
 
   const triggerLabel = caseLabel
   const triggerValue = selectedOption
-    ? `#${selectedOption.id} ${selectedOption.title}`
+    ? [`#${selectedOption.id}`, selectedOption.title].filter(Boolean).join(' ')
     : allLabel
 
   return (
