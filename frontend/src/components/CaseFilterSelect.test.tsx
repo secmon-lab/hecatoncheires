@@ -66,6 +66,12 @@ describe('CaseFilterSelect', () => {
     // Full text is mirrored to the trigger's title attribute so ellipsised
     // long titles remain inspectable via hover / focus.
     expect(trigger).toHaveAttribute('title', '#2 Server outage')
+    // Selected state is also reflected in aria-label so a screen reader
+    // user hears the active filter when the trigger receives focus.
+    expect(trigger).toHaveAttribute(
+      'aria-label',
+      'Filter actions by Case: #2 Server outage',
+    )
   })
 
   it('does not render a chip when nothing is selected and omits the title attribute', () => {
@@ -78,7 +84,11 @@ describe('CaseFilterSelect', () => {
       />,
     )
     expect(screen.queryByTestId('case-filter-chip')).toBeNull()
-    expect(screen.getByTestId('case-filter-trigger')).not.toHaveAttribute('title')
+    const trigger = screen.getByTestId('case-filter-trigger')
+    expect(trigger).not.toHaveAttribute('title')
+    // Unselected state falls back to the static aria-label so the trigger
+    // still announces its purpose.
+    expect(trigger).toHaveAttribute('aria-label', 'Filter actions by Case')
   })
 
   it('opens the popover, lists the cases, and invokes onSelect for a clicked item', () => {

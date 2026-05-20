@@ -160,7 +160,11 @@ export default function CaseFilterSelect({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={triggerAriaLabel}
+        aria-label={
+          selectedFullText
+            ? `${triggerAriaLabel}: ${selectedFullText}`
+            : triggerAriaLabel
+        }
         data-testid={testId ? `${testId}-trigger` : undefined}
         title={selectedFullText || undefined}
       >
