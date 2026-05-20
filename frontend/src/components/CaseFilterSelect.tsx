@@ -148,9 +148,9 @@ export default function CaseFilterSelect({
   }
 
   const triggerLabel = caseLabel
-  const triggerValue = selectedOption
+  const selectedFullText = selectedOption
     ? [`#${selectedOption.id}`, selectedOption.title].filter(Boolean).join(' ')
-    : allLabel
+    : ''
 
   return (
     <div className="h-filter-dd" ref={rootRef} data-testid={testId}>
@@ -160,11 +160,28 @@ export default function CaseFilterSelect({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={triggerAriaLabel}
+        aria-label={
+          selectedFullText
+            ? `${triggerAriaLabel}: ${selectedFullText}`
+            : triggerAriaLabel
+        }
         data-testid={testId ? `${testId}-trigger` : undefined}
+        title={selectedFullText || undefined}
       >
         <span className="h-filter-dd-label">{triggerLabel}</span>
-        <span className="h-filter-dd-value">{triggerValue}</span>
+        {selectedOption ? (
+          <span
+            className={styles.selectedChip}
+            data-testid={testId ? `${testId}-chip` : undefined}
+          >
+            <span className={styles.chipId}>#{selectedOption.id}</span>
+            {selectedOption.title && (
+              <span className={styles.chipTitle}>{selectedOption.title}</span>
+            )}
+          </span>
+        ) : (
+          <span className="h-filter-dd-value">{allLabel}</span>
+        )}
         <IconChevDown size={12} />
       </button>
       {open && (
