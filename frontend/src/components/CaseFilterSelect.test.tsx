@@ -42,7 +42,43 @@ describe('CaseFilterSelect', () => {
         onSelect={() => {}}
       />,
     )
-    expect(screen.getByTestId('case-filter-trigger')).toHaveTextContent('#2 Server outage')
+    // The trigger now renders #id and title as separate spans inside the chip;
+    // assert each piece individually rather than the joined string.
+    const chip = screen.getByTestId('case-filter-chip')
+    expect(chip).toHaveTextContent('#2')
+    expect(chip).toHaveTextContent('Server outage')
+  })
+
+  it('renders a chip with the full title-attribute fallback when a case is selected', () => {
+    render(
+      <CaseFilterSelect
+        {...baseProps}
+        cases={cases}
+        selectedCaseId={2}
+        onSelect={() => {}}
+      />,
+    )
+    const trigger = screen.getByTestId('case-filter-trigger')
+    const chip = screen.getByTestId('case-filter-chip')
+    expect(chip).toBeInTheDocument()
+    expect(chip).toHaveTextContent('#2')
+    expect(chip).toHaveTextContent('Server outage')
+    // Full text is mirrored to the trigger's title attribute so ellipsised
+    // long titles remain inspectable via hover / focus.
+    expect(trigger).toHaveAttribute('title', '#2 Server outage')
+  })
+
+  it('does not render a chip when nothing is selected and omits the title attribute', () => {
+    render(
+      <CaseFilterSelect
+        {...baseProps}
+        cases={cases}
+        selectedCaseId={null}
+        onSelect={() => {}}
+      />,
+    )
+    expect(screen.queryByTestId('case-filter-chip')).toBeNull()
+    expect(screen.getByTestId('case-filter-trigger')).not.toHaveAttribute('title')
   })
 
   it('opens the popover, lists the cases, and invokes onSelect for a clicked item', () => {

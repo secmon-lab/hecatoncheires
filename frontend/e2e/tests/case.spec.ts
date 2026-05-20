@@ -141,6 +141,19 @@ test.describe('Case Management', () => {
     const trigger = page.getByTestId('action-case-filter-trigger');
     await trigger.waitFor({ state: 'visible', timeout: 5000 });
     await expect(trigger).toContainText(`#${caseId}`);
+
+    // The selected value should render as a visually distinct chip
+    // (vs. the muted "All Case" state), and the full "#id title" string
+    // should be exposed via the trigger's `title` attribute so an
+    // ellipsised long title stays inspectable.
+    const chip = page.getByTestId('action-case-filter-chip');
+    await expect(chip).toBeVisible();
+    await expect(chip).toContainText(`#${caseId}`);
+    await expect(chip).toContainText('Case With Action Link');
+    await expect(trigger).toHaveAttribute(
+      'title',
+      `#${caseId} Case With Action Link`,
+    );
   });
 
   test('should not display Slack channel button when slackChannelID is empty', async ({ page }) => {

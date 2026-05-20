@@ -197,10 +197,9 @@ describe('ActionList case filter', () => {
     await waitFor(() => {
       expect(screen.getAllByTestId('action-card')).toHaveLength(2)
     })
-    const trigger = screen.getByTestId('action-case-filter-trigger')
-    await waitFor(() => {
-      expect(trigger).toHaveTextContent('#3 GitHub incident')
-    })
+    const chip = await screen.findByTestId('action-case-filter-chip')
+    expect(chip).toHaveTextContent('#3')
+    expect(chip).toHaveTextContent('GitHub incident')
   })
 
   it('navigates to the filtered URL when the case label on a card is clicked', async () => {
@@ -265,8 +264,10 @@ describe('ActionList case filter', () => {
     const trigger = await screen.findByTestId('action-case-filter-trigger')
     await waitFor(() => {
       expect(trigger).toHaveTextContent('Risk')
-      expect(trigger).toHaveTextContent('#3 GitHub incident')
     })
+    const chip = await screen.findByTestId('action-case-filter-chip')
+    expect(chip).toHaveTextContent('#3')
+    expect(chip).toHaveTextContent('GitHub incident')
   })
 
   it('combines text search with case filter (AND)', async () => {
