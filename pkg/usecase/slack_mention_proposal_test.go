@@ -157,13 +157,46 @@ func TestMentionDraftUseCase_HandleAppMention_HappyPath(t *testing.T) {
 
 	gt.NoError(t, uc.HandleAppMention(context.Background(), ev)).Required()
 
-	// First a "processing…" thread message is posted, then it's
-	// UpdateMessage-replaced with the full preview blocks.
-	gt.Number(t, len(slackMock.threadBlockPosts)).GreaterOrEqual(1)
-	gt.Number(t, len(slackMock.updateBlockPosts)).GreaterOrEqual(1)
+	// The mention path must (a) post the "⏳ Drafting…" placeholder
+	// AND the preview as TWO distinct thread replies, with the preview
+	// landing chronologically AFTER any planner trace messages, and
+	// (b) collapse the placeholder into a completed-breadcrumb via
+	// UpdateMessage so the user is pointed at the new preview.
+	gt.Number(t, len(slackMock.threadBlockPosts)).GreaterOrEqual(2).Required()
+	var previewPost *ephemeralBlockPost
+	for i := range slackMock.threadBlockPosts {
+		if containsActionBlock(slackMock.threadBlockPosts[i].rawBlocks) {
+			previewPost = &slackMock.threadBlockPosts[i]
+			break
+		}
+	}
+	gt.Value(t, previewPost).NotNil().Required()
+	gt.Value(t, previewPost.channelID).Equal("C-USER")
+	// Title + description markdown, divider, actions at minimum.
+	gt.Number(t, len(previewPost.rawBlocks)).GreaterOrEqual(3)
+
+	// The processing placeholder must end up as the completed
+	// breadcrumb context block (block_id == mention_draft_processing_completed).
+	gt.Number(t, len(slackMock.updateBlockPosts)).GreaterOrEqual(1).Required()
 	last := slackMock.updateBlockPosts[len(slackMock.updateBlockPosts)-1]
 	gt.Value(t, last.channelID).Equal("C-USER")
-	gt.Number(t, len(last.blocks)).GreaterOrEqual(3) // title+desc markdown, divider, actions at minimum
+	gt.Array(t, last.rawBlocks).Length(1).Required()
+	completedCtx, ok := last.rawBlocks[0].(*goslack.ContextBlock)
+	gt.Bool(t, ok).True().Required()
+	gt.String(t, completedCtx.BlockID).Equal("mention_draft_processing_completed")
+}
+
+// containsActionBlock reports whether the block slice contains an
+// ActionBlock — used by tests to identify the preview post (which is the
+// only block sequence in this flow that carries Submit/Edit/Cancel
+// buttons) without depending on rendered text content.
+func containsActionBlock(blocks []goslack.Block) bool {
+	for _, b := range blocks {
+		if _, ok := b.(*goslack.ActionBlock); ok {
+			return true
+		}
+	}
+	return false
 }
 
 func TestMentionDraftUseCase_HandleAppMention_NoWorkspace_PostsError(t *testing.T) {
@@ -549,6 +582,7 @@ func (m *collectorOnlyMockSlack) PostThreadMessage(_ context.Context, channelID 
 		m.threadBlockPosts = append(m.threadBlockPosts, ephemeralBlockPost{
 			channelID: channelID,
 			blocks:    snaps,
+			rawBlocks: append([]goslack.Block(nil), blocks...),
 		})
 	} else {
 		m.threadTexts = append(m.threadTexts, text)
@@ -946,6 +980,14 @@ func TestLifecycle_DraftFlow_MaterializeThenWorkspaceSwitch(t *testing.T) {
 	// non-fatal errutil.Handle but doesn't block the planner turn).
 	respURL, _ := captureResponseURL(t)
 	cb.ResponseURL = respURL
+
+	// Count preview-shaped thread posts before turn 2 — the
+	// invariant is that this number does NOT increase across the
+	// workspace switch (a new preview at the bottom would break the
+	// "same-position morph" UX). Plain trace / planning context
+	// blocks are allowed to come and go.
+	preSwitchPreviewThreadPosts := countPreviewThreadPosts(h.slackMock.threadBlockPosts)
+
 	wsErr := h.mentionProposal.HandleSelectWorkspace(context.Background(), cb, cb.ActionCallback.BlockActions[0])
 	async.Wait()
 	gt.NoError(t, wsErr).Required()
@@ -959,6 +1001,36 @@ func TestLifecycle_DraftFlow_MaterializeThenWorkspaceSwitch(t *testing.T) {
 	// drops fields outside the active schema.
 	_, hasSeverity := d2.Materialization.CustomFieldValues["severity"]
 	gt.Bool(t, hasSeverity).False()
+
+	// Workspace switch MUST rewrite the existing preview in place — the
+	// flow does not post a fresh thread reply at the bottom (which
+	// would leave two preview rows in the thread and obscure the
+	// "same-position morph" UX). The post-switch preview must reach
+	// Slack via UpdateMessage, not PostThreadMessage. (Plain trace /
+	// planning context blocks may legitimately be posted by the
+	// planner round and are not counted here.)
+	gt.Number(t, countPreviewThreadPosts(h.slackMock.threadBlockPosts)).Equal(preSwitchPreviewThreadPosts)
+	sawWSSwitchPreview := false
+	for _, post := range h.slackMock.updateBlockPosts {
+		if containsActionBlock(post.rawBlocks) {
+			sawWSSwitchPreview = true
+		}
+	}
+	gt.Bool(t, sawWSSwitchPreview).True()
+}
+
+// countPreviewThreadPosts counts the thread posts whose blocks include
+// an ActionBlock (the Submit/Edit/Cancel button row). Plain trace lines
+// and the processing placeholder are excluded — only the preview itself
+// matches this shape.
+func countPreviewThreadPosts(posts []ephemeralBlockPost) int {
+	n := 0
+	for _, p := range posts {
+		if containsActionBlock(p.rawBlocks) {
+			n++
+		}
+	}
+	return n
 }
 
 // --- Scenario C: mention → 2 parallel investigations → materialize ---

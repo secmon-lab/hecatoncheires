@@ -86,6 +86,7 @@ var messagesEN = [msgKeyCount]string{
 	MsgProposalTraceTaskDone:           "✅ Task: %s — done (%s, %d/%d inner loops)",
 	MsgProposalTraceTaskFailedPrompt:   "❌ Task: %s — failed (%s, build prompt): %v",
 	MsgProposalTraceTaskFailed:         "❌ Task: %s — failed (%s, %d/%d inner loops): %v",
+	MsgProposalProcessingCompleted:     "✅ Drafted — see the preview below.",
 
 	// Bookmark
 	MsgBookmarkOpenCase: "Open Case",
@@ -218,6 +219,7 @@ var messagesJA = [msgKeyCount]string{
 	MsgProposalTraceTaskDone:           "✅ タスク: %s — 完了 (%s, %d/%d 内部ループ)",
 	MsgProposalTraceTaskFailedPrompt:   "❌ タスク: %s — 失敗 (%s, プロンプト構築): %v",
 	MsgProposalTraceTaskFailed:         "❌ タスク: %s — 失敗 (%s, %d/%d 内部ループ): %v",
+	MsgProposalProcessingCompleted:     "✅ ドラフトを作成しました。下のプレビューをご確認ください。",
 
 	// Bookmark
 	MsgBookmarkOpenCase: "ケースを開く",

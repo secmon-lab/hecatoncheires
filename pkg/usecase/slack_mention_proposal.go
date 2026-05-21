@@ -161,7 +161,7 @@ func (uc *MentionProposalUseCase) HandleAppMention(ctx context.Context, ev *slac
 	handler := newSlackDraftHandler(
 		uc.repo, uc.registry, uc.slackService,
 		ev.Channel, threadTS, ev.TimeStamp, ev.User,
-		candidates, d.ID, processingTS,
+		candidates, d.ID, processingTS, "",
 	)
 
 	userInput := buildProposalUserInput(d, ev.Text, channelInfo)
@@ -384,7 +384,7 @@ func (uc *MentionProposalUseCase) HandleThreadReply(ctx context.Context, ev *sla
 	handler := newSlackDraftHandler(
 		uc.repo, uc.registry, uc.slackService,
 		ev.Channel, threadTS, ev.TimeStamp, ev.User,
-		candidates, proposalID, "",
+		candidates, proposalID, "", "",
 	)
 
 	result, runErr := uc.draftUC.RunTurn(ctx, draft.TurnRequest{
@@ -621,8 +621,12 @@ func buildCaseCreatedTailBlocks(ctx context.Context, created *model.Case) ([]gos
 
 // buildProcessingContextBlocks renders an immediate "processing…" placeholder
 // posted right after a mention is received and before the (slow) LLM call.
-// It is later UpdateMessage-replaced with the full preview, or DeleteMessage'd
-// on early-failure paths (no workspace / collection failure / etc).
+// On the happy path the placeholder is later replaced with the "drafted —
+// see preview below" breadcrumb (see buildProcessingCompletedBlocks); on
+// early-failure paths it is replaced with the "flow ended" breadcrumb
+// (see removeProcessingMessage). The preview itself is always posted as
+// a fresh thread reply at the bottom so it sits chronologically after
+// the planner trace messages.
 func buildProcessingContextBlocks() ([]goslack.Block, string) {
 	ctxBlock := goslack.NewContextBlock(
 		"mention_draft_processing_ctx",
@@ -632,6 +636,21 @@ func buildProcessingContextBlocks() ([]goslack.Block, string) {
 		),
 	)
 	return []goslack.Block{ctxBlock}, "Drafting a Case…"
+}
+
+// buildProcessingCompletedBlocks renders the placeholder state shown after
+// Materialize has posted the preview as a fresh message at the thread end.
+// Updating (rather than deleting) the placeholder leaves a visible
+// breadcrumb at the position the user first looked at, pointing them to
+// the new preview further down — the bot does not always have the scopes
+// required by chat.delete, so an update is the most reliable cleanup.
+func buildProcessingCompletedBlocks(ctx context.Context) ([]goslack.Block, string) {
+	text := i18n.T(ctx, i18n.MsgProposalProcessingCompleted)
+	ctxBlock := goslack.NewContextBlock(
+		"mention_draft_processing_completed",
+		goslack.NewTextBlockObject(goslack.MarkdownType, text, false, false),
+	)
+	return []goslack.Block{ctxBlock}, text
 }
 
 // removeProcessingMessage replaces the placeholder with a single context line

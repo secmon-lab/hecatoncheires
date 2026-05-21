@@ -39,13 +39,22 @@ type slackDraftHandler struct {
 	// (sub-agent fan-out, planner main thread) cannot interleave Slack
 	// posts mid-event.
 	processingMu sync.Mutex
-	// processingTS is the TS of the initial "processing…" placeholder
-	// that HandleAppMention posts at mention time. It is NOT used as a
-	// rolling progress buffer; it is updated exactly once at
-	// Materialize, when the placeholder is replaced with the preview
-	// blocks. Phase-trace lines are posted as fresh thread replies
-	// (see Trace) and never touch this TS.
+	// processingTS is the TS of the initial "⏳ Drafting…" placeholder
+	// that HandleAppMention posts at mention time. On the mention
+	// path, Materialize posts the preview as a fresh thread reply at
+	// the bottom (so it sits AFTER the planner trace messages) and
+	// collapses this placeholder into a short breadcrumb pointing
+	// readers to the new preview. Phase-trace lines are posted as
+	// fresh thread replies (see Trace) and never touch this TS.
 	processingTS string
+	// previewTS is set only on the workspace-switch path
+	// (HandleSelectWorkspace) and carries the TS of the EXISTING
+	// preview message the user clicked on. Materialize updates that
+	// message in place so the switch reads as a same-position rewrite,
+	// preserving the original UX where the preview "morphs" into the
+	// new workspace's content. previewTS and processingTS are mutually
+	// exclusive — at most one is set per turn.
+	previewTS string
 	// taskTS holds the Slack message TS for each registered task. Each
 	// task is posted as its own thread reply so that subsequent
 	// per-task updates land in place — the message stays anchored at
@@ -63,7 +72,18 @@ type slackDraftHandler struct {
 }
 
 // newSlackDraftHandler builds a per-turn handler with the host context the
-// draft runtime needs.
+// draft runtime needs. processingTS and previewTS are mutually exclusive:
+//
+//   - processingTS: mention path. The "⏳ Drafting…" placeholder TS;
+//     Materialize collapses it into a breadcrumb after posting the
+//     preview as a fresh thread reply at the bottom.
+//   - previewTS: workspace-switch path. The TS of the existing preview
+//     message the user clicked on; Materialize updates that message in
+//     place so the switch reads as a same-position rewrite.
+//
+// Pass "" for both on paths that have no anchor (e.g. thread-reply
+// resume, question-answer resume) — Materialize then just posts a
+// fresh preview at the thread end.
 func newSlackDraftHandler(
 	repo interfaces.Repository,
 	registry *model.WorkspaceRegistry,
@@ -71,7 +91,7 @@ func newSlackDraftHandler(
 	channelID, threadTS, mentionTS, creatorUser string,
 	candidates []*model.WorkspaceEntry,
 	proposalID model.CaseProposalID,
-	processingTS string,
+	processingTS, previewTS string,
 ) *slackDraftHandler {
 	return &slackDraftHandler{
 		repo:         repo,
@@ -84,6 +104,7 @@ func newSlackDraftHandler(
 		proposalID:   proposalID,
 		mentionTS:    mentionTS,
 		processingTS: processingTS,
+		previewTS:    previewTS,
 	}
 }
 
@@ -197,22 +218,32 @@ func (h *slackDraftHandler) Materialize(ctx context.Context, ssn *model.Session,
 
 	blocks, fallback := buildPreviewBlocks(d, entry, h.candidates)
 
-	// Update the in-place processing message into the preview if we have
-	// one; otherwise post a fresh message.
 	h.processingMu.Lock()
 	processingTS := h.processingTS
+	previewTS := h.previewTS
 	h.processingMu.Unlock()
 
 	var ts string
-	if processingTS != "" {
-		if err := h.slackService.UpdateMessage(ctx, h.channelID, processingTS, blocks, fallback); err != nil {
-			errutil.Handle(ctx, goerr.Wrap(err, "update processing message into preview"),
-				"falling back to fresh thread post")
-		} else {
-			ts = processingTS
+	switch {
+	case previewTS != "":
+		// Workspace-switch path: rewrite the preview the user clicked
+		// on in place so the switch reads as a same-position morph.
+		if err := h.slackService.UpdateMessage(ctx, h.channelID, previewTS, blocks, fallback); err != nil {
+			return goerr.Wrap(err, "update preview in place on workspace switch",
+				goerr.V("channel_id", h.channelID),
+				goerr.V("preview_ts", previewTS),
+			)
 		}
-	}
-	if ts == "" {
+		ts = previewTS
+	default:
+		// Mention / thread-reply path: post the preview as a fresh
+		// thread reply so it sits chronologically AFTER the planner
+		// trace messages (RegisterTasks / Trace / TraceRound) that
+		// have already been posted during this turn. Slack orders
+		// thread replies by their original `ts`; updating the
+		// processing-placeholder TS in place (as the prior
+		// implementation did) kept the preview pinned at the
+		// mention-time position above every trace line.
 		newTS, err := h.slackService.PostThreadMessage(ctx, h.channelID, h.threadTS, blocks, fallback)
 		if err != nil {
 			return goerr.Wrap(err, "post preview message",
@@ -221,6 +252,21 @@ func (h *slackDraftHandler) Materialize(ctx context.Context, ssn *model.Session,
 			)
 		}
 		ts = newTS
+
+		// Collapse the now-stale processing placeholder into a short
+		// breadcrumb pointing readers to the freshly-posted preview
+		// further down. The preview is already live, so a failed
+		// update is non-fatal — the user just sees a "⏳ Drafting…"
+		// stub that never advanced.
+		if processingTS != "" {
+			completedBlocks, completedFallback := buildProcessingCompletedBlocks(ctx)
+			if err := h.slackService.UpdateMessage(ctx, h.channelID, processingTS, completedBlocks, completedFallback); err != nil {
+				errutil.Handle(ctx, goerr.Wrap(err, "collapse processing placeholder after preview post",
+					goerr.V("channel_id", h.channelID),
+					goerr.V("processing_ts", processingTS),
+				), "non-fatal: preview already posted")
+			}
+		}
 	}
 
 	// Persist ephemeral ref so interaction handlers (Submit/Edit/Cancel)
