@@ -68,7 +68,11 @@ func clampSlackOptionDescription(value string) string {
 	if len(runes) <= slackOptionDescriptionMaxRunes {
 		return value
 	}
-	return string(runes[:slackOptionDescriptionMaxRunes-1]) + clampSuffixSingleLine
+	// Reserve room for the suffix in rune units so changing
+	// clampSuffixSingleLine to a longer sentinel does not silently push us
+	// back over the 75-rune cap.
+	suffixRunes := len([]rune(clampSuffixSingleLine))
+	return string(runes[:slackOptionDescriptionMaxRunes-suffixRunes]) + clampSuffixSingleLine
 }
 
 // slackUserIDPattern matches the rendered form of a Slack user ID. Real
