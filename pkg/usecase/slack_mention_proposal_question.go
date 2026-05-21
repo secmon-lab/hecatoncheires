@@ -432,7 +432,7 @@ func (uc *MentionProposalUseCase) HandleQuestionSubmit(ctx context.Context, call
 	handler := newSlackDraftHandler(
 		uc.repo, uc.registry, uc.slackService,
 		channelID, threadTS, messageTS, callback.User.ID,
-		candidates, proposalID, "",
+		candidates, proposalID, "", "",
 	)
 
 	userInput := formatDraftQuestionAnswers(pq, answers)

@@ -110,12 +110,15 @@ func (uc *MentionProposalUseCase) HandleSelectWorkspace(ctx context.Context, cal
 	candidates := uc.accessibleWorkspaces(callback.User.ID)
 	threadTS := session.ThreadTS
 
-	// (4) Build host handler. The processingTS is empty for ws-switch — the
-	// preview is updated via response_url's chat.update path inside Materialize.
+	// (4) Build host handler. previewTS carries the TS of the existing
+	// preview the user clicked on; Materialize will UpdateMessage that
+	// row in place so the workspace switch reads as a same-position
+	// morph rather than a fresh post at the thread end. processingTS
+	// is empty — there is no "⏳ Drafting…" placeholder on this path.
 	handler := newSlackDraftHandler(
 		uc.repo, uc.registry, uc.slackService,
 		d.Source.ChannelID, threadTS, "", callback.User.ID,
-		candidates, d.ID, d.EphemeralMessageTS,
+		candidates, d.ID, "", d.EphemeralMessageTS,
 	)
 
 	// (5) Run the planner turn. TriggerTS is empty for this synthetic event

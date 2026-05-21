@@ -24,7 +24,7 @@ func NewSlackDraftHandlerForTest(
 	return newSlackDraftHandler(
 		repo, registry, slackService,
 		channelID, threadTS, "1700000000.000001", "U-test",
-		nil, model.CaseProposalID("draft-test"), "",
+		nil, model.CaseProposalID("draft-test"), "", "",
 	)
 }
 

@@ -109,6 +109,11 @@ const (
 	MsgProposalTraceTaskDone           // "✅ Task: %s — done (%s, %d/%d inner loops)" (title, elapsed, used, max)
 	MsgProposalTraceTaskFailedPrompt   // "❌ Task: %s — failed (%s, build prompt): %v" (title, elapsed, err)
 	MsgProposalTraceTaskFailed         // "❌ Task: %s — failed (%s, %d/%d inner loops): %v" (title, elapsed, used, max, err)
+	// MsgProposalProcessingCompleted replaces the initial "⏳ Drafting…"
+	// placeholder once Materialize has posted the preview at the thread
+	// end. It tells the user the placeholder is no longer the live status
+	// and to look at the new preview message further down the thread.
+	MsgProposalProcessingCompleted
 
 	// Bookmark
 	MsgBookmarkOpenCase
