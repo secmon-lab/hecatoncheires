@@ -41,6 +41,40 @@ func clampPlainText(value string, multiline bool) string {
 	return string(runes[:slackPlainTextMaxRunes]) + suffix
 }
 
+// slackOptionDescriptionMaxRunes is Slack's hard cap on
+// option.description.text for static_select / multi_static_select option
+// objects. Exceeding it (e.g. an operator-authored field option with a
+// long description in the workspace config) makes Slack reject the entire
+// views.open with invalid_arguments, taking every custom-field modal
+// (Create / Edit / Draft Edit) down with it. Description text is only
+// rendered as a small subtitle in the dropdown anyway and gets visually
+// truncated by Slack on display, so trimming the tail to fit the cap
+// keeps the visible portion intact.
+const slackOptionDescriptionMaxRunes = 75
+
+// clampSlackOptionDescription truncates value so the resulting rune count
+// never exceeds slackOptionDescriptionMaxRunes. Truncation respects rune
+// boundaries so multibyte characters (e.g. Japanese) are not split. When
+// truncation happens, the last rune is replaced with an ellipsis so the
+// final rune count is exactly slackOptionDescriptionMaxRunes. Empty input
+// is returned unchanged so the caller can keep its "omit description when
+// blank" branch (Slack rejects empty description.text just as it rejects
+// over-long ones).
+func clampSlackOptionDescription(value string) string {
+	if value == "" {
+		return value
+	}
+	runes := []rune(value)
+	if len(runes) <= slackOptionDescriptionMaxRunes {
+		return value
+	}
+	// Reserve room for the suffix in rune units so changing
+	// clampSuffixSingleLine to a longer sentinel does not silently push us
+	// back over the 75-rune cap.
+	suffixRunes := len([]rune(clampSuffixSingleLine))
+	return string(runes[:slackOptionDescriptionMaxRunes-suffixRunes]) + clampSuffixSingleLine
+}
+
 // slackUserIDPattern matches the rendered form of a Slack user ID. Real
 // user IDs start with U (regular users) or W (Enterprise Grid org-level
 // users), followed by uppercase alphanumerics. Bots ("B…"), apps ("A…"),

@@ -78,6 +78,20 @@ var ShouldBroadcastAnyActionEventForTest = shouldBroadcastAnyActionEvent
 // external tests can verify the Slack input-length contract.
 var ClampPlainTextForTest = clampPlainText
 
+// ClampSlackOptionDescriptionForTest exposes the unexported
+// clampSlackOptionDescription helper so external tests can verify the
+// 75-rune option-description contract.
+var ClampSlackOptionDescriptionForTest = clampSlackOptionDescription
+
+// SlackOptionDescriptionMaxRunesForTest exposes the 75-rune ceiling for
+// assertions.
+const SlackOptionDescriptionMaxRunesForTest = slackOptionDescriptionMaxRunes
+
+// BuildFieldOptionsForTest exposes buildFieldOptions so external tests can
+// assert that long option descriptions are clamped before being handed to
+// Slack.
+var BuildFieldOptionsForTest = buildFieldOptions
+
 // IsLikelySlackUserIDForTest exposes the unexported isLikelySlackUserID
 // helper so external tests can verify the user-ID syntactic gate.
 var IsLikelySlackUserIDForTest = isLikelySlackUserID

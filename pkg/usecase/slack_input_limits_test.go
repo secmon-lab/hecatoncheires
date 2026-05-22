@@ -70,6 +70,56 @@ func TestClampPlainText_FivekDescriptionFitsUnderSlackCeiling(t *testing.T) {
 	gt.Bool(t, strings.HasSuffix(got, usecase.ClampSuffixMultiLineForTest)).True()
 }
 
+func TestClampSlackOptionDescription_EmptyString(t *testing.T) {
+	// Empty must stay empty so callers can keep the "omit description when
+	// blank" branch (Slack rejects empty description.text too).
+	gt.String(t, usecase.ClampSlackOptionDescriptionForTest("")).Equal("")
+}
+
+func TestClampSlackOptionDescription_ShortStringPassesThrough(t *testing.T) {
+	short := "Severity above SLO, immediate attention"
+	gt.String(t, usecase.ClampSlackOptionDescriptionForTest(short)).Equal(short)
+}
+
+func TestClampSlackOptionDescription_BoundaryAtMax(t *testing.T) {
+	// Exactly 75 runes (the Slack ceiling) passes through unchanged.
+	exactlyMax := strings.Repeat("a", usecase.SlackOptionDescriptionMaxRunesForTest)
+	got := usecase.ClampSlackOptionDescriptionForTest(exactlyMax)
+	gt.String(t, got).Equal(exactlyMax)
+	gt.Number(t, len([]rune(got))).Equal(usecase.SlackOptionDescriptionMaxRunesForTest)
+}
+
+func TestClampSlackOptionDescription_OneOverMaxIsClamped(t *testing.T) {
+	overByOne := strings.Repeat("a", usecase.SlackOptionDescriptionMaxRunesForTest+1)
+	got := usecase.ClampSlackOptionDescriptionForTest(overByOne)
+	// After clamping, the final rune count must equal the Slack ceiling
+	// (74 prefix runes + 1 ellipsis rune == 75), never exceed it.
+	gt.Number(t, len([]rune(got))).Equal(usecase.SlackOptionDescriptionMaxRunesForTest)
+	gt.Bool(t, strings.HasSuffix(got, usecase.ClampSuffixSingleLineForTest)).True()
+}
+
+func TestClampSlackOptionDescription_FarOverMaxIsClamped(t *testing.T) {
+	// 500 ASCII chars (well past the 75 ceiling) must still fit inside the
+	// cap, with a single ellipsis appended.
+	long := strings.Repeat("x", 500)
+	got := usecase.ClampSlackOptionDescriptionForTest(long)
+	gt.Number(t, len([]rune(got))).Equal(usecase.SlackOptionDescriptionMaxRunesForTest)
+	gt.Bool(t, strings.HasSuffix(got, usecase.ClampSuffixSingleLineForTest)).True()
+}
+
+func TestClampSlackOptionDescription_RespectsRuneBoundaries(t *testing.T) {
+	// Multibyte (Japanese) content must clamp on rune boundaries so a
+	// UTF-8 sequence never gets split — a severed rune would reach Slack
+	// as garbage.
+	const jaRune = "あ"
+	long := strings.Repeat(jaRune, usecase.SlackOptionDescriptionMaxRunesForTest+10)
+	got := usecase.ClampSlackOptionDescriptionForTest(long)
+	gt.Number(t, len([]rune(got))).Equal(usecase.SlackOptionDescriptionMaxRunesForTest)
+	prefix := strings.TrimSuffix(got, usecase.ClampSuffixSingleLineForTest)
+	// Every prefix rune is the original multibyte char — no severed sequence.
+	gt.String(t, prefix).Equal(strings.Repeat(jaRune, usecase.SlackOptionDescriptionMaxRunesForTest-1))
+}
+
 func TestIsLikelySlackUserID(t *testing.T) {
 	cases := []struct {
 		name string

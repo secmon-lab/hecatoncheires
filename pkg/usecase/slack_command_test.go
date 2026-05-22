@@ -906,7 +906,7 @@ func TestSlackUseCases_HandleSlashCommand_EditCase(t *testing.T) {
 
 		// Create a case linked to a channel
 		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
-			ReporterID:     "U-TEST-DEFAULT",
+			ReporterID:  "U-TEST-DEFAULT",
 			Title:       "Existing Case",
 			Description: "Existing description",
 			FieldValues: map[string]model.FieldValue{
@@ -1002,8 +1002,8 @@ func TestSlackUseCases_HandleSlashCommand_EditCase(t *testing.T) {
 		})
 
 		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
-			ReporterID:     "U-TEST-DEFAULT",
-			Title: "WS Case",
+			ReporterID: "U-TEST-DEFAULT",
+			Title:      "WS Case",
 		})
 		gt.NoError(t, err).Required()
 		created.SlackChannelID = "C-WS-CASE"
@@ -1041,7 +1041,7 @@ func TestSlackUseCases_HandleCaseEditSubmit(t *testing.T) {
 
 		// Create an existing case
 		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
-			ReporterID:     "U-TEST-DEFAULT",
+			ReporterID:  "U-TEST-DEFAULT",
 			Title:       "Original Title",
 			Description: "Original description",
 			AssigneeIDs: []string{"U-ASSIGNEE"},
@@ -1113,7 +1113,7 @@ func TestSlackUseCases_HandleCaseEditSubmit(t *testing.T) {
 			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
 		})
 		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
-			ReporterID:     "U-TEST-DEFAULT",
+			ReporterID:  "U-TEST-DEFAULT",
 			Title:       "Original",
 			AssigneeIDs: []string{"U-OLD-A", "U-OLD-B"},
 		})
@@ -1166,7 +1166,7 @@ func TestSlackUseCases_HandleCaseEditSubmit(t *testing.T) {
 			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
 		})
 		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
-			ReporterID:     "U-TEST-DEFAULT",
+			ReporterID:  "U-TEST-DEFAULT",
 			Title:       "Original",
 			AssigneeIDs: []string{"U-OLD"},
 		})
@@ -1310,8 +1310,8 @@ func TestBuildFieldInputBlockWithValue(t *testing.T) {
 		})
 
 		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
-			ReporterID:     "U-TEST-DEFAULT",
-			Title: "Test",
+			ReporterID: "U-TEST-DEFAULT",
+			Title:      "Test",
 			FieldValues: map[string]model.FieldValue{
 				"notes": {FieldID: "notes", Type: types.FieldTypeText, Value: "initial text"},
 			},
@@ -1346,8 +1346,8 @@ func TestBuildFieldInputBlockWithValue(t *testing.T) {
 		})
 
 		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
-			ReporterID:     "U-TEST-DEFAULT",
-			Title: "Test",
+			ReporterID: "U-TEST-DEFAULT",
+			Title:      "Test",
 			FieldValues: map[string]model.FieldValue{
 				"due": {FieldID: "due", Type: types.FieldTypeDate, Value: "2026-01-15"},
 			},
@@ -1380,8 +1380,8 @@ func TestBuildFieldInputBlockWithValue(t *testing.T) {
 		})
 
 		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
-			ReporterID:     "U-TEST-DEFAULT",
-			Title: "No Fields",
+			ReporterID: "U-TEST-DEFAULT",
+			Title:      "No Fields",
 		})
 		gt.NoError(t, err).Required()
 		created.SlackChannelID = "C-NOFIELD"
@@ -1401,6 +1401,56 @@ func TestBuildFieldInputBlockWithValue(t *testing.T) {
 	})
 }
 
+func TestBuildFieldOptions_ClampsLongDescription(t *testing.T) {
+	maxRunes := usecase.SlackOptionDescriptionMaxRunesForTest
+
+	t.Run("long description is clamped to Slack ceiling", func(t *testing.T) {
+		// A description authored by a workspace operator that exceeds
+		// Slack's 75-rune option-description cap would otherwise make
+		// views.open fail with invalid_arguments, locking users out of
+		// every Create / Edit / Draft Edit modal that uses this field.
+		longDesc := strings.Repeat("a", maxRunes+50)
+		got := usecase.BuildFieldOptionsForTest([]config.FieldOption{
+			{ID: "high", Name: "High", Description: longDesc},
+		})
+		gt.Array(t, got).Length(1).Required()
+		gt.Value(t, got[0].Description).NotNil()
+		gt.Number(t, len([]rune(got[0].Description.Text))).Equal(maxRunes)
+	})
+
+	t.Run("short description passes through unchanged", func(t *testing.T) {
+		short := "Severity above SLO"
+		got := usecase.BuildFieldOptionsForTest([]config.FieldOption{
+			{ID: "high", Name: "High", Description: short},
+		})
+		gt.Array(t, got).Length(1).Required()
+		gt.Value(t, got[0].Description).NotNil()
+		gt.String(t, got[0].Description.Text).Equal(short)
+	})
+
+	t.Run("blank description still yields no description object", func(t *testing.T) {
+		// The "omit description when blank" branch existed before this fix
+		// and must be preserved — otherwise we would emit an empty
+		// description block that Slack also rejects.
+		got := usecase.BuildFieldOptionsForTest([]config.FieldOption{
+			{ID: "high", Name: "High", Description: ""},
+		})
+		gt.Array(t, got).Length(1).Required()
+		gt.Value(t, got[0].Description).Nil()
+	})
+
+	t.Run("option label is left untouched", func(t *testing.T) {
+		// The fix targets only description; the option label and value
+		// must continue to pass through unchanged.
+		got := usecase.BuildFieldOptionsForTest([]config.FieldOption{
+			{ID: "high", Name: "High", Description: strings.Repeat("x", maxRunes+10)},
+		})
+		gt.Array(t, got).Length(1).Required()
+		gt.String(t, got[0].Text.Text).Equal("High")
+		gt.String(t, got[0].Value).Equal("high")
+	})
+}
+
 func TestSlackUseCases_HandleSlashCommand_Subcommands(t *testing.T) {
 	i18n.Init(i18n.LangEN)
 
@@ -1412,8 +1462,8 @@ func TestSlackUseCases_HandleSlashCommand_Subcommands(t *testing.T) {
 			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
 		})
 		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
-			ReporterID:     "U-TEST-DEFAULT",
-			Title: "Existing Case",
+			ReporterID: "U-TEST-DEFAULT",
+			Title:      "Existing Case",
 		})
 		gt.NoError(t, err).Required()
 		created.SlackChannelID = "C-CASE"
@@ -1547,7 +1597,7 @@ func TestLifecycle_CommandChoiceToCaseEdit(t *testing.T) {
 		Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
 	})
 	created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
-		ReporterID:     "U-TEST-DEFAULT",
+		ReporterID:  "U-TEST-DEFAULT",
 		Title:       "Original Title",
 		Description: "Original Desc",
 		AssigneeIDs: []string{"U-OLD"},
@@ -1631,8 +1681,8 @@ func TestSlackUseCases_HandleCommandChoiceSubmit(t *testing.T) {
 			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
 		})
 		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
-			ReporterID:     "U-TEST-DEFAULT",
-			Title: "Existing Case",
+			ReporterID: "U-TEST-DEFAULT",
+			Title:      "Existing Case",
 		})
 		gt.NoError(t, err).Required()
 		return repo, registry, created.ID
@@ -1799,8 +1849,8 @@ func TestSlackUseCases_HandleActionCreationSubmit(t *testing.T) {
 		// Create the parent case linked to a channel so CreateAction's Slack
 		// notification can find a target.
 		caseRecord, err := repo.Case().Create(context.Background(), "risk", &model.Case{
-			ReporterID:     "U-TEST-DEFAULT",
-			Title: "Parent Case",
+			ReporterID: "U-TEST-DEFAULT",
+			Title:      "Parent Case",
 		})
 		gt.NoError(t, err).Required()
 		caseRecord.SlackChannelID = "C-CASE"

@@ -667,11 +667,16 @@ func buildFieldInputBlock(field config.FieldDefinition) slack.Block {
 	return inputBlock
 }
 
-// buildFieldOptions converts config field options to Slack option block objects
+// buildFieldOptions converts config field options to Slack option block
+// objects. The per-option description is clamped to Slack's hard 75-rune
+// cap; an operator-authored long description would otherwise make
+// views.open fail with invalid_arguments and lock users out of the modal
+// (Slack visually truncates the dropdown subtitle anyway, so the trim is
+// not user-visible information loss).
 func buildFieldOptions(options []config.FieldOption) []*slack.OptionBlockObject {
 	result := make([]*slack.OptionBlockObject, 0, len(options))
 	for _, opt := range options {
-		desc := opt.Description
+		desc := clampSlackOptionDescription(opt.Description)
 		var descObj *slack.TextBlockObject
 		if desc != "" {
 			descObj = slack.NewTextBlockObject(slack.PlainTextType, desc, false, false)
