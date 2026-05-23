@@ -82,13 +82,9 @@ name = "Auto-summarize on creation"
 description = "Summarize a newly opened risk case and post to its Slack channel."
 events.case = { on = ["created"] }
 prompt = """
-A new risk case has been created.
-- Title: {{.Case.Title}}
-- Description: {{.Case.Description}}
-
-Write a concise (3 lines or fewer) summary of the risk and post it to the case Slack channel
-via slack__post_to_case_channel. If additional investigation is required, append a short
-note to the case description via case__update_case.
+Write a concise (3 lines or fewer) summary of this risk case and post it to the
+case Slack channel via slack__post_to_case_channel. If additional investigation is
+required, append a short note to the case description via case__update_case.
 """
 
 # When a case closes, draft a retrospective action item.
@@ -97,9 +93,8 @@ id = "post-close-retro"
 name = "Schedule retrospective on close"
 events.case = { on = ["closed"] }
 prompt = """
-Case "{{.Case.Title}}" was closed.
-Create a retrospective action via core__create_action and announce it to relevant
-stakeholders via slack__post_to_case_channel.
+Create a retrospective action for this closed case via core__create_action and
+announce it to relevant stakeholders via slack__post_to_case_channel.
 """
 
 # Periodic stale-check.
