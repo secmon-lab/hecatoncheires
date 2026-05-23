@@ -62,8 +62,17 @@ func (k JobRunKey) Validate() error {
 // The same document doubles as the lock record so a lease can be
 // atomically taken or released in the same transaction that updates
 // run history.
+//
+// Identifiers are flat top-level fields (no nested JobRunKey) so a
+// Firestore doc viewed in isolation surfaces "which (workspace, case,
+// job) is this?" without having to parse the document path, and a
+// BigQuery export yields rows that JOIN directly on WorkspaceID /
+// CaseID / JobID with JobRunLog / JobRunEvent.
 type JobRun struct {
-	Key         JobRunKey
+	WorkspaceID string
+	CaseID      int64
+	JobID       string
+
 	LastRunAt   time.Time
 	LastStatus  JobRunStatus
 	LastError   string
@@ -76,6 +85,17 @@ type JobRun struct {
 	// agreement is assumed; lease durations are large enough to absorb
 	// minor skew).
 	LeaseUntil time.Time
+}
+
+// Key returns the composite JobRunKey for this run, reconstructed from
+// the flat identifier fields. Kept for callers that still want to
+// thread the composite around (scanner / runner helpers); the storage
+// layer relies on the flat fields directly.
+func (r *JobRun) Key() JobRunKey {
+	if r == nil {
+		return JobRunKey{}
+	}
+	return JobRunKey{WorkspaceID: r.WorkspaceID, CaseID: r.CaseID, JobID: r.JobID}
 }
 
 // IsLeased reports whether the JobRun currently holds a non-expired
@@ -256,12 +276,20 @@ type JobRunEvent struct {
 	RunID       string
 	TraceID     string
 
+	// EventID is the doc ID of this event. It is a UUIDv7 string,
+	// chosen for Firestore-console readability (the doc ID surfaces a
+	// millisecond timestamp prefix) and global uniqueness. doc IDs are
+	// NOT relied on for strict ordering — `Sequence` is the
+	// authoritative monotonic order.
+	EventID string
+
 	// Position.
-	// Sequence and ParentSequence are int64 (not uint64) so the
-	// Firestore SDK can serialise them; the SDK rejects uint64. The
+	// Sequence is the authoritative monotonic order within a Run. It is
+	// int64 (not uint64) because the Firestore SDK rejects uint64. The
 	// value space is still effectively unbounded for this workload
-	// (max int64 = 9.2e18 events per Run).
-	Sequence   int64 // monotonic within the Run; also the zero-padded doc ID
+	// (max int64 = 9.2e18 events per Run). List queries MUST OrderBy
+	// "Sequence" — doc ID order may diverge under clock skew.
+	Sequence   int64
 	OccurredAt time.Time
 	Kind       JobRunEventKind
 
@@ -308,6 +336,9 @@ func (e *JobRunEvent) Validate() error {
 	}
 	if e.TraceID == "" {
 		return goerr.New("trace id is empty")
+	}
+	if e.EventID == "" {
+		return goerr.New("event id is empty")
 	}
 	if e.Sequence == 0 {
 		return goerr.New("sequence is zero")

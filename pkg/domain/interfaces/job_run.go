@@ -114,18 +114,24 @@ type JobRunLogRepository interface {
 // JobRunEventRepository persists the per-Run timeline of events
 // (LLM_REQUEST / LLM_RESPONSE / TOOL_CALL / RUN_ERROR). Stored at:
 //
-//	workspaces/{WS}/cases/{Case}/jobRuns/{Job}/logs/{Run}/events/{Sequence}
+//	workspaces/{WS}/cases/{Case}/jobRuns/{Job}/logs/{Run}/events/{EventID}
+//
+// EventID is a UUIDv7 (timestamp-prefixed) chosen for Firestore-console
+// readability and global uniqueness. The authoritative monotonic order
+// is the Sequence field, not the doc ID — List MUST OrderBy("Sequence").
 //
 // Within a single Run, exactly one runSequencer instance owns Sequence
 // allocation — both the per-call appends from the trace.Handler AND any
 // RUN_ERROR emits from JobRunner go through the same sequencer.
 type JobRunEventRepository interface {
-	// Append writes one event. Sequence must be set by the caller and
-	// strictly increasing across calls in the same Run. Backends use
-	// Create (not Set) so a duplicate Sequence surfaces as
-	// ErrJobRunEventExists rather than silently overwriting.
+	// Append writes one event keyed by ev.EventID. Both EventID and
+	// Sequence must be set by the caller; Sequence must be strictly
+	// increasing across calls in the same Run. Backends use Create
+	// (not Set) so a duplicate EventID surfaces as ErrJobRunEventExists.
 	Append(ctx context.Context, ev *model.JobRunEvent) error
 
-	// List returns events for (key, runID) in ascending Sequence order.
+	// List returns events for (key, runID) in ascending Sequence order
+	// (not doc-ID order — doc IDs are UUIDv7 and may diverge under
+	// clock skew).
 	List(ctx context.Context, key model.JobRunKey, runID string) ([]*model.JobRunEvent, error)
 }

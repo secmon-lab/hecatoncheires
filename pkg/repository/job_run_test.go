@@ -41,7 +41,9 @@ func runJobRunRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 
 		got, err := repo.JobRun().Get(ctx, key)
 		gt.NoError(t, err).Required()
-		gt.Value(t, got.Key).Equal(key)
+		gt.String(t, got.WorkspaceID).Equal(key.WorkspaceID)
+		gt.Number(t, got.CaseID).Equal(key.CaseID)
+		gt.String(t, got.JobID).Equal(key.JobID)
 		gt.Bool(t, got.LastRunAt.Equal(now)).True()
 		gt.Value(t, got.LastStatus).Equal(model.JobRunStatusSuccess)
 		gt.String(t, got.LastError).Equal("")
@@ -184,14 +186,14 @@ func runJobRunRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		gt.NoError(t, err).Required()
 		gt.Array(t, runsA).Length(2).Required()
 		for _, r := range runsA {
-			gt.Value(t, r.Key.CaseID).Equal(caseA)
-			gt.Value(t, r.Key.WorkspaceID).Equal(ws)
+			gt.Number(t, r.CaseID).Equal(caseA)
+			gt.String(t, r.WorkspaceID).Equal(ws)
 		}
 
 		runsB, err := repo.JobRun().ListByCase(ctx, ws, caseB)
 		gt.NoError(t, err).Required()
 		gt.Array(t, runsB).Length(1).Required()
-		gt.Value(t, runsB[0].Key.JobID).Equal("b1")
+		gt.String(t, runsB[0].JobID).Equal("b1")
 	})
 
 	t.Run("ListByCase returns empty for a case with no runs", func(t *testing.T) {
@@ -417,6 +419,7 @@ func runJobRunEventRepositoryTest(t *testing.T, newRepo func(t *testing.T) inter
 			JobID:       key.JobID,
 			RunID:       runID,
 			TraceID:     "trace-1",
+			EventID:     "ev-1",
 			Sequence:    1,
 			OccurredAt:  now,
 			Kind:        model.JobRunEventKindLLMRequest,
@@ -442,6 +445,7 @@ func runJobRunEventRepositoryTest(t *testing.T, newRepo func(t *testing.T) inter
 			JobID:       key.JobID,
 			RunID:       runID,
 			TraceID:     "trace-1",
+			EventID:     "ev-2",
 			Sequence:    2,
 			OccurredAt:  now.Add(time.Second),
 			Kind:        model.JobRunEventKindLLMResponse,
@@ -463,6 +467,7 @@ func runJobRunEventRepositoryTest(t *testing.T, newRepo func(t *testing.T) inter
 			JobID:          key.JobID,
 			RunID:          runID,
 			TraceID:        "trace-1",
+			EventID:        "ev-3",
 			Sequence:       3,
 			OccurredAt:     now.Add(2 * time.Second),
 			Kind:           model.JobRunEventKindToolCall,
@@ -483,6 +488,7 @@ func runJobRunEventRepositoryTest(t *testing.T, newRepo func(t *testing.T) inter
 			JobID:       key.JobID,
 			RunID:       runID,
 			TraceID:     "trace-1",
+			EventID:     "ev-4",
 			Sequence:    4,
 			OccurredAt:  now.Add(4 * time.Second),
 			Kind:        model.JobRunEventKindRunError,
@@ -555,6 +561,7 @@ func runJobRunEventRepositoryTest(t *testing.T, newRepo func(t *testing.T) inter
 			JobID:       key.JobID,
 			RunID:       "run-dup",
 			TraceID:     "trace-dup",
+			EventID:     "ev-dup",
 			Sequence:    1,
 			OccurredAt:  now,
 			Kind:        model.JobRunEventKindLLMRequest,

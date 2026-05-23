@@ -85,7 +85,7 @@ func (r *jobRunRepository) TryAcquireLease(ctx context.Context, key model.JobRun
 	}
 
 	if !ok {
-		existing = &model.JobRun{Key: key}
+		existing = &model.JobRun{WorkspaceID: key.WorkspaceID, CaseID: key.CaseID, JobID: key.JobID}
 	}
 	existing.LeaseUntil = now.Add(leaseDuration)
 	r.runs[key] = existing
@@ -119,7 +119,7 @@ func (r *jobRunRepository) RecordRun(ctx context.Context, key model.JobRunKey, s
 	defer r.mu.Unlock()
 	existing, ok := r.runs[key]
 	if !ok {
-		existing = &model.JobRun{Key: key}
+		existing = &model.JobRun{WorkspaceID: key.WorkspaceID, CaseID: key.CaseID, JobID: key.JobID}
 	}
 	existing.LastRunAt = lastRunAt
 	existing.LastStatus = status
@@ -240,11 +240,13 @@ func (r *jobRunLogRepository) List(ctx context.Context, key model.JobRunKey, lim
 	return out, nil
 }
 
-// jobRunEventKey identifies a single JobRunEvent inside the memory store.
+// jobRunEventKey identifies a single JobRunEvent inside the memory
+// store. The map key mirrors the Firestore doc key — (Run, EventID) —
+// so collisions surface in the same way across both backends.
 type jobRunEventKey struct {
-	K        model.JobRunKey
-	RunID    string
-	Sequence int64
+	K       model.JobRunKey
+	RunID   string
+	EventID string
 }
 
 type jobRunEventRepository struct {
@@ -304,16 +306,16 @@ func (r *jobRunEventRepository) Append(ctx context.Context, ev *model.JobRunEven
 		return goerr.Wrap(err, "invalid job run event")
 	}
 	key := jobRunEventKey{
-		K:        model.JobRunKey{WorkspaceID: ev.WorkspaceID, CaseID: ev.CaseID, JobID: ev.JobID},
-		RunID:    ev.RunID,
-		Sequence: ev.Sequence,
+		K:       model.JobRunKey{WorkspaceID: ev.WorkspaceID, CaseID: ev.CaseID, JobID: ev.JobID},
+		RunID:   ev.RunID,
+		EventID: ev.EventID,
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, ok := r.events[key]; ok {
 		return goerr.Wrap(interfaces.ErrJobRunEventExists, "job run event already exists",
 			goerr.V("run_id", ev.RunID),
-			goerr.V("sequence", ev.Sequence))
+			goerr.V("event_id", ev.EventID))
 	}
 	r.events[key] = copyJobRunEvent(ev)
 	return nil

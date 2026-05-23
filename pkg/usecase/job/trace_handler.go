@@ -7,6 +7,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem/trace"
 
@@ -265,7 +266,10 @@ func (h *jobRunTraceHandler) EmitRunError(ctx context.Context, stage, message st
 }
 
 // baseEvent stamps the common identifier / phase / sequence / occurred-at
-// fields onto a fresh event. The caller fills in the kind-specific payload.
+// fields onto a fresh event. The caller fills in the kind-specific
+// payload. EventID is a freshly minted UUIDv7 (timestamp-prefixed for
+// Firestore-console readability); the authoritative monotonic order is
+// the Sequence field, not the doc ID.
 func (h *jobRunTraceHandler) baseEvent(kind model.JobRunEventKind, at time.Time) *model.JobRunEvent {
 	h.mu.Lock()
 	phase := h.phase
@@ -277,6 +281,7 @@ func (h *jobRunTraceHandler) baseEvent(kind model.JobRunEventKind, at time.Time)
 		JobID:       h.routing.JobID,
 		RunID:       h.routing.RunID,
 		TraceID:     h.routing.TraceID,
+		EventID:     uuid.Must(uuid.NewV7()).String(),
 		Sequence:    h.seq.Next(),
 		OccurredAt:  at,
 		Kind:        kind,

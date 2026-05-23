@@ -191,6 +191,7 @@ func validJobRunEvent(kind model.JobRunEventKind) *model.JobRunEvent {
 		JobID:       "job-A",
 		RunID:       "run-1",
 		TraceID:     "trace-1",
+		EventID:     "ev-1",
 		Sequence:    1,
 		OccurredAt:  now,
 		Kind:        kind,
@@ -231,6 +232,11 @@ func TestJobRunEvent_Validate(t *testing.T) {
 	t.Run("empty workspace id", func(t *testing.T) {
 		e := validJobRunEvent(model.JobRunEventKindLLMRequest)
 		e.WorkspaceID = ""
+		gt.Error(t, e.Validate())
+	})
+	t.Run("empty event id", func(t *testing.T) {
+		e := validJobRunEvent(model.JobRunEventKindLLMRequest)
+		e.EventID = ""
 		gt.Error(t, e.Validate())
 	})
 	t.Run("zero sequence", func(t *testing.T) {
