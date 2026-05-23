@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem/trace"
@@ -439,13 +440,20 @@ func marshalJSON(v any) string {
 	return string(b)
 }
 
-// truncateString returns s if its byte length is at most max bytes,
-// otherwise s[:max]. Returning byte-aligned (not rune-aligned) is fine
-// because Firestore accepts arbitrary UTF-8 bytes; the value is for
-// human inspection and downstream JSON parsing tolerates the cut.
+// truncateString returns s capped at max bytes, snapped back to a UTF-8
+// rune boundary so the result never contains a partial multi-byte
+// character. Firestore rejects strings that are not valid UTF-8, and a
+// blind byte-slice can leave a trailing fragment of a JP/CJK rune which
+// would make the doc unwritable.
 func truncateString(s string, max int) string {
-	if max <= 0 || len(s) <= max {
+	if max <= 0 {
+		return ""
+	}
+	if len(s) <= max {
 		return s
+	}
+	for max > 0 && !utf8.RuneStart(s[max]) {
+		max--
 	}
 	return s[:max]
 }

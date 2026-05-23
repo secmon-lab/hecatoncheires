@@ -437,14 +437,6 @@ type LLMToolSpec struct {
 	Description string
 }
 
-// LLMUsage holds per-call token accounting. Provider differences are
-// already normalised at the gollem layer; cache-token fields are not
-// available in the current contract.
-type LLMUsage struct {
-	InputTokens  int64
-	OutputTokens int64
-}
-
 // ToolCallPayload is the full record of one tool execution. Maps to
 // gollem trace.ToolExecData plus wall-clock timestamps captured by the
 // handler at Start/End boundaries.
