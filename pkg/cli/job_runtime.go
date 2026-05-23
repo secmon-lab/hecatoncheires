@@ -24,25 +24,25 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
 )
 
-// scheduledRuntime bundles the dependencies the scheduled CLI / HTTP
-// endpoint need to fire a sweep.
-type scheduledRuntime struct {
+// tickRuntime bundles the dependencies the tick CLI / HTTP endpoint
+// need to fire a sweep.
+type tickRuntime struct {
 	repo     interfaces.Repository
 	registry *model.WorkspaceRegistry
 	scanner  *job.ScheduledScanner
 }
 
-// buildScheduledRuntime wires the minimal dependency graph for a
-// scheduled-Job sweep. This includes the Job runner (so dispatched Jobs
-// can actually execute), but excludes the full HTTP / Slack worker
-// stack the serve command needs.
-func buildScheduledRuntime(
+// buildTickRuntime wires the minimal dependency graph for a scheduled-Job
+// sweep. This includes the Job runner (so dispatched Jobs can actually
+// execute), but excludes the full HTTP / Slack worker stack the serve
+// command needs.
+func buildTickRuntime(
 	ctx context.Context,
 	appCfg *config.AppConfig,
 	repoCfg *config.Repository,
 	llmCfg *config.LLM,
 	c *cli.Command,
-) (*scheduledRuntime, error) {
+) (*tickRuntime, error) {
 	_, registry, err := appCfg.Configure(c)
 	if err != nil {
 		return nil, goerr.Wrap(err, "load workspace configs")
@@ -73,7 +73,7 @@ func buildScheduledRuntime(
 		Publisher: jobUC,
 	})
 
-	return &scheduledRuntime{
+	return &tickRuntime{
 		repo:     repo,
 		registry: registry,
 		scanner:  scanner,

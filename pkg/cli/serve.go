@@ -460,12 +460,12 @@ func cmdServe() *cli.Command {
 				SlackService: slackSvc,
 			})
 			uc.Case.SetEventPublisher(jobUC)
-			scheduledScanner := job.NewScheduledScanner(job.ScannerDeps{
+			tickScanner := job.NewScheduledScanner(job.ScannerDeps{
 				Repo:      repo,
 				Registry:  registry,
 				Publisher: jobUC,
 			})
-			scheduledHook := httpctrl.NewScheduledHookHandler(scheduledScanner)
+			tickHook := httpctrl.NewTickHookHandler(tickScanner)
 
 			// Start Slack user refresh worker if Slack service is available
 			// N+1 Prevention Policy: Worker uses DeleteAll → SaveMany (Replace strategy)
@@ -575,7 +575,7 @@ func cmdServe() *cli.Command {
 			}
 
 			// Register the scheduled-Job sweep webhook.
-			httpOpts = append(httpOpts, httpctrl.WithScheduledHook(scheduledHook))
+			httpOpts = append(httpOpts, httpctrl.WithTickHook(tickHook))
 
 			// Create HTTP server
 			httpHandler, err := httpctrl.New(gqlHandler, httpOpts...)

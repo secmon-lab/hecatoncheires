@@ -13,7 +13,7 @@ Two event domains can trigger a Job:
 | Domain      | When it fires |
 |-------------|---------------|
 | `case`      | Case lifecycle transitions (`created`, `closed`). Fired by `CaseUseCase` immediately after persistence. |
-| `scheduled` | A duration (`every`) or cron expression (`cron`) elapsed since the last successful run. Fired by the `hecatoncheires scheduled` CLI or the `POST /hooks/scheduled` endpoint. |
+| `scheduled` | A duration (`every`) or cron expression (`cron`) elapsed since the last successful run. Fired by the `hecatoncheires tick` CLI or the `POST /hooks/tick` endpoint. |
 
 A Job may subscribe to multiple domains; the runtime fires one
 invocation per matching `(job, case)` tuple.
@@ -135,13 +135,13 @@ same `ScheduledScanner.Scan` call.
 ### CLI: one-shot sweep
 
 ```sh
-$ hecatoncheires scheduled --config /etc/hecatoncheires/workspaces/
+$ hecatoncheires tick --config /etc/hecatoncheires/workspaces/
 ```
 
 Suitable for `cron`, GitHub Actions, or any external timer. The command
 exits when the sweep and every dispatched Job goroutine finish.
 
-### HTTP: `POST /hooks/scheduled`
+### HTTP: `POST /hooks/tick`
 
 Available on the `hecatoncheires serve` HTTP server. Wire to Cloud
 Scheduler / Eventarc / your preferred scheduler. The endpoint:

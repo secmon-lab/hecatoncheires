@@ -21,11 +21,11 @@ func (s *stubScanner) Scan(_ context.Context) error {
 	return nil
 }
 
-func TestScheduledHookHandler_RespondsImmediatelyAndTriggersScan(t *testing.T) {
+func TestTickHookHandler_RespondsImmediatelyAndTriggersScan(t *testing.T) {
 	scanner := &stubScanner{}
-	h := httpctrl.NewScheduledHookHandler(scanner)
+	h := httpctrl.NewTickHookHandler(scanner)
 
-	req := httptest.NewRequest("POST", "/hooks/scheduled", nil)
+	req := httptest.NewRequest("POST", "/hooks/tick", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
@@ -36,9 +36,9 @@ func TestScheduledHookHandler_RespondsImmediatelyAndTriggersScan(t *testing.T) {
 	gt.Number(t, scanner.calls.Load()).Equal(int32(1))
 }
 
-func TestScheduledHookHandler_FailsWhenScannerNil(t *testing.T) {
-	h := httpctrl.NewScheduledHookHandler(nil)
-	req := httptest.NewRequest("POST", "/hooks/scheduled", nil)
+func TestTickHookHandler_FailsWhenScannerNil(t *testing.T) {
+	h := httpctrl.NewTickHookHandler(nil)
+	req := httptest.NewRequest("POST", "/hooks/tick", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	gt.Number(t, rec.Code).Equal(503)
