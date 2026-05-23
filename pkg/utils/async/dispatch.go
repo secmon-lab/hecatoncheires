@@ -7,22 +7,21 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
-	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
 
 var inflight sync.WaitGroup
 
 // Dispatch executes a handler function asynchronously in a new goroutine.
-// It creates a background context (preserving the logger) and routes any
-// handler error through errutil.Handle so it lands in Sentry as well as
-// the structured log. Pending dispatches are tracked by a package-level
-// WaitGroup so tests can synchronise on completion via Wait().
+// The background context inherits every value from the caller's ctx
+// (logger, Sentry hub, trace IDs, etc.) but the cancellation signal is
+// severed via context.WithoutCancel — the entry-point request will
+// return before the background work completes, and we do not want that
+// to cancel the tail. Handler errors route through errutil.Handle so
+// they land in Sentry alongside the structured log. Pending dispatches
+// are tracked by a package-level WaitGroup so tests can synchronise on
+// completion via Wait().
 func Dispatch(ctx context.Context, handler func(ctx context.Context) error) {
-	// Create a new background context but preserve logger
-	bgCtx := context.Background()
-	if logger := logging.From(ctx); logger != nil {
-		bgCtx = logging.With(bgCtx, logger)
-	}
+	bgCtx := context.WithoutCancel(ctx)
 
 	inflight.Add(1)
 	go func() {
