@@ -208,10 +208,12 @@ test.describe('Case Management', () => {
         const response = await route.fetch();
         const json = await response.json();
 
-        // Inject Slack channel data into the response
+        // Inject Slack channel data into the response. slackChannelName
+        // is intentionally not injected: GetCase no longer requests it,
+        // and the sidebar link now uses a generic "Open in Slack" label
+        // driven by slackChannelID alone.
         if (json.data?.case) {
           json.data.case.slackChannelID = 'C1234567890';
-          json.data.case.slackChannelName = 'test-channel';
           json.data.case.slackChannelURL = 'https://test-workspace.slack.com/archives/C1234567890';
         }
 
@@ -229,11 +231,9 @@ test.describe('Case Management', () => {
     const isVisible = await caseDetailPage.isSlackChannelButtonVisible();
     expect(isVisible).toBeTruthy();
 
-    // Verify button text contains channel name
-    const buttonText = await caseDetailPage.getSlackChannelButtonText();
-    expect(buttonText).toContain('#test-channel');
-
-    // Verify button href points to Slack
+    // Verify button href points to Slack. The label is now a generic
+    // "Open in Slack" i18n string driven by slackChannelID alone, so we
+    // no longer assert on the visible text.
     const href = await caseDetailPage.getSlackChannelButtonHref();
     expect(href).toBe('https://test-workspace.slack.com/archives/C1234567890');
   });

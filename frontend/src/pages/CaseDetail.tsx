@@ -632,6 +632,7 @@ export default function CaseDetail() {
             <section className="h-aside-section h-aside-section-slack">
               <a
                 className="slack-link"
+                data-testid="aside-slack-link"
                 href={slackChannelURL || `slack://channel?id=${slackChannelID}`}
                 target="_blank"
                 rel="noreferrer noopener"
