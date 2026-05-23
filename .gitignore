@@ -34,6 +34,9 @@ go.work.sum
 /tmp
 /.cckiro
 
+# Claude Code scheduled task lock (per-worktree runtime state)
+.claude/scheduled_tasks.lock
+
 # Node
 node_modules/
 .pnpm-store/
