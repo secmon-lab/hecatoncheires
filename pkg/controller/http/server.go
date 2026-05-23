@@ -29,6 +29,7 @@ type Server struct {
 	slackCommandHandler     *SlackCommandHandler
 	slackSigningSecret      string
 	workspaceRegistry       *model.WorkspaceRegistry
+	tickHookHandler         *TickHookHandler
 }
 
 type Options func(*Server)
@@ -73,6 +74,15 @@ func WithSlackService(svc slack.Service) Options {
 func WithSlackCommand(handler *SlackCommandHandler) Options {
 	return func(s *Server) {
 		s.slackCommandHandler = handler
+	}
+}
+
+// WithTickHook wires the POST /hooks/tick handler so external schedulers
+// (Cloud Scheduler, internal cron) can trigger a sweep over scheduled
+// Jobs. nil handler leaves the route unregistered.
+func WithTickHook(handler *TickHookHandler) Options {
+	return func(s *Server) {
+		s.tickHookHandler = handler
 	}
 }
 
@@ -148,6 +158,12 @@ func New(gqlHandler http.Handler, opts ...Options) (*Server, error) {
 				r.Post("/command/{ws_id}", s.slackCommandHandler.ServeHTTP)
 			}
 		})
+	}
+
+	// Scheduled Job sweep endpoint. Unauthenticated by design (deploy
+	// behind IAP / private network).
+	if s.tickHookHandler != nil {
+		r.Post("/hooks/tick", s.tickHookHandler.ServeHTTP)
 	}
 
 	// Static file serving for SPA (catch-all, must be last)

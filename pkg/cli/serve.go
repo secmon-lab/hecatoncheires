@@ -28,6 +28,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/worker"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/urfave/cli/v3"
@@ -443,6 +444,29 @@ func cmdServe() *cli.Command {
 
 			uc := usecase.New(repo, registry, ucOpts...)
 
+			// Wire the event-driven Job runtime. The JobUseCase listens to
+			// CaseUseCase lifecycle events and dispatches Agent Jobs in the
+			// background. The ScheduledScanner / HTTP hook handler are wired
+			// further below.
+			llmClient, llmErr := llmCfg.NewClient(ctx)
+			if llmErr != nil {
+				logging.Default().Info("LLM client not configured; Job runtime will skip dispatch", "error", llmErr.Error())
+			}
+			jobUC, _ := buildJobRuntime(jobRuntimeDeps{
+				Repo:         repo,
+				Registry:     registry,
+				LLMClient:    llmClient,
+				UC:           uc,
+				SlackService: slackSvc,
+			})
+			uc.Case.SetEventPublisher(jobUC)
+			tickScanner := job.NewScheduledScanner(job.ScannerDeps{
+				Repo:      repo,
+				Registry:  registry,
+				Publisher: jobUC,
+			})
+			tickHook := httpctrl.NewTickHookHandler(tickScanner)
+
 			// Start Slack user refresh worker if Slack service is available
 			// N+1 Prevention Policy: Worker uses DeleteAll → SaveMany (Replace strategy)
 			// to avoid individual DB operations in loops
@@ -549,6 +573,9 @@ func cmdServe() *cli.Command {
 				logging.Default().Info("Slack interaction handler enabled")
 				logging.Default().Info("Slack slash command handler enabled")
 			}
+
+			// Register the scheduled-Job sweep webhook.
+			httpOpts = append(httpOpts, httpctrl.WithTickHook(tickHook))
 
 			// Create HTTP server
 			httpHandler, err := httpctrl.New(gqlHandler, httpOpts...)

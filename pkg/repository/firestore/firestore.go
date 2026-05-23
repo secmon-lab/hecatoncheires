@@ -23,6 +23,7 @@ type Firestore struct {
 	caseProposal  *caseProposalRepository
 	session       *sessionRepository
 	notifySlot    *notificationSlotRepository
+	jobRun        *jobRunRepository
 }
 
 var _ interfaces.Repository = &Firestore{}
@@ -57,6 +58,7 @@ func New(ctx context.Context, projectID, databaseID string) (*Firestore, error) 
 		caseProposal:  newCaseProposalRepository(client),
 		session:       newSessionRepository(client),
 		notifySlot:    newNotificationSlotRepository(client),
+		jobRun:        newJobRunRepository(client),
 	}
 
 	return f, nil
@@ -112,6 +114,10 @@ func (f *Firestore) Session() interfaces.SessionRepository {
 
 func (f *Firestore) NotificationSlot() interfaces.NotificationSlotRepository {
 	return f.notifySlot
+}
+
+func (f *Firestore) JobRun() interfaces.JobRunRepository {
+	return f.jobRun
 }
 
 func (f *Firestore) Close() error {

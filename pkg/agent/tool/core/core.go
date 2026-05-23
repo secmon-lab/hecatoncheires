@@ -131,3 +131,27 @@ func NewReadOnly(deps Deps) []gollem.Tool {
 	}
 	return tools
 }
+
+// NewWriterForJob builds the writer subset of the core tool family suitable
+// for event-driven Agent Jobs. It exposes creation and edit tools but
+// withholds the destructive variants (archive/unarchive/delete_action_step)
+// — Jobs run unattended and an auto-archive flag from a misjudgement is
+// strictly worse than leaving the action in place for a human to triage.
+//
+// Read-only list / get / list_action_steps are not included; combine with
+// NewReadOnly when both sides are needed.
+func NewWriterForJob(deps Deps) []gollem.Tool {
+	statusSet := deps.StatusSet
+	if statusSet == nil {
+		statusSet = model.DefaultActionStatusSet()
+	}
+	return []gollem.Tool{
+		&createActionTool{actionUC: deps.ActionUC, workspaceID: deps.WorkspaceID, caseID: deps.CaseID, statusSet: statusSet},
+		&updateActionTool{actionUC: deps.ActionUC, workspaceID: deps.WorkspaceID},
+		&updateActionStatusTool{actionUC: deps.ActionUC, workspaceID: deps.WorkspaceID, statusSet: statusSet},
+		&setActionAssigneeTool{actionUC: deps.ActionUC, workspaceID: deps.WorkspaceID},
+		&addActionStepTool{stepUC: deps.ActionStepUC, workspaceID: deps.WorkspaceID},
+		&setActionStepDoneTool{stepUC: deps.ActionStepUC, workspaceID: deps.WorkspaceID},
+		&renameActionStepTool{stepUC: deps.ActionStepUC, workspaceID: deps.WorkspaceID},
+	}
+}

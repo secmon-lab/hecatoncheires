@@ -22,6 +22,7 @@ type Memory struct {
 	caseProposal  *caseProposalRepository
 	session       *sessionRepository
 	notifySlot    *notificationSlotRepository
+	jobRun        *jobRunRepository
 }
 
 var _ interfaces.Repository = &Memory{}
@@ -42,6 +43,7 @@ func New() *Memory {
 		caseProposal:  newCaseProposalRepository(),
 		session:       newSessionRepository(),
 		notifySlot:    newNotificationSlotRepository(),
+		jobRun:        newJobRunRepository(),
 	}
 }
 
@@ -95,6 +97,10 @@ func (m *Memory) Session() interfaces.SessionRepository {
 
 func (m *Memory) NotificationSlot() interfaces.NotificationSlotRepository {
 	return m.notifySlot
+}
+
+func (m *Memory) JobRun() interfaces.JobRunRepository {
+	return m.jobRun
 }
 
 func (m *Memory) Close() error {

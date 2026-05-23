@@ -70,6 +70,7 @@ type AppConfig struct {
 	Compile   CompileSection      `toml:"compile"`
 	Assist    AssistSection       `toml:"assist"`
 	Action    *ActionSection      `toml:"action"`
+	Jobs      []JobSection        `toml:"job"`
 }
 
 // ActionSection represents the [action] section in a TOML config.
@@ -104,6 +105,7 @@ type WorkspaceConfig struct {
 	CompilePrompt        string
 	AssistPrompt         string
 	AssistLanguage       string
+	Jobs                 []*model.Job
 }
 
 // Labels represents entity display labels
@@ -214,6 +216,12 @@ func (a *AppConfig) Validate() error {
 	// schema errors surface at startup.
 	if _, err := a.resolveActionStatusSet(); err != nil {
 		return goerr.Wrap(err, "invalid [action] section")
+	}
+
+	// [[job]] entries are optional. When supplied, validate eagerly so
+	// schema / cron / duration errors surface at startup.
+	if _, err := a.resolveJobs(); err != nil {
+		return goerr.Wrap(err, "invalid [[job]] section")
 	}
 
 	return nil
@@ -386,6 +394,11 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 		return nil, goerr.Wrap(err, "failed to resolve action status set", goerr.V(ConfigPathKey, path))
 	}
 
+	jobs, err := appCfg.resolveJobs()
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to resolve jobs", goerr.V(ConfigPathKey, path))
+	}
+
 	return &WorkspaceConfig{
 		ID:                   wsID,
 		Name:                 wsName,
@@ -400,6 +413,7 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 		CompilePrompt:        appCfg.Compile.Prompt,
 		AssistPrompt:         appCfg.Assist.Prompt,
 		AssistLanguage:       appCfg.Assist.Language,
+		Jobs:                 jobs,
 	}, nil
 }
 
@@ -443,6 +457,7 @@ func (a *AppConfig) Configure(c *cli.Command) ([]*WorkspaceConfig, *model.Worksp
 			CompilePrompt:        wc.CompilePrompt,
 			AssistPrompt:         wc.AssistPrompt,
 			AssistLanguage:       wc.AssistLanguage,
+			Jobs:                 wc.Jobs,
 		})
 		logging.Default().Info("Registered workspace", "id", wc.ID, "name", wc.Name)
 	}

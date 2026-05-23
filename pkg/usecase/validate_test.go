@@ -93,7 +93,7 @@ func TestValidateDB_AllFieldTypesValid(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := repo.Case().Create(ctx, wsID, &model.Case{
-		ReporterID: "U-TEST-DEFAULT",
+		ReporterID:  "U-TEST-DEFAULT",
 		Title:       "Valid Case",
 		Description: "All field types are valid",
 		FieldValues: map[string]model.FieldValue{
@@ -120,7 +120,7 @@ func TestValidateDB_SelectInvalidOptionID(t *testing.T) {
 
 	_, err := repo.Case().Create(ctx, wsID, &model.Case{
 		ReporterID: "U-TEST-DEFAULT",
-		Title: "Bad Select",
+		Title:      "Bad Select",
 		FieldValues: map[string]model.FieldValue{
 			"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "unknown-severity"},
 		},
@@ -143,7 +143,7 @@ func TestValidateDB_SelectWrongType(t *testing.T) {
 	// Value is int instead of string — detected as invalid because Value won't match any option
 	_, err := repo.Case().Create(ctx, wsID, &model.Case{
 		ReporterID: "U-TEST-DEFAULT",
-		Title: "Select Wrong Type",
+		Title:      "Select Wrong Type",
 		FieldValues: map[string]model.FieldValue{
 			"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: 42},
 		},
@@ -164,7 +164,7 @@ func TestValidateDB_MultiSelectInvalidOptionID(t *testing.T) {
 
 	_, err := repo.Case().Create(ctx, wsID, &model.Case{
 		ReporterID: "U-TEST-DEFAULT",
-		Title: "Bad MultiSelect",
+		Title:      "Bad MultiSelect",
 		FieldValues: map[string]model.FieldValue{
 			"tags": {FieldID: "tags", Type: types.FieldTypeMultiSelect, Value: []string{"network", "nonexistent"}},
 		},
@@ -186,7 +186,7 @@ func TestValidateDB_MultiSelectWrongType(t *testing.T) {
 	// Value is string instead of []string — invalid for multi-select
 	_, err := repo.Case().Create(ctx, wsID, &model.Case{
 		ReporterID: "U-TEST-DEFAULT",
-		Title: "Bad MultiSelect Type",
+		Title:      "Bad MultiSelect Type",
 		FieldValues: map[string]model.FieldValue{
 			"tags": {FieldID: "tags", Type: types.FieldTypeMultiSelect, Value: "should-be-array"},
 		},
@@ -208,7 +208,7 @@ func TestValidateDB_NonSelectFieldsNotChecked(t *testing.T) {
 	// Even with wrong types for non-select fields, ValidateDB should not report issues
 	_, err := repo.Case().Create(ctx, wsID, &model.Case{
 		ReporterID: "U-TEST-DEFAULT",
-		Title: "Non-select fields with wrong types",
+		Title:      "Non-select fields with wrong types",
 		FieldValues: map[string]model.FieldValue{
 			"title-text": {FieldID: "title-text", Type: types.FieldTypeText, Value: 12345},
 			"score":      {FieldID: "score", Type: types.FieldTypeNumber, Value: "not-a-number"},
@@ -231,7 +231,7 @@ func TestValidateDB_UnknownFieldSkipped(t *testing.T) {
 
 	_, err := repo.Case().Create(ctx, wsID, &model.Case{
 		ReporterID: "U-TEST-DEFAULT",
-		Title: "Unknown Field",
+		Title:      "Unknown Field",
 		FieldValues: map[string]model.FieldValue{
 			"unknown-field": {FieldID: "unknown-field", Type: types.FieldTypeSelect, Value: "anything"},
 		},
@@ -251,7 +251,7 @@ func TestValidateDB_MultipleIssuesAcrossFields(t *testing.T) {
 	// Case with invalid values in both select and multi-select fields
 	_, err := repo.Case().Create(ctx, wsID, &model.Case{
 		ReporterID: "U-TEST-DEFAULT",
-		Title: "Multiple Issues",
+		Title:      "Multiple Issues",
 		FieldValues: map[string]model.FieldValue{
 			"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "nonexistent"},
 			"tags":     {FieldID: "tags", Type: types.FieldTypeMultiSelect, Value: []string{"bogus"}},
@@ -319,7 +319,7 @@ func TestValidateDB_MultipleWorkspaces(t *testing.T) {
 	// Valid case in ws1
 	_, err := repo.Case().Create(ctx, wsID1, &model.Case{
 		ReporterID: "U-TEST-DEFAULT",
-		Title: "Valid in ws1",
+		Title:      "Valid in ws1",
 		FieldValues: map[string]model.FieldValue{
 			"status": {FieldID: "status", Type: types.FieldTypeSelect, Value: "open"},
 		},
@@ -329,7 +329,7 @@ func TestValidateDB_MultipleWorkspaces(t *testing.T) {
 	// Invalid case in ws2
 	_, err = repo.Case().Create(ctx, wsID2, &model.Case{
 		ReporterID: "U-TEST-DEFAULT",
-		Title: "Invalid in ws2",
+		Title:      "Invalid in ws2",
 		FieldValues: map[string]model.FieldValue{
 			"priority": {FieldID: "priority", Type: types.FieldTypeSelect, Value: "p999"},
 		},
@@ -352,7 +352,7 @@ func TestValidateDB_InterfaceSliceMultiSelect(t *testing.T) {
 	// []interface{} with valid strings — can happen from JSON/Firestore deserialization
 	_, err := repo.Case().Create(ctx, wsID, &model.Case{
 		ReporterID: "U-TEST-DEFAULT",
-		Title: "Interface Slice MultiSelect",
+		Title:      "Interface Slice MultiSelect",
 		FieldValues: map[string]model.FieldValue{
 			"tags": {FieldID: "tags", Type: types.FieldTypeMultiSelect, Value: []interface{}{"network", "malware"}},
 		},
@@ -372,7 +372,7 @@ func TestValidateDB_InterfaceSliceMultiSelectInvalid(t *testing.T) {
 	// []interface{} with non-string elements
 	_, err := repo.Case().Create(ctx, wsID, &model.Case{
 		ReporterID: "U-TEST-DEFAULT",
-		Title: "Interface Slice Invalid",
+		Title:      "Interface Slice Invalid",
 		FieldValues: map[string]model.FieldValue{
 			"tags": {FieldID: "tags", Type: types.FieldTypeMultiSelect, Value: []interface{}{123, 456}},
 		},
@@ -393,7 +393,7 @@ func TestValidateDB_IssueContainsSampleInfo(t *testing.T) {
 
 	created, err := repo.Case().Create(ctx, wsID, &model.Case{
 		ReporterID: "U-TEST-DEFAULT",
-		Title: "Sample Case",
+		Title:      "Sample Case",
 		FieldValues: map[string]model.FieldValue{
 			"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "deleted-option"},
 		},

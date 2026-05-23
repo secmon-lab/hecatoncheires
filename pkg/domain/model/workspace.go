@@ -28,6 +28,7 @@ type WorkspaceEntry struct {
 	CompilePrompt        string
 	AssistPrompt         string
 	AssistLanguage       string
+	Jobs                 []*Job // Event-driven agent jobs loaded from workspace TOML
 }
 
 // WorkspaceRegistry holds workspace configurations.
