@@ -3,6 +3,7 @@ package job_test
 import (
 	"context"
 	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/m-mizutani/gollem/llm/gemini"
 	"github.com/m-mizutani/gollem/llm/openai"
 	"github.com/m-mizutani/gollem/mock"
+	"github.com/m-mizutani/gollem/trace"
 	"github.com/m-mizutani/gt"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/job"
@@ -86,6 +88,117 @@ func TestSingleLoopJobExecutor_RequiresUserPrompt(t *testing.T) {
 		LLMClient:    scriptedLLM([]string{"x"}),
 	})
 	gt.Error(t, err)
+}
+
+// recordingTraceHandler is a trace.Handler that just counts which hooks
+// were called. Used to verify Executor wires req.TraceHandler into gollem.
+type recordingTraceHandler struct {
+	mu              sync.Mutex
+	startLLMCalls   int
+	endLLMCalls     int
+	startToolCalls  int
+	endToolCalls    int
+	finishCalls     int
+	startAgentCalls int
+	endAgentCalls   int
+	addEventCalls   int
+	startSubCalls   int
+	endSubCalls     int
+	startChildCalls int
+	endChildCalls   int
+}
+
+func (h *recordingTraceHandler) inc(field *int) {
+	h.mu.Lock()
+	*field++
+	h.mu.Unlock()
+}
+
+func (h *recordingTraceHandler) StartAgentExecute(ctx context.Context) context.Context {
+	h.inc(&h.startAgentCalls)
+	return ctx
+}
+func (h *recordingTraceHandler) EndAgentExecute(ctx context.Context, err error) {
+	h.inc(&h.endAgentCalls)
+}
+func (h *recordingTraceHandler) StartLLMCall(ctx context.Context) context.Context {
+	h.inc(&h.startLLMCalls)
+	return ctx
+}
+func (h *recordingTraceHandler) EndLLMCall(ctx context.Context, data *trace.LLMCallData, err error) {
+	h.inc(&h.endLLMCalls)
+}
+func (h *recordingTraceHandler) StartToolExec(ctx context.Context, toolName string, args map[string]any) context.Context {
+	h.inc(&h.startToolCalls)
+	return ctx
+}
+func (h *recordingTraceHandler) EndToolExec(ctx context.Context, result map[string]any, err error) {
+	h.inc(&h.endToolCalls)
+}
+func (h *recordingTraceHandler) StartSubAgent(ctx context.Context, name string) context.Context {
+	h.inc(&h.startSubCalls)
+	return ctx
+}
+func (h *recordingTraceHandler) EndSubAgent(ctx context.Context, err error) {
+	h.inc(&h.endSubCalls)
+}
+func (h *recordingTraceHandler) StartChildAgent(ctx context.Context, name string) context.Context {
+	h.inc(&h.startChildCalls)
+	return ctx
+}
+func (h *recordingTraceHandler) EndChildAgent(ctx context.Context, err error) {
+	h.inc(&h.endChildCalls)
+}
+func (h *recordingTraceHandler) AddEvent(ctx context.Context, kind string, data any) {
+	h.inc(&h.addEventCalls)
+}
+func (h *recordingTraceHandler) Finish(ctx context.Context) error {
+	h.inc(&h.finishCalls)
+	return nil
+}
+
+// TestSingleLoopJobExecutor_TraceHandlerIsWired pins the contract that
+// non-nil ExecuteRequest.TraceHandler reaches gollem.WithTrace. The
+// proxy signal is that StartLLMCall + EndLLMCall both fire during the
+// agent loop.
+func TestSingleLoopJobExecutor_TraceHandlerIsWired(t *testing.T) {
+	exec := job.NewSingleLoopJobExecutor()
+	llm := scriptedLLM([]string{"done"})
+	handler := &recordingTraceHandler{}
+
+	_, err := exec.Execute(context.Background(), job.ExecuteRequest{
+		JobID:        "test-job",
+		SystemPrompt: "x",
+		Prompt:       "y",
+		LLMClient:    llm,
+		TraceHandler: handler,
+	})
+	gt.NoError(t, err).Required()
+	// gollem.go invokes StartAgentExecute and EndAgentExecute on the
+	// configured trace handler from inside Execute() regardless of which
+	// LLM client is in use. (StartLLMCall / EndLLMCall are emitted by
+	// the provider-specific client packages, NOT by mock.LLMClientMock,
+	// so they can't be used as a wire-signal in unit tests.) If our
+	// handler did not reach gollem.WithTrace, these counters would stay 0.
+	gt.Number(t, handler.startAgentCalls).Equal(1)
+	gt.Number(t, handler.endAgentCalls).Equal(1)
+	gt.Number(t, handler.finishCalls).Equal(1)
+}
+
+// TestSingleLoopJobExecutor_TraceHandlerNilIsBackwardCompat ensures the
+// executor still runs when no handler is supplied (existing callers).
+func TestSingleLoopJobExecutor_TraceHandlerNilIsBackwardCompat(t *testing.T) {
+	exec := job.NewSingleLoopJobExecutor()
+	llm := scriptedLLM([]string{"done"})
+
+	out, err := exec.Execute(context.Background(), job.ExecuteRequest{
+		JobID:        "test-job",
+		SystemPrompt: "x",
+		Prompt:       "y",
+		LLMClient:    llm,
+	})
+	gt.NoError(t, err).Required()
+	gt.Value(t, out.Status).Equal(job.ExecuteStatusSuccess)
 }
 
 func TestSingleLoopJobExecutor_LLMErrorPropagates(t *testing.T) {

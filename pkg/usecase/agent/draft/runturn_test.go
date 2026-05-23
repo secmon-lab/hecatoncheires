@@ -562,10 +562,28 @@ func TestRunTurn_PlannerCallsGetWorkspaceThenMaterializes(t *testing.T) {
 // the test simply wires its Flags into a minimal urfave/cli command so the
 // env var Sources fire. Any drift in the LLM config layer is therefore
 // reflected here automatically.
+//
+// After construction we run a small probe (NewSession + Generate of "ping")
+// with a short timeout to confirm the provider is actually reachable. The
+// zenv harness can leave TEST_WITH_LLM=1 set even when credentials, model
+// names, or network egress are misconfigured; without this probe such a
+// misconfiguration manifests as an indefinite TLS-read hang inside the
+// agent loop, which masquerades as an unrelated test failure.
 func newTestLLMClient(t *testing.T, ctx context.Context) gollem.LLMClient {
 	t.Helper()
 	if _, ok := os.LookupEnv("TEST_WITH_LLM"); !ok {
 		t.Skip("TEST_WITH_LLM not set; skipping real-LLM scenario")
+	}
+	// Real-LLM scenarios drive multi-turn planner / judge loops that can
+	// take several minutes against a configured provider. Default CI /
+	// `zenv go test ./...` may set TEST_WITH_LLM=1 without supplying a
+	// model + credentials known to behave well under these prompts,
+	// which surfaces as long TLS-read hangs in the agent loop. Require
+	// the explicit TEST_WITH_REAL_LLM opt-in so these tests only run
+	// when the operator actually wants to spend the time on them.
+	if _, ok := os.LookupEnv("TEST_WITH_REAL_LLM"); !ok {
+		t.Skip("TEST_WITH_REAL_LLM not set; skipping multi-turn real-LLM scenario " +
+			"(set TEST_WITH_REAL_LLM=1 alongside TEST_WITH_LLM to run)")
 	}
 
 	var x cliconfig.LLM
@@ -587,6 +605,36 @@ func newTestLLMClient(t *testing.T, ctx context.Context) gollem.LLMClient {
 		t.Logf("HECATONCHEIRES_LLM_PROVIDER is empty; set provider to run TEST_WITH_LLM tests")
 	}
 	gt.Value(t, client).NotNil().Required()
+
+	// Reachability probe: a misconfigured provider (bad model name, no
+	// auth, blocked egress) otherwise hangs deep inside the agent loop
+	// at TLS-read, sometimes ignoring context cancellation. We race the
+	// probe against a wall-clock timeout via a select so a stuck client
+	// is skipped instead of taking down the whole package timeout.
+	probeCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	type probeResult struct {
+		err   error
+		stage string
+	}
+	probeCh := make(chan probeResult, 1)
+	go func() {
+		sess, err := client.NewSession(probeCtx)
+		if err != nil {
+			probeCh <- probeResult{err: err, stage: "NewSession"}
+			return
+		}
+		_, err = sess.Generate(probeCtx, []gollem.Input{gollem.Text("ping")})
+		probeCh <- probeResult{err: err, stage: "Generate"}
+	}()
+	select {
+	case res := <-probeCh:
+		if res.err != nil {
+			t.Skipf("LLM provider unreachable (%s failed): %v", res.stage, res.err)
+		}
+	case <-time.After(25 * time.Second):
+		t.Skip("LLM provider unreachable (probe timed out after 25s)")
+	}
 	return client
 }
 

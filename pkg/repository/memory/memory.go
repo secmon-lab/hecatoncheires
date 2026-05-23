@@ -23,6 +23,8 @@ type Memory struct {
 	session       *sessionRepository
 	notifySlot    *notificationSlotRepository
 	jobRun        *jobRunRepository
+	jobRunLog     *jobRunLogRepository
+	jobRunEvent   *jobRunEventRepository
 }
 
 var _ interfaces.Repository = &Memory{}
@@ -44,6 +46,8 @@ func New() *Memory {
 		session:       newSessionRepository(),
 		notifySlot:    newNotificationSlotRepository(),
 		jobRun:        newJobRunRepository(),
+		jobRunLog:     newJobRunLogRepository(),
+		jobRunEvent:   newJobRunEventRepository(),
 	}
 }
 
@@ -101,6 +105,14 @@ func (m *Memory) NotificationSlot() interfaces.NotificationSlotRepository {
 
 func (m *Memory) JobRun() interfaces.JobRunRepository {
 	return m.jobRun
+}
+
+func (m *Memory) JobRunLog() interfaces.JobRunLogRepository {
+	return m.jobRunLog
+}
+
+func (m *Memory) JobRunEvent() interfaces.JobRunEventRepository {
+	return m.jobRunEvent
 }
 
 func (m *Memory) Close() error {
