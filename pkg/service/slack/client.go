@@ -11,6 +11,9 @@ import (
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/slack-go/slack"
+	"golang.org/x/sync/errgroup"
+
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
 // resolveDisplayName picks the most user-friendly label Slack exposes for a
@@ -24,8 +27,19 @@ func resolveDisplayName(u slack.User) string {
 }
 
 const (
-	// DefaultCacheTTL is the default TTL for channel name cache
-	DefaultCacheTTL = 45 * time.Second
+	// DefaultCacheTTL is the default TTL for the channel-name in-memory
+	// cache. Channel names rarely change, and a multi-minute TTL keeps
+	// the GraphQL `cases` query off the conversations.info path during
+	// normal navigation. Callers that need fresher data can override via
+	// WithCacheTTL (e.g. unit tests with no real cache window).
+	DefaultCacheTTL = 10 * time.Minute
+
+	// DefaultChannelInfoParallelism caps how many conversations.info
+	// requests one GetChannelNames call may run concurrently. Slack
+	// rates conversations.info at Tier 3 (~50 req/min); 5 keeps us well
+	// under the per-workspace budget while collapsing the 10-channel
+	// cold-cache case from sequential seconds to a few hundred ms.
+	DefaultChannelInfoParallelism = 5
 )
 
 // cacheEntry holds a cached channel name with expiration
@@ -38,6 +52,17 @@ type cacheEntry struct {
 type client struct {
 	api      *slack.Client
 	cacheTTL time.Duration
+
+	// channelInfoParallelism caps the per-call fan-out used by
+	// GetChannelNames when fetching cache-missed channels. Adjust via
+	// WithChannelInfoParallelism.
+	channelInfoParallelism int
+
+	// fetchChannelInfo resolves a single channel id to its name. It is
+	// initialised in New to a thin wrapper around api.GetConversationInfoContext
+	// and overridable from tests (see export_test.go) so unit tests can
+	// drive the concurrent path without a live Slack workspace.
+	fetchChannelInfo func(ctx context.Context, id string) (string, error)
 
 	mu    sync.RWMutex
 	cache map[string]cacheEntry
@@ -61,16 +86,40 @@ func WithCacheTTL(ttl time.Duration) Option {
 	}
 }
 
+// WithChannelInfoParallelism overrides the maximum number of in-flight
+// conversations.info requests inside one GetChannelNames call. Values
+// less than 1 are coerced to 1 (serial). Defaults to
+// DefaultChannelInfoParallelism.
+func WithChannelInfoParallelism(n int) Option {
+	return func(c *client) {
+		if n < 1 {
+			n = 1
+		}
+		c.channelInfoParallelism = n
+	}
+}
+
 // New creates a new Slack service with the provided bot token
 func New(token string, opts ...Option) (Service, error) {
 	if token == "" {
 		return nil, goerr.New("Slack bot token is required")
 	}
 
+	api := slack.New(token)
 	c := &client{
-		api:      slack.New(token),
-		cacheTTL: DefaultCacheTTL,
-		cache:    make(map[string]cacheEntry),
+		api:                    api,
+		cacheTTL:               DefaultCacheTTL,
+		channelInfoParallelism: DefaultChannelInfoParallelism,
+		cache:                  make(map[string]cacheEntry),
+	}
+	c.fetchChannelInfo = func(ctx context.Context, id string) (string, error) {
+		info, err := c.api.GetConversationInfoContext(ctx, &slack.GetConversationInfoInput{
+			ChannelID: id,
+		})
+		if err != nil {
+			return "", err
+		}
+		return info.Name, nil
 	}
 
 	for _, opt := range opts {
@@ -131,55 +180,134 @@ func (c *client) ListJoinedChannels(ctx context.Context, teamID string) ([]Chann
 	return channels, nil
 }
 
-// GetChannelNames retrieves channel names for the given IDs with caching
+// GetChannelNames retrieves channel names for the given IDs with caching.
+//
+// Behaviour:
+//   - Cache hits return immediately under a read lock.
+//   - Cache misses are deduplicated, then fetched concurrently via
+//     conversations.info, capped at c.channelInfoParallelism.
+//   - Per-channel lookup failures (e.g. channel_not_found,
+//     not_in_channel) are reported via errutil.Handle and omitted from
+//     the result map — the caller will use the fallback name. This
+//     preserves the previous "partial result is OK" contract while
+//     making the failure observable instead of silent.
+//   - Errors that invalidate the whole call (auth / token / rate-limit /
+//     context cancellation) propagate up as the function's error so the
+//     caller can react. The first such error wins; the rest of the
+//     in-flight fetches are cancelled via the errgroup's context.
 func (c *client) GetChannelNames(ctx context.Context, ids []string) (map[string]string, error) {
-	result := make(map[string]string)
-	var missingIDs []string
-
 	now := time.Now()
 
-	// Check cache first
+	// First pass: serve cache hits, collect deduped misses.
+	result := make(map[string]string, len(ids))
+	missingSet := make(map[string]struct{})
 	c.mu.RLock()
 	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		if _, already := result[id]; already {
+			continue
+		}
 		if entry, ok := c.cache[id]; ok && entry.expiresAt.After(now) {
 			result[id] = entry.name
-		} else {
-			missingIDs = append(missingIDs, id)
+			continue
 		}
+		missingSet[id] = struct{}{}
 	}
 	c.mu.RUnlock()
 
-	// Fetch missing channels from API
-	if len(missingIDs) > 0 {
-		c.mu.Lock()
-		defer c.mu.Unlock()
-
-		for _, id := range missingIDs {
-			// Double-check cache after acquiring write lock
-			if entry, ok := c.cache[id]; ok && entry.expiresAt.After(now) {
-				result[id] = entry.name
-				continue
-			}
-
-			info, err := c.api.GetConversationInfoContext(ctx, &slack.GetConversationInfoInput{
-				ChannelID: id,
-			})
-			if err != nil {
-				// If we can't get the channel info, skip it
-				// The caller will use the fallback name
-				continue
-			}
-
-			name := info.Name
-			result[id] = name
-			c.cache[id] = cacheEntry{
-				name:      name,
-				expiresAt: now.Add(c.cacheTTL),
-			}
-		}
+	if len(missingSet) == 0 {
+		return result, nil
 	}
 
+	missingIDs := make([]string, 0, len(missingSet))
+	for id := range missingSet {
+		missingIDs = append(missingIDs, id)
+	}
+
+	// Concurrent fetch of cache misses. We accumulate into a local map
+	// guarded by its own mutex, then merge into the shared cache once
+	// at the end so the long write-lock window from the old serial
+	// implementation is gone (other GetChannelNames callers can keep
+	// serving cache hits while we wait on Slack).
+	fetched := make(map[string]string, len(missingIDs))
+	var fetchedMu sync.Mutex
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(max(c.channelInfoParallelism, 1))
+
+	for _, id := range missingIDs {
+		g.Go(func() error {
+			name, err := c.fetchChannelInfo(gctx, id)
+			if err != nil {
+				if isChannelInfoFatal(err) {
+					return goerr.Wrap(err, "failed to fetch slack channel info",
+						goerr.V("channel_id", id))
+				}
+				// Per-channel non-fatal: surface to ops, then drop the
+				// id from the result map so the caller's fallback path
+				// kicks in. We pass the parent ctx (not gctx) so a
+				// peer's fatal failure doesn't suppress the log entry
+				// for an already-observed per-channel error.
+				errutil.Handle(ctx, goerr.Wrap(err, "slack channel info lookup",
+					goerr.V("channel_id", id)), "slack channel info lookup")
+				return nil
+			}
+			fetchedMu.Lock()
+			fetched[id] = name
+			fetchedMu.Unlock()
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	// Merge into the shared cache and the result map. Only one short
+	// write-lock window per call.
+	c.mu.Lock()
+	expiresAt := now.Add(c.cacheTTL)
+	for id, name := range fetched {
+		c.cache[id] = cacheEntry{name: name, expiresAt: expiresAt}
+		result[id] = name
+	}
+	c.mu.Unlock()
+
 	return result, nil
+}
+
+// isChannelInfoFatal reports whether an error from conversations.info
+// should abort the whole GetChannelNames call (vs. being treated as a
+// per-channel "skip and continue" condition). Rate limits, auth/token
+// failures, and context cancellation are the canonical fatals; the
+// rest (channel_not_found, not_in_channel, …) are localised to one id.
+func isChannelInfoFatal(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var rateErr *slack.RateLimitedError
+	if errors.As(err, &rateErr) {
+		return true
+	}
+	var slackErr slack.SlackErrorResponse
+	if errors.As(err, &slackErr) {
+		switch slackErr.Err {
+		case "invalid_auth",
+			"not_authed",
+			"token_revoked",
+			"token_expired",
+			"account_inactive",
+			"missing_scope",
+			"ratelimited":
+			return true
+		}
+	}
+	return false
 }
 
 // GetUserInfo retrieves user information for the given user ID

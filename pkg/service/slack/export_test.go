@@ -1,5 +1,7 @@
 package slack
 
+import "context"
+
 // Export internal functions and types for testing
 var (
 	// WithCacheTTL is exported for testing
@@ -17,3 +19,21 @@ var (
 	// fallback order without hitting the Slack API.
 	ResolveDisplayNameForTest = resolveDisplayName
 )
+
+// SetChannelInfoFetcherForTest swaps the per-channel info fetcher on a
+// Service produced by New. Tests use this to drive GetChannelNames
+// without a live Slack workspace (the production fetcher closes over
+// slack.Client.GetConversationInfoContext). Returns the previous
+// fetcher so a test can restore it if needed.
+func SetChannelInfoFetcherForTest(svc Service, f func(ctx context.Context, id string) (string, error)) func(ctx context.Context, id string) (string, error) {
+	c := svc.(*client)
+	prev := c.fetchChannelInfo
+	c.fetchChannelInfo = f
+	return prev
+}
+
+// ChannelInfoParallelismForTest reports the active fetch parallelism so
+// tests can assert that WithChannelInfoParallelism is honoured.
+func ChannelInfoParallelismForTest(svc Service) int {
+	return svc.(*client).channelInfoParallelism
+}

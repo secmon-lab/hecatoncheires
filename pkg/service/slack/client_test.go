@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
@@ -125,6 +128,227 @@ func TestIntegration(t *testing.T) {
 
 		gt.Value(t, user.ID).Equal(users[0].ID)
 		t.Logf("Got user info: %s (%s)", user.RealName, user.ID)
+	})
+}
+
+func TestGetChannelNames(t *testing.T) {
+	t.Run("cache hit avoids fetcher calls on second invocation", func(t *testing.T) {
+		svc, err := slack.New("test-token", slack.WithCacheTTL(time.Hour))
+		gt.NoError(t, err).Required()
+
+		var calls atomic.Int32
+		slack.SetChannelInfoFetcherForTest(svc, func(_ context.Context, id string) (string, error) {
+			calls.Add(1)
+			return "name-of-" + id, nil
+		})
+
+		ctx := context.Background()
+		ids := []string{"C1", "C2"}
+
+		first, err := svc.GetChannelNames(ctx, ids)
+		gt.NoError(t, err).Required()
+		gt.Value(t, first["C1"]).Equal("name-of-C1")
+		gt.Value(t, first["C2"]).Equal("name-of-C2")
+		gt.Number(t, int(calls.Load())).Equal(2)
+
+		second, err := svc.GetChannelNames(ctx, ids)
+		gt.NoError(t, err).Required()
+		gt.Value(t, second["C1"]).Equal("name-of-C1")
+		gt.Value(t, second["C2"]).Equal("name-of-C2")
+		// Second invocation must be served entirely from cache: no
+		// additional fetcher calls.
+		gt.Number(t, int(calls.Load())).Equal(2)
+	})
+
+	t.Run("cache miss fetches missing channels concurrently up to parallelism", func(t *testing.T) {
+		const parallelism = 5
+		const total = parallelism * 2 // 10 channels, 5 in-flight at a time
+
+		svc, err := slack.New("test-token",
+			slack.WithCacheTTL(time.Hour),
+			slack.WithChannelInfoParallelism(parallelism),
+		)
+		gt.NoError(t, err).Required()
+
+		// Barrier: every fetcher blocks on `release` until the
+		// goroutine driving the test has confirmed that exactly
+		// `parallelism` fetchers are in flight at the same time.
+		var inflight atomic.Int32
+		var maxInflight atomic.Int32
+		release := make(chan struct{})
+
+		slack.SetChannelInfoFetcherForTest(svc, func(ctx context.Context, id string) (string, error) {
+			cur := inflight.Add(1)
+			for {
+				old := maxInflight.Load()
+				if cur <= old || maxInflight.CompareAndSwap(old, cur) {
+					break
+				}
+			}
+			defer inflight.Add(-1)
+
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+			return "name-of-" + id, nil
+		})
+
+		ids := make([]string, 0, total)
+		for i := range total {
+			ids = append(ids, fmt.Sprintf("C%02d", i))
+		}
+
+		// Run GetChannelNames in a goroutine so we can observe the
+		// in-flight count from the test goroutine.
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		type res struct {
+			names map[string]string
+			err   error
+		}
+		done := make(chan res, 1)
+		go func() {
+			names, err := svc.GetChannelNames(ctx, ids)
+			done <- res{names: names, err: err}
+		}()
+
+		// Wait until the goroutines hit the parallelism cap, then
+		// release them all. A deadline keeps the test from hanging if
+		// the cap is wrong.
+		deadline := time.Now().Add(3 * time.Second)
+		for inflight.Load() < int32(parallelism) {
+			if time.Now().After(deadline) {
+				cancel()
+				gt.Number(t, int(maxInflight.Load())).Equal(parallelism)
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		close(release)
+
+		result := <-done
+		gt.NoError(t, result.err).Required()
+		gt.Number(t, len(result.names)).Equal(total)
+		for _, id := range ids {
+			gt.Value(t, result.names[id]).Equal("name-of-" + id)
+		}
+		// Concurrency must have actually saturated the cap. If the
+		// fetcher were called serially, maxInflight would be 1.
+		gt.Number(t, int(maxInflight.Load())).Equal(parallelism)
+	})
+
+	t.Run("per-channel failure is dropped from result and does not abort peers", func(t *testing.T) {
+		svc, err := slack.New("test-token", slack.WithCacheTTL(time.Hour))
+		gt.NoError(t, err).Required()
+
+		slack.SetChannelInfoFetcherForTest(svc, func(_ context.Context, id string) (string, error) {
+			if id == "C_MISSING" {
+				return "", goslack.SlackErrorResponse{Err: "channel_not_found"}
+			}
+			return "name-of-" + id, nil
+		})
+
+		names, err := svc.GetChannelNames(context.Background(), []string{"C1", "C_MISSING", "C2"})
+		gt.NoError(t, err).Required()
+		gt.Value(t, names["C1"]).Equal("name-of-C1")
+		gt.Value(t, names["C2"]).Equal("name-of-C2")
+		_, hasMissing := names["C_MISSING"]
+		gt.Bool(t, hasMissing).False()
+	})
+
+	t.Run("fatal SlackErrorResponse aborts the whole call", func(t *testing.T) {
+		svc, err := slack.New("test-token", slack.WithCacheTTL(time.Hour))
+		gt.NoError(t, err).Required()
+
+		slack.SetChannelInfoFetcherForTest(svc, func(_ context.Context, id string) (string, error) {
+			return "", goslack.SlackErrorResponse{Err: "invalid_auth"}
+		})
+
+		names, err := svc.GetChannelNames(context.Background(), []string{"C1"})
+		gt.Value(t, err).NotNil()
+		gt.Value(t, names).Nil()
+
+		var slackErr goslack.SlackErrorResponse
+		gt.Bool(t, errors.As(err, &slackErr)).True()
+		gt.Value(t, slackErr.Err).Equal("invalid_auth")
+	})
+
+	t.Run("rate-limited error is fatal", func(t *testing.T) {
+		svc, err := slack.New("test-token", slack.WithCacheTTL(time.Hour))
+		gt.NoError(t, err).Required()
+
+		slack.SetChannelInfoFetcherForTest(svc, func(_ context.Context, id string) (string, error) {
+			return "", &goslack.RateLimitedError{RetryAfter: 30 * time.Second}
+		})
+
+		_, err = svc.GetChannelNames(context.Background(), []string{"C1"})
+		gt.Value(t, err).NotNil()
+
+		var rateErr *goslack.RateLimitedError
+		gt.Bool(t, errors.As(err, &rateErr)).True()
+	})
+
+	t.Run("duplicate IDs are deduplicated before fetching", func(t *testing.T) {
+		svc, err := slack.New("test-token", slack.WithCacheTTL(time.Hour))
+		gt.NoError(t, err).Required()
+
+		var calls atomic.Int32
+		var mu sync.Mutex
+		seen := map[string]int{}
+		slack.SetChannelInfoFetcherForTest(svc, func(_ context.Context, id string) (string, error) {
+			calls.Add(1)
+			mu.Lock()
+			seen[id]++
+			mu.Unlock()
+			return "name-of-" + id, nil
+		})
+
+		names, err := svc.GetChannelNames(context.Background(),
+			[]string{"C1", "C2", "C1", "C2", "C1"})
+		gt.NoError(t, err).Required()
+		gt.Number(t, len(names)).Equal(2)
+		gt.Value(t, names["C1"]).Equal("name-of-C1")
+		gt.Value(t, names["C2"]).Equal("name-of-C2")
+		gt.Number(t, int(calls.Load())).Equal(2)
+		mu.Lock()
+		gt.Number(t, seen["C1"]).Equal(1)
+		gt.Number(t, seen["C2"]).Equal(1)
+		mu.Unlock()
+	})
+
+	t.Run("empty input returns empty map without calling fetcher", func(t *testing.T) {
+		svc, err := slack.New("test-token")
+		gt.NoError(t, err).Required()
+
+		var calls atomic.Int32
+		slack.SetChannelInfoFetcherForTest(svc, func(_ context.Context, id string) (string, error) {
+			calls.Add(1)
+			return "", nil
+		})
+
+		names, err := svc.GetChannelNames(context.Background(), nil)
+		gt.NoError(t, err).Required()
+		gt.Number(t, len(names)).Equal(0)
+		gt.Number(t, int(calls.Load())).Equal(0)
+	})
+
+	t.Run("WithChannelInfoParallelism is honoured and floors to 1", func(t *testing.T) {
+		svc, err := slack.New("test-token", slack.WithChannelInfoParallelism(7))
+		gt.NoError(t, err).Required()
+		gt.Number(t, slack.ChannelInfoParallelismForTest(svc)).Equal(7)
+
+		svcFloor, err := slack.New("test-token", slack.WithChannelInfoParallelism(0))
+		gt.NoError(t, err).Required()
+		gt.Number(t, slack.ChannelInfoParallelismForTest(svcFloor)).Equal(1)
+	})
+
+	t.Run("default parallelism matches DefaultChannelInfoParallelism", func(t *testing.T) {
+		svc, err := slack.New("test-token")
+		gt.NoError(t, err).Required()
+		gt.Number(t, slack.ChannelInfoParallelismForTest(svc)).Equal(slack.DefaultChannelInfoParallelism)
 	})
 }
 
