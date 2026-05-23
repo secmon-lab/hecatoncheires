@@ -21,6 +21,7 @@ type Repository interface {
 	CaseProposal() CaseProposalRepository
 	Session() SessionRepository
 	NotificationSlot() NotificationSlotRepository
+	JobRun() JobRunRepository
 
 	// Auth methods
 	PutToken(ctx context.Context, token *auth.Token) error

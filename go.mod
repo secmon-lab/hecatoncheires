@@ -12,6 +12,7 @@ require (
 	github.com/go-chi/chi/v5 v5.2.3
 	github.com/google/go-github/v75 v75.0.0
 	github.com/google/uuid v1.6.0
+	github.com/graph-gophers/dataloader/v7 v7.1.3
 	github.com/jomei/notionapi v1.13.3
 	github.com/lestrrat-go/jwx/v2 v2.1.6
 	github.com/m-mizutani/clog v0.2.1
@@ -22,6 +23,7 @@ require (
 	github.com/m-mizutani/masq v0.2.0
 	github.com/mattn/go-isatty v0.0.22
 	github.com/pelletier/go-toml/v2 v2.2.4
+	github.com/robfig/cron/v3 v3.0.1
 	github.com/shurcooL/githubv4 v0.0.0-20260209031235-2402fdf4a9ed
 	github.com/slack-go/slack v0.23.1
 	github.com/urfave/cli/v3 v3.6.1
@@ -97,7 +99,6 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.3.14 // indirect
 	github.com/googleapis/gax-go/v2 v2.21.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
-	github.com/graph-gophers/dataloader/v7 v7.1.3 // indirect
 	github.com/hashicorp/aws-sdk-go-base/v2 v2.0.0-beta.72 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-getter v1.8.6 // indirect

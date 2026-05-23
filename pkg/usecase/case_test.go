@@ -4,9 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 
+	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/mock"
 	"github.com/m-mizutani/gt"
+	goslack "github.com/slack-go/slack"
+
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slackpost"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
@@ -16,7 +23,9 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
-	goslack "github.com/slack-go/slack"
+	jobagent "github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/job"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 )
 
 const testWorkspaceID = "test-ws"
@@ -957,7 +966,7 @@ func TestCaseUseCase_PrivateCaseAccessControl(t *testing.T) {
 
 		// Create case directly in repo with IsPrivate and ChannelUserIDs
 		caseModel := &model.Case{
-			ReporterID: "U-TEST-DEFAULT",
+			ReporterID:     "U-TEST-DEFAULT",
 			Title:          "Private Case",
 			Description:    "Secret desc",
 			Status:         types.CaseStatusOpen,
@@ -982,7 +991,7 @@ func TestCaseUseCase_PrivateCaseAccessControl(t *testing.T) {
 		// Create case as a different user
 		adminCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UADMIN"})
 		caseModel := &model.Case{
-			ReporterID: "U-TEST-DEFAULT",
+			ReporterID:     "U-TEST-DEFAULT",
 			Title:          "Private Case",
 			Description:    "Secret desc",
 			Status:         types.CaseStatusOpen,
@@ -1014,7 +1023,7 @@ func TestCaseUseCase_PrivateCaseAccessControl(t *testing.T) {
 
 		// Create private case with UMEMBER as member
 		privCase := &model.Case{
-			ReporterID: "U-TEST-DEFAULT",
+			ReporterID:     "U-TEST-DEFAULT",
 			Title:          "Private Visible",
 			Description:    "Visible to member",
 			Status:         types.CaseStatusOpen,
@@ -1026,7 +1035,7 @@ func TestCaseUseCase_PrivateCaseAccessControl(t *testing.T) {
 
 		// Create private case without UMEMBER
 		privCase2 := &model.Case{
-			ReporterID: "U-TEST-DEFAULT",
+			ReporterID:     "U-TEST-DEFAULT",
 			Title:          "Private Hidden",
 			Description:    "Not visible",
 			Status:         types.CaseStatusOpen,
@@ -1058,7 +1067,7 @@ func TestCaseUseCase_PrivateCaseAccessControl(t *testing.T) {
 
 		adminCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UADMIN"})
 		caseModel := &model.Case{
-			ReporterID: "U-TEST-DEFAULT",
+			ReporterID:     "U-TEST-DEFAULT",
 			Title:          "Private Case",
 			Description:    "Secret",
 			Status:         types.CaseStatusOpen,
@@ -1084,7 +1093,7 @@ func TestCaseUseCase_PrivateCaseAccessControl(t *testing.T) {
 
 		adminCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UADMIN"})
 		caseModel := &model.Case{
-			ReporterID: "U-TEST-DEFAULT",
+			ReporterID:     "U-TEST-DEFAULT",
 			Title:          "Private Case",
 			Description:    "Secret",
 			Status:         types.CaseStatusOpen,
@@ -1106,7 +1115,7 @@ func TestCaseUseCase_PrivateCaseAccessControl(t *testing.T) {
 
 		adminCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UADMIN"})
 		caseModel := &model.Case{
-			ReporterID: "U-TEST-DEFAULT",
+			ReporterID:     "U-TEST-DEFAULT",
 			Title:          "Private Case",
 			Description:    "Secret",
 			Status:         types.CaseStatusOpen,
@@ -1143,7 +1152,7 @@ func TestCaseUseCase_PrivateCaseAccessControl(t *testing.T) {
 
 		// Create a case that simulates existing data (IsPrivate=false, ChannelUserIDs=nil)
 		caseModel := &model.Case{
-			ReporterID: "U-TEST-DEFAULT",
+			ReporterID:  "U-TEST-DEFAULT",
 			Title:       "Legacy Case",
 			Description: "Old case",
 			Status:      types.CaseStatusOpen,
@@ -2289,4 +2298,209 @@ func TestCaseUseCase_GetCase_DraftVisibility(t *testing.T) {
 		_, err = uc.GetCase(otherCtx, testWorkspaceID, draft.ID)
 		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
 	})
+}
+
+// recordingCaseEventPublisher captures every PublishCaseLifecycle invocation
+// so lifecycle-wiring tests can assert what fired and what did not.
+type recordingCaseEventPublisher struct {
+	events []recordedCaseEvent
+}
+
+type recordedCaseEvent struct {
+	workspaceID string
+	caseID      int64
+	lifecycle   model.CaseLifecycle
+	actor       string
+}
+
+func (r *recordingCaseEventPublisher) PublishCaseLifecycle(_ context.Context, workspaceID string, c *model.Case, lifecycle model.CaseLifecycle, actor string) {
+	r.events = append(r.events, recordedCaseEvent{
+		workspaceID: workspaceID,
+		caseID:      c.ID,
+		lifecycle:   lifecycle,
+		actor:       actor,
+	})
+}
+
+func TestCaseUseCase_PublishesCreatedLifecycle(t *testing.T) {
+	repo := memory.New()
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace:   model.Workspace{ID: testWorkspaceID, Name: "Test"},
+		FieldSchema: &config.FieldSchema{},
+	})
+	uc := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+	pub := &recordingCaseEventPublisher{}
+	uc.SetEventPublisher(pub)
+
+	ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-CALLER"})
+	created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", nil, nil, false, "", "")
+	gt.NoError(t, err).Required()
+
+	gt.Array(t, pub.events).Length(1).Required()
+	gt.Value(t, pub.events[0].lifecycle).Equal(model.CaseLifecycleCreated)
+	gt.Value(t, pub.events[0].caseID).Equal(created.ID)
+	gt.String(t, pub.events[0].workspaceID).Equal(testWorkspaceID)
+	gt.String(t, pub.events[0].actor).Equal("U-CALLER")
+}
+
+func TestCaseUseCase_PublishesClosedLifecycle(t *testing.T) {
+	repo := memory.New()
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace:   model.Workspace{ID: testWorkspaceID, Name: "Test"},
+		FieldSchema: &config.FieldSchema{},
+	})
+	uc := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+	pub := &recordingCaseEventPublisher{}
+	uc.SetEventPublisher(pub)
+
+	ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-CALLER"})
+	created, err := uc.CreateCase(ctx, testWorkspaceID, "T", "", nil, nil, false, "", "")
+	gt.NoError(t, err).Required()
+	gt.Array(t, pub.events).Length(1).Required()
+
+	closed, err := uc.CloseCase(ctx, testWorkspaceID, created.ID)
+	gt.NoError(t, err).Required()
+	gt.Array(t, pub.events).Length(2).Required()
+	gt.Value(t, pub.events[1].lifecycle).Equal(model.CaseLifecycleClosed)
+	gt.Value(t, pub.events[1].caseID).Equal(closed.ID)
+}
+
+func TestCaseUseCase_NoPublishWhenNotConfigured(t *testing.T) {
+	repo := memory.New()
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace:   model.Workspace{ID: testWorkspaceID, Name: "Test"},
+		FieldSchema: &config.FieldSchema{},
+	})
+	uc := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+	// no SetEventPublisher
+
+	ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-CALLER"})
+	_, err := uc.CreateCase(ctx, testWorkspaceID, "T", "", nil, nil, false, "", "")
+	gt.NoError(t, err).Required()
+	// Compiles and runs without panic.
+}
+
+// jobLifecycleSlackPostRecorder is a slackpost.Poster that records every
+// PostMessage / PostThreadMessage call so the lifecycle test below can
+// verify the agent actually reached the Slack tool.
+type jobLifecycleSlackPostRecorder struct {
+	mu     sync.Mutex
+	posted []jobLifecycleSlackPost
+}
+
+type jobLifecycleSlackPost struct {
+	channelID string
+	threadTS  string
+	text      string
+}
+
+func (r *jobLifecycleSlackPostRecorder) PostMessage(_ context.Context, channelID string, _ []goslack.Block, text string) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.posted = append(r.posted, jobLifecycleSlackPost{channelID: channelID, text: text})
+	return "ts-1", nil
+}
+
+func (r *jobLifecycleSlackPostRecorder) PostThreadMessage(_ context.Context, channelID string, threadTS string, _ []goslack.Block, text string) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.posted = append(r.posted, jobLifecycleSlackPost{channelID: channelID, threadTS: threadTS, text: text})
+	return "ts-2", nil
+}
+
+func (r *jobLifecycleSlackPostRecorder) snapshot() []jobLifecycleSlackPost {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := append([]jobLifecycleSlackPost(nil), r.posted...)
+	return out
+}
+
+// TestLifecycle_CreateCaseTriggersAgentJob wires the full event-driven Job
+// pipeline (CaseUseCase publish -> JobUseCase match -> JobRunner ->
+// SingleLoopJobExecutor -> slack_post tool) and verifies that a brand-new
+// Case fires a Slack post via the agent.
+func TestLifecycle_CreateCaseTriggersAgentJob(t *testing.T) {
+	const wsID = "lifecycle-ws"
+	caseJob := &model.Job{
+		ID:     "summarize-on-create",
+		Prompt: "Post a one-line summary of the case to Slack via slack__post_to_case_channel.",
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace:   model.Workspace{ID: wsID, Name: "Lifecycle"},
+		FieldSchema: &config.FieldSchema{},
+		Jobs:        []*model.Job{caseJob},
+	})
+
+	repo := memory.New()
+	caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+
+	round := atomic.Int32{}
+	llm := &mock.LLMClientMock{
+		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mock.SessionMock{
+				GenerateFunc: func(_ context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					n := round.Add(1)
+					switch n {
+					case 1:
+						return &gollem.Response{
+							FunctionCalls: []*gollem.FunctionCall{{
+								ID:   "call-1",
+								Name: "slack__post_to_case_channel",
+								Arguments: map[string]any{
+									"text": "Lifecycle test (auto summary)",
+								},
+							}},
+						}, nil
+					default:
+						return &gollem.Response{Texts: []string{"done"}}, nil
+					}
+				},
+			}, nil
+		},
+	}
+
+	postRec := &jobLifecycleSlackPostRecorder{}
+
+	builder := job.ToolBuilderFunc(func(_ context.Context, c *model.Case, _ *model.WorkspaceEntry) []gollem.Tool {
+		channelID := "C-LIFECYCLE"
+		if c != nil && c.SlackChannelID != "" {
+			channelID = c.SlackChannelID
+		}
+		return slackpost.New(slackpost.Deps{Poster: postRec, ChannelID: channelID})
+	})
+
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo:        repo,
+		Registry:    registry,
+		LLMClient:   llm,
+		Executor:    jobagent.NewSingleLoopJobExecutor(),
+		ToolBuilder: builder,
+	})
+	jobUC := job.NewUseCase(registry, runner)
+	caseUC.SetEventPublisher(jobUC)
+
+	ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-CALLER"})
+	created, err := caseUC.CreateCase(ctx, wsID, "Lifecycle test", "auto summary please", nil, nil, false, "", "")
+	gt.NoError(t, err).Required()
+
+	async.Wait()
+
+	posts := postRec.snapshot()
+	gt.Array(t, posts).Length(1).Required()
+	gt.String(t, posts[0].text).Contains("Lifecycle test")
+
+	run, err := repo.JobRun().Get(ctx, model.JobRunKey{
+		WorkspaceID: wsID,
+		CaseID:      created.ID,
+		JobID:       caseJob.ID,
+	})
+	gt.NoError(t, err).Required()
+	gt.Value(t, run.LastStatus).Equal(model.JobRunStatusSuccess)
 }

@@ -1,0 +1,196 @@
+package model_test
+
+import (
+	"testing"
+	"time"
+
+	"github.com/m-mizutani/gt"
+	"github.com/robfig/cron/v3"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+)
+
+func TestCaseLifecycle_IsValid(t *testing.T) {
+	gt.Bool(t, model.CaseLifecycleCreated.IsValid()).True()
+	gt.Bool(t, model.CaseLifecycleClosed.IsValid()).True()
+	gt.Bool(t, model.CaseLifecycle("updated").IsValid()).False()
+	gt.Bool(t, model.CaseLifecycle("").IsValid()).False()
+}
+
+func TestCaseEventConfig_Matches(t *testing.T) {
+	cfg := &model.CaseEventConfig{
+		On: []model.CaseLifecycle{
+			model.CaseLifecycleCreated,
+			model.CaseLifecycleClosed,
+		},
+	}
+	gt.Bool(t, cfg.Matches(model.CaseLifecycleCreated)).True()
+	gt.Bool(t, cfg.Matches(model.CaseLifecycleClosed)).True()
+	gt.Bool(t, cfg.Matches(model.CaseLifecycle("other"))).False()
+
+	// Nil receiver returns false (no match).
+	var nilCfg *model.CaseEventConfig
+	gt.Bool(t, nilCfg.Matches(model.CaseLifecycleCreated)).False()
+}
+
+func TestCaseEventConfig_Validate(t *testing.T) {
+	t.Run("ok with one value", func(t *testing.T) {
+		cfg := &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}}
+		gt.NoError(t, cfg.Validate())
+	})
+	t.Run("ok with multiple", func(t *testing.T) {
+		cfg := &model.CaseEventConfig{On: []model.CaseLifecycle{
+			model.CaseLifecycleCreated, model.CaseLifecycleClosed,
+		}}
+		gt.NoError(t, cfg.Validate())
+	})
+	t.Run("empty on", func(t *testing.T) {
+		cfg := &model.CaseEventConfig{}
+		gt.Error(t, cfg.Validate())
+	})
+	t.Run("invalid lifecycle", func(t *testing.T) {
+		cfg := &model.CaseEventConfig{On: []model.CaseLifecycle{"invalid"}}
+		gt.Error(t, cfg.Validate())
+	})
+	t.Run("duplicate", func(t *testing.T) {
+		cfg := &model.CaseEventConfig{On: []model.CaseLifecycle{
+			model.CaseLifecycleCreated, model.CaseLifecycleCreated,
+		}}
+		gt.Error(t, cfg.Validate())
+	})
+	t.Run("nil receiver", func(t *testing.T) {
+		var cfg *model.CaseEventConfig
+		gt.Error(t, cfg.Validate())
+	})
+}
+
+func TestScheduledEventConfig_Validate(t *testing.T) {
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+	sched, err := parser.Parse("0 9 * * *")
+	gt.NoError(t, err).Required()
+
+	t.Run("every only", func(t *testing.T) {
+		cfg := &model.ScheduledEventConfig{Every: time.Hour}
+		gt.NoError(t, cfg.Validate())
+	})
+	t.Run("cron only", func(t *testing.T) {
+		cfg := &model.ScheduledEventConfig{Cron: sched, CronExpr: "0 9 * * *"}
+		gt.NoError(t, cfg.Validate())
+	})
+	t.Run("both", func(t *testing.T) {
+		cfg := &model.ScheduledEventConfig{Every: time.Hour, Cron: sched, CronExpr: "0 9 * * *"}
+		gt.Error(t, cfg.Validate())
+	})
+	t.Run("neither", func(t *testing.T) {
+		cfg := &model.ScheduledEventConfig{}
+		gt.Error(t, cfg.Validate())
+	})
+	t.Run("nil receiver", func(t *testing.T) {
+		var cfg *model.ScheduledEventConfig
+		gt.Error(t, cfg.Validate())
+	})
+}
+
+func TestJobEvents_Validate(t *testing.T) {
+	t.Run("case only", func(t *testing.T) {
+		ev := &model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		}
+		gt.NoError(t, ev.Validate())
+	})
+	t.Run("scheduled only", func(t *testing.T) {
+		ev := &model.JobEvents{
+			Scheduled: &model.ScheduledEventConfig{Every: time.Hour},
+		}
+		gt.NoError(t, ev.Validate())
+	})
+	t.Run("both", func(t *testing.T) {
+		ev := &model.JobEvents{
+			Case:      &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleClosed}},
+			Scheduled: &model.ScheduledEventConfig{Every: time.Hour},
+		}
+		gt.NoError(t, ev.Validate())
+	})
+	t.Run("none", func(t *testing.T) {
+		ev := &model.JobEvents{}
+		gt.Error(t, ev.Validate())
+	})
+	t.Run("invalid sub-config propagates", func(t *testing.T) {
+		ev := &model.JobEvents{
+			Case: &model.CaseEventConfig{On: nil}, // empty -> error
+		}
+		gt.Error(t, ev.Validate())
+	})
+}
+
+func TestJob_Validate(t *testing.T) {
+	ok := &model.Job{
+		ID:     "test-job",
+		Prompt: "do a thing",
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	gt.NoError(t, ok.Validate())
+
+	t.Run("missing id", func(t *testing.T) {
+		j := *ok
+		j.ID = ""
+		gt.Error(t, j.Validate())
+	})
+	t.Run("missing prompt", func(t *testing.T) {
+		j := *ok
+		j.Prompt = ""
+		gt.Error(t, j.Validate())
+	})
+	t.Run("missing events", func(t *testing.T) {
+		j := *ok
+		j.Events = model.JobEvents{}
+		gt.Error(t, j.Validate())
+	})
+	t.Run("nil receiver", func(t *testing.T) {
+		var j *model.Job
+		gt.Error(t, j.Validate())
+	})
+}
+
+func TestJob_Listens(t *testing.T) {
+	j := &model.Job{
+		ID:     "test-job",
+		Prompt: "do a thing",
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{
+				model.CaseLifecycleCreated,
+			}},
+			Scheduled: &model.ScheduledEventConfig{Every: time.Hour},
+		},
+	}
+
+	gt.Bool(t, j.ListensCase(model.CaseLifecycleCreated)).True()
+	gt.Bool(t, j.ListensCase(model.CaseLifecycleClosed)).False()
+	gt.Bool(t, j.ListensScheduled()).True()
+
+	t.Run("disabled job listens to nothing", func(t *testing.T) {
+		d := *j
+		d.Disabled = true
+		gt.Bool(t, d.ListensCase(model.CaseLifecycleCreated)).False()
+		gt.Bool(t, d.ListensScheduled()).False()
+	})
+
+	t.Run("nil receiver listens to nothing", func(t *testing.T) {
+		var n *model.Job
+		gt.Bool(t, n.ListensCase(model.CaseLifecycleCreated)).False()
+		gt.Bool(t, n.ListensScheduled()).False()
+	})
+
+	t.Run("scheduled-only job does not match case", func(t *testing.T) {
+		s := &model.Job{
+			ID:     "sched",
+			Prompt: "x",
+			Events: model.JobEvents{
+				Scheduled: &model.ScheduledEventConfig{Every: time.Hour},
+			},
+		}
+		gt.Bool(t, s.ListensCase(model.CaseLifecycleCreated)).False()
+		gt.Bool(t, s.ListensScheduled()).True()
+	})
+}

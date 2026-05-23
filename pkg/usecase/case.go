@@ -17,6 +17,14 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
+// CaseEventPublisher is the narrow surface of pkg/usecase/job.UseCase that
+// CaseUseCase calls into after a lifecycle transition. The interface is
+// defined here so this package does not import pkg/usecase/job (which
+// would create a cycle: job → usecase → job).
+type CaseEventPublisher interface {
+	PublishCaseLifecycle(ctx context.Context, workspaceID string, c *model.Case, lifecycle model.CaseLifecycle, actorUserID string)
+}
+
 type CaseUseCase struct {
 	repo              interfaces.Repository
 	workspaceRegistry *model.WorkspaceRegistry
@@ -24,6 +32,7 @@ type CaseUseCase struct {
 	slackAdminService slack.AdminService
 	baseURL           string
 	welcomeRenderers  map[string]*welcomeRenderer
+	eventPublisher    CaseEventPublisher
 }
 
 func NewCaseUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistry, slackService slack.Service, slackAdminService slack.AdminService, baseURL string) *CaseUseCase {
@@ -53,6 +62,27 @@ func NewCaseUseCase(repo interfaces.Repository, registry *model.WorkspaceRegistr
 	}
 
 	return uc
+}
+
+// SetEventPublisher wires the lifecycle event publisher. Called once at
+// startup after the job dispatch UseCase has been constructed. nil is
+// allowed (Job dispatch effectively disabled).
+func (uc *CaseUseCase) SetEventPublisher(p CaseEventPublisher) {
+	uc.eventPublisher = p
+}
+
+// publishLifecycle is a no-op when the publisher is unset. Suppression of
+// self-firing (a Job actor mutation re-firing its own event) lives inside
+// the publisher implementation; this method only forwards.
+func (uc *CaseUseCase) publishLifecycle(ctx context.Context, workspaceID string, c *model.Case, lifecycle model.CaseLifecycle) {
+	if uc == nil || uc.eventPublisher == nil || c == nil {
+		return
+	}
+	actor := ""
+	if tok, err := auth.TokenFromContext(ctx); err == nil {
+		actor = tok.Sub
+	}
+	uc.eventPublisher.PublishCaseLifecycle(ctx, workspaceID, c, lifecycle, actor)
 }
 
 func (uc *CaseUseCase) fieldValidatorForWorkspace(workspaceID string) *model.FieldValidator {
@@ -142,6 +172,11 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 		}
 		return nil, actErr
 	}
+
+	// Fire the case lifecycle event AFTER activation succeeded. Failure
+	// here must not roll back the case — the Job dispatch is fire-and-
+	// forget by design.
+	uc.publishLifecycle(ctx, workspaceID, activated, model.CaseLifecycleCreated)
 	return activated, nil
 }
 
@@ -596,6 +631,7 @@ func (uc *CaseUseCase) CloseCase(ctx context.Context, workspaceID string, id int
 		return nil, goerr.Wrap(err, "failed to close case", goerr.V(CaseIDKey, id))
 	}
 
+	uc.publishLifecycle(ctx, workspaceID, updated, model.CaseLifecycleClosed)
 	return updated, nil
 }
 
@@ -819,6 +855,12 @@ func (uc *CaseUseCase) SubmitDraft(ctx context.Context, workspaceID string, id i
 		}
 		return nil, actErr
 	}
+
+	// A DRAFT-promoted-to-OPEN case is the first time the entity is
+	// "real" — fire the created lifecycle event so Jobs that listen for
+	// new cases run uniformly whether they came from CreateCase or
+	// SubmitDraft.
+	uc.publishLifecycle(ctx, workspaceID, activated, model.CaseLifecycleCreated)
 	return activated, nil
 }
 
