@@ -11,6 +11,7 @@ import (
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/trace"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool"
 )
@@ -64,6 +65,13 @@ type ExecuteRequest struct {
 	// ProgressFunc, when non-nil, receives short progress messages emitted
 	// by the runtime (tool calls, lifecycle). Used by Handler.Trace.
 	ProgressFunc tool.UpdateFunc
+
+	// TraceHandler, when non-nil, is wired into gollem via
+	// gollem.WithTrace so the agent loop's LLM/tool boundaries are
+	// recorded per-call. JobRunner.Run constructs a jobRunTraceHandler
+	// per Run and supplies it here; tests may supply a hand-written
+	// trace.Handler or leave this nil for no-op behaviour.
+	TraceHandler trace.Handler
 }
 
 // ExecuteResult is the outcome of a Job run.
@@ -142,6 +150,9 @@ func (e *SingleLoopJobExecutor) Execute(ctx context.Context, req ExecuteRequest)
 	}
 	if req.HistoryRepository != nil && req.HistoryKey != "" {
 		opts = append(opts, gollem.WithHistoryRepository(req.HistoryRepository, req.HistoryKey))
+	}
+	if req.TraceHandler != nil {
+		opts = append(opts, gollem.WithTrace(req.TraceHandler))
 	}
 
 	agent := gollem.New(req.LLMClient, opts...)

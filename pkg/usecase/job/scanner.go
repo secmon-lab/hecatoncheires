@@ -82,14 +82,16 @@ func (s *ScheduledScanner) Scan(ctx context.Context) error {
 			}
 			byJobID := make(map[string]*model.JobRun, len(runs))
 			for _, r := range runs {
-				byJobID[r.Key.JobID] = r
+				byJobID[r.JobID] = r
 			}
 			for _, j := range scheduledJobs {
 				last, ok := byJobID[j.ID]
 				if !ok {
-					last = &model.JobRun{Key: model.JobRunKey{
-						WorkspaceID: ws.Workspace.ID, CaseID: c.ID, JobID: j.ID,
-					}}
+					last = &model.JobRun{
+						WorkspaceID: ws.Workspace.ID,
+						CaseID:      c.ID,
+						JobID:       j.ID,
+					}
 				}
 				if !IsDue(j.Events.Scheduled, last.LastRunAt, now) {
 					continue

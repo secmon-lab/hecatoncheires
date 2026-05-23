@@ -186,4 +186,3 @@ func TestPublish_IgnoresUnknownWorkspace(t *testing.T) {
 	async.Wait()
 	gt.Number(t, exec.calls.Load()).Equal(int32(0))
 }
-

@@ -95,7 +95,7 @@ func TestScheduledScanner_PublishesDueJobs(t *testing.T) {
 	// Seed a last-run timestamp two hours ago so the job is due.
 	gt.NoError(t, repo.JobRun().RecordRun(ctx, model.JobRunKey{
 		WorkspaceID: "ws", CaseID: caseA.ID, JobID: dueJob.ID,
-	}, model.JobRunStatusSuccess, time.Now().UTC().Add(-2*time.Hour), "", "")).Required()
+	}, model.JobRunStatusSuccess, time.Now().UTC().Add(-2*time.Hour), "", "", "")).Required()
 
 	pub := &recordingPublisher{}
 	scanner := job.NewScheduledScanner(job.ScannerDeps{
@@ -133,7 +133,7 @@ func TestScheduledScanner_SkipsNotYetDue(t *testing.T) {
 	// Last run was just now — not due.
 	gt.NoError(t, repo.JobRun().RecordRun(ctx, model.JobRunKey{
 		WorkspaceID: "ws", CaseID: caseA.ID, JobID: j.ID,
-	}, model.JobRunStatusSuccess, time.Now().UTC(), "", "")).Required()
+	}, model.JobRunStatusSuccess, time.Now().UTC(), "", "", "")).Required()
 
 	pub := &recordingPublisher{}
 	scanner := job.NewScheduledScanner(job.ScannerDeps{

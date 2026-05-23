@@ -22,6 +22,8 @@ type Repository interface {
 	Session() SessionRepository
 	NotificationSlot() NotificationSlotRepository
 	JobRun() JobRunRepository
+	JobRunLog() JobRunLogRepository
+	JobRunEvent() JobRunEventRepository
 
 	// Auth methods
 	PutToken(ctx context.Context, token *auth.Token) error

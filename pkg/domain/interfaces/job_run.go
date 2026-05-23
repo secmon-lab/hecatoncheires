@@ -14,6 +14,21 @@ import (
 // errors.Is(err, ErrJobRunNotFound) rather than parsing strings.
 var ErrJobRunNotFound = goerr.New("job run not found")
 
+// ErrJobRunLogNotFound is returned when JobRunLogRepository.Get does not
+// find a log for the given (key, runID).
+var ErrJobRunLogNotFound = goerr.New("job run log not found")
+
+// ErrJobRunLogExists is returned when JobRunLogRepository.Create is
+// called with a (key, runID) that already exists. Hard error rather than
+// silent overwrite so a duplicate RunID generation surfaces immediately.
+var ErrJobRunLogExists = goerr.New("job run log already exists")
+
+// ErrJobRunEventExists is returned when JobRunEventRepository.Append is
+// called with a Sequence that already exists for the same (key, runID).
+// This signals a sequencer bug (e.g. two emitters not sharing a counter)
+// rather than a transient collision; the caller should fail loudly.
+var ErrJobRunEventExists = goerr.New("job run event sequence already exists")
+
 // JobRunRepository persists per-(workspace, case, job) execution metadata
 // and provides atomic lease primitives for serialising concurrent runs.
 //
@@ -58,5 +73,65 @@ type JobRunRepository interface {
 	// clears any lease that may still be active (treat RecordRun as
 	// implying release). lastRunAt is the caller's clock at the moment
 	// the run completed — repositories do not stamp it themselves.
-	RecordRun(ctx context.Context, key model.JobRunKey, status model.JobRunStatus, lastRunAt time.Time, traceID, errMsg string) error
+	// runID identifies the specific JobRunLog produced by this run and
+	// is mirrored into JobRun.LastRunID for cross-reference.
+	RecordRun(ctx context.Context, key model.JobRunKey, status model.JobRunStatus, lastRunAt time.Time, runID, traceID, errMsg string) error
+}
+
+// JobRunLogRepository persists one *invocation* of a Job (= one Run)
+// against a Case. Stored at:
+//
+//	workspaces/{WorkspaceID}/cases/{CaseID}/jobRuns/{JobID}/logs/{RunID}
+//
+// The Stage transitions RUNNING -> SUCCESS|FAILED. Callers Create the
+// log in RUNNING state once prompts are ready, then Finish it when the
+// agent loop terminates. A Run that crashes mid-flight leaves the
+// RUNNING log in place; that is intentional so the events captured up
+// to the crash remain attributable.
+type JobRunLogRepository interface {
+	// Create writes the RUNNING-stage log. Errors with
+	// ErrJobRunLogExists if a doc for the same (key, runID) already
+	// exists; backends MUST use Firestore Create (or equivalent) so the
+	// duplicate is rejected by the storage layer.
+	Create(ctx context.Context, log *model.JobRunLog) error
+
+	// Finish transitions an existing log to its terminal stage
+	// (SUCCESS or FAILED). The caller supplies the full *JobRunLog
+	// with Stage / EndedAt / Error populated; the implementation just
+	// persists it.
+	Finish(ctx context.Context, log *model.JobRunLog) error
+
+	// Get returns the log identified by (key, runID), or
+	// (nil, ErrJobRunLogNotFound) when no such log exists.
+	Get(ctx context.Context, key model.JobRunKey, runID string) (*model.JobRunLog, error)
+
+	// List returns logs under (key) in descending StartedAt order, up
+	// to limit. limit <= 0 means no limit. Implemented as a single
+	// subcollection scan per call (no cross-Job aggregation here).
+	List(ctx context.Context, key model.JobRunKey, limit int) ([]*model.JobRunLog, error)
+}
+
+// JobRunEventRepository persists the per-Run timeline of events
+// (LLM_REQUEST / LLM_RESPONSE / TOOL_CALL / RUN_ERROR). Stored at:
+//
+//	workspaces/{WS}/cases/{Case}/jobRuns/{Job}/logs/{Run}/events/{EventID}
+//
+// EventID is a UUIDv7 (timestamp-prefixed) chosen for Firestore-console
+// readability and global uniqueness. The authoritative monotonic order
+// is the Sequence field, not the doc ID — List MUST OrderBy("Sequence").
+//
+// Within a single Run, exactly one runSequencer instance owns Sequence
+// allocation — both the per-call appends from the trace.Handler AND any
+// RUN_ERROR emits from JobRunner go through the same sequencer.
+type JobRunEventRepository interface {
+	// Append writes one event keyed by ev.EventID. Both EventID and
+	// Sequence must be set by the caller; Sequence must be strictly
+	// increasing across calls in the same Run. Backends use Create
+	// (not Set) so a duplicate EventID surfaces as ErrJobRunEventExists.
+	Append(ctx context.Context, ev *model.JobRunEvent) error
+
+	// List returns events for (key, runID) in ascending Sequence order
+	// (not doc-ID order — doc IDs are UUIDv7 and may diverge under
+	// clock skew).
+	List(ctx context.Context, key model.JobRunKey, runID string) ([]*model.JobRunEvent, error)
 }
