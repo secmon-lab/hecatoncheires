@@ -2,7 +2,6 @@ package job
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/m-mizutani/goerr/v2"
@@ -70,18 +69,27 @@ func (s *ScheduledScanner) Scan(ctx context.Context) error {
 		}
 
 		for _, c := range cases {
+			// One subcollection query per OPEN case: returns this case's
+			// existing JobRuns (typically <= number of scheduled jobs
+			// in the workspace). Cross-case access patterns do not exist
+			// for JobRun, so we keep the per-case scope that matches the
+			// Firestore subcollection layout.
+			runs, err := s.deps.Repo.JobRun().ListByCase(ctx, ws.Workspace.ID, c.ID)
+			if err != nil {
+				return goerr.Wrap(err, "list job runs for case",
+					goerr.V("workspace_id", ws.Workspace.ID),
+					goerr.V("case_id", c.ID))
+			}
+			byJobID := make(map[string]*model.JobRun, len(runs))
+			for _, r := range runs {
+				byJobID[r.Key.JobID] = r
+			}
 			for _, j := range scheduledJobs {
-				key := model.JobRunKey{WorkspaceID: ws.Workspace.ID, CaseID: c.ID, JobID: j.ID}
-				last, err := s.deps.Repo.JobRun().Get(ctx, key)
-				switch {
-				case err == nil:
-				case errors.Is(err, interfaces.ErrJobRunNotFound):
-					last = &model.JobRun{Key: key}
-				default:
-					return goerr.Wrap(err, "load job run for due check",
-						goerr.V("workspace_id", ws.Workspace.ID),
-						goerr.V("case_id", c.ID),
-						goerr.V("job_id", j.ID))
+				last, ok := byJobID[j.ID]
+				if !ok {
+					last = &model.JobRun{Key: model.JobRunKey{
+						WorkspaceID: ws.Workspace.ID, CaseID: c.ID, JobID: j.ID,
+					}}
 				}
 				if !IsDue(j.Events.Scheduled, last.LastRunAt, now) {
 					continue
@@ -93,7 +101,7 @@ func (s *ScheduledScanner) Scan(ctx context.Context) error {
 					Timestamp:    now,
 					ActorUserID:  model.SystemActorID,
 					LastRunAt:    last.LastRunAt,
-					ScheduledFor: NextFireTime(j.Events.Scheduled, last.LastRunAt),
+					ScheduledFor: NextFireTime(j.Events.Scheduled, last.LastRunAt, now),
 				}
 				s.deps.Publisher.Publish(ctx, ev)
 			}
@@ -129,9 +137,11 @@ func IsDue(cfg *model.ScheduledEventConfig, lastRunAt, now time.Time) bool {
 
 // NextFireTime returns the next scheduled firing time given the last run.
 // Used to surface the "scheduled_for" context in the system prompt and
-// to drive due-checks in tests. Returns the zero value when the config is
-// unset.
-func NextFireTime(cfg *model.ScheduledEventConfig, lastRunAt time.Time) time.Time {
+// to drive due-checks in tests. The reference time `now` is the anchor
+// used when there is no prior run (first-fire semantics); take it from
+// the caller so the function remains deterministic and trivially
+// testable. Returns the zero value when the config is unset.
+func NextFireTime(cfg *model.ScheduledEventConfig, lastRunAt, now time.Time) time.Time {
 	if cfg == nil {
 		return time.Time{}
 	}
@@ -143,7 +153,7 @@ func NextFireTime(cfg *model.ScheduledEventConfig, lastRunAt time.Time) time.Tim
 		return lastRunAt.Add(cfg.Every)
 	case cfg.Cron != nil:
 		if lastRunAt.IsZero() {
-			return cfg.Cron.Next(time.Now().UTC())
+			return cfg.Cron.Next(now)
 		}
 		return cfg.Cron.Next(lastRunAt)
 	default:

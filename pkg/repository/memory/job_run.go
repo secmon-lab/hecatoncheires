@@ -47,15 +47,18 @@ func (r *jobRunRepository) Get(ctx context.Context, key model.JobRunKey) (*model
 	return copyJobRun(run), nil
 }
 
-func (r *jobRunRepository) List(ctx context.Context, workspaceID string) ([]*model.JobRun, error) {
+func (r *jobRunRepository) ListByCase(ctx context.Context, workspaceID string, caseID int64) ([]*model.JobRun, error) {
 	if workspaceID == "" {
 		return nil, goerr.New("workspace id is empty")
 	}
+	if caseID == 0 {
+		return nil, goerr.New("case id is zero")
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := make([]*model.JobRun, 0, len(r.runs))
+	var out []*model.JobRun
 	for k, v := range r.runs {
-		if k.WorkspaceID != workspaceID {
+		if k.WorkspaceID != workspaceID || k.CaseID != caseID {
 			continue
 		}
 		out = append(out, copyJobRun(v))

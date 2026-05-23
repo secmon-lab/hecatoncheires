@@ -28,10 +28,14 @@ type JobRunRepository interface {
 	// and for surface observability; both treat absence as "never run".
 	Get(ctx context.Context, key model.JobRunKey) (*model.JobRun, error)
 
-	// List returns every JobRun under the given workspace. The
-	// ScheduledScanner uses it to enumerate prior-run timestamps for the
-	// due-check pass.
-	List(ctx context.Context, workspaceID string) ([]*model.JobRun, error)
+	// ListByCase returns every JobRun stored under the given (workspace,
+	// case) tuple. Implemented as a single Firestore subcollection scan
+	// per call (no cross-case work), which matches the underlying
+	// storage layout. The scanner calls this once per OPEN case during a
+	// tick — typical workspaces have a small number of jobs per case
+	// (~handful), so a single subcollection query returns the entire
+	// per-case index that the due-check needs.
+	ListByCase(ctx context.Context, workspaceID string, caseID int64) ([]*model.JobRun, error)
 
 	// TryAcquireLease attempts to take the lock for the given key, valid
 	// until now+leaseDuration. Returns true if the caller now owns the

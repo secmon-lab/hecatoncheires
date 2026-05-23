@@ -7,11 +7,12 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
-	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"google.golang.org/api/iterator"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 )
 
 const jobRunsCollection = "jobRuns"
@@ -59,75 +60,47 @@ func (r *jobRunRepository) Get(ctx context.Context, key model.JobRunKey) (*model
 	return &run, nil
 }
 
-func (r *jobRunRepository) List(ctx context.Context, workspaceID string) ([]*model.JobRun, error) {
+func (r *jobRunRepository) ListByCase(ctx context.Context, workspaceID string, caseID int64) ([]*model.JobRun, error) {
 	if workspaceID == "" {
 		return nil, goerr.New("workspace id is empty")
 	}
-	// We walk only jobRuns under this workspace by anchoring at the
-	// workspace document path, but Firestore's CollectionGroup is the
-	// least-index path for this many-cases-per-workspace shape.
-	// To stay within existing single-field indexes we filter by parent
-	// workspace path via Where on the implicit __name__ prefix is not
-	// directly supported; instead we list cases first and fan out.
-	wsCases := r.client.
+	if caseID == 0 {
+		return nil, goerr.New("case id is zero")
+	}
+	// A single Firestore subcollection query — the storage layout
+	// (workspaces/{ws}/cases/{c}/jobRuns) already gives us a natural
+	// per-case scope. The scanner calls this once per OPEN case; cross-
+	// case access patterns simply do not exist for JobRun.
+	caseDoc := r.client.
 		Collection("workspaces").Doc(workspaceID).
-		Collection("cases").
-		DocumentRefs(ctx)
+		Collection("cases").Doc(fmt.Sprintf("%d", caseID))
+	iter := caseDoc.Collection(jobRunsCollection).Documents(ctx)
+	defer iter.Stop()
 
 	var runs []*model.JobRun
 	for {
-		caseRef, err := wsCases.Next()
+		snap, err := iter.Next()
 		if err == iterator.Done {
 			break
 		}
 		if err != nil {
-			return nil, goerr.Wrap(err, "failed to iterate cases for job runs",
-				goerr.V("workspace_id", workspaceID))
+			return nil, goerr.Wrap(err, "failed to iterate job runs",
+				goerr.V("workspace_id", workspaceID),
+				goerr.V("case_id", caseID))
 		}
-		jobIter := caseRef.Collection(jobRunsCollection).Documents(ctx)
-		for {
-			snap, err := jobIter.Next()
-			if err == iterator.Done {
-				break
-			}
-			if err != nil {
-				jobIter.Stop()
-				return nil, goerr.Wrap(err, "failed to iterate job runs",
-					goerr.V("workspace_id", workspaceID),
-					goerr.V("case_id", caseRef.ID))
-			}
-			var run model.JobRun
-			if err := snap.DataTo(&run); err != nil {
-				jobIter.Stop()
-				return nil, goerr.Wrap(err, "failed to decode job run",
-					goerr.V("doc_path", snap.Ref.Path))
-			}
-			// Reconstruct key from parent refs.
-			caseID, parseErr := parseInt64DocID(caseRef.ID)
-			if parseErr != nil {
-				jobIter.Stop()
-				return nil, goerr.Wrap(parseErr, "invalid case doc id",
-					goerr.V("case_doc_id", caseRef.ID))
-			}
-			run.Key = model.JobRunKey{
-				WorkspaceID: workspaceID,
-				CaseID:      caseID,
-				JobID:       snap.Ref.ID,
-			}
-			runs = append(runs, &run)
+		var run model.JobRun
+		if err := snap.DataTo(&run); err != nil {
+			return nil, goerr.Wrap(err, "failed to decode job run",
+				goerr.V("doc_path", snap.Ref.Path))
 		}
-		jobIter.Stop()
+		run.Key = model.JobRunKey{
+			WorkspaceID: workspaceID,
+			CaseID:      caseID,
+			JobID:       snap.Ref.ID,
+		}
+		runs = append(runs, &run)
 	}
 	return runs, nil
-}
-
-func parseInt64DocID(id string) (int64, error) {
-	var n int64
-	_, err := fmt.Sscanf(id, "%d", &n)
-	if err != nil {
-		return 0, goerr.Wrap(err, "parse int64 doc id")
-	}
-	return n, nil
 }
 
 func (r *jobRunRepository) TryAcquireLease(ctx context.Context, key model.JobRunKey, now time.Time, leaseDuration time.Duration) (bool, error) {

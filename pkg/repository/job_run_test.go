@@ -162,32 +162,63 @@ func runJobRunRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		gt.Bool(t, got.LeaseUntil.IsZero()).True()
 	})
 
-	t.Run("List returns runs scoped to workspace", func(t *testing.T) {
+	t.Run("ListByCase returns runs scoped to the (workspace, case) pair", func(t *testing.T) {
 		repo := newRepo(t)
-		ws1 := fmt.Sprintf("ws1-%d", time.Now().UnixNano())
-		ws2 := fmt.Sprintf("ws2-%d", time.Now().UnixNano())
+		ws := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		caseA := time.Now().UnixNano()
 		caseB := time.Now().UnixNano() + 1
 		now := time.Now().UTC().Truncate(time.Millisecond)
 
 		gt.NoError(t, repo.JobRun().RecordRun(ctx,
-			model.JobRunKey{WorkspaceID: ws1, CaseID: caseA, JobID: "a1"},
+			model.JobRunKey{WorkspaceID: ws, CaseID: caseA, JobID: "a1"},
 			model.JobRunStatusSuccess, now, "t1", "")).Required()
 		gt.NoError(t, repo.JobRun().RecordRun(ctx,
-			model.JobRunKey{WorkspaceID: ws1, CaseID: caseA, JobID: "a2"},
+			model.JobRunKey{WorkspaceID: ws, CaseID: caseA, JobID: "a2"},
 			model.JobRunStatusSuccess, now, "t2", "")).Required()
 		gt.NoError(t, repo.JobRun().RecordRun(ctx,
-			model.JobRunKey{WorkspaceID: ws2, CaseID: caseB, JobID: "b1"},
+			model.JobRunKey{WorkspaceID: ws, CaseID: caseB, JobID: "b1"},
 			model.JobRunStatusSuccess, now, "t3", "")).Required()
 
-		runs1, err := repo.JobRun().List(ctx, ws1)
+		runsA, err := repo.JobRun().ListByCase(ctx, ws, caseA)
 		gt.NoError(t, err).Required()
-		gt.Array(t, runs1).Length(2)
+		gt.Array(t, runsA).Length(2).Required()
+		for _, r := range runsA {
+			gt.Value(t, r.Key.CaseID).Equal(caseA)
+			gt.Value(t, r.Key.WorkspaceID).Equal(ws)
+		}
 
-		runs2, err := repo.JobRun().List(ctx, ws2)
+		runsB, err := repo.JobRun().ListByCase(ctx, ws, caseB)
 		gt.NoError(t, err).Required()
-		gt.Array(t, runs2).Length(1)
-		gt.Value(t, runs2[0].Key.JobID).Equal("b1")
+		gt.Array(t, runsB).Length(1).Required()
+		gt.Value(t, runsB[0].Key.JobID).Equal("b1")
+	})
+
+	t.Run("ListByCase returns empty for a case with no runs", func(t *testing.T) {
+		repo := newRepo(t)
+		ws := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		runs, err := repo.JobRun().ListByCase(ctx, ws, time.Now().UnixNano())
+		gt.NoError(t, err).Required()
+		gt.Array(t, runs).Length(0)
+	})
+
+	t.Run("ListByCase scopes by workspace (same case id in different workspaces)", func(t *testing.T) {
+		repo := newRepo(t)
+		ws1 := fmt.Sprintf("ws1-%d", time.Now().UnixNano())
+		ws2 := fmt.Sprintf("ws2-%d", time.Now().UnixNano())
+		caseShared := time.Now().UnixNano()
+		now := time.Now().UTC().Truncate(time.Millisecond)
+
+		gt.NoError(t, repo.JobRun().RecordRun(ctx,
+			model.JobRunKey{WorkspaceID: ws1, CaseID: caseShared, JobID: "j"},
+			model.JobRunStatusSuccess, now, "t1", "")).Required()
+		gt.NoError(t, repo.JobRun().RecordRun(ctx,
+			model.JobRunKey{WorkspaceID: ws2, CaseID: caseShared, JobID: "j"},
+			model.JobRunStatusSuccess, now, "t2", "")).Required()
+
+		runs1, err := repo.JobRun().ListByCase(ctx, ws1, caseShared)
+		gt.NoError(t, err).Required()
+		gt.Array(t, runs1).Length(1).Required()
+		gt.Value(t, runs1[0].LastTraceID).Equal("t1")
 	})
 
 	t.Run("invalid key surfaces error", func(t *testing.T) {
