@@ -108,7 +108,6 @@ export default function CaseDetail() {
   const c = data?.case
   const isPrivate = !!c?.isPrivate
   const slackChannelID: string = c?.slackChannelID || ''
-  const slackChannelName: string = c?.slackChannelName || ''
   const slackChannelURL: string | null = c?.slackChannelURL || null
   const channelUserCount: number = c?.channelUserCount || 0
 
@@ -401,7 +400,6 @@ export default function CaseDetail() {
               <IconLock size={13} sw={2} />
               <span className="h-banner-text">
                 {t('msgPrivateBanner', {
-                  channel: slackChannelName || slackChannelID,
                   count: String(channelUserCount || 0),
                 })}
               </span>
@@ -638,7 +636,7 @@ export default function CaseDetail() {
                 target="_blank"
                 rel="noreferrer noopener"
               >
-                <IconSlack size={11} />#{slackChannelName || slackChannelID}
+                <IconSlack size={11} />{t('labelOpenInSlack')}
                 <IconExt size={10} />
               </a>
             </section>
