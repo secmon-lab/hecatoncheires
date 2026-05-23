@@ -30,7 +30,6 @@ export const GET_DRAFTS = gql`
         imageUrl
       }
       slackChannelID
-      slackChannelName
       createdAt
       updatedAt
       fields {

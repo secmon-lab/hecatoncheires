@@ -30,6 +30,7 @@ export const msgKeys = {
   btnWatch: 'btnWatch',
   btnChange: 'btnChange',
   labelBy: 'labelBy',
+  labelOpenInSlack: 'labelOpenInSlack',
   msgPrivateBanner: 'msgPrivateBanner',
   labelProgress: 'labelProgress',
   filterStatus: 'filterStatus',

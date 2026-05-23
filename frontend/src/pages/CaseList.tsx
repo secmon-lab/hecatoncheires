@@ -49,7 +49,6 @@ interface CaseRow {
   reporter?: CaseUser | null
   assignees: CaseUser[]
   slackChannelID: string
-  slackChannelName?: string | null
   createdAt: string
   fields: Array<{ fieldId: string; value: any }>
 }
