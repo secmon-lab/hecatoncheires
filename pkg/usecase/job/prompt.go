@@ -13,6 +13,8 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 )
 
 //go:embed prompts/system.md
@@ -105,7 +107,24 @@ type systemPromptWorkspace struct {
 }
 
 type systemPromptField struct {
-	ID, Name, Type string
+	ID          string
+	Name        string
+	Type        string
+	Required    bool
+	Description string
+	Options     []systemPromptFieldOption
+}
+
+type systemPromptFieldOption struct {
+	ID          string
+	Name        string
+	Description string
+	Metadata    []systemPromptKV
+}
+
+type systemPromptKV struct {
+	Key   string
+	Value string
 }
 
 type systemPromptCase struct {
@@ -125,6 +144,15 @@ type systemPromptCase struct {
 type systemPromptFieldValue struct {
 	ID    string
 	Value string
+	// Resolved is populated when the field type is select / multi-select
+	// and at least one raw element of Value matched a known option ID.
+	// select produces at most one entry, multi-select may produce many.
+	Resolved []systemPromptFieldValueOption
+}
+
+type systemPromptFieldValueOption struct {
+	OptionID   string
+	OptionName string
 }
 
 type systemPromptAction struct {
@@ -178,6 +206,13 @@ func BuildSystemPrompt(in PromptInputs) (string, error) {
 func buildSystemPromptData(in PromptInputs) systemPromptData {
 	data := systemPromptData{}
 
+	// fieldMetaByID lets the Case loop below look up field type and
+	// option metadata when rendering field_values. It is built once
+	// from the workspace schema and shared across both sections so the
+	// custom-fields description and the field_values resolution stay
+	// in sync.
+	fieldMetaByID := map[string]fieldMeta{}
+
 	if ws := in.Workspace; ws != nil {
 		data.Workspace = systemPromptWorkspace{
 			ID:          ws.Workspace.ID,
@@ -186,11 +221,28 @@ func buildSystemPromptData(in PromptInputs) systemPromptData {
 		}
 		if schema := ws.FieldSchema; schema != nil {
 			for _, f := range schema.Fields {
-				data.Workspace.Fields = append(data.Workspace.Fields, systemPromptField{
-					ID:   f.ID,
-					Name: f.Name,
-					Type: string(f.Type),
-				})
+				meta := fieldMeta{fieldType: f.Type}
+				field := systemPromptField{
+					ID:          f.ID,
+					Name:        f.Name,
+					Type:        string(f.Type),
+					Required:    f.Required,
+					Description: f.Description,
+				}
+				if len(f.Options) > 0 {
+					meta.options = make(map[string]config.FieldOption, len(f.Options))
+				}
+				for _, o := range f.Options {
+					meta.options[o.ID] = o
+					field.Options = append(field.Options, systemPromptFieldOption{
+						ID:          o.ID,
+						Name:        o.Name,
+						Description: o.Description,
+						Metadata:    fieldOptionMetadata(o.Metadata),
+					})
+				}
+				fieldMetaByID[f.ID] = meta
+				data.Workspace.Fields = append(data.Workspace.Fields, field)
 			}
 		}
 	}
@@ -220,9 +272,11 @@ func buildSystemPromptData(in PromptInputs) systemPromptData {
 			sort.Strings(keys)
 			for _, k := range keys {
 				v := c.FieldValues[k]
+				meta := fieldMetaByID[k]
 				cs.FieldValues = append(cs.FieldValues, systemPromptFieldValue{
-					ID:    k,
-					Value: fmt.Sprint(v.Value),
+					ID:       k,
+					Value:    formatFieldValue(meta.fieldType, v.Value),
+					Resolved: resolveFieldValueOptions(meta, v.Value),
 				})
 			}
 		}
@@ -316,6 +370,108 @@ func buildSystemPromptData(in PromptInputs) systemPromptData {
 	}
 
 	return data
+}
+
+// fieldMeta is the small lookup shape buildSystemPromptData uses to
+// bridge the workspace FieldSchema and the Case.FieldValues loop. It
+// holds the field's declared type and an option index keyed by option
+// ID. Kept package-private — internal scaffolding for prompt rendering.
+type fieldMeta struct {
+	fieldType types.FieldType
+	options   map[string]config.FieldOption
+}
+
+// fieldOptionMetadata flattens the option's freeform metadata map into
+// a stable, sorted slice of key/value pairs so the rendered prompt is
+// deterministic across runs. Empty / nil input returns nil so the
+// template's {{ if .Metadata }} guard short-circuits cleanly.
+func fieldOptionMetadata(meta map[string]any) []systemPromptKV {
+	if len(meta) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(meta))
+	for k := range meta {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make([]systemPromptKV, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, systemPromptKV{Key: k, Value: fmt.Sprint(meta[k])})
+	}
+	return out
+}
+
+// formatFieldValue renders the raw field value as a single human-
+// readable string for the prompt. multi-select inputs (whether
+// `[]string` or `[]any` carrying strings) are joined with ", " so the
+// rendered line stays compact; everything else falls back to fmt.Sprint
+// which already matches the previous behaviour.
+func formatFieldValue(ft types.FieldType, raw any) string {
+	if ft == types.FieldTypeMultiSelect {
+		if parts, ok := multiSelectIDs(raw); ok {
+			return strings.Join(parts, ", ")
+		}
+	}
+	return fmt.Sprint(raw)
+}
+
+// resolveFieldValueOptions returns the option metadata for every
+// element of the raw value that matched a known option ID. For
+// non-select fields (or when no option matches) it returns nil so the
+// template's {{ if .Resolved }} guard skips the parenthetical.
+func resolveFieldValueOptions(meta fieldMeta, raw any) []systemPromptFieldValueOption {
+	switch meta.fieldType {
+	case types.FieldTypeSelect:
+		s, ok := raw.(string)
+		if !ok {
+			return nil
+		}
+		opt, ok := meta.options[s]
+		if !ok {
+			return nil
+		}
+		return []systemPromptFieldValueOption{{OptionID: opt.ID, OptionName: opt.Name}}
+	case types.FieldTypeMultiSelect:
+		ids, ok := multiSelectIDs(raw)
+		if !ok {
+			return nil
+		}
+		var out []systemPromptFieldValueOption
+		for _, id := range ids {
+			opt, ok := meta.options[id]
+			if !ok {
+				continue
+			}
+			out = append(out, systemPromptFieldValueOption{OptionID: opt.ID, OptionName: opt.Name})
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+// multiSelectIDs normalises the two on-the-wire shapes for a multi-
+// select value (`[]string` from Go callers, `[]any` from Firestore
+// JSON decoding) into a single `[]string`. The bool return signals
+// whether the input matched a recognised multi-select shape so the
+// caller can fall back to the generic fmt.Sprint path.
+func multiSelectIDs(raw any) ([]string, bool) {
+	switch v := raw.(type) {
+	case []string:
+		return v, true
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, e := range v {
+			s, ok := e.(string)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, s)
+		}
+		return out, true
+	default:
+		return nil, false
+	}
 }
 
 func describeCaseLifecycle(lc model.CaseLifecycle) string {

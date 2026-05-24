@@ -302,13 +302,13 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 // will appear in the system prompt. The contract is:
 //   - operator narrowed (Case.AgentSourceIDs non-empty)
 //     → fetch each by ID, drop any that no longer exist or that are
-//       disabled (silent skip: a Source toggled off after selection
-//       must not invalidate the Case settings or fail the Job), return
-//       narrowed=true so the prompt phrases the list as a preference.
+//     disabled (silent skip: a Source toggled off after selection
+//     must not invalidate the Case settings or fail the Job), return
+//     narrowed=true so the prompt phrases the list as a preference.
 //   - no selection (empty)
 //     → list every ENABLED Workspace Source so the agent sees the full
-//       catalogue, return narrowed=false so the prompt phrases the
-//       list as "no narrowing in effect".
+//     catalogue, return narrowed=false so the prompt phrases the
+//     list as "no narrowing in effect".
 //
 // Either way the agent is never *forced* to restrict itself — the
 // Sources section is a hint, not a filter. See `prompts/system.md`

@@ -14,7 +14,16 @@ actions explicitly justified by the trigger reason below.
 {{- if .Workspace.Fields }}
 - custom fields:
 {{- range .Workspace.Fields }}
-  - {{ .ID }} ({{ .Type }}): {{ .Name }}
+  - {{ .ID }} ({{ .Type }}): {{ .Name }}{{ if .Required }} [required]{{ end }}
+{{- if .Description }}
+    description: {{ .Description }}
+{{- end }}
+{{- if .Options }}
+    options:
+{{- range .Options }}
+      - {{ .ID }}{{ if .Name }} — {{ .Name }}{{ end }}{{ if .Description }} ({{ .Description }}){{ end }}{{ if .Metadata }} [{{ range $i, $kv := .Metadata }}{{ if $i }}, {{ end }}{{ $kv.Key }}={{ $kv.Value }}{{ end }}]{{ end }}
+{{- end }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- end }}
@@ -45,7 +54,7 @@ actions explicitly justified by the trigger reason below.
 {{- if .FieldValues }}
 - field_values:
 {{- range .FieldValues }}
-  - {{ .ID }}: {{ .Value }}
+  - {{ .ID }}: {{ .Value }}{{ if .Resolved }} ({{ range $i, $r := .Resolved }}{{ if $i }}, {{ end }}{{ $r.OptionName }}{{ end }}){{ end }}
 {{- end }}
 {{- end }}
 {{- end }}

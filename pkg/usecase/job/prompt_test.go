@@ -9,6 +9,7 @@ import (
 	"github.com/robfig/cron/v3"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
 )
@@ -312,5 +313,219 @@ func TestBuildSystemPrompt_SourcesSection(t *testing.T) {
 		})
 		gt.NoError(t, err).Required()
 		mustNotContain(t, got, "# Sources")
+	})
+}
+
+// fieldSchemaFixture is the workspace FieldSchema used by the
+// custom-fields / field_values tests below. It exercises required,
+// description, select / multi-select options, option descriptions, and
+// option metadata so a single fixture covers every template branch.
+func fieldSchemaFixture() *config.FieldSchema {
+	return &config.FieldSchema{
+		Fields: []config.FieldDefinition{
+			{
+				ID:          "severity",
+				Name:        "Severity",
+				Type:        types.FieldTypeSelect,
+				Required:    true,
+				Description: "How severe the case is.",
+				Options: []config.FieldOption{
+					{ID: "low", Name: "Low", Description: "Minor impact", Metadata: map[string]any{"score": 1}},
+					{ID: "high", Name: "High", Description: "Severe impact", Metadata: map[string]any{"score": 4}},
+				},
+			},
+			{
+				ID:   "affected_systems",
+				Name: "Affected systems",
+				Type: types.FieldTypeMultiSelect,
+				Options: []config.FieldOption{
+					{ID: "prod", Name: "Production"},
+					{ID: "staging", Name: "Staging"},
+				},
+			},
+			{
+				ID:   "notes",
+				Name: "Notes",
+				Type: types.FieldTypeText,
+			},
+		},
+	}
+}
+
+func newCustomFieldsWorkspace() *model.WorkspaceEntry {
+	ws := newWorkspace("ws", "WS")
+	ws.FieldSchema = fieldSchemaFixture()
+	return ws
+}
+
+func caseCreatedEvent() job.Event {
+	return job.Event{
+		Domain:        model.JobEventDomainCase,
+		WorkspaceID:   "ws",
+		CaseID:        7,
+		Timestamp:     time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC),
+		ActorUserID:   "U-CALLER",
+		CaseLifecycle: model.CaseLifecycleCreated,
+	}
+}
+
+func caseCreatedJob() *model.Job {
+	return &model.Job{
+		ID:     "j",
+		Prompt: "x",
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+}
+
+func TestBuildSystemPrompt_CustomFieldsSchema(t *testing.T) {
+	t.Run("required marker and description are rendered", func(t *testing.T) {
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: newCustomFieldsWorkspace(),
+			Case:      newCase(7),
+			Event:     caseCreatedEvent(),
+		})
+		gt.NoError(t, err).Required()
+		mustContain(t, got, "- custom fields:")
+		mustContain(t, got, "- severity (select): Severity [required]")
+		mustContain(t, got, "description: How severe the case is.")
+		// Non-required field has no [required] marker.
+		mustContain(t, got, "- affected_systems (multi-select): Affected systems")
+		mustNotContain(t, got, "Affected systems [required]")
+		// Text field with no description, no options: just the header
+		// line is emitted, no trailing metadata lines.
+		mustContain(t, got, "- notes (text): Notes")
+	})
+
+	t.Run("select options carry name, description, and metadata", func(t *testing.T) {
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: newCustomFieldsWorkspace(),
+			Case:      newCase(7),
+			Event:     caseCreatedEvent(),
+		})
+		gt.NoError(t, err).Required()
+		mustContain(t, got, "options:")
+		mustContain(t, got, "- low — Low (Minor impact) [score=1]")
+		mustContain(t, got, "- high — High (Severe impact) [score=4]")
+		// Multi-select option with no description / metadata renders
+		// only the ID and Name.
+		mustContain(t, got, "- prod — Production")
+		mustNotContain(t, got, "Production (")
+		mustNotContain(t, got, "Production [")
+	})
+
+	t.Run("custom fields section is omitted when schema is nil", func(t *testing.T) {
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: newWorkspace("ws", "WS"),
+			Case:      newCase(7),
+			Event:     caseCreatedEvent(),
+		})
+		gt.NoError(t, err).Required()
+		mustNotContain(t, got, "- custom fields:")
+	})
+
+	t.Run("custom fields section is omitted when schema has no fields", func(t *testing.T) {
+		ws := newWorkspace("ws", "WS")
+		ws.FieldSchema = &config.FieldSchema{}
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: ws,
+			Case:      newCase(7),
+			Event:     caseCreatedEvent(),
+		})
+		gt.NoError(t, err).Required()
+		mustNotContain(t, got, "- custom fields:")
+	})
+}
+
+func TestBuildSystemPrompt_CaseFieldValuesResolution(t *testing.T) {
+	t.Run("select value resolves to option name", func(t *testing.T) {
+		c := newCase(7)
+		c.FieldValues = map[string]model.FieldValue{
+			"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "high"},
+		}
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: newCustomFieldsWorkspace(),
+			Case:      c,
+			Event:     caseCreatedEvent(),
+		})
+		gt.NoError(t, err).Required()
+		mustContain(t, got, "- severity: high (High)")
+	})
+
+	t.Run("multi-select []string is joined and resolved", func(t *testing.T) {
+		c := newCase(7)
+		c.FieldValues = map[string]model.FieldValue{
+			"affected_systems": {
+				FieldID: "affected_systems",
+				Type:    types.FieldTypeMultiSelect,
+				Value:   []string{"prod", "staging"},
+			},
+		}
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: newCustomFieldsWorkspace(),
+			Case:      c,
+			Event:     caseCreatedEvent(),
+		})
+		gt.NoError(t, err).Required()
+		mustContain(t, got, "- affected_systems: prod, staging (Production, Staging)")
+	})
+
+	t.Run("multi-select []any (from Firestore decode) is joined and resolved", func(t *testing.T) {
+		c := newCase(7)
+		c.FieldValues = map[string]model.FieldValue{
+			"affected_systems": {
+				FieldID: "affected_systems",
+				Type:    types.FieldTypeMultiSelect,
+				Value:   []any{"staging", "prod"},
+			},
+		}
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: newCustomFieldsWorkspace(),
+			Case:      c,
+			Event:     caseCreatedEvent(),
+		})
+		gt.NoError(t, err).Required()
+		mustContain(t, got, "- affected_systems: staging, prod (Staging, Production)")
+	})
+
+	t.Run("unknown option id falls back to raw value with no parenthetical", func(t *testing.T) {
+		c := newCase(7)
+		c.FieldValues = map[string]model.FieldValue{
+			"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "ghost"},
+		}
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: newCustomFieldsWorkspace(),
+			Case:      c,
+			Event:     caseCreatedEvent(),
+		})
+		gt.NoError(t, err).Required()
+		mustContain(t, got, "- severity: ghost")
+		// No parenthetical because the option ID did not resolve.
+		mustNotContain(t, got, "severity: ghost (")
+	})
+
+	t.Run("text field renders verbatim with no resolution", func(t *testing.T) {
+		c := newCase(7)
+		c.FieldValues = map[string]model.FieldValue{
+			"notes": {FieldID: "notes", Type: types.FieldTypeText, Value: "free text here"},
+		}
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: newCustomFieldsWorkspace(),
+			Case:      c,
+			Event:     caseCreatedEvent(),
+		})
+		gt.NoError(t, err).Required()
+		mustContain(t, got, "- notes: free text here")
+		mustNotContain(t, got, "notes: free text here (")
 	})
 }
