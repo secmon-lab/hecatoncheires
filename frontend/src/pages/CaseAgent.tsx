@@ -14,7 +14,7 @@ import {
   IconChevRight,
   IconEdit,
   IconExt,
-  IconSparkle,
+  IconRobot,
 } from '../components/Icons'
 import Button from '../components/Button'
 import Checkbox from '../components/caseAgent/Checkbox'
@@ -261,12 +261,11 @@ export default function CaseAgent() {
       {/* Header */}
       <div className={styles.header}>
         <div className="col" style={{ gap: 4 }}>
-          <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+          <div className="row" style={{ gap: 10, alignItems: 'center' }}>
             <span className={styles.headerIcon}>
-              <IconSparkle size={14} sw={1.8} />
+              <IconRobot size={22} sw={1.6} />
             </span>
             <h1 className={styles.headerTitle}>{t('caseAgentTitle')}</h1>
-            <span className={styles.variantPill}>{t('caseAgentVariantBadge')}</span>
           </div>
           <div className={styles.headerSub}>{t('caseAgentSubtitle')}</div>
         </div>

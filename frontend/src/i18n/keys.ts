@@ -408,7 +408,6 @@ export const msgKeys = {
   caseAgentTitle: 'caseAgentTitle',
   caseAgentSubtitle: 'caseAgentSubtitle',
   caseAgentBack: 'caseAgentBack',
-  caseAgentVariantBadge: 'caseAgentVariantBadge',
   caseAgentAdditionalPrompt: 'caseAgentAdditionalPrompt',
   caseAgentMarkdownBadge: 'caseAgentMarkdownBadge',
   caseAgentPromptCharCount: 'caseAgentPromptCharCount',

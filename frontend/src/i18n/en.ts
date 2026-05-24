@@ -409,7 +409,6 @@ export const en: Messages = {
   caseAgentTitle: 'Agent',
   caseAgentSubtitle: 'Per-case additional prompt, agent sources, and run history.',
   caseAgentBack: '← Back to case #{id}',
-  caseAgentVariantBadge: 'V3 · Dashboard',
   caseAgentAdditionalPrompt: 'Additional prompt',
   caseAgentMarkdownBadge: 'Markdown',
   caseAgentPromptCharCount: '{count} / {limit}',

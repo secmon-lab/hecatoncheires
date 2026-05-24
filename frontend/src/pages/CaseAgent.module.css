@@ -38,10 +38,10 @@
   margin-bottom: 18px;
 }
 .headerIcon {
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
-  background: color-mix(in oklch, var(--accent) 12%, transparent);
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--accent) 14%, transparent);
   color: var(--accent);
   display: inline-flex;
   align-items: center;
@@ -49,16 +49,10 @@
 }
 .headerTitle {
   margin: 0;
-  font-size: 22px;
+  font-size: 28px;
   font-weight: 600;
   letter-spacing: -0.02em;
-}
-.variantPill {
-  font-size: 11px;
-  color: var(--fg-soft);
-  padding: 2px 8px;
-  border: 1px solid var(--line);
-  border-radius: 99px;
+  line-height: 1.2;
 }
 .headerSub {
   font-size: 12.5px;

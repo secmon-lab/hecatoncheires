@@ -409,7 +409,6 @@ export const ja: Messages = {
   caseAgentTitle: 'Agent',
   caseAgentSubtitle: 'このケース固有の追加プロンプトと利用 Source、過去の Agent 実行ログ',
   caseAgentBack: '← ケース #{id} に戻る',
-  caseAgentVariantBadge: 'V3 · Dashboard',
   caseAgentAdditionalPrompt: '追加プロンプト',
   caseAgentMarkdownBadge: 'Markdown',
   caseAgentPromptCharCount: '{count} / {limit}',
