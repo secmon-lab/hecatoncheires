@@ -516,6 +516,88 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, workspaceID string, id in
 	return updated, nil
 }
 
+// UpdateAgentSettings replaces the Case-specific agent additional prompt
+// and the AgentSourceIDs whitelist. enabledSourceIDs == nil or empty
+// resets the selection to "use every Source". Non-empty IDs are
+// validated against the Workspace's Source list — any unknown ID makes
+// the whole update fail with ErrInvalidArgument (we never silently
+// drop an ID the caller meant to keep). Order is preserved exactly as
+// supplied so the UI selection round-trips unchanged.
+func (uc *CaseUseCase) UpdateAgentSettings(ctx context.Context, workspaceID string, caseID int64, additionalPrompt string, enabledSourceIDs []model.SourceID) (*model.Case, error) {
+	existing, err := uc.repo.Case().Get(ctx, workspaceID, caseID)
+	if err != nil {
+		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, caseID))
+	}
+
+	// Access control. Drafts cannot carry agent settings (no agent runs
+	// against an unsubmitted draft anyway), so reject the call early.
+	if existing.IsDraft() {
+		return nil, goerr.Wrap(ErrCaseIsDraft,
+			"agent settings are unavailable on drafts",
+			goerr.V(CaseIDKey, caseID))
+	}
+
+	token, tokenErr := auth.TokenFromContext(ctx)
+	if tokenErr == nil && !model.IsCaseAccessible(existing, token.Sub) {
+		return nil, goerr.Wrap(ErrAccessDenied, "cannot update agent settings on private case",
+			goerr.V(CaseIDKey, caseID), goerr.V("user_id", token.Sub))
+	}
+
+	// Validate Source IDs against the workspace catalogue. We load the
+	// full list (small per workspace) once instead of N parallel Gets
+	// because callers typically pick a handful.
+	if len(enabledSourceIDs) > 0 {
+		sources, err := uc.repo.Source().List(ctx, workspaceID)
+		if err != nil {
+			return nil, goerr.Wrap(err, "list sources for agent settings",
+				goerr.V("workspace_id", workspaceID))
+		}
+		known := make(map[model.SourceID]struct{}, len(sources))
+		for _, s := range sources {
+			known[s.ID] = struct{}{}
+		}
+		seen := make(map[model.SourceID]struct{}, len(enabledSourceIDs))
+		for _, id := range enabledSourceIDs {
+			if id == "" {
+				return nil, goerr.Wrap(ErrInvalidArgument,
+					"source id is empty", goerr.V(CaseIDKey, caseID))
+			}
+			if _, ok := known[id]; !ok {
+				return nil, goerr.Wrap(ErrInvalidArgument,
+					"unknown source id",
+					goerr.V("source_id", string(id)),
+					goerr.V(CaseIDKey, caseID))
+			}
+			if _, dup := seen[id]; dup {
+				return nil, goerr.Wrap(ErrInvalidArgument,
+					"duplicate source id",
+					goerr.V("source_id", string(id)),
+					goerr.V(CaseIDKey, caseID))
+			}
+			seen[id] = struct{}{}
+		}
+	}
+
+	// Mutate the existing pointer rather than rebuilding the struct: the
+	// rebuild pattern silently drops any new field added to model.Case
+	// later. The repository's Update is a pure Set; whatever we hand
+	// it is what lands in storage.
+	existing.AgentAdditionalPrompt = additionalPrompt
+	if len(enabledSourceIDs) == 0 {
+		existing.AgentSourceIDs = nil
+	} else {
+		existing.AgentSourceIDs = append([]model.SourceID(nil), enabledSourceIDs...)
+	}
+	existing.UpdatedAt = time.Now().UTC()
+
+	updated, err := uc.repo.Case().Update(ctx, workspaceID, existing)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to update case agent settings",
+			goerr.V(CaseIDKey, caseID))
+	}
+	return updated, nil
+}
+
 func (uc *CaseUseCase) DeleteCase(ctx context.Context, workspaceID string, id int64) error {
 	// Get existing case for access control
 	existingCase, err := uc.repo.Case().Get(ctx, workspaceID, id)

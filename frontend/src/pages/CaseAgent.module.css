@@ -1,0 +1,526 @@
+/* CaseAgent page (V3 Dashboard) — ports the design markup from
+   case-agent.jsx / ScreenCaseAgentV3. Existing global utilities (.card,
+   .row, .col, .btn variants, .soft, .mono, .truncate) carry most of the
+   visual weight; only Agent-specific layout rules live here. */
+
+.shell {
+  max-width: 1220px;
+  margin: 0 auto;
+  /* Breathing room above the top breadcrumb so it doesn't hug the
+     workspace breadcrumb header. */
+  padding-top: var(--sp-6);
+}
+
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: var(--sp-3);
+  margin-bottom: var(--sp-5);
+  font-size: 12px;
+  color: var(--fg-soft);
+}
+.crumbLink {
+  color: var(--fg-muted);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.crumbLink:hover { color: var(--fg); }
+.crumbSep { color: var(--fg-soft); }
+.crumbTitle { max-width: 360px; }
+
+.header {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.headerIcon {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--accent) 12%, transparent);
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.headerTitle {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.variantPill {
+  font-size: 11px;
+  color: var(--fg-soft);
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+}
+.headerSub {
+  font-size: 12.5px;
+  color: var(--fg-soft);
+}
+
+/* 2-column settings cluster (additional prompt + sources) */
+.settings {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+@media (max-width: 1023px) {
+  .settings { grid-template-columns: 1fr; }
+}
+
+.settingsCard {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  /* Keep the two cards visually balanced even when one is empty: hold a
+     fixed baseline height, then grow vertically as content is added.
+     Both cards use the same min so the grid columns stay symmetric. */
+  min-height: 320px;
+}
+.settingsHead {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.settingsHeadTitle {
+  font-size: 13px;
+  font-weight: 600;
+}
+.markdownBadge {
+  font-size: 10.5px;
+  color: var(--fg-soft);
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+.promptCount {
+  font-size: 10.5px;
+  color: var(--fg-soft);
+  font-family: var(--font-mono);
+}
+
+/* Settings-card Edit buttons. The default .btn is so subtle on the
+   card header that operators miss it; bump contrast (accent border +
+   accent text) without going all the way to primary fill so it still
+   reads as a tertiary action. */
+.editBtn {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: color-mix(in oklch, var(--accent) 6%, var(--bg-elev));
+  font-weight: 500;
+}
+.editBtn:hover {
+  background: color-mix(in oklch, var(--accent) 12%, var(--bg-elev));
+  border-color: var(--accent);
+}
+
+.promptBody {
+  padding: 14px 18px;
+  font-size: 13px;
+  line-height: 1.7;
+  /* Fill the remaining card height so an empty / short prompt does not
+     collapse the card. Long prompts grow the card vertically rather
+     than scrolling internally. */
+  flex: 1;
+}
+.promptBody.compact { padding: 14px 18px; }
+.promptBody p { margin: 0 0 4px; }
+.promptBody h3 { font-size: 13px; font-weight: 600; margin: 0 0 6px; }
+.promptBody ul { margin: 0 0 8px; padding-left: 20px; }
+.promptBody li { margin-bottom: 3px; }
+.promptBody blockquote {
+  border-left: 3px solid var(--accent-line);
+  padding: 4px 10px;
+  background: var(--accent-soft);
+  margin: 8px 0;
+  color: var(--fg-muted);
+  font-size: 12.5px;
+}
+.promptBody code {
+  background: var(--bg-sunken);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.92em;
+  font-family: var(--font-mono);
+}
+.promptPlaceholder {
+  color: var(--fg-soft);
+  font-style: italic;
+}
+
+.promptEditor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 18px;
+}
+.promptTextarea {
+  width: 100%;
+  min-height: 240px;
+  padding: 10px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-sunken);
+  color: var(--fg);
+  resize: vertical;
+}
+.promptTextarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.promptEditorActions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.sourcesList {
+  flex: 1;
+  /* Fill the card; allow the card itself to grow if many sources are
+     selected. */
+}
+.sourceRow {
+  display: flex;
+  align-items: flex-start;
+  padding: 10px 14px;
+  gap: 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+.sourceRow:last-child { border-bottom: none; }
+.sourceRowDim { opacity: 0.45; }
+.sourceRowBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sourceRowHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.sourceRowName {
+  font-weight: 500;
+}
+.sourceRowDesc {
+  font-size: 11px;
+  color: var(--fg-soft);
+  line-height: 1.4;
+  /* Wrap fully; descriptions can be long, multi-line. */
+  word-break: break-word;
+}
+.sourceTypeChip {
+  font-size: 10px;
+  color: var(--fg-muted);
+  background: var(--bg-sunken);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.sourceLastSync {
+  color: var(--fg-soft);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+.sourceDisabledChip {
+  font-size: 10px;
+  color: var(--fg-soft);
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+/* Source-kind colored letter chip */
+.sourceIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.sourcesEmpty {
+  padding: 24px;
+  text-align: center;
+  color: var(--fg-soft);
+  font-size: 12px;
+}
+
+/* Sources selector (edit mode) */
+.sourceSelector {
+  padding: 8px 0;
+  flex: 1;
+  /* Selection list grows with the card; no internal scroll. */
+}
+.sourceSelectorRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.sourceSelectorRow:hover { background: rgba(127, 127, 127, 0.05); }
+.sourceSelectorRowDisabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.sourceSelectorActions {
+  display: flex;
+  gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-sunken);
+}
+
+.checkbox {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid var(--line-strong);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: transparent;
+}
+.checkbox.checked {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+/* Stats hero */
+.statsCard {
+  padding: 14px 18px;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+}
+.statKpi {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 3px;
+  padding: 0 4px;
+}
+.statLabel {
+  font-size: 10px;
+  color: var(--fg-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+.statValue {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.statValueOk { color: var(--ok); }
+.statSub {
+  font-size: 10.5px;
+  color: var(--fg-soft);
+}
+.statDivider {
+  width: 1px;
+  height: 38px;
+  background: var(--line);
+}
+@media (max-width: 767px) {
+  .statsCard {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .statKpi { flex: 1 1 45%; }
+  .statDivider { display: none; }
+}
+
+/* Run logs */
+.runHead {
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.runHeadTitle { font-size: 13px; font-weight: 600; }
+.runHeadCount {
+  color: var(--fg-soft);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.miniSpark {
+  display: flex;
+  gap: 1px;
+  align-items: flex-end;
+  height: 18px;
+  margin-right: 10px;
+}
+.miniSparkBar {
+  width: 4px;
+  border-radius: 1px;
+  opacity: 0.85;
+}
+
+.runTableHead {
+  display: flex;
+  align-items: center;
+  padding: 6px 18px;
+  font-size: 10.5px;
+  color: var(--fg-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-sunken);
+  gap: 10px;
+}
+.runTableHead span { white-space: nowrap; }
+.runRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 18px;
+  border-bottom: 1px solid var(--line);
+  color: inherit;
+  text-decoration: none;
+  font-size: 12px;
+}
+.runRow:last-child { border-bottom: none; }
+.runRow:hover { background: var(--bg-sunken); }
+.runColStatus { width: 84px; }
+.runColJob {
+  width: 140px;
+  font-weight: 500;
+}
+.runColStartedWrap { flex: 1; min-width: 0; }
+.runColStarted {
+  color: var(--fg-soft);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+.runColError {
+  color: var(--danger);
+  font-size: 11px;
+  margin-top: 1px;
+}
+.runColDuration {
+  width: 80px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--fg-soft);
+}
+.runColDurationRunning { color: var(--info); }
+.runColTrigger {
+  width: 80px;
+  text-align: right;
+  font-size: 10.5px;
+}
+.triggerChip {
+  color: var(--fg-soft);
+  border: 1px solid var(--line);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* Stage badge — design uses inline color-mix; we reproduce via classes
+   so the dot animates without leaking through to other places. */
+.stageBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.stageBadgeSm {
+  padding: 1px 6px;
+  font-size: 10.5px;
+}
+.stageDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 99px;
+  flex-shrink: 0;
+}
+.stageDotSm { width: 5px; height: 5px; }
+.stageRunning {
+  color: var(--info);
+  background: color-mix(in oklch, var(--info) 10%, transparent);
+  border: 1px solid color-mix(in oklch, var(--info) 28%, transparent);
+}
+.stageRunning .stageDot {
+  background: var(--info);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--info) 25%, transparent);
+  animation: stagePulse 1.4s ease-in-out infinite;
+}
+.stageSuccess {
+  color: var(--ok);
+  background: color-mix(in oklch, var(--ok) 10%, transparent);
+  border: 1px solid color-mix(in oklch, var(--ok) 28%, transparent);
+}
+.stageSuccess .stageDot { background: var(--ok); }
+.stageFailed {
+  color: var(--danger);
+  background: color-mix(in oklch, var(--danger) 10%, transparent);
+  border: 1px solid color-mix(in oklch, var(--danger) 28%, transparent);
+}
+.stageFailed .stageDot { background: var(--danger); }
+
+@keyframes stagePulse {
+  0%, 100% { box-shadow: 0 0 0 3px color-mix(in oklch, var(--info) 25%, transparent); }
+  50% { box-shadow: 0 0 0 5px color-mix(in oklch, var(--info) 10%, transparent); }
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  padding: 10px 18px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-sunken);
+}
+.paginationLabel {
+  color: var(--fg-soft);
+  font-size: 11.5px;
+}
+.paginationActions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+.statusCard {
+  padding: 24px;
+  text-align: center;
+  color: var(--fg-soft);
+  font-size: 13px;
+}
+.errorBanner {
+  padding: 12px 18px;
+  border-bottom: 1px solid color-mix(in oklch, var(--danger) 25%, transparent);
+  background: color-mix(in oklch, var(--danger) 6%, transparent);
+  color: var(--danger);
+  font-size: 12px;
+}

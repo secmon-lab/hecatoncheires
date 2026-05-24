@@ -38,6 +38,13 @@ var (
 
 	// Other errors
 	ErrDuplicateField = errors.New("duplicate field")
+
+	// ErrInvalidArgument is returned by usecase methods when the caller
+	// provides input that violates a domain invariant (unknown ID, list
+	// element that does not belong to the workspace, etc.). Distinct from
+	// ErrAccessDenied / ErrNotFound so the GraphQL layer can map it to
+	// BAD_USER_INPUT rather than INTERNAL.
+	ErrInvalidArgument = errors.New("invalid argument")
 )
 
 // Context keys for error values

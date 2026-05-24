@@ -2,6 +2,8 @@ import { Navigate, Routes, Route, useParams } from 'react-router-dom'
 import Layout from './components/Layout'
 import CaseList from './pages/CaseList'
 import CaseDetail from './pages/CaseDetail'
+import CaseAgent from './pages/CaseAgent'
+import JobRunLogDetail from './pages/JobRunLogDetail'
 import ActionList from './pages/ActionList'
 import AssistLogList from './pages/AssistLogList'
 import SourceList from './pages/SourceList'
@@ -29,6 +31,8 @@ function App() {
           <Route path="cases/:id" element={<CaseDetail />} />
           <Route path="cases/:id/actions/:actionId" element={<CaseDetail />} />
           <Route path="cases/:id/assists" element={<AssistLogList />} />
+          <Route path="cases/:id/agent" element={<CaseAgent />} />
+          <Route path="cases/:id/agent/runs/:runId" element={<JobRunLogDetail />} />
           <Route path="actions" element={<ActionList />} />
           <Route path="actions/:actionId" element={<ActionList />} />
           <Route path="actions/case/:caseId" element={<ActionList />} />

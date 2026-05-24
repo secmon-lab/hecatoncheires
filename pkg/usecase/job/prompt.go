@@ -53,6 +53,24 @@ type PromptInputs struct {
 	Actions   []*model.Action
 	Event     Event
 	Now       time.Time
+
+	// Sources is the resolved set of *model.Source the agent should be
+	// aware of for this Case. It is always populated when source
+	// listing succeeds — even when the operator has not narrowed the
+	// selection — so the LLM has the full catalogue of investigation
+	// sources at hand. The distinction "operator narrowed vs. workspace
+	// default" is carried separately on SourcesNarrowed so the system
+	// prompt can phrase the section accordingly.
+	Sources []*model.Source
+
+	// SourcesNarrowed reports whether the Sources slice reflects an
+	// explicit operator selection from the Case Agent page
+	// (Case.AgentSourceIDs non-empty). When true the system prompt
+	// labels the list as a *preference*; when false it labels the list
+	// as the full available catalogue and explicitly states no narrowing
+	// is in effect. Either way the agent is never told to restrict its
+	// search — selection is a hint, not a filter.
+	SourcesNarrowed bool
 }
 
 // systemPromptData is the typed dot value passed into the system prompt
@@ -64,6 +82,19 @@ type systemPromptData struct {
 	Actions   []systemPromptAction
 	Trigger   systemPromptTrigger
 	Reason    systemPromptReason
+	Sources   systemPromptSourceSection
+}
+
+type systemPromptSourceSection struct {
+	Items    []systemPromptSource
+	Narrowed bool
+}
+
+type systemPromptSource struct {
+	ID          string
+	Name        string
+	Type        string
+	Description string
 }
 
 type systemPromptWorkspace struct {
@@ -78,16 +109,17 @@ type systemPromptField struct {
 }
 
 type systemPromptCase struct {
-	ID             int64
-	Title          string
-	Description    string
-	Status         string
-	ReporterID     string
-	AssigneeIDs    []string
-	SlackChannelID string
-	CreatedAt      string
-	UpdatedAt      string
-	FieldValues    []systemPromptFieldValue
+	ID                    int64
+	Title                 string
+	Description           string
+	Status                string
+	ReporterID            string
+	AssigneeIDs           []string
+	SlackChannelID        string
+	CreatedAt             string
+	UpdatedAt             string
+	FieldValues           []systemPromptFieldValue
+	AgentAdditionalPrompt string
 }
 
 type systemPromptFieldValue struct {
@@ -165,13 +197,14 @@ func buildSystemPromptData(in PromptInputs) systemPromptData {
 
 	if c := in.Case; c != nil {
 		cs := &systemPromptCase{
-			ID:             c.ID,
-			Title:          c.Title,
-			Description:    c.Description,
-			Status:         c.Status.String(),
-			ReporterID:     c.ReporterID,
-			AssigneeIDs:    append([]string(nil), c.AssigneeIDs...),
-			SlackChannelID: c.SlackChannelID,
+			ID:                    c.ID,
+			Title:                 c.Title,
+			Description:           c.Description,
+			Status:                c.Status.String(),
+			ReporterID:            c.ReporterID,
+			AssigneeIDs:           append([]string(nil), c.AssigneeIDs...),
+			SlackChannelID:        c.SlackChannelID,
+			AgentAdditionalPrompt: c.AgentAdditionalPrompt,
 		}
 		if !c.CreatedAt.IsZero() {
 			cs.CreatedAt = c.CreatedAt.UTC().Format(time.RFC3339)
@@ -205,6 +238,19 @@ func buildSystemPromptData(in PromptInputs) systemPromptData {
 			Title:      a.Title,
 			Status:     a.Status.String(),
 			AssigneeID: a.AssigneeID,
+		})
+	}
+
+	data.Sources.Narrowed = in.SourcesNarrowed
+	for _, s := range in.Sources {
+		if s == nil {
+			continue
+		}
+		data.Sources.Items = append(data.Sources.Items, systemPromptSource{
+			ID:          string(s.ID),
+			Name:        s.Name,
+			Type:        string(s.SourceType),
+			Description: s.Description,
 		})
 	}
 

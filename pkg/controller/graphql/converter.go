@@ -104,21 +104,28 @@ func toGraphQLCase(c *model.Case, workspaceID string) *graphql1.Case {
 		reporterID = &c.ReporterID
 	}
 
+	agentSourceIDs := make([]string, 0, len(c.AgentSourceIDs))
+	for _, id := range c.AgentSourceIDs {
+		agentSourceIDs = append(agentSourceIDs, string(id))
+	}
+
 	return &graphql1.Case{
-		ID:             int(c.ID),
-		WorkspaceID:    workspaceID,
-		Title:          c.Title,
-		Description:    c.Description,
-		Status:         c.Status.Normalize(),
-		IsPrivate:      c.IsPrivate,
-		AccessDenied:   c.AccessDenied,
-		ChannelUserIDs: channelUserIDs,
-		ReporterID:     reporterID,
-		AssigneeIDs:    assigneeIDs,
-		SlackChannelID: &c.SlackChannelID,
-		Fields:         toGraphQLFieldValues(c.FieldValues),
-		CreatedAt:      c.CreatedAt,
-		UpdatedAt:      c.UpdatedAt,
+		ID:                    int(c.ID),
+		WorkspaceID:           workspaceID,
+		Title:                 c.Title,
+		Description:           c.Description,
+		Status:                c.Status.Normalize(),
+		IsPrivate:             c.IsPrivate,
+		AccessDenied:          c.AccessDenied,
+		ChannelUserIDs:        channelUserIDs,
+		ReporterID:            reporterID,
+		AssigneeIDs:           assigneeIDs,
+		SlackChannelID:        &c.SlackChannelID,
+		Fields:                toGraphQLFieldValues(c.FieldValues),
+		AgentAdditionalPrompt: c.AgentAdditionalPrompt,
+		AgentSourceIDs:        agentSourceIDs,
+		CreatedAt:             c.CreatedAt,
+		UpdatedAt:             c.UpdatedAt,
 	}
 }
 

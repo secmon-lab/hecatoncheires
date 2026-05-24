@@ -44,6 +44,7 @@ type UseCases struct {
 	Source                   *SourceUseCase
 	Assist                   *AssistUseCase
 	MentionProposal          *MentionProposalUseCase
+	JobRun                   *JobRunUseCase
 }
 
 type Option func(*UseCases)
@@ -181,6 +182,7 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 		githubSvc = uc.githubClient
 	}
 	uc.Source = NewSourceUseCase(repo, uc.notion, uc.slackService, githubSvc)
+	uc.JobRun = NewJobRunUseCase(repo, registry)
 
 	// Whenever Slack is wired, the LLM client must also be wired — Slack-driven
 	// flows (agent mention, mention-draft, assist) all require LLM by design.

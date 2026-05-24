@@ -154,6 +154,13 @@ type Case {
   # through its own dataloader so callers can mix filters within a request.
   actions(filter: ActionArchiveFilter = ACTIVE): [Action!]!
   slackMessages(limit: Int, cursor: String): SlackMessageConnection!
+  # Case-specific Markdown snippet appended to the Job system prompt
+  # at agent execution time. Empty string when unset.
+  agentAdditionalPrompt: String!
+  # Sources the agent should consider when running against this Case.
+  # Empty list (the default) means "use every Workspace Source"; non-
+  # empty narrows the agent to exactly those Sources.
+  agentSources: [Source!]!
   createdAt: Time!
   updatedAt: Time!
 }
@@ -568,6 +575,19 @@ type Query {
 
   # Assist Logs
   assistLogs(workspaceId: String!, caseId: Int!, limit: Int, offset: Int): AssistLogConnection!
+
+  # Agent (Job) execution history surfaced under a single Case. The page
+  # walks every Job that has run against the Case and returns logs in
+  # newest-first order. `first` defaults to 20 and is clamped to 100;
+  # `after` is the opaque cursor returned from the previous page.
+  caseJobRunLogs(workspaceId: String!, caseId: Int!, first: Int, after: String): JobRunLogConnection!
+
+  # Single JobRunLog identified by its RunID under the given Case. The
+  # JobID is resolved server-side, so the client does not need it.
+  jobRunLog(workspaceId: String!, caseId: Int!, runId: String!): JobRunLog!
+
+  # Full event timeline of one Run in ascending Sequence order.
+  jobRunEvents(workspaceId: String!, caseId: Int!, runId: String!): [JobRunEvent!]!
 }
 
 type Mutation {
@@ -630,4 +650,82 @@ type Mutation {
   deleteSource(workspaceId: String!, id: String!): Boolean!
   validateNotionDB(workspaceId: String!, databaseID: String!): NotionDBValidationResult!
   validateNotionPage(workspaceId: String!, pageID: String!): NotionPageValidationResult!
+
+  # Replace the Case-scoped agent additional prompt and Source allowlist
+  # atomically. enabledSourceIds is treated as the full new selection:
+  # passing an empty list clears it (= "use every Source"); the order is
+  # preserved verbatim so the UI round-trips unchanged.
+  updateCaseAgentSettings(workspaceId: String!, input: UpdateCaseAgentSettingsInput!): Case!
+}
+
+input UpdateCaseAgentSettingsInput {
+  caseId: Int!
+  agentAdditionalPrompt: String!
+  enabledSourceIds: [String!]!
+}
+
+# JobRunStage mirrors model.JobRunStage and is what the frontend uses
+# to render the Status pill in the run log table and detail header.
+enum JobRunStage {
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+# Cursor-paginated slice of JobRunLogs for one Case. nextCursor is null
+# when the caller has reached the end of the history.
+type JobRunLogConnection {
+  items: [JobRunLog!]!
+  nextCursor: String
+}
+
+# One Job invocation against one Case. The fields mirror
+# model.JobRunLog plus a server-resolved jobName (looked up from the
+# Workspace TOML registry; falls back to jobId when unknown).
+type JobRunLog {
+  workspaceId: String!
+  caseId: Int!
+  jobId: String!
+  jobName: String!
+  runId: String!
+  traceId: String!
+  stage: JobRunStage!
+  startedAt: Time!
+  endedAt: Time
+  # Wall-clock duration in milliseconds. Null while RUNNING.
+  durationMs: Int
+  # Non-null when the Run ended in FAILED; the message is the same one
+  # the agent reported. Empty string for RUNNING / SUCCESS so the
+  # frontend never has to special-case absence.
+  errorMessage: String!
+  systemPrompt: String!
+  # Trigger provenance (case lifecycle vs scheduled cron) copied from
+  # the Event that started this Run.
+  eventType: String!
+  eventTriggerAt: Time!
+}
+
+enum JobRunEventKind {
+  LLM_REQUEST
+  LLM_RESPONSE
+  TOOL_CALL
+  RUN_ERROR
+}
+
+# One entry on the JobRunLog detail timeline. The payload shape varies
+# per Kind; we serialise it as a JSON blob so the frontend can render
+# each type without needing four sibling fields on every event.
+type JobRunEvent {
+  eventId: String!
+  runId: String!
+  sequence: Int!
+  occurredAt: Time!
+  kind: JobRunEventKind!
+  parentSequence: Int!
+  phase: String!
+  agentLabel: String!
+  # Exactly one of the four payload-shaped objects, encoded as JSON
+  # for transport simplicity. Schema: see model.LLMRequestPayload /
+  # LLMResponsePayload / ToolCallPayload / RunErrorPayload.
+  payload: JSON!
 }

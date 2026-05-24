@@ -69,20 +69,28 @@ func copyCase(c *model.Case) *model.Case {
 	channelUserIDs := make([]string, len(c.ChannelUserIDs))
 	copy(channelUserIDs, c.ChannelUserIDs)
 
+	var agentSourceIDs []model.SourceID
+	if c.AgentSourceIDs != nil {
+		agentSourceIDs = make([]model.SourceID, len(c.AgentSourceIDs))
+		copy(agentSourceIDs, c.AgentSourceIDs)
+	}
+
 	return &model.Case{
-		ID:             c.ID,
-		Title:          c.Title,
-		Description:    c.Description,
-		Status:         c.Status,
-		ReporterID:     c.ReporterID,
-		AssigneeIDs:    assigneeIDs,
-		SlackChannelID: c.SlackChannelID,
-		IsPrivate:      c.IsPrivate,
-		ChannelUserIDs: channelUserIDs,
-		FieldValues:    fieldValues,
-		RequestKey:     c.RequestKey,
-		CreatedAt:      c.CreatedAt,
-		UpdatedAt:      c.UpdatedAt,
+		ID:                    c.ID,
+		Title:                 c.Title,
+		Description:           c.Description,
+		Status:                c.Status,
+		ReporterID:            c.ReporterID,
+		AssigneeIDs:           assigneeIDs,
+		SlackChannelID:        c.SlackChannelID,
+		IsPrivate:             c.IsPrivate,
+		ChannelUserIDs:        channelUserIDs,
+		FieldValues:           fieldValues,
+		RequestKey:            c.RequestKey,
+		AgentAdditionalPrompt: c.AgentAdditionalPrompt,
+		AgentSourceIDs:        agentSourceIDs,
+		CreatedAt:             c.CreatedAt,
+		UpdatedAt:             c.UpdatedAt,
 	}
 }
 

@@ -14,6 +14,7 @@ import {
 import { DISCARD_DRAFT, GET_DRAFTS } from '../graphql/drafts'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
+import { GET_CASE_LATEST_JOB_RUN } from '../graphql/caseAgent'
 import CustomFieldHelpRow from '../components/fields/CustomFieldHelpRow'
 import InlineText from '../components/inline/InlineText'
 import InlineLongText from '../components/inline/InlineLongText'
@@ -28,6 +29,7 @@ import Button from '../components/Button'
 import Modal from '../components/Modal'
 import {
   IconChevLeft,
+  IconChevRight,
   IconLock,
   IconCheck,
   IconRefresh,
@@ -37,7 +39,8 @@ import {
   IconSlack,
   IconExt,
   IconDots,
-  IconBell,
+  IconSparkle,
+  IconX,
 } from '../components/Icons'
 import { Avatar, PrivateBadge, StatusBadge } from '../components/Primitives'
 import CaseDeleteDialog from './CaseDeleteDialog'
@@ -69,13 +72,83 @@ function formatHHMM(iso?: string | null) {
   return `${hh}:${mm}`
 }
 
+// AgentTileStageIcon mirrors the design's small leading indicator on
+// the "Last run · …" line: green check / red X / pulsing blue dot for
+// SUCCESS / FAILED / RUNNING, and a neutral dash placeholder when the
+// agent has never run for this case.
+function AgentTileStageIcon({ stage }: { stage: string | null }) {
+  if (stage === 'SUCCESS') {
+    return (
+      <span className="agent-tile-stage-icon success" aria-hidden>
+        <IconCheck size={9} sw={3} />
+      </span>
+    )
+  }
+  if (stage === 'FAILED') {
+    return (
+      <span className="agent-tile-stage-icon failed" aria-hidden>
+        <IconX size={9} sw={3} />
+      </span>
+    )
+  }
+  if (stage === 'RUNNING') {
+    return <span className="agent-tile-stage-icon running" aria-hidden />
+  }
+  return (
+    <span className="agent-tile-stage-icon never" aria-hidden>
+      —
+    </span>
+  )
+}
+
+function agentTileStageClass(stage: string | null): string {
+  switch (stage) {
+    case 'SUCCESS': return 'agent-tile-stage-success'
+    case 'FAILED':  return 'agent-tile-stage-failed'
+    case 'RUNNING': return 'agent-tile-stage-running'
+    default:        return 'agent-tile-stage-never'
+  }
+}
+
+function agentTileStageLabel(stage: string | null, t: (k: 'caseAgentRunStageSuccess' | 'caseAgentRunStageFailed' | 'caseAgentRunStageRunning' | 'caseDetailAgentNeverRun') => string): string {
+  switch (stage) {
+    case 'SUCCESS': return t('caseAgentRunStageSuccess')
+    case 'FAILED':  return t('caseAgentRunStageFailed')
+    case 'RUNNING': return t('caseAgentRunStageRunning')
+    default:        return t('caseDetailAgentNeverRun')
+  }
+}
+
+// formatAgentTileRelative renders an "Xh ago" style string in the
+// active locale. The threshold bands match the design mock: <1m
+// shows seconds, <1h minutes, <24h hours, then days; past a week we
+// fall back to the absolute local date so we never claim "300d ago".
+function formatAgentTileRelative(
+  iso: string,
+  _lang: 'en' | 'ja',
+  t: (k: 'caseDetailAgentRelSeconds' | 'caseDetailAgentRelMinutes' | 'caseDetailAgentRelHours' | 'caseDetailAgentRelDays', params: { count: number }) => string,
+): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const diffMs = Math.max(0, Date.now() - d.getTime())
+  const sec = Math.floor(diffMs / 1000)
+  if (sec < 60) return t('caseDetailAgentRelSeconds', { count: sec })
+  const min = Math.floor(sec / 60)
+  if (min < 60) return t('caseDetailAgentRelMinutes', { count: min })
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return t('caseDetailAgentRelHours', { count: hr })
+  const day = Math.floor(hr / 24)
+  if (day < 7) return t('caseDetailAgentRelDays', { count: day })
+  return d.toLocaleDateString()
+}
+
 export default function CaseDetail() {
   const { id, actionId: actionIdParam } = useParams<{ id: string; actionId?: string }>()
   const caseId = Number(id)
   const openActionId = actionIdParam ? Number(actionIdParam) : null
   const navigate = useNavigate()
   const { currentWorkspace } = useWorkspace()
-  const { t } = useTranslation()
+  const { t, lang } = useTranslation()
   const actionStatuses = useActionStatuses(currentWorkspace?.id)
 
   const [addingAction, setAddingAction] = useState(false)
@@ -121,6 +194,13 @@ export default function CaseDetail() {
     },
     skip: !currentWorkspace || Number.isNaN(caseId) || !isPrivate || !slackChannelID,
   })
+
+  const { data: latestRunData } = useQuery(GET_CASE_LATEST_JOB_RUN, {
+    variables: { workspaceId: currentWorkspace?.id, caseId },
+    skip: !currentWorkspace || Number.isNaN(caseId) || c?.status === 'DRAFT',
+    fetchPolicy: 'cache-and-network',
+  })
+  const latestRun = latestRunData?.caseJobRunLogs?.items?.[0] ?? null
 
   const refetchOptions = useMemo(
     () => [
@@ -266,15 +346,6 @@ export default function CaseDetail() {
           {t('btnBack')}
         </Button>
         <span className="spacer" />
-        <Button
-          size="sm"
-          variant="ghost"
-          icon={<IconBell size={13} />}
-          data-testid="watch-case-button"
-          aria-label={t('btnWatch')}
-        >
-          {t('btnWatch')}
-        </Button>
         {c.status === 'DRAFT' ? (
           <>
             <Button
@@ -655,6 +726,47 @@ export default function CaseDetail() {
               />
             </div>
           </section>
+
+          {c.status !== 'DRAFT' && (
+            <section className="h-aside-section">
+              <div className="h-aside-h">
+                <span className="h-aside-title">{t('caseDetailAgentLinkLabel')}</span>
+              </div>
+              {/* 2-line tile (designer pick "B"): square accent icon +
+                  bold title + "Last run · <stage> · <relative>" subline.
+                  Doubles as the page entrypoint AND a passive read-out
+                  of the most recent Job run's outcome. */}
+              <Link
+                to={`/ws/${currentWorkspace!.id}/cases/${caseId}/agent`}
+                className="agent-tile"
+                data-testid="case-agent-link"
+              >
+                <span className="agent-tile-icon">
+                  <IconSparkle size={18} sw={1.8} />
+                </span>
+                <div className="agent-tile-body">
+                  <div className="agent-tile-title">
+                    {t('caseDetailAgentTileTitle')}
+                  </div>
+                  <div className="agent-tile-sub">
+                    <AgentTileStageIcon stage={latestRun?.stage ?? null} />
+                    <span>{t('caseDetailAgentLastRun')}</span>
+                    <span className="agent-tile-sub-sep">·</span>
+                    <span className={agentTileStageClass(latestRun?.stage ?? null)}>
+                      {agentTileStageLabel(latestRun?.stage ?? null, t)}
+                    </span>
+                    {latestRun?.startedAt && (
+                      <>
+                        <span className="agent-tile-sub-sep">·</span>
+                        <span>{formatAgentTileRelative(latestRun.startedAt, lang, t)}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <IconChevRight size={14} className="agent-tile-chev" />
+              </Link>
+            </section>
+          )}
 
           <section className="h-aside-section" data-testid="case-assignees-inline">
             <div className="h-aside-h">

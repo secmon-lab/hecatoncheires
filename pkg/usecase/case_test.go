@@ -2504,3 +2504,108 @@ func TestLifecycle_CreateCaseTriggersAgentJob(t *testing.T) {
 	gt.NoError(t, err).Required()
 	gt.Value(t, run.LastStatus).Equal(model.JobRunStatusSuccess)
 }
+
+func TestCaseUseCase_UpdateAgentSettings(t *testing.T) {
+	setup := func(t *testing.T) (interfaces.Repository, *usecase.CaseUseCase, model.SourceID, model.SourceID, *model.Case) {
+		t.Helper()
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UREPORTER"})
+
+		src1, err := repo.Source().Create(context.Background(), testWorkspaceID, &model.Source{
+			ID: model.NewSourceID(), Name: "src1", SourceType: model.SourceTypeSlack, Enabled: true,
+			SlackConfig: &model.SlackConfig{},
+		})
+		gt.NoError(t, err).Required()
+		src2, err := repo.Source().Create(context.Background(), testWorkspaceID, &model.Source{
+			ID: model.NewSourceID(), Name: "src2", SourceType: model.SourceTypeGitHub, Enabled: true,
+			GitHubConfig: &model.GitHubConfig{},
+		})
+		gt.NoError(t, err).Required()
+
+		c, err := uc.CreateCase(ctx, testWorkspaceID, "agent settings target", "desc", nil, nil, false, "", "")
+		gt.NoError(t, err).Required()
+		return repo, uc, src1.ID, src2.ID, c
+	}
+
+	t.Run("updates prompt and source list", func(t *testing.T) {
+		_, uc, src1, src2, c := setup(t)
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UREPORTER"})
+
+		updated, err := uc.UpdateAgentSettings(ctx, testWorkspaceID, c.ID, "## case notes", []model.SourceID{src1, src2})
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.AgentAdditionalPrompt).Equal("## case notes")
+		gt.Array(t, updated.AgentSourceIDs).Length(2).Required()
+		gt.Value(t, updated.AgentSourceIDs[0]).Equal(src1)
+		gt.Value(t, updated.AgentSourceIDs[1]).Equal(src2)
+
+		// Read-back through GetCase to confirm persistence.
+		got, err := uc.GetCase(ctx, testWorkspaceID, c.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.AgentAdditionalPrompt).Equal("## case notes")
+		gt.Array(t, got.AgentSourceIDs).Length(2).Required()
+	})
+
+	t.Run("clearing source list keeps empty selection", func(t *testing.T) {
+		_, uc, src1, _, c := setup(t)
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UREPORTER"})
+
+		_, err := uc.UpdateAgentSettings(ctx, testWorkspaceID, c.ID, "first", []model.SourceID{src1})
+		gt.NoError(t, err).Required()
+
+		cleared, err := uc.UpdateAgentSettings(ctx, testWorkspaceID, c.ID, "", nil)
+		gt.NoError(t, err).Required()
+		gt.Value(t, cleared.AgentAdditionalPrompt).Equal("")
+		gt.Number(t, len(cleared.AgentSourceIDs)).Equal(0)
+	})
+
+	t.Run("unknown source id is rejected", func(t *testing.T) {
+		_, uc, src1, _, c := setup(t)
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UREPORTER"})
+
+		bogus := model.NewSourceID()
+		_, err := uc.UpdateAgentSettings(ctx, testWorkspaceID, c.ID, "p", []model.SourceID{src1, bogus})
+		gt.Error(t, err).Is(usecase.ErrInvalidArgument)
+	})
+
+	t.Run("duplicate source id is rejected", func(t *testing.T) {
+		_, uc, src1, _, c := setup(t)
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UREPORTER"})
+
+		_, err := uc.UpdateAgentSettings(ctx, testWorkspaceID, c.ID, "p", []model.SourceID{src1, src1})
+		gt.Error(t, err).Is(usecase.ErrInvalidArgument)
+	})
+
+	t.Run("private case rejects non-member", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UREPORTER"})
+
+		c, err := uc.CreateCase(ctx, testWorkspaceID, "private case", "", nil, nil, true, "", "")
+		gt.NoError(t, err).Required()
+
+		// Mark the case as private with explicit channel membership.
+		raw, err := repo.Case().Get(context.Background(), testWorkspaceID, c.ID)
+		gt.NoError(t, err).Required()
+		raw.IsPrivate = true
+		raw.ChannelUserIDs = []string{"UREPORTER"}
+		_, err = repo.Case().Update(context.Background(), testWorkspaceID, raw)
+		gt.NoError(t, err).Required()
+
+		// Member succeeds.
+		_, err = uc.UpdateAgentSettings(ctx, testWorkspaceID, c.ID, "ok", nil)
+		gt.NoError(t, err)
+
+		// Non-member is denied.
+		other := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "USTRANGER"})
+		_, err = uc.UpdateAgentSettings(other, testWorkspaceID, c.ID, "blocked", nil)
+		gt.Error(t, err).Is(usecase.ErrAccessDenied)
+	})
+
+	t.Run("missing case returns not found", func(t *testing.T) {
+		_, uc, _, _, _ := setup(t)
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UREPORTER"})
+		_, err := uc.UpdateAgentSettings(ctx, testWorkspaceID, 99999, "p", nil)
+		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
+	})
+}

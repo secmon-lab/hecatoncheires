@@ -138,26 +138,28 @@ type ComplexityRoot struct {
 	}
 
 	Case struct {
-		AccessDenied     func(childComplexity int) int
-		Actions          func(childComplexity int, filter *graphql1.ActionArchiveFilter) int
-		AssigneeIDs      func(childComplexity int) int
-		Assignees        func(childComplexity int) int
-		ChannelUserCount func(childComplexity int) int
-		ChannelUsers     func(childComplexity int, limit *int, offset *int, filter *string) int
-		CreatedAt        func(childComplexity int) int
-		Description      func(childComplexity int) int
-		Fields           func(childComplexity int) int
-		ID               func(childComplexity int) int
-		IsPrivate        func(childComplexity int) int
-		Reporter         func(childComplexity int) int
-		ReporterID       func(childComplexity int) int
-		SlackChannelID   func(childComplexity int) int
-		SlackChannelName func(childComplexity int) int
-		SlackChannelURL  func(childComplexity int) int
-		SlackMessages    func(childComplexity int, limit *int, cursor *string) int
-		Status           func(childComplexity int) int
-		Title            func(childComplexity int) int
-		UpdatedAt        func(childComplexity int) int
+		AccessDenied          func(childComplexity int) int
+		Actions               func(childComplexity int, filter *graphql1.ActionArchiveFilter) int
+		AgentAdditionalPrompt func(childComplexity int) int
+		AgentSources          func(childComplexity int) int
+		AssigneeIDs           func(childComplexity int) int
+		Assignees             func(childComplexity int) int
+		ChannelUserCount      func(childComplexity int) int
+		ChannelUsers          func(childComplexity int, limit *int, offset *int, filter *string) int
+		CreatedAt             func(childComplexity int) int
+		Description           func(childComplexity int) int
+		Fields                func(childComplexity int) int
+		ID                    func(childComplexity int) int
+		IsPrivate             func(childComplexity int) int
+		Reporter              func(childComplexity int) int
+		ReporterID            func(childComplexity int) int
+		SlackChannelID        func(childComplexity int) int
+		SlackChannelName      func(childComplexity int) int
+		SlackChannelURL       func(childComplexity int) int
+		SlackMessages         func(childComplexity int, limit *int, cursor *string) int
+		Status                func(childComplexity int) int
+		Title                 func(childComplexity int) int
+		UpdatedAt             func(childComplexity int) int
 	}
 
 	ChannelUserConnection struct {
@@ -220,38 +222,73 @@ type ComplexityRoot struct {
 		Repo  func(childComplexity int) int
 	}
 
+	JobRunEvent struct {
+		AgentLabel     func(childComplexity int) int
+		EventID        func(childComplexity int) int
+		Kind           func(childComplexity int) int
+		OccurredAt     func(childComplexity int) int
+		ParentSequence func(childComplexity int) int
+		Payload        func(childComplexity int) int
+		Phase          func(childComplexity int) int
+		RunID          func(childComplexity int) int
+		Sequence       func(childComplexity int) int
+	}
+
+	JobRunLog struct {
+		CaseID         func(childComplexity int) int
+		DurationMs     func(childComplexity int) int
+		EndedAt        func(childComplexity int) int
+		ErrorMessage   func(childComplexity int) int
+		EventTriggerAt func(childComplexity int) int
+		EventType      func(childComplexity int) int
+		JobID          func(childComplexity int) int
+		JobName        func(childComplexity int) int
+		RunID          func(childComplexity int) int
+		Stage          func(childComplexity int) int
+		StartedAt      func(childComplexity int) int
+		SystemPrompt   func(childComplexity int) int
+		TraceID        func(childComplexity int) int
+		WorkspaceID    func(childComplexity int) int
+	}
+
+	JobRunLogConnection struct {
+		Items      func(childComplexity int) int
+		NextCursor func(childComplexity int) int
+	}
+
 	Mutation struct {
-		AddActionStep          func(childComplexity int, workspaceID string, input graphql1.AddActionStepInput) int
-		ArchiveAction          func(childComplexity int, workspaceID string, id int) int
-		CloseCase              func(childComplexity int, workspaceID string, id int) int
-		CreateAction           func(childComplexity int, workspaceID string, input graphql1.CreateActionInput) int
-		CreateCase             func(childComplexity int, workspaceID string, input graphql1.CreateCaseInput) int
-		CreateDraft            func(childComplexity int, workspaceID string, input graphql1.CreateDraftInput) int
-		CreateGitHubSource     func(childComplexity int, workspaceID string, input graphql1.CreateGitHubSourceInput) int
-		CreateNotionDBSource   func(childComplexity int, workspaceID string, input graphql1.CreateNotionDBSourceInput) int
-		CreateNotionPageSource func(childComplexity int, workspaceID string, input graphql1.CreateNotionPageSourceInput) int
-		CreateSlackSource      func(childComplexity int, workspaceID string, input graphql1.CreateSlackSourceInput) int
-		DeleteActionStep       func(childComplexity int, workspaceID string, input graphql1.DeleteActionStepInput) int
-		DeleteCase             func(childComplexity int, workspaceID string, id int) int
-		DeleteSource           func(childComplexity int, workspaceID string, id string) int
-		DiscardDraft           func(childComplexity int, workspaceID string, id int) int
-		Noop                   func(childComplexity int) int
-		PostActionSlackMessage func(childComplexity int, workspaceID string, id int) int
-		RenameActionStep       func(childComplexity int, workspaceID string, input graphql1.RenameActionStepInput) int
-		ReopenCase             func(childComplexity int, workspaceID string, id int) int
-		SetActionStepDone      func(childComplexity int, workspaceID string, input graphql1.SetActionStepDoneInput) int
-		SubmitDraft            func(childComplexity int, workspaceID string, id int, input *graphql1.SubmitDraftInput) int
-		SyncCaseChannelUsers   func(childComplexity int, workspaceID string, id int) int
-		UnarchiveAction        func(childComplexity int, workspaceID string, id int) int
-		UpdateAction           func(childComplexity int, workspaceID string, input graphql1.UpdateActionInput) int
-		UpdateCase             func(childComplexity int, workspaceID string, input graphql1.UpdateCaseInput) int
-		UpdateGitHubSource     func(childComplexity int, workspaceID string, input graphql1.UpdateGitHubSourceInput) int
-		UpdateNotionDBSource   func(childComplexity int, workspaceID string, input graphql1.UpdateNotionDBSourceInput) int
-		UpdateNotionPageSource func(childComplexity int, workspaceID string, input graphql1.UpdateNotionPageSourceInput) int
-		UpdateSlackSource      func(childComplexity int, workspaceID string, input graphql1.UpdateSlackSourceInput) int
-		UpdateSource           func(childComplexity int, workspaceID string, input graphql1.UpdateSourceInput) int
-		ValidateNotionDb       func(childComplexity int, workspaceID string, databaseID string) int
-		ValidateNotionPage     func(childComplexity int, workspaceID string, pageID string) int
+		AddActionStep           func(childComplexity int, workspaceID string, input graphql1.AddActionStepInput) int
+		ArchiveAction           func(childComplexity int, workspaceID string, id int) int
+		CloseCase               func(childComplexity int, workspaceID string, id int) int
+		CreateAction            func(childComplexity int, workspaceID string, input graphql1.CreateActionInput) int
+		CreateCase              func(childComplexity int, workspaceID string, input graphql1.CreateCaseInput) int
+		CreateDraft             func(childComplexity int, workspaceID string, input graphql1.CreateDraftInput) int
+		CreateGitHubSource      func(childComplexity int, workspaceID string, input graphql1.CreateGitHubSourceInput) int
+		CreateNotionDBSource    func(childComplexity int, workspaceID string, input graphql1.CreateNotionDBSourceInput) int
+		CreateNotionPageSource  func(childComplexity int, workspaceID string, input graphql1.CreateNotionPageSourceInput) int
+		CreateSlackSource       func(childComplexity int, workspaceID string, input graphql1.CreateSlackSourceInput) int
+		DeleteActionStep        func(childComplexity int, workspaceID string, input graphql1.DeleteActionStepInput) int
+		DeleteCase              func(childComplexity int, workspaceID string, id int) int
+		DeleteSource            func(childComplexity int, workspaceID string, id string) int
+		DiscardDraft            func(childComplexity int, workspaceID string, id int) int
+		Noop                    func(childComplexity int) int
+		PostActionSlackMessage  func(childComplexity int, workspaceID string, id int) int
+		RenameActionStep        func(childComplexity int, workspaceID string, input graphql1.RenameActionStepInput) int
+		ReopenCase              func(childComplexity int, workspaceID string, id int) int
+		SetActionStepDone       func(childComplexity int, workspaceID string, input graphql1.SetActionStepDoneInput) int
+		SubmitDraft             func(childComplexity int, workspaceID string, id int, input *graphql1.SubmitDraftInput) int
+		SyncCaseChannelUsers    func(childComplexity int, workspaceID string, id int) int
+		UnarchiveAction         func(childComplexity int, workspaceID string, id int) int
+		UpdateAction            func(childComplexity int, workspaceID string, input graphql1.UpdateActionInput) int
+		UpdateCase              func(childComplexity int, workspaceID string, input graphql1.UpdateCaseInput) int
+		UpdateCaseAgentSettings func(childComplexity int, workspaceID string, input graphql1.UpdateCaseAgentSettingsInput) int
+		UpdateGitHubSource      func(childComplexity int, workspaceID string, input graphql1.UpdateGitHubSourceInput) int
+		UpdateNotionDBSource    func(childComplexity int, workspaceID string, input graphql1.UpdateNotionDBSourceInput) int
+		UpdateNotionPageSource  func(childComplexity int, workspaceID string, input graphql1.UpdateNotionPageSourceInput) int
+		UpdateSlackSource       func(childComplexity int, workspaceID string, input graphql1.UpdateSlackSourceInput) int
+		UpdateSource            func(childComplexity int, workspaceID string, input graphql1.UpdateSourceInput) int
+		ValidateNotionDb        func(childComplexity int, workspaceID string, databaseID string) int
+		ValidateNotionPage      func(childComplexity int, workspaceID string, pageID string) int
 	}
 
 	NotionDBConfig struct {
@@ -288,10 +325,13 @@ type ComplexityRoot struct {
 		ActionsByCase       func(childComplexity int, workspaceID string, caseID int, filter *graphql1.ActionArchiveFilter) int
 		AssistLogs          func(childComplexity int, workspaceID string, caseID int, limit *int, offset *int) int
 		Case                func(childComplexity int, workspaceID string, id int) int
+		CaseJobRunLogs      func(childComplexity int, workspaceID string, caseID int, first *int, after *string) int
 		Cases               func(childComplexity int, workspaceID string, status *types.CaseStatus) int
 		Drafts              func(childComplexity int, workspaceID string) int
 		FieldConfiguration  func(childComplexity int, workspaceID string) int
 		Health              func(childComplexity int) int
+		JobRunEvents        func(childComplexity int, workspaceID string, caseID int, runID string) int
+		JobRunLog           func(childComplexity int, workspaceID string, caseID int, runID string) int
 		OpenCaseActions     func(childComplexity int, workspaceID string) int
 		SlackJoinedChannels func(childComplexity int) int
 		SlackUsers          func(childComplexity int) int
@@ -394,6 +434,8 @@ type CaseResolver interface {
 	Fields(ctx context.Context, obj *graphql1.Case) ([]*graphql1.FieldValue, error)
 	Actions(ctx context.Context, obj *graphql1.Case, filter *graphql1.ActionArchiveFilter) ([]*graphql1.Action, error)
 	SlackMessages(ctx context.Context, obj *graphql1.Case, limit *int, cursor *string) (*graphql1.SlackMessageConnection, error)
+	AgentAdditionalPrompt(ctx context.Context, obj *graphql1.Case) (string, error)
+	AgentSources(ctx context.Context, obj *graphql1.Case) ([]*graphql1.Source, error)
 }
 type MutationResolver interface {
 	Noop(ctx context.Context) (*bool, error)
@@ -427,6 +469,7 @@ type MutationResolver interface {
 	DeleteSource(ctx context.Context, workspaceID string, id string) (bool, error)
 	ValidateNotionDb(ctx context.Context, workspaceID string, databaseID string) (*graphql1.NotionDBValidationResult, error)
 	ValidateNotionPage(ctx context.Context, workspaceID string, pageID string) (*graphql1.NotionPageValidationResult, error)
+	UpdateCaseAgentSettings(ctx context.Context, workspaceID string, input graphql1.UpdateCaseAgentSettingsInput) (*graphql1.Case, error)
 }
 type QueryResolver interface {
 	Health(ctx context.Context) (string, error)
@@ -446,6 +489,9 @@ type QueryResolver interface {
 	Source(ctx context.Context, workspaceID string, id string) (*graphql1.Source, error)
 	ValidateGitHubRepo(ctx context.Context, workspaceID string, repository string) (*graphql1.GitHubRepoValidationResult, error)
 	AssistLogs(ctx context.Context, workspaceID string, caseID int, limit *int, offset *int) (*graphql1.AssistLogConnection, error)
+	CaseJobRunLogs(ctx context.Context, workspaceID string, caseID int, first *int, after *string) (*graphql1.JobRunLogConnection, error)
+	JobRunLog(ctx context.Context, workspaceID string, caseID int, runID string) (*graphql1.JobRunLog, error)
+	JobRunEvents(ctx context.Context, workspaceID string, caseID int, runID string) ([]*graphql1.JobRunEvent, error)
 }
 
 type executableSchema struct {
@@ -857,6 +903,18 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Case.Actions(childComplexity, args["filter"].(*graphql1.ActionArchiveFilter)), true
+	case "Case.agentAdditionalPrompt":
+		if e.complexity.Case.AgentAdditionalPrompt == nil {
+			break
+		}
+
+		return e.complexity.Case.AgentAdditionalPrompt(childComplexity), true
+	case "Case.agentSources":
+		if e.complexity.Case.AgentSources == nil {
+			break
+		}
+
+		return e.complexity.Case.AgentSources(childComplexity), true
 	case "Case.assigneeIDs":
 		if e.complexity.Case.AssigneeIDs == nil {
 			break
@@ -1183,6 +1241,159 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.GitHubRepository.Repo(childComplexity), true
 
+	case "JobRunEvent.agentLabel":
+		if e.complexity.JobRunEvent.AgentLabel == nil {
+			break
+		}
+
+		return e.complexity.JobRunEvent.AgentLabel(childComplexity), true
+	case "JobRunEvent.eventId":
+		if e.complexity.JobRunEvent.EventID == nil {
+			break
+		}
+
+		return e.complexity.JobRunEvent.EventID(childComplexity), true
+	case "JobRunEvent.kind":
+		if e.complexity.JobRunEvent.Kind == nil {
+			break
+		}
+
+		return e.complexity.JobRunEvent.Kind(childComplexity), true
+	case "JobRunEvent.occurredAt":
+		if e.complexity.JobRunEvent.OccurredAt == nil {
+			break
+		}
+
+		return e.complexity.JobRunEvent.OccurredAt(childComplexity), true
+	case "JobRunEvent.parentSequence":
+		if e.complexity.JobRunEvent.ParentSequence == nil {
+			break
+		}
+
+		return e.complexity.JobRunEvent.ParentSequence(childComplexity), true
+	case "JobRunEvent.payload":
+		if e.complexity.JobRunEvent.Payload == nil {
+			break
+		}
+
+		return e.complexity.JobRunEvent.Payload(childComplexity), true
+	case "JobRunEvent.phase":
+		if e.complexity.JobRunEvent.Phase == nil {
+			break
+		}
+
+		return e.complexity.JobRunEvent.Phase(childComplexity), true
+	case "JobRunEvent.runId":
+		if e.complexity.JobRunEvent.RunID == nil {
+			break
+		}
+
+		return e.complexity.JobRunEvent.RunID(childComplexity), true
+	case "JobRunEvent.sequence":
+		if e.complexity.JobRunEvent.Sequence == nil {
+			break
+		}
+
+		return e.complexity.JobRunEvent.Sequence(childComplexity), true
+
+	case "JobRunLog.caseId":
+		if e.complexity.JobRunLog.CaseID == nil {
+			break
+		}
+
+		return e.complexity.JobRunLog.CaseID(childComplexity), true
+	case "JobRunLog.durationMs":
+		if e.complexity.JobRunLog.DurationMs == nil {
+			break
+		}
+
+		return e.complexity.JobRunLog.DurationMs(childComplexity), true
+	case "JobRunLog.endedAt":
+		if e.complexity.JobRunLog.EndedAt == nil {
+			break
+		}
+
+		return e.complexity.JobRunLog.EndedAt(childComplexity), true
+	case "JobRunLog.errorMessage":
+		if e.complexity.JobRunLog.ErrorMessage == nil {
+			break
+		}
+
+		return e.complexity.JobRunLog.ErrorMessage(childComplexity), true
+	case "JobRunLog.eventTriggerAt":
+		if e.complexity.JobRunLog.EventTriggerAt == nil {
+			break
+		}
+
+		return e.complexity.JobRunLog.EventTriggerAt(childComplexity), true
+	case "JobRunLog.eventType":
+		if e.complexity.JobRunLog.EventType == nil {
+			break
+		}
+
+		return e.complexity.JobRunLog.EventType(childComplexity), true
+	case "JobRunLog.jobId":
+		if e.complexity.JobRunLog.JobID == nil {
+			break
+		}
+
+		return e.complexity.JobRunLog.JobID(childComplexity), true
+	case "JobRunLog.jobName":
+		if e.complexity.JobRunLog.JobName == nil {
+			break
+		}
+
+		return e.complexity.JobRunLog.JobName(childComplexity), true
+	case "JobRunLog.runId":
+		if e.complexity.JobRunLog.RunID == nil {
+			break
+		}
+
+		return e.complexity.JobRunLog.RunID(childComplexity), true
+	case "JobRunLog.stage":
+		if e.complexity.JobRunLog.Stage == nil {
+			break
+		}
+
+		return e.complexity.JobRunLog.Stage(childComplexity), true
+	case "JobRunLog.startedAt":
+		if e.complexity.JobRunLog.StartedAt == nil {
+			break
+		}
+
+		return e.complexity.JobRunLog.StartedAt(childComplexity), true
+	case "JobRunLog.systemPrompt":
+		if e.complexity.JobRunLog.SystemPrompt == nil {
+			break
+		}
+
+		return e.complexity.JobRunLog.SystemPrompt(childComplexity), true
+	case "JobRunLog.traceId":
+		if e.complexity.JobRunLog.TraceID == nil {
+			break
+		}
+
+		return e.complexity.JobRunLog.TraceID(childComplexity), true
+	case "JobRunLog.workspaceId":
+		if e.complexity.JobRunLog.WorkspaceID == nil {
+			break
+		}
+
+		return e.complexity.JobRunLog.WorkspaceID(childComplexity), true
+
+	case "JobRunLogConnection.items":
+		if e.complexity.JobRunLogConnection.Items == nil {
+			break
+		}
+
+		return e.complexity.JobRunLogConnection.Items(childComplexity), true
+	case "JobRunLogConnection.nextCursor":
+		if e.complexity.JobRunLogConnection.NextCursor == nil {
+			break
+		}
+
+		return e.complexity.JobRunLogConnection.NextCursor(childComplexity), true
+
 	case "Mutation.addActionStep":
 		if e.complexity.Mutation.AddActionStep == nil {
 			break
@@ -1442,6 +1653,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.UpdateCase(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.UpdateCaseInput)), true
+	case "Mutation.updateCaseAgentSettings":
+		if e.complexity.Mutation.UpdateCaseAgentSettings == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_updateCaseAgentSettings_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.UpdateCaseAgentSettings(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.UpdateCaseAgentSettingsInput)), true
 	case "Mutation.updateGitHubSource":
 		if e.complexity.Mutation.UpdateGitHubSource == nil {
 			break
@@ -1675,6 +1897,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Query.Case(childComplexity, args["workspaceId"].(string), args["id"].(int)), true
+	case "Query.caseJobRunLogs":
+		if e.complexity.Query.CaseJobRunLogs == nil {
+			break
+		}
+
+		args, err := ec.field_Query_caseJobRunLogs_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Query.CaseJobRunLogs(childComplexity, args["workspaceId"].(string), args["caseId"].(int), args["first"].(*int), args["after"].(*string)), true
 	case "Query.cases":
 		if e.complexity.Query.Cases == nil {
 			break
@@ -1714,6 +1947,28 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Query.Health(childComplexity), true
+	case "Query.jobRunEvents":
+		if e.complexity.Query.JobRunEvents == nil {
+			break
+		}
+
+		args, err := ec.field_Query_jobRunEvents_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Query.JobRunEvents(childComplexity, args["workspaceId"].(string), args["caseId"].(int), args["runId"].(string)), true
+	case "Query.jobRunLog":
+		if e.complexity.Query.JobRunLog == nil {
+			break
+		}
+
+		args, err := ec.field_Query_jobRunLog_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Query.JobRunLog(childComplexity, args["workspaceId"].(string), args["caseId"].(int), args["runId"].(string)), true
 	case "Query.openCaseActions":
 		if e.complexity.Query.OpenCaseActions == nil {
 			break
@@ -2047,6 +2302,7 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 		ec.unmarshalInputSetActionStepDoneInput,
 		ec.unmarshalInputSubmitDraftInput,
 		ec.unmarshalInputUpdateActionInput,
+		ec.unmarshalInputUpdateCaseAgentSettingsInput,
 		ec.unmarshalInputUpdateCaseInput,
 		ec.unmarshalInputUpdateGitHubSourceInput,
 		ec.unmarshalInputUpdateNotionDBSourceInput,
@@ -2306,6 +2562,13 @@ type Case {
   # through its own dataloader so callers can mix filters within a request.
   actions(filter: ActionArchiveFilter = ACTIVE): [Action!]!
   slackMessages(limit: Int, cursor: String): SlackMessageConnection!
+  # Case-specific Markdown snippet appended to the Job system prompt
+  # at agent execution time. Empty string when unset.
+  agentAdditionalPrompt: String!
+  # Sources the agent should consider when running against this Case.
+  # Empty list (the default) means "use every Workspace Source"; non-
+  # empty narrows the agent to exactly those Sources.
+  agentSources: [Source!]!
   createdAt: Time!
   updatedAt: Time!
 }
@@ -2720,6 +2983,19 @@ type Query {
 
   # Assist Logs
   assistLogs(workspaceId: String!, caseId: Int!, limit: Int, offset: Int): AssistLogConnection!
+
+  # Agent (Job) execution history surfaced under a single Case. The page
+  # walks every Job that has run against the Case and returns logs in
+  # newest-first order. ` + "`" + `first` + "`" + ` defaults to 20 and is clamped to 100;
+  # ` + "`" + `after` + "`" + ` is the opaque cursor returned from the previous page.
+  caseJobRunLogs(workspaceId: String!, caseId: Int!, first: Int, after: String): JobRunLogConnection!
+
+  # Single JobRunLog identified by its RunID under the given Case. The
+  # JobID is resolved server-side, so the client does not need it.
+  jobRunLog(workspaceId: String!, caseId: Int!, runId: String!): JobRunLog!
+
+  # Full event timeline of one Run in ascending Sequence order.
+  jobRunEvents(workspaceId: String!, caseId: Int!, runId: String!): [JobRunEvent!]!
 }
 
 type Mutation {
@@ -2782,6 +3058,84 @@ type Mutation {
   deleteSource(workspaceId: String!, id: String!): Boolean!
   validateNotionDB(workspaceId: String!, databaseID: String!): NotionDBValidationResult!
   validateNotionPage(workspaceId: String!, pageID: String!): NotionPageValidationResult!
+
+  # Replace the Case-scoped agent additional prompt and Source allowlist
+  # atomically. enabledSourceIds is treated as the full new selection:
+  # passing an empty list clears it (= "use every Source"); the order is
+  # preserved verbatim so the UI round-trips unchanged.
+  updateCaseAgentSettings(workspaceId: String!, input: UpdateCaseAgentSettingsInput!): Case!
+}
+
+input UpdateCaseAgentSettingsInput {
+  caseId: Int!
+  agentAdditionalPrompt: String!
+  enabledSourceIds: [String!]!
+}
+
+# JobRunStage mirrors model.JobRunStage and is what the frontend uses
+# to render the Status pill in the run log table and detail header.
+enum JobRunStage {
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+# Cursor-paginated slice of JobRunLogs for one Case. nextCursor is null
+# when the caller has reached the end of the history.
+type JobRunLogConnection {
+  items: [JobRunLog!]!
+  nextCursor: String
+}
+
+# One Job invocation against one Case. The fields mirror
+# model.JobRunLog plus a server-resolved jobName (looked up from the
+# Workspace TOML registry; falls back to jobId when unknown).
+type JobRunLog {
+  workspaceId: String!
+  caseId: Int!
+  jobId: String!
+  jobName: String!
+  runId: String!
+  traceId: String!
+  stage: JobRunStage!
+  startedAt: Time!
+  endedAt: Time
+  # Wall-clock duration in milliseconds. Null while RUNNING.
+  durationMs: Int
+  # Non-null when the Run ended in FAILED; the message is the same one
+  # the agent reported. Empty string for RUNNING / SUCCESS so the
+  # frontend never has to special-case absence.
+  errorMessage: String!
+  systemPrompt: String!
+  # Trigger provenance (case lifecycle vs scheduled cron) copied from
+  # the Event that started this Run.
+  eventType: String!
+  eventTriggerAt: Time!
+}
+
+enum JobRunEventKind {
+  LLM_REQUEST
+  LLM_RESPONSE
+  TOOL_CALL
+  RUN_ERROR
+}
+
+# One entry on the JobRunLog detail timeline. The payload shape varies
+# per Kind; we serialise it as a JSON blob so the frontend can render
+# each type without needing four sibling fields on every event.
+type JobRunEvent {
+  eventId: String!
+  runId: String!
+  sequence: Int!
+  occurredAt: Time!
+  kind: JobRunEventKind!
+  parentSequence: Int!
+  phase: String!
+  agentLabel: String!
+  # Exactly one of the four payload-shaped objects, encoded as JSON
+  # for transport simplicity. Schema: see model.LLMRequestPayload /
+  # LLMResponsePayload / ToolCallPayload / RunErrorPayload.
+  payload: JSON!
 }
 `, BuiltIn: false},
 }
@@ -3228,6 +3582,22 @@ func (ec *executionContext) field_Mutation_updateAction_args(ctx context.Context
 	return args, nil
 }
 
+func (ec *executionContext) field_Mutation_updateCaseAgentSettings_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNUpdateCaseAgentSettingsInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateCaseAgentSettingsInput)
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg1
+	return args, nil
+}
+
 func (ec *executionContext) field_Mutation_updateCase_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -3446,6 +3816,32 @@ func (ec *executionContext) field_Query_assistLogs_args(ctx context.Context, raw
 	return args, nil
 }
 
+func (ec *executionContext) field_Query_caseJobRunLogs_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "caseId", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["caseId"] = arg1
+	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "first", ec.unmarshalOInt2ᚖint)
+	if err != nil {
+		return nil, err
+	}
+	args["first"] = arg2
+	arg3, err := graphql.ProcessArgField(ctx, rawArgs, "after", ec.unmarshalOString2ᚖstring)
+	if err != nil {
+		return nil, err
+	}
+	args["after"] = arg3
+	return args, nil
+}
+
 func (ec *executionContext) field_Query_case_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -3497,6 +3893,48 @@ func (ec *executionContext) field_Query_fieldConfiguration_args(ctx context.Cont
 		return nil, err
 	}
 	args["workspaceId"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_Query_jobRunEvents_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "caseId", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["caseId"] = arg1
+	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "runId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["runId"] = arg2
+	return args, nil
+}
+
+func (ec *executionContext) field_Query_jobRunLog_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "caseId", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["caseId"] = arg1
+	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "runId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["runId"] = arg2
 	return args, nil
 }
 
@@ -3735,6 +4173,10 @@ func (ec *executionContext) fieldContext_Action_case(_ context.Context, field gr
 				return ec.fieldContext_Case_actions(ctx, field)
 			case "slackMessages":
 				return ec.fieldContext_Case_slackMessages(ctx, field)
+			case "agentAdditionalPrompt":
+				return ec.fieldContext_Case_agentAdditionalPrompt(ctx, field)
+			case "agentSources":
+				return ec.fieldContext_Case_agentSources(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Case_createdAt(ctx, field)
 			case "updatedAt":
@@ -6158,6 +6600,82 @@ func (ec *executionContext) fieldContext_Case_slackMessages(ctx context.Context,
 	return fc, nil
 }
 
+func (ec *executionContext) _Case_agentAdditionalPrompt(ctx context.Context, field graphql.CollectedField, obj *graphql1.Case) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Case_agentAdditionalPrompt,
+		func(ctx context.Context) (any, error) {
+			return ec.resolvers.Case().AgentAdditionalPrompt(ctx, obj)
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Case_agentAdditionalPrompt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Case",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Case_agentSources(ctx context.Context, field graphql.CollectedField, obj *graphql1.Case) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Case_agentSources,
+		func(ctx context.Context) (any, error) {
+			return ec.resolvers.Case().AgentSources(ctx, obj)
+		},
+		nil,
+		ec.marshalNSource2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSourceᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Case_agentSources(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Case",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Source_id(ctx, field)
+			case "name":
+				return ec.fieldContext_Source_name(ctx, field)
+			case "sourceType":
+				return ec.fieldContext_Source_sourceType(ctx, field)
+			case "description":
+				return ec.fieldContext_Source_description(ctx, field)
+			case "enabled":
+				return ec.fieldContext_Source_enabled(ctx, field)
+			case "config":
+				return ec.fieldContext_Source_config(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Source_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Source_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Source", field.Name)
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Case_createdAt(ctx context.Context, field graphql.CollectedField, obj *graphql1.Case) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -7225,6 +7743,761 @@ func (ec *executionContext) fieldContext_GitHubRepository_repo(_ context.Context
 	return fc, nil
 }
 
+func (ec *executionContext) _JobRunEvent_eventId(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunEvent) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_JobRunEvent_eventId,
+		func(ctx context.Context) (any, error) {
+			return obj.EventID, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_JobRunEvent_eventId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "JobRunEvent",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _JobRunEvent_runId(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunEvent) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_JobRunEvent_runId,
+		func(ctx context.Context) (any, error) {
+			return obj.RunID, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_JobRunEvent_runId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "JobRunEvent",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _JobRunEvent_sequence(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunEvent) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_JobRunEvent_sequence,
+		func(ctx context.Context) (any, error) {
+			return obj.Sequence, nil
+		},
+		nil,
+		ec.marshalNInt2int,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_JobRunEvent_sequence(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "JobRunEvent",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _JobRunEvent_occurredAt(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunEvent) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_JobRunEvent_occurredAt,
+		func(ctx context.Context) (any, error) {
+			return obj.OccurredAt, nil
+		},
+		nil,
+		ec.marshalNTime2timeᚐTime,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_JobRunEvent_occurredAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "JobRunEvent",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _JobRunEvent_kind(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunEvent) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_JobRunEvent_kind,
+		func(ctx context.Context) (any, error) {
+			return obj.Kind, nil
+		},
+		nil,
+		ec.marshalNJobRunEventKind2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐJobRunEventKind,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_JobRunEvent_kind(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "JobRunEvent",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type JobRunEventKind does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _JobRunEvent_parentSequence(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunEvent) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_JobRunEvent_parentSequence,
+		func(ctx context.Context) (any, error) {
+			return obj.ParentSequence, nil
+		},
+		nil,
+		ec.marshalNInt2int,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_JobRunEvent_parentSequence(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "JobRunEvent",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _JobRunEvent_phase(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunEvent) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_JobRunEvent_phase,
+		func(ctx context.Context) (any, error) {
+			return obj.Phase, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_JobRunEvent_phase(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "JobRunEvent",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _JobRunEvent_agentLabel(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunEvent) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_JobRunEvent_agentLabel,
+		func(ctx context.Context) (any, error) {
+			return obj.AgentLabel, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_JobRunEvent_agentLabel(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "JobRunEvent",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _JobRunEvent_payload(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunEvent) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_JobRunEvent_payload,
+		func(ctx context.Context) (any, error) {
+			return obj.Payload, nil
+		},
+		nil,
+		ec.marshalNJSON2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_JobRunEvent_payload(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "JobRunEvent",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type JSON does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _JobRunLog_workspaceId(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunLog) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_JobRunLog_workspaceId,
+		func(ctx context.Context) (any, error) {
+			return obj.WorkspaceID, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_JobRunLog_workspaceId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "JobRunLog",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _JobRunLog_caseId(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunLog) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_JobRunLog_caseId,
+		func(ctx context.Context) (any, error) {
+			return obj.CaseID, nil
+		},
+		nil,
+		ec.marshalNInt2int,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_JobRunLog_caseId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "JobRunLog",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _JobRunLog_jobId(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunLog) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_JobRunLog_jobId,
+		func(ctx context.Context) (any, error) {
+			return obj.JobID, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_JobRunLog_jobId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "JobRunLog",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _JobRunLog_jobName(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunLog) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_JobRunLog_jobName,
+		func(ctx context.Context) (any, error) {
+			return obj.JobName, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_JobRunLog_jobName(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "JobRunLog",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _JobRunLog_runId(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunLog) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_JobRunLog_runId,
+		func(ctx context.Context) (any, error) {
+			return obj.RunID, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_JobRunLog_runId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "JobRunLog",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _JobRunLog_traceId(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunLog) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_JobRunLog_traceId,
+		func(ctx context.Context) (any, error) {
+			return obj.TraceID, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_JobRunLog_traceId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "JobRunLog",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _JobRunLog_stage(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunLog) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_JobRunLog_stage,
+		func(ctx context.Context) (any, error) {
+			return obj.Stage, nil
+		},
+		nil,
+		ec.marshalNJobRunStage2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐJobRunStage,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_JobRunLog_stage(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "JobRunLog",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type JobRunStage does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _JobRunLog_startedAt(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunLog) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_JobRunLog_startedAt,
+		func(ctx context.Context) (any, error) {
+			return obj.StartedAt, nil
+		},
+		nil,
+		ec.marshalNTime2timeᚐTime,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_JobRunLog_startedAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "JobRunLog",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _JobRunLog_endedAt(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunLog) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_JobRunLog_endedAt,
+		func(ctx context.Context) (any, error) {
+			return obj.EndedAt, nil
+		},
+		nil,
+		ec.marshalOTime2ᚖtimeᚐTime,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_JobRunLog_endedAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "JobRunLog",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _JobRunLog_durationMs(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunLog) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_JobRunLog_durationMs,
+		func(ctx context.Context) (any, error) {
+			return obj.DurationMs, nil
+		},
+		nil,
+		ec.marshalOInt2ᚖint,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_JobRunLog_durationMs(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "JobRunLog",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _JobRunLog_errorMessage(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunLog) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_JobRunLog_errorMessage,
+		func(ctx context.Context) (any, error) {
+			return obj.ErrorMessage, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_JobRunLog_errorMessage(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "JobRunLog",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _JobRunLog_systemPrompt(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunLog) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_JobRunLog_systemPrompt,
+		func(ctx context.Context) (any, error) {
+			return obj.SystemPrompt, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_JobRunLog_systemPrompt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "JobRunLog",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _JobRunLog_eventType(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunLog) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_JobRunLog_eventType,
+		func(ctx context.Context) (any, error) {
+			return obj.EventType, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_JobRunLog_eventType(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "JobRunLog",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _JobRunLog_eventTriggerAt(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunLog) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_JobRunLog_eventTriggerAt,
+		func(ctx context.Context) (any, error) {
+			return obj.EventTriggerAt, nil
+		},
+		nil,
+		ec.marshalNTime2timeᚐTime,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_JobRunLog_eventTriggerAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "JobRunLog",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _JobRunLogConnection_items(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunLogConnection) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_JobRunLogConnection_items,
+		func(ctx context.Context) (any, error) {
+			return obj.Items, nil
+		},
+		nil,
+		ec.marshalNJobRunLog2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐJobRunLogᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_JobRunLogConnection_items(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "JobRunLogConnection",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "workspaceId":
+				return ec.fieldContext_JobRunLog_workspaceId(ctx, field)
+			case "caseId":
+				return ec.fieldContext_JobRunLog_caseId(ctx, field)
+			case "jobId":
+				return ec.fieldContext_JobRunLog_jobId(ctx, field)
+			case "jobName":
+				return ec.fieldContext_JobRunLog_jobName(ctx, field)
+			case "runId":
+				return ec.fieldContext_JobRunLog_runId(ctx, field)
+			case "traceId":
+				return ec.fieldContext_JobRunLog_traceId(ctx, field)
+			case "stage":
+				return ec.fieldContext_JobRunLog_stage(ctx, field)
+			case "startedAt":
+				return ec.fieldContext_JobRunLog_startedAt(ctx, field)
+			case "endedAt":
+				return ec.fieldContext_JobRunLog_endedAt(ctx, field)
+			case "durationMs":
+				return ec.fieldContext_JobRunLog_durationMs(ctx, field)
+			case "errorMessage":
+				return ec.fieldContext_JobRunLog_errorMessage(ctx, field)
+			case "systemPrompt":
+				return ec.fieldContext_JobRunLog_systemPrompt(ctx, field)
+			case "eventType":
+				return ec.fieldContext_JobRunLog_eventType(ctx, field)
+			case "eventTriggerAt":
+				return ec.fieldContext_JobRunLog_eventTriggerAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type JobRunLog", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _JobRunLogConnection_nextCursor(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunLogConnection) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_JobRunLogConnection_nextCursor,
+		func(ctx context.Context) (any, error) {
+			return obj.NextCursor, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_JobRunLogConnection_nextCursor(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "JobRunLogConnection",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Mutation_noop(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -7315,6 +8588,10 @@ func (ec *executionContext) fieldContext_Mutation_createCase(ctx context.Context
 				return ec.fieldContext_Case_actions(ctx, field)
 			case "slackMessages":
 				return ec.fieldContext_Case_slackMessages(ctx, field)
+			case "agentAdditionalPrompt":
+				return ec.fieldContext_Case_agentAdditionalPrompt(ctx, field)
+			case "agentSources":
+				return ec.fieldContext_Case_agentSources(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Case_createdAt(ctx, field)
 			case "updatedAt":
@@ -7398,6 +8675,10 @@ func (ec *executionContext) fieldContext_Mutation_updateCase(ctx context.Context
 				return ec.fieldContext_Case_actions(ctx, field)
 			case "slackMessages":
 				return ec.fieldContext_Case_slackMessages(ctx, field)
+			case "agentAdditionalPrompt":
+				return ec.fieldContext_Case_agentAdditionalPrompt(ctx, field)
+			case "agentSources":
+				return ec.fieldContext_Case_agentSources(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Case_createdAt(ctx, field)
 			case "updatedAt":
@@ -7522,6 +8803,10 @@ func (ec *executionContext) fieldContext_Mutation_closeCase(ctx context.Context,
 				return ec.fieldContext_Case_actions(ctx, field)
 			case "slackMessages":
 				return ec.fieldContext_Case_slackMessages(ctx, field)
+			case "agentAdditionalPrompt":
+				return ec.fieldContext_Case_agentAdditionalPrompt(ctx, field)
+			case "agentSources":
+				return ec.fieldContext_Case_agentSources(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Case_createdAt(ctx, field)
 			case "updatedAt":
@@ -7605,6 +8890,10 @@ func (ec *executionContext) fieldContext_Mutation_reopenCase(ctx context.Context
 				return ec.fieldContext_Case_actions(ctx, field)
 			case "slackMessages":
 				return ec.fieldContext_Case_slackMessages(ctx, field)
+			case "agentAdditionalPrompt":
+				return ec.fieldContext_Case_agentAdditionalPrompt(ctx, field)
+			case "agentSources":
+				return ec.fieldContext_Case_agentSources(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Case_createdAt(ctx, field)
 			case "updatedAt":
@@ -7688,6 +8977,10 @@ func (ec *executionContext) fieldContext_Mutation_syncCaseChannelUsers(ctx conte
 				return ec.fieldContext_Case_actions(ctx, field)
 			case "slackMessages":
 				return ec.fieldContext_Case_slackMessages(ctx, field)
+			case "agentAdditionalPrompt":
+				return ec.fieldContext_Case_agentAdditionalPrompt(ctx, field)
+			case "agentSources":
+				return ec.fieldContext_Case_agentSources(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Case_createdAt(ctx, field)
 			case "updatedAt":
@@ -7771,6 +9064,10 @@ func (ec *executionContext) fieldContext_Mutation_createDraft(ctx context.Contex
 				return ec.fieldContext_Case_actions(ctx, field)
 			case "slackMessages":
 				return ec.fieldContext_Case_slackMessages(ctx, field)
+			case "agentAdditionalPrompt":
+				return ec.fieldContext_Case_agentAdditionalPrompt(ctx, field)
+			case "agentSources":
+				return ec.fieldContext_Case_agentSources(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Case_createdAt(ctx, field)
 			case "updatedAt":
@@ -7854,6 +9151,10 @@ func (ec *executionContext) fieldContext_Mutation_submitDraft(ctx context.Contex
 				return ec.fieldContext_Case_actions(ctx, field)
 			case "slackMessages":
 				return ec.fieldContext_Case_slackMessages(ctx, field)
+			case "agentAdditionalPrompt":
+				return ec.fieldContext_Case_agentAdditionalPrompt(ctx, field)
+			case "agentSources":
+				return ec.fieldContext_Case_agentSources(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Case_createdAt(ctx, field)
 			case "updatedAt":
@@ -9222,6 +10523,93 @@ func (ec *executionContext) fieldContext_Mutation_validateNotionPage(ctx context
 	return fc, nil
 }
 
+func (ec *executionContext) _Mutation_updateCaseAgentSettings(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_updateCaseAgentSettings,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().UpdateCaseAgentSettings(ctx, fc.Args["workspaceId"].(string), fc.Args["input"].(graphql1.UpdateCaseAgentSettingsInput))
+		},
+		nil,
+		ec.marshalNCase2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCase,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_updateCaseAgentSettings(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Case_id(ctx, field)
+			case "title":
+				return ec.fieldContext_Case_title(ctx, field)
+			case "description":
+				return ec.fieldContext_Case_description(ctx, field)
+			case "status":
+				return ec.fieldContext_Case_status(ctx, field)
+			case "isPrivate":
+				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "accessDenied":
+				return ec.fieldContext_Case_accessDenied(ctx, field)
+			case "channelUserCount":
+				return ec.fieldContext_Case_channelUserCount(ctx, field)
+			case "channelUsers":
+				return ec.fieldContext_Case_channelUsers(ctx, field)
+			case "reporterID":
+				return ec.fieldContext_Case_reporterID(ctx, field)
+			case "reporter":
+				return ec.fieldContext_Case_reporter(ctx, field)
+			case "assigneeIDs":
+				return ec.fieldContext_Case_assigneeIDs(ctx, field)
+			case "assignees":
+				return ec.fieldContext_Case_assignees(ctx, field)
+			case "slackChannelID":
+				return ec.fieldContext_Case_slackChannelID(ctx, field)
+			case "slackChannelName":
+				return ec.fieldContext_Case_slackChannelName(ctx, field)
+			case "slackChannelURL":
+				return ec.fieldContext_Case_slackChannelURL(ctx, field)
+			case "fields":
+				return ec.fieldContext_Case_fields(ctx, field)
+			case "actions":
+				return ec.fieldContext_Case_actions(ctx, field)
+			case "slackMessages":
+				return ec.fieldContext_Case_slackMessages(ctx, field)
+			case "agentAdditionalPrompt":
+				return ec.fieldContext_Case_agentAdditionalPrompt(ctx, field)
+			case "agentSources":
+				return ec.fieldContext_Case_agentSources(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Case_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Case_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Case", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_updateCaseAgentSettings_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _NotionDBConfig_databaseID(ctx context.Context, field graphql.CollectedField, obj *graphql1.NotionDBConfig) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -9858,6 +11246,10 @@ func (ec *executionContext) fieldContext_Query_cases(ctx context.Context, field 
 				return ec.fieldContext_Case_actions(ctx, field)
 			case "slackMessages":
 				return ec.fieldContext_Case_slackMessages(ctx, field)
+			case "agentAdditionalPrompt":
+				return ec.fieldContext_Case_agentAdditionalPrompt(ctx, field)
+			case "agentSources":
+				return ec.fieldContext_Case_agentSources(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Case_createdAt(ctx, field)
 			case "updatedAt":
@@ -9941,6 +11333,10 @@ func (ec *executionContext) fieldContext_Query_case(ctx context.Context, field g
 				return ec.fieldContext_Case_actions(ctx, field)
 			case "slackMessages":
 				return ec.fieldContext_Case_slackMessages(ctx, field)
+			case "agentAdditionalPrompt":
+				return ec.fieldContext_Case_agentAdditionalPrompt(ctx, field)
+			case "agentSources":
+				return ec.fieldContext_Case_agentSources(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Case_createdAt(ctx, field)
 			case "updatedAt":
@@ -10024,6 +11420,10 @@ func (ec *executionContext) fieldContext_Query_drafts(ctx context.Context, field
 				return ec.fieldContext_Case_actions(ctx, field)
 			case "slackMessages":
 				return ec.fieldContext_Case_slackMessages(ctx, field)
+			case "agentAdditionalPrompt":
+				return ec.fieldContext_Case_agentAdditionalPrompt(ctx, field)
+			case "agentSources":
+				return ec.fieldContext_Case_agentSources(ctx, field)
 			case "createdAt":
 				return ec.fieldContext_Case_createdAt(ctx, field)
 			case "updatedAt":
@@ -10711,6 +12111,185 @@ func (ec *executionContext) fieldContext_Query_assistLogs(ctx context.Context, f
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Query_assistLogs_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_caseJobRunLogs(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Query_caseJobRunLogs,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Query().CaseJobRunLogs(ctx, fc.Args["workspaceId"].(string), fc.Args["caseId"].(int), fc.Args["first"].(*int), fc.Args["after"].(*string))
+		},
+		nil,
+		ec.marshalNJobRunLogConnection2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐJobRunLogConnection,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Query_caseJobRunLogs(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "items":
+				return ec.fieldContext_JobRunLogConnection_items(ctx, field)
+			case "nextCursor":
+				return ec.fieldContext_JobRunLogConnection_nextCursor(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type JobRunLogConnection", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_caseJobRunLogs_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_jobRunLog(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Query_jobRunLog,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Query().JobRunLog(ctx, fc.Args["workspaceId"].(string), fc.Args["caseId"].(int), fc.Args["runId"].(string))
+		},
+		nil,
+		ec.marshalNJobRunLog2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐJobRunLog,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Query_jobRunLog(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "workspaceId":
+				return ec.fieldContext_JobRunLog_workspaceId(ctx, field)
+			case "caseId":
+				return ec.fieldContext_JobRunLog_caseId(ctx, field)
+			case "jobId":
+				return ec.fieldContext_JobRunLog_jobId(ctx, field)
+			case "jobName":
+				return ec.fieldContext_JobRunLog_jobName(ctx, field)
+			case "runId":
+				return ec.fieldContext_JobRunLog_runId(ctx, field)
+			case "traceId":
+				return ec.fieldContext_JobRunLog_traceId(ctx, field)
+			case "stage":
+				return ec.fieldContext_JobRunLog_stage(ctx, field)
+			case "startedAt":
+				return ec.fieldContext_JobRunLog_startedAt(ctx, field)
+			case "endedAt":
+				return ec.fieldContext_JobRunLog_endedAt(ctx, field)
+			case "durationMs":
+				return ec.fieldContext_JobRunLog_durationMs(ctx, field)
+			case "errorMessage":
+				return ec.fieldContext_JobRunLog_errorMessage(ctx, field)
+			case "systemPrompt":
+				return ec.fieldContext_JobRunLog_systemPrompt(ctx, field)
+			case "eventType":
+				return ec.fieldContext_JobRunLog_eventType(ctx, field)
+			case "eventTriggerAt":
+				return ec.fieldContext_JobRunLog_eventTriggerAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type JobRunLog", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_jobRunLog_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_jobRunEvents(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Query_jobRunEvents,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Query().JobRunEvents(ctx, fc.Args["workspaceId"].(string), fc.Args["caseId"].(int), fc.Args["runId"].(string))
+		},
+		nil,
+		ec.marshalNJobRunEvent2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐJobRunEventᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Query_jobRunEvents(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "eventId":
+				return ec.fieldContext_JobRunEvent_eventId(ctx, field)
+			case "runId":
+				return ec.fieldContext_JobRunEvent_runId(ctx, field)
+			case "sequence":
+				return ec.fieldContext_JobRunEvent_sequence(ctx, field)
+			case "occurredAt":
+				return ec.fieldContext_JobRunEvent_occurredAt(ctx, field)
+			case "kind":
+				return ec.fieldContext_JobRunEvent_kind(ctx, field)
+			case "parentSequence":
+				return ec.fieldContext_JobRunEvent_parentSequence(ctx, field)
+			case "phase":
+				return ec.fieldContext_JobRunEvent_phase(ctx, field)
+			case "agentLabel":
+				return ec.fieldContext_JobRunEvent_agentLabel(ctx, field)
+			case "payload":
+				return ec.fieldContext_JobRunEvent_payload(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type JobRunEvent", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_jobRunEvents_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -14124,6 +15703,47 @@ func (ec *executionContext) unmarshalInputUpdateActionInput(ctx context.Context,
 	return it, nil
 }
 
+func (ec *executionContext) unmarshalInputUpdateCaseAgentSettingsInput(ctx context.Context, obj any) (graphql1.UpdateCaseAgentSettingsInput, error) {
+	var it graphql1.UpdateCaseAgentSettingsInput
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"caseId", "agentAdditionalPrompt", "enabledSourceIds"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "caseId":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("caseId"))
+			data, err := ec.unmarshalNInt2int(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.CaseID = data
+		case "agentAdditionalPrompt":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("agentAdditionalPrompt"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.AgentAdditionalPrompt = data
+		case "enabledSourceIds":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("enabledSourceIds"))
+			data, err := ec.unmarshalNString2ᚕstringᚄ(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.EnabledSourceIds = data
+		}
+	}
+
+	return it, nil
+}
+
 func (ec *executionContext) unmarshalInputUpdateCaseInput(ctx context.Context, obj any) (graphql1.UpdateCaseInput, error) {
 	var it graphql1.UpdateCaseInput
 	asMap := map[string]any{}
@@ -15645,6 +17265,78 @@ func (ec *executionContext) _Case(ctx context.Context, sel ast.SelectionSet, obj
 			}
 
 			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "agentAdditionalPrompt":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Case_agentAdditionalPrompt(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "agentSources":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Case_agentSources(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "createdAt":
 			out.Values[i] = ec._Case_createdAt(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
@@ -16113,6 +17805,224 @@ func (ec *executionContext) _GitHubRepository(ctx context.Context, sel ast.Selec
 	return out
 }
 
+var jobRunEventImplementors = []string{"JobRunEvent"}
+
+func (ec *executionContext) _JobRunEvent(ctx context.Context, sel ast.SelectionSet, obj *graphql1.JobRunEvent) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, jobRunEventImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("JobRunEvent")
+		case "eventId":
+			out.Values[i] = ec._JobRunEvent_eventId(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "runId":
+			out.Values[i] = ec._JobRunEvent_runId(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "sequence":
+			out.Values[i] = ec._JobRunEvent_sequence(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "occurredAt":
+			out.Values[i] = ec._JobRunEvent_occurredAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "kind":
+			out.Values[i] = ec._JobRunEvent_kind(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "parentSequence":
+			out.Values[i] = ec._JobRunEvent_parentSequence(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "phase":
+			out.Values[i] = ec._JobRunEvent_phase(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "agentLabel":
+			out.Values[i] = ec._JobRunEvent_agentLabel(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "payload":
+			out.Values[i] = ec._JobRunEvent_payload(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var jobRunLogImplementors = []string{"JobRunLog"}
+
+func (ec *executionContext) _JobRunLog(ctx context.Context, sel ast.SelectionSet, obj *graphql1.JobRunLog) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, jobRunLogImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("JobRunLog")
+		case "workspaceId":
+			out.Values[i] = ec._JobRunLog_workspaceId(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "caseId":
+			out.Values[i] = ec._JobRunLog_caseId(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "jobId":
+			out.Values[i] = ec._JobRunLog_jobId(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "jobName":
+			out.Values[i] = ec._JobRunLog_jobName(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "runId":
+			out.Values[i] = ec._JobRunLog_runId(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "traceId":
+			out.Values[i] = ec._JobRunLog_traceId(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "stage":
+			out.Values[i] = ec._JobRunLog_stage(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "startedAt":
+			out.Values[i] = ec._JobRunLog_startedAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "endedAt":
+			out.Values[i] = ec._JobRunLog_endedAt(ctx, field, obj)
+		case "durationMs":
+			out.Values[i] = ec._JobRunLog_durationMs(ctx, field, obj)
+		case "errorMessage":
+			out.Values[i] = ec._JobRunLog_errorMessage(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "systemPrompt":
+			out.Values[i] = ec._JobRunLog_systemPrompt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "eventType":
+			out.Values[i] = ec._JobRunLog_eventType(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "eventTriggerAt":
+			out.Values[i] = ec._JobRunLog_eventTriggerAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var jobRunLogConnectionImplementors = []string{"JobRunLogConnection"}
+
+func (ec *executionContext) _JobRunLogConnection(ctx context.Context, sel ast.SelectionSet, obj *graphql1.JobRunLogConnection) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, jobRunLogConnectionImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("JobRunLogConnection")
+		case "items":
+			out.Values[i] = ec._JobRunLogConnection_items(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "nextCursor":
+			out.Values[i] = ec._JobRunLogConnection_nextCursor(ctx, field, obj)
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
 var mutationImplementors = []string{"Mutation"}
 
 func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet) graphql.Marshaler {
@@ -16342,6 +18252,13 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 		case "validateNotionPage":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_validateNotionPage(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "updateCaseAgentSettings":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_updateCaseAgentSettings(ctx, field)
 			})
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
@@ -16939,6 +18856,72 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 					}
 				}()
 				res = ec._Query_assistLogs(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "caseJobRunLogs":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_caseJobRunLogs(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "jobRunLog":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_jobRunLog(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "jobRunEvents":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_jobRunEvents(ctx, field)
 				if res == graphql.Null {
 					atomic.AddUint32(&fs.Invalids, 1)
 				}
@@ -18603,6 +20586,168 @@ func (ec *executionContext) marshalNInt2int(ctx context.Context, sel ast.Selecti
 	return res
 }
 
+func (ec *executionContext) unmarshalNJSON2string(ctx context.Context, v any) (string, error) {
+	res, err := graphql.UnmarshalString(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNJSON2string(ctx context.Context, sel ast.SelectionSet, v string) graphql.Marshaler {
+	_ = sel
+	res := graphql.MarshalString(v)
+	if res == graphql.Null {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+	}
+	return res
+}
+
+func (ec *executionContext) marshalNJobRunEvent2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐJobRunEventᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.JobRunEvent) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNJobRunEvent2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐJobRunEvent(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNJobRunEvent2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐJobRunEvent(ctx context.Context, sel ast.SelectionSet, v *graphql1.JobRunEvent) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._JobRunEvent(ctx, sel, v)
+}
+
+func (ec *executionContext) unmarshalNJobRunEventKind2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐJobRunEventKind(ctx context.Context, v any) (graphql1.JobRunEventKind, error) {
+	var res graphql1.JobRunEventKind
+	err := res.UnmarshalGQL(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNJobRunEventKind2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐJobRunEventKind(ctx context.Context, sel ast.SelectionSet, v graphql1.JobRunEventKind) graphql.Marshaler {
+	return v
+}
+
+func (ec *executionContext) marshalNJobRunLog2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐJobRunLog(ctx context.Context, sel ast.SelectionSet, v graphql1.JobRunLog) graphql.Marshaler {
+	return ec._JobRunLog(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNJobRunLog2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐJobRunLogᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.JobRunLog) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNJobRunLog2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐJobRunLog(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNJobRunLog2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐJobRunLog(ctx context.Context, sel ast.SelectionSet, v *graphql1.JobRunLog) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._JobRunLog(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNJobRunLogConnection2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐJobRunLogConnection(ctx context.Context, sel ast.SelectionSet, v graphql1.JobRunLogConnection) graphql.Marshaler {
+	return ec._JobRunLogConnection(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNJobRunLogConnection2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐJobRunLogConnection(ctx context.Context, sel ast.SelectionSet, v *graphql1.JobRunLogConnection) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._JobRunLogConnection(ctx, sel, v)
+}
+
+func (ec *executionContext) unmarshalNJobRunStage2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐJobRunStage(ctx context.Context, v any) (graphql1.JobRunStage, error) {
+	var res graphql1.JobRunStage
+	err := res.UnmarshalGQL(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNJobRunStage2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐJobRunStage(ctx context.Context, sel ast.SelectionSet, v graphql1.JobRunStage) graphql.Marshaler {
+	return v
+}
+
 func (ec *executionContext) marshalNNotionDBValidationResult2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐNotionDBValidationResult(ctx context.Context, sel ast.SelectionSet, v graphql1.NotionDBValidationResult) graphql.Marshaler {
 	return ec._NotionDBValidationResult(ctx, sel, &v)
 }
@@ -19067,6 +21212,11 @@ func (ec *executionContext) marshalNTime2timeᚐTime(ctx context.Context, sel as
 
 func (ec *executionContext) unmarshalNUpdateActionInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateActionInput(ctx context.Context, v any) (graphql1.UpdateActionInput, error) {
 	res, err := ec.unmarshalInputUpdateActionInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) unmarshalNUpdateCaseAgentSettingsInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateCaseAgentSettingsInput(ctx context.Context, v any) (graphql1.UpdateCaseAgentSettingsInput, error) {
+	res, err := ec.unmarshalInputUpdateCaseAgentSettingsInput(ctx, v)
 	return res, graphql.ErrorOnPath(ctx, err)
 }
 

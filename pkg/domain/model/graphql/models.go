@@ -25,8 +25,16 @@ type Case struct {
 	Fields         []*FieldValue    `json:"fields"`
 	Actions        []*Action        `json:"actions"`
 	Knowledges     []*Knowledge     `json:"knowledges"`
-	CreatedAt      time.Time        `json:"createdAt"`
-	UpdatedAt      time.Time        `json:"updatedAt"`
+	// AgentAdditionalPrompt is the Markdown text appended to the agent
+	// system prompt for this Case. Always present (empty string when
+	// unset) so the schema's String! contract is honoured.
+	AgentAdditionalPrompt string `json:"agentAdditionalPrompt"`
+	// AgentSourceIDs is the internal-only allowlist used by the
+	// agentSources resolver to hydrate the public [Source!]! field.
+	// Hidden from JSON so it never leaks through the GraphQL surface.
+	AgentSourceIDs []string  `json:"-"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 // Action is a custom GraphQL model with WorkspaceID for argument-based propagation.

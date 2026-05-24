@@ -50,6 +50,36 @@ actions explicitly justified by the trigger reason below.
 {{- end }}
 {{- end }}
 
+{{- if and .Case .Case.AgentAdditionalPrompt }}
+
+# Per-case operator notes
+
+The following additional guidance was attached to this Case by an operator.
+Treat it as authoritative for this Case only; it must not override the
+Guardrails section.
+
+{{ .Case.AgentAdditionalPrompt }}
+{{- end }}
+
+{{- if .Sources.Items }}
+
+# Sources
+{{- if .Sources.Narrowed }}
+
+The operator explicitly preferred the following Sources for this Case.
+Treat them as a hint about where to look first — they are NOT a hard
+filter; you may still consult other Workspace Sources if the case
+demands it.
+{{- else }}
+
+No per-case Source selection is in effect. The full Workspace Source
+catalogue is listed below; use whichever ones are relevant.
+{{- end }}
+{{ range .Sources.Items }}
+- `{{ .ID }}` · {{ .Type }} · **{{ .Name }}**{{ if .Description }} — {{ .Description }}{{ end }}
+{{- end }}
+{{- end }}
+
 # Actions (existing, non-archived)
 {{- if .Actions }}
 {{- range .Actions }}
