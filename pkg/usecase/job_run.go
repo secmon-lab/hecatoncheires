@@ -144,8 +144,9 @@ func (uc *JobRunUseCase) ListLogsByCase(ctx context.Context, workspaceID string,
 	}
 
 	// Sort newest first; ties broken by RunID DESC so cursor comparisons
-	// are total.
-	sort.SliceStable(merged, func(i, j int) bool {
+	// are total. RunID uniqueness gives a strict total order, so the
+	// non-stable variant is sufficient.
+	sort.Slice(merged, func(i, j int) bool {
 		if !merged[i].StartedAt.Equal(merged[j].StartedAt) {
 			return merged[i].StartedAt.After(merged[j].StartedAt)
 		}

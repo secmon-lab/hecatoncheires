@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@apollo/client'
 
@@ -102,12 +102,20 @@ export default function CaseAgent() {
     fetchPolicy: 'cache-and-network',
   })
 
+  // Pagination is held in a stack of "after" cursors. Index 0 is the
+  // head (after=null); each Next push appends the connection's
+  // nextCursor; Prev pops. We re-query with cursorStack[currentPage]
+  // so navigation works in both directions without relying on Apollo
+  // cache merge — the server is the source of truth for ordering.
+  const [cursorStack, setCursorStack] = useState<(string | null)[]>([null])
+  const [currentPage, setCurrentPage] = useState(0)
+  const currentCursor = cursorStack[currentPage] ?? null
+
   const {
     data: runLogData,
     loading: runLogLoading,
-    refetch: refetchRunLogs,
   } = useQuery<{ caseJobRunLogs: JobRunLogConnection }>(GET_CASE_JOB_RUN_LOGS, {
-    variables: { workspaceId, caseId, first: 20 },
+    variables: { workspaceId, caseId, first: 20, after: currentCursor },
     skip: !workspaceId || !caseId,
     fetchPolicy: 'cache-and-network',
   })
@@ -129,13 +137,10 @@ export default function CaseAgent() {
   const runLogs = runLogData?.caseJobRunLogs?.items ?? []
   const nextCursor = runLogData?.caseJobRunLogs?.nextCursor ?? null
 
-  // Enabled-only set of sources for the read-only list (matches design:
-  // disabled sources are hidden in the right card preview).
-  const enabledSelectedSources = useMemo(() => {
-    if (!caseData) return [] as AgentSource[]
-    const set = new Set(caseData.agentSources.map((s) => s.id))
-    return caseData.agentSources.filter((s) => set.has(s.id))
-  }, [caseData])
+  // The agentSources field is already filtered server-side to the
+  // operator's selection, so use it directly. The earlier no-op
+  // Set→filter wrapper has been removed.
+  const selectedSources: AgentSource[] = caseData?.agentSources ?? []
 
   if (!workspaceId || !caseId) {
     return null
@@ -429,11 +434,11 @@ export default function CaseAgent() {
                 </Button>
               </div>
             </>
-          ) : enabledSelectedSources.length === 0 ? (
+          ) : selectedSources.length === 0 ? (
             <div className={styles.sourcesEmpty}>{t('caseAgentSourcesAll')}</div>
           ) : (
             <div className={styles.sourcesList}>
-              {enabledSelectedSources.map((s) => (
+              {selectedSources.map((s) => (
                 <div key={s.id} className={styles.sourceRow}>
                   <Checkbox checked />
                   <SourceIcon kind={s.sourceType} size={14} />
@@ -578,7 +583,15 @@ export default function CaseAgent() {
             {t('caseAgentPaginationLabel', { shown: runLogs.length, total: runLogs.length })}
           </span>
           <div className={styles.paginationActions}>
-            <Button size="sm" variant="ghost" disabled>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={currentPage === 0}
+              onClick={() => {
+                setCursorStack((stack) => stack.slice(0, -1))
+                setCurrentPage((p) => Math.max(0, p - 1))
+              }}
+            >
               <IconChevLeft size={11} />
               {t('caseAgentPaginationPrev')}
             </Button>
@@ -586,7 +599,11 @@ export default function CaseAgent() {
               size="sm"
               variant="ghost"
               disabled={!nextCursor}
-              onClick={() => void refetchRunLogs({ workspaceId, caseId, first: 20, after: nextCursor })}
+              onClick={() => {
+                if (!nextCursor) return
+                setCursorStack((stack) => [...stack, nextCursor])
+                setCurrentPage((p) => p + 1)
+              }}
             >
               {t('caseAgentPaginationNext')}
               <IconChevRight size={11} />

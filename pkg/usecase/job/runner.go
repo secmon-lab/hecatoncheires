@@ -2,7 +2,6 @@ package job
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -11,19 +10,9 @@ import (
 
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
-	"github.com/secmon-lab/hecatoncheires/pkg/repository/firestore"
-	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/job"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
-
-// isSourceNotFound matches both repository backends' "not found"
-// sentinels so that an operator-selected Source that has since been
-// deleted is silently dropped from the prompt instead of failing the
-// entire Run.
-func isSourceNotFound(err error) bool {
-	return errors.Is(err, memory.ErrNotFound) || errors.Is(err, firestore.ErrNotFound)
-}
 
 // DefaultLeaseDuration is the default lease length acquired by JobRunner
 // before invoking the executor. Long enough to absorb LLM latency, short
@@ -329,15 +318,22 @@ func (r *JobRunner) resolveSources(ctx context.Context, workspaceID string, c *m
 		return nil, false, nil
 	}
 
-	// No operator selection → load every enabled Workspace Source so
-	// the prompt can still list the full catalogue.
+	// One List call covers both branches: the empty-selection branch
+	// returns every enabled Source as-is, the narrowed branch filters
+	// the same list by the operator's allowlist. Workspace Source
+	// catalogues are small (handful per workspace), so a single list
+	// query is cheaper than N parallel Gets and avoids any per-ID
+	// "not found" handling — IDs missing from the catalogue (Source
+	// deleted after selection) simply don't appear in the filter
+	// output, which is exactly the silent-skip semantics we want.
+	all, err := r.deps.Repo.Source().List(ctx, workspaceID)
+	if err != nil {
+		return nil, len(c.AgentSourceIDs) > 0, goerr.Wrap(err, "list workspace sources",
+			goerr.V("workspace_id", workspaceID),
+			goerr.V("case_id", c.ID))
+	}
+
 	if len(c.AgentSourceIDs) == 0 {
-		all, err := r.deps.Repo.Source().List(ctx, workspaceID)
-		if err != nil {
-			return nil, false, goerr.Wrap(err, "list workspace sources",
-				goerr.V("workspace_id", workspaceID),
-				goerr.V("case_id", c.ID))
-		}
 		out := make([]*model.Source, 0, len(all))
 		for _, s := range all {
 			if s == nil || !s.Enabled {
@@ -348,24 +344,18 @@ func (r *JobRunner) resolveSources(ctx context.Context, workspaceID string, c *m
 		return out, false, nil
 	}
 
-	// Operator narrowed → fetch each by ID, silently skip ones that no
-	// longer exist or that were toggled off after selection.
-	out := make([]*model.Source, 0, len(c.AgentSourceIDs))
-	for _, id := range c.AgentSourceIDs {
-		s, err := r.deps.Repo.Source().Get(ctx, workspaceID, id)
-		if err != nil {
-			if isSourceNotFound(err) {
-				continue
-			}
-			return nil, true, goerr.Wrap(err, "get source for case agent",
-				goerr.V("workspace_id", workspaceID),
-				goerr.V("case_id", c.ID),
-				goerr.V("source_id", string(id)))
-		}
+	known := make(map[model.SourceID]*model.Source, len(all))
+	for _, s := range all {
 		if s == nil || !s.Enabled {
 			continue
 		}
-		out = append(out, s)
+		known[s.ID] = s
+	}
+	out := make([]*model.Source, 0, len(c.AgentSourceIDs))
+	for _, id := range c.AgentSourceIDs {
+		if s, ok := known[id]; ok {
+			out = append(out, s)
+		}
 	}
 	return out, true, nil
 }
