@@ -39,7 +39,7 @@ import {
   IconSlack,
   IconExt,
   IconDots,
-  IconSparkle,
+  IconRobot,
   IconX,
 } from '../components/Icons'
 import { Avatar, PrivateBadge, StatusBadge } from '../components/Primitives'
@@ -742,7 +742,7 @@ export default function CaseDetail() {
                 data-testid="case-agent-link"
               >
                 <span className="agent-tile-icon">
-                  <IconSparkle size={18} sw={1.8} />
+                  <IconRobot size={20} sw={1.6} />
                 </span>
                 <div className="agent-tile-body">
                   <div className="agent-tile-title">
