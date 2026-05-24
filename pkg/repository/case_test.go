@@ -1056,6 +1056,79 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.NoError(t, err).Required()
 		gt.Number(t, len(drafts)).Equal(0)
 	})
+
+	t.Run("Create and Get round-trip agent settings", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		prompt := "## Per-case notes\n\n- Treat dataset X as read-only.\n- Cite `audit-log` source for every claim."
+		sourceA := model.NewSourceID()
+		sourceB := model.NewSourceID()
+
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:            "U-TEST-DEFAULT",
+			CreatedAt:             time.Now().UTC(),
+			UpdatedAt:             time.Now().UTC(),
+			Title:                 "Case with agent settings",
+			AgentAdditionalPrompt: prompt,
+			AgentSourceIDs:        []model.SourceID{sourceA, sourceB},
+		})
+		gt.NoError(t, err).Required()
+
+		gt.Value(t, created.AgentAdditionalPrompt).Equal(prompt)
+		gt.Array(t, created.AgentSourceIDs).Length(2).Required()
+		gt.Value(t, created.AgentSourceIDs[0]).Equal(sourceA)
+		gt.Value(t, created.AgentSourceIDs[1]).Equal(sourceB)
+
+		retrieved, err := repo.Case().Get(ctx, wsID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, retrieved.AgentAdditionalPrompt).Equal(prompt)
+		gt.Array(t, retrieved.AgentSourceIDs).Length(2).Required()
+		gt.Value(t, retrieved.AgentSourceIDs[0]).Equal(sourceA)
+		gt.Value(t, retrieved.AgentSourceIDs[1]).Equal(sourceB)
+	})
+
+	t.Run("Update modifies agent settings", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:            "U-TEST-DEFAULT",
+			CreatedAt:             time.Now().UTC(),
+			UpdatedAt:             time.Now().UTC(),
+			Title:                 "Case agent update",
+			AgentAdditionalPrompt: "initial",
+			AgentSourceIDs:        []model.SourceID{model.NewSourceID()},
+		})
+		gt.NoError(t, err).Required()
+
+		newPrompt := "updated **prompt** body"
+		newSrc := model.NewSourceID()
+		created.AgentAdditionalPrompt = newPrompt
+		created.AgentSourceIDs = []model.SourceID{newSrc}
+
+		updated, err := repo.Case().Update(ctx, wsID, created)
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.AgentAdditionalPrompt).Equal(newPrompt)
+		gt.Array(t, updated.AgentSourceIDs).Length(1).Required()
+		gt.Value(t, updated.AgentSourceIDs[0]).Equal(newSrc)
+
+		retrieved, err := repo.Case().Get(ctx, wsID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, retrieved.AgentAdditionalPrompt).Equal(newPrompt)
+		gt.Array(t, retrieved.AgentSourceIDs).Length(1).Required()
+		gt.Value(t, retrieved.AgentSourceIDs[0]).Equal(newSrc)
+
+		// Clearing the source list back to empty must round-trip.
+		retrieved.AgentSourceIDs = nil
+		retrieved.AgentAdditionalPrompt = ""
+		cleared, err := repo.Case().Update(ctx, wsID, retrieved)
+		gt.NoError(t, err).Required()
+		gt.Value(t, cleared.AgentAdditionalPrompt).Equal("")
+		gt.Number(t, len(cleared.AgentSourceIDs)).Equal(0)
+	})
 }
 
 func TestCaseRepository_Memory(t *testing.T) {

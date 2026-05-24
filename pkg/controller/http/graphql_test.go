@@ -3510,3 +3510,147 @@ func TestGraphQLHandler_DraftsReporterMissingSurfacesError(t *testing.T) {
 	gt.Value(t, *result.Drafts[0].ReporterID).Equal(reporterID)
 	gt.Value(t, result.Drafts[0].Reporter).Nil()
 }
+
+func TestGraphQLHandler_UpdateCaseAgentSettingsMutation(t *testing.T) {
+	repo := memory.New()
+	handler, err := setupGraphQLServer(repo)
+	gt.NoError(t, err).Required()
+
+	ctx := context.Background()
+	c, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+		Title:      "agent target",
+		ReporterID: "U-REPORTER",
+		CreatedAt:  time.Now().UTC(),
+		UpdatedAt:  time.Now().UTC(),
+	})
+	gt.NoError(t, err).Required()
+
+	src, err := repo.Source().Create(ctx, testWorkspaceID, &model.Source{
+		ID: model.NewSourceID(), Name: "Datadog", SourceType: model.SourceTypeSlack, Enabled: true,
+		SlackConfig: &model.SlackConfig{},
+	})
+	gt.NoError(t, err).Required()
+
+	mutation := `
+		mutation($workspaceId: String!, $input: UpdateCaseAgentSettingsInput!) {
+			updateCaseAgentSettings(workspaceId: $workspaceId, input: $input) {
+				id
+				agentAdditionalPrompt
+				agentSources { id name }
+			}
+		}
+	`
+	vars := map[string]any{
+		"workspaceId": testWorkspaceID,
+		"input": map[string]any{
+			"caseId":                c.ID,
+			"agentAdditionalPrompt": "### per-case\n- focus on prod",
+			"enabledSourceIds":      []string{string(src.ID)},
+		},
+	}
+	rec := executeGraphQLRequestWithAuth(t, handler, mutation, vars, "U-REPORTER")
+	gt.Value(t, rec.Code).Equal(http.StatusOK)
+	resp := parseGraphQLResponse(t, rec)
+	gt.Array(t, resp.Errors).Length(0)
+
+	var out struct {
+		UpdateCaseAgentSettings struct {
+			ID                    int    `json:"id"`
+			AgentAdditionalPrompt string `json:"agentAdditionalPrompt"`
+			AgentSources          []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"agentSources"`
+		} `json:"updateCaseAgentSettings"`
+	}
+	gt.NoError(t, json.Unmarshal(resp.Data, &out)).Required()
+	gt.Value(t, out.UpdateCaseAgentSettings.AgentAdditionalPrompt).Equal("### per-case\n- focus on prod")
+	gt.Array(t, out.UpdateCaseAgentSettings.AgentSources).Length(1).Required()
+	gt.Value(t, out.UpdateCaseAgentSettings.AgentSources[0].ID).Equal(string(src.ID))
+	gt.Value(t, out.UpdateCaseAgentSettings.AgentSources[0].Name).Equal("Datadog")
+
+	persisted, err := repo.Case().Get(ctx, testWorkspaceID, c.ID)
+	gt.NoError(t, err).Required()
+	gt.Value(t, persisted.AgentAdditionalPrompt).Equal("### per-case\n- focus on prod")
+	gt.Array(t, persisted.AgentSourceIDs).Length(1).Required()
+	gt.Value(t, persisted.AgentSourceIDs[0]).Equal(src.ID)
+}
+
+func TestGraphQLHandler_CaseJobRunLogsQuery(t *testing.T) {
+	repo := memory.New()
+	handler, err := setupGraphQLServer(repo)
+	gt.NoError(t, err).Required()
+
+	ctx := context.Background()
+	c, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+		Title:      "agent target",
+		ReporterID: "U-REPORTER",
+		CreatedAt:  time.Now().UTC(),
+		UpdatedAt:  time.Now().UTC(),
+	})
+	gt.NoError(t, err).Required()
+
+	base := time.Date(2026, 5, 24, 9, 0, 0, 0, time.UTC)
+	for i, runID := range []string{"run-a", "run-b", "run-c"} {
+		started := base.Add(time.Duration(i) * time.Minute)
+		log := &model.JobRunLog{
+			WorkspaceID:     testWorkspaceID,
+			CaseID:          c.ID,
+			JobID:           "incident-rca",
+			RunID:           runID,
+			TraceID:         "trace-" + runID,
+			Stage:           model.JobRunStageRunning,
+			StartedAt:       started,
+			ExecutorKind:    "single_loop",
+			ExecutorVersion: "test",
+		}
+		gt.NoError(t, repo.JobRunLog().Create(ctx, log)).Required()
+		log.Stage = model.JobRunStageSuccess
+		log.EndedAt = started.Add(5 * time.Second)
+		gt.NoError(t, repo.JobRunLog().Finish(ctx, log)).Required()
+
+		gt.NoError(t, repo.JobRun().RecordRun(
+			ctx,
+			model.JobRunKey{WorkspaceID: testWorkspaceID, CaseID: c.ID, JobID: "incident-rca"},
+			model.JobRunStatusSuccess,
+			started, runID, "trace-"+runID, "",
+		)).Required()
+	}
+
+	query := `
+		query($wsid: String!, $cid: Int!, $first: Int) {
+			caseJobRunLogs(workspaceId: $wsid, caseId: $cid, first: $first) {
+				items { runId stage startedAt durationMs }
+				nextCursor
+			}
+		}
+	`
+	vars := map[string]any{
+		"wsid":  testWorkspaceID,
+		"cid":   c.ID,
+		"first": 2,
+	}
+	rec := executeGraphQLRequestWithAuth(t, handler, query, vars, "U-REPORTER")
+	gt.Value(t, rec.Code).Equal(http.StatusOK)
+	resp := parseGraphQLResponse(t, rec)
+	gt.Array(t, resp.Errors).Length(0)
+
+	var out struct {
+		CaseJobRunLogs struct {
+			Items []struct {
+				RunID      string `json:"runId"`
+				Stage      string `json:"stage"`
+				StartedAt  string `json:"startedAt"`
+				DurationMs *int   `json:"durationMs"`
+			} `json:"items"`
+			NextCursor *string `json:"nextCursor"`
+		} `json:"caseJobRunLogs"`
+	}
+	gt.NoError(t, json.Unmarshal(resp.Data, &out)).Required()
+	gt.Array(t, out.CaseJobRunLogs.Items).Length(2).Required()
+	gt.Value(t, out.CaseJobRunLogs.Items[0].RunID).Equal("run-c")
+	gt.Value(t, out.CaseJobRunLogs.Items[1].RunID).Equal("run-b")
+	gt.Value(t, out.CaseJobRunLogs.NextCursor).NotNil().Required()
+	gt.Value(t, out.CaseJobRunLogs.Items[0].DurationMs).NotNil().Required()
+	gt.Number(t, *out.CaseJobRunLogs.Items[0].DurationMs).Equal(5000)
+}

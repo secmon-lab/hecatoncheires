@@ -212,6 +212,40 @@ type GitHubRepository struct {
 	Repo  string `json:"repo"`
 }
 
+type JobRunEvent struct {
+	EventID        string          `json:"eventId"`
+	RunID          string          `json:"runId"`
+	Sequence       int             `json:"sequence"`
+	OccurredAt     time.Time       `json:"occurredAt"`
+	Kind           JobRunEventKind `json:"kind"`
+	ParentSequence int             `json:"parentSequence"`
+	Phase          string          `json:"phase"`
+	AgentLabel     string          `json:"agentLabel"`
+	Payload        string          `json:"payload"`
+}
+
+type JobRunLog struct {
+	WorkspaceID    string      `json:"workspaceId"`
+	CaseID         int         `json:"caseId"`
+	JobID          string      `json:"jobId"`
+	JobName        string      `json:"jobName"`
+	RunID          string      `json:"runId"`
+	TraceID        string      `json:"traceId"`
+	Stage          JobRunStage `json:"stage"`
+	StartedAt      time.Time   `json:"startedAt"`
+	EndedAt        *time.Time  `json:"endedAt,omitempty"`
+	DurationMs     *int        `json:"durationMs,omitempty"`
+	ErrorMessage   string      `json:"errorMessage"`
+	SystemPrompt   string      `json:"systemPrompt"`
+	EventType      string      `json:"eventType"`
+	EventTriggerAt time.Time   `json:"eventTriggerAt"`
+}
+
+type JobRunLogConnection struct {
+	Items      []*JobRunLog `json:"items"`
+	NextCursor *string      `json:"nextCursor,omitempty"`
+}
+
 type Mutation struct {
 }
 
@@ -342,6 +376,12 @@ type UpdateActionInput struct {
 	DueDate        *time.Time `json:"dueDate,omitempty"`
 	ClearDueDate   *bool      `json:"clearDueDate,omitempty"`
 	ClearAssignee  *bool      `json:"clearAssignee,omitempty"`
+}
+
+type UpdateCaseAgentSettingsInput struct {
+	CaseID                int      `json:"caseId"`
+	AgentAdditionalPrompt string   `json:"agentAdditionalPrompt"`
+	EnabledSourceIds      []string `json:"enabledSourceIds"`
 }
 
 type UpdateCaseInput struct {
@@ -590,6 +630,122 @@ func (e *FieldType) UnmarshalJSON(b []byte) error {
 }
 
 func (e FieldType) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
+}
+
+type JobRunEventKind string
+
+const (
+	JobRunEventKindLlmRequest  JobRunEventKind = "LLM_REQUEST"
+	JobRunEventKindLlmResponse JobRunEventKind = "LLM_RESPONSE"
+	JobRunEventKindToolCall    JobRunEventKind = "TOOL_CALL"
+	JobRunEventKindRunError    JobRunEventKind = "RUN_ERROR"
+)
+
+var AllJobRunEventKind = []JobRunEventKind{
+	JobRunEventKindLlmRequest,
+	JobRunEventKindLlmResponse,
+	JobRunEventKindToolCall,
+	JobRunEventKindRunError,
+}
+
+func (e JobRunEventKind) IsValid() bool {
+	switch e {
+	case JobRunEventKindLlmRequest, JobRunEventKindLlmResponse, JobRunEventKindToolCall, JobRunEventKindRunError:
+		return true
+	}
+	return false
+}
+
+func (e JobRunEventKind) String() string {
+	return string(e)
+}
+
+func (e *JobRunEventKind) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = JobRunEventKind(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid JobRunEventKind", str)
+	}
+	return nil
+}
+
+func (e JobRunEventKind) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *JobRunEventKind) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e JobRunEventKind) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
+}
+
+type JobRunStage string
+
+const (
+	JobRunStageRunning JobRunStage = "RUNNING"
+	JobRunStageSuccess JobRunStage = "SUCCESS"
+	JobRunStageFailed  JobRunStage = "FAILED"
+)
+
+var AllJobRunStage = []JobRunStage{
+	JobRunStageRunning,
+	JobRunStageSuccess,
+	JobRunStageFailed,
+}
+
+func (e JobRunStage) IsValid() bool {
+	switch e {
+	case JobRunStageRunning, JobRunStageSuccess, JobRunStageFailed:
+		return true
+	}
+	return false
+}
+
+func (e JobRunStage) String() string {
+	return string(e)
+}
+
+func (e *JobRunStage) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = JobRunStage(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid JobRunStage", str)
+	}
+	return nil
+}
+
+func (e JobRunStage) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *JobRunStage) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e JobRunStage) MarshalJSON() ([]byte, error) {
 	var buf bytes.Buffer
 	e.MarshalGQL(&buf)
 	return buf.Bytes(), nil

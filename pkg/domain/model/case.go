@@ -22,6 +22,15 @@ var ErrCaseNotDraft = goerr.New("case is not a draft")
 // Validate() before write so this failure mode never reaches storage.
 var ErrCaseMissingReporter = goerr.New("case has no reporter")
 
+// ErrCaseAgentPromptTooLong is returned by Case.Validate when the
+// Case-specific agent additional prompt exceeds AgentAdditionalPromptMaxLen.
+var ErrCaseAgentPromptTooLong = goerr.New("case agent additional prompt is too long")
+
+// AgentAdditionalPromptMaxLen caps the per-Case agent additional prompt
+// length (UTF-8 bytes). The cap protects callers (LLM context window,
+// Firestore doc size) and is enforced at the persistence boundary.
+const AgentAdditionalPromptMaxLen = 16384
+
 // Case represents a generic case/project entity.
 //
 // Lifecycle (see types.CaseStatus): DRAFT → OPEN → CLOSED. A case in DRAFT is
@@ -42,8 +51,24 @@ type Case struct {
 	AccessDenied   bool                  // Runtime-only: set by UseCase when access is restricted (not persisted)
 	FieldValues    map[string]FieldValue // key = FieldID
 	RequestKey     string                // UUID for preventing duplicate case creation from Slack modals
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+
+	// AgentAdditionalPrompt is a Case-specific Markdown snippet that the
+	// Job runner appends to the TOML-defined Job prompt at agent execution
+	// time. Empty by default; capped at AgentAdditionalPromptMaxLen bytes
+	// and enforced by Validate().
+	AgentAdditionalPrompt string
+
+	// AgentSourceIDs restricts which Sources the agent uses when running
+	// against this Case. Empty (nil or len==0) means "use every Source
+	// the agent would normally consider" — i.e. preserves the existing
+	// default of all enabled Workspace Sources. Non-empty narrows the
+	// set to exactly the listed IDs (unknown / disabled IDs are dropped
+	// at use time, not at write time, so a Source toggled off later does
+	// not invalidate the stored selection).
+	AgentSourceIDs []SourceID
+
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // IsDraft reports whether this Case is currently in the unsubmitted draft state.
@@ -57,6 +82,13 @@ func (c *Case) IsDraft() bool {
 func (c *Case) Validate() error {
 	if c == nil {
 		return goerr.New("case is nil")
+	}
+	if len(c.AgentAdditionalPrompt) > AgentAdditionalPromptMaxLen {
+		return goerr.Wrap(ErrCaseAgentPromptTooLong,
+			"agent additional prompt exceeds maximum length",
+			goerr.V("len", len(c.AgentAdditionalPrompt)),
+			goerr.V("max", AgentAdditionalPromptMaxLen),
+		)
 	}
 	return nil
 }

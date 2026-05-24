@@ -1,0 +1,361 @@
+/* JobRunLogDetail page — ports the 06d design from case-agent.jsx's
+   ScreenJobRunLogDetail. Layout is single-column at max-width 1080. */
+
+.shell {
+  max-width: 1080px;
+  margin: 0 auto;
+  /* Breathing room above the breadcrumb so it doesn't hug the workspace
+     breadcrumb header. */
+  padding-top: var(--sp-6);
+}
+
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: var(--sp-3);
+  margin-bottom: var(--sp-5);
+  font-size: 12px;
+}
+.crumbLink {
+  color: var(--fg-muted);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.crumbLink:hover { color: var(--fg); }
+.crumbSep { color: var(--fg-soft); }
+.crumbTitle { max-width: 360px; color: var(--fg-soft); }
+
+.header {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.headerLead { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.headerCaption {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.captionLabel {
+  font-size: 11px;
+  color: var(--fg-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+}
+.captionRunId {
+  color: var(--fg-soft);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+/* Meta card — divider-separated KPI strip */
+.metaCard {
+  padding: 14px 18px;
+  margin-bottom: 14px;
+  display: flex;
+  flex-wrap: wrap;
+}
+.metaKpi {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 2px 18px 2px 0;
+  flex: 0 0 auto;
+  min-width: 130px;
+}
+.metaKpiLabel {
+  font-size: 10px;
+  color: var(--fg-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+.metaKpiValue { font-size: 12.5px; }
+.metaKpiValue.mono { font-family: var(--font-mono); }
+.metaDivider {
+  width: 1px;
+  background: var(--line);
+  margin-right: 18px;
+  align-self: stretch;
+}
+
+/* ID row card */
+.idCard {
+  padding: 10px 18px;
+  margin-bottom: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  font-size: 11.5px;
+}
+.idRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.idLabel { color: var(--fg-soft); }
+.idChip {
+  background: var(--bg-sunken);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+.copyBtn {
+  padding: 1px 5px;
+  font-size: 10px;
+  color: var(--fg-soft);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.copyBtn:hover {
+  border-color: var(--line);
+  color: var(--fg);
+}
+.copyBtnOk { color: var(--ok); }
+
+/* System prompt details */
+.promptDetails {
+  margin-bottom: 14px;
+  padding: 0;
+  overflow: hidden;
+}
+.promptSummary {
+  padding: 12px 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  list-style: none;
+  user-select: none;
+}
+.promptSummary::-webkit-details-marker { display: none; }
+.promptDetails[open] .promptSummaryChev {
+  transform: rotate(90deg);
+}
+.promptSummaryChev { transition: transform 0.15s ease; }
+.promptSummaryTitle { font-size: 13px; font-weight: 600; }
+.promptSummaryLines {
+  color: var(--fg-soft);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.promptSummaryHint {
+  margin-left: auto;
+  color: var(--fg-soft);
+  font-size: 11px;
+}
+.promptPre {
+  margin: 0;
+  padding: 14px 18px;
+  background: var(--bg-sunken);
+  border-top: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: var(--fg-muted);
+  white-space: pre-wrap;
+  max-height: 320px;
+  overflow: auto;
+}
+
+/* Timeline card */
+.timelineCard {
+  padding: 0;
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+.timelineHead {
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+}
+.timelineTitle { font-size: 13px; font-weight: 600; }
+.timelineCount {
+  color: var(--fg-soft);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  margin-left: 8px;
+}
+.timelineLegend {
+  margin-left: auto;
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+}
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--fg-soft);
+}
+.legendDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 99px;
+  flex-shrink: 0;
+}
+
+.timelineBody {
+  padding: 8px 0;
+}
+.eventRow {
+  display: flex;
+  gap: 12px;
+  padding: 8px 18px;
+  align-items: flex-start;
+  position: relative;
+}
+.eventTimeCol { width: 90px; padding-top: 1px; }
+.eventTime {
+  color: var(--fg-soft);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.eventRail {
+  position: relative;
+  width: 14px;
+  align-self: stretch;
+  flex-shrink: 0;
+}
+.eventRailLine {
+  position: absolute;
+  left: 4px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line);
+}
+.eventRailLineLast { bottom: 50%; }
+.eventRailDot {
+  position: absolute;
+  left: 0;
+  top: 4px;
+  width: 9px;
+  height: 9px;
+  border-radius: 99px;
+  border: 2px solid var(--bg-elev);
+}
+.eventBody {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.eventHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.typePill {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+.eventSummary {
+  font-size: 12.5px;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  word-break: break-word;
+}
+
+/* Always-visible body for each event: shows the actual LLM message /
+   response text or the full tool-call arguments, without truncation.
+   Long content wraps and grows the row vertically. */
+.eventContent {
+  margin-top: 4px;
+  padding: 8px 10px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--fg-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  /* Cap very large payloads so they don't blow out the page; users can
+     scroll within the box or hit "expand" for the full raw JSON. */
+  max-height: 320px;
+  overflow: auto;
+}
+.eventContentMuted {
+  color: var(--fg-soft);
+  font-style: italic;
+}
+.eventMeta {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--fg-soft);
+  flex-wrap: wrap;
+}
+.eventMeta .mono { color: var(--fg-muted); }
+.eventExpandBtn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-size: 10.5px;
+  color: var(--fg-soft);
+  cursor: pointer;
+  font-family: inherit;
+}
+.eventExpandBtn:hover {
+  border-color: var(--line);
+  color: var(--fg);
+}
+.eventDetail {
+  margin-top: 6px;
+  padding: 10px 12px;
+  background: var(--bg-sunken);
+  border-radius: 6px;
+}
+.eventDetail pre {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--fg-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.errorBox {
+  padding: 12px 18px;
+  border-bottom: 1px solid color-mix(in oklch, var(--danger) 25%, transparent);
+  background: color-mix(in oklch, var(--danger) 6%, transparent);
+  color: var(--danger);
+  font-size: 12px;
+  margin-bottom: 14px;
+  border-radius: 6px;
+}
+
+.statusCard {
+  padding: 24px;
+  text-align: center;
+  color: var(--fg-soft);
+  font-size: 13px;
+}

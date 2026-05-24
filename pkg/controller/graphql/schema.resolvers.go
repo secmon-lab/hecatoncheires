@@ -407,6 +407,59 @@ func (r *caseResolver) SlackMessages(ctx context.Context, obj *graphql1.Case, li
 	}, nil
 }
 
+// AgentAdditionalPrompt is the resolver for the agentAdditionalPrompt field.
+func (r *caseResolver) AgentAdditionalPrompt(ctx context.Context, obj *graphql1.Case) (string, error) {
+	if obj == nil {
+		return "", nil
+	}
+	// Hidden when the caller cannot access the parent Case (matches the
+	// AccessDenied pattern used by other private-case-sensitive fields).
+	if obj.AccessDenied {
+		return "", nil
+	}
+	return obj.AgentAdditionalPrompt, nil
+}
+
+// AgentSources is the resolver for the agentSources field.
+func (r *caseResolver) AgentSources(ctx context.Context, obj *graphql1.Case) ([]*graphql1.Source, error) {
+	if obj == nil || obj.AccessDenied {
+		return []*graphql1.Source{}, nil
+	}
+	if len(obj.AgentSourceIDs) == 0 {
+		return []*graphql1.Source{}, nil
+	}
+	// Load all workspace sources once and filter by the Case's allowlist,
+	// preserving the order the operator selected.
+	sources, err := r.repo.Source().List(ctx, obj.WorkspaceID)
+	if err != nil {
+		return nil, goerr.Wrap(err, "list sources for case agent",
+			goerr.V("workspace_id", obj.WorkspaceID),
+			goerr.V("case_id", obj.ID))
+	}
+	known := make(map[model.SourceID]*model.Source, len(sources))
+	for _, s := range sources {
+		known[s.ID] = s
+	}
+	out := make([]*graphql1.Source, 0, len(obj.AgentSourceIDs))
+	for _, raw := range obj.AgentSourceIDs {
+		s, ok := known[model.SourceID(raw)]
+		if !ok {
+			// Source was deleted after selection — silently drop so the
+			// page still renders; the operator can re-pick from the editor.
+			continue
+		}
+		gq, err := toGraphQLSource(s)
+		if err != nil {
+			return nil, goerr.Wrap(err, "convert source for case agent",
+				goerr.V("source_id", raw))
+		}
+		if gq != nil {
+			out = append(out, gq)
+		}
+	}
+	return out, nil
+}
+
 // Noop is the resolver for the noop field.
 func (r *mutationResolver) Noop(ctx context.Context) (*bool, error) {
 	result := true
@@ -884,6 +937,19 @@ func (r *mutationResolver) ValidateNotionPage(ctx context.Context, workspaceID s
 	return gql, nil
 }
 
+// UpdateCaseAgentSettings is the resolver for the updateCaseAgentSettings field.
+func (r *mutationResolver) UpdateCaseAgentSettings(ctx context.Context, workspaceID string, input graphql1.UpdateCaseAgentSettingsInput) (*graphql1.Case, error) {
+	ids := make([]model.SourceID, 0, len(input.EnabledSourceIds))
+	for _, raw := range input.EnabledSourceIds {
+		ids = append(ids, model.SourceID(raw))
+	}
+	updated, err := r.UseCases.Case.UpdateAgentSettings(ctx, workspaceID, int64(input.CaseID), input.AgentAdditionalPrompt, ids)
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLCase(updated, workspaceID), nil
+}
+
 // Health is the resolver for the health field.
 func (r *queryResolver) Health(ctx context.Context) (string, error) {
 	return "ok", nil
@@ -1254,6 +1320,52 @@ func (r *queryResolver) AssistLogs(ctx context.Context, workspaceID string, case
 		TotalCount: totalCount,
 		HasMore:    hasMore,
 	}, nil
+}
+
+// CaseJobRunLogs is the resolver for the caseJobRunLogs field.
+func (r *queryResolver) CaseJobRunLogs(ctx context.Context, workspaceID string, caseID int, first *int, after *string) (*graphql1.JobRunLogConnection, error) {
+	page := 0
+	if first != nil {
+		page = *first
+	}
+	result, err := r.UseCases.JobRun.ListLogsByCase(ctx, workspaceID, int64(caseID), page, after)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]*graphql1.JobRunLog, 0, len(result.Items))
+	for _, log := range result.Items {
+		items = append(items, toGraphQLJobRunLog(log, r.UseCases.JobRun.ResolveJobName(workspaceID, log.JobID)))
+	}
+	return &graphql1.JobRunLogConnection{
+		Items:      items,
+		NextCursor: result.NextCursor,
+	}, nil
+}
+
+// JobRunLog is the resolver for the jobRunLog field.
+func (r *queryResolver) JobRunLog(ctx context.Context, workspaceID string, caseID int, runID string) (*graphql1.JobRunLog, error) {
+	log, err := r.UseCases.JobRun.GetLog(ctx, workspaceID, int64(caseID), runID)
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLJobRunLog(log, r.UseCases.JobRun.ResolveJobName(workspaceID, log.JobID)), nil
+}
+
+// JobRunEvents is the resolver for the jobRunEvents field.
+func (r *queryResolver) JobRunEvents(ctx context.Context, workspaceID string, caseID int, runID string) ([]*graphql1.JobRunEvent, error) {
+	events, err := r.UseCases.JobRun.ListEvents(ctx, workspaceID, int64(caseID), runID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*graphql1.JobRunEvent, 0, len(events))
+	for _, ev := range events {
+		gq, err := toGraphQLJobRunEvent(ev)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, gq)
+	}
+	return out, nil
 }
 
 // Action returns ActionResolver implementation.

@@ -34,6 +34,11 @@ const runErrorStageExecute = "execute"
 // it has acquired the lease and loaded the Case. Implementations are
 // expected to be pure (no I/O) and to use the *model.Case to pin
 // channel-scoped tools.
+//
+// Source-aware tools (Slack search, GitHub query, Notion lookup, …)
+// MUST honour the per-Case allowlist in c.AgentSourceIDs: when the
+// slice is non-empty, expose only those Sources; an empty slice means
+// "use every Workspace Source", preserving today's default behaviour.
 type ToolBuilder interface {
 	Build(ctx context.Context, c *model.Case, ws *model.WorkspaceEntry) []gollem.Tool
 }
@@ -183,14 +188,21 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 		return r.recordPrepareFailure(ctx, key, goerr.Wrap(actErr, "load actions"))
 	}
 
+	sources, narrowed, srcErr := r.resolveSources(ctx, ev.WorkspaceID, c)
+	if srcErr != nil {
+		return r.recordPrepareFailure(ctx, key, goerr.Wrap(srcErr, "load sources for system prompt"))
+	}
+
 	startedAt := r.clock()
 	in := PromptInputs{
-		Job:       j,
-		Workspace: ws,
-		Case:      c,
-		Actions:   actions,
-		Event:     ev,
-		Now:       startedAt,
+		Job:             j,
+		Workspace:       ws,
+		Case:            c,
+		Actions:         actions,
+		Event:           ev,
+		Now:             startedAt,
+		Sources:         sources,
+		SourcesNarrowed: narrowed,
 	}
 	systemPrompt, err := BuildSystemPrompt(in)
 	if err != nil {
@@ -284,6 +296,68 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 		return goerr.Wrap(recErr, "record successful run")
 	}
 	return execErr
+}
+
+// resolveSources turns Case.AgentSourceIDs into the list of Sources that
+// will appear in the system prompt. The contract is:
+//   - operator narrowed (Case.AgentSourceIDs non-empty)
+//     → fetch each by ID, drop any that no longer exist or that are
+//       disabled (silent skip: a Source toggled off after selection
+//       must not invalidate the Case settings or fail the Job), return
+//       narrowed=true so the prompt phrases the list as a preference.
+//   - no selection (empty)
+//     → list every ENABLED Workspace Source so the agent sees the full
+//       catalogue, return narrowed=false so the prompt phrases the
+//       list as "no narrowing in effect".
+//
+// Either way the agent is never *forced* to restrict itself — the
+// Sources section is a hint, not a filter. See `prompts/system.md`
+// `# Sources`.
+func (r *JobRunner) resolveSources(ctx context.Context, workspaceID string, c *model.Case) ([]*model.Source, bool, error) {
+	if c == nil {
+		return nil, false, nil
+	}
+
+	// One List call covers both branches: the empty-selection branch
+	// returns every enabled Source as-is, the narrowed branch filters
+	// the same list by the operator's allowlist. Workspace Source
+	// catalogues are small (handful per workspace), so a single list
+	// query is cheaper than N parallel Gets and avoids any per-ID
+	// "not found" handling — IDs missing from the catalogue (Source
+	// deleted after selection) simply don't appear in the filter
+	// output, which is exactly the silent-skip semantics we want.
+	all, err := r.deps.Repo.Source().List(ctx, workspaceID)
+	if err != nil {
+		return nil, len(c.AgentSourceIDs) > 0, goerr.Wrap(err, "list workspace sources",
+			goerr.V("workspace_id", workspaceID),
+			goerr.V("case_id", c.ID))
+	}
+
+	if len(c.AgentSourceIDs) == 0 {
+		out := make([]*model.Source, 0, len(all))
+		for _, s := range all {
+			if s == nil || !s.Enabled {
+				continue
+			}
+			out = append(out, s)
+		}
+		return out, false, nil
+	}
+
+	known := make(map[model.SourceID]*model.Source, len(all))
+	for _, s := range all {
+		if s == nil || !s.Enabled {
+			continue
+		}
+		known[s.ID] = s
+	}
+	out := make([]*model.Source, 0, len(c.AgentSourceIDs))
+	for _, id := range c.AgentSourceIDs {
+		if s, ok := known[id]; ok {
+			out = append(out, s)
+		}
+	}
+	return out, true, nil
 }
 
 // recordPrepareFailure writes a FAILED outcome to the JobRun lock doc

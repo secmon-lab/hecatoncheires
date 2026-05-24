@@ -2,6 +2,7 @@ package model_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -168,6 +169,24 @@ func TestCase_Validate(t *testing.T) {
 	t.Run("case with ReporterID passes Validate", func(t *testing.T) {
 		c := &model.Case{Title: "Has Reporter", ReporterID: "UREPORTER123"}
 		gt.NoError(t, c.Validate())
+	})
+
+	t.Run("agent additional prompt within limit passes Validate", func(t *testing.T) {
+		c := &model.Case{
+			Title:                 "Within limit",
+			AgentAdditionalPrompt: strings.Repeat("a", model.AgentAdditionalPromptMaxLen),
+		}
+		gt.NoError(t, c.Validate())
+	})
+
+	t.Run("agent additional prompt over limit fails Validate", func(t *testing.T) {
+		c := &model.Case{
+			Title:                 "Over limit",
+			AgentAdditionalPrompt: strings.Repeat("a", model.AgentAdditionalPromptMaxLen+1),
+		}
+		err := c.Validate()
+		gt.Error(t, err)
+		gt.Bool(t, errors.Is(err, model.ErrCaseAgentPromptTooLong)).True()
 	})
 }
 

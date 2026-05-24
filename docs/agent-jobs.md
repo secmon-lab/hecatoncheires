@@ -66,16 +66,37 @@ The runtime constructs a structured system prompt every invocation. The
 contents are fixed by the runtime — Job authors only control
 `prompt` (the user message).
 
-| Section             | Content |
-|---------------------|---------|
-| Role                | Agent role and tone (fixed text). |
-| Workspace           | `id`, `name`, `description`, custom field schema. |
-| Case                | All persisted fields of the current case. |
-| Actions             | Existing non-archived actions, for de-duplication. |
-| Trigger condition   | The Job's declared subscription (events.case / events.scheduled). |
-| Trigger reason      | The concrete event that fired this invocation (timestamps, actor, lifecycle / cron tick). |
-| Guardrails          | Fixed restrictions: no auto-close, no delete, channel-scoped Slack, etc. |
-| Tools               | gollem auto-injects the resolved tool list. |
+| Section                  | Content |
+|--------------------------|---------|
+| Role                     | Agent role and tone (fixed text). |
+| Workspace                | `id`, `name`, `description`, custom field schema. |
+| Case                     | All persisted fields of the current case. |
+| Per-case operator notes  | Rendered only when the Case has `AgentAdditionalPrompt` set (see below). |
+| Actions                  | Existing non-archived actions, for de-duplication. |
+| Trigger condition        | The Job's declared subscription (events.case / events.scheduled). |
+| Trigger reason           | The concrete event that fired this invocation (timestamps, actor, lifecycle / cron tick). |
+| Guardrails               | Fixed restrictions: no auto-close, no delete, channel-scoped Slack, etc. |
+| Tools                    | gollem auto-injects the resolved tool list. |
+
+### Per-case agent customisation
+
+The Case Agent page (`/ws/{ws}/cases/{id}/agent`) lets operators attach
+two Case-scoped knobs that the runtime applies on top of the TOML Job
+definition:
+
+- **Additional prompt**: a Markdown snippet (max 16,384 bytes) that is
+  rendered into the `Per-case operator notes` section of the system
+  prompt. It does **not** replace the TOML prompt or the Guardrails —
+  treat it as extra context, not as a way to grant new capabilities.
+- **Source allowlist** (`AgentSourceIDs`): when empty, every enabled
+  Workspace Source remains in play. When non-empty, Source-aware tools
+  MUST narrow themselves to the listed IDs. Unknown / deleted IDs are
+  silently skipped at use time so a Source toggled off later does not
+  invalidate the stored selection.
+
+Both values round-trip through the `updateCaseAgentSettings` GraphQL
+mutation. Drafts cannot carry agent settings (they have no Slack
+channel and no Job runs against them).
 
 ## Tools available to a Job
 
