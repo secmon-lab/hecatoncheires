@@ -221,13 +221,16 @@ func buildSystemPromptData(in PromptInputs) systemPromptData {
 		}
 		if schema := ws.FieldSchema; schema != nil {
 			for _, f := range schema.Fields {
-				meta := fieldMeta{fieldType: f.Type, options: map[string]config.FieldOption{}}
+				meta := fieldMeta{fieldType: f.Type}
 				field := systemPromptField{
 					ID:          f.ID,
 					Name:        f.Name,
 					Type:        string(f.Type),
 					Required:    f.Required,
 					Description: f.Description,
+				}
+				if len(f.Options) > 0 {
+					meta.options = make(map[string]config.FieldOption, len(f.Options))
 				}
 				for _, o := range f.Options {
 					meta.options[o.ID] = o
@@ -455,9 +458,7 @@ func resolveFieldValueOptions(meta fieldMeta, raw any) []systemPromptFieldValueO
 func multiSelectIDs(raw any) ([]string, bool) {
 	switch v := raw.(type) {
 	case []string:
-		out := make([]string, 0, len(v))
-		out = append(out, v...)
-		return out, true
+		return v, true
 	case []any:
 		out := make([]string, 0, len(v))
 		for _, e := range v {
