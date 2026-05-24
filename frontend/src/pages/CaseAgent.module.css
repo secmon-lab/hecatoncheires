@@ -59,12 +59,52 @@
   color: var(--fg-soft);
 }
 
+/* Section label that sits above each major block (Settings vs.
+   Run history). Matches the right-rail label style used in the Case
+   detail sidebar so the visual vocabulary stays consistent. */
+.sectionHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 16px;
+}
+.sectionHeadTitle {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  /* Subtle accent-tinted pill behind the label so it reads as a
+     deliberate section marker, not just another grey caption. */
+  padding: 3px 10px;
+  background: color-mix(in oklch, var(--accent) 10%, transparent);
+  border-radius: 99px;
+}
+.sectionHeadRule {
+  flex: 1;
+  height: 1px;
+  /* Soft accent-tinted rule matching the chip so the divider doesn't
+     feel disconnected from the label. */
+  background: color-mix(in oklch, var(--accent) 18%, var(--line));
+}
+
+/* Outer block wrappers. Settings comes first; Results sits below
+   with generous top/bottom whitespace so the two areas read as
+   distinct chapters at a glance. */
+.settingsBlock {
+  margin-top: 20px;
+  margin-bottom: 48px;
+}
+.resultsBlock {
+  margin-top: 20px;
+}
+
 /* 2-column settings cluster (additional prompt + sources) */
 .settings {
   display: grid;
   grid-template-columns: 1.4fr 1fr;
   gap: 14px;
-  margin-bottom: 14px;
+  margin-bottom: 0;
 }
 @media (max-width: 1023px) {
   .settings { grid-template-columns: 1fr; }

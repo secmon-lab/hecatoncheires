@@ -407,6 +407,8 @@ export const msgKeys = {
   // Case Agent page (V3 Dashboard) + JobRunLog detail
   caseAgentTitle: 'caseAgentTitle',
   caseAgentSubtitle: 'caseAgentSubtitle',
+  caseAgentSectionSettings: 'caseAgentSectionSettings',
+  caseAgentSectionResults: 'caseAgentSectionResults',
   caseAgentBack: 'caseAgentBack',
   caseAgentAdditionalPrompt: 'caseAgentAdditionalPrompt',
   caseAgentMarkdownBadge: 'caseAgentMarkdownBadge',

@@ -408,6 +408,8 @@ export const ja: Messages = {
 
   caseAgentTitle: 'Agent',
   caseAgentSubtitle: 'このケース固有の追加プロンプトと利用 Source、過去の Agent 実行ログ',
+  caseAgentSectionSettings: '設定',
+  caseAgentSectionResults: '実行履歴',
   caseAgentBack: '← ケース #{id} に戻る',
   caseAgentAdditionalPrompt: '追加プロンプト',
   caseAgentMarkdownBadge: 'Markdown',

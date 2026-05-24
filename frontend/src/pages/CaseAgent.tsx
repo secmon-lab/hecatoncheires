@@ -277,8 +277,16 @@ export default function CaseAgent() {
         </div>
       )}
 
-      {/* Settings 2-column cluster */}
-      <div className={styles.settings}>
+      {/* Settings block — operator inputs that shape the next run. */}
+      <div className={styles.settingsBlock}>
+        <div className={styles.sectionHead}>
+          <span className={styles.sectionHeadTitle}>
+            {t('caseAgentSectionSettings')}
+          </span>
+          <span className={styles.sectionHeadRule} />
+        </div>
+        {/* 2-column settings cluster */}
+        <div className={styles.settings}>
         {/* Additional prompt card */}
         <div className={['card', styles.settingsCard].join(' ')}>
           <div className={styles.settingsHead}>
@@ -450,7 +458,18 @@ export default function CaseAgent() {
             </div>
           )}
         </div>
+        </div>
       </div>
+
+      {/* Results block — the outcome of past runs. Visually separated
+          from Settings above so the page reads as two chapters. */}
+      <div className={styles.resultsBlock}>
+        <div className={styles.sectionHead}>
+          <span className={styles.sectionHeadTitle}>
+            {t('caseAgentSectionResults')}
+          </span>
+          <span className={styles.sectionHeadRule} />
+        </div>
 
       {/* Stats hero — values are computed from the loaded page slice
           plus a single derived KPI (count). Cron / token KPIs render
@@ -574,6 +593,7 @@ export default function CaseAgent() {
             </Button>
           </div>
         </div>
+      </div>
       </div>
     </div>
   )

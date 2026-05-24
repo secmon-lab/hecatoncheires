@@ -408,6 +408,8 @@ export const en: Messages = {
 
   caseAgentTitle: 'Agent',
   caseAgentSubtitle: 'Per-case additional prompt, agent sources, and run history.',
+  caseAgentSectionSettings: 'Settings',
+  caseAgentSectionResults: 'Run history',
   caseAgentBack: '← Back to case #{id}',
   caseAgentAdditionalPrompt: 'Additional prompt',
   caseAgentMarkdownBadge: 'Markdown',
