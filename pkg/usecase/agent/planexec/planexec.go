@@ -125,12 +125,17 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 		trace.WithTraceID(req.TraceID),
 		trace.WithMetadata(req.TraceMetadata),
 	)
-	// Use the parent ctx (not a downstream-cancelled one) so the final
-	// trace flush still runs even when the turn was cancelled by the
-	// host.
+	// context.WithoutCancel detaches the cleanup from the caller's
+	// cancellation tree so the final trace flush still runs (and can
+	// reach Firestore) when the host already cancelled ctx — e.g. a
+	// heartbeat-driven turn-lock loss or a parent request timeout.
+	// Using ctx directly here means the persisted-trace I/O fails
+	// silently at exactly the moment the trace is most valuable for
+	// debugging.
 	defer func() {
-		if err := recorder.Finish(ctx); err != nil {
-			errutil.Handle(ctx, err, "planexec: persist agent trace")
+		cleanupCtx := context.WithoutCancel(ctx)
+		if err := recorder.Finish(cleanupCtx); err != nil {
+			errutil.Handle(cleanupCtx, err, "planexec: persist agent trace")
 		}
 	}()
 

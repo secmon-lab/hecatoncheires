@@ -712,6 +712,7 @@ function placeholderRow(): JobRunLogRow {
     caseId: 0,
     jobId: '',
     jobName: '',
+    strategy: 'SIMPLE',
     runId: '',
     stage: 'SUCCESS',
     startedAt: '',
