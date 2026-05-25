@@ -8,6 +8,8 @@ import ActionList from './pages/ActionList'
 import AssistLogList from './pages/AssistLogList'
 import SourceList from './pages/SourceList'
 import SourceDetail from './pages/SourceDetail'
+import ImportNew from './pages/ImportNew'
+import ImportDetail from './pages/ImportDetail'
 import WorkspaceSelector from './pages/WorkspaceSelector'
 import WorkspaceGuard from './components/WorkspaceGuard'
 import { AuthGuard } from './components/auth/auth-guard'
@@ -44,6 +46,13 @@ function App() {
           <Route path="drafts/:id" element={<DraftDetailRedirect />} />
           <Route path="sources" element={<SourceList />} />
           <Route path="sources/:id" element={<SourceDetail />} />
+          {/* /imports has no list page by design — sessions are addressable
+              only by ID. A bare /imports navigation lands here from the
+              breadcrumb Layout renders, so redirect it to the new-import
+              entry point instead of showing a blank page. */}
+          <Route path="imports" element={<Navigate to="new" replace />} />
+          <Route path="imports/new" element={<ImportNew />} />
+          <Route path="imports/:importId" element={<ImportDetail />} />
         </Route>
       </Routes>
     </AuthGuard>

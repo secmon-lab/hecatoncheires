@@ -10,6 +10,7 @@ require (
 	github.com/fatih/color v1.18.0
 	github.com/getsentry/sentry-go v0.46.1
 	github.com/go-chi/chi/v5 v5.2.3
+	github.com/goccy/go-yaml v1.19.0
 	github.com/google/go-github/v75 v75.0.0
 	github.com/google/uuid v1.6.0
 	github.com/graph-gophers/dataloader/v7 v7.1.3
@@ -91,7 +92,6 @@ require (
 	github.com/go-task/template v0.2.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/goccy/go-json v0.10.3 // indirect
-	github.com/goccy/go-yaml v1.19.0 // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect

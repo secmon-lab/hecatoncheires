@@ -25,6 +25,7 @@ type Memory struct {
 	jobRun        *jobRunRepository
 	jobRunLog     *jobRunLogRepository
 	jobRunEvent   *jobRunEventRepository
+	importRepo    *importRepository
 }
 
 var _ interfaces.Repository = &Memory{}
@@ -48,6 +49,7 @@ func New() *Memory {
 		jobRun:        newJobRunRepository(),
 		jobRunLog:     newJobRunLogRepository(),
 		jobRunEvent:   newJobRunEventRepository(),
+		importRepo:    newImportRepository(),
 	}
 }
 
@@ -113,6 +115,10 @@ func (m *Memory) JobRunLog() interfaces.JobRunLogRepository {
 
 func (m *Memory) JobRunEvent() interfaces.JobRunEventRepository {
 	return m.jobRunEvent
+}
+
+func (m *Memory) Import() interfaces.ImportRepository {
+	return m.importRepo
 }
 
 func (m *Memory) Close() error {

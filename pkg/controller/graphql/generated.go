@@ -222,6 +222,82 @@ type ComplexityRoot struct {
 		Repo  func(childComplexity int) int
 	}
 
+	ImportActionResult struct {
+		CreatedAction   func(childComplexity int) int
+		CreatedActionID func(childComplexity int) int
+		Error           func(childComplexity int) int
+		Status          func(childComplexity int) int
+	}
+
+	ImportCaseResult struct {
+		CreatedCase   func(childComplexity int) int
+		CreatedCaseID func(childComplexity int) int
+		Error         func(childComplexity int) int
+		Status        func(childComplexity int) int
+	}
+
+	ImportIssue struct {
+		Message  func(childComplexity int) int
+		Path     func(childComplexity int) int
+		Severity func(childComplexity int) int
+	}
+
+	ImportSession struct {
+		CreatedAt       func(childComplexity int) int
+		CreatedCount    func(childComplexity int) int
+		CreatorUserID   func(childComplexity int) int
+		ExecutedAt      func(childComplexity int) int
+		FailedCount     func(childComplexity int) int
+		FieldSchemaHash func(childComplexity int) int
+		ID              func(childComplexity int) int
+		Issues          func(childComplexity int) int
+		SkippedCount    func(childComplexity int) int
+		Snapshot        func(childComplexity int) int
+		Source          func(childComplexity int) int
+		Status          func(childComplexity int) int
+		UpdatedAt       func(childComplexity int) int
+		Valid           func(childComplexity int) int
+		WorkspaceID     func(childComplexity int) int
+	}
+
+	ImportSnapshot struct {
+		Cases   func(childComplexity int) int
+		Version func(childComplexity int) int
+	}
+
+	ImportSnapshotAction struct {
+		AssigneeID  func(childComplexity int) int
+		Description func(childComplexity int) int
+		DueDate     func(childComplexity int) int
+		Index       func(childComplexity int) int
+		Issues      func(childComplexity int) int
+		Result      func(childComplexity int) int
+		Title       func(childComplexity int) int
+	}
+
+	ImportSnapshotCase struct {
+		Actions     func(childComplexity int) int
+		AssigneeIDs func(childComplexity int) int
+		Assignees   func(childComplexity int) int
+		Description func(childComplexity int) int
+		Fields      func(childComplexity int) int
+		Index       func(childComplexity int) int
+		IsPrivate   func(childComplexity int) int
+		Issues      func(childComplexity int) int
+		Result      func(childComplexity int) int
+		Title       func(childComplexity int) int
+	}
+
+	ImportSnapshotField struct {
+		Display func(childComplexity int) int
+		Key     func(childComplexity int) int
+	}
+
+	ImportSource struct {
+		OriginalFileName func(childComplexity int) int
+		SizeBytes        func(childComplexity int) int
+	}
+
 	JobRunEvent struct {
 		AgentLabel     func(childComplexity int) int
 		EventID        func(childComplexity int) int
@@ -263,6 +339,7 @@ type ComplexityRoot struct {
 		CloseCase               func(childComplexity int, workspaceID string, id int) int
 		CreateAction            func(childComplexity int, workspaceID string, input graphql1.CreateActionInput) int
 		CreateCase              func(childComplexity int, workspaceID string, input graphql1.CreateCaseInput) int
+		CreateCaseImport        func(childComplexity int, workspaceID string, input graphql1.CreateCaseImportInput) int
 		CreateDraft             func(childComplexity int, workspaceID string, input graphql1.CreateDraftInput) int
 		CreateGitHubSource      func(childComplexity int, workspaceID string, input graphql1.CreateGitHubSourceInput) int
 		CreateNotionDBSource    func(childComplexity int, workspaceID string, input graphql1.CreateNotionDBSourceInput) int
@@ -272,6 +349,7 @@ type ComplexityRoot struct {
 		DeleteCase              func(childComplexity int, workspaceID string, id int) int
 		DeleteSource            func(childComplexity int, workspaceID string, id string) int
 		DiscardDraft            func(childComplexity int, workspaceID string, id int) int
+		ExecuteCaseImport       func(childComplexity int, workspaceID string, id string) int
 		Noop                    func(childComplexity int) int
 		PostActionSlackMessage  func(childComplexity int, workspaceID string, id int) int
 		RenameActionStep        func(childComplexity int, workspaceID string, input graphql1.RenameActionStepInput) int
@@ -326,6 +404,7 @@ type ComplexityRoot struct {
 		ActionsByCase       func(childComplexity int, workspaceID string, caseID int, filter *graphql1.ActionArchiveFilter) int
 		AssistLogs          func(childComplexity int, workspaceID string, caseID int, limit *int, offset *int) int
 		Case                func(childComplexity int, workspaceID string, id int) int
+		CaseImport          func(childComplexity int, workspaceID string, id string) int
 		CaseJobRunLogs      func(childComplexity int, workspaceID string, caseID int, first *int, after *string) int
 		Cases               func(childComplexity int, workspaceID string, status *types.CaseStatus) int
 		Drafts              func(childComplexity int, workspaceID string) int
@@ -471,6 +550,8 @@ type MutationResolver interface {
 	ValidateNotionDb(ctx context.Context, workspaceID string, databaseID string) (*graphql1.NotionDBValidationResult, error)
 	ValidateNotionPage(ctx context.Context, workspaceID string, pageID string) (*graphql1.NotionPageValidationResult, error)
 	UpdateCaseAgentSettings(ctx context.Context, workspaceID string, input graphql1.UpdateCaseAgentSettingsInput) (*graphql1.Case, error)
+	CreateCaseImport(ctx context.Context, workspaceID string, input graphql1.CreateCaseImportInput) (*graphql1.ImportSession, error)
+	ExecuteCaseImport(ctx context.Context, workspaceID string, id string) (*graphql1.ImportSession, error)
 }
 type QueryResolver interface {
 	Health(ctx context.Context) (string, error)
@@ -493,6 +574,7 @@ type QueryResolver interface {
 	CaseJobRunLogs(ctx context.Context, workspaceID string, caseID int, first *int, after *string) (*graphql1.JobRunLogConnection, error)
 	JobRunLog(ctx context.Context, workspaceID string, caseID int, runID string) (*graphql1.JobRunLog, error)
 	JobRunEvents(ctx context.Context, workspaceID string, caseID int, runID string) ([]*graphql1.JobRunEvent, error)
+	CaseImport(ctx context.Context, workspaceID string, id string) (*graphql1.ImportSession, error)
 }
 
 type executableSchema struct {
@@ -1242,6 +1324,309 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.GitHubRepository.Repo(childComplexity), true
 
+	case "ImportActionResult.createdAction":
+		if e.complexity.ImportActionResult.CreatedAction == nil {
+			break
+		}
+
+		return e.complexity.ImportActionResult.CreatedAction(childComplexity), true
+	case "ImportActionResult.createdActionID":
+		if e.complexity.ImportActionResult.CreatedActionID == nil {
+			break
+		}
+
+		return e.complexity.ImportActionResult.CreatedActionID(childComplexity), true
+	case "ImportActionResult.error":
+		if e.complexity.ImportActionResult.Error == nil {
+			break
+		}
+
+		return e.complexity.ImportActionResult.Error(childComplexity), true
+	case "ImportActionResult.status":
+		if e.complexity.ImportActionResult.Status == nil {
+			break
+		}
+
+		return e.complexity.ImportActionResult.Status(childComplexity), true
+
+	case "ImportCaseResult.createdCase":
+		if e.complexity.ImportCaseResult.CreatedCase == nil {
+			break
+		}
+
+		return e.complexity.ImportCaseResult.CreatedCase(childComplexity), true
+	case "ImportCaseResult.createdCaseID":
+		if e.complexity.ImportCaseResult.CreatedCaseID == nil {
+			break
+		}
+
+		return e.complexity.ImportCaseResult.CreatedCaseID(childComplexity), true
+	case "ImportCaseResult.error":
+		if e.complexity.ImportCaseResult.Error == nil {
+			break
+		}
+
+		return e.complexity.ImportCaseResult.Error(childComplexity), true
+	case "ImportCaseResult.status":
+		if e.complexity.ImportCaseResult.Status == nil {
+			break
+		}
+
+		return e.complexity.ImportCaseResult.Status(childComplexity), true
+
+	case "ImportIssue.message":
+		if e.complexity.ImportIssue.Message == nil {
+			break
+		}
+
+		return e.complexity.ImportIssue.Message(childComplexity), true
+	case "ImportIssue.path":
+		if e.complexity.ImportIssue.Path == nil {
+			break
+		}
+
+		return e.complexity.ImportIssue.Path(childComplexity), true
+	case "ImportIssue.severity":
+		if e.complexity.ImportIssue.Severity == nil {
+			break
+		}
+
+		return e.complexity.ImportIssue.Severity(childComplexity), true
+
+	case "ImportSession.createdAt":
+		if e.complexity.ImportSession.CreatedAt == nil {
+			break
+		}
+
+		return e.complexity.ImportSession.CreatedAt(childComplexity), true
+	case "ImportSession.createdCount":
+		if e.complexity.ImportSession.CreatedCount == nil {
+			break
+		}
+
+		return e.complexity.ImportSession.CreatedCount(childComplexity), true
+	case "ImportSession.creatorUserID":
+		if e.complexity.ImportSession.CreatorUserID == nil {
+			break
+		}
+
+		return e.complexity.ImportSession.CreatorUserID(childComplexity), true
+	case "ImportSession.executedAt":
+		if e.complexity.ImportSession.ExecutedAt == nil {
+			break
+		}
+
+		return e.complexity.ImportSession.ExecutedAt(childComplexity), true
+	case "ImportSession.failedCount":
+		if e.complexity.ImportSession.FailedCount == nil {
+			break
+		}
+
+		return e.complexity.ImportSession.FailedCount(childComplexity), true
+	case "ImportSession.fieldSchemaHash":
+		if e.complexity.ImportSession.FieldSchemaHash == nil {
+			break
+		}
+
+		return e.complexity.ImportSession.FieldSchemaHash(childComplexity), true
+	case "ImportSession.id":
+		if e.complexity.ImportSession.ID == nil {
+			break
+		}
+
+		return e.complexity.ImportSession.ID(childComplexity), true
+	case "ImportSession.issues":
+		if e.complexity.ImportSession.Issues == nil {
+			break
+		}
+
+		return e.complexity.ImportSession.Issues(childComplexity), true
+	case "ImportSession.skippedCount":
+		if e.complexity.ImportSession.SkippedCount == nil {
+			break
+		}
+
+		return e.complexity.ImportSession.SkippedCount(childComplexity), true
+	case "ImportSession.snapshot":
+		if e.complexity.ImportSession.Snapshot == nil {
+			break
+		}
+
+		return e.complexity.ImportSession.Snapshot(childComplexity), true
+	case "ImportSession.source":
+		if e.complexity.ImportSession.Source == nil {
+			break
+		}
+
+		return e.complexity.ImportSession.Source(childComplexity), true
+	case "ImportSession.status":
+		if e.complexity.ImportSession.Status == nil {
+			break
+		}
+
+		return e.complexity.ImportSession.Status(childComplexity), true
+	case "ImportSession.updatedAt":
+		if e.complexity.ImportSession.UpdatedAt == nil {
+			break
+		}
+
+		return e.complexity.ImportSession.UpdatedAt(childComplexity), true
+	case "ImportSession.valid":
+		if e.complexity.ImportSession.Valid == nil {
+			break
+		}
+
+		return e.complexity.ImportSession.Valid(childComplexity), true
+	case "ImportSession.workspaceID":
+		if e.complexity.ImportSession.WorkspaceID == nil {
+			break
+		}
+
+		return e.complexity.ImportSession.WorkspaceID(childComplexity), true
+
+	case "ImportSnapshot.cases":
+		if e.complexity.ImportSnapshot.Cases == nil {
+			break
+		}
+
+		return e.complexity.ImportSnapshot.Cases(childComplexity), true
+	case "ImportSnapshot.version":
+		if e.complexity.ImportSnapshot.Version == nil {
+			break
+		}
+
+		return e.complexity.ImportSnapshot.Version(childComplexity), true
+
+	case "ImportSnapshotAction.assigneeID":
+		if e.complexity.ImportSnapshotAction.AssigneeID == nil {
+			break
+		}
+
+		return e.complexity.ImportSnapshotAction.AssigneeID(childComplexity), true
+	case "ImportSnapshotAction.description":
+		if e.complexity.ImportSnapshotAction.Description == nil {
+			break
+		}
+
+		return e.complexity.ImportSnapshotAction.Description(childComplexity), true
+	case "ImportSnapshotAction.dueDate":
+		if e.complexity.ImportSnapshotAction.DueDate == nil {
+			break
+		}
+
+		return e.complexity.ImportSnapshotAction.DueDate(childComplexity), true
+	case "ImportSnapshotAction.index":
+		if e.complexity.ImportSnapshotAction.Index == nil {
+			break
+		}
+
+		return e.complexity.ImportSnapshotAction.Index(childComplexity), true
+	case "ImportSnapshotAction.issues":
+		if e.complexity.ImportSnapshotAction.Issues == nil {
+			break
+		}
+
+		return e.complexity.ImportSnapshotAction.Issues(childComplexity), true
+	case "ImportSnapshotAction.result":
+		if e.complexity.ImportSnapshotAction.Result == nil {
+			break
+		}
+
+		return e.complexity.ImportSnapshotAction.Result(childComplexity), true
+	case "ImportSnapshotAction.title":
+		if e.complexity.ImportSnapshotAction.Title == nil {
+			break
+		}
+
+		return e.complexity.ImportSnapshotAction.Title(childComplexity), true
+
+	case "ImportSnapshotCase.actions":
+		if e.complexity.ImportSnapshotCase.Actions == nil {
+			break
+		}
+
+		return e.complexity.ImportSnapshotCase.Actions(childComplexity), true
+	case "ImportSnapshotCase.assigneeIDs":
+		if e.complexity.ImportSnapshotCase.AssigneeIDs == nil {
+			break
+		}
+
+		return e.complexity.ImportSnapshotCase.AssigneeIDs(childComplexity), true
+	case "ImportSnapshotCase.assignees":
+		if e.complexity.ImportSnapshotCase.Assignees == nil {
+			break
+		}
+
+		return e.complexity.ImportSnapshotCase.Assignees(childComplexity), true
+	case "ImportSnapshotCase.description":
+		if e.complexity.ImportSnapshotCase.Description == nil {
+			break
+		}
+
+		return e.complexity.ImportSnapshotCase.Description(childComplexity), true
+	case "ImportSnapshotCase.fields":
+		if e.complexity.ImportSnapshotCase.Fields == nil {
+			break
+		}
+
+		return e.complexity.ImportSnapshotCase.Fields(childComplexity), true
+	case "ImportSnapshotCase.index":
+		if e.complexity.ImportSnapshotCase.Index == nil {
+			break
+		}
+
+		return e.complexity.ImportSnapshotCase.Index(childComplexity), true
+	case "ImportSnapshotCase.isPrivate":
+		if e.complexity.ImportSnapshotCase.IsPrivate == nil {
+			break
+		}
+
+		return e.complexity.ImportSnapshotCase.IsPrivate(childComplexity), true
+	case "ImportSnapshotCase.issues":
+		if e.complexity.ImportSnapshotCase.Issues == nil {
+			break
+		}
+
+		return e.complexity.ImportSnapshotCase.Issues(childComplexity), true
+	case "ImportSnapshotCase.result":
+		if e.complexity.ImportSnapshotCase.Result == nil {
+			break
+		}
+
+		return e.complexity.ImportSnapshotCase.Result(childComplexity), true
+	case "ImportSnapshotCase.title":
+		if e.complexity.ImportSnapshotCase.Title == nil {
+			break
+		}
+
+		return e.complexity.ImportSnapshotCase.Title(childComplexity), true
+
+	case "ImportSnapshotField.display":
+		if e.complexity.ImportSnapshotField.Display == nil {
+			break
+		}
+
+		return e.complexity.ImportSnapshotField.Display(childComplexity), true
+	case "ImportSnapshotField.key":
+		if e.complexity.ImportSnapshotField.Key == nil {
+			break
+		}
+
+		return e.complexity.ImportSnapshotField.Key(childComplexity), true
+
+	case "ImportSource.originalFileName":
+		if e.complexity.ImportSource.OriginalFileName == nil {
+			break
+		}
+
+		return e.complexity.ImportSource.OriginalFileName(childComplexity), true
+	case "ImportSource.sizeBytes":
+		if e.complexity.ImportSource.SizeBytes == nil {
+			break
+		}
+
+		return e.complexity.ImportSource.SizeBytes(childComplexity), true
+
 	case "JobRunEvent.agentLabel":
 		if e.complexity.JobRunEvent.AgentLabel == nil {
 			break
@@ -1456,6 +1841,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.CreateCase(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.CreateCaseInput)), true
+	case "Mutation.createCaseImport":
+		if e.complexity.Mutation.CreateCaseImport == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_createCaseImport_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.CreateCaseImport(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.CreateCaseImportInput)), true
 	case "Mutation.createDraft":
 		if e.complexity.Mutation.CreateDraft == nil {
 			break
@@ -1555,6 +1951,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.DiscardDraft(childComplexity, args["workspaceId"].(string), args["id"].(int)), true
+	case "Mutation.executeCaseImport":
+		if e.complexity.Mutation.ExecuteCaseImport == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_executeCaseImport_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.ExecuteCaseImport(childComplexity, args["workspaceId"].(string), args["id"].(string)), true
 	case "Mutation.noop":
 		if e.complexity.Mutation.Noop == nil {
 			break
@@ -1904,6 +2311,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Query.Case(childComplexity, args["workspaceId"].(string), args["id"].(int)), true
+	case "Query.caseImport":
+		if e.complexity.Query.CaseImport == nil {
+			break
+		}
+
+		args, err := ec.field_Query_caseImport_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Query.CaseImport(childComplexity, args["workspaceId"].(string), args["id"].(string)), true
 	case "Query.caseJobRunLogs":
 		if e.complexity.Query.CaseJobRunLogs == nil {
 			break
@@ -2297,6 +2715,7 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 	inputUnmarshalMap := graphql.BuildUnmarshalerMap(
 		ec.unmarshalInputAddActionStepInput,
 		ec.unmarshalInputCreateActionInput,
+		ec.unmarshalInputCreateCaseImportInput,
 		ec.unmarshalInputCreateCaseInput,
 		ec.unmarshalInputCreateDraftInput,
 		ec.unmarshalInputCreateGitHubSourceInput,
@@ -3003,6 +3422,11 @@ type Query {
 
   # Full event timeline of one Run in ascending Sequence order.
   jobRunEvents(workspaceId: String!, caseId: Int!, runId: String!): [JobRunEvent!]!
+
+  # Case Import — single session lookup. Sessions are scoped to the creator;
+  # the resolver returns "not found" for sessions owned by other users even
+  # when the ID is known.
+  caseImport(workspaceId: String!, id: ID!): ImportSession!
 }
 
 type Mutation {
@@ -3071,6 +3495,19 @@ type Mutation {
   # passing an empty list clears it (= "use every Source"); the order is
   # preserved verbatim so the UI round-trips unchanged.
   updateCaseAgentSettings(workspaceId: String!, input: UpdateCaseAgentSettingsInput!): Case!
+
+  # Case Import — create a pending ImportSession from raw YAML content.
+  # The session is persisted to Firestore and identified by an ImportSessionID
+  # (returned in ` + "`" + `id` + "`" + `). The caller is captured from the auth context and
+  # becomes the only principal allowed to read or execute the session.
+  createCaseImport(workspaceId: String!, input: CreateCaseImportInput!): ImportSession!
+
+  # Case Import — execute the persisted snapshot (Case/Action creation).
+  # Allowed only when status==PENDING and the session is ` + "`" + `valid` + "`" + `. Fails
+  # with an explicit error if the workspace field schema has drifted
+  # since createCaseImport (issues are appended to the session for the
+  # detail UI to display).
+  executeCaseImport(workspaceId: String!, id: ID!): ImportSession!
 }
 
 input UpdateCaseAgentSettingsInput {
@@ -3159,6 +3596,130 @@ type JobRunEvent {
   # for transport simplicity. Schema: see model.LLMRequestPayload /
   # LLMResponsePayload / ToolCallPayload / RunErrorPayload.
   payload: JSON!
+}
+
+# ---- Case Import (YAML → Case/Action) ---------------------------------------
+#
+# Workflow: createCaseImport persists a normalized ImportSession in PENDING
+# state from raw YAML. executeCaseImport advances it exactly once to
+# APPLIED (all cases created) or FAILED (one or more failures; subsequent
+# items are SKIPPED). Sessions are kept indefinitely and surfaced only by
+# direct ID lookup — there is no list query.
+
+enum ImportSessionStatus {
+  PENDING
+  APPLIED
+  FAILED
+}
+
+enum ImportItemResultStatus {
+  PENDING
+  CREATED
+  FAILED
+  SKIPPED
+}
+
+enum ImportIssueSeverity {
+  ERROR
+  WARNING
+}
+
+# One validation or execution finding. ` + "`" + `path` + "`" + ` is a JSONPath-like locator
+# such as "cases[0].fields.severity" that the frontend uses to highlight
+# the offending value. ` + "`" + `message` + "`" + ` is already in the caller's language.
+type ImportIssue {
+  path: String!
+  message: String!
+  severity: ImportIssueSeverity!
+}
+
+# Metadata about the uploaded source YAML.
+type ImportSource {
+  originalFileName: String!
+  sizeBytes: Int!
+}
+
+# Per-Case execution result. ` + "`" + `createdCase` + "`" + ` is hydrated via DataLoader and
+# is null when the Case was deleted after applied.
+type ImportCaseResult {
+  status: ImportItemResultStatus!
+  createdCase: Case
+  createdCaseID: Int
+  error: ImportIssue
+}
+
+type ImportActionResult {
+  status: ImportItemResultStatus!
+  createdAction: Action
+  createdActionID: Int
+  error: ImportIssue
+}
+
+# Pre-rendered key/value pair so the frontend does not need to know how
+# each FieldValue type stringifies.
+type ImportSnapshotField {
+  key: String!
+  display: String!
+}
+
+type ImportSnapshotAction {
+  index: Int!
+  title: String!
+  description: String
+  assigneeID: String
+  dueDate: Time
+  issues: [ImportIssue!]!
+  result: ImportActionResult!
+}
+
+type ImportSnapshotCase {
+  index: Int!
+  title: String!
+  description: String
+  isPrivate: Boolean!
+  assigneeIDs: [String!]!
+  """Slack users referenced by assigneeIDs, resolved on the server. Lookup is
+  batched per request so the frontend never has to ship the full slackUsers
+  list. IDs that cannot be resolved are simply omitted from the array."""
+  assignees: [SlackUser!]!
+  fields: [ImportSnapshotField!]!
+  actions: [ImportSnapshotAction!]!
+  issues: [ImportIssue!]!
+  result: ImportCaseResult!
+}
+
+type ImportSnapshot {
+  version: Int!
+  cases: [ImportSnapshotCase!]!
+}
+
+type ImportSession {
+  id: ID!
+  workspaceID: String!
+  creatorUserID: String!
+  status: ImportSessionStatus!
+  source: ImportSource!
+  snapshot: ImportSnapshot!
+  # Session-level issues (YAML parse failure, version mismatch, schema
+  # stale, etc.). Per-Case / per-Action issues live under snapshot.
+  issues: [ImportIssue!]!
+  # True iff there are no ERROR-severity issues anywhere; the Execute
+  # button on the UI is gated on this flag.
+  valid: Boolean!
+  fieldSchemaHash: String!
+  createdAt: Time!
+  updatedAt: Time!
+  executedAt: Time
+  createdCount: Int!
+  failedCount: Int!
+  skippedCount: Int!
+}
+
+input CreateCaseImportInput {
+  """Raw YAML content (UTF-8)."""
+  content: String!
+  """Optional original file name for display purposes."""
+  originalFileName: String
 }
 `, BuiltIn: false},
 }
@@ -3305,6 +3866,22 @@ func (ec *executionContext) field_Mutation_createAction_args(ctx context.Context
 	}
 	args["workspaceId"] = arg0
 	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNCreateActionInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateActionInput)
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_createCaseImport_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNCreateCaseImportInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateCaseImportInput)
 	if err != nil {
 		return nil, err
 	}
@@ -3465,6 +4042,22 @@ func (ec *executionContext) field_Mutation_discardDraft_args(ctx context.Context
 	}
 	args["workspaceId"] = arg0
 	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_executeCaseImport_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNID2string)
 	if err != nil {
 		return nil, err
 	}
@@ -3836,6 +4429,22 @@ func (ec *executionContext) field_Query_assistLogs_args(ctx context.Context, raw
 		return nil, err
 	}
 	args["offset"] = arg3
+	return args, nil
+}
+
+func (ec *executionContext) field_Query_caseImport_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNID2string)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg1
 	return args, nil
 }
 
@@ -7766,6 +8375,1637 @@ func (ec *executionContext) fieldContext_GitHubRepository_repo(_ context.Context
 	return fc, nil
 }
 
+func (ec *executionContext) _ImportActionResult_status(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportActionResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportActionResult_status,
+		func(ctx context.Context) (any, error) {
+			return obj.Status, nil
+		},
+		nil,
+		ec.marshalNImportItemResultStatus2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportItemResultStatus,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportActionResult_status(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportActionResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type ImportItemResultStatus does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportActionResult_createdAction(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportActionResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportActionResult_createdAction,
+		func(ctx context.Context) (any, error) {
+			return obj.CreatedAction, nil
+		},
+		nil,
+		ec.marshalOAction2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐAction,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportActionResult_createdAction(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportActionResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Action_id(ctx, field)
+			case "caseID":
+				return ec.fieldContext_Action_caseID(ctx, field)
+			case "case":
+				return ec.fieldContext_Action_case(ctx, field)
+			case "title":
+				return ec.fieldContext_Action_title(ctx, field)
+			case "description":
+				return ec.fieldContext_Action_description(ctx, field)
+			case "assigneeID":
+				return ec.fieldContext_Action_assigneeID(ctx, field)
+			case "assignee":
+				return ec.fieldContext_Action_assignee(ctx, field)
+			case "slackMessageTS":
+				return ec.fieldContext_Action_slackMessageTS(ctx, field)
+			case "status":
+				return ec.fieldContext_Action_status(ctx, field)
+			case "dueDate":
+				return ec.fieldContext_Action_dueDate(ctx, field)
+			case "archived":
+				return ec.fieldContext_Action_archived(ctx, field)
+			case "archivedAt":
+				return ec.fieldContext_Action_archivedAt(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Action_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Action_updatedAt(ctx, field)
+			case "messages":
+				return ec.fieldContext_Action_messages(ctx, field)
+			case "events":
+				return ec.fieldContext_Action_events(ctx, field)
+			case "steps":
+				return ec.fieldContext_Action_steps(ctx, field)
+			case "stepProgress":
+				return ec.fieldContext_Action_stepProgress(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Action", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportActionResult_createdActionID(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportActionResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportActionResult_createdActionID,
+		func(ctx context.Context) (any, error) {
+			return obj.CreatedActionID, nil
+		},
+		nil,
+		ec.marshalOInt2ᚖint,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportActionResult_createdActionID(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportActionResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportActionResult_error(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportActionResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportActionResult_error,
+		func(ctx context.Context) (any, error) {
+			return obj.Error, nil
+		},
+		nil,
+		ec.marshalOImportIssue2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportIssue,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportActionResult_error(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportActionResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "path":
+				return ec.fieldContext_ImportIssue_path(ctx, field)
+			case "message":
+				return ec.fieldContext_ImportIssue_message(ctx, field)
+			case "severity":
+				return ec.fieldContext_ImportIssue_severity(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type ImportIssue", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportCaseResult_status(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportCaseResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportCaseResult_status,
+		func(ctx context.Context) (any, error) {
+			return obj.Status, nil
+		},
+		nil,
+		ec.marshalNImportItemResultStatus2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportItemResultStatus,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportCaseResult_status(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportCaseResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type ImportItemResultStatus does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportCaseResult_createdCase(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportCaseResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportCaseResult_createdCase,
+		func(ctx context.Context) (any, error) {
+			return obj.CreatedCase, nil
+		},
+		nil,
+		ec.marshalOCase2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCase,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportCaseResult_createdCase(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportCaseResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Case_id(ctx, field)
+			case "title":
+				return ec.fieldContext_Case_title(ctx, field)
+			case "description":
+				return ec.fieldContext_Case_description(ctx, field)
+			case "status":
+				return ec.fieldContext_Case_status(ctx, field)
+			case "isPrivate":
+				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "accessDenied":
+				return ec.fieldContext_Case_accessDenied(ctx, field)
+			case "channelUserCount":
+				return ec.fieldContext_Case_channelUserCount(ctx, field)
+			case "channelUsers":
+				return ec.fieldContext_Case_channelUsers(ctx, field)
+			case "reporterID":
+				return ec.fieldContext_Case_reporterID(ctx, field)
+			case "reporter":
+				return ec.fieldContext_Case_reporter(ctx, field)
+			case "assigneeIDs":
+				return ec.fieldContext_Case_assigneeIDs(ctx, field)
+			case "assignees":
+				return ec.fieldContext_Case_assignees(ctx, field)
+			case "slackChannelID":
+				return ec.fieldContext_Case_slackChannelID(ctx, field)
+			case "slackChannelName":
+				return ec.fieldContext_Case_slackChannelName(ctx, field)
+			case "slackChannelURL":
+				return ec.fieldContext_Case_slackChannelURL(ctx, field)
+			case "fields":
+				return ec.fieldContext_Case_fields(ctx, field)
+			case "actions":
+				return ec.fieldContext_Case_actions(ctx, field)
+			case "slackMessages":
+				return ec.fieldContext_Case_slackMessages(ctx, field)
+			case "agentAdditionalPrompt":
+				return ec.fieldContext_Case_agentAdditionalPrompt(ctx, field)
+			case "agentSources":
+				return ec.fieldContext_Case_agentSources(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Case_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Case_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Case", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportCaseResult_createdCaseID(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportCaseResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportCaseResult_createdCaseID,
+		func(ctx context.Context) (any, error) {
+			return obj.CreatedCaseID, nil
+		},
+		nil,
+		ec.marshalOInt2ᚖint,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportCaseResult_createdCaseID(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportCaseResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportCaseResult_error(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportCaseResult) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportCaseResult_error,
+		func(ctx context.Context) (any, error) {
+			return obj.Error, nil
+		},
+		nil,
+		ec.marshalOImportIssue2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportIssue,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportCaseResult_error(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportCaseResult",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "path":
+				return ec.fieldContext_ImportIssue_path(ctx, field)
+			case "message":
+				return ec.fieldContext_ImportIssue_message(ctx, field)
+			case "severity":
+				return ec.fieldContext_ImportIssue_severity(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type ImportIssue", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportIssue_path(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportIssue) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportIssue_path,
+		func(ctx context.Context) (any, error) {
+			return obj.Path, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportIssue_path(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportIssue",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportIssue_message(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportIssue) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportIssue_message,
+		func(ctx context.Context) (any, error) {
+			return obj.Message, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportIssue_message(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportIssue",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportIssue_severity(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportIssue) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportIssue_severity,
+		func(ctx context.Context) (any, error) {
+			return obj.Severity, nil
+		},
+		nil,
+		ec.marshalNImportIssueSeverity2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportIssueSeverity,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportIssue_severity(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportIssue",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type ImportIssueSeverity does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSession_id(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSession) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSession_id,
+		func(ctx context.Context) (any, error) {
+			return obj.ID, nil
+		},
+		nil,
+		ec.marshalNID2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSession_id(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSession",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type ID does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSession_workspaceID(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSession) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSession_workspaceID,
+		func(ctx context.Context) (any, error) {
+			return obj.WorkspaceID, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSession_workspaceID(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSession",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSession_creatorUserID(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSession) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSession_creatorUserID,
+		func(ctx context.Context) (any, error) {
+			return obj.CreatorUserID, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSession_creatorUserID(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSession",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSession_status(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSession) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSession_status,
+		func(ctx context.Context) (any, error) {
+			return obj.Status, nil
+		},
+		nil,
+		ec.marshalNImportSessionStatus2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportSessionStatus,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSession_status(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSession",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type ImportSessionStatus does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSession_source(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSession) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSession_source,
+		func(ctx context.Context) (any, error) {
+			return obj.Source, nil
+		},
+		nil,
+		ec.marshalNImportSource2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportSource,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSession_source(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSession",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "originalFileName":
+				return ec.fieldContext_ImportSource_originalFileName(ctx, field)
+			case "sizeBytes":
+				return ec.fieldContext_ImportSource_sizeBytes(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type ImportSource", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSession_snapshot(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSession) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSession_snapshot,
+		func(ctx context.Context) (any, error) {
+			return obj.Snapshot, nil
+		},
+		nil,
+		ec.marshalNImportSnapshot2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportSnapshot,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSession_snapshot(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSession",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "version":
+				return ec.fieldContext_ImportSnapshot_version(ctx, field)
+			case "cases":
+				return ec.fieldContext_ImportSnapshot_cases(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type ImportSnapshot", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSession_issues(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSession) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSession_issues,
+		func(ctx context.Context) (any, error) {
+			return obj.Issues, nil
+		},
+		nil,
+		ec.marshalNImportIssue2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportIssueᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSession_issues(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSession",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "path":
+				return ec.fieldContext_ImportIssue_path(ctx, field)
+			case "message":
+				return ec.fieldContext_ImportIssue_message(ctx, field)
+			case "severity":
+				return ec.fieldContext_ImportIssue_severity(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type ImportIssue", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSession_valid(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSession) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSession_valid,
+		func(ctx context.Context) (any, error) {
+			return obj.Valid, nil
+		},
+		nil,
+		ec.marshalNBoolean2bool,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSession_valid(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSession",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSession_fieldSchemaHash(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSession) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSession_fieldSchemaHash,
+		func(ctx context.Context) (any, error) {
+			return obj.FieldSchemaHash, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSession_fieldSchemaHash(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSession",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSession_createdAt(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSession) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSession_createdAt,
+		func(ctx context.Context) (any, error) {
+			return obj.CreatedAt, nil
+		},
+		nil,
+		ec.marshalNTime2timeᚐTime,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSession_createdAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSession",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSession_updatedAt(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSession) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSession_updatedAt,
+		func(ctx context.Context) (any, error) {
+			return obj.UpdatedAt, nil
+		},
+		nil,
+		ec.marshalNTime2timeᚐTime,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSession_updatedAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSession",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSession_executedAt(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSession) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSession_executedAt,
+		func(ctx context.Context) (any, error) {
+			return obj.ExecutedAt, nil
+		},
+		nil,
+		ec.marshalOTime2ᚖtimeᚐTime,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSession_executedAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSession",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSession_createdCount(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSession) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSession_createdCount,
+		func(ctx context.Context) (any, error) {
+			return obj.CreatedCount, nil
+		},
+		nil,
+		ec.marshalNInt2int,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSession_createdCount(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSession",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSession_failedCount(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSession) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSession_failedCount,
+		func(ctx context.Context) (any, error) {
+			return obj.FailedCount, nil
+		},
+		nil,
+		ec.marshalNInt2int,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSession_failedCount(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSession",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSession_skippedCount(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSession) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSession_skippedCount,
+		func(ctx context.Context) (any, error) {
+			return obj.SkippedCount, nil
+		},
+		nil,
+		ec.marshalNInt2int,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSession_skippedCount(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSession",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSnapshot_version(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSnapshot) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSnapshot_version,
+		func(ctx context.Context) (any, error) {
+			return obj.Version, nil
+		},
+		nil,
+		ec.marshalNInt2int,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSnapshot_version(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSnapshot",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSnapshot_cases(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSnapshot) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSnapshot_cases,
+		func(ctx context.Context) (any, error) {
+			return obj.Cases, nil
+		},
+		nil,
+		ec.marshalNImportSnapshotCase2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportSnapshotCaseᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSnapshot_cases(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSnapshot",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "index":
+				return ec.fieldContext_ImportSnapshotCase_index(ctx, field)
+			case "title":
+				return ec.fieldContext_ImportSnapshotCase_title(ctx, field)
+			case "description":
+				return ec.fieldContext_ImportSnapshotCase_description(ctx, field)
+			case "isPrivate":
+				return ec.fieldContext_ImportSnapshotCase_isPrivate(ctx, field)
+			case "assigneeIDs":
+				return ec.fieldContext_ImportSnapshotCase_assigneeIDs(ctx, field)
+			case "assignees":
+				return ec.fieldContext_ImportSnapshotCase_assignees(ctx, field)
+			case "fields":
+				return ec.fieldContext_ImportSnapshotCase_fields(ctx, field)
+			case "actions":
+				return ec.fieldContext_ImportSnapshotCase_actions(ctx, field)
+			case "issues":
+				return ec.fieldContext_ImportSnapshotCase_issues(ctx, field)
+			case "result":
+				return ec.fieldContext_ImportSnapshotCase_result(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type ImportSnapshotCase", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSnapshotAction_index(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSnapshotAction) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSnapshotAction_index,
+		func(ctx context.Context) (any, error) {
+			return obj.Index, nil
+		},
+		nil,
+		ec.marshalNInt2int,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSnapshotAction_index(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSnapshotAction",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSnapshotAction_title(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSnapshotAction) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSnapshotAction_title,
+		func(ctx context.Context) (any, error) {
+			return obj.Title, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSnapshotAction_title(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSnapshotAction",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSnapshotAction_description(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSnapshotAction) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSnapshotAction_description,
+		func(ctx context.Context) (any, error) {
+			return obj.Description, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSnapshotAction_description(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSnapshotAction",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSnapshotAction_assigneeID(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSnapshotAction) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSnapshotAction_assigneeID,
+		func(ctx context.Context) (any, error) {
+			return obj.AssigneeID, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSnapshotAction_assigneeID(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSnapshotAction",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSnapshotAction_dueDate(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSnapshotAction) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSnapshotAction_dueDate,
+		func(ctx context.Context) (any, error) {
+			return obj.DueDate, nil
+		},
+		nil,
+		ec.marshalOTime2ᚖtimeᚐTime,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSnapshotAction_dueDate(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSnapshotAction",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSnapshotAction_issues(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSnapshotAction) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSnapshotAction_issues,
+		func(ctx context.Context) (any, error) {
+			return obj.Issues, nil
+		},
+		nil,
+		ec.marshalNImportIssue2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportIssueᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSnapshotAction_issues(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSnapshotAction",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "path":
+				return ec.fieldContext_ImportIssue_path(ctx, field)
+			case "message":
+				return ec.fieldContext_ImportIssue_message(ctx, field)
+			case "severity":
+				return ec.fieldContext_ImportIssue_severity(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type ImportIssue", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSnapshotAction_result(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSnapshotAction) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSnapshotAction_result,
+		func(ctx context.Context) (any, error) {
+			return obj.Result, nil
+		},
+		nil,
+		ec.marshalNImportActionResult2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportActionResult,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSnapshotAction_result(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSnapshotAction",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "status":
+				return ec.fieldContext_ImportActionResult_status(ctx, field)
+			case "createdAction":
+				return ec.fieldContext_ImportActionResult_createdAction(ctx, field)
+			case "createdActionID":
+				return ec.fieldContext_ImportActionResult_createdActionID(ctx, field)
+			case "error":
+				return ec.fieldContext_ImportActionResult_error(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type ImportActionResult", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSnapshotCase_index(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSnapshotCase) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSnapshotCase_index,
+		func(ctx context.Context) (any, error) {
+			return obj.Index, nil
+		},
+		nil,
+		ec.marshalNInt2int,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSnapshotCase_index(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSnapshotCase",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSnapshotCase_title(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSnapshotCase) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSnapshotCase_title,
+		func(ctx context.Context) (any, error) {
+			return obj.Title, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSnapshotCase_title(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSnapshotCase",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSnapshotCase_description(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSnapshotCase) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSnapshotCase_description,
+		func(ctx context.Context) (any, error) {
+			return obj.Description, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSnapshotCase_description(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSnapshotCase",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSnapshotCase_isPrivate(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSnapshotCase) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSnapshotCase_isPrivate,
+		func(ctx context.Context) (any, error) {
+			return obj.IsPrivate, nil
+		},
+		nil,
+		ec.marshalNBoolean2bool,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSnapshotCase_isPrivate(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSnapshotCase",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSnapshotCase_assigneeIDs(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSnapshotCase) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSnapshotCase_assigneeIDs,
+		func(ctx context.Context) (any, error) {
+			return obj.AssigneeIDs, nil
+		},
+		nil,
+		ec.marshalNString2ᚕstringᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSnapshotCase_assigneeIDs(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSnapshotCase",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSnapshotCase_assignees(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSnapshotCase) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSnapshotCase_assignees,
+		func(ctx context.Context) (any, error) {
+			return obj.Assignees, nil
+		},
+		nil,
+		ec.marshalNSlackUser2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackUserᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSnapshotCase_assignees(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSnapshotCase",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_SlackUser_id(ctx, field)
+			case "name":
+				return ec.fieldContext_SlackUser_name(ctx, field)
+			case "realName":
+				return ec.fieldContext_SlackUser_realName(ctx, field)
+			case "imageUrl":
+				return ec.fieldContext_SlackUser_imageUrl(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type SlackUser", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSnapshotCase_fields(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSnapshotCase) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSnapshotCase_fields,
+		func(ctx context.Context) (any, error) {
+			return obj.Fields, nil
+		},
+		nil,
+		ec.marshalNImportSnapshotField2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportSnapshotFieldᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSnapshotCase_fields(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSnapshotCase",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "key":
+				return ec.fieldContext_ImportSnapshotField_key(ctx, field)
+			case "display":
+				return ec.fieldContext_ImportSnapshotField_display(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type ImportSnapshotField", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSnapshotCase_actions(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSnapshotCase) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSnapshotCase_actions,
+		func(ctx context.Context) (any, error) {
+			return obj.Actions, nil
+		},
+		nil,
+		ec.marshalNImportSnapshotAction2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportSnapshotActionᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSnapshotCase_actions(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSnapshotCase",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "index":
+				return ec.fieldContext_ImportSnapshotAction_index(ctx, field)
+			case "title":
+				return ec.fieldContext_ImportSnapshotAction_title(ctx, field)
+			case "description":
+				return ec.fieldContext_ImportSnapshotAction_description(ctx, field)
+			case "assigneeID":
+				return ec.fieldContext_ImportSnapshotAction_assigneeID(ctx, field)
+			case "dueDate":
+				return ec.fieldContext_ImportSnapshotAction_dueDate(ctx, field)
+			case "issues":
+				return ec.fieldContext_ImportSnapshotAction_issues(ctx, field)
+			case "result":
+				return ec.fieldContext_ImportSnapshotAction_result(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type ImportSnapshotAction", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSnapshotCase_issues(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSnapshotCase) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSnapshotCase_issues,
+		func(ctx context.Context) (any, error) {
+			return obj.Issues, nil
+		},
+		nil,
+		ec.marshalNImportIssue2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportIssueᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSnapshotCase_issues(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSnapshotCase",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "path":
+				return ec.fieldContext_ImportIssue_path(ctx, field)
+			case "message":
+				return ec.fieldContext_ImportIssue_message(ctx, field)
+			case "severity":
+				return ec.fieldContext_ImportIssue_severity(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type ImportIssue", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSnapshotCase_result(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSnapshotCase) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSnapshotCase_result,
+		func(ctx context.Context) (any, error) {
+			return obj.Result, nil
+		},
+		nil,
+		ec.marshalNImportCaseResult2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportCaseResult,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSnapshotCase_result(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSnapshotCase",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "status":
+				return ec.fieldContext_ImportCaseResult_status(ctx, field)
+			case "createdCase":
+				return ec.fieldContext_ImportCaseResult_createdCase(ctx, field)
+			case "createdCaseID":
+				return ec.fieldContext_ImportCaseResult_createdCaseID(ctx, field)
+			case "error":
+				return ec.fieldContext_ImportCaseResult_error(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type ImportCaseResult", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSnapshotField_key(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSnapshotField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSnapshotField_key,
+		func(ctx context.Context) (any, error) {
+			return obj.Key, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSnapshotField_key(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSnapshotField",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSnapshotField_display(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSnapshotField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSnapshotField_display,
+		func(ctx context.Context) (any, error) {
+			return obj.Display, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSnapshotField_display(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSnapshotField",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSource_originalFileName(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSource) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSource_originalFileName,
+		func(ctx context.Context) (any, error) {
+			return obj.OriginalFileName, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSource_originalFileName(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSource",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _ImportSource_sizeBytes(ctx context.Context, field graphql.CollectedField, obj *graphql1.ImportSource) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_ImportSource_sizeBytes,
+		func(ctx context.Context) (any, error) {
+			return obj.SizeBytes, nil
+		},
+		nil,
+		ec.marshalNInt2int,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_ImportSource_sizeBytes(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "ImportSource",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _JobRunEvent_eventId(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunEvent) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -10664,6 +12904,152 @@ func (ec *executionContext) fieldContext_Mutation_updateCaseAgentSettings(ctx co
 	return fc, nil
 }
 
+func (ec *executionContext) _Mutation_createCaseImport(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_createCaseImport,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().CreateCaseImport(ctx, fc.Args["workspaceId"].(string), fc.Args["input"].(graphql1.CreateCaseImportInput))
+		},
+		nil,
+		ec.marshalNImportSession2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportSession,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_createCaseImport(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_ImportSession_id(ctx, field)
+			case "workspaceID":
+				return ec.fieldContext_ImportSession_workspaceID(ctx, field)
+			case "creatorUserID":
+				return ec.fieldContext_ImportSession_creatorUserID(ctx, field)
+			case "status":
+				return ec.fieldContext_ImportSession_status(ctx, field)
+			case "source":
+				return ec.fieldContext_ImportSession_source(ctx, field)
+			case "snapshot":
+				return ec.fieldContext_ImportSession_snapshot(ctx, field)
+			case "issues":
+				return ec.fieldContext_ImportSession_issues(ctx, field)
+			case "valid":
+				return ec.fieldContext_ImportSession_valid(ctx, field)
+			case "fieldSchemaHash":
+				return ec.fieldContext_ImportSession_fieldSchemaHash(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_ImportSession_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_ImportSession_updatedAt(ctx, field)
+			case "executedAt":
+				return ec.fieldContext_ImportSession_executedAt(ctx, field)
+			case "createdCount":
+				return ec.fieldContext_ImportSession_createdCount(ctx, field)
+			case "failedCount":
+				return ec.fieldContext_ImportSession_failedCount(ctx, field)
+			case "skippedCount":
+				return ec.fieldContext_ImportSession_skippedCount(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type ImportSession", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_createCaseImport_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_executeCaseImport(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_executeCaseImport,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().ExecuteCaseImport(ctx, fc.Args["workspaceId"].(string), fc.Args["id"].(string))
+		},
+		nil,
+		ec.marshalNImportSession2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportSession,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_executeCaseImport(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_ImportSession_id(ctx, field)
+			case "workspaceID":
+				return ec.fieldContext_ImportSession_workspaceID(ctx, field)
+			case "creatorUserID":
+				return ec.fieldContext_ImportSession_creatorUserID(ctx, field)
+			case "status":
+				return ec.fieldContext_ImportSession_status(ctx, field)
+			case "source":
+				return ec.fieldContext_ImportSession_source(ctx, field)
+			case "snapshot":
+				return ec.fieldContext_ImportSession_snapshot(ctx, field)
+			case "issues":
+				return ec.fieldContext_ImportSession_issues(ctx, field)
+			case "valid":
+				return ec.fieldContext_ImportSession_valid(ctx, field)
+			case "fieldSchemaHash":
+				return ec.fieldContext_ImportSession_fieldSchemaHash(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_ImportSession_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_ImportSession_updatedAt(ctx, field)
+			case "executedAt":
+				return ec.fieldContext_ImportSession_executedAt(ctx, field)
+			case "createdCount":
+				return ec.fieldContext_ImportSession_createdCount(ctx, field)
+			case "failedCount":
+				return ec.fieldContext_ImportSession_failedCount(ctx, field)
+			case "skippedCount":
+				return ec.fieldContext_ImportSession_skippedCount(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type ImportSession", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_executeCaseImport_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _NotionDBConfig_databaseID(ctx context.Context, field graphql.CollectedField, obj *graphql1.NotionDBConfig) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -12346,6 +14732,79 @@ func (ec *executionContext) fieldContext_Query_jobRunEvents(ctx context.Context,
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Query_jobRunEvents_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_caseImport(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Query_caseImport,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Query().CaseImport(ctx, fc.Args["workspaceId"].(string), fc.Args["id"].(string))
+		},
+		nil,
+		ec.marshalNImportSession2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportSession,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Query_caseImport(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_ImportSession_id(ctx, field)
+			case "workspaceID":
+				return ec.fieldContext_ImportSession_workspaceID(ctx, field)
+			case "creatorUserID":
+				return ec.fieldContext_ImportSession_creatorUserID(ctx, field)
+			case "status":
+				return ec.fieldContext_ImportSession_status(ctx, field)
+			case "source":
+				return ec.fieldContext_ImportSession_source(ctx, field)
+			case "snapshot":
+				return ec.fieldContext_ImportSession_snapshot(ctx, field)
+			case "issues":
+				return ec.fieldContext_ImportSession_issues(ctx, field)
+			case "valid":
+				return ec.fieldContext_ImportSession_valid(ctx, field)
+			case "fieldSchemaHash":
+				return ec.fieldContext_ImportSession_fieldSchemaHash(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_ImportSession_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_ImportSession_updatedAt(ctx, field)
+			case "executedAt":
+				return ec.fieldContext_ImportSession_executedAt(ctx, field)
+			case "createdCount":
+				return ec.fieldContext_ImportSession_createdCount(ctx, field)
+			case "failedCount":
+				return ec.fieldContext_ImportSession_failedCount(ctx, field)
+			case "skippedCount":
+				return ec.fieldContext_ImportSession_skippedCount(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type ImportSession", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_caseImport_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -15155,6 +17614,40 @@ func (ec *executionContext) unmarshalInputCreateActionInput(ctx context.Context,
 	return it, nil
 }
 
+func (ec *executionContext) unmarshalInputCreateCaseImportInput(ctx context.Context, obj any) (graphql1.CreateCaseImportInput, error) {
+	var it graphql1.CreateCaseImportInput
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"content", "originalFileName"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "content":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("content"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Content = data
+		case "originalFileName":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("originalFileName"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.OriginalFileName = data
+		}
+	}
+
+	return it, nil
+}
+
 func (ec *executionContext) unmarshalInputCreateCaseInput(ctx context.Context, obj any) (graphql1.CreateCaseInput, error) {
 	var it graphql1.CreateCaseInput
 	asMap := map[string]any{}
@@ -17830,6 +20323,524 @@ func (ec *executionContext) _GitHubRepository(ctx context.Context, sel ast.Selec
 	return out
 }
 
+var importActionResultImplementors = []string{"ImportActionResult"}
+
+func (ec *executionContext) _ImportActionResult(ctx context.Context, sel ast.SelectionSet, obj *graphql1.ImportActionResult) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, importActionResultImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("ImportActionResult")
+		case "status":
+			out.Values[i] = ec._ImportActionResult_status(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "createdAction":
+			out.Values[i] = ec._ImportActionResult_createdAction(ctx, field, obj)
+		case "createdActionID":
+			out.Values[i] = ec._ImportActionResult_createdActionID(ctx, field, obj)
+		case "error":
+			out.Values[i] = ec._ImportActionResult_error(ctx, field, obj)
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var importCaseResultImplementors = []string{"ImportCaseResult"}
+
+func (ec *executionContext) _ImportCaseResult(ctx context.Context, sel ast.SelectionSet, obj *graphql1.ImportCaseResult) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, importCaseResultImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("ImportCaseResult")
+		case "status":
+			out.Values[i] = ec._ImportCaseResult_status(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "createdCase":
+			out.Values[i] = ec._ImportCaseResult_createdCase(ctx, field, obj)
+		case "createdCaseID":
+			out.Values[i] = ec._ImportCaseResult_createdCaseID(ctx, field, obj)
+		case "error":
+			out.Values[i] = ec._ImportCaseResult_error(ctx, field, obj)
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var importIssueImplementors = []string{"ImportIssue"}
+
+func (ec *executionContext) _ImportIssue(ctx context.Context, sel ast.SelectionSet, obj *graphql1.ImportIssue) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, importIssueImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("ImportIssue")
+		case "path":
+			out.Values[i] = ec._ImportIssue_path(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "message":
+			out.Values[i] = ec._ImportIssue_message(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "severity":
+			out.Values[i] = ec._ImportIssue_severity(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var importSessionImplementors = []string{"ImportSession"}
+
+func (ec *executionContext) _ImportSession(ctx context.Context, sel ast.SelectionSet, obj *graphql1.ImportSession) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, importSessionImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("ImportSession")
+		case "id":
+			out.Values[i] = ec._ImportSession_id(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "workspaceID":
+			out.Values[i] = ec._ImportSession_workspaceID(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "creatorUserID":
+			out.Values[i] = ec._ImportSession_creatorUserID(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "status":
+			out.Values[i] = ec._ImportSession_status(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "source":
+			out.Values[i] = ec._ImportSession_source(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "snapshot":
+			out.Values[i] = ec._ImportSession_snapshot(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "issues":
+			out.Values[i] = ec._ImportSession_issues(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "valid":
+			out.Values[i] = ec._ImportSession_valid(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "fieldSchemaHash":
+			out.Values[i] = ec._ImportSession_fieldSchemaHash(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "createdAt":
+			out.Values[i] = ec._ImportSession_createdAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "updatedAt":
+			out.Values[i] = ec._ImportSession_updatedAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "executedAt":
+			out.Values[i] = ec._ImportSession_executedAt(ctx, field, obj)
+		case "createdCount":
+			out.Values[i] = ec._ImportSession_createdCount(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "failedCount":
+			out.Values[i] = ec._ImportSession_failedCount(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "skippedCount":
+			out.Values[i] = ec._ImportSession_skippedCount(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var importSnapshotImplementors = []string{"ImportSnapshot"}
+
+func (ec *executionContext) _ImportSnapshot(ctx context.Context, sel ast.SelectionSet, obj *graphql1.ImportSnapshot) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, importSnapshotImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("ImportSnapshot")
+		case "version":
+			out.Values[i] = ec._ImportSnapshot_version(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "cases":
+			out.Values[i] = ec._ImportSnapshot_cases(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var importSnapshotActionImplementors = []string{"ImportSnapshotAction"}
+
+func (ec *executionContext) _ImportSnapshotAction(ctx context.Context, sel ast.SelectionSet, obj *graphql1.ImportSnapshotAction) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, importSnapshotActionImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("ImportSnapshotAction")
+		case "index":
+			out.Values[i] = ec._ImportSnapshotAction_index(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "title":
+			out.Values[i] = ec._ImportSnapshotAction_title(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "description":
+			out.Values[i] = ec._ImportSnapshotAction_description(ctx, field, obj)
+		case "assigneeID":
+			out.Values[i] = ec._ImportSnapshotAction_assigneeID(ctx, field, obj)
+		case "dueDate":
+			out.Values[i] = ec._ImportSnapshotAction_dueDate(ctx, field, obj)
+		case "issues":
+			out.Values[i] = ec._ImportSnapshotAction_issues(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "result":
+			out.Values[i] = ec._ImportSnapshotAction_result(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var importSnapshotCaseImplementors = []string{"ImportSnapshotCase"}
+
+func (ec *executionContext) _ImportSnapshotCase(ctx context.Context, sel ast.SelectionSet, obj *graphql1.ImportSnapshotCase) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, importSnapshotCaseImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("ImportSnapshotCase")
+		case "index":
+			out.Values[i] = ec._ImportSnapshotCase_index(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "title":
+			out.Values[i] = ec._ImportSnapshotCase_title(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "description":
+			out.Values[i] = ec._ImportSnapshotCase_description(ctx, field, obj)
+		case "isPrivate":
+			out.Values[i] = ec._ImportSnapshotCase_isPrivate(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "assigneeIDs":
+			out.Values[i] = ec._ImportSnapshotCase_assigneeIDs(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "assignees":
+			out.Values[i] = ec._ImportSnapshotCase_assignees(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "fields":
+			out.Values[i] = ec._ImportSnapshotCase_fields(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "actions":
+			out.Values[i] = ec._ImportSnapshotCase_actions(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "issues":
+			out.Values[i] = ec._ImportSnapshotCase_issues(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "result":
+			out.Values[i] = ec._ImportSnapshotCase_result(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var importSnapshotFieldImplementors = []string{"ImportSnapshotField"}
+
+func (ec *executionContext) _ImportSnapshotField(ctx context.Context, sel ast.SelectionSet, obj *graphql1.ImportSnapshotField) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, importSnapshotFieldImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("ImportSnapshotField")
+		case "key":
+			out.Values[i] = ec._ImportSnapshotField_key(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "display":
+			out.Values[i] = ec._ImportSnapshotField_display(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var importSourceImplementors = []string{"ImportSource"}
+
+func (ec *executionContext) _ImportSource(ctx context.Context, sel ast.SelectionSet, obj *graphql1.ImportSource) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, importSourceImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("ImportSource")
+		case "originalFileName":
+			out.Values[i] = ec._ImportSource_originalFileName(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "sizeBytes":
+			out.Values[i] = ec._ImportSource_sizeBytes(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
 var jobRunEventImplementors = []string{"JobRunEvent"}
 
 func (ec *executionContext) _JobRunEvent(ctx context.Context, sel ast.SelectionSet, obj *graphql1.JobRunEvent) graphql.Marshaler {
@@ -18289,6 +21300,20 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 		case "updateCaseAgentSettings":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_updateCaseAgentSettings(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "createCaseImport":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_createCaseImport(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "executeCaseImport":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_executeCaseImport(ctx, field)
 			})
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
@@ -18952,6 +21977,28 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 					}
 				}()
 				res = ec._Query_jobRunEvents(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "caseImport":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_caseImport(ctx, field)
 				if res == graphql.Null {
 					atomic.AddUint32(&fs.Invalids, 1)
 				}
@@ -20294,6 +23341,11 @@ func (ec *executionContext) unmarshalNCreateActionInput2githubᚗcomᚋsecmonᚑ
 	return res, graphql.ErrorOnPath(ctx, err)
 }
 
+func (ec *executionContext) unmarshalNCreateCaseImportInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateCaseImportInput(ctx context.Context, v any) (graphql1.CreateCaseImportInput, error) {
+	res, err := ec.unmarshalInputCreateCaseImportInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
 func (ec *executionContext) unmarshalNCreateCaseInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateCaseInput(ctx context.Context, v any) (graphql1.CreateCaseInput, error) {
 	res, err := ec.unmarshalInputCreateCaseInput(ctx, v)
 	return res, graphql.ErrorOnPath(ctx, err)
@@ -20598,6 +23650,306 @@ func (ec *executionContext) marshalNID2ᚕstringᚄ(ctx context.Context, sel ast
 	}
 
 	return ret
+}
+
+func (ec *executionContext) marshalNImportActionResult2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportActionResult(ctx context.Context, sel ast.SelectionSet, v *graphql1.ImportActionResult) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._ImportActionResult(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNImportCaseResult2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportCaseResult(ctx context.Context, sel ast.SelectionSet, v *graphql1.ImportCaseResult) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._ImportCaseResult(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNImportIssue2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportIssueᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.ImportIssue) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNImportIssue2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportIssue(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNImportIssue2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportIssue(ctx context.Context, sel ast.SelectionSet, v *graphql1.ImportIssue) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._ImportIssue(ctx, sel, v)
+}
+
+func (ec *executionContext) unmarshalNImportIssueSeverity2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportIssueSeverity(ctx context.Context, v any) (graphql1.ImportIssueSeverity, error) {
+	var res graphql1.ImportIssueSeverity
+	err := res.UnmarshalGQL(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNImportIssueSeverity2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportIssueSeverity(ctx context.Context, sel ast.SelectionSet, v graphql1.ImportIssueSeverity) graphql.Marshaler {
+	return v
+}
+
+func (ec *executionContext) unmarshalNImportItemResultStatus2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportItemResultStatus(ctx context.Context, v any) (graphql1.ImportItemResultStatus, error) {
+	var res graphql1.ImportItemResultStatus
+	err := res.UnmarshalGQL(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNImportItemResultStatus2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportItemResultStatus(ctx context.Context, sel ast.SelectionSet, v graphql1.ImportItemResultStatus) graphql.Marshaler {
+	return v
+}
+
+func (ec *executionContext) marshalNImportSession2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportSession(ctx context.Context, sel ast.SelectionSet, v graphql1.ImportSession) graphql.Marshaler {
+	return ec._ImportSession(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNImportSession2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportSession(ctx context.Context, sel ast.SelectionSet, v *graphql1.ImportSession) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._ImportSession(ctx, sel, v)
+}
+
+func (ec *executionContext) unmarshalNImportSessionStatus2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportSessionStatus(ctx context.Context, v any) (graphql1.ImportSessionStatus, error) {
+	var res graphql1.ImportSessionStatus
+	err := res.UnmarshalGQL(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNImportSessionStatus2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportSessionStatus(ctx context.Context, sel ast.SelectionSet, v graphql1.ImportSessionStatus) graphql.Marshaler {
+	return v
+}
+
+func (ec *executionContext) marshalNImportSnapshot2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportSnapshot(ctx context.Context, sel ast.SelectionSet, v *graphql1.ImportSnapshot) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._ImportSnapshot(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNImportSnapshotAction2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportSnapshotActionᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.ImportSnapshotAction) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNImportSnapshotAction2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportSnapshotAction(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNImportSnapshotAction2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportSnapshotAction(ctx context.Context, sel ast.SelectionSet, v *graphql1.ImportSnapshotAction) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._ImportSnapshotAction(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNImportSnapshotCase2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportSnapshotCaseᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.ImportSnapshotCase) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNImportSnapshotCase2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportSnapshotCase(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNImportSnapshotCase2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportSnapshotCase(ctx context.Context, sel ast.SelectionSet, v *graphql1.ImportSnapshotCase) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._ImportSnapshotCase(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNImportSnapshotField2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportSnapshotFieldᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.ImportSnapshotField) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNImportSnapshotField2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportSnapshotField(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNImportSnapshotField2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportSnapshotField(ctx context.Context, sel ast.SelectionSet, v *graphql1.ImportSnapshotField) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._ImportSnapshotField(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNImportSource2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportSource(ctx context.Context, sel ast.SelectionSet, v *graphql1.ImportSource) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._ImportSource(ctx, sel, v)
 }
 
 func (ec *executionContext) unmarshalNInt2int(ctx context.Context, v any) (int, error) {
@@ -21743,6 +25095,13 @@ func (ec *executionContext) unmarshalOFieldValueInput2ᚕᚖgithubᚗcomᚋsecmo
 		}
 	}
 	return res, nil
+}
+
+func (ec *executionContext) marshalOImportIssue2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐImportIssue(ctx context.Context, sel ast.SelectionSet, v *graphql1.ImportIssue) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	return ec._ImportIssue(ctx, sel, v)
 }
 
 func (ec *executionContext) unmarshalOInt2ᚖint(ctx context.Context, v any) (*int, error) {

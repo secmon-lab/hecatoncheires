@@ -588,6 +588,11 @@ type Query {
 
   # Full event timeline of one Run in ascending Sequence order.
   jobRunEvents(workspaceId: String!, caseId: Int!, runId: String!): [JobRunEvent!]!
+
+  # Case Import — single session lookup. Sessions are scoped to the creator;
+  # the resolver returns "not found" for sessions owned by other users even
+  # when the ID is known.
+  caseImport(workspaceId: String!, id: ID!): ImportSession!
 }
 
 type Mutation {
@@ -656,6 +661,19 @@ type Mutation {
   # passing an empty list clears it (= "use every Source"); the order is
   # preserved verbatim so the UI round-trips unchanged.
   updateCaseAgentSettings(workspaceId: String!, input: UpdateCaseAgentSettingsInput!): Case!
+
+  # Case Import — create a pending ImportSession from raw YAML content.
+  # The session is persisted to Firestore and identified by an ImportSessionID
+  # (returned in `id`). The caller is captured from the auth context and
+  # becomes the only principal allowed to read or execute the session.
+  createCaseImport(workspaceId: String!, input: CreateCaseImportInput!): ImportSession!
+
+  # Case Import — execute the persisted snapshot (Case/Action creation).
+  # Allowed only when status==PENDING and the session is `valid`. Fails
+  # with an explicit error if the workspace field schema has drifted
+  # since createCaseImport (issues are appended to the session for the
+  # detail UI to display).
+  executeCaseImport(workspaceId: String!, id: ID!): ImportSession!
 }
 
 input UpdateCaseAgentSettingsInput {
@@ -744,4 +762,128 @@ type JobRunEvent {
   # for transport simplicity. Schema: see model.LLMRequestPayload /
   # LLMResponsePayload / ToolCallPayload / RunErrorPayload.
   payload: JSON!
+}
+
+# ---- Case Import (YAML → Case/Action) ---------------------------------------
+#
+# Workflow: createCaseImport persists a normalized ImportSession in PENDING
+# state from raw YAML. executeCaseImport advances it exactly once to
+# APPLIED (all cases created) or FAILED (one or more failures; subsequent
+# items are SKIPPED). Sessions are kept indefinitely and surfaced only by
+# direct ID lookup — there is no list query.
+
+enum ImportSessionStatus {
+  PENDING
+  APPLIED
+  FAILED
+}
+
+enum ImportItemResultStatus {
+  PENDING
+  CREATED
+  FAILED
+  SKIPPED
+}
+
+enum ImportIssueSeverity {
+  ERROR
+  WARNING
+}
+
+# One validation or execution finding. `path` is a JSONPath-like locator
+# such as "cases[0].fields.severity" that the frontend uses to highlight
+# the offending value. `message` is already in the caller's language.
+type ImportIssue {
+  path: String!
+  message: String!
+  severity: ImportIssueSeverity!
+}
+
+# Metadata about the uploaded source YAML.
+type ImportSource {
+  originalFileName: String!
+  sizeBytes: Int!
+}
+
+# Per-Case execution result. `createdCase` is hydrated via DataLoader and
+# is null when the Case was deleted after applied.
+type ImportCaseResult {
+  status: ImportItemResultStatus!
+  createdCase: Case
+  createdCaseID: Int
+  error: ImportIssue
+}
+
+type ImportActionResult {
+  status: ImportItemResultStatus!
+  createdAction: Action
+  createdActionID: Int
+  error: ImportIssue
+}
+
+# Pre-rendered key/value pair so the frontend does not need to know how
+# each FieldValue type stringifies.
+type ImportSnapshotField {
+  key: String!
+  display: String!
+}
+
+type ImportSnapshotAction {
+  index: Int!
+  title: String!
+  description: String
+  assigneeID: String
+  dueDate: Time
+  issues: [ImportIssue!]!
+  result: ImportActionResult!
+}
+
+type ImportSnapshotCase {
+  index: Int!
+  title: String!
+  description: String
+  isPrivate: Boolean!
+  assigneeIDs: [String!]!
+  """Slack users referenced by assigneeIDs, resolved on the server. Lookup is
+  batched per request so the frontend never has to ship the full slackUsers
+  list. IDs that cannot be resolved are simply omitted from the array."""
+  assignees: [SlackUser!]!
+  fields: [ImportSnapshotField!]!
+  actions: [ImportSnapshotAction!]!
+  issues: [ImportIssue!]!
+  result: ImportCaseResult!
+}
+
+type ImportSnapshot {
+  version: Int!
+  cases: [ImportSnapshotCase!]!
+}
+
+type ImportSession {
+  id: ID!
+  workspaceID: String!
+  creatorUserID: String!
+  status: ImportSessionStatus!
+  source: ImportSource!
+  snapshot: ImportSnapshot!
+  # Session-level issues (YAML parse failure, version mismatch, schema
+  # stale, etc.). Per-Case / per-Action issues live under snapshot.
+  issues: [ImportIssue!]!
+  # True iff there are no ERROR-severity issues anywhere; the Execute
+  # button on the UI is gated on this flag.
+  valid: Boolean!
+  fieldSchemaHash: String!
+  createdAt: Time!
+  updatedAt: Time!
+  executedAt: Time
+  createdCount: Int!
+  failedCount: Int!
+  skippedCount: Int!
+}
+
+input CreateCaseImportInput {
+  """Raw YAML content (UTF-8)."""
+  content: String!
+  """Optional original file name for display purposes."""
+  originalFileName: String
 }

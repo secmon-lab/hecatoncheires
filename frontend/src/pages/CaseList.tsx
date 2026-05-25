@@ -297,6 +297,12 @@ export default function CaseList() {
               </div>
             )}
           </div>
+          <Button
+            variant="secondary"
+            onClick={() => navigate(`/ws/${currentWorkspace!.id}/imports/new`)}
+          >
+            {t('btnImport')}
+          </Button>
           <Button variant="primary" icon={<IconPlus size={14} />} onClick={() => setIsFormOpen(true)}>
             {t('btnNewCase', { caseLabel })}
           </Button>
