@@ -9,7 +9,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	slackmodel "github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
-	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/draft"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/proposal"
 )
 
 // NewSlackDraftHandlerForTest builds a slackDraftHandler with the
@@ -20,7 +20,7 @@ func NewSlackDraftHandlerForTest(
 	registry *model.WorkspaceRegistry,
 	slackService slack.Service,
 	channelID, threadTS string,
-) draft.Handler {
+) proposal.Handler {
 	return newSlackDraftHandler(
 		repo, registry, slackService,
 		channelID, threadTS, "1700000000.000001", "U-test",

@@ -15,7 +15,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
-	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/draft"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/proposal"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
@@ -253,7 +253,7 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 				HeartbeatInterval:   agent.DefaultHeartbeatInterval,
 				HeartbeatStaleAfter: agent.DefaultHeartbeatStaleAfter,
 			}
-			draftUC, err := draft.New(deps, 0, 0, 0)
+			draftUC, err := proposal.New(deps, 0, 0, 0)
 			if err != nil {
 				errutil.Handle(context.Background(), goerr.Wrap(err, "failed to build draft usecase"), "failed to build draft usecase")
 			} else {

@@ -1,4 +1,4 @@
-package draft
+package proposal
 
 import (
 	"github.com/m-mizutani/goerr/v2"
@@ -17,7 +17,7 @@ type UseCase struct {
 	subAgentLoopMax    int
 }
 
-// New builds a draft.UseCase.
+// New builds a proposal.UseCase.
 //
 // plannerLoopMax / subAgentMaxPerTurn / subAgentLoopMax are the budget
 // knobs (§5.1). They are caller-controlled — the spec recommends defaults

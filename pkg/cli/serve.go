@@ -15,6 +15,8 @@ import (
 	"github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/handler"
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/trace"
 	"github.com/vektah/gqlparser/v2/gqlerror"
 
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
@@ -426,12 +428,16 @@ func cmdServe() *cli.Command {
 			// Slack-driven AI flows (mention agent) require History + Trace
 			// persistence; the bucket flag is mandatory in that case.
 			var storageCleanup func()
+			var agentHistoryRepo gollem.HistoryRepository
+			var agentTraceRepo trace.Repository
 			if slackSvc != nil {
 				historyRepo, traceRepo, cleanup, err := storageCfg.Configure(ctx)
 				if err != nil {
 					return goerr.Wrap(err, "failed to configure agent storage")
 				}
 				storageCleanup = cleanup
+				agentHistoryRepo = historyRepo
+				agentTraceRepo = traceRepo
 				ucOpts = append(ucOpts, usecase.WithHistoryRepository(historyRepo))
 				ucOpts = append(ucOpts, usecase.WithTraceRepository(traceRepo))
 				logging.Default().Info("Agent session archive enabled", logAttrsToArgs(storageCfg.LogAttrs())...)
@@ -458,6 +464,8 @@ func cmdServe() *cli.Command {
 				LLMClient:    llmClient,
 				UC:           uc,
 				SlackService: slackSvc,
+				HistoryRepo:  agentHistoryRepo,
+				TraceRepo:    agentTraceRepo,
 			})
 			uc.Case.SetEventPublisher(jobUC)
 			tickScanner := job.NewScheduledScanner(job.ScannerDeps{

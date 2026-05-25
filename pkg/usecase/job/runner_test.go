@@ -30,7 +30,7 @@ func newRunner(t *testing.T, wsID string, jobs []*model.Job, exec jobagent.JobEx
 		Repo:      repo,
 		Registry:  registry,
 		LLMClient: inertLLM(),
-		Executor:  exec,
+		Executors: map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: exec},
 	})
 	_ = repo
 	return r, registry, c
@@ -59,6 +59,86 @@ func TestJobRunner_HappyPath(t *testing.T) {
 	gt.Number(t, exec.calls.Load()).Equal(int32(1))
 }
 
+// TestJobRunner_StrategyDispatchPicksRegisteredExecutor verifies that
+// the runner picks the executor that matches Job.Strategy at Run time
+// and writes the matching ExecutorKind onto the JobRunLog.
+func TestJobRunner_StrategyDispatchPicksRegisteredExecutor(t *testing.T) {
+	simpleExec := &recordingExecutor{}
+	planexecExec := &recordingExecutor{}
+
+	j := &model.Job{
+		ID:       "planexec-job",
+		Prompt:   "x",
+		Strategy: model.JobStrategyPlanexec,
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	repo, c := setupCase(t, "ws")
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws"}, Jobs: []*model.Job{j}})
+
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo: repo, Registry: registry, LLMClient: inertLLM(),
+		Executors: map[model.JobStrategy]jobagent.JobExecutor{
+			model.JobStrategySimple:   simpleExec,
+			model.JobStrategyPlanexec: planexecExec,
+		},
+	})
+	err := runner.Run(context.Background(), j, job.Event{
+		Domain:        model.JobEventDomainCase,
+		WorkspaceID:   "ws",
+		CaseID:        c.ID,
+		Timestamp:     time.Now().UTC(),
+		CaseLifecycle: model.CaseLifecycleCreated,
+	})
+	gt.NoError(t, err).Required()
+	gt.Number(t, planexecExec.calls.Load()).Equal(int32(1))
+	gt.Number(t, simpleExec.calls.Load()).Equal(int32(0))
+
+	// ExecutorKind on the persisted JobRunLog reflects the chosen
+	// strategy. Read it back through the repository (List for the
+	// (workspace, case, job) key).
+	key := model.JobRunKey{WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID}
+	logs, listErr := repo.JobRunLog().List(context.Background(), key, 0)
+	gt.NoError(t, listErr).Required()
+	gt.Array(t, logs).Length(1).Required()
+	gt.String(t, logs[0].ExecutorKind).Equal("plan_execute")
+}
+
+// TestJobRunner_StrategyDispatchFailsWhenExecutorMissing verifies that
+// running a planexec-strategy Job without a registered executor records
+// a prepare-stage failure rather than panicking.
+func TestJobRunner_StrategyDispatchFailsWhenExecutorMissing(t *testing.T) {
+	j := &model.Job{
+		ID:       "planexec-job",
+		Prompt:   "x",
+		Strategy: model.JobStrategyPlanexec,
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	repo, c := setupCase(t, "ws")
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws"}, Jobs: []*model.Job{j}})
+
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo: repo, Registry: registry, LLMClient: inertLLM(),
+		Executors: map[model.JobStrategy]jobagent.JobExecutor{
+			model.JobStrategySimple: &recordingExecutor{},
+			// JobStrategyPlanexec deliberately absent.
+		},
+	})
+	err := runner.Run(context.Background(), j, job.Event{
+		Domain:        model.JobEventDomainCase,
+		WorkspaceID:   "ws",
+		CaseID:        c.ID,
+		Timestamp:     time.Now().UTC(),
+		CaseLifecycle: model.CaseLifecycleCreated,
+	})
+	gt.Error(t, err)
+}
+
 func TestJobRunner_SkipsWhenLeaseHeld(t *testing.T) {
 	exec := &recordingExecutor{}
 	j := &model.Job{
@@ -79,7 +159,7 @@ func TestJobRunner_SkipsWhenLeaseHeld(t *testing.T) {
 	gt.Bool(t, got).True()
 
 	runner := job.NewJobRunner(job.RunnerDeps{
-		Repo: repo, Registry: registry, LLMClient: inertLLM(), Executor: exec,
+		Repo: repo, Registry: registry, LLMClient: inertLLM(), Executors: map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: exec},
 	})
 	err = runner.Run(context.Background(), j, job.Event{
 		Domain:        model.JobEventDomainCase,
@@ -118,7 +198,7 @@ func TestJobRunner_FailureIsRecorded(t *testing.T) {
 	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws"}, Jobs: []*model.Job{j}})
 
 	runner := job.NewJobRunner(job.RunnerDeps{
-		Repo: repo, Registry: registry, LLMClient: inertLLM(), Executor: exec,
+		Repo: repo, Registry: registry, LLMClient: inertLLM(), Executors: map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: exec},
 	})
 	err := runner.Run(context.Background(), j, job.Event{
 		Domain:        model.JobEventDomainCase,
@@ -151,7 +231,7 @@ func TestJobRunner_SuccessClearsLease(t *testing.T) {
 	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws"}, Jobs: []*model.Job{j}})
 
 	runner := job.NewJobRunner(job.RunnerDeps{
-		Repo: repo, Registry: registry, LLMClient: inertLLM(), Executor: exec,
+		Repo: repo, Registry: registry, LLMClient: inertLLM(), Executors: map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: exec},
 	})
 	gt.NoError(t, runner.Run(context.Background(), j, job.Event{
 		Domain: model.JobEventDomainCase, WorkspaceID: "ws", CaseID: c.ID,
@@ -168,9 +248,9 @@ func TestJobRunner_SuccessClearsLease(t *testing.T) {
 
 func TestJobRunner_InvalidJob(t *testing.T) {
 	runner := job.NewJobRunner(job.RunnerDeps{
-		Repo:     nil, // unreachable: validation fires first
-		Registry: model.NewWorkspaceRegistry(),
-		Executor: &recordingExecutor{},
+		Repo:      nil, // unreachable: validation fires first
+		Registry:  model.NewWorkspaceRegistry(),
+		Executors: map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: &recordingExecutor{}},
 	})
 	err := runner.Run(context.Background(), &model.Job{}, job.Event{})
 	gt.Error(t, err)
@@ -206,7 +286,7 @@ func TestJobRunner_PassesBuilderTools(t *testing.T) {
 	})
 
 	runner := job.NewJobRunner(job.RunnerDeps{
-		Repo: repo, Registry: registry, LLMClient: inertLLM(), Executor: exec,
+		Repo: repo, Registry: registry, LLMClient: inertLLM(), Executors: map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: exec},
 		ToolBuilder: builder,
 	})
 	gt.NoError(t, runner.Run(context.Background(), j, job.Event{
@@ -290,7 +370,7 @@ func TestJobRunner_GoldenPath(t *testing.T) {
 	}
 
 	runner := job.NewJobRunner(job.RunnerDeps{
-		Repo: repo, Registry: registry, LLMClient: inertLLM(), Executor: exec,
+		Repo: repo, Registry: registry, LLMClient: inertLLM(), Executors: map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: exec},
 		NewRunID:   func() string { return runID },
 		NewTraceID: func() string { return traceID },
 		Clock:      func() time.Time { return fixedT },
@@ -429,7 +509,7 @@ func TestJobRunner_LLMFailure_AppendsRunError(t *testing.T) {
 	}
 
 	runner := job.NewJobRunner(job.RunnerDeps{
-		Repo: repo, Registry: registry, LLMClient: inertLLM(), Executor: exec,
+		Repo: repo, Registry: registry, LLMClient: inertLLM(), Executors: map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: exec},
 		NewRunID:   func() string { return runID },
 		NewTraceID: func() string { return traceID },
 		Clock:      func() time.Time { return fixedT },
@@ -491,7 +571,7 @@ func TestJobRunner_WorkspaceLoadFailure_NoLog(t *testing.T) {
 	registry := model.NewWorkspaceRegistry()
 
 	runner := job.NewJobRunner(job.RunnerDeps{
-		Repo: repo, Registry: registry, LLMClient: inertLLM(), Executor: &recordingExecutor{},
+		Repo: repo, Registry: registry, LLMClient: inertLLM(), Executors: map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: &recordingExecutor{}},
 	})
 	err := runner.Run(ctx, j, job.Event{
 		Domain:        model.JobEventDomainCase,

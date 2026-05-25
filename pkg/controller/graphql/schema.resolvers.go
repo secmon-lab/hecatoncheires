@@ -407,19 +407,6 @@ func (r *caseResolver) SlackMessages(ctx context.Context, obj *graphql1.Case, li
 	}, nil
 }
 
-// AgentAdditionalPrompt is the resolver for the agentAdditionalPrompt field.
-func (r *caseResolver) AgentAdditionalPrompt(ctx context.Context, obj *graphql1.Case) (string, error) {
-	if obj == nil {
-		return "", nil
-	}
-	// Hidden when the caller cannot access the parent Case (matches the
-	// AccessDenied pattern used by other private-case-sensitive fields).
-	if obj.AccessDenied {
-		return "", nil
-	}
-	return obj.AgentAdditionalPrompt, nil
-}
-
 // AgentSources is the resolver for the agentSources field.
 func (r *caseResolver) AgentSources(ctx context.Context, obj *graphql1.Case) ([]*graphql1.Source, error) {
 	if obj == nil || obj.AccessDenied {

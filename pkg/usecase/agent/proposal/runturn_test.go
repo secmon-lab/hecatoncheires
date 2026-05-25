@@ -1,4 +1,4 @@
-package draft_test
+package proposal_test
 
 import (
 	"context"
@@ -29,7 +29,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
-	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/draft"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/proposal"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 	"github.com/urfave/cli/v3"
 )
@@ -39,22 +39,22 @@ import (
 // service mock.
 type hostStub struct {
 	mu              sync.Mutex
-	postedQuestion  []draft.QuestionPayload
-	materialized    []draft.MaterializePayload
+	postedQuestion  []proposal.QuestionPayload
+	materialized    []proposal.MaterializePayload
 	traceLines      []string
 	roundLines      map[string][]string
-	registeredTasks []draft.TaskInfo
+	registeredTasks []proposal.TaskInfo
 	taskLines       map[string][]string
 	busyCalls       int
 }
 
-func (h *hostStub) Question(_ context.Context, _ *model.Session, q draft.QuestionPayload) error {
+func (h *hostStub) Question(_ context.Context, _ *model.Session, q proposal.QuestionPayload) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.postedQuestion = append(h.postedQuestion, q)
 	return nil
 }
-func (h *hostStub) Materialize(_ context.Context, _ *model.Session, m draft.MaterializePayload) error {
+func (h *hostStub) Materialize(_ context.Context, _ *model.Session, m proposal.MaterializePayload) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.materialized = append(h.materialized, m)
@@ -73,7 +73,7 @@ func (h *hostStub) TraceRound(_ context.Context, roundKey, line string) {
 	}
 	h.roundLines[roundKey] = append(h.roundLines[roundKey], line)
 }
-func (h *hostStub) RegisterTasks(_ context.Context, tasks []draft.TaskInfo) {
+func (h *hostStub) RegisterTasks(_ context.Context, tasks []proposal.TaskInfo) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.registeredTasks = append(h.registeredTasks, tasks...)
@@ -124,7 +124,7 @@ func newScriptedLLM(plans []string) *mock.LLMClientMock {
 	}
 }
 
-func mustDraft(t *testing.T, llm gollem.LLMClient, plannerMax, subMax int) *draft.UseCase {
+func mustDraft(t *testing.T, llm gollem.LLMClient, plannerMax, subMax int) *proposal.UseCase {
 	t.Helper()
 	deps := &agent.CommonDeps{
 		Repo:                memory.New(),
@@ -134,7 +134,7 @@ func mustDraft(t *testing.T, llm gollem.LLMClient, plannerMax, subMax int) *draf
 		HeartbeatInterval:   time.Second,
 		HeartbeatStaleAfter: 5 * time.Second,
 	}
-	uc, err := draft.New(deps, plannerMax, subMax, 20)
+	uc, err := proposal.New(deps, plannerMax, subMax, 20)
 	gt.NoError(t, err).Required()
 	return uc
 }
@@ -157,23 +157,23 @@ func TestRunTurn_QuestionHappyPath(t *testing.T) {
 	uc := mustDraft(t, llm, 8, 16)
 
 	host := &hostStub{}
-	res, err := uc.RunTurn(ctx, draft.TurnRequest{
+	res, err := uc.RunTurn(ctx, proposal.TurnRequest{
 		Session:   newOpenSession(),
 		UserInput: "@bot which workspace?",
-		Trigger:   draft.TriggerAppMention,
+		Trigger:   proposal.TriggerAppMention,
 		TriggerTS: "1700000001.000001",
 		Handler:   host,
 	})
 	async.Wait()
 	gt.NoError(t, err).Required()
 	gt.Value(t, res).NotNil().Required()
-	gt.Value(t, res.Status).Equal(draft.StatusCompleted)
+	gt.Value(t, res.Status).Equal(proposal.StatusCompleted)
 	gt.Value(t, res.EndedWith).Equal(model.SessionEndedWithQuestion)
 	gt.Array(t, host.postedQuestion).Length(1).Required()
 	gt.Value(t, host.postedQuestion[0].Reason).Equal("need workspace")
 	gt.Array(t, host.postedQuestion[0].Items).Length(1).Required()
 	gt.Value(t, host.postedQuestion[0].Items[0].ID).Equal("q-ws")
-	gt.Value(t, host.postedQuestion[0].Items[0].Type).Equal(draft.QuestionItemSelect)
+	gt.Value(t, host.postedQuestion[0].Items[0].Type).Equal(proposal.QuestionItemSelect)
 	gt.Array(t, host.materialized).Length(0)
 }
 
@@ -236,16 +236,16 @@ func TestRunTurn_InvestigateThenMaterialize(t *testing.T) {
 
 	uc := mustDraft(t, llm, 8, 16)
 	host := &hostStub{}
-	res, err := uc.RunTurn(ctx, draft.TurnRequest{
+	res, err := uc.RunTurn(ctx, proposal.TurnRequest{
 		Session:   newOpenSession(),
 		UserInput: "@bot create a case for the API outage",
-		Trigger:   draft.TriggerAppMention,
+		Trigger:   proposal.TriggerAppMention,
 		TriggerTS: "1700000010.000001",
 		Handler:   host,
 	})
 	async.Wait()
 	gt.NoError(t, err).Required()
-	gt.Value(t, res.Status).Equal(draft.StatusCompleted)
+	gt.Value(t, res.Status).Equal(proposal.StatusCompleted)
 	gt.Value(t, res.EndedWith).Equal(model.SessionEndedWithMaterialize)
 
 	gt.Array(t, host.materialized).Length(1).Required()
@@ -294,10 +294,10 @@ func TestRunTurn_PlannerBudgetExhaustionFallback(t *testing.T) {
 
 	uc := mustDraft(t, combined, 2, 16)
 	host := &hostStub{}
-	res, err := uc.RunTurn(ctx, draft.TurnRequest{
+	res, err := uc.RunTurn(ctx, proposal.TurnRequest{
 		Session:   newOpenSession(),
 		UserInput: "@bot loop please",
-		Trigger:   draft.TriggerAppMention,
+		Trigger:   proposal.TriggerAppMention,
 		TriggerTS: "1700000020.000001",
 		Handler:   host,
 	})
@@ -305,7 +305,7 @@ func TestRunTurn_PlannerBudgetExhaustionFallback(t *testing.T) {
 	gt.NoError(t, err).Required()
 	// Budget exhausted → StatusFallback with non-empty reason. Runtime
 	// does NOT post anything itself; the host renders fallback copy.
-	gt.Value(t, res.Status).Equal(draft.StatusFallback)
+	gt.Value(t, res.Status).Equal(proposal.StatusFallback)
 	gt.String(t, res.FallbackReason).NotEqual("")
 	gt.Array(t, host.materialized).Length(0)
 	gt.Array(t, host.postedQuestion).Length(0)
@@ -324,7 +324,7 @@ func TestRunTurn_BusyShortCircuits(t *testing.T) {
 		HeartbeatInterval:   200 * time.Millisecond,
 		HeartbeatStaleAfter: 5 * time.Second,
 	}
-	uc, err := draft.New(deps, 8, 16, 20)
+	uc, err := proposal.New(deps, 8, 16, 20)
 	gt.NoError(t, err).Required()
 
 	ssn := newOpenSession()
@@ -337,15 +337,15 @@ func TestRunTurn_BusyShortCircuits(t *testing.T) {
 	gt.Bool(t, acq.Acquired).True().Required()
 
 	host := &hostStub{}
-	res, err := uc.RunTurn(ctx, draft.TurnRequest{
+	res, err := uc.RunTurn(ctx, proposal.TurnRequest{
 		Session:   ssn,
 		UserInput: "second mention",
-		Trigger:   draft.TriggerAppMention,
+		Trigger:   proposal.TriggerAppMention,
 		TriggerTS: "trigger-B",
 		Handler:   host,
 	})
 	gt.NoError(t, err).Required()
-	gt.Value(t, res.Status).Equal(draft.StatusBusy)
+	gt.Value(t, res.Status).Equal(proposal.StatusBusy)
 	gt.Number(t, host.busyCalls).Equal(1)
 	gt.Array(t, host.postedQuestion).Length(0)
 }
@@ -363,7 +363,7 @@ func TestRunTurn_IdempotentRetryDropsSilently(t *testing.T) {
 		HeartbeatInterval:   200 * time.Millisecond,
 		HeartbeatStaleAfter: 5 * time.Second,
 	}
-	uc, err := draft.New(deps, 8, 16, 20)
+	uc, err := proposal.New(deps, 8, 16, 20)
 	gt.NoError(t, err).Required()
 
 	ssn := newOpenSession()
@@ -375,15 +375,15 @@ func TestRunTurn_IdempotentRetryDropsSilently(t *testing.T) {
 	gt.Bool(t, acq.Acquired).True().Required()
 
 	host := &hostStub{}
-	res, err := uc.RunTurn(ctx, draft.TurnRequest{
+	res, err := uc.RunTurn(ctx, proposal.TurnRequest{
 		Session:   ssn,
 		UserInput: "duplicate",
-		Trigger:   draft.TriggerAppMention,
+		Trigger:   proposal.TriggerAppMention,
 		TriggerTS: "trig-dup",
 		Handler:   host,
 	})
 	gt.NoError(t, err).Required()
-	gt.Value(t, res.Status).Equal(draft.StatusIdempotent)
+	gt.Value(t, res.Status).Equal(proposal.StatusIdempotent)
 	gt.Number(t, host.busyCalls).Equal(0)
 	gt.Array(t, host.postedQuestion).Length(0)
 }
@@ -509,21 +509,21 @@ func TestRunTurn_PlannerCallsGetWorkspaceThenMaterializes(t *testing.T) {
 		HeartbeatInterval:   time.Second,
 		HeartbeatStaleAfter: 5 * time.Second,
 	}
-	uc, err := draft.New(deps, 8, 16, 20)
+	uc, err := proposal.New(deps, 8, 16, 20)
 	gt.NoError(t, err).Required()
 
 	host := &hostStub{}
-	res, err := uc.RunTurn(ctx, draft.TurnRequest{
+	res, err := uc.RunTurn(ctx, proposal.TurnRequest{
 		Session:   newOpenSession(),
 		UserInput: "@bot create a draft",
-		Trigger:   draft.TriggerAppMention,
+		Trigger:   proposal.TriggerAppMention,
 		TriggerTS: "1700000030.000001",
 		Handler:   host,
 	})
 	async.Wait()
 	gt.NoError(t, err).Required()
 	gt.Value(t, res).NotNil().Required()
-	gt.Value(t, res.Status).Equal(draft.StatusCompleted)
+	gt.Value(t, res.Status).Equal(proposal.StatusCompleted)
 	gt.Value(t, res.EndedWith).Equal(model.SessionEndedWithMaterialize)
 
 	gt.Array(t, host.materialized).Length(1).Required()
@@ -987,7 +987,7 @@ func anySlice[T any](in []T) []any {
 // LLM judge for cases where exact output cannot be pinned down.
 type llmScenario struct {
 	userInput  string
-	trigger    draft.Trigger
+	trigger    proposal.Trigger
 	workspaces []*model.WorkspaceEntry
 
 	// Optional sub-agent backing services. When set, sub-agents that the
@@ -1006,7 +1006,7 @@ type llmScenario struct {
 	// belongs to.
 	sources []llmScenarioSource
 
-	expectStatus draft.Status
+	expectStatus proposal.Status
 	expectAction model.SessionEndReason
 
 	// requirePlannerTools lists tool names that MUST appear at least once
@@ -1105,7 +1105,7 @@ func (f *fakeNotionClient) GetPageMarkdown(ctx context.Context, pageID string) (
 	return f.getPageFn(ctx, pageID)
 }
 
-// runScenario wires up a one-off draft.UseCase against the supplied LLM,
+// runScenario wires up a one-off proposal.UseCase against the supplied LLM,
 // drives RunTurn with the scenario's mention, and then checks every
 // criterion. Helpers above (newScenarioTraceRepo, collectToolNames,
 // runJudge) are composed here so the per-scenario test bodies stay short.
@@ -1161,8 +1161,8 @@ func runScenario(t *testing.T, ctx context.Context, llm gollem.LLMClient, sc llm
 	// 20 inner loops). Real-LLM sub-agents may iterate through several
 	// search / get_page calls before they have enough context to
 	// summarise, and the production defaults are sized for that.
-	// Passing 0 lets draft.New apply the defaults explicitly.
-	uc, err := draft.New(deps, 0, 0, 0)
+	// Passing 0 lets proposal.New apply the defaults explicitly.
+	uc, err := proposal.New(deps, 0, 0, 0)
 	gt.NoError(t, err).Required()
 
 	host := &hostStub{}
@@ -1170,7 +1170,7 @@ func runScenario(t *testing.T, ctx context.Context, llm gollem.LLMClient, sc llm
 	now := time.Now()
 	triggerTS := fmt.Sprintf("real-llm-%d.%06d", now.Unix(), now.Nanosecond()/1000)
 
-	res, err := uc.RunTurn(ctx, draft.TurnRequest{
+	res, err := uc.RunTurn(ctx, proposal.TurnRequest{
 		Session:   ssn,
 		UserInput: sc.userInput,
 		Trigger:   sc.trigger,
@@ -1383,9 +1383,9 @@ func TestRunTurn_RealLLM_VagueMentionAsksQuestion(t *testing.T) {
 
 	runScenario(t, ctx, llm, llmScenario{
 		userInput:         "@bot please draft a case for me",
-		trigger:           draft.TriggerAppMention,
+		trigger:           proposal.TriggerAppMention,
 		workspaces:        workspaces,
-		expectStatus:      draft.StatusCompleted,
+		expectStatus:      proposal.StatusCompleted,
 		expectAction:      model.SessionEndedWithQuestion,
 		questionCriterion: "The question (its `Reason` and `Items` text combined) asks the user to identify which workspace this case belongs to (Incident Response, Recruitment, or Risk Management), OR equivalently asks for the case scope or topic that would let the agent disambiguate the workspace. Every `select` or `multi_select` item must list at least 2 distinct, non-empty options.",
 		// Tool-call discipline: the planner MUST consult get_workspace
@@ -1571,12 +1571,12 @@ func TestRunTurn_RealLLM_InfersFieldsFromSources(t *testing.T) {
 	runScenario(t, ctx, llm, llmScenario{
 		userInput: "@bot please draft a risk case for the recurring insider-threat pattern around Tanaka's absconding (持ち逃げ) incidents. " +
 			"The Risk Register Notion DB and the #risk Slack channel both have prior context — please consult them and fill the case fields based on what you find.",
-		trigger:              draft.TriggerAppMention,
+		trigger:              proposal.TriggerAppMention,
 		workspaces:           []*model.WorkspaceEntry{workspace},
 		slackSearch:          slackSearch,
 		notionClient:         notionClient,
 		sources:              sources,
-		expectStatus:         draft.StatusCompleted,
+		expectStatus:         proposal.StatusCompleted,
 		expectAction:         model.SessionEndedWithMaterialize,
 		expectWorkspaceID:    "ws-risk",
 		requireFieldKeys:     []string{"likelihood", "impact", "owner_team"},
@@ -1699,9 +1699,9 @@ func TestRunTurn_RealLLM_PicksRightWorkspaceFromMany(t *testing.T) {
 			"PostgreSQL primary failover took 8 minutes; pgbouncer retried, no data loss. Oncall was paged. " +
 			"Customer-visible 5xx for ~6 of those 8 minutes. " +
 			"No further investigation needed — please pick the appropriate workspace from the registered list and materialise the draft directly.",
-		trigger:             draft.TriggerAppMention,
+		trigger:             proposal.TriggerAppMention,
 		workspaces:          workspaces,
-		expectStatus:        draft.StatusCompleted,
+		expectStatus:        proposal.StatusCompleted,
 		expectAction:        model.SessionEndedWithMaterialize,
 		expectWorkspaceID:   "ws-incident",
 		requireFieldKeys:    []string{"severity"},
@@ -1827,7 +1827,7 @@ func TestRunTurn_RealLLM_QuestionAnsweredThenMaterializes(t *testing.T) {
 		HeartbeatStaleAfter: 30 * time.Second,
 	}
 	// Use package defaults (8 / 16 / 20).
-	uc, err := draft.New(deps, 0, 0, 0)
+	uc, err := proposal.New(deps, 0, 0, 0)
 	gt.NoError(t, err).Required()
 
 	host := &hostStub{}
@@ -1836,17 +1836,17 @@ func TestRunTurn_RealLLM_QuestionAnsweredThenMaterializes(t *testing.T) {
 	// ---- Turn 1: vague mention → planner asks the user. ----
 	now1 := time.Now()
 	turn1TS := fmt.Sprintf("turn1-%d.%06d", now1.Unix(), now1.Nanosecond()/1000)
-	res1, err := uc.RunTurn(ctx, draft.TurnRequest{
+	res1, err := uc.RunTurn(ctx, proposal.TurnRequest{
 		Session:   ssn,
 		UserInput: "@bot please draft a case for me",
-		Trigger:   draft.TriggerAppMention,
+		Trigger:   proposal.TriggerAppMention,
 		TriggerTS: turn1TS,
 		Handler:   host,
 	})
 	async.Wait()
 	gt.NoError(t, err).Required()
 	gt.Value(t, res1).NotNil().Required()
-	gt.Value(t, res1.Status).Equal(draft.StatusCompleted)
+	gt.Value(t, res1.Status).Equal(proposal.StatusCompleted)
 	gt.Value(t, res1.EndedWith).Equal(model.SessionEndedWithQuestion)
 	gt.Array(t, host.postedQuestion).Length(1).Required()
 	gt.Array(t, host.materialized).Length(0)
@@ -1882,17 +1882,17 @@ func TestRunTurn_RealLLM_QuestionAnsweredThenMaterializes(t *testing.T) {
 	// ---- Turn 2: thread reply → planner picks ws-risk and materialises. ----
 	now2 := time.Now()
 	turn2TS := fmt.Sprintf("turn2-%d.%06d", now2.Unix(), now2.Nanosecond()/1000)
-	res2, err := uc.RunTurn(ctx, draft.TurnRequest{
+	res2, err := uc.RunTurn(ctx, proposal.TurnRequest{
 		Session:   ssn,
 		UserInput: reply,
-		Trigger:   draft.TriggerThreadReply,
+		Trigger:   proposal.TriggerThreadReply,
 		TriggerTS: turn2TS,
 		Handler:   host,
 	})
 	async.Wait()
 	gt.NoError(t, err).Required()
 	gt.Value(t, res2).NotNil().Required()
-	gt.Value(t, res2.Status).Equal(draft.StatusCompleted)
+	gt.Value(t, res2.Status).Equal(proposal.StatusCompleted)
 	gt.Value(t, res2.EndedWith).Equal(model.SessionEndedWithMaterialize)
 
 	gt.Array(t, host.materialized).Length(1).Required()

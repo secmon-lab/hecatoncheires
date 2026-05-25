@@ -55,8 +55,46 @@ prompt = "Post a status digest to the case Slack channel."
 | `description` | string   | no       | Free-form description for operators. |
 | `prompt`      | string   | yes      | Go `text/template`. Has access to `.Case`, `.Workspace`, `.Event`. |
 | `disabled`    | bool     | no       | Defaults to `false` (= active). Set `true` to temporarily disable. |
+| `strategy`    | string   | no       | `"simple"` (default) or `"planexec"`. See *Execution strategy* below. |
 | `events.case` | table    | (\*)     | `on = ["created" \| "closed", ...]`. Always an array. |
 | `events.scheduled` | table | (\*)   | Exactly one of `every = "1h"` or `cron = "0 9 * * *"`. |
+
+### Execution strategy
+
+The `strategy` field selects which runtime drives the Job's LLM loop.
+Defaults to `simple`, which is the v1 behaviour: a single
+`gollem.Agent.Execute` call with the configured tool set. Set it to
+`planexec` to opt into the plan-and-execute runtime shared with the
+proposal mode — a planner LLM emits a list of parallel sub-agent tasks,
+the runtime fans them out, replans with the observations, and finishes
+with a structured summary.
+
+```toml
+[[job]]
+id = "deep-investigation-on-create"
+prompt = "Investigate the case from every angle and summarise findings."
+strategy = "planexec"
+events.case = { on = ["created"] }
+```
+
+| Strategy | When to use |
+|----------|-------------|
+| `simple` (default) | Single-step actions: post a digest, set a status, send a Slack reply. The Job's prompt is a direct instruction the agent executes in one ReAct loop. |
+| `planexec` | Multi-step investigations: pull context from several sources, cross-reference, and produce a structured summary. The runtime budgets up to 8 planner rounds and 16 parallel sub-agent tasks per turn (configurable in the binary). |
+
+Notes:
+
+- `planexec` Jobs run **unattended** — they cannot ask the operator a
+  question mid-run. Use `simple` if your Job is interactive in spirit
+  but happens to need a small amount of planning; the planexec
+  Question feature is reserved for the proposal mode.
+- `planexec` Jobs surface their per-phase progress through the same
+  JobRunLog event trail as `simple`, so the Cases UI shows you the
+  plan, sub-agent activity, and final summary in order.
+- The JobRunLog `executorKind` field is recorded as `single_loop`
+  (simple) or `plan_execute` (planexec). The Cases UI renders the
+  Run row with a `planexec` chip when the Job ran under the
+  plan-and-execute runtime.
 
 (\*) At least one of `events.case` / `events.scheduled` must be present.
 

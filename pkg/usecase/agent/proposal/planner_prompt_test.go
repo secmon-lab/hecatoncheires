@@ -1,4 +1,4 @@
-package draft_test
+package proposal_test
 
 import (
 	"strings"
@@ -8,11 +8,11 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
-	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/draft"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/proposal"
 )
 
 func TestRenderPlannerPrompt_NoWorkspaces(t *testing.T) {
-	got, err := draft.RenderPlannerPromptForTest(nil, "English")
+	got, err := proposal.RenderPlannerPromptForTest(nil, "English")
 	gt.NoError(t, err).Required()
 
 	gt.S(t, got).Contains("First, identify the workspace")
@@ -59,7 +59,7 @@ func TestRenderPlannerPrompt_WorkspacesIdentityOnly(t *testing.T) {
 		},
 	})
 
-	got, err := draft.RenderPlannerPromptForTest(r, "Japanese")
+	got, err := proposal.RenderPlannerPromptForTest(r, "Japanese")
 	gt.NoError(t, err).Required()
 
 	gt.S(t, got).Contains("`ws-zzfixture` — ZZFixtureWorkspace")
@@ -78,7 +78,7 @@ func TestRenderPlannerPrompt_WorkspacesIdentityOnly(t *testing.T) {
 }
 
 func TestRenderPlannerPrompt_LanguageSuppressed(t *testing.T) {
-	got, err := draft.RenderPlannerPromptForTest(nil, "")
+	got, err := proposal.RenderPlannerPromptForTest(nil, "")
 	gt.NoError(t, err).Required()
 	gt.Bool(t, strings.Contains(got, "## Language")).False()
 }
@@ -93,7 +93,7 @@ func TestRenderPlannerPrompt_LanguageSuppressed(t *testing.T) {
 // failure mode and TestRunTurn_RealLLM_InfersFieldsFromSources
 // starts flaking again.
 func TestRenderPlannerPrompt_InvestigateBeforeMaterializeRule(t *testing.T) {
-	got, err := draft.RenderPlannerPromptForTest(nil, "English")
+	got, err := proposal.RenderPlannerPromptForTest(nil, "English")
 	gt.NoError(t, err).Required()
 	gt.S(t, got).Contains("Investigate-before-materialize when sources advertise relevant context")
 	gt.S(t, got).Contains("you **MUST** emit at least one `investigate` round")
@@ -110,7 +110,7 @@ func TestRenderPlannerPrompt_InvestigateBeforeMaterializeRule(t *testing.T) {
 // which fails TestRunTurn_RealLLM_VagueMentionAsksQuestion's
 // requirePlannerTools=["get_workspace"] check.
 func TestRenderPlannerPrompt_ListWorkspacesDoesNotCount(t *testing.T) {
-	got, err := draft.RenderPlannerPromptForTest(nil, "English")
+	got, err := proposal.RenderPlannerPromptForTest(nil, "English")
 	gt.NoError(t, err).Required()
 	gt.S(t, got).Contains("`list_workspaces` does **NOT** count")
 	gt.S(t, got).Contains("`list_workspaces` does NOT count toward this check")
@@ -123,7 +123,7 @@ func TestRenderPlannerPrompt_ListWorkspacesDoesNotCount(t *testing.T) {
 // fact rejecting via the Hard rule) shrinks the surface area where
 // that mistake can occur.
 func TestRenderPlannerPrompt_ListWorkspacesDiscouraged(t *testing.T) {
-	got, err := draft.RenderPlannerPromptForTest(nil, "English")
+	got, err := proposal.RenderPlannerPromptForTest(nil, "English")
 	gt.NoError(t, err).Required()
 	gt.S(t, got).Contains("**Do not call this in normal operation.**")
 	gt.S(t, got).Contains("**This is the tool you should be calling on round 0.**")

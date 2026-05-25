@@ -16,7 +16,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
-	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/draft"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/proposal"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	goslack "github.com/slack-go/slack"
@@ -32,7 +32,7 @@ var ErrNoAccessibleWorkspace = errors.New("no accessible workspace for user")
 var ErrInferenceInProgress = errors.New("draft inference in progress")
 
 // MentionProposalUseCase handles app_mention events that occur in channels NOT
-// bound to an existing Case. It funnels each mention into draft.UseCase
+// bound to an existing Case. It funnels each mention into proposal.UseCase
 // (the open-mode planner / sub-agent runtime), passing a per-mention
 // slackDraftHandler that translates terminal actions and trace updates
 // into Slack messages.
@@ -41,7 +41,7 @@ type MentionProposalUseCase struct {
 	registry     *model.WorkspaceRegistry
 	slackService slacksvc.Service
 	collector    *slacksvc.MessageCollector
-	draftUC      *draft.UseCase
+	draftUC      *proposal.UseCase
 }
 
 // NewMentionProposalUseCase constructs a MentionProposalUseCase. All dependencies
@@ -52,7 +52,7 @@ func NewMentionProposalUseCase(
 	repo interfaces.Repository,
 	registry *model.WorkspaceRegistry,
 	slackService slacksvc.Service,
-	draftUC *draft.UseCase,
+	draftUC *proposal.UseCase,
 ) *MentionProposalUseCase {
 	return &MentionProposalUseCase{
 		repo:         repo,
@@ -65,7 +65,7 @@ func NewMentionProposalUseCase(
 
 // HandleAppMention runs the initial-mention flow: candidate workspace
 // resolution → message collection → draft persistence → planner-driven
-// turn (draft.UseCase.RunTurn). The slackDraftHandler renders the planner's
+// turn (proposal.UseCase.RunTurn). The slackDraftHandler renders the planner's
 // terminal action (post_message / post_question / materialize) into Slack.
 //
 // It is the caller's responsibility to ensure the channel is NOT bound to
@@ -166,10 +166,10 @@ func (uc *MentionProposalUseCase) HandleAppMention(ctx context.Context, ev *slac
 
 	userInput := buildProposalUserInput(d, ev.Text, channelInfo)
 
-	result, runErr := uc.draftUC.RunTurn(ctx, draft.TurnRequest{
+	result, runErr := uc.draftUC.RunTurn(ctx, proposal.TurnRequest{
 		Session:          session,
 		UserInput:        userInput,
-		Trigger:          draft.TriggerAppMention,
+		Trigger:          proposal.TriggerAppMention,
 		TriggerTS:        ev.TimeStamp,
 		ActorUserID:      ev.User,
 		ExistingProposal: d,
@@ -181,12 +181,12 @@ func (uc *MentionProposalUseCase) HandleAppMention(ctx context.Context, ev *slac
 		return goerr.Wrap(runErr, "draft turn failed")
 	}
 	switch result.Status {
-	case draft.StatusBusy, draft.StatusIdempotent:
+	case proposal.StatusBusy, proposal.StatusIdempotent:
 		// Handler.PostBusy already posted the busy notice (StatusBusy);
 		// StatusIdempotent is silent. The processing placeholder may
 		// still be showing — replace it with the "ended" footer.
 		uc.removeProcessingMessage(ctx, ev.Channel, processingTS)
-	case draft.StatusFallback:
+	case proposal.StatusFallback:
 		// Planner exhausted budget / hit an internal error before reaching
 		// a terminal action. Surface a system fallback message so the user
 		// is not left waiting on the processing placeholder.
@@ -387,10 +387,10 @@ func (uc *MentionProposalUseCase) HandleThreadReply(ctx context.Context, ev *sla
 		candidates, proposalID, "", "",
 	)
 
-	result, runErr := uc.draftUC.RunTurn(ctx, draft.TurnRequest{
+	result, runErr := uc.draftUC.RunTurn(ctx, proposal.TurnRequest{
 		Session:          session,
 		UserInput:        ev.Text,
-		Trigger:          draft.TriggerThreadReply,
+		Trigger:          proposal.TriggerThreadReply,
 		TriggerTS:        ev.TimeStamp,
 		ActorUserID:      ev.User,
 		ExistingProposal: d,
@@ -399,7 +399,7 @@ func (uc *MentionProposalUseCase) HandleThreadReply(ctx context.Context, ev *sla
 	if runErr != nil {
 		return goerr.Wrap(runErr, "thread reply turn failed")
 	}
-	if result.Status == draft.StatusFallback {
+	if result.Status == proposal.StatusFallback {
 		uc.notifyDraftFallback(ctx, ev.Channel, threadTS, result.FallbackReason)
 	}
 

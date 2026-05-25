@@ -229,6 +229,7 @@ type JobRunLog struct {
 	CaseID         int         `json:"caseId"`
 	JobID          string      `json:"jobId"`
 	JobName        string      `json:"jobName"`
+	Strategy       JobStrategy `json:"strategy"`
 	RunID          string      `json:"runId"`
 	TraceID        string      `json:"traceId"`
 	Stage          JobRunStage `json:"stage"`
@@ -746,6 +747,61 @@ func (e *JobRunStage) UnmarshalJSON(b []byte) error {
 }
 
 func (e JobRunStage) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
+}
+
+type JobStrategy string
+
+const (
+	JobStrategySimple   JobStrategy = "SIMPLE"
+	JobStrategyPlanexec JobStrategy = "PLANEXEC"
+)
+
+var AllJobStrategy = []JobStrategy{
+	JobStrategySimple,
+	JobStrategyPlanexec,
+}
+
+func (e JobStrategy) IsValid() bool {
+	switch e {
+	case JobStrategySimple, JobStrategyPlanexec:
+		return true
+	}
+	return false
+}
+
+func (e JobStrategy) String() string {
+	return string(e)
+}
+
+func (e *JobStrategy) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = JobStrategy(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid JobStrategy", str)
+	}
+	return nil
+}
+
+func (e JobStrategy) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *JobStrategy) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e JobStrategy) MarshalJSON() ([]byte, error) {
 	var buf bytes.Buffer
 	e.MarshalGQL(&buf)
 	return buf.Bytes(), nil

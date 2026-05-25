@@ -9,6 +9,7 @@ import (
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/trace"
 	"github.com/urfave/cli/v3"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/actionwriter"
@@ -18,9 +19,11 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	jobagent "github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/job"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/planexec"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
 )
 
@@ -88,6 +91,14 @@ type jobRuntimeDeps struct {
 	LLMClient    gollem.LLMClient
 	UC           *usecase.UseCases
 	SlackService slacksvc.Service // may be nil; slack_post tool then no-ops
+
+	// HistoryRepo / TraceRepo are required when wiring the planexec
+	// executor (it needs persistent storage to replay sub-agent
+	// reasoning). Nil falls back to in-memory implementations so the
+	// scheduled-tick CLI command (which does not configure storage)
+	// still gets a fully wired runtime.
+	HistoryRepo gollem.HistoryRepository
+	TraceRepo   trace.Repository
 }
 
 // buildJobRuntime constructs the JobRunner + JobUseCase pair, with a
@@ -140,11 +151,48 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner) {
 		return out
 	})
 
+	executors := map[model.JobStrategy]jobagent.JobExecutor{
+		model.JobStrategySimple: jobagent.NewSingleLoopJobExecutor(),
+	}
+
+	// Wire the planexec executor when an LLM client is available. We
+	// only need it for workspaces that declared `strategy = "planexec"`
+	// in TOML; constructing it unconditionally is safe because the map
+	// lookup at Run time picks the right one. Falls back to in-memory
+	// history / trace repos when the caller did not pre-configure them
+	// (e.g. the `tick` CLI command in test environments).
+	if deps.LLMClient != nil {
+		historyRepo := deps.HistoryRepo
+		if historyRepo == nil {
+			historyRepo = agentarchive.NewMemoryHistoryRepository()
+		}
+		traceRepo := deps.TraceRepo
+		if traceRepo == nil {
+			traceRepo = agentarchive.NewMemoryTraceRepository()
+		}
+		planexecRunner, err := planexec.NewRunner(planexec.RunnerDeps{
+			LLMClient:   deps.LLMClient,
+			HistoryRepo: historyRepo,
+			TraceRepo:   traceRepo,
+			Budget: planexec.BudgetConfig{
+				PlannerLoopMax:     8,
+				SubAgentMaxPerTurn: 16,
+				SubAgentLoopMax:    20,
+			},
+		})
+		if err == nil {
+			planexecExec, peErr := jobagent.NewPlanexecJobExecutor(planexecRunner)
+			if peErr == nil {
+				executors[model.JobStrategyPlanexec] = planexecExec
+			}
+		}
+	}
+
 	runner := job.NewJobRunner(job.RunnerDeps{
 		Repo:        deps.Repo,
 		Registry:    deps.Registry,
 		LLMClient:   deps.LLMClient,
-		Executor:    jobagent.NewSingleLoopJobExecutor(),
+		Executors:   executors,
 		ToolBuilder: toolBuilder,
 	})
 	jobUC := job.NewUseCase(deps.Registry, runner)

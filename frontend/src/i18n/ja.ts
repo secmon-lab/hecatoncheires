@@ -445,6 +445,8 @@ export const ja: Messages = {
   caseAgentRunStageSuccess: 'Success',
   caseAgentRunStageFailed: 'Failed',
   caseAgentRunDurationRunning: 'running',
+  jobStrategySimple: 'simple',
+  jobStrategyPlanexec: 'planexec',
   caseAgentLoadError: 'エージェント設定の読み込みに失敗しました。',
   caseAgentSaveError: '保存に失敗しました: {message}',
   caseAgentSaving: '保存中…',

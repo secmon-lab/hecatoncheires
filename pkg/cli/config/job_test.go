@@ -68,6 +68,73 @@ events.scheduled = { every = "30m" }
 	gt.Value(t, fourth.Events.Case.On[0]).Equal(model.CaseLifecycleCreated)
 	gt.Value(t, fourth.Events.Case.On[1]).Equal(model.CaseLifecycleClosed)
 	gt.Number(t, int64(fourth.Events.Scheduled.Every)).Equal(int64(30 * time.Minute))
+
+	// Default Strategy normalisation: absence in TOML means "simple".
+	gt.Value(t, first.Strategy).Equal(model.JobStrategySimple)
+	gt.Value(t, second.Strategy).Equal(model.JobStrategySimple)
+}
+
+func TestJobSection_Strategy(t *testing.T) {
+	t.Run("explicit simple", func(t *testing.T) {
+		const src = `
+[[job]]
+id = "j-simple"
+prompt = "x"
+strategy = "simple"
+events.case = { on = ["created"] }
+`
+		var app config.AppConfig
+		gt.NoError(t, toml.Unmarshal([]byte(src), &app)).Required()
+		gt.NoError(t, app.Validate()).Required()
+		j, err := app.Jobs[0].Validate()
+		gt.NoError(t, err).Required()
+		gt.Value(t, j.Strategy).Equal(model.JobStrategySimple)
+	})
+
+	t.Run("planexec", func(t *testing.T) {
+		const src = `
+[[job]]
+id = "j-pe"
+prompt = "x"
+strategy = "planexec"
+events.case = { on = ["created"] }
+`
+		var app config.AppConfig
+		gt.NoError(t, toml.Unmarshal([]byte(src), &app)).Required()
+		gt.NoError(t, app.Validate()).Required()
+		j, err := app.Jobs[0].Validate()
+		gt.NoError(t, err).Required()
+		gt.Value(t, j.Strategy).Equal(model.JobStrategyPlanexec)
+	})
+
+	t.Run("empty falls back to simple", func(t *testing.T) {
+		const src = `
+[[job]]
+id = "j-default"
+prompt = "x"
+events.case = { on = ["created"] }
+`
+		var app config.AppConfig
+		gt.NoError(t, toml.Unmarshal([]byte(src), &app)).Required()
+		gt.NoError(t, app.Validate()).Required()
+		j, err := app.Jobs[0].Validate()
+		gt.NoError(t, err).Required()
+		gt.Value(t, j.Strategy).Equal(model.JobStrategySimple)
+	})
+
+	t.Run("unknown is rejected", func(t *testing.T) {
+		const src = `
+[[job]]
+id = "j-bad"
+prompt = "x"
+strategy = "ultra"
+events.case = { on = ["created"] }
+`
+		var app config.AppConfig
+		gt.NoError(t, toml.Unmarshal([]byte(src), &app)).Required()
+		// AppConfig.Validate runs resolveJobs which calls JobSection.Validate.
+		gt.Error(t, app.Validate())
+	})
 }
 
 func TestJobSection_Validate_Errors(t *testing.T) {

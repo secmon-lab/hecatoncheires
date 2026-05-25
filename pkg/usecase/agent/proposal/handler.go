@@ -1,4 +1,4 @@
-package draft
+package proposal
 
 import (
 	"context"
@@ -19,7 +19,7 @@ const (
 	// while the prior turn ended on action=question.
 	TriggerThreadReply
 	// TriggerWSSwitch — the user switched the active workspace via the
-	// preview UI, requiring a re-materialise on the existing draft.
+	// preview UI, requiring a re-materialise on the existing proposal.
 	TriggerWSSwitch
 )
 

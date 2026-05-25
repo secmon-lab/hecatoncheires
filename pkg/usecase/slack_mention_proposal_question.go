@@ -7,7 +7,7 @@ import (
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
-	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/draft"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/proposal"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	goslack "github.com/slack-go/slack"
@@ -80,7 +80,7 @@ func (a draftQuestionAnswer) IsEmpty() bool {
 // can re-enter the draft flow. requesterUserID is the Slack user id of
 // the person who originally @-mentioned the bot; pass empty to suppress
 // the mention (used in tests / synthetic flows).
-func buildProposalQuestionBlocks(q draft.QuestionPayload, proposalID model.CaseProposalID, requesterUserID string) ([]goslack.Block, string) {
+func buildProposalQuestionBlocks(q proposal.QuestionPayload, proposalID model.CaseProposalID, requesterUserID string) ([]goslack.Block, string) {
 	header := goslack.NewSectionBlock(
 		goslack.NewTextBlockObject(goslack.MarkdownType,
 			questionHeaderText(q.Reason, requesterUserID), false, false),
@@ -89,7 +89,7 @@ func buildProposalQuestionBlocks(q draft.QuestionPayload, proposalID model.CaseP
 	blocks := []goslack.Block{header, goslack.NewDividerBlock()}
 
 	for _, item := range q.Items {
-		if item.Type == draft.QuestionItemFreeText {
+		if item.Type == proposal.QuestionItemFreeText {
 			// `free_text`: the item's only control is a multiline
 			// plain-text input. No closed-list companion, no Other
 			// fallback — the prose is the answer.
@@ -119,7 +119,7 @@ func buildProposalQuestionBlocks(q draft.QuestionPayload, proposalID model.CaseP
 		}
 
 		var element goslack.BlockElement
-		if item.Type == draft.QuestionItemMultiSelect {
+		if item.Type == proposal.QuestionItemMultiSelect {
 			element = goslack.NewCheckboxGroupsBlockElement(ActionIDDraftQuestionChoice, opts...)
 		} else {
 			element = goslack.NewRadioButtonsBlockElement(ActionIDDraftQuestionChoice, opts...)
@@ -186,7 +186,7 @@ func buildDraftQuestionAnsweredBlocks(pq *model.PendingQuestion, answers map[str
 		fmt.Fprintf(&b, "*%s*\n", escapeMarkdownInline(item.Text))
 		ans := answers[item.ID]
 		var parts []string
-		if item.Type == string(draft.QuestionItemFreeText) {
+		if item.Type == string(proposal.QuestionItemFreeText) {
 			// `free_text` items render the prose directly without
 			// the backtick "selection" framing used for closed lists.
 			if v := strings.TrimSpace(ans.OtherText); v != "" {
@@ -254,7 +254,7 @@ func parseDraftQuestionAnswers(pq *model.PendingQuestion, state *goslack.BlockAc
 		choiceBlockID := BlockIDDraftQuestionItemPrefix + item.ID
 		if blk, ok := state.Values[choiceBlockID]; ok {
 			switch item.Type {
-			case string(draft.QuestionItemFreeText):
+			case string(proposal.QuestionItemFreeText):
 				// `free_text`: the item's primary control is a single
 				// plain_text_input with our free-text action_id. Park
 				// the prose into OtherText so downstream code reads
@@ -263,7 +263,7 @@ func parseDraftQuestionAnswers(pq *model.PendingQuestion, state *goslack.BlockAc
 				if act, ok := blk[ActionIDDraftQuestionFreeText]; ok {
 					ans.OtherText = act.Value
 				}
-			case string(draft.QuestionItemMultiSelect):
+			case string(proposal.QuestionItemMultiSelect):
 				if act, ok := blk[ActionIDDraftQuestionChoice]; ok {
 					for _, opt := range act.SelectedOptions {
 						if opt.Value == "" {
@@ -284,7 +284,7 @@ func parseDraftQuestionAnswers(pq *model.PendingQuestion, state *goslack.BlockAc
 		// Closed-list items also carry a per-item "Other (free text)"
 		// fallback in a sibling block. `free_text` items don't render
 		// that block, so the lookup is a harmless miss.
-		if item.Type != string(draft.QuestionItemFreeText) {
+		if item.Type != string(proposal.QuestionItemFreeText) {
 			otherBlockID := BlockIDDraftQuestionItemPrefix + item.ID + BlockIDDraftQuestionOtherSuffix
 			if blk, ok := state.Values[otherBlockID]; ok {
 				if act, ok := blk[ActionIDDraftQuestionOther]; ok {
@@ -312,7 +312,7 @@ func formatDraftQuestionAnswers(pq *model.PendingQuestion, answers map[string]dr
 		fmt.Fprintf(&b, "## %s\n", item.Text)
 		ans := answers[item.ID]
 		var parts []string
-		if item.Type == string(draft.QuestionItemFreeText) {
+		if item.Type == string(proposal.QuestionItemFreeText) {
 			// `free_text` items have no closed-list companion, so the
 			// "selected:" / "other:" framing would be misleading.
 			// Surface the prose under a clear label.
@@ -436,10 +436,10 @@ func (uc *MentionProposalUseCase) HandleQuestionSubmit(ctx context.Context, call
 	)
 
 	userInput := formatDraftQuestionAnswers(pq, answers)
-	result, runErr := uc.draftUC.RunTurn(ctx, draft.TurnRequest{
+	result, runErr := uc.draftUC.RunTurn(ctx, proposal.TurnRequest{
 		Session:          session,
 		UserInput:        userInput,
-		Trigger:          draft.TriggerThreadReply,
+		Trigger:          proposal.TriggerThreadReply,
 		TriggerTS:        messageTS,
 		ActorUserID:      callback.User.ID,
 		ExistingProposal: d,
@@ -448,7 +448,7 @@ func (uc *MentionProposalUseCase) HandleQuestionSubmit(ctx context.Context, call
 	if runErr != nil {
 		return goerr.Wrap(runErr, "draft question submit turn failed")
 	}
-	if result.Status == draft.StatusFallback {
+	if result.Status == proposal.StatusFallback {
 		uc.notifyDraftFallback(ctx, channelID, threadTS, result.FallbackReason)
 	}
 
@@ -485,7 +485,7 @@ func (uc *MentionProposalUseCase) markQuestionStale(ctx context.Context, channel
 // re-mentioned in the header so the original requester gets paged again
 // to finish answering.
 func (uc *MentionProposalUseCase) repostQuestionWithError(ctx context.Context, channelID, messageTS, requesterUserID string, pq *model.PendingQuestion, answers map[string]draftQuestionAnswer, missing []string) {
-	blocks, fallback := buildProposalQuestionBlocks(draft.QuestionPayload{
+	blocks, fallback := buildProposalQuestionBlocks(proposal.QuestionPayload{
 		Reason: pq.Reason,
 		Items:  pendingItemsToDraftItems(pq.Items),
 	}, "", requesterUserID)
@@ -515,12 +515,12 @@ func (uc *MentionProposalUseCase) repostQuestionWithError(ctx context.Context, c
 // pendingItemsToDraftItems is a thin shim to reuse buildProposalQuestionBlocks
 // for the re-render path without leaking model.PendingQuestionItem into the
 // draft package.
-func pendingItemsToDraftItems(in []model.PendingQuestionItem) []draft.QuestionItem {
-	out := make([]draft.QuestionItem, len(in))
+func pendingItemsToDraftItems(in []model.PendingQuestionItem) []proposal.QuestionItem {
+	out := make([]proposal.QuestionItem, len(in))
 	for i, it := range in {
-		out[i] = draft.QuestionItem{
+		out[i] = proposal.QuestionItem{
 			ID: it.ID, Text: it.Text,
-			Type:    draft.QuestionItemType(it.Type),
+			Type:    proposal.QuestionItemType(it.Type),
 			Options: append([]string(nil), it.Options...),
 		}
 	}

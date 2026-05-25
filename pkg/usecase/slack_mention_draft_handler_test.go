@@ -12,7 +12,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
-	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/draft"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/proposal"
 	goslack "github.com/slack-go/slack"
 )
 
@@ -108,7 +108,7 @@ func TestSlackDraftHandler_TraceAndTaskBlocksArePerMessage(t *testing.T) {
 	gt.String(t, calls[1].text).Contains("investigate")
 
 	// Register two tasks. Each gets its OWN fresh post.
-	h.RegisterTasks(ctx, []draft.TaskInfo{
+	h.RegisterTasks(ctx, []proposal.TaskInfo{
 		{ID: "inv-1", Title: "Recent thread"},
 		{ID: "inv-2", Title: "Service team"},
 	})

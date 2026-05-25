@@ -246,6 +246,7 @@ type ComplexityRoot struct {
 		RunID          func(childComplexity int) int
 		Stage          func(childComplexity int) int
 		StartedAt      func(childComplexity int) int
+		Strategy       func(childComplexity int) int
 		SystemPrompt   func(childComplexity int) int
 		TraceID        func(childComplexity int) int
 		WorkspaceID    func(childComplexity int) int
@@ -434,7 +435,7 @@ type CaseResolver interface {
 	Fields(ctx context.Context, obj *graphql1.Case) ([]*graphql1.FieldValue, error)
 	Actions(ctx context.Context, obj *graphql1.Case, filter *graphql1.ActionArchiveFilter) ([]*graphql1.Action, error)
 	SlackMessages(ctx context.Context, obj *graphql1.Case, limit *int, cursor *string) (*graphql1.SlackMessageConnection, error)
-	AgentAdditionalPrompt(ctx context.Context, obj *graphql1.Case) (string, error)
+
 	AgentSources(ctx context.Context, obj *graphql1.Case) ([]*graphql1.Source, error)
 }
 type MutationResolver interface {
@@ -1362,6 +1363,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.JobRunLog.StartedAt(childComplexity), true
+	case "JobRunLog.strategy":
+		if e.complexity.JobRunLog.Strategy == nil {
+			break
+		}
+
+		return e.complexity.JobRunLog.Strategy(childComplexity), true
 	case "JobRunLog.systemPrompt":
 		if e.complexity.JobRunLog.SystemPrompt == nil {
 			break
@@ -3087,6 +3094,17 @@ type JobRunLogConnection {
   nextCursor: String
 }
 
+# JobStrategy mirrors model.JobStrategy. The frontend uses it to render
+# a chip on the JobRunLog detail row so operators can tell at a glance
+# whether the Job ran through the single-loop or plan-and-execute
+# runtime. SIMPLE corresponds to the v1 SingleLoopJobExecutor;
+# PLANEXEC corresponds to the planexec (plan-and-execute) runtime
+# shared with the proposal mode.
+enum JobStrategy {
+  SIMPLE
+  PLANEXEC
+}
+
 # One Job invocation against one Case. The fields mirror
 # model.JobRunLog plus a server-resolved jobName (looked up from the
 # Workspace TOML registry; falls back to jobId when unknown).
@@ -3095,6 +3113,11 @@ type JobRunLog {
   caseId: Int!
   jobId: String!
   jobName: String!
+  # The strategy the Job ran under. Derived server-side from
+  # model.JobRunLog.ExecutorKind ("single_loop" → SIMPLE,
+  # "plan_execute" → PLANEXEC, anything else → SIMPLE as the safe
+  # default).
+  strategy: JobStrategy!
   runId: String!
   traceId: String!
   stage: JobRunStage!
@@ -6607,7 +6630,7 @@ func (ec *executionContext) _Case_agentAdditionalPrompt(ctx context.Context, fie
 		field,
 		ec.fieldContext_Case_agentAdditionalPrompt,
 		func(ctx context.Context) (any, error) {
-			return ec.resolvers.Case().AgentAdditionalPrompt(ctx, obj)
+			return obj.AgentAdditionalPrompt, nil
 		},
 		nil,
 		ec.marshalNString2string,
@@ -6620,8 +6643,8 @@ func (ec *executionContext) fieldContext_Case_agentAdditionalPrompt(_ context.Co
 	fc = &graphql.FieldContext{
 		Object:     "Case",
 		Field:      field,
-		IsMethod:   true,
-		IsResolver: true,
+		IsMethod:   false,
+		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type String does not have child fields")
 		},
@@ -8120,6 +8143,35 @@ func (ec *executionContext) fieldContext_JobRunLog_jobName(_ context.Context, fi
 	return fc, nil
 }
 
+func (ec *executionContext) _JobRunLog_strategy(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunLog) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_JobRunLog_strategy,
+		func(ctx context.Context) (any, error) {
+			return obj.Strategy, nil
+		},
+		nil,
+		ec.marshalNJobStrategy2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐJobStrategy,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_JobRunLog_strategy(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "JobRunLog",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type JobStrategy does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _JobRunLog_runId(ctx context.Context, field graphql.CollectedField, obj *graphql1.JobRunLog) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -8442,6 +8494,8 @@ func (ec *executionContext) fieldContext_JobRunLogConnection_items(_ context.Con
 				return ec.fieldContext_JobRunLog_jobId(ctx, field)
 			case "jobName":
 				return ec.fieldContext_JobRunLog_jobName(ctx, field)
+			case "strategy":
+				return ec.fieldContext_JobRunLog_strategy(ctx, field)
 			case "runId":
 				return ec.fieldContext_JobRunLog_runId(ctx, field)
 			case "traceId":
@@ -12197,6 +12251,8 @@ func (ec *executionContext) fieldContext_Query_jobRunLog(ctx context.Context, fi
 				return ec.fieldContext_JobRunLog_jobId(ctx, field)
 			case "jobName":
 				return ec.fieldContext_JobRunLog_jobName(ctx, field)
+			case "strategy":
+				return ec.fieldContext_JobRunLog_strategy(ctx, field)
 			case "runId":
 				return ec.fieldContext_JobRunLog_runId(ctx, field)
 			case "traceId":
@@ -17266,41 +17322,10 @@ func (ec *executionContext) _Case(ctx context.Context, sel ast.SelectionSet, obj
 
 			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "agentAdditionalPrompt":
-			field := field
-
-			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
-				defer func() {
-					if r := recover(); r != nil {
-						ec.Error(ctx, ec.Recover(ctx, r))
-					}
-				}()
-				res = ec._Case_agentAdditionalPrompt(ctx, field, obj)
-				if res == graphql.Null {
-					atomic.AddUint32(&fs.Invalids, 1)
-				}
-				return res
+			out.Values[i] = ec._Case_agentAdditionalPrompt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
 			}
-
-			if field.Deferrable != nil {
-				dfs, ok := deferred[field.Deferrable.Label]
-				di := 0
-				if ok {
-					dfs.AddField(field)
-					di = len(dfs.Values) - 1
-				} else {
-					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
-					deferred[field.Deferrable.Label] = dfs
-				}
-				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
-					return innerFunc(ctx, dfs)
-				})
-
-				// don't run the out.Concurrently() call below
-				out.Values[i] = graphql.Null
-				continue
-			}
-
-			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "agentSources":
 			field := field
 
@@ -17912,6 +17937,11 @@ func (ec *executionContext) _JobRunLog(ctx context.Context, sel ast.SelectionSet
 			}
 		case "jobName":
 			out.Values[i] = ec._JobRunLog_jobName(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "strategy":
+			out.Values[i] = ec._JobRunLog_strategy(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
@@ -20745,6 +20775,16 @@ func (ec *executionContext) unmarshalNJobRunStage2githubᚗcomᚋsecmonᚑlabᚋ
 }
 
 func (ec *executionContext) marshalNJobRunStage2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐJobRunStage(ctx context.Context, sel ast.SelectionSet, v graphql1.JobRunStage) graphql.Marshaler {
+	return v
+}
+
+func (ec *executionContext) unmarshalNJobStrategy2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐJobStrategy(ctx context.Context, v any) (graphql1.JobStrategy, error) {
+	var res graphql1.JobStrategy
+	err := res.UnmarshalGQL(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNJobStrategy2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐJobStrategy(ctx context.Context, sel ast.SelectionSet, v graphql1.JobStrategy) graphql.Marshaler {
 	return v
 }
 

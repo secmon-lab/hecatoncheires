@@ -52,11 +52,14 @@ interface CaseAgentSettings {
   agentSources: AgentSource[]
 }
 
+type JobStrategy = 'SIMPLE' | 'PLANEXEC'
+
 interface JobRunLogRow {
   workspaceId: string
   caseId: number
   jobId: string
   jobName: string
+  strategy: JobStrategy
   runId: string
   stage: JobRunStage
   startedAt: string
@@ -553,7 +556,14 @@ export default function CaseAgent() {
               <span className={styles.runColStatus}>
                 <StageBadge stage={r.stage} size="sm" />
               </span>
-              <span className={['truncate', styles.runColJob].join(' ')}>{r.jobName}</span>
+              <span className={['truncate', styles.runColJob].join(' ')}>
+                {r.jobName}
+                {r.strategy === 'PLANEXEC' ? (
+                  <span className={styles.strategyChip}>
+                    {t('jobStrategyPlanexec')}
+                  </span>
+                ) : null}
+              </span>
               <div className={styles.runColStartedWrap}>
                 <div className={['truncate', styles.runColStarted].join(' ')}>
                   {formatStarted(r.startedAt)}

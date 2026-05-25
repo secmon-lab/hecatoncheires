@@ -13,7 +13,7 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
-	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/draft"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/proposal"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	goslack "github.com/slack-go/slack"
 )
@@ -33,7 +33,7 @@ type editMetadata struct {
 }
 
 // HandleSelectWorkspace runs when the user changes the workspace selector on
-// the preview ephemeral. It re-routes the request through draft.UseCase.RunTurn
+// the preview ephemeral. It re-routes the request through proposal.UseCase.RunTurn
 // with a TriggerWSSwitch trigger; the planner re-materialises against the new
 // workspace's schema using the existing conversation history. The lock-first
 // ordering of F4-3 is preserved by setting InferenceInProgress before the turn
@@ -130,10 +130,10 @@ func (uc *MentionProposalUseCase) HandleSelectWorkspace(ctx context.Context, cal
 	// resumes against the new workspace without re-running its own selection
 	// — matches the "Trigger context" branch in the planner prompt.
 	userInput := "[system event] The user has switched the active workspace to " + entry.Workspace.ID + "."
-	result, runErr := uc.draftUC.RunTurn(ctx, draft.TurnRequest{
+	result, runErr := uc.draftUC.RunTurn(ctx, proposal.TurnRequest{
 		Session:          session,
 		UserInput:        userInput,
-		Trigger:          draft.TriggerWSSwitch,
+		Trigger:          proposal.TriggerWSSwitch,
 		TriggerTS:        "",
 		ActorUserID:      callback.User.ID,
 		ExistingProposal: d,
@@ -152,11 +152,11 @@ func (uc *MentionProposalUseCase) HandleSelectWorkspace(ctx context.Context, cal
 		return goerr.Wrap(runErr, "ws-switch turn failed")
 	}
 	switch result.Status {
-	case draft.StatusBusy, draft.StatusIdempotent:
+	case proposal.StatusBusy, proposal.StatusIdempotent:
 		// Locked / duplicate — the lock UI we already posted is the user
 		// signal; nothing more to do.
 		return nil
-	case draft.StatusFallback:
+	case proposal.StatusFallback:
 		// Planner exhausted budget — render an error block so the user
 		// isn't stuck on the locked preview.
 		errBlocks, errFallback := buildMaterializationErrorBlocks(entry.Workspace.Name)

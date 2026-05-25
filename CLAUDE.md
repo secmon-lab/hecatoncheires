@@ -97,6 +97,9 @@ The application follows Domain-Driven Design (DDD) with clean architecture:
   - `firestore/` - Firestore backend
   - `memory/` - In-memory backend (testing/development)
 - `pkg/usecase/` - Application use cases orchestrating domain operations
+  - `agent/planexec/` - Reusable plan-and-execute runtime (planner LLM → parallel sub-agents → replan → final response). Shared by `agent/proposal` (case-draft mode) and `agent/job` (planexec-strategy Jobs).
+  - `agent/proposal/` - Case-draft (proposal) agent host. Owns the Slack-facing Handler interface and turn-lock semantics.
+  - `agent/job/` - Job execution layer: `SingleLoopJobExecutor` (strategy=simple) and `PlanexecJobExecutor` (strategy=planexec).
 - `pkg/utils/` - Shared utilities (logging, etc.)
 - `frontend/` - React TypeScript application
 - `graphql/` - GraphQL schema definitions
