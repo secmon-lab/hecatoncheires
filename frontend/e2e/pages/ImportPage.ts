@@ -56,9 +56,18 @@ export class ImportPage extends BasePage {
       mimeType: 'application/yaml',
       buffer: Buffer.from(yamlContent, 'utf-8'),
     });
-    await this.page.waitForURL(/\/imports\/[^/]+$/, { timeout: 10_000 });
+    // The detail URL is /imports/<uuid>. We must match only the
+    // session-id form here — a bare /imports/[^/]+ regex also matches
+    // the source /imports/new page, which is what Playwright sees
+    // *before* the createCaseImport mutation resolves. Pin the match
+    // to UUID v4 shape (8-4-4-4-12 hex) so the wait truly blocks
+    // until the post-upload navigate fires.
+    await this.page.waitForURL(
+      /\/imports\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+      { timeout: 15_000 },
+    );
     const url = new URL(this.page.url());
-    const m = url.pathname.match(/\/imports\/([^/]+)$/);
+    const m = url.pathname.match(/\/imports\/([0-9a-f-]{8,})$/i);
     if (!m) {
       throw new Error(`unexpected URL after upload: ${this.page.url()}`);
     }
