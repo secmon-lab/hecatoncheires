@@ -100,7 +100,7 @@ func TestHandleSelectWorkspace_LocksFirstThenUpdates(t *testing.T) {
 	gt.NoError(t, repo.CaseProposal().Save(context.Background(), d)).Required()
 
 	// Seed a Session for the thread; HandleSelectWorkspace looks it up to
-	// pass into draft.UseCase.RunTurn.
+	// pass into proposal.UseCase.RunTurn.
 	gt.NoError(t, repo.Session().Put(context.Background(), &model.Session{
 		ID:            "ssn-test",
 		ChannelID:     channelID,

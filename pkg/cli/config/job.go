@@ -23,12 +23,17 @@ var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month 
 // (pkg/usecase/job) trusts that every Job it receives has already been
 // vetted.
 type JobSection struct {
-	ID          string           `toml:"id"`
-	Name        string           `toml:"name"`
-	Description string           `toml:"description"`
-	Prompt      string           `toml:"prompt"`
-	Disabled    bool             `toml:"disabled"`
-	Events      JobEventsSection `toml:"events"`
+	ID          string `toml:"id"`
+	Name        string `toml:"name"`
+	Description string `toml:"description"`
+	Prompt      string `toml:"prompt"`
+	Disabled    bool   `toml:"disabled"`
+	// Strategy selects the execution runtime for this Job. Empty falls
+	// back to "simple" (the v1 SingleLoopJobExecutor); set to "planexec"
+	// to drive the Job through the plan-and-execute runtime shared with
+	// proposal. Unknown values fail loud at config load time.
+	Strategy string           `toml:"strategy"`
+	Events   JobEventsSection `toml:"events"`
 }
 
 // JobEventsSection mirrors the `events.<domain> = { ... }` map. At least
@@ -77,12 +82,20 @@ func (s *JobSection) Validate() (*model.Job, error) {
 			goerr.V("job_id", s.ID))
 	}
 
+	strategy := model.NormaliseJobStrategy(model.JobStrategy(s.Strategy))
+	if !strategy.IsValid() {
+		return nil, goerr.New("invalid job strategy",
+			goerr.V("job_id", s.ID),
+			goerr.V("strategy", s.Strategy))
+	}
+
 	job := &model.Job{
 		ID:          s.ID,
 		Name:        s.Name,
 		Description: s.Description,
 		Prompt:      s.Prompt,
 		Disabled:    s.Disabled,
+		Strategy:    strategy,
 		Events:      *events,
 	}
 	if err := job.Validate(); err != nil {

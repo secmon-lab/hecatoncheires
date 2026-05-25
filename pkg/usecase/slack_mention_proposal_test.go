@@ -19,7 +19,7 @@ import (
 	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
-	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/draft"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/proposal"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 	goslack "github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
@@ -55,9 +55,9 @@ func stubPlannerLLM(jsonResponse string) gollem.LLMClient {
 	}
 }
 
-// newDraftUC builds a draft.UseCase backed by the same memory repo so the
+// newDraftUC builds a proposal.UseCase backed by the same memory repo so the
 // in-test slackDraftHandler can read and write the persisted state.
-func newDraftUC(t *testing.T, repo interfaces.Repository, llm gollem.LLMClient) *draft.UseCase {
+func newDraftUC(t *testing.T, repo interfaces.Repository, llm gollem.LLMClient) *proposal.UseCase {
 	t.Helper()
 	deps := &agent.CommonDeps{
 		Repo:                repo,
@@ -67,7 +67,7 @@ func newDraftUC(t *testing.T, repo interfaces.Repository, llm gollem.LLMClient) 
 		HeartbeatInterval:   time.Second,
 		HeartbeatStaleAfter: 5 * time.Second,
 	}
-	uc, err := draft.New(deps, 8, 16, 20)
+	uc, err := proposal.New(deps, 8, 16, 20)
 	gt.NoError(t, err).Required()
 	return uc
 }

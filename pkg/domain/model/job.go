@@ -162,6 +162,55 @@ func (e *JobEvents) Validate() error {
 	return nil
 }
 
+// JobStrategy selects which execution runtime drives a Job. The default
+// (zero value) is JobStrategySimple, which preserves the v1 single-loop
+// behaviour. JobStrategyPlanexec opts the Job into the planexec
+// (plan-and-execute) runtime shared with proposal — useful when the
+// Job needs to investigate, replan, and produce a structured summary
+// rather than emit a single ReAct turn.
+type JobStrategy string
+
+const (
+	// JobStrategySimple drives the Job through the v1
+	// SingleLoopJobExecutor (one gollem.Agent.Execute call with the
+	// configured tool set).
+	JobStrategySimple JobStrategy = "simple"
+
+	// JobStrategyPlanexec drives the Job through the planexec runtime
+	// (plan → parallel sub-agents → replan → final response). The host
+	// disables Question because Jobs run unattended.
+	JobStrategyPlanexec JobStrategy = "planexec"
+)
+
+// IsValid reports whether s is one of the recognised strategy values.
+// The zero value (empty string) is NOT considered valid here — callers
+// MUST normalise via NormaliseJobStrategy first, which substitutes
+// JobStrategySimple for the empty input. This split keeps Validate
+// strict (any non-empty unknown value is rejected) while letting TOML
+// omit the field entirely.
+func (s JobStrategy) IsValid() bool {
+	switch s {
+	case JobStrategySimple, JobStrategyPlanexec:
+		return true
+	default:
+		return false
+	}
+}
+
+// String returns the canonical string form for prompt rendering / logs.
+func (s JobStrategy) String() string { return string(s) }
+
+// NormaliseJobStrategy collapses the empty value to JobStrategySimple
+// so callers downstream of TOML loading can treat every Job uniformly.
+// Unknown non-empty values pass through unchanged and are then rejected
+// by Validate, surfacing the typo at config-load time.
+func NormaliseJobStrategy(s JobStrategy) JobStrategy {
+	if s == "" {
+		return JobStrategySimple
+	}
+	return s
+}
+
 // Job is a workspace-scoped, declaratively configured agent that runs in
 // response to events. Jobs are loaded from workspace TOML and held in
 // memory on the WorkspaceEntry — they are not persisted to a backend.
@@ -183,6 +232,11 @@ type Job struct {
 	// excludes the Job from event matching without removing the TOML
 	// entry.
 	Disabled bool
+
+	// Strategy selects which execution runtime drives this Job. Empty
+	// (the zero value) is equivalent to JobStrategySimple; the config
+	// loader normalises before Validate runs.
+	Strategy JobStrategy
 
 	// Events maps the event domains this Job subscribes to. Validate
 	// guarantees at least one non-nil entry.
@@ -206,7 +260,7 @@ func (j *Job) ListensScheduled() bool {
 }
 
 // Validate enforces the full Job invariant set: identity, prompt presence,
-// and event-map well-formedness.
+// event-map well-formedness, and strategy enum membership.
 func (j *Job) Validate() error {
 	if j == nil {
 		return goerr.New("job is nil")
@@ -217,6 +271,11 @@ func (j *Job) Validate() error {
 	if j.Prompt == "" {
 		return goerr.New("job prompt is empty",
 			goerr.V("job_id", j.ID))
+	}
+	if j.Strategy != "" && !j.Strategy.IsValid() {
+		return goerr.New("job strategy is invalid",
+			goerr.V("job_id", j.ID),
+			goerr.V("strategy", string(j.Strategy)))
 	}
 	if err := j.Events.Validate(); err != nil {
 		return goerr.Wrap(err, "job events invalid",

@@ -12,14 +12,14 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	agentcommon "github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
-	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/draft"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/proposal"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
 
-// slackDraftHandler implements draft.Handler for the host (Slack)-side of
+// slackDraftHandler implements proposal.Handler for the host (Slack)-side of
 // the open-mode mention flow. It is per-mention: HandleAppMention builds a
-// fresh slackDraftHandler, hands it to draft.UseCase.RunTurn, and discards
+// fresh slackDraftHandler, hands it to proposal.UseCase.RunTurn, and discards
 // it on return. State that needs to outlast the turn (CaseProposal, Session)
 // is persisted via repo.
 type slackDraftHandler struct {
@@ -114,7 +114,7 @@ func newSlackDraftHandler(
 // button at the bottom. The question payload is mirrored onto the Session
 // so the submit handler can label answers back against the original text
 // even after the planner advances and rebuilds the surrounding messages.
-func (h *slackDraftHandler) Question(ctx context.Context, ssn *model.Session, q draft.QuestionPayload) error {
+func (h *slackDraftHandler) Question(ctx context.Context, ssn *model.Session, q proposal.QuestionPayload) error {
 	// Mention the original requester in the form header so they get paged
 	// the moment we ask. We pull the user from the Session (not h.creatorUser
 	// alone) so resume-via-thread-reply paths surface the right person too.
@@ -153,7 +153,7 @@ func (h *slackDraftHandler) Question(ctx context.Context, ssn *model.Session, q 
 // WorkspaceMaterialization (coercing planner JSON to typed FieldValues),
 // persist via SetMaterialization, and post (or update in place) the preview
 // Block Kit.
-func (h *slackDraftHandler) Materialize(ctx context.Context, ssn *model.Session, m draft.MaterializePayload) error {
+func (h *slackDraftHandler) Materialize(ctx context.Context, ssn *model.Session, m proposal.MaterializePayload) error {
 	logger := logging.From(ctx)
 
 	if h.registry == nil {
@@ -381,7 +381,7 @@ func (h *slackDraftHandler) TraceRound(ctx context.Context, roundKey, line strin
 // planner goroutine and runs to completion BEFORE any sub-agent is
 // spawned (see runInvestigationsParallel), so the post-then-store gap
 // below cannot race against TraceTask reads of taskTS.
-func (h *slackDraftHandler) RegisterTasks(ctx context.Context, tasks []draft.TaskInfo) {
+func (h *slackDraftHandler) RegisterTasks(ctx context.Context, tasks []proposal.TaskInfo) {
 	if len(tasks) == 0 {
 		return
 	}
@@ -458,5 +458,5 @@ func (h *slackDraftHandler) PostBusy(ctx context.Context, _ *model.Session, _ ag
 	return nil
 }
 
-// Compile-time assertion: slackDraftHandler satisfies draft.Handler.
-var _ draft.Handler = (*slackDraftHandler)(nil)
+// Compile-time assertion: slackDraftHandler satisfies proposal.Handler.
+var _ proposal.Handler = (*slackDraftHandler)(nil)

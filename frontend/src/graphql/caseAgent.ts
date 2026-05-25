@@ -84,6 +84,7 @@ export const GET_CASE_JOB_RUN_LOGS = gql`
         caseId
         jobId
         jobName
+        strategy
         runId
         traceId
         stage
@@ -106,6 +107,7 @@ export const GET_JOB_RUN_LOG = gql`
       caseId
       jobId
       jobName
+      strategy
       runId
       traceId
       stage

@@ -72,6 +72,18 @@ type ExecuteRequest struct {
 	// per Run and supplies it here; tests may supply a hand-written
 	// trace.Handler or leave this nil for no-op behaviour.
 	TraceHandler trace.Handler
+
+	// TraceID is the per-Run identifier the executor surfaces into the
+	// underlying runtime's trace.Recorder. Required by the planexec
+	// executor; the single-loop executor ignores it (gollem traces are
+	// attached via TraceHandler in that path).
+	TraceID string
+
+	// Language is the user-facing language label ("Japanese", "English",
+	// ...) the executor may inject into prompts. Empty means "no
+	// directive" — the planexec planner prompt will skip the language
+	// section. Single-loop executor ignores this field.
+	Language string
 }
 
 // ExecuteResult is the outcome of a Job run.

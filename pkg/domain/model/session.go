@@ -85,7 +85,7 @@ type PendingQuestion struct {
 	PostedMessageTS string
 	// Reason is the planner's single-rationale text shared across all items.
 	Reason string
-	// Items mirrors draft.QuestionPayload.Items at the time the question was
+	// Items mirrors proposal.QuestionPayload.Items at the time the question was
 	// posted. Stored here so the submit handler can label each answer back
 	// against the original question text and option list, even after the
 	// planner advances and the Slack message blocks have been rebuilt.

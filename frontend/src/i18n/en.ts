@@ -445,6 +445,8 @@ export const en: Messages = {
   caseAgentRunStageSuccess: 'Success',
   caseAgentRunStageFailed: 'Failed',
   caseAgentRunDurationRunning: 'running',
+  jobStrategySimple: 'simple',
+  jobStrategyPlanexec: 'planexec',
   caseAgentLoadError: 'Failed to load agent settings.',
   caseAgentSaveError: 'Failed to save: {message}',
   caseAgentSaving: 'Saving...',

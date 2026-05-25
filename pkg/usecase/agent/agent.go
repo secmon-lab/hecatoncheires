@@ -3,7 +3,7 @@
 // and reserved for the future `triage` mode that will run after Case
 // creation. Slack SDK / pkg/service/slack imports are forbidden inside this
 // package; modes must communicate with their host via small handler
-// interfaces (e.g. draft.Handler, casebound.Handler).
+// interfaces (e.g. proposal.Handler, casebound.Handler).
 package agent
 
 import (

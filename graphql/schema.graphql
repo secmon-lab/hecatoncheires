@@ -679,6 +679,17 @@ type JobRunLogConnection {
   nextCursor: String
 }
 
+# JobStrategy mirrors model.JobStrategy. The frontend uses it to render
+# a chip on the JobRunLog detail row so operators can tell at a glance
+# whether the Job ran through the single-loop or plan-and-execute
+# runtime. SIMPLE corresponds to the v1 SingleLoopJobExecutor;
+# PLANEXEC corresponds to the planexec (plan-and-execute) runtime
+# shared with the proposal mode.
+enum JobStrategy {
+  SIMPLE
+  PLANEXEC
+}
+
 # One Job invocation against one Case. The fields mirror
 # model.JobRunLog plus a server-resolved jobName (looked up from the
 # Workspace TOML registry; falls back to jobId when unknown).
@@ -687,6 +698,11 @@ type JobRunLog {
   caseId: Int!
   jobId: String!
   jobName: String!
+  # The strategy the Job ran under. Derived server-side from
+  # model.JobRunLog.ExecutorKind ("single_loop" → SIMPLE,
+  # "plan_execute" → PLANEXEC, anything else → SIMPLE as the safe
+  # default).
+  strategy: JobStrategy!
   runId: String!
   traceId: String!
   stage: JobRunStage!

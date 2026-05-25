@@ -22,6 +22,7 @@ func toGraphQLJobRunLog(log *model.JobRunLog, jobName string) *graphql1.JobRunLo
 		CaseID:         int(log.CaseID),
 		JobID:          log.JobID,
 		JobName:        jobName,
+		Strategy:       jobStrategyFromExecutorKind(log.ExecutorKind),
 		RunID:          log.RunID,
 		TraceID:        log.TraceID,
 		Stage:          jobRunStageToGraphQL(log.Stage),
@@ -38,6 +39,19 @@ func toGraphQLJobRunLog(log *model.JobRunLog, jobName string) *graphql1.JobRunLo
 		gql.DurationMs = &dur
 	}
 	return gql
+}
+
+// jobStrategyFromExecutorKind maps the persisted ExecutorKind string
+// (single_loop / plan_execute / future values) onto the GraphQL
+// JobStrategy enum. Unknown values fall back to SIMPLE so a Run row
+// produced by an older binary, or a typo, never breaks the page.
+func jobStrategyFromExecutorKind(executorKind string) graphql1.JobStrategy {
+	switch executorKind {
+	case "plan_execute":
+		return graphql1.JobStrategyPlanexec
+	default:
+		return graphql1.JobStrategySimple
+	}
 }
 
 func jobRunStageToGraphQL(s model.JobRunStage) graphql1.JobRunStage {

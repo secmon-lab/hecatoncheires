@@ -445,6 +445,21 @@
   width: 140px;
   font-weight: 500;
 }
+/* strategyChip annotates a JobRunLog row when the Run drove through
+   the planexec runtime rather than the default single-loop one. */
+.strategyChip {
+  display: inline-block;
+  margin-left: var(--spacing-xs);
+  padding: 0 var(--spacing-xs);
+  border-radius: 0.25rem;
+  background: var(--bg-highlight);
+  color: var(--text-label);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: 0.05em;
+}
 .runColStartedWrap { flex: 1; min-width: 0; }
 .runColStarted {
   color: var(--fg-soft);

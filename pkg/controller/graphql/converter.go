@@ -109,6 +109,20 @@ func toGraphQLCase(c *model.Case, workspaceID string) *graphql1.Case {
 		agentSourceIDs = append(agentSourceIDs, string(id))
 	}
 
+	// AccessDenied gates every private-case-sensitive field. We mask
+	// AgentAdditionalPrompt here at the converter layer (rather than
+	// behind a custom resolver) because the GraphQL Case.agentAddi-
+	// tionalPrompt field's Go type matches the model exactly, which
+	// makes gqlgen emit a direct struct-field read in the generated
+	// resolver — a custom resolver method on Case would be silently
+	// ignored. Other restricted fields (e.g. agentSources / channelUsers
+	// / messages) live behind list-shape resolvers that gqlgen always
+	// routes through, so they keep their per-field AccessDenied check.
+	agentPrompt := c.AgentAdditionalPrompt
+	if c.AccessDenied {
+		agentPrompt = ""
+	}
+
 	return &graphql1.Case{
 		ID:                    int(c.ID),
 		WorkspaceID:           workspaceID,
@@ -122,7 +136,7 @@ func toGraphQLCase(c *model.Case, workspaceID string) *graphql1.Case {
 		AssigneeIDs:           assigneeIDs,
 		SlackChannelID:        &c.SlackChannelID,
 		Fields:                toGraphQLFieldValues(c.FieldValues),
-		AgentAdditionalPrompt: c.AgentAdditionalPrompt,
+		AgentAdditionalPrompt: agentPrompt,
 		AgentSourceIDs:        agentSourceIDs,
 		CreatedAt:             c.CreatedAt,
 		UpdatedAt:             c.UpdatedAt,

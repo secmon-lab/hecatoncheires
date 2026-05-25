@@ -19,10 +19,25 @@ import (
 // enough that a crashed instance does not lock the row out indefinitely.
 const DefaultLeaseDuration = 10 * time.Minute
 
-// executorKindSingleLoop is the JobRunLog.ExecutorKind value emitted by
-// v1 SingleLoopJobExecutor. Future plan-execute runtimes will write a
-// different value (e.g. "plan_execute") into the same field.
-const executorKindSingleLoop = "single_loop"
+// executorKindSingleLoop is the JobRunLog.ExecutorKind value emitted
+// when JobStrategy=simple drives the run. executorKindPlanexec is the
+// value emitted when JobStrategy=planexec runs through the shared
+// planexec runtime.
+const (
+	executorKindSingleLoop = "single_loop"
+	executorKindPlanexec   = "plan_execute"
+)
+
+// executorKindFor maps a Job.Strategy onto the ExecutorKind value
+// persisted on JobRunLog. Unknown strategies fall back to single_loop —
+// the caller (model.NormaliseJobStrategy + Job.Validate) is responsible
+// for catching typos before they reach this point.
+func executorKindFor(s model.JobStrategy) string {
+	if s == model.JobStrategyPlanexec {
+		return executorKindPlanexec
+	}
+	return executorKindSingleLoop
+}
 
 // runErrorStageExecute labels RUN_ERROR events emitted when the agent
 // loop fails. Other stage labels (e.g. "prepare", "finish") are reserved
@@ -52,10 +67,17 @@ func (f ToolBuilderFunc) Build(ctx context.Context, c *model.Case, ws *model.Wor
 
 // RunnerDeps groups the dependencies a JobRunner needs.
 type RunnerDeps struct {
-	Repo          interfaces.Repository
-	Registry      *model.WorkspaceRegistry
-	LLMClient     gollem.LLMClient
-	Executor      job.JobExecutor
+	Repo      interfaces.Repository
+	Registry  *model.WorkspaceRegistry
+	LLMClient gollem.LLMClient
+
+	// Executors maps a Job.Strategy onto the executor that drives it.
+	// The runner looks up by the job's (normalised) Strategy at Run
+	// time. Wiring code MUST populate at least JobStrategySimple;
+	// JobStrategyPlanexec is required only when any workspace declares
+	// `strategy = "planexec"`.
+	Executors map[model.JobStrategy]job.JobExecutor
+
 	ToolBuilder   ToolBuilder
 	LeaseDuration time.Duration // 0 → DefaultLeaseDuration
 
@@ -66,6 +88,21 @@ type RunnerDeps struct {
 	// Clock returns the current wall-clock time. nil → time.Now().UTC().
 	// Tests inject a fixed clock for deterministic timestamp assertions.
 	Clock func() time.Time
+}
+
+// executorFor picks the JobExecutor matching strategy. Returns an error
+// if no executor is registered for the strategy — callers handle this
+// as a prepare-stage failure (RecordRun with FAILED status).
+func (d *RunnerDeps) executorFor(strategy model.JobStrategy) (job.JobExecutor, error) {
+	if len(d.Executors) == 0 {
+		return nil, goerr.New("no executors registered")
+	}
+	exec, ok := d.Executors[strategy]
+	if !ok {
+		return nil, goerr.New("no executor for strategy",
+			goerr.V("strategy", string(strategy)))
+	}
+	return exec, nil
 }
 
 // JobRunner orchestrates a single (Job, Case) invocation: acquire lease,
@@ -217,6 +254,14 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 	runID := r.newRunID()
 	traceID := r.newTraceID()
 
+	strategy := model.NormaliseJobStrategy(j.Strategy)
+	executor, execLookupErr := r.deps.executorFor(strategy)
+	if execLookupErr != nil {
+		return r.recordPrepareFailure(ctx, key, goerr.Wrap(execLookupErr, "select executor",
+			goerr.V("job_id", j.ID),
+			goerr.V("strategy", string(strategy))))
+	}
+
 	logRec := &model.JobRunLog{
 		WorkspaceID:    key.WorkspaceID,
 		CaseID:         key.CaseID,
@@ -225,7 +270,7 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 		TraceID:        traceID,
 		Stage:          model.JobRunStageRunning,
 		StartedAt:      startedAt,
-		ExecutorKind:   executorKindSingleLoop,
+		ExecutorKind:   executorKindFor(strategy),
 		EventType:      string(ev.Domain),
 		EventTriggerAt: ev.Timestamp.UTC(),
 		SystemPrompt:   truncateString(systemPrompt, model.MaxInlineBytes),
@@ -264,8 +309,9 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 		Tools:        tools,
 		LLMClient:    r.deps.LLMClient,
 		TraceHandler: handler,
+		TraceID:      traceID,
 	}
-	_, execErr := r.deps.Executor.Execute(ctx, execReq)
+	_, execErr := executor.Execute(ctx, execReq)
 
 	// --- finish stage ----------------------------------------------
 	endedAt := r.clock()

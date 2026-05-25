@@ -151,6 +151,42 @@ func TestJob_Validate(t *testing.T) {
 		var j *model.Job
 		gt.Error(t, j.Validate())
 	})
+	t.Run("strategy zero value is accepted", func(t *testing.T) {
+		j := *ok
+		j.Strategy = ""
+		gt.NoError(t, j.Validate())
+	})
+	t.Run("strategy simple is accepted", func(t *testing.T) {
+		j := *ok
+		j.Strategy = model.JobStrategySimple
+		gt.NoError(t, j.Validate())
+	})
+	t.Run("strategy planexec is accepted", func(t *testing.T) {
+		j := *ok
+		j.Strategy = model.JobStrategyPlanexec
+		gt.NoError(t, j.Validate())
+	})
+	t.Run("unknown strategy is rejected", func(t *testing.T) {
+		j := *ok
+		j.Strategy = model.JobStrategy("ultra")
+		gt.Error(t, j.Validate())
+	})
+}
+
+func TestJobStrategy_IsValid(t *testing.T) {
+	gt.Bool(t, model.JobStrategySimple.IsValid()).True()
+	gt.Bool(t, model.JobStrategyPlanexec.IsValid()).True()
+	gt.Bool(t, model.JobStrategy("").IsValid()).False()
+	gt.Bool(t, model.JobStrategy("planning").IsValid()).False()
+}
+
+func TestNormaliseJobStrategy(t *testing.T) {
+	gt.Value(t, model.NormaliseJobStrategy("")).Equal(model.JobStrategySimple)
+	gt.Value(t, model.NormaliseJobStrategy(model.JobStrategySimple)).Equal(model.JobStrategySimple)
+	gt.Value(t, model.NormaliseJobStrategy(model.JobStrategyPlanexec)).Equal(model.JobStrategyPlanexec)
+	// Unknown non-empty values pass through unchanged so Validate can
+	// reject them with a useful message.
+	gt.Value(t, model.NormaliseJobStrategy(model.JobStrategy("ultra"))).Equal(model.JobStrategy("ultra"))
 }
 
 func TestJob_Listens(t *testing.T) {

@@ -2,7 +2,7 @@
 // plan/execute loop that coordinates a planner LLM and parallel sub-agent
 // investigations to produce a CaseProposal for the host (Slack) to render.
 // The plan schema and parsing live in this file.
-package draft
+package proposal
 
 import (
 	"bytes"
@@ -435,7 +435,7 @@ func planSchema() *gollem.Parameter {
 		},
 	}
 	materializeProps := map[string]*gollem.Parameter{
-		"workspace_id": str("Target workspace ID for the draft."),
+		"workspace_id": str("Target workspace ID for the proposal."),
 		"title":        str("Case title."),
 		"description":  str("Case description."),
 		"custom_field_values": {

@@ -1,4 +1,4 @@
-package draft_test
+package proposal_test
 
 import (
 	"context"
@@ -16,7 +16,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
-	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/draft"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/proposal"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 )
 
@@ -27,15 +27,15 @@ import (
 type recordingHandler struct {
 	mu             sync.Mutex
 	lines          []string
-	registered     []draft.TaskInfo
+	registered     []proposal.TaskInfo
 	taskLines      map[string][]string
 	taskLineLatest map[string]string
 }
 
-func (h *recordingHandler) Question(_ context.Context, _ *model.Session, _ draft.QuestionPayload) error {
+func (h *recordingHandler) Question(_ context.Context, _ *model.Session, _ proposal.QuestionPayload) error {
 	return errors.New("unexpected Question in investigate test")
 }
-func (h *recordingHandler) Materialize(_ context.Context, _ *model.Session, _ draft.MaterializePayload) error {
+func (h *recordingHandler) Materialize(_ context.Context, _ *model.Session, _ proposal.MaterializePayload) error {
 	return errors.New("unexpected Materialize in investigate test")
 }
 func (h *recordingHandler) Trace(_ context.Context, line string) {
@@ -44,7 +44,7 @@ func (h *recordingHandler) Trace(_ context.Context, line string) {
 	h.lines = append(h.lines, line)
 }
 func (h *recordingHandler) TraceRound(_ context.Context, _, _ string) {}
-func (h *recordingHandler) RegisterTasks(_ context.Context, tasks []draft.TaskInfo) {
+func (h *recordingHandler) RegisterTasks(_ context.Context, tasks []proposal.TaskInfo) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.registered = append(h.registered, tasks...)
@@ -85,10 +85,10 @@ func (h *recordingHandler) TaskHistory(taskID string) []string {
 	return out
 }
 
-func (h *recordingHandler) RegisteredTasks() []draft.TaskInfo {
+func (h *recordingHandler) RegisteredTasks() []proposal.TaskInfo {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	out := make([]draft.TaskInfo, len(h.registered))
+	out := make([]proposal.TaskInfo, len(h.registered))
 	copy(out, h.registered)
 	return out
 }
@@ -137,7 +137,7 @@ func newFakeLLM(byDescription map[string]fakeSessionConfig) *mock.LLMClientMock 
 	}
 }
 
-func mustUseCase(t *testing.T, llm gollem.LLMClient) *draft.UseCase {
+func mustUseCase(t *testing.T, llm gollem.LLMClient) *proposal.UseCase {
 	t.Helper()
 	deps := &agent.CommonDeps{
 		Repo:                memory.New(),
@@ -147,7 +147,7 @@ func mustUseCase(t *testing.T, llm gollem.LLMClient) *draft.UseCase {
 		HeartbeatInterval:   time.Second,
 		HeartbeatStaleAfter: 5 * time.Second,
 	}
-	uc, err := draft.New(deps, 8, 16, 20)
+	uc, err := proposal.New(deps, 8, 16, 20)
 	gt.NoError(t, err).Required()
 	return uc
 }
@@ -161,14 +161,14 @@ func TestRunOneInvestigation_Completed(t *testing.T) {
 	resolver := agent.NewToolSetResolver(agent.ToolSetDeps{})
 
 	h := &recordingHandler{}
-	task := draft.PlanInvestigateTaskForTest{
+	task := proposal.PlanInvestigateTaskForTest{
 		ID: "inv-1", Title: "Lookup cause",
 		Description:        "Investigate the recent error spike.",
 		AcceptanceCriteria: "Root cause identified.",
 		Tools:              []string{agent.ToolSetCoreRO},
 	}
-	res := draft.RunOneInvestigationForTest(uc, ctx, task, h, resolver)
-	gt.Value(t, res.Status).Equal(draft.InvestigationCompletedForTest)
+	res := proposal.RunOneInvestigationForTest(uc, ctx, task, h, resolver)
+	gt.Value(t, res.Status).Equal(proposal.InvestigationCompletedForTest)
 	gt.String(t, res.Summary).Contains("Found the cause")
 	gt.Value(t, res.TaskID).Equal("inv-1")
 	gt.Value(t, res.Title).Equal("Lookup cause")
@@ -196,13 +196,13 @@ func TestRunOneInvestigation_FailedSurfaceErrorInTrace(t *testing.T) {
 	resolver := agent.NewToolSetResolver(agent.ToolSetDeps{})
 
 	h := &recordingHandler{}
-	task := draft.PlanInvestigateTaskForTest{
+	task := proposal.PlanInvestigateTaskForTest{
 		ID: "inv-2", Title: "Lookup cause",
 		Description: "x", AcceptanceCriteria: "y",
 		Tools: []string{agent.ToolSetSlackRO},
 	}
-	res := draft.RunOneInvestigationForTest(uc, ctx, task, h, resolver)
-	gt.Value(t, res.Status).Equal(draft.InvestigationFailedForTest)
+	res := proposal.RunOneInvestigationForTest(uc, ctx, task, h, resolver)
+	gt.Value(t, res.Status).Equal(proposal.InvestigationFailedForTest)
 	gt.String(t, res.Error).Contains("upstream LLM 5xx")
 	gt.String(t, h.TaskLatest("inv-2")).Contains("failed")
 }
@@ -217,26 +217,26 @@ func TestRunInvestigationsParallel_MixedSuccessAndFailure(t *testing.T) {
 	resolver := agent.NewToolSetResolver(agent.ToolSetDeps{})
 
 	h := &recordingHandler{}
-	plan := &draft.PlanInvestigateForTest{
+	plan := &proposal.PlanInvestigateForTest{
 		Message: "Looking at A and B",
-		Tasks: []draft.PlanInvestigateTaskForTest{
+		Tasks: []proposal.PlanInvestigateTaskForTest{
 			{ID: "inv-1", Title: "A", Description: "check thread A", AcceptanceCriteria: "a", Tools: []string{agent.ToolSetSlackRO}},
 			{ID: "inv-2", Title: "B", Description: "check thread B", AcceptanceCriteria: "b", Tools: []string{agent.ToolSetSlackRO}},
 		},
 	}
-	results := draft.RunInvestigationsParallelForTest(uc, ctx, plan, h, resolver)
+	results := proposal.RunInvestigationsParallelForTest(uc, ctx, plan, h, resolver)
 	async.Wait()
 
 	gt.Array(t, results).Length(2).Required()
 
 	// Map results by TaskID to make assertions order-independent.
-	byID := map[string]draft.InvestigationResultForTest{}
+	byID := map[string]proposal.InvestigationResultForTest{}
 	for _, r := range results {
 		byID[r.TaskID] = r
 	}
-	gt.Value(t, byID["inv-1"].Status).Equal(draft.InvestigationCompletedForTest)
+	gt.Value(t, byID["inv-1"].Status).Equal(proposal.InvestigationCompletedForTest)
 	gt.String(t, byID["inv-1"].Summary).Equal("summary one")
-	gt.Value(t, byID["inv-2"].Status).Equal(draft.InvestigationFailedForTest)
+	gt.Value(t, byID["inv-2"].Status).Equal(proposal.InvestigationFailedForTest)
 	gt.String(t, byID["inv-2"].Error).Equal("denied")
 
 	// Phase prelude is on the phase-level trace channel.

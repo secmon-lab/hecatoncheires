@@ -1,4 +1,4 @@
-package draft
+package proposal
 
 import (
 	"context"

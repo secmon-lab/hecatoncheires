@@ -85,7 +85,7 @@ func TestPublish_DispatchesMatchingJobs(t *testing.T) {
 		Repo:        repo,
 		Registry:    registry,
 		LLMClient:   inertLLM(),
-		Executor:    exec,
+		Executors:   map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: exec},
 		ToolBuilder: nil,
 	})
 	uc := job.NewUseCase(registry, runner)
@@ -120,7 +120,7 @@ func TestPublish_SkipsWhenContextIsJobActor(t *testing.T) {
 
 	exec := &recordingExecutor{}
 	runner := job.NewJobRunner(job.RunnerDeps{
-		Repo: repo, Registry: registry, LLMClient: inertLLM(), Executor: exec,
+		Repo: repo, Registry: registry, LLMClient: inertLLM(), Executors: map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: exec},
 	})
 	uc := job.NewUseCase(registry, runner)
 
@@ -154,7 +154,7 @@ func TestPublish_IgnoresNonMatchingJobs(t *testing.T) {
 
 	exec := &recordingExecutor{}
 	runner := job.NewJobRunner(job.RunnerDeps{
-		Repo: repo, Registry: registry, LLMClient: inertLLM(), Executor: exec,
+		Repo: repo, Registry: registry, LLMClient: inertLLM(), Executors: map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: exec},
 	})
 	uc := job.NewUseCase(registry, runner)
 
@@ -174,7 +174,7 @@ func TestPublish_IgnoresUnknownWorkspace(t *testing.T) {
 
 	exec := &recordingExecutor{}
 	runner := job.NewJobRunner(job.RunnerDeps{
-		Repo: repo, Registry: registry, LLMClient: inertLLM(), Executor: exec,
+		Repo: repo, Registry: registry, LLMClient: inertLLM(), Executors: map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: exec},
 	})
 	uc := job.NewUseCase(registry, runner)
 	uc.Publish(context.Background(), job.Event{

@@ -1,4 +1,4 @@
-package draft_test
+package proposal_test
 
 import (
 	"strings"
@@ -6,7 +6,7 @@ import (
 
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gt"
-	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/draft"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/proposal"
 )
 
 func TestParseAndValidate_Investigate(t *testing.T) {
@@ -26,9 +26,9 @@ func TestParseAndValidate_Investigate(t *testing.T) {
 			]
 		}
 	}`)
-	p, err := draft.ParseAndValidateForTest(raw)
+	p, err := proposal.ParseAndValidateForTest(raw)
 	gt.NoError(t, err).Required()
-	gt.Value(t, p.Action).Equal(draft.ActionInvestigateForTest)
+	gt.Value(t, p.Action).Equal(proposal.ActionInvestigateForTest)
 	gt.Value(t, p.Investigate).NotNil().Required()
 	gt.Array(t, p.Investigate.Tasks).Length(1).Required()
 	gt.Value(t, p.Investigate.Tasks[0].ID).Equal("inv-1")
@@ -45,13 +45,13 @@ func TestParseAndValidate_Question_SingleSelect(t *testing.T) {
 			]
 		}
 	}`)
-	p, err := draft.ParseAndValidateForTest(raw)
+	p, err := proposal.ParseAndValidateForTest(raw)
 	gt.NoError(t, err).Required()
-	gt.Value(t, p.Action).Equal(draft.ActionQuestionForTest)
+	gt.Value(t, p.Action).Equal(proposal.ActionQuestionForTest)
 	gt.Value(t, p.Question).NotNil().Required()
 	gt.Array(t, p.Question.Items).Length(1).Required()
 	gt.Value(t, p.Question.Items[0].ID).Equal("q-ws")
-	gt.Value(t, p.Question.Items[0].Type).Equal(draft.QuestionTypeSelectForTest)
+	gt.Value(t, p.Question.Items[0].Type).Equal(proposal.QuestionTypeSelectForTest)
 	gt.Array(t, p.Question.Items[0].Options).Length(2)
 }
 
@@ -69,10 +69,10 @@ func TestParseAndValidate_Question_FreeTextNoOptions(t *testing.T) {
 			]
 		}
 	}`)
-	p, err := draft.ParseAndValidateForTest(raw)
+	p, err := proposal.ParseAndValidateForTest(raw)
 	gt.NoError(t, err).Required()
 	gt.Array(t, p.Question.Items).Length(1).Required()
-	gt.Value(t, p.Question.Items[0].Type).Equal(draft.QuestionTypeFreeTextForTest)
+	gt.Value(t, p.Question.Items[0].Type).Equal(proposal.QuestionTypeFreeTextForTest)
 	gt.Array(t, p.Question.Items[0].Options).Length(0)
 }
 
@@ -91,9 +91,9 @@ func TestParseAndValidate_Question_FreeTextIgnoresOptions(t *testing.T) {
 			]
 		}
 	}`)
-	p, err := draft.ParseAndValidateForTest(raw)
+	p, err := proposal.ParseAndValidateForTest(raw)
 	gt.NoError(t, err).Required()
-	gt.Value(t, p.Question.Items[0].Type).Equal(draft.QuestionTypeFreeTextForTest)
+	gt.Value(t, p.Question.Items[0].Type).Equal(proposal.QuestionTypeFreeTextForTest)
 }
 
 // TestParseAndValidate_Question_RejectsSelectWithoutOptions guards the
@@ -110,7 +110,7 @@ func TestParseAndValidate_Question_RejectsSelectWithoutOptions(t *testing.T) {
 			]
 		}
 	}`)
-	_, err := draft.ParseAndValidateForTest(raw)
+	_, err := proposal.ParseAndValidateForTest(raw)
 	gt.Error(t, err)
 }
 
@@ -126,10 +126,10 @@ func TestParseAndValidate_Question_MultiSelectMultipleItems(t *testing.T) {
 			]
 		}
 	}`)
-	p, err := draft.ParseAndValidateForTest(raw)
+	p, err := proposal.ParseAndValidateForTest(raw)
 	gt.NoError(t, err).Required()
 	gt.Array(t, p.Question.Items).Length(2).Required()
-	gt.Value(t, p.Question.Items[1].Type).Equal(draft.QuestionTypeMultiSelectForTest)
+	gt.Value(t, p.Question.Items[1].Type).Equal(proposal.QuestionTypeMultiSelectForTest)
 }
 
 func TestParseAndValidate_Materialize(t *testing.T) {
@@ -143,7 +143,7 @@ func TestParseAndValidate_Materialize(t *testing.T) {
 			"custom_field_values": {"severity": "high"}
 		}
 	}`)
-	p, err := draft.ParseAndValidateForTest(raw)
+	p, err := proposal.ParseAndValidateForTest(raw)
 	gt.NoError(t, err).Required()
 	gt.Value(t, p.Materialize.WorkspaceID).Equal("ws-1")
 	gt.Value(t, p.Materialize.Title).Equal("API outage")
@@ -151,7 +151,7 @@ func TestParseAndValidate_Materialize(t *testing.T) {
 }
 
 func TestParseAndValidate_RejectsBadJSON(t *testing.T) {
-	_, err := draft.ParseAndValidateForTest([]byte(`{not json`))
+	_, err := proposal.ParseAndValidateForTest([]byte(`{not json`))
 	gt.Error(t, err)
 }
 
@@ -162,7 +162,7 @@ func TestParseAndValidate_RejectsActionPayloadMismatch(t *testing.T) {
 			"action": "investigate",
 			"question": {"reason":"r","items":[{"id":"q","text":"t","type":"select","options":["a","b"]}]}
 		}`)
-		_, err := draft.ParseAndValidateForTest(raw)
+		_, err := proposal.ParseAndValidateForTest(raw)
 		gt.Error(t, err)
 	})
 	t.Run("question but payload missing", func(t *testing.T) {
@@ -170,7 +170,7 @@ func TestParseAndValidate_RejectsActionPayloadMismatch(t *testing.T) {
 			"reasoning": "x",
 			"action": "question"
 		}`)
-		_, err := draft.ParseAndValidateForTest(raw)
+		_, err := proposal.ParseAndValidateForTest(raw)
 		gt.Error(t, err)
 	})
 	t.Run("multiple payloads set", func(t *testing.T) {
@@ -180,7 +180,7 @@ func TestParseAndValidate_RejectsActionPayloadMismatch(t *testing.T) {
 			"question": {"reason":"r","items":[{"id":"q","text":"t","type":"select","options":["a","b"]}]},
 			"materialize": {"workspace_id": "ws", "title": "t"}
 		}`)
-		_, err := draft.ParseAndValidateForTest(raw)
+		_, err := proposal.ParseAndValidateForTest(raw)
 		gt.Error(t, err)
 	})
 }
@@ -191,7 +191,7 @@ func TestParseAndValidate_RejectsEmptyReasoning(t *testing.T) {
 		"action": "post_message",
 		"post_message": {"text": "hi"}
 	}`)
-	_, err := draft.ParseAndValidateForTest(raw)
+	_, err := proposal.ParseAndValidateForTest(raw)
 	gt.Error(t, err)
 }
 
@@ -202,7 +202,7 @@ func TestParseAndValidate_RejectsZeroOrTooManyTasks(t *testing.T) {
 			"action": "investigate",
 			"investigate": {"tasks": []}
 		}`)
-		_, err := draft.ParseAndValidateForTest(raw)
+		_, err := proposal.ParseAndValidateForTest(raw)
 		gt.Error(t, err)
 	})
 	t.Run("six tasks", func(t *testing.T) {
@@ -215,7 +215,7 @@ func TestParseAndValidate_RejectsZeroOrTooManyTasks(t *testing.T) {
 			"action": "investigate",
 			"investigate": {"tasks": [` + strings.Join(tasks, ",") + `]}
 		}`)
-		_, err := draft.ParseAndValidateForTest(raw)
+		_, err := proposal.ParseAndValidateForTest(raw)
 		gt.Error(t, err)
 	})
 }
@@ -229,7 +229,7 @@ func TestParseAndValidate_RejectsDuplicateTaskID(t *testing.T) {
 			{"id":"inv-1","title":"b","description":"d","acceptance_criteria":"a","tools":["slack_ro"]}
 		]}
 	}`)
-	_, err := draft.ParseAndValidateForTest(raw)
+	_, err := proposal.ParseAndValidateForTest(raw)
 	gt.Error(t, err)
 }
 
@@ -241,7 +241,7 @@ func TestParseAndValidate_RejectsUnknownToolID(t *testing.T) {
 			{"id":"inv-1","title":"a","description":"d","acceptance_criteria":"a","tools":["fake_set"]}
 		]}
 	}`)
-	_, err := draft.ParseAndValidateForTest(raw)
+	_, err := proposal.ParseAndValidateForTest(raw)
 	gt.Error(t, err)
 }
 
@@ -253,7 +253,7 @@ func TestParseAndValidate_RejectsEmptyToolsList(t *testing.T) {
 			{"id":"inv-1","title":"a","description":"d","acceptance_criteria":"a","tools":[]}
 		]}
 	}`)
-	_, err := draft.ParseAndValidateForTest(raw)
+	_, err := proposal.ParseAndValidateForTest(raw)
 	gt.Error(t, err)
 }
 
@@ -263,7 +263,7 @@ func TestParseAndValidate_RejectsQuestionOptionsTooFew(t *testing.T) {
 		"action": "question",
 		"question": {"reason":"y","items":[{"id":"q","text":"?","type":"select","options":["only"]}]}
 	}`)
-	_, err := draft.ParseAndValidateForTest(raw)
+	_, err := proposal.ParseAndValidateForTest(raw)
 	gt.Error(t, err)
 }
 
@@ -273,7 +273,7 @@ func TestParseAndValidate_RejectsQuestionWithoutItems(t *testing.T) {
 		"action": "question",
 		"question": {"reason":"y","items":[]}
 	}`)
-	_, err := draft.ParseAndValidateForTest(raw)
+	_, err := proposal.ParseAndValidateForTest(raw)
 	gt.Error(t, err)
 }
 
@@ -283,7 +283,7 @@ func TestParseAndValidate_RejectsQuestionUnknownType(t *testing.T) {
 		"action": "question",
 		"question": {"reason":"y","items":[{"id":"q","text":"?","type":"radio","options":["a","b"]}]}
 	}`)
-	_, err := draft.ParseAndValidateForTest(raw)
+	_, err := proposal.ParseAndValidateForTest(raw)
 	gt.Error(t, err)
 }
 
@@ -293,12 +293,12 @@ func TestParseAndValidate_RejectsMaterializeMissingWorkspace(t *testing.T) {
 		"action": "materialize",
 		"materialize": {"title": "t"}
 	}`)
-	_, err := draft.ParseAndValidateForTest(raw)
+	_, err := proposal.ParseAndValidateForTest(raw)
 	gt.Error(t, err)
 }
 
 func TestPlanSchema_Shape(t *testing.T) {
-	schema := draft.PlanSchemaForTest()
+	schema := proposal.PlanSchemaForTest()
 	gt.Value(t, schema.Type).Equal(gollem.TypeObject)
 	gt.Map(t, schema.Properties).HasKey("action")
 	gt.Map(t, schema.Properties).HasKey("reasoning")
@@ -311,18 +311,18 @@ func TestPlanSchema_Shape(t *testing.T) {
 }
 
 func TestFormatObservations_RendersStatusAndCriteria(t *testing.T) {
-	inv := &draft.PlanInvestigateForTest{
-		Tasks: []draft.PlanInvestigateTaskForTest{
+	inv := &proposal.PlanInvestigateForTest{
+		Tasks: []proposal.PlanInvestigateTaskForTest{
 			{ID: "inv-1", Title: "A", AcceptanceCriteria: "X identified", Tools: []string{"slack_ro"}},
 		},
 	}
-	results := []draft.InvestigationResultForTest{
+	results := []proposal.InvestigationResultForTest{
 		{
 			TaskID: "inv-1", Title: "A", AcceptanceCriteria: "X identified",
-			Status: draft.InvestigationCompletedForTest, Summary: "We found the cause.",
+			Status: proposal.InvestigationCompletedForTest, Summary: "We found the cause.",
 		},
 	}
-	got := draft.FormatObservationsForTest(inv, results)
+	got := proposal.FormatObservationsForTest(inv, results)
 	gt.String(t, got).Contains("# Observations from prior investigations")
 	gt.String(t, got).Contains("## inv-1: A")
 	gt.String(t, got).Contains("**Status**: completed")
@@ -331,18 +331,18 @@ func TestFormatObservations_RendersStatusAndCriteria(t *testing.T) {
 }
 
 func TestFormatObservations_FailedHasErrorBlock(t *testing.T) {
-	inv := &draft.PlanInvestigateForTest{
-		Tasks: []draft.PlanInvestigateTaskForTest{
+	inv := &proposal.PlanInvestigateForTest{
+		Tasks: []proposal.PlanInvestigateTaskForTest{
 			{ID: "inv-2", Title: "B", AcceptanceCriteria: "Y resolved", Tools: []string{"github"}},
 		},
 	}
-	results := []draft.InvestigationResultForTest{
+	results := []proposal.InvestigationResultForTest{
 		{
 			TaskID: "inv-2", Title: "B", AcceptanceCriteria: "Y resolved",
-			Status: draft.InvestigationFailedForTest, Error: "rate limited",
+			Status: proposal.InvestigationFailedForTest, Error: "rate limited",
 		},
 	}
-	got := draft.FormatObservationsForTest(inv, results)
+	got := proposal.FormatObservationsForTest(inv, results)
 	gt.String(t, got).Contains("**Status**: failed")
 	gt.String(t, got).Contains("**Error**: rate limited")
 }
@@ -410,7 +410,7 @@ func TestExtractJSONObject(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := draft.ExtractJSONObjectForTest([]byte(c.in))
+			got := proposal.ExtractJSONObjectForTest([]byte(c.in))
 			gt.String(t, string(got)).Equal(c.want)
 		})
 	}
@@ -436,7 +436,7 @@ func TestParseAndValidate_TolerantOfPreamble(t *testing.T) {
 			]
 		}
 	}`)
-	p, err := draft.ParseAndValidateForTest(raw)
+	p, err := proposal.ParseAndValidateForTest(raw)
 	gt.NoError(t, err).Required()
-	gt.Value(t, p.Action).Equal(draft.ActionInvestigateForTest)
+	gt.Value(t, p.Action).Equal(proposal.ActionInvestigateForTest)
 }

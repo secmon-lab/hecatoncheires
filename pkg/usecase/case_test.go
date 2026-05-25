@@ -2480,7 +2480,7 @@ func TestLifecycle_CreateCaseTriggersAgentJob(t *testing.T) {
 		Repo:        repo,
 		Registry:    registry,
 		LLMClient:   llm,
-		Executor:    jobagent.NewSingleLoopJobExecutor(),
+		Executors:   map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: jobagent.NewSingleLoopJobExecutor()},
 		ToolBuilder: builder,
 	})
 	jobUC := job.NewUseCase(registry, runner)

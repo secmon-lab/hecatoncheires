@@ -444,6 +444,8 @@ export const msgKeys = {
   caseAgentRunStageSuccess: 'caseAgentRunStageSuccess',
   caseAgentRunStageFailed: 'caseAgentRunStageFailed',
   caseAgentRunDurationRunning: 'caseAgentRunDurationRunning',
+  jobStrategySimple: 'jobStrategySimple',
+  jobStrategyPlanexec: 'jobStrategyPlanexec',
   caseAgentLoadError: 'caseAgentLoadError',
   caseAgentSaveError: 'caseAgentSaveError',
   caseAgentSaving: 'caseAgentSaving',
