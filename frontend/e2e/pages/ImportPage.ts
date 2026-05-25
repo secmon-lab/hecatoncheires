@@ -23,21 +23,24 @@ export class ImportPage extends BasePage {
     super(page);
     this.fileInput = page.locator('input[type="file"]');
     this.dropzone = page.locator('[role="button"][aria-label]').first();
+    // Button text is the same in both en and ja locales for the
+    // Import-related labels (we intentionally kept them un-translated
+    // so cross-locale automation does not break here). Status badges
+    // are uppercase ASCII so they are locale-stable.
     this.executeButton = page.getByRole('button', {
       name: /Execute import/i,
     });
     this.openCasesListButton = page.getByRole('button', {
-      name: /Open cases list/i,
+      name: /Open cases list|Cases 一覧へ/i,
     });
     this.statusBadge = page.locator('main span').filter({
       hasText: /^(PENDING|APPLIED|FAILED)$/,
     }).first();
-    this.schemaToggle = page.locator('summary').filter({
-      hasText: /YAML schema/i,
-    });
-    this.copySchemaButton = page.getByRole('button', {
-      name: /Copy JSON Schema|Copied/i,
-    });
+    // The "schema" summary text differs across locales ("YAML schema" in
+    // en / "YAML スキーマ" in ja). Anchor on structure instead — the
+    // single <details><summary> block on the New Import page.
+    this.schemaToggle = page.locator('main details > summary').first();
+    this.copySchemaButton = page.locator('main details button').first();
   }
 
   /** Go to the New Import page. */

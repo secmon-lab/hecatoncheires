@@ -63,7 +63,16 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      // Pin the browser locale to en-US. The frontend's I18nProvider
+      // sniffs navigator.language to pick between en and ja, so on a
+      // CI host whose default locale resolves to ja-JP the wizard
+      // renders in Japanese and any English-text Playwright locator
+      // misses. Forcing en-US keeps E2E assertions on stable English
+      // strings regardless of the runner image.
+      use: {
+        ...devices['Desktop Chrome'],
+        locale: 'en-US',
+      },
     },
 
     // Additional browsers (uncomment if cross-browser testing is needed)

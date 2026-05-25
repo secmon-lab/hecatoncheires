@@ -60,16 +60,23 @@ cases:
 - `cases[].fields` is validated against the workspace field schema.
   Select-type fields must use a defined option ID; required fields must
   be present.  Errors here surface in the preview before execute.
-- `cases[].actions[].title` is **required**.
-- `dueDate` accepts RFC3339 (`2026-06-30T00:00:00Z`) or `YYYY-MM-DD`.
+- `cases[].assigneeIDs` and any `User`-typed field values are resolved
+  against the workspace's SlackUser registry at preview time. Unknown
+  IDs are reported as ERROR issues at their exact YAML path.
+- `cases[].actions` is **ignored on import**. DRAFT cases cannot hold
+  editable Actions, so the entire `actions:` block is dropped at
+  preview time and surfaced as a per-Case WARNING. Add Actions after
+  promoting the draft to OPEN from the Case detail page.
 
 ## Failure semantics
 
-- **No rollback.** If item N fails, items 1..N-1 stay created in
-  Firestore.  Because the imported Cases are DRAFTs, nothing leaked to
-  Slack — the user can review or delete them from the Cases list.
-- **No skipped retry.** Items after the first failure are marked
-  `skipped` in the snapshot and not attempted in this run.
+- **Cases run independently.** A failure on one Case does NOT stop or
+  skip the rest — every Case in the snapshot is attempted. Each Case
+  carries its own `result.status` (`created` / `failed`) so the detail
+  page can show exactly which items succeeded and which did not.
+- **No rollback.** Cases created before a later failure stay in
+  Firestore as DRAFTs. Because they are DRAFTs nothing leaked to Slack;
+  the user can review or delete them from the Cases list.
 - **One-shot session.** A session is `PENDING` until executed; once it
   is `APPLIED` or `FAILED`, it cannot be re-executed.  To retry,
   upload the file again to create a new session.

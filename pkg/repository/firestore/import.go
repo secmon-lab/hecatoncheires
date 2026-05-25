@@ -68,19 +68,12 @@ func (r *importRepository) Update(ctx context.Context, workspaceID string, s *mo
 			goerr.V("session", s.WorkspaceID))
 	}
 
-	docRef := r.docRef(workspaceID, s.ID)
-	if _, err := docRef.Get(ctx); err != nil {
-		if status.Code(err) == codes.NotFound {
-			return nil, goerr.Wrap(ErrNotFound, "import session not found",
-				goerr.V("workspace_id", workspaceID),
-				goerr.V("import_id", s.ID))
-		}
-		return nil, goerr.Wrap(err, "failed to check import session existence",
-			goerr.V("workspace_id", workspaceID),
-			goerr.V("import_id", s.ID))
-	}
-
-	if _, err := docRef.Set(ctx, s); err != nil {
+	// Set is upsert-by-design here. The previous Get → Set guard added a
+	// round-trip per Update with no real safety: any caller wanting an
+	// existence check has already retrieved the session via Get before
+	// mutating + Updating. Drop the extra read; the only legitimate
+	// caller path is "Get → mutate → Update" through the usecase.
+	if _, err := r.docRef(workspaceID, s.ID).Set(ctx, s); err != nil {
 		return nil, goerr.Wrap(err, "failed to update import session",
 			goerr.V("workspace_id", workspaceID),
 			goerr.V("import_id", s.ID))
