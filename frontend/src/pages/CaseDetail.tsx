@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { useNavigate, useParams, Link } from 'react-router-dom'
+import { useNavigate, useParams, Link, useLocation } from 'react-router-dom'
 import { useQuery, useMutation } from '@apollo/client'
 import {
   GET_CASE,
@@ -147,9 +147,23 @@ export default function CaseDetail() {
   const caseId = Number(id)
   const openActionId = actionIdParam ? Number(actionIdParam) : null
   const navigate = useNavigate()
+  const location = useLocation()
   const { currentWorkspace } = useWorkspace()
   const { t, lang } = useTranslation()
   const actionStatuses = useActionStatuses(currentWorkspace?.id)
+
+  // Honour the originating case-list tab when going back. CaseList sets
+  // location.state.fromStatus when the user clicks into a row; if the
+  // detail page was opened by direct URL (e.g. Slack deep link), the
+  // state is absent and we fall back to the default Open tab.
+  const fromStatusQuery = (location.state as { fromStatus?: string } | null)?.fromStatus
+  const ALLOWED_FROM_STATUS = ['closed', 'draft', 'all'] as const
+  const safeFromStatus = ALLOWED_FROM_STATUS.find((s) => s === fromStatusQuery)
+  const caseListUrl = currentWorkspace
+    ? safeFromStatus
+      ? `/ws/${currentWorkspace.id}/cases?status=${safeFromStatus}`
+      : `/ws/${currentWorkspace.id}/cases`
+    : '/'
 
   const [addingAction, setAddingAction] = useState(false)
   const [actionStatusFilters, setActionStatusFilters] = useState<string[]>([])
@@ -268,7 +282,7 @@ export default function CaseDetail() {
   const handleDelete = async () => {
     await deleteCase({ variables: { workspaceId: currentWorkspace!.id, id: caseId } })
     setConfirmDelete(false)
-    navigate(`/ws/${currentWorkspace!.id}/cases`)
+    navigate(caseListUrl)
   }
   const handleSync = async () => {
     await syncMembers({ variables: { workspaceId: currentWorkspace!.id, id: caseId } })
@@ -278,7 +292,7 @@ export default function CaseDetail() {
     if (!window.confirm(t('draftDiscardConfirm'))) return
     try {
       await discardDraft({ variables: { workspaceId: currentWorkspace!.id, id: caseId } })
-      navigate(`/ws/${currentWorkspace!.id}/cases`)
+      navigate(caseListUrl)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       setDraftError(t('draftDiscardErrorGeneric', { message: msg }))
@@ -341,7 +355,7 @@ export default function CaseDetail() {
           variant="ghost"
           size="sm"
           icon={<IconChevLeft size={13} />}
-          onClick={() => navigate(`/ws/${currentWorkspace!.id}/cases`)}
+          onClick={() => navigate(caseListUrl)}
         >
           {t('btnBack')}
         </Button>

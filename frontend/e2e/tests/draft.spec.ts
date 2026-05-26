@@ -131,7 +131,10 @@ test.describe('Drafts (Save-as-draft → Edit / Submit)', () => {
     await caseDetailPage.waitForPageLoad();
 
     await caseDetailPage.clickDiscardDraft();
-    await page.waitForURL(new RegExp(`/ws/${TEST_WORKSPACE_ID}/cases$`));
+    // Discarding from the Drafts tab lands back on /cases?status=draft;
+    // accept both with and without the query so the regex stays robust
+    // to future tweaks to the from-tab carry-over logic.
+    await page.waitForURL(new RegExp(`/ws/${TEST_WORKSPACE_ID}/cases(\\?|$)`));
     await caseListPage.waitForTableLoad();
     await caseListPage.clickStatusTab('Draft');
     expect(await caseListPage.caseExists(draftTitle)).toBeFalsy();
