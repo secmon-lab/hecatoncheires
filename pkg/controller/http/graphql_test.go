@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -3653,4 +3654,399 @@ func TestGraphQLHandler_CaseJobRunLogsQuery(t *testing.T) {
 	gt.Value(t, out.CaseJobRunLogs.NextCursor).NotNil().Required()
 	gt.Value(t, out.CaseJobRunLogs.Items[0].DurationMs).NotNil().Required()
 	gt.Number(t, *out.CaseJobRunLogs.Items[0].DurationMs).Equal(5000)
+}
+
+// TestGraphQLHandler_CaseImportLifecycle drives the import end-to-end
+// through the GraphQL HTTP boundary: createCaseImport → executeCaseImport
+// → drafts query. The point is to assert that an import-driven Case
+// actually lands in the repository as DRAFT and is visible through the
+// regular drafts query — the bug class we're guarding against is "the
+// resolver returns a session but no Case is ever persisted" or "the
+// Case is persisted but without the reporter / wrong status".
+func TestGraphQLHandler_CaseImportLifecycle(t *testing.T) {
+	repo := memory.New()
+	handler, err := setupGraphQLServer(repo)
+	gt.NoError(t, err).Required()
+
+	const reporter = "U-IMPORT-CALLER"
+
+	// Pre-seed the Slack users referenced in the YAML so the preview's
+	// per-user existence check succeeds. Without this the session would
+	// surface "unknown Slack user" errors for every assignee and the
+	// lifecycle never reaches APPLIED.
+	gt.NoError(t, repo.SlackUser().SaveMany(context.Background(), []*model.SlackUser{
+		{ID: model.SlackUserID("U001"), Name: "u001"},
+		{ID: model.SlackUserID("U002"), Name: "u002"},
+	})).Required()
+
+	yamlContent := `version: 1
+cases:
+  - title: "Suspicious login"
+    description: "Multiple failed attempts."
+    isPrivate: false
+    assigneeIDs: [U001]
+    actions:
+      - title: "Block source IP"
+        description: "Add firewall rule"
+        assigneeID: U002
+      - title: "Notify SOC"
+  - title: "Failed deployment"
+    description: "Canary deploy failed."
+    actions:
+      - title: "Roll back to v2.2"
+`
+
+	// Step 1: createCaseImport → ImportSession is persisted (status=PENDING, valid=true).
+	createMutation := `
+		mutation($workspaceId: String!, $input: CreateCaseImportInput!) {
+			createCaseImport(workspaceId: $workspaceId, input: $input) {
+				id
+				status
+				valid
+				createdCount
+				failedCount
+				skippedCount
+				issues { path message severity }
+				snapshot {
+					cases {
+						index
+						title
+						actions { index title }
+					}
+				}
+			}
+		}
+	`
+	createVars := map[string]any{
+		"workspaceId": testWorkspaceID,
+		"input": map[string]any{
+			"content":          yamlContent,
+			"originalFileName": "incidents.yaml",
+		},
+	}
+	rec := executeGraphQLRequestWithAuth(t, handler, createMutation, createVars, reporter)
+	gt.Value(t, rec.Code).Equal(http.StatusOK)
+	resp := parseGraphQLResponse(t, rec)
+	gt.Array(t, resp.Errors).Length(0)
+
+	var createOut struct {
+		CreateCaseImport struct {
+			ID           string `json:"id"`
+			Status       string `json:"status"`
+			Valid        bool   `json:"valid"`
+			CreatedCount int    `json:"createdCount"`
+			FailedCount  int    `json:"failedCount"`
+			SkippedCount int    `json:"skippedCount"`
+			Issues       []struct {
+				Path     string `json:"path"`
+				Message  string `json:"message"`
+				Severity string `json:"severity"`
+			} `json:"issues"`
+			Snapshot struct {
+				Cases []struct {
+					Index   int    `json:"index"`
+					Title   string `json:"title"`
+					Actions []struct {
+						Index int    `json:"index"`
+						Title string `json:"title"`
+					} `json:"actions"`
+				} `json:"cases"`
+			} `json:"snapshot"`
+		} `json:"createCaseImport"`
+	}
+	gt.NoError(t, json.Unmarshal(resp.Data, &createOut)).Required()
+
+	gt.String(t, createOut.CreateCaseImport.Status).Equal("PENDING")
+	gt.Bool(t, createOut.CreateCaseImport.Valid).True()
+	gt.Number(t, createOut.CreateCaseImport.CreatedCount).Equal(0)
+	// The YAML carries actions: blocks; Import drops them and emits a
+	// WARNING per Case. That keeps Valid=true (warnings do not block
+	// execute) but the session-level issues list stays empty.
+	gt.Array(t, createOut.CreateCaseImport.Issues).Length(0)
+	gt.Array(t, createOut.CreateCaseImport.Snapshot.Cases).Length(2).Required()
+	gt.String(t, createOut.CreateCaseImport.Snapshot.Cases[0].Title).Equal("Suspicious login")
+	gt.String(t, createOut.CreateCaseImport.Snapshot.Cases[1].Title).Equal("Failed deployment")
+	// Actions are NOT imported (DRAFT restriction). The snapshot must
+	// carry zero Action rows; the dropped count is conveyed through a
+	// per-Case WARNING issue instead.
+	gt.Array(t, createOut.CreateCaseImport.Snapshot.Cases[0].Actions).Length(0)
+	gt.Array(t, createOut.CreateCaseImport.Snapshot.Cases[1].Actions).Length(0)
+
+	sessionID := createOut.CreateCaseImport.ID
+	gt.String(t, sessionID).NotEqual("")
+
+	// Step 2: executeCaseImport → both Cases become CREATED, status=APPLIED.
+	execMutation := `
+		mutation($workspaceId: String!, $id: ID!) {
+			executeCaseImport(workspaceId: $workspaceId, id: $id) {
+				id
+				status
+				createdCount
+				failedCount
+				skippedCount
+				snapshot {
+					cases {
+						title
+						result {
+							status
+							createdCaseID
+						}
+						actions {
+							title
+							result { status createdActionID }
+						}
+					}
+				}
+			}
+		}
+	`
+	execVars := map[string]any{
+		"workspaceId": testWorkspaceID,
+		"id":          sessionID,
+	}
+	rec = executeGraphQLRequestWithAuth(t, handler, execMutation, execVars, reporter)
+	gt.Value(t, rec.Code).Equal(http.StatusOK)
+	resp = parseGraphQLResponse(t, rec)
+	gt.Array(t, resp.Errors).Length(0)
+
+	var execOut struct {
+		ExecuteCaseImport struct {
+			ID           string `json:"id"`
+			Status       string `json:"status"`
+			CreatedCount int    `json:"createdCount"`
+			FailedCount  int    `json:"failedCount"`
+			SkippedCount int    `json:"skippedCount"`
+			Snapshot     struct {
+				Cases []struct {
+					Title  string `json:"title"`
+					Result struct {
+						Status        string `json:"status"`
+						CreatedCaseID *int   `json:"createdCaseID"`
+					} `json:"result"`
+					Actions []struct {
+						Title  string `json:"title"`
+						Result struct {
+							Status          string `json:"status"`
+							CreatedActionID *int   `json:"createdActionID"`
+						} `json:"result"`
+					} `json:"actions"`
+				} `json:"cases"`
+			} `json:"snapshot"`
+		} `json:"executeCaseImport"`
+	}
+	gt.NoError(t, json.Unmarshal(resp.Data, &execOut)).Required()
+
+	gt.String(t, execOut.ExecuteCaseImport.Status).Equal("APPLIED")
+	gt.Number(t, execOut.ExecuteCaseImport.CreatedCount).Equal(2)
+	gt.Number(t, execOut.ExecuteCaseImport.FailedCount).Equal(0)
+	gt.Number(t, execOut.ExecuteCaseImport.SkippedCount).Equal(0)
+	gt.Array(t, execOut.ExecuteCaseImport.Snapshot.Cases).Length(2).Required()
+	for _, c := range execOut.ExecuteCaseImport.Snapshot.Cases {
+		gt.String(t, c.Result.Status).Equal("CREATED")
+		gt.Value(t, c.Result.CreatedCaseID).NotNil().Required()
+		// Actions are never imported (DRAFT restriction). The snapshot
+		// must not surface any Action rows from the YAML.
+		gt.Array(t, c.Actions).Length(0)
+	}
+
+	// Step 3: drafts query — both imported cases must surface as DRAFT
+	// with the correct title and reporter (the auth-context userID).
+	draftsQuery := `
+		query($wsId: String!) {
+			drafts(workspaceId: $wsId) {
+				id
+				title
+				status
+				reporterID
+				assigneeIDs
+			}
+		}
+	`
+	rec = executeGraphQLRequestWithAuth(t, handler, draftsQuery, map[string]any{
+		"wsId": testWorkspaceID,
+	}, reporter)
+	gt.Value(t, rec.Code).Equal(http.StatusOK)
+	resp = parseGraphQLResponse(t, rec)
+	gt.Array(t, resp.Errors).Length(0)
+
+	var draftsOut struct {
+		Drafts []struct {
+			ID          int      `json:"id"`
+			Title       string   `json:"title"`
+			Status      string   `json:"status"`
+			ReporterID  *string  `json:"reporterID"`
+			AssigneeIDs []string `json:"assigneeIDs"`
+		} `json:"drafts"`
+	}
+	gt.NoError(t, json.Unmarshal(resp.Data, &draftsOut)).Required()
+	gt.Array(t, draftsOut.Drafts).Length(2).Required()
+
+	titles := []string{draftsOut.Drafts[0].Title, draftsOut.Drafts[1].Title}
+	gt.Array(t, titles).Has("Suspicious login")
+	gt.Array(t, titles).Has("Failed deployment")
+	for _, d := range draftsOut.Drafts {
+		gt.String(t, d.Status).Equal(string(types.CaseStatusDraft))
+		gt.Value(t, d.ReporterID).NotNil().Required()
+		gt.String(t, *d.ReporterID).Equal(reporter)
+	}
+
+	// Step 4: persistence sanity check — re-read the cases directly
+	// from the repository (bypassing GraphQL) and confirm Import did
+	// NOT create any Actions. Actions cannot be edited on DRAFT cases,
+	// so the import path drops them on purpose.
+	ctx := context.Background()
+	for _, d := range draftsOut.Drafts {
+		actions, aerr := repo.Action().GetByCase(ctx, testWorkspaceID, int64(d.ID), interfaces.ActionListOptions{})
+		gt.NoError(t, aerr).Required()
+		gt.Array(t, actions).Length(0)
+	}
+
+	// Step 5: a second executeCaseImport call on the same session must
+	// be rejected because the session has already transitioned to APPLIED.
+	rec = executeGraphQLRequestWithAuth(t, handler, execMutation, execVars, reporter)
+	gt.Value(t, rec.Code).Equal(http.StatusOK)
+	resp = parseGraphQLResponse(t, rec)
+	gt.Number(t, len(resp.Errors)).GreaterOrEqual(1)
+
+	// Step 6: a different user must not be able to see the same import
+	// session through caseImport (session is creator-scoped).
+	getImportQuery := `
+		query($wsId: String!, $id: ID!) {
+			caseImport(workspaceId: $wsId, id: $id) { id status }
+		}
+	`
+	rec = executeGraphQLRequestWithAuth(t, handler, getImportQuery, map[string]any{
+		"wsId": testWorkspaceID,
+		"id":   sessionID,
+	}, "U-OTHER")
+	gt.Value(t, rec.Code).Equal(http.StatusOK)
+	resp = parseGraphQLResponse(t, rec)
+	gt.Number(t, len(resp.Errors)).GreaterOrEqual(1)
+}
+
+// TestGraphQLHandler_CaseImportPreviewWithErrors verifies the preview
+// path: a YAML that fails structural validation surfaces the issues to
+// the client, the session is persisted in PENDING/valid=false state,
+// and executeCaseImport on it is rejected (so DRAFT cases are never
+// created from an invalid import).
+func TestGraphQLHandler_CaseImportPreviewWithErrors(t *testing.T) {
+	repo := memory.New()
+	handler, err := setupGraphQLServer(repo)
+	gt.NoError(t, err).Required()
+
+	const reporter = "U-IMPORT-CALLER"
+
+	yamlContent := `version: 1
+cases:
+  - title: ""
+    description: "missing title"
+    actions:
+      - title: "should not run"
+  - title: "OK case"
+    actions:
+      - title: ""
+`
+
+	createMutation := `
+		mutation($workspaceId: String!, $input: CreateCaseImportInput!) {
+			createCaseImport(workspaceId: $workspaceId, input: $input) {
+				id valid
+				snapshot {
+					cases {
+						title
+						issues { path message severity }
+						actions { title issues { path message severity } }
+					}
+				}
+			}
+		}
+	`
+	rec := executeGraphQLRequestWithAuth(t, handler, createMutation, map[string]any{
+		"workspaceId": testWorkspaceID,
+		"input": map[string]any{
+			"content":          yamlContent,
+			"originalFileName": "bad.yaml",
+		},
+	}, reporter)
+	gt.Value(t, rec.Code).Equal(http.StatusOK)
+	resp := parseGraphQLResponse(t, rec)
+	gt.Array(t, resp.Errors).Length(0)
+
+	var createOut struct {
+		CreateCaseImport struct {
+			ID       string `json:"id"`
+			Valid    bool   `json:"valid"`
+			Snapshot struct {
+				Cases []struct {
+					Title  string `json:"title"`
+					Issues []struct {
+						Path     string `json:"path"`
+						Severity string `json:"severity"`
+					} `json:"issues"`
+					Actions []struct {
+						Title  string `json:"title"`
+						Issues []struct {
+							Path     string `json:"path"`
+							Severity string `json:"severity"`
+						} `json:"issues"`
+					} `json:"actions"`
+				} `json:"cases"`
+			} `json:"snapshot"`
+		} `json:"createCaseImport"`
+	}
+	gt.NoError(t, json.Unmarshal(resp.Data, &createOut)).Required()
+
+	gt.Bool(t, createOut.CreateCaseImport.Valid).False()
+	gt.Array(t, createOut.CreateCaseImport.Snapshot.Cases).Length(2).Required()
+	// Case 0 has a missing-title ERROR on the case itself (this is
+	// what makes the whole session invalid).
+	c0 := createOut.CreateCaseImport.Snapshot.Cases[0]
+	c0HasTitleError := false
+	for _, i := range c0.Issues {
+		if i.Severity == "ERROR" && strings.Contains(i.Path, "cases[0].title") {
+			c0HasTitleError = true
+		}
+	}
+	gt.Bool(t, c0HasTitleError).True()
+	// Case 1 has a non-empty `actions:` block in the YAML; Import
+	// drops those actions but surfaces a WARNING so the user knows
+	// they were skipped. Snapshot.Actions must be empty (DRAFT
+	// restriction — Import never creates Actions).
+	c1 := createOut.CreateCaseImport.Snapshot.Cases[1]
+	gt.Array(t, c1.Actions).Length(0)
+	c1HasActionWarning := false
+	for _, i := range c1.Issues {
+		if i.Severity == "WARNING" && strings.Contains(i.Path, "cases[1].actions") {
+			c1HasActionWarning = true
+		}
+	}
+	gt.Bool(t, c1HasActionWarning).True()
+
+	// Execute must refuse and no DRAFT cases should appear.
+	execMutation := `
+		mutation($workspaceId: String!, $id: ID!) {
+			executeCaseImport(workspaceId: $workspaceId, id: $id) { id status }
+		}
+	`
+	rec = executeGraphQLRequestWithAuth(t, handler, execMutation, map[string]any{
+		"workspaceId": testWorkspaceID,
+		"id":          createOut.CreateCaseImport.ID,
+	}, reporter)
+	gt.Value(t, rec.Code).Equal(http.StatusOK)
+	resp = parseGraphQLResponse(t, rec)
+	gt.Number(t, len(resp.Errors)).GreaterOrEqual(1)
+
+	draftsQuery := `query($wsId: String!) { drafts(workspaceId: $wsId) { id } }`
+	rec = executeGraphQLRequestWithAuth(t, handler, draftsQuery, map[string]any{
+		"wsId": testWorkspaceID,
+	}, reporter)
+	resp = parseGraphQLResponse(t, rec)
+	gt.Array(t, resp.Errors).Length(0)
+	var draftsOut struct {
+		Drafts []struct {
+			ID int `json:"id"`
+		} `json:"drafts"`
+	}
+	gt.NoError(t, json.Unmarshal(resp.Data, &draftsOut)).Required()
+	gt.Array(t, draftsOut.Drafts).Length(0)
 }

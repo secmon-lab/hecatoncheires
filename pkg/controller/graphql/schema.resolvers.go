@@ -937,6 +937,28 @@ func (r *mutationResolver) UpdateCaseAgentSettings(ctx context.Context, workspac
 	return toGraphQLCase(updated, workspaceID), nil
 }
 
+// CreateCaseImport is the resolver for the createCaseImport field.
+func (r *mutationResolver) CreateCaseImport(ctx context.Context, workspaceID string, input graphql1.CreateCaseImportInput) (*graphql1.ImportSession, error) {
+	originalFileName := ""
+	if input.OriginalFileName != nil {
+		originalFileName = *input.OriginalFileName
+	}
+	session, err := r.UseCases.Import.Create(ctx, workspaceID, input.Content, originalFileName)
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLImportSession(ctx, r.repo, r.UseCases.WorkspaceRegistry(), session), nil
+}
+
+// ExecuteCaseImport is the resolver for the executeCaseImport field.
+func (r *mutationResolver) ExecuteCaseImport(ctx context.Context, workspaceID string, id string) (*graphql1.ImportSession, error) {
+	session, err := r.UseCases.Import.Execute(ctx, workspaceID, model.ImportSessionID(id))
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLImportSession(ctx, r.repo, r.UseCases.WorkspaceRegistry(), session), nil
+}
+
 // Health is the resolver for the health field.
 func (r *queryResolver) Health(ctx context.Context) (string, error) {
 	return "ok", nil
@@ -1353,6 +1375,15 @@ func (r *queryResolver) JobRunEvents(ctx context.Context, workspaceID string, ca
 		out = append(out, gq)
 	}
 	return out, nil
+}
+
+// CaseImport is the resolver for the caseImport field.
+func (r *queryResolver) CaseImport(ctx context.Context, workspaceID string, id string) (*graphql1.ImportSession, error) {
+	session, err := r.UseCases.Import.Get(ctx, workspaceID, model.ImportSessionID(id))
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLImportSession(ctx, r.repo, r.UseCases.WorkspaceRegistry(), session), nil
 }
 
 // Action returns ActionResolver implementation.

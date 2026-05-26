@@ -100,6 +100,13 @@ type CreateActionInput struct {
 	DueDate        *time.Time `json:"dueDate,omitempty"`
 }
 
+type CreateCaseImportInput struct {
+	// Raw YAML content (UTF-8).
+	Content string `json:"content"`
+	// Optional original file name for display purposes.
+	OriginalFileName *string `json:"originalFileName,omitempty"`
+}
+
 type CreateCaseInput struct {
 	Title       string             `json:"title"`
 	Description *string            `json:"description,omitempty"`
@@ -210,6 +217,85 @@ type GitHubRepoValidationResult struct {
 type GitHubRepository struct {
 	Owner string `json:"owner"`
 	Repo  string `json:"repo"`
+}
+
+type ImportActionResult struct {
+	Status          ImportItemResultStatus `json:"status"`
+	CreatedAction   *Action                `json:"createdAction,omitempty"`
+	CreatedActionID *int                   `json:"createdActionID,omitempty"`
+	Error           *ImportIssue           `json:"error,omitempty"`
+}
+
+type ImportCaseResult struct {
+	Status        ImportItemResultStatus `json:"status"`
+	CreatedCase   *Case                  `json:"createdCase,omitempty"`
+	CreatedCaseID *int                   `json:"createdCaseID,omitempty"`
+	Error         *ImportIssue           `json:"error,omitempty"`
+}
+
+type ImportIssue struct {
+	Path     string              `json:"path"`
+	Message  string              `json:"message"`
+	Severity ImportIssueSeverity `json:"severity"`
+}
+
+type ImportSession struct {
+	ID              string              `json:"id"`
+	WorkspaceID     string              `json:"workspaceID"`
+	CreatorUserID   string              `json:"creatorUserID"`
+	Status          ImportSessionStatus `json:"status"`
+	Source          *ImportSource       `json:"source"`
+	Snapshot        *ImportSnapshot     `json:"snapshot"`
+	Issues          []*ImportIssue      `json:"issues"`
+	Valid           bool                `json:"valid"`
+	FieldSchemaHash string              `json:"fieldSchemaHash"`
+	CreatedAt       time.Time           `json:"createdAt"`
+	UpdatedAt       time.Time           `json:"updatedAt"`
+	ExecutedAt      *time.Time          `json:"executedAt,omitempty"`
+	CreatedCount    int                 `json:"createdCount"`
+	FailedCount     int                 `json:"failedCount"`
+	SkippedCount    int                 `json:"skippedCount"`
+}
+
+type ImportSnapshot struct {
+	Version int                   `json:"version"`
+	Cases   []*ImportSnapshotCase `json:"cases"`
+}
+
+type ImportSnapshotAction struct {
+	Index       int                 `json:"index"`
+	Title       string              `json:"title"`
+	Description *string             `json:"description,omitempty"`
+	AssigneeID  *string             `json:"assigneeID,omitempty"`
+	DueDate     *time.Time          `json:"dueDate,omitempty"`
+	Issues      []*ImportIssue      `json:"issues"`
+	Result      *ImportActionResult `json:"result"`
+}
+
+type ImportSnapshotCase struct {
+	Index       int      `json:"index"`
+	Title       string   `json:"title"`
+	Description *string  `json:"description,omitempty"`
+	IsPrivate   bool     `json:"isPrivate"`
+	AssigneeIDs []string `json:"assigneeIDs"`
+	// Slack users referenced by assigneeIDs, resolved on the server. Lookup is
+	//   batched per request so the frontend never has to ship the full slackUsers
+	//   list. IDs that cannot be resolved are simply omitted from the array.
+	Assignees []*SlackUser            `json:"assignees"`
+	Fields    []*ImportSnapshotField  `json:"fields"`
+	Actions   []*ImportSnapshotAction `json:"actions"`
+	Issues    []*ImportIssue          `json:"issues"`
+	Result    *ImportCaseResult       `json:"result"`
+}
+
+type ImportSnapshotField struct {
+	Key     string `json:"key"`
+	Display string `json:"display"`
+}
+
+type ImportSource struct {
+	OriginalFileName string `json:"originalFileName"`
+	SizeBytes        int    `json:"sizeBytes"`
 }
 
 type JobRunEvent struct {
@@ -631,6 +717,177 @@ func (e *FieldType) UnmarshalJSON(b []byte) error {
 }
 
 func (e FieldType) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
+}
+
+type ImportIssueSeverity string
+
+const (
+	ImportIssueSeverityError   ImportIssueSeverity = "ERROR"
+	ImportIssueSeverityWarning ImportIssueSeverity = "WARNING"
+)
+
+var AllImportIssueSeverity = []ImportIssueSeverity{
+	ImportIssueSeverityError,
+	ImportIssueSeverityWarning,
+}
+
+func (e ImportIssueSeverity) IsValid() bool {
+	switch e {
+	case ImportIssueSeverityError, ImportIssueSeverityWarning:
+		return true
+	}
+	return false
+}
+
+func (e ImportIssueSeverity) String() string {
+	return string(e)
+}
+
+func (e *ImportIssueSeverity) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = ImportIssueSeverity(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid ImportIssueSeverity", str)
+	}
+	return nil
+}
+
+func (e ImportIssueSeverity) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *ImportIssueSeverity) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e ImportIssueSeverity) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
+}
+
+type ImportItemResultStatus string
+
+const (
+	ImportItemResultStatusPending ImportItemResultStatus = "PENDING"
+	ImportItemResultStatusCreated ImportItemResultStatus = "CREATED"
+	ImportItemResultStatusFailed  ImportItemResultStatus = "FAILED"
+	ImportItemResultStatusSkipped ImportItemResultStatus = "SKIPPED"
+)
+
+var AllImportItemResultStatus = []ImportItemResultStatus{
+	ImportItemResultStatusPending,
+	ImportItemResultStatusCreated,
+	ImportItemResultStatusFailed,
+	ImportItemResultStatusSkipped,
+}
+
+func (e ImportItemResultStatus) IsValid() bool {
+	switch e {
+	case ImportItemResultStatusPending, ImportItemResultStatusCreated, ImportItemResultStatusFailed, ImportItemResultStatusSkipped:
+		return true
+	}
+	return false
+}
+
+func (e ImportItemResultStatus) String() string {
+	return string(e)
+}
+
+func (e *ImportItemResultStatus) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = ImportItemResultStatus(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid ImportItemResultStatus", str)
+	}
+	return nil
+}
+
+func (e ImportItemResultStatus) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *ImportItemResultStatus) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e ImportItemResultStatus) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
+}
+
+type ImportSessionStatus string
+
+const (
+	ImportSessionStatusPending ImportSessionStatus = "PENDING"
+	ImportSessionStatusApplied ImportSessionStatus = "APPLIED"
+	ImportSessionStatusFailed  ImportSessionStatus = "FAILED"
+)
+
+var AllImportSessionStatus = []ImportSessionStatus{
+	ImportSessionStatusPending,
+	ImportSessionStatusApplied,
+	ImportSessionStatusFailed,
+}
+
+func (e ImportSessionStatus) IsValid() bool {
+	switch e {
+	case ImportSessionStatusPending, ImportSessionStatusApplied, ImportSessionStatusFailed:
+		return true
+	}
+	return false
+}
+
+func (e ImportSessionStatus) String() string {
+	return string(e)
+}
+
+func (e *ImportSessionStatus) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = ImportSessionStatus(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid ImportSessionStatus", str)
+	}
+	return nil
+}
+
+func (e ImportSessionStatus) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *ImportSessionStatus) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e ImportSessionStatus) MarshalJSON() ([]byte, error) {
 	var buf bytes.Buffer
 	e.MarshalGQL(&buf)
 	return buf.Bytes(), nil

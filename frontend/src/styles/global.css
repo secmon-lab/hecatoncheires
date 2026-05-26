@@ -432,7 +432,11 @@
   overflow: auto;
   padding: 0;
   min-height: 0;
-  background: var(--bg-elev);
+  /* The page surface uses the muted --bg token so that "elevated"
+     content (cards, panels) painted with --bg-elev / --bg-paper sits
+     visibly above it. Using --bg-elev here would flatten every card
+     into the background — exactly the bug the Import wizard surfaced. */
+  background: var(--bg);
 }
 .h-main-inner { padding: var(--sp-6) var(--sp-8); }
 

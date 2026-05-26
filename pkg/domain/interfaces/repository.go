@@ -24,6 +24,7 @@ type Repository interface {
 	JobRun() JobRunRepository
 	JobRunLog() JobRunLogRepository
 	JobRunEvent() JobRunEventRepository
+	Import() ImportRepository
 
 	// Auth methods
 	PutToken(ctx context.Context, token *auth.Token) error
