@@ -188,6 +188,13 @@ export default function CaseList() {
   const [columnsOpen, setColumnsOpen] = useState(false)
   const columnsBtnRef = useRef<HTMLDivElement>(null)
 
+  // Reset pagination whenever the tab changes — browser back/forward
+  // updates statusFilter without going through the click handlers, so
+  // without this the user can land on a now-out-of-range page index.
+  useEffect(() => {
+    setPage(0)
+  }, [statusFilter])
+
   const [visibleCols, setVisibleCols] = useState<string[]>(() => {
     try {
       const raw = localStorage.getItem(storageKey)
