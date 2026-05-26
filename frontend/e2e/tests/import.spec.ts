@@ -16,12 +16,15 @@ import { TEST_WORKSPACE_ID } from '../fixtures/testData';
 //   - The "Open cases list" button returns to the Case list, where the
 //     imported cases now appear under the Drafts tab.
 
+// NOTE: no assigneeIDs / USER-typed fields here. The preview validates
+// Slack-user references against the workspace's SlackUser registry and
+// the E2E test workspace is not pre-seeded with users, so any reference
+// would surface as "unknown Slack user" and gate Execute off.
 const VALID_YAML = `version: 1
 cases:
   - title: "__E2E__ Suspicious login"
     description: "Multiple failed attempts from 10.0.0.1."
     isPrivate: false
-    assigneeIDs: [U001]
     actions:
       - title: "Block source IP"
         description: "Add firewall rule"
