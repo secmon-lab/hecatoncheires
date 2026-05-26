@@ -16,21 +16,27 @@ import { TEST_WORKSPACE_ID } from '../fixtures/testData';
 //   - The "Open cases list" button returns to the Case list, where the
 //     imported cases now appear under the Drafts tab.
 
-// NOTE: no assigneeIDs / USER-typed fields here. The preview validates
-// Slack-user references against the workspace's SlackUser registry and
-// the E2E test workspace is not pre-seeded with users, so any reference
-// would surface as "unknown Slack user" and gate Execute off.
+// NOTE: shape must match frontend/e2e/fixtures/config.test.toml — the
+// E2E workspace flags `category` as required (select), so every Case
+// must supply it or the preview gates Execute off. `assigneeIDs` and
+// USER-typed fields are intentionally omitted because the test
+// workspace has no pre-seeded SlackUser registry and any unknown ID
+// would surface as an ERROR issue.
 const VALID_YAML = `version: 1
 cases:
   - title: "__E2E__ Suspicious login"
     description: "Multiple failed attempts from 10.0.0.1."
     isPrivate: false
+    fields:
+      category: bug
     actions:
       - title: "Block source IP"
         description: "Add firewall rule"
       - title: "Notify SOC"
   - title: "__E2E__ Failed deployment"
     description: "Canary deploy failed."
+    fields:
+      category: task
     actions:
       - title: "Roll back to v2.2"
 `;
