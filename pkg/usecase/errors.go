@@ -21,9 +21,25 @@ var (
 	ErrCaseNotDraft = errors.New("case is not a draft")
 	// ErrMissingRequiredOnSubmit is returned by SubmitDraft when the draft
 	// is missing one or more required custom fields. The wrapping goerr
-	// carries the field IDs and human-friendly names so the frontend can
-	// point the user at exactly which inputs to fill.
+	// carries the field IDs and human-friendly names (see MissingFieldIDsKey /
+	// MissingFieldNamesKey) so the frontend can point the user at exactly
+	// which inputs to fill.
 	ErrMissingRequiredOnSubmit = errors.New("draft is missing required fields")
+	// ErrDraftTitleRequired is returned by SubmitDraft when the draft was
+	// saved with an empty title. Slack channel naming requires a non-empty
+	// title, so this is enforced at promote time even though Save-as-Draft
+	// accepted the empty value.
+	ErrDraftTitleRequired = errors.New("draft title is required before submit")
+	// ErrFieldValidationFailed wraps a field-level validation failure from
+	// the workspace's field schema (option lookup, type coercion, etc.).
+	// Used so the GraphQL layer can surface "fix the field" as a specific
+	// code without grepping wrapped error messages.
+	ErrFieldValidationFailed = errors.New("field validation failed")
+	// ErrActivationFailed wraps a post-promotion activation failure (Slack
+	// channel creation, channel invites, welcome message). The draft is
+	// rolled back to DRAFT before this error returns, so callers / frontends
+	// should advise "retry submit".
+	ErrActivationFailed = errors.New("case activation failed")
 
 	// Action Slack-post state errors
 	ErrSlackMessageAlreadyPosted = errors.New("action already has a Slack message")
@@ -52,4 +68,13 @@ const (
 	CaseIDKey       = "case_id"
 	ActionIDKey     = "action_id"
 	ActionStepIDKey = "action_step_id"
+	// MissingFieldIDsKey / MissingFieldNamesKey are populated on
+	// ErrMissingRequiredOnSubmit so the GraphQL error mapper can expose the
+	// list to the frontend (which renders them as the offending inputs).
+	MissingFieldIDsKey   = "missing_field_ids"
+	MissingFieldNamesKey = "missing_field_names"
+	// CurrentStatusKey is populated on status-transition errors so the
+	// frontend can tell the user the current state of the case (e.g. "this
+	// draft has already been opened — refresh to see the change").
+	CurrentStatusKey = "current_status"
 )

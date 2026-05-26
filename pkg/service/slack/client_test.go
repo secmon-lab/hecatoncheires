@@ -2,9 +2,13 @@ package slack_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/m-mizutani/goerr/v2"
@@ -230,4 +234,119 @@ func TestResolveDisplayName(t *testing.T) {
 		}
 		gt.String(t, slack.ResolveDisplayNameForTest(u)).Equal("")
 	})
+}
+
+// inviteFake captures the user IDs the slack-go client tried to invite and
+// returns a configurable per-user response. The fake speaks the
+// conversations.invite contract: a JSON body with "ok" and optional
+// "error" string. Slack's real endpoint is atomic across the supplied
+// user list — we mimic that by failing the entire request if its single
+// user_id appears in the failingUsers set.
+type inviteFake struct {
+	mu            sync.Mutex
+	failingUsers  map[string]string // userID -> slack error code
+	successfulIDs []string          // user IDs that received an "ok" response
+	calls         int
+}
+
+func (f *inviteFake) handler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.calls++
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		users := r.FormValue("users")
+		if errCode, bad := f.failingUsers[users]; bad {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": errCode})
+			return
+		}
+		f.successfulIDs = append(f.successfulIDs, users)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "channel": map[string]any{"id": "C1"}})
+	}
+}
+
+func TestInviteUsersToChannel_BadUserDoesNotBlockValidUsers(t *testing.T) {
+	fake := &inviteFake{
+		failingUsers: map[string]string{
+			"U_BAD": "user_not_found",
+		},
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/conversations.invite", fake.handler())
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	svc, err := slack.NewWithAPIURLForTest("xoxb-test", srv.URL+"/")
+	gt.NoError(t, err).Required()
+
+	err = svc.InviteUsersToChannel(context.Background(), "C_TARGET", []string{"U_GOOD_1", "U_BAD", "U_GOOD_2"})
+
+	// The function must return an error so errutil.Handle on the caller
+	// records the failure, but the valid users MUST still have been
+	// invited individually.
+	gt.Value(t, err).NotNil()
+
+	var ge *goerr.Error
+	gt.Bool(t, errors.As(err, &ge)).True().Required()
+	values := ge.Values()
+	gt.Value(t, values["channel_id"]).Equal("C_TARGET")
+
+	failed, ok := values["failed_user_ids"].([]string)
+	gt.Bool(t, ok).True().Required()
+	gt.Array(t, failed).Length(1).Required()
+	gt.String(t, failed[0]).Equal("U_BAD")
+
+	reasons, ok := values["failure_reasons"].([]string)
+	gt.Bool(t, ok).True().Required()
+	gt.Array(t, reasons).Length(1).Required()
+	gt.String(t, reasons[0]).Contains("user_not_found")
+
+	// Three invite calls were issued (one per user), not one batch.
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	gt.Number(t, fake.calls).Equal(3)
+	gt.Array(t, fake.successfulIDs).Length(2).Required()
+	gt.String(t, fake.successfulIDs[0]).Equal("U_GOOD_1")
+	gt.String(t, fake.successfulIDs[1]).Equal("U_GOOD_2")
+}
+
+func TestInviteUsersToChannel_AllSuccess_ReturnsNil(t *testing.T) {
+	fake := &inviteFake{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/conversations.invite", fake.handler())
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	svc, err := slack.NewWithAPIURLForTest("xoxb-test", srv.URL+"/")
+	gt.NoError(t, err).Required()
+
+	err = svc.InviteUsersToChannel(context.Background(), "C_TARGET", []string{"U_A", "U_B"})
+	gt.NoError(t, err)
+
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	gt.Number(t, fake.calls).Equal(2)
+}
+
+func TestInviteUsersToChannel_EmptyList_NoApiCall(t *testing.T) {
+	fake := &inviteFake{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/conversations.invite", fake.handler())
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	svc, err := slack.NewWithAPIURLForTest("xoxb-test", srv.URL+"/")
+	gt.NoError(t, err).Required()
+
+	err = svc.InviteUsersToChannel(context.Background(), "C_TARGET", nil)
+	gt.NoError(t, err)
+
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	gt.Number(t, fake.calls).Equal(0)
 }

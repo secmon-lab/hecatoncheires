@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from 'react'
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useQuery } from '@apollo/client'
 import { useNavigate } from 'react-router-dom'
 import { GET_CASES } from '../graphql/case'
@@ -7,6 +7,9 @@ import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
 import Button from '../components/Button'
+import BulkSelectionBar from '../components/BulkSelectionBar'
+import BulkDeleteConfirmDialog from '../components/BulkDeleteConfirmDialog'
+import BulkResultDialog from '../components/BulkResultDialog'
 import {
   IconPlus,
   IconSearch,
@@ -19,6 +22,11 @@ import {
 import { Avatar, AssigneeNamesStack, StatusBadge, SlackLink } from '../components/Primitives'
 import CaseForm from './CaseForm'
 import { displayName } from '../utils/user'
+import {
+  useBulkDraftAction,
+  type BulkActionKind,
+  type BulkActionResult,
+} from '../hooks/useBulkDraftAction'
 
 const PAGE_SIZE = 20
 
@@ -164,7 +172,7 @@ export default function CaseList() {
   })
   // Drafts are workspace-wide on the server; this query drives both the
   // Drafts tab and the sidebar / header count.
-  const { data: draftData } = useQuery(GET_DRAFTS, {
+  const { data: draftData, refetch: refetchDrafts } = useQuery(GET_DRAFTS, {
     variables: { workspaceId: currentWorkspace?.id },
     skip: !currentWorkspace,
   })
@@ -195,6 +203,44 @@ export default function CaseList() {
 
   const fieldDefs: FieldDef[] = configData?.fieldConfiguration?.fields || []
   const caseLabel = configData?.fieldConfiguration?.labels?.case || t('navCases')
+
+  // Bulk selection state — only used when the Drafts tab is active.
+  // Storing as a Set keeps add/remove/lookup O(1) and survives across
+  // pagination as long as the user stays on the Drafts tab.
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
+  const [resultDialog, setResultDialog] = useState<
+    { open: boolean; kind: BulkActionKind; results: BulkActionResult[] }
+  >({ open: false, kind: 'submit', results: [] })
+  const { state: bulkState, run: runBulk } = useBulkDraftAction()
+
+  // Leaving the Drafts tab (or switching workspace) drops the selection so
+  // the user does not return to a mismatched state.
+  useEffect(() => {
+    if (statusFilter !== 'DRAFT') {
+      setSelectedIds((prev) => (prev.size === 0 ? prev : new Set()))
+    }
+  }, [statusFilter, wsKey])
+
+  // Drafts can disappear between renders (other tab's mutations, draft TTL
+  // expiry). Drop selections for IDs that no longer exist so the action
+  // count stays honest.
+  const draftIdSet = useMemo(() => {
+    const ids = new Set<number>()
+    for (const d of draftData?.drafts ?? []) ids.add(d.id)
+    return ids
+  }, [draftData])
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      let changed = false
+      const next = new Set<number>()
+      for (const id of prev) {
+        if (draftIdSet.has(id)) next.add(id)
+        else changed = true
+      }
+      return changed ? next : prev
+    })
+  }, [draftIdSet])
 
   const allColumns = [
     ...BUILTIN_COLUMNS.map((c) => ({ key: c.key, label: t(c.labelKey), width: c.width, custom: false as const })),
@@ -247,6 +293,106 @@ export default function CaseList() {
   }
 
   const visibleColumns = allColumns.filter((c) => isVisible(c.key))
+
+  const isDraftsTab = statusFilter === 'DRAFT'
+
+  // Drafts the user is allowed to select. accessDenied rows have an
+  // opaque title and we cannot act on them server-side either, so they
+  // are excluded from select-all and from the per-row checkbox.
+  const selectableDrafts = useMemo(() => {
+    if (!isDraftsTab) return [] as CaseRow[]
+    return filtered.filter((c) => !c.accessDenied)
+  }, [isDraftsTab, filtered])
+
+  // Three-state checkbox state for the header: all / some / none of the
+  // selectable drafts (across pages) are selected.
+  const allSelectableIds = useMemo(
+    () => selectableDrafts.map((c) => c.id),
+    [selectableDrafts],
+  )
+  const allSelected =
+    allSelectableIds.length > 0 && allSelectableIds.every((id) => selectedIds.has(id))
+  const someSelected =
+    !allSelected && allSelectableIds.some((id) => selectedIds.has(id))
+
+  const headerCheckboxRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (headerCheckboxRef.current) {
+      headerCheckboxRef.current.indeterminate = someSelected
+    }
+  }, [someSelected])
+
+  const toggleAll = useCallback(() => {
+    setSelectedIds((prev) => {
+      if (allSelected) {
+        // Clear only the IDs we own — keep any IDs from filtered-out
+        // searches that the user may want to retain when search clears.
+        const next = new Set(prev)
+        for (const id of allSelectableIds) next.delete(id)
+        return next
+      }
+      const next = new Set(prev)
+      for (const id of allSelectableIds) next.add(id)
+      return next
+    })
+  }, [allSelected, allSelectableIds])
+
+  const toggleRow = useCallback((id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds((prev) => (prev.size === 0 ? prev : new Set()))
+  }, [])
+
+  const selectedDrafts = useMemo(() => {
+    if (!isDraftsTab) return [] as { id: number; title: string }[]
+    return selectableDrafts
+      .filter((c) => selectedIds.has(c.id))
+      .map((c) => ({ id: c.id, title: c.title }))
+  }, [isDraftsTab, selectableDrafts, selectedIds])
+
+  const performBulk = useCallback(
+    async (kind: BulkActionKind) => {
+      if (!currentWorkspace || selectedDrafts.length === 0) return
+      const results = await runBulk(kind, {
+        workspaceId: currentWorkspace.id,
+        drafts: selectedDrafts,
+      })
+      // Refetch so successful drafts disappear from the list (Submit
+      // promotes to OPEN; Discard removes the row). Failed ones stay so
+      // the user can edit and retry.
+      void refetchDrafts()
+      // Drop selections of drafts that succeeded; keep failures selected
+      // so the user can re-act on them after fixing.
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        for (const r of results) if (r.ok) next.delete(r.id)
+        return next
+      })
+      setResultDialog({ open: true, kind, results })
+    },
+    [currentWorkspace, selectedDrafts, runBulk, refetchDrafts],
+  )
+
+  const handleBulkSubmit = useCallback(() => {
+    void performBulk('submit')
+  }, [performBulk])
+
+  const handleBulkDeleteRequest = useCallback(() => {
+    if (selectedDrafts.length === 0) return
+    setConfirmDeleteOpen(true)
+  }, [selectedDrafts.length])
+
+  const handleBulkDeleteConfirm = useCallback(() => {
+    setConfirmDeleteOpen(false)
+    void performBulk('discard')
+  }, [performBulk])
 
   return (
     <div className="h-main-inner">
@@ -309,7 +455,7 @@ export default function CaseList() {
         </div>
       </div>
 
-      <div className="row" style={{ marginBottom: 12, gap: 12, flexWrap: 'wrap' }}>
+      <div className="row" style={{ marginBottom: 12, gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
         <div className="seg">
           <button
             className={statusFilter === 'OPEN' ? 'on' : ''}
@@ -342,6 +488,20 @@ export default function CaseList() {
             {t('tabAll')}
           </button>
         </div>
+        {isDraftsTab && (
+          <BulkSelectionBar
+            selectedCount={selectedDrafts.length}
+            onSubmit={handleBulkSubmit}
+            onDelete={handleBulkDeleteRequest}
+            onClear={clearSelection}
+            disabled={bulkState.loading}
+            progressLabel={
+              bulkState.loading
+                ? t('bulkProgress', { done: bulkState.done, total: bulkState.total })
+                : undefined
+            }
+          />
+        )}
         <span className="spacer" />
         <div className="h-search" style={{ width: 260, marginLeft: 0 }}>
           <IconSearch size={13} />
@@ -362,6 +522,19 @@ export default function CaseList() {
         <table className="h-table">
           <thead>
             <tr>
+              {isDraftsTab && (
+                <th style={{ width: 36 }}>
+                  <input
+                    ref={headerCheckboxRef}
+                    type="checkbox"
+                    data-testid="bulk-header-checkbox"
+                    aria-label={t('bulkSelectAllAria')}
+                    checked={allSelected}
+                    onChange={toggleAll}
+                    disabled={allSelectableIds.length === 0 || bulkState.loading}
+                  />
+                </th>
+              )}
               <th style={{ width: 64 }}>{t('labelId')}</th>
               <th>{t('headerTitle')}</th>
               {visibleColumns.map((c) => (
@@ -373,53 +546,74 @@ export default function CaseList() {
           <tbody>
             {pageRows.length === 0 && (
               <tr>
-                <td colSpan={3 + visibleColumns.length} style={{ padding: 32, textAlign: 'center', color: 'var(--fg-soft)' }}>
+                <td
+                  colSpan={3 + visibleColumns.length + (isDraftsTab ? 1 : 0)}
+                  style={{ padding: 32, textAlign: 'center', color: 'var(--fg-soft)' }}
+                >
                   {t('noDataAvailable')}
                 </td>
               </tr>
             )}
-            {pageRows.map((c) => (
-              <tr
-                key={c.id}
-                onClick={() => {
-                  if (c.accessDenied) return
-                  // Drafts share the regular case detail page — Submit /
-                  // Discard surface there based on status.
-                  navigate(`/ws/${currentWorkspace!.id}/cases/${c.id}`)
-                }}
-                style={{ cursor: c.accessDenied ? 'default' : 'pointer' }}
-              >
-                <td className="id mono">#{c.id}</td>
-                <td>
-                  <div className="row" style={{ gap: 8 }}>
-                    {c.isPrivate && (
-                      <span title={t('badgePrivate')} data-testid="private-lock-icon" style={{ color: 'var(--warn)', display: 'inline-flex' }}>
-                        <IconLock size={12} sw={2} />
-                      </span>
-                    )}
-                    {c.accessDenied ? (
-                      <span data-testid="access-denied-label" className="muted" style={{ fontStyle: 'italic' }}>
-                        {t('badgePrivate')}
-                      </span>
-                    ) : (
-                      <span className="title truncate" style={{ maxWidth: 380 }}>{c.title}</span>
-                    )}
-                  </div>
-                </td>
-                {visibleColumns.map((col) => (
-                  <td key={col.key}>{renderCell(col, c)}</td>
-                ))}
-                <td>
-                  <button
-                    className="h-icon-btn"
-                    style={{ width: 24, height: 24 }}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <IconDots size={14} />
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {pageRows.map((c) => {
+              const rowSelected = isDraftsTab && selectedIds.has(c.id)
+              return (
+                <tr
+                  key={c.id}
+                  onClick={() => {
+                    if (c.accessDenied) return
+                    // Drafts share the regular case detail page — Submit /
+                    // Discard surface there based on status.
+                    navigate(`/ws/${currentWorkspace!.id}/cases/${c.id}`)
+                  }}
+                  style={{
+                    cursor: c.accessDenied ? 'default' : 'pointer',
+                    background: rowSelected ? 'var(--bg-highlight)' : undefined,
+                  }}
+                >
+                  {isDraftsTab && (
+                    <td style={{ width: 36 }} onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        data-testid={`bulk-row-checkbox-${c.id}`}
+                        aria-label={t('bulkSelectRowAria', { id: c.id })}
+                        checked={selectedIds.has(c.id)}
+                        onChange={() => toggleRow(c.id)}
+                        disabled={c.accessDenied || bulkState.loading}
+                      />
+                    </td>
+                  )}
+                  <td className="id mono">#{c.id}</td>
+                  <td>
+                    <div className="row" style={{ gap: 8 }}>
+                      {c.isPrivate && (
+                        <span title={t('badgePrivate')} data-testid="private-lock-icon" style={{ color: 'var(--warn)', display: 'inline-flex' }}>
+                          <IconLock size={12} sw={2} />
+                        </span>
+                      )}
+                      {c.accessDenied ? (
+                        <span data-testid="access-denied-label" className="muted" style={{ fontStyle: 'italic' }}>
+                          {t('badgePrivate')}
+                        </span>
+                      ) : (
+                        <span className="title truncate" style={{ maxWidth: 380 }}>{c.title}</span>
+                      )}
+                    </div>
+                  </td>
+                  {visibleColumns.map((col) => (
+                    <td key={col.key}>{renderCell(col, c)}</td>
+                  ))}
+                  <td>
+                    <button
+                      className="h-icon-btn"
+                      style={{ width: 24, height: 24 }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <IconDots size={14} />
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
         <div
@@ -461,6 +655,22 @@ export default function CaseList() {
       {isFormOpen && (
         <CaseForm caseItem={null} onClose={() => setIsFormOpen(false)} />
       )}
+
+      <BulkDeleteConfirmDialog
+        open={confirmDeleteOpen}
+        count={selectedDrafts.length}
+        previewTitles={selectedDrafts.map((d) => d.title)}
+        onConfirm={handleBulkDeleteConfirm}
+        onCancel={() => setConfirmDeleteOpen(false)}
+        disabled={bulkState.loading}
+      />
+
+      <BulkResultDialog
+        open={resultDialog.open}
+        kind={resultDialog.kind}
+        results={resultDialog.results}
+        onClose={() => setResultDialog((prev) => ({ ...prev, open: false }))}
+      />
     </div>
   )
 }

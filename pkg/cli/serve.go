@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
+	"maps"
 	"net/http"
 	"os"
 	"os/signal"
@@ -24,7 +24,6 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
 	gqlctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/graphql"
 	httpctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/http"
-	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
@@ -103,44 +102,32 @@ func httpStatusForGraphQLErrors(errs []gqlErrorEnvelope) int {
 
 // classifyError maps a domain/usecase error to a GraphQL extensions.code.
 // Returning "" leaves the error untagged, which the HTTP middleware treats
-// as a server fault (500).
+// as a server fault (500). Delegates to the GraphQL controller's shared
+// classifier so both the ErrorPresenter (extensions.code) and the HTTP
+// middleware (status mapping) see the same answer.
 func classifyError(err error) string {
-	switch {
-	case errors.Is(err, model.ErrInvalidFieldType),
-		errors.Is(err, model.ErrInvalidOptionID),
-		errors.Is(err, model.ErrMissingRequired),
-		errors.Is(err, model.ErrInvalidNotionID),
-		errors.Is(err, model.ErrInvalidGitHubRepo):
-		return "BAD_USER_INPUT"
-	case errors.Is(err, usecase.ErrCaseNotFound),
-		errors.Is(err, usecase.ErrActionNotFound),
-		errors.Is(err, model.ErrWorkspaceNotFound):
-		return "NOT_FOUND"
-	case errors.Is(err, usecase.ErrAccessDenied):
-		return "FORBIDDEN"
-	case errors.Is(err, usecase.ErrCaseAlreadyClosed),
-		errors.Is(err, usecase.ErrCaseAlreadyOpen),
-		errors.Is(err, usecase.ErrDuplicateField):
-		return "CONFLICT"
-	}
-	return ""
+	return gqlctrl.ErrorCode(err)
 }
 
 func isClientError(err error) bool {
-	return classifyError(err) != ""
+	return gqlctrl.IsClientError(err)
 }
 
 func statusForExtensionCode(code string) int {
 	switch code {
-	case "BAD_USER_INPUT":
+	case gqlctrl.ErrCodeBadUserInput,
+		gqlctrl.ErrCodeMissingRequiredFields,
+		gqlctrl.ErrCodeTitleRequired,
+		gqlctrl.ErrCodeFieldValidationFailed:
 		return http.StatusBadRequest
-	case "NOT_FOUND":
+	case gqlctrl.ErrCodeNotFound:
 		return http.StatusNotFound
-	case "FORBIDDEN":
+	case gqlctrl.ErrCodeForbidden:
 		return http.StatusForbidden
-	case "CONFLICT":
+	case gqlctrl.ErrCodeConflict,
+		gqlctrl.ErrCodeInvalidStatusTransition:
 		return http.StatusConflict
-	case "UNAUTHENTICATED":
+	case gqlctrl.ErrCodeUnauthenticated:
 		return http.StatusUnauthorized
 	default:
 		return 0
@@ -500,9 +487,10 @@ func cmdServe() *cli.Command {
 				if gqlErr.Extensions == nil {
 					gqlErr.Extensions = map[string]any{}
 				}
-				if code := classifyError(err); code != "" {
-					gqlErr.Extensions["code"] = code
-				}
+				// Merge code + code-specific detail (e.g. missingFieldNames,
+				// currentStatus) from the GraphQL error mapper. Frontend
+				// switches on extensions.code and renders the detail keys.
+				maps.Copy(gqlErr.Extensions, gqlctrl.ErrorExtensions(err))
 
 				// Log full stack trace for diagnostics. Client-faulted errors
 				// are expected normal flow (validation, not-found, etc.) and

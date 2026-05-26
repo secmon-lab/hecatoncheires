@@ -843,7 +843,7 @@ func (uc *CaseUseCase) SubmitDraft(ctx context.Context, workspaceID string, id i
 			if validator := uc.fieldValidatorForWorkspace(workspaceID); validator != nil {
 				enriched, vErr := validator.ValidateCaseFieldsPartial(validated)
 				if vErr != nil {
-					return nil, goerr.Wrap(vErr, "field validation failed", goerr.V(CaseIDKey, id))
+					return nil, goerr.Wrap(ErrFieldValidationFailed, vErr.Error(), goerr.V(CaseIDKey, id))
 				}
 				validated = enriched
 			}
@@ -868,7 +868,8 @@ func (uc *CaseUseCase) SubmitDraft(ctx context.Context, workspaceID string, id i
 	// and listing both need at least a few chars. The Save as Draft path
 	// allowed empty titles for partial entries; require one on Submit.
 	if c.Title == "" {
-		return nil, goerr.New("draft title is required before submit",
+		return nil, goerr.Wrap(ErrDraftTitleRequired,
+			"draft title is required before submit",
 			goerr.V(CaseIDKey, id))
 	}
 
@@ -900,14 +901,17 @@ func (uc *CaseUseCase) SubmitDraft(ctx context.Context, workspaceID string, id i
 			return nil, goerr.Wrap(ErrMissingRequiredOnSubmit,
 				fmt.Sprintf("required field(s) not filled: %s", strings.Join(missingNames, ", ")),
 				goerr.V(CaseIDKey, id),
-				goerr.V("missing_field_ids", missingIDs),
-				goerr.V("missing_field_names", missingNames),
+				goerr.V(MissingFieldIDsKey, missingIDs),
+				goerr.V(MissingFieldNamesKey, missingNames),
 			)
 		}
 	}
 
 	if err := c.SubmitDraft(); err != nil {
-		return nil, goerr.Wrap(err, "cannot submit draft", goerr.V(CaseIDKey, id))
+		return nil, goerr.Wrap(err, "cannot submit draft",
+			goerr.V(CaseIDKey, id),
+			goerr.V(CurrentStatusKey, string(c.Status)),
+		)
 	}
 
 	c.UpdatedAt = time.Now().UTC()
@@ -935,7 +939,7 @@ func (uc *CaseUseCase) SubmitDraft(ctx context.Context, workspaceID string, id i
 				goerr.V(CaseIDKey, id),
 			), "draft case missing during rollback")
 		}
-		return nil, actErr
+		return nil, goerr.Wrap(ErrActivationFailed, actErr.Error(), goerr.V(CaseIDKey, id))
 	}
 
 	// A DRAFT-promoted-to-OPEN case is the first time the entity is
