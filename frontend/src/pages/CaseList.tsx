@@ -225,12 +225,19 @@ export default function CaseList() {
   // Drafts can disappear between renders (other tab's mutations, draft TTL
   // expiry). Drop selections for IDs that no longer exist so the action
   // count stays honest.
+  //
+  // Return null while the drafts query has not produced data yet — a
+  // refetch / network blip can briefly null out `draftData`, and without
+  // this guard we would interpret "no data" as "every draft is gone" and
+  // wipe the user's selection.
   const draftIdSet = useMemo(() => {
+    if (!draftData?.drafts) return null
     const ids = new Set<number>()
-    for (const d of draftData?.drafts ?? []) ids.add(d.id)
+    for (const d of draftData.drafts) ids.add(d.id)
     return ids
   }, [draftData])
   useEffect(() => {
+    if (!draftIdSet) return
     setSelectedIds((prev) => {
       let changed = false
       const next = new Set<number>()
