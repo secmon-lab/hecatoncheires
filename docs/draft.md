@@ -79,6 +79,77 @@ release: users who want to revise the draft re-open the Slack modal
 to start fresh, or pick up the saved entry as-is and add details
 after Submit.
 
+## Web: Bulk actions on the Drafts tab
+
+When more than a handful of drafts pile up — common after a busy
+Slack day, or when the YAML importer parks half-finished entries
+for review — single-row Submit / Discard becomes the bottleneck. The
+Drafts tab on the Case list adds a checkbox column and a floating
+action bar to bulk-process them.
+
+### UI affordances
+
+* A checkbox in the table header offers a tri-state select-all over
+  every accessible draft in the current filter (across pages of the
+  same workspace).
+* Per-row checkboxes live in the new left-most column. The
+  `accessDenied` rows that block private drafts of other users keep
+  their checkbox disabled.
+* Once one or more rows are selected the **BulkSelectionBar** docks
+  above the table with three actions:
+  * **Submit selected** — runs `submitDraft` on each selection.
+    Success removes the row (DRAFT → OPEN); failure leaves the
+    draft in place with the failure cause surfaced in the result
+    dialog.
+  * **Delete selected** — opens a **BulkDeleteConfirmDialog** with
+    a count, body, and a preview of up to five draft titles. Only
+    after the user confirms does it run `discardDraft` per row.
+  * **Clear selection** — drops the selection without acting.
+
+The bar is hidden when no rows are selected. The Open and Closed
+tabs do not show the checkbox column at all — bulk actions are
+draft-only.
+
+### Result dialog
+
+After every bulk run the **BulkResultDialog** opens with two
+sections:
+
+* **Succeeded (N)** — IDs and titles that completed.
+* **Failed (N)** — IDs and titles paired with the human-readable
+  reasons. The dialog matches one i18n string per error code, so
+  CJK users see the same surface their UI normally provides.
+
+Successful drafts are dropped from the on-screen selection so the
+user can re-act on failures without re-checking; the table is
+refetched immediately after the dialog opens so DRAFT → OPEN
+promotions disappear from the list naturally.
+
+### Error codes on `submitDraft` / `discardDraft`
+
+The GraphQL resolvers tag each error in the response's
+`extensions.code` field. The frontend's bulk hook
+(`useBulkDraftAction`) branches on the code to render an
+appropriate message; new codes added on the Go side
+(`pkg/controller/graphql/errors.go` constants) MUST also be added
+to the TypeScript `DRAFT_ERROR_CODE` table in
+`frontend/src/graphql/draftErrorCodes.ts` so the discriminated
+union stays in sync.
+
+| extensions.code             | Trigger                                              | extra extension fields    |
+|-----------------------------|------------------------------------------------------|---------------------------|
+| `MISSING_REQUIRED_FIELDS`   | `SubmitDraft` rejected: required custom fields blank | `missingFieldNames`       |
+| `TITLE_REQUIRED`            | `SubmitDraft` rejected: title is empty               | —                         |
+| `INVALID_STATUS_TRANSITION` | Race: draft already promoted by another tab          | `currentStatus`           |
+| `FIELD_VALIDATION_FAILED`   | Field-level validator (option ID, type)              | —                         |
+| `FORBIDDEN`                 | Private draft from another reporter                  | —                         |
+| `NOT_FOUND`                 | Draft was discarded between fetch and submit         | —                         |
+| `ACTIVATION_FAILED`         | Slack channel creation / invites failed; draft rolled back | —                   |
+
+The HTTP middleware maps the client-fault codes to 4xx and leaves
+server-fault codes (e.g. `ACTIVATION_FAILED`) on 500 so they continue
+to page when something genuine is wrong.
+
 ## GraphQL surface
 
 ```graphql

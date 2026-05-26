@@ -7,6 +7,7 @@ import (
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
+	gqlctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/graphql"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 )
@@ -17,14 +18,20 @@ func TestClassifyError(t *testing.T) {
 		err  error
 		want string
 	}{
-		{"missing required → BAD_USER_INPUT", goerr.Wrap(model.ErrMissingRequired, "x"), "BAD_USER_INPUT"},
-		{"invalid option ID → BAD_USER_INPUT", goerr.Wrap(model.ErrInvalidOptionID, "x"), "BAD_USER_INPUT"},
-		{"invalid field type → BAD_USER_INPUT", goerr.Wrap(model.ErrInvalidFieldType, "x"), "BAD_USER_INPUT"},
-		{"case not found → NOT_FOUND", goerr.Wrap(usecase.ErrCaseNotFound, "x"), "NOT_FOUND"},
-		{"action not found → NOT_FOUND", goerr.Wrap(usecase.ErrActionNotFound, "x"), "NOT_FOUND"},
-		{"workspace not found → NOT_FOUND", goerr.Wrap(model.ErrWorkspaceNotFound, "x"), "NOT_FOUND"},
-		{"access denied → FORBIDDEN", goerr.Wrap(usecase.ErrAccessDenied, "x"), "FORBIDDEN"},
-		{"already closed → CONFLICT", goerr.Wrap(usecase.ErrCaseAlreadyClosed, "x"), "CONFLICT"},
+		{"missing required → BAD_USER_INPUT", goerr.Wrap(model.ErrMissingRequired, "x"), gqlctrl.ErrCodeBadUserInput},
+		{"invalid option ID → BAD_USER_INPUT", goerr.Wrap(model.ErrInvalidOptionID, "x"), gqlctrl.ErrCodeBadUserInput},
+		{"invalid field type → BAD_USER_INPUT", goerr.Wrap(model.ErrInvalidFieldType, "x"), gqlctrl.ErrCodeBadUserInput},
+		{"case not found → NOT_FOUND", goerr.Wrap(usecase.ErrCaseNotFound, "x"), gqlctrl.ErrCodeNotFound},
+		{"action not found → NOT_FOUND", goerr.Wrap(usecase.ErrActionNotFound, "x"), gqlctrl.ErrCodeNotFound},
+		{"workspace not found → NOT_FOUND", goerr.Wrap(model.ErrWorkspaceNotFound, "x"), gqlctrl.ErrCodeNotFound},
+		{"access denied → FORBIDDEN", goerr.Wrap(usecase.ErrAccessDenied, "x"), gqlctrl.ErrCodeForbidden},
+		{"already closed → CONFLICT", goerr.Wrap(usecase.ErrCaseAlreadyClosed, "x"), gqlctrl.ErrCodeConflict},
+		{"missing required on submit → MISSING_REQUIRED_FIELDS", goerr.Wrap(usecase.ErrMissingRequiredOnSubmit, "x"), gqlctrl.ErrCodeMissingRequiredFields},
+		{"draft title required → TITLE_REQUIRED", goerr.Wrap(usecase.ErrDraftTitleRequired, "x"), gqlctrl.ErrCodeTitleRequired},
+		{"case not draft (domain) → INVALID_STATUS_TRANSITION", goerr.Wrap(model.ErrCaseNotDraft, "x"), gqlctrl.ErrCodeInvalidStatusTransition},
+		{"case not draft (usecase) → INVALID_STATUS_TRANSITION", goerr.Wrap(usecase.ErrCaseNotDraft, "x"), gqlctrl.ErrCodeInvalidStatusTransition},
+		{"field validation failed → FIELD_VALIDATION_FAILED", goerr.Wrap(usecase.ErrFieldValidationFailed, "x"), gqlctrl.ErrCodeFieldValidationFailed},
+		{"activation failed → ACTIVATION_FAILED", goerr.Wrap(usecase.ErrActivationFailed, "x"), gqlctrl.ErrCodeActivationFailed},
 		{"random error → untagged", goerr.New("boom"), ""},
 	}
 	for _, c := range cases {
@@ -35,11 +42,16 @@ func TestClassifyError(t *testing.T) {
 }
 
 func TestStatusForExtensionCode(t *testing.T) {
-	gt.Number(t, statusForExtensionCode("BAD_USER_INPUT")).Equal(http.StatusBadRequest)
-	gt.Number(t, statusForExtensionCode("NOT_FOUND")).Equal(http.StatusNotFound)
-	gt.Number(t, statusForExtensionCode("FORBIDDEN")).Equal(http.StatusForbidden)
-	gt.Number(t, statusForExtensionCode("CONFLICT")).Equal(http.StatusConflict)
-	gt.Number(t, statusForExtensionCode("UNAUTHENTICATED")).Equal(http.StatusUnauthorized)
+	gt.Number(t, statusForExtensionCode(gqlctrl.ErrCodeBadUserInput)).Equal(http.StatusBadRequest)
+	gt.Number(t, statusForExtensionCode(gqlctrl.ErrCodeNotFound)).Equal(http.StatusNotFound)
+	gt.Number(t, statusForExtensionCode(gqlctrl.ErrCodeForbidden)).Equal(http.StatusForbidden)
+	gt.Number(t, statusForExtensionCode(gqlctrl.ErrCodeConflict)).Equal(http.StatusConflict)
+	gt.Number(t, statusForExtensionCode(gqlctrl.ErrCodeUnauthenticated)).Equal(http.StatusUnauthorized)
+	gt.Number(t, statusForExtensionCode(gqlctrl.ErrCodeMissingRequiredFields)).Equal(http.StatusBadRequest)
+	gt.Number(t, statusForExtensionCode(gqlctrl.ErrCodeTitleRequired)).Equal(http.StatusBadRequest)
+	gt.Number(t, statusForExtensionCode(gqlctrl.ErrCodeFieldValidationFailed)).Equal(http.StatusBadRequest)
+	gt.Number(t, statusForExtensionCode(gqlctrl.ErrCodeInvalidStatusTransition)).Equal(http.StatusConflict)
+	gt.Number(t, statusForExtensionCode(gqlctrl.ErrCodeActivationFailed)).Equal(0) // server fault → 500 fallback
 	gt.Number(t, statusForExtensionCode("")).Equal(0)
 	gt.Number(t, statusForExtensionCode("WHATEVER")).Equal(0)
 }

@@ -315,16 +315,70 @@ func (c *client) GetConversationMembers(ctx context.Context, channelID string) (
 	return members, nil
 }
 
-// InviteUsersToChannel invites users to a Slack channel
+// InviteUsersToChannel invites users to a Slack channel one user at a
+// time and aggregates the per-user failures into a single error.
+//
+// Why not a single batch call: Slack's `conversations.invite` is
+// atomic across the supplied user list. If even one ID is invalid
+// (user_not_found, cant_invite_self, …) the entire call returns an
+// error and NONE of the users are added. Real-world workspaces tend
+// to accumulate stale auto-invite IDs over time, so a single bad ID
+// in workspace config silently locks the reporter out of every newly
+// created channel. Inviting per-user isolates each failure to the ID
+// it concerns; the valid users still land in the channel.
+//
+// Per-user transient rate limits (slack.RateLimitedError) are
+// respected once, honouring Slack's RetryAfter hint and the caller's
+// ctx cancellation.
+//
+// The returned error (when non-nil) carries the channel ID and the
+// list of failed user IDs / reasons under goerr values so callers can
+// surface a structured summary to the operator. Errors are
+// non-fatal at the activation layer (errutil.Handle), so the case
+// still succeeds — but the failed users are now identifiable instead
+// of being hidden inside an opaque atomic batch error.
 func (c *client) InviteUsersToChannel(ctx context.Context, channelID string, userIDs []string) error {
 	if len(userIDs) == 0 {
 		return nil
 	}
-	_, err := c.api.InviteUsersToConversationContext(ctx, channelID, userIDs...)
-	if err != nil {
-		return goerr.Wrap(err, "failed to invite users to Slack channel",
-			goerr.V("channel_id", channelID),
-			goerr.V("user_ids", userIDs))
+
+	var failedIDs []string
+	var failureReasons []string
+	for _, uid := range userIDs {
+		if err := c.inviteOneUser(ctx, channelID, uid); err != nil {
+			failedIDs = append(failedIDs, uid)
+			failureReasons = append(failureReasons, err.Error())
+		}
+	}
+
+	if len(failedIDs) == 0 {
+		return nil
+	}
+	return goerr.New("failed to invite some users to Slack channel",
+		goerr.V("channel_id", channelID),
+		goerr.V("failed_user_ids", failedIDs),
+		goerr.V("failure_reasons", failureReasons),
+		goerr.V("attempted_user_ids", userIDs),
+	)
+}
+
+// inviteOneUser performs a single-user invite with one rate-limit
+// retry. Returns nil on success.
+func (c *client) inviteOneUser(ctx context.Context, channelID, userID string) error {
+	if _, err := c.api.InviteUsersToConversationContext(ctx, channelID, userID); err != nil {
+		var rateLimitErr *slack.RateLimitedError
+		if errors.As(err, &rateLimitErr) {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(rateLimitErr.RetryAfter):
+			}
+			if _, retryErr := c.api.InviteUsersToConversationContext(ctx, channelID, userID); retryErr != nil {
+				return retryErr
+			}
+			return nil
+		}
+		return err
 	}
 	return nil
 }
