@@ -55,24 +55,24 @@ test.describe('Case Import (YAML)', () => {
     await page.getByRole('button', { name: /^Import$/ }).click();
     await page.waitForURL(new RegExp(`/ws/${TEST_WORKSPACE_ID}/imports/new$`));
 
-    // 2. Upload the YAML and confirm we landed on the detail page.
+    // 2. While on /imports/new, the schema panel exists. Verify the
+    //    JSON Schema toggle reveals a copyable JSON Schema. Do this
+    //    BEFORE uploading because once the upload completes the page
+    //    navigates to /imports/:id and the schema panel disappears.
+    await importPage.copyJsonSchema();
+    await expect(page.locator('main details pre').first()).toContainText(
+      '$schema',
+    );
+
+    // 3. Upload the YAML and confirm we landed on the detail page.
     const sessionId = await importPage.uploadYaml(VALID_YAML);
     expect(sessionId).toMatch(/^[0-9a-f-]{8,}$/i);
     await expect(page).toHaveURL(new RegExp(`/ws/${TEST_WORKSPACE_ID}/imports/${sessionId}$`));
     expect(await importPage.readStatus()).toBe('PENDING');
 
-    // 3. The preview should show both imported cases by title.
+    // 4. The preview should show both imported cases by title.
     await expect(page.getByText('__E2E__ Suspicious login').first()).toBeVisible();
     await expect(page.getByText('__E2E__ Failed deployment').first()).toBeVisible();
-
-    // 4. The JSON Schema toggle exposes a copyable JSON Schema panel.
-    await importPage.copyJsonSchema();
-    // The button text flips to a "Copied" / "コピーしました" label on success
-    // (locale-dependent), so just confirm the click did not surface an
-    // error and the underlying <pre> still contains JSON Schema markers.
-    await expect(page.locator('main details pre').first()).toContainText(
-      '$schema',
-    );
 
     // 5. Execute → status moves to APPLIED.
     expect(await importPage.isExecuteEnabled()).toBeTruthy();
