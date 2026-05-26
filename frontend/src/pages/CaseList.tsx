@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useQuery } from '@apollo/client'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { GET_CASES } from '../graphql/case'
 import { GET_DRAFTS } from '../graphql/drafts'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
@@ -29,6 +29,32 @@ import {
 } from '../hooks/useBulkDraftAction'
 
 const PAGE_SIZE = 20
+
+type StatusFilter = 'OPEN' | 'CLOSED' | 'ALL' | 'DRAFT'
+
+// URL representation of the tab. Lower-case so the query string stays
+// readable; OPEN is the implicit default and is never emitted.
+type StatusQuery = 'closed' | 'draft' | 'all'
+export const CASE_LIST_STATUS_PARAM = 'status'
+
+function parseStatusFilter(raw: string | null): StatusFilter {
+  switch ((raw ?? '').toLowerCase()) {
+    case 'closed': return 'CLOSED'
+    case 'draft': return 'DRAFT'
+    case 'all': return 'ALL'
+    case 'open': return 'OPEN'
+    default: return 'OPEN'
+  }
+}
+
+function statusToQuery(filter: StatusFilter): StatusQuery | undefined {
+  switch (filter) {
+    case 'CLOSED': return 'closed'
+    case 'DRAFT': return 'draft'
+    case 'ALL': return 'all'
+    case 'OPEN': return undefined
+  }
+}
 
 interface FieldOption {
   id: string
@@ -129,15 +155,38 @@ export default function CaseList() {
   const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
 
-  const [statusFilter, setStatusFilter] = useState<'OPEN' | 'CLOSED' | 'ALL' | 'DRAFT'>('OPEN')
+  const wsKey = currentWorkspace?.id || 'default'
+  const storageKey = `caseListColumns:${wsKey}`
+
+  // The selected tab lives in the URL (`?status=closed|draft|all`) so
+  // that navigating away and back — via the case detail page, browser
+  // back, or a shared link — restores whichever tab the user was on.
+  // `OPEN` is the implicit default and is represented by the query
+  // being absent.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const statusFilter: StatusFilter = parseStatusFilter(searchParams.get(CASE_LIST_STATUS_PARAM))
+
+  const setStatusFilter = useCallback(
+    (next: StatusFilter) => {
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev)
+          const q = statusToQuery(next)
+          if (q) params.set(CASE_LIST_STATUS_PARAM, q)
+          else params.delete(CASE_LIST_STATUS_PARAM)
+          return params
+        },
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
+
   const [searchText, setSearchText] = useState('')
   const [page, setPage] = useState(0)
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [columnsOpen, setColumnsOpen] = useState(false)
   const columnsBtnRef = useRef<HTMLDivElement>(null)
-
-  const wsKey = currentWorkspace?.id || 'default'
-  const storageKey = `caseListColumns:${wsKey}`
 
   const [visibleCols, setVisibleCols] = useState<string[]>(() => {
     try {
@@ -570,7 +619,12 @@ export default function CaseList() {
                     if (c.accessDenied) return
                     // Drafts share the regular case detail page — Submit /
                     // Discard surface there based on status.
-                    navigate(`/ws/${currentWorkspace!.id}/cases/${c.id}`)
+                    // Pass the active tab through location.state so that
+                    // the detail page's back/delete/discard handlers can
+                    // return to the same tab.
+                    navigate(`/ws/${currentWorkspace!.id}/cases/${c.id}`, {
+                      state: { fromStatus: statusToQuery(statusFilter) },
+                    })
                   }}
                   style={{
                     cursor: c.accessDenied ? 'default' : 'pointer',
