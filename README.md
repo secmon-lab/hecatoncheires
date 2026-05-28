@@ -16,21 +16,36 @@ Hecatoncheires is a flexible project and case management system that adapts to y
 
 ## Quick Start
 
-1. Create a `config.toml` file with your field definitions (see [Configuration Guide](docs/config.md) and [examples/config.toml](examples/config.toml))
-2. Set up Firestore and Slack credentials (see [Authentication](docs/auth.md) and [Slack Integration](docs/slack.md))
-3. Run the server:
+The fastest way to try Hecatoncheires locally (in-memory backend, no auth) is in
+[docs/getting_started.md](docs/getting_started.md). In short:
+
+1. Create a `config.toml` file with your field definitions (see [Configuration](docs/configuration.md) and [examples/config.toml](examples/config.toml))
+2. Run the server with the memory backend:
    ```bash
-   hecatoncheires serve --firestore-project-id=YOUR_PROJECT_ID
+   go run . serve --repository-backend=memory --config=config.toml --no-auth=U000000000 --addr=:8080
    ```
-4. Access the web UI at `http://localhost:8080`
+3. Access the web UI at `http://localhost:8080`
+
+For a production deployment (Firestore, Cloud Storage, LLM provider, Slack
+credentials), see [docs/deployment.md](docs/deployment.md).
 
 ## Documentation
 
+Full documentation lives in [docs/](docs/README.md), organized by audience.
+
 | Document | Description |
 |----------|-------------|
-| [Configuration Guide](docs/config.md) | TOML config file, CLI flags, field types, and validation rules |
-| [Authentication](docs/auth.md) | Slack OAuth setup and no-auth development mode |
-| [Slack Integration](docs/slack.md) | Events API, webhooks, and channel management |
+| [Documentation index](docs/README.md) | Reading paths by audience |
+| [Concepts](docs/concepts.md) | Core concepts and glossary |
+| [Getting Started](docs/getting_started.md) | Run locally in minutes |
+| [Deployment](docs/deployment.md) | Production deployment overview |
+| [Configuration](docs/configuration.md) | `config.toml` complete reference |
+| [CLI Reference](docs/cli.md) | Subcommands, flags, and environment variables |
+| [Slack Integration](docs/slack.md) | Slack App setup (OAuth, Events, Interactivity, Slash) |
+| [Integrations](docs/integrations.md) | Notion and GitHub |
+| [User Guide](docs/user_guide.md) | End-user Slack workflows |
+| [Operations](docs/operations.md) | Observability, runbook, backup |
+| [Developing](docs/develop/README.md) | Architecture and contributor guide |
 
 ## Development
 
