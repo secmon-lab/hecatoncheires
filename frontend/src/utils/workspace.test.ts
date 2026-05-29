@@ -21,6 +21,14 @@ describe('workspaceMark', () => {
     expect(workspaceMark('risk')).toBe('RI')
     expect(workspaceMark('リスク管理')).toBe('リス')
   })
+
+  it('slices on Unicode code points so surrogate pairs are not split', () => {
+    // A name starting with a surrogate-pair emoji must not produce a broken
+    // half-character. Two words → first code point of each.
+    expect(workspaceMark('🎉 Party')).toBe('🎉P')
+    // Single word starting with surrogate pairs → first two code points intact.
+    expect(workspaceMark('🎉🎊fest')).toBe('🎉🎊')
+  })
 })
 
 describe('workspaceVisual', () => {

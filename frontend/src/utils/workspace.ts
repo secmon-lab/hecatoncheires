@@ -39,20 +39,28 @@ export type WorkspaceVisual =
 
 // workspaceMark builds a short initials badge label from the workspace name.
 // Two words → first letter of each; otherwise the first two characters.
+// Slicing is done over Unicode code points (via the spread operator) so names
+// starting with surrogate-pair characters (emoji, rare CJK, math symbols) are
+// not split mid-pair into replacement glyphs.
 export function workspaceMark(name: string): string {
   const trimmed = (name || '').trim()
   if (!trimmed) return '?'
   const parts = trimmed.split(/\s+/)
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
-  return trimmed.slice(0, 2).toUpperCase()
+  if (parts.length >= 2) {
+    const first = [...parts[0]][0] || ''
+    const second = [...parts[1]][0] || ''
+    return (first + second).toUpperCase()
+  }
+  return [...trimmed].slice(0, 2).join('').toUpperCase()
 }
 
 // hashIndex computes a deterministic, order-independent index in [0, mod).
 // djb2 over the UTF-16 code units of the key.
 function hashIndex(key: string, mod: number): number {
   let hash = 5381
-  for (let i = 0; i < key.length; i++) {
-    hash = ((hash << 5) + hash + key.charCodeAt(i)) >>> 0
+  const str = key || ''
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) + hash + str.charCodeAt(i)) >>> 0
   }
   return hash % mod
 }
