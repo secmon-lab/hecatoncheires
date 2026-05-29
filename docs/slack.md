@@ -4,23 +4,48 @@ Hecatoncheires integrates with Slack for both authentication and event webhooks.
 
 ## Table of Contents
 
-1. [Slack OAuth Authentication](#slack-oauth-authentication)
+1. [Slack OAuth & Authentication](#slack-oauth--authentication)
 2. [Slack Events API (Webhooks)](#slack-events-api-webhooks)
 3. [Slack Interactivity (Action Notifications)](#slack-interactivity-action-notifications)
 4. [Slack Slash Commands (Case Creation & Editing)](#slack-slash-commands-case-creation--editing)
 5. [Automatic Risk Channel Creation](#automatic-risk-channel-creation)
 6. [Enterprise Grid (Org-Level App) Setup](#enterprise-grid-org-level-app-setup)
-7. [Complete Setup Guide](#complete-setup-guide)
-8. [Environment Variables Reference](#environment-variables-reference)
+7. [Message Storage and Retrieval](#message-storage-and-retrieval)
+8. [Security Considerations](#security-considerations)
+9. [Permissions Reference](#permissions-reference)
+10. [API Endpoints](#api-endpoints)
+11. [Environment Variables Reference](#environment-variables-reference)
+12. [Troubleshooting](#troubleshooting)
+13. [See Also](#see-also)
 
 ---
 
-## Slack OAuth Authentication
+## Slack OAuth & Authentication
 
 Slack OAuth is used for user authentication via OpenID Connect (OIDC). The system can operate in two modes:
 
 1. **Slack OAuth Mode**: Production authentication using Slack workspace
 2. **No-Auth Mode**: Development mode that skips OAuth flow but still requires a valid Slack user ID
+
+### Quick Start
+
+#### Basic Setup
+
+```bash
+# Required for Slack authentication
+export HECATONCHEIRES_BASE_URL="https://your-domain.com"
+export HECATONCHEIRES_SLACK_CLIENT_ID="your-client-id"
+export HECATONCHEIRES_SLACK_CLIENT_SECRET="your-client-secret"
+
+# Optional: for displaying user avatars
+export HECATONCHEIRES_SLACK_BOT_TOKEN="xoxb-your-bot-token"
+```
+
+Then start the server:
+
+```bash
+./hecatoncheires serve
+```
 
 ### Authentication Setup
 
@@ -84,6 +109,167 @@ Slack OAuth is used for user authentication via OpenID Connect (OIDC). The syste
 2. Under **App Credentials**, you'll find:
    - **Client ID**: Copy this value
    - **Client Secret**: Click "Show" and copy this value
+
+### Authentication Flow
+
+#### 1. Login
+
+The frontend automatically handles the login flow. When an unauthenticated user accesses the application:
+
+1. The frontend's `AuthGuard` component detects unauthenticated state
+2. It displays a login page with a "Sign in with Slack" button
+3. Clicking the button redirects to `/api/auth/login`, passing the original location (path + query + hash) as a `return_to` query parameter so the user can be brought back after authentication. See [Post-Login Redirect](#post-login-redirect-return_to) for details.
+4. The backend redirects to Slack for authentication
+
+#### 2. Authorization
+
+1. Slack asks the user to authorize the app
+2. After authorization, Slack redirects back to `/api/auth/callback`
+3. The backend:
+   - Validates the OAuth callback
+   - Exchanges the authorization code for user tokens
+   - Creates a session token
+   - Sets HTTPOnly cookies (`token_id` and `token_secret`)
+   - Redirects to the original `return_to` target if one was preserved, otherwise to `/` (home page)
+
+#### 3. Access Protected Resources
+
+After login, authentication tokens are stored in HTTPOnly cookies:
+- `token_id`: Token identifier
+- `token_secret`: Token secret (for verification)
+
+These cookies are automatically sent with subsequent requests. The backend middleware validates these tokens for all protected endpoints.
+
+#### 4. Check Authentication Status
+
+The frontend uses `/api/auth/me` to check authentication status:
+
+```bash
+curl https://your-server.com/api/auth/me
+```
+
+Response for authenticated users:
+```json
+{
+  "sub": "U-xxxxxxxxx",
+  "email": "user@example.com",
+  "name": "User Name"
+}
+```
+
+#### 5. Logout
+
+The frontend handles logout by calling `/api/auth/logout` (POST):
+
+```bash
+curl -X POST https://your-server.com/api/auth/logout
+```
+
+The backend:
+1. Deletes the session token from storage
+2. Clears authentication cookies
+3. Returns success response
+
+The frontend then redirects to `/` and shows the login page.
+
+### Post-Login Redirect (`return_to`)
+
+When a user opens a deep link to a protected resource (e.g. `/ws/abc/cases/xyz`) without an active session, the system preserves that target across the OAuth roundtrip and brings the user back to it after they sign in.
+
+#### How it works
+
+1. **Frontend (`LoginPage`)**: when the user clicks **Sign in with Slack**, the page builds `return_to` from `window.location.pathname + search + hash` and appends it to `/api/auth/login` (e.g. `/api/auth/login?return_to=%2Fws%2Fabc%2Fcases%2Fxyz`).
+2. **Backend (`/api/auth/login`)**: the handler validates `return_to` and, if accepted, stores the value in a separate `oauth_return_to` cookie. CSRF protection (`oauth_state`) is unchanged — the new cookie carries only the redirect target so the two responsibilities stay separate.
+3. **Backend (`/api/auth/callback`)**: after verifying the OAuth `state`, the handler reads `oauth_return_to`, re-validates it, and uses it as the post-login redirect target. The cookie is cleared whether or not its value was accepted.
+
+#### Validation rules (open-redirect protection)
+
+`return_to` must be a same-origin relative path. The backend rejects values that:
+
+- are empty or longer than 2048 characters
+- do not start with `/`
+- start with `//` (protocol-relative URL → another host)
+- start with `/\` (backslash trick that some browsers normalise to `//`)
+- contain control characters (anything below `0x20` or `0x7f`)
+- parse as a URL with a non-empty scheme or host
+
+Rejection is silent: the OAuth flow proceeds and the user falls back to `/` after authentication. There is no error page, so probe attempts cannot fingerprint the validator.
+
+#### Cookie
+
+| Cookie name | Path | HttpOnly | SameSite | Secure | MaxAge |
+|---|---|---|---|---|---|
+| `oauth_return_to` | `/` | yes | Lax | yes (when TLS) | 600s (10 min) |
+
+The cookie is cleared on every callback, even when the value fails revalidation, so a stale or tampered value never persists across attempts.
+
+#### No-auth mode
+
+In no-auth mode the OAuth roundtrip is skipped, so there is no callback to read the cookie. The login handler honours `return_to` directly: a valid value becomes the redirect target, anything else falls back to `/`. The validator is identical to the OAuth path.
+
+#### Notes
+
+- **Hash fragments (`#step-3`)** survive the roundtrip because the frontend URL-encodes them into the `return_to` *query value* (so they are transmitted as data, not as the request's fragment). The backend stores the encoded value verbatim and emits it back in the `Location` header on redirect; modern browsers carry the fragment to the final navigation.
+- **`return_to` is advisory, not authoritative**: it controls only where the browser lands after sign-in. Per-resource access control still happens at the GraphQL layer once the page loads.
+
+### No-Auth Mode (Development)
+
+For local development and testing, you can use the `--no-auth` flag to skip OAuth flow while still operating as a real Slack user:
+
+```bash
+# Requires bot token for user validation
+export HECATONCHEIRES_SLACK_BOT_TOKEN="xoxb-your-bot-token"
+export HECATONCHEIRES_NO_AUTH="U1234567890"  # Your Slack user ID
+
+./hecatoncheires serve
+```
+
+Or use CLI flags:
+```bash
+./hecatoncheires serve \
+  --slack-bot-token="xoxb-your-bot-token" \
+  --no-auth="U1234567890"
+```
+
+**Requirements:**
+- `--slack-bot-token` is required for user validation
+- The specified user ID must exist in your Slack workspace
+- `--no-auth` cannot be used with `--slack-client-id` or `--slack-client-secret`
+
+**How it works:**
+- On startup, the server validates the user ID via Slack API (`users.info`)
+- If valid, all requests are automatically authenticated as that user
+- No OAuth flow or cookies are required
+
+This is useful for:
+- Local development
+- Testing
+- CI/CD environments
+
+### Token Management
+
+#### Token Structure
+
+```go
+{
+  "id": "unique-token-id",        // Public token identifier
+  "secret": "secret-value",        // Secret for verification (masked in logs)
+  "sub": "slack-user-id",         // Slack user ID
+  "email": "user@example.com",    // User email
+  "name": "User Name",            // User display name
+  "expires_at": "2025-01-05...",  // Expiration timestamp (7 days)
+  "created_at": "2024-12-29..."   // Creation timestamp
+}
+```
+
+#### Token Lifecycle
+
+1. **Creation**: On successful OAuth callback
+2. **Storage**: In Firestore or Memory (depending on configuration)
+3. **Caching**: In-memory cache for 5 minutes (reduces DB load)
+4. **Validation**: On each request via middleware
+5. **Expiration**: Automatically after 7 days
+6. **Deletion**: On logout or when expired
 
 ---
 
@@ -168,6 +354,34 @@ For the bot to receive messages from channels, you need to invite it:
 2. Type `/invite @your-bot-name`
 3. The bot will now receive message events from that channel
 
+### Webhook Event Processing
+
+When a message is posted in a channel where your bot is present:
+
+1. Slack sends a POST request to `/hooks/slack/event`
+2. The middleware verifies the request signature using the signing secret
+3. If verification succeeds, the handler:
+   - Responds immediately with HTTP 200 (within 3 seconds as required by Slack)
+   - Processes the event asynchronously in the background
+4. The event is parsed and the message is saved to the database
+
+#### Supported Events
+
+Currently supported event types:
+
+- `message` - Regular channel messages
+- `app_mention` - When someone @mentions your app
+- `member_joined_channel` - When a user joins a channel (triggers channel member sync for private cases)
+- `member_left_channel` - When a user leaves a channel (triggers channel member sync for private cases)
+
+Messages are stored with:
+- Channel ID
+- User ID and name
+- Message text
+- Timestamp
+- Thread information (if it's a threaded message)
+- File attachment metadata (if files are attached to the message)
+
 ---
 
 ## Slack Interactivity (Action Notifications)
@@ -186,7 +400,7 @@ When an action is created in Hecatoncheires, a notification message is automatic
 In addition, Action change events (status / assignee / title edits) and
 ActionStep CRUD events (add / remove / done / reopen / rename) post a
 context-block thread reply to the Action's primary Slack message — see
-[docs/action-steps.md](./action-steps.md) for the full list of step events
+[docs/user_guide.md](./user_guide.md#lifecycle-events) for the full list of step events
 and notification text.
 
 Status changes, assignee changes, and every Step CRUD event are additionally
@@ -606,7 +820,7 @@ The background user refresh worker behaves differently based on the app type:
 - **Org-Level App**: Calls `auth.teams.list` to discover all installed workspaces, then calls `users.list` with each Team ID. Users are deduplicated across workspaces
 - **WS-Level App**: Calls `users.list` without a Team ID (single workspace, same as before)
 
-### Troubleshooting
+### Enterprise Grid Troubleshooting
 
 #### Only users from one workspace are fetched
 
@@ -627,346 +841,13 @@ You have `slack.team_id` set in a workspace config, but the app is a workspace-l
 
 ---
 
-## Complete Setup Guide
-
-### Step-by-Step Configuration
-
-Follow these steps to set up both authentication and webhooks:
-
-1. **Create Slack App** (see [Create a Slack App](#1-create-a-slack-app))
-
-2. **Configure OAuth** (see [Configure OAuth & Permissions](#2-configure-oauth--permissions))
-   - Set redirect URL: `${BASE_URL}/api/auth/callback`
-   - Add user scopes: `openid`, `profile`, `email` (always); plus `search:read` when enabling the agent's Slack message search tool, `channels:history` when enabling `slack__get_messages` to read public channels without bot membership, and `admin.conversations:write` when enabling Enterprise Grid cross-workspace channel connect.
-   - Add bot scopes: `bookmarks:write`, `channels:history`, `channels:manage`, `channels:read`, `chat:write`, `commands`, `files:read`, `groups:read`, `groups:write`, `team:read`, `usergroups:read`, `users:read`, `users:read.email`
-
-3. **Configure Events API** (see [Events API Setup](#events-api-setup))
-   - Enable Event Subscriptions
-   - Set request URL: `${BASE_URL}/hooks/slack/event`
-   - Subscribe to bot events: `message.channels`, `app_mention`, `member_joined_channel`, `member_left_channel`
-
-4. **Configure Interactivity** (see [Interactivity Setup](#interactivity-setup))
-   - Enable Interactivity in **Interactivity & Shortcuts**
-   - Set request URL: `${BASE_URL}/hooks/slack/interaction`
-
-5. **Configure Slash Commands** (optional, see [Slash Command Setup](#slash-command-setup))
-   - Create slash command(s) in **Slash Commands**
-   - Set request URL: `${BASE_URL}/hooks/slack/command` or `${BASE_URL}/hooks/slack/command/{workspace_id}`
-
-6. **Get Credentials**:
-   - Client ID (from Basic Information)
-   - Client Secret (from Basic Information)
-   - Signing Secret (from Basic Information)
-
-7. **Install App to Workspace**:
-   - Install the app
-   - Copy Bot User OAuth Token (`xoxb-...`)
-
-8. **Set Environment Variables** (see below)
-
-9. **Start the Server**:
-   ```bash
-   ./hecatoncheires serve
-   ```
-
-10. **Verify Setup**:
-   - Check logs for "Slack authentication enabled"
-   - Check logs for "Slack webhook handler enabled"
-   - Check logs for "Slack interaction handler enabled"
-   - Check logs for "Slack slash command handler enabled" (if slash commands are configured)
-   - Test authentication by accessing the web UI
-   - Test webhook by posting a message in a channel (after inviting the bot)
-   - Test interactivity by creating an action and clicking buttons in the Slack message
-   - Test slash command by typing your command in Slack (e.g., `/create-case`)
-
-### Environment Variables
-
-Set the following environment variables:
-
-```bash
-# Required for Slack authentication
-export HECATONCHEIRES_BASE_URL="https://your-ngrok-id.ngrok.io"
-export HECATONCHEIRES_SLACK_CLIENT_ID="your-client-id"
-export HECATONCHEIRES_SLACK_CLIENT_SECRET="your-client-secret"
-
-# Required for Slack webhooks
-export HECATONCHEIRES_SLACK_SIGNING_SECRET="your-signing-secret"
-
-# Required for both (fetching user info and bot operations)
-export HECATONCHEIRES_SLACK_BOT_TOKEN="xoxb-your-bot-token"
-```
-
-For local development with ngrok:
-1. Start ngrok: `ngrok http 8080`
-2. Set `HECATONCHEIRES_BASE_URL` to the HTTPS URL provided by ngrok (without trailing slash)
-3. Update both OAuth redirect URL and Events request URL in Slack app settings
-
-Or use CLI flags:
-
-```bash
-./hecatoncheires serve \
-  --base-url="https://your-ngrok-id.ngrok.io" \
-  --slack-client-id="your-client-id" \
-  --slack-client-secret="your-client-secret" \
-  --slack-signing-secret="your-signing-secret" \
-  --slack-bot-token="xoxb-your-bot-token"
-```
-
----
-
-## Authentication Flow
-
-### 1. Login
-
-The frontend automatically handles the login flow. When an unauthenticated user accesses the application:
-
-1. The frontend's `AuthGuard` component detects unauthenticated state
-2. It displays a login page with a "Sign in with Slack" button
-3. Clicking the button redirects to `/api/auth/login`
-4. The backend redirects to Slack for authentication
-
-### 2. Authorization
-
-1. Slack asks the user to authorize the app
-2. After authorization, Slack redirects back to `/api/auth/callback`
-3. The backend:
-   - Validates the OAuth callback
-   - Exchanges the authorization code for user tokens
-   - Creates a session token
-   - Sets HTTPOnly cookies (`token_id` and `token_secret`)
-   - Redirects to `/` (home page)
-
-### 3. Access Protected Resources
-
-After login, authentication tokens are stored in HTTPOnly cookies:
-- `token_id`: Token identifier
-- `token_secret`: Token secret (for verification)
-
-These cookies are automatically sent with subsequent requests. The backend middleware validates these tokens for all protected endpoints.
-
-### 4. Logout
-
-The frontend handles logout by calling `/api/auth/logout` (POST). The backend deletes the session token and clears cookies.
-
----
-
-## Webhook Event Processing
-
-When a message is posted in a channel where your bot is present:
-
-1. Slack sends a POST request to `/hooks/slack/event`
-2. The middleware verifies the request signature using the signing secret
-3. If verification succeeds, the handler:
-   - Responds immediately with HTTP 200 (within 3 seconds as required by Slack)
-   - Processes the event asynchronously in the background
-4. The event is parsed and the message is saved to the database
-
-### Supported Events
-
-Currently supported event types:
-
-- `message` - Regular channel messages
-- `app_mention` - When someone @mentions your app
-- `member_joined_channel` - When a user joins a channel (triggers channel member sync for private cases)
-- `member_left_channel` - When a user leaves a channel (triggers channel member sync for private cases)
-
-Messages are stored with:
-- Channel ID
-- User ID and name
-- Message text
-- Timestamp
-- Thread information (if it's a threaded message)
-- File attachment metadata (if files are attached to the message)
-
-### Message Storage
-
-Messages are stored in Firestore using a subcollection structure:
-
-```
-slack_channels/{channelID}/
-  - metadata (channel info, last message time, message count)
-  messages/{messageID}
-    - message data
-```
-
-This structure allows efficient querying and pagination per channel.
-
----
-
-## No-Auth Mode (Development)
-
-For local development and testing, you can use the `--no-auth` flag to skip OAuth flow while still operating as a real Slack user:
-
-```bash
-# Requires bot token for user validation
-export HECATONCHEIRES_SLACK_BOT_TOKEN="xoxb-your-bot-token"
-export HECATONCHEIRES_NO_AUTH="U1234567890"  # Your Slack user ID
-
-./hecatoncheires serve
-```
-
-**Requirements:**
-- `--slack-bot-token` is required for user validation
-- The specified user ID must exist in your Slack workspace
-- `--no-auth` cannot be used with `--slack-client-id` or `--slack-client-secret`
-
-This is useful for local development and testing.
-
----
-
-## Security Considerations
-
-### Production Deployment
-
-1. **HTTPS Required**: Always use HTTPS in production
-   - OAuth callbacks require HTTPS
-   - Webhook endpoints require HTTPS
-   - Cookies are set with `Secure` flag when using HTTPS
-
-2. **Signing Secret Verification**:
-   - All webhook requests are verified using HMAC-SHA256
-   - Timestamp verification prevents replay attacks (5-minute window)
-   - Requests with invalid signatures are rejected with HTTP 401
-
-3. **Secure Token Storage**:
-   - Tokens are stored with masked secrets in logs
-   - HTTPOnly cookies prevent XSS attacks
-   - SameSite=Lax for CSRF protection
-
-4. **Token Expiration**:
-   - Session tokens expire after 7 days
-   - Expired tokens are automatically deleted
-   - Token cache TTL: 5 minutes
-
-### Firestore Security Rules
-
-If using Firestore for storage, configure security rules:
-
-```javascript
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    // Tokens collection - server-side access only
-    match /tokens/{tokenId} {
-      allow read, write: if false;
-    }
-
-    // Slack messages - server-side access only
-    match /slack_channels/{channelId} {
-      allow read, write: if false;
-      match /messages/{messageId} {
-        allow read, write: if false;
-      }
-    }
-  }
-}
-```
-
----
-
-## Troubleshooting
-
-### Authentication Issues
-
-#### Login fails with "invalid_client"
-- Verify `HECATONCHEIRES_SLACK_CLIENT_ID` and `HECATONCHEIRES_SLACK_CLIENT_SECRET`
-- Check that the client secret hasn't been regenerated in Slack
-
-#### Callback fails with "redirect_uri_mismatch"
-- Ensure the callback URL in Slack app settings exactly matches `${HECATONCHEIRES_BASE_URL}/api/auth/callback`
-- Check for trailing slashes (BASE_URL should not have trailing slash)
-- Verify you're using HTTPS
-
-#### Authentication not working
-- Verify all required environment variables are set
-- Check for typos in variable names
-- Ensure values are not empty strings
-
-#### No-auth mode fails to start
-- Verify `HECATONCHEIRES_SLACK_BOT_TOKEN` is set
-- Ensure the user ID exists in your Slack workspace
-- Check that `--slack-client-id` and `--slack-client-secret` are not set (they are mutually exclusive with `--no-auth`)
-
-### Webhook Issues
-
-#### Webhook verification fails
-- Verify `HECATONCHEIRES_SLACK_SIGNING_SECRET` is correct
-- Ensure the signing secret matches the one in Slack app settings
-- Check server logs for signature verification errors
-
-#### Events not being received
-- Verify the app is installed to the workspace
-- Check that the bot is invited to the channels (`/invite @bot-name`)
-- Verify Event Subscriptions are enabled in Slack app settings
-- Check that you've subscribed to the correct bot events
-- Ensure the request URL is correctly set in Slack
-
-#### Request URL verification fails
-- Make sure the server is running with correct signing secret
-- Verify the endpoint is accessible from the internet (check ngrok URL)
-- Check server logs for incoming requests
-
-### General Issues
-
-#### User avatars not displaying
-- Verify `HECATONCHEIRES_SLACK_BOT_TOKEN` is set
-- Ensure the app is installed to your workspace
-- Verify the bot token has `users:read` scope
-- Check that the bot token starts with `xoxb-`
-
----
-
-## API Endpoints
-
-### Authentication Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/auth/login` | GET | Initiates OAuth flow (redirects to Slack) |
-| `/api/auth/callback` | GET | OAuth callback handler (internal use) |
-| `/api/auth/logout` | POST | Logs out and deletes token |
-| `/api/auth/me` | GET | Returns current user info |
-| `/api/auth/user-info` | GET | Returns Slack user profile (requires `user` query param) |
-
-### Webhook Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/hooks/slack/event` | POST | Receives Slack Events API webhooks |
-| `/hooks/slack/interaction` | POST | Receives Slack interactive component payloads (button clicks, modal submissions) |
-| `/hooks/slack/command` | POST | Receives Slack slash command invocations (opens case creation modal) |
-| `/hooks/slack/command/{ws_id}` | POST | Receives Slack slash command invocations for a specific workspace |
-
-All webhook endpoints require valid Slack signature verification.
-
----
-
-## Environment Variables Reference
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `HECATONCHEIRES_BASE_URL` | Yes* | - | Base URL of the application (e.g., `https://your-domain.com`). No trailing slash. |
-| `HECATONCHEIRES_SLACK_CLIENT_ID` | Yes* | - | Slack OAuth client ID |
-| `HECATONCHEIRES_SLACK_CLIENT_SECRET` | Yes* | - | Slack OAuth client secret |
-| `HECATONCHEIRES_SLACK_BOT_TOKEN` | No*** | - | Slack Bot User OAuth Token (starts with `xoxb-`) |
-| `HECATONCHEIRES_SLACK_USER_OAUTH_TOKEN` | No | - | Slack User OAuth Token (starts with `xoxp-`) for cross-workspace channel connect in Enterprise Grid. Requires `admin.conversations:write` scope. |
-| `HECATONCHEIRES_SLACK_SIGNING_SECRET` | Yes** | - | Slack Events API signing secret |
-| `HECATONCHEIRES_SLACK_CHANNEL_PREFIX` | No | `risk` | Prefix for auto-created Slack channel names for risks (e.g., `incident` creates `#incident-1-risk-name`) |
-| `HECATONCHEIRES_NO_AUTH` | No | - | Slack user ID for no-auth mode (development only) |
-
-\* Required for OAuth mode.
-
-\** Required only if you want to enable Slack webhook integration. Without this, webhook endpoints will not be enabled.
-
-\*** Required when using `HECATONCHEIRES_NO_AUTH`.
-
----
-
 ## Message Storage and Retrieval
 
 Messages received from Slack webhooks are stored in Firestore and can be queried via GraphQL (when implemented) or directly through the repository layer.
 
 ### Storage Structure
+
+Messages are stored in Firestore using a subcollection structure:
 
 ```
 slack_channels/{channelID}
@@ -994,6 +875,8 @@ slack_channels/{channelID}
     - created_at: timestamp
 ```
 
+This structure allows efficient querying and pagination per channel.
+
 ### Message Lifecycle
 
 1. **Reception**: Webhook receives event from Slack
@@ -1012,6 +895,68 @@ slack_channels/{channelID}
 > **Note on agent message search**: workspace-wide Slack message search is implemented as the AI agent tool `slack__search_messages` (in `pkg/agent/tool/slack`) and uses the Slack `search.messages` API. That API is **User-token-only**, so a Slack User OAuth Token (`xoxp-...`) with the `search:read` scope is required. Configure it via `HECATONCHEIRES_SLACK_USER_OAUTH_TOKEN`. When the User OAuth Token is not configured, the search tool is silently omitted from the agent's tool set.
 
 > **Note on agent message retrieval (`slack__get_messages`)**: the agent's bulk message-fetch tool uses `conversations.replies` / `conversations.history`. Per the Slack API contract ("Only user tokens can access public channels they are not in"), Bot tokens can only read channels the bot has been invited to and return `not_in_channel` otherwise. When the same User OAuth Token also has the `channels:history` scope, the tool routes the call through the User token, which means **public** channels are readable even without bot membership. Private channels still require Slack user membership regardless of token; this scope does not change that. If `channels:history` is not granted on the User OAuth Token, the tool transparently falls back to the Bot token (existing behaviour).
+
+---
+
+## Security Considerations
+
+### Production Deployment
+
+1. **HTTPS Required**: Always use HTTPS in production
+   - OAuth callbacks require HTTPS
+   - Webhook endpoints require HTTPS
+   - Cookies are set with `Secure` flag when using HTTPS
+   - Token secrets are transmitted securely
+
+2. **Set Base URL**: Use your actual domain
+   ```bash
+   export HECATONCHEIRES_BASE_URL="https://your-domain.com"
+   ```
+   The callback URL (`/api/auth/callback`) is automatically appended
+
+3. **Signing Secret Verification**:
+   - All webhook requests are verified using HMAC-SHA256
+   - Timestamp verification prevents replay attacks (5-minute window)
+   - Requests with invalid signatures are rejected with HTTP 401
+
+4. **Secure Token Storage**:
+   - Tokens are stored with masked secrets in logs
+   - HTTPOnly cookies prevent XSS attacks
+   - SameSite=Lax for CSRF protection
+
+5. **Token Expiration**:
+   - Session tokens expire after 7 days
+   - Expired tokens are automatically deleted
+   - Token cache TTL: 5 minutes
+
+6. **Error Handling**:
+   - Backend returns HTTP 401 for unauthenticated requests
+   - Frontend handles authentication redirects
+   - Backend never redirects to login page (frontend responsibility)
+
+### Firestore Security Rules
+
+If using Firestore for storage, configure security rules:
+
+```javascript
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Tokens collection - server-side access only
+    match /tokens/{tokenId} {
+      allow read, write: if false;
+    }
+
+    // Slack messages - server-side access only
+    match /slack_channels/{channelId} {
+      allow read, write: if false;
+      match /messages/{messageId} {
+        allow read, write: if false;
+      }
+    }
+  }
+}
+```
 
 ---
 
@@ -1087,7 +1032,120 @@ These bot events must be subscribed to in the Slack app settings:
 
 ---
 
+## API Endpoints
+
+### Authentication Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/auth/login` | GET | Initiates OAuth flow (redirects to Slack) |
+| `/api/auth/callback` | GET | OAuth callback handler (internal use) |
+| `/api/auth/logout` | POST | Logs out and deletes token |
+| `/api/auth/me` | GET | Returns current user info |
+| `/api/auth/user-info` | GET | Returns Slack user profile (requires `user` query param) |
+
+### Webhook Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/hooks/slack/event` | POST | Receives Slack Events API webhooks |
+| `/hooks/slack/interaction` | POST | Receives Slack interactive component payloads (button clicks, modal submissions) |
+| `/hooks/slack/command` | POST | Receives Slack slash command invocations (opens case creation modal) |
+| `/hooks/slack/command/{ws_id}` | POST | Receives Slack slash command invocations for a specific workspace |
+
+All webhook endpoints require valid Slack signature verification.
+
+---
+
+## Environment Variables Reference
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `HECATONCHEIRES_BASE_URL` | Yes* | - | Base URL of the application (e.g., `https://your-domain.com`). No trailing slash. |
+| `HECATONCHEIRES_SLACK_CLIENT_ID` | Yes* | - | Slack OAuth client ID |
+| `HECATONCHEIRES_SLACK_CLIENT_SECRET` | Yes* | - | Slack OAuth client secret |
+| `HECATONCHEIRES_SLACK_BOT_TOKEN` | No*** | - | Slack Bot User OAuth Token (starts with `xoxb-`) |
+| `HECATONCHEIRES_SLACK_USER_OAUTH_TOKEN` | No | - | Slack User OAuth Token (starts with `xoxp-`) for cross-workspace channel connect in Enterprise Grid. Requires `admin.conversations:write` scope. |
+| `HECATONCHEIRES_SLACK_SIGNING_SECRET` | Yes** | - | Slack Events API signing secret |
+| `HECATONCHEIRES_SLACK_CHANNEL_PREFIX` | No | `risk` | Prefix for auto-created Slack channel names for risks (e.g., `incident` creates `#incident-1-risk-name`) |
+| `HECATONCHEIRES_NO_AUTH` | No | - | Slack user ID for no-auth mode (development only) |
+
+\* Required for OAuth mode. The callback URL is automatically constructed as `${BASE_URL}/api/auth/callback`.
+
+\** Required only if you want to enable Slack webhook integration. Without this, webhook endpoints will not be enabled.
+
+\*** Required when using `HECATONCHEIRES_NO_AUTH`.
+
+For local development with ngrok:
+1. Start ngrok: `ngrok http 8080`
+2. Set `HECATONCHEIRES_BASE_URL` to the HTTPS URL provided by ngrok (without trailing slash)
+3. Update both OAuth redirect URL and Events request URL in Slack app settings
+
+---
+
+## Troubleshooting
+
+### Authentication Issues
+
+#### Login fails with "invalid_client"
+- Verify `HECATONCHEIRES_SLACK_CLIENT_ID` and `HECATONCHEIRES_SLACK_CLIENT_SECRET`
+- Check that the client secret hasn't been regenerated in Slack
+
+#### Callback fails with "redirect_uri_mismatch"
+- Ensure the callback URL in Slack app settings exactly matches `${HECATONCHEIRES_BASE_URL}/api/auth/callback`
+- Check for trailing slashes (BASE_URL should not have trailing slash)
+- Verify you're using HTTPS
+
+#### Token verification fails
+- Check system time synchronization (JWT verification is time-sensitive)
+- Verify network access to `https://slack.com/.well-known/openid-configuration`
+
+#### Authentication not working
+- Verify all required environment variables are set:
+  - `HECATONCHEIRES_BASE_URL`
+  - `HECATONCHEIRES_SLACK_CLIENT_ID`
+  - `HECATONCHEIRES_SLACK_CLIENT_SECRET`
+- Check for typos in variable names
+- Ensure values are not empty strings
+- Verify `BASE_URL` doesn't have a trailing slash
+
+#### No-auth mode fails to start
+- Verify `HECATONCHEIRES_SLACK_BOT_TOKEN` is set
+- Ensure the user ID exists in your Slack workspace
+- Check that `--slack-client-id` and `--slack-client-secret` are not set (they are mutually exclusive with `--no-auth`)
+
+### Webhook Issues
+
+#### Webhook verification fails
+- Verify `HECATONCHEIRES_SLACK_SIGNING_SECRET` is correct
+- Ensure the signing secret matches the one in Slack app settings
+- Check server logs for signature verification errors
+
+#### Events not being received
+- Verify the app is installed to the workspace
+- Check that the bot is invited to the channels (`/invite @bot-name`)
+- Verify Event Subscriptions are enabled in Slack app settings
+- Check that you've subscribed to the correct bot events
+- Ensure the request URL is correctly set in Slack
+
+#### Request URL verification fails
+- Make sure the server is running with correct signing secret
+- Verify the endpoint is accessible from the internet (check ngrok URL)
+- Check server logs for incoming requests
+
+### General Issues
+
+#### User avatars not displaying
+- Verify `HECATONCHEIRES_SLACK_BOT_TOKEN` is set
+- Ensure the app is installed to your workspace
+- Verify the bot token has `users:read` scope
+- Check that the bot token starts with `xoxb-`
+
+---
+
 ## See Also
 
-- [Configuration Guide](./config.md) - TOML config file, CLI flags, and field definitions
-- [Authentication Guide](./auth.md) - Slack OAuth and no-auth mode setup
+- [Configuration Guide](./configuration.md) - TOML config file and field definitions
+- [CLI Reference](./cli.md) - CLI flags
+- [Integrations Guide](./integrations.md) - GitHub, Notion, and other external integrations
+- [User Guide](./user_guide.md) - Action steps, drafts, case import, and Slack-driven workflows

@@ -1,4 +1,8 @@
-# Notion Integration
+# Integrations
+
+Hecatoncheires can wire up external services to surface their content to the AI agent and to feed the Source ingestion pipeline. This document covers the integrations you can enable: Notion and GitHub.
+
+## Notion
 
 Hecatoncheires integrates with Notion to surface Notion content to the AI agent through tools registered in `pkg/agent/tool/notion/`:
 
@@ -7,7 +11,7 @@ Hecatoncheires integrates with Notion to surface Notion content to the AI agent 
 
 This document covers the Notion setup needed for those tools.
 
-## 1. Create a Notion Internal Integration
+### 1. Create a Notion Internal Integration
 
 1. Open <https://www.notion.so/profile/integrations> (or **Settings → Integrations → Develop your own integrations**).
 2. Click **New integration**.
@@ -23,7 +27,7 @@ This document covers the Notion setup needed for those tools.
 
 > Notion's official Markdown Content API works with both *public* and *internal* integrations as long as the integration has the **Read content** capability and the page is shared with it. Internal integrations are the recommended choice for self-hosted deployments because they do not require publishing the integration.
 
-## 2. Share Pages / Databases with the Integration
+### 2. Share Pages / Databases with the Integration
 
 Notion's permission model is opt-in: a page or database is invisible to the integration until it is explicitly shared.
 
@@ -35,7 +39,7 @@ For each top-level page or database you want the agent to see:
 
 Pages or child blocks that are **not** shared with the connection will appear as `<unknown>` placeholders in the Markdown output (a documented Notion API limitation).
 
-## 3. Configure the Server
+### 3. Configure the Server
 
 Set the API token via flag or environment variable:
 
@@ -60,14 +64,14 @@ If the token is omitted, the Notion-backed agent tools are silently skipped and 
 Notion API token not configured, Source features will be limited
 ```
 
-## 4. API Surface Used by the Agent Tools
+### 4. API Surface Used by the Agent Tools
 
 | Tool | Endpoint | Notes |
 |------|----------|-------|
 | `notion__search` | `POST /v1/search` | Title-substring match across all pages and databases shared with the integration. Pagination via `start_cursor` / `next_cursor`. Capped at 100 results per call. |
 | `notion__get_page` | `GET /v1/pages/{page_id}/markdown` | Returns Notion-flavored ("enhanced") Markdown rendered server-side by Notion. Requires `Notion-Version: 2026-03-11` (sent automatically by `pkg/agent/tool/notion/client.go`). |
 
-### About the Markdown Content API
+#### About the Markdown Content API
 
 The `GET /v1/pages/{page_id}/markdown` endpoint was introduced by Notion in early 2026 and is the supported way to retrieve a page's full content as a Markdown document in a single call. Hecatoncheires uses it because:
 
@@ -77,13 +81,13 @@ The `GET /v1/pages/{page_id}/markdown` endpoint was introduced by Notion in earl
 
 > The third-party `jomei/notionapi` Go client used elsewhere in the codebase does not expose this endpoint, so `pkg/agent/tool/notion/client.go` calls it directly with `net/http` while reusing the same API token. The Markdown endpoint and the Search endpoint live in the agent tool package because they are exclusively used by the agent — `pkg/service/notion` keeps only the Source-facing surface.
 
-## 5. Operational Notes
+### 5. Operational Notes
 
 - **Rate limits**: Notion enforces ~3 req/s averaged. The Notion service uses the `notionapi` library's built-in retry-on-429 (3 retries) for `Search` and `QueryUpdatedPages`. The Markdown endpoint does not use the library, but Notion returns standard 429 responses, which surface to the agent as an error string (the agent typically retries with a delay).
 - **Token rotation**: rotating the Internal Integration Token requires re-deploying the server with the new token. There is no graceful refresh — the previous token is invalidated immediately.
 - **Multi-instance safety**: the Notion client is stateless and safe to instantiate per process; no shared in-memory state is held across instances.
 
-## 6. Troubleshooting
+### 6. Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
@@ -92,3 +96,58 @@ The `GET /v1/pages/{page_id}/markdown` endpoint was introduced by Notion in earl
 | `core__notion_search` returns no results despite knowing pages exist | Pages have not been shared with the integration | Same as above — sharing is per-tree, not workspace-wide. |
 | Markdown response has `truncated: true` and ends with `<unknown>` blocks | Page exceeds Notion's render limits, or blocks reference unshared child pages | Split the page, or share the referenced child pages with the integration. |
 | Agent gets a "validation_error: invalid Notion-Version" | Running against a Notion enterprise tenant that pins a lower API version | This is unlikely under default Notion plans; contact Notion support if the response references a different `notion-version` constraint. |
+
+## GitHub
+
+Hecatoncheires uses a single GitHub App to power both the Source pipeline (PR/Issue ingestion) and the agent's GitHub tools (search, get_issue, get_pull_request, get_file, list_commits). Wiring up the App enables both at once — there is no separate flag for the agent tools.
+
+### GitHub App Setup
+
+1. Create a GitHub App at `https://github.com/settings/apps/new`
+2. Grant the following permissions:
+   - **Repository permissions**: Issues (Read), Pull Requests (Read), Contents (Read)
+3. Install the App on the target organization or repositories
+4. Note the App ID, Installation ID, and download the private key
+
+### Configuration
+
+All three flags (`--github-app-id`, `--github-app-installation-id`, `--github-app-private-key`) must be set to enable GitHub features (Source pipeline + agent tools). If any flag is missing, GitHub features are gracefully disabled and the application continues to run normally with other source types.
+
+```bash
+hecatoncheires serve \
+  --github-app-id=12345 \
+  --github-app-installation-id=67890 \
+  --github-app-private-key=/path/to/private-key.pem \
+  ...
+```
+
+The `--github-app-private-key` accepts either a file path to a PEM file or the PEM content directly as a string.
+
+### Source Management
+
+GitHub Sources are managed via the GraphQL API:
+
+- `createGitHubSource` - Create a new GitHub source with repository list
+- `updateGitHubSource` - Update an existing GitHub source
+- `validateGitHubRepo` - Validate access to a repository before adding it
+
+Repositories can be specified in `owner/repo` format or as full GitHub URLs (e.g., `https://github.com/owner/repo`).
+
+### Agent Tools
+
+When the GitHub App is configured, the Slack mention agent and the assist flow gain the following gollem tools:
+
+| Tool | Purpose |
+| --- | --- |
+| `github__search` | Search issues and pull requests using GitHub search syntax (`repo:`, `is:open`, `author:`, `label:`, etc.). Up to 50 hits per call. |
+| `github__get_issue` | Fetch a single issue (not PR) with its body, labels, and full comment thread. |
+| `github__get_pull_request` | Fetch a single PR with body, labels, comments, and reviews. Optional `include_files=true` adds the diff (per-file patches truncated at 20 KB). |
+| `github__get_file` | Fetch a file's content at any branch/tag/SHA. UTF-8 text only; binaries return `is_binary=true` with empty content. Capped at 1 MB. |
+| `github__list_commits` | List commits with optional `path`, `author`, `since`, `until` filters. Up to 50 commits per call. |
+
+The tools operate within whatever scope the GitHub App's installation grants — there is no per-repository allowlist on the application side.
+
+## See Also
+
+- [Configuration](configuration.md) — CLI flags and environment variables, including `--notion-api-token` and the `--github-app-*` flags.
+- [Slack](slack.md) — Slack app setup and authentication, which power the mention agent and assist flow that consume these integration tools.

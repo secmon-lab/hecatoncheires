@@ -1,26 +1,6 @@
 # Configuration Guide
 
-Hecatoncheires is configured through a combination of a TOML configuration file and CLI flags (or environment variables).
-
-## Table of Contents
-
-1. [Configuration File (config.toml)](#configuration-file-configtoml)
-2. [CLI Flags & Environment Variables](#cli-flags--environment-variables)
-3. [Workspace Section](#workspace-section)
-4. [Labels](#labels)
-5. [Field Definitions](#field-definitions)
-6. [Field Types](#field-types)
-7. [Options (for select / multi-select)](#options-for-select--multi-select)
-8. [Slack Section](#slack-section)
-9. [Assist Section](#assist-section)
-10. [Action Section](#action-section)
-11. [Validation Rules](#validation-rules)
-12. [Complete Example](#complete-example)
-13. [GitHub Source Integration](#github-source-integration)
-14. [Observability (Sentry)](#observability-sentry)
-15. [Diagnosis Command](#diagnosis-command)
-
----
+Hecatoncheires is configured through a combination of a TOML configuration file and CLI flags (or environment variables). This guide is the complete reference for the `config.toml` file.
 
 ## Configuration File (config.toml)
 
@@ -62,158 +42,6 @@ channel_prefix = "risk"
 prompt = "Check action deadlines and follow up on pending items."
 language = "Japanese"
 ```
-
----
-
-## CLI Flags & Environment Variables
-
-All flags can also be set via environment variables. Environment variables use the prefix `HECATONCHEIRES_` with uppercase, underscore-separated names (e.g., `--log-level` becomes `HECATONCHEIRES_LOG_LEVEL`).
-
-CLI flags take precedence over environment variables.
-
-### Global Flags (Logger)
-
-Available for all commands.
-
-| Flag | Alias | Env Var | Default | Description |
-|------|-------|---------|---------|-------------|
-| `--log-level` | `-l` | `HECATONCHEIRES_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
-| `--log-format` | `-f` | `HECATONCHEIRES_LOG_FORMAT` | `console` | Log format: `console`, `json` |
-| `--log-output` | `-o` | `HECATONCHEIRES_LOG_OUTPUT` | `stdout` | Log output: `stdout`, `stderr`, `-`, or a file path |
-| `--log-quiet` | `-q` | `HECATONCHEIRES_LOG_QUIET` | `false` | Quiet mode (disables all log output) |
-| `--log-stacktrace` | `-s` | `HECATONCHEIRES_LOG_STACKTRACE` | `true` | Show stacktrace in console format |
-
-### Serve Command Flags
-
-The `serve` command (alias: `s`) starts the HTTP server.
-
-| Flag | Env Var | Default | Required | Description |
-|------|---------|---------|----------|-------------|
-| `--addr` | `HECATONCHEIRES_ADDR` | `:8080` | No | HTTP server address and port |
-| `--base-url` | `HECATONCHEIRES_BASE_URL` | - | Yes\* | Application base URL (e.g., `https://your-domain.com`). No trailing slash |
-| `--graphiql` | `HECATONCHEIRES_GRAPHIQL` | `true` | No | Enable GraphiQL playground at `/graphiql` |
-| `--config` | `HECATONCHEIRES_CONFIG` | `./config.toml` | No | Path to TOML configuration file |
-| `--firestore-project-id` | `HECATONCHEIRES_FIRESTORE_PROJECT_ID` | - | Yes | Google Cloud Firestore project ID |
-| `--firestore-database-id` | `HECATONCHEIRES_FIRESTORE_DATABASE_ID` | `(default)` | No | Firestore database ID |
-| `--notion-api-token` | `HECATONCHEIRES_NOTION_API_TOKEN` | - | No | Notion API token for Source integration |
-| `--no-auth` | `HECATONCHEIRES_NO_AUTH` | - | No | Slack user ID for no-auth mode (development only) |
-| `--slack-client-id` | `HECATONCHEIRES_SLACK_CLIENT_ID` | - | Yes\* | Slack OAuth client ID |
-| `--slack-client-secret` | `HECATONCHEIRES_SLACK_CLIENT_SECRET` | - | Yes\* | Slack OAuth client secret |
-| `--slack-bot-token` | `HECATONCHEIRES_SLACK_BOT_TOKEN` | - | No\*\* | Slack Bot User OAuth Token (`xoxb-...`) |
-| `--slack-signing-secret` | `HECATONCHEIRES_SLACK_SIGNING_SECRET` | - | No\*\*\* | Slack signing secret for webhook verification |
-| `--slack-channel-prefix` | `HECATONCHEIRES_SLACK_CHANNEL_PREFIX` | `risk` | No | Prefix for auto-created Slack channel names |
-| `--slack-notification-slot-duration` | `HECATONCHEIRES_NOTIFICATION_SLOT_DURATION` | `1h` | No | Rolling window during which Action/Step change notifications are aggregated into a single editable channel message. Set `0` to disable aggregation (legacy `reply_broadcast` per event). See [slack-notifications.md](./slack-notifications.md) |
-| `--github-app-id` | `HECATONCHEIRES_GITHUB_APP_ID` | - | No | GitHub App ID for GitHub Source integration |
-| `--github-app-installation-id` | `HECATONCHEIRES_GITHUB_APP_INSTALLATION_ID` | - | No | GitHub App Installation ID |
-| `--github-app-private-key` | `HECATONCHEIRES_GITHUB_APP_PRIVATE_KEY` | - | No | GitHub App private key (PEM string or file path) |
-| `--llm-provider` | `HECATONCHEIRES_LLM_PROVIDER` | - | No\*\*\*\* | LLM provider: `openai`, `claude`, or `gemini`. Empty disables AI features |
-| `--llm-model` | `HECATONCHEIRES_LLM_MODEL` | - | No | LLM model name (provider default if empty) |
-| `--llm-openai-api-key` | `HECATONCHEIRES_LLM_OPENAI_API_KEY` | - | No\*\*\*\* | OpenAI API key (required when `--llm-provider=openai`) |
-| `--llm-claude-api-key` | `HECATONCHEIRES_LLM_CLAUDE_API_KEY` | - | No\*\*\*\* | Anthropic Claude API key (used with direct Anthropic access) |
-| `--llm-gemini-project-id` | `HECATONCHEIRES_LLM_GEMINI_PROJECT_ID` | - | No\*\*\*\* | Google Cloud project ID (Gemini, or Claude via Vertex AI) |
-| `--llm-gemini-location` | `HECATONCHEIRES_LLM_GEMINI_LOCATION` | `global` | No | Google Cloud location for Gemini / Claude on Vertex AI |
-| `--embedding-gemini-project-id` | `HECATONCHEIRES_EMBEDDING_GEMINI_PROJECT_ID` | - | Cond. | Google Cloud project ID for the Gemini embedding client. Required whenever `--llm-provider` is set |
-| `--embedding-gemini-location` | `HECATONCHEIRES_EMBEDDING_GEMINI_LOCATION` | `global` | No | Google Cloud location for the Gemini embedding client |
-| `--embedding-model` | `HECATONCHEIRES_EMBEDDING_MODEL` | `gemini-embedding-2` | No | Gemini embedding model name |
-| `--cloud-storage-bucket` | `HECATONCHEIRES_CLOUD_STORAGE_BUCKET` | - | Yes\*\*\*\*\* | Cloud Storage bucket holding agent thread session History/Trace blobs. See [agent-session.md](./agent-session.md) |
-| `--cloud-storage-prefix` | `HECATONCHEIRES_CLOUD_STORAGE_PREFIX` | - | No | Optional object key prefix within the Cloud Storage bucket |
-| `--sentry-dsn` | `HECATONCHEIRES_SENTRY_DSN` | - | No | Sentry DSN. Setting a non-empty value enables Sentry error reporting via `errutil.Handle`. See [Observability (Sentry)](#observability-sentry) |
-| `--sentry-env` | `HECATONCHEIRES_SENTRY_ENV` | - | No | Sentry environment tag (e.g., `production`, `staging`) |
-| `--sentry-release` | `HECATONCHEIRES_SENTRY_RELEASE` | - | No | Sentry release identifier (e.g., commit SHA) |
-
-\* Required for OAuth mode. Alternatively, use `--no-auth` with `--slack-bot-token` for development.
-
-\*\* Required when using `--no-auth`. Also enables user avatar display and Slack user refresh worker.
-
-\*\*\* Required only to enable Slack webhook integration. Without this, webhook endpoints are not registered.
-
-\*\*\*\* `--llm-provider` is optional for `serve` (AI features will be disabled if unset). When set, the matching provider credentials become required:
-- `openai` → `--llm-openai-api-key`
-- `claude` → either `--llm-claude-api-key` (direct Anthropic API) **or** `--llm-gemini-project-id` (Vertex AI). The two are mutually exclusive.
-- `gemini` → `--llm-gemini-project-id` and `--llm-gemini-location`
-
-The embedding client is configured separately from `--llm-provider` and is **required whenever LLM is enabled** (`--llm-provider` set on `serve`, or always for `assist`). It is reserved for upcoming similarity-search features; the wiring is preserved so callers can keep the same flags through the redesign. The default model is `gemini-embedding-2`; the dimension is fixed at 768. Application Default Credentials must be authorized for the project. Without `--llm-provider`, `serve` runs in a degraded mode that does not need the embedder either.
-
-\*\*\*\*\* Required whenever `--slack-bot-token` is configured. The agent that responds to Slack mentions persists per-thread conversation History and execution Trace into the bucket so follow-up mentions can resume the session. The service account needs **Storage Object Admin** on the bucket.
-
-### Migrate Command Flags
-
-The `migrate` command (alias: `m`) manages Firestore indexes.
-
-| Flag | Env Var | Default | Required | Description |
-|------|---------|---------|----------|-------------|
-| `--firestore-project-id` | `HECATONCHEIRES_FIRESTORE_PROJECT_ID` | - | Yes | Google Cloud Firestore project ID |
-| `--firestore-database-id` | `HECATONCHEIRES_FIRESTORE_DATABASE_ID` | `(default)` | No | Firestore database ID |
-| `--dry-run` | - | `false` | No | Preview migration changes without applying |
-
-### Diagnosis Command
-
-The `diagnosis` command groups one-shot data inspection / repair jobs. Each
-sub-subcommand is a self-contained job; the umbrella itself takes no flags.
-
-#### `diagnosis fix-unsent-action`
-
-Re-posts Slack messages for Actions whose initial Slack post never reached
-Slack. The job sweeps every workspace in the registry, finds Actions with an
-empty `SlackMessageTS`, and replays the post via the unified
-`ActionUseCase.PostSlackMessageToAction` entry point. Repeat runs are safe:
-already-posted Actions are skipped.
-
-```bash
-hecatoncheires diagnosis fix-unsent-action \
-  --config=./config.toml \
-  --slack-bot-token=xoxb-... \
-  --firestore-project-id=...
-```
-
-| Flag | Env Var | Default | Required | Description |
-|------|---------|---------|----------|-------------|
-| `--config` | `HECATONCHEIRES_CONFIG` | `./config.toml` | Yes | Workspace configuration file |
-| `--base-url` | `HECATONCHEIRES_BASE_URL` | - | No | Base URL used to render the action's WebUI link inside the Slack message |
-| `--default-lang` | `HECATONCHEIRES_DEFAULT_LANG` | `en` | No | Default language for the Slack message text (`en`, `ja`) |
-| `--slack-bot-token` | `HECATONCHEIRES_SLACK_BOT_TOKEN` | - | Yes | Slack Bot Token used to post the recovery messages |
-| `--firestore-project-id` | `HECATONCHEIRES_FIRESTORE_PROJECT_ID` | - | Cond. | Required when using the Firestore backend |
-| `--firestore-database-id` | `HECATONCHEIRES_FIRESTORE_DATABASE_ID` | `(default)` | No | Firestore database ID |
-| Sentry flags | see [Observability (Sentry)](#observability-sentry) | - | No | Same flags as `serve` for error reporting |
-
-The job logs a final summary line:
-
-```
-fix-unsent-action complete total=N fixed=X skipped=Y failed=Z
-```
-
-- `Total` — Actions found with an empty `SlackMessageTS`
-- `Fixed` — Successfully posted; timestamp persisted
-- `Skipped` — Documented skip conditions (parent Case has no Slack channel,
-  the Action was already posted by a concurrent run, or the row was deleted
-  during the sweep)
-- `Failed` — Unexpected errors. Each is reported via `errutil.Handle` so it
-  reaches the configured error sink (Sentry / log); the sweep continues
-  past failures so a single bad row never blocks the rest
-
-### Authentication Modes
-
-The serve command supports two authentication modes:
-
-**OAuth Mode (Production)**
-```bash
-hecatoncheires serve \
-  --base-url=https://your-domain.com \
-  --slack-client-id=YOUR_CLIENT_ID \
-  --slack-client-secret=YOUR_CLIENT_SECRET \
-  --slack-bot-token=xoxb-YOUR_BOT_TOKEN \
-  --firestore-project-id=YOUR_PROJECT_ID
-```
-
-**No-Auth Mode (Development)**
-```bash
-hecatoncheires serve \
-  --no-auth=U1234567890 \
-  --slack-bot-token=xoxb-YOUR_BOT_TOKEN \
-  --firestore-project-id=YOUR_PROJECT_ID
-```
-
-`--no-auth` and `--slack-client-id`/`--slack-client-secret` are mutually exclusive. If both are provided, `--no-auth` takes precedence.
 
 ---
 
@@ -678,7 +506,7 @@ configuration enables it.
 | `slack__post_message` | Assist only (`HECATONCHEIRES_SLACK_BOT_TOKEN`) | Post a message to the case's Slack channel. |
 | `slack__get_messages` | `HECATONCHEIRES_SLACK_BOT_TOKEN` | Bulk fetch of one or more Slack messages and their thread context (max 10 per call, parallel, partial failure tolerated). |
 | `slack__search_messages` | `HECATONCHEIRES_SLACK_USER_OAUTH_TOKEN` with `search:read` scope | Workspace-wide Slack message search. See [docs/slack.md](slack.md#user-token-scopes). |
-| `notion__search`, `notion__get_page` | `HECATONCHEIRES_NOTION_API_TOKEN` | Notion title search and Markdown content retrieval. See [docs/notion.md](notion.md). |
+| `notion__search`, `notion__get_page` | `HECATONCHEIRES_NOTION_API_TOKEN` | Notion title search and Markdown content retrieval. See [docs/integrations.md](integrations.md). |
 
 ---
 
@@ -773,6 +601,128 @@ When no preset captures what you need, supply an absolute color as `#RRGGBB` or 
 | `"var(--ok)"` | ❌ Validation error |
 | `"red"` | ❌ Validation error |
 | `"rgb(255,0,0)"` | ❌ Validation error |
+
+---
+
+## Job Definitions (`[[job]]`)
+
+Agent Jobs let workspace administrators declaratively wire LLM-powered automation to Case lifecycle events and periodic ticks. Each Job is defined in the workspace TOML, listens to one or more events, and runs the Plan-and-Execute agent runtime with a fixed system-prompt structure and a curated tool palette (read-only + writer).
+
+```toml
+# A minimal lifecycle Job.
+[[job]]
+id = "summarize-on-create"
+name = "Auto-summarize on creation"
+description = "Summarize a new case and post the summary to Slack."
+events.case = { on = ["created"] }
+prompt = """
+Summarize this case in three lines or fewer and post it to the Slack channel
+bound to the case via slack__post_to_case_channel.
+"""
+
+# A multi-trigger Job: fires on lifecycle events AND every hour.
+[[job]]
+id = "watch"
+events.case = { on = ["created", "closed"] }
+events.scheduled = { every = "1h" }
+prompt = "Take any appropriate action..."
+
+# A cron-based scheduled Job.
+[[job]]
+id = "daily-digest"
+events.scheduled = { cron = "0 9 * * *" }  # 09:00 UTC every day
+prompt = "Post a status digest to the case Slack channel."
+```
+
+### Fields
+
+| Field         | Type     | Required | Notes |
+|---------------|----------|----------|-------|
+| `id`          | string   | yes      | Workspace-unique, kebab-case. |
+| `name`        | string   | no       | Human-readable label for logs. |
+| `description` | string   | no       | Free-form description for operators. |
+| `prompt`      | string   | yes      | Go `text/template`. Has access to `.Case`, `.Workspace`, `.Event`. |
+| `disabled`    | bool     | no       | Defaults to `false` (= active). Set `true` to temporarily disable. |
+| `strategy`    | string   | no       | `"simple"` (default) or `"planexec"`. See *Execution strategy* below. |
+| `events.case` | table    | (\*)     | `on = ["created" \| "closed", ...]`. Always an array. |
+| `events.scheduled` | table | (\*)   | Exactly one of `every = "1h"` or `cron = "0 9 * * *"`. |
+
+### Execution strategy
+
+The `strategy` field selects which runtime drives the Job's LLM loop.
+Defaults to `simple`, which is the v1 behaviour: a single
+`gollem.Agent.Execute` call with the configured tool set. Set it to
+`planexec` to opt into the plan-and-execute runtime shared with the
+proposal mode — a planner LLM emits a list of parallel sub-agent tasks,
+the runtime fans them out, replans with the observations, and finishes
+with a structured summary.
+
+```toml
+[[job]]
+id = "deep-investigation-on-create"
+prompt = "Investigate the case from every angle and summarise findings."
+strategy = "planexec"
+events.case = { on = ["created"] }
+```
+
+| Strategy | When to use |
+|----------|-------------|
+| `simple` (default) | Single-step actions: post a digest, set a status, send a Slack reply. The Job's prompt is a direct instruction the agent executes in one ReAct loop. |
+| `planexec` | Multi-step investigations: pull context from several sources, cross-reference, and produce a structured summary. The runtime budgets up to 8 planner rounds and 16 parallel sub-agent tasks per turn (configurable in the binary). |
+
+Notes:
+
+- `planexec` Jobs run **unattended** — they cannot ask the operator a
+  question mid-run. Use `simple` if your Job is interactive in spirit
+  but happens to need a small amount of planning; the planexec
+  Question feature is reserved for the proposal mode.
+- `planexec` Jobs surface their per-phase progress through the same
+  JobRunLog event trail as `simple`, so the Cases UI shows you the
+  plan, sub-agent activity, and final summary in order.
+- The JobRunLog `executorKind` field is recorded as `single_loop`
+  (simple) or `plan_execute` (planexec). The Cases UI renders the
+  Run row with a `planexec` chip when the Job ran under the
+  plan-and-execute runtime.
+
+(\*) At least one of `events.case` / `events.scheduled` must be present.
+
+### System prompt
+
+The runtime constructs a structured system prompt every invocation. The
+contents are fixed by the runtime — Job authors only control
+`prompt` (the user message).
+
+| Section                  | Content |
+|--------------------------|---------|
+| Role                     | Agent role and tone (fixed text). |
+| Workspace                | `id`, `name`, `description`, and the custom field schema. Each field's `id`, `name`, `type`, `required` flag (when true), `description` (when set), and — for `select` / `multi-select` — every option's `id`, `name`, `description`, and freeform metadata pairs are emitted so the agent knows the field's constraints and the meaning of each option ID. |
+| Case                     | All persisted fields of the current case. For `field_values`, `select` / `multi-select` entries are rendered as `id: <raw> (<option name>, ...)` so the agent can map raw option IDs back to their human-readable label without re-consulting the schema. Unknown option IDs fall back to the raw value. |
+| Per-case operator notes  | Rendered only when the Case has `AgentAdditionalPrompt` set (see below). |
+| Actions                  | Existing non-archived actions, for de-duplication. |
+| Trigger condition        | The Job's declared subscription (events.case / events.scheduled). |
+| Trigger reason           | The concrete event that fired this invocation (timestamps, actor, lifecycle / cron tick). |
+| Guardrails               | Fixed restrictions: no auto-close, no delete, channel-scoped Slack, etc. |
+| Tools                    | gollem auto-injects the resolved tool list. |
+
+### Per-case agent customisation
+
+The Case Agent page (`/ws/{ws}/cases/{id}/agent`) lets operators attach
+two Case-scoped knobs that the runtime applies on top of the TOML Job
+definition:
+
+- **Additional prompt**: a Markdown snippet (max 16,384 bytes) that is
+  rendered into the `Per-case operator notes` section of the system
+  prompt. It does **not** replace the TOML prompt or the Guardrails —
+  treat it as extra context, not as a way to grant new capabilities.
+- **Source allowlist** (`AgentSourceIDs`): when empty, every enabled
+  Workspace Source remains in play. When non-empty, Source-aware tools
+  MUST narrow themselves to the listed IDs. Unknown / deleted IDs are
+  silently skipped at use time so a Source toggled off later does not
+  invalidate the stored selection.
+
+Both values round-trip through the `updateCaseAgentSettings` GraphQL
+mutation. Drafts cannot carry agent settings (they have no Slack
+channel and no Job runs against them).
 
 ---
 
@@ -872,102 +822,10 @@ type = "url"
 
 ---
 
-## GitHub Integration
-
-Hecatoncheires uses a single GitHub App to power both the Source pipeline (PR/Issue ingestion) and the agent's GitHub tools (search, get_issue, get_pull_request, get_file, list_commits). Wiring up the App enables both at once — there is no separate flag for the agent tools.
-
-### GitHub App Setup
-
-1. Create a GitHub App at `https://github.com/settings/apps/new`
-2. Grant the following permissions:
-   - **Repository permissions**: Issues (Read), Pull Requests (Read), Contents (Read)
-3. Install the App on the target organization or repositories
-4. Note the App ID, Installation ID, and download the private key
-
-### Configuration
-
-All three flags (`--github-app-id`, `--github-app-installation-id`, `--github-app-private-key`) must be set to enable GitHub features (Source pipeline + agent tools). If any flag is missing, GitHub features are gracefully disabled and the application continues to run normally with other source types.
-
-```bash
-hecatoncheires serve \
-  --github-app-id=12345 \
-  --github-app-installation-id=67890 \
-  --github-app-private-key=/path/to/private-key.pem \
-  ...
-```
-
-The `--github-app-private-key` accepts either a file path to a PEM file or the PEM content directly as a string.
-
-### Source Management
-
-GitHub Sources are managed via the GraphQL API:
-
-- `createGitHubSource` - Create a new GitHub source with repository list
-- `updateGitHubSource` - Update an existing GitHub source
-- `validateGitHubRepo` - Validate access to a repository before adding it
-
-Repositories can be specified in `owner/repo` format or as full GitHub URLs (e.g., `https://github.com/owner/repo`).
-
-### Agent Tools
-
-When the GitHub App is configured, the Slack mention agent and the assist flow gain the following gollem tools:
-
-| Tool | Purpose |
-| --- | --- |
-| `github__search` | Search issues and pull requests using GitHub search syntax (`repo:`, `is:open`, `author:`, `label:`, etc.). Up to 50 hits per call. |
-| `github__get_issue` | Fetch a single issue (not PR) with its body, labels, and full comment thread. |
-| `github__get_pull_request` | Fetch a single PR with body, labels, comments, and reviews. Optional `include_files=true` adds the diff (per-file patches truncated at 20 KB). |
-| `github__get_file` | Fetch a file's content at any branch/tag/SHA. UTF-8 text only; binaries return `is_binary=true` with empty content. Capped at 1 MB. |
-| `github__list_commits` | List commits with optional `path`, `author`, `since`, `until` filters. Up to 50 commits per call. |
-
-The tools operate within whatever scope the GitHub App's installation grants — there is no per-repository allowlist on the application side.
-
----
-
-## Observability (Sentry)
-
-The server can forward errors to [Sentry](https://sentry.io/) in addition to
-the structured log. Sentry is opt-in: leaving `HECATONCHEIRES_SENTRY_DSN`
-empty keeps the SDK uninitialized and the integration becomes a cheap no-op
-(one atomic flag check per error).
-
-### Environment variables
-
-| Env Var | Default | Description |
-|---------|---------|-------------|
-| `HECATONCHEIRES_SENTRY_DSN` | - | Sentry DSN. **Setting this enables Sentry.** |
-| `HECATONCHEIRES_SENTRY_ENV` | - | Environment tag (`production`, `staging`, etc.) |
-| `HECATONCHEIRES_SENTRY_RELEASE` | - | Release identifier — set to the commit SHA in CI |
-
-### What gets reported
-
-Every call to `errutil.Handle` (and the HTTP variant) feeds the error to
-Sentry's `CaptureException`. `goerr` values attached to the error appear as
-the **`goerr_values`** Sentry context, so structured fields such as
-`slack_error`, `query`, or `case_id` show up alongside the exception
-without per-call site changes.
-
-For HTTP requests, Sentry middleware sits right after `RequestID` so
-captures inside a handler automatically carry the request URL, method, and
-headers. Panics propagate through the middleware (`Repanic: true`) so chi's
-`Recoverer` still produces a `500` response after Sentry has captured the
-event.
-
-### Operational troubleshoot
-
-- **Slack `missing_scope` even after adding the scope**: re-install the
-  Slack App to the workspace. Adding scopes in the App Manifest does not
-  re-issue existing tokens; the `xoxp-...` you had before the change still
-  carries the old scope set. Re-install (Install App → Reinstall to
-  Workspace) and replace the token in `HECATONCHEIRES_SLACK_USER_OAUTH_TOKEN`.
-- **Confirming what scope Slack actually wants**: when a Slack call fails,
-  the wrapped error carries the `slack_error` / `slack_response_messages` /
-  `slack_response_warnings` fields. Both the structured log and the Sentry
-  `goerr_values` context include these — search for them to find the
-  Slack-side error code without parsing free-form error strings.
-
 ## See Also
 
-- [Authentication Guide](./auth.md) - Slack OAuth setup and no-auth development mode
-- [Slack Integration Guide](./slack.md) - Events API, webhooks, and channel management
-- [Example Configuration](../examples/config.toml) - Complete example for security risk management
+- [CLI Flags & Environment Variables](cli.md) — server flags, environment variables, and the diagnosis command
+- [Integrations](integrations.md) — GitHub source integration and Notion tools
+- [Operations](operations.md) — observability (Sentry) and operational guidance
+- [Slack](slack.md) — Slack app setup, scopes, and authentication
+- [User Guide](user_guide.md) — drafts, import, action steps, case-draft, and agent Jobs usage
