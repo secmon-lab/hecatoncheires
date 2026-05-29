@@ -5,6 +5,9 @@
 [workspace]
 id = "risk"
 name = "Risk Management"
+# Optional badge glyph. Mutually exclusive with `color`. When set, the UI shows
+# this emoji on a neutral background instead of the auto-generated initials.
+emoji = "🛡️"
 
 [labels]
 case = "Risk"

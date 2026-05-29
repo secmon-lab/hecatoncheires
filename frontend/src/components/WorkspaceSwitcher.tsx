@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { IconChevDown } from './Icons'
+import { workspaceVisual, type WorkspaceVisualInput } from '../utils/workspace'
 
 interface Workspace {
   id: string
   name: string
+  emoji?: string | null
+  color?: string | null
 }
 
 interface Props {
@@ -12,12 +15,16 @@ interface Props {
   workspaces: Workspace[]
 }
 
-function workspaceMark(name: string): string {
-  const trimmed = (name || '').trim()
-  if (!trimmed) return '?'
-  const parts = trimmed.split(/\s+/)
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
-  return trimmed.slice(0, 2).toUpperCase()
+function WorkspaceBadge({ ws }: { ws: WorkspaceVisualInput }) {
+  const v = workspaceVisual(ws)
+  return (
+    <span
+      className={v.kind === 'emoji' ? 'h-ws-mark is-emoji' : 'h-ws-mark'}
+      style={{ background: v.background }}
+    >
+      {v.kind === 'emoji' ? v.emoji : v.mark}
+    </span>
+  )
 }
 
 export default function WorkspaceSwitcher({ current, workspaces }: Props) {
@@ -35,7 +42,7 @@ export default function WorkspaceSwitcher({ current, workspaces }: Props) {
 
   if (!current) return null
 
-  const mark = <span className="h-ws-mark">{workspaceMark(current.name)}</span>
+  const mark = <WorkspaceBadge ws={current} />
 
   if (workspaces.length <= 1) {
     return (
@@ -76,7 +83,7 @@ export default function WorkspaceSwitcher({ current, workspaces }: Props) {
                 fontWeight: ws.id === current.id ? 600 : 500,
               }}
             >
-              <span className="h-ws-mark">{workspaceMark(ws.name)}</span>
+              <WorkspaceBadge ws={ws} />
               <span>{ws.name}</span>
             </Link>
           ))}
