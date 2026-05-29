@@ -3,22 +3,7 @@ import { useAuth } from '../contexts/auth-context'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
 import { IconChevRight } from '../components/Icons'
-
-function workspaceMark(name: string): string {
-  const trimmed = (name || '').trim()
-  if (!trimmed) return '?'
-  const parts = trimmed.split(/\s+/)
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
-  return trimmed.slice(0, 2).toUpperCase()
-}
-
-const WORKSPACE_GRADIENTS = [
-  'linear-gradient(135deg, #5b6cff, #8b3fb5)',
-  'linear-gradient(135deg, #ff9b3f, #c8501c)',
-  'linear-gradient(135deg, #2cb38d, #126b56)',
-  'linear-gradient(135deg, #3fb6e5, #1d6f9e)',
-  'linear-gradient(135deg, #e25b8e, #872551)',
-]
+import { workspaceVisual } from '../utils/workspace'
 
 export default function WorkspaceSelector() {
   const { workspaces, isLoading } = useWorkspace()
@@ -59,7 +44,9 @@ export default function WorkspaceSelector() {
           </div>
         </div>
         <div className="col" style={{ gap: 8 }}>
-          {workspaces.map((ws, i) => (
+          {workspaces.map((ws) => {
+            const visual = workspaceVisual(ws)
+            return (
             <Link
               key={ws.id}
               to={`/ws/${ws.id}/cases`}
@@ -74,12 +61,13 @@ export default function WorkspaceSelector() {
               <div
                 style={{
                   width: 40, height: 40, borderRadius: 8,
-                  background: WORKSPACE_GRADIENTS[i % WORKSPACE_GRADIENTS.length],
-                  color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 13, fontWeight: 700,
+                  background: visual.background,
+                  color: visual.kind === 'emoji' ? 'inherit' : 'white',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: visual.kind === 'emoji' ? 20 : 13, fontWeight: 700,
                 }}
               >
-                {workspaceMark(ws.name)}
+                {visual.kind === 'emoji' ? visual.emoji : visual.mark}
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 600, fontSize: 14 }} className="truncate">{ws.name}</div>
@@ -87,7 +75,8 @@ export default function WorkspaceSelector() {
               </div>
               <IconChevRight size={16} style={{ color: 'var(--fg-soft)' }} />
             </Link>
-          ))}
+            )
+          })}
         </div>
         <div style={{ marginTop: 20, textAlign: 'center', color: 'var(--fg-soft)', fontSize: 12 }}>
           <button

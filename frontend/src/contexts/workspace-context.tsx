@@ -11,6 +11,11 @@ import { useNavigate } from "react-router-dom";
 interface Workspace {
   id: string;
   name: string;
+  // Optional display hints from /api/workspaces. emoji and color are mutually
+  // exclusive (enforced server-side); the UI resolves them via
+  // utils/workspace.ts workspaceVisual().
+  emoji?: string | null;
+  color?: string | null;
 }
 
 interface WorkspaceContextType {

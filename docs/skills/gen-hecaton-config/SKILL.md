@@ -88,10 +88,12 @@ description = "Help text"
 
 ### `[workspace]` section (required)
 
-| Key    | Required | Description                                                          |
-|--------|----------|----------------------------------------------------------------------|
-| `id`   | **Yes**  | Unique identifier. Pattern: `^[a-z0-9]+(-[a-z0-9]+)*$`, max 63 chars |
-| `name` | No       | Display name. Defaults to the value of `id` if omitted               |
+| Key     | Required | Description                                                          |
+|---------|----------|----------------------------------------------------------------------|
+| `id`    | **Yes**  | Unique identifier. Pattern: `^[a-z0-9]+(-[a-z0-9]+)*$`, max 63 chars |
+| `name`  | No       | Display name. Defaults to the value of `id` if omitted               |
+| `emoji` | No       | Badge glyph (≤16 runes). Mutually exclusive with `color`             |
+| `color` | No       | Badge color `#RRGGBB` (6-digit hex). Mutually exclusive with `emoji` |
 
 ### `[labels]` section (optional)
 
@@ -168,6 +170,7 @@ The generated config must satisfy all of the following:
 6. `select` and `multi-select` fields have at least one option
 7. Every option `id` matches the same pattern and is unique within its parent field
 8. Every option `name` is non-empty
+9. `[workspace] emoji` and `[workspace] color` are not both set; `color`, if present, is a 6-digit `#RRGGBB` hex code
 
 ### Complete example
 

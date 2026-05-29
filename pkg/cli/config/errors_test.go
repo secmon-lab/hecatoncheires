@@ -216,6 +216,9 @@ func TestConfigErrors_AllSentinelErrorsAreDefined(t *testing.T) {
 		{"ErrMissingOptions", config.ErrMissingOptions},
 		{"ErrInvalidMetadata", config.ErrInvalidMetadata},
 		{"ErrMissingName", config.ErrMissingName},
+		{"ErrWorkspaceEmojiColorConflict", config.ErrWorkspaceEmojiColorConflict},
+		{"ErrInvalidWorkspaceColor", config.ErrInvalidWorkspaceColor},
+		{"ErrInvalidWorkspaceEmoji", config.ErrInvalidWorkspaceEmoji},
 	}
 
 	for _, se := range sentinelErrors {

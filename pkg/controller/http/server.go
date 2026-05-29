@@ -206,8 +206,10 @@ func accessLogger(next http.Handler) http.Handler {
 // workspacesHandler returns a handler that serves the workspace list as JSON
 func workspacesHandler(registry *model.WorkspaceRegistry) http.HandlerFunc {
 	type workspaceResponse struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
+		ID    string `json:"id"`
+		Name  string `json:"name"`
+		Emoji string `json:"emoji,omitempty"`
+		Color string `json:"color,omitempty"`
 	}
 	type response struct {
 		Workspaces []workspaceResponse `json:"workspaces"`
@@ -220,8 +222,10 @@ func workspacesHandler(registry *model.WorkspaceRegistry) http.HandlerFunc {
 		}
 		for i, ws := range workspaces {
 			resp.Workspaces[i] = workspaceResponse{
-				ID:   ws.ID,
-				Name: ws.Name,
+				ID:    ws.ID,
+				Name:  ws.Name,
+				Emoji: ws.Emoji,
+				Color: ws.Color,
 			}
 		}
 

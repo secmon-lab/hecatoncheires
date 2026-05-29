@@ -18,15 +18,29 @@ var (
 	ErrDuplicateWorkspaceID  = goerr.New("duplicate workspace ID")
 	ErrNoConfigFiles         = goerr.New("no configuration files found")
 	ErrInvalidWelcomeMessage = goerr.New("invalid Slack welcome message template")
+	// ErrWorkspaceEmojiColorConflict is returned when both emoji and color are
+	// set in the [workspace] section. They are mutually exclusive because the
+	// UI renders either an emoji badge (neutral background) or a colored
+	// initials badge, never both.
+	ErrWorkspaceEmojiColorConflict = goerr.New("workspace emoji and color are mutually exclusive")
+	// ErrInvalidWorkspaceColor is returned when the [workspace] color is not a
+	// 6-digit #RRGGBB hex code.
+	ErrInvalidWorkspaceColor = goerr.New("invalid workspace color format")
+	// ErrInvalidWorkspaceEmoji is returned when the [workspace] emoji exceeds
+	// the allowed rune length.
+	ErrInvalidWorkspaceEmoji = goerr.New("invalid workspace emoji")
 )
 
 // Context keys for error values
 const (
-	ConfigPathKey  = "config_path"
-	FieldIDKey     = "field_id"
-	FieldTypeKey   = "field_type"
-	OptionIDKey    = "option_id"
-	FieldIndexKey  = "field_index"
-	OptionIndexKey = "option_index"
-	WorkspaceIDKey = "workspace_id"
+	ConfigPathKey     = "config_path"
+	FieldIDKey        = "field_id"
+	FieldTypeKey      = "field_type"
+	OptionIDKey       = "option_id"
+	FieldIndexKey     = "field_index"
+	OptionIndexKey    = "option_index"
+	WorkspaceIDKey    = "workspace_id"
+	WorkspaceColorKey = "workspace_color"
+	WorkspaceEmojiKey = "workspace_emoji"
+	WorkspaceEmojiLen = "workspace_emoji_len"
 )

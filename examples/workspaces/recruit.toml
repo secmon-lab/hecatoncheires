@@ -5,6 +5,9 @@
 [workspace]
 id = "recruit"
 name = "Recruitment"
+# Optional badge background color (#RRGGBB). Mutually exclusive with `emoji`.
+# When set, the initials badge uses a gradient derived from this color.
+color = "#2cb38d"
 
 [labels]
 case = "Candidate"

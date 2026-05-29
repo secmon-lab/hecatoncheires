@@ -53,6 +53,7 @@ The `[workspace]` section defines the workspace's identity and is **required** i
 [workspace]
 id = "risk"
 name = "Risk Management"
+emoji = "🛡️"   # optional; mutually exclusive with color
 ```
 
 ### Properties
@@ -61,6 +62,24 @@ name = "Risk Management"
 |----------|------|----------|-------------|
 | `id` | string | **Yes** | Unique workspace identifier. Must match `^[a-z0-9]+(-[a-z0-9]+)*$` and be at most 63 characters |
 | `name` | string | No | Display name for the workspace. Defaults to `id` if omitted |
+| `emoji` | string | No | Badge glyph shown in the workspace selector and switcher. Mutually exclusive with `color`. Up to 16 runes |
+| `color` | string | No | Badge background color as a `#RRGGBB` hex code (6-digit only). Mutually exclusive with `emoji` |
+
+### Workspace Badge (emoji / color)
+
+Each workspace is shown as a small badge in the workspace selector and the
+breadcrumb switcher. You can control its appearance with **either** `emoji`
+**or** `color` — they are mutually exclusive, and setting both fails validation
+at startup.
+
+- **`emoji`** — renders the emoji on a neutral background (e.g. `emoji = "🛡️"`).
+- **`color`** — renders the workspace's initials on a gradient derived from the
+  given `#RRGGBB` color (e.g. `color = "#2cb38d"`). Only the 6-digit hex form is
+  accepted; `#fff` and named colors are rejected.
+- **Neither** — the initials are shown on an automatically assigned color that
+  is derived deterministically from the workspace `id`. The same workspace
+  always gets the same color regardless of how many workspaces exist or their
+  order, so the selector and switcher stay consistent.
 
 ### Workspace ID Format
 

@@ -1165,3 +1165,121 @@ required = true
 	gt.Bool(t, ok).True()
 	gt.Value(t, score).Equal(int64(3))
 }
+
+func TestLoadWorkspaceConfigs_Emoji(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "risk.toml")
+	content := `
+[workspace]
+id = "risk"
+name = "Risk Management"
+emoji = "🛡️"
+`
+	gt.NoError(t, os.WriteFile(configPath, []byte(content), 0644)).Required()
+
+	configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+	gt.NoError(t, err).Required()
+	gt.Array(t, configs).Length(1).Required()
+	gt.Value(t, configs[0].Emoji).Equal("🛡️")
+	gt.Value(t, configs[0].Color).Equal("")
+}
+
+func TestLoadWorkspaceConfigs_Color(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "incident.toml")
+	content := `
+[workspace]
+id = "incident"
+name = "Incident Response"
+color = "#c8501c"
+`
+	gt.NoError(t, os.WriteFile(configPath, []byte(content), 0644)).Required()
+
+	configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+	gt.NoError(t, err).Required()
+	gt.Array(t, configs).Length(1).Required()
+	gt.Value(t, configs[0].Color).Equal("#c8501c")
+	gt.Value(t, configs[0].Emoji).Equal("")
+}
+
+func TestLoadWorkspaceConfigs_EmojiColorConflict(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "risk.toml")
+	content := `
+[workspace]
+id = "risk"
+name = "Risk Management"
+emoji = "🛡️"
+color = "#c8501c"
+`
+	gt.NoError(t, os.WriteFile(configPath, []byte(content), 0644)).Required()
+
+	_, err := config.LoadWorkspaceConfigs([]string{configPath})
+	gt.Value(t, err).NotNil()
+	gt.Error(t, err).Is(config.ErrWorkspaceEmojiColorConflict)
+}
+
+func TestLoadWorkspaceConfigs_InvalidColor(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "risk.toml")
+	content := `
+[workspace]
+id = "risk"
+name = "Risk Management"
+color = "blue"
+`
+	gt.NoError(t, os.WriteFile(configPath, []byte(content), 0644)).Required()
+
+	_, err := config.LoadWorkspaceConfigs([]string{configPath})
+	gt.Value(t, err).NotNil()
+	gt.Error(t, err).Is(config.ErrInvalidWorkspaceColor)
+}
+
+func TestLoadWorkspaceConfigs_InvalidColorThreeDigit(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "risk.toml")
+	content := `
+[workspace]
+id = "risk"
+name = "Risk Management"
+color = "#fff"
+`
+	gt.NoError(t, os.WriteFile(configPath, []byte(content), 0644)).Required()
+
+	_, err := config.LoadWorkspaceConfigs([]string{configPath})
+	gt.Value(t, err).NotNil()
+	gt.Error(t, err).Is(config.ErrInvalidWorkspaceColor)
+}
+
+func TestLoadWorkspaceConfigs_EmojiTooLong(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "risk.toml")
+	content := `
+[workspace]
+id = "risk"
+name = "Risk Management"
+emoji = "this is clearly not a single emoji glyph"
+`
+	gt.NoError(t, os.WriteFile(configPath, []byte(content), 0644)).Required()
+
+	_, err := config.LoadWorkspaceConfigs([]string{configPath})
+	gt.Value(t, err).NotNil()
+	gt.Error(t, err).Is(config.ErrInvalidWorkspaceEmoji)
+}
+
+func TestLoadWorkspaceConfigs_NoEmojiNoColor(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "risk.toml")
+	content := `
+[workspace]
+id = "risk"
+name = "Risk Management"
+`
+	gt.NoError(t, os.WriteFile(configPath, []byte(content), 0644)).Required()
+
+	configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+	gt.NoError(t, err).Required()
+	gt.Array(t, configs).Length(1).Required()
+	gt.Value(t, configs[0].Emoji).Equal("")
+	gt.Value(t, configs[0].Color).Equal("")
+}

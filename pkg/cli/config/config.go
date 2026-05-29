@@ -28,11 +28,56 @@ var fieldIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 // identifiers, so the legacy hyphen-separated form is preserved.
 var workspaceIDPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
+// workspaceColorPattern is the validation pattern for the [workspace] color.
+// Only the 6-digit #RRGGBB form is accepted so the frontend can derive a
+// gradient from the base color without handling the 3-digit shorthand.
+var workspaceColorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+// maxWorkspaceEmojiRunes bounds the [workspace] emoji length. A single emoji
+// can span several runes (variation selectors, ZWJ sequences, skin-tone
+// modifiers, flags), so the limit is generous rather than "one rune". It only
+// guards against operators pasting arbitrary text into the field.
+const maxWorkspaceEmojiRunes = 16
+
 // WorkspaceBaseConfig represents the [workspace] section in a TOML config
 type WorkspaceBaseConfig struct {
 	ID          string `toml:"id"`
 	Name        string `toml:"name"`
 	Description string `toml:"description"` // Human-readable description used to disambiguate workspaces (especially for AI-side workspace estimation)
+	// Emoji is an optional display glyph rendered in the workspace badge.
+	// Mutually exclusive with Color. Empty when unset.
+	Emoji string `toml:"emoji"`
+	// Color is an optional #RRGGBB hex used as the workspace badge background.
+	// Mutually exclusive with Emoji. Empty when unset.
+	Color string `toml:"color"`
+}
+
+// Validate checks the optional emoji/color fields of the [workspace] section.
+// emoji and color are mutually exclusive; color must be a #RRGGBB hex code;
+// emoji must not exceed maxWorkspaceEmojiRunes runes.
+func (w *WorkspaceBaseConfig) Validate() error {
+	if w.Emoji != "" && w.Color != "" {
+		return goerr.Wrap(ErrWorkspaceEmojiColorConflict,
+			"workspace emoji and color cannot both be set",
+			goerr.V(WorkspaceIDKey, w.ID),
+		)
+	}
+	if w.Color != "" && !workspaceColorPattern.MatchString(w.Color) {
+		return goerr.Wrap(ErrInvalidWorkspaceColor,
+			"workspace color must be a #RRGGBB hex code",
+			goerr.V(WorkspaceIDKey, w.ID),
+			goerr.V(WorkspaceColorKey, w.Color),
+		)
+	}
+	if n := len([]rune(w.Emoji)); n > maxWorkspaceEmojiRunes {
+		return goerr.Wrap(ErrInvalidWorkspaceEmoji,
+			"workspace emoji is too long",
+			goerr.V(WorkspaceIDKey, w.ID),
+			goerr.V(WorkspaceEmojiKey, w.Emoji),
+			goerr.V(WorkspaceEmojiLen, n),
+		)
+	}
+	return nil
 }
 
 // SlackInviteSection represents the [slack.invite] section in a TOML config
@@ -95,6 +140,8 @@ type WorkspaceConfig struct {
 	ID                   string
 	Name                 string
 	Description          string
+	Emoji                string
+	Color                string
 	SlackChannelPrefix   string
 	SlackTeamID          string
 	SlackInviteUsers     []string
@@ -369,6 +416,11 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 		)
 	}
 
+	// Validate optional emoji/color (mutually exclusive, color format, emoji length)
+	if err := appCfg.Workspace.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "invalid [workspace] emoji/color", goerr.V(ConfigPathKey, path))
+	}
+
 	// Use workspace ID as default Slack channel prefix if not specified
 	slackPrefix := appCfg.Slack.ChannelPrefix
 	if slackPrefix == "" {
@@ -403,6 +455,8 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 		ID:                   wsID,
 		Name:                 wsName,
 		Description:          appCfg.Workspace.Description,
+		Emoji:                appCfg.Workspace.Emoji,
+		Color:                appCfg.Workspace.Color,
 		SlackChannelPrefix:   slackPrefix,
 		SlackTeamID:          appCfg.Slack.TeamID,
 		SlackInviteUsers:     appCfg.Slack.Invite.Users,
@@ -446,6 +500,8 @@ func (a *AppConfig) Configure(c *cli.Command) ([]*WorkspaceConfig, *model.Worksp
 				ID:          wc.ID,
 				Name:        wc.Name,
 				Description: wc.Description,
+				Emoji:       wc.Emoji,
+				Color:       wc.Color,
 			},
 			FieldSchema:          wc.FieldSchema,
 			ActionStatusSet:      wc.ActionStatusSet,

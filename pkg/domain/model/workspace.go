@@ -10,6 +10,12 @@ type Workspace struct {
 	ID          string
 	Name        string
 	Description string // Human-readable description (e.g. for AI workspace estimation, UI tooltips)
+	// Emoji is an optional display glyph for the workspace badge. Mutually
+	// exclusive with Color (enforced at config load). Empty when unset.
+	Emoji string
+	// Color is an optional #RRGGBB hex used as the workspace badge background.
+	// Mutually exclusive with Emoji (enforced at config load). Empty when unset.
+	Color string
 }
 
 // ErrWorkspaceNotFound is returned when a workspace is not found in the registry
