@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"strconv"
 	"strings"
 
 	"github.com/m-mizutani/goerr/v2"
@@ -282,7 +283,8 @@ func buildThreadFieldValues(entry *model.WorkspaceEntry, fields []threadcase.Dec
 			continue
 		}
 		var val any
-		if ft == types.FieldTypeMultiSelect {
+		switch ft {
+		case types.FieldTypeMultiSelect:
 			switch {
 			case len(df.Values) > 0:
 				val = df.Values
@@ -291,7 +293,19 @@ func buildThreadFieldValues(entry *model.WorkspaceEntry, fields []threadcase.Dec
 			default:
 				continue
 			}
-		} else {
+		case types.FieldTypeNumber:
+			if df.Value == "" {
+				continue
+			}
+			// Number fields are stored as float64; the LLM emits the value as a
+			// string, so parse it. A non-numeric value is dropped rather than
+			// written as a string the validator / storage would reject.
+			n, parseErr := strconv.ParseFloat(strings.TrimSpace(df.Value), 64)
+			if parseErr != nil {
+				continue
+			}
+			val = n
+		default:
 			if df.Value == "" {
 				continue
 			}

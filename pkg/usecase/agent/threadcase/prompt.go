@@ -55,6 +55,9 @@ func buildSystemPrompt(c *model.Case, ws *model.WorkspaceEntry, mode Mode) strin
 		b.WriteString("# Custom field schema (for materialize)\n")
 		for _, f := range ws.FieldSchema.Fields {
 			fmt.Fprintf(&b, "- %s (id=%s, type=%s)", f.Name, f.ID, f.Type)
+			if f.Description != "" {
+				fmt.Fprintf(&b, " description=%q", f.Description)
+			}
 			if len(f.Options) > 0 {
 				opts := make([]string, 0, len(f.Options))
 				for _, o := range f.Options {

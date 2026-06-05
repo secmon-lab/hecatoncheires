@@ -187,6 +187,7 @@ export const msgKeys = {
   titleCaseBoard: 'titleCaseBoard',
   subtitleCaseBoard: 'subtitleCaseBoard',
   placeholderSearchCaseBoard: 'placeholderSearchCaseBoard',
+  errorMoveCase: 'errorMoveCase',
   labelSlackThread: 'labelSlackThread',
   btnNewAction: 'btnNewAction',
   titleActionFormNew: 'titleActionFormNew',

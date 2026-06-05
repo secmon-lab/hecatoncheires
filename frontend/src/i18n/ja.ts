@@ -189,6 +189,7 @@ export const ja: Messages = {
   titleCaseBoard: '{workspaceName} ケース',
   subtitleCaseBoard: 'ケースの管理・追跡',
   placeholderSearchCaseBoard: 'タイトルでケースを検索...',
+  errorMoveCase: 'ケースを移動できませんでした。もう一度お試しください。',
   labelSlackThread: 'Slack スレッド',
   btnNewAction: '新規アクション',
   titleActionFormNew: '新規アクション',

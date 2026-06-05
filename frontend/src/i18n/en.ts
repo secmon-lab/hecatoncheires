@@ -189,6 +189,7 @@ export const en: Messages = {
   titleCaseBoard: '{workspaceName} Cases',
   subtitleCaseBoard: 'Manage and track cases',
   placeholderSearchCaseBoard: 'Search cases by title...',
+  errorMoveCase: 'Could not move the case. Please try again.',
   labelSlackThread: 'Slack thread',
   btnNewAction: 'New Action',
   titleActionFormNew: 'New Action',

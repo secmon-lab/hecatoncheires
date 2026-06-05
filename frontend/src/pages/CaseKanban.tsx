@@ -29,6 +29,10 @@ export default function CaseKanban() {
   const [search, setSearch] = useState('')
   const [draggingId, setDraggingId] = useState<number | null>(null)
   const [dragOverCol, setDragOverCol] = useState<string | null>(null)
+  // Surfaced when a drag-to-move (updateCaseStatus) fails. Because the move is
+  // optimistic, the card snaps back on failure; without this banner the revert
+  // would look like an unexplained glitch to the user.
+  const [moveError, setMoveError] = useState(false)
 
   const { statuses, isClosed, label } = useCaseStatuses(currentWorkspace?.id)
 
@@ -75,6 +79,7 @@ export default function CaseKanban() {
     if (id == null) return
     const c = cases.find((x) => x.id === id)
     if (!c || c.boardStatus === target) return
+    setMoveError(false)
     try {
       await updateCaseStatus({
         variables: { workspaceId: currentWorkspace!.id, input: { id, status: target } },
@@ -90,7 +95,9 @@ export default function CaseKanban() {
         },
       })
     } catch (e) {
+      // The optimistic update already reverted the card; tell the user why.
       console.error('Failed to move case', e)
+      setMoveError(true)
     }
   }
 
@@ -125,6 +132,24 @@ export default function CaseKanban() {
           </Button>
         )}
       </div>
+
+      {moveError && (
+        <div
+          role="alert"
+          data-testid="case-board-move-error"
+          style={{
+            marginBottom: 'var(--spacing-md-sm)',
+            padding: 'var(--spacing-sm) var(--spacing-md-sm)',
+            borderRadius: '0.375rem',
+            border: '1px solid var(--color-error)',
+            background: 'var(--bg-subtle)',
+            color: 'var(--color-error)',
+            fontSize: 12.5,
+          }}
+        >
+          {t('errorMoveCase')}
+        </div>
+      )}
 
       <div data-testid="case-kanban-board" className={`kanban ${styles.kanbanWrap}`}>
         {statuses.map((col) => (
