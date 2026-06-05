@@ -35,6 +35,21 @@ type WorkspaceEntry struct {
 	AssistPrompt         string
 	AssistLanguage       string
 	Jobs                 []*Job // Event-driven agent jobs loaded from workspace TOML
+
+	// CaseMode selects channel-per-case (default) or thread-per-case binding.
+	CaseMode CaseMode
+	// SlackMonitorChannelID is the channel watched for thread-mode case
+	// creation. Required (and only meaningful) when CaseMode is thread.
+	SlackMonitorChannelID string
+	// CaseStatusSet is the configurable workflow status set that attaches to
+	// Cases in thread mode (the Kanban columns). Non-nil only for thread-mode
+	// workspaces; reuses the generic ActionStatusSet value type.
+	CaseStatusSet *ActionStatusSet
+}
+
+// IsThreadMode reports whether this workspace uses thread-per-case binding.
+func (e *WorkspaceEntry) IsThreadMode() bool {
+	return e != nil && e.CaseMode.IsThread()
 }
 
 // WorkspaceRegistry holds workspace configurations.
@@ -67,6 +82,22 @@ func (r *WorkspaceRegistry) Get(workspaceID string) (*WorkspaceEntry, error) {
 			goerr.V("workspace_id", workspaceID))
 	}
 	return entry, nil
+}
+
+// FindByMonitorChannel returns the thread-mode workspace entry whose monitored
+// channel matches channelID. It only considers thread-mode workspaces; the
+// boolean is false when no thread-mode workspace watches the channel.
+func (r *WorkspaceRegistry) FindByMonitorChannel(channelID string) (*WorkspaceEntry, bool) {
+	if r == nil || channelID == "" {
+		return nil, false
+	}
+	for _, id := range r.order {
+		entry := r.entries[id]
+		if entry.IsThreadMode() && entry.SlackMonitorChannelID == channelID {
+			return entry, true
+		}
+	}
+	return nil, false
 }
 
 // List returns all registered workspace entries in registration order

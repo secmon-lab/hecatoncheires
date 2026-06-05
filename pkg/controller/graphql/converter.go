@@ -123,6 +123,17 @@ func toGraphQLCase(c *model.Case, workspaceID string) *graphql1.Case {
 		agentPrompt = ""
 	}
 
+	var slackThreadTS *string
+	if c.SlackThreadTS != "" {
+		v := c.SlackThreadTS
+		slackThreadTS = &v
+	}
+	var boardStatus *string
+	if c.BoardStatus != "" {
+		v := c.BoardStatus
+		boardStatus = &v
+	}
+
 	return &graphql1.Case{
 		ID:                    int(c.ID),
 		WorkspaceID:           workspaceID,
@@ -135,11 +146,53 @@ func toGraphQLCase(c *model.Case, workspaceID string) *graphql1.Case {
 		ReporterID:            reporterID,
 		AssigneeIDs:           assigneeIDs,
 		SlackChannelID:        &c.SlackChannelID,
+		SlackThreadTS:         slackThreadTS,
+		IsThreadBound:         c.IsThreadBound(),
+		BoardStatus:           boardStatus,
 		Fields:                toGraphQLFieldValues(c.FieldValues),
 		AgentAdditionalPrompt: agentPrompt,
 		AgentSourceIDs:        agentSourceIDs,
 		CreatedAt:             c.CreatedAt,
 		UpdatedAt:             c.UpdatedAt,
+	}
+}
+
+// toActionConfig converts a generic status set into the GraphQL ActionConfig
+// shape. Reused for both the action status config and the thread-mode case
+// status config (caseStatusConfig), which share the same wire type.
+func toActionConfig(set *model.ActionStatusSet) *graphql1.ActionConfig {
+	statusDefs := set.Statuses()
+	gqlStatuses := make([]*graphql1.ActionStatusDefinition, 0, len(statusDefs))
+	for _, def := range statusDefs {
+		var description, color, emoji *string
+		if def.Description != "" {
+			v := def.Description
+			description = &v
+		}
+		if def.Color != "" {
+			v := def.Color
+			color = &v
+		}
+		if def.Emoji != "" {
+			v := def.Emoji
+			emoji = &v
+		}
+		gqlStatuses = append(gqlStatuses, &graphql1.ActionStatusDefinition{
+			ID:          def.ID,
+			Name:        def.Name,
+			Description: description,
+			Color:       color,
+			Emoji:       emoji,
+		})
+	}
+	closedIDs := set.ClosedIDs()
+	if closedIDs == nil {
+		closedIDs = []string{}
+	}
+	return &graphql1.ActionConfig{
+		Initial:  set.InitialID(),
+		Closed:   closedIDs,
+		Statuses: gqlStatuses,
 	}
 }
 

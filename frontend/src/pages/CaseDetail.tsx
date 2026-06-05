@@ -11,6 +11,7 @@ import {
   SYNC_CASE_CHANNEL_USERS,
   GET_CASES,
 } from '../graphql/case'
+import { UPDATE_CASE_STATUS } from '../graphql/caseStatus'
 import { DISCARD_DRAFT, GET_DRAFTS } from '../graphql/drafts'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
@@ -23,6 +24,7 @@ import FilterDropdown from '../components/FilterDropdown'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
 import { useActionStatuses } from '../hooks/useActionStatuses'
+import { useCaseStatuses } from '../hooks/useCaseStatuses'
 import { actionStatusColorStyle } from '../utils/actionStatusStyle'
 import { displayName } from '../utils/user'
 import Button from '../components/Button'
@@ -151,6 +153,8 @@ export default function CaseDetail() {
   const { currentWorkspace } = useWorkspace()
   const { t, lang } = useTranslation()
   const actionStatuses = useActionStatuses(currentWorkspace?.id)
+  // Thread-mode workspaces attach the configurable status set to the Case.
+  const caseStatuses = useCaseStatuses(currentWorkspace?.id)
 
   // Honour the originating case-list tab when going back. CaseList sets
   // location.state.fromStatus when the user clicks into a row; if the
@@ -197,6 +201,17 @@ export default function CaseDetail() {
   const slackChannelID: string = c?.slackChannelID || ''
   const slackChannelURL: string | null = c?.slackChannelURL || null
   const channelUserCount: number = c?.channelUserCount || 0
+  // Thread-mode is a WORKSPACE property: in a thread-mode workspace every case
+  // uses the thread model (no Actions, a configurable board status, no
+  // lifecycle close button) regardless of the individual case's binding flag.
+  // We key the UI off the workspace mode, not the per-case isThreadBound, so a
+  // case still renders thread-style even if its thread binding is missing.
+  const threadMode = caseStatuses.isThreadMode
+  const isThreadBound = !!c?.isThreadBound
+  const slackThreadTS: string = c?.slackThreadTS || ''
+  // Effective board status: fall back to the configured initial status when the
+  // case has none yet, so the selector always has a valid value to show.
+  const boardStatus: string = c?.boardStatus || caseStatuses.initialId || ''
 
   const { data: membersData } = useQuery(GET_CASE_MEMBERS, {
     variables: {
@@ -235,6 +250,7 @@ export default function CaseDetail() {
   const [closeCase, { loading: closing }] = useMutation(CLOSE_CASE, { refetchQueries: refetchOptions })
   const [reopenCase, { loading: reopening }] = useMutation(REOPEN_CASE, { refetchQueries: refetchOptions })
   const [updateCase, { loading: updating }] = useMutation(UPDATE_CASE, { refetchQueries: refetchOptions })
+  const [updateCaseStatus] = useMutation(UPDATE_CASE_STATUS, { refetchQueries: refetchOptions })
   const [deleteCase, { loading: deleting }] = useMutation(DELETE_CASE, {
     refetchQueries: [
       { query: GET_CASES, variables: { workspaceId: currentWorkspace?.id, status: 'OPEN' } },
@@ -278,6 +294,13 @@ export default function CaseDetail() {
   }
   const handleReopen = async () => {
     await reopenCase({ variables: { workspaceId: currentWorkspace!.id, id: caseId } })
+  }
+  // Thread-mode cases carry the configurable board status; changing it here
+  // moves the case between Kanban columns (and closes it when the target is a
+  // closed status, server-side).
+  const handleBoardStatusChange = async (next: string) => {
+    if (!next || next === boardStatus) return
+    await updateCaseStatus({ variables: { workspaceId: currentWorkspace!.id, input: { id: caseId, status: next } } })
   }
   const handleDelete = async () => {
     await deleteCase({ variables: { workspaceId: currentWorkspace!.id, id: caseId } })
@@ -381,6 +404,11 @@ export default function CaseDetail() {
               {t('btnEdit')}
             </Button>
           </>
+        ) : threadMode ? (
+          // Thread mode: closing/reopening is driven by the board status
+          // selector (a closed status closes the case), so no lifecycle
+          // Close/Reopen button is shown here.
+          null
         ) : c.status === 'OPEN' ? (
           <Button
             size="sm"
@@ -517,11 +545,10 @@ export default function CaseDetail() {
             />
           </section>
 
-          {/* Related Actions only exist for activated cases. Drafts have
-              no actions, no Slack channel, no async tail — hide the
-              entire section so the page stays focused on filling in the
-              draft before submission. */}
-          {c.status !== 'DRAFT' && (
+          {/* Related Actions only exist for activated channel-mode cases.
+              Drafts have no actions yet, and thread-mode workspaces never
+              manage Actions at all — hide the entire section in both cases. */}
+          {c.status !== 'DRAFT' && !threadMode && (
           <section className="h-section">
             <div className="h-section-h">
               <span className="h-section-title">{t('sectionRelatedActions')}</span>
@@ -718,11 +745,15 @@ export default function CaseDetail() {
               <a
                 className="slack-link"
                 data-testid="aside-slack-link"
-                href={slackChannelURL || `slack://channel?id=${slackChannelID}`}
+                href={
+                  isThreadBound && slackThreadTS
+                    ? `https://slack.com/archives/${slackChannelID}/p${slackThreadTS.replace('.', '')}`
+                    : slackChannelURL || `slack://channel?id=${slackChannelID}`
+                }
                 target="_blank"
                 rel="noreferrer noopener"
               >
-                <IconSlack size={11} />{t('labelOpenInSlack')}
+                <IconSlack size={11} />{isThreadBound ? t('labelSlackThread') : t('labelOpenInSlack')}
                 <IconExt size={10} />
               </a>
             </section>
@@ -733,11 +764,43 @@ export default function CaseDetail() {
               <span className="h-aside-title">{t('labelStatus')}</span>
             </div>
             <div data-testid="aside-status-display" className="h-status-strong">
-              <StatusBadge
-                status={c.status}
-                labelOpen={t('statusOpen')}
-                labelClosed={t('statusClosed')}
-              />
+              {threadMode ? (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <span
+                    className="pip"
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      ...actionStatusColorStyle(caseStatuses.get(boardStatus)?.color),
+                    }}
+                  />
+                  <select
+                    data-testid="aside-board-status"
+                    value={boardStatus}
+                    onChange={(e) => { void handleBoardStatusChange(e.target.value) }}
+                    style={{
+                      border: '1px solid var(--border-default)',
+                      borderRadius: '0.375rem',
+                      background: 'var(--bg-paper)',
+                      color: 'var(--text-body)',
+                      fontFamily: 'inherit',
+                      fontSize: 13,
+                      padding: '0.125rem 0.375rem',
+                    }}
+                  >
+                    {caseStatuses.statuses.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name || s.id}</option>
+                    ))}
+                  </select>
+                </span>
+              ) : (
+                <StatusBadge
+                  status={c.status}
+                  labelOpen={t('statusOpen')}
+                  labelClosed={t('statusClosed')}
+                />
+              )}
             </div>
           </section>
 

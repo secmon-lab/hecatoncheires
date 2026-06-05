@@ -479,6 +479,11 @@ type UpdateCaseInput struct {
 	Fields      []*FieldValueInput `json:"fields,omitempty"`
 }
 
+type UpdateCaseStatusInput struct {
+	ID     int    `json:"id"`
+	Status string `json:"status"`
+}
+
 type UpdateGitHubSourceInput struct {
 	ID           string   `json:"id"`
 	Name         *string  `json:"name,omitempty"`

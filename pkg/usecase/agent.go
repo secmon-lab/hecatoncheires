@@ -21,6 +21,8 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	agentcommon "github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/casebound"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/planexec"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/threadcase"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	goslack "github.com/slack-go/slack" //nolint:depguard
@@ -37,6 +39,11 @@ type AgentUseCase struct {
 	// casebound runs the case-bound gollem ReAct loop. It is non-nil
 	// whenever the LLM client is configured.
 	casebound *casebound.UseCase
+
+	// threadcase runs the thread-mode plan-and-execute agent (materialize on
+	// creation, investigate / respond / close on mention). Non-nil whenever
+	// the LLM client is configured.
+	threadcase *threadcase.UseCase
 }
 
 // AgentDeps groups the dependencies AgentUseCase needs. Required fields are
@@ -62,6 +69,15 @@ type AgentDeps struct {
 	// tool family.
 	ActionUC     *ActionUseCase
 	ActionStepUC *ActionStepUseCase
+
+	// CaseUC is required for thread mode: the thread-case orchestrator applies
+	// the agent's materialize / close decisions through it so every case
+	// mutation funnels through the single CaseUseCase entry point.
+	CaseUC *CaseUseCase
+
+	// ThreadcaseBudget overrides the planexec budget for the thread-mode
+	// agent. Zero values fall back to DefaultThreadcaseBudget.
+	ThreadcaseBudget planexec.BudgetConfig
 
 	// Optional Slack tool clients. SlackService is the Bot-token client;
 	// SlackSearch and SlackRetriever sit on the User OAuth Token.
@@ -105,8 +121,37 @@ func NewAgentUseCase(deps AgentDeps) *AgentUseCase {
 		} else {
 			uc.casebound = cb
 		}
+
+		// Build the thread-mode agent. It reuses the same backend deps and a
+		// dedicated planexec runner.
+		budget := deps.ThreadcaseBudget
+		if budget.PlannerLoopMax <= 0 || budget.SubAgentMaxPerTurn <= 0 || budget.SubAgentLoopMax <= 0 {
+			budget = DefaultThreadcaseBudget
+		}
+		runner, runnerErr := planexec.NewRunner(planexec.RunnerDeps{
+			LLMClient:   deps.LLM,
+			HistoryRepo: deps.HistoryRepo,
+			TraceRepo:   deps.TraceRepo,
+			Budget:      budget,
+		})
+		if runnerErr != nil {
+			errutil.Handle(context.Background(), goerr.Wrap(runnerErr, "failed to build threadcase planexec runner"), "failed to build threadcase planexec runner")
+		} else if tc, tcErr := threadcase.New(commonDeps, runner); tcErr != nil {
+			errutil.Handle(context.Background(), goerr.Wrap(tcErr, "failed to build threadcase usecase"), "failed to build threadcase usecase")
+		} else {
+			uc.threadcase = tc
+		}
 	}
 	return uc
+}
+
+// DefaultThreadcaseBudget is the planexec budget used for thread-mode agent
+// turns when AgentDeps.ThreadcaseBudget is unset. Conservative bounds keep a
+// mention turn responsive while allowing a couple of investigation rounds.
+var DefaultThreadcaseBudget = planexec.BudgetConfig{
+	PlannerLoopMax:     8,
+	SubAgentMaxPerTurn: 16,
+	SubAgentLoopMax:    20,
 }
 
 // HandleAgentMention processes an app_mention event and responds with an AI agent

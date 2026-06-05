@@ -3427,18 +3427,16 @@ func TestGraphQLHandler_DraftsReporterResolvesToSlackUser(t *testing.T) {
 	gt.Value(t, legacy.Reporter.RealName).Equal("Bob")
 }
 
-// TestGraphQLHandler_DraftsReporterMissingSurfacesError pins the
-// reverse contract of DraftsReporterResolvesToSlackUser: when the
-// ReporterID is recorded but the SlackUser repository has no entry for
-// it, the GraphQL response must carry a field-level error pointing at
-// `drafts[].reporter`. The earlier silent-nil behaviour made the
-// Drafts page show an empty Reporter cell that was visually
-// indistinguishable from "no reporter recorded" — and there was no
-// way for the client (or ops) to tell which it was. The empty cell is
-// now paired with both an errutil.Handle report (logs + Sentry) and a
-// GraphQL `errors[]` entry, so the bug class can never silently ship
-// again.
-func TestGraphQLHandler_DraftsReporterMissingSurfacesError(t *testing.T) {
+// TestGraphQLHandler_DraftsReporterMissingResolvesToNull pins the
+// display-first contract: when the ReporterID is recorded but the
+// SlackUser repository has no entry for it (an unsynced thread-mode
+// poster, a stale workspace, a deleted account), the GraphQL response
+// must NOT carry a field-level error. A single missing reporter must
+// not fail the whole list query and blank the page out (Sentry
+// ARGUS-7S). The reporter field resolves to null while reporterID is
+// still echoed, and ops visibility is preserved out-of-band by the
+// SlackUser dataloader's errutil.Handle report (logs + Sentry).
+func TestGraphQLHandler_DraftsReporterMissingResolvesToNull(t *testing.T) {
 	const reporterID = "UORPHANREPORTER"
 
 	repo := memory.New()
@@ -3474,27 +3472,20 @@ func TestGraphQLHandler_DraftsReporterMissingSurfacesError(t *testing.T) {
 	}, reporterID)
 	resp := parseGraphQLResponse(t, rec)
 
-	// At least one error must be surfaced naming the reporter path so
-	// the client can render a meaningful state instead of an empty
-	// cell. Reporter is nullable in the schema, so the rest of the
-	// drafts list still comes back populated — that's the whole point.
-	gt.Number(t, len(resp.Errors)).GreaterOrEqual(1).Required()
-	var found bool
+	// No field-level error for the reporter path: the query succeeds so
+	// the Drafts page renders, even though one reporter could not be
+	// resolved.
 	for _, e := range resp.Errors {
 		for _, p := range e.Path {
 			if s, ok := p.(string); ok && s == "reporter" {
-				found = true
-				break
+				t.Fatalf("unexpected reporter-path GraphQL error: %s", e.Message)
 			}
 		}
-		if found {
-			break
-		}
 	}
-	gt.Bool(t, found).True()
 
 	// reporterID is still echoed back since the converter does not
-	// touch storage — the failure is in the resolver, not the data.
+	// touch storage; reporter resolves to null because the SlackUser
+	// is absent from the repository.
 	var result struct {
 		Drafts []struct {
 			ID         int     `json:"id"`

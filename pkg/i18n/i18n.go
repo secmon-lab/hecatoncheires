@@ -93,6 +93,12 @@ const (
 	// the prior turn finishes.
 	MsgKeyAgentBusy
 
+	// Thread-mode case messages. Posted to the monitored channel's thread.
+	MsgThreadCaseCreated  // "🧵 Case registered. <%s|Open in web UI>" (url)
+	MsgThreadCaseUpdated  // ":pencil2: Updated the case details."
+	MsgThreadCaseClosed   // ":white_check_mark: Closed this case (%s)." (status name)
+	MsgThreadCaseQuestion // ":question: %s" (reason) — question header line
+
 	// Draft (open-mode) planner / sub-agent trace lines. These are rendered
 	// into the per-turn Slack progress message so the user can follow what
 	// the agent is doing.

@@ -101,6 +101,15 @@ func (uc *SlackUseCases) HandleSlackEvent(ctx context.Context, event *slackevent
 	// constructed together with slackService in usecase.New). When Slack is
 	// not wired (e.g. unit tests that only exercise message storage), skip
 	// dispatch entirely.
+	// Thread-mode monitored channel takes precedence: app_mention inside a
+	// case thread runs the thread-mode investigation agent; a top-level
+	// mention is ignored here because the accompanying `message` event drives
+	// case creation.
+	if threadEntry, isThread := uc.threadModeEntry(msg.ChannelID()); isThread {
+		uc.handleThreadModeEvent(ctx, event, msg, threadEntry)
+		return nil
+	}
+
 	if appMention, ok := event.InnerEvent.Data.(*slackevents.AppMentionEvent); ok {
 		if uc.isCaseBoundChannel(ctx, appMention.Channel) {
 			if uc.agent == nil {
@@ -228,6 +237,86 @@ func (uc *SlackUseCases) isCaseBoundChannel(ctx context.Context, channelID strin
 	return false
 }
 
+// threadModeEntry reports whether channelID is the monitored channel of a
+// thread-mode workspace, returning that workspace entry.
+func (uc *SlackUseCases) threadModeEntry(channelID string) (*model.WorkspaceEntry, bool) {
+	if uc.registry == nil {
+		return nil, false
+	}
+	return uc.registry.FindByMonitorChannel(channelID)
+}
+
+// handleThreadModeEvent dispatches a Slack event that landed in a thread-mode
+// monitored channel:
+//   - app_mention inside a case thread → thread-mode investigation agent.
+//   - top-level human message → thread-mode case creation.
+//
+// Top-level mentions are ignored here: the accompanying message event already
+// drives creation, and creation is idempotent.
+func (uc *SlackUseCases) handleThreadModeEvent(ctx context.Context, event *slackevents.EventsAPIEvent, msg *slack.Message, entry *model.WorkspaceEntry) {
+	if uc.agent == nil {
+		return
+	}
+	wsID := entry.Workspace.ID
+
+	if appMention, ok := event.InnerEvent.Data.(*slackevents.AppMentionEvent); ok {
+		threadTS := appMention.ThreadTimeStamp
+		if threadTS == "" || threadTS == appMention.TimeStamp {
+			// Top-level mention; case creation is handled by the message event.
+			return
+		}
+		c, err := uc.repo.Case().GetBySlackThread(ctx, wsID, appMention.Channel, threadTS)
+		if err != nil {
+			errutil.Handle(ctx, err, "thread mode: look up case for mention")
+			return
+		}
+		if c == nil {
+			return
+		}
+		ctx = uc.contextWithUserLang(ctx, appMention.User)
+		if err := uc.agent.HandleThreadCaseMention(ctx, msg, entry, c); err != nil {
+			errutil.Handle(ctx, goerr.Wrap(err, "failed to handle thread case mention",
+				goerr.V("channel_id", appMention.Channel),
+				goerr.V("thread_ts", threadTS),
+			), "failed to handle thread case mention")
+		}
+		return
+	}
+
+	if msgEv, ok := event.InnerEvent.Data.(*slackevents.MessageEvent); ok {
+		if !uc.isThreadCaseCreationTrigger(ctx, msgEv) {
+			return
+		}
+		ctx = uc.contextWithUserLang(ctx, msgEv.User)
+		if err := uc.agent.HandleThreadCaseCreation(ctx, msg, entry); err != nil {
+			errutil.Handle(ctx, goerr.Wrap(err, "failed to handle thread case creation",
+				goerr.V("channel_id", msgEv.Channel),
+				goerr.V("message_ts", msgEv.TimeStamp),
+			), "failed to handle thread case creation")
+		}
+	}
+}
+
+// isThreadCaseCreationTrigger reports whether a message event in a monitored
+// channel should create a new thread-mode case: a top-level post by a human
+// (no subtype, not a bot, not our own bot).
+func (uc *SlackUseCases) isThreadCaseCreationTrigger(ctx context.Context, ev *slackevents.MessageEvent) bool {
+	// Only top-level posts start a case; replies belong to an existing thread.
+	if ev.ThreadTimeStamp != "" && ev.ThreadTimeStamp != ev.TimeStamp {
+		return false
+	}
+	// Skip edits / joins / bot_message and other subtypes, and bot posts.
+	if ev.SubType != "" || ev.BotID != "" {
+		return false
+	}
+	if uc.slackService != nil {
+		if botUserID, err := uc.slackService.GetBotUserID(ctx); err == nil && botUserID != "" && ev.User == botUserID {
+			return false
+		}
+	}
+	return ev.User != ""
+}
+
 // handleMembershipEvent processes member_joined_channel / member_left_channel events.
 // It syncs the full channel member list from Slack API for the affected case (if any).
 func (uc *SlackUseCases) handleMembershipEvent(ctx context.Context, event *slackevents.EventsAPIEvent) error {
@@ -311,6 +400,37 @@ func (uc *SlackUseCases) HandleSlackMessage(ctx context.Context, msg *slack.Mess
 	if uc.registry == nil {
 		return nil
 	}
+
+	// Thread-mode monitored channels host many cases (one per thread), so the
+	// channel-based lookup below would mis-attribute. Route by thread instead:
+	// resolve the case bound to this message's thread and save under it.
+	if entry, ok := uc.registry.FindByMonitorChannel(msg.ChannelID()); ok {
+		threadTS := msg.ThreadTS()
+		if threadTS == "" {
+			threadTS = msg.ID()
+		}
+		c, err := uc.repo.Case().GetBySlackThread(ctx, entry.Workspace.ID, msg.ChannelID(), threadTS)
+		if err != nil {
+			return goerr.Wrap(err, "failed to look up thread case for message",
+				goerr.V("channelID", msg.ChannelID()),
+				goerr.V("threadTS", threadTS),
+				goerr.V("workspaceID", entry.Workspace.ID),
+			)
+		}
+		if c != nil {
+			if err := uc.repo.CaseMessage().Put(ctx, entry.Workspace.ID, c.ID, msg); err != nil {
+				return goerr.Wrap(err, "failed to save message to thread case sub-collection",
+					goerr.V("channelID", msg.ChannelID()),
+					goerr.V("threadTS", threadTS),
+					goerr.V("caseID", c.ID),
+				)
+			}
+		}
+		logging.From(ctx).Info("slack message saved (thread mode)",
+			"messageID", msg.ID(), "channelID", msg.ChannelID())
+		return nil
+	}
+
 	for _, entry := range uc.registry.List() {
 		c, err := uc.repo.Case().GetBySlackChannelID(ctx, entry.Workspace.ID, msg.ChannelID())
 		if err != nil {

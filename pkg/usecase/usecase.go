@@ -211,6 +211,7 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 				TraceRepo:      uc.traceRepo,
 				ActionUC:       uc.Action,
 				ActionStepUC:   uc.ActionStep,
+				CaseUC:         uc.Case,
 				SlackService:   uc.slackService,
 				SlackSearch:    uc.slackSearch,
 				SlackRetriever: uc.slackRetriever,

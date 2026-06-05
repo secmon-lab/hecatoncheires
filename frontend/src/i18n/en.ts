@@ -8,6 +8,7 @@ export const en: Messages = {
   // Navigation
   navCases: 'Cases',
   navActions: 'Actions',
+  navBoard: 'Board',
   navSources: 'Sources',
 
   // Common buttons
@@ -186,6 +187,11 @@ export const en: Messages = {
   // Actions
   titleActions: '{workspaceName} Actions',
   subtitleActions: 'Manage and track actions',
+  titleCaseBoard: '{workspaceName} Cases',
+  subtitleCaseBoard: 'Manage and track cases',
+  placeholderSearchCaseBoard: 'Search cases by title...',
+  errorMoveCase: 'Could not move the case. Please try again.',
+  labelSlackThread: 'Slack thread',
   btnNewAction: 'New Action',
   titleActionFormNew: 'New Action',
   titleActionFormEdit: 'Edit Action',

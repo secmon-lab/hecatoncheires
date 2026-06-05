@@ -288,6 +288,42 @@ func (r *caseRepository) GetBySlackChannelID(ctx context.Context, workspaceID st
 	return &c, nil
 }
 
+func (r *caseRepository) GetBySlackThread(ctx context.Context, workspaceID string, channelID string, threadTS string) (*model.Case, error) {
+	if channelID == "" || threadTS == "" {
+		return nil, nil
+	}
+
+	// Two equality filters. Firestore satisfies a conjunction of equality
+	// filters by merging the per-field single-field indexes, so this does NOT
+	// require a manually-managed composite index. Filtering on both fields in
+	// the query (rather than SlackThreadTS alone + an in-memory channel check)
+	// avoids a correctness bug where two channels share the same thread
+	// timestamp and Limit(1) returns the wrong channel's case.
+	iter := r.casesCollection(workspaceID).
+		Where("SlackChannelID", "==", channelID).
+		Where("SlackThreadTS", "==", threadTS).
+		Limit(1).
+		Documents(ctx)
+	defer iter.Stop()
+
+	docSnap, err := iter.Next()
+	if err == iterator.Done {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to query case by slack thread",
+			goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
+	}
+
+	var c model.Case
+	if err := docSnap.DataTo(&c); err != nil {
+		return nil, goerr.Wrap(err, "failed to decode case",
+			goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
+	}
+
+	return &c, nil
+}
+
 func (r *caseRepository) GetByRequestKey(ctx context.Context, workspaceID string, key string) (*model.Case, error) {
 	iter := r.casesCollection(workspaceID).
 		Where("RequestKey", "==", key).

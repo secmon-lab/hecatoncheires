@@ -1,4 +1,4 @@
-import { Page, Locator } from '@playwright/test';
+import { Page, Locator, expect } from '@playwright/test';
 import { BasePage } from './BasePage';
 
 /**
@@ -102,6 +102,10 @@ export class ActionDetailPage extends BasePage {
     );
     await dropdown.selectOption(newStatus);
     await responsePromise;
+    // The mutation response settles the network, but the controlled <select>
+    // only reflects the new value after Apollo normalises the cache and React
+    // re-renders. Wait for that so callers reading getStatus() don't race.
+    await expect(dropdown).toHaveValue(newStatus, { timeout: 5000 });
   }
 
   /**

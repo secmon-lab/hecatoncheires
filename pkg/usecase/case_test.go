@@ -2609,3 +2609,72 @@ func TestCaseUseCase_UpdateAgentSettings(t *testing.T) {
 		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
 	})
 }
+
+func TestCaseUseCase_UpdateCaseStatus(t *testing.T) {
+	newThreadUC := func(t *testing.T) (interfaces.Repository, *usecase.CaseUseCase) {
+		t.Helper()
+		repo := memory.New()
+		set, err := model.NewActionStatusSet("triage", []string{"done"}, []model.ActionStatusDefinition{
+			{ID: "triage", Name: "Triage"},
+			{ID: "in_review", Name: "In Review"},
+			{ID: "done", Name: "Done"},
+		})
+		gt.NoError(t, err).Required()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace:             model.Workspace{ID: "support"},
+			CaseMode:              model.CaseModeThread,
+			SlackMonitorChannelID: "C-MONITOR",
+			CaseStatusSet:         set,
+		})
+		return repo, usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+	}
+
+	t.Run("moving to an open status keeps the case OPEN", func(t *testing.T) {
+		repo, uc := newThreadUC(t)
+		ctx := context.Background()
+		c, err := uc.CreateThreadCase(ctx, "support", "C-MONITOR", "1700000000.000100", "U-REP", "t", "b")
+		gt.NoError(t, err).Required()
+
+		updated, err := uc.UpdateCaseStatus(ctx, "support", c.ID, "in_review")
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.BoardStatus).Equal("in_review")
+		gt.Value(t, updated.Status).Equal(types.CaseStatusOpen)
+		_ = repo
+	})
+
+	t.Run("moving to a closed status closes the case", func(t *testing.T) {
+		_, uc := newThreadUC(t)
+		ctx := context.Background()
+		c, err := uc.CreateThreadCase(ctx, "support", "C-MONITOR", "1700000000.000200", "U-REP", "t", "b")
+		gt.NoError(t, err).Required()
+
+		updated, err := uc.UpdateCaseStatus(ctx, "support", c.ID, "done")
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.BoardStatus).Equal("done")
+		gt.Value(t, updated.Status).Equal(types.CaseStatusClosed)
+	})
+
+	t.Run("invalid board status is rejected", func(t *testing.T) {
+		_, uc := newThreadUC(t)
+		ctx := context.Background()
+		c, err := uc.CreateThreadCase(ctx, "support", "C-MONITOR", "1700000000.000300", "U-REP", "t", "b")
+		gt.NoError(t, err).Required()
+
+		_, err = uc.UpdateCaseStatus(ctx, "support", c.ID, "bogus")
+		gt.Error(t, err)
+	})
+
+	t.Run("channel-mode workspace has no case status set", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "chan"}})
+		uc := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+		ctx := context.Background()
+		created, err := repo.Case().Create(ctx, "chan", &model.Case{ReporterID: "U", Title: "x", SlackChannelID: "C1"})
+		gt.NoError(t, err).Required()
+
+		_, err = uc.UpdateCaseStatus(ctx, "chan", created.ID, "anything")
+		gt.Error(t, err)
+	})
+}

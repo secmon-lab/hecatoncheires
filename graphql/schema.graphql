@@ -147,6 +147,16 @@ type Case {
   slackChannelID: String
   slackChannelName: String
   slackChannelURL: String
+  # slackThreadTS is set for thread-mode cases (the Slack thread the case is
+  # bound to); null for channel-mode cases.
+  slackThreadTS: String
+  # isThreadBound is true for thread-mode cases (slackThreadTS != ""). The UI
+  # uses it to hide the Actions tab and link to the Slack thread.
+  isThreadBound: Boolean!
+  # boardStatus is the configurable workflow status id (the Kanban column) for
+  # thread-mode cases; null for channel-mode cases. Validity is workspace-
+  # scoped: resolve display from caseStatusConfig.
+  boardStatus: String
   fields: [FieldValue!]!       # Resolved from case_field_values via DataLoader
   # actions exposes the case's actions. The `filter` argument selects which
   # archive slice to return (ACTIVE / ARCHIVED / ALL); the default ACTIVE
@@ -329,6 +339,13 @@ input UpdateActionInput {
   dueDate: Time
   clearDueDate: Boolean
   clearAssignee: Boolean
+}
+
+input UpdateCaseStatusInput {
+  id: Int!
+  # Board status id. Must match a status defined in the workspace's
+  # [case.status] configuration.
+  status: String!
 }
 
 input AddActionStepInput {
@@ -564,6 +581,11 @@ type Query {
   # Configuration
   fieldConfiguration(workspaceId: String!): FieldConfiguration!
 
+  # caseStatusConfig returns the configurable Case status set (the Kanban
+  # columns) for a thread-mode workspace, or null for channel-mode workspaces.
+  # Reuses the ActionConfig shape since both are generic status sets.
+  caseStatusConfig(workspaceId: String!): ActionConfig
+
   # Slack (not workspace-scoped)
   slackUsers: [SlackUser!]!
   slackJoinedChannels: [SlackChannelInfo!]!
@@ -604,6 +626,10 @@ type Mutation {
   deleteCase(workspaceId: String!, id: Int!): Boolean!
   closeCase(workspaceId: String!, id: Int!): Case!
   reopenCase(workspaceId: String!, id: Int!): Case!
+  # updateCaseStatus sets a thread-mode case's board status (Kanban column).
+  # The lifecycle status is synced server-side (a closed board status closes
+  # the case). Used by the Kanban drag-and-drop.
+  updateCaseStatus(workspaceId: String!, input: UpdateCaseStatusInput!): Case!
   syncCaseChannelUsers(workspaceId: String!, id: Int!): Case!
 
   # Persist the supplied form payload as a DRAFT case. No Slack channel

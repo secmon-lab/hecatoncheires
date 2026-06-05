@@ -6,6 +6,7 @@ export const msgKeys = {
   // Navigation
   navCases: 'navCases',
   navActions: 'navActions',
+  navBoard: 'navBoard',
   navSources: 'navSources',
 
   // Common buttons
@@ -184,6 +185,11 @@ export const msgKeys = {
   // Actions
   titleActions: 'titleActions',
   subtitleActions: 'subtitleActions',
+  titleCaseBoard: 'titleCaseBoard',
+  subtitleCaseBoard: 'subtitleCaseBoard',
+  placeholderSearchCaseBoard: 'placeholderSearchCaseBoard',
+  errorMoveCase: 'errorMoveCase',
+  labelSlackThread: 'labelSlackThread',
   btnNewAction: 'btnNewAction',
   titleActionFormNew: 'titleActionFormNew',
   titleActionFormEdit: 'titleActionFormEdit',

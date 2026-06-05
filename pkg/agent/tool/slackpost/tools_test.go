@@ -74,6 +74,31 @@ func TestPostToCaseChannel_ThreadReply(t *testing.T) {
 	gt.String(t, out["message_ts"].(string)).Equal("9999.0001")
 }
 
+func TestPostToCaseChannel_DefaultThreadTS(t *testing.T) {
+	// Thread-mode cases bind DefaultThreadTS so Job output lands in the case
+	// thread without the agent having to pass thread_ts.
+	p := &mockPoster{resp: "5555.0001"}
+	tools := slackpost.New(slackpost.Deps{Poster: p, ChannelID: "C-MONITOR", DefaultThreadTS: "1700000000.000100"})
+
+	out, err := tools[0].Run(context.Background(), map[string]any{"text": "job output"})
+	gt.NoError(t, err).Required()
+	gt.Array(t, p.posts).Length(1).Required()
+	gt.String(t, p.posts[0].channelID).Equal("C-MONITOR")
+	gt.String(t, p.posts[0].threadTS).Equal("1700000000.000100")
+	gt.String(t, out["thread_ts"].(string)).Equal("1700000000.000100")
+}
+
+func TestPostToCaseChannel_ExplicitThreadOverridesDefault(t *testing.T) {
+	p := &mockPoster{resp: "5555.0002"}
+	tools := slackpost.New(slackpost.Deps{Poster: p, ChannelID: "C-MONITOR", DefaultThreadTS: "1700000000.000100"})
+
+	out, err := tools[0].Run(context.Background(), map[string]any{"text": "x", "thread_ts": "1800000000.000999"})
+	gt.NoError(t, err).Required()
+	gt.Array(t, p.posts).Length(1).Required()
+	gt.String(t, p.posts[0].threadTS).Equal("1800000000.000999")
+	gt.String(t, out["thread_ts"].(string)).Equal("1800000000.000999")
+}
+
 func TestPostToCaseChannel_RejectsMissingChannel(t *testing.T) {
 	p := &mockPoster{}
 	tools := slackpost.New(slackpost.Deps{Poster: p, ChannelID: ""})

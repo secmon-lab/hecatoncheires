@@ -338,11 +338,21 @@ channel_prefix = "risk"
 
 | Property | Type | Required | Default | Description |
 |----------|------|----------|---------|-------------|
-| `channel_prefix` | string | No | workspace ID | Prefix for auto-created Slack channel names |
+| `channel_prefix` | string | No | workspace ID | Prefix for auto-created Slack channel names (channel mode only) |
+| `mode` | string | No | `channel` | Case binding mode: `channel` (one Case per dedicated channel) or `thread` (one Case per thread in a monitored channel) |
+| `channel` | string | Conditional | — | The monitored Slack channel ID (e.g. `C0123456789`). **Required when `mode = "thread"`.** Use the channel **ID**, not the name |
 
-When a case is created, Hecatoncheires can automatically create a Slack channel with the naming pattern: `{channel_prefix}-{case_number}`.
+When a case is created (channel mode), Hecatoncheires can automatically create a Slack channel with the naming pattern: `{channel_prefix}-{case_number}`.
 
 If `channel_prefix` is not specified, the workspace ID is used as the default prefix.
+
+**Thread mode:** When `mode = "thread"`, `channel_prefix`, `[slack.invite]`, and
+`welcome_messages` are ignored (no dedicated channel is created). The monitored
+`channel` must exist, the bot must be a member of it, and the app must subscribe
+to the `message.channels` (and `message.groups` for private channels) events. A
+`[case.status]` section is required in thread mode — see
+[Case Section](#case-section-thread-mode). See also
+[Slack Integration → Thread mode](slack.md#thread-mode-monitored-channel).
 
 **Note:** The `--slack-channel-prefix` CLI flag can override this configuration for the entire serve command.
 
@@ -620,6 +630,50 @@ When no preset captures what you need, supply an absolute color as `#RRGGBB` or 
 | `"var(--ok)"` | ❌ Validation error |
 | `"red"` | ❌ Validation error |
 | `"rgb(255,0,0)"` | ❌ Validation error |
+
+---
+
+## Case Section (thread mode)
+
+The `[case]` section configures the status set that attaches to **Cases** in
+thread mode (`[slack] mode = "thread"`). It is **required** for thread-mode
+workspaces and **ignored** (with a startup warning) in channel mode, where the
+configurable status set lives on Actions instead (`[action]`).
+
+The shape mirrors `[action]` exactly — the same keys, the same color values, and
+the same validation rules apply (see [Action Section](#action-section)).
+
+```toml
+[slack]
+mode = "thread"
+channel = "C0123456789"   # the monitored channel ID
+
+[case]
+initial = "triage"            # Required: status assigned to a newly created Case
+closed  = ["done", "wontfix"] # IDs treated as closed (closes the Case via lifecycle sync)
+
+[[case.status]]
+id = "triage"
+name = "Triage"
+color = "active"
+emoji = "🩺"
+
+[[case.status]]
+id = "investigating"
+name = "Investigating"
+color = "waiting"
+
+[[case.status]]
+id = "done"
+name = "Done"
+color = "success"
+emoji = "✅"
+```
+
+The Kanban board renders one column per `[[case.status]]` for thread-mode
+workspaces; dragging a Case into a `closed` column closes the Case. The
+investigation agent can also move a Case to a closed status when a mention
+indicates the issue is resolved.
 
 ---
 

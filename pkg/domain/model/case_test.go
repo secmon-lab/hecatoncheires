@@ -155,6 +155,64 @@ func TestCase_IsDraft(t *testing.T) {
 	gt.Bool(t, nilCase.IsDraft()).False()
 }
 
+func TestCase_IsThreadBound(t *testing.T) {
+	gt.Bool(t, (&model.Case{SlackThreadTS: "1700000000.000100"}).IsThreadBound()).True()
+	gt.Bool(t, (&model.Case{SlackThreadTS: ""}).IsThreadBound()).False()
+	gt.Bool(t, (&model.Case{SlackChannelID: "C001"}).IsThreadBound()).False()
+
+	var nilCase *model.Case
+	gt.Bool(t, nilCase.IsThreadBound()).False()
+}
+
+func TestCase_SyncLifecycleFromBoardStatus(t *testing.T) {
+	set, err := model.NewActionStatusSet(
+		"TRIAGE",
+		[]string{"DONE"},
+		[]model.ActionStatusDefinition{
+			{ID: "TRIAGE", Name: "Triage"},
+			{ID: "INVESTIGATING", Name: "Investigating"},
+			{ID: "DONE", Name: "Done"},
+		},
+	)
+	gt.NoError(t, err).Required()
+
+	t.Run("open board status maps to OPEN", func(t *testing.T) {
+		c := &model.Case{Status: types.CaseStatusOpen, BoardStatus: "INVESTIGATING"}
+		c.SyncLifecycleFromBoardStatus(set)
+		gt.Value(t, c.Status).Equal(types.CaseStatusOpen)
+	})
+
+	t.Run("closed board status maps to CLOSED", func(t *testing.T) {
+		c := &model.Case{Status: types.CaseStatusOpen, BoardStatus: "DONE"}
+		c.SyncLifecycleFromBoardStatus(set)
+		gt.Value(t, c.Status).Equal(types.CaseStatusClosed)
+	})
+
+	t.Run("reopening from closed maps back to OPEN", func(t *testing.T) {
+		c := &model.Case{Status: types.CaseStatusClosed, BoardStatus: "TRIAGE"}
+		c.SyncLifecycleFromBoardStatus(set)
+		gt.Value(t, c.Status).Equal(types.CaseStatusOpen)
+	})
+
+	t.Run("draft is left untouched", func(t *testing.T) {
+		c := &model.Case{Status: types.CaseStatusDraft, BoardStatus: "DONE"}
+		c.SyncLifecycleFromBoardStatus(set)
+		gt.Value(t, c.Status).Equal(types.CaseStatusDraft)
+	})
+
+	t.Run("nil set is a no-op", func(t *testing.T) {
+		c := &model.Case{Status: types.CaseStatusOpen, BoardStatus: "DONE"}
+		c.SyncLifecycleFromBoardStatus(nil)
+		gt.Value(t, c.Status).Equal(types.CaseStatusOpen)
+	})
+
+	t.Run("empty board status is a no-op", func(t *testing.T) {
+		c := &model.Case{Status: types.CaseStatusOpen, BoardStatus: ""}
+		c.SyncLifecycleFromBoardStatus(set)
+		gt.Value(t, c.Status).Equal(types.CaseStatusOpen)
+	})
+}
+
 func TestCase_Validate(t *testing.T) {
 	t.Run("nil case returns error", func(t *testing.T) {
 		var c *model.Case
