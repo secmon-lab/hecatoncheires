@@ -8,6 +8,7 @@ export const ja: Messages = {
   // Navigation
   navCases: 'ケース',
   navActions: 'アクション',
+  navBoard: 'ボード',
   navSources: 'ソース',
 
   // Common buttons

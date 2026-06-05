@@ -8,6 +8,7 @@ export const en: Messages = {
   // Navigation
   navCases: 'Cases',
   navActions: 'Actions',
+  navBoard: 'Board',
   navSources: 'Sources',
 
   // Common buttons

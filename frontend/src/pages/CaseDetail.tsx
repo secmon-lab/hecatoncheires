@@ -11,6 +11,7 @@ import {
   SYNC_CASE_CHANNEL_USERS,
   GET_CASES,
 } from '../graphql/case'
+import { UPDATE_CASE_STATUS } from '../graphql/caseStatus'
 import { DISCARD_DRAFT, GET_DRAFTS } from '../graphql/drafts'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
@@ -243,6 +244,7 @@ export default function CaseDetail() {
   const [closeCase, { loading: closing }] = useMutation(CLOSE_CASE, { refetchQueries: refetchOptions })
   const [reopenCase, { loading: reopening }] = useMutation(REOPEN_CASE, { refetchQueries: refetchOptions })
   const [updateCase, { loading: updating }] = useMutation(UPDATE_CASE, { refetchQueries: refetchOptions })
+  const [updateCaseStatus] = useMutation(UPDATE_CASE_STATUS, { refetchQueries: refetchOptions })
   const [deleteCase, { loading: deleting }] = useMutation(DELETE_CASE, {
     refetchQueries: [
       { query: GET_CASES, variables: { workspaceId: currentWorkspace?.id, status: 'OPEN' } },
@@ -286,6 +288,13 @@ export default function CaseDetail() {
   }
   const handleReopen = async () => {
     await reopenCase({ variables: { workspaceId: currentWorkspace!.id, id: caseId } })
+  }
+  // Thread-mode cases carry the configurable board status; changing it here
+  // moves the case between Kanban columns (and closes it when the target is a
+  // closed status, server-side).
+  const handleBoardStatusChange = async (next: string) => {
+    if (!next || next === boardStatus) return
+    await updateCaseStatus({ variables: { workspaceId: currentWorkspace!.id, input: { id: caseId, status: next } } })
   }
   const handleDelete = async () => {
     await deleteCase({ variables: { workspaceId: currentWorkspace!.id, id: caseId } })
@@ -744,11 +753,8 @@ export default function CaseDetail() {
               <span className="h-aside-title">{t('labelStatus')}</span>
             </div>
             <div data-testid="aside-status-display" className="h-status-strong">
-              {isThreadBound && boardStatus ? (
-                <span
-                  data-testid="aside-board-status"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                >
+              {isThreadBound && caseStatuses.isThreadMode ? (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                   <span
                     className="pip"
                     style={{
@@ -758,7 +764,24 @@ export default function CaseDetail() {
                       ...actionStatusColorStyle(caseStatuses.get(boardStatus)?.color),
                     }}
                   />
-                  {caseStatuses.label(boardStatus)}
+                  <select
+                    data-testid="aside-board-status"
+                    value={boardStatus}
+                    onChange={(e) => { void handleBoardStatusChange(e.target.value) }}
+                    style={{
+                      border: '1px solid var(--border-default)',
+                      borderRadius: '0.375rem',
+                      background: 'var(--bg-paper)',
+                      color: 'var(--text-body)',
+                      fontFamily: 'inherit',
+                      fontSize: 13,
+                      padding: '0.125rem 0.375rem',
+                    }}
+                  >
+                    {caseStatuses.statuses.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name || s.id}</option>
+                    ))}
+                  </select>
                 </span>
               ) : (
                 <StatusBadge

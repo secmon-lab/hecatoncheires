@@ -24,6 +24,11 @@ test.describe('Thread-mode Case board', () => {
 
     // Thread mode has no Actions: the "New Action" button must be absent.
     expect(await board.hasNewActionButton()).toBeFalsy();
+
+    // The sidebar nav item is labelled "Board" (not "Actions") in thread mode.
+    const sidebar = page.locator('.h-side');
+    await expect(sidebar.getByText('Board', { exact: true })).toBeVisible();
+    await expect(sidebar.getByText('Actions', { exact: true })).toHaveCount(0);
   });
 
   test('still renders the Action board for a channel-mode workspace', async ({ page }) => {
@@ -37,5 +42,9 @@ test.describe('Thread-mode Case board', () => {
     // And the thread-mode Case board must NOT be present here.
     const caseBoard = new CaseKanbanPage(page);
     expect(await caseBoard.isBoardVisible()).toBeFalsy();
+
+    // The sidebar keeps the "Actions" label for channel-mode workspaces.
+    const sidebar = page.locator('.h-side');
+    await expect(sidebar.getByText('Actions', { exact: true })).toBeVisible();
   });
 });

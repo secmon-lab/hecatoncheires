@@ -6,6 +6,7 @@ export const msgKeys = {
   // Navigation
   navCases: 'navCases',
   navActions: 'navActions',
+  navBoard: 'navBoard',
   navSources: 'navSources',
 
   // Common buttons

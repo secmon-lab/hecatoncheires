@@ -6,6 +6,7 @@ import { useTranslation } from '../i18n'
 import { GET_CASES } from '../graphql/case'
 import { GET_ACTIONS } from '../graphql/action'
 import { GET_SOURCES } from '../graphql/source'
+import { useCaseStatuses } from '../hooks/useCaseStatuses'
 import { Avatar } from './Primitives'
 import {
   IconCases,
@@ -47,10 +48,19 @@ export default function Sidebar() {
   const { t } = useTranslation()
   const wsPrefix = currentWorkspace ? `/ws/${currentWorkspace.id}` : ''
   const counts = useNavCounts(currentWorkspace?.id)
+  // In thread mode the /actions route renders a Case Kanban (not Actions), so
+  // the nav item is labelled "Board" and counts cases instead of actions.
+  const { isThreadMode } = useCaseStatuses(currentWorkspace?.id)
 
   const items = [
     { id: 'cases',      label: t('navCases'),      Icon: IconCases,     to: `${wsPrefix}/cases`,      count: counts.cases },
-    { id: 'actions',    label: t('navActions'),    Icon: IconActions,   to: `${wsPrefix}/actions`,    count: counts.actions },
+    {
+      id: 'actions',
+      label: isThreadMode ? t('navBoard') : t('navActions'),
+      Icon: IconActions,
+      to: `${wsPrefix}/actions`,
+      count: isThreadMode ? counts.cases : counts.actions,
+    },
     { id: 'sources',    label: t('navSources'),    Icon: IconSources,   to: `${wsPrefix}/sources`,    count: counts.sources },
   ]
 
