@@ -41,10 +41,15 @@ cases:
       - title: "Roll back to v2.2"
 `;
 
+// Invalid because the required `category` select field is missing, which gates
+// the Execute button off. The title is unique and searchable so the test can
+// assert (isolation-safe, without counting) that no such draft was created —
+// rather than diffing the workspace-wide Drafts count, which other parallel
+// specs mutate on the shared in-memory server.
 const INVALID_YAML = `version: 1
 cases:
-  - title: ""
-    description: "missing title"
+  - title: "__E2E_INVALID__ Missing category"
+    description: "no category → invalid"
     actions:
       - title: "should not run"
 `;
@@ -101,24 +106,22 @@ test.describe('Case Import (YAML)', () => {
     const caseListPage = new CaseListPage(page);
     const importPage = new ImportPage(page);
 
-    // Capture the current Drafts count so we can assert it does not move.
-    await caseListPage.clickStatusTab('Draft');
-    const beforeCount = await caseListPage.getDraftsTabCount();
-
     await page.getByRole('button', { name: /^Import$/ }).click();
     await page.waitForURL(new RegExp(`/ws/${TEST_WORKSPACE_ID}/imports/new$`));
 
     await importPage.uploadYaml(INVALID_YAML, 'bad.yaml');
     expect(await importPage.readStatus()).toBe('PENDING');
 
-    // Execute must be disabled because the session is not valid.
+    // Execute must be disabled because the session is not valid (missing the
+    // required `category` field), so no draft can be created from it.
     expect(await importPage.isExecuteEnabled()).toBeFalsy();
 
-    // Return to the Case list — drafts count should be unchanged.
+    // Return to the Case list and confirm the invalid case never became a
+    // draft. Asserting on the unique title (rather than a workspace-wide count
+    // delta) keeps this robust under parallel test execution.
     await page.goto(`/ws/${TEST_WORKSPACE_ID}/cases`);
     await caseListPage.waitForTableLoad();
     await caseListPage.clickStatusTab('Draft');
-    const afterCount = await caseListPage.getDraftsTabCount();
-    expect(afterCount).toBe(beforeCount);
+    expect(await caseListPage.caseExists('__E2E_INVALID__ Missing category')).toBeFalsy();
   });
 });

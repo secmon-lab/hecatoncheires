@@ -218,19 +218,28 @@ export default function CaseList() {
     return () => document.removeEventListener('mousedown', onClick)
   }, [columnsOpen])
 
+  // The list queries use cache-and-network so navigating back to the Cases
+  // page (e.g. after a YAML import created drafts, or a case was created /
+  // closed elsewhere) always revalidates against the server instead of
+  // showing a stale cached list. Without this, the cached result from an
+  // earlier visit is returned verbatim and the freshly-created rows never
+  // appear until a hard reload.
   const { data: openData } = useQuery(GET_CASES, {
     variables: { workspaceId: currentWorkspace?.id, status: 'OPEN' },
     skip: !currentWorkspace,
+    fetchPolicy: 'cache-and-network',
   })
   const { data: closedData } = useQuery(GET_CASES, {
     variables: { workspaceId: currentWorkspace?.id, status: 'CLOSED' },
     skip: !currentWorkspace,
+    fetchPolicy: 'cache-and-network',
   })
   // Drafts are workspace-wide on the server; this query drives both the
   // Drafts tab and the sidebar / header count.
   const { data: draftData, refetch: refetchDrafts } = useQuery(GET_DRAFTS, {
     variables: { workspaceId: currentWorkspace?.id },
     skip: !currentWorkspace,
+    fetchPolicy: 'cache-and-network',
   })
   const { data: configData } = useQuery(GET_FIELD_CONFIGURATION, {
     variables: { workspaceId: currentWorkspace?.id },

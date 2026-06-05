@@ -169,6 +169,7 @@ for i in $(seq 1 $MAX_RETRIES); do
     --log-level=error \
     --repository-backend=memory \
     --config="$PROJECT_ROOT/frontend/e2e/fixtures/config.test.toml" \
+    --config="$PROJECT_ROOT/frontend/e2e/fixtures/config.review.test.toml" \
     --no-auth=U000000000 \
     --addr="127.0.0.1:$CANDIDATE_PORT" \
     --graphiql=false &

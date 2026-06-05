@@ -72,6 +72,11 @@ var messagesEN = [msgKeyCount]string{
 	MsgAgentSessionInfo:   "Session Info",
 	MsgKeyAgentBusy:       ":hourglass_flowing_sand: Already handling your previous request. I'll respond, then please mention me again if more is needed.",
 
+	MsgThreadCaseCreated:  ":thread: Case registered. <%s|Open in the web UI>",
+	MsgThreadCaseUpdated:  ":pencil2: Updated the case details.",
+	MsgThreadCaseClosed:   ":white_check_mark: Closed this case (%s).",
+	MsgThreadCaseQuestion: ":question: %s",
+
 	// Draft (open-mode) trace lines
 	MsgProposalTracePlanning:           "🤔 Planning…",
 	MsgProposalTracePlannerRetry:       "⚠️ Planner output rejected; retrying",
@@ -204,6 +209,11 @@ var messagesJA = [msgKeyCount]string{
 	MsgAgentError:         "リクエストの処理中にエラーが発生しました。しばらくしてから再試行してください。",
 	MsgAgentSessionInfo:   "セッション情報",
 	MsgKeyAgentBusy:       ":hourglass_flowing_sand: 直前のリクエストを処理中です。完了後にもう一度メンションしてください。",
+
+	MsgThreadCaseCreated:  ":thread: ケースを登録しました。<%s|Web UI で開く>",
+	MsgThreadCaseUpdated:  ":pencil2: ケースの内容を更新しました。",
+	MsgThreadCaseClosed:   ":white_check_mark: このケースをクローズしました（%s）。",
+	MsgThreadCaseQuestion: ":question: %s",
 
 	// Draft (open-mode) trace lines
 	MsgProposalTracePlanning:           "🤔 計画中…",

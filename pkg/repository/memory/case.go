@@ -83,6 +83,8 @@ func copyCase(c *model.Case) *model.Case {
 		ReporterID:            c.ReporterID,
 		AssigneeIDs:           assigneeIDs,
 		SlackChannelID:        c.SlackChannelID,
+		SlackThreadTS:         c.SlackThreadTS,
+		BoardStatus:           c.BoardStatus,
 		IsPrivate:             c.IsPrivate,
 		ChannelUserIDs:        channelUserIDs,
 		FieldValues:           fieldValues,
@@ -253,6 +255,28 @@ func (r *caseRepository) GetBySlackChannelID(ctx context.Context, workspaceID st
 
 	for _, c := range ws {
 		if c.SlackChannelID == channelID {
+			return copyCase(c), nil
+		}
+	}
+
+	return nil, nil
+}
+
+func (r *caseRepository) GetBySlackThread(_ context.Context, workspaceID string, channelID string, threadTS string) (*model.Case, error) {
+	if channelID == "" || threadTS == "" {
+		return nil, nil
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ws, exists := r.cases[workspaceID]
+	if !exists {
+		return nil, nil
+	}
+
+	for _, c := range ws {
+		if c.SlackChannelID == channelID && c.SlackThreadTS == threadTS {
 			return copyCase(c), nil
 		}
 	}

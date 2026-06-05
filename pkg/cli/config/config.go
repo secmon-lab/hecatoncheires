@@ -39,6 +39,12 @@ var workspaceColorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 // guards against operators pasting arbitrary text into the field.
 const maxWorkspaceEmojiRunes = 16
 
+// slackChannelIDPattern is a lenient check for a Slack channel ID. Slack
+// channel IDs start with C (public), G (private/group) and are uppercase
+// alphanumerics. This catches obvious mistakes (channel names like
+// `#team-support`) without over-constraining future ID shapes.
+var slackChannelIDPattern = regexp.MustCompile(`^[CG][A-Z0-9]+$`)
+
 // WorkspaceBaseConfig represents the [workspace] section in a TOML config
 type WorkspaceBaseConfig struct {
 	ID          string `toml:"id"`
@@ -92,6 +98,19 @@ type SlackSection struct {
 	TeamID          string             `toml:"team_id"`
 	Invite          SlackInviteSection `toml:"invite"`
 	WelcomeMessages []string           `toml:"welcome_messages"`
+	// Mode selects the case-binding mode: "channel" (default) or "thread".
+	Mode string `toml:"mode"`
+	// Channel is the monitored Slack channel ID for thread mode (e.g. C0123...).
+	Channel string `toml:"channel"`
+}
+
+// CaseSection represents the [case] section in a TOML config. It mirrors
+// [action] but configures the status set that attaches to Cases in thread
+// mode. It is required for thread-mode workspaces and ignored otherwise.
+type CaseSection struct {
+	Initial string                  `toml:"initial"`
+	Closed  []string                `toml:"closed"`
+	Status  []ActionStatusConfigRow `toml:"status"`
 }
 
 // CompileSection represents the [compile] section in a TOML config
@@ -115,6 +134,7 @@ type AppConfig struct {
 	Compile   CompileSection      `toml:"compile"`
 	Assist    AssistSection       `toml:"assist"`
 	Action    *ActionSection      `toml:"action"`
+	Case      *CaseSection        `toml:"case"`
 	Jobs      []JobSection        `toml:"job"`
 }
 
@@ -153,6 +173,9 @@ type WorkspaceConfig struct {
 	AssistPrompt         string
 	AssistLanguage       string
 	Jobs                 []*model.Job
+	CaseMode             model.CaseMode
+	SlackMonitorChannel  string
+	CaseStatusSet        *model.ActionStatusSet
 }
 
 // Labels represents entity display labels
@@ -271,7 +294,66 @@ func (a *AppConfig) Validate() error {
 		return goerr.Wrap(err, "invalid [[job]] section")
 	}
 
+	// [slack] mode / channel and [case.status] validation. Resolve eagerly so
+	// case-mode misconfigurations surface at startup.
+	if err := a.validateCaseMode(); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+// validateCaseMode validates the [slack] mode / channel pairing and the
+// [case.status] requirement for thread mode. It also resolves the case status
+// set eagerly so schema errors surface at startup.
+func (a *AppConfig) validateCaseMode() error {
+	mode := model.CaseMode(a.Slack.Mode)
+	if a.Slack.Mode != "" && !mode.IsValid() {
+		return goerr.Wrap(ErrInvalidCaseMode, "[slack] mode must be \"channel\" or \"thread\"",
+			goerr.V("mode", a.Slack.Mode))
+	}
+
+	if !mode.IsThread() {
+		// Channel mode: monitored channel and [case.status] are not used.
+		return nil
+	}
+
+	// Thread mode requirements.
+	if a.Slack.Channel == "" {
+		return goerr.Wrap(ErrMissingMonitorChannel, "[slack] channel is required when mode = \"thread\"")
+	}
+	if !slackChannelIDPattern.MatchString(a.Slack.Channel) {
+		return goerr.Wrap(ErrInvalidMonitorChannel,
+			"[slack] channel must be a Slack channel ID (e.g. C0123456789), not a channel name",
+			goerr.V("channel", a.Slack.Channel))
+	}
+	if a.Case == nil || len(a.Case.Status) == 0 {
+		return goerr.Wrap(ErrMissingCaseStatus, "[case.status] is required when mode = \"thread\"")
+	}
+	if _, err := a.resolveCaseStatusSet(); err != nil {
+		return goerr.Wrap(err, "invalid [case] section")
+	}
+	return nil
+}
+
+// resolveCaseStatusSet builds the case status set from the [case] section.
+// Returns nil (no error) when [case] is omitted; callers requiring a set must
+// check for thread mode separately.
+func (a *AppConfig) resolveCaseStatusSet() (*model.ActionStatusSet, error) {
+	if a.Case == nil {
+		return nil, nil
+	}
+	defs := make([]model.ActionStatusDefinition, 0, len(a.Case.Status))
+	for _, row := range a.Case.Status {
+		defs = append(defs, model.ActionStatusDefinition{
+			ID:          row.ID,
+			Name:        row.Name,
+			Description: row.Description,
+			Color:       row.Color,
+			Emoji:       row.Emoji,
+		})
+	}
+	return model.NewActionStatusSet(a.Case.Initial, a.Case.Closed, defs)
 }
 
 // resolveActionStatusSet returns the ActionStatusSet implied by the [action]
@@ -451,6 +533,25 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 		return nil, goerr.Wrap(err, "failed to resolve jobs", goerr.V(ConfigPathKey, path))
 	}
 
+	caseMode := model.CaseMode(appCfg.Slack.Mode).Normalize()
+	caseStatusSet, err := appCfg.resolveCaseStatusSet()
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to resolve case status set", goerr.V(ConfigPathKey, path))
+	}
+
+	// Warn about channel-mode-only settings supplied to a thread-mode workspace
+	// (and vice versa) so operators notice ignored configuration at startup.
+	if caseMode.IsThread() {
+		if slackPrefix != wsID || len(appCfg.Slack.Invite.Users) > 0 ||
+			len(appCfg.Slack.Invite.Groups) > 0 || len(appCfg.Slack.WelcomeMessages) > 0 {
+			logging.Default().Warn("thread-mode workspace ignores channel-mode Slack settings (channel_prefix / invite / welcome_messages)",
+				"workspace_id", wsID, "config_path", path)
+		}
+	} else if appCfg.Case != nil {
+		logging.Default().Warn("channel-mode workspace ignores [case.status]",
+			"workspace_id", wsID, "config_path", path)
+	}
+
 	return &WorkspaceConfig{
 		ID:                   wsID,
 		Name:                 wsName,
@@ -468,6 +569,9 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 		AssistPrompt:         appCfg.Assist.Prompt,
 		AssistLanguage:       appCfg.Assist.Language,
 		Jobs:                 jobs,
+		CaseMode:             caseMode,
+		SlackMonitorChannel:  appCfg.Slack.Channel,
+		CaseStatusSet:        caseStatusSet,
 	}, nil
 }
 
@@ -503,19 +607,22 @@ func (a *AppConfig) Configure(c *cli.Command) ([]*WorkspaceConfig, *model.Worksp
 				Emoji:       wc.Emoji,
 				Color:       wc.Color,
 			},
-			FieldSchema:          wc.FieldSchema,
-			ActionStatusSet:      wc.ActionStatusSet,
-			SlackChannelPrefix:   wc.SlackChannelPrefix,
-			SlackTeamID:          wc.SlackTeamID,
-			SlackInviteUsers:     wc.SlackInviteUsers,
-			SlackInviteGroups:    wc.SlackInviteGroups,
-			SlackWelcomeMessages: wc.SlackWelcomeMessages,
-			CompilePrompt:        wc.CompilePrompt,
-			AssistPrompt:         wc.AssistPrompt,
-			AssistLanguage:       wc.AssistLanguage,
-			Jobs:                 wc.Jobs,
+			FieldSchema:           wc.FieldSchema,
+			ActionStatusSet:       wc.ActionStatusSet,
+			SlackChannelPrefix:    wc.SlackChannelPrefix,
+			SlackTeamID:           wc.SlackTeamID,
+			SlackInviteUsers:      wc.SlackInviteUsers,
+			SlackInviteGroups:     wc.SlackInviteGroups,
+			SlackWelcomeMessages:  wc.SlackWelcomeMessages,
+			CompilePrompt:         wc.CompilePrompt,
+			AssistPrompt:          wc.AssistPrompt,
+			AssistLanguage:        wc.AssistLanguage,
+			Jobs:                  wc.Jobs,
+			CaseMode:              wc.CaseMode,
+			SlackMonitorChannelID: wc.SlackMonitorChannel,
+			CaseStatusSet:         wc.CaseStatusSet,
 		})
-		logging.Default().Info("Registered workspace", "id", wc.ID, "name", wc.Name)
+		logging.Default().Info("Registered workspace", "id", wc.ID, "name", wc.Name, "case_mode", wc.CaseMode.Normalize())
 	}
 
 	return workspaceConfigs, registry, nil

@@ -184,6 +184,10 @@ export const msgKeys = {
   // Actions
   titleActions: 'titleActions',
   subtitleActions: 'subtitleActions',
+  titleCaseBoard: 'titleCaseBoard',
+  subtitleCaseBoard: 'subtitleCaseBoard',
+  placeholderSearchCaseBoard: 'placeholderSearchCaseBoard',
+  labelSlackThread: 'labelSlackThread',
   btnNewAction: 'btnNewAction',
   titleActionFormNew: 'titleActionFormNew',
   titleActionFormEdit: 'titleActionFormEdit',

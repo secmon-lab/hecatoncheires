@@ -24,6 +24,9 @@ export const GET_CASES = gql`
         imageUrl
       }
       slackChannelID
+      slackThreadTS
+      isThreadBound
+      boardStatus
       createdAt
       updatedAt
       fields {
@@ -60,6 +63,9 @@ export const GET_CASE = gql`
       }
       slackChannelID
       slackChannelURL
+      slackThreadTS
+      isThreadBound
+      boardStatus
       createdAt
       updatedAt
       fields {

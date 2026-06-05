@@ -22,6 +22,9 @@ type Case struct {
 	AssigneeIDs    []string         `json:"assigneeIDs"`
 	Assignees      []*SlackUser     `json:"assignees"`
 	SlackChannelID *string          `json:"slackChannelID,omitempty"`
+	SlackThreadTS  *string          `json:"slackThreadTS,omitempty"`
+	IsThreadBound  bool             `json:"isThreadBound"`
+	BoardStatus    *string          `json:"boardStatus,omitempty"`
 	Fields         []*FieldValue    `json:"fields"`
 	Actions        []*Action        `json:"actions"`
 	Knowledges     []*Knowledge     `json:"knowledges"`

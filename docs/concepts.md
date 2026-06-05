@@ -93,6 +93,23 @@ The link between a Case and a Slack channel. Hecatoncheires can auto-create a
 channel per Case (with a configurable prefix) and auto-invite members. See
 [Slack Integration](slack.md#automatic-risk-channel-creation).
 
+### Case mode (channel vs thread)
+Each Workspace chooses how Cases bind to Slack, via `[slack] mode`:
+
+- **channel** (default): one Case maps to a dedicated Slack channel created at
+  case creation. This is the original model — Cases manage Actions and can be
+  saved as Drafts.
+- **thread**: the Workspace monitors a single channel (`[slack] channel`), and
+  **every human top-level message in that channel becomes a Case** bound to its
+  thread. Thread replies are recorded on the Case, and mentioning the bot in the
+  thread runs an investigation agent that can answer, fill in the Case fields, or
+  close the Case. Thread-mode Cases do **not** use Actions or Drafts; instead the
+  configurable status set (`[case.status]`) attaches to the Case itself and the
+  Kanban board shows Cases. Jobs run identically in both modes.
+
+See [Configuration → Case Section](configuration.md#case-section-thread-mode) and
+[Slack Integration](slack.md#thread-mode-monitored-channel).
+
 ### Private case
 A Case whose bound Slack channel is private. Access is restricted to channel
 members; non-members cannot read the Case or its child entities. Enforced in the

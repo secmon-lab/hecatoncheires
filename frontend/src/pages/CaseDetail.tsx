@@ -23,6 +23,7 @@ import FilterDropdown from '../components/FilterDropdown'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
 import { useActionStatuses } from '../hooks/useActionStatuses'
+import { useCaseStatuses } from '../hooks/useCaseStatuses'
 import { actionStatusColorStyle } from '../utils/actionStatusStyle'
 import { displayName } from '../utils/user'
 import Button from '../components/Button'
@@ -151,6 +152,8 @@ export default function CaseDetail() {
   const { currentWorkspace } = useWorkspace()
   const { t, lang } = useTranslation()
   const actionStatuses = useActionStatuses(currentWorkspace?.id)
+  // Thread-mode workspaces attach the configurable status set to the Case.
+  const caseStatuses = useCaseStatuses(currentWorkspace?.id)
 
   // Honour the originating case-list tab when going back. CaseList sets
   // location.state.fromStatus when the user clicks into a row; if the
@@ -197,6 +200,11 @@ export default function CaseDetail() {
   const slackChannelID: string = c?.slackChannelID || ''
   const slackChannelURL: string | null = c?.slackChannelURL || null
   const channelUserCount: number = c?.channelUserCount || 0
+  // Thread-mode cases bind to a Slack thread rather than a dedicated channel:
+  // Actions do not apply, and the Slack link should open the thread.
+  const isThreadBound = !!c?.isThreadBound
+  const slackThreadTS: string = c?.slackThreadTS || ''
+  const boardStatus: string = c?.boardStatus || ''
 
   const { data: membersData } = useQuery(GET_CASE_MEMBERS, {
     variables: {
@@ -517,11 +525,10 @@ export default function CaseDetail() {
             />
           </section>
 
-          {/* Related Actions only exist for activated cases. Drafts have
-              no actions, no Slack channel, no async tail — hide the
-              entire section so the page stays focused on filling in the
-              draft before submission. */}
-          {c.status !== 'DRAFT' && (
+          {/* Related Actions only exist for activated channel-mode cases.
+              Drafts have no actions yet, and thread-mode cases never manage
+              Actions at all — hide the entire section in both cases. */}
+          {c.status !== 'DRAFT' && !isThreadBound && (
           <section className="h-section">
             <div className="h-section-h">
               <span className="h-section-title">{t('sectionRelatedActions')}</span>
@@ -718,11 +725,15 @@ export default function CaseDetail() {
               <a
                 className="slack-link"
                 data-testid="aside-slack-link"
-                href={slackChannelURL || `slack://channel?id=${slackChannelID}`}
+                href={
+                  isThreadBound && slackThreadTS
+                    ? `https://slack.com/archives/${slackChannelID}/p${slackThreadTS.replace('.', '')}`
+                    : slackChannelURL || `slack://channel?id=${slackChannelID}`
+                }
                 target="_blank"
                 rel="noreferrer noopener"
               >
-                <IconSlack size={11} />{t('labelOpenInSlack')}
+                <IconSlack size={11} />{isThreadBound ? t('labelSlackThread') : t('labelOpenInSlack')}
                 <IconExt size={10} />
               </a>
             </section>
@@ -733,11 +744,29 @@ export default function CaseDetail() {
               <span className="h-aside-title">{t('labelStatus')}</span>
             </div>
             <div data-testid="aside-status-display" className="h-status-strong">
-              <StatusBadge
-                status={c.status}
-                labelOpen={t('statusOpen')}
-                labelClosed={t('statusClosed')}
-              />
+              {isThreadBound && boardStatus ? (
+                <span
+                  data-testid="aside-board-status"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                >
+                  <span
+                    className="pip"
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      ...actionStatusColorStyle(caseStatuses.get(boardStatus)?.color),
+                    }}
+                  />
+                  {caseStatuses.label(boardStatus)}
+                </span>
+              ) : (
+                <StatusBadge
+                  status={c.status}
+                  labelOpen={t('statusOpen')}
+                  labelClosed={t('statusClosed')}
+                />
+              )}
             </div>
           </section>
 

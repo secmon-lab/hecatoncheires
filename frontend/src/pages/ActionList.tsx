@@ -7,6 +7,8 @@ import { GET_CASES } from '../graphql/case'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
 import { useActionStatuses } from '../hooks/useActionStatuses'
+import { useCaseStatuses } from '../hooks/useCaseStatuses'
+import CaseKanban from './CaseKanban'
 import {
   actionStatusColorStyle,
   actionStatusSlug,
@@ -60,6 +62,8 @@ export default function ActionList() {
   const [draggingId, setDraggingId] = useState<number | null>(null)
   const [dragOverCol, setDragOverCol] = useState<string | null>(null)
   const { statuses, isClosed, label } = useActionStatuses(currentWorkspace?.id)
+  // Thread-mode workspaces show a Case board instead of the Action board.
+  const { isThreadMode } = useCaseStatuses(currentWorkspace?.id)
 
   const filterCaseId = useMemo(() => {
     if (!caseId) return null
@@ -168,6 +172,12 @@ export default function ActionList() {
   }
 
   const openCount = actions.filter((a) => !isClosed(a.status)).length
+
+  // Thread-mode workspaces bind the configurable status to the Case itself, so
+  // the board renders Cases instead of Actions.
+  if (isThreadMode) {
+    return <CaseKanban />
+  }
 
   return (
     <div className="h-main-inner" style={{ display: 'flex', flexDirection: 'column' }}>

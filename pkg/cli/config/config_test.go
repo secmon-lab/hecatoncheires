@@ -1,12 +1,14 @@
 package config_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 )
 
 func TestLoadFieldSchema(t *testing.T) {
@@ -1282,4 +1284,133 @@ name = "Risk Management"
 	gt.Array(t, configs).Length(1).Required()
 	gt.Value(t, configs[0].Emoji).Equal("")
 	gt.Value(t, configs[0].Color).Equal("")
+}
+
+func TestLoadWorkspaceConfigs_CaseMode(t *testing.T) {
+	writeAndLoad := func(t *testing.T, content string) ([]*config.WorkspaceConfig, error) {
+		t.Helper()
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		gt.NoError(t, os.WriteFile(configPath, []byte(content), 0644)).Required()
+		return config.LoadWorkspaceConfigs([]string{configPath})
+	}
+
+	t.Run("defaults to channel mode when omitted", func(t *testing.T) {
+		configs, err := writeAndLoad(t, `
+[workspace]
+id = "risk"
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`)
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1).Required()
+		gt.Value(t, configs[0].CaseMode).Equal(model.CaseModeChannel)
+		gt.Value(t, configs[0].SlackMonitorChannel).Equal("")
+		gt.Value(t, configs[0].CaseStatusSet).Nil()
+	})
+
+	t.Run("thread mode resolves monitored channel and case status set", func(t *testing.T) {
+		configs, err := writeAndLoad(t, `
+[workspace]
+id = "support"
+
+[slack]
+mode = "thread"
+channel = "C0123ABC"
+
+[case]
+initial = "TRIAGE"
+closed = ["DONE"]
+
+  [[case.status]]
+  id = "TRIAGE"
+  name = "Triage"
+  color = "active"
+
+  [[case.status]]
+  id = "DONE"
+  name = "Done"
+  color = "success"
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`)
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1).Required()
+		gt.Value(t, configs[0].CaseMode).Equal(model.CaseModeThread)
+		gt.Value(t, configs[0].SlackMonitorChannel).Equal("C0123ABC")
+		set := configs[0].CaseStatusSet
+		gt.Value(t, set).NotNil().Required()
+		gt.Value(t, set.InitialID()).Equal("TRIAGE")
+		gt.Bool(t, set.IsClosed("DONE")).True()
+		gt.Bool(t, set.IsClosed("TRIAGE")).False()
+		gt.Array(t, set.IDs()).Length(2)
+	})
+
+	t.Run("invalid mode is rejected", func(t *testing.T) {
+		_, err := writeAndLoad(t, `
+[workspace]
+id = "support"
+
+[slack]
+mode = "bogus"
+`)
+		gt.Error(t, err).Required()
+		gt.Bool(t, errors.Is(err, config.ErrInvalidCaseMode)).True()
+	})
+
+	t.Run("thread mode without channel is rejected", func(t *testing.T) {
+		_, err := writeAndLoad(t, `
+[workspace]
+id = "support"
+
+[slack]
+mode = "thread"
+
+[case]
+initial = "TRIAGE"
+  [[case.status]]
+  id = "TRIAGE"
+  name = "Triage"
+`)
+		gt.Error(t, err).Required()
+		gt.Bool(t, errors.Is(err, config.ErrMissingMonitorChannel)).True()
+	})
+
+	t.Run("thread mode with channel name (not ID) is rejected", func(t *testing.T) {
+		_, err := writeAndLoad(t, `
+[workspace]
+id = "support"
+
+[slack]
+mode = "thread"
+channel = "#team-support"
+
+[case]
+initial = "TRIAGE"
+  [[case.status]]
+  id = "TRIAGE"
+  name = "Triage"
+`)
+		gt.Error(t, err).Required()
+		gt.Bool(t, errors.Is(err, config.ErrInvalidMonitorChannel)).True()
+	})
+
+	t.Run("thread mode without [case.status] is rejected", func(t *testing.T) {
+		_, err := writeAndLoad(t, `
+[workspace]
+id = "support"
+
+[slack]
+mode = "thread"
+channel = "C0123ABC"
+`)
+		gt.Error(t, err).Required()
+		gt.Bool(t, errors.Is(err, config.ErrMissingCaseStatus)).True()
+	})
 }

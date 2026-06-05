@@ -211,6 +211,57 @@ func TestSlackUseCases_HandleSlackMessage(t *testing.T) {
 		gt.Value(t, caseMsgs[0].Text()).Equal("Hello from mapped channel")
 	})
 
+	t.Run("thread mode: saves reply to the thread's case sub-collection", func(t *testing.T) {
+		repo := memory.New()
+		ctx := context.Background()
+
+		// A thread-mode case bound to (monitored channel, thread ts).
+		threadTS := "1700000000.000100"
+		created, err := repo.Case().Create(ctx, "support", &model.Case{
+			ReporterID:     "U-REPORTER",
+			Title:          "Thread case",
+			SlackChannelID: "C-MONITOR",
+			SlackThreadTS:  threadTS,
+			BoardStatus:    "TRIAGE",
+		})
+		gt.NoError(t, err).Required()
+
+		set, err := model.NewActionStatusSet("TRIAGE", []string{"DONE"}, []model.ActionStatusDefinition{
+			{ID: "TRIAGE", Name: "Triage"},
+			{ID: "DONE", Name: "Done"},
+		})
+		gt.NoError(t, err).Required()
+
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace:             model.Workspace{ID: "support", Name: "Support"},
+			CaseMode:              model.CaseModeThread,
+			SlackMonitorChannelID: "C-MONITOR",
+			CaseStatusSet:         set,
+		})
+		uc := usecase.New(repo, registry)
+
+		// A reply in the case thread (thread_ts points at the case's thread).
+		reply := slack.NewMessageFromData(
+			"1700000005.000001",
+			"C-MONITOR",
+			threadTS,
+			"T1",
+			"U-ASKER",
+			"bob",
+			"Any update on this?",
+			"1700000005.000001",
+			time.Now(),
+			nil,
+		)
+		gt.NoError(t, uc.Slack.HandleSlackMessage(ctx, reply)).Required()
+
+		caseMsgs, _, err := repo.CaseMessage().List(ctx, "support", created.ID, 10, "")
+		gt.NoError(t, err).Required()
+		gt.Array(t, caseMsgs).Length(1).Required()
+		gt.Value(t, caseMsgs[0].Text()).Equal("Any update on this?")
+	})
+
 	t.Run("saves to action sub-collection when message is in action thread", func(t *testing.T) {
 		repo := memory.New()
 		ctx := context.Background()

@@ -467,6 +467,103 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.Value(t, found).Nil()
 	})
 
+	t.Run("thread-mode round-trip persists SlackThreadTS and BoardStatus", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		threadTS := fmt.Sprintf("%d.000100", time.Now().UnixNano())
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:     "U-THREAD-REPORTER",
+			CreatedAt:      time.Now().UTC(),
+			UpdatedAt:      time.Now().UTC(),
+			Title:          "Thread case",
+			Description:    "Created from a monitored channel post",
+			Status:         types.CaseStatusOpen,
+			SlackChannelID: "C-MONITOR",
+			SlackThreadTS:  threadTS,
+			BoardStatus:    "TRIAGE",
+		})
+		gt.NoError(t, err).Required()
+
+		retrieved, err := repo.Case().Get(ctx, wsID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, retrieved.SlackThreadTS).Equal(threadTS)
+		gt.Value(t, retrieved.BoardStatus).Equal("TRIAGE")
+		gt.Value(t, retrieved.SlackChannelID).Equal("C-MONITOR")
+		gt.Bool(t, retrieved.IsThreadBound()).True()
+	})
+
+	t.Run("GetBySlackThread returns matching thread case", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		threadA := fmt.Sprintf("%d.000111", time.Now().UnixNano())
+		threadB := fmt.Sprintf("%d.000222", time.Now().UnixNano())
+
+		caseA, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:     "U-A",
+			CreatedAt:      time.Now().UTC(),
+			UpdatedAt:      time.Now().UTC(),
+			Title:          "Thread A",
+			SlackChannelID: "C-MONITOR",
+			SlackThreadTS:  threadA,
+			BoardStatus:    "TRIAGE",
+		})
+		gt.NoError(t, err).Required()
+
+		_, err = repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:     "U-B",
+			CreatedAt:      time.Now().UTC(),
+			UpdatedAt:      time.Now().UTC(),
+			Title:          "Thread B",
+			SlackChannelID: "C-MONITOR",
+			SlackThreadTS:  threadB,
+			BoardStatus:    "TRIAGE",
+		})
+		gt.NoError(t, err).Required()
+
+		found, err := repo.Case().GetBySlackThread(ctx, wsID, "C-MONITOR", threadA)
+		gt.NoError(t, err).Required()
+		gt.Value(t, found).NotNil().Required()
+		gt.Value(t, found.ID).Equal(caseA.ID)
+		gt.Value(t, found.Title).Equal("Thread A")
+		gt.Value(t, found.SlackThreadTS).Equal(threadA)
+	})
+
+	t.Run("GetBySlackThread returns nil for unknown thread", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		found, err := repo.Case().GetBySlackThread(ctx, wsID, "C-MONITOR", "9999999999.000000")
+		gt.NoError(t, err)
+		gt.Value(t, found).Nil()
+	})
+
+	t.Run("GetBySlackThread does not match when channel differs", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		threadTS := fmt.Sprintf("%d.000333", time.Now().UnixNano())
+		_, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:     "U-C",
+			CreatedAt:      time.Now().UTC(),
+			UpdatedAt:      time.Now().UTC(),
+			Title:          "Thread C",
+			SlackChannelID: "C-MONITOR",
+			SlackThreadTS:  threadTS,
+			BoardStatus:    "TRIAGE",
+		})
+		gt.NoError(t, err).Required()
+
+		found, err := repo.Case().GetBySlackThread(ctx, wsID, "C-OTHER", threadTS)
+		gt.NoError(t, err)
+		gt.Value(t, found).Nil()
+	})
+
 	t.Run("CountFieldValues counts total and valid select values", func(t *testing.T) {
 		repo := newRepo(t)
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())

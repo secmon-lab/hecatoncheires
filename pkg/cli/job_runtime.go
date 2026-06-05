@@ -116,9 +116,13 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner) {
 		}
 		caseID := int64(0)
 		channelID := ""
+		threadTS := ""
 		if c != nil {
 			caseID = c.ID
 			channelID = c.SlackChannelID
+			// Thread-mode cases post Job output into the case thread rather
+			// than the monitored channel's root.
+			threadTS = c.SlackThreadTS
 		}
 		wsID := ""
 		if ws != nil {
@@ -144,8 +148,9 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner) {
 		})...)
 		if deps.SlackService != nil && channelID != "" {
 			out = append(out, slackpost.New(slackpost.Deps{
-				Poster:    slackPosterAdapter{svc: deps.SlackService},
-				ChannelID: channelID,
+				Poster:          slackPosterAdapter{svc: deps.SlackService},
+				ChannelID:       channelID,
+				DefaultThreadTS: threadTS,
 			})...)
 		}
 		return out

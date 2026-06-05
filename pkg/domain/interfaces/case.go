@@ -46,6 +46,11 @@ type CaseRepository interface {
 	// Returns nil, nil if no case is found with the given channel ID.
 	GetBySlackChannelID(ctx context.Context, workspaceID string, channelID string) (*model.Case, error)
 
+	// GetBySlackThread retrieves a thread-mode case by its monitored channel
+	// and thread timestamp. Returns nil, nil if no matching case exists. Used
+	// for thread-mode case lookup (idempotent creation and reply ingest).
+	GetBySlackThread(ctx context.Context, workspaceID string, channelID string, threadTS string) (*model.Case, error)
+
 	// GetByRequestKey retrieves a case by its request key.
 	// Returns nil, nil if no case is found with the given key.
 	GetByRequestKey(ctx context.Context, workspaceID string, key string) (*model.Case, error)

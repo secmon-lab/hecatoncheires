@@ -288,6 +288,43 @@ func (r *caseRepository) GetBySlackChannelID(ctx context.Context, workspaceID st
 	return &c, nil
 }
 
+func (r *caseRepository) GetBySlackThread(ctx context.Context, workspaceID string, channelID string, threadTS string) (*model.Case, error) {
+	if channelID == "" || threadTS == "" {
+		return nil, nil
+	}
+
+	// Single-field query on SlackThreadTS (Slack message timestamps are unique
+	// per workspace), then verify the channel in memory. This avoids the
+	// composite index that Where(channel).Where(thread) would require while
+	// still scoping the result to the monitored channel.
+	iter := r.casesCollection(workspaceID).
+		Where("SlackThreadTS", "==", threadTS).
+		Limit(1).
+		Documents(ctx)
+	defer iter.Stop()
+
+	docSnap, err := iter.Next()
+	if err == iterator.Done {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to query case by slack thread",
+			goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
+	}
+
+	var c model.Case
+	if err := docSnap.DataTo(&c); err != nil {
+		return nil, goerr.Wrap(err, "failed to decode case",
+			goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
+	}
+
+	if c.SlackChannelID != channelID {
+		return nil, nil
+	}
+
+	return &c, nil
+}
+
 func (r *caseRepository) GetByRequestKey(ctx context.Context, workspaceID string, key string) (*model.Case, error) {
 	iter := r.casesCollection(workspaceID).
 		Where("RequestKey", "==", key).

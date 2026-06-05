@@ -160,6 +160,51 @@ func TestWorkspaceRegistry_Workspaces(t *testing.T) {
 	gt.Value(t, workspaces[1].Name).Equal("Recruitment")
 }
 
+func TestWorkspaceEntry_IsThreadMode(t *testing.T) {
+	gt.Bool(t, (&model.WorkspaceEntry{CaseMode: model.CaseModeThread}).IsThreadMode()).True()
+	gt.Bool(t, (&model.WorkspaceEntry{CaseMode: model.CaseModeChannel}).IsThreadMode()).False()
+	// Empty mode normalises to channel.
+	gt.Bool(t, (&model.WorkspaceEntry{}).IsThreadMode()).False()
+
+	var nilEntry *model.WorkspaceEntry
+	gt.Bool(t, nilEntry.IsThreadMode()).False()
+}
+
+func TestWorkspaceRegistry_FindByMonitorChannel(t *testing.T) {
+	reg := model.NewWorkspaceRegistry()
+	reg.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: "channel-ws"},
+		CaseMode:  model.CaseModeChannel,
+	})
+	reg.Register(&model.WorkspaceEntry{
+		Workspace:             model.Workspace{ID: "thread-ws"},
+		CaseMode:              model.CaseModeThread,
+		SlackMonitorChannelID: "C0MONITOR",
+	})
+
+	t.Run("matches the monitored channel of a thread-mode workspace", func(t *testing.T) {
+		entry, ok := reg.FindByMonitorChannel("C0MONITOR")
+		gt.Bool(t, ok).True()
+		gt.Value(t, entry.Workspace.ID).Equal("thread-ws")
+	})
+
+	t.Run("does not match an unknown channel", func(t *testing.T) {
+		_, ok := reg.FindByMonitorChannel("C0UNKNOWN")
+		gt.Bool(t, ok).False()
+	})
+
+	t.Run("empty channel never matches", func(t *testing.T) {
+		_, ok := reg.FindByMonitorChannel("")
+		gt.Bool(t, ok).False()
+	})
+
+	t.Run("nil registry is safe", func(t *testing.T) {
+		var nilReg *model.WorkspaceRegistry
+		_, ok := nilReg.FindByMonitorChannel("C0MONITOR")
+		gt.Bool(t, ok).False()
+	})
+}
+
 func TestWorkspaceEntry_SlackTeamID(t *testing.T) {
 	reg := model.NewWorkspaceRegistry()
 

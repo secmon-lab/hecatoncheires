@@ -31,6 +31,12 @@ type Deps struct {
 	// Empty ChannelID makes the tool fail loudly at invocation time
 	// (typically a draft-mode Case that never got a channel).
 	ChannelID string
+	// DefaultThreadTS is the thread the message defaults into when the agent
+	// does not pass an explicit thread_ts. For thread-mode cases this is the
+	// case's SlackThreadTS so Job output lands in the case thread rather than
+	// at the monitored channel's root. Empty for channel-mode cases (posts go
+	// to the channel root by default).
+	DefaultThreadTS string
 }
 
 // New builds the writer-side Slack tools available to Jobs.
@@ -79,7 +85,7 @@ func (t *postToCaseChannelTool) Run(ctx context.Context, args map[string]any) (m
 		return nil, goerr.New("text is required")
 	}
 
-	threadTS := ""
+	threadTS := t.deps.DefaultThreadTS
 	if v, ok := args["thread_ts"]; ok && v != nil {
 		s, ok := v.(string)
 		if !ok {

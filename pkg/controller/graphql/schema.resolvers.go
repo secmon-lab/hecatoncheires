@@ -523,6 +523,15 @@ func (r *mutationResolver) ReopenCase(ctx context.Context, workspaceID string, i
 	return toGraphQLCase(reopened, workspaceID), nil
 }
 
+// UpdateCaseStatus is the resolver for the updateCaseStatus field.
+func (r *mutationResolver) UpdateCaseStatus(ctx context.Context, workspaceID string, input graphql1.UpdateCaseStatusInput) (*graphql1.Case, error) {
+	updated, err := r.UseCases.Case.UpdateCaseStatus(ctx, workspaceID, int64(input.ID), input.Status)
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLCase(updated, workspaceID), nil
+}
+
 // SyncCaseChannelUsers is the resolver for the syncCaseChannelUsers field.
 func (r *mutationResolver) SyncCaseChannelUsers(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error) {
 	updated, err := r.UseCases.Case.SyncCaseChannelUsers(ctx, workspaceID, int64(id))
@@ -1120,48 +1129,25 @@ func (r *queryResolver) FieldConfiguration(ctx context.Context, workspaceID stri
 	}
 
 	statusSet := r.UseCases.Case.GetActionStatusSet(workspaceID)
-	statusDefs := statusSet.Statuses()
-	gqlStatuses := make([]*graphql1.ActionStatusDefinition, 0, len(statusDefs))
-	for _, def := range statusDefs {
-		def := def
-		var description, color, emoji *string
-		if def.Description != "" {
-			v := def.Description
-			description = &v
-		}
-		if def.Color != "" {
-			v := def.Color
-			color = &v
-		}
-		if def.Emoji != "" {
-			v := def.Emoji
-			emoji = &v
-		}
-		gqlStatuses = append(gqlStatuses, &graphql1.ActionStatusDefinition{
-			ID:          def.ID,
-			Name:        def.Name,
-			Description: description,
-			Color:       color,
-			Emoji:       emoji,
-		})
-	}
-
-	closedIDs := statusSet.ClosedIDs()
-	if closedIDs == nil {
-		closedIDs = []string{}
-	}
 
 	return &graphql1.FieldConfiguration{
 		Fields: fields,
 		Labels: &graphql1.EntityLabels{
 			Case: schema.Labels.Case,
 		},
-		ActionConfig: &graphql1.ActionConfig{
-			Initial:  statusSet.InitialID(),
-			Closed:   closedIDs,
-			Statuses: gqlStatuses,
-		},
+		ActionConfig: toActionConfig(statusSet),
 	}, nil
+}
+
+// CaseStatusConfig is the resolver for the caseStatusConfig field.
+func (r *queryResolver) CaseStatusConfig(ctx context.Context, workspaceID string) (*graphql1.ActionConfig, error) {
+	statusSet := r.UseCases.Case.GetCaseStatusSet(workspaceID)
+	if statusSet == nil {
+		// Channel-mode workspace: no Case status set. Null is the schema
+		// contract for "this workspace does not use Case-level statuses".
+		return nil, nil
+	}
+	return toActionConfig(statusSet), nil
 }
 
 // SlackUsers is the resolver for the slackUsers field.
@@ -1406,3 +1392,21 @@ type actionEventResolver struct{ *Resolver }
 type caseResolver struct{ *Resolver }
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
+
+// !!! WARNING !!!
+// The code below was going to be deleted when updating resolvers. It has been copied here so you have
+// one last chance to move it out of harms way if you want. There are two reasons this happens:
+//  - When renaming or deleting a resolver the old code will be put in here. You can safely delete
+//    it when you're done.
+//  - You have helper methods in this file. Move them out to keep these resolver files clean.
+/*
+	func (r *caseResolver) SlackThreadTs(ctx context.Context, obj *graphql1.Case) (*string, error) {
+	panic(fmt.Errorf("not implemented: SlackThreadTs - slackThreadTS"))
+}
+func (r *caseResolver) IsThreadBound(ctx context.Context, obj *graphql1.Case) (bool, error) {
+	panic(fmt.Errorf("not implemented: IsThreadBound - isThreadBound"))
+}
+func (r *caseResolver) BoardStatus(ctx context.Context, obj *graphql1.Case) (*string, error) {
+	panic(fmt.Errorf("not implemented: BoardStatus - boardStatus"))
+}
+*/

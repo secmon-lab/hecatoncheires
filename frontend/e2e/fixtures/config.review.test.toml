@@ -1,0 +1,43 @@
+# Hecatoncheires E2E Test Configuration — thread mode
+# A second workspace used to exercise the thread-per-case mode in E2E:
+# the Kanban board renders Cases (not Actions) grouped by [case.status].
+
+[workspace]
+id   = "review"
+name = "E2E Review (thread)"
+
+[labels]
+case = "Review"
+
+[slack]
+mode    = "thread"
+channel = "C0E2EREVIEW"
+
+[case]
+initial = "triage"
+closed  = ["done"]
+
+[[case.status]]
+id    = "triage"
+name  = "Triage"
+color = "idle"
+
+[[case.status]]
+id    = "in_review"
+name  = "In Review"
+color = "active"
+
+[[case.status]]
+id    = "done"
+name  = "Done"
+color = "success"
+
+[[fields]]
+id       = "review_type"
+name     = "Review Type"
+type     = "select"
+required = false
+options = [
+  { id = "code", name = "Code" },
+  { id = "design", name = "Design" },
+]

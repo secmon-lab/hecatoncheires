@@ -29,6 +29,10 @@ var (
 	// ErrInvalidWorkspaceEmoji is returned when the [workspace] emoji exceeds
 	// the allowed rune length.
 	ErrInvalidWorkspaceEmoji = goerr.New("invalid workspace emoji")
+	ErrInvalidCaseMode       = goerr.New("invalid case mode")
+	ErrMissingMonitorChannel = goerr.New("thread mode requires [slack] channel")
+	ErrInvalidMonitorChannel = goerr.New("invalid Slack channel ID")
+	ErrMissingCaseStatus     = goerr.New("thread mode requires [case.status]")
 )
 
 // Context keys for error values

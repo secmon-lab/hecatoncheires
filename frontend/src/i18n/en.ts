@@ -186,6 +186,10 @@ export const en: Messages = {
   // Actions
   titleActions: '{workspaceName} Actions',
   subtitleActions: 'Manage and track actions',
+  titleCaseBoard: '{workspaceName} Cases',
+  subtitleCaseBoard: 'Manage and track cases',
+  placeholderSearchCaseBoard: 'Search cases by title...',
+  labelSlackThread: 'Slack thread',
   btnNewAction: 'New Action',
   titleActionFormNew: 'New Action',
   titleActionFormEdit: 'Edit Action',

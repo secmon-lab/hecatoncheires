@@ -748,6 +748,150 @@ func (uc *CaseUseCase) ReopenCase(ctx context.Context, workspaceID string, id in
 	return updated, nil
 }
 
+// caseStatusSetForWorkspace returns the configurable Case status set for the
+// workspace (thread mode), or nil when the workspace is channel mode / has no
+// case status set.
+func (uc *CaseUseCase) caseStatusSetForWorkspace(workspaceID string) *model.ActionStatusSet {
+	if uc.workspaceRegistry == nil {
+		return nil
+	}
+	entry, err := uc.workspaceRegistry.Get(workspaceID)
+	if err != nil {
+		return nil
+	}
+	return entry.CaseStatusSet
+}
+
+// CreateThreadCase creates a thread-mode Case bound to (channelID, threadTS).
+// It is idempotent: a re-delivered Slack message that maps to an existing
+// thread returns the existing Case unchanged. The reporter is the posting
+// user; the initial board status is the workspace's configured initial status.
+// CaseLifecycleCreated is published so Jobs fire exactly as in channel mode.
+func (uc *CaseUseCase) CreateThreadCase(ctx context.Context, workspaceID, channelID, threadTS, reporterID, title, description string) (*model.Case, error) {
+	if channelID == "" || threadTS == "" {
+		return nil, goerr.New("channelID and threadTS are required for thread case")
+	}
+
+	existing, err := uc.repo.Case().GetBySlackThread(ctx, workspaceID, channelID, threadTS)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to check existing thread case",
+			goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
+	}
+	if existing != nil {
+		return existing, nil
+	}
+
+	set := uc.caseStatusSetForWorkspace(workspaceID)
+	initialStatus := ""
+	if set != nil {
+		initialStatus = set.InitialID()
+	}
+
+	now := time.Now().UTC()
+	c := &model.Case{
+		Title:          title,
+		Description:    description,
+		Status:         types.CaseStatusOpen,
+		ReporterID:     reporterID,
+		SlackChannelID: channelID,
+		SlackThreadTS:  threadTS,
+		BoardStatus:    initialStatus,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	created, err := uc.repo.Case().Create(ctx, workspaceID, c)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to create thread case",
+			goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
+	}
+
+	uc.publishLifecycle(ctx, workspaceID, created, model.CaseLifecycleCreated)
+	return created, nil
+}
+
+// MaterializeThreadCase applies the LLM-materialized title / description /
+// custom field values onto a thread-mode Case. Empty title / description are
+// ignored (the placeholder set at creation is kept). Field values are
+// type-checked via the workspace validator before write.
+func (uc *CaseUseCase) MaterializeThreadCase(ctx context.Context, workspaceID string, id int64, title, description string, fieldValues map[string]model.FieldValue) (*model.Case, error) {
+	existing, err := uc.repo.Case().Get(ctx, workspaceID, id)
+	if err != nil {
+		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
+	}
+
+	if title != "" {
+		existing.Title = title
+	}
+	if description != "" {
+		existing.Description = description
+	}
+	if len(fieldValues) > 0 {
+		if validator := uc.fieldValidatorForWorkspace(workspaceID); validator != nil {
+			enriched, vErr := validator.ValidateCaseFieldsPartial(fieldValues)
+			if vErr != nil {
+				return nil, goerr.Wrap(vErr, "thread case field validation failed", goerr.V(CaseIDKey, id))
+			}
+			fieldValues = enriched
+		}
+		if existing.FieldValues == nil {
+			existing.FieldValues = make(map[string]model.FieldValue, len(fieldValues))
+		}
+		for k, v := range fieldValues {
+			existing.FieldValues[k] = v
+		}
+	}
+
+	existing.UpdatedAt = time.Now().UTC()
+	updated, err := uc.repo.Case().Update(ctx, workspaceID, existing)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to materialize thread case", goerr.V(CaseIDKey, id))
+	}
+	return updated, nil
+}
+
+// UpdateCaseStatus sets the configurable board status of a thread-mode Case
+// and synchronises the lifecycle Status (a closed board status closes the
+// case). It is the single entry point for both the Kanban drag-and-drop and
+// the agent's `close` decision; CaseLifecycleClosed is published only on the
+// open→closed edge so Jobs fire once.
+func (uc *CaseUseCase) UpdateCaseStatus(ctx context.Context, workspaceID string, id int64, boardStatus string) (*model.Case, error) {
+	set := uc.caseStatusSetForWorkspace(workspaceID)
+	if set == nil {
+		return nil, goerr.New("workspace has no case status set (not thread mode)",
+			goerr.V("workspace_id", workspaceID))
+	}
+	if !set.IsValid(boardStatus) {
+		return nil, goerr.New("invalid board status id",
+			goerr.V("workspace_id", workspaceID), goerr.V("board_status", boardStatus))
+	}
+
+	existing, err := uc.repo.Case().Get(ctx, workspaceID, id)
+	if err != nil {
+		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
+	}
+
+	// Access control for private cases.
+	if token, tokenErr := auth.TokenFromContext(ctx); tokenErr == nil && !model.IsCaseAccessible(existing, token.Sub) {
+		return nil, goerr.Wrap(ErrAccessDenied, "cannot update private case status",
+			goerr.V(CaseIDKey, id), goerr.V("user_id", token.Sub))
+	}
+
+	wasClosed := existing.Status.Normalize() == types.CaseStatusClosed
+	existing.BoardStatus = boardStatus
+	existing.SyncLifecycleFromBoardStatus(set)
+	existing.UpdatedAt = time.Now().UTC()
+
+	updated, err := uc.repo.Case().Update(ctx, workspaceID, existing)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to update case status", goerr.V(CaseIDKey, id))
+	}
+
+	if !wasClosed && updated.Status.Normalize() == types.CaseStatusClosed {
+		uc.publishLifecycle(ctx, workspaceID, updated, model.CaseLifecycleClosed)
+	}
+	return updated, nil
+}
+
 // ListDrafts returns every draft case in the workspace. Drafts are
 // workspace-wide so any team member can pick one up; private drafts are
 // the exception and remain visible only to their reporter (a draft has
@@ -976,6 +1120,15 @@ func (uc *CaseUseCase) draftURL(workspaceID string, caseID int64) string {
 	return fmt.Sprintf("%s/ws/%s/drafts/%d", uc.baseURL, workspaceID, caseID)
 }
 
+// CaseURL returns the web-UI URL for a specific case detail page, or an empty
+// string when no baseURL has been configured.
+func (uc *CaseUseCase) CaseURL(workspaceID string, caseID int64) string {
+	if uc.baseURL == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s/ws/%s/cases/%d", uc.baseURL, workspaceID, caseID)
+}
+
 // SyncCaseChannelUsers synchronizes channel members from Slack API to the case
 func (uc *CaseUseCase) SyncCaseChannelUsers(ctx context.Context, workspaceID string, caseID int64) (*model.Case, error) {
 	existing, err := uc.repo.Case().Get(ctx, workspaceID, caseID)
@@ -1167,4 +1320,10 @@ func (uc *CaseUseCase) GetFieldConfiguration(workspaceID string) *config.FieldSc
 // needs to render or validate action statuses outside ActionUseCase.
 func (uc *CaseUseCase) GetActionStatusSet(workspaceID string) *model.ActionStatusSet {
 	return resolveActionStatusSet(uc.workspaceRegistry, workspaceID)
+}
+
+// GetCaseStatusSet returns the configurable Case status set (the Kanban
+// columns) for a thread-mode workspace, or nil for channel-mode workspaces.
+func (uc *CaseUseCase) GetCaseStatusSet(workspaceID string) *model.ActionStatusSet {
+	return uc.caseStatusSetForWorkspace(workspaceID)
 }

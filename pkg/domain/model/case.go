@@ -46,6 +46,20 @@ type Case struct {
 	ReporterID     string   // Slack User ID of the case reporter (immutable after creation)
 	AssigneeIDs    []string // Slack User IDs
 	SlackChannelID string
+
+	// SlackThreadTS binds a thread-mode Case to its Slack thread. Empty for
+	// channel-mode Cases (SlackChannelID is then a dedicated channel). For
+	// thread-mode Cases SlackChannelID is the monitored channel and
+	// SlackThreadTS is the thread parent timestamp. See CaseMode.
+	SlackThreadTS string
+
+	// BoardStatus is the configurable workflow status id (the Kanban column)
+	// for thread-mode Cases, validated against the workspace's CaseStatusSet.
+	// Empty for channel-mode Cases, where the configurable status attaches to
+	// Actions instead. The lifecycle Status is kept in sync with BoardStatus
+	// via SyncLifecycleFromBoardStatus (closed status id => CLOSED).
+	BoardStatus string
+
 	IsPrivate      bool                  // Private mode flag
 	ChannelUserIDs []string              // Slack User IDs of channel members (synced for all cases)
 	AccessDenied   bool                  // Runtime-only: set by UseCase when access is restricted (not persisted)
@@ -74,6 +88,31 @@ type Case struct {
 // IsDraft reports whether this Case is currently in the unsubmitted draft state.
 func (c *Case) IsDraft() bool {
 	return c != nil && c.Status.IsDraft()
+}
+
+// IsThreadBound reports whether this Case is bound to a Slack thread
+// (thread-mode). Channel-mode Cases have an empty SlackThreadTS.
+func (c *Case) IsThreadBound() bool {
+	return c != nil && c.SlackThreadTS != ""
+}
+
+// SyncLifecycleFromBoardStatus keeps the lifecycle Status consistent with the
+// configurable BoardStatus for thread-mode Cases: a closed board status maps
+// to CaseStatusClosed, any other to CaseStatusOpen. DRAFT cases are left
+// untouched (thread-mode Cases are never drafts, but guard defensively). It is
+// a no-op when set is nil or BoardStatus is empty.
+func (c *Case) SyncLifecycleFromBoardStatus(set *ActionStatusSet) {
+	if c == nil || set == nil || c.BoardStatus == "" {
+		return
+	}
+	if c.Status.IsDraft() {
+		return
+	}
+	if set.IsClosed(c.BoardStatus) {
+		c.Status = types.CaseStatusClosed
+	} else {
+		c.Status = types.CaseStatusOpen
+	}
 }
 
 // Validate checks the basic invariants every persisted Case must satisfy.
