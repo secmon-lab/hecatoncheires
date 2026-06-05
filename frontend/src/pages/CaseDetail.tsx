@@ -201,11 +201,17 @@ export default function CaseDetail() {
   const slackChannelID: string = c?.slackChannelID || ''
   const slackChannelURL: string | null = c?.slackChannelURL || null
   const channelUserCount: number = c?.channelUserCount || 0
-  // Thread-mode cases bind to a Slack thread rather than a dedicated channel:
-  // Actions do not apply, and the Slack link should open the thread.
+  // Thread-mode is a WORKSPACE property: in a thread-mode workspace every case
+  // uses the thread model (no Actions, a configurable board status, no
+  // lifecycle close button) regardless of the individual case's binding flag.
+  // We key the UI off the workspace mode, not the per-case isThreadBound, so a
+  // case still renders thread-style even if its thread binding is missing.
+  const threadMode = caseStatuses.isThreadMode
   const isThreadBound = !!c?.isThreadBound
   const slackThreadTS: string = c?.slackThreadTS || ''
-  const boardStatus: string = c?.boardStatus || ''
+  // Effective board status: fall back to the configured initial status when the
+  // case has none yet, so the selector always has a valid value to show.
+  const boardStatus: string = c?.boardStatus || caseStatuses.initialId || ''
 
   const { data: membersData } = useQuery(GET_CASE_MEMBERS, {
     variables: {
@@ -398,6 +404,11 @@ export default function CaseDetail() {
               {t('btnEdit')}
             </Button>
           </>
+        ) : threadMode ? (
+          // Thread mode: closing/reopening is driven by the board status
+          // selector (a closed status closes the case), so no lifecycle
+          // Close/Reopen button is shown here.
+          null
         ) : c.status === 'OPEN' ? (
           <Button
             size="sm"
@@ -535,9 +546,9 @@ export default function CaseDetail() {
           </section>
 
           {/* Related Actions only exist for activated channel-mode cases.
-              Drafts have no actions yet, and thread-mode cases never manage
-              Actions at all — hide the entire section in both cases. */}
-          {c.status !== 'DRAFT' && !isThreadBound && (
+              Drafts have no actions yet, and thread-mode workspaces never
+              manage Actions at all — hide the entire section in both cases. */}
+          {c.status !== 'DRAFT' && !threadMode && (
           <section className="h-section">
             <div className="h-section-h">
               <span className="h-section-title">{t('sectionRelatedActions')}</span>
@@ -753,7 +764,7 @@ export default function CaseDetail() {
               <span className="h-aside-title">{t('labelStatus')}</span>
             </div>
             <div data-testid="aside-status-display" className="h-status-strong">
-              {isThreadBound && caseStatuses.isThreadMode ? (
+              {threadMode ? (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                   <span
                     className="pip"

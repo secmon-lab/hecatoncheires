@@ -6,8 +6,9 @@
 id   = "review"
 name = "E2E Review (thread)"
 
-[labels]
-case = "Review"
+# Labels are intentionally left at the defaults ("Case") so the shared Case
+# page objects (which match the "New Case" / "New Case" form labels) work
+# against this workspace too.
 
 [slack]
 mode    = "thread"
