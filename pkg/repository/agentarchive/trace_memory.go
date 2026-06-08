@@ -65,6 +65,22 @@ func (r *MemoryTraceRepository) Load(sessionID, traceID string) *trace.Trace {
 	return &t
 }
 
+// Snapshot returns every persisted trace as raw JSON, keyed "sessionID/traceID".
+// Intended for diagnostics (e.g. the eval harness trace dump).
+func (r *MemoryTraceRepository) Snapshot() map[string]json.RawMessage {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make(map[string]json.RawMessage)
+	for sid, traces := range r.entries {
+		for tid, data := range traces {
+			cp := make([]byte, len(data))
+			copy(cp, data)
+			out[sid+"/"+tid] = cp
+		}
+	}
+	return out
+}
+
 // TraceIDs returns all traceIDs persisted for the given sessionID.
 func (r *MemoryTraceRepository) TraceIDs(sessionID string) []string {
 	r.mu.RLock()

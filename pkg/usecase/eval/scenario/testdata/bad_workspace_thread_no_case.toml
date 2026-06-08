@@ -1,0 +1,19 @@
+# Thread mode but missing [case] status set -> workspace validation must fail.
+[meta]
+id       = "bad-workspace"
+workflow = "thread_mode_initial"
+
+[workspace]
+id   = "support"
+name = "Support"
+
+[slack]
+mode    = "thread"
+channel = "C0123456789"
+
+[input]
+text = "something"
+
+[[expect.checks]]
+id       = "c1"
+question = "ok?"

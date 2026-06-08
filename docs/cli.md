@@ -14,6 +14,7 @@ Subcommands:
 - [`validate`](#validate) — validate configuration files and optionally check DB consistency.
 - [`diagnosis`](#diagnosis) — one-shot data inspection / repair jobs.
 - [`tick`](#tick) — run a single sweep over scheduled Agent Jobs.
+- [`eval`](./eval.md) — run offline scenario-based evaluation of LLM workflows (see [eval.md](./eval.md)).
 
 For TOML configuration topics (workspace definitions, field schemas, the `[assist]` section, etc.), see [configuration.md](./configuration.md).
 

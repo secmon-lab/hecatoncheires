@@ -100,6 +100,7 @@ The application follows Domain-Driven Design (DDD) with clean architecture:
   - `agent/planexec/` - Reusable plan-and-execute runtime (planner LLM → parallel sub-agents → replan → final response). Shared by `agent/proposal` (case-draft mode) and `agent/job` (planexec-strategy Jobs).
   - `agent/proposal/` - Case-draft (proposal) agent host. Owns the Slack-facing Handler interface and turn-lock semantics.
   - `agent/job/` - Job execution layer: `SingleLoopJobExecutor` (strategy=simple) and `PlanexecJobExecutor` (strategy=planexec).
+  - `eval/` - Offline eval harness (`hecatoncheires eval`): runs scenario files through a workflow driver, judges the produced artifact with an LLM checklist, and dumps diagnostics. See `docs/eval.md`.
 - `pkg/utils/` - Shared utilities (logging, etc.)
 - `frontend/` - React TypeScript application
 - `graphql/` - GraphQL schema definitions
@@ -256,6 +257,20 @@ In principle, do not trust developers who use this library from outside
 - This includes but is not limited to: new Slack scopes, new environment variables, new configuration options, new API endpoints, changed behavior
 - Documentation updates are part of the implementation, not an afterthought — include them in specs and implementation plans from the start
 - If a feature requires external setup (e.g., adding OAuth scopes in Slack App settings), document the required steps
+
+### Eval tool catalog
+
+- When you add or remove an agent tool that an eval scenario can reference (the
+  `[tools.*]` keys / tool-usage checks), you MUST update the eval tool catalog
+  so the catalog, the `hecatoncheires eval --list-tools` output, the scenario
+  validator, and the authoring skill stay in sync.
+- The single source of truth is `ToolCatalog()` in `pkg/usecase/eval/runner.go`
+  (with the tool-name constants in `pkg/usecase/eval/toolsim`). Update it there;
+  `--list-tools` and the scenario validator read from it. Also refresh the tool
+  list in `skills/hecatoncheires-build-scenario/SKILL.md` and `docs/eval.md`.
+- If the tool's client is concrete (not an interface), note whether it is
+  simulatable or live-only in the catalog entry (e.g. `github_search` is
+  live-only in v1).
 
 ### Check
 

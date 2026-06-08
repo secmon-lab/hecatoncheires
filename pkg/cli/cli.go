@@ -42,6 +42,7 @@ func Run(ctx context.Context, args []string, version string) error {
 			cmdValidate(),
 			cmdDiagnosis(),
 			cmdTick(),
+			cmdEval(),
 		},
 	}
 
