@@ -68,11 +68,13 @@ func (*JobExecution) Run(ctx context.Context, e *env.Env, sc *scenario.Scenario,
 	}
 	if len(logs) == 0 {
 		// No run record was created — the run failed before logging (e.g. a
-		// prepare-stage error). Surface that as a driver error.
+		// prepare-stage error). Surface that as a driver error. The case itself
+		// already exists (it was seeded), so this is about the missing run log,
+		// not a missing case.
 		if runErr != nil {
 			return nil, goerr.Wrap(runErr, "job run failed before producing a log")
 		}
-		return nil, errNoCase
+		return nil, goerr.New("job run produced no log records")
 	}
 	latest := logs[0]
 
@@ -83,12 +85,24 @@ func (*JobExecution) Run(ctx context.Context, e *env.Env, sc *scenario.Scenario,
 			Error: latest.Error,
 		},
 	}
-	art.Outcome.Summary, art.ToolCalls = readTimeline(ctx, e.Repo, key, latest.RunID)
-
-	if c, err := e.Repo.Case().Get(ctx, wsID, target.ID); err == nil {
-		art.Case = c
+	summary, toolCalls, err := readTimeline(ctx, e.Repo, key, latest.RunID)
+	if err != nil {
+		return nil, err
 	}
-	art.Actions = listCaseActions(ctx, e.Repo, wsID, target.ID)
+	art.Outcome.Summary = summary
+	art.ToolCalls = toolCalls
+
+	c, err := e.Repo.Case().Get(ctx, wsID, target.ID)
+	if err != nil {
+		return nil, goerr.Wrap(err, "get case after job run")
+	}
+	art.Case = c
+
+	actions, err := listCaseActions(ctx, e.Repo, wsID, target.ID)
+	if err != nil {
+		return nil, err
+	}
+	art.Actions = actions
 
 	logger.Info("eval: job done", "scenario", sc.Meta.ID, "job", jobModel.ID, "stage", art.Outcome.Stage, "actions", len(art.Actions))
 	return art, nil
@@ -120,10 +134,10 @@ func resolveJob(jobs []*model.Job, id string) (*model.Job, error) {
 
 // readTimeline extracts the final LLM summary text and the ordered tool calls
 // from the job run event timeline.
-func readTimeline(ctx context.Context, repo interfaces.Repository, key model.JobRunKey, runID string) (summary string, toolCalls []evaltype.ToolCallRecord) {
+func readTimeline(ctx context.Context, repo interfaces.Repository, key model.JobRunKey, runID string) (summary string, toolCalls []evaltype.ToolCallRecord, err error) {
 	events, err := repo.JobRunEvent().List(ctx, key, runID)
 	if err != nil {
-		return "", nil
+		return "", nil, goerr.Wrap(err, "list job run events")
 	}
 	seq := 0
 	for _, ev := range events {
@@ -146,13 +160,13 @@ func readTimeline(ctx context.Context, repo interfaces.Repository, key model.Job
 			}
 		}
 	}
-	return summary, toolCalls
+	return summary, toolCalls, nil
 }
 
-func listCaseActions(ctx context.Context, repo interfaces.Repository, wsID string, caseID int64) []*model.Action {
+func listCaseActions(ctx context.Context, repo interfaces.Repository, wsID string, caseID int64) ([]*model.Action, error) {
 	all, err := repo.Action().List(ctx, wsID, interfaces.ActionListOptions{})
 	if err != nil {
-		return nil
+		return nil, goerr.Wrap(err, "list actions")
 	}
 	out := make([]*model.Action, 0)
 	for _, a := range all {
@@ -160,5 +174,5 @@ func listCaseActions(ctx context.Context, repo interfaces.Repository, wsID strin
 			out = append(out, a)
 		}
 	}
-	return out
+	return out, nil
 }

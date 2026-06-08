@@ -152,8 +152,22 @@ func runAll(ctx context.Context, scenarios []*scenario.Scenario, registry *drive
 	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
 	for i := range scenarios {
+		// Stop acquiring slots once the context is cancelled (e.g. Ctrl-C) instead
+		// of blocking on a full semaphore or spawning more work; mark the
+		// remaining scenarios as errored so the report is complete.
+		select {
+		case <-ctx.Done():
+			results[i] = evaltype.ScenarioResult{
+				ScenarioID: scenarios[i].Meta.ID,
+				Workflow:   scenarios[i].Meta.Workflow,
+				Status:     evaltype.StatusError,
+				Err:        ctx.Err().Error(),
+			}
+			continue
+		case sem <- struct{}{}:
+		}
+
 		wg.Add(1)
-		sem <- struct{}{}
 		go func(idx int) {
 			defer wg.Done()
 			defer func() { <-sem }()
