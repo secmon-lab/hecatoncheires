@@ -47,6 +47,7 @@ flowchart TD
 | [deployment.md](deployment.md) | Production deployment overview |
 | [configuration.md](configuration.md) | `config.toml` complete reference |
 | [cli.md](cli.md) | CLI subcommands, flags, environment variables |
+| [eval.md](eval.md) | Offline scenario-based evaluation of LLM workflows |
 | [slack.md](slack.md) | Slack App setup and integration |
 | [integrations.md](integrations.md) | Notion and GitHub integrations |
 | [user_guide.md](user_guide.md) | End-user guide (Slack workflows) |

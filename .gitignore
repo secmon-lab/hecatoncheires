@@ -32,6 +32,8 @@ go.work.sum
 # .vscode/
 
 /tmp
+# eval and other tooling may write a tmp/ dir from a subdirectory cwd; ignore them anywhere
+tmp/
 /.cckiro
 
 # Claude Code scheduled task lock (per-worktree runtime state)

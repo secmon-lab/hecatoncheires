@@ -41,6 +41,7 @@ Full documentation lives in [docs/](docs/README.md), organized by audience.
 | [Deployment](docs/deployment.md) | Production deployment overview |
 | [Configuration](docs/configuration.md) | `config.toml` complete reference |
 | [CLI Reference](docs/cli.md) | Subcommands, flags, and environment variables |
+| [Eval Harness](docs/eval.md) | Offline scenario-based evaluation of LLM workflows |
 | [Slack Integration](docs/slack.md) | Slack App setup (OAuth, Events, Interactivity, Slash) |
 | [Integrations](docs/integrations.md) | Notion and GitHub |
 | [User Guide](docs/user_guide.md) | End-user Slack workflows |

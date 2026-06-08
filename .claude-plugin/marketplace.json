@@ -1,0 +1,15 @@
+{
+  "name": "hecatoncheires",
+  "owner": {
+    "name": "secmon-lab"
+  },
+  "description": "Plugins for the Hecatoncheires project",
+  "plugins": [
+    {
+      "name": "hecatoncheires-build-scenario",
+      "source": "./skills/hecatoncheires-build-scenario",
+      "description": "Author eval scenario TOML files for `hecatoncheires eval` (workspace config, input, simulated tool data / sources, answering persona, and the judge checklist).",
+      "version": "0.1.0"
+    }
+  ]
+}

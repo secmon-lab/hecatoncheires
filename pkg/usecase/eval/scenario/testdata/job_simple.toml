@@ -1,0 +1,53 @@
+# job workflow scenario: run a workspace Job against a seeded case.
+[meta]
+id          = "job-triage-summary"
+description = "Triage-summary job runs against a seeded case"
+workflow    = "job"
+language    = "en"
+
+[workspace]
+id   = "support"
+name = "Support"
+
+[[fields]]
+id       = "severity"
+name     = "Severity"
+type     = "select"
+required = false
+options  = [ {id = "high", name = "High"}, {id = "low", name = "Low"} ]
+
+# Workspace job (note: [[job]] array — distinct from the eval's [run_job] selector).
+[[job]]
+id       = "triage-summary"
+name     = "Triage summary"
+prompt   = "Summarize the case titled {{.Case.Title}} and note next steps."
+strategy = "simple"
+  [job.events.case]
+  on = ["created"]
+
+# Source surfaced to the job via the system prompt (resolveSources).
+[[sources]]
+name = "Incident runbooks"
+type = "notion_db"
+  [sources.notion_db]
+  database_id = "11112222333344445555666677778888"
+
+# Seeded target case the job runs against.
+[[cases]]
+title       = "Cannot log in to portal (503)"
+description = "Users report 503 on login since this morning."
+  [cases.fields]
+  severity = "high"
+
+# Eval job selector: which workspace job to run, against which seeded case.
+[run_job]
+id          = "triage-summary"
+target_case = "Cannot log in to portal (503)"
+
+[[expect.checks]]
+id       = "job-succeeded"
+question = "Did the job run complete successfully (outcome SUCCESS)?"
+
+[[expect.checks]]
+id       = "summary-mentions-login"
+question = "Does the job summary address the portal login / 503 issue?"

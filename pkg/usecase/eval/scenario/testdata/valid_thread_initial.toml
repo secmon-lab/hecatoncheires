@@ -1,0 +1,79 @@
+# Valid thread_mode_initial scenario. Workspace config uses the standard
+# top-level layout; eval-specific tables coexist (config loader ignores them).
+[meta]
+id          = "thread-initial-login-issue"
+description = "Portal login 503 should be materialized into a case"
+workflow    = "thread_mode_initial"
+language    = "en"
+
+[workspace]
+id   = "support"
+name = "Support"
+
+[[fields]]
+id       = "severity"
+name     = "Severity"
+type     = "select"
+required = true
+options  = [ {id = "high", name = "High"}, {id = "low", name = "Low"} ]
+
+[slack]
+mode    = "thread"
+channel = "C0123456789"
+
+[[case.status]]
+id   = "triage"
+name = "Triage"
+[[case.status]]
+id   = "done"
+name = "Done"
+[case]
+initial = "triage"
+closed  = ["done"]
+
+[input]
+text = "Cannot log in to the portal, I keep getting a 503 error since this morning."
+
+[[cases]]
+title        = "Portal outage 2026-05"
+description  = "Earlier portal incident"
+board_status = "done"
+  [cases.fields]
+  severity = "high"
+
+# Workspace data sources seeded into the repo (source-aware tools/workflows read them).
+[[sources]]
+name = "Incident runbooks"
+type = "notion_db"
+description = "Runbook database"
+  [sources.notion_db]
+  database_id    = "11112222333344445555666677778888"
+  database_title = "Runbooks"
+  database_url   = "https://notion.so/runbooks"
+
+[[sources]]
+name = "Incident channel"
+type = "slack"
+  [sources.slack]
+  channels = [ {id = "C0123456789", name = "incidents"} ]
+
+[tools.slack_search]
+background = """
+#incidents has two threads reporting portal 503 errors since this morning.
+"""
+
+[persona]
+description      = "A non-technical employee reporting an issue."
+knowledge        = """
+- The error started around 9:00 this morning.
+- It affects the web portal; the mobile app works fine.
+"""
+max_answer_turns = 3
+
+[[expect.checks]]
+id       = "title-identifies-login-failure"
+question = "Does the case title concisely identify that this is a portal login failure?"
+
+[[expect.checks]]
+id       = "severity-high"
+question = "Is the 'severity' field set to 'high'?"
