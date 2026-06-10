@@ -16,6 +16,9 @@ jobs:
       security-events: write
     runs-on: ubuntu-latest
     steps:
+      - name: Run cicd-sensor
+        uses: cicd-sensor/cicd-sensor-action@6ee257338e68af2b279b321b3346fe5f385aa498 # v0.0.29
+
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Set up Go
@@ -50,6 +53,9 @@ jobs:
       run:
         working-directory: frontend
     steps:
+      - name: Run cicd-sensor
+        uses: cicd-sensor/cicd-sensor-action@6ee257338e68af2b279b321b3346fe5f385aa498 # v0.0.29
+
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       # Install pnpm BEFORE setup-node so the pinned version from
