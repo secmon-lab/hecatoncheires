@@ -374,3 +374,51 @@ func TestFieldValidator_ValidateNumber_MultipleTypes(t *testing.T) {
 		})
 	}
 }
+
+func TestFieldValidator_ValidateCaseFieldsAll(t *testing.T) {
+	schema := &config.FieldSchema{
+		Fields: []config.FieldDefinition{
+			{
+				ID:       "severity",
+				Name:     "Severity",
+				Type:     types.FieldTypeSelect,
+				Required: true,
+				Options: []config.FieldOption{
+					{ID: "low", Name: "Low"},
+					{ID: "high", Name: "High"},
+				},
+			},
+			{
+				ID:       "summary",
+				Name:     "Summary",
+				Type:     types.FieldTypeText,
+				Required: true,
+			},
+		},
+	}
+	v := model.NewFieldValidator(schema)
+
+	t.Run("aggregates all violations without fail-fast", func(t *testing.T) {
+		// severity has an invalid option, summary (required text) is missing,
+		// and an unknown field id is supplied. All three must be reported.
+		_, err := v.ValidateCaseFieldsAll(map[string]model.FieldValue{
+			"severity": {FieldID: "severity", Value: "critical"},
+			"bogus":    {FieldID: "bogus", Value: "x"},
+		})
+		gt.Error(t, err).Is(model.ErrCaseFieldValidation)
+		msg := err.Error()
+		gt.String(t, msg).Contains("severity")
+		gt.String(t, msg).Contains("summary")
+		gt.String(t, msg).Contains("bogus")
+	})
+
+	t.Run("returns enriched values when all valid", func(t *testing.T) {
+		out, err := v.ValidateCaseFieldsAll(map[string]model.FieldValue{
+			"severity": {FieldID: "severity", Value: "high"},
+			"summary":  {FieldID: "summary", Value: "a clear summary"},
+		})
+		gt.NoError(t, err).Required()
+		gt.Value(t, out["severity"].Type).Equal(types.FieldTypeSelect)
+		gt.Value(t, out["summary"].Type).Equal(types.FieldTypeText)
+	})
+}

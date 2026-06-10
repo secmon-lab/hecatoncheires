@@ -111,6 +111,15 @@ type CaseSection struct {
 	Initial string                  `toml:"initial"`
 	Closed  []string                `toml:"closed"`
 	Status  []ActionStatusConfigRow `toml:"status"`
+	Prompts CasePromptsSection      `toml:"prompts"`
+}
+
+// CasePromptsSection represents the [case.prompts] sub-table: workspace-
+// specific additional prompts for the case agent, keyed by lifecycle phase.
+// Only `create` (the thread-mode initialization agent) is consumed today;
+// `mention` / `close` are reserved for future phases.
+type CasePromptsSection struct {
+	Create string `toml:"create"`
 }
 
 // CompileSection represents the [compile] section in a TOML config
@@ -172,10 +181,13 @@ type WorkspaceConfig struct {
 	CompilePrompt        string
 	AssistPrompt         string
 	AssistLanguage       string
-	Jobs                 []*model.Job
-	CaseMode             model.CaseMode
-	SlackMonitorChannel  string
-	CaseStatusSet        *model.ActionStatusSet
+	// CaseCreatePrompt is the workspace-specific additional prompt for the
+	// thread-mode case initialization agent, from [case.prompts].create.
+	CaseCreatePrompt    string
+	Jobs                []*model.Job
+	CaseMode            model.CaseMode
+	SlackMonitorChannel string
+	CaseStatusSet       *model.ActionStatusSet
 }
 
 // Labels represents entity display labels
@@ -539,6 +551,17 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 		return nil, goerr.Wrap(err, "failed to resolve case status set", goerr.V(ConfigPathKey, path))
 	}
 
+	caseCreatePrompt := ""
+	if appCfg.Case != nil {
+		caseCreatePrompt = appCfg.Case.Prompts.Create
+	}
+	if len(caseCreatePrompt) > model.AgentAdditionalPromptMaxLen {
+		return nil, goerr.New("[case.prompts].create exceeds the maximum length",
+			goerr.V(ConfigPathKey, path),
+			goerr.V("len", len(caseCreatePrompt)),
+			goerr.V("max", model.AgentAdditionalPromptMaxLen))
+	}
+
 	// Warn about channel-mode-only settings supplied to a thread-mode workspace
 	// (and vice versa) so operators notice ignored configuration at startup.
 	if caseMode.IsThread() {
@@ -568,6 +591,7 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 		CompilePrompt:        appCfg.Compile.Prompt,
 		AssistPrompt:         appCfg.Assist.Prompt,
 		AssistLanguage:       appCfg.Assist.Language,
+		CaseCreatePrompt:     caseCreatePrompt,
 		Jobs:                 jobs,
 		CaseMode:             caseMode,
 		SlackMonitorChannel:  appCfg.Slack.Channel,
@@ -617,6 +641,7 @@ func (a *AppConfig) Configure(c *cli.Command) ([]*WorkspaceConfig, *model.Worksp
 			CompilePrompt:         wc.CompilePrompt,
 			AssistPrompt:          wc.AssistPrompt,
 			AssistLanguage:        wc.AssistLanguage,
+			CaseCreatePrompt:      wc.CaseCreatePrompt,
 			Jobs:                  wc.Jobs,
 			CaseMode:              wc.CaseMode,
 			SlackMonitorChannelID: wc.SlackMonitorChannel,

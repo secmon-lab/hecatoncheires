@@ -809,6 +809,65 @@ func (uc *CaseUseCase) CreateThreadCase(ctx context.Context, workspaceID, channe
 	return created, nil
 }
 
+// CreateThreadCaseWithFields creates a thread-mode Case with the supplied
+// title / description / custom fields, running FULL validation (required
+// fields, allowed options, value types) before persisting. All violations are
+// aggregated (ValidateCaseFieldsAll), not fail-fast, so the caller — the
+// thread-mode initialization (create) agent — can be told everything that is
+// wrong in one shot and re-emit. Unlike CreateThreadCase, the case is only
+// created once it satisfies the schema; there is no placeholder pass.
+func (uc *CaseUseCase) CreateThreadCaseWithFields(ctx context.Context, workspaceID, channelID, threadTS, reporterID, title, description string, fieldValues map[string]model.FieldValue) (*model.Case, error) {
+	if channelID == "" || threadTS == "" {
+		return nil, goerr.New("channelID and threadTS are required for thread case")
+	}
+
+	existing, err := uc.repo.Case().GetBySlackThread(ctx, workspaceID, channelID, threadTS)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to check existing thread case",
+			goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
+	}
+	if existing != nil {
+		return existing, nil
+	}
+
+	if validator := uc.fieldValidatorForWorkspace(workspaceID); validator != nil {
+		enriched, vErr := validator.ValidateCaseFieldsAll(fieldValues)
+		if vErr != nil {
+			return nil, goerr.Wrap(vErr, "thread case field validation failed",
+				goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
+		}
+		fieldValues = enriched
+	}
+
+	set := uc.caseStatusSetForWorkspace(workspaceID)
+	initialStatus := ""
+	if set != nil {
+		initialStatus = set.InitialID()
+	}
+
+	now := time.Now().UTC()
+	c := &model.Case{
+		Title:          title,
+		Description:    description,
+		Status:         types.CaseStatusOpen,
+		ReporterID:     reporterID,
+		SlackChannelID: channelID,
+		SlackThreadTS:  threadTS,
+		BoardStatus:    initialStatus,
+		FieldValues:    fieldValues,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	created, err := uc.repo.Case().Create(ctx, workspaceID, c)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to create thread case with fields",
+			goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
+	}
+
+	uc.publishLifecycle(ctx, workspaceID, created, model.CaseLifecycleCreated)
+	return created, nil
+}
+
 // MaterializeThreadCase applies the LLM-materialized title / description /
 // custom field values onto a thread-mode Case. Empty title / description are
 // ignored (the placeholder set at creation is kept). Field values are

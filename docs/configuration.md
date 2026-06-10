@@ -675,6 +675,36 @@ workspaces; dragging a Case into a `closed` column closes the Case. The
 investigation agent can also move a Case to a closed status when a mention
 indicates the issue is resolved.
 
+### Case agent prompts (`[case.prompts]`)
+
+Thread-mode case **initialization** is agent-driven: when a human posts a
+top-level message in the monitored channel, the bot does **not** create a Case
+immediately. Instead it runs a plan-and-execute agent that investigates (all
+read-only search tools are available), may ask the reporter to clarify intent
+(a question posted to the thread), and only commits a Case once it can fill a
+valid title, description, and every **required** custom field. If validation
+fails — a required field missing, or a value outside the allowed options — the
+agent is told what is wrong and tries again, all bounded by the planner round
+budget. When the agent cannot conclude within budget, it posts a "couldn't
+conclude" notice; the reporter can reply or mention the bot in the thread to
+resume. On success the bot posts a Block Kit summary of the created Case.
+
+The optional `[case.prompts]` sub-table injects workspace-specific guidance into
+this agent. Today only the `create` key (the initialization agent) is consumed;
+`mention` / `close` are reserved for future phases.
+
+```toml
+[case.prompts]
+create = """
+For security incidents, always set the severity field and capture the affected
+service in the description before creating the case.
+"""
+```
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `create` | string | No | Appended to the case-initialization agent's system prompt as "Workspace-specific instructions". Capped at 16384 bytes; startup fails if exceeded. |
+
 ---
 
 ## Job Definitions (`[[job]]`)

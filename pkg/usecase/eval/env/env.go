@@ -178,6 +178,7 @@ func buildRegistry(wc *config.WorkspaceConfig) (*model.WorkspaceRegistry, *model
 		CompilePrompt:         wc.CompilePrompt,
 		AssistPrompt:          wc.AssistPrompt,
 		AssistLanguage:        wc.AssistLanguage,
+		CaseCreatePrompt:      wc.CaseCreatePrompt,
 		Jobs:                  wc.Jobs,
 		CaseMode:              wc.CaseMode,
 		SlackMonitorChannelID: wc.SlackMonitorChannel,
@@ -266,9 +267,8 @@ func buildJobRunner(
 		HistoryRepo: historyRepo,
 		TraceRepo:   traceRepo,
 		Budget: planexec.BudgetConfig{
-			PlannerLoopMax:     8,
-			SubAgentMaxPerTurn: 16,
-			SubAgentLoopMax:    20,
+			PlannerLoopMax:  8,
+			SubAgentLoopMax: 20,
 		},
 	}); err == nil {
 		if exec, peErr := jobagent.NewPlanexecJobExecutor(planexecRunner); peErr == nil {

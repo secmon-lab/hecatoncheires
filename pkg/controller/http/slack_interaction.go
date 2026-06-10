@@ -175,6 +175,14 @@ func (h *SlackInteractionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 				return nil
 			})
 
+		case usecase.ActionIDThreadCreateQuestionSubmit:
+			// Submit on the thread-mode case-initialization question form.
+			// Resumes the create agent in the async tail (it talks to the LLM
+			// and Slack), after the block_actions ack.
+			async.Dispatch(ctx, func(ctx context.Context) error {
+				return h.agentUC.HandleThreadCaseQuestionSubmit(ctx, &cb, a)
+			})
+
 		case usecase.SlackActionIDSaveAsDraft:
 			// Save as Draft button on the Case creation modal. The persistence
 			// (CreateDraft + modal/ephemeral updates) is non-trivial and may

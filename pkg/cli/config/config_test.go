@@ -1414,3 +1414,74 @@ channel = "C0123ABC"
 		gt.Bool(t, errors.Is(err, config.ErrMissingCaseStatus)).True()
 	})
 }
+
+func TestLoadWorkspaceConfigs_CaseCreatePrompt(t *testing.T) {
+	t.Run("loads [case.prompts].create", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "support.toml")
+		content := `
+[workspace]
+id = "support"
+name = "Support"
+
+[slack]
+mode = "thread"
+channel = "C0123456789"
+
+[case]
+initial = "TRIAGE"
+closed = ["DONE"]
+
+[[case.status]]
+id = "TRIAGE"
+name = "Triage"
+
+[[case.status]]
+id = "DONE"
+name = "Done"
+
+[case.prompts]
+create = "Always fill the severity field for security cases."
+`
+		err := os.WriteFile(configPath, []byte(content), 0644)
+		gt.NoError(t, err).Required()
+
+		configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1).Required()
+		gt.String(t, configs[0].CaseCreatePrompt).Equal("Always fill the severity field for security cases.")
+	})
+
+	t.Run("absent [case.prompts] yields empty prompt", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "support.toml")
+		content := `
+[workspace]
+id = "support"
+name = "Support"
+
+[slack]
+mode = "thread"
+channel = "C0123456789"
+
+[case]
+initial = "TRIAGE"
+closed = ["DONE"]
+
+[[case.status]]
+id = "TRIAGE"
+name = "Triage"
+
+[[case.status]]
+id = "DONE"
+name = "Done"
+`
+		err := os.WriteFile(configPath, []byte(content), 0644)
+		gt.NoError(t, err).Required()
+
+		configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1).Required()
+		gt.String(t, configs[0].CaseCreatePrompt).Equal("")
+	})
+}

@@ -125,7 +125,7 @@ func NewAgentUseCase(deps AgentDeps) *AgentUseCase {
 		// Build the thread-mode agent. It reuses the same backend deps and a
 		// dedicated planexec runner.
 		budget := deps.ThreadcaseBudget
-		if budget.PlannerLoopMax <= 0 || budget.SubAgentMaxPerTurn <= 0 || budget.SubAgentLoopMax <= 0 {
+		if budget.PlannerLoopMax <= 0 || budget.SubAgentLoopMax <= 0 {
 			budget = DefaultThreadcaseBudget
 		}
 		runner, runnerErr := planexec.NewRunner(planexec.RunnerDeps{
@@ -149,9 +149,8 @@ func NewAgentUseCase(deps AgentDeps) *AgentUseCase {
 // turns when AgentDeps.ThreadcaseBudget is unset. Conservative bounds keep a
 // mention turn responsive while allowing a couple of investigation rounds.
 var DefaultThreadcaseBudget = planexec.BudgetConfig{
-	PlannerLoopMax:     8,
-	SubAgentMaxPerTurn: 16,
-	SubAgentLoopMax:    20,
+	PlannerLoopMax:  8,
+	SubAgentLoopMax: 20,
 }
 
 // HandleAgentMention processes an app_mention event and responds with an AI agent

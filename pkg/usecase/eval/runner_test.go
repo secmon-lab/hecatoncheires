@@ -195,7 +195,7 @@ func TestRun_Lifecycle_Materialize(t *testing.T) {
 	gt.B(t, ok).True()
 	gt.V(t, sev.Value).Equal("high")
 	gt.A(t, run.Transcript).Length(1)
-	gt.V(t, run.Transcript[0].Mode).Equal("materialize")
+	gt.V(t, run.Transcript[0].Mode).Equal("create")
 }
 
 // questionLLM asks the user a question on the creation turn (first replan),
@@ -251,8 +251,8 @@ func TestRun_Lifecycle_QuestionAnswerLoop(t *testing.T) {
 	// The agent asked a question, the simulator answered, and the answer was
 	// injected as a mention: two turns, the second carrying the answer.
 	gt.A(t, run.Transcript).Length(2)
-	gt.V(t, run.Transcript[0].Mode).Equal("materialize")
-	gt.V(t, run.Transcript[1].Mode).Equal("mention")
+	gt.V(t, run.Transcript[0].Mode).Equal("create")
+	gt.V(t, run.Transcript[1].Mode).Equal("resume")
 	gt.String(t, run.Transcript[1].Input).Contains("high")
 	// The case still materialized after the follow-up.
 	gt.V(t, run.Case.Title).Equal("Portal login 503")
@@ -554,5 +554,5 @@ func TestRun_RealLLM_ThreadInitial(t *testing.T) {
 	run := readRun(t, sc.DumpDir)
 	gt.V(t, run.Case.Title).NotEqual("")
 	gt.Number(t, len(run.Transcript)).GreaterOrEqual(1)
-	gt.V(t, run.Transcript[0].Mode).Equal("materialize")
+	gt.V(t, run.Transcript[0].Mode).Equal("create")
 }

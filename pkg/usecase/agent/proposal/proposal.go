@@ -12,17 +12,19 @@ import (
 type UseCase struct {
 	deps *agent.CommonDeps
 
-	plannerLoopMax     int
-	subAgentMaxPerTurn int
-	subAgentLoopMax    int
+	plannerLoopMax  int
+	subAgentLoopMax int
 }
 
 // New builds a proposal.UseCase.
 //
-// plannerLoopMax / subAgentMaxPerTurn / subAgentLoopMax are the budget
-// knobs (§5.1). They are caller-controlled — the spec recommends defaults
-// of 8 / 16 / 20 wired via CLI flags. Pass 0 to use the package defaults.
-func New(deps *agent.CommonDeps, plannerLoopMax, subAgentMaxPerTurn, subAgentLoopMax int) (*UseCase, error) {
+// plannerLoopMax / subAgentLoopMax are the budget knobs. They are
+// caller-controlled — the recommended defaults are 8 / 20 wired via CLI
+// flags. Pass 0 to use the package defaults. There is no per-turn total
+// sub-agent count: the round-count limit (plannerLoopMax) plus the
+// per-sub-agent budget (subAgentLoopMax) are the only knobs, with per-round
+// fan-out bounded by plan validation.
+func New(deps *agent.CommonDeps, plannerLoopMax, subAgentLoopMax int) (*UseCase, error) {
 	if deps == nil {
 		return nil, goerr.New("CommonDeps is required")
 	}
@@ -38,31 +40,25 @@ func New(deps *agent.CommonDeps, plannerLoopMax, subAgentMaxPerTurn, subAgentLoo
 	if plannerLoopMax <= 0 {
 		plannerLoopMax = DefaultPlannerLoopMax
 	}
-	if subAgentMaxPerTurn <= 0 {
-		subAgentMaxPerTurn = DefaultSubAgentMaxPerTurn
-	}
 	if subAgentLoopMax <= 0 {
 		subAgentLoopMax = DefaultSubAgentLoopMax
 	}
 	return &UseCase{
-		deps:               deps,
-		plannerLoopMax:     plannerLoopMax,
-		subAgentMaxPerTurn: subAgentMaxPerTurn,
-		subAgentLoopMax:    subAgentLoopMax,
+		deps:            deps,
+		plannerLoopMax:  plannerLoopMax,
+		subAgentLoopMax: subAgentLoopMax,
 	}, nil
 }
 
-// PlannerLoopMax / SubAgentMaxPerTurn / SubAgentLoopMax expose the active
-// budget so callers (e.g. tests) can assert on the wired configuration.
-func (uc *UseCase) PlannerLoopMax() int     { return uc.plannerLoopMax }
-func (uc *UseCase) SubAgentMaxPerTurn() int { return uc.subAgentMaxPerTurn }
-func (uc *UseCase) SubAgentLoopMax() int    { return uc.subAgentLoopMax }
+// PlannerLoopMax / SubAgentLoopMax expose the active budget so callers
+// (e.g. tests) can assert on the wired configuration.
+func (uc *UseCase) PlannerLoopMax() int  { return uc.plannerLoopMax }
+func (uc *UseCase) SubAgentLoopMax() int { return uc.subAgentLoopMax }
 
 // Default budget values used when the caller passes 0.
 const (
-	DefaultPlannerLoopMax     = 8
-	DefaultSubAgentMaxPerTurn = 16
-	DefaultSubAgentLoopMax    = 20
+	DefaultPlannerLoopMax  = 8
+	DefaultSubAgentLoopMax = 20
 )
 
 // Sub-agent summary truncation — long summaries are cut to keep planner

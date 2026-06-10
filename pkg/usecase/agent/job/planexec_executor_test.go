@@ -52,9 +52,8 @@ func newRunner(t *testing.T, llm gollem.LLMClient) *planexec.Runner {
 		HistoryRepo: agentarchive.NewMemoryHistoryRepository(),
 		TraceRepo:   agentarchive.NewMemoryTraceRepository(),
 		Budget: planexec.BudgetConfig{
-			PlannerLoopMax:     8,
-			SubAgentMaxPerTurn: 16,
-			SubAgentLoopMax:    20,
+			PlannerLoopMax:  8,
+			SubAgentLoopMax: 20,
 		},
 	})
 	gt.NoError(t, err).Required()
@@ -176,9 +175,8 @@ func TestPlanexecJobExecutor_BudgetExhaustionMapsToError(t *testing.T) {
 		HistoryRepo: agentarchive.NewMemoryHistoryRepository(),
 		TraceRepo:   agentarchive.NewMemoryTraceRepository(),
 		Budget: planexec.BudgetConfig{
-			PlannerLoopMax:     2,
-			SubAgentMaxPerTurn: 16,
-			SubAgentLoopMax:    20,
+			PlannerLoopMax:  2,
+			SubAgentLoopMax: 20,
 		},
 	})
 	gt.NoError(t, err).Required()

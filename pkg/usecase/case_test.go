@@ -2678,3 +2678,78 @@ func TestCaseUseCase_UpdateCaseStatus(t *testing.T) {
 		gt.Error(t, err)
 	})
 }
+
+func TestCaseUseCase_CreateThreadCaseWithFields(t *testing.T) {
+	newThreadUC := func(t *testing.T) (interfaces.Repository, *usecase.CaseUseCase) {
+		t.Helper()
+		repo := memory.New()
+		set, err := model.NewActionStatusSet("triage", []string{"done"}, []model.ActionStatusDefinition{
+			{ID: "triage", Name: "Triage"},
+			{ID: "done", Name: "Done"},
+		})
+		gt.NoError(t, err).Required()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace:             model.Workspace{ID: "support"},
+			CaseMode:              model.CaseModeThread,
+			SlackMonitorChannelID: "C-MONITOR",
+			CaseStatusSet:         set,
+			FieldSchema: &config.FieldSchema{
+				Fields: []config.FieldDefinition{
+					{ID: "severity", Name: "Severity", Type: types.FieldTypeSelect, Required: true, Options: []config.FieldOption{{ID: "high", Name: "High"}, {ID: "low", Name: "Low"}}},
+					{ID: "summary", Name: "Summary", Type: types.FieldTypeText, Required: true},
+				},
+			},
+		})
+		return repo, usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+	}
+
+	t.Run("full validation rejects missing required and bad option (aggregated)", func(t *testing.T) {
+		_, uc := newThreadUC(t)
+		ctx := context.Background()
+		_, err := uc.CreateThreadCaseWithFields(ctx, "support", "C-MONITOR", "1700000000.000100", "U-REP", "Title",
+			"desc", map[string]model.FieldValue{
+				"severity": {FieldID: "severity", Value: "critical"}, // invalid option; summary missing
+			})
+		gt.Error(t, err).Is(model.ErrCaseFieldValidation)
+		gt.String(t, err.Error()).Contains("severity")
+		gt.String(t, err.Error()).Contains("summary")
+	})
+
+	t.Run("valid fields create the case and round-trip", func(t *testing.T) {
+		repo, uc := newThreadUC(t)
+		ctx := context.Background()
+		created, err := uc.CreateThreadCaseWithFields(ctx, "support", "C-MONITOR", "1700000000.000200", "U-REP", "Login outage",
+			"Users cannot log in.", map[string]model.FieldValue{
+				"severity": {FieldID: "severity", Value: "high"},
+				"summary":  {FieldID: "summary", Value: "login broken"},
+			})
+		gt.NoError(t, err).Required()
+		gt.Value(t, created.Title).Equal("Login outage")
+		gt.Value(t, created.BoardStatus).Equal("triage")
+		gt.Value(t, created.ReporterID).Equal("U-REP")
+
+		got, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", "1700000000.000200")
+		gt.NoError(t, err).Required()
+		gt.Value(t, got).NotNil().Required()
+		gt.Value(t, got.Title).Equal("Login outage")
+		gt.Value(t, got.Description).Equal("Users cannot log in.")
+		gt.Value(t, got.FieldValues["severity"].Value).Equal("high")
+		gt.Value(t, got.FieldValues["summary"].Value).Equal("login broken")
+	})
+
+	t.Run("idempotent on existing thread", func(t *testing.T) {
+		_, uc := newThreadUC(t)
+		ctx := context.Background()
+		first, err := uc.CreateThreadCaseWithFields(ctx, "support", "C-MONITOR", "1700000000.000300", "U-REP", "T",
+			"d", map[string]model.FieldValue{
+				"severity": {FieldID: "severity", Value: "low"},
+				"summary":  {FieldID: "summary", Value: "s"},
+			})
+		gt.NoError(t, err).Required()
+		again, err := uc.CreateThreadCaseWithFields(ctx, "support", "C-MONITOR", "1700000000.000300", "U-REP", "T2",
+			"d2", nil)
+		gt.NoError(t, err).Required()
+		gt.Number(t, again.ID).Equal(first.ID)
+	})
+}

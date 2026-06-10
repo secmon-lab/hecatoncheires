@@ -204,7 +204,7 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 		)
 	}
 
-	budget := agent.NewBudget(uc.plannerLoopMax, uc.subAgentMaxPerTurn, uc.subAgentLoopMax)
+	budget := agent.NewBudget(uc.plannerLoopMax, uc.subAgentLoopMax)
 
 	// First-round user input: budget prefix + caller-supplied text.
 	nextInput := budget.FormatPrefix() + "\n\n" + req.UserInput
@@ -279,19 +279,10 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 			continue
 		}
 
-		if p.Action == actionInvestigate {
-			if got := len(p.Investigate.Tasks); got > budget.SubAgentRemaining() {
-				nextInput = budget.FormatPrefix() + "\n\n" +
-					fmt.Sprintf("Your last plan requested %d investigation tasks, but only %d sub-agent slots remain. Re-plan with fewer tasks, or pick a terminal action.", got, budget.SubAgentRemaining())
-				continue
-			}
-		}
-
 		handler.TraceRound(turnCtx, roundKey, i18n.T(turnCtx, i18n.MsgProposalTracePlannerAction, string(p.Action), p.Reasoning))
 
 		switch p.Action {
 		case actionInvestigate:
-			budget.SubAgentUsed += len(p.Investigate.Tasks)
 			results := uc.runInvestigationsParallel(turnCtx, p.Investigate, handler, resolver)
 			nextInput = budget.FormatPrefix() + "\n\n" + formatObservationsAsUserTurn(p.Investigate, results)
 			// A fresh logical round begins after investigation

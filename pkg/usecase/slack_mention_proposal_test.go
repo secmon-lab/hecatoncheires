@@ -67,7 +67,7 @@ func newDraftUC(t *testing.T, repo interfaces.Repository, llm gollem.LLMClient) 
 		HeartbeatInterval:   time.Second,
 		HeartbeatStaleAfter: 5 * time.Second,
 	}
-	uc, err := proposal.New(deps, 8, 16, 20)
+	uc, err := proposal.New(deps, 8, 20)
 	gt.NoError(t, err).Required()
 	return uc
 }

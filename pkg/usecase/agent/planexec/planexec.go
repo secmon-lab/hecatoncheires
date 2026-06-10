@@ -210,11 +210,7 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 			req.Sink.PlanProposed(ctx, PlanInfo{Round: logicalRound, Reasoning: p.Message, IsReplan: false})
 
 			tasks := p.Tasks
-			if got := len(tasks); got > bg.subAgentRemaining() {
-				nextInput = formatBudgetRejection(bg, got)
-				continue
-			}
-			results := r.runPhase(ctx, logicalRound, tasks, &req, bg)
+			results := r.runPhase(ctx, logicalRound, tasks, &req)
 			allResults = append(allResults, PhaseSummary{
 				Phase:   logicalRound,
 				Tasks:   tasks,
@@ -256,16 +252,56 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 		}
 
 		if len(rr.Tasks) == 0 {
-			// Loop terminates; produce the final response.
-			break
+			// The planner wants to terminate. Produce the final response and,
+			// when an OnFinalize hook is wired, let the host validate AND
+			// commit it. A non-nil error from OnFinalize (validation failed OR
+			// the terminal side effect failed) folds back as another round so
+			// the planner can investigate / ask / re-emit until it succeeds or
+			// the round budget is exhausted.
+			text, rawJSON, finalErr := generateFinalResponse(
+				ctx,
+				r.llm,
+				r.historyRepo,
+				recorder,
+				systemPrompt,
+				req.HistoryKey,
+				req.LanguageLabel,
+				allResults,
+				req.FinalOutputSchema,
+			)
+			if finalErr != nil {
+				// Surface to errutil so the operator sees the reason even
+				// though the host gets a graceful RunResult back.
+				errutil.Handle(ctx, finalErr, "planexec: final response failed")
+				return &RunResult{
+					Status:         StatusFallbackError,
+					AllResults:     allResults,
+					FallbackReason: finalErr.Error(),
+				}, nil
+			}
+			if req.OnFinalize != nil {
+				if commitErr := req.OnFinalize(ctx, rawJSON); commitErr != nil {
+					// Validation / commit rejection is expected with LLM
+					// output and we retry inline; tag benign so the operator
+					// still sees the line in logs but Sentry does not page on
+					// every LLM hiccup.
+					errutil.Handle(ctx, goerr.Wrap(commitErr, "final output rejected; retrying",
+						goerr.T(errutil.TagBenign),
+					), "final output rejected; retrying")
+					nextInput = formatRetryInput(bg, commitErr)
+					continue
+				}
+			}
+			return &RunResult{
+				Status:     StatusCompleted,
+				FinalText:  text,
+				FinalRaw:   rawJSON,
+				AllResults: allResults,
+			}, nil
 		}
 
 		tasks := rr.Tasks
-		if got := len(tasks); got > bg.subAgentRemaining() {
-			nextInput = formatBudgetRejection(bg, got)
-			continue
-		}
-		results := r.runPhase(ctx, logicalRound, tasks, &req, bg)
+		results := r.runPhase(ctx, logicalRound, tasks, &req)
 		allResults = append(allResults, PhaseSummary{
 			Phase:   logicalRound,
 			Tasks:   tasks,
@@ -273,36 +309,6 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 		})
 		nextInput = bg.formatPrefix() + "\n\n" + formatObservationsAsUserTurn(tasks, results)
 	}
-
-	// --- Final response phase --------------------------------------
-	text, rawJSON, finalErr := generateFinalResponse(
-		ctx,
-		r.llm,
-		r.historyRepo,
-		recorder,
-		systemPrompt,
-		req.HistoryKey,
-		req.LanguageLabel,
-		allResults,
-		req.FinalOutputSchema,
-	)
-	if finalErr != nil {
-		// Fallback path: surface to errutil so the operator sees the
-		// reason even though the host gets a graceful RunResult back.
-		errutil.Handle(ctx, finalErr, "planexec: final response failed")
-		return &RunResult{
-			Status:         StatusFallbackError,
-			AllResults:     allResults,
-			FallbackReason: finalErr.Error(),
-		}, nil
-	}
-
-	return &RunResult{
-		Status:     StatusCompleted,
-		FinalText:  text,
-		FinalRaw:   rawJSON,
-		AllResults: allResults,
-	}, nil
 }
 
 // runPhase wraps Sink.PhaseStarted + executePhase so the boilerplate
@@ -313,14 +319,12 @@ func (r *Runner) runPhase(
 	logicalRound int,
 	tasks []TaskPlan,
 	req *RunRequest,
-	bg *budget,
 ) []TaskResult {
 	infos := make([]TaskInfo, len(tasks))
 	for i, t := range tasks {
 		infos[i] = TaskInfo{ID: t.ID, Title: t.Title}
 	}
 	req.Sink.PhaseStarted(ctx, logicalRound, infos)
-	bg.subAgentUsed += len(tasks)
 	return executePhase(ctx, tasks, req.Sink, req.ToolResolver, r.llm, r.budget.SubAgentLoopMax)
 }
 
@@ -342,14 +346,6 @@ func formatRetryInput(bg *budget, cause error) string {
 	return bg.formatPrefix() + "\n\nYour previous output failed validation: " +
 		cause.Error() +
 		". Please re-emit a JSON object that matches the response schema."
-}
-
-// formatBudgetRejection rejects an over-allocated plan and asks the
-// planner to re-emit with fewer tasks.
-func formatBudgetRejection(bg *budget, requested int) string {
-	return bg.formatPrefix() + "\n\n" +
-		fmt.Sprintf("Your last plan requested %d investigation tasks, but only %d sub-agent slots remain. Re-plan with fewer tasks.",
-			requested, bg.subAgentRemaining())
 }
 
 // formatQuestionAnswers folds the user's QuestionResult into the next

@@ -81,6 +81,18 @@ type RunRequest struct {
 	// proposal passes its materialize schema; job passes nil.
 	FinalOutputSchema *gollem.Parameter
 
+	// OnFinalize is invoked with the structured final output once the
+	// planner loop decides to terminate. The host parses + validates the
+	// output AND performs the terminal side effect (e.g. create the Case).
+	// When it returns a non-nil error — whether validation failed OR the
+	// side effect (persistence) failed — the runner folds the error back
+	// into the next planner round (charged against PlannerLoopMax) so the
+	// planner can investigate / ask / re-emit until it succeeds or the
+	// round budget is exhausted. nil → the turn completes. Optional; only
+	// meaningful when FinalOutputSchema != nil. When nil, the final output
+	// is returned as-is (existing proposal / job behaviour is unaffected).
+	OnFinalize func(ctx context.Context, raw json.RawMessage) error
+
 	// --- Output ----------------------------------------------------
 
 	// Sink is the progress / state output channel. Required (use
@@ -114,6 +126,9 @@ func (r *RunRequest) Validate() error {
 	}
 	if r.AllowQuestion && r.OnQuestion == nil {
 		return goerr.New("on question callback is required when AllowQuestion is true")
+	}
+	if r.OnFinalize != nil && r.FinalOutputSchema == nil {
+		return goerr.New("final output schema is required when OnFinalize is set")
 	}
 	if r.Sink == nil {
 		return goerr.New("sink is required")

@@ -34,7 +34,12 @@ type WorkspaceEntry struct {
 	CompilePrompt        string
 	AssistPrompt         string
 	AssistLanguage       string
-	Jobs                 []*Job // Event-driven agent jobs loaded from workspace TOML
+	// CaseCreatePrompt is the workspace-specific additional prompt for the
+	// thread-mode case initialization (create) agent, configured via TOML
+	// [case.prompts].create. Empty when unset; appended to the ModeCreate
+	// planner system prompt.
+	CaseCreatePrompt string
+	Jobs             []*Job // Event-driven agent jobs loaded from workspace TOML
 
 	// CaseMode selects channel-per-case (default) or thread-per-case binding.
 	CaseMode CaseMode
