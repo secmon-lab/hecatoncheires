@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/m-mizutani/goerr/v2"
@@ -34,6 +35,54 @@ func (v *FieldValidator) ValidateCaseFields(fieldValues map[string]FieldValue) (
 // the remaining values are preserved untouched on the existing Case.
 func (v *FieldValidator) ValidateCaseFieldsPartial(fieldValues map[string]FieldValue) (map[string]FieldValue, error) {
 	return v.validateCaseFields(fieldValues, true)
+}
+
+// ValidateCaseFieldsAll is the full-validation variant that does NOT fail
+// fast. It walks every supplied value and every required field, accumulating
+// all violations, and returns them as a single ErrCaseFieldValidation whose
+// message lists every violation (one per line). Unlike the fail-fast
+// ValidateCaseFields, an unknown field id is reported as a violation (not
+// silently preserved) so the thread-mode create agent learns it referenced a
+// field that does not exist. On success it returns the enriched values (Type
+// injected) and a nil error.
+func (v *FieldValidator) ValidateCaseFieldsAll(fieldValues map[string]FieldValue) (map[string]FieldValue, error) {
+	fieldDefMap := make(map[string]config.FieldDefinition)
+	for _, fd := range v.schema.Fields {
+		fieldDefMap[fd.ID] = fd
+	}
+
+	result := make(map[string]FieldValue, len(fieldValues))
+	var violations []string
+
+	for fieldID, fv := range fieldValues {
+		fieldDef, ok := fieldDefMap[fieldID]
+		if !ok {
+			violations = append(violations,
+				fmt.Sprintf("field %q: not defined in the workspace schema", fieldID))
+			continue
+		}
+		fv.Type = fieldDef.Type
+		result[fieldID] = fv
+		if err := v.validateFieldValue(fieldDef, fv); err != nil {
+			violations = append(violations, fmt.Sprintf("field %q: %s", fieldID, err.Error()))
+		}
+	}
+
+	for _, fieldDef := range v.schema.Fields {
+		if fieldDef.Required {
+			if _, ok := result[fieldDef.ID]; !ok {
+				violations = append(violations,
+					fmt.Sprintf("field %q: required but missing", fieldDef.ID))
+			}
+		}
+	}
+
+	if len(violations) > 0 {
+		return nil, goerr.Wrap(ErrCaseFieldValidation,
+			"case field validation failed:\n- "+strings.Join(violations, "\n- "),
+			goerr.V("violations", violations))
+	}
+	return result, nil
 }
 
 func (v *FieldValidator) validateCaseFields(fieldValues map[string]FieldValue, partial bool) (map[string]FieldValue, error) {

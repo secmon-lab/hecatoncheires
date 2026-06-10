@@ -3,12 +3,16 @@ package usecase_test
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/m-mizutani/gollem"
+	"github.com/m-mizutani/gollem/llm/claude"
+	"github.com/m-mizutani/gollem/llm/gemini"
+	"github.com/m-mizutani/gollem/llm/openai"
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
@@ -19,6 +23,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
+	goslack "github.com/slack-go/slack"
 )
 
 // newScriptedClient returns a mock LLM that pops the supplied responses in
@@ -102,7 +107,8 @@ func TestThreadCase_Creation(t *testing.T) {
 	gt.NoError(t, agentUC.HandleThreadCaseCreation(ctx, msg, entry)).Required()
 	async.Wait()
 
-	// A case was created, bound to the thread, with materialized fields.
+	// The create agent committed a case bound to the thread, carrying the
+	// validated fields (creation was deferred until a valid create decision).
 	c, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", "1700000000.000100")
 	gt.NoError(t, err).Required()
 	gt.Value(t, c).NotNil().Required()
@@ -113,14 +119,14 @@ func TestThreadCase_Creation(t *testing.T) {
 	gt.Value(t, c.SlackThreadTS).Equal("1700000000.000100")
 	gt.Value(t, c.FieldValues["severity"].Value).Equal("high")
 
-	// The creation ack (with web-UI link) was posted to the thread.
-	foundAck := false
+	// The Block Kit summary (carrying the web-UI link) was posted to the thread.
+	foundSummary := false
 	for _, m := range slackMock.postedMessages {
 		if strings.Contains(m.Text, "https://app.test/ws/support/cases/") {
-			foundAck = true
+			foundSummary = true
 		}
 	}
-	gt.Bool(t, foundAck).True()
+	gt.Bool(t, foundSummary).True()
 }
 
 func TestThreadCase_Creation_Idempotent(t *testing.T) {
@@ -249,4 +255,361 @@ func TestThreadCase_MentionClose(t *testing.T) {
 	gt.NoError(t, err).Required()
 	gt.Value(t, closed.BoardStatus).Equal("DONE")
 	gt.Value(t, closed.Status).Equal(types.CaseStatusClosed)
+}
+
+// TestLifecycle_ThreadCaseCreate_QuestionResume drives the full deferred-create
+// lifecycle through the public entry points: the initial post makes the agent
+// ask a question (no case yet), then a thread reply resumes the create agent
+// which commits the case. History continuity is exercised implicitly (the same
+// thread session spans both turns).
+func TestLifecycle_ThreadCaseCreate_QuestionResume(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	reg := newThreadWorkspaceRegistry()
+	slackMock := &agentTestSlackService{}
+	caseUC := usecase.NewCaseUseCase(repo, reg, slackMock, nil, "https://app.test")
+
+	llm := newScriptedClient([]string{
+		// Turn 1 (create): plan -> sub-agent -> replan asks a question.
+		tcInvestigatePlan,
+		"Need to know the severity before creating the case.",
+		`{"message":"need info","question":{"reason":"What severity?","items":[{"id":"q1","text":"Severity?","type":"select","options":["high","low"]}]}}`,
+		// Turn 2 (resume): plan -> sub-agent -> replan done -> create.
+		tcInvestigatePlan,
+		"The reporter says it is high severity.",
+		tcReplanDone,
+		`{"title":"Login outage","description":"Users cannot log in.","fields":[{"field_id":"severity","value":"high"}]}`,
+	})
+
+	agentUC := usecase.NewAgentUseCase(usecase.AgentDeps{
+		Repo:         repo,
+		Registry:     reg,
+		LLM:          llm,
+		HistoryRepo:  agentarchive.NewMemoryHistoryRepository(),
+		TraceRepo:    agentarchive.NewMemoryTraceRepository(),
+		SlackService: slackMock,
+		CaseUC:       caseUC,
+	})
+	entry, err := reg.Get("support")
+	gt.NoError(t, err).Required()
+
+	// Turn 1: the initial post. The agent should ask a question and NOT create.
+	post := slackmodel.NewMessageFromData(
+		"1700000000.000100", "C-MONITOR", "", "T1", "U-REPORTER", "alice",
+		"Something is wrong with the portal", "1700000000.000100", time.Now(), nil)
+	gt.NoError(t, agentUC.HandleThreadCaseCreation(ctx, post, entry)).Required()
+	async.Wait()
+
+	noCase, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", "1700000000.000100")
+	gt.NoError(t, err).Required()
+	gt.Value(t, noCase).Nil() // deferred: no case while the question is pending
+
+	ssn, err := repo.Session().GetByThread(ctx, "C-MONITOR", "1700000000.000100")
+	gt.NoError(t, err).Required()
+	gt.Value(t, ssn).NotNil().Required()
+	gt.Value(t, ssn.LastAction).Equal(model.SessionEndedWithQuestion)
+	sessionIDTurn1 := ssn.ID
+
+	// Turn 2: a thread reply answers the question and resumes the create agent.
+	reply := slackmodel.NewMessageFromData(
+		"1700000000.000201", "C-MONITOR", "1700000000.000100", "T1", "U-REPORTER", "alice",
+		"high", "1700000000.000201", time.Now(), nil)
+	gt.NoError(t, agentUC.ResumeThreadCaseCreation(ctx, reply, entry)).Required()
+	async.Wait()
+
+	// The case now exists with the validated fields.
+	c, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", "1700000000.000100")
+	gt.NoError(t, err).Required()
+	gt.Value(t, c).NotNil().Required()
+	gt.Value(t, c.Title).Equal("Login outage")
+	gt.Value(t, c.ReporterID).Equal("U-REPORTER")
+	gt.Value(t, c.FieldValues["severity"].Value).Equal("high")
+
+	// History continuity: the same thread session was reused across both turns,
+	// and it is now bound to the created case (Session.ID unchanged).
+	ssn2, err := repo.Session().GetByThread(ctx, "C-MONITOR", "1700000000.000100")
+	gt.NoError(t, err).Required()
+	gt.Value(t, ssn2.ID).Equal(sessionIDTurn1)
+	gt.Number(t, ssn2.CaseID).Equal(c.ID)
+}
+
+// realLLMForThreadCreate builds a real LLM client for the gated thread-create
+// test. The dedicated gate is TEST_THREAD_CREATE; the client itself is built
+// from the same TEST_LLM_* env vars the eval harness uses.
+func realLLMForThreadCreate(t *testing.T) gollem.LLMClient {
+	t.Helper()
+	if os.Getenv("TEST_THREAD_CREATE") == "" {
+		t.Skip("TEST_THREAD_CREATE not set; skipping real-LLM thread-create test")
+	}
+	ctx := context.Background()
+	model := os.Getenv("TEST_LLM_MODEL")
+	switch os.Getenv("TEST_LLM_PROVIDER") {
+	case "openai":
+		key := os.Getenv("TEST_LLM_OPENAI_API_KEY")
+		gt.Value(t, key).NotEqual("")
+		var opts []openai.Option
+		if model != "" {
+			opts = append(opts, openai.WithModel(model))
+		}
+		c, err := openai.New(ctx, key, opts...)
+		gt.NoError(t, err).Required()
+		return c
+	case "claude":
+		key := os.Getenv("TEST_LLM_CLAUDE_API_KEY")
+		project := os.Getenv("TEST_LLM_GEMINI_PROJECT_ID")
+		switch {
+		case key != "":
+			var opts []claude.Option
+			if model != "" {
+				opts = append(opts, claude.WithModel(model))
+			}
+			c, err := claude.New(ctx, key, opts...)
+			gt.NoError(t, err).Required()
+			return c
+		case project != "":
+			location := os.Getenv("TEST_LLM_GEMINI_LOCATION")
+			gt.Value(t, location).NotEqual("")
+			var opts []claude.VertexOption
+			if model != "" {
+				opts = append(opts, claude.WithVertexModel(model))
+			}
+			c, err := claude.NewWithVertex(ctx, location, project, opts...)
+			gt.NoError(t, err).Required()
+			return c
+		default:
+			t.Skip("claude provider needs TEST_LLM_CLAUDE_API_KEY or TEST_LLM_GEMINI_PROJECT_ID")
+			return nil
+		}
+	case "gemini":
+		project := os.Getenv("TEST_LLM_GEMINI_PROJECT_ID")
+		location := os.Getenv("TEST_LLM_GEMINI_LOCATION")
+		gt.Value(t, project).NotEqual("")
+		gt.Value(t, location).NotEqual("")
+		var opts []gemini.Option
+		if model != "" {
+			opts = append(opts, gemini.WithModel(model))
+		}
+		c, err := gemini.New(ctx, project, location, opts...)
+		gt.NoError(t, err).Required()
+		return c
+	default:
+		t.Skip("TEST_LLM_PROVIDER must be openai | claude | gemini")
+		return nil
+	}
+}
+
+// TestRealLLM_ThreadCaseCreate_VagueToCreate reproduces the target use case
+// against a real model: a vague initial message, after which the agent does
+// light investigation, asks the user to clarify intent, then (given the answer)
+// commits a validated case. The required `severity` field can only be filled
+// from the user's answer, so a well-behaved agent must ask before it can
+// create. The test asserts the *wiring contract* — a valid case is eventually
+// created and a summary is posted — not the wording quality.
+func TestRealLLM_ThreadCaseCreate_VagueToCreate(t *testing.T) {
+	llm := realLLMForThreadCreate(t)
+	ctx := context.Background()
+
+	repo := memory.New()
+	set, err := model.NewActionStatusSet("TRIAGE", []string{"DONE"}, []model.ActionStatusDefinition{
+		{ID: "TRIAGE", Name: "Triage"},
+		{ID: "DONE", Name: "Done"},
+	})
+	gt.NoError(t, err).Required()
+	reg := model.NewWorkspaceRegistry()
+	reg.Register(&model.WorkspaceEntry{
+		Workspace:             model.Workspace{ID: "support", Name: "Support"},
+		CaseMode:              model.CaseModeThread,
+		SlackMonitorChannelID: "C-MONITOR",
+		CaseStatusSet:         set,
+		CaseCreatePrompt:      "If the severity is unclear from the message, ask the reporter before creating the case.",
+		FieldSchema: &config.FieldSchema{
+			Fields: []config.FieldDefinition{
+				{ID: "severity", Name: "Severity", Type: types.FieldTypeSelect, Required: true, Description: "How severe the issue is.", Options: []config.FieldOption{{ID: "high", Name: "High"}, {ID: "low", Name: "Low"}}},
+			},
+		},
+	})
+	slackMock := &agentTestSlackService{}
+	caseUC := usecase.NewCaseUseCase(repo, reg, slackMock, nil, "https://app.test")
+	agentUC := usecase.NewAgentUseCase(usecase.AgentDeps{
+		Repo:         repo,
+		Registry:     reg,
+		LLM:          llm,
+		HistoryRepo:  agentarchive.NewMemoryHistoryRepository(),
+		TraceRepo:    agentarchive.NewMemoryTraceRepository(),
+		SlackService: slackMock,
+		CaseUC:       caseUC,
+	})
+	entry, err := reg.Get("support")
+	gt.NoError(t, err).Required()
+
+	const channel = "C-MONITOR"
+	const rootTS = "1700000000.000100"
+	post := slackmodel.NewMessageFromData(rootTS, channel, "", "T1", "U-REPORTER", "alice",
+		"hey, something seems off with the portal, can you take a look?", rootTS, time.Now(), nil)
+	gt.NoError(t, agentUC.HandleThreadCaseCreation(ctx, post, entry)).Required()
+	async.Wait()
+
+	// Up to a few resume turns: answer any pending question with a concrete
+	// reply that supplies the severity, until the case is created.
+	const maxTurns = 4
+	for turn := 0; turn < maxTurns; turn++ {
+		if c, _ := repo.Case().GetBySlackThread(ctx, "support", channel, rootTS); c != nil {
+			break
+		}
+		ssn, serr := repo.Session().GetByThread(ctx, channel, rootTS)
+		gt.NoError(t, serr).Required()
+		if ssn == nil || ssn.LastAction != model.SessionEndedWithQuestion {
+			break
+		}
+		replyTS := time.Now().Format("1700000000.000201")
+		reply := slackmodel.NewMessageFromData(replyTS, channel, rootTS, "T1", "U-REPORTER", "alice",
+			"It's high severity — the production portal login returns a 503 for everyone.", replyTS, time.Now(), nil)
+		gt.NoError(t, agentUC.ResumeThreadCaseCreation(ctx, reply, entry)).Required()
+		async.Wait()
+	}
+
+	c, err := repo.Case().GetBySlackThread(ctx, "support", channel, rootTS)
+	gt.NoError(t, err).Required()
+	gt.Value(t, c).NotNil().Required()
+	gt.String(t, c.Title).NotEqual("")
+	// The required field must be satisfied and within the allowed option set.
+	gt.Value(t, c.FieldValues["severity"].Value).Equal("high")
+
+	// A summary carrying the web-UI link was posted.
+	foundSummary := false
+	for _, m := range slackMock.postedMessages {
+		if strings.Contains(m.Text, "https://app.test/ws/support/cases/") {
+			foundSummary = true
+		}
+	}
+	gt.Bool(t, foundSummary).True()
+}
+
+// TestThreadCase_QuestionSubmit drives the interactive question form: the
+// create agent asks a question (posting a Block Kit form + persisting the
+// snapshot), the user submits an answer, and the resumed agent commits the
+// case. Asserts the submit handler clears PendingQuestion, rewrites the form
+// into the answered view, and creates the case from the answer.
+func TestThreadCase_QuestionSubmit(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	reg := newThreadWorkspaceRegistry()
+	slackMock := &agentTestSlackService{}
+	caseUC := usecase.NewCaseUseCase(repo, reg, slackMock, nil, "https://app.test")
+
+	llm := newScriptedClient([]string{
+		// Turn 1 (create): plan -> sub-agent -> ask a question.
+		tcInvestigatePlan,
+		"Need the severity.",
+		`{"message":"need info","question":{"reason":"What severity?","items":[{"id":"q-sev","text":"Severity?","type":"select","options":["high","low"]}]}}`,
+		// Turn 2 (resume after submit): plan -> sub-agent -> replan done -> create.
+		tcInvestigatePlan,
+		"Reporter said high.",
+		tcReplanDone,
+		`{"title":"Login outage","description":"Users cannot log in.","fields":[{"field_id":"severity","value":"high"}]}`,
+	})
+	agentUC := usecase.NewAgentUseCase(usecase.AgentDeps{
+		Repo:         repo,
+		Registry:     reg,
+		LLM:          llm,
+		HistoryRepo:  agentarchive.NewMemoryHistoryRepository(),
+		TraceRepo:    agentarchive.NewMemoryTraceRepository(),
+		SlackService: slackMock,
+		CaseUC:       caseUC,
+	})
+	entry, err := reg.Get("support")
+	gt.NoError(t, err).Required()
+
+	const channel = "C-MONITOR"
+	const rootTS = "1700000000.000100"
+	post := slackmodel.NewMessageFromData(rootTS, channel, "", "T1", "U-REPORTER", "alice",
+		"portal seems broken", rootTS, time.Now(), nil)
+	gt.NoError(t, agentUC.HandleThreadCaseCreation(ctx, post, entry)).Required()
+	async.Wait()
+
+	// No case yet; the form was posted and the snapshot persisted.
+	noCase, err := repo.Case().GetBySlackThread(ctx, "support", channel, rootTS)
+	gt.NoError(t, err).Required()
+	gt.Value(t, noCase).Nil()
+	ssn, err := repo.Session().GetByThread(ctx, channel, rootTS)
+	gt.NoError(t, err).Required()
+	gt.Value(t, ssn.PendingQuestion).NotNil().Required()
+	formTS := ssn.PendingQuestion.PostedMessageTS
+	gt.String(t, formTS).NotEqual("")
+
+	// The user submits "high".
+	cb := &goslack.InteractionCallback{
+		Type:    goslack.InteractionTypeBlockActions,
+		User:    goslack.User{ID: "U-REPORTER"},
+		Channel: goslack.Channel{GroupConversation: goslack.GroupConversation{Conversation: goslack.Conversation{ID: channel}}},
+		Message: goslack.Message{Msg: goslack.Msg{Timestamp: formTS, ThreadTimestamp: rootTS}},
+		BlockActionState: &goslack.BlockActionStates{
+			Values: map[string]map[string]goslack.BlockAction{
+				usecase.BlockIDDraftQuestionItemPrefix + "q-sev": {
+					usecase.ActionIDDraftQuestionChoice: {SelectedOption: goslack.OptionBlockObject{Value: "high"}},
+				},
+			},
+		},
+		ActionCallback: goslack.ActionCallbacks{
+			BlockActions: []*goslack.BlockAction{{ActionID: usecase.ActionIDThreadCreateQuestionSubmit, Value: rootTS}},
+		},
+	}
+	gt.NoError(t, agentUC.HandleThreadCaseQuestionSubmit(ctx, cb, cb.ActionCallback.BlockActions[0])).Required()
+	async.Wait()
+
+	// The case was created from the answer; PendingQuestion cleared.
+	c, err := repo.Case().GetBySlackThread(ctx, "support", channel, rootTS)
+	gt.NoError(t, err).Required()
+	gt.Value(t, c).NotNil().Required()
+	gt.Value(t, c.Title).Equal("Login outage")
+	gt.Value(t, c.FieldValues["severity"].Value).Equal("high")
+
+	ssn2, err := repo.Session().GetByThread(ctx, channel, rootTS)
+	gt.NoError(t, err).Required()
+	gt.Value(t, ssn2.PendingQuestion).Nil()
+	gt.Number(t, ssn2.CaseID).Equal(c.ID)
+
+	// The form message was rewritten (answered view) via UpdateMessage.
+	gt.Bool(t, len(slackMock.updatedMessages) >= 1).True()
+}
+
+// TestThreadCase_QuestionSubmit_StaleAfterCreate verifies a late submit on a
+// thread whose case already exists is dropped (the form is marked stale, no
+// second case).
+func TestThreadCase_QuestionSubmit_StaleAfterCreate(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	reg := newThreadWorkspaceRegistry()
+	slackMock := &agentTestSlackService{}
+	caseUC := usecase.NewCaseUseCase(repo, reg, slackMock, nil, "https://app.test")
+	agentUC := usecase.NewAgentUseCase(usecase.AgentDeps{
+		Repo:         repo,
+		Registry:     reg,
+		LLM:          newScriptedClient(nil),
+		HistoryRepo:  agentarchive.NewMemoryHistoryRepository(),
+		TraceRepo:    agentarchive.NewMemoryTraceRepository(),
+		SlackService: slackMock,
+		CaseUC:       caseUC,
+	})
+
+	const channel = "C-MONITOR"
+	const rootTS = "1700000000.000100"
+	// Pre-existing case for the thread.
+	_, err := caseUC.CreateThreadCase(ctx, "support", channel, rootTS, "U-REPORTER", "seed", "seed")
+	gt.NoError(t, err).Required()
+
+	cb := &goslack.InteractionCallback{
+		Type:    goslack.InteractionTypeBlockActions,
+		User:    goslack.User{ID: "U-REPORTER"},
+		Channel: goslack.Channel{GroupConversation: goslack.GroupConversation{Conversation: goslack.Conversation{ID: channel}}},
+		Message: goslack.Message{Msg: goslack.Msg{Timestamp: "1700000000.000900", ThreadTimestamp: rootTS}},
+		ActionCallback: goslack.ActionCallbacks{
+			BlockActions: []*goslack.BlockAction{{ActionID: usecase.ActionIDThreadCreateQuestionSubmit, Value: rootTS}},
+		},
+	}
+	gt.NoError(t, agentUC.HandleThreadCaseQuestionSubmit(ctx, cb, cb.ActionCallback.BlockActions[0])).Required()
+	async.Wait()
+
+	// The stale form was rewritten; no duplicate case.
+	gt.Bool(t, len(slackMock.updatedMessages) >= 1).True()
 }

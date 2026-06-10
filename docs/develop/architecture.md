@@ -146,6 +146,31 @@ mention resumes where the previous turn left off:
 If the mention thread happens to live under an Action notification message
 (matched via `Action.SlackMessageTS`), the session records the `ActionID`.
 
+### Thread-mode case initialization (deferred, agent-driven)
+
+In thread mode, a top-level human post does **not** create a Case immediately.
+`HandleThreadCaseCreation` runs the `threadcase` plan-and-execute agent in
+`ModeCreate`: it investigates (read-only search tools), may ask the reporter a
+question (terminal `question` action → the turn ends and waits), and only
+commits a Case once it produces a final `create` decision that passes full
+field validation. The commit happens **inside the planner loop** via the
+planexec `OnFinalize` hook (host callback `Handler.Create` →
+`CaseUC.CreateThreadCaseWithFields`): if validation fails (all violations are
+aggregated, not fail-fast) *or* the persistence call fails, the error folds
+back as another planner round so the agent can fix and re-emit, bounded by
+`PlannerLoopMax`. On success the host posts a Block Kit summary; on budget
+exhaustion it posts a fallback notice.
+
+Because a `question` ends the turn (the per-thread turn-lock cannot be held
+while waiting on an async Slack reply), the task can span multiple turns. The
+**same** thread Session (and therefore the same gollem history key) is reused
+across the initial turn, any question/answer resume turns
+(`ResumeThreadCaseCreation`, triggered by a reply or mention on a case-less
+thread), and the later case-bound mention turns — so the conversation history
+is one continuous thread. The created case id is stamped onto the Session
+(`Session.CaseID`) without changing `Session.ID`. See the agent runtime
+vocabulary (turn / round / budget) in `.claude/rules/architecture.md`.
+
 ### Storage layout
 
 Configurable via two CLI flags / environment variables:

@@ -25,9 +25,11 @@ const (
 )
 
 // ThreadInitial drives the thread-mode initial sequence: a top-level post
-// creates a case (materialize turn); if the agent asks the user a question, the
-// simulator answers and the answer is injected as a mention, looping up to the
-// persona's MaxAnswerTurns. The produced case is the artifact.
+// starts the initialization (create) agent. The agent investigates and may ask
+// the user a question instead of creating a case immediately; when it does, the
+// simulator answers and the answer is injected as a thread reply that resumes
+// the create agent, looping up to the persona's MaxAnswerTurns until the agent
+// commits a case. The produced case is the artifact.
 type ThreadInitial struct{}
 
 // NewThreadInitial builds the driver.
@@ -53,13 +55,13 @@ func (*ThreadInitial) Run(ctx context.Context, e *env.Env, sc *scenario.Scenario
 	now := time.Now().UTC()
 	first := slackmodel.NewMessageFromData(runThreadTS, channel, "", evalTeamID, reporter, reporter, sc.Input.Text, runThreadTS, now, nil)
 
-	logger.Info("eval turn: materialize (case creation)", "scenario", sc.Meta.ID, "channel", channel)
+	logger.Info("eval turn: create (case initialization)", "scenario", sc.Meta.ID, "channel", channel)
 	if err := e.AgentUC.HandleThreadCaseCreation(ctx, first, e.Entry); err != nil {
 		return nil, goerr.Wrap(err, "thread case creation")
 	}
 	async.Wait()
 
-	transcript := []evaltype.TurnRecord{{Turn: 1, Mode: "materialize", Input: sc.Input.Text}}
+	transcript := []evaltype.TurnRecord{{Turn: 1, Mode: "create", Input: sc.Input.Text}}
 
 	for turn := 2; turn <= sc.Persona.MaxAnswerTurns+1; turn++ {
 		session, err := e.Repo.Session().GetByThread(ctx, channel, runThreadTS)
@@ -67,7 +69,7 @@ func (*ThreadInitial) Run(ctx context.Context, e *env.Env, sc *scenario.Scenario
 			return nil, goerr.Wrap(err, "load session")
 		}
 		if session == nil || session.LastAction != model.SessionEndedWithQuestion {
-			break // no pending question -> done
+			break // no pending question -> the agent created the case (or gave up)
 		}
 
 		questionText := lastThreadReply(e)
@@ -81,26 +83,20 @@ func (*ThreadInitial) Run(ctx context.Context, e *env.Env, sc *scenario.Scenario
 		}
 		answerText := joinAnswers(ans)
 
-		foundCase, err := e.Repo.Case().GetBySlackThread(ctx, wsID, channel, runThreadTS)
-		if err != nil {
-			return nil, goerr.Wrap(err, "load case for mention")
-		}
-		if foundCase == nil {
-			return nil, errNoCase
-		}
+		// The case does NOT exist yet (the agent deferred creation to ask).
+		// Inject the answer as a thread reply that resumes the create agent.
+		replyTS := fmt.Sprintf("1700000000.%06d", 200+turn)
+		reply := slackmodel.NewMessageFromData(replyTS, channel, runThreadTS, evalTeamID, reporter, reporter, answerText, replyTS, time.Now().UTC(), nil)
 
-		mentionTS := fmt.Sprintf("1700000000.%06d", 200+turn)
-		mention := slackmodel.NewMessageFromData(mentionTS, channel, runThreadTS, evalTeamID, reporter, reporter, answerText, mentionTS, time.Now().UTC(), nil)
-
-		logger.Info("eval turn: mention (answer injected)", "scenario", sc.Meta.ID, "turn", turn)
-		if err := e.AgentUC.HandleThreadCaseMention(ctx, mention, e.Entry, foundCase); err != nil {
-			return nil, goerr.Wrap(err, "thread case mention")
+		logger.Info("eval turn: resume create (answer injected)", "scenario", sc.Meta.ID, "turn", turn)
+		if err := e.AgentUC.ResumeThreadCaseCreation(ctx, reply, e.Entry); err != nil {
+			return nil, goerr.Wrap(err, "resume thread case creation")
 		}
 		async.Wait()
 
 		transcript = append(transcript, evaltype.TurnRecord{
 			Turn:     turn,
-			Mode:     "mention",
+			Mode:     "resume",
 			Input:    answerText,
 			Question: &q,
 			Answer:   &ans,

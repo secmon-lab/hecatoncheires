@@ -134,7 +134,7 @@ func mustDraft(t *testing.T, llm gollem.LLMClient, plannerMax, subMax int) *prop
 		HeartbeatInterval:   time.Second,
 		HeartbeatStaleAfter: 5 * time.Second,
 	}
-	uc, err := proposal.New(deps, plannerMax, subMax, 20)
+	uc, err := proposal.New(deps, plannerMax, 20)
 	gt.NoError(t, err).Required()
 	return uc
 }
@@ -200,7 +200,7 @@ func TestRunTurn_InvestigateThenMaterialize(t *testing.T) {
 						return &gollem.Response{Texts: []string{"The thread mentions team-X was paged."}}, nil
 					}
 					// First planner round (initial mention).
-					if strings.Contains(body, "[budget] planner 0/8") {
+					if strings.Contains(body, "[budget] planner round 0/8") {
 						return &gollem.Response{Texts: []string{`{
 							"reasoning":"need more context",
 							"action":"investigate",
@@ -324,7 +324,7 @@ func TestRunTurn_BusyShortCircuits(t *testing.T) {
 		HeartbeatInterval:   200 * time.Millisecond,
 		HeartbeatStaleAfter: 5 * time.Second,
 	}
-	uc, err := proposal.New(deps, 8, 16, 20)
+	uc, err := proposal.New(deps, 8, 20)
 	gt.NoError(t, err).Required()
 
 	ssn := newOpenSession()
@@ -363,7 +363,7 @@ func TestRunTurn_IdempotentRetryDropsSilently(t *testing.T) {
 		HeartbeatInterval:   200 * time.Millisecond,
 		HeartbeatStaleAfter: 5 * time.Second,
 	}
-	uc, err := proposal.New(deps, 8, 16, 20)
+	uc, err := proposal.New(deps, 8, 20)
 	gt.NoError(t, err).Required()
 
 	ssn := newOpenSession()
@@ -441,7 +441,7 @@ func TestRunTurn_PlannerCallsGetWorkspaceThenMaterializes(t *testing.T) {
 						if !ok {
 							return nil, errors.New("expected gollem.Text on round 1")
 						}
-						if !strings.Contains(string(txt), "[budget] planner 0/8") {
+						if !strings.Contains(string(txt), "[budget] planner round 0/8") {
 							return nil, errors.New("round 1 input missing budget prefix")
 						}
 						return &gollem.Response{
@@ -509,7 +509,7 @@ func TestRunTurn_PlannerCallsGetWorkspaceThenMaterializes(t *testing.T) {
 		HeartbeatInterval:   time.Second,
 		HeartbeatStaleAfter: 5 * time.Second,
 	}
-	uc, err := proposal.New(deps, 8, 16, 20)
+	uc, err := proposal.New(deps, 8, 20)
 	gt.NoError(t, err).Required()
 
 	host := &hostStub{}
@@ -1162,7 +1162,7 @@ func runScenario(t *testing.T, ctx context.Context, llm gollem.LLMClient, sc llm
 	// search / get_page calls before they have enough context to
 	// summarise, and the production defaults are sized for that.
 	// Passing 0 lets proposal.New apply the defaults explicitly.
-	uc, err := proposal.New(deps, 0, 0, 0)
+	uc, err := proposal.New(deps, 0, 0)
 	gt.NoError(t, err).Required()
 
 	host := &hostStub{}
@@ -1827,7 +1827,7 @@ func TestRunTurn_RealLLM_QuestionAnsweredThenMaterializes(t *testing.T) {
 		HeartbeatStaleAfter: 30 * time.Second,
 	}
 	// Use package defaults (8 / 16 / 20).
-	uc, err := proposal.New(deps, 0, 0, 0)
+	uc, err := proposal.New(deps, 0, 0)
 	gt.NoError(t, err).Required()
 
 	host := &hostStub{}

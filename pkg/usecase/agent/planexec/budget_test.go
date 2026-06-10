@@ -9,18 +9,16 @@ import (
 
 func TestBudgetConfig_Validate_OK(t *testing.T) {
 	cfg := planexec.BudgetConfig{
-		PlannerLoopMax:     8,
-		SubAgentMaxPerTurn: 16,
-		SubAgentLoopMax:    20,
+		PlannerLoopMax:  8,
+		SubAgentLoopMax: 20,
 	}
 	gt.NoError(t, cfg.Validate())
 }
 
 func TestBudgetConfig_Validate_RejectsNonPositive(t *testing.T) {
 	bases := planexec.BudgetConfig{
-		PlannerLoopMax:     8,
-		SubAgentMaxPerTurn: 16,
-		SubAgentLoopMax:    20,
+		PlannerLoopMax:  8,
+		SubAgentLoopMax: 20,
 	}
 
 	cases := []struct {
@@ -29,7 +27,6 @@ func TestBudgetConfig_Validate_RejectsNonPositive(t *testing.T) {
 	}{
 		{"planner zero", func(c *planexec.BudgetConfig) { c.PlannerLoopMax = 0 }},
 		{"planner negative", func(c *planexec.BudgetConfig) { c.PlannerLoopMax = -1 }},
-		{"subagent max zero", func(c *planexec.BudgetConfig) { c.SubAgentMaxPerTurn = 0 }},
 		{"subagent loop zero", func(c *planexec.BudgetConfig) { c.SubAgentLoopMax = 0 }},
 	}
 	for _, tc := range cases {

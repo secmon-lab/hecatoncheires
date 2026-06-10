@@ -77,6 +77,14 @@ var messagesEN = [msgKeyCount]string{
 	MsgThreadCaseClosed:   ":white_check_mark: Closed this case (%s).",
 	MsgThreadCaseQuestion: ":question: %s",
 
+	MsgThreadCaseCreating:       ":mag: Got it — looking into this…",
+	MsgThreadCaseCreateFallback: "I couldn't pull this together into a case yet. Add a little more detail and mention me again.",
+	MsgThreadCaseSummaryHeader:  ":white_check_mark: Created a case",
+	MsgThreadCaseSummaryTitle:   "Title",
+	MsgThreadCaseSummaryDesc:    "Description",
+	MsgThreadCaseSummaryStatus:  "Status",
+	MsgThreadCaseSummaryLink:    "<%s|Open in the web UI>",
+
 	// Draft (open-mode) trace lines
 	MsgProposalTracePlanning:           "🤔 Planning…",
 	MsgProposalTracePlannerRetry:       "⚠️ Planner output rejected; retrying",
@@ -214,6 +222,14 @@ var messagesJA = [msgKeyCount]string{
 	MsgThreadCaseUpdated:  ":pencil2: ケースの内容を更新しました。",
 	MsgThreadCaseClosed:   ":white_check_mark: このケースをクローズしました（%s）。",
 	MsgThreadCaseQuestion: ":question: %s",
+
+	MsgThreadCaseCreating:       ":mag: 受け付けました。調査しています…",
+	MsgThreadCaseCreateFallback: "ケースとしてまとめきれませんでした。もう少し情報を添えて、もう一度メンションしてください。",
+	MsgThreadCaseSummaryHeader:  ":white_check_mark: ケースを作成しました",
+	MsgThreadCaseSummaryTitle:   "タイトル",
+	MsgThreadCaseSummaryDesc:    "説明",
+	MsgThreadCaseSummaryStatus:  "ステータス",
+	MsgThreadCaseSummaryLink:    "<%s|Web UI で開く>",
 
 	// Draft (open-mode) trace lines
 	MsgProposalTracePlanning:           "🤔 計画中…",

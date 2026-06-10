@@ -99,6 +99,15 @@ const (
 	MsgThreadCaseClosed   // ":white_check_mark: Closed this case (%s)." (status name)
 	MsgThreadCaseQuestion // ":question: %s" (reason) — question header line
 
+	// Thread-mode case initialization (create) flow.
+	MsgThreadCaseCreating       // "🔍 Got it — looking into this…" (initial progress)
+	MsgThreadCaseCreateFallback // "I couldn't pull this together into a case yet. Add a little more detail and mention me again."
+	MsgThreadCaseSummaryHeader  // "✅ Created a case" (Block Kit summary header)
+	MsgThreadCaseSummaryTitle   // "Title" (field label)
+	MsgThreadCaseSummaryDesc    // "Description" (field label)
+	MsgThreadCaseSummaryStatus  // "Status" (field label)
+	MsgThreadCaseSummaryLink    // "<%s|Open in web UI>" (url)
+
 	// Draft (open-mode) planner / sub-agent trace lines. These are rendered
 	// into the per-turn Slack progress message so the user can follow what
 	// the agent is doing.

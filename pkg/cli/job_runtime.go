@@ -180,9 +180,8 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner) {
 			HistoryRepo: historyRepo,
 			TraceRepo:   traceRepo,
 			Budget: planexec.BudgetConfig{
-				PlannerLoopMax:     8,
-				SubAgentMaxPerTurn: 16,
-				SubAgentLoopMax:    20,
+				PlannerLoopMax:  8,
+				SubAgentLoopMax: 20,
 			},
 		})
 		if err == nil {

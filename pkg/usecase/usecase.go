@@ -256,7 +256,7 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 				HeartbeatInterval:   agent.DefaultHeartbeatInterval,
 				HeartbeatStaleAfter: agent.DefaultHeartbeatStaleAfter,
 			}
-			draftUC, err := proposal.New(deps, 0, 0, 0)
+			draftUC, err := proposal.New(deps, 0, 0)
 			if err != nil {
 				errutil.Handle(context.Background(), goerr.Wrap(err, "failed to build draft usecase"), "failed to build draft usecase")
 			} else {

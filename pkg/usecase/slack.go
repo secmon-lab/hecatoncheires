@@ -270,10 +270,19 @@ func (uc *SlackUseCases) handleThreadModeEvent(ctx context.Context, event *slack
 			errutil.Handle(ctx, err, "thread mode: look up case for mention")
 			return
 		}
+		ctx = uc.contextWithUserLang(ctx, appMention.User)
 		if c == nil {
+			// No case yet: the initialization (create) agent is still forming
+			// one (e.g. it asked a question or fell back). Resume it with this
+			// mention as the latest intent.
+			if err := uc.agent.ResumeThreadCaseCreation(ctx, msg, entry); err != nil {
+				errutil.Handle(ctx, goerr.Wrap(err, "failed to resume thread case creation (mention)",
+					goerr.V("channel_id", appMention.Channel),
+					goerr.V("thread_ts", threadTS),
+				), "failed to resume thread case creation")
+			}
 			return
 		}
-		ctx = uc.contextWithUserLang(ctx, appMention.User)
 		if err := uc.agent.HandleThreadCaseMention(ctx, msg, entry, c); err != nil {
 			errutil.Handle(ctx, goerr.Wrap(err, "failed to handle thread case mention",
 				goerr.V("channel_id", appMention.Channel),
@@ -284,17 +293,58 @@ func (uc *SlackUseCases) handleThreadModeEvent(ctx context.Context, event *slack
 	}
 
 	if msgEv, ok := event.InnerEvent.Data.(*slackevents.MessageEvent); ok {
-		if !uc.isThreadCaseCreationTrigger(ctx, msgEv) {
+		if uc.isThreadCaseCreationTrigger(ctx, msgEv) {
+			ctx = uc.contextWithUserLang(ctx, msgEv.User)
+			if err := uc.agent.HandleThreadCaseCreation(ctx, msg, entry); err != nil {
+				errutil.Handle(ctx, goerr.Wrap(err, "failed to handle thread case creation",
+					goerr.V("channel_id", msgEv.Channel),
+					goerr.V("message_ts", msgEv.TimeStamp),
+				), "failed to handle thread case creation")
+			}
 			return
 		}
-		ctx = uc.contextWithUserLang(ctx, msgEv.User)
-		if err := uc.agent.HandleThreadCaseCreation(ctx, msg, entry); err != nil {
-			errutil.Handle(ctx, goerr.Wrap(err, "failed to handle thread case creation",
-				goerr.V("channel_id", msgEv.Channel),
-				goerr.V("message_ts", msgEv.TimeStamp),
-			), "failed to handle thread case creation")
+		// A human reply inside a thread that has no case yet resumes the
+		// initialization agent (the user answering a pending question, or
+		// adding detail after a fallback).
+		if uc.isThreadCaseResumeTrigger(ctx, msgEv) {
+			c, err := uc.repo.Case().GetBySlackThread(ctx, wsID, msgEv.Channel, msgEv.ThreadTimeStamp)
+			if err != nil {
+				errutil.Handle(ctx, err, "thread mode: look up case for reply")
+				return
+			}
+			if c != nil {
+				// Reply in an existing case thread; non-mention replies are not
+				// acted on (the mention flow owns case threads).
+				return
+			}
+			ctx = uc.contextWithUserLang(ctx, msgEv.User)
+			if err := uc.agent.ResumeThreadCaseCreation(ctx, msg, entry); err != nil {
+				errutil.Handle(ctx, goerr.Wrap(err, "failed to resume thread case creation (reply)",
+					goerr.V("channel_id", msgEv.Channel),
+					goerr.V("thread_ts", msgEv.ThreadTimeStamp),
+				), "failed to resume thread case creation")
+			}
 		}
 	}
+}
+
+// isThreadCaseResumeTrigger reports whether a message event is a human reply
+// inside an existing thread (not a top-level post, not a bot / subtype message)
+// — the shape that can resume a pending initialization turn.
+func (uc *SlackUseCases) isThreadCaseResumeTrigger(ctx context.Context, ev *slackevents.MessageEvent) bool {
+	// Must be a reply (has a parent thread distinct from itself).
+	if ev.ThreadTimeStamp == "" || ev.ThreadTimeStamp == ev.TimeStamp {
+		return false
+	}
+	if ev.SubType != "" || ev.BotID != "" {
+		return false
+	}
+	if uc.slackService != nil {
+		if botUserID, err := uc.slackService.GetBotUserID(ctx); err == nil && botUserID != "" && ev.User == botUserID {
+			return false
+		}
+	}
+	return ev.User != ""
 }
 
 // isThreadCaseCreationTrigger reports whether a message event in a monitored

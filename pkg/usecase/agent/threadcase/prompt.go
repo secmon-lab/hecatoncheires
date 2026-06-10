@@ -18,6 +18,10 @@ const (
 	// monitored-channel post. The planner investigates the message and emits
 	// a materialize decision to fill title / description / fields.
 	ModeMaterialize
+	// ModeCreate runs when a monitored-channel post arrives but NO case exists
+	// yet. The planner investigates / asks the user, and only commits a new
+	// case (final create decision) once it can satisfy validation.
+	ModeCreate
 )
 
 // buildSystemPrompt renders the planner system prompt for a thread-mode turn.
@@ -28,6 +32,8 @@ func buildSystemPrompt(c *model.Case, ws *model.WorkspaceEntry, mode Mode) strin
 
 	b.WriteString("You are an investigation agent operating inside a Slack thread that represents a single case.\n")
 	switch mode {
+	case ModeCreate:
+		b.WriteString("A message was posted in a monitored channel, but NO case exists yet. Do NOT rush to create one. First do light investigation about the reporter and the topic (recent messages, related threads) using the read-only search tools. When the intent or required information is unclear, ask the user a `question` (a select / multi-select form) instead of guessing. Once the direction is clear, investigate deeper, and only then emit the final create decision with a concise title, a clear description, and every custom field required by the schema. The case will be validated before it is created: if required fields are missing or values are not allowed, you will be asked to fix them and re-emit.\n")
 	case ModeMaterialize:
 		b.WriteString("A new case was just created from the first message in this thread. Investigate the message (using the read-only tools when helpful) and emit a `materialize` decision that fills a concise title, a clear description, and any custom fields you are confident about.\n")
 	default:
@@ -75,6 +81,14 @@ func buildSystemPrompt(c *model.Case, ws *model.WorkspaceEntry, mode Mode) strin
 		if len(closed) > 0 {
 			fmt.Fprintf(&b, "# Closed status ids (for close): %s\n\n", strings.Join(closed, ", "))
 		}
+	}
+
+	// Workspace-specific instructions configured via TOML [case.prompts].create.
+	// Applies to the ModeCreate flow (case initialization).
+	if mode == ModeCreate && ws != nil && strings.TrimSpace(ws.CaseCreatePrompt) != "" {
+		b.WriteString("# Workspace-specific instructions\n")
+		b.WriteString(ws.CaseCreatePrompt)
+		b.WriteString("\n")
 	}
 
 	return b.String()

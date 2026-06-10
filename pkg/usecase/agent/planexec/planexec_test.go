@@ -2,12 +2,14 @@ package planexec_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/mock"
 	"github.com/m-mizutani/gollem/trace"
@@ -108,9 +110,8 @@ func newRunner(t *testing.T, llm gollem.LLMClient) *planexec.Runner {
 		HistoryRepo: agentarchive.NewMemoryHistoryRepository(),
 		TraceRepo:   agentarchive.NewMemoryTraceRepository(),
 		Budget: planexec.BudgetConfig{
-			PlannerLoopMax:     8,
-			SubAgentMaxPerTurn: 16,
-			SubAgentLoopMax:    20,
+			PlannerLoopMax:  8,
+			SubAgentLoopMax: 20,
 		},
 	})
 	gt.NoError(t, err).Required()
@@ -225,9 +226,8 @@ func TestRunner_Run_PlannerBudgetExhausted(t *testing.T) {
 		HistoryRepo: agentarchive.NewMemoryHistoryRepository(),
 		TraceRepo:   agentarchive.NewMemoryTraceRepository(),
 		Budget: planexec.BudgetConfig{
-			PlannerLoopMax:     2,
-			SubAgentMaxPerTurn: 16,
-			SubAgentLoopMax:    20,
+			PlannerLoopMax:  2,
+			SubAgentLoopMax: 20,
 		},
 	})
 	gt.NoError(t, err).Required()
@@ -298,4 +298,96 @@ func TestRunner_Run_RetriesOnValidationFailure(t *testing.T) {
 	gt.NoError(t, err).Required()
 	gt.Value(t, res.Status).Equal(planexec.StatusCompleted)
 	gt.String(t, res.FinalText).Equal("done.")
+}
+
+// --- Integration: OnFinalize rejects then accepts -------------------
+
+// When OnFinalize returns an error (validation OR commit failure), the
+// runner must fold the error back as another planner round and try the
+// final phase again, succeeding once OnFinalize accepts.
+func TestRunner_Run_OnFinalizeRejectThenAccept(t *testing.T) {
+	ctx := context.Background()
+	llm := newSequencedLLM([]sequencedResponse{
+		// Round 1: one task.
+		{text: `{"message":"start","tasks":[
+			{"id":"t-1","title":"A","description":"x","acceptance_criteria":"a","tools":["slack_ro"]}
+		]}`},
+		{text: "investigation result"},
+		// Round 2: terminate → final attempt #1 (rejected by OnFinalize).
+		{text: `{"message":"done","tasks":[]}`},
+		{text: `{"title":""}`}, // empty title → OnFinalize rejects
+		// Round 3: terminate again → final attempt #2 (accepted).
+		{text: `{"message":"retry","tasks":[]}`},
+		{text: `{"title":"Found case"}`},
+	})
+
+	runner := newRunner(t, llm.Client())
+	req := baseRequest()
+	req.FinalOutputSchema = &gollem.Parameter{
+		Type: gollem.TypeObject,
+		Properties: map[string]*gollem.Parameter{
+			"title": {Type: gollem.TypeString},
+		},
+	}
+	var finalizeCalls atomic.Int32
+	var committed atomic.Value
+	req.OnFinalize = func(_ context.Context, raw json.RawMessage) error {
+		finalizeCalls.Add(1)
+		var out struct {
+			Title string `json:"title"`
+		}
+		gt.NoError(t, json.Unmarshal(raw, &out)).Required()
+		if out.Title == "" {
+			return goerr.New("title is required")
+		}
+		committed.Store(out.Title)
+		return nil
+	}
+
+	res, err := runner.Run(ctx, req)
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(planexec.StatusCompleted)
+	// OnFinalize was called twice: first rejected, second accepted.
+	gt.Number(t, int(finalizeCalls.Load())).Equal(2)
+	gt.Value(t, committed.Load()).Equal("Found case")
+	gt.String(t, string(res.FinalRaw)).Contains("Found case")
+}
+
+// OnFinalize that keeps rejecting must eventually exhaust the round
+// budget and fall back without completing.
+func TestRunner_Run_OnFinalizeAlwaysRejects_Fallback(t *testing.T) {
+	ctx := context.Background()
+	llm := newSequencedLLM([]sequencedResponse{
+		{text: `{"message":"start","tasks":[
+			{"id":"t-1","title":"A","description":"x","acceptance_criteria":"a","tools":["slack_ro"]}
+		]}`},
+		{text: "result"},
+		// Round 2: terminate → final (rejected).
+		{text: `{"message":"done","tasks":[]}`},
+		{text: `{"title":""}`},
+		// Round 3: terminate → final (rejected). Budget (3) now exhausted.
+		{text: `{"message":"again","tasks":[]}`},
+		{text: `{"title":""}`},
+	})
+
+	runner, err := planexec.NewRunner(planexec.RunnerDeps{
+		LLMClient:   llm.Client(),
+		HistoryRepo: agentarchive.NewMemoryHistoryRepository(),
+		TraceRepo:   agentarchive.NewMemoryTraceRepository(),
+		Budget:      planexec.BudgetConfig{PlannerLoopMax: 3, SubAgentLoopMax: 20},
+	})
+	gt.NoError(t, err).Required()
+
+	req := baseRequest()
+	req.FinalOutputSchema = &gollem.Parameter{
+		Type:       gollem.TypeObject,
+		Properties: map[string]*gollem.Parameter{"title": {Type: gollem.TypeString}},
+	}
+	req.OnFinalize = func(_ context.Context, _ json.RawMessage) error {
+		return goerr.New("always reject")
+	}
+
+	res, err := runner.Run(ctx, req)
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(planexec.StatusFallbackBudget)
 }

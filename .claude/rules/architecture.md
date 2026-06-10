@@ -252,3 +252,60 @@ format, so additions there must remain serialisable.
   GraphQL API, do they hit the same usecase method?"* If no — or if
   logic is duplicated at the controller level — fix it before
   merging.
+
+# Agent runtime vocabulary (planexec / proposal / threadcase)
+
+These terms are easy to conflate; they have precise meanings across the
+plan-and-execute agent runtime (`pkg/usecase/agent/...`). Use them
+consistently in code, comments, specs, and reviews. There are three
+nested levels:
+
+- **Round** — ONE iteration of the planner loop: a single planner /
+  replan LLM call plus the work that round dispatches (the `investigate`
+  phase's sub-agents, a validation/commit re-emit, etc.). This is one
+  iteration of the `for {}` in `planexec.Runner.Run`.
+- **Turn** — ONE `runner.Run` / `RunTurn` invocation: from agent start
+  until it stops to wait for user input or otherwise completes. A turn
+  runs *many rounds*. A turn ends on a terminal outcome:
+  - the planner asks the user (`question` / `OnQuestion` →
+    `QuestionResult{Terminate:true}`) — the turn closes and waits; the
+    user's reply / form-submit starts the **next** turn;
+  - a terminal action commits (e.g. case create / materialize);
+  - fallback (loop budget exhausted, internal error).
+  A turn is NOT a single loop iteration; it spans many rounds.
+- **Task** — the whole effort (e.g. creating one case), possibly spanning
+  **multiple turns** separated by `question`s. (No stricter name yet;
+  "task" is fine.)
+
+**Why `question` ends the turn (not `Terminate:false`):** holding the
+per-thread turn-lock open while waiting minutes/hours for a Slack submit
+is not viable under horizontal scaling; the pending question is persisted
+(`Session.PendingQuestion`, shared backend) and the answer arrives on a
+fresh dispatched event that starts a **new turn**.
+
+## Budget
+
+The budget model is the combination of **two** controls — there is NO
+running "total sub-agent task count" across a turn:
+
+1. **Round-count limit** — `PlannerLoopMax` bounds the **number of rounds
+   in a turn** (`budget.canPlannerCall()`). Validation/commit re-tries
+   (planexec `OnFinalize` returning an error) are additional rounds and
+   consume this. This is the main loop guard.
+2. **Per-sub-agent budget** — `SubAgentLoopMax` is the inner gollem loop
+   limit granted **fresh to every sub-agent** (so the sub-agent budget
+   naturally recovers per round).
+
+Per-round fan-out is already bounded by plan validation (≤ 5 tasks per
+phase), so total sub-agent work is naturally bounded by
+`PlannerLoopMax × (≤5) × SubAgentLoopMax` without a separate total cap.
+
+- **Do NOT reintroduce a per-turn total sub-agent count.** The legacy
+  `SubAgentMaxPerTurn` / `subAgentUsed` accumulator is being retired —
+  the round-count limit plus the per-sub-agent budget are the only knobs.
+- `PlannerLoopMax` is a loop bound, NOT "the budget". When someone says
+  "the budget" in this runtime they mean the sub-agent (investigation)
+  budget, which recovers per round.
+
+`newBudget(BudgetConfig)` is constructed once per `runner.Run` (per
+turn); crossing a `question` boundary starts a fresh turn.

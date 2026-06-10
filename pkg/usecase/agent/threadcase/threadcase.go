@@ -2,6 +2,7 @@ package threadcase
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -85,6 +86,10 @@ type Result struct {
 	Status    Status
 	Decision  *Decision
 	BusyOwner *model.Session
+	// Case is the newly created case for a ModeCreate turn that committed it
+	// (via Handler.Create inside the planner loop). Nil for other modes and
+	// for non-completed statuses.
+	Case *model.Case
 }
 
 // RunTurn executes one thread-mode turn: acquire the per-thread lock, run the
@@ -149,6 +154,37 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 		return planexec.QuestionResult{Terminate: true}, nil
 	}
 
+	// ModeCreate commits the new case inside the planner loop via OnFinalize so
+	// that both validation failures and persistence failures fold back into a
+	// re-plan. Other modes return a parsed Decision for the host to apply.
+	isCreate := req.Mode == ModeCreate
+	finalSchema := decisionSchema()
+	var createdCase *model.Case
+	var onFinalize func(context.Context, json.RawMessage) error
+	if isCreate {
+		finalSchema = createDecisionSchema()
+		onFinalize = func(fctx context.Context, raw json.RawMessage) error {
+			dec, perr := parseCreateDecision(raw)
+			if perr != nil {
+				return perr
+			}
+			fields, verr := validateCreateDecision(req.Workspace, dec)
+			if verr != nil {
+				return verr
+			}
+			c, cerr := req.Handler.Create(fctx, req.Session, CreatePayload{
+				Title:       dec.Title,
+				Description: dec.Description,
+				Fields:      fields,
+			})
+			if cerr != nil {
+				return goerr.Wrap(cerr, "create case")
+			}
+			createdCase = c
+			return nil
+		}
+	}
+
 	runResult, runErr := uc.runner.Run(turnCtx, planexec.RunRequest{
 		HistoryKey: req.Session.ID,
 		TraceID:    handle.OwnerID,
@@ -167,7 +203,8 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 		KnownToolIDs:      agent.KnownToolSetIDs,
 		AllowQuestion:     true,
 		OnQuestion:        onQuestion,
-		FinalOutputSchema: decisionSchema(),
+		FinalOutputSchema: finalSchema,
+		OnFinalize:        onFinalize,
 		Sink:              sink,
 	})
 	if runErr != nil {
@@ -185,6 +222,11 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 		if runResult.EndedWithQuestion {
 			uc.persistSession(turnCtx, req.Session, model.SessionEndedWithQuestion)
 			return &Result{Status: StatusQuestion}, nil
+		}
+		if isCreate {
+			// The case was committed inside OnFinalize; createdCase is set.
+			uc.persistSession(turnCtx, req.Session, model.SessionEndedWithCaseBoundReply)
+			return &Result{Status: StatusCompleted, Case: createdCase}, nil
 		}
 		decision, perr := parseDecision(runResult.FinalRaw)
 		if perr != nil {
@@ -241,7 +283,9 @@ func validateRequest(req *TurnRequest) error {
 	if req.Session == nil {
 		return goerr.New("Session is required")
 	}
-	if req.Case == nil {
+	// ModeCreate runs before any case exists, so Case is intentionally nil
+	// there; every other mode operates on an existing case.
+	if req.Case == nil && req.Mode != ModeCreate {
 		return goerr.New("Case is required")
 	}
 	if req.Workspace == nil {
