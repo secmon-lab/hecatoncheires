@@ -96,6 +96,9 @@ func renderFieldValue(def config.FieldDefinition, fv model.FieldValue) string {
 		}
 		return strings.Join(names, ", ")
 	default:
+		if fv.Value == nil {
+			return ""
+		}
 		return fmt.Sprintf("%v", fv.Value)
 	}
 	return ""
@@ -114,7 +117,13 @@ func toStringSlice(v any) []string {
 	switch s := v.(type) {
 	case []string:
 		return s
-	case []interface{}:
+	case string:
+		// LLMs sometimes emit a bare string for a single-option multi-select.
+		if s == "" {
+			return nil
+		}
+		return []string{s}
+	case []any:
 		out := make([]string, 0, len(s))
 		for _, e := range s {
 			if str, ok := e.(string); ok {

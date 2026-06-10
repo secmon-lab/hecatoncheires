@@ -59,3 +59,33 @@ func TestValidateCreateDecision_Valid(t *testing.T) {
 	gt.Value(t, fields["severity"].Value).Equal("high")
 	gt.Value(t, fields["summary"].Type).Equal(types.FieldTypeText)
 }
+
+func TestValidateCreateDecision_OptionalEmptyNumberSkipped(t *testing.T) {
+	ws := &model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: "support"},
+		FieldSchema: &config.FieldSchema{
+			Fields: []config.FieldDefinition{
+				{ID: "title_ok", Name: "T", Type: types.FieldTypeText, Required: true},
+				{ID: "score", Name: "Score", Type: types.FieldTypeNumber}, // optional
+			},
+		},
+	}
+	// An optional number field emitted with an empty value must not raise a
+	// spurious "not a number" violation; it is simply dropped.
+	dec := &threadcase.CreateDecisionForTest{
+		Title:       "A title",
+		Description: "desc",
+		Fields: []threadcase.DecisionField{
+			{FieldID: "title_ok", Value: "ok"},
+			{FieldID: "score", Value: ""},
+		},
+	}
+	fields, err := threadcase.ValidateCreateDecisionForTest(ws, dec)
+	gt.NoError(t, err).Required()
+	_, hasScore := fields["score"]
+	gt.Bool(t, hasScore).False()
+
+	// nil decision is rejected gracefully.
+	_, err = threadcase.ValidateCreateDecisionForTest(ws, nil)
+	gt.Error(t, err).Required()
+}

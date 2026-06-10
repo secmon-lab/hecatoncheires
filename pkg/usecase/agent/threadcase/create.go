@@ -73,6 +73,9 @@ func parseCreateDecision(raw []byte) (*CreateDecision, error) {
 // accumulated and returned as one error so the planner can fix everything in a
 // single re-emit. On success it returns the enriched field-value map.
 func validateCreateDecision(ws *model.WorkspaceEntry, d *CreateDecision) (map[string]model.FieldValue, error) {
+	if d == nil {
+		return nil, goerr.New("create decision is nil")
+	}
 	var violations []string
 
 	if strings.TrimSpace(d.Title) == "" {
@@ -142,7 +145,14 @@ func coerceCreateFields(ws *model.WorkspaceEntry, fields []DecisionField) (map[s
 				val = []string{}
 			}
 		case types.FieldTypeNumber:
-			n, err := strconv.ParseFloat(strings.TrimSpace(df.Value), 64)
+			trimmed := strings.TrimSpace(df.Value)
+			if trimmed == "" {
+				// Optional number left empty by the planner: drop it rather than
+				// emitting a spurious "not a number" violation. A missing
+				// REQUIRED number is still caught by ValidateCaseFieldsAll.
+				continue
+			}
+			n, err := strconv.ParseFloat(trimmed, 64)
 			if err != nil {
 				violations = append(violations, "field "+strconv.Quote(df.FieldID)+": value must be a number, got "+strconv.Quote(df.Value))
 				continue
