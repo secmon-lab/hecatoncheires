@@ -157,10 +157,24 @@ If the mention thread happens to live under an Action notification message
 ### Thread-mode case initialization (deferred, agent-driven)
 
 In thread mode, case creation is initiated **only** by a post at the channel
-root (a top-level message in the monitored channel). A mention or a reply
-inside a thread that is not bound to a Case is ignored — activity inside an
-arbitrary thread never starts a Case. A channel-root post does **not** create a
-Case immediately, though: `HandleThreadCaseCreation` runs the `threadcase`
+root (a top-level message in the monitored channel). A **human** root post
+always qualifies. A **bot-authored** root post qualifies only when the workspace
+opts in via `[slack] accept_bot` (default off) — otherwise a
+channel would spawn a Case for every bot notification. `isThreadCaseCreationTrigger`
+rejects replies, edits, system events, and our own bot's posts; a
+`bot_message`/`bot_id` post additionally requires the opt-in flag. This is
+deliberate: in opted-in channels the case-creating signal is often an intake-form
+app's relayed request.
+The reporter is, as a rule, the post's author; only when the author is a bot
+does `HandleThreadCaseCreation` fall back to resolving it from the first Slack
+user mention in the body (the requester named in the form). When none is
+present the reporter stays empty: thread-mode Cases are exempt from the
+mandatory-reporter rule (`model.Case.ValidateNew` requires `ReporterID` only for
+channel-mode Cases), so creation still proceeds and the GraphQL `reporter` field
+resolves to null. A mention or a reply inside a thread that is not bound to a Case is
+ignored — activity inside an arbitrary thread never starts a Case. A
+channel-root post does **not** create a Case immediately, though:
+`HandleThreadCaseCreation` runs the `threadcase`
 plan-and-execute agent in
 `ModeCreate`: it investigates (read-only search tools), may ask the reporter a
 question (terminal `question` action → the turn ends and waits), and only

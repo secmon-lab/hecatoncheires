@@ -212,7 +212,14 @@ impossible:
   forgets to inject the reporter (e.g. a Slack interactivity
   callback that skipped `auth.ContextWithToken`) fails loudly at
   the first write instead of silently producing unattributable
-  data.
+  data. **Scoped exception:** `Case.ValidateNew` enforces
+  `ReporterID` only for channel-mode Cases (the reporter is the
+  channel creator). Thread-mode Cases (`SlackThreadTS` set) may be
+  created by an integration bot's channel-root intake post that
+  names no human, so an empty `ReporterID` is a legitimate state
+  there; the GraphQL `reporter` field is nullable and resolves to
+  null. A relaxation like this must be narrowly scoped and the
+  reason recorded at the check, never a blanket removal.
 - **Every persisted model needs a repository-level round-trip test
   that creates with all fields populated and reads each one back
   exhaustively.** Tests that only assert `Title` and `ID` cannot

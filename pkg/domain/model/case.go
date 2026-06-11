@@ -12,14 +12,15 @@ import (
 // not a draft.
 var ErrCaseNotDraft = goerr.New("case is not a draft")
 
-// ErrCaseMissingReporter is returned by Case.Validate when a case is
-// about to be persisted without a reporter. Every persisted case —
-// DRAFT, OPEN, or CLOSED — must name a reporter; cases originate from
-// some authenticated user (Web cookie, Slack interactivity callback,
-// no-auth dev-mode token) and losing that identity later means the
-// Cases / Drafts UI shows an empty Reporter column and Slack invites
-// have nobody to add as the channel creator. Repositories MUST call
-// Validate() before write so this failure mode never reaches storage.
+// ErrCaseMissingReporter is returned by Case.ValidateNew when a channel-mode
+// case is about to be created without a reporter. A channel-mode case
+// originates from some authenticated user (Web cookie, Slack interactivity
+// callback, no-auth dev-mode token); losing that identity later means the
+// Cases / Drafts UI shows an empty Reporter column and Slack invites have
+// nobody to add as the channel creator, so repositories enforce it at the
+// Create boundary. Thread-mode cases (SlackThreadTS set) are exempt: a
+// channel-root intake post relayed by an integration bot may name no human, so
+// an empty ReporterID is a legitimate state there.
 var ErrCaseMissingReporter = goerr.New("case has no reporter")
 
 // ErrCaseAgentPromptTooLong is returned by Case.Validate when the
@@ -132,18 +133,22 @@ func (c *Case) Validate() error {
 	return nil
 }
 
-// ValidateNew checks the invariants that must hold for a newly created Case,
-// including ReporterID which is required at creation time. Repositories MUST
-// call this instead of Validate for Create operations so an empty ReporterID
-// (the canonical failure mode where a Slack handler forgot to inject
-// auth.ContextWithToken) is caught at the persistence boundary.
+// ValidateNew checks the invariants that must hold for a newly created Case.
+// For channel-mode cases it additionally enforces ReporterID at creation time:
+// that field is the channel creator and its silent loss (the canonical failure
+// mode where a Slack handler forgot to inject auth.ContextWithToken) is caught
+// at the persistence boundary. Thread-mode cases (SlackThreadTS set) are
+// exempt — a channel-root intake post relayed by an integration bot may name no
+// human, so an empty ReporterID is allowed (it is best-effort resolved from the
+// post body; see usecase.HandleThreadCaseCreation). Repositories MUST call this
+// instead of Validate for Create operations.
 func (c *Case) ValidateNew() error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
-	if c.ReporterID == "" {
+	if c.SlackThreadTS == "" && c.ReporterID == "" {
 		return goerr.Wrap(ErrCaseMissingReporter,
-			"case is missing ReporterID",
+			"channel-mode case is missing ReporterID",
 			goerr.V("title", c.Title),
 			goerr.V("status", c.Status),
 		)

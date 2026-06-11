@@ -254,7 +254,8 @@ func TestCase_ValidateNew(t *testing.T) {
 		gt.Error(t, c.ValidateNew())
 	})
 
-	t.Run("case without ReporterID fails ValidateNew", func(t *testing.T) {
+	t.Run("channel-mode case without ReporterID fails ValidateNew", func(t *testing.T) {
+		// No SlackThreadTS => channel-mode; reporter is mandatory.
 		c := &model.Case{Title: "No Reporter"}
 		err := c.ValidateNew()
 		gt.Error(t, err)
@@ -263,6 +264,27 @@ func TestCase_ValidateNew(t *testing.T) {
 
 	t.Run("case with ReporterID passes ValidateNew", func(t *testing.T) {
 		c := &model.Case{Title: "Has Reporter", ReporterID: "UREPORTER123"}
+		gt.NoError(t, c.ValidateNew())
+	})
+
+	t.Run("thread-mode case without ReporterID passes ValidateNew", func(t *testing.T) {
+		// SlackThreadTS set => thread-mode; an integration-bot intake post may
+		// name no human, so an empty ReporterID is a legitimate state.
+		c := &model.Case{
+			Title:          "Bot-relayed, no reporter",
+			SlackChannelID: "C-MONITOR",
+			SlackThreadTS:  "1700000000.000900",
+		}
+		gt.NoError(t, c.ValidateNew())
+	})
+
+	t.Run("thread-mode case with ReporterID passes ValidateNew", func(t *testing.T) {
+		c := &model.Case{
+			Title:          "Thread case with reporter",
+			ReporterID:     "UREPORTER123",
+			SlackChannelID: "C-MONITOR",
+			SlackThreadTS:  "1700000000.000901",
+		}
 		gt.NoError(t, c.ValidateNew())
 	})
 }

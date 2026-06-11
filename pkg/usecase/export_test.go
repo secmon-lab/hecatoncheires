@@ -39,6 +39,10 @@ var BuildCaseCreatedTailBlocksForTest = buildCaseCreatedTailBlocks
 // planner's first-turn prompt content.
 var BuildProposalUserInputForTest = buildProposalUserInput
 
+// FirstSlackUserMentionForTest exposes firstSlackUserMention so tests can
+// verify reporter extraction from a bot-relayed intake post.
+var FirstSlackUserMentionForTest = firstSlackUserMention
+
 // BuildAssistSystemPrompt is exported for testing
 var BuildAssistSystemPrompt = (*AssistUseCase).buildAssistSystemPrompt
 

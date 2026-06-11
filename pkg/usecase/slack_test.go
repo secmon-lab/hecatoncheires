@@ -125,9 +125,15 @@ func TestSlackUseCases_ThreadModeCreationInitiation(t *testing.T) {
 
 	// wire builds a SlackUseCases backed by a thread-mode workspace and a probe
 	// LLM that records whether the agent planner was ever invoked.
-	wire := func() (*usecase.SlackUseCases, *memory.Memory, *atomic.Bool) {
+	// createFromBotPosts toggles the workspace's [slack] accept_bot.
+	wire := func(createFromBotPosts bool) (*usecase.SlackUseCases, *memory.Memory, *atomic.Bool) {
 		repo := memory.New()
 		reg := newThreadWorkspaceRegistry()
+		if createFromBotPosts {
+			if e, err := reg.Get("support"); err == nil {
+				e.AcceptBot = true
+			}
+		}
 		slackMock := &agentTestSlackService{}
 		caseUC := usecase.NewCaseUseCase(repo, reg, slackMock, nil, "https://app.test")
 
@@ -196,7 +202,7 @@ func TestSlackUseCases_ThreadModeCreationInitiation(t *testing.T) {
 
 	t.Run("mention in a case-less thread is ignored", func(t *testing.T) {
 		ctx := context.Background()
-		uc, repo, llmInvoked := wire()
+		uc, repo, llmInvoked := wire(false)
 
 		threadTS := "1700000000.000100" // a thread with no case bound
 		gt.NoError(t, uc.HandleSlackEvent(ctx, mentionEvent(threadTS))).Required()
@@ -215,7 +221,7 @@ func TestSlackUseCases_ThreadModeCreationInitiation(t *testing.T) {
 
 	t.Run("reply in a case-less thread is ignored", func(t *testing.T) {
 		ctx := context.Background()
-		uc, repo, llmInvoked := wire()
+		uc, repo, llmInvoked := wire(false)
 
 		threadTS := "1700000000.000100"
 		gt.NoError(t, uc.HandleSlackEvent(ctx, messageEvent("1700000005.000001", threadTS))).Required()
@@ -230,7 +236,7 @@ func TestSlackUseCases_ThreadModeCreationInitiation(t *testing.T) {
 
 	t.Run("channel-root post initiates case creation", func(t *testing.T) {
 		ctx := context.Background()
-		uc, _, llmInvoked := wire()
+		uc, _, llmInvoked := wire(false)
 
 		// A top-level post (no thread_ts): the message's own ts is the thread.
 		rootTS := "1700000010.000001"
@@ -240,6 +246,72 @@ func TestSlackUseCases_ThreadModeCreationInitiation(t *testing.T) {
 		// The create turn was initiated: the planner was invoked. (It errors out
 		// on Generate here, which the create flow handles gracefully — the point
 		// is only that root posts reach creation while threaded events do not.)
+		gt.Value(t, llmInvoked.Load()).Equal(true)
+	})
+
+	// botFormRootEvent is a channel-root post authored by an integration bot
+	// (an intake-form app) rather than a human: no SubType / "bot_message", an
+	// empty User, a BotID, and the human requester named in the body.
+	botFormRootEvent := func(ts, text string) *slackevents.EventsAPIEvent {
+		return &slackevents.EventsAPIEvent{
+			Type: slackevents.CallbackEvent,
+			InnerEvent: slackevents.EventsAPIInnerEvent{
+				Type: string(slackevents.Message),
+				Data: &slackevents.MessageEvent{
+					Type:           "message",
+					SubType:        "bot_message",
+					BotID:          "B-FORMBOT",
+					Text:           text,
+					TimeStamp:      ts,
+					Channel:        channel,
+					EventTimeStamp: ts,
+				},
+			},
+			TeamID: "T1",
+		}
+	}
+
+	t.Run("bot root post is ignored when accept_bot is off (default)", func(t *testing.T) {
+		ctx := context.Background()
+		uc, repo, llmInvoked := wire(false)
+
+		// Default off: a bot-authored channel-root post must NOT start a case, so
+		// the channel is not flooded with a case per bot notification.
+		rootTS := "1700000015.000001"
+		gt.NoError(t, uc.HandleSlackEvent(ctx, botFormRootEvent(rootTS, "RISK NAVIGATOR request\nReporter: <@U06KHSXQW4V|ahyan>"))).Required()
+		async.Wait()
+
+		gt.Value(t, llmInvoked.Load()).Equal(false)
+
+		ssn, err := repo.Session().GetByThread(ctx, channel, rootTS)
+		gt.NoError(t, err).Required()
+		gt.Value(t, ssn).Nil()
+	})
+
+	t.Run("bot-relayed form root post initiates case creation when opted in", func(t *testing.T) {
+		ctx := context.Background()
+		uc, _, llmInvoked := wire(true)
+
+		// With the workspace opted in, an intake form posted by a bot at the
+		// channel root initiates creation, attributing to the body's requester.
+		rootTS := "1700000020.000001"
+		gt.NoError(t, uc.HandleSlackEvent(ctx, botFormRootEvent(rootTS, "RISK NAVIGATOR request\nReporter: <@U06KHSXQW4V|ahyan>"))).Required()
+		async.Wait()
+
+		gt.Value(t, llmInvoked.Load()).Equal(true)
+	})
+
+	t.Run("opted-in bot root post with no body mention still initiates creation (empty reporter)", func(t *testing.T) {
+		ctx := context.Background()
+		uc, _, llmInvoked := wire(true)
+
+		// A bot post with no human mention in the body still initiates creation:
+		// a thread-mode case is allowed to have no reporter, so the reporter
+		// simply stays empty and the create turn runs.
+		rootTS := "1700000030.000001"
+		gt.NoError(t, uc.HandleSlackEvent(ctx, botFormRootEvent(rootTS, "automated heartbeat, no requester"))).Required()
+		async.Wait()
+
 		gt.Value(t, llmInvoked.Load()).Equal(true)
 	})
 }
