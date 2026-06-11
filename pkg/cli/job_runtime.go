@@ -19,6 +19,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	modelconfig "github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
@@ -107,12 +108,16 @@ type jobRuntimeDeps struct {
 func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner) {
 	actionAdapter := usecase.NewActionToolAdapter(deps.UC.Action)
 	stepAdapter := usecase.NewActionStepToolAdapter(deps.UC.ActionStep)
-	caseAdapter := newJobCaseAdapter(deps.UC.Case)
+	caseAdapter := usecase.NewCaseToolAdapter(deps.UC.Case)
 
 	toolBuilder := job.ToolBuilderFunc(func(_ context.Context, c *model.Case, ws *model.WorkspaceEntry) []gollem.Tool {
 		var statusSet *model.ActionStatusSet
+		var caseStatusSet *model.ActionStatusSet
+		var fieldSchema *modelconfig.FieldSchema
 		if ws != nil {
 			statusSet = ws.ActionStatusSet
+			caseStatusSet = ws.CaseStatusSet
+			fieldSchema = ws.FieldSchema
 		}
 		caseID := int64(0)
 		channelID := ""
@@ -145,6 +150,8 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner) {
 			CaseUC:      caseAdapter,
 			WorkspaceID: wsID,
 			CaseID:      caseID,
+			Schema:      fieldSchema,
+			StatusSet:   caseStatusSet,
 		})...)
 		if deps.SlackService != nil && channelID != "" {
 			out = append(out, slackpost.New(slackpost.Deps{

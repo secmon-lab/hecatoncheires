@@ -1164,6 +1164,7 @@ func TestLifecycle_DraftFlow_MaterializeThenSubmitCreatesCase(t *testing.T) {
 	}, nil)
 
 	h := newLifecycleHarness(t, registry, llm)
+	seedSlackUsers(t, h.repo, "U-AUTHOR")
 
 	gt.NoError(t, h.slackUC.HandleSlackEvent(context.Background(),
 		appMentionEvent(channelID, "U-AUTHOR", "<@BOT> case", mentionTS))).Required()

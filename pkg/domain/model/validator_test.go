@@ -422,3 +422,57 @@ func TestFieldValidator_ValidateCaseFieldsAll(t *testing.T) {
 		gt.Value(t, out["summary"].Type).Equal(types.FieldTypeText)
 	})
 }
+
+func TestFieldValidator_ValidateCaseFieldsPartialStrict(t *testing.T) {
+	schema := &config.FieldSchema{
+		Fields: []config.FieldDefinition{
+			{
+				ID:       "severity",
+				Name:     "Severity",
+				Type:     types.FieldTypeSelect,
+				Required: true,
+				Options: []config.FieldOption{
+					{ID: "low", Name: "Low"},
+					{ID: "high", Name: "High"},
+				},
+			},
+			{
+				ID:       "summary",
+				Name:     "Summary",
+				Type:     types.FieldTypeText,
+				Required: true,
+			},
+		},
+	}
+	v := model.NewFieldValidator(schema)
+
+	t.Run("missing required field is NOT a violation", func(t *testing.T) {
+		// Only severity is submitted; the required summary is absent. Unlike
+		// ValidateCaseFieldsAll, a partial strict update must not fail on it.
+		out, err := v.ValidateCaseFieldsPartialStrict(map[string]model.FieldValue{
+			"severity": {FieldID: "severity", Value: "high"},
+		})
+		gt.NoError(t, err).Required()
+		gt.Value(t, out["severity"].Type).Equal(types.FieldTypeSelect)
+		gt.Map(t, out).Length(1)
+	})
+
+	t.Run("unknown field id IS a violation", func(t *testing.T) {
+		_, err := v.ValidateCaseFieldsPartialStrict(map[string]model.FieldValue{
+			"ghost": {FieldID: "ghost", Value: "x"},
+		})
+		gt.Error(t, err).Is(model.ErrCaseFieldValidation)
+		gt.String(t, err.Error()).Contains("ghost")
+	})
+
+	t.Run("type / option violations are accumulated", func(t *testing.T) {
+		_, err := v.ValidateCaseFieldsPartialStrict(map[string]model.FieldValue{
+			"severity": {FieldID: "severity", Value: "critical"},
+			"ghost":    {FieldID: "ghost", Value: "x"},
+		})
+		gt.Error(t, err).Is(model.ErrCaseFieldValidation)
+		msg := err.Error()
+		gt.String(t, msg).Contains("severity")
+		gt.String(t, msg).Contains("ghost")
+	})
+}

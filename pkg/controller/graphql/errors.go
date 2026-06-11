@@ -64,8 +64,10 @@ func ErrorCode(err error) string {
 	case errors.Is(err, model.ErrInvalidFieldType),
 		errors.Is(err, model.ErrInvalidOptionID),
 		errors.Is(err, model.ErrMissingRequired),
+		errors.Is(err, model.ErrCaseFieldValidation),
 		errors.Is(err, model.ErrInvalidNotionID),
 		errors.Is(err, model.ErrInvalidGitHubRepo),
+		errors.Is(err, usecase.ErrUnknownUser),
 		errors.Is(err, usecase.ErrInvalidArgument):
 		return ErrCodeBadUserInput
 	case errors.Is(err, usecase.ErrCaseNotFound),

@@ -413,14 +413,19 @@ func replanSchema(opts schemaOptions) *gollem.Parameter {
 }
 
 func tasksSchema(knownToolIDs []string) *gollem.Parameter {
+	// Every field below is enforced by TaskPlan.Validate; mark them Required so
+	// the model is compelled to emit them. Without this, models that omit (most
+	// commonly) `description` send the planner into a retry loop that burns the
+	// whole budget before the turn falls back.
 	taskProps := map[string]*gollem.Parameter{
-		"id":                  {Type: gollem.TypeString, Description: "Phase-unique identifier (e.g. inv-1)."},
-		"title":               {Type: gollem.TypeString, Description: "Short label for the trace UI (~40 chars)."},
-		"description":         {Type: gollem.TypeString, Description: "Detailed instruction for the sub-agent."},
-		"acceptance_criteria": {Type: gollem.TypeString, Description: "Measurable completion condition."},
+		"id":                  {Type: gollem.TypeString, Description: "Phase-unique identifier (e.g. inv-1).", Required: true},
+		"title":               {Type: gollem.TypeString, Description: "Short label for the trace UI (~40 chars).", Required: true},
+		"description":         {Type: gollem.TypeString, Description: "Detailed instruction for the sub-agent.", Required: true},
+		"acceptance_criteria": {Type: gollem.TypeString, Description: "Measurable completion condition.", Required: true},
 		"tools": {
 			Type:        gollem.TypeArray,
 			Description: "Allowed tool set IDs for this task.",
+			Required:    true,
 			Items: &gollem.Parameter{
 				Type: gollem.TypeString,
 				Enum: knownToolIDs,

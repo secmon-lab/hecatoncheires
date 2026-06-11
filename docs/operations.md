@@ -87,8 +87,14 @@ Read-only:
 Writer (Job-only):
 - `core__create_action`, `core__update_action`, `core__update_action_status`, `core__set_action_assignee`
 - `core__add_action_step`, `core__set_action_step_done`, `core__rename_action_step`
-- `case__update_case` — title / description / assignees only; status changes and deletion are **not** exposed
+- `case__update_case` — title / description / assignees / custom field values. Status changes and deletion are **not** exposed here (status moves through `case__update_case_status`). Inputs are validated in the usecase: unknown field ids, type / option mismatches, and assignee / user-field ids that do not exist in the SlackUser store are rejected so the agent gets a correctable error. The tool description instructs the agent to review the case's current values (shown in the system prompt) before overwriting, since title and description are full replacements.
+- `case__update_case_status` — moves the case to another board status (a closed status closes the case). Only present for thread-mode workspaces (those with a configured `CaseStatusSet`); the parameter enumerates the configured status ids.
 - `slack__post_to_case_channel` — fixed to `Case.SlackChannelID`; arbitrary channels are not exposed
+
+The same `case__update_case` / `case__update_case_status` tools are also
+available to the case-bound mention agent (`pkg/usecase/agent/casebound`), so a
+human mentioning the bot in a case channel can have it edit the case directly.
+They are wired only when a `CaseUC` is supplied to the agent runtime.
 
 Writer mutations run as `model.SystemActorID` (`"@system"`). The
 `CaseUseCase.UpdateCase` path skips Slack user-token permission checks

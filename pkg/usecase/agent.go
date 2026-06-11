@@ -108,6 +108,7 @@ func NewAgentUseCase(deps AgentDeps) *AgentUseCase {
 			GitHubClient:        deps.GitHubClient,
 			ActionUC:            NewActionToolAdapter(deps.ActionUC),
 			ActionStepUC:        NewActionStepToolAdapter(deps.ActionStepUC),
+			CaseUC:              NewCaseToolAdapter(deps.CaseUC),
 			HeartbeatInterval:   agentcommon.DefaultHeartbeatInterval,
 			HeartbeatStaleAfter: agentcommon.DefaultHeartbeatStaleAfter,
 		}

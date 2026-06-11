@@ -10,11 +10,13 @@ import (
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/trace"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
@@ -251,11 +253,33 @@ func (uc *UseCase) buildTools(req TurnRequest) []gollem.Tool {
 	notionTools := notiontool.New(notiontool.Deps{Client: d.NotionClient})
 	githubTools := githubtool.New(d.GitHubClient)
 
-	all := make([]gollem.Tool, 0, len(coreTools)+len(slackTools)+len(notionTools)+len(githubTools))
+	// Case-editing tools (title / description / assignees / custom fields and,
+	// for thread-mode workspaces, board status). Only wired when a CaseUC is
+	// configured; the schema / status set come from the workspace so the tool
+	// specs and the system prompt advertise the same field ids and status ids.
+	var caseTools []gollem.Tool
+	if d.CaseUC != nil {
+		var fieldSchema *config.FieldSchema
+		var caseStatusSet *model.ActionStatusSet
+		if req.Workspace != nil {
+			fieldSchema = req.Workspace.FieldSchema
+			caseStatusSet = req.Workspace.CaseStatusSet
+		}
+		caseTools = casewriter.New(casewriter.Deps{
+			CaseUC:      d.CaseUC,
+			WorkspaceID: wsID,
+			CaseID:      caseID,
+			Schema:      fieldSchema,
+			StatusSet:   caseStatusSet,
+		})
+	}
+
+	all := make([]gollem.Tool, 0, len(coreTools)+len(slackTools)+len(notionTools)+len(githubTools)+len(caseTools))
 	all = append(all, coreTools...)
 	all = append(all, slackTools...)
 	all = append(all, notionTools...)
 	all = append(all, githubTools...)
+	all = append(all, caseTools...)
 	return all
 }
 

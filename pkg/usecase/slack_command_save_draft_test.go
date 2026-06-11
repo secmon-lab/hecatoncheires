@@ -101,6 +101,7 @@ func TestSlackUseCases_HandleSaveAsDraftClick(t *testing.T) {
 		slackMock := &saveDraftMockSlack{}
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+		seedSlackUsers(t, repo, "UREPORTER")
 
 		cb := newSaveDraftCallback(t, "UREPORTER", "ws-1", "C-ORIGIN", "Working title", "draft body", true)
 
@@ -142,6 +143,7 @@ func TestSlackUseCases_HandleSaveAsDraftClick(t *testing.T) {
 		slackMock := &saveDraftMockSlack{}
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+		seedSlackUsers(t, repo, "UREPORTER")
 
 		cb := newSaveDraftCallback(t, "UREPORTER", "ws-1", "C-ORIGIN", "", "just a body", false)
 
@@ -210,6 +212,7 @@ func TestSlackUseCases_HandleSaveAsDraftClick(t *testing.T) {
 		}
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+		seedSlackUsers(t, repo, "UREPORTER")
 
 		cb := newSaveDraftCallback(t, "UREPORTER", "ws-1", "C-ORIGIN", "Working title", "", false)
 		err := slackUC.HandleSaveAsDraftClick(context.Background(), caseUC, cb)
@@ -231,6 +234,7 @@ func TestSlackUseCases_HandleSaveAsDraftClick(t *testing.T) {
 		slackMock := &saveDraftMockSlack{}
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+		seedSlackUsers(t, repo, "UREPORTER")
 
 		cb := newSaveDraftCallback(t, "UREPORTER", "ws-1", "", "T", "D", false)
 		err := slackUC.HandleSaveAsDraftClick(context.Background(), caseUC, cb)

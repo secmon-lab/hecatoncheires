@@ -16,6 +16,7 @@ import (
 	"github.com/m-mizutani/gollem/trace"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/actionwriter"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
@@ -23,6 +24,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	modelconfig "github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
@@ -233,12 +235,17 @@ func buildJobRunner(
 ) *job.JobRunner {
 	actionAdapter := usecase.NewActionToolAdapter(uc.Action)
 	stepAdapter := usecase.NewActionStepToolAdapter(uc.ActionStep)
+	caseAdapter := usecase.NewCaseToolAdapter(uc.Case)
 
 	toolBuilder := job.ToolBuilderFunc(func(_ context.Context, c *model.Case, ws *model.WorkspaceEntry) []gollem.Tool {
 		var statusSet *model.ActionStatusSet
+		var caseStatusSet *model.ActionStatusSet
+		var fieldSchema *modelconfig.FieldSchema
 		wsID := ""
 		if ws != nil {
 			statusSet = ws.ActionStatusSet
+			caseStatusSet = ws.CaseStatusSet
+			fieldSchema = ws.FieldSchema
 			wsID = ws.Workspace.ID
 		}
 		caseID := int64(0)
@@ -256,6 +263,13 @@ func buildJobRunner(
 		out := make([]gollem.Tool, 0, 16)
 		out = append(out, core.NewReadOnly(coreDeps)...)
 		out = append(out, actionwriter.New(coreDeps)...)
+		out = append(out, casewriter.New(casewriter.Deps{
+			CaseUC:      caseAdapter,
+			WorkspaceID: wsID,
+			CaseID:      caseID,
+			Schema:      fieldSchema,
+			StatusSet:   caseStatusSet,
+		})...)
 		return out
 	})
 

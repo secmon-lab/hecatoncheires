@@ -48,12 +48,40 @@ type promptCurrentAction struct {
 	DueDate     string
 }
 
+// promptFieldOption is one selectable option of a select / multi-select field.
+type promptFieldOption struct {
+	ID   string
+	Name string
+}
+
+// promptFieldDef describes a custom field the agent may set via
+// case__update_case. Surfaced so the LLM knows the valid field ids, types, and
+// option ids before it tries to write them.
+type promptFieldDef struct {
+	ID          string
+	Name        string
+	Type        string
+	Required    bool
+	Description string
+	Options     []promptFieldOption
+}
+
+// promptStatus is one board status id the agent may move the case to via
+// case__update_case_status.
+type promptStatus struct {
+	ID     string
+	Name   string
+	Closed bool
+}
+
 // promptData holds all data for the casebound system prompt template.
 type promptData struct {
 	ChannelID     string
 	Now           string
 	Case          *model.Case
 	Fields        []promptField
+	FieldSchema   []promptFieldDef
+	BoardStatuses []promptStatus
 	CurrentAction *promptCurrentAction
 	Actions       []promptAction
 	Messages      []promptMessage
@@ -84,6 +112,33 @@ func buildSystemPrompt(c *model.Case, entry *model.WorkspaceEntry, channelID str
 				name = fieldID
 			}
 			data.Fields = append(data.Fields, promptField{Name: name, Value: fv.Value})
+		}
+	}
+
+	// Advertise the editable field schema and board statuses so the agent can
+	// drive case__update_case / case__update_case_status with valid ids.
+	if entry != nil && entry.FieldSchema != nil {
+		for _, fd := range entry.FieldSchema.Fields {
+			def := promptFieldDef{
+				ID:          fd.ID,
+				Name:        fd.Name,
+				Type:        string(fd.Type),
+				Required:    fd.Required,
+				Description: fd.Description,
+			}
+			for _, o := range fd.Options {
+				def.Options = append(def.Options, promptFieldOption{ID: o.ID, Name: o.Name})
+			}
+			data.FieldSchema = append(data.FieldSchema, def)
+		}
+	}
+	if entry != nil && entry.CaseStatusSet != nil {
+		for _, s := range entry.CaseStatusSet.Statuses() {
+			data.BoardStatuses = append(data.BoardStatuses, promptStatus{
+				ID:     s.ID,
+				Name:   s.Name,
+				Closed: entry.CaseStatusSet.IsClosed(s.ID),
+			})
 		}
 	}
 

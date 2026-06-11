@@ -2,13 +2,12 @@ package threadcase
 
 import (
 	"encoding/json"
-	"strconv"
 	"strings"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
-	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 )
 
 // CreateDecision is the structured final output of a ModeCreate turn: the
@@ -110,70 +109,17 @@ func validateCreateDecision(ws *model.WorkspaceEntry, d *CreateDecision) (map[st
 // model.FieldValue entries keyed by field id, coercing multi-select and number
 // shapes. Type-resolution problems (unknown field id, unparseable number) are
 // returned as violation strings rather than silently dropped — the create path
-// must surface them so the planner can correct the value.
+// must surface them so the planner can correct the value. It delegates to the
+// shared model.CoerceFieldInputs so the create path and the casewriter tool
+// coerce identically.
 func coerceCreateFields(ws *model.WorkspaceEntry, fields []DecisionField) (map[string]model.FieldValue, []string) {
-	out := make(map[string]model.FieldValue, len(fields))
-	if len(fields) == 0 {
-		return out, nil
+	var schema *config.FieldSchema
+	if ws != nil {
+		schema = ws.FieldSchema
 	}
-	typeByID := make(map[string]types.FieldType)
-	if ws != nil && ws.FieldSchema != nil {
-		for _, f := range ws.FieldSchema.Fields {
-			typeByID[f.ID] = types.FieldType(f.Type)
-		}
-	}
-
-	var violations []string
+	inputs := make([]model.FieldInput, 0, len(fields))
 	for _, df := range fields {
-		ft, known := typeByID[df.FieldID]
-		if !known {
-			// Leave it in the map so ValidateCaseFieldsAll reports the
-			// "not defined in the workspace schema" violation with a
-			// consistent message.
-			out[df.FieldID] = model.FieldValue{FieldID: types.FieldID(df.FieldID), Value: firstNonEmpty(df.Value, df.Values)}
-			continue
-		}
-		var val any
-		switch ft {
-		case types.FieldTypeMultiSelect, types.FieldTypeMultiUser:
-			switch {
-			case len(df.Values) > 0:
-				val = df.Values
-			case df.Value != "":
-				val = []string{df.Value}
-			default:
-				val = []string{}
-			}
-		case types.FieldTypeNumber:
-			trimmed := strings.TrimSpace(df.Value)
-			if trimmed == "" {
-				// Optional number left empty by the planner: drop it rather than
-				// emitting a spurious "not a number" violation. A missing
-				// REQUIRED number is still caught by ValidateCaseFieldsAll.
-				continue
-			}
-			n, err := strconv.ParseFloat(trimmed, 64)
-			if err != nil {
-				violations = append(violations, "field "+strconv.Quote(df.FieldID)+": value must be a number, got "+strconv.Quote(df.Value))
-				continue
-			}
-			val = n
-		default:
-			val = df.Value
-		}
-		out[df.FieldID] = model.FieldValue{FieldID: types.FieldID(df.FieldID), Type: ft, Value: val}
+		inputs = append(inputs, model.FieldInput{FieldID: df.FieldID, Value: df.Value, Values: df.Values})
 	}
-	return out, violations
-}
-
-// firstNonEmpty returns the scalar when present, else the slice — used only to
-// preserve an unknown field's value for the validator's error message.
-func firstNonEmpty(scalar string, slice []string) any {
-	if scalar != "" {
-		return scalar
-	}
-	if len(slice) > 0 {
-		return slice
-	}
-	return ""
+	return model.CoerceFieldInputs(schema, inputs)
 }

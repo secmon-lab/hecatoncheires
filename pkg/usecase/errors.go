@@ -55,6 +55,13 @@ var (
 	// Other errors
 	ErrDuplicateField = errors.New("duplicate field")
 
+	// ErrUnknownUser is returned by a case write when an assignee id or a
+	// user / multi-user field value references a user that does not exist in
+	// the SlackUser store. It guards against an agent (or API client)
+	// persisting a hallucinated / mistyped user id. Slack sync delay is
+	// treated as non-existence per project policy.
+	ErrUnknownUser = errors.New("unknown user")
+
 	// ErrInvalidArgument is returned by usecase methods when the caller
 	// provides input that violates a domain invariant (unknown ID, list
 	// element that does not belong to the workspace, etc.). Distinct from

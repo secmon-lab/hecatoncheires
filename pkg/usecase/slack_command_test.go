@@ -360,6 +360,7 @@ func TestSlackUseCases_HandleCaseCreationSubmit(t *testing.T) {
 		slackMock := &commandTestSlackService{}
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+		seedSlackUsers(t, repo, "U001")
 
 		meta, _ := json.Marshal(map[string]string{
 			"workspace_id": "risk",
@@ -431,6 +432,7 @@ func TestSlackUseCases_HandleCaseCreationSubmit(t *testing.T) {
 		slackMock := &commandTestSlackService{}
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+		seedSlackUsers(t, repo, "U001")
 
 		meta, _ := json.Marshal(map[string]string{
 			"workspace_id": "risk",
@@ -491,6 +493,7 @@ func TestSlackUseCases_HandleCaseCreationSubmit(t *testing.T) {
 		slackMock := &commandTestSlackService{}
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+		seedSlackUsers(t, repo, "U001")
 
 		meta, _ := json.Marshal(map[string]string{
 			"workspace_id": "risk",
@@ -540,6 +543,7 @@ func TestSlackUseCases_HandleCaseCreationSubmit(t *testing.T) {
 		slackMock := &commandTestSlackService{}
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+		seedSlackUsers(t, repo, "U001")
 
 		meta, _ := json.Marshal(map[string]string{
 			"workspace_id": "risk",
@@ -626,6 +630,7 @@ func TestSlackUseCases_HandleCaseCreationSubmit(t *testing.T) {
 		slackMock := &commandTestSlackService{}
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+		seedSlackUsers(t, repo, "UREPORTER")
 
 		meta, _ := json.Marshal(map[string]string{
 			"workspace_id": "risk",
@@ -695,6 +700,7 @@ func TestSlackUseCases_HandleCaseCreationSubmit(t *testing.T) {
 		slackMock := &commandTestSlackService{}
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "https://example.test")
+		seedSlackUsers(t, repo, "UREPORTER")
 
 		meta, _ := json.Marshal(map[string]string{
 			"workspace_id": "risk",
@@ -745,6 +751,7 @@ func TestSlackUseCases_HandleCaseCreationSubmit(t *testing.T) {
 		slackMock := &commandTestSlackService{}
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "https://example.test")
+		seedSlackUsers(t, repo, "UREPORTER")
 
 		meta, _ := json.Marshal(map[string]string{
 			"workspace_id": "risk",
@@ -797,6 +804,7 @@ func TestSlackUseCases_HandleCaseCreationSubmit(t *testing.T) {
 		slackMock := &commandTestSlackService{}
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "https://example.test")
+		seedSlackUsers(t, repo, "UREPORTER")
 
 		meta, _ := json.Marshal(map[string]string{
 			"workspace_id": "risk",
@@ -845,6 +853,7 @@ func TestSlackUseCases_HandleCaseCreationSubmit(t *testing.T) {
 		slackMock := &commandTestSlackService{}
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+		seedSlackUsers(t, repo, "UREPORTER")
 
 		meta, _ := json.Marshal(map[string]string{
 			"workspace_id": "risk",
@@ -1122,6 +1131,7 @@ func TestSlackUseCases_HandleCaseEditSubmit(t *testing.T) {
 		slackMock := &commandTestSlackService{}
 		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+		seedSlackUsers(t, repo, "U-NEW-A", "U-NEW-B", "U-NEW-C")
 
 		meta, _ := json.Marshal(map[string]any{
 			"workspace_id": "risk",
@@ -1607,6 +1617,7 @@ func TestLifecycle_CommandChoiceToCaseEdit(t *testing.T) {
 	slackMock := &commandTestSlackService{}
 	slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
 	caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+	seedSlackUsers(t, repo, "U-NEW")
 
 	// Step 1: User submits the command choice modal with "update_case".
 	choiceMeta, _ := json.Marshal(map[string]any{

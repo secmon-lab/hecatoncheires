@@ -46,6 +46,27 @@ func (v *FieldValidator) ValidateCaseFieldsPartial(fieldValues map[string]FieldV
 // field that does not exist. On success it returns the enriched values (Type
 // injected) and a nil error.
 func (v *FieldValidator) ValidateCaseFieldsAll(fieldValues map[string]FieldValue) (map[string]FieldValue, error) {
+	return v.validateCaseFieldsStrict(fieldValues, true)
+}
+
+// ValidateCaseFieldsPartialStrict is the agent-and-API boundary variant: like
+// ValidateCaseFieldsPartial it does NOT require missing required fields (a
+// partial update need not resubmit every field), but — unlike the lenient
+// partial variant — an unknown field id is reported as a violation rather than
+// silently preserved, and every violation is accumulated into a single
+// ErrCaseFieldValidation so the caller can fix them in one shot. Use this for
+// UpdateCase / MaterializeThreadCase where the submitted values come from an
+// untrusted source (LLM / API client) that must not write a field id the
+// workspace does not define.
+func (v *FieldValidator) ValidateCaseFieldsPartialStrict(fieldValues map[string]FieldValue) (map[string]FieldValue, error) {
+	return v.validateCaseFieldsStrict(fieldValues, false)
+}
+
+// validateCaseFieldsStrict is the shared accumulate-all-violations core behind
+// ValidateCaseFieldsAll (requireRequired=true) and ValidateCaseFieldsPartialStrict
+// (requireRequired=false). Both reject unknown field ids; they differ only in
+// whether a missing required field is a violation.
+func (v *FieldValidator) validateCaseFieldsStrict(fieldValues map[string]FieldValue, requireRequired bool) (map[string]FieldValue, error) {
 	fieldDefMap := make(map[string]config.FieldDefinition)
 	for _, fd := range v.schema.Fields {
 		fieldDefMap[fd.ID] = fd
@@ -68,11 +89,13 @@ func (v *FieldValidator) ValidateCaseFieldsAll(fieldValues map[string]FieldValue
 		}
 	}
 
-	for _, fieldDef := range v.schema.Fields {
-		if fieldDef.Required {
-			if _, ok := result[fieldDef.ID]; !ok {
-				violations = append(violations,
-					fmt.Sprintf("field %q: required but missing", fieldDef.ID))
+	if requireRequired {
+		for _, fieldDef := range v.schema.Fields {
+			if fieldDef.Required {
+				if _, ok := result[fieldDef.ID]; !ok {
+					violations = append(violations,
+						fmt.Sprintf("field %q: required but missing", fieldDef.ID))
+				}
 			}
 		}
 	}
