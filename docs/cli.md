@@ -60,7 +60,7 @@ The `serve` command (alias: `s`) starts the HTTP server.
 | `--github-app-private-key` | `HECATONCHEIRES_GITHUB_APP_PRIVATE_KEY` | - | No | GitHub App private key (PEM string or file path) |
 | `--webfetch-enabled` | `HECATONCHEIRES_WEBFETCH_ENABLED` | `true` | No | Enable the agent `webfetch` tool. Built only when an LLM client is also configured (the LLM screens fetched content for indirect prompt injection). Connections to non-public IPs are blocked (SSRF guard) |
 | `--webfetch-timeout` | `HECATONCHEIRES_WEBFETCH_TIMEOUT` | `10` | No | `webfetch` HTTP request timeout in seconds |
-| `--webfetch-max-size` | `HECATONCHEIRES_WEBFETCH_MAX_SIZE` | `1048576` | No | `webfetch` maximum response body size in bytes (excess is truncated) |
+| `--webfetch-max-size` | `HECATONCHEIRES_WEBFETCH_MAX_SIZE` | `262144` | No | `webfetch` maximum response body size in bytes (excess is truncated). Default 256 KiB keeps a single fetch within model context / cost limits |
 | `--llm-provider` | `HECATONCHEIRES_LLM_PROVIDER` | - | No\*\*\*\* | LLM provider: `openai`, `claude`, or `gemini`. Empty disables AI features |
 | `--llm-model` | `HECATONCHEIRES_LLM_MODEL` | - | No | LLM model name (provider default if empty) |
 | `--llm-openai-api-key` | `HECATONCHEIRES_LLM_OPENAI_API_KEY` | - | No\*\*\*\* | OpenAI API key (required when `--llm-provider=openai`) |

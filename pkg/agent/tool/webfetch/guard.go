@@ -16,6 +16,14 @@ func isBlockedIP(ip net.IP) bool {
 	if ip == nil {
 		return true
 	}
+	// Block Carrier-Grade NAT (CGNAT) 100.64.0.0/10 (RFC 6598). net.IP.IsPrivate
+	// does not cover it, but overlay networks (e.g. Tailscale) route internal
+	// hosts through this range, so it must not be reachable via the agent.
+	if ip4 := ip.To4(); ip4 != nil {
+		if ip4[0] == 100 && ip4[1] >= 64 && ip4[1] < 128 {
+			return true
+		}
+	}
 	return ip.IsLoopback() ||
 		ip.IsPrivate() ||
 		ip.IsLinkLocalUnicast() ||

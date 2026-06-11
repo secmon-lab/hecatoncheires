@@ -6,6 +6,8 @@ import (
 
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/webfetch"
+	"golang.org/x/text/encoding/japanese"
+	"golang.org/x/text/transform"
 )
 
 func TestExtract(t *testing.T) {
@@ -68,6 +70,21 @@ func TestExtract(t *testing.T) {
 		_, _, err := webfetch.ExtractForTest("application/octet-stream", []byte{0x00, 0x01})
 		gt.Error(t, err).Required()
 	})
+
+	t.Run("shift_jis html is decoded to utf-8", func(t *testing.T) {
+		const jp = "ログイン障害の調査"
+		sjis, _, encErr := transform.Bytes(japanese.ShiftJIS.NewEncoder(), []byte(jp))
+		gt.NoError(t, encErr).Required()
+		// Sanity: the encoded bytes are not already UTF-8 of the same string.
+		gt.Bool(t, string(sjis) == jp).False()
+
+		body := append([]byte("<html><body><p>"), sjis...)
+		body = append(body, []byte("</p></body></html>")...)
+
+		text, _, err := webfetch.ExtractForTest("text/html; charset=Shift_JIS", body)
+		gt.NoError(t, err).Required()
+		gt.String(t, text).Contains(jp)
+	})
 }
 
 func TestCollapseWhitespace(t *testing.T) {
@@ -75,5 +92,13 @@ func TestCollapseWhitespace(t *testing.T) {
 		in := "  a   b\n\n\n\nc  \t d  "
 		out := webfetch.CollapseWhitespaceForTest(in)
 		gt.String(t, out).Equal("a b\n\nc d")
+	})
+
+	t.Run("crlf line endings collapse like lf", func(t *testing.T) {
+		// Without \r stripping, the stray \r resets the newline-run counter and
+		// these 4 CRLF newlines would survive instead of collapsing to two.
+		in := "a\r\n\r\n\r\n\r\nb"
+		out := webfetch.CollapseWhitespaceForTest(in)
+		gt.String(t, out).Equal("a\n\nb")
 	})
 }

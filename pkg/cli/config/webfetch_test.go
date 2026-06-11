@@ -31,7 +31,7 @@ func TestWebFetchDefaults(t *testing.T) {
 
 	s := w.Settings()
 	gt.Value(t, s.Timeout).Equal(10 * time.Second)
-	gt.Number(t, s.MaxBytes).Equal(int64(1048576))
+	gt.Number(t, s.MaxBytes).Equal(int64(262144))
 	gt.String(t, s.UserAgent).NotEqual("")
 	// The LLM client is injected by the usecase layer, not by config.
 	gt.Value(t, s.LLM).Nil()

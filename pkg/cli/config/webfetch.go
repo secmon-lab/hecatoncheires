@@ -42,7 +42,10 @@ func (w *WebFetch) Flags() []cli.Flag {
 		&cli.IntFlag{
 			Name:        "webfetch-max-size",
 			Usage:       "webfetch maximum response body size in bytes",
-			Value:       1048576,
+			// 256 KiB: large enough for any article / advisory / doc page, while
+			// keeping a single fetch well under model context and cost limits
+			// (1 MiB of text can exceed 250k tokens).
+			Value:       262144,
 			Sources:     cli.EnvVars("HECATONCHEIRES_WEBFETCH_MAX_SIZE"),
 			Destination: &w.maxBytes,
 		},

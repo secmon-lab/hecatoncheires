@@ -2,6 +2,7 @@ package webfetch
 
 import (
 	"bytes"
+	"io"
 	"mime"
 	"regexp"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
+	"golang.org/x/net/html/charset"
 )
 
 // extract converts an HTTP response body into plain text suitable for
@@ -24,6 +26,17 @@ import (
 // Binary media types are rejected with an error so untyped or binary payloads
 // never reach the LLM analyze step.
 func extract(contentType string, body []byte) (text string, isHTML bool, err error) {
+	// Decode non-UTF-8 content (Shift_JIS, EUC-JP, ISO-8859-1, ...) to UTF-8
+	// using the charset from Content-Type or sniffed from the body, so the LLM
+	// receives readable text for internationalized pages. Failures fall back to
+	// the raw bytes rather than erroring — a misdetected charset should not make
+	// the page unfetchable.
+	if r, cErr := charset.NewReader(bytes.NewReader(body), contentType); cErr == nil {
+		if decoded, rErr := io.ReadAll(r); rErr == nil {
+			body = decoded
+		}
+	}
+
 	mediaType, _, mtErr := mime.ParseMediaType(contentType)
 	if mtErr != nil {
 		mediaType = strings.TrimSpace(strings.ToLower(contentType))
@@ -239,6 +252,10 @@ func isInsidePre(n *html.Node) bool {
 //   - 3+ consecutive newlines collapse to two
 //   - leading and trailing whitespace are trimmed
 func collapseWhitespace(s string) string {
+	// Strip carriage returns up front: a stray \r (from CRLF / CR line endings)
+	// is otherwise treated as a normal rune and resets the newline-run counter,
+	// defeating the 3+-newline collapse below for CRLF pages.
+	s = strings.ReplaceAll(s, "\r", "")
 	var sb strings.Builder
 	sb.Grow(len(s))
 	var prevSpace, prevNewline bool
