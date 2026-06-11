@@ -21,6 +21,7 @@ func cmdEval() *cli.Command {
 		llmCfg      config.LLM
 		slackCfg    config.Slack
 		githubCfg   config.GitHub
+		webfetchCfg config.WebFetch
 		notionTok   string
 		reportPath  string
 		dumpDir     string
@@ -59,6 +60,7 @@ func cmdEval() *cli.Command {
 	flags = append(flags, llmCfg.Flags()...)
 	flags = append(flags, slackCfg.Flags()...)
 	flags = append(flags, githubCfg.Flags()...)
+	flags = append(flags, webfetchCfg.Flags()...)
 
 	return &cli.Command{
 		Name:      "eval",
@@ -105,7 +107,7 @@ func cmdEval() *cli.Command {
 				}
 				cfg.LLM = llmClient
 
-				if err := wireLiveTools(ctx, &cfg, &slackCfg, &githubCfg, notionTok); err != nil {
+				if err := wireLiveTools(ctx, &cfg, &slackCfg, &githubCfg, &webfetchCfg, notionTok); err != nil {
 					return err
 				}
 			}
@@ -126,7 +128,7 @@ func cmdEval() *cli.Command {
 // wireLiveTools builds real tool clients from flags so scenarios that mark a
 // tool live=true can use them. Each is optional; env errors clearly if a live
 // tool is requested without its client.
-func wireLiveTools(ctx context.Context, cfg *eval.Config, slackCfg *config.Slack, githubCfg *config.GitHub, notionTok string) error {
+func wireLiveTools(ctx context.Context, cfg *eval.Config, slackCfg *config.Slack, githubCfg *config.GitHub, webfetchCfg *config.WebFetch, notionTok string) error {
 	if slackCfg.UserOAuthToken() != "" {
 		searchSvc, err := slacktool.NewSearchClient(slackCfg.UserOAuthToken())
 		if err != nil {
@@ -146,6 +148,13 @@ func wireLiveTools(ctx context.Context, cfg *eval.Config, slackCfg *config.Slack
 		return goerr.Wrap(err, "failed to initialize GitHub client")
 	}
 	cfg.GitHub = githubSvc
+
+	// WebFetch is live-only: its HTTP-side settings flow through, and the eval
+	// env injects the eval LLM client into the tool before it is built.
+	if webfetchCfg.IsEnabled() {
+		settings := webfetchCfg.Settings()
+		cfg.WebFetch = &settings
+	}
 	_ = ctx
 	return nil
 }

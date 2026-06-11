@@ -55,6 +55,7 @@ At time of writing:
 - `slack_search` — search Slack messages (read-only; sim + live)
 - `notion_search` — search Notion pages (read-only; sim + live)
 - `github_search` — search GitHub issues/PRs (read-only; **live-only** in v1)
+- `webfetch` — fetch a URL and return its content as Markdown, screened for prompt injection (read-only; **live-only** in v1)
 
 > Keep this list in sync: when an agent tool is added, update it here and in the
 > `eval` tool catalog (see CLAUDE.md). When unsure, trust `--list-tools`.

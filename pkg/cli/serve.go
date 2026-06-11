@@ -163,6 +163,7 @@ func cmdServe() *cli.Command {
 	var llmCfg config.LLM
 	var embCfg config.Embedding
 	var githubCfg config.GitHub
+	var webfetchCfg config.WebFetch
 	var storageCfg config.Storage
 	var sentryCfg config.Sentry
 
@@ -216,6 +217,7 @@ func cmdServe() *cli.Command {
 	flags = append(flags, llmCfg.Flags()...)
 	flags = append(flags, embCfg.Flags()...)
 	flags = append(flags, githubCfg.Flags()...)
+	flags = append(flags, webfetchCfg.Flags()...)
 	flags = append(flags, storageCfg.Flags()...)
 	flags = append(flags, sentryCfg.Flags()...)
 
@@ -411,6 +413,15 @@ func cmdServe() *cli.Command {
 				logging.Default().Info("GitHub App not configured, GitHub Source features will be disabled")
 			}
 
+			// Enable the agent webfetch tool. It is built only when an LLM
+			// client is also configured (injection screening is mandatory).
+			if webfetchCfg.IsEnabled() {
+				ucOpts = append(ucOpts, usecase.WithWebFetch(webfetchCfg.Settings()))
+				logging.Default().Info("WebFetch tool enabled", logAttrsToArgs(webfetchCfg.LogAttrs())...)
+			} else {
+				logging.Default().Info("WebFetch tool disabled")
+			}
+
 			// Configure agent session archive (Cloud Storage) when Slack is wired.
 			// Slack-driven AI flows (mention agent) require History + Trace
 			// persistence; the bucket flag is mandatory in that case.
@@ -451,6 +462,7 @@ func cmdServe() *cli.Command {
 				LLMClient:    llmClient,
 				UC:           uc,
 				SlackService: slackSvc,
+				WebFetch:     uc.WebFetchClient(),
 				HistoryRepo:  agentHistoryRepo,
 				TraceRepo:    agentTraceRepo,
 			})

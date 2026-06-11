@@ -8,16 +8,18 @@ import (
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/webfetch"
 )
 
 // ToolSet IDs known to the planner. Sub-agents request a subset of these
 // per investigation task and the resolver below maps each ID to a concrete
 // []gollem.Tool slice.
 const (
-	ToolSetCoreRO  = "core_ro"
-	ToolSetSlackRO = "slack_ro"
-	ToolSetNotion  = "notion"
-	ToolSetGitHub  = "github"
+	ToolSetCoreRO   = "core_ro"
+	ToolSetSlackRO  = "slack_ro"
+	ToolSetNotion   = "notion"
+	ToolSetGitHub   = "github"
+	ToolSetWebFetch = "webfetch"
 )
 
 // KnownToolSetIDs is the canonical list of identifiers a planner is allowed
@@ -27,6 +29,7 @@ var KnownToolSetIDs = []string{
 	ToolSetSlackRO,
 	ToolSetNotion,
 	ToolSetGitHub,
+	ToolSetWebFetch,
 }
 
 // IsKnownToolSetID reports whether id is a member of KnownToolSetIDs.
@@ -39,20 +42,22 @@ func IsKnownToolSetID(id string) bool {
 // vary per turn — workspace, case, slack/notion/github clients) and called
 // per sub-agent.
 type ToolSetResolver struct {
-	core   []gollem.Tool
-	slack  []gollem.Tool
-	notion []gollem.Tool
-	github []gollem.Tool
+	core     []gollem.Tool
+	slack    []gollem.Tool
+	notion   []gollem.Tool
+	github   []gollem.Tool
+	webfetch []gollem.Tool
 }
 
 // ToolSetDeps carries the per-turn deps that flavor each toolset's binding.
 // Optional fields (SlackSearch / NotionClient / GitHubClient) may be nil; the
 // corresponding toolset is empty in that case.
 type ToolSetDeps struct {
-	Core   core.Deps
-	Slack  slacktool.Deps
-	Notion notiontool.Deps
-	GitHub *githubtool.Client
+	Core     core.Deps
+	Slack    slacktool.Deps
+	Notion   notiontool.Deps
+	GitHub   *githubtool.Client
+	WebFetch *webfetch.Client
 }
 
 // NewToolSetResolver builds the per-toolset slices once so each sub-agent
@@ -61,10 +66,11 @@ type ToolSetDeps struct {
 // case while a turn is forming.
 func NewToolSetResolver(d ToolSetDeps) *ToolSetResolver {
 	return &ToolSetResolver{
-		core:   core.NewReadOnly(d.Core),
-		slack:  slacktool.NewReadOnly(d.Slack),
-		notion: notiontool.New(d.Notion),
-		github: githubtool.New(d.GitHub),
+		core:     core.NewReadOnly(d.Core),
+		slack:    slacktool.NewReadOnly(d.Slack),
+		notion:   notiontool.New(d.Notion),
+		github:   githubtool.New(d.GitHub),
+		webfetch: webfetch.New(d.WebFetch),
 	}
 }
 
@@ -87,6 +93,8 @@ func (r *ToolSetResolver) Resolve(ids []string) []gollem.Tool {
 			total += len(r.notion)
 		case ToolSetGitHub:
 			total += len(r.github)
+		case ToolSetWebFetch:
+			total += len(r.webfetch)
 		}
 	}
 	out := make([]gollem.Tool, 0, total)
@@ -100,6 +108,8 @@ func (r *ToolSetResolver) Resolve(ids []string) []gollem.Tool {
 			out = append(out, r.notion...)
 		case ToolSetGitHub:
 			out = append(out, r.github...)
+		case ToolSetWebFetch:
+			out = append(out, r.webfetch...)
 		}
 	}
 	return out
