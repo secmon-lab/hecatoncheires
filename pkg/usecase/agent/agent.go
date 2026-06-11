@@ -13,6 +13,7 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gollem/trace"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
@@ -46,6 +47,11 @@ type CommonDeps struct {
 	// draft mode (read-only sub-agents).
 	ActionUC     core.ActionMutator
 	ActionStepUC core.ActionStepMutator
+
+	// CaseUC backs the casewriter tools (case__update_case /
+	// case__update_case_status) in case-bound mode. Optional: nil means the
+	// case-bound agent cannot edit the case itself (the tools are not built).
+	CaseUC casewriter.CaseMutator
 
 	// HeartbeatInterval / HeartbeatStaleAfter govern §5.3 turn-lock activity
 	// detection. Zero values fall back to DefaultHeartbeatInterval /

@@ -538,6 +538,13 @@ mentioned in an unbound channel). It persists the gollem conversation history
 so follow-up mentions can pick up where the previous turn left off, and
 writes a Trace blob for every turn for diagnostics.
 
+In case-bound mode you can ask the agent to edit the case itself — change the
+title, description, assignees, or custom field values, and (for thread-mode
+workspaces) move the case to another board status, including closing it. The
+agent validates the values before saving: unknown fields, invalid option ids,
+and assignees / user fields that are not known Slack users are refused with an
+explanation rather than written.
+
 A per-thread **turn lock** prevents two turns from running concurrently on
 the same thread.
 

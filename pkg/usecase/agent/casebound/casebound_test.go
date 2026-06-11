@@ -1,16 +1,39 @@
 package casebound_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gt"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/casebound"
 )
+
+// fakeCaseMutator satisfies casewriter.CaseMutator for tool-wiring tests.
+type fakeCaseMutator struct{}
+
+func (fakeCaseMutator) UpdateCase(context.Context, string, int64, casewriter.CaseUpdate) (*model.Case, error) {
+	return &model.Case{}, nil
+}
+
+func (fakeCaseMutator) UpdateCaseStatus(context.Context, string, int64, string) (*model.Case, error) {
+	return &model.Case{}, nil
+}
+
+func toolNames(tools []gollem.Tool) map[string]bool {
+	out := make(map[string]bool, len(tools))
+	for _, tl := range tools {
+		out[tl.Spec().Name] = true
+	}
+	return out
+}
 
 func TestBuildSystemPrompt_CaseAndFieldValues(t *testing.T) {
 	entry := &model.WorkspaceEntry{
@@ -162,4 +185,77 @@ func TestBuildUserInput_SkipsCurrentMentionInDelta(t *testing.T) {
 	// The delta line for the current mention TS must not be duplicated.
 	occurrences := strings.Count(got, "current message text")
 	gt.Number(t, occurrences).Equal(1)
+}
+
+func TestBuildSystemPrompt_EditableFieldsAndStatuses(t *testing.T) {
+	statusSet, err := model.NewActionStatusSet("open", []string{"closed"}, []model.ActionStatusDefinition{
+		{ID: "open", Name: "Open"},
+		{ID: "closed", Name: "Closed"},
+	})
+	gt.NoError(t, err).Required()
+
+	entry := &model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: "ws-test", Name: "Test"},
+		FieldSchema: &config.FieldSchema{
+			Fields: []config.FieldDefinition{
+				{ID: "severity", Name: "Severity", Type: types.FieldTypeSelect, Required: true, Options: []config.FieldOption{{ID: "high", Name: "High"}, {ID: "low", Name: "Low"}}},
+			},
+		},
+		CaseStatusSet: statusSet,
+	}
+	c := &model.Case{Title: "Case", Status: types.CaseStatusOpen}
+	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
+
+	prompt := casebound.BuildSystemPromptForTest(c, entry, "C0TEST", now, nil, nil, nil)
+
+	gt.String(t, prompt).Contains("Editable Custom Fields")
+	gt.String(t, prompt).Contains("`severity`")
+	gt.String(t, prompt).Contains("`high`")
+	gt.String(t, prompt).Contains("(required)")
+	gt.String(t, prompt).Contains("Board Statuses")
+	gt.String(t, prompt).Contains("`closed`")
+	gt.String(t, prompt).Contains("(closed)")
+}
+
+func TestBuildTools_CaseWriterWiring(t *testing.T) {
+	statusSet, err := model.NewActionStatusSet("open", []string{"closed"}, []model.ActionStatusDefinition{
+		{ID: "open", Name: "Open"},
+		{ID: "closed", Name: "Closed"},
+	})
+	gt.NoError(t, err).Required()
+
+	entry := &model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: "ws-test", Name: "Test"},
+		FieldSchema: &config.FieldSchema{
+			Fields: []config.FieldDefinition{{ID: "severity", Name: "Severity", Type: types.FieldTypeSelect}},
+		},
+		CaseStatusSet: statusSet,
+	}
+	req := casebound.TurnRequest{Workspace: entry, Case: &model.Case{ID: 1}}
+
+	t.Run("no CaseUC means no case-write tools", func(t *testing.T) {
+		tools := casebound.BuildToolsForTest(&agent.CommonDeps{}, req)
+		names := toolNames(tools)
+		gt.Bool(t, names["case__update_case"]).False()
+		gt.Bool(t, names["case__update_case_status"]).False()
+	})
+
+	t.Run("with CaseUC and a status set, both case-write tools are present", func(t *testing.T) {
+		tools := casebound.BuildToolsForTest(&agent.CommonDeps{CaseUC: fakeCaseMutator{}}, req)
+		names := toolNames(tools)
+		gt.Bool(t, names["case__update_case"]).True()
+		gt.Bool(t, names["case__update_case_status"]).True()
+	})
+
+	t.Run("with CaseUC but no status set, status tool is omitted", func(t *testing.T) {
+		noStatus := &model.WorkspaceEntry{
+			Workspace:   model.Workspace{ID: "ws-test", Name: "Test"},
+			FieldSchema: entry.FieldSchema,
+		}
+		reqNoStatus := casebound.TurnRequest{Workspace: noStatus, Case: &model.Case{ID: 1}}
+		tools := casebound.BuildToolsForTest(&agent.CommonDeps{CaseUC: fakeCaseMutator{}}, reqNoStatus)
+		names := toolNames(tools)
+		gt.Bool(t, names["case__update_case"]).True()
+		gt.Bool(t, names["case__update_case_status"]).False()
+	})
 }

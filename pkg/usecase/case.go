@@ -3,6 +3,8 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"maps"
+	"sort"
 	"strings"
 	"time"
 
@@ -109,6 +111,156 @@ func (uc *CaseUseCase) fieldSchemaForWorkspace(workspaceID string) *config.Field
 		return nil
 	}
 	return entry.FieldSchema
+}
+
+// fieldValidationMode selects how strictly validateCaseWrite treats the
+// supplied custom-field values. The three modes mirror the three legal
+// shapes a case write can take.
+type fieldValidationMode int
+
+const (
+	// validatePartial type-checks the submitted fields, PRESERVES unknown
+	// ids (forward-compat for fields removed from the schema), and does not
+	// require missing required fields. Used by the draft paths.
+	validatePartial fieldValidationMode = iota
+	// validatePartialStrict type-checks the submitted fields, REJECTS unknown
+	// ids, and does not require missing required fields. Used by the partial
+	// edit paths whose input is untrusted (UpdateCase / MaterializeThreadCase).
+	validatePartialStrict
+	// validateAll type-checks every field, REJECTS unknown ids, and requires
+	// every required field. Used by the open-create paths.
+	validateAll
+)
+
+// validateCaseWrite is the single validation gate every case write funnels
+// through so the agent (UpdateCase / MaterializeThreadCase), GraphQL, and
+// Slack paths enforce identical rules. It (1) runs the workspace field
+// validator in the requested mode, enriching each value with its config Type,
+// and (2) verifies that every referenced user id — assignees plus the values
+// of user / multi-user fields — exists in the SlackUser store. A missing user
+// is rejected with ErrUnknownUser (Slack sync delay is treated as
+// non-existence per project policy). A nil workspace validator skips the field
+// checks (no schema configured) but the user-existence check still runs.
+// Returns the enriched field values (nil-safe: a nil fieldValues yields nil).
+func (uc *CaseUseCase) validateCaseWrite(
+	ctx context.Context,
+	workspaceID string,
+	mode fieldValidationMode,
+	fieldValues map[string]model.FieldValue,
+	assigneeIDs []string,
+) (map[string]model.FieldValue, error) {
+	enriched := fieldValues
+	// Skip the field validator only for partial modes with no submitted fields
+	// (an assignee-only / status-adjacent update must not touch untouched
+	// fields). validateAll always runs so missing required fields are caught
+	// even when the caller supplied none.
+	if fieldValues != nil || mode == validateAll {
+		if validator := uc.fieldValidatorForWorkspace(workspaceID); validator != nil {
+			var err error
+			switch mode {
+			case validateAll:
+				enriched, err = validator.ValidateCaseFieldsAll(fieldValues)
+			case validatePartialStrict:
+				enriched, err = validator.ValidateCaseFieldsPartialStrict(fieldValues)
+			default:
+				enriched, err = validator.ValidateCaseFieldsPartial(fieldValues)
+			}
+			if err != nil {
+				return nil, goerr.Wrap(err, "case field validation failed", goerr.V("workspace_id", workspaceID))
+			}
+		}
+	}
+
+	if err := uc.verifyUsersExist(ctx, assigneeIDs, enriched); err != nil {
+		return nil, err
+	}
+	return enriched, nil
+}
+
+// verifyUsersExist collects every user id referenced by the write — the
+// assignees plus the values of user / multi-user custom fields — and confirms
+// each exists in the SlackUser store with a single batch lookup (N+1-safe).
+// Reporter is intentionally NOT checked: it is set from the auth context /
+// inbound Slack event, where the user provably exists even if the periodic
+// SlackUser sync has not caught up yet. Unknown ids are reported together via
+// ErrUnknownUser.
+func (uc *CaseUseCase) verifyUsersExist(ctx context.Context, assigneeIDs []string, fieldValues map[string]model.FieldValue) error {
+	idSet := make(map[string]struct{}, len(assigneeIDs))
+	for _, id := range assigneeIDs {
+		if id != "" {
+			idSet[id] = struct{}{}
+		}
+	}
+	for _, fv := range fieldValues {
+		switch fv.Type {
+		case types.FieldTypeUser:
+			if s, ok := fv.Value.(string); ok && s != "" {
+				idSet[s] = struct{}{}
+			}
+		case types.FieldTypeMultiUser:
+			for _, s := range coerceUserIDSlice(fv.Value) {
+				if s != "" {
+					idSet[s] = struct{}{}
+				}
+			}
+		}
+	}
+	if len(idSet) == 0 {
+		return nil
+	}
+
+	ids := make([]model.SlackUserID, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, model.SlackUserID(id))
+	}
+	found, err := uc.repo.SlackUser().GetByIDs(ctx, ids)
+	if err != nil {
+		return goerr.Wrap(err, "failed to look up users for case write")
+	}
+
+	var missing []string
+	for id := range idSet {
+		if _, ok := found[model.SlackUserID(id)]; !ok {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return goerr.Wrap(ErrUnknownUser,
+			"unknown user id(s): "+strings.Join(missing, ", "),
+			goerr.V("missing_user_ids", missing))
+	}
+	return nil
+}
+
+// coerceUserIDSlice extracts string ids from a multi-user field value, which
+// may arrive as []string (typed coercion) or []any (raw decode).
+func coerceUserIDSlice(v any) []string {
+	switch a := v.(type) {
+	case []string:
+		return a
+	case []any:
+		out := make([]string, 0, len(a))
+		for _, item := range a {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+// mergeFieldValues overlays the validated patch onto a copy of the existing
+// field values. It is the shared merge behind UpdateCase / MaterializeThreadCase
+// / SubmitDraft so the "preserve untouched fields, replace submitted ones"
+// contract lives in one place. existing is never mutated.
+func mergeFieldValues(existing, patch map[string]model.FieldValue) map[string]model.FieldValue {
+	merged := make(map[string]model.FieldValue, len(existing)+len(patch))
+	maps.Copy(merged, existing)
+	maps.Copy(merged, patch)
+	return merged
 }
 
 func (uc *CaseUseCase) slackTeamIDForWorkspace(workspaceID string) string {
@@ -237,24 +389,21 @@ func (uc *CaseUseCase) persistCase(ctx context.Context, workspaceID string, in p
 		}
 	}
 
-	// Validate and enrich custom fields with Type from config. Drafts use
-	// the partial validator: supplied fields are type-checked, but missing
-	// required fields do NOT fail — half-finished entries are the whole
-	// point of the draft state. The full required-field check runs again
-	// in SubmitDraft before promoting the case to OPEN.
-	if validator := uc.fieldValidatorForWorkspace(workspaceID); validator != nil {
-		var enriched map[string]model.FieldValue
-		var err error
-		if in.Status.IsDraft() {
-			enriched, err = validator.ValidateCaseFieldsPartial(in.FieldValues)
-		} else {
-			enriched, err = validator.ValidateCaseFields(in.FieldValues)
-		}
-		if err != nil {
-			return nil, goerr.Wrap(err, "field validation failed")
-		}
-		in.FieldValues = enriched
+	// Validate and enrich custom fields with Type from config, and verify
+	// every referenced user (assignees + user-field values) exists. Drafts use
+	// the partial mode: supplied fields are type-checked, but missing required
+	// fields do NOT fail — half-finished entries are the whole point of the
+	// draft state. The full required-field check runs again in SubmitDraft
+	// before promoting the case to OPEN.
+	mode := validateAll
+	if in.Status.IsDraft() {
+		mode = validatePartial
 	}
+	enriched, err := uc.validateCaseWrite(ctx, workspaceID, mode, in.FieldValues, in.AssigneeIDs)
+	if err != nil {
+		return nil, goerr.Wrap(err, "case write validation failed")
+	}
+	in.FieldValues = enriched
 
 	// Set reporter from auth context (immutable after creation).
 	var reporterID string
@@ -459,28 +608,27 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, workspaceID string, id in
 		assigneeIDs = patch.AssigneeIDs
 	}
 
-	// Build the field-value map. Without a patch, preserve the existing map
-	// verbatim (no validator pass — stale option IDs from a prior config must
-	// not cause an unrelated update to fail).
+	// Validate the submitted fields and assignees through the shared gate, then
+	// merge the enriched values onto the existing ones. Without a field patch,
+	// preserve the existing map verbatim (no validator pass — stale option IDs
+	// from a prior config must not cause an unrelated update to fail); only the
+	// changed assignees are still checked. assigneeIDs is passed for the
+	// existence check only when the caller is actually replacing them.
+	checkAssignees := assigneeIDs
+	if !patch.hasAssign {
+		checkAssignees = nil
+	}
 	fieldValues := existingCase.FieldValues
 	if patch.Fields != nil {
-		// Partial validation: only the submitted entries are type-checked.
-		validated := patch.Fields
-		if validator := uc.fieldValidatorForWorkspace(workspaceID); validator != nil {
-			enriched, err := validator.ValidateCaseFieldsPartial(validated)
-			if err != nil {
-				return nil, goerr.Wrap(err, "field validation failed", goerr.V(CaseIDKey, id))
-			}
-			validated = enriched
+		validated, err := uc.validateCaseWrite(ctx, workspaceID, validatePartialStrict, patch.Fields, checkAssignees)
+		if err != nil {
+			return nil, goerr.Wrap(err, "case write validation failed", goerr.V(CaseIDKey, id))
 		}
-		merged := make(map[string]model.FieldValue, len(existingCase.FieldValues)+len(validated))
-		for k, v := range existingCase.FieldValues {
-			merged[k] = v
+		fieldValues = mergeFieldValues(existingCase.FieldValues, validated)
+	} else if patch.hasAssign {
+		if _, err := uc.validateCaseWrite(ctx, workspaceID, validatePartialStrict, nil, checkAssignees); err != nil {
+			return nil, goerr.Wrap(err, "case write validation failed", goerr.V(CaseIDKey, id))
 		}
-		for k, v := range validated {
-			merged[k] = v
-		}
-		fieldValues = merged
 	}
 
 	// Rename Slack channel if title changed and channel exists
@@ -830,14 +978,12 @@ func (uc *CaseUseCase) CreateThreadCaseWithFields(ctx context.Context, workspace
 		return existing, nil
 	}
 
-	if validator := uc.fieldValidatorForWorkspace(workspaceID); validator != nil {
-		enriched, vErr := validator.ValidateCaseFieldsAll(fieldValues)
-		if vErr != nil {
-			return nil, goerr.Wrap(vErr, "thread case field validation failed",
-				goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
-		}
-		fieldValues = enriched
+	enriched, vErr := uc.validateCaseWrite(ctx, workspaceID, validateAll, fieldValues, nil)
+	if vErr != nil {
+		return nil, goerr.Wrap(vErr, "thread case field validation failed",
+			goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
 	}
+	fieldValues = enriched
 
 	set := uc.caseStatusSetForWorkspace(workspaceID)
 	initialStatus := ""
@@ -885,19 +1031,11 @@ func (uc *CaseUseCase) MaterializeThreadCase(ctx context.Context, workspaceID st
 		existing.Description = description
 	}
 	if len(fieldValues) > 0 {
-		if validator := uc.fieldValidatorForWorkspace(workspaceID); validator != nil {
-			enriched, vErr := validator.ValidateCaseFieldsPartial(fieldValues)
-			if vErr != nil {
-				return nil, goerr.Wrap(vErr, "thread case field validation failed", goerr.V(CaseIDKey, id))
-			}
-			fieldValues = enriched
+		validated, vErr := uc.validateCaseWrite(ctx, workspaceID, validatePartialStrict, fieldValues, nil)
+		if vErr != nil {
+			return nil, goerr.Wrap(vErr, "thread case field validation failed", goerr.V(CaseIDKey, id))
 		}
-		if existing.FieldValues == nil {
-			existing.FieldValues = make(map[string]model.FieldValue, len(fieldValues))
-		}
-		for k, v := range fieldValues {
-			existing.FieldValues[k] = v
-		}
+		existing.FieldValues = mergeFieldValues(existing.FieldValues, validated)
 	}
 
 	existing.UpdatedAt = time.Now().UTC()
@@ -1043,6 +1181,11 @@ func (uc *CaseUseCase) SubmitDraft(ctx context.Context, workspaceID string, id i
 		}
 		if patch.Fields != nil {
 			validated := patch.Fields
+			// Drafts keep the lenient partial validation (preserve unknown ids,
+			// no required check) and the ErrFieldValidationFailed wrapping so
+			// the GraphQL FIELD_VALIDATION_FAILED code is preserved on the
+			// pre-submit edit path. The strict / required enforcement happens
+			// below, just before the draft is promoted to OPEN.
 			if validator := uc.fieldValidatorForWorkspace(workspaceID); validator != nil {
 				enriched, vErr := validator.ValidateCaseFieldsPartial(validated)
 				if vErr != nil {
@@ -1050,14 +1193,12 @@ func (uc *CaseUseCase) SubmitDraft(ctx context.Context, workspaceID string, id i
 				}
 				validated = enriched
 			}
-			merged := make(map[string]model.FieldValue, len(c.FieldValues)+len(validated))
-			for k, v := range c.FieldValues {
-				merged[k] = v
-			}
-			for k, v := range validated {
-				merged[k] = v
-			}
-			c.FieldValues = merged
+			c.FieldValues = mergeFieldValues(c.FieldValues, validated)
+		}
+		// Verify every referenced user exists (assignees + user-field values),
+		// consistent with every other case write.
+		if err := uc.verifyUsersExist(ctx, c.AssigneeIDs, c.FieldValues); err != nil {
+			return nil, goerr.Wrap(err, "case write validation failed", goerr.V(CaseIDKey, id))
 		}
 		c.UpdatedAt = time.Now().UTC()
 		persistedPatch, pErr := uc.repo.Case().Update(ctx, workspaceID, c)

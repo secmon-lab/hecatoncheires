@@ -197,6 +197,7 @@ func TestHandleEdit_OpensModalWithTriggerID(t *testing.T) {
 func TestHandleSubmit_RecordsReporter(t *testing.T) {
 	const reporterID = "U-MENTION-SUBMIT"
 	repo := memory.New()
+	seedSlackUsers(t, repo, reporterID)
 	registry := newRegistryWithSchema("ws-submit", "WS Submit", &config.FieldSchema{})
 	slackMock := newCollectorOnlyMockSlack()
 	mentionUC := usecase.NewMentionProposalUseCase(repo, registry, slackMock, newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-submit"))))
@@ -242,6 +243,7 @@ func TestHandleSubmit_RecordsReporter(t *testing.T) {
 func TestHandleEditSubmit_RecordsReporter(t *testing.T) {
 	const reporterID = "U-MENTION-EDIT-SUBMIT"
 	repo := memory.New()
+	seedSlackUsers(t, repo, reporterID)
 	registry := newRegistryWithSchema("ws-edit-submit", "WS Edit Submit", &config.FieldSchema{})
 	slackMock := newCollectorOnlyMockSlack()
 	mentionUC := usecase.NewMentionProposalUseCase(repo, registry, slackMock, newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-edit-submit"))))

@@ -122,6 +122,14 @@ mentioned in an unbound channel). It persists the gollem conversation history
 so follow-up mentions can pick up where the previous turn left off, and
 writes a Trace blob for every turn for diagnostics.
 
+In case-bound mode the agent can edit the bound Case directly via the
+`case__update_case` (title / description / assignees / custom fields) and, for
+thread-mode workspaces, `case__update_case_status` tools — the same tools the
+event-driven Agent Jobs use. Both funnel through `CaseUseCase.UpdateCase` /
+`UpdateCaseStatus`, so every entry point (Web GraphQL, Slack modal, Job, mention
+agent) enforces the same validation, including the SlackUser existence check on
+assignees and user-typed field values.
+
 A per-thread **turn lock** (CAS-backed in Firestore, mutex-backed in memory)
 prevents two turns from running concurrently on the same thread. A heartbeat
 goroutine refreshes the lock every 10s; if the holder dies, the next caller

@@ -439,6 +439,7 @@ func TestSlackInteractionHandler_ViewSubmission(t *testing.T) {
 
 	t.Run("handles case creation submission", func(t *testing.T) {
 		repo := memory.New()
+		seedSlackUsersHTTP(t, repo, "U001")
 		registry := model.NewWorkspaceRegistry()
 		registry.Register(&model.WorkspaceEntry{
 			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},

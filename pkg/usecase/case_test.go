@@ -58,6 +58,7 @@ func TestCaseUseCase_CreateCase(t *testing.T) {
 		})
 		uc := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+		seedSlackUsers(t, repo, "U001")
 
 		fieldValues := map[string]model.FieldValue{
 			"priority": {FieldID: "priority", Value: "high"},
@@ -117,7 +118,7 @@ func TestCaseUseCase_CreateCase(t *testing.T) {
 
 		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, fieldValues, false, "", "")
 		gt.Value(t, err).NotNil()
-		gt.Error(t, err).Is(model.ErrInvalidOptionID)
+		gt.Error(t, err).Is(model.ErrCaseFieldValidation)
 	})
 
 	t.Run("create case with missing required field fails", func(t *testing.T) {
@@ -143,7 +144,7 @@ func TestCaseUseCase_CreateCase(t *testing.T) {
 
 		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
 		gt.Value(t, err).NotNil()
-		gt.Error(t, err).Is(model.ErrMissingRequired)
+		gt.Error(t, err).Is(model.ErrCaseFieldValidation)
 	})
 }
 
@@ -236,6 +237,7 @@ func TestCaseUseCase_UpdateCase(t *testing.T) {
 		})
 		uc := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+		seedSlackUsers(t, repo, "U001", "U002")
 
 		// Create case first
 		fieldValues := map[string]model.FieldValue{
@@ -269,6 +271,7 @@ func TestCaseUseCase_UpdateCase(t *testing.T) {
 		repo := memory.New()
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UORIG"})
+		seedSlackUsers(t, repo, "U001", "U002", "U003")
 
 		original := map[string]model.FieldValue{
 			"stage":    {FieldID: "stage", Value: "screen"},
@@ -632,6 +635,7 @@ func TestCaseUseCase_CreateCase_SlackInvite(t *testing.T) {
 			},
 		}
 		uc := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
+		seedSlackUsers(t, repo, "UASSIGNEE1", "UASSIGNEE2")
 
 		token := auth.NewToken("UCREATOR", "creator@example.com", "Creator")
 		ctx := auth.ContextWithToken(context.Background(), token)
@@ -656,6 +660,7 @@ func TestCaseUseCase_CreateCase_SlackInvite(t *testing.T) {
 			},
 		}
 		uc := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
+		seedSlackUsers(t, repo, "UCREATOR", "UOTHER")
 
 		token := auth.NewToken("UCREATOR", "creator@example.com", "Creator")
 		ctx := auth.ContextWithToken(context.Background(), token)
@@ -680,6 +685,7 @@ func TestCaseUseCase_CreateCase_SlackInvite(t *testing.T) {
 			},
 		}
 		uc := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
+		seedSlackUsers(t, repo, "UASSIGNEE")
 
 		token := auth.NewToken("UCREATOR", "creator@example.com", "Creator")
 		ctx := auth.ContextWithToken(context.Background(), token)
@@ -697,6 +703,7 @@ func TestCaseUseCase_CreateCase_SlackInvite(t *testing.T) {
 			},
 		}
 		uc := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
+		seedSlackUsers(t, repo, "UASSIGNEE")
 
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
@@ -1265,6 +1272,7 @@ func TestCaseUseCase_CreateCase_AutoInvite(t *testing.T) {
 			SlackInviteUsers: []string{"UCREATOR", "UASSIGNEE", "UAUTO1"},
 		})
 		uc := usecase.NewCaseUseCase(repo, registry, mock, nil, "")
+		seedSlackUsers(t, repo, "UASSIGNEE")
 
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
 		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{"UASSIGNEE"}, nil, false, "", "")
@@ -1418,6 +1426,7 @@ func TestCaseUseCase_CreateCase_AutoInvite(t *testing.T) {
 			Workspace: model.Workspace{ID: testWorkspaceID, Name: "Test Workspace"},
 		})
 		uc := usecase.NewCaseUseCase(repo, registry, mock, nil, "")
+		seedSlackUsers(t, repo, "UASSIGNEE")
 
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
 		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{"UASSIGNEE"}, nil, false, "", "")
@@ -1434,6 +1443,7 @@ func TestCaseUseCase_ReporterID(t *testing.T) {
 		repo := memory.New()
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UREPORTER"})
+		seedSlackUsers(t, repo, "UASSIGNEE")
 
 		created, err := uc.CreateCase(ctx, testWorkspaceID, "Reporter Test", "desc", []string{"UASSIGNEE"}, nil, false, "", "")
 		gt.NoError(t, err).Required()
@@ -1459,6 +1469,7 @@ func TestCaseUseCase_ReporterID(t *testing.T) {
 		repo := memory.New()
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UREPORTER"})
+		seedSlackUsers(t, repo, "UOTHER")
 
 		created, err := uc.CreateCase(ctx, testWorkspaceID, "Reporter Preserved", "desc", []string{}, nil, false, "", "")
 		gt.NoError(t, err).Required()
@@ -1710,6 +1721,7 @@ func TestCaseUseCase_CreateDraft(t *testing.T) {
 		}
 		uc := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UAUTHOR"})
+		seedSlackUsers(t, repo, "UASSIGN")
 
 		got, err := uc.CreateDraft(ctx, testWorkspaceID, "Half-written", "Desc", []string{"UASSIGN"}, nil, true)
 		gt.NoError(t, err).Required()
@@ -1947,6 +1959,7 @@ func TestCaseUseCase_SubmitDraft(t *testing.T) {
 		}
 		uc := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UAUTHOR"})
+		seedSlackUsers(t, repo, "UASSIGN")
 
 		draft, err := uc.CreateDraft(ctx, testWorkspaceID, "Will Submit", "Body", []string{"UASSIGN"}, nil, false)
 		gt.NoError(t, err).Required()
@@ -1984,6 +1997,7 @@ func TestCaseUseCase_SubmitDraft(t *testing.T) {
 		}
 		uc := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UAUTHOR"})
+		seedSlackUsers(t, repo, "UOLD", "UNEW")
 
 		draft, err := uc.CreateDraft(ctx, testWorkspaceID, "Half-written", "old body", []string{"UOLD"}, nil, false)
 		gt.NoError(t, err).Required()
@@ -2751,5 +2765,120 @@ func TestCaseUseCase_CreateThreadCaseWithFields(t *testing.T) {
 			"d2", nil)
 		gt.NoError(t, err).Required()
 		gt.Number(t, again.ID).Equal(first.ID)
+	})
+}
+
+// seedSlackUsers stores minimal SlackUser records so case writes that
+// reference these ids (assignees / user-field values) pass the existence
+// check that every case write now performs via CaseUseCase.validateCaseWrite.
+// Shared across the usecase_test package.
+func seedSlackUsers(t *testing.T, repo interfaces.Repository, ids ...string) {
+	t.Helper()
+	if len(ids) == 0 {
+		return
+	}
+	users := make([]*model.SlackUser, 0, len(ids))
+	for _, id := range ids {
+		users = append(users, &model.SlackUser{ID: model.SlackUserID(id), Name: id})
+	}
+	gt.NoError(t, repo.SlackUser().SaveMany(context.Background(), users)).Required()
+}
+
+func TestCaseUseCase_UpdateCase_UserExistence(t *testing.T) {
+	newUC := func(t *testing.T) (*usecase.CaseUseCase, interfaces.Repository) {
+		t.Helper()
+		repo := memory.New()
+		fieldSchema := &config.FieldSchema{
+			Fields: []config.FieldDefinition{
+				{ID: "owner", Name: "Owner", Type: types.FieldTypeUser},
+				{ID: "watchers", Name: "Watchers", Type: types.FieldTypeMultiUser},
+			},
+		}
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace:   model.Workspace{ID: testWorkspaceID, Name: "Test Workspace"},
+			FieldSchema: fieldSchema,
+		})
+		return usecase.NewCaseUseCase(repo, registry, nil, nil, ""), repo
+	}
+
+	t.Run("rejects unknown assignee id", func(t *testing.T) {
+		uc, repo := newUC(t)
+		seedSlackUsers(t, repo, "UCREATOR")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", nil, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		patch := usecase.CaseUpdate{}
+		patch.SetAssignees([]string{"UGHOST"})
+		_, err = uc.UpdateCase(ctx, testWorkspaceID, created.ID, patch)
+		gt.Error(t, err).Is(usecase.ErrUnknownUser)
+	})
+
+	t.Run("accepts assignee that exists in the SlackUser store", func(t *testing.T) {
+		uc, repo := newUC(t)
+		seedSlackUsers(t, repo, "UCREATOR", "UREAL")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", nil, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		patch := usecase.CaseUpdate{}
+		patch.SetAssignees([]string{"UREAL"})
+		updated, err := uc.UpdateCase(ctx, testWorkspaceID, created.ID, patch)
+		gt.NoError(t, err).Required()
+		gt.Array(t, updated.AssigneeIDs).Equal([]string{"UREAL"})
+	})
+
+	t.Run("rejects unknown user-field value", func(t *testing.T) {
+		uc, repo := newUC(t)
+		seedSlackUsers(t, repo, "UCREATOR")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", nil, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		_, err = uc.UpdateCase(ctx, testWorkspaceID, created.ID, usecase.CaseUpdate{
+			Fields: map[string]model.FieldValue{
+				"owner": {FieldID: "owner", Value: "UGHOST"},
+			},
+		})
+		gt.Error(t, err).Is(usecase.ErrUnknownUser)
+	})
+
+	t.Run("rejects unknown multi-user field value, accepts known", func(t *testing.T) {
+		uc, repo := newUC(t)
+		seedSlackUsers(t, repo, "UCREATOR", "UA", "UB")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", nil, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		_, err = uc.UpdateCase(ctx, testWorkspaceID, created.ID, usecase.CaseUpdate{
+			Fields: map[string]model.FieldValue{
+				"watchers": {FieldID: "watchers", Type: types.FieldTypeMultiUser, Value: []string{"UA", "UGHOST"}},
+			},
+		})
+		gt.Error(t, err).Is(usecase.ErrUnknownUser)
+
+		updated, err := uc.UpdateCase(ctx, testWorkspaceID, created.ID, usecase.CaseUpdate{
+			Fields: map[string]model.FieldValue{
+				"watchers": {FieldID: "watchers", Type: types.FieldTypeMultiUser, Value: []string{"UA", "UB"}},
+			},
+		})
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.FieldValues["watchers"].Value).Equal([]string{"UA", "UB"})
+	})
+
+	t.Run("rejects submitted unknown field id (strict)", func(t *testing.T) {
+		uc, repo := newUC(t)
+		seedSlackUsers(t, repo, "UCREATOR")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", nil, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		_, err = uc.UpdateCase(ctx, testWorkspaceID, created.ID, usecase.CaseUpdate{
+			Fields: map[string]model.FieldValue{
+				"ghost_field": {FieldID: "ghost_field", Value: "x"},
+			},
+		})
+		gt.Error(t, err).Is(model.ErrCaseFieldValidation)
 	})
 }

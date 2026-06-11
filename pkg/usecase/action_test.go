@@ -720,6 +720,7 @@ func TestActionUseCase_PostSlackMessageToAction(t *testing.T) {
 		caseUC := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
 		actionUC := usecase.NewActionUseCase(repo, nil, mock, "https://example.com", nil)
 		memberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMEMBER"})
+		seedSlackUsers(t, repo, "UMEMBER")
 
 		c, err := caseUC.CreateCase(memberCtx, testWorkspaceID, "Private Case", "Desc",
 			[]string{"UMEMBER"}, nil, true, "", "")

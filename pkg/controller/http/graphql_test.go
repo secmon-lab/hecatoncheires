@@ -352,8 +352,20 @@ func TestGraphQLHandler_CaseQuery(t *testing.T) {
 	})
 }
 
+// seedSlackUsersHTTP stores minimal SlackUser records so case writes that
+// reference these ids pass the existence check CaseUseCase now performs.
+func seedSlackUsersHTTP(t *testing.T, repo interfaces.Repository, ids ...string) {
+	t.Helper()
+	users := make([]*model.SlackUser, 0, len(ids))
+	for _, id := range ids {
+		users = append(users, &model.SlackUser{ID: model.SlackUserID(id), Name: id})
+	}
+	gt.NoError(t, repo.SlackUser().SaveMany(context.Background(), users)).Required()
+}
+
 func TestGraphQLHandler_CreateCaseMutation(t *testing.T) {
 	repo := memory.New()
+	seedSlackUsersHTTP(t, repo, "U001", "U002")
 	handler, err := setupGraphQLServer(repo)
 	gt.NoError(t, err).Required()
 
@@ -446,6 +458,7 @@ func TestGraphQLHandler_CreateCaseMutation(t *testing.T) {
 
 func TestGraphQLHandler_UpdateCaseMutation(t *testing.T) {
 	repo := memory.New()
+	seedSlackUsersHTTP(t, repo, "U001", "U002", "U003")
 	handler, err := setupGraphQLServer(repo)
 	gt.NoError(t, err).Required()
 
