@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -124,16 +125,16 @@ func TestSlackUseCases_ThreadModeCreationInitiation(t *testing.T) {
 
 	// wire builds a SlackUseCases backed by a thread-mode workspace and a probe
 	// LLM that records whether the agent planner was ever invoked.
-	wire := func() (*usecase.SlackUseCases, *memory.Memory, *bool) {
+	wire := func() (*usecase.SlackUseCases, *memory.Memory, *atomic.Bool) {
 		repo := memory.New()
 		reg := newThreadWorkspaceRegistry()
 		slackMock := &agentTestSlackService{}
 		caseUC := usecase.NewCaseUseCase(repo, reg, slackMock, nil, "https://app.test")
 
-		llmInvoked := false
+		var llmInvoked atomic.Bool
 		probe := &mockLLMClient{
 			newSessionFn: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
-				llmInvoked = true
+				llmInvoked.Store(true)
 				return &mockLLMSession{
 					generateContentFn: func(_ context.Context, _ ...gollem.Input) (*gollem.Response, error) {
 						return nil, errors.New("planner must not run for ignored events")
@@ -201,7 +202,7 @@ func TestSlackUseCases_ThreadModeCreationInitiation(t *testing.T) {
 		gt.NoError(t, uc.HandleSlackEvent(ctx, mentionEvent(threadTS))).Required()
 		async.Wait()
 
-		gt.Value(t, *llmInvoked).Equal(false)
+		gt.Value(t, llmInvoked.Load()).Equal(false)
 
 		c, err := repo.Case().GetBySlackThread(ctx, "support", channel, threadTS)
 		gt.NoError(t, err).Required()
@@ -220,7 +221,7 @@ func TestSlackUseCases_ThreadModeCreationInitiation(t *testing.T) {
 		gt.NoError(t, uc.HandleSlackEvent(ctx, messageEvent("1700000005.000001", threadTS))).Required()
 		async.Wait()
 
-		gt.Value(t, *llmInvoked).Equal(false)
+		gt.Value(t, llmInvoked.Load()).Equal(false)
 
 		ssn, err := repo.Session().GetByThread(ctx, channel, threadTS)
 		gt.NoError(t, err).Required()
@@ -239,7 +240,7 @@ func TestSlackUseCases_ThreadModeCreationInitiation(t *testing.T) {
 		// The create turn was initiated: the planner was invoked. (It errors out
 		// on Generate here, which the create flow handles gracefully — the point
 		// is only that root posts reach creation while threaded events do not.)
-		gt.Value(t, *llmInvoked).Equal(true)
+		gt.Value(t, llmInvoked.Load()).Equal(true)
 	})
 }
 
