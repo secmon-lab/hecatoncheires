@@ -16,14 +16,15 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
 
-// HandleThreadCaseCreation processes a top-level human post in a thread-mode
-// monitored channel. It does NOT create a case immediately: it runs the
-// initialization (create) agent, which investigates, may ask the user, and
-// only commits a validated case once it is confident. On success it posts a
-// Block Kit summary; on a question it waits for the user to resume; on
-// fallback it posts a "couldn't conclude" message. Resuming after a question
-// is handled by ResumeThreadCaseCreation (a thread reply / mention on a
-// case-less thread).
+// HandleThreadCaseCreation processes a channel-root human post in a thread-mode
+// monitored channel — the ONLY trigger that initiates case creation. It does
+// NOT create a case immediately: it runs the initialization (create) agent,
+// which investigates, may ask the user, and only commits a validated case once
+// it is confident. On success it posts a Block Kit summary; on a question it
+// posts an interactive form and waits; on fallback it posts a "couldn't
+// conclude" message. Resuming after a question is driven by the question
+// form's Submit interaction (HandleThreadCaseQuestionSubmit) — a free-text
+// reply or mention in the not-yet-a-case thread is intentionally ignored.
 func (uc *AgentUseCase) HandleThreadCaseCreation(ctx context.Context, msg *slackmodel.Message, entry *model.WorkspaceEntry) error {
 	if uc.threadcase == nil || uc.deps.CaseUC == nil || entry == nil {
 		return nil
@@ -52,10 +53,12 @@ func (uc *AgentUseCase) HandleThreadCaseCreation(ctx context.Context, msg *slack
 }
 
 // ResumeThreadCaseCreation continues the initialization (create) agent on a
-// thread that has no case yet — triggered by a reply or a mention while a
-// creation turn previously ended on a question (or fell back). The new message
-// is the latest user intent; the conversation history (keyed on Session.ID)
-// carries the prior turn's investigation and question.
+// thread that has no case yet, with msg as the latest user intent; the
+// conversation history (keyed on Session.ID) carries the prior turn's
+// investigation and question. In production this is reached only through the
+// offline eval harness — the live Slack flow resumes a deferred question via
+// the question form's Submit interaction, and free-text replies / mentions in
+// a not-yet-a-case thread are ignored (see handleThreadModeEvent).
 func (uc *AgentUseCase) ResumeThreadCaseCreation(ctx context.Context, msg *slackmodel.Message, entry *model.WorkspaceEntry) error {
 	if uc.threadcase == nil || uc.deps.CaseUC == nil || entry == nil {
 		return nil
@@ -147,7 +150,7 @@ func (uc *AgentUseCase) runThreadCaseCreation(
 		uc.postThreadCaseSummary(ctx, wsID, entry, res.Case, traceMsg, channelID, threadTS)
 	case threadcase.StatusQuestion:
 		// The question form was posted by the handler; wait for the user to
-		// reply / mention again (ResumeThreadCaseCreation).
+		// answer it via the form's Submit interaction (HandleThreadCaseQuestionSubmit).
 	case threadcase.StatusFallback:
 		uc.finalizeTrace(ctx, traceMsg, channelID, threadTS, i18n.T(ctx, i18n.MsgThreadCaseCreateFallback))
 	case threadcase.StatusBusy, threadcase.StatusIdempotent:

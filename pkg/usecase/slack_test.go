@@ -2,11 +2,13 @@ package usecase_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"testing"
 	"time"
 
+	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
@@ -14,6 +16,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 	slackevents "github.com/slack-go/slack/slackevents"
 )
 
@@ -108,6 +111,135 @@ func TestSlackUseCases_HandleSlackEvent(t *testing.T) {
 
 		// Should not error, just skip
 		gt.NoError(t, uc.Slack.HandleSlackEvent(ctx, event)).Required()
+	})
+}
+
+// TestSlackUseCases_ThreadModeCreationInitiation verifies the thread-mode
+// routing rule: case creation is initiated ONLY by a channel-root post.
+// A mention or a reply inside a thread that has no case yet must be ignored —
+// no create/resume turn runs (the LLM planner is never invoked, and no session
+// is created for the thread).
+func TestSlackUseCases_ThreadModeCreationInitiation(t *testing.T) {
+	const channel = "C-MONITOR"
+
+	// wire builds a SlackUseCases backed by a thread-mode workspace and a probe
+	// LLM that records whether the agent planner was ever invoked.
+	wire := func() (*usecase.SlackUseCases, *memory.Memory, *bool) {
+		repo := memory.New()
+		reg := newThreadWorkspaceRegistry()
+		slackMock := &agentTestSlackService{}
+		caseUC := usecase.NewCaseUseCase(repo, reg, slackMock, nil, "https://app.test")
+
+		llmInvoked := false
+		probe := &mockLLMClient{
+			newSessionFn: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+				llmInvoked = true
+				return &mockLLMSession{
+					generateContentFn: func(_ context.Context, _ ...gollem.Input) (*gollem.Response, error) {
+						return nil, errors.New("planner must not run for ignored events")
+					},
+				}, nil
+			},
+		}
+
+		agentUC := usecase.NewAgentUseCase(usecase.AgentDeps{
+			Repo:         repo,
+			Registry:     reg,
+			LLM:          probe,
+			HistoryRepo:  agentarchive.NewMemoryHistoryRepository(),
+			TraceRepo:    agentarchive.NewMemoryTraceRepository(),
+			SlackService: slackMock,
+			CaseUC:       caseUC,
+		})
+		slackUC := usecase.NewSlackUseCases(repo, reg, agentUC, nil, slackMock)
+		return slackUC, repo, &llmInvoked
+	}
+
+	mentionEvent := func(threadTS string) *slackevents.EventsAPIEvent {
+		return &slackevents.EventsAPIEvent{
+			Type: slackevents.CallbackEvent,
+			InnerEvent: slackevents.EventsAPIInnerEvent{
+				Type: string(slackevents.AppMention),
+				Data: &slackevents.AppMentionEvent{
+					Type:            "app_mention",
+					User:            "U-ASKER",
+					Text:            "<@UBOT001> please help",
+					TimeStamp:       "1700000009.000001",
+					ThreadTimeStamp: threadTS,
+					Channel:         channel,
+					EventTimeStamp:  "1700000009",
+				},
+			},
+			TeamID: "T1",
+		}
+	}
+
+	messageEvent := func(ts, threadTS string) *slackevents.EventsAPIEvent {
+		return &slackevents.EventsAPIEvent{
+			Type: slackevents.CallbackEvent,
+			InnerEvent: slackevents.EventsAPIInnerEvent{
+				Type: string(slackevents.Message),
+				Data: &slackevents.MessageEvent{
+					Type:            "message",
+					User:            "U-ASKER",
+					Text:            "some text",
+					TimeStamp:       ts,
+					ThreadTimeStamp: threadTS,
+					Channel:         channel,
+					EventTimeStamp:  ts,
+				},
+			},
+			TeamID: "T1",
+		}
+	}
+
+	t.Run("mention in a case-less thread is ignored", func(t *testing.T) {
+		ctx := context.Background()
+		uc, repo, llmInvoked := wire()
+
+		threadTS := "1700000000.000100" // a thread with no case bound
+		gt.NoError(t, uc.HandleSlackEvent(ctx, mentionEvent(threadTS))).Required()
+		async.Wait()
+
+		gt.Value(t, *llmInvoked).Equal(false)
+
+		c, err := repo.Case().GetBySlackThread(ctx, "support", channel, threadTS)
+		gt.NoError(t, err).Required()
+		gt.Value(t, c).Nil()
+
+		ssn, err := repo.Session().GetByThread(ctx, channel, threadTS)
+		gt.NoError(t, err).Required()
+		gt.Value(t, ssn).Nil()
+	})
+
+	t.Run("reply in a case-less thread is ignored", func(t *testing.T) {
+		ctx := context.Background()
+		uc, repo, llmInvoked := wire()
+
+		threadTS := "1700000000.000100"
+		gt.NoError(t, uc.HandleSlackEvent(ctx, messageEvent("1700000005.000001", threadTS))).Required()
+		async.Wait()
+
+		gt.Value(t, *llmInvoked).Equal(false)
+
+		ssn, err := repo.Session().GetByThread(ctx, channel, threadTS)
+		gt.NoError(t, err).Required()
+		gt.Value(t, ssn).Nil()
+	})
+
+	t.Run("channel-root post initiates case creation", func(t *testing.T) {
+		ctx := context.Background()
+		uc, _, llmInvoked := wire()
+
+		// A top-level post (no thread_ts): the message's own ts is the thread.
+		rootTS := "1700000010.000001"
+		gt.NoError(t, uc.HandleSlackEvent(ctx, messageEvent(rootTS, ""))).Required()
+		async.Wait()
+
+		// The create turn was initiated: the planner was invoked. (It errors out
+		// on Generate here, which the create flow handles gracefully — the point
+		// is only that root posts reach creation while threaded events do not.)
+		gt.Value(t, *llmInvoked).Equal(true)
 	})
 }
 

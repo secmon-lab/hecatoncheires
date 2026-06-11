@@ -677,17 +677,20 @@ indicates the issue is resolved.
 
 ### Case agent prompts (`[case.prompts]`)
 
-Thread-mode case **initialization** is agent-driven: when a human posts a
-top-level message in the monitored channel, the bot does **not** create a Case
-immediately. Instead it runs a plan-and-execute agent that investigates (all
-read-only search tools are available), may ask the reporter to clarify intent
-(a question posted to the thread), and only commits a Case once it can fill a
-valid title, description, and every **required** custom field. If validation
-fails — a required field missing, or a value outside the allowed options — the
-agent is told what is wrong and tries again, all bounded by the planner round
-budget. When the agent cannot conclude within budget, it posts a "couldn't
-conclude" notice; the reporter can reply or mention the bot in the thread to
-resume. On success the bot posts a Block Kit summary of the created Case.
+Thread-mode case **initialization** is agent-driven and is started **only** by
+a post at the channel root: when a human posts a top-level message in the
+monitored channel, the bot does **not** create a Case immediately. (A mention
+or a reply inside a thread that has no Case yet is ignored — only a channel-root
+post starts a Case.) Instead it runs a plan-and-execute agent that investigates
+(all read-only search tools are available), may ask the reporter to clarify
+intent (a question form posted to the thread), and only commits a Case once it
+can fill a valid title, description, and every **required** custom field. If
+validation fails — a required field missing, or a value outside the allowed
+options — the agent is told what is wrong and tries again, all bounded by the
+planner round budget. A pending question is answered by submitting the question
+form (not by a free-text reply). When the agent cannot conclude within budget,
+it posts a "couldn't conclude" notice. On success the bot posts a Block Kit
+summary of the created Case.
 
 The optional `[case.prompts]` sub-table injects workspace-specific guidance into
 this agent. Today only the `create` key (the initialization agent) is consumed;
