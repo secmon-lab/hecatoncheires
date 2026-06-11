@@ -16,6 +16,7 @@ import (
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/webfetch"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
@@ -65,9 +66,10 @@ type AssistDeps struct {
 	SlackRetriever slacktool.MessageRetriever
 
 	// Optional integrations.
-	NotionTool   notiontool.Client
-	GitHubClient *githubtool.Client
-	EmbedClient  interfaces.EmbedClient
+	NotionTool     notiontool.Client
+	GitHubClient   *githubtool.Client
+	WebFetchClient *webfetch.Client
+	EmbedClient    interfaces.EmbedClient
 }
 
 // NewAssistUseCase creates a new AssistUseCase from a deps bundle. See AssistDeps.
@@ -171,12 +173,14 @@ func (uc *AssistUseCase) processCase(ctx context.Context, entry *model.Workspace
 	})
 	notionTools := notiontool.New(notiontool.Deps{Client: uc.deps.NotionTool})
 	githubTools := githubtool.New(uc.deps.GitHubClient)
+	webfetchTools := webfetch.New(uc.deps.WebFetchClient)
 
-	allTools := make([]gollem.Tool, 0, len(coreTools)+len(slackTools)+len(notionTools)+len(githubTools))
+	allTools := make([]gollem.Tool, 0, len(coreTools)+len(slackTools)+len(notionTools)+len(githubTools)+len(webfetchTools))
 	allTools = append(allTools, coreTools...)
 	allTools = append(allTools, slackTools...)
 	allTools = append(allTools, notionTools...)
 	allTools = append(allTools, githubTools...)
+	allTools = append(allTools, webfetchTools...)
 
 	// Create and execute the agent
 	agent := gollem.New(uc.deps.LLM,

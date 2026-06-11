@@ -16,6 +16,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slackpost"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/webfetch"
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
@@ -68,6 +69,7 @@ func buildTickRuntime(
 		Registry:  registry,
 		LLMClient: llmClient,
 		UC:        uc,
+		WebFetch:  uc.WebFetchClient(),
 	})
 	uc.Case.SetEventPublisher(jobUC)
 
@@ -92,6 +94,7 @@ type jobRuntimeDeps struct {
 	LLMClient    gollem.LLMClient
 	UC           *usecase.UseCases
 	SlackService slacksvc.Service // may be nil; slack_post tool then no-ops
+	WebFetch     *webfetch.Client // may be nil; webfetch tool then not bound
 
 	// HistoryRepo / TraceRepo are required when wiring the planexec
 	// executor (it needs persistent storage to replay sub-agent
@@ -160,6 +163,7 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner) {
 				DefaultThreadTS: threadTS,
 			})...)
 		}
+		out = append(out, webfetch.New(deps.WebFetch)...)
 		return out
 	})
 

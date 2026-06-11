@@ -21,6 +21,7 @@ import (
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/webfetch"
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
@@ -51,6 +52,9 @@ type Options struct {
 	LiveSlackSearch slacktool.SearchService
 	LiveNotion      notiontool.Client
 	GitHub          *githubtool.Client
+	// WebFetch holds the live-only webfetch HTTP settings; the eval LLM is
+	// injected as the screening client when the tool is built.
+	WebFetch *webfetch.ClientConfig
 }
 
 // Env is a prepared single-scenario environment.
@@ -105,6 +109,9 @@ func Build(ctx context.Context, sc *scenario.Scenario, opts Options) (*Env, erro
 	}
 	if opts.GitHub != nil {
 		ucOpts = append(ucOpts, usecase.WithGitHubService(opts.GitHub))
+	}
+	if opts.WebFetch != nil {
+		ucOpts = append(ucOpts, usecase.WithWebFetch(*opts.WebFetch))
 	}
 
 	uc := usecase.New(repo, registry, ucOpts...)

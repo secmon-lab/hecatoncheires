@@ -418,7 +418,16 @@ func TestRun_DryRunRejectsUnknownWorkflow(t *testing.T) {
 
 func TestToolCatalog(t *testing.T) {
 	cat := eval.ToolCatalog()
-	gt.A(t, cat).Length(3)
+	gt.A(t, cat).Length(4).Required()
+
+	names := make(map[string]bool, len(cat))
+	for _, e := range cat {
+		names[e.Name] = true
+	}
+	gt.Bool(t, names["slack_search"]).True()
+	gt.Bool(t, names["notion_search"]).True()
+	gt.Bool(t, names["github_search"]).True()
+	gt.Bool(t, names["webfetch"]).True()
 }
 
 // --- real-LLM end-to-end test ---------------------------------------------

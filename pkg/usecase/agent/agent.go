@@ -18,6 +18,7 @@ import (
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/webfetch"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
@@ -41,6 +42,7 @@ type CommonDeps struct {
 	SlackRetriever slacktool.MessageRetriever
 	NotionClient   notiontool.Client
 	GitHubClient   *githubtool.Client
+	WebFetchClient *webfetch.Client
 
 	// Action mutator interfaces, used by `core` toolset. Required for
 	// case-bound mode (which uses the full mutating tool set). Optional for

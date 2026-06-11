@@ -22,6 +22,7 @@ import (
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/webfetch"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/eval/driver"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/eval/env"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/eval/evaltype"
@@ -55,6 +56,7 @@ func ToolCatalog() []toolCatalogEntry {
 		{Name: toolsim.ToolSlackSearch, Description: "Search Slack messages", ReadOnly: true, Simulatable: true},
 		{Name: toolsim.ToolNotionSearch, Description: "Search Notion pages", ReadOnly: true, Simulatable: true},
 		{Name: toolsim.ToolGitHubSearch, Description: "Search GitHub issues/PRs (live-only in v1)", ReadOnly: true, Simulatable: false},
+		{Name: toolsim.ToolWebFetch, Description: "Fetch a URL and return its content as Markdown, screened for prompt injection (live-only)", ReadOnly: true, Simulatable: false},
 	}
 }
 
@@ -84,6 +86,9 @@ type Config struct {
 	LiveSlackSearch slacktool.SearchService
 	LiveNotion      notiontool.Client
 	GitHub          *githubtool.Client
+	// WebFetch carries the HTTP-side settings for the live-only webfetch tool;
+	// the eval env injects the eval LLM client before the tool is built.
+	WebFetch *webfetch.ClientConfig
 }
 
 // Run executes the harness over the given paths and writes the summary to
@@ -195,6 +200,7 @@ func runOne(ctx context.Context, sc *scenario.Scenario, registry *driver.Registr
 		LiveSlackSearch: cfg.LiveSlackSearch,
 		LiveNotion:      cfg.LiveNotion,
 		GitHub:          cfg.GitHub,
+		WebFetch:        cfg.WebFetch,
 	})
 	if err != nil {
 		return errorResult(res, err)

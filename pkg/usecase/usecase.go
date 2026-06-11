@@ -10,6 +10,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/webfetch"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/notion"
@@ -29,6 +30,8 @@ type UseCases struct {
 	slackSearch              slacktool.SearchService
 	slackRetriever           slacktool.MessageRetriever
 	githubClient             *github.Client
+	webfetchSettings         *webfetch.ClientConfig
+	webfetchClient           *webfetch.Client
 	llmClient                gollem.LLMClient
 	embedClient              interfaces.EmbedClient
 	historyRepo              gollem.HistoryRepository
@@ -77,6 +80,15 @@ func WithBaseURL(url string) Option {
 func WithGitHubService(c *github.Client) Option {
 	return func(uc *UseCases) {
 		uc.githubClient = c
+	}
+}
+
+// WithWebFetch configures the agent webfetch tool's HTTP-side settings. The
+// shared LLM client (used for injection screening) is injected in New, so the
+// tool is built only when both these settings and an LLM client are present.
+func WithWebFetch(cfg webfetch.ClientConfig) Option {
+	return func(uc *UseCases) {
+		uc.webfetchSettings = &cfg
 	}
 }
 
@@ -169,6 +181,16 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 		opt(uc)
 	}
 
+	// Build the webfetch client only when both the HTTP settings (WithWebFetch)
+	// and an LLM client (WithLLMClient) are present. The LLM screen is the only
+	// injection defense in this codebase, so webfetch fails closed (stays nil)
+	// without an LLM client.
+	if uc.webfetchSettings != nil && uc.llmClient != nil {
+		cfg := *uc.webfetchSettings
+		cfg.LLM = uc.llmClient
+		uc.webfetchClient = webfetch.NewClient(cfg)
+	}
+
 	uc.Case = NewCaseUseCase(repo, registry, uc.slackService, uc.slackAdminService, uc.baseURL)
 	slotCoord := newNotificationSlotCoordinator(repo.NotificationSlot(), uc.slackService, uc.notificationSlotDuration, nil)
 	uc.Action = NewActionUseCase(repo, registry, uc.slackService, uc.baseURL, slotCoord)
@@ -217,6 +239,7 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 				SlackRetriever: uc.slackRetriever,
 				NotionTool:     uc.notionTool,
 				GitHubClient:   uc.githubClient,
+				WebFetchClient: uc.webfetchClient,
 				EmbedClient:    uc.embedClient,
 			})
 		} else if uc.historyRepo != nil || uc.traceRepo != nil {
@@ -232,6 +255,7 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 			SlackRetriever: uc.slackRetriever,
 			NotionTool:     uc.notionTool,
 			GitHubClient:   uc.githubClient,
+			WebFetchClient: uc.webfetchClient,
 			EmbedClient:    uc.embedClient,
 		})
 
@@ -251,6 +275,7 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 				SlackRetriever:      uc.slackRetriever,
 				NotionClient:        uc.notionTool,
 				GitHubClient:        uc.githubClient,
+				WebFetchClient:      uc.webfetchClient,
 				ActionUC:            NewActionToolAdapter(uc.Action),
 				ActionStepUC:        NewActionStepToolAdapter(uc.ActionStep),
 				HeartbeatInterval:   agent.DefaultHeartbeatInterval,
@@ -277,4 +302,11 @@ func (uc *UseCases) WorkspaceRegistry() *model.WorkspaceRegistry {
 // SlackService returns the Slack service (may be nil if not configured)
 func (uc *UseCases) SlackService() slack.Service {
 	return uc.slackService
+}
+
+// WebFetchClient returns the agent webfetch client (nil when the tool is
+// disabled or no LLM client is configured). Exposed so the Job runtime wiring
+// can bind the same client into the Job tool set.
+func (uc *UseCases) WebFetchClient() *webfetch.Client {
+	return uc.webfetchClient
 }

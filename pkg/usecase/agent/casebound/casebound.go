@@ -15,6 +15,7 @@ import (
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/webfetch"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
@@ -252,6 +253,7 @@ func (uc *UseCase) buildTools(req TurnRequest) []gollem.Tool {
 	})
 	notionTools := notiontool.New(notiontool.Deps{Client: d.NotionClient})
 	githubTools := githubtool.New(d.GitHubClient)
+	webfetchTools := webfetch.New(d.WebFetchClient)
 
 	// Case-editing tools (title / description / assignees / custom fields and,
 	// for thread-mode workspaces, board status). Only wired when a CaseUC is
@@ -274,11 +276,12 @@ func (uc *UseCase) buildTools(req TurnRequest) []gollem.Tool {
 		})
 	}
 
-	all := make([]gollem.Tool, 0, len(coreTools)+len(slackTools)+len(notionTools)+len(githubTools)+len(caseTools))
+	all := make([]gollem.Tool, 0, len(coreTools)+len(slackTools)+len(notionTools)+len(githubTools)+len(webfetchTools)+len(caseTools))
 	all = append(all, coreTools...)
 	all = append(all, slackTools...)
 	all = append(all, notionTools...)
 	all = append(all, githubTools...)
+	all = append(all, webfetchTools...)
 	all = append(all, caseTools...)
 	return all
 }

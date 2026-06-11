@@ -223,6 +223,7 @@ from the eval job tool set — action creation is the primary observable.)
 | `slack_search` | sim + live |
 | `notion_search` | sim + live |
 | `github_search` | **live-only** (simulating it needs a production interface extraction, deferred) |
+| `webfetch` | **live-only** (real HTTP GET + LLM injection screening; the eval LLM does the screening) |
 
 `sim` tools generate responses from their `background`; `live` tools call the
 real API (require the matching credentials). Every tool call — sim or live — is

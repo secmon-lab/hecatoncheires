@@ -14,6 +14,7 @@ import (
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/webfetch"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	slackmodel "github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
@@ -86,9 +87,10 @@ type AgentDeps struct {
 	SlackRetriever slacktool.MessageRetriever
 
 	// Optional integrations.
-	NotionTool   notiontool.Client
-	GitHubClient *githubtool.Client
-	EmbedClient  interfaces.EmbedClient
+	NotionTool     notiontool.Client
+	GitHubClient   *githubtool.Client
+	WebFetchClient *webfetch.Client
+	EmbedClient    interfaces.EmbedClient
 }
 
 // NewAgentUseCase creates a new AgentUseCase from a deps bundle. See AgentDeps.
@@ -106,6 +108,7 @@ func NewAgentUseCase(deps AgentDeps) *AgentUseCase {
 			SlackRetriever:      deps.SlackRetriever,
 			NotionClient:        deps.NotionTool,
 			GitHubClient:        deps.GitHubClient,
+			WebFetchClient:      deps.WebFetchClient,
 			ActionUC:            NewActionToolAdapter(deps.ActionUC),
 			ActionStepUC:        NewActionStepToolAdapter(deps.ActionStepUC),
 			CaseUC:              NewCaseToolAdapter(deps.CaseUC),

@@ -29,6 +29,7 @@ const (
 	ToolSlackSearch  = "slack_search"
 	ToolNotionSearch = "notion_search"
 	ToolGitHubSearch = "github_search"
+	ToolWebFetch     = "webfetch"
 )
 
 // SimulatableTools is the catalog of tool names the harness can simulate.
