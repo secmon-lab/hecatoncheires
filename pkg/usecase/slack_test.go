@@ -249,6 +249,35 @@ func TestSlackUseCases_ThreadModeCreationInitiation(t *testing.T) {
 		gt.Value(t, llmInvoked.Load()).Equal(true)
 	})
 
+	t.Run("human file_share root post initiates case creation", func(t *testing.T) {
+		ctx := context.Background()
+		uc, _, llmInvoked := wire(false)
+
+		// A human filing an intake request by uploading a screenshot/document
+		// posts a "file_share" subtype message at the channel root; it must start
+		// a case (the flag gates bot posts only, not human file shares).
+		ev := &slackevents.EventsAPIEvent{
+			Type: slackevents.CallbackEvent,
+			InnerEvent: slackevents.EventsAPIInnerEvent{
+				Type: string(slackevents.Message),
+				Data: &slackevents.MessageEvent{
+					Type:           "message",
+					SubType:        "file_share",
+					User:           "U-ASKER",
+					Text:           "please review this",
+					TimeStamp:      "1700000040.000001",
+					Channel:        channel,
+					EventTimeStamp: "1700000040.000001",
+				},
+			},
+			TeamID: "T1",
+		}
+		gt.NoError(t, uc.HandleSlackEvent(ctx, ev)).Required()
+		async.Wait()
+
+		gt.Value(t, llmInvoked.Load()).Equal(true)
+	})
+
 	// botFormRootEvent is a channel-root post authored by an integration bot
 	// (an intake-form app) rather than a human: no SubType / "bot_message", an
 	// empty User, a BotID, and the human requester named in the body.

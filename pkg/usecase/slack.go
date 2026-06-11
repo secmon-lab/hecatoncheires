@@ -317,11 +317,12 @@ func (uc *SlackUseCases) isThreadCaseCreationTrigger(ctx context.Context, ev *sl
 		return false
 	}
 	// Accept only substantive new posts. A fresh human post carries an empty
-	// subtype; app posts carry either an empty subtype or "bot_message". Every
-	// other subtype (message_changed / message_deleted / channel_join / topic
-	// changes / …) is an edit or a system event, not a new request.
+	// subtype; app posts carry "bot_message"; a post that attaches a screenshot
+	// or document carries "file_share" (a common way to file an intake request).
+	// Every other subtype (message_changed / message_deleted / channel_join /
+	// topic changes / …) is an edit or a system event, not a new request.
 	switch ev.SubType {
-	case "", "bot_message":
+	case "", "bot_message", "file_share":
 	default:
 		return false
 	}

@@ -131,20 +131,25 @@ func TestThreadCase_Creation(t *testing.T) {
 
 func TestFirstSlackUserMention(t *testing.T) {
 	cases := []struct {
-		name string
-		text string
-		want string
+		name   string
+		text   string
+		ignore []string
+		want   string
 	}{
-		{"plain mention", "ping <@U123ABC> please", "U123ABC"},
-		{"mention with label", "Reporter: <@U06KHSXQW4V|ahyan/HP> here", "U06KHSXQW4V"},
-		{"enterprise W id", "owner <@W99TEAM01|grid>", "W99TEAM01"},
-		{"first of several", "<@U001> cc <@U002>", "U001"},
-		{"none", "no users here, just text", ""},
-		{"empty", "", ""},
+		{"plain mention", "ping <@U123ABC> please", nil, "U123ABC"},
+		{"mention with label", "Reporter: <@U06KHSXQW4V|ahyan/HP> here", nil, "U06KHSXQW4V"},
+		{"enterprise W id", "owner <@W99TEAM01|grid>", nil, "W99TEAM01"},
+		{"first of several", "<@U001> cc <@U002>", nil, "U001"},
+		{"none", "no users here, just text", nil, ""},
+		{"empty", "", nil, ""},
+		// The first mention is the bot itself; it is skipped so the requester
+		// named next becomes the reporter.
+		{"ignore first (bot mentioned before requester)", "<@UBOT001> request from <@U002>", []string{"UBOT001"}, "U002"},
+		{"ignore all", "<@U001> cc <@U002>", []string{"U001", "U002"}, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			gt.Value(t, usecase.FirstSlackUserMentionForTest(tc.text)).Equal(tc.want)
+			gt.Value(t, usecase.FirstSlackUserMentionForTest(tc.text, tc.ignore...)).Equal(tc.want)
 		})
 	}
 }
@@ -178,11 +183,13 @@ func TestThreadCase_Creation_BotRelayedReporter(t *testing.T) {
 	entry, err := reg.Get("support")
 	gt.NoError(t, err).Required()
 
-	// Bot-authored form post: empty user ID, the requester named in the body.
+	// Bot-authored form post: empty user ID. The body @-mentions the bot itself
+	// (UBOT001, the agentTestSlackService bot user) BEFORE the requester, so the
+	// resolver must skip the bot and attribute the case to the requester.
 	threadTS := "1700000000.000700"
 	msg := slackmodel.NewMessageFromData(
 		threadTS, "C-MONITOR", "", "T1", "", "",
-		"RISK NAVIGATOR request\nReporter: <@U06KHSXQW4V|ahyan>\nReview the Backlog API usage.",
+		"<@UBOT001> RISK NAVIGATOR request\nReporter: <@U06KHSXQW4V|ahyan>\nReview the Backlog API usage.",
 		threadTS, time.Now(), nil)
 
 	gt.NoError(t, agentUC.HandleThreadCaseCreation(ctx, msg, entry)).Required()
@@ -192,7 +199,8 @@ func TestThreadCase_Creation_BotRelayedReporter(t *testing.T) {
 	gt.NoError(t, err).Required()
 	gt.Value(t, c).NotNil().Required()
 	gt.Value(t, c.Title).Equal("Backlog API risk review")
-	// The reporter was resolved from the body mention, not the (bot) author.
+	// The reporter was resolved from the body mention, skipping the bot's own ID
+	// and the (bot) author.
 	gt.Value(t, c.ReporterID).Equal("U06KHSXQW4V")
 	gt.Value(t, c.SlackThreadTS).Equal(threadTS)
 }
