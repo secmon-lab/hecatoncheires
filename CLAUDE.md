@@ -331,7 +331,11 @@ The shortlist:
 - **Every persisted model needs `Validate()`** enforcing required
   identity fields (ReporterID, CreatorID, etc.). Repositories
   MUST call it before every write so a handler bug that forgot to
-  inject the reporter fails loudly at the first write.
+  inject the reporter fails loudly at the first write. (Scoped
+  exception: `Case.ValidateNew` requires `ReporterID` only for
+  channel-mode Cases; thread-mode Cases created from a bot intake
+  post that names no human may have an empty reporter. Keep such
+  relaxations narrowly scoped and documented at the check.)
 
 ### Repository Tests
 

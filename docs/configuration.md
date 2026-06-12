@@ -341,6 +341,7 @@ channel_prefix = "risk"
 | `channel_prefix` | string | No | workspace ID | Prefix for auto-created Slack channel names (channel mode only) |
 | `mode` | string | No | `channel` | Case binding mode: `channel` (one Case per dedicated channel) or `thread` (one Case per thread in a monitored channel) |
 | `channel` | string | Conditional | — | The monitored Slack channel ID (e.g. `C0123456789`). **Required when `mode = "thread"`.** Use the channel **ID**, not the name |
+| `accept_bot` | bool | No | `false` | Thread mode only. When `true`, **bot-authored** channel-root posts (e.g. an intake-form app's relayed request) also start a Case; every bot root post is picked up. When `false`, only human channel-root posts start a Case. |
 
 When a case is created (channel mode), Hecatoncheires can automatically create a Slack channel with the naming pattern: `{channel_prefix}-{case_number}`.
 
@@ -678,10 +679,20 @@ indicates the issue is resolved.
 ### Case agent prompts (`[case.prompts]`)
 
 Thread-mode case **initialization** is agent-driven and is started **only** by
-a post at the channel root: when a human posts a top-level message in the
-monitored channel, the bot does **not** create a Case immediately. (A mention
-or a reply inside a thread that has no Case yet is ignored — only a channel-root
-post starts a Case.) Instead it runs a plan-and-execute agent that investigates
+a post at the channel root. The root post may be authored by a human **or** by
+an integration bot — e.g. an intake-form app that relays a request on a person's
+behalf. **Bot-authored root posts are opt-in**: they start a Case only when the
+workspace sets `[slack] accept_bot = true` (default `false`, so a
+channel is not flooded with a Case per bot notification); human root posts always
+start a Case. (A mention or a reply inside a thread that has no Case yet is
+ignored — only a channel-root post starts a Case.) The Case **reporter** is, as a
+rule, the post's author. Only when the root post is bot-authored (so it has no
+human author) is the reporter taken from the first Slack user mention in the body
+(typically the requester named in the form); if the post names no user, the
+reporter is left **empty** — a thread-mode Case is allowed to have no reporter,
+so creation still proceeds. When such a root post arrives, the bot does **not**
+create a Case immediately.
+Instead it runs a plan-and-execute agent that investigates
 (all read-only search tools are available), may ask the reporter to clarify
 intent (a question form posted to the thread), and only commits a Case once it
 can fill a valid title, description, and every **required** custom field. If

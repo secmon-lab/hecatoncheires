@@ -2,6 +2,7 @@ package repository_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -492,6 +493,53 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.Value(t, retrieved.BoardStatus).Equal("TRIAGE")
 		gt.Value(t, retrieved.SlackChannelID).Equal("C-MONITOR")
 		gt.Bool(t, retrieved.IsThreadBound()).True()
+	})
+
+	t.Run("thread-mode case may be created with an empty reporter", func(t *testing.T) {
+		// A channel-root intake post relayed by an integration bot may name no
+		// human, so a thread-mode Create must accept an empty ReporterID
+		// (ValidateNew exempts thread-mode). Channel-mode still requires one.
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		threadTS := fmt.Sprintf("%d.000133", time.Now().UnixNano())
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:     "",
+			CreatedAt:      time.Now().UTC(),
+			UpdatedAt:      time.Now().UTC(),
+			Title:          "Bot-relayed thread case",
+			Description:    "No human reporter named in the form",
+			Status:         types.CaseStatusOpen,
+			SlackChannelID: "C-MONITOR",
+			SlackThreadTS:  threadTS,
+			BoardStatus:    "TRIAGE",
+		})
+		gt.NoError(t, err).Required()
+
+		retrieved, err := repo.Case().Get(ctx, wsID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, retrieved.ReporterID).Equal("")
+		gt.Value(t, retrieved.SlackThreadTS).Equal(threadTS)
+		gt.Value(t, retrieved.Title).Equal("Bot-relayed thread case")
+		gt.Bool(t, retrieved.IsThreadBound()).True()
+	})
+
+	t.Run("channel-mode case still requires a reporter", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		_, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:     "",
+			CreatedAt:      time.Now().UTC(),
+			UpdatedAt:      time.Now().UTC(),
+			Title:          "Channel case without reporter",
+			Status:         types.CaseStatusOpen,
+			SlackChannelID: "C-DEDICATED",
+		})
+		gt.Error(t, err).Required()
+		gt.Bool(t, errors.Is(err, model.ErrCaseMissingReporter)).True()
 	})
 
 	t.Run("GetBySlackThread returns matching thread case", func(t *testing.T) {

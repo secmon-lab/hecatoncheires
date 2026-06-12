@@ -129,6 +129,129 @@ func TestThreadCase_Creation(t *testing.T) {
 	gt.Bool(t, foundSummary).True()
 }
 
+func TestFirstSlackUserMention(t *testing.T) {
+	cases := []struct {
+		name   string
+		text   string
+		ignore []string
+		want   string
+	}{
+		{"plain mention", "ping <@U123ABC> please", nil, "U123ABC"},
+		{"mention with label", "Reporter: <@U06KHSXQW4V|ahyan/HP> here", nil, "U06KHSXQW4V"},
+		{"enterprise W id", "owner <@W99TEAM01|grid>", nil, "W99TEAM01"},
+		{"first of several", "<@U001> cc <@U002>", nil, "U001"},
+		{"none", "no users here, just text", nil, ""},
+		{"empty", "", nil, ""},
+		// The first mention is the bot itself; it is skipped so the requester
+		// named next becomes the reporter.
+		{"ignore first (bot mentioned before requester)", "<@UBOT001> request from <@U002>", []string{"UBOT001"}, "U002"},
+		{"ignore all", "<@U001> cc <@U002>", []string{"U001", "U002"}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gt.Value(t, usecase.FirstSlackUserMentionForTest(tc.text, tc.ignore...)).Equal(tc.want)
+		})
+	}
+}
+
+// A channel-root post relayed by an integration bot (no human author) creates a
+// case attributed to the human named in the body — the first Slack mention.
+func TestThreadCase_Creation_BotRelayedReporter(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	reg := newThreadWorkspaceRegistry()
+	slackMock := &agentTestSlackService{}
+	caseUC := usecase.NewCaseUseCase(repo, reg, slackMock, nil, "https://app.test")
+
+	llm := newScriptedClient([]string{
+		tcInvestigatePlan,
+		"The form requests an API risk review.",
+		tcReplanDone,
+		`{"kind":"materialize","title":"Backlog API risk review","description":"Review the Backlog API usage.","fields":[{"field_id":"severity","value":"low"}]}`,
+	})
+
+	agentUC := usecase.NewAgentUseCase(usecase.AgentDeps{
+		Repo:         repo,
+		Registry:     reg,
+		LLM:          llm,
+		HistoryRepo:  agentarchive.NewMemoryHistoryRepository(),
+		TraceRepo:    agentarchive.NewMemoryTraceRepository(),
+		SlackService: slackMock,
+		CaseUC:       caseUC,
+	})
+
+	entry, err := reg.Get("support")
+	gt.NoError(t, err).Required()
+
+	// Bot-authored form post: empty user ID. The body @-mentions the bot itself
+	// (UBOT001, the agentTestSlackService bot user) BEFORE the requester, so the
+	// resolver must skip the bot and attribute the case to the requester.
+	threadTS := "1700000000.000700"
+	msg := slackmodel.NewMessageFromData(
+		threadTS, "C-MONITOR", "", "T1", "", "",
+		"<@UBOT001> RISK NAVIGATOR request\nReporter: <@U06KHSXQW4V|ahyan>\nReview the Backlog API usage.",
+		threadTS, time.Now(), nil)
+
+	gt.NoError(t, agentUC.HandleThreadCaseCreation(ctx, msg, entry)).Required()
+	async.Wait()
+
+	c, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", threadTS)
+	gt.NoError(t, err).Required()
+	gt.Value(t, c).NotNil().Required()
+	gt.Value(t, c.Title).Equal("Backlog API risk review")
+	// The reporter was resolved from the body mention, skipping the bot's own ID
+	// and the (bot) author.
+	gt.Value(t, c.ReporterID).Equal("U06KHSXQW4V")
+	gt.Value(t, c.SlackThreadTS).Equal(threadTS)
+}
+
+// A bot-authored post with no human mention in the body still creates a case;
+// the thread-mode case is simply persisted with an empty reporter.
+func TestThreadCase_Creation_BotNoReporterEmpty(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	reg := newThreadWorkspaceRegistry()
+	slackMock := &agentTestSlackService{}
+	caseUC := usecase.NewCaseUseCase(repo, reg, slackMock, nil, "https://app.test")
+
+	llm := newScriptedClient([]string{
+		tcInvestigatePlan,
+		"An automated heartbeat with no named requester.",
+		tcReplanDone,
+		`{"kind":"materialize","title":"Heartbeat case","description":"Automated, no requester.","fields":[{"field_id":"severity","value":"low"}]}`,
+	})
+
+	agentUC := usecase.NewAgentUseCase(usecase.AgentDeps{
+		Repo:         repo,
+		Registry:     reg,
+		LLM:          llm,
+		HistoryRepo:  agentarchive.NewMemoryHistoryRepository(),
+		TraceRepo:    agentarchive.NewMemoryTraceRepository(),
+		SlackService: slackMock,
+		CaseUC:       caseUC,
+	})
+
+	entry, err := reg.Get("support")
+	gt.NoError(t, err).Required()
+
+	// Bot-authored post: empty user ID and no Slack mention anywhere in the body.
+	threadTS := "1700000000.000800"
+	msg := slackmodel.NewMessageFromData(
+		threadTS, "C-MONITOR", "", "T1", "", "",
+		"automated heartbeat, no requester named", threadTS, time.Now(), nil)
+
+	gt.NoError(t, agentUC.HandleThreadCaseCreation(ctx, msg, entry)).Required()
+	async.Wait()
+
+	c, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", threadTS)
+	gt.NoError(t, err).Required()
+	gt.Value(t, c).NotNil().Required()
+	gt.Value(t, c.Title).Equal("Heartbeat case")
+	// No human could be resolved, so the reporter is empty (allowed in thread mode).
+	gt.Value(t, c.ReporterID).Equal("")
+	gt.Value(t, c.SlackThreadTS).Equal(threadTS)
+}
+
 func TestThreadCase_Creation_Idempotent(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.New()

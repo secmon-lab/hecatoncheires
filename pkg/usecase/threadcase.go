@@ -2,6 +2,8 @@ package usecase
 
 import (
 	"context"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -16,8 +18,35 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
 
-// HandleThreadCaseCreation processes a channel-root human post in a thread-mode
-// monitored channel — the ONLY trigger that initiates case creation. It does
+// slackUserMentionRe matches a Slack user-mention token: <@U123ABC> or
+// <@U123ABC|display name> (W-prefixed Enterprise Grid IDs included). The capture
+// group is the bare user ID; the optional |label part is ignored.
+var slackUserMentionRe = regexp.MustCompile(`<@([UW][A-Z0-9]+)(?:\|[^>]*)?>`)
+
+// firstSlackUserMention returns the user ID of the first Slack user-mention in
+// text that is not in ignoreIDs, or "" if there is none. It is used to attribute
+// a bot-relayed intake post (whose author is an app, not a person) to the human
+// named in the body; ignoreIDs lets the caller skip our own bot's user ID so a
+// form that @-mentions the bot before the requester does not misattribute the
+// case to the bot.
+func firstSlackUserMention(text string, ignoreIDs ...string) string {
+	for _, m := range slackUserMentionRe.FindAllStringSubmatch(text, -1) {
+		if len(m) < 2 {
+			continue
+		}
+		if slices.Contains(ignoreIDs, m[1]) {
+			continue
+		}
+		return m[1]
+	}
+	return ""
+}
+
+// HandleThreadCaseCreation processes a channel-root post (by a human or an
+// integration bot) in a thread-mode monitored channel — the ONLY trigger that
+// initiates case creation. For a bot-relayed post the reporter is best-effort
+// resolved from the first Slack user mention in the body, and stays empty when
+// none is present (thread-mode cases may have no reporter). It does
 // NOT create a case immediately: it runs the initialization (create) agent,
 // which investigates, may ask the user, and only commits a validated case once
 // it is confident. On success it posts a Block Kit summary; on a question it
@@ -45,6 +74,25 @@ func (uc *AgentUseCase) HandleThreadCaseCreation(ctx context.Context, msg *slack
 	}
 	if existing != nil {
 		return nil
+	}
+
+	// The reporter is, as a rule, the post's author (msg.UserID, set above).
+	// Body inference is the EXCEPTION, used only when the post has no human
+	// author — a channel-root intake form relayed by an integration bot. There
+	// we best-effort attribute the case to the human named in the body (the
+	// first Slack user mention, typically the requester), skipping our own bot's
+	// user ID so a form that @-mentions the bot before the requester does not
+	// misattribute the case to the bot. If none is present the reporter stays
+	// empty: a thread-mode case is allowed to have no reporter (see
+	// model.Case.ValidateNew), so creation still proceeds.
+	if reporter == "" {
+		botUserID := ""
+		if uc.deps.SlackService != nil {
+			if id, berr := uc.deps.SlackService.GetBotUserID(ctx); berr == nil {
+				botUserID = id
+			}
+		}
+		reporter = firstSlackUserMention(text, botUserID)
 	}
 
 	return uc.runThreadCaseCreation(ctx, entry, channelID, threadTS, reporter,

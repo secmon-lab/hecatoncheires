@@ -46,6 +46,13 @@ type WorkspaceEntry struct {
 	// SlackMonitorChannelID is the channel watched for thread-mode case
 	// creation. Required (and only meaningful) when CaseMode is thread.
 	SlackMonitorChannelID string
+	// AcceptBot opts the thread-mode monitored channel into
+	// treating bot-authored channel-root posts (e.g. an intake-form app's
+	// relayed request) as case-creation triggers. Default false: only human
+	// channel-root posts start a case, so the channel is not flooded with a case
+	// per bot notification. When true, every bot root post (bot_message /
+	// bot_id) starts a case.
+	AcceptBot bool
 	// CaseStatusSet is the configurable workflow status set that attaches to
 	// Cases in thread mode (the Kanban columns). Non-nil only for thread-mode
 	// workspaces; reuses the generic ActionStatusSet value type.

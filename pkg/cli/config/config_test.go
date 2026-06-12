@@ -1350,6 +1350,42 @@ type = "text"
 		gt.Bool(t, set.IsClosed("DONE")).True()
 		gt.Bool(t, set.IsClosed("TRIAGE")).False()
 		gt.Array(t, set.IDs()).Length(2)
+		// accept_bot defaults to false when omitted.
+		gt.Value(t, configs[0].AcceptBot).Equal(false)
+	})
+
+	t.Run("thread mode opts into bot posts via accept_bot", func(t *testing.T) {
+		configs, err := writeAndLoad(t, `
+[workspace]
+id = "support"
+
+[slack]
+mode = "thread"
+channel = "C0123ABC"
+accept_bot = true
+
+[case]
+initial = "TRIAGE"
+closed = ["DONE"]
+
+  [[case.status]]
+  id = "TRIAGE"
+  name = "Triage"
+  color = "active"
+
+  [[case.status]]
+  id = "DONE"
+  name = "Done"
+  color = "success"
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`)
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1).Required()
+		gt.Value(t, configs[0].AcceptBot).Equal(true)
 	})
 
 	t.Run("invalid mode is rejected", func(t *testing.T) {

@@ -102,6 +102,10 @@ type SlackSection struct {
 	Mode string `toml:"mode"`
 	// Channel is the monitored Slack channel ID for thread mode (e.g. C0123...).
 	Channel string `toml:"channel"`
+	// AcceptBot, when true, makes bot-authored channel-root posts
+	// (e.g. an intake-form app's relayed request) start a case in thread mode.
+	// Default false: only human channel-root posts start a case.
+	AcceptBot bool `toml:"accept_bot"`
 }
 
 // CaseSection represents the [case] section in a TOML config. It mirrors
@@ -187,6 +191,7 @@ type WorkspaceConfig struct {
 	Jobs                []*model.Job
 	CaseMode            model.CaseMode
 	SlackMonitorChannel string
+	AcceptBot           bool
 	CaseStatusSet       *model.ActionStatusSet
 }
 
@@ -595,6 +600,7 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 		Jobs:                 jobs,
 		CaseMode:             caseMode,
 		SlackMonitorChannel:  appCfg.Slack.Channel,
+		AcceptBot:            appCfg.Slack.AcceptBot,
 		CaseStatusSet:        caseStatusSet,
 	}, nil
 }
@@ -645,6 +651,7 @@ func (a *AppConfig) Configure(c *cli.Command) ([]*WorkspaceConfig, *model.Worksp
 			Jobs:                  wc.Jobs,
 			CaseMode:              wc.CaseMode,
 			SlackMonitorChannelID: wc.SlackMonitorChannel,
+			AcceptBot:             wc.AcceptBot,
 			CaseStatusSet:         wc.CaseStatusSet,
 		})
 		logging.Default().Info("Registered workspace", "id", wc.ID, "name", wc.Name, "case_mode", wc.CaseMode.Normalize())

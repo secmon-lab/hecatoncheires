@@ -248,7 +248,8 @@ func (uc *SlackUseCases) threadModeEntry(channelID string) (*model.WorkspaceEntr
 
 // handleThreadModeEvent dispatches a Slack event that landed in a thread-mode
 // monitored channel:
-//   - top-level human message at the channel root → thread-mode case creation.
+//   - channel-root message by a human → thread-mode case creation (and, when
+//     the workspace sets accept_bot, by an integration bot too).
 //   - app_mention inside an existing case thread → thread-mode investigation agent.
 //
 // Anything else is ignored. Case creation is initiated ONLY by a channel-root
@@ -291,7 +292,7 @@ func (uc *SlackUseCases) handleThreadModeEvent(ctx context.Context, event *slack
 	if msgEv, ok := event.InnerEvent.Data.(*slackevents.MessageEvent); ok {
 		// Only a channel-root post starts a case. Replies inside a thread (case
 		// thread or not) carry no creation/resume semantics and are ignored.
-		if uc.isThreadCaseCreationTrigger(ctx, msgEv) {
+		if uc.isThreadCaseCreationTrigger(ctx, msgEv, entry) {
 			ctx = uc.contextWithUserLang(ctx, msgEv.User)
 			if err := uc.agent.HandleThreadCaseCreation(ctx, msg, entry); err != nil {
 				errutil.Handle(ctx, goerr.Wrap(err, "failed to handle thread case creation",
@@ -304,22 +305,42 @@ func (uc *SlackUseCases) handleThreadModeEvent(ctx context.Context, event *slack
 }
 
 // isThreadCaseCreationTrigger reports whether a message event in a monitored
-// channel should create a new thread-mode case: a top-level post by a human
-// (no subtype, not a bot, not our own bot).
-func (uc *SlackUseCases) isThreadCaseCreationTrigger(ctx context.Context, ev *slackevents.MessageEvent) bool {
+// channel should create a new thread-mode case. A human channel-root post
+// always qualifies. A bot-authored channel-root post (an intake-form app that
+// relays a request) qualifies ONLY when the workspace opts in via
+// [slack] accept_bot — default off, so a channel is not flooded
+// with a case per bot notification. The requester named in the body becomes the
+// case reporter (see HandleThreadCaseCreation).
+func (uc *SlackUseCases) isThreadCaseCreationTrigger(ctx context.Context, ev *slackevents.MessageEvent, entry *model.WorkspaceEntry) bool {
 	// Only top-level posts start a case; replies belong to an existing thread.
 	if ev.ThreadTimeStamp != "" && ev.ThreadTimeStamp != ev.TimeStamp {
 		return false
 	}
-	// Skip edits / joins / bot_message and other subtypes, and bot posts.
-	if ev.SubType != "" || ev.BotID != "" {
+	// Accept only substantive new posts. A fresh human post carries an empty
+	// subtype; app posts carry "bot_message"; a post that attaches a screenshot
+	// or document carries "file_share" (a common way to file an intake request).
+	// Every other subtype (message_changed / message_deleted / channel_join /
+	// topic changes / …) is an edit or a system event, not a new request.
+	switch ev.SubType {
+	case "", "bot_message", "file_share":
+	default:
 		return false
 	}
+	// Never react to our own posts — that would be a self-trigger loop. (Our
+	// posts to a monitored channel are thread replies, already excluded above,
+	// but guard the bot user id too in case that ever changes.)
 	if uc.slackService != nil {
 		if botUserID, err := uc.slackService.GetBotUserID(ctx); err == nil && botUserID != "" && ev.User == botUserID {
 			return false
 		}
 	}
+	// Bot-authored root post (an integration intake form): a trigger only when
+	// the workspace opted in. Default off keeps unrelated bot notifications from
+	// each spawning a case.
+	if ev.BotID != "" || ev.SubType == "bot_message" {
+		return entry != nil && entry.AcceptBot
+	}
+	// Human channel-root post.
 	return ev.User != ""
 }
 
