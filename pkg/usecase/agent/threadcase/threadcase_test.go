@@ -52,20 +52,27 @@ func newScriptedLLM(scripts []string) gollem.LLMClient {
 }
 
 type hostStub struct {
-	mu        sync.Mutex
-	traces    []string
-	questions []threadcase.QuestionPayload
-	creates   []threadcase.CreatePayload
+	mu         sync.Mutex
+	traces     []string
+	activities []string
+	questions  []threadcase.QuestionPayload
+	creates    []threadcase.CreatePayload
 	// createErr, when set, is returned by Create for the first n calls to
 	// exercise the OnFinalize re-plan path; createErrRemaining decrements.
 	createErr          error
 	createErrRemaining int
 }
 
-func (h *hostStub) Trace(_ context.Context, line string) {
+func (h *hostStub) TraceAppend(_ context.Context, line string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.traces = append(h.traces, line)
+}
+
+func (h *hostStub) TraceReplace(_ context.Context, line string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.activities = append(h.activities, line)
 }
 
 func (h *hostStub) Question(_ context.Context, _ *model.Session, q threadcase.QuestionPayload) error {

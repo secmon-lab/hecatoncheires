@@ -118,9 +118,10 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 	turnCtx := handle.Ctx
 	req.Session = handle.Session
 
-	// Surface individual sub-agent tool calls to the thread trace block.
+	// Individual sub-agent tool calls are ephemeral activity: overwrite the
+	// single live line rather than appending each one to the trace block.
 	turnCtx = tool.WithUpdate(turnCtx, func(innerCtx context.Context, message string) {
-		req.Handler.Trace(innerCtx, message)
+		req.Handler.TraceReplace(innerCtx, message)
 	})
 
 	resolver := uc.buildToolResolver(req)

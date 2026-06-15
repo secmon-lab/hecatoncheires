@@ -177,10 +177,11 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 	systemPrompt := buildSystemPrompt(req.Case, req.Workspace, req.ChannelID, time.Now().UTC(), req.CurrentAction, req.Actions, req.SystemMessages)
 	userInput := buildUserInput(req.DeltaMessages, req.MentionText, req.MentionTS)
 
-	// Wire trace updates into the tool middleware so individual tool calls
-	// surface to Slack via Handler.Trace.
+	// Per-tool activity is ephemeral: route it through TraceReplace so each
+	// "Searching…/Fetching…" line overwrites the previous one in place rather
+	// than piling up in the thread.
 	turnCtx = tool.WithUpdate(turnCtx, func(innerCtx context.Context, message string) {
-		req.Handler.Trace(innerCtx, message)
+		req.Handler.TraceReplace(innerCtx, message)
 	})
 
 	allTools := uc.buildTools(req)
@@ -192,10 +193,12 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 		gollem.WithToolMiddleware(
 			func(next gollem.ToolHandler) gollem.ToolHandler {
 				return func(ctx context.Context, tr *gollem.ToolExecRequest) (*gollem.ToolExecResponse, error) {
-					req.Handler.Trace(ctx, fmt.Sprintf("🔧 `%s`", tr.Tool.Name))
+					// The "running this tool" notice is transient activity; the
+					// error is a milestone worth keeping in the history.
+					req.Handler.TraceReplace(ctx, fmt.Sprintf("🔧 `%s`", tr.Tool.Name))
 					resp, err := next(ctx, tr)
 					if resp != nil && resp.Error != nil {
-						req.Handler.Trace(ctx, "❌ Error: "+resp.Error.Error())
+						req.Handler.TraceAppend(ctx, "❌ Error: "+resp.Error.Error())
 					}
 					return resp, err
 				}

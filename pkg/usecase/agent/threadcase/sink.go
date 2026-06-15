@@ -14,7 +14,7 @@ import (
 func newHandlerSink(h Handler) planexec.Sink {
 	return planexec.SinkFuncs{
 		NotifyFn: func(ctx context.Context, line string) {
-			h.Trace(ctx, line)
+			h.TraceAppend(ctx, line)
 		},
 		PlanProposedFn: func(ctx context.Context, info planexec.PlanInfo) {
 			label := "🧭 Planning"
@@ -22,16 +22,16 @@ func newHandlerSink(h Handler) planexec.Sink {
 				label = "🧭 Re-planning"
 			}
 			if info.Reasoning != "" {
-				h.Trace(ctx, fmt.Sprintf("%s — %s", label, info.Reasoning))
+				h.TraceAppend(ctx, fmt.Sprintf("%s — %s", label, info.Reasoning))
 			} else {
-				h.Trace(ctx, label)
+				h.TraceAppend(ctx, label)
 			}
 		},
 		PhaseStartedFn: func(ctx context.Context, phase int, tasks []planexec.TaskInfo) {
-			h.Trace(ctx, fmt.Sprintf("🔎 Investigating (%d task(s))", len(tasks)))
+			h.TraceAppend(ctx, fmt.Sprintf("🔎 Investigating (%d task(s))", len(tasks)))
 		},
 		TaskFinishedFn: func(ctx context.Context, result planexec.TaskResult) {
-			h.Trace(ctx, fmt.Sprintf("✓ %s", result.Title))
+			h.TraceAppend(ctx, fmt.Sprintf("✓ %s", result.Title))
 		},
 	}
 }
