@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -858,4 +859,134 @@ func TestAgentUseCase_ActionLinkage(t *testing.T) {
 	gt.NoError(t, err).Required()
 	gt.Value(t, session).NotNil().Required()
 	gt.Value(t, session.ActionID).Equal(createdAction.ID)
+}
+
+// traceBlockTexts extracts the rendered markdown text of every context block
+// in order, so trace tests can assert on the visible lines.
+func traceBlockTexts(blocks []goslack.Block) []string {
+	out := make([]string, 0, len(blocks))
+	for _, b := range blocks {
+		cb, ok := b.(*goslack.ContextBlock)
+		if !ok {
+			continue
+		}
+		for _, el := range cb.ContextElements.Elements {
+			if tb, ok := el.(*goslack.TextBlockObject); ok {
+				out = append(out, tb.Text)
+			}
+		}
+	}
+	return out
+}
+
+// TestTraceMessage_AppendAccumulatesReplaceOverwrites verifies the core
+// contract of the trace banner: milestone lines (appendLine) accumulate as
+// separate context blocks and stay visible, while the transient activity line
+// (replaceLine) overwrites a single trailing block instead of piling up. A
+// new milestone clears the live line, so per-tool chatter never lingers after
+// the step that produced it.
+func TestTraceMessage_AppendAccumulatesReplaceOverwrites(t *testing.T) {
+	ctx := context.Background()
+	cap := &traceCapture{}
+	tm := usecase.NewTraceMessageForTest(cap, "C-TRACE", "1700000000.000001")
+
+	// First milestone: posts a fresh message with a single block.
+	usecase.TraceMessageAppendForTest(tm, ctx, "🧭 Planning")
+	// Second milestone: accumulates, two blocks now.
+	usecase.TraceMessageAppendForTest(tm, ctx, "🔎 Investigating (2 task(s))")
+
+	calls := cap.calls()
+	gt.Array(t, calls).Length(2).Required()
+	gt.Value(t, calls[0].method).Equal("post")
+	gt.Value(t, calls[1].method).Equal("update")
+	gt.Array(t, traceBlockTexts(calls[1].blocks)).Equal([]string{
+		"🧭 Planning",
+		"🔎 Investigating (2 task(s))",
+	})
+
+	// Three activity updates: each overwrites the single live line, so the
+	// block count stays at 3 (2 milestones + 1 live line), never growing.
+	usecase.TraceMessageReplaceForTest(tm, ctx, "Searching Slack: from:@issei")
+	usecase.TraceMessageReplaceForTest(tm, ctx, "Searching Notion: scraping")
+	usecase.TraceMessageReplaceForTest(tm, ctx, "Fetching Notion page abc")
+
+	calls = cap.calls()
+	last := calls[len(calls)-1]
+	gt.Array(t, traceBlockTexts(last.blocks)).Equal([]string{
+		"🧭 Planning",
+		"🔎 Investigating (2 task(s))",
+		"Fetching Notion page abc",
+	})
+	// Fallback text mirrors the rendered lines, live line last.
+	gt.String(t, last.text).Contains("Fetching Notion page abc")
+
+	// A new milestone clears the live activity line.
+	usecase.TraceMessageAppendForTest(tm, ctx, "✓ Reporter profile & recent activity")
+	calls = cap.calls()
+	last = calls[len(calls)-1]
+	gt.Array(t, traceBlockTexts(last.blocks)).Equal([]string{
+		"🧭 Planning",
+		"🔎 Investigating (2 task(s))",
+		"✓ Reporter profile & recent activity",
+	})
+}
+
+// TestTraceMessage_LiveLineSurvivesBlockCap verifies that when milestone
+// history exceeds Slack's 50-block ceiling, the history is truncated to the
+// oldest dropped but the transient live line is always preserved as the final
+// block — it is never pushed out by milestone overflow.
+func TestTraceMessage_LiveLineSurvivesBlockCap(t *testing.T) {
+	ctx := context.Background()
+	cap := &traceCapture{}
+	tm := usecase.NewTraceMessageForTest(cap, "C-TRACE", "1700000000.000001")
+
+	// Push well past the cap with milestones.
+	for i := range usecase.MaxTraceBlocksForTest + 10 {
+		usecase.TraceMessageAppendForTest(tm, ctx, fmt.Sprintf("milestone %d", i))
+	}
+	// Then a live activity line.
+	usecase.TraceMessageReplaceForTest(tm, ctx, "Searching Slack: tail")
+
+	calls := cap.calls()
+	last := calls[len(calls)-1]
+	texts := traceBlockTexts(last.blocks)
+	// Total blocks never exceed the cap.
+	gt.Number(t, len(texts)).Equal(usecase.MaxTraceBlocksForTest)
+	// The live line is always the last block.
+	gt.Value(t, texts[len(texts)-1]).Equal("Searching Slack: tail")
+	// The most recent milestone is retained just above the live line.
+	gt.Value(t, texts[len(texts)-2]).Equal(fmt.Sprintf("milestone %d", usecase.MaxTraceBlocksForTest+10-1))
+
+	// The fallback text mirrors the visible window (it must not carry the
+	// dropped milestones, or it could blow past Slack's 4000-char text limit).
+	fallbackLines := strings.Split(last.text, "\n")
+	gt.Number(t, len(fallbackLines)).Equal(usecase.MaxTraceBlocksForTest)
+	gt.Value(t, fallbackLines[len(fallbackLines)-1]).Equal("Searching Slack: tail")
+	gt.String(t, last.text).NotContains("milestone 0\n")
+}
+
+// TestTraceMessage_ConcurrentUpdatesDoNotPanic exercises the mutex guarding
+// the shared lines/liveLine state, mirroring parallel sub-agent activity
+// updates racing planner milestones.
+func TestTraceMessage_ConcurrentUpdatesDoNotPanic(t *testing.T) {
+	ctx := context.Background()
+	cap := &traceCapture{}
+	tm := usecase.NewTraceMessageForTest(cap, "C-TRACE", "1700000000.000001")
+
+	var wg sync.WaitGroup
+	for i := range 50 {
+		wg.Add(2)
+		go func(n int) {
+			defer wg.Done()
+			usecase.TraceMessageAppendForTest(tm, ctx, fmt.Sprintf("milestone %d", n))
+		}(i)
+		go func(n int) {
+			defer wg.Done()
+			usecase.TraceMessageReplaceForTest(tm, ctx, fmt.Sprintf("activity %d", n))
+		}(i)
+	}
+	wg.Wait()
+
+	// At least one Slack call was made and the banner is still renderable.
+	gt.Number(t, len(cap.calls())).GreaterOrEqual(1)
 }

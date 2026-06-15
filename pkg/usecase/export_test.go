@@ -31,6 +31,32 @@ func NewSlackDraftHandlerForTest(
 // BuildTraceContextBlocksForTest is exported for testing
 var BuildTraceContextBlocksForTest = buildTraceContextBlocks
 
+// TraceMessageForTest is the test-facing alias for the unexported
+// traceMessage so external tests can exercise the append/replace rendering
+// contract through the helpers below.
+type TraceMessageForTest = traceMessage
+
+// NewTraceMessageForTest builds a traceMessage wired to the given Slack
+// service, mirroring newTraceMessage but injectable from external tests.
+func NewTraceMessageForTest(svc slack.Service, channelID, threadTS string) *TraceMessageForTest {
+	return &traceMessage{slackService: svc, channelID: channelID, threadTS: threadTS}
+}
+
+// TraceMessageAppendForTest invokes the unexported appendLine (milestone
+// history) on a traceMessage.
+func TraceMessageAppendForTest(tm *TraceMessageForTest, ctx context.Context, line string) {
+	tm.appendLine(ctx, line)
+}
+
+// TraceMessageReplaceForTest invokes the unexported replaceLine (transient
+// live line) on a traceMessage.
+func TraceMessageReplaceForTest(tm *TraceMessageForTest, ctx context.Context, line string) {
+	tm.replaceLine(ctx, line)
+}
+
+// MaxTraceBlocksForTest exposes the per-message block ceiling for assertions.
+const MaxTraceBlocksForTest = maxTraceBlocks
+
 // BuildCaseCreatedTailBlocksForTest is exported for testing
 var BuildCaseCreatedTailBlocksForTest = buildCaseCreatedTailBlocks
 

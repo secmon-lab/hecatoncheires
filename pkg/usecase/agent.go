@@ -257,9 +257,10 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 		SystemMessages: toCaseboundMessages(systemMessages),
 		DeltaMessages:  toCaseboundMessages(deltaMessages),
 		TriggerTS:      msg.ID(),
-		Handler: casebound.HandlerFunc(func(innerCtx context.Context, line string) {
-			traceMsg.update(innerCtx, line)
-		}),
+		Handler: casebound.HandlerFuncs{
+			TraceAppendFn:  traceMsg.appendLine,
+			TraceReplaceFn: traceMsg.replaceLine,
+		},
 	}
 
 	result, runErr := uc.casebound.RunTurn(ctx, req)
@@ -525,13 +526,23 @@ func (uc *AgentUseCase) collectContextMessages(ctx context.Context, msg *slackmo
 	return uc.deps.SlackService.GetConversationHistory(ctx, msg.ChannelID(), oldest, 100)
 }
 
-// traceMessage manages a single updatable Slack message for showing agent progress using context blocks
+// traceMessage manages a single updatable Slack message for showing agent
+// progress using context blocks. It distinguishes two kinds of progress:
+//
+//   - lines: the persistent milestone history (planner rounds, task results,
+//     errors). Appended via appendLine; these accumulate and stay visible.
+//   - liveLine: a single transient activity line (the tool the agent is
+//     running right now). Overwritten via replaceLine so per-tool chatter
+//     ("Searching…", "Fetching…") never piles up in the thread.
+//
+// The live line is always rendered last, after the milestone history.
 type traceMessage struct {
 	slackService slack.Service
 	channelID    string
 	threadTS     string
 	messageTS    string
 	lines        []string
+	liveLine     string
 	mu           sync.Mutex
 }
 
@@ -566,18 +577,74 @@ func buildTraceContextBlocks(lines []string) []goslack.Block {
 	return blocks
 }
 
+// buildContextBlocks renders the milestone history followed by the transient
+// live line. When a live line is present, one block slot is reserved for it so
+// a long milestone history never pushes the in-place line out of the message.
 func (tm *traceMessage) buildContextBlocks() []goslack.Block {
-	return buildTraceContextBlocks(tm.lines)
+	if tm.liveLine == "" {
+		return buildTraceContextBlocks(tm.lines)
+	}
+	lines := tm.lines
+	if len(lines) > maxTraceBlocks-1 {
+		lines = lines[len(lines)-(maxTraceBlocks-1):]
+	}
+	blocks := buildTraceContextBlocks(lines)
+	return append(blocks, goslack.NewContextBlock("",
+		goslack.NewTextBlockObject(goslack.MarkdownType, tm.liveLine, false, false),
+	))
 }
 
-// update adds a line to the trace message and posts/updates in Slack as a context block
-func (tm *traceMessage) update(ctx context.Context, line string) {
+// fallbackText renders the plain-text notification fallback. It mirrors the
+// same window buildContextBlocks renders (most recent maxTraceBlocks lines,
+// live line last) so the fallback stays consistent with the visible blocks and
+// never exceeds Slack's 4000-char text-field limit, which an unbounded
+// milestone history would otherwise blow past with a msg_too_long error.
+func (tm *traceMessage) fallbackText() string {
+	lines := tm.lines
+	if tm.liveLine == "" {
+		if len(lines) > maxTraceBlocks {
+			lines = lines[len(lines)-maxTraceBlocks:]
+		}
+		return strings.Join(lines, "\n")
+	}
+	if len(lines) > maxTraceBlocks-1 {
+		lines = lines[len(lines)-(maxTraceBlocks-1):]
+	}
+	all := make([]string, 0, len(lines)+1)
+	all = append(all, lines...)
+	all = append(all, tm.liveLine)
+	return strings.Join(all, "\n")
+}
+
+// appendLine appends a milestone to the persistent history and clears the
+// transient live line, then re-renders the Slack message. Use this for
+// progress that must remain visible (planner milestones, task results, errors).
+func (tm *traceMessage) appendLine(ctx context.Context, line string) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
 	tm.lines = append(tm.lines, line)
+	tm.liveLine = ""
+	tm.flush(ctx)
+}
+
+// replaceLine overwrites the single transient live line in place, without
+// growing the milestone history, then re-renders the Slack message. Use this
+// for ephemeral per-tool activity ("Searching…", "Fetching…") that should not
+// accumulate. An empty line clears the live line.
+func (tm *traceMessage) replaceLine(ctx context.Context, line string) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	tm.liveLine = line
+	tm.flush(ctx)
+}
+
+// flush renders the current trace state and posts (first call) or updates
+// (subsequent calls) the Slack message. Callers MUST hold tm.mu.
+func (tm *traceMessage) flush(ctx context.Context) {
 	blocks := tm.buildContextBlocks()
-	fallback := strings.Join(tm.lines, "\n")
+	fallback := tm.fallbackText()
 
 	if tm.messageTS == "" {
 		ts, err := tm.slackService.PostThreadMessage(ctx, tm.channelID, tm.threadTS, blocks, fallback)
@@ -589,13 +656,13 @@ func (tm *traceMessage) update(ctx context.Context, line string) {
 			return
 		}
 		tm.messageTS = ts
-	} else {
-		if err := tm.slackService.UpdateMessage(ctx, tm.channelID, tm.messageTS, blocks, fallback); err != nil {
-			errutil.Handle(ctx, goerr.Wrap(err, "failed to update trace message",
-				goerr.V("channel_id", tm.channelID),
-				goerr.V("message_ts", tm.messageTS),
-			), "failed to update trace message")
-		}
+		return
+	}
+	if err := tm.slackService.UpdateMessage(ctx, tm.channelID, tm.messageTS, blocks, fallback); err != nil {
+		errutil.Handle(ctx, goerr.Wrap(err, "failed to update trace message",
+			goerr.V("channel_id", tm.channelID),
+			goerr.V("message_ts", tm.messageTS),
+		), "failed to update trace message")
 	}
 }
 

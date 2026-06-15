@@ -168,7 +168,7 @@ func (uc *AgentUseCase) runThreadCaseCreation(
 	traceMsg := uc.newTraceMessage(channelID, threadTS)
 	// Immediate progress so the user is not left staring at silence while the
 	// agent investigates.
-	traceMsg.update(ctx, i18n.T(ctx, i18n.MsgThreadCaseCreating))
+	traceMsg.appendLine(ctx, i18n.T(ctx, i18n.MsgThreadCaseCreating))
 
 	res, runErr := uc.threadcase.RunTurn(ctx, threadcase.TurnRequest{
 		Session:        session,
@@ -389,9 +389,14 @@ func (uc *AgentUseCase) postThreadReply(ctx context.Context, channelID, threadTS
 func (uc *AgentUseCase) newThreadcaseCreateHandler(channelID, threadTS, reporter string, entry *model.WorkspaceEntry, traceMsg *traceMessage) threadcase.Handler {
 	wsID := entry.Workspace.ID
 	return threadcase.HandlerFuncs{
-		TraceFn: func(ctx context.Context, line string) {
+		TraceAppendFn: func(ctx context.Context, line string) {
 			if traceMsg != nil {
-				traceMsg.update(ctx, line)
+				traceMsg.appendLine(ctx, line)
+			}
+		},
+		TraceReplaceFn: func(ctx context.Context, line string) {
+			if traceMsg != nil {
+				traceMsg.replaceLine(ctx, line)
 			}
 		},
 		QuestionFn: func(ctx context.Context, ssn *model.Session, q threadcase.QuestionPayload) error {
@@ -430,9 +435,14 @@ func (uc *AgentUseCase) postThreadcaseQuestion(ctx context.Context, channelID, t
 // newThreadcaseHandler builds the host-side Handler for one thread-mode turn.
 func (uc *AgentUseCase) newThreadcaseHandler(channelID, threadTS string, traceMsg *traceMessage) threadcase.Handler {
 	return threadcase.HandlerFuncs{
-		TraceFn: func(ctx context.Context, line string) {
+		TraceAppendFn: func(ctx context.Context, line string) {
 			if traceMsg != nil {
-				traceMsg.update(ctx, line)
+				traceMsg.appendLine(ctx, line)
+			}
+		},
+		TraceReplaceFn: func(ctx context.Context, line string) {
+			if traceMsg != nil {
+				traceMsg.replaceLine(ctx, line)
 			}
 		},
 		QuestionFn: func(ctx context.Context, _ *model.Session, q threadcase.QuestionPayload) error {

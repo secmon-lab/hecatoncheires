@@ -60,12 +60,16 @@ type CreatePayload struct {
 	Fields      map[string]model.FieldValue
 }
 
-// Handler is the host-side surface for one thread-mode turn. Trace renders
-// progress lines; Question posts a question to the thread; Create commits a
-// new case for the ModeCreate flow.
+// Handler is the host-side surface for one thread-mode turn. TraceAppend /
+// TraceReplace render progress lines; Question posts a question to the thread;
+// Create commits a new case for the ModeCreate flow.
 type Handler interface {
-	// Trace appends a progressive status line to the thread-side trace block.
-	Trace(ctx context.Context, line string)
+	// TraceAppend records a milestone line that must stay visible (planner
+	// rounds, task results) in the thread-side trace block.
+	TraceAppend(ctx context.Context, line string)
+	// TraceReplace overwrites the single transient activity line in place, so
+	// per-tool chatter ("Searching…", "Fetching…") does not accumulate.
+	TraceReplace(ctx context.Context, line string)
 	// Question posts a question to the user. Returning an error aborts the turn.
 	Question(ctx context.Context, ssn *model.Session, q QuestionPayload) error
 	// Create persists a new case for the ModeCreate flow and returns it. It is
@@ -80,16 +84,24 @@ type Handler interface {
 // Missing entries are treated as no-ops (Create errors when unset, since a
 // ModeCreate turn cannot commit without it).
 type HandlerFuncs struct {
-	TraceFn    func(ctx context.Context, line string)
-	QuestionFn func(ctx context.Context, ssn *model.Session, q QuestionPayload) error
-	CreateFn   func(ctx context.Context, ssn *model.Session, p CreatePayload) (*model.Case, error)
+	TraceAppendFn  func(ctx context.Context, line string)
+	TraceReplaceFn func(ctx context.Context, line string)
+	QuestionFn     func(ctx context.Context, ssn *model.Session, q QuestionPayload) error
+	CreateFn       func(ctx context.Context, ssn *model.Session, p CreatePayload) (*model.Case, error)
 }
 
-func (h HandlerFuncs) Trace(ctx context.Context, line string) {
-	if h.TraceFn == nil {
+func (h HandlerFuncs) TraceAppend(ctx context.Context, line string) {
+	if h.TraceAppendFn == nil {
 		return
 	}
-	h.TraceFn(ctx, line)
+	h.TraceAppendFn(ctx, line)
+}
+
+func (h HandlerFuncs) TraceReplace(ctx context.Context, line string) {
+	if h.TraceReplaceFn == nil {
+		return
+	}
+	h.TraceReplaceFn(ctx, line)
 }
 
 func (h HandlerFuncs) Question(ctx context.Context, ssn *model.Session, q QuestionPayload) error {
