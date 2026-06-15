@@ -594,14 +594,24 @@ func (tm *traceMessage) buildContextBlocks() []goslack.Block {
 	))
 }
 
-// fallbackText renders the plain-text notification fallback: milestone history
-// plus the live line, if any.
+// fallbackText renders the plain-text notification fallback. It mirrors the
+// same window buildContextBlocks renders (most recent maxTraceBlocks lines,
+// live line last) so the fallback stays consistent with the visible blocks and
+// never exceeds Slack's 4000-char text-field limit, which an unbounded
+// milestone history would otherwise blow past with a msg_too_long error.
 func (tm *traceMessage) fallbackText() string {
+	lines := tm.lines
 	if tm.liveLine == "" {
-		return strings.Join(tm.lines, "\n")
+		if len(lines) > maxTraceBlocks {
+			lines = lines[len(lines)-maxTraceBlocks:]
+		}
+		return strings.Join(lines, "\n")
 	}
-	all := make([]string, 0, len(tm.lines)+1)
-	all = append(all, tm.lines...)
+	if len(lines) > maxTraceBlocks-1 {
+		lines = lines[len(lines)-(maxTraceBlocks-1):]
+	}
+	all := make([]string, 0, len(lines)+1)
+	all = append(all, lines...)
 	all = append(all, tm.liveLine)
 	return strings.Join(all, "\n")
 }

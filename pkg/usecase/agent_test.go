@@ -956,6 +956,13 @@ func TestTraceMessage_LiveLineSurvivesBlockCap(t *testing.T) {
 	gt.Value(t, texts[len(texts)-1]).Equal("Searching Slack: tail")
 	// The most recent milestone is retained just above the live line.
 	gt.Value(t, texts[len(texts)-2]).Equal(fmt.Sprintf("milestone %d", usecase.MaxTraceBlocksForTest+10-1))
+
+	// The fallback text mirrors the visible window (it must not carry the
+	// dropped milestones, or it could blow past Slack's 4000-char text limit).
+	fallbackLines := strings.Split(last.text, "\n")
+	gt.Number(t, len(fallbackLines)).Equal(usecase.MaxTraceBlocksForTest)
+	gt.Value(t, fallbackLines[len(fallbackLines)-1]).Equal("Searching Slack: tail")
+	gt.String(t, last.text).NotContains("milestone 0\n")
 }
 
 // TestTraceMessage_ConcurrentUpdatesDoNotPanic exercises the mutex guarding
