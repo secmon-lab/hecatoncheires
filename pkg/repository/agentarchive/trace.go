@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 
 	"cloud.google.com/go/storage"
+	"github.com/gollem-dev/gollem/trace"
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/m-mizutani/gollem/trace"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/safe"
 )
 

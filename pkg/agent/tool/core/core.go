@@ -8,7 +8,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/m-mizutani/gollem"
+	"github.com/gollem-dev/gollem"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"

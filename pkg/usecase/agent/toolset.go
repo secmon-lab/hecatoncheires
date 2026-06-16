@@ -3,7 +3,7 @@ package agent
 import (
 	"slices"
 
-	"github.com/m-mizutani/gollem"
+	"github.com/gollem-dev/gollem"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"

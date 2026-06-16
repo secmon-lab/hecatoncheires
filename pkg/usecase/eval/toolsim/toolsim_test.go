@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/m-mizutani/gollem"
+	"github.com/gollem-dev/gollem"
 	"github.com/m-mizutani/gt"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"

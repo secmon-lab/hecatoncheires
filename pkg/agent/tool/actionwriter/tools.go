@@ -7,7 +7,7 @@
 package actionwriter
 
 import (
-	"github.com/m-mizutani/gollem"
+	"github.com/gollem-dev/gollem"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
 )
 

@@ -12,8 +12,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/gollem-dev/gollem"
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/m-mizutani/gollem"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/eval/evaltype"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/eval/scenario"
 )

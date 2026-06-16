@@ -11,8 +11,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/gollem-dev/gollem"
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/m-mizutani/gollem"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"

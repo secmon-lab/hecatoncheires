@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/m-mizutani/gollem"
-	"github.com/m-mizutani/gollem/trace"
+	"github.com/gollem-dev/gollem"
+	"github.com/gollem-dev/gollem/trace"
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 )

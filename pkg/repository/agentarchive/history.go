@@ -7,8 +7,8 @@ import (
 	"io"
 
 	"cloud.google.com/go/storage"
+	"github.com/gollem-dev/gollem"
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/m-mizutani/gollem"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/safe"
 )

@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
+	"github.com/gollem-dev/gollem"
+	"github.com/gollem-dev/gollem/trace"
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/m-mizutani/gollem"
-	"github.com/m-mizutani/gollem/trace"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"

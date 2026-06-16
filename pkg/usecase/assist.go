@@ -10,8 +10,8 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/gollem-dev/gollem"
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/m-mizutani/gollem"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"

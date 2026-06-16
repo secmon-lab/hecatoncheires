@@ -4,7 +4,7 @@ import (
 	"context"
 	"net"
 
-	"github.com/m-mizutani/gollem"
+	"github.com/gollem-dev/gollem"
 )
 
 // Test seams. These re-export internal identifiers so the external

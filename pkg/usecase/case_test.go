@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/m-mizutani/gollem"
-	"github.com/m-mizutani/gollem/mock"
+	"github.com/gollem-dev/gollem"
+	"github.com/gollem-dev/gollem/mock"
 	"github.com/m-mizutani/gt"
 	goslack "github.com/slack-go/slack"
 

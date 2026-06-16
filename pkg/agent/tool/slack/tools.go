@@ -10,7 +10,7 @@
 package slacktool
 
 import (
-	"github.com/m-mizutani/gollem"
+	"github.com/gollem-dev/gollem"
 	slackservice "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 )
 

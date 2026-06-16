@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync/atomic"
 
-	"github.com/m-mizutani/gollem/trace"
+	"github.com/gollem-dev/gollem/trace"
 )
 
 // LLMCallCounter is a minimal gollem trace.Handler that does nothing except

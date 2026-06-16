@@ -10,11 +10,11 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/m-mizutani/gollem"
-	"github.com/m-mizutani/gollem/llm/claude"
-	"github.com/m-mizutani/gollem/llm/gemini"
-	"github.com/m-mizutani/gollem/llm/openai"
-	"github.com/m-mizutani/gollem/mock"
+	"github.com/gollem-dev/gollem"
+	"github.com/gollem-dev/gollem/llm/claude"
+	"github.com/gollem-dev/gollem/llm/gemini"
+	"github.com/gollem-dev/gollem/llm/openai"
+	"github.com/gollem-dev/gollem/mock"
 	"github.com/m-mizutani/gt"
 	eval "github.com/secmon-lab/hecatoncheires/pkg/usecase/eval"
 )

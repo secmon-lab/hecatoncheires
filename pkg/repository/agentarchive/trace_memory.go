@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"sync"
 
+	"github.com/gollem-dev/gollem/trace"
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/m-mizutani/gollem/trace"
 )
 
 // MemoryTraceRepository is an in-process trace.Repository for tests. It keeps

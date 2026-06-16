@@ -17,8 +17,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/gollem-dev/gollem"
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/m-mizutani/gollem"
 )
 
 // Validation limits applied during parsePlanResult / parseReplanResult.
