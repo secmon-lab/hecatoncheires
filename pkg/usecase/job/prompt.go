@@ -79,6 +79,10 @@ type PromptInputs struct {
 // template. All template branches read from this single struct so adding
 // a new section is a focused change: add a field, add a `{{ if }}` block.
 type systemPromptData struct {
+	// Now is the turn's start time (RFC3339, UTC), rendered as the
+	// agent's absolute "current time". Empty when PromptInputs.Now is
+	// the zero value so the template can omit the section entirely.
+	Now       string
 	Workspace systemPromptWorkspace
 	Case      *systemPromptCase
 	Actions   []systemPromptAction
@@ -205,6 +209,13 @@ func BuildSystemPrompt(in PromptInputs) (string, error) {
 
 func buildSystemPromptData(in PromptInputs) systemPromptData {
 	data := systemPromptData{}
+
+	// Now is the turn's start time (runner.go injects r.clock()); a zero
+	// value means the caller did not supply it, so the section is skipped
+	// rather than rendering a bogus "0001-01-01" timestamp.
+	if !in.Now.IsZero() {
+		data.Now = in.Now.UTC().Format(time.RFC3339)
+	}
 
 	// fieldMetaByID lets the Case loop below look up field type and
 	// option metadata when rendering field_values. It is built once
