@@ -812,6 +812,7 @@ contents are fixed by the runtime — Job authors only control
 | Section                  | Content |
 |--------------------------|---------|
 | Role                     | Agent role and tone (fixed text). |
+| Current time             | The turn's execution start time in UTC RFC3339, so the agent has an absolute "now" to reason about recency and elapsed time. Omitted only when the runtime did not supply a timestamp. |
 | Workspace                | `id`, `name`, `description`, and the custom field schema. Each field's `id`, `name`, `type`, `required` flag (when true), `description` (when set), and — for `select` / `multi-select` — every option's `id`, `name`, `description`, and freeform metadata pairs are emitted so the agent knows the field's constraints and the meaning of each option ID. |
 | Case                     | All persisted fields of the current case. For `field_values`, `select` / `multi-select` entries are rendered as `id: <raw> (<option name>, ...)` so the agent can map raw option IDs back to their human-readable label without re-consulting the schema. Unknown option IDs fall back to the raw value. |
 | Per-case operator notes  | Rendered only when the Case has `AgentAdditionalPrompt` set (see below). |

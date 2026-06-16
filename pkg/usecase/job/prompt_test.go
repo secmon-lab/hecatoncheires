@@ -529,3 +529,32 @@ func TestBuildSystemPrompt_CaseFieldValuesResolution(t *testing.T) {
 		mustNotContain(t, got, "notes: free text here (")
 	})
 }
+
+func TestBuildSystemPrompt_CurrentTime(t *testing.T) {
+	t.Run("renders the turn start time normalised to UTC RFC3339", func(t *testing.T) {
+		// Deliberately non-UTC input to prove the section is normalised.
+		jst := time.FixedZone("JST", 9*60*60)
+		now := time.Date(2026, 5, 23, 21, 30, 0, 0, jst)
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: newWorkspace("ws", "WS"),
+			Case:      newCase(7),
+			Event:     caseCreatedEvent(),
+			Now:       now,
+		})
+		gt.NoError(t, err).Required()
+		mustContain(t, got, "# Current time")
+		mustContain(t, got, "The current time (this turn's execution start) is 2026-05-23T12:30:00Z (UTC).")
+	})
+
+	t.Run("omits the section when Now is the zero value", func(t *testing.T) {
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: newWorkspace("ws", "WS"),
+			Case:      newCase(7),
+			Event:     caseCreatedEvent(),
+		})
+		gt.NoError(t, err).Required()
+		mustNotContain(t, got, "# Current time")
+	})
+}
