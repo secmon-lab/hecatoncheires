@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gollem-dev/gollem"
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/m-mizutani/gollem"
 	"github.com/m-mizutani/gt"
 	goslack "github.com/slack-go/slack"
 

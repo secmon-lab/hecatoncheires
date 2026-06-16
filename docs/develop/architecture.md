@@ -249,7 +249,7 @@ insufficient — Save mutates objects on every LLM turn.
 
 ### Reading the artifacts
 
-History blobs are gollem `History` JSON (`pkg/m-mizutani/gollem` v0.24+
+History blobs are gollem `History` JSON (`github.com/gollem-dev/gollem` v0.26+
 format, version 3). They can be loaded back into a Go process via
 `gollem.HistoryRepository.Load(ctx, sessionID)`.
 

@@ -7,9 +7,9 @@ package cli
 import (
 	"context"
 
+	"github.com/gollem-dev/gollem"
+	"github.com/gollem-dev/gollem/trace"
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/m-mizutani/gollem"
-	"github.com/m-mizutani/gollem/trace"
 	"github.com/urfave/cli/v3"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/actionwriter"

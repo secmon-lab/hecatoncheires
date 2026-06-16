@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"sync"
 
+	"github.com/gollem-dev/gollem"
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/m-mizutani/gollem"
 )
 
 // MemoryHistoryRepository is an in-process gollem.HistoryRepository for

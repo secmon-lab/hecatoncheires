@@ -1,6 +1,6 @@
 package planexec
 
-import "github.com/m-mizutani/gollem"
+import "github.com/gollem-dev/gollem"
 
 // ToolResolver translates the symbolic Tools list inside a TaskPlan into a
 // concrete []gollem.Tool slice for one sub-agent. The interface is the

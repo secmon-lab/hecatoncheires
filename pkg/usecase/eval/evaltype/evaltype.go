@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/m-mizutani/gollem"
+	"github.com/gollem-dev/gollem"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 )
 

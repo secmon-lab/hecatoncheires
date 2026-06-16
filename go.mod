@@ -19,7 +19,6 @@ require (
 	github.com/m-mizutani/clog v0.2.1
 	github.com/m-mizutani/fireconf v0.3.0
 	github.com/m-mizutani/goerr/v2 v2.0.1
-	github.com/m-mizutani/gollem v0.24.4-0.20260510002946-5511f9a2d66f
 	github.com/m-mizutani/gt v0.2.1
 	github.com/m-mizutani/masq v0.2.0
 	github.com/mattn/go-isatty v0.0.22
@@ -95,6 +94,7 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/goccy/go-json v0.10.3 // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
+	github.com/gollem-dev/gollem v0.26.0
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect

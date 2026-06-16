@@ -8,8 +8,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/gollem-dev/gollem"
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/m-mizutani/gollem"
 	slackgo "github.com/slack-go/slack"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool"

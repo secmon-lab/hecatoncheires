@@ -3,8 +3,8 @@ package threadcase
 import (
 	"encoding/json"
 
+	"github.com/gollem-dev/gollem"
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/m-mizutani/gollem"
 )
 
 // DecisionKind discriminates the terminal action the planner chose for a

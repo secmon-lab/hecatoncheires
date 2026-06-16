@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/m-mizutani/gollem"
+	"github.com/gollem-dev/gollem"
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/proposal"
 )

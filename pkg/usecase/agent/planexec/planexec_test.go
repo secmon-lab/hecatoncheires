@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gollem-dev/gollem"
+	"github.com/gollem-dev/gollem/mock"
+	"github.com/gollem-dev/gollem/trace"
 	"github.com/m-mizutani/goerr/v2"
-	"github.com/m-mizutani/gollem"
-	"github.com/m-mizutani/gollem/mock"
-	"github.com/m-mizutani/gollem/trace"
 	"github.com/m-mizutani/gt"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"

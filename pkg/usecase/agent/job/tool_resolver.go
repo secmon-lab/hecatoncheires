@@ -3,7 +3,7 @@ package job
 import (
 	"slices"
 
-	"github.com/m-mizutani/gollem"
+	"github.com/gollem-dev/gollem"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/planexec"
 )
