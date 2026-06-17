@@ -138,7 +138,12 @@ func (r *memoRepository) List(ctx context.Context, workspaceID string, caseID in
 	}
 
 	// Sort by CreatedAt ascending in memory — no composite index needed.
+	// Tie-break on ID (UUID v7 is lexicographically time-ordered) so the order
+	// is stable when two memos share a CreatedAt timestamp.
 	sort.Slice(memos, func(i, j int) bool {
+		if memos[i].CreatedAt.Equal(memos[j].CreatedAt) {
+			return memos[i].ID < memos[j].ID
+		}
 		return memos[i].CreatedAt.Before(memos[j].CreatedAt)
 	})
 

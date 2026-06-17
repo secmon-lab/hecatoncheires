@@ -143,7 +143,7 @@ func (uc *MemoUseCase) CreateMemo(ctx context.Context, workspaceID string, in Cr
 		ID:          model.NewMemoID(),
 		WorkspaceID: workspaceID,
 		CaseID:      in.CaseID,
-		Title:       in.Title,
+		Title:       strings.TrimSpace(in.Title),
 		FieldValues: enriched,
 		CreatorID:   creatorFromContext(ctx),
 		CreatedAt:   now,
@@ -183,7 +183,7 @@ func (uc *MemoUseCase) UpdateMemo(ctx context.Context, workspaceID string, in Up
 	}
 
 	if in.Title != nil {
-		memo.Title = *in.Title
+		memo.Title = strings.TrimSpace(*in.Title)
 	}
 	memo.FieldValues = enriched
 	memo.UpdatedAt = time.Now().UTC()

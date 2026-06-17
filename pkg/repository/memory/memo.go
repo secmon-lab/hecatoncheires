@@ -144,8 +144,13 @@ func (r *memoRepository) List(ctx context.Context, workspaceID string, caseID in
 		memos = append(memos, copyMemo(m))
 	}
 
-	// Sort by CreatedAt ascending to mirror the Firestore implementation.
+	// Sort by CreatedAt ascending to mirror the Firestore implementation,
+	// tie-breaking on ID (UUID v7 is lexicographically time-ordered) for a
+	// stable order when timestamps collide.
 	sort.Slice(memos, func(i, j int) bool {
+		if memos[i].CreatedAt.Equal(memos[j].CreatedAt) {
+			return memos[i].ID < memos[j].ID
+		}
 		return memos[i].CreatedAt.Before(memos[j].CreatedAt)
 	})
 

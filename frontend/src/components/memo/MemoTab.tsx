@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, Fragment } from 'react'
 import { useQuery, useMutation } from '@apollo/client'
 import Button from '../Button'
 import { IconSparkle, IconChevRight, IconChevDown, IconPlus } from '../Icons'
@@ -304,7 +304,7 @@ function MemoRowItem({ memo, memoFields: _memoFields, summaryFields, colorField,
                 const shown = opts.slice(0, 2)
                 const more = opts.length - shown.length
                 return (
-                  <>
+                  <Fragment key={f.id}>
                     {shown.map((o) => (
                       <span
                         key={`${f.id}-${o.id}`}
@@ -335,7 +335,7 @@ function MemoRowItem({ memo, memoFields: _memoFields, summaryFields, colorField,
                         +{more}
                       </span>
                     )}
-                  </>
+                  </Fragment>
                 )
               }
 

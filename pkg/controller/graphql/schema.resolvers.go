@@ -1493,20 +1493,24 @@ func (r *queryResolver) MemoConfiguration(ctx context.Context, workspaceID strin
 			}
 			metadataJSON, _ := json.Marshal(metadata)
 			metadataStr := string(metadataJSON)
+			// Copy the description into a local so the &-of is not the address
+			// of a loop variable's field (kept distinct per iteration).
+			optDesc := opt.Description
 			options[j] = &graphql1.FieldOption{
 				ID:          opt.ID,
 				Name:        opt.Name,
-				Description: &field.Options[j].Description,
+				Description: &optDesc,
 				Metadata:    &metadataStr,
 			}
 		}
 		fieldType := toGraphQLFieldType(field.Type)
+		fieldDesc := field.Description
 		fields = append(fields, &graphql1.FieldDefinition{
 			ID:          field.ID,
 			Name:        field.Name,
 			Type:        fieldType,
 			Required:    field.Required,
-			Description: &field.Description,
+			Description: &fieldDesc,
 			Options:     options,
 		})
 	}
