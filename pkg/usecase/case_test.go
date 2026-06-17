@@ -364,6 +364,20 @@ func TestCaseUseCase_AssignCase(t *testing.T) {
 		gt.Value(t, updated.AssigneeIDs).Equal([]string{"U001"})
 	})
 
+	t.Run("assigning an empty list is a no-op returning the case unchanged", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+		seedSlackUsers(t, repo, "UCREATOR", "U001")
+
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", []string{"U001"}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		updated, err := uc.AssignCase(ctx, testWorkspaceID, created.ID, []string{})
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.AssigneeIDs).Equal([]string{"U001"})
+	})
+
 	t.Run("assigning an unknown user fails", func(t *testing.T) {
 		repo := memory.New()
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
@@ -424,6 +438,20 @@ func TestCaseUseCase_UnassignCase(t *testing.T) {
 		retrieved, err := uc.GetCase(ctx, testWorkspaceID, created.ID)
 		gt.NoError(t, err).Required()
 		gt.Value(t, retrieved.AssigneeIDs).Equal([]string{"U001", "U003"})
+	})
+
+	t.Run("unassigning an empty list is a no-op returning the case unchanged", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+		seedSlackUsers(t, repo, "UCREATOR", "U001")
+
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", []string{"U001"}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		updated, err := uc.UnassignCase(ctx, testWorkspaceID, created.ID, []string{})
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.AssigneeIDs).Equal([]string{"U001"})
 	})
 
 	t.Run("unassigning a since-deleted user still works without existence check", func(t *testing.T) {

@@ -697,8 +697,15 @@ func (uc *CaseUseCase) assertCaseEditable(ctx context.Context, workspaceID strin
 // assignees must resolve to known Slack users. An empty userIDs slice is a
 // no-op that returns the case unchanged.
 func (uc *CaseUseCase) AssignCase(ctx context.Context, workspaceID string, id int64, userIDs []string) (*model.Case, error) {
-	if _, err := uc.assertCaseEditable(ctx, workspaceID, id); err != nil {
+	existingCase, err := uc.assertCaseEditable(ctx, workspaceID, id)
+	if err != nil {
 		return nil, err
+	}
+
+	// An empty input is a guaranteed no-op; short-circuit before the user
+	// existence check and the assignee transaction.
+	if len(userIDs) == 0 {
+		return existingCase, nil
 	}
 
 	if err := uc.verifyUsersExist(ctx, userIDs, nil); err != nil {
@@ -717,8 +724,15 @@ func (uc *CaseUseCase) AssignCase(ctx context.Context, workspaceID string, id in
 // existence check (a since-deleted user must still be removable). An empty
 // userIDs slice is a no-op that returns the case unchanged.
 func (uc *CaseUseCase) UnassignCase(ctx context.Context, workspaceID string, id int64, userIDs []string) (*model.Case, error) {
-	if _, err := uc.assertCaseEditable(ctx, workspaceID, id); err != nil {
+	existingCase, err := uc.assertCaseEditable(ctx, workspaceID, id)
+	if err != nil {
 		return nil, err
+	}
+
+	// An empty input is a guaranteed no-op; short-circuit before the
+	// assignee transaction.
+	if len(userIDs) == 0 {
+		return existingCase, nil
 	}
 
 	updated, err := uc.repo.Case().RemoveAssignees(ctx, workspaceID, id, userIDs, time.Now().UTC())
