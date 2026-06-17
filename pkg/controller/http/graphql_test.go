@@ -483,7 +483,6 @@ func TestGraphQLHandler_UpdateCaseMutation(t *testing.T) {
 					id
 					title
 					description
-					assigneeIDs
 				}
 			}
 		`
@@ -494,7 +493,6 @@ func TestGraphQLHandler_UpdateCaseMutation(t *testing.T) {
 				"id":          createdCase.ID,
 				"title":       "Updated Title",
 				"description": "Updated Description",
-				"assigneeIDs": []string{"U001", "U002", "U003"},
 			},
 		}
 
@@ -510,10 +508,9 @@ func TestGraphQLHandler_UpdateCaseMutation(t *testing.T) {
 
 		var result struct {
 			UpdateCase struct {
-				ID          int      `json:"id"`
-				Title       string   `json:"title"`
-				Description string   `json:"description"`
-				AssigneeIDs []string `json:"assigneeIDs"`
+				ID          int    `json:"id"`
+				Title       string `json:"title"`
+				Description string `json:"description"`
 			} `json:"updateCase"`
 		}
 
@@ -523,15 +520,11 @@ func TestGraphQLHandler_UpdateCaseMutation(t *testing.T) {
 
 		gt.Value(t, result.UpdateCase.Description).Equal("Updated Description")
 
-		gt.Array(t, result.UpdateCase.AssigneeIDs).Length(3)
-
 		// Verify the case was actually updated in repository
 		updatedCase, err := repo.Case().Get(ctx, testWorkspaceID, createdCase.ID)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, updatedCase.Title).Equal("Updated Title")
-
-		gt.Array(t, updatedCase.AssigneeIDs).Length(3)
 	})
 
 	t.Run("update non-existent case", func(t *testing.T) {
@@ -557,6 +550,116 @@ func TestGraphQLHandler_UpdateCaseMutation(t *testing.T) {
 
 		resp := parseGraphQLResponse(t, rec)
 
+		gt.Number(t, len(resp.Errors)).GreaterOrEqual(1)
+	})
+}
+
+func TestGraphQLHandler_AssignUnassignCaseMutation(t *testing.T) {
+	repo := memory.New()
+	seedSlackUsersHTTP(t, repo, "U001", "U002", "U003")
+	handler, err := setupGraphQLServer(repo)
+	gt.NoError(t, err).Required()
+
+	ctx := context.Background()
+
+	createdCase, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+		ReporterID:  "U-TEST-DEFAULT",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Title:       "Assignment Target",
+		Description: "Desc",
+		AssigneeIDs: []string{"U001"},
+	})
+	gt.NoError(t, err).Required()
+
+	t.Run("assignCase unions the new users", func(t *testing.T) {
+		mutation := `
+			mutation($workspaceId: String!, $id: Int!, $userIDs: [String!]!) {
+				assignCase(workspaceId: $workspaceId, id: $id, userIDs: $userIDs) {
+					id
+					assigneeIDs
+				}
+			}
+		`
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          createdCase.ID,
+			"userIDs":     []string{"U002", "U003"},
+		}
+
+		rec := executeGraphQLRequest(t, handler, mutation, variables)
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+		gt.Value(t, resp.Data).NotNil().Required()
+
+		var result struct {
+			AssignCase struct {
+				ID          int      `json:"id"`
+				AssigneeIDs []string `json:"assigneeIDs"`
+			} `json:"assignCase"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+		gt.Value(t, result.AssignCase.AssigneeIDs).Equal([]string{"U001", "U002", "U003"})
+
+		stored, err := repo.Case().Get(ctx, testWorkspaceID, createdCase.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, stored.AssigneeIDs).Equal([]string{"U001", "U002", "U003"})
+	})
+
+	t.Run("unassignCase removes the listed users", func(t *testing.T) {
+		mutation := `
+			mutation($workspaceId: String!, $id: Int!, $userIDs: [String!]!) {
+				unassignCase(workspaceId: $workspaceId, id: $id, userIDs: $userIDs) {
+					id
+					assigneeIDs
+				}
+			}
+		`
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          createdCase.ID,
+			"userIDs":     []string{"U001", "U003"},
+		}
+
+		rec := executeGraphQLRequest(t, handler, mutation, variables)
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+		gt.Value(t, resp.Data).NotNil().Required()
+
+		var result struct {
+			UnassignCase struct {
+				ID          int      `json:"id"`
+				AssigneeIDs []string `json:"assigneeIDs"`
+			} `json:"unassignCase"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+		gt.Value(t, result.UnassignCase.AssigneeIDs).Equal([]string{"U002"})
+
+		stored, err := repo.Case().Get(ctx, testWorkspaceID, createdCase.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, stored.AssigneeIDs).Equal([]string{"U002"})
+	})
+
+	t.Run("assignCase on a non-existent case errors", func(t *testing.T) {
+		mutation := `
+			mutation($workspaceId: String!, $id: Int!, $userIDs: [String!]!) {
+				assignCase(workspaceId: $workspaceId, id: $id, userIDs: $userIDs) {
+					id
+				}
+			}
+		`
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"id":          99999,
+			"userIDs":     []string{"U001"},
+		}
+
+		rec := executeGraphQLRequest(t, handler, mutation, variables)
+		resp := parseGraphQLResponse(t, rec)
 		gt.Number(t, len(resp.Errors)).GreaterOrEqual(1)
 	})
 }

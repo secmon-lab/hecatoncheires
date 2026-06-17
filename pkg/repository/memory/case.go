@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
@@ -224,6 +225,46 @@ func (r *caseRepository) Update(ctx context.Context, workspaceID string, c *mode
 
 	updated := copyCase(c)
 	r.cases[workspaceID][updated.ID] = updated
+	return copyCase(updated), nil
+}
+
+func (r *caseRepository) AddAssignees(ctx context.Context, workspaceID string, id int64, userIDs []string, updatedAt time.Time) (*model.Case, error) {
+	return r.mutateAssignees(workspaceID, id, updatedAt, func(c *model.Case) bool {
+		return c.AssignUsers(userIDs)
+	})
+}
+
+func (r *caseRepository) RemoveAssignees(ctx context.Context, workspaceID string, id int64, userIDs []string, updatedAt time.Time) (*model.Case, error) {
+	return r.mutateAssignees(workspaceID, id, updatedAt, func(c *model.Case) bool {
+		return c.UnassignUsers(userIDs)
+	})
+}
+
+// mutateAssignees applies mutate to a fresh copy of the stored case under the
+// write lock so the read-modify-write is atomic against concurrent callers,
+// mirroring the Firestore transaction. updatedAt is stamped only when the set
+// actually changed so a no-op assign does not bump the timestamp.
+func (r *caseRepository) mutateAssignees(workspaceID string, id int64, updatedAt time.Time, mutate func(*model.Case) bool) (*model.Case, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	ws, exists := r.cases[workspaceID]
+	if !exists {
+		return nil, goerr.Wrap(ErrNotFound, "case not found", goerr.V("id", id))
+	}
+	stored, exists := ws[id]
+	if !exists {
+		return nil, goerr.Wrap(ErrNotFound, "case not found", goerr.V("id", id))
+	}
+
+	updated := copyCase(stored)
+	if mutate(updated) {
+		updated.UpdatedAt = updatedAt
+		if err := updated.Validate(); err != nil {
+			return nil, goerr.Wrap(err, "case validation failed before assignee update", goerr.V("id", id))
+		}
+		r.cases[workspaceID][id] = updated
+	}
 	return copyCase(updated), nil
 }
 

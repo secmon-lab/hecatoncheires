@@ -297,10 +297,11 @@ input UpdateCaseInput {
   id: Int!
   # All fields below are optional. Omitted fields preserve their current value
   # on the existing Case. This allows true partial updates from clients that
-  # only want to change one thing (e.g. inline edit of assignees).
+  # only want to change one thing. Assignees are NOT updatable here — use the
+  # assignCase / unassignCase delta mutations so concurrent edits cannot
+  # clobber one another.
   title: String
   description: String
-  assigneeIDs: [String!]
   fields: [FieldValueInput!]
 }
 
@@ -309,10 +310,11 @@ input UpdateCaseInput {
 # and promote-to-OPEN are one business operation, so they go through one
 # usecase call — splitting them across an updateCase + submitDraft pair
 # at the client risks leaving an inconsistent draft behind on failure.
+# Assignees are NOT part of this input — manage them via assignCase /
+# unassignCase on the draft before submitting.
 input SubmitDraftInput {
   title: String
   description: String
-  assigneeIDs: [String!]
   fields: [FieldValueInput!]
 }
 
@@ -623,6 +625,13 @@ type Mutation {
   # Cases
   createCase(workspaceId: String!, input: CreateCaseInput!): Case!
   updateCase(workspaceId: String!, input: UpdateCaseInput!): Case!
+  # assignCase / unassignCase mutate the assignee set by delta rather than
+  # replacing the whole list (updateCase). The add/remove is applied as a
+  # transactional set operation server-side, so concurrent "assign me" actions
+  # cannot clobber one another. Adding an already-assigned user (or removing an
+  # absent one) is a no-op. Returns the updated case.
+  assignCase(workspaceId: String!, id: Int!, userIDs: [String!]!): Case!
+  unassignCase(workspaceId: String!, id: Int!, userIDs: [String!]!): Case!
   deleteCase(workspaceId: String!, id: Int!): Boolean!
   closeCase(workspaceId: String!, id: Int!): Case!
   reopenCase(workspaceId: String!, id: Int!): Case!

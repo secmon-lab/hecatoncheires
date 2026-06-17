@@ -262,3 +262,40 @@ export const SYNC_CASE_CHANNEL_USERS = gql`
     }
   }
 `
+
+// ASSIGN_CASE / UNASSIGN_CASE mutate the assignee set by delta (add / remove
+// the listed users) instead of replacing the whole list via updateCase. The
+// server applies the change atomically, so concurrent edits cannot clobber
+// one another. Assignees can ONLY be changed through these — updateCase /
+// submitDraft no longer accept assigneeIDs.
+export const ASSIGN_CASE = gql`
+  mutation AssignCase($workspaceId: String!, $id: Int!, $userIDs: [String!]!) {
+    assignCase(workspaceId: $workspaceId, id: $id, userIDs: $userIDs) {
+      id
+      assigneeIDs
+      assignees {
+        id
+        name
+        realName
+        imageUrl
+      }
+      updatedAt
+    }
+  }
+`
+
+export const UNASSIGN_CASE = gql`
+  mutation UnassignCase($workspaceId: String!, $id: Int!, $userIDs: [String!]!) {
+    unassignCase(workspaceId: $workspaceId, id: $id, userIDs: $userIDs) {
+      id
+      assigneeIDs
+      assignees {
+        id
+        name
+        realName
+        imageUrl
+      }
+      updatedAt
+    }
+  }
+`

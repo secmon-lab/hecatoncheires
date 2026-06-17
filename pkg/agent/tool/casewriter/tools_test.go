@@ -17,11 +17,17 @@ type statusCall struct {
 	boardStatus string
 }
 
+type assignCall struct {
+	userIDs []string
+}
+
 type mockCaseUC struct {
-	calls       []casewriter.CaseUpdate
-	statusCalls []statusCall
-	resp        *model.Case
-	err         error
+	calls         []casewriter.CaseUpdate
+	statusCalls   []statusCall
+	assignCalls   []assignCall
+	unassignCalls []assignCall
+	resp          *model.Case
+	err           error
 }
 
 func (m *mockCaseUC) UpdateCase(ctx context.Context, workspaceID string, id int64, patch casewriter.CaseUpdate) (*model.Case, error) {
@@ -34,6 +40,22 @@ func (m *mockCaseUC) UpdateCase(ctx context.Context, workspaceID string, id int6
 
 func (m *mockCaseUC) UpdateCaseStatus(ctx context.Context, workspaceID string, id int64, boardStatus string) (*model.Case, error) {
 	m.statusCalls = append(m.statusCalls, statusCall{boardStatus: boardStatus})
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.resp, nil
+}
+
+func (m *mockCaseUC) AssignCase(ctx context.Context, workspaceID string, id int64, userIDs []string) (*model.Case, error) {
+	m.assignCalls = append(m.assignCalls, assignCall{userIDs: userIDs})
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.resp, nil
+}
+
+func (m *mockCaseUC) UnassignCase(ctx context.Context, workspaceID string, id int64, userIDs []string) (*model.Case, error) {
+	m.unassignCalls = append(m.unassignCalls, assignCall{userIDs: userIDs})
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -74,9 +96,13 @@ func testStatusSet(t *testing.T) *model.ActionStatusSet {
 func TestUpdateCaseTool_Title(t *testing.T) {
 	uc := &mockCaseUC{resp: &model.Case{ID: 42, Title: "new", Status: types.CaseStatusOpen}}
 	tools := casewriter.New(casewriter.Deps{CaseUC: uc, WorkspaceID: "ws", CaseID: 42})
-	gt.Array(t, tools).Length(1).Required()
+	// New always returns update + assign + unassign (3 tools when no StatusSet).
+	gt.Array(t, tools).Length(3).Required()
 
-	out, err := tools[0].Run(context.Background(), map[string]any{
+	updateTool := toolByName(t, tools, "case__update_case")
+	gt.Value(t, updateTool).NotNil().Required()
+
+	out, err := updateTool.Run(context.Background(), map[string]any{
 		"title": "new",
 	})
 	gt.NoError(t, err).Required()
@@ -85,47 +111,90 @@ func TestUpdateCaseTool_Title(t *testing.T) {
 	gt.Value(t, uc.calls[0].Title).NotNil()
 	gt.String(t, *uc.calls[0].Title).Equal("new")
 	gt.Value(t, uc.calls[0].Description).Nil()
-	gt.Bool(t, uc.calls[0].HasAssign).False()
 
 	gt.Number(t, out["id"].(int64)).Equal(int64(42))
 	gt.String(t, out["title"].(string)).Equal("new")
 }
 
-func TestUpdateCaseTool_Assignees(t *testing.T) {
+func TestUpdateCaseTool_NoAssigneeIDsParam(t *testing.T) {
+	// case__update_case must NOT expose an assignee_ids parameter; assignees
+	// are mutated exclusively through case__assign / case__unassign.
+	uc := &mockCaseUC{resp: &model.Case{}}
+	tools := casewriter.New(casewriter.Deps{CaseUC: uc, WorkspaceID: "ws", CaseID: 1})
+	updateTool := toolByName(t, tools, "case__update_case")
+	gt.Value(t, updateTool).NotNil().Required()
+	_, has := updateTool.Spec().Parameters["assignee_ids"]
+	gt.Bool(t, has).False()
+}
+
+func TestAssignCaseTool(t *testing.T) {
 	uc := &mockCaseUC{resp: &model.Case{ID: 1, AssigneeIDs: []string{"U1", "U2"}, Status: types.CaseStatusOpen}}
 	tools := casewriter.New(casewriter.Deps{CaseUC: uc, WorkspaceID: "ws", CaseID: 1})
+	assignTool := toolByName(t, tools, "case__assign")
+	gt.Value(t, assignTool).NotNil().Required()
 
-	t.Run("set", func(t *testing.T) {
-		uc.calls = nil
-		_, err := tools[0].Run(context.Background(), map[string]any{
-			"assignee_ids": []any{"U1", "U2"},
+	t.Run("calls AssignCase with provided user IDs and returns assignee_ids", func(t *testing.T) {
+		uc.assignCalls = nil
+		out, err := assignTool.Run(context.Background(), map[string]any{
+			"user_ids": []any{"U1", "U2"},
 		})
 		gt.NoError(t, err).Required()
-		gt.Array(t, uc.calls).Length(1).Required()
-		gt.Bool(t, uc.calls[0].HasAssign).True()
-		gt.Array(t, uc.calls[0].AssigneeIDs).Length(2)
-		gt.String(t, uc.calls[0].AssigneeIDs[0]).Equal("U1")
-		gt.String(t, uc.calls[0].AssigneeIDs[1]).Equal("U2")
+		gt.Array(t, uc.assignCalls).Length(1).Required()
+		gt.Array(t, uc.assignCalls[0].userIDs).Length(2).Required()
+		gt.String(t, uc.assignCalls[0].userIDs[0]).Equal("U1")
+		gt.String(t, uc.assignCalls[0].userIDs[1]).Equal("U2")
+		gt.Value(t, out["assignee_ids"]).Equal([]string{"U1", "U2"})
 	})
 
-	t.Run("clear", func(t *testing.T) {
-		uc.calls = nil
-		_, err := tools[0].Run(context.Background(), map[string]any{
-			"assignee_ids": []any{},
-		})
-		gt.NoError(t, err).Required()
-		gt.Array(t, uc.calls).Length(1).Required()
-		gt.Bool(t, uc.calls[0].HasAssign).True()
-		gt.Array(t, uc.calls[0].AssigneeIDs).Length(0)
+	t.Run("missing user_ids errors", func(t *testing.T) {
+		uc.assignCalls = nil
+		_, err := assignTool.Run(context.Background(), map[string]any{})
+		gt.Error(t, err)
+		gt.Array(t, uc.assignCalls).Length(0)
 	})
 
-	t.Run("non-string element", func(t *testing.T) {
-		uc.calls = nil
-		_, err := tools[0].Run(context.Background(), map[string]any{
-			"assignee_ids": []any{"U1", 42},
+	t.Run("empty user_ids errors", func(t *testing.T) {
+		uc.assignCalls = nil
+		_, err := assignTool.Run(context.Background(), map[string]any{
+			"user_ids": []any{},
 		})
 		gt.Error(t, err)
-		gt.Array(t, uc.calls).Length(0)
+		gt.Array(t, uc.assignCalls).Length(0)
+	})
+}
+
+func TestUnassignCaseTool(t *testing.T) {
+	uc := &mockCaseUC{resp: &model.Case{ID: 2, AssigneeIDs: []string{"U3"}, Status: types.CaseStatusOpen}}
+	tools := casewriter.New(casewriter.Deps{CaseUC: uc, WorkspaceID: "ws", CaseID: 2})
+	unassignTool := toolByName(t, tools, "case__unassign")
+	gt.Value(t, unassignTool).NotNil().Required()
+
+	t.Run("calls UnassignCase with provided user IDs and returns assignee_ids", func(t *testing.T) {
+		uc.unassignCalls = nil
+		out, err := unassignTool.Run(context.Background(), map[string]any{
+			"user_ids": []any{"U3"},
+		})
+		gt.NoError(t, err).Required()
+		gt.Array(t, uc.unassignCalls).Length(1).Required()
+		gt.Array(t, uc.unassignCalls[0].userIDs).Length(1).Required()
+		gt.String(t, uc.unassignCalls[0].userIDs[0]).Equal("U3")
+		gt.Value(t, out["assignee_ids"]).Equal([]string{"U3"})
+	})
+
+	t.Run("missing user_ids errors", func(t *testing.T) {
+		uc.unassignCalls = nil
+		_, err := unassignTool.Run(context.Background(), map[string]any{})
+		gt.Error(t, err)
+		gt.Array(t, uc.unassignCalls).Length(0)
+	})
+
+	t.Run("empty user_ids errors", func(t *testing.T) {
+		uc.unassignCalls = nil
+		_, err := unassignTool.Run(context.Background(), map[string]any{
+			"user_ids": []any{},
+		})
+		gt.Error(t, err)
+		gt.Array(t, uc.unassignCalls).Length(0)
 	})
 }
 
@@ -134,10 +203,12 @@ func TestUpdateCaseTool_Fields(t *testing.T) {
 		"summary": {FieldID: "summary", Type: types.FieldTypeText, Value: "done"},
 	}}}
 	tools := casewriter.New(casewriter.Deps{CaseUC: uc, WorkspaceID: "ws", CaseID: 7, Schema: testSchema()})
+	updateTool := toolByName(t, tools, "case__update_case")
+	gt.Value(t, updateTool).NotNil().Required()
 
 	t.Run("coerces scalar, number and multi values", func(t *testing.T) {
 		uc.calls = nil
-		_, err := tools[0].Run(context.Background(), map[string]any{
+		_, err := updateTool.Run(context.Background(), map[string]any{
 			"fields": []any{
 				map[string]any{"field_id": "summary", "value": "done"},
 				map[string]any{"field_id": "score", "value": "42"},
@@ -154,7 +225,7 @@ func TestUpdateCaseTool_Fields(t *testing.T) {
 
 	t.Run("unparseable number is rejected before reaching the usecase", func(t *testing.T) {
 		uc.calls = nil
-		_, err := tools[0].Run(context.Background(), map[string]any{
+		_, err := updateTool.Run(context.Background(), map[string]any{
 			"fields": []any{
 				map[string]any{"field_id": "score", "value": "not-a-number"},
 			},
@@ -166,7 +237,9 @@ func TestUpdateCaseTool_Fields(t *testing.T) {
 	t.Run("fields without a schema errors", func(t *testing.T) {
 		uc.calls = nil
 		noSchema := casewriter.New(casewriter.Deps{CaseUC: uc, WorkspaceID: "ws", CaseID: 7})
-		_, err := noSchema[0].Run(context.Background(), map[string]any{
+		noSchemaTool := toolByName(t, noSchema, "case__update_case")
+		gt.Value(t, noSchemaTool).NotNil().Required()
+		_, err := noSchemaTool.Run(context.Background(), map[string]any{
 			"fields": []any{map[string]any{"field_id": "summary", "value": "x"}},
 		})
 		gt.Error(t, err)
@@ -177,7 +250,9 @@ func TestUpdateCaseTool_Fields(t *testing.T) {
 func TestUpdateCaseTool_RejectsEmptyPatch(t *testing.T) {
 	uc := &mockCaseUC{resp: &model.Case{}}
 	tools := casewriter.New(casewriter.Deps{CaseUC: uc, WorkspaceID: "ws", CaseID: 1})
-	_, err := tools[0].Run(context.Background(), map[string]any{})
+	updateTool := toolByName(t, tools, "case__update_case")
+	gt.Value(t, updateTool).NotNil().Required()
+	_, err := updateTool.Run(context.Background(), map[string]any{})
 	gt.Error(t, err)
 	gt.Array(t, uc.calls).Length(0)
 }
@@ -186,7 +261,9 @@ func TestUpdateCaseTool_PropagatesUseCaseError(t *testing.T) {
 	sentinel := goerr.New("boom")
 	uc := &mockCaseUC{err: sentinel}
 	tools := casewriter.New(casewriter.Deps{CaseUC: uc, WorkspaceID: "ws", CaseID: 1})
-	_, err := tools[0].Run(context.Background(), map[string]any{
+	updateTool := toolByName(t, tools, "case__update_case")
+	gt.Value(t, updateTool).NotNil().Required()
+	_, err := updateTool.Run(context.Background(), map[string]any{
 		"title": "x",
 	})
 	gt.Error(t, err).Is(sentinel)
@@ -194,7 +271,9 @@ func TestUpdateCaseTool_PropagatesUseCaseError(t *testing.T) {
 
 func TestUpdateCaseTool_NilCaseUCErrors(t *testing.T) {
 	tools := casewriter.New(casewriter.Deps{WorkspaceID: "ws", CaseID: 1})
-	_, err := tools[0].Run(context.Background(), map[string]any{"title": "x"})
+	updateTool := toolByName(t, tools, "case__update_case")
+	gt.Value(t, updateTool).NotNil().Required()
+	_, err := updateTool.Run(context.Background(), map[string]any{"title": "x"})
 	gt.Error(t, err)
 }
 
@@ -203,7 +282,9 @@ func TestUpdateCaseTool_HasNoStatusParameter(t *testing.T) {
 	// the field-update tool must NOT carry a status parameter.
 	uc := &mockCaseUC{resp: &model.Case{}}
 	tools := casewriter.New(casewriter.Deps{CaseUC: uc, WorkspaceID: "ws", CaseID: 1})
-	spec := tools[0].Spec()
+	updateTool := toolByName(t, tools, "case__update_case")
+	gt.Value(t, updateTool).NotNil().Required()
+	spec := updateTool.Spec()
 	_, has := spec.Parameters["status"]
 	gt.Bool(t, has).False()
 	_, hasFields := spec.Parameters["fields"]
@@ -213,7 +294,9 @@ func TestUpdateCaseTool_HasNoStatusParameter(t *testing.T) {
 func TestUpdateCaseTool_DescriptionWarnsAgainstBlindOverwrite(t *testing.T) {
 	uc := &mockCaseUC{resp: &model.Case{}}
 	tools := casewriter.New(casewriter.Deps{CaseUC: uc, WorkspaceID: "ws", CaseID: 1})
-	desc := tools[0].Spec().Description
+	updateTool := toolByName(t, tools, "case__update_case")
+	gt.Value(t, updateTool).NotNil().Required()
+	desc := updateTool.Spec().Description
 	gt.String(t, desc).Contains("Do not overwrite blindly")
 	gt.String(t, desc).Contains("FULL replacements")
 }
@@ -221,14 +304,16 @@ func TestUpdateCaseTool_DescriptionWarnsAgainstBlindOverwrite(t *testing.T) {
 func TestStatusTool_NotBuiltWithoutStatusSet(t *testing.T) {
 	uc := &mockCaseUC{resp: &model.Case{}}
 	tools := casewriter.New(casewriter.Deps{CaseUC: uc, WorkspaceID: "ws", CaseID: 1})
-	gt.Array(t, tools).Length(1)
+	// Without a StatusSet: update + assign + unassign = 3 tools.
+	gt.Array(t, tools).Length(3)
 	gt.Value(t, toolByName(t, tools, "case__update_case_status")).Nil()
 }
 
 func TestStatusTool_BuiltWithStatusSet(t *testing.T) {
 	uc := &mockCaseUC{resp: &model.Case{ID: 5, Status: types.CaseStatusClosed, BoardStatus: "closed"}}
 	tools := casewriter.New(casewriter.Deps{CaseUC: uc, WorkspaceID: "ws", CaseID: 5, StatusSet: testStatusSet(t)})
-	gt.Array(t, tools).Length(2)
+	// With StatusSet: update + assign + unassign + status = 4 tools.
+	gt.Array(t, tools).Length(4)
 
 	statusTool := toolByName(t, tools, "case__update_case_status")
 	gt.Value(t, statusTool).NotNil().Required()

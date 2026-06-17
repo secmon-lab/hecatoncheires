@@ -537,29 +537,18 @@ func (uc *CaseUseCase) activateCase(ctx context.Context, workspaceID string, c *
 // case preserves all stored field values; a non-nil map merges the supplied
 // entries on top of the existing ones (entries are not removed individually
 // — clients should send the empty value to clear a field if needed).
+//
+// Assignees are intentionally NOT part of this patch. They are mutated only
+// through the dedicated AssignCase / UnassignCase delta operations, so every
+// entry point shares one race-free path and a full-list replace can never
+// silently clobber a concurrent edit.
 type CaseUpdate struct {
 	Title       *string
 	Description *string
-	// nil means "preserve existing assignees"; a non-nil slice (including an
-	// empty one) means "replace assignees with this list".
-	AssigneeIDs []string
 	// nil means "preserve all stored field values". A non-nil map merges its
 	// entries on top of the existing values (callers cannot remove individual
 	// entries via this API).
-	Fields    map[string]model.FieldValue
-	hasAssign bool
-}
-
-// SetAssignees marks the patch as "replacing assignees with ids" (which may
-// be empty). Use this rather than assigning the field directly so that the
-// nil-vs-empty distinction is preserved through callers that may construct
-// an empty slice for a missing input.
-func (p *CaseUpdate) SetAssignees(ids []string) {
-	if ids == nil {
-		ids = []string{}
-	}
-	p.AssigneeIDs = ids
-	p.hasAssign = true
+	Fields map[string]model.FieldValue
 }
 
 func (uc *CaseUseCase) UpdateCase(ctx context.Context, workspaceID string, id int64, patch CaseUpdate) (*model.Case, error) {
@@ -603,32 +592,21 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, workspaceID string, id in
 		description = *patch.Description
 	}
 
+	// Assignees are never touched here — they move only through
+	// AssignCase / UnassignCase. The existing list is preserved verbatim.
 	assigneeIDs := existingCase.AssigneeIDs
-	if patch.hasAssign {
-		assigneeIDs = patch.AssigneeIDs
-	}
 
-	// Validate the submitted fields and assignees through the shared gate, then
-	// merge the enriched values onto the existing ones. Without a field patch,
-	// preserve the existing map verbatim (no validator pass — stale option IDs
-	// from a prior config must not cause an unrelated update to fail); only the
-	// changed assignees are still checked. assigneeIDs is passed for the
-	// existence check only when the caller is actually replacing them.
-	checkAssignees := assigneeIDs
-	if !patch.hasAssign {
-		checkAssignees = nil
-	}
+	// Validate the submitted fields through the shared gate, then merge the
+	// enriched values onto the existing ones. Without a field patch, preserve
+	// the existing map verbatim (no validator pass — stale option IDs from a
+	// prior config must not cause an unrelated update to fail).
 	fieldValues := existingCase.FieldValues
 	if patch.Fields != nil {
-		validated, err := uc.validateCaseWrite(ctx, workspaceID, validatePartialStrict, patch.Fields, checkAssignees)
+		validated, err := uc.validateCaseWrite(ctx, workspaceID, validatePartialStrict, patch.Fields, nil)
 		if err != nil {
 			return nil, goerr.Wrap(err, "case write validation failed", goerr.V(CaseIDKey, id))
 		}
 		fieldValues = mergeFieldValues(existingCase.FieldValues, validated)
-	} else if patch.hasAssign {
-		if _, err := uc.validateCaseWrite(ctx, workspaceID, validatePartialStrict, nil, checkAssignees); err != nil {
-			return nil, goerr.Wrap(err, "case write validation failed", goerr.V(CaseIDKey, id))
-		}
 	}
 
 	// Rename Slack channel if title changed and channel exists
@@ -662,6 +640,117 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, workspaceID string, id in
 	}
 
 	return updated, nil
+}
+
+// assertCaseEditable loads the case and runs the same access-control gate as
+// UpdateCase (draft-aware: private drafts fall back to a reporter check since
+// they have no Slack channel yet). It is the shared precondition for the
+// assignee mutators below.
+func (uc *CaseUseCase) assertCaseEditable(ctx context.Context, workspaceID string, id int64) (*model.Case, error) {
+	existingCase, err := uc.repo.Case().Get(ctx, workspaceID, id)
+	if err != nil {
+		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
+	}
+
+	token, tokenErr := auth.TokenFromContext(ctx)
+	if tokenErr == nil {
+		if existingCase.IsDraft() {
+			if existingCase.IsPrivate && existingCase.ReporterID != token.Sub {
+				return nil, goerr.Wrap(ErrAccessDenied, "cannot edit private draft",
+					goerr.V(CaseIDKey, id), goerr.V("user_id", token.Sub))
+			}
+		} else if !model.IsCaseAccessible(existingCase, token.Sub) {
+			return nil, goerr.Wrap(ErrAccessDenied, "cannot edit private case",
+				goerr.V(CaseIDKey, id), goerr.V("user_id", token.Sub))
+		}
+	}
+	return existingCase, nil
+}
+
+// AssignCase atomically adds the given Slack user IDs to the case's assignee
+// set. Unlike UpdateCase — which replaces the whole assignee list and therefore
+// loses a concurrent edit inside its read-modify-write window — the add is
+// applied as a transactional set union in the repository, so two simultaneous
+// "assign me" actions both land. IDs already assigned are ignored. New
+// assignees must resolve to known Slack users. An empty userIDs slice is a
+// no-op that returns the case unchanged.
+func (uc *CaseUseCase) AssignCase(ctx context.Context, workspaceID string, id int64, userIDs []string) (*model.Case, error) {
+	existingCase, err := uc.assertCaseEditable(ctx, workspaceID, id)
+	if err != nil {
+		return nil, err
+	}
+
+	// An empty input is a guaranteed no-op; short-circuit before the user
+	// existence check and the assignee transaction.
+	if len(userIDs) == 0 {
+		return existingCase, nil
+	}
+
+	if err := uc.verifyUsersExist(ctx, userIDs, nil); err != nil {
+		return nil, goerr.Wrap(err, "assignee verification failed", goerr.V(CaseIDKey, id))
+	}
+
+	updated, err := uc.repo.Case().AddAssignees(ctx, workspaceID, id, userIDs, time.Now().UTC())
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to add assignees", goerr.V(CaseIDKey, id))
+	}
+	return updated, nil
+}
+
+// UnassignCase atomically removes the given Slack user IDs from the case's
+// assignee set. IDs not currently assigned are ignored. Removal needs no user
+// existence check (a since-deleted user must still be removable). An empty
+// userIDs slice is a no-op that returns the case unchanged.
+func (uc *CaseUseCase) UnassignCase(ctx context.Context, workspaceID string, id int64, userIDs []string) (*model.Case, error) {
+	existingCase, err := uc.assertCaseEditable(ctx, workspaceID, id)
+	if err != nil {
+		return nil, err
+	}
+
+	// An empty input is a guaranteed no-op; short-circuit before the
+	// assignee transaction.
+	if len(userIDs) == 0 {
+		return existingCase, nil
+	}
+
+	updated, err := uc.repo.Case().RemoveAssignees(ctx, workspaceID, id, userIDs, time.Now().UTC())
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to remove assignees", goerr.V(CaseIDKey, id))
+	}
+	return updated, nil
+}
+
+// diffAssignees computes the delta needed to turn the current assignee set
+// into the desired one: toAdd are ids in desired but not current, toRemove are
+// ids in current but not desired. It lets a full-selection UI (e.g. a Slack
+// multi-user select) reconcile through the delta AssignCase / UnassignCase
+// path instead of a full-list replace. Blank ids in either input are ignored.
+func diffAssignees(current, desired []string) (toAdd, toRemove []string) {
+	currentSet := make(map[string]struct{}, len(current))
+	for _, id := range current {
+		if id != "" {
+			currentSet[id] = struct{}{}
+		}
+	}
+	desiredSet := make(map[string]struct{}, len(desired))
+	for _, id := range desired {
+		if id == "" {
+			continue
+		}
+		desiredSet[id] = struct{}{}
+		if _, ok := currentSet[id]; !ok {
+			toAdd = append(toAdd, id)
+		}
+	}
+	for _, id := range current {
+		if id == "" {
+			continue
+		}
+		if _, ok := desiredSet[id]; !ok {
+			toRemove = append(toRemove, id)
+		}
+	}
+	return toAdd, toRemove
 }
 
 // UpdateAgentSettings replaces the Case-specific agent additional prompt
@@ -1176,9 +1265,8 @@ func (uc *CaseUseCase) SubmitDraft(ctx context.Context, workspaceID string, id i
 		if patch.Description != nil {
 			c.Description = *patch.Description
 		}
-		if patch.hasAssign {
-			c.AssigneeIDs = patch.AssigneeIDs
-		}
+		// Assignees are not part of the submit-draft patch; they are managed
+		// via AssignCase / UnassignCase on the draft before promotion.
 		if patch.Fields != nil {
 			validated := patch.Fields
 			// Drafts keep the lenient partial validation (preserve unknown ids,

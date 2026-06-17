@@ -27,6 +27,14 @@ func (fakeCaseMutator) UpdateCaseStatus(context.Context, string, int64, string) 
 	return &model.Case{}, nil
 }
 
+func (fakeCaseMutator) AssignCase(_ context.Context, _ string, _ int64, _ []string) (*model.Case, error) {
+	return &model.Case{}, nil
+}
+
+func (fakeCaseMutator) UnassignCase(_ context.Context, _ string, _ int64, _ []string) (*model.Case, error) {
+	return &model.Case{}, nil
+}
+
 func toolNames(tools []gollem.Tool) map[string]bool {
 	out := make(map[string]bool, len(tools))
 	for _, tl := range tools {

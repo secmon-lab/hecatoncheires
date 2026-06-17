@@ -86,6 +86,31 @@ Cases follow a simple linear lifecycle:
 * `CLOSED` — closed via `closeCase`; can be re-opened via
   `reopenCase`. `closeCase` / `reopenCase` reject `DRAFT` cases.
 
+### Editing assignees
+
+Assignees are mutated **only** through the dedicated `assignCase` /
+`unassignCase` mutations, never through `updateCase` / `submitDraft`
+(whose inputs deliberately omit `assigneeIDs`). The initial assignees
+of a brand-new case are still set at creation time via
+`createCase` / `createDraft`.
+
+`assignCase` / `unassignCase` change the set by **delta** — they add or
+remove only the listed user IDs and leave the rest untouched. Adding an
+already-assigned user (or removing an absent one) is a no-op. The
+add/remove is applied as a transactional set operation server-side, so
+two simultaneous edits cannot clobber one another the way a full-list
+replace could. `assignCase` refuses user IDs that are not known Slack
+users; `unassignCase` does not, so a since-deleted user can always be
+removed. Both honour private-case access control.
+
+Full-selection UIs reconcile through this delta path rather than
+replacing the list: the WebUI assignee picker (case detail inline edit
+and the create/edit modal) and the Slack `/cmd` edit modal's
+multi-user select both diff the chosen selection against the case's
+current assignees and call `assignCase` / `unassignCase` for just the
+difference. The agent does the same via its `case__assign` /
+`case__unassign` tools.
+
 ### Slack: Save as Draft
 
 The `/cmd` creation modal exposes a **Draft mode** checkbox inside

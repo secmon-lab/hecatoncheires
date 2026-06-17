@@ -2,6 +2,7 @@ package interfaces
 
 import (
 	"context"
+	"time"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
@@ -38,6 +39,21 @@ type CaseRepository interface {
 
 	// Update updates an existing case
 	Update(ctx context.Context, workspaceID string, c *model.Case) (*model.Case, error)
+
+	// AddAssignees atomically unions the given Slack user IDs into the case's
+	// assignee set and returns the updated case. IDs already present are
+	// ignored. Unlike Update (which replaces the whole assignee list and so
+	// races with concurrent edits), this reads and writes the case inside a
+	// single transaction, so simultaneous "assign me" actions cannot clobber
+	// one another. updatedAt is supplied by the caller — the repository never
+	// reads the clock. The full case document is rewritten, so model
+	// invariants are re-validated.
+	AddAssignees(ctx context.Context, workspaceID string, id int64, userIDs []string, updatedAt time.Time) (*model.Case, error)
+
+	// RemoveAssignees atomically removes the given Slack user IDs from the
+	// case's assignee set and returns the updated case. IDs not present are
+	// ignored. Concurrency and updatedAt semantics match AddAssignees.
+	RemoveAssignees(ctx context.Context, workspaceID string, id int64, userIDs []string, updatedAt time.Time) (*model.Case, error)
 
 	// Delete deletes a case by ID
 	Delete(ctx context.Context, workspaceID string, id int64) error

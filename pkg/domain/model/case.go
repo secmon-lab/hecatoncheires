@@ -171,6 +171,57 @@ func (c *Case) SubmitDraft() error {
 	return nil
 }
 
+// AssignUsers adds the given Slack user IDs to AssigneeIDs as a set union:
+// IDs already present are ignored, blank IDs are skipped, and genuinely new
+// IDs are appended in input order so existing order is preserved. It reports
+// whether the assignee set actually changed, letting callers skip a no-op
+// write. This is the in-memory half of the atomic assign operation; the
+// repository supplies the concurrency guarantee (transaction / lock).
+func (c *Case) AssignUsers(userIDs []string) bool {
+	existing := make(map[string]struct{}, len(c.AssigneeIDs))
+	for _, id := range c.AssigneeIDs {
+		existing[id] = struct{}{}
+	}
+	changed := false
+	for _, id := range userIDs {
+		if id == "" {
+			continue
+		}
+		if _, ok := existing[id]; ok {
+			continue
+		}
+		existing[id] = struct{}{}
+		c.AssigneeIDs = append(c.AssigneeIDs, id)
+		changed = true
+	}
+	return changed
+}
+
+// UnassignUsers removes the given Slack user IDs from AssigneeIDs, preserving
+// the order of the IDs that remain. Removing an ID that is not present is a
+// no-op. It reports whether the assignee set actually changed.
+func (c *Case) UnassignUsers(userIDs []string) bool {
+	if len(c.AssigneeIDs) == 0 || len(userIDs) == 0 {
+		return false
+	}
+	remove := make(map[string]struct{}, len(userIDs))
+	for _, id := range userIDs {
+		remove[id] = struct{}{}
+	}
+	kept := make([]string, 0, len(c.AssigneeIDs))
+	for _, id := range c.AssigneeIDs {
+		if _, drop := remove[id]; drop {
+			continue
+		}
+		kept = append(kept, id)
+	}
+	if len(kept) == len(c.AssigneeIDs) {
+		return false
+	}
+	c.AssigneeIDs = kept
+	return true
+}
+
 // IsCaseAccessible checks if a user has access to a case.
 // Non-private cases are always accessible.
 // Private cases are accessible only if the userID is in ChannelUserIDs.

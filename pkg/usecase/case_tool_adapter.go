@@ -34,12 +34,17 @@ func (a *caseToolAdapter) UpdateCase(ctx context.Context, workspaceID string, id
 		Description: patch.Description,
 		Fields:      patch.Fields,
 	}
-	if patch.HasAssign {
-		in.SetAssignees(patch.AssigneeIDs)
-	}
 	return a.uc.UpdateCase(ctx, workspaceID, id, in)
 }
 
 func (a *caseToolAdapter) UpdateCaseStatus(ctx context.Context, workspaceID string, id int64, boardStatus string) (*model.Case, error) {
 	return a.uc.UpdateCaseStatus(ctx, workspaceID, id, boardStatus)
+}
+
+func (a *caseToolAdapter) AssignCase(ctx context.Context, workspaceID string, id int64, userIDs []string) (*model.Case, error) {
+	return a.uc.AssignCase(ctx, workspaceID, id, userIDs)
+}
+
+func (a *caseToolAdapter) UnassignCase(ctx context.Context, workspaceID string, id int64, userIDs []string) (*model.Case, error) {
+	return a.uc.UnassignCase(ctx, workspaceID, id, userIDs)
 }

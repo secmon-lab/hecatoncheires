@@ -2,8 +2,9 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery } from '@apollo/client'
 import UserSelect from '../components/UserSelect'
-import { CREATE_CASE, UPDATE_CASE, GET_CASE, GET_CASES } from '../graphql/case'
+import { CREATE_CASE, UPDATE_CASE, ASSIGN_CASE, UNASSIGN_CASE, GET_CASE, GET_CASES } from '../graphql/case'
 import { CREATE_DRAFT, SUBMIT_DRAFT, GET_DRAFTS } from '../graphql/drafts'
+import { diffAssignees } from '../utils/assignees'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import { useWorkspace } from '../contexts/workspace-context'
@@ -94,6 +95,24 @@ export default function CaseForm({ caseItem, onClose, onSubmitted }: CaseFormPro
       : [],
     awaitRefetchQueries: true,
   })
+  const [assignCase] = useMutation(ASSIGN_CASE)
+  const [unassignCase] = useMutation(UNASSIGN_CASE)
+
+  // reconcileAssignees persists the modal's assignee selection through the
+  // delta assign/unassign mutations. Assignees are not part of the
+  // updateCase / submitDraft inputs (a full-list replace there could clobber a
+  // concurrent edit), so on the edit paths we diff the picker selection
+  // against the case's original assignees and apply only the change.
+  const reconcileAssignees = async (id: number) => {
+    if (!caseItem) return
+    const { toAdd, toRemove } = diffAssignees(caseItem.assigneeIDs ?? [], assigneeIDs)
+    if (toAdd.length > 0) {
+      await assignCase({ variables: { workspaceId: currentWorkspace!.id, id, userIDs: toAdd } })
+    }
+    if (toRemove.length > 0) {
+      await unassignCase({ variables: { workspaceId: currentWorkspace!.id, id, userIDs: toRemove } })
+    }
+  }
 
   const fields = configData?.fieldConfiguration?.fields || []
   const caseLabel = configData?.fieldConfiguration?.labels?.case || 'Case'
@@ -136,6 +155,7 @@ export default function CaseForm({ caseItem, onClose, onSubmitted }: CaseFormPro
         // required-field validation and channel-activation see the same
         // payload. Splitting these across two roundtrips would let a
         // failed promotion leave an already-edited DRAFT behind.
+        await reconcileAssignees(caseItem.id)
         await submitDraft({
           variables: {
             workspaceId: currentWorkspace!.id,
@@ -143,7 +163,6 @@ export default function CaseForm({ caseItem, onClose, onSubmitted }: CaseFormPro
             input: {
               title,
               description,
-              assigneeIDs,
               fields: fieldArr,
             },
           },
@@ -158,11 +177,11 @@ export default function CaseForm({ caseItem, onClose, onSubmitted }: CaseFormPro
               id: caseItem.id,
               title,
               description,
-              assigneeIDs,
               fields: fieldArr,
             },
           },
         })
+        await reconcileAssignees(caseItem.id)
         onClose()
       } else {
         await createCase({
@@ -201,11 +220,11 @@ export default function CaseForm({ caseItem, onClose, onSubmitted }: CaseFormPro
             id: caseItem.id,
             title,
             description,
-            assigneeIDs,
             fields: fieldArr,
           },
         },
       })
+      await reconcileAssignees(caseItem.id)
       onClose()
     } catch (e: any) {
       console.error('Draft overwrite failed', e)
