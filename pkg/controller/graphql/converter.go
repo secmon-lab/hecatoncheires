@@ -280,6 +280,37 @@ func actionArchiveFilterToScope(f *graphql1.ActionArchiveFilter) interfaces.Acti
 	}
 }
 
+// memoArchiveFilterToScope maps the optional GraphQL MemoArchiveFilter
+// to the domain MemoArchiveScope. nil maps to ActiveOnly to match the
+// schema-side default.
+func memoArchiveFilterToScope(f *graphql1.MemoArchiveFilter) interfaces.MemoArchiveScope {
+	if f == nil {
+		return interfaces.MemoArchiveScopeActiveOnly
+	}
+	switch *f {
+	case graphql1.MemoArchiveFilterArchived:
+		return interfaces.MemoArchiveScopeArchivedOnly
+	case graphql1.MemoArchiveFilterAll:
+		return interfaces.MemoArchiveScopeAll
+	default:
+		return interfaces.MemoArchiveScopeActiveOnly
+	}
+}
+
+// toGraphQLMemo converts a domain Memo to its GraphQL view.
+func toGraphQLMemo(m *model.Memo, workspaceID string) *graphql1.Memo {
+	return &graphql1.Memo{
+		ID:          string(m.ID),
+		WorkspaceID: workspaceID,
+		CaseID:      int(m.CaseID),
+		Title:       m.Title,
+		Fields:      toGraphQLFieldValues(m.FieldValues),
+		ArchivedAt:  m.ArchivedAt,
+		CreatedAt:   m.CreatedAt,
+		UpdatedAt:   m.UpdatedAt,
+	}
+}
+
 // toGraphQLFieldType converts a domain FieldType to GraphQL FieldType
 func toGraphQLFieldType(ft types.FieldType) graphql1.FieldType {
 	switch ft {

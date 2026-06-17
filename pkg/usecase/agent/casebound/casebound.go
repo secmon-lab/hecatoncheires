@@ -12,6 +12,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
+	memotool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/memo"
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
@@ -279,13 +280,28 @@ func (uc *UseCase) buildTools(req TurnRequest) []gollem.Tool {
 		})
 	}
 
-	all := make([]gollem.Tool, 0, len(coreTools)+len(slackTools)+len(notionTools)+len(githubTools)+len(webfetchTools)+len(caseTools))
+	// Case-scoped memo tools (memo__list/get/create/update/archive). Wired only
+	// when a MemoUC is configured and the workspace has a memo schema; the schema
+	// drives the field coercion in the create/update tools.
+	var memoTools []gollem.Tool
+	if d.MemoUC != nil && req.Workspace != nil && req.Workspace.MemoConfig.Enabled() {
+		memoTools = memotool.New(memotool.Deps{
+			Repo:        d.Repo,
+			WorkspaceID: wsID,
+			CaseID:      caseID,
+			MemoUC:      d.MemoUC,
+			Schema:      req.Workspace.MemoConfig.FieldSchema,
+		})
+	}
+
+	all := make([]gollem.Tool, 0, len(coreTools)+len(slackTools)+len(notionTools)+len(githubTools)+len(webfetchTools)+len(caseTools)+len(memoTools))
 	all = append(all, coreTools...)
 	all = append(all, slackTools...)
 	all = append(all, notionTools...)
 	all = append(all, githubTools...)
 	all = append(all, webfetchTools...)
 	all = append(all, caseTools...)
+	all = append(all, memoTools...)
 	return all
 }
 

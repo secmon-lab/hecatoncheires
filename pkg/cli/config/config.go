@@ -148,7 +148,19 @@ type AppConfig struct {
 	Assist    AssistSection       `toml:"assist"`
 	Action    *ActionSection      `toml:"action"`
 	Case      *CaseSection        `toml:"case"`
+	Memo      *MemoSection        `toml:"memo"`
 	Jobs      []JobSection        `toml:"job"`
+}
+
+// MemoSection represents the [memo] section in a TOML config. When omitted
+// (nil) or with no fields, the workspace does not enable the memo feature.
+type MemoSection struct {
+	// Description is the workspace's "strong definition" of the memo, injected
+	// into the agent system prompt and shown in the WebUI.
+	Description string `toml:"description"`
+	// Fields are the memo custom field definitions ([[memo.fields]]), reusing
+	// the same FieldDefinition schema as Case fields.
+	Fields []FieldDefinition `toml:"fields"`
 }
 
 // ActionSection represents the [action] section in a TOML config.
@@ -181,6 +193,7 @@ type WorkspaceConfig struct {
 	SlackInviteGroups    []string
 	SlackWelcomeMessages []string
 	FieldSchema          *domainConfig.FieldSchema
+	MemoConfig           *domainConfig.MemoConfig
 	ActionStatusSet      *model.ActionStatusSet
 	CompilePrompt        string
 	AssistPrompt         string
@@ -297,6 +310,24 @@ func (a *AppConfig) Validate() error {
 				goerr.V(FieldIDKey, field.ID))
 		}
 		fieldIDs[field.ID] = true
+	}
+
+	// [memo] is optional. When supplied, validate its field definitions with the
+	// same rules as case fields (ID pattern, name, type, option requirements) and
+	// enforce field-ID uniqueness so schema errors surface at startup.
+	if a.Memo != nil {
+		memoFieldIDs := make(map[string]bool)
+		for idx, field := range a.Memo.Fields {
+			if err := field.Validate(); err != nil {
+				return goerr.Wrap(err, "invalid memo field",
+					goerr.V(FieldIndexKey, idx))
+			}
+			if memoFieldIDs[field.ID] {
+				return goerr.Wrap(ErrDuplicateFieldID, "duplicate memo field ID",
+					goerr.V(FieldIDKey, field.ID))
+			}
+			memoFieldIDs[field.ID] = true
+		}
 	}
 
 	// [action] is optional. When supplied, build the ActionStatusSet eagerly so
@@ -592,6 +623,7 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 		SlackInviteGroups:    appCfg.Slack.Invite.Groups,
 		SlackWelcomeMessages: appCfg.Slack.WelcomeMessages,
 		FieldSchema:          appCfg.ToDomainFieldSchema(),
+		MemoConfig:           appCfg.ToDomainMemoConfig(),
 		ActionStatusSet:      statusSet,
 		CompilePrompt:        appCfg.Compile.Prompt,
 		AssistPrompt:         appCfg.Assist.Prompt,
@@ -638,6 +670,7 @@ func (a *AppConfig) Configure(c *cli.Command) ([]*WorkspaceConfig, *model.Worksp
 				Color:       wc.Color,
 			},
 			FieldSchema:           wc.FieldSchema,
+			MemoConfig:            wc.MemoConfig,
 			ActionStatusSet:       wc.ActionStatusSet,
 			SlackChannelPrefix:    wc.SlackChannelPrefix,
 			SlackTeamID:           wc.SlackTeamID,
@@ -660,10 +693,11 @@ func (a *AppConfig) Configure(c *cli.Command) ([]*WorkspaceConfig, *model.Worksp
 	return workspaceConfigs, registry, nil
 }
 
-// ToDomainFieldSchema converts AppConfig to domain FieldSchema
-func (a *AppConfig) ToDomainFieldSchema() *domainConfig.FieldSchema {
-	fields := make([]domainConfig.FieldDefinition, len(a.Fields))
-	for i, field := range a.Fields {
+// toDomainFields converts TOML FieldDefinition rows into their domain form.
+// Shared by case field schema and memo field schema conversion.
+func toDomainFields(in []FieldDefinition) []domainConfig.FieldDefinition {
+	fields := make([]domainConfig.FieldDefinition, len(in))
+	for i, field := range in {
 		options := make([]domainConfig.FieldOption, len(field.Options))
 		for j, opt := range field.Options {
 			options[j] = domainConfig.FieldOption{
@@ -683,7 +717,11 @@ func (a *AppConfig) ToDomainFieldSchema() *domainConfig.FieldSchema {
 			Options:     options,
 		}
 	}
+	return fields
+}
 
+// ToDomainFieldSchema converts AppConfig to domain FieldSchema
+func (a *AppConfig) ToDomainFieldSchema() *domainConfig.FieldSchema {
 	labels := domainConfig.EntityLabels{
 		Case: a.Labels.Case,
 	}
@@ -693,7 +731,22 @@ func (a *AppConfig) ToDomainFieldSchema() *domainConfig.FieldSchema {
 	}
 
 	return &domainConfig.FieldSchema{
-		Fields: fields,
+		Fields: toDomainFields(a.Fields),
 		Labels: labels,
+	}
+}
+
+// ToDomainMemoConfig converts the [memo] section to a domain MemoConfig.
+// Returns nil when [memo] is omitted, leaving the memo feature disabled for the
+// workspace.
+func (a *AppConfig) ToDomainMemoConfig() *domainConfig.MemoConfig {
+	if a.Memo == nil {
+		return nil
+	}
+	return &domainConfig.MemoConfig{
+		Description: a.Memo.Description,
+		FieldSchema: &domainConfig.FieldSchema{
+			Fields: toDomainFields(a.Memo.Fields),
+		},
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
+	memotool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/memo"
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
@@ -54,6 +55,10 @@ type CommonDeps struct {
 	// case__update_case_status) in case-bound mode. Optional: nil means the
 	// case-bound agent cannot edit the case itself (the tools are not built).
 	CaseUC casewriter.CaseMutator
+
+	// MemoUC backs the Case-scoped memo tools (memo__*) in case-bound mode.
+	// Optional: nil means the agent gets no memo tools.
+	MemoUC memotool.MemoMutator
 
 	// HeartbeatInterval / HeartbeatStaleAfter govern §5.3 turn-lock activity
 	// detection. Zero values fall back to DefaultHeartbeatInterval /

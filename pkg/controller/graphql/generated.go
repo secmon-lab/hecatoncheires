@@ -43,6 +43,7 @@ type ResolverRoot interface {
 	Action() ActionResolver
 	ActionEvent() ActionEventResolver
 	Case() CaseResolver
+	Memo() MemoResolver
 	Mutation() MutationResolver
 	Query() QueryResolver
 }
@@ -336,9 +337,26 @@ type ComplexityRoot struct {
 		NextCursor func(childComplexity int) int
 	}
 
+	Memo struct {
+		ArchivedAt func(childComplexity int) int
+		Case       func(childComplexity int) int
+		CaseID     func(childComplexity int) int
+		CreatedAt  func(childComplexity int) int
+		Fields     func(childComplexity int) int
+		ID         func(childComplexity int) int
+		Title      func(childComplexity int) int
+		UpdatedAt  func(childComplexity int) int
+	}
+
+	MemoConfiguration struct {
+		Description func(childComplexity int) int
+		Fields      func(childComplexity int) int
+	}
+
 	Mutation struct {
 		AddActionStep           func(childComplexity int, workspaceID string, input graphql1.AddActionStepInput) int
 		ArchiveAction           func(childComplexity int, workspaceID string, id int) int
+		ArchiveMemo             func(childComplexity int, workspaceID string, caseID int, id string) int
 		AssignCase              func(childComplexity int, workspaceID string, id int, userIDs []string) int
 		CloseCase               func(childComplexity int, workspaceID string, id int) int
 		CreateAction            func(childComplexity int, workspaceID string, input graphql1.CreateActionInput) int
@@ -346,6 +364,7 @@ type ComplexityRoot struct {
 		CreateCaseImport        func(childComplexity int, workspaceID string, input graphql1.CreateCaseImportInput) int
 		CreateDraft             func(childComplexity int, workspaceID string, input graphql1.CreateDraftInput) int
 		CreateGitHubSource      func(childComplexity int, workspaceID string, input graphql1.CreateGitHubSourceInput) int
+		CreateMemo              func(childComplexity int, workspaceID string, input graphql1.CreateMemoInput) int
 		CreateNotionDBSource    func(childComplexity int, workspaceID string, input graphql1.CreateNotionDBSourceInput) int
 		CreateNotionPageSource  func(childComplexity int, workspaceID string, input graphql1.CreateNotionPageSourceInput) int
 		CreateSlackSource       func(childComplexity int, workspaceID string, input graphql1.CreateSlackSourceInput) int
@@ -362,12 +381,14 @@ type ComplexityRoot struct {
 		SubmitDraft             func(childComplexity int, workspaceID string, id int, input *graphql1.SubmitDraftInput) int
 		SyncCaseChannelUsers    func(childComplexity int, workspaceID string, id int) int
 		UnarchiveAction         func(childComplexity int, workspaceID string, id int) int
+		UnarchiveMemo           func(childComplexity int, workspaceID string, caseID int, id string) int
 		UnassignCase            func(childComplexity int, workspaceID string, id int, userIDs []string) int
 		UpdateAction            func(childComplexity int, workspaceID string, input graphql1.UpdateActionInput) int
 		UpdateCase              func(childComplexity int, workspaceID string, input graphql1.UpdateCaseInput) int
 		UpdateCaseAgentSettings func(childComplexity int, workspaceID string, input graphql1.UpdateCaseAgentSettingsInput) int
 		UpdateCaseStatus        func(childComplexity int, workspaceID string, input graphql1.UpdateCaseStatusInput) int
 		UpdateGitHubSource      func(childComplexity int, workspaceID string, input graphql1.UpdateGitHubSourceInput) int
+		UpdateMemo              func(childComplexity int, workspaceID string, input graphql1.UpdateMemoInput) int
 		UpdateNotionDBSource    func(childComplexity int, workspaceID string, input graphql1.UpdateNotionDBSourceInput) int
 		UpdateNotionPageSource  func(childComplexity int, workspaceID string, input graphql1.UpdateNotionPageSourceInput) int
 		UpdateSlackSource       func(childComplexity int, workspaceID string, input graphql1.UpdateSlackSourceInput) int
@@ -419,6 +440,9 @@ type ComplexityRoot struct {
 		Health              func(childComplexity int) int
 		JobRunEvents        func(childComplexity int, workspaceID string, caseID int, runID string) int
 		JobRunLog           func(childComplexity int, workspaceID string, caseID int, runID string) int
+		Memo                func(childComplexity int, workspaceID string, caseID int, id string) int
+		MemoConfiguration   func(childComplexity int, workspaceID string) int
+		MemosByCase         func(childComplexity int, workspaceID string, caseID int, filter *graphql1.MemoArchiveFilter) int
 		OpenCaseActions     func(childComplexity int, workspaceID string) int
 		SlackJoinedChannels func(childComplexity int) int
 		SlackUsers          func(childComplexity int) int
@@ -525,6 +549,11 @@ type CaseResolver interface {
 
 	AgentSources(ctx context.Context, obj *graphql1.Case) ([]*graphql1.Source, error)
 }
+type MemoResolver interface {
+	Case(ctx context.Context, obj *graphql1.Memo) (*graphql1.Case, error)
+
+	Fields(ctx context.Context, obj *graphql1.Memo) ([]*graphql1.FieldValue, error)
+}
 type MutationResolver interface {
 	Noop(ctx context.Context) (*bool, error)
 	CreateCase(ctx context.Context, workspaceID string, input graphql1.CreateCaseInput) (*graphql1.Case, error)
@@ -563,6 +592,10 @@ type MutationResolver interface {
 	UpdateCaseAgentSettings(ctx context.Context, workspaceID string, input graphql1.UpdateCaseAgentSettingsInput) (*graphql1.Case, error)
 	CreateCaseImport(ctx context.Context, workspaceID string, input graphql1.CreateCaseImportInput) (*graphql1.ImportSession, error)
 	ExecuteCaseImport(ctx context.Context, workspaceID string, id string) (*graphql1.ImportSession, error)
+	CreateMemo(ctx context.Context, workspaceID string, input graphql1.CreateMemoInput) (*graphql1.Memo, error)
+	UpdateMemo(ctx context.Context, workspaceID string, input graphql1.UpdateMemoInput) (*graphql1.Memo, error)
+	ArchiveMemo(ctx context.Context, workspaceID string, caseID int, id string) (*graphql1.Memo, error)
+	UnarchiveMemo(ctx context.Context, workspaceID string, caseID int, id string) (*graphql1.Memo, error)
 }
 type QueryResolver interface {
 	Health(ctx context.Context) (string, error)
@@ -587,6 +620,9 @@ type QueryResolver interface {
 	JobRunLog(ctx context.Context, workspaceID string, caseID int, runID string) (*graphql1.JobRunLog, error)
 	JobRunEvents(ctx context.Context, workspaceID string, caseID int, runID string) ([]*graphql1.JobRunEvent, error)
 	CaseImport(ctx context.Context, workspaceID string, id string) (*graphql1.ImportSession, error)
+	MemosByCase(ctx context.Context, workspaceID string, caseID int, filter *graphql1.MemoArchiveFilter) ([]*graphql1.Memo, error)
+	Memo(ctx context.Context, workspaceID string, caseID int, id string) (*graphql1.Memo, error)
+	MemoConfiguration(ctx context.Context, workspaceID string) (*graphql1.MemoConfiguration, error)
 }
 
 type executableSchema struct {
@@ -1816,6 +1852,68 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.JobRunLogConnection.NextCursor(childComplexity), true
 
+	case "Memo.archivedAt":
+		if e.complexity.Memo.ArchivedAt == nil {
+			break
+		}
+
+		return e.complexity.Memo.ArchivedAt(childComplexity), true
+	case "Memo.case":
+		if e.complexity.Memo.Case == nil {
+			break
+		}
+
+		return e.complexity.Memo.Case(childComplexity), true
+	case "Memo.caseID":
+		if e.complexity.Memo.CaseID == nil {
+			break
+		}
+
+		return e.complexity.Memo.CaseID(childComplexity), true
+	case "Memo.createdAt":
+		if e.complexity.Memo.CreatedAt == nil {
+			break
+		}
+
+		return e.complexity.Memo.CreatedAt(childComplexity), true
+	case "Memo.fields":
+		if e.complexity.Memo.Fields == nil {
+			break
+		}
+
+		return e.complexity.Memo.Fields(childComplexity), true
+	case "Memo.id":
+		if e.complexity.Memo.ID == nil {
+			break
+		}
+
+		return e.complexity.Memo.ID(childComplexity), true
+	case "Memo.title":
+		if e.complexity.Memo.Title == nil {
+			break
+		}
+
+		return e.complexity.Memo.Title(childComplexity), true
+	case "Memo.updatedAt":
+		if e.complexity.Memo.UpdatedAt == nil {
+			break
+		}
+
+		return e.complexity.Memo.UpdatedAt(childComplexity), true
+
+	case "MemoConfiguration.description":
+		if e.complexity.MemoConfiguration.Description == nil {
+			break
+		}
+
+		return e.complexity.MemoConfiguration.Description(childComplexity), true
+	case "MemoConfiguration.fields":
+		if e.complexity.MemoConfiguration.Fields == nil {
+			break
+		}
+
+		return e.complexity.MemoConfiguration.Fields(childComplexity), true
+
 	case "Mutation.addActionStep":
 		if e.complexity.Mutation.AddActionStep == nil {
 			break
@@ -1838,6 +1936,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.ArchiveAction(childComplexity, args["workspaceId"].(string), args["id"].(int)), true
+	case "Mutation.archiveMemo":
+		if e.complexity.Mutation.ArchiveMemo == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_archiveMemo_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.ArchiveMemo(childComplexity, args["workspaceId"].(string), args["caseID"].(int), args["id"].(string)), true
 	case "Mutation.assignCase":
 		if e.complexity.Mutation.AssignCase == nil {
 			break
@@ -1915,6 +2024,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.CreateGitHubSource(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.CreateGitHubSourceInput)), true
+	case "Mutation.createMemo":
+		if e.complexity.Mutation.CreateMemo == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_createMemo_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.CreateMemo(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.CreateMemoInput)), true
 	case "Mutation.createNotionDBSource":
 		if e.complexity.Mutation.CreateNotionDBSource == nil {
 			break
@@ -2086,6 +2206,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.UnarchiveAction(childComplexity, args["workspaceId"].(string), args["id"].(int)), true
+	case "Mutation.unarchiveMemo":
+		if e.complexity.Mutation.UnarchiveMemo == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_unarchiveMemo_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.UnarchiveMemo(childComplexity, args["workspaceId"].(string), args["caseID"].(int), args["id"].(string)), true
 	case "Mutation.unassignCase":
 		if e.complexity.Mutation.UnassignCase == nil {
 			break
@@ -2152,6 +2283,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.UpdateGitHubSource(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.UpdateGitHubSourceInput)), true
+	case "Mutation.updateMemo":
+		if e.complexity.Mutation.UpdateMemo == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_updateMemo_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.UpdateMemo(childComplexity, args["workspaceId"].(string), args["input"].(graphql1.UpdateMemoInput)), true
 	case "Mutation.updateNotionDBSource":
 		if e.complexity.Mutation.UpdateNotionDBSource == nil {
 			break
@@ -2468,6 +2610,39 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Query.JobRunLog(childComplexity, args["workspaceId"].(string), args["caseId"].(int), args["runId"].(string)), true
+	case "Query.memo":
+		if e.complexity.Query.Memo == nil {
+			break
+		}
+
+		args, err := ec.field_Query_memo_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Query.Memo(childComplexity, args["workspaceId"].(string), args["caseID"].(int), args["id"].(string)), true
+	case "Query.memoConfiguration":
+		if e.complexity.Query.MemoConfiguration == nil {
+			break
+		}
+
+		args, err := ec.field_Query_memoConfiguration_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Query.MemoConfiguration(childComplexity, args["workspaceId"].(string)), true
+	case "Query.memosByCase":
+		if e.complexity.Query.MemosByCase == nil {
+			break
+		}
+
+		args, err := ec.field_Query_memosByCase_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Query.MemosByCase(childComplexity, args["workspaceId"].(string), args["caseID"].(int), args["filter"].(*graphql1.MemoArchiveFilter)), true
 	case "Query.openCaseActions":
 		if e.complexity.Query.OpenCaseActions == nil {
 			break
@@ -2793,6 +2968,7 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 		ec.unmarshalInputCreateCaseInput,
 		ec.unmarshalInputCreateDraftInput,
 		ec.unmarshalInputCreateGitHubSourceInput,
+		ec.unmarshalInputCreateMemoInput,
 		ec.unmarshalInputCreateNotionDBSourceInput,
 		ec.unmarshalInputCreateNotionPageSourceInput,
 		ec.unmarshalInputCreateSlackSourceInput,
@@ -2806,6 +2982,7 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 		ec.unmarshalInputUpdateCaseInput,
 		ec.unmarshalInputUpdateCaseStatusInput,
 		ec.unmarshalInputUpdateGitHubSourceInput,
+		ec.unmarshalInputUpdateMemoInput,
 		ec.unmarshalInputUpdateNotionDBSourceInput,
 		ec.unmarshalInputUpdateNotionPageSourceInput,
 		ec.unmarshalInputUpdateSlackSourceInput,
@@ -3161,6 +3338,53 @@ enum ActionArchiveFilter {
   # ALL returns both active and archived actions. Intended for cleanup /
   # batch operations; UI views should use ACTIVE or ARCHIVED.
   ALL
+}
+
+# MemoArchiveFilter selects which archive slice a memo list resolver returns.
+enum MemoArchiveFilter {
+  # ACTIVE returns only non-archived memos. Default for memosByCase.
+  ACTIVE
+  # ARCHIVED returns only archived memos.
+  ARCHIVED
+  # ALL returns both active and archived memos.
+  ALL
+}
+
+# Memo is a Case-scoped note that records facts, observations, hypotheses,
+# or decisions accumulated while working the Case. Like a Case it carries
+# workspace-defined custom field values.
+type Memo {
+  id: ID!
+  caseID: Int!
+  case: Case
+  title: String!
+  fields: [FieldValue!]!
+  # archivedAt is null for an active memo and non-null once archived.
+  # There is no derived ` + "`" + `archived` + "`" + ` boolean; callers derive it from archivedAt != null.
+  archivedAt: Time
+  createdAt: Time!
+  updatedAt: Time!
+}
+
+# MemoConfiguration describes a workspace's memo configuration for the WebUI.
+# When the workspace has not enabled memos, the resolver returns a non-null
+# object with an empty fields list; the frontend uses that to hide the Memos tab.
+type MemoConfiguration {
+  description: String!
+  fields: [FieldDefinition!]!
+}
+
+input CreateMemoInput {
+  caseID: Int!
+  title: String!
+  fields: [FieldValueInput!]
+}
+
+input UpdateMemoInput {
+  id: ID!
+  caseID: Int!
+  title: String
+  fields: [FieldValueInput!]
 }
 
 # ActionEvent records a single change to an Action, surfaced in the
@@ -3526,6 +3750,15 @@ type Query {
   # the resolver returns "not found" for sessions owned by other users even
   # when the ID is known.
   caseImport(workspaceId: String!, id: ID!): ImportSession!
+
+  # Memos — Case-scoped notes with workspace-defined custom fields.
+  # ` + "`" + `filter` + "`" + ` defaults to ACTIVE so default views never surface archived memos.
+  memosByCase(workspaceId: String!, caseID: Int!, filter: MemoArchiveFilter = ACTIVE): [Memo!]!
+  memo(workspaceId: String!, caseID: Int!, id: ID!): Memo
+  # memoConfiguration returns the workspace memo feature settings. The result
+  # is non-null; when memos are disabled the returned object has an empty
+  # fields list so the frontend can hide the Memos tab.
+  memoConfiguration(workspaceId: String!): MemoConfiguration!
 }
 
 type Mutation {
@@ -3618,6 +3851,14 @@ type Mutation {
   # since createCaseImport (issues are appended to the session for the
   # detail UI to display).
   executeCaseImport(workspaceId: String!, id: ID!): ImportSession!
+
+  # Memos — Case-scoped notes with workspace-defined custom fields.
+  createMemo(workspaceId: String!, input: CreateMemoInput!): Memo!
+  updateMemo(workspaceId: String!, input: UpdateMemoInput!): Memo!
+  # archiveMemo soft-deletes a memo (sets archivedAt). Idempotent.
+  archiveMemo(workspaceId: String!, caseID: Int!, id: ID!): Memo!
+  # unarchiveMemo restores a soft-deleted memo (clears archivedAt).
+  unarchiveMemo(workspaceId: String!, caseID: Int!, id: ID!): Memo!
 }
 
 input UpdateCaseAgentSettingsInput {
@@ -3951,6 +4192,27 @@ func (ec *executionContext) field_Mutation_archiveAction_args(ctx context.Contex
 	return args, nil
 }
 
+func (ec *executionContext) field_Mutation_archiveMemo_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "caseID", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["caseID"] = arg1
+	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNID2string)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg2
+	return args, nil
+}
+
 func (ec *executionContext) field_Mutation_assignCase_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -4061,6 +4323,22 @@ func (ec *executionContext) field_Mutation_createGitHubSource_args(ctx context.C
 	}
 	args["workspaceId"] = arg0
 	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNCreateGitHubSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateGitHubSourceInput)
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_createMemo_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNCreateMemoInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateMemoInput)
 	if err != nil {
 		return nil, err
 	}
@@ -4313,6 +4591,27 @@ func (ec *executionContext) field_Mutation_unarchiveAction_args(ctx context.Cont
 	return args, nil
 }
 
+func (ec *executionContext) field_Mutation_unarchiveMemo_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "caseID", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["caseID"] = arg1
+	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNID2string)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg2
+	return args, nil
+}
+
 func (ec *executionContext) field_Mutation_unassignCase_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -4407,6 +4706,22 @@ func (ec *executionContext) field_Mutation_updateGitHubSource_args(ctx context.C
 	}
 	args["workspaceId"] = arg0
 	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNUpdateGitHubSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateGitHubSourceInput)
+	if err != nil {
+		return nil, err
+	}
+	args["input"] = arg1
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_updateMemo_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "input", ec.unmarshalNUpdateMemoInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateMemoInput)
 	if err != nil {
 		return nil, err
 	}
@@ -4746,6 +5061,59 @@ func (ec *executionContext) field_Query_jobRunLog_args(ctx context.Context, rawA
 		return nil, err
 	}
 	args["runId"] = arg2
+	return args, nil
+}
+
+func (ec *executionContext) field_Query_memoConfiguration_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_Query_memo_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "caseID", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["caseID"] = arg1
+	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "id", ec.unmarshalNID2string)
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg2
+	return args, nil
+}
+
+func (ec *executionContext) field_Query_memosByCase_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "caseID", ec.unmarshalNInt2int)
+	if err != nil {
+		return nil, err
+	}
+	args["caseID"] = arg1
+	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "filter", ec.unmarshalOMemoArchiveFilter2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐMemoArchiveFilter)
+	if err != nil {
+		return nil, err
+	}
+	args["filter"] = arg2
 	return args, nil
 }
 
@@ -11070,6 +11438,368 @@ func (ec *executionContext) fieldContext_JobRunLogConnection_nextCursor(_ contex
 	return fc, nil
 }
 
+func (ec *executionContext) _Memo_id(ctx context.Context, field graphql.CollectedField, obj *graphql1.Memo) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Memo_id,
+		func(ctx context.Context) (any, error) {
+			return obj.ID, nil
+		},
+		nil,
+		ec.marshalNID2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Memo_id(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Memo",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type ID does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Memo_caseID(ctx context.Context, field graphql.CollectedField, obj *graphql1.Memo) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Memo_caseID,
+		func(ctx context.Context) (any, error) {
+			return obj.CaseID, nil
+		},
+		nil,
+		ec.marshalNInt2int,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Memo_caseID(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Memo",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Memo_case(ctx context.Context, field graphql.CollectedField, obj *graphql1.Memo) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Memo_case,
+		func(ctx context.Context) (any, error) {
+			return ec.resolvers.Memo().Case(ctx, obj)
+		},
+		nil,
+		ec.marshalOCase2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCase,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Memo_case(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Memo",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Case_id(ctx, field)
+			case "title":
+				return ec.fieldContext_Case_title(ctx, field)
+			case "description":
+				return ec.fieldContext_Case_description(ctx, field)
+			case "status":
+				return ec.fieldContext_Case_status(ctx, field)
+			case "isPrivate":
+				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "accessDenied":
+				return ec.fieldContext_Case_accessDenied(ctx, field)
+			case "channelUserCount":
+				return ec.fieldContext_Case_channelUserCount(ctx, field)
+			case "channelUsers":
+				return ec.fieldContext_Case_channelUsers(ctx, field)
+			case "reporterID":
+				return ec.fieldContext_Case_reporterID(ctx, field)
+			case "reporter":
+				return ec.fieldContext_Case_reporter(ctx, field)
+			case "assigneeIDs":
+				return ec.fieldContext_Case_assigneeIDs(ctx, field)
+			case "assignees":
+				return ec.fieldContext_Case_assignees(ctx, field)
+			case "slackChannelID":
+				return ec.fieldContext_Case_slackChannelID(ctx, field)
+			case "slackChannelName":
+				return ec.fieldContext_Case_slackChannelName(ctx, field)
+			case "slackChannelURL":
+				return ec.fieldContext_Case_slackChannelURL(ctx, field)
+			case "slackThreadTS":
+				return ec.fieldContext_Case_slackThreadTS(ctx, field)
+			case "isThreadBound":
+				return ec.fieldContext_Case_isThreadBound(ctx, field)
+			case "boardStatus":
+				return ec.fieldContext_Case_boardStatus(ctx, field)
+			case "fields":
+				return ec.fieldContext_Case_fields(ctx, field)
+			case "actions":
+				return ec.fieldContext_Case_actions(ctx, field)
+			case "slackMessages":
+				return ec.fieldContext_Case_slackMessages(ctx, field)
+			case "agentAdditionalPrompt":
+				return ec.fieldContext_Case_agentAdditionalPrompt(ctx, field)
+			case "agentSources":
+				return ec.fieldContext_Case_agentSources(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Case_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Case_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Case", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Memo_title(ctx context.Context, field graphql.CollectedField, obj *graphql1.Memo) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Memo_title,
+		func(ctx context.Context) (any, error) {
+			return obj.Title, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Memo_title(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Memo",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Memo_fields(ctx context.Context, field graphql.CollectedField, obj *graphql1.Memo) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Memo_fields,
+		func(ctx context.Context) (any, error) {
+			return ec.resolvers.Memo().Fields(ctx, obj)
+		},
+		nil,
+		ec.marshalNFieldValue2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐFieldValueᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Memo_fields(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Memo",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "fieldId":
+				return ec.fieldContext_FieldValue_fieldId(ctx, field)
+			case "value":
+				return ec.fieldContext_FieldValue_value(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type FieldValue", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Memo_archivedAt(ctx context.Context, field graphql.CollectedField, obj *graphql1.Memo) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Memo_archivedAt,
+		func(ctx context.Context) (any, error) {
+			return obj.ArchivedAt, nil
+		},
+		nil,
+		ec.marshalOTime2ᚖtimeᚐTime,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Memo_archivedAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Memo",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Memo_createdAt(ctx context.Context, field graphql.CollectedField, obj *graphql1.Memo) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Memo_createdAt,
+		func(ctx context.Context) (any, error) {
+			return obj.CreatedAt, nil
+		},
+		nil,
+		ec.marshalNTime2timeᚐTime,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Memo_createdAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Memo",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Memo_updatedAt(ctx context.Context, field graphql.CollectedField, obj *graphql1.Memo) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Memo_updatedAt,
+		func(ctx context.Context) (any, error) {
+			return obj.UpdatedAt, nil
+		},
+		nil,
+		ec.marshalNTime2timeᚐTime,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Memo_updatedAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Memo",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Time does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _MemoConfiguration_description(ctx context.Context, field graphql.CollectedField, obj *graphql1.MemoConfiguration) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_MemoConfiguration_description,
+		func(ctx context.Context) (any, error) {
+			return obj.Description, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_MemoConfiguration_description(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "MemoConfiguration",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _MemoConfiguration_fields(ctx context.Context, field graphql.CollectedField, obj *graphql1.MemoConfiguration) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_MemoConfiguration_fields,
+		func(ctx context.Context) (any, error) {
+			return obj.Fields, nil
+		},
+		nil,
+		ec.marshalNFieldDefinition2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐFieldDefinitionᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_MemoConfiguration_fields(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "MemoConfiguration",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_FieldDefinition_id(ctx, field)
+			case "name":
+				return ec.fieldContext_FieldDefinition_name(ctx, field)
+			case "type":
+				return ec.fieldContext_FieldDefinition_type(ctx, field)
+			case "required":
+				return ec.fieldContext_FieldDefinition_required(ctx, field)
+			case "description":
+				return ec.fieldContext_FieldDefinition_description(ctx, field)
+			case "options":
+				return ec.fieldContext_FieldDefinition_options(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type FieldDefinition", field.Name)
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Mutation_noop(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -13655,6 +14385,242 @@ func (ec *executionContext) fieldContext_Mutation_executeCaseImport(ctx context.
 	return fc, nil
 }
 
+func (ec *executionContext) _Mutation_createMemo(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_createMemo,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().CreateMemo(ctx, fc.Args["workspaceId"].(string), fc.Args["input"].(graphql1.CreateMemoInput))
+		},
+		nil,
+		ec.marshalNMemo2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐMemo,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_createMemo(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Memo_id(ctx, field)
+			case "caseID":
+				return ec.fieldContext_Memo_caseID(ctx, field)
+			case "case":
+				return ec.fieldContext_Memo_case(ctx, field)
+			case "title":
+				return ec.fieldContext_Memo_title(ctx, field)
+			case "fields":
+				return ec.fieldContext_Memo_fields(ctx, field)
+			case "archivedAt":
+				return ec.fieldContext_Memo_archivedAt(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Memo_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Memo_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Memo", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_createMemo_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_updateMemo(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_updateMemo,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().UpdateMemo(ctx, fc.Args["workspaceId"].(string), fc.Args["input"].(graphql1.UpdateMemoInput))
+		},
+		nil,
+		ec.marshalNMemo2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐMemo,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_updateMemo(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Memo_id(ctx, field)
+			case "caseID":
+				return ec.fieldContext_Memo_caseID(ctx, field)
+			case "case":
+				return ec.fieldContext_Memo_case(ctx, field)
+			case "title":
+				return ec.fieldContext_Memo_title(ctx, field)
+			case "fields":
+				return ec.fieldContext_Memo_fields(ctx, field)
+			case "archivedAt":
+				return ec.fieldContext_Memo_archivedAt(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Memo_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Memo_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Memo", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_updateMemo_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_archiveMemo(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_archiveMemo,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().ArchiveMemo(ctx, fc.Args["workspaceId"].(string), fc.Args["caseID"].(int), fc.Args["id"].(string))
+		},
+		nil,
+		ec.marshalNMemo2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐMemo,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_archiveMemo(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Memo_id(ctx, field)
+			case "caseID":
+				return ec.fieldContext_Memo_caseID(ctx, field)
+			case "case":
+				return ec.fieldContext_Memo_case(ctx, field)
+			case "title":
+				return ec.fieldContext_Memo_title(ctx, field)
+			case "fields":
+				return ec.fieldContext_Memo_fields(ctx, field)
+			case "archivedAt":
+				return ec.fieldContext_Memo_archivedAt(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Memo_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Memo_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Memo", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_archiveMemo_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_unarchiveMemo(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_unarchiveMemo,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().UnarchiveMemo(ctx, fc.Args["workspaceId"].(string), fc.Args["caseID"].(int), fc.Args["id"].(string))
+		},
+		nil,
+		ec.marshalNMemo2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐMemo,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_unarchiveMemo(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Memo_id(ctx, field)
+			case "caseID":
+				return ec.fieldContext_Memo_caseID(ctx, field)
+			case "case":
+				return ec.fieldContext_Memo_case(ctx, field)
+			case "title":
+				return ec.fieldContext_Memo_title(ctx, field)
+			case "fields":
+				return ec.fieldContext_Memo_fields(ctx, field)
+			case "archivedAt":
+				return ec.fieldContext_Memo_archivedAt(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Memo_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Memo_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Memo", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_unarchiveMemo_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _NotionDBConfig_databaseID(ctx context.Context, field graphql.CollectedField, obj *graphql1.NotionDBConfig) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -15477,6 +16443,171 @@ func (ec *executionContext) fieldContext_Query_caseImport(ctx context.Context, f
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Query_caseImport_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_memosByCase(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Query_memosByCase,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Query().MemosByCase(ctx, fc.Args["workspaceId"].(string), fc.Args["caseID"].(int), fc.Args["filter"].(*graphql1.MemoArchiveFilter))
+		},
+		nil,
+		ec.marshalNMemo2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐMemoᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Query_memosByCase(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Memo_id(ctx, field)
+			case "caseID":
+				return ec.fieldContext_Memo_caseID(ctx, field)
+			case "case":
+				return ec.fieldContext_Memo_case(ctx, field)
+			case "title":
+				return ec.fieldContext_Memo_title(ctx, field)
+			case "fields":
+				return ec.fieldContext_Memo_fields(ctx, field)
+			case "archivedAt":
+				return ec.fieldContext_Memo_archivedAt(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Memo_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Memo_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Memo", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_memosByCase_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_memo(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Query_memo,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Query().Memo(ctx, fc.Args["workspaceId"].(string), fc.Args["caseID"].(int), fc.Args["id"].(string))
+		},
+		nil,
+		ec.marshalOMemo2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐMemo,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Query_memo(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Memo_id(ctx, field)
+			case "caseID":
+				return ec.fieldContext_Memo_caseID(ctx, field)
+			case "case":
+				return ec.fieldContext_Memo_case(ctx, field)
+			case "title":
+				return ec.fieldContext_Memo_title(ctx, field)
+			case "fields":
+				return ec.fieldContext_Memo_fields(ctx, field)
+			case "archivedAt":
+				return ec.fieldContext_Memo_archivedAt(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Memo_createdAt(ctx, field)
+			case "updatedAt":
+				return ec.fieldContext_Memo_updatedAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Memo", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_memo_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_memoConfiguration(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Query_memoConfiguration,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Query().MemoConfiguration(ctx, fc.Args["workspaceId"].(string))
+		},
+		nil,
+		ec.marshalNMemoConfiguration2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐMemoConfiguration,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Query_memoConfiguration(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "description":
+				return ec.fieldContext_MemoConfiguration_description(ctx, field)
+			case "fields":
+				return ec.fieldContext_MemoConfiguration_fields(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type MemoConfiguration", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_memoConfiguration_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -18478,6 +19609,47 @@ func (ec *executionContext) unmarshalInputCreateGitHubSourceInput(ctx context.Co
 	return it, nil
 }
 
+func (ec *executionContext) unmarshalInputCreateMemoInput(ctx context.Context, obj any) (graphql1.CreateMemoInput, error) {
+	var it graphql1.CreateMemoInput
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"caseID", "title", "fields"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "caseID":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("caseID"))
+			data, err := ec.unmarshalNInt2int(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.CaseID = data
+		case "title":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("title"))
+			data, err := ec.unmarshalNString2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Title = data
+		case "fields":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("fields"))
+			data, err := ec.unmarshalOFieldValueInput2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐFieldValueInputᚄ(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Fields = data
+		}
+	}
+
+	return it, nil
+}
+
 func (ec *executionContext) unmarshalInputCreateNotionDBSourceInput(ctx context.Context, obj any) (graphql1.CreateNotionDBSourceInput, error) {
 	var it graphql1.CreateNotionDBSourceInput
 	asMap := map[string]any{}
@@ -19089,6 +20261,54 @@ func (ec *executionContext) unmarshalInputUpdateGitHubSourceInput(ctx context.Co
 				return it, err
 			}
 			it.Enabled = data
+		}
+	}
+
+	return it, nil
+}
+
+func (ec *executionContext) unmarshalInputUpdateMemoInput(ctx context.Context, obj any) (graphql1.UpdateMemoInput, error) {
+	var it graphql1.UpdateMemoInput
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"id", "caseID", "title", "fields"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "id":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("id"))
+			data, err := ec.unmarshalNID2string(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.ID = data
+		case "caseID":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("caseID"))
+			data, err := ec.unmarshalNInt2int(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.CaseID = data
+		case "title":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("title"))
+			data, err := ec.unmarshalOString2ᚖstring(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Title = data
+		case "fields":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("fields"))
+			data, err := ec.unmarshalOFieldValueInput2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐFieldValueInputᚄ(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Fields = data
 		}
 	}
 
@@ -21765,6 +22985,180 @@ func (ec *executionContext) _JobRunLogConnection(ctx context.Context, sel ast.Se
 	return out
 }
 
+var memoImplementors = []string{"Memo"}
+
+func (ec *executionContext) _Memo(ctx context.Context, sel ast.SelectionSet, obj *graphql1.Memo) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, memoImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("Memo")
+		case "id":
+			out.Values[i] = ec._Memo_id(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "caseID":
+			out.Values[i] = ec._Memo_caseID(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "case":
+			field := field
+
+			innerFunc := func(ctx context.Context, _ *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Memo_case(ctx, field, obj)
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "title":
+			out.Values[i] = ec._Memo_title(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "fields":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Memo_fields(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.Deferrable != nil {
+				dfs, ok := deferred[field.Deferrable.Label]
+				di := 0
+				if ok {
+					dfs.AddField(field)
+					di = len(dfs.Values) - 1
+				} else {
+					dfs = graphql.NewFieldSet([]graphql.CollectedField{field})
+					deferred[field.Deferrable.Label] = dfs
+				}
+				dfs.Concurrently(di, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, dfs)
+				})
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "archivedAt":
+			out.Values[i] = ec._Memo_archivedAt(ctx, field, obj)
+		case "createdAt":
+			out.Values[i] = ec._Memo_createdAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "updatedAt":
+			out.Values[i] = ec._Memo_updatedAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var memoConfigurationImplementors = []string{"MemoConfiguration"}
+
+func (ec *executionContext) _MemoConfiguration(ctx context.Context, sel ast.SelectionSet, obj *graphql1.MemoConfiguration) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, memoConfigurationImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("MemoConfiguration")
+		case "description":
+			out.Values[i] = ec._MemoConfiguration_description(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "fields":
+			out.Values[i] = ec._MemoConfiguration_fields(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
 var mutationImplementors = []string{"Mutation"}
 
 func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet) graphql.Marshaler {
@@ -22036,6 +23430,34 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 		case "executeCaseImport":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_executeCaseImport(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "createMemo":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_createMemo(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "updateMemo":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_updateMemo(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "archiveMemo":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_archiveMemo(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "unarchiveMemo":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_unarchiveMemo(ctx, field)
 			})
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
@@ -22740,6 +24162,69 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 					}
 				}()
 				res = ec._Query_caseImport(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "memosByCase":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_memosByCase(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "memo":
+			field := field
+
+			innerFunc := func(ctx context.Context, _ *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_memo(ctx, field)
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "memoConfiguration":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_memoConfiguration(ctx, field)
 				if res == graphql.Null {
 					atomic.AddUint32(&fs.Invalids, 1)
 				}
@@ -24102,6 +25587,11 @@ func (ec *executionContext) unmarshalNCreateGitHubSourceInput2githubᚗcomᚋsec
 	return res, graphql.ErrorOnPath(ctx, err)
 }
 
+func (ec *executionContext) unmarshalNCreateMemoInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateMemoInput(ctx context.Context, v any) (graphql1.CreateMemoInput, error) {
+	res, err := ec.unmarshalInputCreateMemoInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
 func (ec *executionContext) unmarshalNCreateNotionDBSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCreateNotionDBSourceInput(ctx context.Context, v any) (graphql1.CreateNotionDBSourceInput, error) {
 	res, err := ec.unmarshalInputCreateNotionDBSourceInput(ctx, v)
 	return res, graphql.ErrorOnPath(ctx, err)
@@ -24881,6 +26371,78 @@ func (ec *executionContext) marshalNJobStrategy2githubᚗcomᚋsecmonᚑlabᚋhe
 	return v
 }
 
+func (ec *executionContext) marshalNMemo2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐMemo(ctx context.Context, sel ast.SelectionSet, v graphql1.Memo) graphql.Marshaler {
+	return ec._Memo(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNMemo2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐMemoᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.Memo) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNMemo2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐMemo(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNMemo2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐMemo(ctx context.Context, sel ast.SelectionSet, v *graphql1.Memo) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._Memo(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNMemoConfiguration2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐMemoConfiguration(ctx context.Context, sel ast.SelectionSet, v graphql1.MemoConfiguration) graphql.Marshaler {
+	return ec._MemoConfiguration(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNMemoConfiguration2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐMemoConfiguration(ctx context.Context, sel ast.SelectionSet, v *graphql1.MemoConfiguration) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._MemoConfiguration(ctx, sel, v)
+}
+
 func (ec *executionContext) marshalNNotionDBValidationResult2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐNotionDBValidationResult(ctx context.Context, sel ast.SelectionSet, v graphql1.NotionDBValidationResult) graphql.Marshaler {
 	return ec._NotionDBValidationResult(ctx, sel, &v)
 }
@@ -25365,6 +26927,11 @@ func (ec *executionContext) unmarshalNUpdateCaseStatusInput2githubᚗcomᚋsecmo
 
 func (ec *executionContext) unmarshalNUpdateGitHubSourceInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateGitHubSourceInput(ctx context.Context, v any) (graphql1.UpdateGitHubSourceInput, error) {
 	res, err := ec.unmarshalInputUpdateGitHubSourceInput(ctx, v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) unmarshalNUpdateMemoInput2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐUpdateMemoInput(ctx context.Context, v any) (graphql1.UpdateMemoInput, error) {
+	res, err := ec.unmarshalInputUpdateMemoInput(ctx, v)
 	return res, graphql.ErrorOnPath(ctx, err)
 }
 
@@ -25891,6 +27458,29 @@ func (ec *executionContext) marshalOJSON2ᚖstring(ctx context.Context, sel ast.
 	_ = ctx
 	res := graphql.MarshalString(*v)
 	return res
+}
+
+func (ec *executionContext) marshalOMemo2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐMemo(ctx context.Context, sel ast.SelectionSet, v *graphql1.Memo) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	return ec._Memo(ctx, sel, v)
+}
+
+func (ec *executionContext) unmarshalOMemoArchiveFilter2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐMemoArchiveFilter(ctx context.Context, v any) (*graphql1.MemoArchiveFilter, error) {
+	if v == nil {
+		return nil, nil
+	}
+	var res = new(graphql1.MemoArchiveFilter)
+	err := res.UnmarshalGQL(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalOMemoArchiveFilter2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐMemoArchiveFilter(ctx context.Context, sel ast.SelectionSet, v *graphql1.MemoArchiveFilter) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	return v
 }
 
 func (ec *executionContext) marshalOSlackUser2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐSlackUser(ctx context.Context, sel ast.SelectionSet, v *graphql1.SlackUser) graphql.Marshaler {

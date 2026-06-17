@@ -76,3 +76,18 @@ type Knowledge struct {
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
+
+// Memo is a custom GraphQL model with WorkspaceID for argument-based propagation.
+// WorkspaceID is not exposed in the GraphQL schema; it is used internally
+// to pass workspace context to nested field resolvers (case, fields).
+type Memo struct {
+	ID          string        `json:"id"`
+	WorkspaceID string        `json:"-"`
+	CaseID      int           `json:"caseID"`
+	Case        *Case         `json:"case,omitempty"`
+	Title       string        `json:"title"`
+	Fields      []*FieldValue `json:"fields"`
+	ArchivedAt  *time.Time    `json:"archivedAt,omitempty"`
+	CreatedAt   time.Time     `json:"createdAt"`
+	UpdatedAt   time.Time     `json:"updatedAt"`
+}

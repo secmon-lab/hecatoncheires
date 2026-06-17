@@ -19,6 +19,8 @@ import { DISCARD_DRAFT, GET_DRAFTS } from '../graphql/drafts'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import { GET_CASE_LATEST_JOB_RUN } from '../graphql/caseAgent'
+import { GET_MEMO_CONFIGURATION } from '../graphql/memo'
+import MemoTab from '../components/memo/MemoTab'
 import CustomFieldHelpRow from '../components/fields/CustomFieldHelpRow'
 import InlineText from '../components/inline/InlineText'
 import InlineLongText from '../components/inline/InlineLongText'
@@ -233,6 +235,12 @@ export default function CaseDetail() {
     fetchPolicy: 'cache-and-network',
   })
   const latestRun = latestRunData?.caseJobRunLogs?.items?.[0] ?? null
+
+  const { data: memoConfigData } = useQuery(GET_MEMO_CONFIGURATION, {
+    variables: { workspaceId: currentWorkspace?.id },
+    skip: !currentWorkspace,
+  })
+  const memoEnabled = (memoConfigData?.memoConfiguration?.fields?.length ?? 0) > 0
 
   const refetchOptions = useMemo(
     () => [
@@ -557,6 +565,19 @@ export default function CaseDetail() {
           {/* Related Actions only exist for activated channel-mode cases.
               Drafts have no actions yet, and thread-mode workspaces never
               manage Actions at all — hide the entire section in both cases. */}
+          {memoEnabled && (
+          <section className="h-section">
+            <div className="h-section-h">
+              <span className="h-section-title">{t('tabMemos')}</span>
+            </div>
+            <MemoTab
+              caseId={caseId}
+              workspaceId={currentWorkspace!.id}
+              accessDenied={c.accessDenied}
+            />
+          </section>
+          )}
+
           {c.status !== 'DRAFT' && !threadMode && (
           <section className="h-section">
             <div className="h-section-h">

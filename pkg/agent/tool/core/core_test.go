@@ -229,6 +229,9 @@ func (m *mockRepo) JobRunEvent() interfaces.JobRunEventRepository {
 func (m *mockRepo) Import() interfaces.ImportRepository {
 	panic("unexpected call: Import()")
 }
+func (m *mockRepo) Memo() interfaces.MemoRepository {
+	panic("unexpected call: Memo()")
+}
 func (m *mockRepo) Close() error { return nil }
 
 // newMockRepo builds a mockRepo with default no-op sub-repos

@@ -105,6 +105,47 @@ catalogue is listed below; use whichever ones are relevant.
 {{- else }}
 (none)
 {{- end }}
+{{- if .Memo.Enabled }}
+
+# Memos (case-scoped memory)
+{{- if .Memo.Definition }}
+
+{{ .Memo.Definition }}
+{{- end }}
+
+Memos are this case's persistent memory, shared by humans and agents. Record
+facts / observations / hypotheses / decisions with the `memo__*` tools, and
+consult existing memos before acting. Each memo has a title and the custom
+fields below.
+{{- if .Memo.Fields }}
+
+- memo fields:
+{{- range .Memo.Fields }}
+  - {{ .ID }} ({{ .Type }}): {{ .Name }}{{ if .Required }} [required]{{ end }}
+{{- if .Description }}
+    description: {{ .Description }}
+{{- end }}
+{{- if .Options }}
+    options:
+{{- range .Options }}
+      - {{ .ID }}{{ if .Name }} — {{ .Name }}{{ end }}{{ if .Description }} ({{ .Description }}){{ end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+Current memos ({{ .Memo.TotalCount }} total{{ if .Memo.Overflow }}, showing first {{ len .Memo.Items }}{{ end }}):
+{{- if .Memo.Items }}
+{{- range .Memo.Items }}
+- `{{ .ID }}` {{ .Title }}
+{{- end }}
+{{- if .Memo.Overflow }}
+- … more memos exist; use memo__list_memos / memo__get_memo to read them.
+{{- end }}
+{{- else }}
+(none yet)
+{{- end }}
+{{- end }}
 
 # Trigger condition
 

@@ -25,6 +25,7 @@ var ErrWorkspaceNotFound = goerr.New("workspace not found")
 type WorkspaceEntry struct {
 	Workspace            Workspace
 	FieldSchema          *config.FieldSchema
+	MemoConfig           *config.MemoConfig // Memo "strong definition" + custom field schema (nil/empty when memos disabled)
 	ActionStatusSet      *ActionStatusSet
 	SlackChannelPrefix   string
 	SlackTeamID          string // Slack Team ID for org-level app support (empty for WS-level apps)

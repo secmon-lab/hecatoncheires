@@ -40,6 +40,7 @@ type UseCases struct {
 	notificationSlotDuration time.Duration
 	Case                     *CaseUseCase
 	Action                   *ActionUseCase
+	Memo                     *MemoUseCase
 	ActionStep               *ActionStepUseCase
 	Agent                    *AgentUseCase
 	Auth                     AuthUseCaseInterface
@@ -194,6 +195,7 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 	uc.Case = NewCaseUseCase(repo, registry, uc.slackService, uc.slackAdminService, uc.baseURL)
 	slotCoord := newNotificationSlotCoordinator(repo.NotificationSlot(), uc.slackService, uc.notificationSlotDuration, nil)
 	uc.Action = NewActionUseCase(repo, registry, uc.slackService, uc.baseURL, slotCoord)
+	uc.Memo = NewMemoUseCase(repo, registry)
 	uc.ActionStep = NewActionStepUseCase(repo, uc.slackService, slotCoord)
 
 	// Convert *github.Client to githubAPI interface, preserving nil-ness:
@@ -234,6 +236,7 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 				ActionUC:       uc.Action,
 				ActionStepUC:   uc.ActionStep,
 				CaseUC:         uc.Case,
+				MemoUC:         uc.Memo,
 				SlackService:   uc.slackService,
 				SlackSearch:    uc.slackSearch,
 				SlackRetriever: uc.slackRetriever,

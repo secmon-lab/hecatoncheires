@@ -71,6 +71,11 @@ type AgentDeps struct {
 	ActionUC     *ActionUseCase
 	ActionStepUC *ActionStepUseCase
 
+	// MemoUC backs the Case-scoped memo tools (memo__*) in case-bound mode.
+	// Optional: nil means the agent gets no memo tools (e.g. the workspace has
+	// not enabled memos, or memos are intentionally withheld).
+	MemoUC *MemoUseCase
+
 	// CaseUC is required for thread mode: the thread-case orchestrator applies
 	// the agent's materialize / close decisions through it so every case
 	// mutation funnels through the single CaseUseCase entry point.
@@ -112,6 +117,7 @@ func NewAgentUseCase(deps AgentDeps) *AgentUseCase {
 			ActionUC:            NewActionToolAdapter(deps.ActionUC),
 			ActionStepUC:        NewActionStepToolAdapter(deps.ActionStepUC),
 			CaseUC:              NewCaseToolAdapter(deps.CaseUC),
+			MemoUC:              NewMemoToolAdapter(deps.MemoUC),
 			HeartbeatInterval:   agentcommon.DefaultHeartbeatInterval,
 			HeartbeatStaleAfter: agentcommon.DefaultHeartbeatStaleAfter,
 		}

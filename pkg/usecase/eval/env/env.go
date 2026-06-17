@@ -17,6 +17,7 @@ import (
 
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/actionwriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
+	memotool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/memo"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
@@ -243,6 +244,7 @@ func buildJobRunner(
 	actionAdapter := usecase.NewActionToolAdapter(uc.Action)
 	stepAdapter := usecase.NewActionStepToolAdapter(uc.ActionStep)
 	caseAdapter := usecase.NewCaseToolAdapter(uc.Case)
+	memoAdapter := usecase.NewMemoToolAdapter(uc.Memo)
 
 	toolBuilder := job.ToolBuilderFunc(func(_ context.Context, c *model.Case, ws *model.WorkspaceEntry) []gollem.Tool {
 		var statusSet *model.ActionStatusSet
@@ -277,6 +279,15 @@ func buildJobRunner(
 			Schema:      fieldSchema,
 			StatusSet:   caseStatusSet,
 		})...)
+		if ws != nil && ws.MemoConfig.Enabled() {
+			out = append(out, memotool.New(memotool.Deps{
+				Repo:        repo,
+				WorkspaceID: wsID,
+				CaseID:      caseID,
+				MemoUC:      memoAdapter,
+				Schema:      ws.MemoConfig.FieldSchema,
+			})...)
+		}
 		return out
 	})
 
