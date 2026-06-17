@@ -87,3 +87,11 @@ models:
     fields:
       case:
         resolver: true
+  Memo:
+    model:
+      - github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql.Memo
+    fields:
+      case:
+        resolver: true
+      fields:
+        resolver: true

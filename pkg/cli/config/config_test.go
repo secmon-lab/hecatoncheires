@@ -1521,3 +1521,128 @@ name = "Done"
 		gt.String(t, configs[0].CaseCreatePrompt).Equal("")
 	})
 }
+
+func TestLoadWorkspaceConfigs_Memo(t *testing.T) {
+	t.Run("parses memo section with description and fields", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "risk.toml")
+		content := `
+[workspace]
+id = "risk"
+name = "Risk Management"
+
+[[fields]]
+id = "category"
+name = "Category"
+type = "text"
+
+[memo]
+description = "Investigation memory for this case."
+
+[[memo.fields]]
+id = "memo_type"
+name = "Type"
+type = "select"
+required = true
+options = [
+  { id = "fact", name = "Fact" },
+  { id = "hypothesis", name = "Hypothesis" },
+]
+
+[[memo.fields]]
+id = "body"
+name = "Body"
+type = "text"
+`
+		err := os.WriteFile(configPath, []byte(content), 0644)
+		gt.NoError(t, err).Required()
+
+		configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1).Required()
+
+		mc := configs[0].MemoConfig
+		gt.Value(t, mc).NotNil().Required()
+		gt.String(t, mc.Description).Equal("Investigation memory for this case.")
+		gt.Bool(t, mc.Enabled()).True()
+		gt.Value(t, mc.FieldSchema).NotNil().Required()
+		gt.Array(t, mc.FieldSchema.Fields).Length(2).Required()
+		gt.String(t, mc.FieldSchema.Fields[0].ID).Equal("memo_type")
+		gt.Bool(t, mc.FieldSchema.Fields[0].Required).True()
+		gt.Array(t, mc.FieldSchema.Fields[0].Options).Length(2)
+		gt.String(t, mc.FieldSchema.Fields[1].ID).Equal("body")
+	})
+
+	t.Run("memo omitted leaves config nil and feature disabled", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "risk.toml")
+		content := `
+[workspace]
+id = "risk"
+name = "Risk Management"
+
+[[fields]]
+id = "category"
+name = "Category"
+type = "text"
+`
+		err := os.WriteFile(configPath, []byte(content), 0644)
+		gt.NoError(t, err).Required()
+
+		configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1).Required()
+		gt.Value(t, configs[0].MemoConfig).Nil()
+	})
+
+	t.Run("invalid memo field type fails validation", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "risk.toml")
+		content := `
+[workspace]
+id = "risk"
+name = "Risk Management"
+
+[memo]
+description = "x"
+
+[[memo.fields]]
+id = "bad"
+name = "Bad"
+type = "not_a_type"
+`
+		err := os.WriteFile(configPath, []byte(content), 0644)
+		gt.NoError(t, err).Required()
+
+		_, err = config.LoadWorkspaceConfigs([]string{configPath})
+		gt.Error(t, err)
+	})
+
+	t.Run("duplicate memo field id fails validation", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "risk.toml")
+		content := `
+[workspace]
+id = "risk"
+name = "Risk Management"
+
+[memo]
+description = "x"
+
+[[memo.fields]]
+id = "dup"
+name = "One"
+type = "text"
+
+[[memo.fields]]
+id = "dup"
+name = "Two"
+type = "text"
+`
+		err := os.WriteFile(configPath, []byte(content), 0644)
+		gt.NoError(t, err).Required()
+
+		_, err = config.LoadWorkspaceConfigs([]string{configPath})
+		gt.Error(t, err)
+	})
+}

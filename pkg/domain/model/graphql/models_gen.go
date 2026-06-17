@@ -130,6 +130,12 @@ type CreateGitHubSourceInput struct {
 	Enabled      *bool    `json:"enabled,omitempty"`
 }
 
+type CreateMemoInput struct {
+	CaseID int                `json:"caseID"`
+	Title  string             `json:"title"`
+	Fields []*FieldValueInput `json:"fields,omitempty"`
+}
+
 type CreateNotionDBSourceInput struct {
 	Name        *string `json:"name,omitempty"`
 	Description *string `json:"description,omitempty"`
@@ -333,6 +339,11 @@ type JobRunLogConnection struct {
 	NextCursor *string      `json:"nextCursor,omitempty"`
 }
 
+type MemoConfiguration struct {
+	Description string             `json:"description"`
+	Fields      []*FieldDefinition `json:"fields"`
+}
+
 type Mutation struct {
 }
 
@@ -488,6 +499,13 @@ type UpdateGitHubSourceInput struct {
 	Description  *string  `json:"description,omitempty"`
 	Repositories []string `json:"repositories,omitempty"`
 	Enabled      *bool    `json:"enabled,omitempty"`
+}
+
+type UpdateMemoInput struct {
+	ID     string             `json:"id"`
+	CaseID int                `json:"caseID"`
+	Title  *string            `json:"title,omitempty"`
+	Fields []*FieldValueInput `json:"fields,omitempty"`
 }
 
 type UpdateNotionDBSourceInput struct {
@@ -1062,6 +1080,63 @@ func (e *JobStrategy) UnmarshalJSON(b []byte) error {
 }
 
 func (e JobStrategy) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
+}
+
+type MemoArchiveFilter string
+
+const (
+	MemoArchiveFilterActive   MemoArchiveFilter = "ACTIVE"
+	MemoArchiveFilterArchived MemoArchiveFilter = "ARCHIVED"
+	MemoArchiveFilterAll      MemoArchiveFilter = "ALL"
+)
+
+var AllMemoArchiveFilter = []MemoArchiveFilter{
+	MemoArchiveFilterActive,
+	MemoArchiveFilterArchived,
+	MemoArchiveFilterAll,
+}
+
+func (e MemoArchiveFilter) IsValid() bool {
+	switch e {
+	case MemoArchiveFilterActive, MemoArchiveFilterArchived, MemoArchiveFilterAll:
+		return true
+	}
+	return false
+}
+
+func (e MemoArchiveFilter) String() string {
+	return string(e)
+}
+
+func (e *MemoArchiveFilter) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = MemoArchiveFilter(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid MemoArchiveFilter", str)
+	}
+	return nil
+}
+
+func (e MemoArchiveFilter) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *MemoArchiveFilter) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e MemoArchiveFilter) MarshalJSON() ([]byte, error) {
 	var buf bytes.Buffer
 	e.MarshalGQL(&buf)
 	return buf.Bytes(), nil

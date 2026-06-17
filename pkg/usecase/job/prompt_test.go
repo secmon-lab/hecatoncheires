@@ -558,3 +558,70 @@ func TestBuildSystemPrompt_CurrentTime(t *testing.T) {
 		mustNotContain(t, got, "# Current time")
 	})
 }
+
+func newWorkspaceWithMemo(id, name string) *model.WorkspaceEntry {
+	ws := newWorkspace(id, name)
+	ws.MemoConfig = &config.MemoConfig{
+		Description: "Investigation memory for this case.",
+		FieldSchema: &config.FieldSchema{Fields: []config.FieldDefinition{
+			{ID: "memo_type", Name: "Type", Type: types.FieldTypeSelect, Required: true, Options: []config.FieldOption{
+				{ID: "fact", Name: "Fact"},
+			}},
+			{ID: "body", Name: "Body", Type: types.FieldTypeText},
+		}},
+	}
+	return ws
+}
+
+func TestBuildSystemPrompt_MemoSection(t *testing.T) {
+	ev := job.Event{Domain: model.JobEventDomainCase, WorkspaceID: "ws", CaseID: 42}
+
+	t.Run("renders definition, fields and active memos", func(t *testing.T) {
+		now := time.Date(2026, 5, 23, 9, 0, 0, 0, time.UTC)
+		memos := []*model.Memo{
+			{ID: "m-1", WorkspaceID: "ws", CaseID: 42, Title: "first memory", CreatedAt: now, UpdatedAt: now},
+			{ID: "m-2", WorkspaceID: "ws", CaseID: 42, Title: "second memory", CreatedAt: now, UpdatedAt: now},
+		}
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job: &model.Job{ID: "j"}, Workspace: newWorkspaceWithMemo("ws", "WS"), Case: newCase(42), Memos: memos, Event: ev,
+		})
+		gt.NoError(t, err).Required()
+		mustContain(t, got, "# Memos (case-scoped memory)")
+		mustContain(t, got, "Investigation memory for this case.")
+		mustContain(t, got, "memo_type (select): Type [required]")
+		mustContain(t, got, "Current memos (2 total)")
+		mustContain(t, got, "`m-1` first memory")
+		mustContain(t, got, "`m-2` second memory")
+	})
+
+	t.Run("caps preview at 20 and reports overflow", func(t *testing.T) {
+		now := time.Date(2026, 5, 23, 9, 0, 0, 0, time.UTC)
+		var memos []*model.Memo
+		for i := range 25 {
+			memos = append(memos, &model.Memo{ID: model.MemoID("m-" + string(rune('a'+i))), WorkspaceID: "ws", CaseID: 42, Title: "memory", CreatedAt: now, UpdatedAt: now})
+		}
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job: &model.Job{ID: "j"}, Workspace: newWorkspaceWithMemo("ws", "WS"), Case: newCase(42), Memos: memos, Event: ev,
+		})
+		gt.NoError(t, err).Required()
+		mustContain(t, got, "Current memos (25 total, showing first 20)")
+		mustContain(t, got, "more memos exist; use memo__list_memos")
+	})
+
+	t.Run("empty active memos render none-yet", func(t *testing.T) {
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job: &model.Job{ID: "j"}, Workspace: newWorkspaceWithMemo("ws", "WS"), Case: newCase(42), Event: ev,
+		})
+		gt.NoError(t, err).Required()
+		mustContain(t, got, "# Memos (case-scoped memory)")
+		mustContain(t, got, "(none yet)")
+	})
+
+	t.Run("memo-disabled workspace omits the section", func(t *testing.T) {
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job: &model.Job{ID: "j"}, Workspace: newWorkspace("ws", "WS"), Case: newCase(42), Event: ev,
+		})
+		gt.NoError(t, err).Required()
+		gt.Bool(t, strings.Contains(got, "# Memos (case-scoped memory)")).False()
+	})
+}

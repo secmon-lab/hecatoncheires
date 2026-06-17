@@ -15,6 +15,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/actionwriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
+	memotool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/memo"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slackpost"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/webfetch"
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
@@ -112,6 +113,7 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner) {
 	actionAdapter := usecase.NewActionToolAdapter(deps.UC.Action)
 	stepAdapter := usecase.NewActionStepToolAdapter(deps.UC.ActionStep)
 	caseAdapter := usecase.NewCaseToolAdapter(deps.UC.Case)
+	memoAdapter := usecase.NewMemoToolAdapter(deps.UC.Memo)
 
 	toolBuilder := job.ToolBuilderFunc(func(_ context.Context, c *model.Case, ws *model.WorkspaceEntry) []gollem.Tool {
 		var statusSet *model.ActionStatusSet
@@ -164,6 +166,16 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner) {
 			})...)
 		}
 		out = append(out, webfetch.New(deps.WebFetch)...)
+		// Case-scoped memo tools, wired only when the workspace enabled memos.
+		if ws != nil && ws.MemoConfig.Enabled() {
+			out = append(out, memotool.New(memotool.Deps{
+				Repo:        deps.Repo,
+				WorkspaceID: wsID,
+				CaseID:      caseID,
+				MemoUC:      memoAdapter,
+				Schema:      ws.MemoConfig.FieldSchema,
+			})...)
+		}
 		return out
 	})
 

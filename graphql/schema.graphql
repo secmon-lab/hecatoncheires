@@ -254,6 +254,53 @@ enum ActionArchiveFilter {
   ALL
 }
 
+# MemoArchiveFilter selects which archive slice a memo list resolver returns.
+enum MemoArchiveFilter {
+  # ACTIVE returns only non-archived memos. Default for memosByCase.
+  ACTIVE
+  # ARCHIVED returns only archived memos.
+  ARCHIVED
+  # ALL returns both active and archived memos.
+  ALL
+}
+
+# Memo is a Case-scoped note that records facts, observations, hypotheses,
+# or decisions accumulated while working the Case. Like a Case it carries
+# workspace-defined custom field values.
+type Memo {
+  id: ID!
+  caseID: Int!
+  case: Case
+  title: String!
+  fields: [FieldValue!]!
+  # archivedAt is null for an active memo and non-null once archived.
+  # There is no derived `archived` boolean; callers derive it from archivedAt != null.
+  archivedAt: Time
+  createdAt: Time!
+  updatedAt: Time!
+}
+
+# MemoConfiguration describes a workspace's memo configuration for the WebUI.
+# When the workspace has not enabled memos, the resolver returns a non-null
+# object with an empty fields list; the frontend uses that to hide the Memos tab.
+type MemoConfiguration {
+  description: String!
+  fields: [FieldDefinition!]!
+}
+
+input CreateMemoInput {
+  caseID: Int!
+  title: String!
+  fields: [FieldValueInput!]
+}
+
+input UpdateMemoInput {
+  id: ID!
+  caseID: Int!
+  title: String
+  fields: [FieldValueInput!]
+}
+
 # ActionEvent records a single change to an Action, surfaced in the
 # WebUI activity feed alongside thread messages.
 type ActionEvent {
@@ -617,6 +664,15 @@ type Query {
   # the resolver returns "not found" for sessions owned by other users even
   # when the ID is known.
   caseImport(workspaceId: String!, id: ID!): ImportSession!
+
+  # Memos — Case-scoped notes with workspace-defined custom fields.
+  # `filter` defaults to ACTIVE so default views never surface archived memos.
+  memosByCase(workspaceId: String!, caseID: Int!, filter: MemoArchiveFilter = ACTIVE): [Memo!]!
+  memo(workspaceId: String!, caseID: Int!, id: ID!): Memo
+  # memoConfiguration returns the workspace memo feature settings. The result
+  # is non-null; when memos are disabled the returned object has an empty
+  # fields list so the frontend can hide the Memos tab.
+  memoConfiguration(workspaceId: String!): MemoConfiguration!
 }
 
 type Mutation {
@@ -709,6 +765,14 @@ type Mutation {
   # since createCaseImport (issues are appended to the session for the
   # detail UI to display).
   executeCaseImport(workspaceId: String!, id: ID!): ImportSession!
+
+  # Memos — Case-scoped notes with workspace-defined custom fields.
+  createMemo(workspaceId: String!, input: CreateMemoInput!): Memo!
+  updateMemo(workspaceId: String!, input: UpdateMemoInput!): Memo!
+  # archiveMemo soft-deletes a memo (sets archivedAt). Idempotent.
+  archiveMemo(workspaceId: String!, caseID: Int!, id: ID!): Memo!
+  # unarchiveMemo restores a soft-deleted memo (clears archivedAt).
+  unarchiveMemo(workspaceId: String!, caseID: Int!, id: ID!): Memo!
 }
 
 input UpdateCaseAgentSettingsInput {

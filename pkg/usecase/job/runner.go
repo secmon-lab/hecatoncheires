@@ -230,12 +230,26 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 		return r.recordPrepareFailure(ctx, key, goerr.Wrap(srcErr, "load sources for system prompt"))
 	}
 
+	// Active memos are the agent's working memory; load them only when the
+	// workspace enabled memos so non-memo workspaces incur no extra read.
+	var memos []*model.Memo
+	if ws != nil && ws.MemoConfig.Enabled() {
+		ms, memoErr := r.deps.Repo.Memo().List(ctx, ev.WorkspaceID, ev.CaseID, interfaces.MemoListOptions{
+			ArchiveScope: interfaces.MemoArchiveScopeActiveOnly,
+		})
+		if memoErr != nil {
+			return r.recordPrepareFailure(ctx, key, goerr.Wrap(memoErr, "load memos"))
+		}
+		memos = ms
+	}
+
 	startedAt := r.clock()
 	in := PromptInputs{
 		Job:             j,
 		Workspace:       ws,
 		Case:            c,
 		Actions:         actions,
+		Memos:           memos,
 		Event:           ev,
 		Now:             startedAt,
 		Sources:         sources,

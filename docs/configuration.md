@@ -325,6 +325,80 @@ For human-readable text shown in the UI, use top-level `description` — never s
 
 ---
 
+## Memo Section
+
+The optional `[memo]` section enables **case-scoped memos**: a per-Case memory
+where humans and agents record facts, observations, hypotheses, and decisions
+while working a Case. A memo always has an `id` and a `title`; everything else
+is a custom field defined here, using the exact same field schema as case
+`[[fields]]` (same types, options, and validation rules).
+
+When `[memo]` is omitted the memo feature is disabled for the workspace: the
+WebUI hides the Memos tab and agents are given no memo tools.
+
+```toml
+[memo]
+# The "strong definition" of what this memo records. Shown in the WebUI and
+# embedded into the agent system prompt so the agent knows what to write down.
+description = """
+This memo is the investigation memory for an incident case. Record facts,
+observations, hypotheses, and decisions so later agent runs build on them.
+Mark unverified guesses with a confidence so they are not mistaken for facts.
+"""
+
+# Memo custom fields. Identical schema to [[fields]] (id / name / type /
+# required / description / options).
+[[memo.fields]]
+id = "memo_type"
+name = "Type"
+type = "select"
+required = true
+description = "Whether this memory is a verified fact or an inference."
+options = [
+  { id = "fact", name = "Fact", description = "Verified, backed by evidence." },
+  { id = "observation", name = "Observation", description = "Read from logs/data." },
+  { id = "hypothesis", name = "Hypothesis", description = "Unverified inference." },
+  { id = "decision", name = "Decision", description = "A recorded decision." },
+]
+
+[[memo.fields]]
+id = "body"
+name = "Body"
+type = "text"
+description = "Free-form details, evidence, and next steps."
+
+[[memo.fields]]
+id = "evidence"
+name = "Evidence"
+type = "url"
+description = "Link to the primary source (log, dashboard, PR)."
+```
+
+### Properties
+
+| Property            | Description                                                            |
+|---------------------|------------------------------------------------------------------------|
+| `description`       | The strong definition of the memo, embedded into the agent system prompt and shown in the WebUI. |
+| `[[memo.fields]]`   | Memo custom field definitions. Same schema and validation as `[[fields]]`. |
+
+### Behavior
+
+- **WebUI**: a "Memos" tab on the Case detail page lets users list, view,
+  create, edit, and archive memos. Deletion is a soft delete (archive) and is
+  restorable.
+- **Agents**: every agent running in a Case context is given memo tools
+  (`memo__list_memos`, `memo__get_memo`, `memo__create_memo`,
+  `memo__update_memo`, `memo__archive_memo`), scoped to that Case. Create and
+  update are validated against the memo field schema exactly like the WebUI
+  path (required fields enforced, unknown field ids rejected). `memo__list_memos`
+  excludes archived memos by default.
+- **System prompt**: the `description` and the memo field schema are injected
+  into the agent's system prompt, along with the id + title of up to 20 of the
+  Case's active memos (and the total count when there are more). Full content is
+  fetched on demand via the memo tools.
+
+---
+
 ## Slack Section
 
 The `[slack]` section customizes Slack integration settings. This section is optional.

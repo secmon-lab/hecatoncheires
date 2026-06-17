@@ -440,6 +440,29 @@ func (r *caseResolver) AgentSources(ctx context.Context, obj *graphql1.Case) ([]
 	return out, nil
 }
 
+// Case is the resolver for the case field.
+func (r *memoResolver) Case(ctx context.Context, obj *graphql1.Memo) (*graphql1.Case, error) {
+	loaders := GetDataLoaders(ctx)
+	c, err := loaders.Case.Load(ctx, MakeCaseKey(obj.WorkspaceID, int64(obj.CaseID)))()
+	if err != nil {
+		return nil, err
+	}
+	if c == nil {
+		return nil, nil
+	}
+	return toGraphQLCase(c, obj.WorkspaceID), nil
+}
+
+// Fields is the resolver for the fields field.
+func (r *memoResolver) Fields(ctx context.Context, obj *graphql1.Memo) ([]*graphql1.FieldValue, error) {
+	// Fields are pre-populated by toGraphQLMemo; return them or an empty slice
+	// (never nil) to honour the [FieldValue!]! schema contract.
+	if obj.Fields == nil {
+		return []*graphql1.FieldValue{}, nil
+	}
+	return obj.Fields, nil
+}
+
 // Noop is the resolver for the noop field.
 func (r *mutationResolver) Noop(ctx context.Context) (*bool, error) {
 	result := true
@@ -973,6 +996,59 @@ func (r *mutationResolver) ExecuteCaseImport(ctx context.Context, workspaceID st
 	return toGraphQLImportSession(ctx, r.repo, r.UseCases.WorkspaceRegistry(), session), nil
 }
 
+// CreateMemo is the resolver for the createMemo field.
+func (r *mutationResolver) CreateMemo(ctx context.Context, workspaceID string, input graphql1.CreateMemoInput) (*graphql1.Memo, error) {
+	fieldValues := toDomainFieldValues(input.Fields)
+	if fieldValues == nil {
+		fieldValues = map[string]model.FieldValue{}
+	}
+	created, err := r.UseCases.Memo.CreateMemo(ctx, workspaceID, usecase.CreateMemoInput{
+		CaseID:      int64(input.CaseID),
+		Title:       input.Title,
+		FieldValues: fieldValues,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLMemo(created, workspaceID), nil
+}
+
+// UpdateMemo is the resolver for the updateMemo field.
+func (r *mutationResolver) UpdateMemo(ctx context.Context, workspaceID string, input graphql1.UpdateMemoInput) (*graphql1.Memo, error) {
+	var fieldValues map[string]model.FieldValue
+	if input.Fields != nil {
+		fieldValues = toDomainFieldValues(input.Fields)
+	}
+	updated, err := r.UseCases.Memo.UpdateMemo(ctx, workspaceID, usecase.UpdateMemoInput{
+		ID:          model.MemoID(input.ID),
+		CaseID:      int64(input.CaseID),
+		Title:       input.Title,
+		FieldValues: fieldValues,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLMemo(updated, workspaceID), nil
+}
+
+// ArchiveMemo is the resolver for the archiveMemo field.
+func (r *mutationResolver) ArchiveMemo(ctx context.Context, workspaceID string, caseID int, id string) (*graphql1.Memo, error) {
+	updated, err := r.UseCases.Memo.ArchiveMemo(ctx, workspaceID, int64(caseID), model.MemoID(id))
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLMemo(updated, workspaceID), nil
+}
+
+// UnarchiveMemo is the resolver for the unarchiveMemo field.
+func (r *mutationResolver) UnarchiveMemo(ctx context.Context, workspaceID string, caseID int, id string) (*graphql1.Memo, error) {
+	updated, err := r.UseCases.Memo.UnarchiveMemo(ctx, workspaceID, int64(caseID), model.MemoID(id))
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLMemo(updated, workspaceID), nil
+}
+
 // Health is the resolver for the health field.
 func (r *queryResolver) Health(ctx context.Context) (string, error) {
 	return "ok", nil
@@ -1377,6 +1453,73 @@ func (r *queryResolver) CaseImport(ctx context.Context, workspaceID string, id s
 	return toGraphQLImportSession(ctx, r.repo, r.UseCases.WorkspaceRegistry(), session), nil
 }
 
+// MemosByCase is the resolver for the memosByCase field.
+func (r *queryResolver) MemosByCase(ctx context.Context, workspaceID string, caseID int, filter *graphql1.MemoArchiveFilter) ([]*graphql1.Memo, error) {
+	scope := memoArchiveFilterToScope(filter)
+	memos, err := r.UseCases.Memo.ListMemosByCase(ctx, workspaceID, int64(caseID), scope)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*graphql1.Memo, len(memos))
+	for i, m := range memos {
+		result[i] = toGraphQLMemo(m, workspaceID)
+	}
+	return result, nil
+}
+
+// Memo is the resolver for the memo field.
+func (r *queryResolver) Memo(ctx context.Context, workspaceID string, caseID int, id string) (*graphql1.Memo, error) {
+	m, err := r.UseCases.Memo.GetMemo(ctx, workspaceID, int64(caseID), model.MemoID(id))
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLMemo(m, workspaceID), nil
+}
+
+// MemoConfiguration is the resolver for the memoConfiguration field.
+func (r *queryResolver) MemoConfiguration(ctx context.Context, workspaceID string) (*graphql1.MemoConfiguration, error) {
+	cfg, err := r.UseCases.Memo.MemoConfiguration(workspaceID)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to get memo configuration",
+			goerr.V("workspace_id", workspaceID))
+	}
+	fields := make([]*graphql1.FieldDefinition, 0, len(cfg.Fields))
+	for _, field := range cfg.Fields {
+		options := make([]*graphql1.FieldOption, len(field.Options))
+		for j, opt := range field.Options {
+			metadata := opt.Metadata
+			if metadata == nil {
+				metadata = make(map[string]any)
+			}
+			metadataJSON, _ := json.Marshal(metadata)
+			metadataStr := string(metadataJSON)
+			// Copy the description into a local so the &-of is not the address
+			// of a loop variable's field (kept distinct per iteration).
+			optDesc := opt.Description
+			options[j] = &graphql1.FieldOption{
+				ID:          opt.ID,
+				Name:        opt.Name,
+				Description: &optDesc,
+				Metadata:    &metadataStr,
+			}
+		}
+		fieldType := toGraphQLFieldType(field.Type)
+		fieldDesc := field.Description
+		fields = append(fields, &graphql1.FieldDefinition{
+			ID:          field.ID,
+			Name:        field.Name,
+			Type:        fieldType,
+			Required:    field.Required,
+			Description: &fieldDesc,
+			Options:     options,
+		})
+	}
+	return &graphql1.MemoConfiguration{
+		Description: cfg.Description,
+		Fields:      fields,
+	}, nil
+}
+
 // Action returns ActionResolver implementation.
 func (r *Resolver) Action() ActionResolver { return &actionResolver{r} }
 
@@ -1385,6 +1528,9 @@ func (r *Resolver) ActionEvent() ActionEventResolver { return &actionEventResolv
 
 // Case returns CaseResolver implementation.
 func (r *Resolver) Case() CaseResolver { return &caseResolver{r} }
+
+// Memo returns MemoResolver implementation.
+func (r *Resolver) Memo() MemoResolver { return &memoResolver{r} }
 
 // Mutation returns MutationResolver implementation.
 func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
@@ -1395,5 +1541,6 @@ func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 type actionResolver struct{ *Resolver }
 type actionEventResolver struct{ *Resolver }
 type caseResolver struct{ *Resolver }
+type memoResolver struct{ *Resolver }
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }

@@ -53,8 +53,13 @@ type PromptInputs struct {
 	Workspace *model.WorkspaceEntry
 	Case      *model.Case
 	Actions   []*model.Action
-	Event     Event
-	Now       time.Time
+	// Memos is the set of ACTIVE memos for the Case (the agent's working
+	// memory). The system prompt embeds at most memoSystemPromptMax id+title
+	// pairs and, when there are more, the total count; full content is fetched
+	// on demand via the memo tools.
+	Memos []*model.Memo
+	Event Event
+	Now   time.Time
 
 	// Sources is the resolved set of *model.Source the agent should be
 	// aware of for this Case. It is always populated when source
@@ -86,9 +91,32 @@ type systemPromptData struct {
 	Workspace systemPromptWorkspace
 	Case      *systemPromptCase
 	Actions   []systemPromptAction
+	Memo      systemPromptMemoSection
 	Trigger   systemPromptTrigger
 	Reason    systemPromptReason
 	Sources   systemPromptSourceSection
+}
+
+// memoSystemPromptMax bounds how many memo id+title pairs are embedded in the
+// system prompt. Beyond this the prompt reports only the total count and the
+// agent fetches details with the memo tools — this keeps the prompt bounded
+// even for cases that accumulate many memories.
+const memoSystemPromptMax = 20
+
+// systemPromptMemoSection carries the workspace memo definition, the memo field
+// schema, and a bounded preview of the case's active memos.
+type systemPromptMemoSection struct {
+	Enabled    bool
+	Definition string
+	Fields     []systemPromptField
+	Items      []systemPromptMemoBrief
+	TotalCount int
+	Overflow   bool
+}
+
+type systemPromptMemoBrief struct {
+	ID    string
+	Title string
 }
 
 type systemPromptSourceSection struct {
@@ -255,6 +283,50 @@ func buildSystemPromptData(in PromptInputs) systemPromptData {
 				fieldMetaByID[f.ID] = meta
 				data.Workspace.Fields = append(data.Workspace.Fields, field)
 			}
+		}
+
+		// Memo section: the workspace's strong definition + memo field schema.
+		// Rendered only when the workspace enabled memos.
+		if ws.MemoConfig.Enabled() {
+			data.Memo.Enabled = true
+			data.Memo.Definition = ws.MemoConfig.Description
+			for _, f := range ws.MemoConfig.FieldSchema.Fields {
+				field := systemPromptField{
+					ID:          f.ID,
+					Name:        f.Name,
+					Type:        string(f.Type),
+					Required:    f.Required,
+					Description: f.Description,
+				}
+				for _, o := range f.Options {
+					field.Options = append(field.Options, systemPromptFieldOption{
+						ID:          o.ID,
+						Name:        o.Name,
+						Description: o.Description,
+						Metadata:    fieldOptionMetadata(o.Metadata),
+					})
+				}
+				data.Memo.Fields = append(data.Memo.Fields, field)
+			}
+		}
+	}
+
+	// Memo preview: at most memoSystemPromptMax id+title pairs, plus the total
+	// count when there are more (the agent reads the rest via the memo tools).
+	if data.Memo.Enabled {
+		data.Memo.TotalCount = len(in.Memos)
+		for i, m := range in.Memos {
+			if m == nil {
+				continue
+			}
+			if i >= memoSystemPromptMax {
+				data.Memo.Overflow = true
+				break
+			}
+			data.Memo.Items = append(data.Memo.Items, systemPromptMemoBrief{
+				ID:    string(m.ID),
+				Title: m.Title,
+			})
 		}
 	}
 
