@@ -123,12 +123,16 @@ so follow-up mentions can pick up where the previous turn left off, and
 writes a Trace blob for every turn for diagnostics.
 
 In case-bound mode the agent can edit the bound Case directly via the
-`case__update_case` (title / description / assignees / custom fields) and, for
-thread-mode workspaces, `case__update_case_status` tools — the same tools the
-event-driven Agent Jobs use. Both funnel through `CaseUseCase.UpdateCase` /
-`UpdateCaseStatus`, so every entry point (Web GraphQL, Slack modal, Job, mention
-agent) enforces the same validation, including the SlackUser existence check on
-assignees and user-typed field values.
+`case__update_case` (title / description / custom fields), `case__assign` /
+`case__unassign` (delta assignee changes), and, for thread-mode workspaces,
+`case__update_case_status` tools — the same tools the
+event-driven Agent Jobs use. They funnel through `CaseUseCase.UpdateCase` /
+`AssignCase` / `UnassignCase` / `UpdateCaseStatus`, so every entry point (Web
+GraphQL, Slack modal, Job, mention agent) enforces the same validation,
+including the SlackUser existence check on newly assigned users and user-typed
+field values. Assignees are mutated only through the delta `AssignCase` /
+`UnassignCase` path (never as a full-list replace on `UpdateCase`), so
+concurrent edits cannot clobber one another.
 
 A per-thread **turn lock** (CAS-backed in Firestore, mutex-backed in memory)
 prevents two turns from running concurrently on the same thread. A heartbeat

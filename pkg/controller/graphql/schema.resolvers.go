@@ -475,9 +475,6 @@ func (r *mutationResolver) UpdateCase(ctx context.Context, workspaceID string, i
 		Title:       input.Title,
 		Description: input.Description,
 	}
-	if input.AssigneeIDs != nil {
-		patch.SetAssignees(input.AssigneeIDs)
-	}
 	if input.Fields != nil {
 		patch.Fields = toDomainFieldValues(input.Fields)
 	}
@@ -587,9 +584,6 @@ func (r *mutationResolver) SubmitDraft(ctx context.Context, workspaceID string, 
 		}
 		if input.Description != nil {
 			p.Description = input.Description
-		}
-		if input.AssigneeIDs != nil {
-			p.SetAssignees(input.AssigneeIDs)
 		}
 		if input.Fields != nil {
 			p.Fields = toDomainFieldValues(input.Fields)

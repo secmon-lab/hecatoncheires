@@ -483,7 +483,6 @@ func TestGraphQLHandler_UpdateCaseMutation(t *testing.T) {
 					id
 					title
 					description
-					assigneeIDs
 				}
 			}
 		`
@@ -494,7 +493,6 @@ func TestGraphQLHandler_UpdateCaseMutation(t *testing.T) {
 				"id":          createdCase.ID,
 				"title":       "Updated Title",
 				"description": "Updated Description",
-				"assigneeIDs": []string{"U001", "U002", "U003"},
 			},
 		}
 
@@ -510,10 +508,9 @@ func TestGraphQLHandler_UpdateCaseMutation(t *testing.T) {
 
 		var result struct {
 			UpdateCase struct {
-				ID          int      `json:"id"`
-				Title       string   `json:"title"`
-				Description string   `json:"description"`
-				AssigneeIDs []string `json:"assigneeIDs"`
+				ID          int    `json:"id"`
+				Title       string `json:"title"`
+				Description string `json:"description"`
 			} `json:"updateCase"`
 		}
 
@@ -523,15 +520,11 @@ func TestGraphQLHandler_UpdateCaseMutation(t *testing.T) {
 
 		gt.Value(t, result.UpdateCase.Description).Equal("Updated Description")
 
-		gt.Array(t, result.UpdateCase.AssigneeIDs).Length(3)
-
 		// Verify the case was actually updated in repository
 		updatedCase, err := repo.Case().Get(ctx, testWorkspaceID, createdCase.ID)
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, updatedCase.Title).Equal("Updated Title")
-
-		gt.Array(t, updatedCase.AssigneeIDs).Length(3)
 	})
 
 	t.Run("update non-existent case", func(t *testing.T) {

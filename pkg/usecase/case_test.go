@@ -253,7 +253,6 @@ func TestCaseUseCase_UpdateCase(t *testing.T) {
 		updatedTitle := "Updated Title"
 		updatedDesc := "Updated Description"
 		patch := usecase.CaseUpdate{Title: &updatedTitle, Description: &updatedDesc, Fields: updatedFieldValues}
-		patch.SetAssignees([]string{"U002"})
 		updated, err := uc.UpdateCase(ctx, testWorkspaceID, created.ID, patch)
 		gt.NoError(t, err).Required()
 
@@ -304,12 +303,11 @@ func TestCaseUseCase_UpdateCase(t *testing.T) {
 		gt.Value(t, updated.FieldValues["priority"].Value).Equal("high")
 
 		// Update assignees only — title/description/fields preserved.
-		patch := usecase.CaseUpdate{}
-		patch.SetAssignees([]string{"U002", "U003"})
-		assignUpd, err := uc.UpdateCase(ctx, testWorkspaceID, created.ID, patch)
+		// Assignees are now mutated exclusively via AssignCase (delta add).
+		assignUpd, err := uc.AssignCase(ctx, testWorkspaceID, created.ID, []string{"U002", "U003"})
 		gt.NoError(t, err).Required()
 		gt.String(t, assignUpd.Title).Equal("Original")
-		gt.Array(t, assignUpd.AssigneeIDs).Length(2)
+		gt.Array(t, assignUpd.AssigneeIDs).Length(3) // U001 (existing) + U002 + U003
 		gt.Value(t, assignUpd.FieldValues["stage"].Value).Equal("screen")
 
 		// Empty title is rejected.
@@ -1261,7 +1259,6 @@ func TestCaseUseCase_PrivateCaseAccessControl(t *testing.T) {
 		hackTitle := "Hacked"
 		hackDesc := "Hacked desc"
 		hackPatch := usecase.CaseUpdate{Title: &hackTitle, Description: &hackDesc}
-		hackPatch.SetAssignees([]string{})
 		_, err = uc.UpdateCase(nonMemberCtx, testWorkspaceID, created.ID, hackPatch)
 		gt.Value(t, err).NotNil()
 		gt.Error(t, err).Is(usecase.TestErrAccessDenied)
@@ -1653,7 +1650,6 @@ func TestCaseUseCase_ReporterID(t *testing.T) {
 		ut := "Updated Title"
 		ud := "new desc"
 		repPatch := usecase.CaseUpdate{Title: &ut, Description: &ud}
-		repPatch.SetAssignees([]string{"UOTHER"})
 		updated, err := uc.UpdateCase(ctxOther, testWorkspaceID, created.ID, repPatch)
 		gt.NoError(t, err).Required()
 		gt.String(t, updated.ReporterID).Equal("UREPORTER") // Reporter should NOT change
@@ -2159,9 +2155,10 @@ func TestCaseUseCase_SubmitDraft(t *testing.T) {
 	t.Run("submit-with-patch applies edits and still invites reporter", func(t *testing.T) {
 		// Architecturally important: "save final edits and submit" is one
 		// business operation, so it runs through a single SubmitDraft call.
-		// We patch the title, swap assignees, and verify the resulting
-		// channel invite list still includes the original reporter (UAUTHOR)
-		// even though the patch did not name them.
+		// Assignees are now mutated via AssignCase / UnassignCase before
+		// calling SubmitDraft. We verify the resulting channel invite list
+		// still includes the original reporter (UAUTHOR) even though the
+		// title/description patch did not name them.
 		repo := memory.New()
 		mock := &mockSlackService{
 			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
@@ -2175,12 +2172,17 @@ func TestCaseUseCase_SubmitDraft(t *testing.T) {
 		draft, err := uc.CreateDraft(ctx, testWorkspaceID, "Half-written", "old body", []string{"UOLD"}, nil, false)
 		gt.NoError(t, err).Required()
 
+		// Swap assignees before submitting: remove UOLD, add UNEW.
+		_, err = uc.UnassignCase(ctx, testWorkspaceID, draft.ID, []string{"UOLD"})
+		gt.NoError(t, err).Required()
+		_, err = uc.AssignCase(ctx, testWorkspaceID, draft.ID, []string{"UNEW"})
+		gt.NoError(t, err).Required()
+
 		newTitle := "Final title"
 		newBody := "polished body"
 		var patch usecase.CaseUpdate
 		patch.Title = &newTitle
 		patch.Description = &newBody
-		patch.SetAssignees([]string{"UNEW"})
 
 		submitted, err := uc.SubmitDraft(ctx, testWorkspaceID, draft.ID, &patch)
 		gt.NoError(t, err).Required()
@@ -2190,7 +2192,7 @@ func TestCaseUseCase_SubmitDraft(t *testing.T) {
 		gt.Value(t, submitted.ReporterID).Equal("UAUTHOR")
 
 		// Channel invites: reporter (UAUTHOR) + new assignee (UNEW).
-		// The pre-edit assignee (UOLD) has been replaced.
+		// UOLD was removed before submission.
 		gt.Array(t, mock.invitedUserIDs).Length(2)
 		gt.Value(t, mock.invitedUserIDs[0]).Equal("UAUTHOR")
 		gt.Value(t, mock.invitedUserIDs[1]).Equal("UNEW")
@@ -2982,9 +2984,8 @@ func TestCaseUseCase_UpdateCase_UserExistence(t *testing.T) {
 		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", nil, nil, false, "", "")
 		gt.NoError(t, err).Required()
 
-		patch := usecase.CaseUpdate{}
-		patch.SetAssignees([]string{"UGHOST"})
-		_, err = uc.UpdateCase(ctx, testWorkspaceID, created.ID, patch)
+		// Assignees are now mutated via AssignCase, not UpdateCase.
+		_, err = uc.AssignCase(ctx, testWorkspaceID, created.ID, []string{"UGHOST"})
 		gt.Error(t, err).Is(usecase.ErrUnknownUser)
 	})
 
@@ -2995,9 +2996,8 @@ func TestCaseUseCase_UpdateCase_UserExistence(t *testing.T) {
 		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", nil, nil, false, "", "")
 		gt.NoError(t, err).Required()
 
-		patch := usecase.CaseUpdate{}
-		patch.SetAssignees([]string{"UREAL"})
-		updated, err := uc.UpdateCase(ctx, testWorkspaceID, created.ID, patch)
+		// Assignees are now mutated via AssignCase, not UpdateCase.
+		updated, err := uc.AssignCase(ctx, testWorkspaceID, created.ID, []string{"UREAL"})
 		gt.NoError(t, err).Required()
 		gt.Array(t, updated.AssigneeIDs).Equal([]string{"UREAL"})
 	})

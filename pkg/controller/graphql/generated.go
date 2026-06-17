@@ -3206,10 +3206,11 @@ input UpdateCaseInput {
   id: Int!
   # All fields below are optional. Omitted fields preserve their current value
   # on the existing Case. This allows true partial updates from clients that
-  # only want to change one thing (e.g. inline edit of assignees).
+  # only want to change one thing. Assignees are NOT updatable here — use the
+  # assignCase / unassignCase delta mutations so concurrent edits cannot
+  # clobber one another.
   title: String
   description: String
-  assigneeIDs: [String!]
   fields: [FieldValueInput!]
 }
 
@@ -3218,10 +3219,11 @@ input UpdateCaseInput {
 # and promote-to-OPEN are one business operation, so they go through one
 # usecase call — splitting them across an updateCase + submitDraft pair
 # at the client risks leaving an inconsistent draft behind on failure.
+# Assignees are NOT part of this input — manage them via assignCase /
+# unassignCase on the draft before submitting.
 input SubmitDraftInput {
   title: String
   description: String
-  assigneeIDs: [String!]
   fields: [FieldValueInput!]
 }
 
@@ -18791,7 +18793,7 @@ func (ec *executionContext) unmarshalInputSubmitDraftInput(ctx context.Context, 
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"title", "description", "assigneeIDs", "fields"}
+	fieldsInOrder := [...]string{"title", "description", "fields"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -18812,13 +18814,6 @@ func (ec *executionContext) unmarshalInputSubmitDraftInput(ctx context.Context, 
 				return it, err
 			}
 			it.Description = data
-		case "assigneeIDs":
-			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("assigneeIDs"))
-			data, err := ec.unmarshalOString2ᚕstringᚄ(ctx, v)
-			if err != nil {
-				return it, err
-			}
-			it.AssigneeIDs = data
 		case "fields":
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("fields"))
 			data, err := ec.unmarshalOFieldValueInput2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐFieldValueInputᚄ(ctx, v)
@@ -18970,7 +18965,7 @@ func (ec *executionContext) unmarshalInputUpdateCaseInput(ctx context.Context, o
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"id", "title", "description", "assigneeIDs", "fields"}
+	fieldsInOrder := [...]string{"id", "title", "description", "fields"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -18998,13 +18993,6 @@ func (ec *executionContext) unmarshalInputUpdateCaseInput(ctx context.Context, o
 				return it, err
 			}
 			it.Description = data
-		case "assigneeIDs":
-			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("assigneeIDs"))
-			data, err := ec.unmarshalOString2ᚕstringᚄ(ctx, v)
-			if err != nil {
-				return it, err
-			}
-			it.AssigneeIDs = data
 		case "fields":
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("fields"))
 			data, err := ec.unmarshalOFieldValueInput2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐFieldValueInputᚄ(ctx, v)

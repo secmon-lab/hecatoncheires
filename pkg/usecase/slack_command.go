@@ -926,19 +926,10 @@ func (uc *SlackUseCases) HandleCaseEditSubmit(ctx context.Context, caseUC *CaseU
 	fieldValues := extractFieldValues(blockValues)
 	userID := callback.User.ID
 
-	// Extract assignees from the multi-user select. Slack always delivers a
-	// values entry for inputs in the view, even when the user clears every
-	// pick — so the presence of the block tells us the user actually saw the
-	// input and an absent / empty SelectedUsers means "no assignees".
 	patch := CaseUpdate{
 		Title:       &title,
 		Description: &description,
 		Fields:      fieldValues,
-	}
-	if assigneeBlock, ok := blockValues[SlackBlockIDCaseAssignees]; ok {
-		if a, ok := assigneeBlock[SlackActionIDCaseAssignees]; ok {
-			patch.SetAssignees(append([]string{}, a.SelectedUsers...))
-		}
 	}
 	updated, err := caseUC.UpdateCase(ctx, meta.WorkspaceID, meta.CaseID, patch)
 	if err != nil {
@@ -946,6 +937,36 @@ func (uc *SlackUseCases) HandleCaseEditSubmit(ctx context.Context, caseUC *CaseU
 			goerr.V("workspace_id", meta.WorkspaceID),
 			goerr.V("case_id", meta.CaseID),
 			goerr.V("user_id", userID))
+	}
+
+	// Reconcile assignees as a delta against the stored set. The Slack
+	// multi-user select reports the full desired selection (Slack always
+	// delivers a values entry for inputs in the view, so the presence of the
+	// block means the user saw the input and an absent / empty SelectedUsers
+	// means "no assignees"). We diff that selection against the current
+	// assignees and route the add / remove through the atomic AssignCase /
+	// UnassignCase path, so a stale full-list replace can never clobber a
+	// concurrent edit.
+	if assigneeBlock, ok := blockValues[SlackBlockIDCaseAssignees]; ok {
+		if a, ok := assigneeBlock[SlackActionIDCaseAssignees]; ok {
+			toAdd, toRemove := diffAssignees(updated.AssigneeIDs, a.SelectedUsers)
+			if len(toAdd) > 0 {
+				if updated, err = caseUC.AssignCase(ctx, meta.WorkspaceID, meta.CaseID, toAdd); err != nil {
+					return goerr.Wrap(err, "failed to assign users via slash command",
+						goerr.V("workspace_id", meta.WorkspaceID),
+						goerr.V("case_id", meta.CaseID),
+						goerr.V("user_id", userID))
+				}
+			}
+			if len(toRemove) > 0 {
+				if updated, err = caseUC.UnassignCase(ctx, meta.WorkspaceID, meta.CaseID, toRemove); err != nil {
+					return goerr.Wrap(err, "failed to unassign users via slash command",
+						goerr.V("workspace_id", meta.WorkspaceID),
+						goerr.V("case_id", meta.CaseID),
+						goerr.V("user_id", userID))
+				}
+			}
+		}
 	}
 
 	// Post confirmation message to the case channel

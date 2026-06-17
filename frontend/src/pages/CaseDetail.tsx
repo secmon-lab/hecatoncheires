@@ -8,9 +8,12 @@ import {
   REOPEN_CASE,
   DELETE_CASE,
   UPDATE_CASE,
+  ASSIGN_CASE,
+  UNASSIGN_CASE,
   SYNC_CASE_CHANNEL_USERS,
   GET_CASES,
 } from '../graphql/case'
+import { diffAssignees } from '../utils/assignees'
 import { UPDATE_CASE_STATUS } from '../graphql/caseStatus'
 import { DISCARD_DRAFT, GET_DRAFTS } from '../graphql/drafts'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
@@ -250,6 +253,8 @@ export default function CaseDetail() {
   const [closeCase, { loading: closing }] = useMutation(CLOSE_CASE, { refetchQueries: refetchOptions })
   const [reopenCase, { loading: reopening }] = useMutation(REOPEN_CASE, { refetchQueries: refetchOptions })
   const [updateCase, { loading: updating }] = useMutation(UPDATE_CASE, { refetchQueries: refetchOptions })
+  const [assignCase] = useMutation(ASSIGN_CASE, { refetchQueries: refetchOptions })
+  const [unassignCase] = useMutation(UNASSIGN_CASE, { refetchQueries: refetchOptions })
   const [updateCaseStatus] = useMutation(UPDATE_CASE_STATUS, { refetchQueries: refetchOptions })
   const [deleteCase, { loading: deleting }] = useMutation(DELETE_CASE, {
     refetchQueries: [
@@ -322,12 +327,16 @@ export default function CaseDetail() {
     }
   }
   const handleAssigneesChange = async (ids: string[]) => {
-    await updateCase({
-      variables: {
-        workspaceId: currentWorkspace!.id,
-        input: { id: caseId, assigneeIDs: ids },
-      },
-    })
+    // Assignees move through the delta assign/unassign mutations, not
+    // updateCase — diff the picker's full selection against the current set
+    // and apply only the change so a concurrent edit is never clobbered.
+    const { toAdd, toRemove } = diffAssignees(c.assigneeIDs ?? [], ids)
+    if (toAdd.length > 0) {
+      await assignCase({ variables: { workspaceId: currentWorkspace!.id, id: caseId, userIDs: toAdd } })
+    }
+    if (toRemove.length > 0) {
+      await unassignCase({ variables: { workspaceId: currentWorkspace!.id, id: caseId, userIDs: toRemove } })
+    }
   }
   const handleTitleChange = async (next: string) => {
     if (next === c.title) return

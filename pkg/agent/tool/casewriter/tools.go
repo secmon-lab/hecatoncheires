@@ -1,9 +1,11 @@
 // Package casewriter exposes the case-mutation gollem tools available to
 // event-driven Agent Jobs and the case-bound mention agent. Field-style
-// updates (title / description / assignees / custom fields) go through
-// case__update_case; board status transitions (including close, when a status
-// is configured as closed) go through case__update_case_status. Archive and
-// delete are intentionally absent.
+// updates (title / description / custom fields) go through case__update_case;
+// assignee changes go through case__assign / case__unassign (delta add/remove,
+// applied atomically so concurrent edits never clobber); board status
+// transitions (including close, when a status is configured as closed) go
+// through case__update_case_status. Archive and delete are intentionally
+// absent.
 package casewriter
 
 import (
@@ -24,18 +26,18 @@ import (
 type CaseMutator interface {
 	UpdateCase(ctx context.Context, workspaceID string, id int64, patch CaseUpdate) (*model.Case, error)
 	UpdateCaseStatus(ctx context.Context, workspaceID string, id int64, boardStatus string) (*model.Case, error)
+	AssignCase(ctx context.Context, workspaceID string, id int64, userIDs []string) (*model.Case, error)
+	UnassignCase(ctx context.Context, workspaceID string, id int64, userIDs []string) (*model.Case, error)
 }
 
 // CaseUpdate mirrors the partial-update shape of usecase.CaseUpdate. Nil
-// pointer / unset slice means "preserve the existing value". Status is
-// intentionally absent — board status is moved via the separate
-// case__update_case_status tool / usecase.UpdateCaseStatus, which owns the
-// lifecycle (close) semantics.
+// pointer / unset slice means "preserve the existing value". Status and
+// assignees are intentionally absent — board status moves via the separate
+// case__update_case_status tool, and assignees move via case__assign /
+// case__unassign, each owning their own (lifecycle / atomic-delta) semantics.
 type CaseUpdate struct {
 	Title       *string
 	Description *string
-	AssigneeIDs []string
-	HasAssign   bool
 	Fields      map[string]model.FieldValue
 }
 
@@ -60,6 +62,8 @@ type Deps struct {
 func New(deps Deps) []gollem.Tool {
 	tools := []gollem.Tool{
 		&updateCaseTool{deps: deps},
+		&assignCaseTool{deps: deps},
+		&unassignCaseTool{deps: deps},
 	}
 	if deps.StatusSet != nil {
 		tools = append(tools, &updateCaseStatusTool{deps: deps})
@@ -74,9 +78,10 @@ type updateCaseTool struct {
 func (t *updateCaseTool) Spec() gollem.ToolSpec {
 	return gollem.ToolSpec{
 		Name: "case__update_case",
-		Description: "Update the current case's title, description, assignees, or " +
-			"custom field values. This tool cannot change the case status " +
-			"(use case__update_case_status) and cannot delete the case.\n\n" +
+		Description: "Update the current case's title, description, or custom " +
+			"field values. This tool cannot change the case status (use " +
+			"case__update_case_status), cannot change assignees (use case__assign " +
+			"/ case__unassign), and cannot delete the case.\n\n" +
 			"IMPORTANT: Do not overwrite blindly. Before changing any field, " +
 			"review the case's CURRENT values shown in the system prompt and " +
 			"confirm what is already there — ESPECIALLY title and description, " +
@@ -90,11 +95,6 @@ func (t *updateCaseTool) Spec() gollem.ToolSpec {
 			"description": {
 				Type:        gollem.TypeString,
 				Description: "New description (full replacement). Omit to preserve the existing description.",
-			},
-			"assignee_ids": {
-				Type:        gollem.TypeArray,
-				Description: "New assignee user IDs (full replacement). Pass an empty array to clear assignees. Omit to preserve.",
-				Items:       &gollem.Parameter{Type: gollem.TypeString},
 			},
 			"fields": {
 				Type: gollem.TypeArray,
@@ -143,16 +143,6 @@ func (t *updateCaseTool) Run(ctx context.Context, args map[string]any) (map[stri
 		hasUpdate = true
 	}
 
-	if v, ok := args["assignee_ids"]; ok && v != nil {
-		ids, err := toStringSlice(v)
-		if err != nil {
-			return nil, goerr.Wrap(err, "assignee_ids invalid")
-		}
-		patch.AssigneeIDs = ids
-		patch.HasAssign = true
-		hasUpdate = true
-	}
-
 	if v, ok := args["fields"]; ok && v != nil {
 		if t.deps.Schema == nil {
 			return nil, goerr.New("this workspace has no custom fields; the fields parameter is not supported")
@@ -170,7 +160,7 @@ func (t *updateCaseTool) Run(ctx context.Context, args map[string]any) (map[stri
 	}
 
 	if !hasUpdate {
-		return nil, goerr.New("update_case requires at least one of title, description, assignee_ids, fields")
+		return nil, goerr.New("update_case requires at least one of title, description, fields")
 	}
 
 	updated, err := t.deps.CaseUC.UpdateCase(ctx, t.deps.WorkspaceID, t.deps.CaseID, patch)
@@ -188,6 +178,118 @@ func (t *updateCaseTool) Run(ctx context.Context, args map[string]any) (map[stri
 		"assignee_ids": updated.AssigneeIDs,
 		"field_values": renderFieldValues(updated.FieldValues),
 	}, nil
+}
+
+type assignCaseTool struct {
+	deps Deps
+}
+
+func (t *assignCaseTool) Spec() gollem.ToolSpec {
+	return gollem.ToolSpec{
+		Name: "case__assign",
+		Description: "Add one or more assignees to the current case. This is a " +
+			"delta add: the listed user IDs are unioned onto the existing " +
+			"assignees, so already-assigned users are left untouched and other " +
+			"assignees are preserved. Use case__unassign to remove. New assignees " +
+			"must be known Slack users.",
+		Parameters: map[string]*gollem.Parameter{
+			"user_ids": {
+				Type:        gollem.TypeArray,
+				Description: "Slack user IDs to add as assignees.",
+				Items:       &gollem.Parameter{Type: gollem.TypeString},
+				Required:    true,
+			},
+		},
+	}
+}
+
+func (t *assignCaseTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
+	tool.Update(ctx, "Assigning users to case...")
+
+	if t.deps.CaseUC == nil {
+		return nil, goerr.New("casewriter: CaseUC is not configured")
+	}
+
+	ids, err := assigneeIDsArg(args)
+	if err != nil {
+		return nil, err
+	}
+
+	updated, err := t.deps.CaseUC.AssignCase(ctx, t.deps.WorkspaceID, t.deps.CaseID, ids)
+	if err != nil {
+		return nil, goerr.Wrap(err, "assign case",
+			goerr.V("workspace_id", t.deps.WorkspaceID),
+			goerr.V("case_id", t.deps.CaseID))
+	}
+
+	return map[string]any{
+		"id":           updated.ID,
+		"assignee_ids": updated.AssigneeIDs,
+	}, nil
+}
+
+type unassignCaseTool struct {
+	deps Deps
+}
+
+func (t *unassignCaseTool) Spec() gollem.ToolSpec {
+	return gollem.ToolSpec{
+		Name: "case__unassign",
+		Description: "Remove one or more assignees from the current case. This is a " +
+			"delta remove: the listed user IDs are dropped from the existing " +
+			"assignees and the rest are preserved. Removing a user who is not " +
+			"assigned is a no-op.",
+		Parameters: map[string]*gollem.Parameter{
+			"user_ids": {
+				Type:        gollem.TypeArray,
+				Description: "Slack user IDs to remove from the assignees.",
+				Items:       &gollem.Parameter{Type: gollem.TypeString},
+				Required:    true,
+			},
+		},
+	}
+}
+
+func (t *unassignCaseTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
+	tool.Update(ctx, "Unassigning users from case...")
+
+	if t.deps.CaseUC == nil {
+		return nil, goerr.New("casewriter: CaseUC is not configured")
+	}
+
+	ids, err := assigneeIDsArg(args)
+	if err != nil {
+		return nil, err
+	}
+
+	updated, err := t.deps.CaseUC.UnassignCase(ctx, t.deps.WorkspaceID, t.deps.CaseID, ids)
+	if err != nil {
+		return nil, goerr.Wrap(err, "unassign case",
+			goerr.V("workspace_id", t.deps.WorkspaceID),
+			goerr.V("case_id", t.deps.CaseID))
+	}
+
+	return map[string]any{
+		"id":           updated.ID,
+		"assignee_ids": updated.AssigneeIDs,
+	}, nil
+}
+
+// assigneeIDsArg extracts and validates the required non-empty user_ids array
+// shared by case__assign / case__unassign.
+func assigneeIDsArg(args map[string]any) ([]string, error) {
+	v, ok := args["user_ids"]
+	if !ok || v == nil {
+		return nil, goerr.New("user_ids is required")
+	}
+	ids, err := toStringSlice(v)
+	if err != nil {
+		return nil, goerr.Wrap(err, "user_ids invalid")
+	}
+	if len(ids) == 0 {
+		return nil, goerr.New("user_ids must not be empty")
+	}
+	return ids, nil
 }
 
 type updateCaseStatusTool struct {
