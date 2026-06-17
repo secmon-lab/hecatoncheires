@@ -331,6 +331,151 @@ func TestCaseUseCase_UpdateCase(t *testing.T) {
 	})
 }
 
+func TestCaseUseCase_AssignCase(t *testing.T) {
+	t.Run("adds users as a set union and persists", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+		seedSlackUsers(t, repo, "UCREATOR", "U001", "U002")
+
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", []string{"U001"}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		updated, err := uc.AssignCase(ctx, testWorkspaceID, created.ID, []string{"U002"})
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.AssigneeIDs).Equal([]string{"U001", "U002"})
+
+		retrieved, err := uc.GetCase(ctx, testWorkspaceID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, retrieved.AssigneeIDs).Equal([]string{"U001", "U002"})
+	})
+
+	t.Run("assigning an already-assigned user is idempotent", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+		seedSlackUsers(t, repo, "UCREATOR", "U001")
+
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", []string{"U001"}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		updated, err := uc.AssignCase(ctx, testWorkspaceID, created.ID, []string{"U001"})
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.AssigneeIDs).Equal([]string{"U001"})
+	})
+
+	t.Run("assigning an unknown user fails", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+		seedSlackUsers(t, repo, "UCREATOR")
+
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		_, err = uc.AssignCase(ctx, testWorkspaceID, created.ID, []string{"UGHOST"})
+		gt.Value(t, err).NotNil()
+	})
+
+	t.Run("assigning on a non-existent case returns ErrCaseNotFound", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+
+		_, err := uc.AssignCase(ctx, testWorkspaceID, 999, []string{"U001"})
+		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
+	})
+
+	t.Run("assigning on a private case as non-member is denied", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		seedSlackUsers(t, repo, "UMEMBER", "USTRANGER", "U002")
+
+		adminCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMEMBER"})
+		created, err := repo.Case().Create(adminCtx, testWorkspaceID, &model.Case{
+			ReporterID:     "UMEMBER",
+			Title:          "Private",
+			Status:         types.CaseStatusOpen,
+			IsPrivate:      true,
+			ChannelUserIDs: []string{"UMEMBER"},
+		})
+		gt.NoError(t, err).Required()
+
+		strangerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "USTRANGER"})
+		_, err = uc.AssignCase(strangerCtx, testWorkspaceID, created.ID, []string{"U002"})
+		gt.Error(t, err).Is(usecase.TestErrAccessDenied)
+	})
+}
+
+func TestCaseUseCase_UnassignCase(t *testing.T) {
+	t.Run("removes a user and preserves the rest", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+		seedSlackUsers(t, repo, "UCREATOR", "U001", "U002", "U003")
+
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", []string{"U001", "U002", "U003"}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		updated, err := uc.UnassignCase(ctx, testWorkspaceID, created.ID, []string{"U002"})
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.AssigneeIDs).Equal([]string{"U001", "U003"})
+
+		retrieved, err := uc.GetCase(ctx, testWorkspaceID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, retrieved.AssigneeIDs).Equal([]string{"U001", "U003"})
+	})
+
+	t.Run("unassigning a since-deleted user still works without existence check", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+		// Seed only the creator and one assignee; "UGONE" is intentionally not
+		// a known Slack user yet still appears in the assignee list.
+		seedSlackUsers(t, repo, "UCREATOR", "U001")
+		created, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+			ReporterID:  "UCREATOR",
+			Title:       "Title",
+			Status:      types.CaseStatusOpen,
+			AssigneeIDs: []string{"U001", "UGONE"},
+		})
+		gt.NoError(t, err).Required()
+
+		updated, err := uc.UnassignCase(ctx, testWorkspaceID, created.ID, []string{"UGONE"})
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.AssigneeIDs).Equal([]string{"U001"})
+	})
+
+	t.Run("unassigning on a non-existent case returns ErrCaseNotFound", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+
+		_, err := uc.UnassignCase(ctx, testWorkspaceID, 999, []string{"U001"})
+		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
+	})
+
+	t.Run("unassigning on a private case as non-member is denied", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+
+		adminCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMEMBER"})
+		created, err := repo.Case().Create(adminCtx, testWorkspaceID, &model.Case{
+			ReporterID:     "UMEMBER",
+			Title:          "Private",
+			Status:         types.CaseStatusOpen,
+			IsPrivate:      true,
+			ChannelUserIDs: []string{"UMEMBER"},
+			AssigneeIDs:    []string{"UMEMBER"},
+		})
+		gt.NoError(t, err).Required()
+
+		strangerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "USTRANGER"})
+		_, err = uc.UnassignCase(strangerCtx, testWorkspaceID, created.ID, []string{"UMEMBER"})
+		gt.Error(t, err).Is(usecase.TestErrAccessDenied)
+	})
+}
+
 func TestCaseUseCase_DeleteCase(t *testing.T) {
 	t.Run("delete case with actions", func(t *testing.T) {
 		repo := memory.New()

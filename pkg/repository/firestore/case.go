@@ -3,6 +3,7 @@ package firestore
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"cloud.google.com/go/firestore"
 	"github.com/m-mizutani/goerr/v2"
@@ -240,6 +241,62 @@ func (r *caseRepository) Update(ctx context.Context, workspaceID string, c *mode
 	}
 
 	return c, nil
+}
+
+func (r *caseRepository) AddAssignees(ctx context.Context, workspaceID string, id int64, userIDs []string, updatedAt time.Time) (*model.Case, error) {
+	return r.mutateAssignees(ctx, workspaceID, id, updatedAt, func(c *model.Case) bool {
+		return c.AssignUsers(userIDs)
+	})
+}
+
+func (r *caseRepository) RemoveAssignees(ctx context.Context, workspaceID string, id int64, userIDs []string, updatedAt time.Time) (*model.Case, error) {
+	return r.mutateAssignees(ctx, workspaceID, id, updatedAt, func(c *model.Case) bool {
+		return c.UnassignUsers(userIDs)
+	})
+}
+
+// mutateAssignees reads the case, applies mutate, and writes the whole document
+// back inside a single transaction so concurrent assign/unassign calls cannot
+// clobber one another (the lost-update hazard of a read-Update-write through
+// the plain Update path). The full *model.Case is rewritten via tx.Set — no
+// field-by-field reconstruction, so a newly added model field is never
+// silently dropped. updatedAt is stamped only when the set actually changed.
+func (r *caseRepository) mutateAssignees(ctx context.Context, workspaceID string, id int64, updatedAt time.Time, mutate func(*model.Case) bool) (*model.Case, error) {
+	docID := fmt.Sprintf("%d", id)
+	docRef := r.casesCollection(workspaceID).Doc(docID)
+
+	var result *model.Case
+	err := r.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		doc, err := tx.Get(docRef)
+		if err != nil {
+			if status.Code(err) == codes.NotFound {
+				return goerr.Wrap(ErrNotFound, "case not found", goerr.V("id", id))
+			}
+			return goerr.Wrap(err, "failed to get case", goerr.V("id", id))
+		}
+
+		var c model.Case
+		if err := doc.DataTo(&c); err != nil {
+			return goerr.Wrap(err, "failed to decode case", goerr.V("id", id))
+		}
+
+		if mutate(&c) {
+			c.UpdatedAt = updatedAt
+			if err := c.Validate(); err != nil {
+				return goerr.Wrap(err, "case validation failed before assignee update", goerr.V("id", id))
+			}
+			if err := tx.Set(docRef, &c); err != nil {
+				return goerr.Wrap(err, "failed to write case", goerr.V("id", id))
+			}
+		}
+		result = &c
+		return nil
+	})
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to mutate case assignees", goerr.V("id", id))
+	}
+
+	return result, nil
 }
 
 func (r *caseRepository) Delete(ctx context.Context, workspaceID string, id int64) error {

@@ -664,6 +664,70 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, workspaceID string, id in
 	return updated, nil
 }
 
+// assertCaseEditable loads the case and runs the same access-control gate as
+// UpdateCase (draft-aware: private drafts fall back to a reporter check since
+// they have no Slack channel yet). It is the shared precondition for the
+// assignee mutators below.
+func (uc *CaseUseCase) assertCaseEditable(ctx context.Context, workspaceID string, id int64) (*model.Case, error) {
+	existingCase, err := uc.repo.Case().Get(ctx, workspaceID, id)
+	if err != nil {
+		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
+	}
+
+	token, tokenErr := auth.TokenFromContext(ctx)
+	if tokenErr == nil {
+		if existingCase.IsDraft() {
+			if existingCase.IsPrivate && existingCase.ReporterID != token.Sub {
+				return nil, goerr.Wrap(ErrAccessDenied, "cannot edit private draft",
+					goerr.V(CaseIDKey, id), goerr.V("user_id", token.Sub))
+			}
+		} else if !model.IsCaseAccessible(existingCase, token.Sub) {
+			return nil, goerr.Wrap(ErrAccessDenied, "cannot edit private case",
+				goerr.V(CaseIDKey, id), goerr.V("user_id", token.Sub))
+		}
+	}
+	return existingCase, nil
+}
+
+// AssignCase atomically adds the given Slack user IDs to the case's assignee
+// set. Unlike UpdateCase — which replaces the whole assignee list and therefore
+// loses a concurrent edit inside its read-modify-write window — the add is
+// applied as a transactional set union in the repository, so two simultaneous
+// "assign me" actions both land. IDs already assigned are ignored. New
+// assignees must resolve to known Slack users. An empty userIDs slice is a
+// no-op that returns the case unchanged.
+func (uc *CaseUseCase) AssignCase(ctx context.Context, workspaceID string, id int64, userIDs []string) (*model.Case, error) {
+	if _, err := uc.assertCaseEditable(ctx, workspaceID, id); err != nil {
+		return nil, err
+	}
+
+	if err := uc.verifyUsersExist(ctx, userIDs, nil); err != nil {
+		return nil, goerr.Wrap(err, "assignee verification failed", goerr.V(CaseIDKey, id))
+	}
+
+	updated, err := uc.repo.Case().AddAssignees(ctx, workspaceID, id, userIDs, time.Now().UTC())
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to add assignees", goerr.V(CaseIDKey, id))
+	}
+	return updated, nil
+}
+
+// UnassignCase atomically removes the given Slack user IDs from the case's
+// assignee set. IDs not currently assigned are ignored. Removal needs no user
+// existence check (a since-deleted user must still be removable). An empty
+// userIDs slice is a no-op that returns the case unchanged.
+func (uc *CaseUseCase) UnassignCase(ctx context.Context, workspaceID string, id int64, userIDs []string) (*model.Case, error) {
+	if _, err := uc.assertCaseEditable(ctx, workspaceID, id); err != nil {
+		return nil, err
+	}
+
+	updated, err := uc.repo.Case().RemoveAssignees(ctx, workspaceID, id, userIDs, time.Now().UTC())
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to remove assignees", goerr.V(CaseIDKey, id))
+	}
+	return updated, nil
+}
+
 // UpdateAgentSettings replaces the Case-specific agent additional prompt
 // and the AgentSourceIDs whitelist. enabledSourceIDs == nil or empty
 // resets the selection to "use every Source". Non-empty IDs are

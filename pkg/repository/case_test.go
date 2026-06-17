@@ -1274,6 +1274,98 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.Value(t, cleared.AgentAdditionalPrompt).Equal("")
 		gt.Number(t, len(cleared.AgentSourceIDs)).Equal(0)
 	})
+
+	t.Run("AddAssignees unions ids and bumps UpdatedAt", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC().Add(-time.Hour),
+			Title:       "Assign target",
+			AssigneeIDs: []string{"U1"},
+		})
+		gt.NoError(t, err).Required()
+
+		stamp := time.Now().UTC()
+		added, err := repo.Case().AddAssignees(ctx, wsID, created.ID, []string{"U2", "U3"}, stamp)
+		gt.NoError(t, err).Required()
+		gt.Value(t, added.AssigneeIDs).Equal([]string{"U1", "U2", "U3"})
+		gt.Bool(t, added.UpdatedAt.Equal(stamp)).True()
+
+		// Persisted state must match what was returned.
+		got, err := repo.Case().Get(ctx, wsID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.AssigneeIDs).Equal([]string{"U1", "U2", "U3"})
+		gt.Bool(t, got.UpdatedAt.Equal(stamp)).True()
+	})
+
+	t.Run("AddAssignees ignores duplicates without bumping UpdatedAt", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		original := time.Now().UTC().Add(-time.Hour)
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   original,
+			Title:       "Dup target",
+			AssigneeIDs: []string{"U1", "U2"},
+		})
+		gt.NoError(t, err).Required()
+
+		res, err := repo.Case().AddAssignees(ctx, wsID, created.ID, []string{"U1", "U2"}, time.Now().UTC())
+		gt.NoError(t, err).Required()
+		gt.Value(t, res.AssigneeIDs).Equal([]string{"U1", "U2"})
+		// No change -> the stored UpdatedAt must be left untouched.
+		gt.Bool(t, res.UpdatedAt.Equal(original)).True()
+
+		got, err := repo.Case().Get(ctx, wsID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, got.UpdatedAt.Equal(original)).True()
+	})
+
+	t.Run("RemoveAssignees drops ids and preserves order", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:  "U-TEST-DEFAULT",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
+			Title:       "Remove target",
+			AssigneeIDs: []string{"U1", "U2", "U3"},
+		})
+		gt.NoError(t, err).Required()
+
+		stamp := time.Now().UTC()
+		removed, err := repo.Case().RemoveAssignees(ctx, wsID, created.ID, []string{"U2"}, stamp)
+		gt.NoError(t, err).Required()
+		gt.Value(t, removed.AssigneeIDs).Equal([]string{"U1", "U3"})
+		gt.Bool(t, removed.UpdatedAt.Equal(stamp)).True()
+
+		got, err := repo.Case().Get(ctx, wsID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.AssigneeIDs).Equal([]string{"U1", "U3"})
+	})
+
+	t.Run("assignee mutations on missing case error out", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		// memory and firestore expose distinct ErrNotFound sentinels, so the
+		// shared helper asserts only that the operation fails on a missing case.
+		_, err := repo.Case().AddAssignees(ctx, wsID, 99999, []string{"U1"}, time.Now().UTC())
+		gt.Error(t, err)
+
+		_, err = repo.Case().RemoveAssignees(ctx, wsID, 99999, []string{"U1"}, time.Now().UTC())
+		gt.Error(t, err)
+	})
 }
 
 func TestCaseRepository_Memory(t *testing.T) {

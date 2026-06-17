@@ -490,6 +490,24 @@ func (r *mutationResolver) UpdateCase(ctx context.Context, workspaceID string, i
 	return toGraphQLCase(updated, workspaceID), nil
 }
 
+// AssignCase is the resolver for the assignCase field.
+func (r *mutationResolver) AssignCase(ctx context.Context, workspaceID string, id int, userIDs []string) (*graphql1.Case, error) {
+	updated, err := r.UseCases.Case.AssignCase(ctx, workspaceID, int64(id), userIDs)
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLCase(updated, workspaceID), nil
+}
+
+// UnassignCase is the resolver for the unassignCase field.
+func (r *mutationResolver) UnassignCase(ctx context.Context, workspaceID string, id int, userIDs []string) (*graphql1.Case, error) {
+	updated, err := r.UseCases.Case.UnassignCase(ctx, workspaceID, int64(id), userIDs)
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLCase(updated, workspaceID), nil
+}
+
 // DeleteCase is the resolver for the deleteCase field.
 func (r *mutationResolver) DeleteCase(ctx context.Context, workspaceID string, id int) (bool, error) {
 	if err := r.UseCases.Case.DeleteCase(ctx, workspaceID, int64(id)); err != nil {
@@ -1385,21 +1403,3 @@ type actionEventResolver struct{ *Resolver }
 type caseResolver struct{ *Resolver }
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
-
-// !!! WARNING !!!
-// The code below was going to be deleted when updating resolvers. It has been copied here so you have
-// one last chance to move it out of harms way if you want. There are two reasons this happens:
-//  - When renaming or deleting a resolver the old code will be put in here. You can safely delete
-//    it when you're done.
-//  - You have helper methods in this file. Move them out to keep these resolver files clean.
-/*
-	func (r *caseResolver) SlackThreadTs(ctx context.Context, obj *graphql1.Case) (*string, error) {
-	panic(fmt.Errorf("not implemented: SlackThreadTs - slackThreadTS"))
-}
-func (r *caseResolver) IsThreadBound(ctx context.Context, obj *graphql1.Case) (bool, error) {
-	panic(fmt.Errorf("not implemented: IsThreadBound - isThreadBound"))
-}
-func (r *caseResolver) BoardStatus(ctx context.Context, obj *graphql1.Case) (*string, error) {
-	panic(fmt.Errorf("not implemented: BoardStatus - boardStatus"))
-}
-*/

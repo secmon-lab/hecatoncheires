@@ -320,3 +320,84 @@ func TestCase_SubmitDraft(t *testing.T) {
 		gt.Bool(t, errors.Is(err, model.ErrCaseNotDraft)).True()
 	})
 }
+
+func TestCaseAssignUsers(t *testing.T) {
+	t.Run("appends new ids in order and reports change", func(t *testing.T) {
+		c := &model.Case{AssigneeIDs: []string{"U1"}}
+		changed := c.AssignUsers([]string{"U2", "U3"})
+		gt.Bool(t, changed).True()
+		gt.Value(t, c.AssigneeIDs).Equal([]string{"U1", "U2", "U3"})
+	})
+
+	t.Run("ignores duplicates and reports no change", func(t *testing.T) {
+		c := &model.Case{AssigneeIDs: []string{"U1", "U2"}}
+		changed := c.AssignUsers([]string{"U1", "U2"})
+		gt.Bool(t, changed).False()
+		gt.Value(t, c.AssigneeIDs).Equal([]string{"U1", "U2"})
+	})
+
+	t.Run("adds only the genuinely new ids", func(t *testing.T) {
+		c := &model.Case{AssigneeIDs: []string{"U1"}}
+		changed := c.AssignUsers([]string{"U1", "U2"})
+		gt.Bool(t, changed).True()
+		gt.Value(t, c.AssigneeIDs).Equal([]string{"U1", "U2"})
+	})
+
+	t.Run("skips blank ids", func(t *testing.T) {
+		c := &model.Case{}
+		changed := c.AssignUsers([]string{"", "U1", ""})
+		gt.Bool(t, changed).True()
+		gt.Value(t, c.AssigneeIDs).Equal([]string{"U1"})
+	})
+
+	t.Run("assigning into empty slice", func(t *testing.T) {
+		c := &model.Case{}
+		changed := c.AssignUsers([]string{"U1"})
+		gt.Bool(t, changed).True()
+		gt.Value(t, c.AssigneeIDs).Equal([]string{"U1"})
+	})
+
+	t.Run("does not duplicate within a single input batch", func(t *testing.T) {
+		c := &model.Case{}
+		changed := c.AssignUsers([]string{"U1", "U1"})
+		gt.Bool(t, changed).True()
+		gt.Value(t, c.AssigneeIDs).Equal([]string{"U1"})
+	})
+}
+
+func TestCaseUnassignUsers(t *testing.T) {
+	t.Run("removes ids and preserves remaining order", func(t *testing.T) {
+		c := &model.Case{AssigneeIDs: []string{"U1", "U2", "U3"}}
+		changed := c.UnassignUsers([]string{"U2"})
+		gt.Bool(t, changed).True()
+		gt.Value(t, c.AssigneeIDs).Equal([]string{"U1", "U3"})
+	})
+
+	t.Run("removing absent id is a no-op", func(t *testing.T) {
+		c := &model.Case{AssigneeIDs: []string{"U1"}}
+		changed := c.UnassignUsers([]string{"U9"})
+		gt.Bool(t, changed).False()
+		gt.Value(t, c.AssigneeIDs).Equal([]string{"U1"})
+	})
+
+	t.Run("removing from empty set is a no-op", func(t *testing.T) {
+		c := &model.Case{}
+		changed := c.UnassignUsers([]string{"U1"})
+		gt.Bool(t, changed).False()
+		gt.Array(t, c.AssigneeIDs).Length(0)
+	})
+
+	t.Run("empty input is a no-op", func(t *testing.T) {
+		c := &model.Case{AssigneeIDs: []string{"U1"}}
+		changed := c.UnassignUsers(nil)
+		gt.Bool(t, changed).False()
+		gt.Value(t, c.AssigneeIDs).Equal([]string{"U1"})
+	})
+
+	t.Run("removes all matching ids", func(t *testing.T) {
+		c := &model.Case{AssigneeIDs: []string{"U1", "U2"}}
+		changed := c.UnassignUsers([]string{"U1", "U2"})
+		gt.Bool(t, changed).True()
+		gt.Array(t, c.AssigneeIDs).Length(0)
+	})
+}

@@ -86,6 +86,25 @@ Cases follow a simple linear lifecycle:
 * `CLOSED` — closed via `closeCase`; can be re-opened via
   `reopenCase`. `closeCase` / `reopenCase` reject `DRAFT` cases.
 
+### Editing assignees
+
+A case's assignees can be mutated through GraphQL in two ways:
+
+* `updateCase` (with `assigneeIDs`) **replaces** the entire assignee
+  list with the supplied set. This is what the WebUI multi-select and
+  the Slack multi-user picker use, since those widgets always report
+  the full selection.
+* `assignCase` / `unassignCase` change the set by **delta** — they add
+  or remove only the listed user IDs and leave the rest untouched.
+  Adding an already-assigned user (or removing an absent one) is a
+  no-op. The add/remove is applied as a transactional set operation
+  server-side, so two simultaneous "assign me" actions cannot clobber
+  one another the way a read-modify-write through `updateCase` could.
+  `assignCase` refuses user IDs that are not known Slack users;
+  `unassignCase` does not, so a since-deleted user can always be
+  removed. Both honour the same private-case access control as
+  `updateCase`.
+
 ### Slack: Save as Draft
 
 The `/cmd` creation modal exposes a **Draft mode** checkbox inside
