@@ -365,6 +365,24 @@ events.case = { on = ["created"] }
 		gt.String(t, resolved.Prompt).Equal("nested body")
 	})
 
+	t.Run("absolute prompt_file is honoured as-is", func(t *testing.T) {
+		dir := t.TempDir()
+		absPath := filepath.Join(dir, "abs.md")
+		gt.NoError(t, os.WriteFile(absPath, []byte("absolute body"), 0600)).Required()
+
+		// baseDir is a different, unrelated directory: an absolute path must
+		// not be joined against it.
+		job := parseJob(t, `
+[[job]]
+id = "abs_job"
+prompt_file = "`+absPath+`"
+events.case = { on = ["created"] }
+`)
+		resolved, err := job.Validate(t.TempDir())
+		gt.NoError(t, err).Required()
+		gt.String(t, resolved.Prompt).Equal("absolute body")
+	})
+
 	t.Run("prompt and prompt_file are mutually exclusive", func(t *testing.T) {
 		dir := t.TempDir()
 		gt.NoError(t, os.WriteFile(filepath.Join(dir, "p.md"), []byte("body"), 0600)).Required()

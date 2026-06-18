@@ -164,7 +164,13 @@ func (s *JobSection) resolvePrompt(baseDir string) (prompt string, deferred bool
 		return "", true, nil
 	}
 
-	path := filepath.Join(baseDir, s.PromptFile)
+	// An absolute prompt_file is honoured as-is; only relative paths resolve
+	// against the config file's directory (joining an absolute path with
+	// baseDir would mangle it).
+	path := s.PromptFile
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(baseDir, path)
+	}
 	// #nosec G304 -- prompt_file comes from the operator-supplied config file,
 	// the same trust level as the config path itself (CLI argument).
 	data, err := os.ReadFile(path)
