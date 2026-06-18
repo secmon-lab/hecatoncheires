@@ -834,6 +834,7 @@ prompt = "Post a status digest to the case Slack channel."
 | `description` | string   | no       | Free-form description for operators. |
 | `prompt`      | string   | yes      | Go `text/template`. Has access to `.Case`, `.Workspace`, `.Event`. |
 | `disabled`    | bool     | no       | Defaults to `false` (= active). Set `true` to temporarily disable. |
+| `quiet`       | bool     | no       | Defaults to `false`. Set `true` to suppress the operational Slack session log (see *Session log* below). |
 | `strategy`    | string   | no       | `"simple"` (default) or `"planexec"`. See *Execution strategy* below. |
 | `events.case` | table    | (\*)     | `on = ["created" \| "closed", ...]`. Always an array. |
 | `events.scheduled` | table | (\*)   | Exactly one of `every = "1h"` or `cron = "0 9 * * *"`. |
@@ -876,6 +877,41 @@ Notes:
   plan-and-execute runtime.
 
 (\*) At least one of `events.case` / `events.scheduled` must be present.
+
+### Session log
+
+Each Job run posts a minimal operational log to the Case's Slack channel so
+operators can see the agent working in real time. The log is intentionally
+sparse — a starting marker, a few progress lines, and a completion / failure
+marker — not a play-by-play of every LLM call.
+
+- **Starting marker** — when the run begins, the runtime posts a
+  `starting... <job_id>` message. This message roots the run's **session
+  thread**: all subsequent log lines for that run are replies to it.
+  - *Channel-mode Cases* (the Case owns a dedicated channel): the marker is
+    a new channel-root message; progress and completion replies thread under
+    it.
+  - *Thread-mode Cases* (the Case lives in a Slack thread): the marker is a
+    reply in the Case thread, and the Case thread doubles as the session
+    thread (Slack nests only one level).
+- **Progress lines** — the first time the run executes each distinct tool, a
+  single line is posted to the session thread. Repeat calls to the same tool
+  stay silent, so the log stays short.
+- **Completion / failure marker** — when the run finishes, a success or
+  failure marker (with the error text on failure) is posted to the session
+  thread.
+
+The agent's own `slack__post_message` tool is **not** part of the session
+log: it remains a deliberate agent action, posted where the agent directs
+(channel root in channel-mode Cases), and is never suppressed by `quiet`.
+
+Set `quiet = true` to disable the entire session log (starting marker,
+progress lines, and completion / failure marker) for a Job — useful for
+high-frequency or purely background Jobs whose Slack chatter would be noise.
+The run still executes and records its full trace in the Cases UI. The
+session log also no-ops automatically when the deployment has no Slack
+service wired (e.g. the scheduled-tick CLI) or when the Case has no bound
+Slack channel.
 
 ### System prompt
 

@@ -69,3 +69,29 @@ func IsJobActorContext(ctx context.Context) bool {
 	_, ok := ctx.Value(jobActorContextKey{}).(JobActorMarker)
 	return ok
 }
+
+// jobQuietContextKey is the private context.Value key carrying the
+// per-run "quiet" flag. JobRunner.Run stamps it once at the top of a run
+// (mirroring WithJobActor) so the various operational-log post sites
+// (starting marker, session-log thread, completion marker, tool-progress
+// trace handler) can each self-gate via isQuiet without threading the
+// flag through their constructors. It is deliberately unexported: the
+// boundary that "quiet does NOT silence the agent's slack__post_message
+// tool" is enforced structurally — that tool lives in another package and
+// cannot read this key.
+type jobQuietContextKey struct{}
+
+// withQuiet returns a context carrying the given quiet flag.
+func withQuiet(ctx context.Context, quiet bool) context.Context {
+	return context.WithValue(ctx, jobQuietContextKey{}, quiet)
+}
+
+// isQuiet reports whether the context was marked quiet via withQuiet.
+// Absent marker (or nil ctx) means not quiet.
+func isQuiet(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	q, _ := ctx.Value(jobQuietContextKey{}).(bool)
+	return q
+}

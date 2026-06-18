@@ -74,6 +74,33 @@ events.scheduled = { every = "30m" }
 	gt.Value(t, second.Strategy).Equal(model.JobStrategySimple)
 }
 
+func TestJobSection_Quiet(t *testing.T) {
+	const src = `
+[[job]]
+id = "quiet_job"
+prompt = "x"
+quiet = true
+events.case = { on = ["created"] }
+
+[[job]]
+id = "loud_job"
+prompt = "y"
+events.case = { on = ["created"] }
+`
+	var app config.AppConfig
+	gt.NoError(t, toml.Unmarshal([]byte(src), &app)).Required()
+	gt.Array(t, app.Jobs).Length(2).Required()
+
+	quiet, err := app.Jobs[0].Validate()
+	gt.NoError(t, err).Required()
+	gt.Bool(t, quiet.Quiet).True()
+
+	// Absent in TOML defaults to false.
+	loud, err := app.Jobs[1].Validate()
+	gt.NoError(t, err).Required()
+	gt.Bool(t, loud.Quiet).False()
+}
+
 func TestJobSection_Strategy(t *testing.T) {
 	t.Run("explicit simple", func(t *testing.T) {
 		const src = `

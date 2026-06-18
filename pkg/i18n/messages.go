@@ -161,6 +161,13 @@ var messagesEN = [msgKeyCount]string{
 	MsgDraftSavedModalTitle:        "Saved",
 	MsgDraftSavedModalBody:         "Saved as draft #%d. You can close this dialog.",
 	MsgDraftSaveFailedEphemeral:    "Failed to save draft. Please try again.",
+
+	// Job run session log
+	MsgJobRunStarting:     "starting... `%s`",
+	MsgJobRunCompleted:    ":white_check_mark: job `%s` completed",
+	MsgJobRunFailed:       ":x: job `%s` failed: %s",
+	MsgJobRunToolExecuted: ":wrench: `%s`",
+	MsgJobRunToolFailed:   ":warning: `%s` failed",
 }
 
 var messagesJA = [msgKeyCount]string{
@@ -307,4 +314,11 @@ var messagesJA = [msgKeyCount]string{
 	MsgDraftSavedModalTitle:        "保存しました",
 	MsgDraftSavedModalBody:         "下書き #%d として保存しました。このダイアログは閉じて構いません。",
 	MsgDraftSaveFailedEphemeral:    "下書きの保存に失敗しました。もう一度お試しください。",
+
+	// Job run session log
+	MsgJobRunStarting:     "起動中... `%s`",
+	MsgJobRunCompleted:    ":white_check_mark: ジョブ `%s` が完了しました",
+	MsgJobRunFailed:       ":x: ジョブ `%s` が失敗しました: %s",
+	MsgJobRunToolExecuted: ":wrench: `%s`",
+	MsgJobRunToolFailed:   ":warning: `%s` が失敗しました",
 }
