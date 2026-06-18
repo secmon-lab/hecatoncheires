@@ -13,24 +13,24 @@ import (
 func TestJobSection_Validate_RoundTrip(t *testing.T) {
 	const src = `
 [[job]]
-id = "summarize-on-create"
+id = "summarize_on_create"
 name = "Summarize"
 description = "Auto-summarize new cases"
 prompt = "summarize: {{.Case.Title}}"
 events.case = { on = ["created"] }
 
 [[job]]
-id = "daily-digest"
+id = "daily_digest"
 prompt = "post daily digest"
 events.scheduled = { cron = "0 9 * * *" }
 
 [[job]]
-id = "stale-check"
+id = "stale_check"
 prompt = "remind stale"
 events.scheduled = { every = "1h" }
 
 [[job]]
-id = "lifecycle-and-stale-watcher"
+id = "lifecycle_and_stale_watcher"
 prompt = "do both"
 disabled = true
 events.case = { on = ["created", "closed"] }
@@ -44,7 +44,7 @@ events.scheduled = { every = "30m" }
 
 	first, err := app.Jobs[0].Validate()
 	gt.NoError(t, err).Required()
-	gt.Value(t, first.ID).Equal("summarize-on-create")
+	gt.Value(t, first.ID).Equal("summarize_on_create")
 	gt.Value(t, first.Events.Case).NotNil()
 	gt.Array(t, first.Events.Case.On).Length(1)
 	gt.Value(t, first.Events.Case.On[0]).Equal(model.CaseLifecycleCreated)
@@ -78,7 +78,7 @@ func TestJobSection_Strategy(t *testing.T) {
 	t.Run("explicit simple", func(t *testing.T) {
 		const src = `
 [[job]]
-id = "j-simple"
+id = "j_simple"
 prompt = "x"
 strategy = "simple"
 events.case = { on = ["created"] }
@@ -94,7 +94,7 @@ events.case = { on = ["created"] }
 	t.Run("planexec", func(t *testing.T) {
 		const src = `
 [[job]]
-id = "j-pe"
+id = "j_pe"
 prompt = "x"
 strategy = "planexec"
 events.case = { on = ["created"] }
@@ -110,7 +110,7 @@ events.case = { on = ["created"] }
 	t.Run("empty falls back to simple", func(t *testing.T) {
 		const src = `
 [[job]]
-id = "j-default"
+id = "j_default"
 prompt = "x"
 events.case = { on = ["created"] }
 `
@@ -125,7 +125,7 @@ events.case = { on = ["created"] }
 	t.Run("unknown is rejected", func(t *testing.T) {
 		const src = `
 [[job]]
-id = "j-bad"
+id = "j_bad"
 prompt = "x"
 strategy = "ultra"
 events.case = { on = ["created"] }
@@ -150,9 +150,17 @@ events.case = { on = ["created"] }
 `,
 		},
 		{
-			name: "id not kebab-case",
+			name: "id not snake_case (uppercase)",
 			toml: `[[job]]
 id = "Bad_ID"
+prompt = "x"
+events.case = { on = ["created"] }
+`,
+		},
+		{
+			name: "id is kebab-case (rejected)",
+			toml: `[[job]]
+id = "bad-id"
 prompt = "x"
 events.case = { on = ["created"] }
 `,
@@ -265,7 +273,7 @@ func TestLoadWorkspaceConfigs_SampleRiskTOML(t *testing.T) {
 	configs, err := config.LoadWorkspaceConfigs([]string{"../../../examples/workspaces/risk.toml"})
 	gt.NoError(t, err).Required()
 	gt.Array(t, configs).Length(1).Required()
-	gt.Array(t, configs[0].Jobs).Length(3) // summarize-on-create / post-close-retro / stale-check
+	gt.Array(t, configs[0].Jobs).Length(3) // summarize_on_create / post_close_retro / stale_check
 }
 
 func TestJobSection_SingleStringOnIsRejected(t *testing.T) {

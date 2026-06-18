@@ -80,7 +80,7 @@ required = false
 
 # Auto-summarize a newly created case and post the summary to its Slack channel.
 [[job]]
-id = "summarize-on-create"
+id = "summarize_on_create"
 name = "Auto-summarize on creation"
 description = "Summarize a newly opened risk case and post to its Slack channel."
 events.case = { on = ["created"] }
@@ -92,7 +92,7 @@ required, append a short note to the case description via case__update_case.
 
 # When a case closes, draft a retrospective action item.
 [[job]]
-id = "post-close-retro"
+id = "post_close_retro"
 name = "Schedule retrospective on close"
 events.case = { on = ["closed"] }
 prompt = """
@@ -100,9 +100,9 @@ Create a retrospective action for this closed case via core__create_action and
 announce it to relevant stakeholders via slack__post_to_case_channel.
 """
 
-# Periodic stale-check.
+# Periodic stale check.
 [[job]]
-id = "stale-check"
+id = "stale_check"
 name = "Stale case check"
 events.scheduled = { every = "1h" }
 prompt = """

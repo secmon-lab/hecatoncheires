@@ -81,7 +81,7 @@ func TestScheduledScanner_PublishesDueJobs(t *testing.T) {
 
 	registry := model.NewWorkspaceRegistry()
 	dueJob := &model.Job{
-		ID:     "stale-check",
+		ID:     "stale_check",
 		Prompt: "x",
 		Events: model.JobEvents{
 			Scheduled: &model.ScheduledEventConfig{Every: time.Hour},
@@ -119,7 +119,7 @@ func TestScheduledScanner_SkipsNotYetDue(t *testing.T) {
 
 	registry := model.NewWorkspaceRegistry()
 	j := &model.Job{
-		ID:     "stale-check",
+		ID:     "stale_check",
 		Prompt: "x",
 		Events: model.JobEvents{
 			Scheduled: &model.ScheduledEventConfig{Every: time.Hour},

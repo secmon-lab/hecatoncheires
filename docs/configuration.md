@@ -802,7 +802,7 @@ Agent Jobs let workspace administrators declaratively wire LLM-powered automatio
 ```toml
 # A minimal lifecycle Job.
 [[job]]
-id = "summarize-on-create"
+id = "summarize_on_create"
 name = "Auto-summarize on creation"
 description = "Summarize a new case and post the summary to Slack."
 events.case = { on = ["created"] }
@@ -820,7 +820,7 @@ prompt = "Take any appropriate action..."
 
 # A cron-based scheduled Job.
 [[job]]
-id = "daily-digest"
+id = "daily_digest"
 events.scheduled = { cron = "0 9 * * *" }  # 09:00 UTC every day
 prompt = "Post a status digest to the case Slack channel."
 ```
@@ -829,7 +829,7 @@ prompt = "Post a status digest to the case Slack channel."
 
 | Field         | Type     | Required | Notes |
 |---------------|----------|----------|-------|
-| `id`          | string   | yes      | Workspace-unique, kebab-case. |
+| `id`          | string   | yes      | Workspace-unique, snake_case (`^[a-z0-9]+(_[a-z0-9]+)*$`). |
 | `name`        | string   | no       | Human-readable label for logs. |
 | `description` | string   | no       | Free-form description for operators. |
 | `prompt`      | string   | yes      | Go `text/template`. Has access to `.Case`, `.Workspace`, `.Event`. |
@@ -850,7 +850,7 @@ with a structured summary.
 
 ```toml
 [[job]]
-id = "deep-investigation-on-create"
+id = "deep_investigation_on_create"
 prompt = "Investigate the case from every angle and summarise findings."
 strategy = "planexec"
 events.case = { on = ["created"] }

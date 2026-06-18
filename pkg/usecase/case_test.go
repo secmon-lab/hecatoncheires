@@ -2614,7 +2614,7 @@ func (r *jobLifecycleSlackPostRecorder) snapshot() []jobLifecycleSlackPost {
 func TestLifecycle_CreateCaseTriggersAgentJob(t *testing.T) {
 	const wsID = "lifecycle-ws"
 	caseJob := &model.Job{
-		ID:     "summarize-on-create",
+		ID:     "summarize_on_create",
 		Prompt: "Post a one-line summary of the case to Slack via slack__post_to_case_channel.",
 		Events: model.JobEvents{
 			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},

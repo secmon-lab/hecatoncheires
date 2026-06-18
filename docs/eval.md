@@ -185,7 +185,7 @@ For evaluating a Job, the scenario:
 
 ```toml
 [[job]]
-id       = "triage-summary"
+id       = "triage_summary"
 name     = "Triage summary"
 prompt   = "Summarize the case titled {{.Case.Title}} and note next steps."
 strategy = "simple"            # simple | planexec
@@ -197,7 +197,7 @@ title       = "Cannot log in to portal (503)"
 description = "Users report 503 on login since this morning."
 
 [run_job]
-id          = "triage-summary"
+id          = "triage_summary"
 target_case = "Cannot log in to portal (503)"   # optional; defaults to the first seeded case
 
 [[expect.checks]]
