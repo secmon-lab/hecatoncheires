@@ -832,12 +832,34 @@ prompt = "Post a status digest to the case Slack channel."
 | `id`          | string   | yes      | Workspace-unique, snake_case (`^[a-z0-9]+(_[a-z0-9]+)*$`). |
 | `name`        | string   | no       | Human-readable label for logs. |
 | `description` | string   | no       | Free-form description for operators. |
-| `prompt`      | string   | yes      | Go `text/template`. Has access to `.Case`, `.Workspace`, `.Event`. |
+| `prompt`      | string   | (\*\*)   | Inline prompt. Go `text/template`. Has access to `.Case`, `.Workspace`, `.Event`. |
+| `prompt_file` | string   | (\*\*)   | Path to a file holding the prompt, resolved relative to this config file's directory. Use it when the prompt is too long to inline comfortably. |
 | `disabled`    | bool     | no       | Defaults to `false` (= active). Set `true` to temporarily disable. |
 | `quiet`       | bool     | no       | Defaults to `false`. Set `true` to suppress the operational Slack session log (see *Session log* below). |
 | `strategy`    | string   | no       | `"simple"` (default) or `"planexec"`. See *Execution strategy* below. |
 | `events.case` | table    | (\*)     | `on = ["created" \| "closed", ...]`. Always an array. |
 | `events.scheduled` | table | (\*)   | Exactly one of `every = "1h"` or `cron = "0 9 * * *"`. |
+
+(\*\*) Exactly one of `prompt` or `prompt_file` must be set; supplying both, or neither, fails at config load time.
+
+### Prompt source (`prompt` vs `prompt_file`)
+
+Provide the prompt either inline via `prompt` or from an external file via
+`prompt_file` — never both. `prompt_file` is resolved **relative to the
+directory of the config file that declares the Job**, so a prompt can live
+next to its workspace TOML and grow without bloating it:
+
+```toml
+[[job]]
+id = "deep_investigation_on_create"
+prompt_file = "prompts/deep_investigation.md"  # relative to this config.toml
+events.case = { on = ["created"] }
+```
+
+The file's contents are loaded at startup and behave exactly like an inline
+`prompt` (Go `text/template` with access to `.Case`, `.Workspace`, `.Event`);
+trailing whitespace is trimmed. A missing or empty file fails loudly at load
+time.
 
 ### Execution strategy
 

@@ -337,8 +337,10 @@ func (a *AppConfig) Validate() error {
 	}
 
 	// [[job]] entries are optional. When supplied, validate eagerly so
-	// schema / cron / duration errors surface at startup.
-	if _, err := a.resolveJobs(); err != nil {
+	// schema / cron / duration errors surface at startup. baseDir is empty:
+	// this structural pass must not read prompt_file contents (the config
+	// path is unknown here); the file read happens in loadSingleWorkspaceConfig.
+	if _, err := a.resolveJobs(""); err != nil {
 		return goerr.Wrap(err, "invalid [[job]] section")
 	}
 
@@ -576,7 +578,8 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 		return nil, goerr.Wrap(err, "failed to resolve action status set", goerr.V(ConfigPathKey, path))
 	}
 
-	jobs, err := appCfg.resolveJobs()
+	// Resolve relative prompt_file paths against the config file's directory.
+	jobs, err := appCfg.resolveJobs(filepath.Dir(path))
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to resolve jobs", goerr.V(ConfigPathKey, path))
 	}
