@@ -354,10 +354,12 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 
 	// Compose the Slack progress handler with the Firestore trace handler so
 	// tool executions surface (deduped, minimal) into the session thread.
-	// Only when a notifier is wired — otherwise keep the bare handler so the
-	// executor receives the same concrete type the tests assert against.
+	// Only wire it when there is actually a session thread to post into and
+	// the run is not quiet — otherwise the handler would no-op on every trace
+	// event, so skip the trace.Multi fan-out entirely and keep the bare
+	// handler (the type the cast-based tests assert against).
 	var traceHandler trace.Handler = handler
-	if r.deps.SlackNotifier != nil {
+	if r.deps.SlackNotifier != nil && channelID != "" && sessionThreadTS != "" && !isQuiet(ctx) {
 		traceHandler = trace.Multi(handler, newSlackProgressHandler(r.deps.SlackNotifier, channelID, sessionThreadTS))
 	}
 
