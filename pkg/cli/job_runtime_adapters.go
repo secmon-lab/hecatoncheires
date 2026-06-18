@@ -29,3 +29,18 @@ func (a slackPosterAdapter) PostThreadMessage(ctx context.Context, channelID str
 	}
 	return a.svc.PostThreadMessage(ctx, channelID, threadTS, blocks, text)
 }
+
+// slackNotifierAdapter bridges the runner's job.SlackNotifier onto the
+// broader slacksvc.Service. It exposes only the plain-text root / thread
+// posts the operational session log needs.
+type slackNotifierAdapter struct {
+	svc slacksvc.Service
+}
+
+func (a slackNotifierAdapter) PostMessage(ctx context.Context, channelID, text string) (string, error) {
+	return a.svc.PostMessage(ctx, channelID, nil, text)
+}
+
+func (a slackNotifierAdapter) PostThreadReply(ctx context.Context, channelID, threadTS, text string) (string, error) {
+	return a.svc.PostThreadReply(ctx, channelID, threadTS, text)
+}

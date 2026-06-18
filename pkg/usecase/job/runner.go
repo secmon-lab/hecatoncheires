@@ -5,11 +5,13 @@ import (
 	"time"
 
 	"github.com/gollem-dev/gollem"
+	"github.com/gollem-dev/gollem/trace"
 	"github.com/google/uuid"
 	"github.com/m-mizutani/goerr/v2"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/job"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
@@ -58,6 +60,21 @@ type ToolBuilder interface {
 	Build(ctx context.Context, c *model.Case, ws *model.WorkspaceEntry) []gollem.Tool
 }
 
+// SlackNotifier posts the operational, session-level messages a Job run
+// emits around the agent loop: the "starting..." marker, the per-tool
+// progress lines, and the completion / failure marker. It is intentionally
+// the minimal surface the runner needs — a thin adapter over the broader
+// Slack service is wired in at the CLI layer. A nil SlackNotifier disables
+// all operational notifications (e.g. the scheduled-tick CLI, which has no
+// Slack wiring); the agent's own slack__post_message tool is unaffected.
+type SlackNotifier interface {
+	// PostMessage posts a new root message to channelID and returns its
+	// timestamp (used as the session thread parent in channel-mode Cases).
+	PostMessage(ctx context.Context, channelID, text string) (string, error)
+	// PostThreadReply posts a reply under threadTS and returns its timestamp.
+	PostThreadReply(ctx context.Context, channelID, threadTS, text string) (string, error)
+}
+
 // ToolBuilderFunc is the function form of ToolBuilder for inline use.
 type ToolBuilderFunc func(ctx context.Context, c *model.Case, ws *model.WorkspaceEntry) []gollem.Tool
 
@@ -80,6 +97,12 @@ type RunnerDeps struct {
 
 	ToolBuilder   ToolBuilder
 	LeaseDuration time.Duration // 0 → DefaultLeaseDuration
+
+	// SlackNotifier posts the run's operational session log (starting /
+	// tool-progress / completion markers) to the Case's Slack channel. Nil
+	// disables all such notifications; the run still executes and records
+	// its trace as before.
+	SlackNotifier SlackNotifier
 
 	// NewRunID generates a fresh RunID for each Run. nil → UUIDv7.
 	NewRunID func() string
@@ -201,6 +224,12 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 	// re-publish events.
 	ctx = WithJobActor(ctx, JobActorMarker{JobID: j.ID})
 
+	// Carry the Job's quiet flag for the whole run. Each operational-log
+	// post site (starting marker, tool-progress handler, completion marker)
+	// self-gates on isQuiet(ctx) rather than threading the bool through
+	// every constructor — mirroring WithJobActor above.
+	ctx = withQuiet(ctx, j.Quiet)
+
 	// --- prepare stage ----------------------------------------------
 	// Workspace / case / actions / prompt construction all happen
 	// BEFORE we create the JobRunLog. A failure here means the Run
@@ -311,6 +340,27 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 		nil, // default truncator
 	)
 
+	// Post the "starting..." marker and resolve the session thread the
+	// run's operational log consolidates into. Channel-mode Cases root a
+	// fresh thread at the marker; thread-mode Cases reuse the Case thread
+	// (Slack only nests one level). Both no-op for quiet runs / nil
+	// notifier; a failed marker post degrades to no session thread but the
+	// run proceeds.
+	channelID := ""
+	if c != nil {
+		channelID = c.SlackChannelID
+	}
+	sessionThreadTS := r.postStarting(ctx, j, c)
+
+	// Compose the Slack progress handler with the Firestore trace handler so
+	// tool executions surface (deduped, minimal) into the session thread.
+	// Only when a notifier is wired — otherwise keep the bare handler so the
+	// executor receives the same concrete type the tests assert against.
+	var traceHandler trace.Handler = handler
+	if r.deps.SlackNotifier != nil {
+		traceHandler = trace.Multi(handler, newSlackProgressHandler(r.deps.SlackNotifier, channelID, sessionThreadTS))
+	}
+
 	var tools []gollem.Tool
 	if r.deps.ToolBuilder != nil {
 		tools = r.deps.ToolBuilder.Build(ctx, c, ws)
@@ -322,7 +372,7 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 		Prompt:       userPrompt,
 		Tools:        tools,
 		LLMClient:    r.deps.LLMClient,
-		TraceHandler: handler,
+		TraceHandler: traceHandler,
 		TraceID:      traceID,
 	}
 	_, execErr := executor.Execute(ctx, execReq)
@@ -336,8 +386,12 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 		if emitErr := handler.EmitRunError(ctx, runErrorStageExecute, execErr.Error()); emitErr != nil {
 			errutil.Handle(ctx, emitErr, "job: append run_error event")
 		}
+		r.postSessionLog(ctx, channelID, sessionThreadTS,
+			i18n.T(ctx, i18n.MsgJobRunFailed, j.ID, truncateString(execErr.Error(), model.MaxInlineBytes)))
 	} else {
 		logRec.Stage = model.JobRunStageSuccess
+		r.postSessionLog(ctx, channelID, sessionThreadTS,
+			i18n.T(ctx, i18n.MsgJobRunCompleted, j.ID))
 	}
 
 	if finErr := r.deps.Repo.JobRunLog().Finish(ctx, logRec); finErr != nil {
@@ -356,6 +410,60 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 		return goerr.Wrap(recErr, "record successful run")
 	}
 	return execErr
+}
+
+// postStarting posts the "starting..." marker and returns the timestamp
+// that roots the run's session-log thread. The contract:
+//   - no notifier / quiet run / Case without a Slack channel → "" (no
+//     session log at all).
+//   - thread-mode Case (SlackThreadTS set) → reply into the Case thread and
+//     return that thread_ts; the Case thread doubles as the session thread
+//     (Slack nests only one level).
+//   - channel-mode Case → post a root message; its timestamp roots a fresh
+//     session thread. A failed post degrades to "" (run still proceeds).
+//
+// All failures are non-fatal (errutil.Handle); the marker is observability,
+// not part of the run's success contract.
+func (r *JobRunner) postStarting(ctx context.Context, j *model.Job, c *model.Case) string {
+	notifier := r.deps.SlackNotifier
+	if notifier == nil || isQuiet(ctx) || c == nil || c.SlackChannelID == "" {
+		return ""
+	}
+	text := i18n.T(ctx, i18n.MsgJobRunStarting, j.ID)
+
+	if c.SlackThreadTS != "" {
+		if _, err := notifier.PostThreadReply(ctx, c.SlackChannelID, c.SlackThreadTS, text); err != nil {
+			errutil.Handle(ctx, goerr.Wrap(err, "post job run starting marker",
+				goerr.V("channel_id", c.SlackChannelID),
+				goerr.V("thread_ts", c.SlackThreadTS),
+				goerr.V("job_id", j.ID)), "job: post starting marker to slack")
+		}
+		return c.SlackThreadTS
+	}
+
+	ts, err := notifier.PostMessage(ctx, c.SlackChannelID, text)
+	if err != nil {
+		errutil.Handle(ctx, goerr.Wrap(err, "post job run starting marker",
+			goerr.V("channel_id", c.SlackChannelID),
+			goerr.V("job_id", j.ID)), "job: post starting marker to slack")
+		return ""
+	}
+	return ts
+}
+
+// postSessionLog appends one operational line (completion / failure marker)
+// to the run's session thread. No-op when notifications are disabled or no
+// session thread was established. Non-fatal on error.
+func (r *JobRunner) postSessionLog(ctx context.Context, channelID, sessionThreadTS, text string) {
+	notifier := r.deps.SlackNotifier
+	if notifier == nil || isQuiet(ctx) || channelID == "" || sessionThreadTS == "" {
+		return
+	}
+	if _, err := notifier.PostThreadReply(ctx, channelID, sessionThreadTS, text); err != nil {
+		errutil.Handle(ctx, goerr.Wrap(err, "post job run session log",
+			goerr.V("channel_id", channelID),
+			goerr.V("thread_ts", sessionThreadTS)), "job: post session log to slack")
+	}
 }
 
 // resolveSources turns Case.AgentSourceIDs into the list of Sources that

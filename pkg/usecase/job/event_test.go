@@ -33,6 +33,23 @@ func setupCase(t *testing.T, wsID string) (interfaces.Repository, *model.Case) {
 	return repo, created
 }
 
+// setupCaseWithSlack creates an OPEN Case bound to the given Slack channel
+// (and optional thread). channelID empty → no Slack binding; threadTS set →
+// thread-mode Case.
+func setupCaseWithSlack(t *testing.T, wsID, channelID, threadTS string) (interfaces.Repository, *model.Case) {
+	t.Helper()
+	repo := memory.New()
+	created, err := repo.Case().Create(context.Background(), wsID, &model.Case{
+		Title:          "T",
+		Status:         types.CaseStatusOpen,
+		ReporterID:     "U-REP",
+		SlackChannelID: channelID,
+		SlackThreadTS:  threadTS,
+	})
+	gt.NoError(t, err).Required()
+	return repo, created
+}
+
 // inertLLM satisfies gollem.LLMClient but panics if ever called. The
 // recordingExecutor short-circuits before the LLM is touched.
 func inertLLM() gollem.LLMClient {
@@ -51,6 +68,18 @@ func TestJobActorContext(t *testing.T) {
 	gt.Bool(t, job.IsJobActorContext(ctx)).True()
 
 	gt.Bool(t, job.IsJobActorContext(context.TODO())).False()
+}
+
+func TestQuietContext(t *testing.T) {
+	// Absent marker → not quiet.
+	gt.Bool(t, job.IsQuietForTest(context.Background())).False()
+
+	// Explicit true / false round-trip.
+	gt.Bool(t, job.IsQuietForTest(job.WithQuietForTest(context.Background(), true))).True()
+	gt.Bool(t, job.IsQuietForTest(job.WithQuietForTest(context.Background(), false))).False()
+
+	// nil context is treated as not quiet (no panic).
+	gt.Bool(t, job.IsQuietForTest(nil)).False()
 }
 
 // recordingExecutor counts how many times it was called and what prompts

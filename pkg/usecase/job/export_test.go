@@ -21,6 +21,15 @@ func NewRunSequencerForTest() *runSequencer {
 	return newRunSequencer()
 }
 
+// WithQuietForTest exposes withQuiet for tests in other packages.
+var WithQuietForTest = withQuiet
+
+// IsQuietForTest exposes isQuiet for tests in other packages.
+var IsQuietForTest = isQuiet
+
+// NewSlackProgressHandlerForTest exposes newSlackProgressHandler for tests.
+var NewSlackProgressHandlerForTest = newSlackProgressHandler
+
 // NewJobRunTraceHandlerForTest constructs a jobRunTraceHandler for tests.
 // clock and truncator may be nil for defaults.
 func NewJobRunTraceHandlerForTest(

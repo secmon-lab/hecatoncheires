@@ -233,6 +233,13 @@ type Job struct {
 	// entry.
 	Disabled bool
 
+	// Quiet defaults to false. When true, the Job runs without emitting
+	// operational Slack notifications (the "starting..." marker, the
+	// per-run session-log thread, and the completion/failure markers).
+	// It does NOT silence the agent's own slack__post_message tool — that
+	// is a deliberate agent action, not an operational log.
+	Quiet bool
+
 	// Strategy selects which execution runtime drives this Job. Empty
 	// (the zero value) is equivalent to JobStrategySimple; the config
 	// loader normalises before Validate runs.

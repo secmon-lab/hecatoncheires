@@ -215,12 +215,21 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner) {
 		}
 	}
 
+	// Wire the operational session-log notifier only when a Slack service is
+	// present. Leaving it nil (e.g. the scheduled-tick CLI) disables the
+	// starting / progress / completion markers without affecting the run.
+	var slackNotifier job.SlackNotifier
+	if deps.SlackService != nil {
+		slackNotifier = slackNotifierAdapter{svc: deps.SlackService}
+	}
+
 	runner := job.NewJobRunner(job.RunnerDeps{
-		Repo:        deps.Repo,
-		Registry:    deps.Registry,
-		LLMClient:   deps.LLMClient,
-		Executors:   executors,
-		ToolBuilder: toolBuilder,
+		Repo:          deps.Repo,
+		Registry:      deps.Registry,
+		LLMClient:     deps.LLMClient,
+		Executors:     executors,
+		ToolBuilder:   toolBuilder,
+		SlackNotifier: slackNotifier,
 	})
 	jobUC := job.NewUseCase(deps.Registry, runner)
 	return jobUC, runner

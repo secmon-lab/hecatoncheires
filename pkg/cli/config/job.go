@@ -29,6 +29,10 @@ type JobSection struct {
 	Description string `toml:"description"`
 	Prompt      string `toml:"prompt"`
 	Disabled    bool   `toml:"disabled"`
+	// Quiet, when true, suppresses the operational Slack notifications a
+	// Job run normally emits (the "starting..." marker, per-run session-log
+	// thread, and completion/failure markers). Defaults to false.
+	Quiet bool `toml:"quiet"`
 	// Strategy selects the execution runtime for this Job. Empty falls
 	// back to "simple" (the v1 SingleLoopJobExecutor); set to "planexec"
 	// to drive the Job through the plan-and-execute runtime shared with
@@ -96,6 +100,7 @@ func (s *JobSection) Validate() (*model.Job, error) {
 		Description: s.Description,
 		Prompt:      s.Prompt,
 		Disabled:    s.Disabled,
+		Quiet:       s.Quiet,
 		Strategy:    strategy,
 		Events:      *events,
 	}

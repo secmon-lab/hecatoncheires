@@ -12,7 +12,9 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
 
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	jobagent "github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/job"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
 )
@@ -550,6 +552,158 @@ func TestJobRunner_LLMFailure_AppendsRunError(t *testing.T) {
 	gt.String(t, jr.LastRunID).Equal(runID)
 	gt.String(t, jr.LastTraceID).Equal(traceID)
 	gt.String(t, jr.LastError).Equal("llm timeout")
+}
+
+// traceDrivingExecutor emits one tool span through the trace handler it
+// receives (which is a trace.Multi when a SlackNotifier is wired), then
+// optionally returns a terminal error. Used to exercise the session-log
+// notifications end to end.
+type traceDrivingExecutor struct {
+	toolName string
+	err      error
+}
+
+func (e *traceDrivingExecutor) Execute(ctx context.Context, req jobagent.ExecuteRequest) (*jobagent.ExecuteResult, error) {
+	if req.TraceHandler != nil && e.toolName != "" {
+		tctx := req.TraceHandler.StartToolExec(ctx, e.toolName, map[string]any{"q": "x"})
+		req.TraceHandler.EndToolExec(tctx, map[string]any{"ok": true}, nil)
+	}
+	if e.err != nil {
+		return nil, e.err
+	}
+	return &jobagent.ExecuteResult{Status: jobagent.ExecuteStatusSuccess}, nil
+}
+
+func runNotifyJob(t *testing.T, repo interfaces.Repository, wsID string, j *model.Job, c *model.Case, notifier job.SlackNotifier, exec jobagent.JobExecutor) error {
+	t.Helper()
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: wsID, Name: "WS"}, Jobs: []*model.Job{j}})
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo: repo, Registry: registry, LLMClient: inertLLM(),
+		Executors:     map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: exec},
+		SlackNotifier: notifier,
+	})
+	return runner.Run(context.Background(), j, job.Event{
+		Domain: model.JobEventDomainCase, WorkspaceID: wsID, CaseID: c.ID,
+		Timestamp: time.Now().UTC(), CaseLifecycle: model.CaseLifecycleCreated,
+	})
+}
+
+func notifyJob(id string) *model.Job {
+	return &model.Job{
+		ID:     id,
+		Prompt: "x",
+		Events: model.JobEvents{Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}}},
+	}
+}
+
+// TestJobRunner_ChannelModeSessionLog: starting marker roots a channel-root
+// thread; tool progress and completion reply into it.
+func TestJobRunner_ChannelModeSessionLog(t *testing.T) {
+	ctx := context.Background()
+	repo, c := setupCaseWithSlack(t, "ws", "C1", "")
+	j := notifyJob("triage")
+	fake := &fakeNotifier{rootTS: "root-123"}
+
+	gt.NoError(t, runNotifyJob(t, repo, "ws", j, c, fake, &traceDrivingExecutor{toolName: "slack_search"})).Required()
+
+	calls := fake.snapshot()
+	gt.Array(t, calls).Length(3).Required()
+
+	gt.String(t, calls[0].method).Equal("root")
+	gt.String(t, calls[0].channelID).Equal("C1")
+	gt.String(t, calls[0].text).Equal(i18n.T(ctx, i18n.MsgJobRunStarting, "triage"))
+
+	gt.String(t, calls[1].method).Equal("reply")
+	gt.String(t, calls[1].threadTS).Equal("root-123")
+	gt.String(t, calls[1].text).Equal(i18n.T(ctx, i18n.MsgJobRunToolExecuted, "slack_search"))
+
+	gt.String(t, calls[2].method).Equal("reply")
+	gt.String(t, calls[2].threadTS).Equal("root-123")
+	gt.String(t, calls[2].text).Equal(i18n.T(ctx, i18n.MsgJobRunCompleted, "triage"))
+}
+
+// TestJobRunner_ThreadModeSessionLog: thread-mode Case reuses its own thread
+// for the starting marker, progress, and completion (no root post).
+func TestJobRunner_ThreadModeSessionLog(t *testing.T) {
+	ctx := context.Background()
+	repo, c := setupCaseWithSlack(t, "ws", "Cmon", "TT")
+	j := notifyJob("triage")
+	fake := &fakeNotifier{}
+
+	gt.NoError(t, runNotifyJob(t, repo, "ws", j, c, fake, &traceDrivingExecutor{toolName: "case_writer"})).Required()
+
+	calls := fake.snapshot()
+	gt.Array(t, calls).Length(3).Required()
+	for _, call := range calls {
+		gt.String(t, call.method).Equal("reply")
+		gt.String(t, call.channelID).Equal("Cmon")
+		gt.String(t, call.threadTS).Equal("TT")
+	}
+	gt.String(t, calls[0].text).Equal(i18n.T(ctx, i18n.MsgJobRunStarting, "triage"))
+	gt.String(t, calls[1].text).Equal(i18n.T(ctx, i18n.MsgJobRunToolExecuted, "case_writer"))
+	gt.String(t, calls[2].text).Equal(i18n.T(ctx, i18n.MsgJobRunCompleted, "triage"))
+}
+
+// TestJobRunner_QuietSuppressesSessionLog: quiet=true emits no operational
+// Slack traffic at all, even with a wired notifier.
+func TestJobRunner_QuietSuppressesSessionLog(t *testing.T) {
+	repo, c := setupCaseWithSlack(t, "ws", "C1", "")
+	j := notifyJob("triage")
+	j.Quiet = true
+	fake := &fakeNotifier{rootTS: "root-123"}
+
+	gt.NoError(t, runNotifyJob(t, repo, "ws", j, c, fake, &traceDrivingExecutor{toolName: "slack_search"})).Required()
+	gt.Array(t, fake.snapshot()).Length(0)
+}
+
+// TestJobRunner_StartingPostFailureDegrades: a failed starting-marker post
+// disables the session thread but the run still completes successfully.
+func TestJobRunner_StartingPostFailureDegrades(t *testing.T) {
+	repo, c := setupCaseWithSlack(t, "ws", "C1", "")
+	j := notifyJob("triage")
+	fake := &fakeNotifier{rootErr: errors.New("slack down")}
+
+	gt.NoError(t, runNotifyJob(t, repo, "ws", j, c, fake, &traceDrivingExecutor{toolName: "slack_search"})).Required()
+
+	// Only the (failed) root attempt happened; no thread replies because the
+	// session thread was never established.
+	calls := fake.snapshot()
+	gt.Array(t, calls).Length(1).Required()
+	gt.String(t, calls[0].method).Equal("root")
+
+	// Run still recorded success.
+	jr, err := repo.JobRun().Get(context.Background(), model.JobRunKey{WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID})
+	gt.NoError(t, err).Required()
+	gt.Value(t, jr.LastStatus).Equal(model.JobRunStatusSuccess)
+}
+
+// TestJobRunner_FailureMarkerPosted: a failed run posts the failure marker
+// (with the error text) into the session thread.
+func TestJobRunner_FailureMarkerPosted(t *testing.T) {
+	ctx := context.Background()
+	repo, c := setupCaseWithSlack(t, "ws", "C1", "")
+	j := notifyJob("triage")
+	fake := &fakeNotifier{rootTS: "root-123"}
+	sentinel := errors.New("boom")
+
+	err := runNotifyJob(t, repo, "ws", j, c, fake, &traceDrivingExecutor{err: sentinel})
+	gt.Error(t, err).Is(sentinel)
+
+	calls := fake.snapshot()
+	gt.Array(t, calls).Length(2).Required()
+	gt.String(t, calls[0].method).Equal("root")
+	gt.String(t, calls[1].method).Equal("reply")
+	gt.String(t, calls[1].threadTS).Equal("root-123")
+	gt.String(t, calls[1].text).Equal(i18n.T(ctx, i18n.MsgJobRunFailed, "triage", "boom"))
+}
+
+// TestJobRunner_NilNotifierNoPanic: with no notifier wired the run executes
+// (and emits tool spans) without panicking or posting.
+func TestJobRunner_NilNotifierNoPanic(t *testing.T) {
+	repo, c := setupCaseWithSlack(t, "ws", "C1", "")
+	j := notifyJob("triage")
+	gt.NoError(t, runNotifyJob(t, repo, "ws", j, c, nil, &traceDrivingExecutor{toolName: "slack_search"})).Required()
 }
 
 // TestJobRunner_WorkspaceLoadFailure_NoLog asserts that prepare-stage
