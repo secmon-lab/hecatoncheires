@@ -18,7 +18,7 @@ options  = [ {id = "high", name = "High"}, {id = "low", name = "Low"} ]
 
 # Workspace job (note: [[job]] array — distinct from the eval's [run_job] selector).
 [[job]]
-id       = "triage-summary"
+id       = "triage_summary"
 name     = "Triage summary"
 prompt   = "Summarize the case titled {{.Case.Title}} and note next steps."
 strategy = "simple"
@@ -41,7 +41,7 @@ description = "Users report 503 on login since this morning."
 
 # Eval job selector: which workspace job to run, against which seeded case.
 [run_job]
-id          = "triage-summary"
+id          = "triage_summary"
 target_case = "Cannot log in to portal (503)"
 
 [[expect.checks]]

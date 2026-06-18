@@ -66,7 +66,7 @@ func TestJobExecution_RunsJobAndCreatesAction(t *testing.T) {
 
 	ja, ok := art.(*evaltype.JobArtifact)
 	gt.B(t, ok).True()
-	gt.V(t, ja.JobID).Equal("triage-summary")
+	gt.V(t, ja.JobID).Equal("triage_summary")
 	gt.V(t, ja.Outcome.Stage).Equal("SUCCESS")
 	gt.V(t, ja.Case).NotNil()
 	gt.V(t, ja.Case.Title).Equal("Cannot log in to portal (503)")

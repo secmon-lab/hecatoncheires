@@ -176,7 +176,7 @@ func TestLoad_JobScenario(t *testing.T) {
 	gt.NoError(t, err)
 	gt.V(t, sc.Meta.Workflow).Equal("job")
 	gt.V(t, sc.Job).NotNil()
-	gt.V(t, sc.Job.ID).Equal("triage-summary")
+	gt.V(t, sc.Job.ID).Equal("triage_summary")
 	gt.V(t, sc.Job.TargetCase).Equal("Cannot log in to portal (503)")
 	gt.A(t, sc.Cases).Length(1)
 	// The workspace [[job]] is loaded into the workspace config, not the eval struct.

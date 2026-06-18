@@ -9,9 +9,10 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 )
 
-// jobIDPattern matches kebab-case identifiers. Job IDs are surfaced in
-// system prompts and logging, so we keep them human-readable.
-var jobIDPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+// jobIDPattern matches snake_case identifiers. Job IDs are surfaced in
+// system prompts and logging, so we keep them human-readable. Kebab-case
+// (hyphens) is deliberately rejected so Job IDs stay valid identifiers.
+var jobIDPattern = regexp.MustCompile(`^[a-z0-9]+(_[a-z0-9]+)*$`)
 
 // cronParser uses the standard 5-field schedule (minute hour dom month dow)
 // in UTC. Anything more exotic (seconds, descriptors) is rejected at load
@@ -68,7 +69,7 @@ func (s *JobSection) Validate() (*model.Job, error) {
 		return nil, goerr.New("job id is required")
 	}
 	if !jobIDPattern.MatchString(s.ID) {
-		return nil, goerr.New("job id must be kebab-case (^[a-z0-9]+(-[a-z0-9]+)*$)",
+		return nil, goerr.New("job id must be snake_case (^[a-z0-9]+(_[a-z0-9]+)*$)",
 			goerr.V("job_id", s.ID))
 	}
 	if s.Prompt == "" {
