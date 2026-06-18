@@ -1,7 +1,10 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/m-mizutani/goerr/v2"
@@ -27,8 +30,17 @@ type JobSection struct {
 	ID          string `toml:"id"`
 	Name        string `toml:"name"`
 	Description string `toml:"description"`
-	Prompt      string `toml:"prompt"`
-	Disabled    bool   `toml:"disabled"`
+	// Prompt is the inline prompt template. Exactly one of Prompt or
+	// PromptFile must be set; supplying both, or neither, fails at config
+	// load time.
+	Prompt string `toml:"prompt"`
+	// PromptFile points to a file holding the prompt template, resolved
+	// relative to the config file's directory. It exists so long prompts can
+	// live outside the TOML instead of being inlined. The file contents
+	// replace Prompt once read (see resolvePrompt); the runtime layer only
+	// ever sees the resolved model.Job.Prompt.
+	PromptFile string `toml:"prompt_file"`
+	Disabled   bool   `toml:"disabled"`
 	// Quiet, when true, suppresses the operational Slack notifications a
 	// Job run normally emits (the "starting..." marker, per-run session-log
 	// thread, and completion/failure markers). Defaults to false.
@@ -63,9 +75,11 @@ type ScheduledEventSection struct {
 }
 
 // Validate parses and validates a single JobSection, returning a fully
-// resolved model.Job on success. Returns an error wrapped with the job
-// index so the caller can include it in its error message.
-func (s *JobSection) Validate() (*model.Job, error) {
+// resolved model.Job on success. baseDir is the directory of the config
+// file, used to resolve a relative prompt_file path. Returns an error
+// wrapped with the job index so the caller can include it in its error
+// message.
+func (s *JobSection) Validate(baseDir string) (*model.Job, error) {
 	if s == nil {
 		return nil, goerr.New("job section is nil")
 	}
@@ -76,9 +90,10 @@ func (s *JobSection) Validate() (*model.Job, error) {
 		return nil, goerr.New("job id must be snake_case (^[a-z0-9]+(_[a-z0-9]+)*$)",
 			goerr.V("job_id", s.ID))
 	}
-	if s.Prompt == "" {
-		return nil, goerr.New("job prompt is required",
-			goerr.V("job_id", s.ID))
+
+	prompt, deferred, err := s.resolvePrompt(baseDir)
+	if err != nil {
+		return nil, err
 	}
 
 	events, err := s.Events.toModel()
@@ -98,17 +113,73 @@ func (s *JobSection) Validate() (*model.Job, error) {
 		ID:          s.ID,
 		Name:        s.Name,
 		Description: s.Description,
-		Prompt:      s.Prompt,
+		Prompt:      prompt,
 		Disabled:    s.Disabled,
 		Quiet:       s.Quiet,
 		Strategy:    strategy,
 		Events:      *events,
+	}
+	// In structural-validation mode (baseDir == "") the prompt lives in a
+	// prompt_file we deliberately did not read, so job.Prompt is empty and
+	// the model invariant's prompt-non-empty arm would wrongly fail. Identity,
+	// strategy, and events are already validated above; the complete
+	// model.Job.Validate (including the prompt) runs once the file is read in
+	// loadSingleWorkspaceConfig.
+	if deferred {
+		return job, nil
 	}
 	if err := job.Validate(); err != nil {
 		return nil, goerr.Wrap(err, "job invariant violation",
 			goerr.V("job_id", s.ID))
 	}
 	return job, nil
+}
+
+// resolvePrompt determines the effective prompt for the job and enforces the
+// prompt / prompt_file exclusivity. baseDir is the config file's directory,
+// used to resolve a relative prompt_file path.
+//
+// baseDir == "" selects structural-validation mode: the caller
+// (AppConfig.Validate) only checks that the section is well-formed and is in
+// no position to read files. There a prompt_file reference is accepted
+// without touching the filesystem and deferred is returned true, signalling
+// that the prompt content is intentionally unresolved. The real read happens
+// later in loadSingleWorkspaceConfig where the config path is known.
+func (s *JobSection) resolvePrompt(baseDir string) (prompt string, deferred bool, err error) {
+	hasInline := s.Prompt != ""
+	hasFile := s.PromptFile != ""
+	switch {
+	case hasInline && hasFile:
+		return "", false, goerr.New("job prompt and prompt_file are mutually exclusive",
+			goerr.V("job_id", s.ID))
+	case !hasInline && !hasFile:
+		return "", false, goerr.New("job prompt or prompt_file is required",
+			goerr.V("job_id", s.ID))
+	case hasInline:
+		return s.Prompt, false, nil
+	}
+
+	// hasFile: prompt content comes from a file resolved relative to baseDir.
+	if baseDir == "" {
+		return "", true, nil
+	}
+
+	path := filepath.Join(baseDir, s.PromptFile)
+	// #nosec G304 -- prompt_file comes from the operator-supplied config file,
+	// the same trust level as the config path itself (CLI argument).
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false, goerr.Wrap(err, "failed to read job prompt file",
+			goerr.V("job_id", s.ID), goerr.V("prompt_file", s.PromptFile))
+	}
+	// Trim trailing whitespace so an editor's trailing newline does not alter
+	// the rendered prompt relative to an equivalent inline value.
+	content := strings.TrimRight(string(data), " \t\r\n")
+	if content == "" {
+		return "", false, goerr.New("job prompt file is empty",
+			goerr.V("job_id", s.ID), goerr.V("prompt_file", s.PromptFile))
+	}
+	return content, false, nil
 }
 
 func (e *JobEventsSection) toModel() (*model.JobEvents, error) {
@@ -202,9 +273,11 @@ func (s *ScheduledEventSection) toModel() (*model.ScheduledEventConfig, error) {
 }
 
 // resolveJobs walks every [[job]] entry, validating it and collecting the
-// resulting model.Jobs. Duplicate IDs within the workspace surface as a
-// loud failure.
-func (a *AppConfig) resolveJobs() ([]*model.Job, error) {
+// resulting model.Jobs. baseDir is the config file's directory, used to
+// resolve relative prompt_file paths; pass "" for structural-only validation
+// that must not touch the filesystem. Duplicate IDs within the workspace
+// surface as a loud failure.
+func (a *AppConfig) resolveJobs(baseDir string) ([]*model.Job, error) {
 	if len(a.Jobs) == 0 {
 		return nil, nil
 	}
@@ -212,7 +285,7 @@ func (a *AppConfig) resolveJobs() ([]*model.Job, error) {
 	seen := make(map[string]struct{}, len(a.Jobs))
 	for idx := range a.Jobs {
 		section := &a.Jobs[idx]
-		job, err := section.Validate()
+		job, err := section.Validate(baseDir)
 		if err != nil {
 			return nil, goerr.Wrap(err, "invalid job",
 				goerr.V("job_index", idx))
