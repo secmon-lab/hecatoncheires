@@ -13,6 +13,7 @@ type Firestore struct {
 	caseRepo      *caseRepository
 	action        *actionRepository
 	memo          *memoRepository
+	knowledge     *knowledgeRepository
 	slack         *slackRepository
 	slackUser     *slackUserRepository
 	source        *sourceRepository
@@ -52,6 +53,7 @@ func New(ctx context.Context, projectID, databaseID string) (*Firestore, error) 
 		caseRepo:      newCaseRepository(client),
 		action:        newActionRepository(client),
 		memo:          newMemoRepository(client),
+		knowledge:     newKnowledgeRepository(client),
 		slack:         newSlackRepository(client),
 		slackUser:     newSlackUserRepository(client),
 		source:        newSourceRepository(client),
@@ -82,6 +84,10 @@ func (f *Firestore) Action() interfaces.ActionRepository {
 
 func (f *Firestore) Memo() interfaces.MemoRepository {
 	return f.memo
+}
+
+func (f *Firestore) Knowledge() interfaces.KnowledgeRepository {
+	return f.knowledge
 }
 
 func (f *Firestore) Slack() interfaces.SlackRepository {

@@ -617,6 +617,32 @@ export const msgKeys = {
   memoIdLabel: 'memoIdLabel',
   memoCreatorLabel: 'memoCreatorLabel',
   memoCountLabel: 'memoCountLabel',
+
+  // Knowledge
+  navKnowledge: 'navKnowledge',
+  titleKnowledge: 'titleKnowledge',
+  subtitleKnowledge: 'subtitleKnowledge',
+  btnAddKnowledge: 'btnAddKnowledge',
+  placeholderKnowledgeSearch: 'placeholderKnowledgeSearch',
+  labelKnowledgeTags: 'labelKnowledgeTags',
+  labelKnowledgeClaim: 'labelKnowledgeClaim',
+  labelKnowledgeTagsRequired: 'labelKnowledgeTagsRequired',
+  placeholderKnowledgeTitle: 'placeholderKnowledgeTitle',
+  placeholderKnowledgeClaim: 'placeholderKnowledgeClaim',
+  placeholderKnowledgeTagInput: 'placeholderKnowledgeTagInput',
+  errorKnowledgeTitleRequired: 'errorKnowledgeTitleRequired',
+  errorKnowledgeTagsRequired: 'errorKnowledgeTagsRequired',
+  errorKnowledgeClaimTooLong: 'errorKnowledgeClaimTooLong',
+  errorKnowledgeNotFound: 'errorKnowledgeNotFound',
+  emptyKnowledge: 'emptyKnowledge',
+  emptyKnowledgeSearch: 'emptyKnowledgeSearch',
+  knowledgeFilterAll: 'knowledgeFilterAll',
+  knowledgeCharCount: 'knowledgeCharCount',
+  knowledgeCharWarn: 'knowledgeCharWarn',
+  titleDeleteKnowledge: 'titleDeleteKnowledge',
+  msgDeleteKnowledgeConfirm: 'msgDeleteKnowledgeConfirm',
+  warningDeleteKnowledgePermanent: 'warningDeleteKnowledgePermanent',
+  btnSaveHint: 'btnSaveHint',
 } as const
 
 export type MsgKey = keyof typeof msgKeys

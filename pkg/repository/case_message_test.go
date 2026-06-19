@@ -227,11 +227,13 @@ func runCaseMessageRepositoryTest(t *testing.T, newRepo func(t *testing.T) inter
 }
 
 func TestCaseMessageRepository_Memory(t *testing.T) {
+	t.Parallel()
 	runCaseMessageRepositoryTest(t, func(t *testing.T) interfaces.Repository {
 		return memory.New()
 	})
 }
 
 func TestCaseMessageRepository_Firestore(t *testing.T) {
+	t.Parallel()
 	runCaseMessageRepositoryTest(t, newFirestoreRepository)
 }

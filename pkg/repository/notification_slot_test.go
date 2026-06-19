@@ -194,11 +194,13 @@ func withinTolerance(a, b time.Time, tol time.Duration) bool {
 }
 
 func TestNotificationSlotRepository_Memory(t *testing.T) {
+	t.Parallel()
 	runNotificationSlotRepositoryTest(t, func(t *testing.T) interfaces.Repository {
 		return memory.New()
 	})
 }
 
 func TestNotificationSlotRepository_Firestore(t *testing.T) {
+	t.Parallel()
 	runNotificationSlotRepositoryTest(t, newFirestoreRepository)
 }

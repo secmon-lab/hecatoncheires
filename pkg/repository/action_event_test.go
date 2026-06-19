@@ -159,11 +159,13 @@ func runActionEventRepositoryTest(t *testing.T, newRepo func(t *testing.T) inter
 }
 
 func TestActionEventRepository_Memory(t *testing.T) {
+	t.Parallel()
 	runActionEventRepositoryTest(t, func(t *testing.T) interfaces.Repository {
 		return memory.New()
 	})
 }
 
 func TestActionEventRepository_Firestore(t *testing.T) {
+	t.Parallel()
 	runActionEventRepositoryTest(t, newFirestoreRepository)
 }

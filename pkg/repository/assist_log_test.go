@@ -210,11 +210,13 @@ func runAssistLogRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 }
 
 func TestMemoryAssistLogRepository(t *testing.T) {
+	t.Parallel()
 	runAssistLogRepositoryTest(t, func(t *testing.T) interfaces.Repository {
 		return memory.New()
 	})
 }
 
 func TestFirestoreAssistLogRepository(t *testing.T) {
+	t.Parallel()
 	runAssistLogRepositoryTest(t, newFirestoreRepository)
 }

@@ -75,6 +75,7 @@ func newValidSession(workspaceID, creatorUserID string) *model.ImportSession {
 }
 
 func TestImportRepository_RoundTrip_Memory(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	repo := memory.New().Import()
 
@@ -161,6 +162,7 @@ func TestImportRepository_RoundTrip_Memory(t *testing.T) {
 }
 
 func TestImportRepository_Update(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	repo := memory.New().Import()
 
@@ -201,6 +203,7 @@ func TestImportRepository_Update(t *testing.T) {
 }
 
 func TestImportRepository_NotFound(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	repo := memory.New().Import()
 	_, err := repo.Get(ctx, "ws-acme", model.NewImportSessionID())
@@ -214,6 +217,7 @@ func TestImportRepository_NotFound(t *testing.T) {
 }
 
 func TestImportRepository_ValidateRejectsBadSession(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	repo := memory.New().Import()
 	bad := newValidSession("ws-acme", "U1")

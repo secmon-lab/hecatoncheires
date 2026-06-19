@@ -229,6 +229,13 @@ from the eval job tool set — action creation is the primary observable.)
 real API (require the matching credentials). Every tool call — sim or live — is
 recorded so checks can verify tool usage and dumps can show the trajectory.
 
+The catalog enumerates only the **external-service** tools the harness can
+simulate or declare. In-process, always-present tools that operate on the local
+repository — `core__*` (actions), `memo__*` (memos), and `knowledge__*`
+(workspace knowledge) — are not listed in the catalog and are not
+scenario-configurable; the eval agent is wired with them directly (knowledge
+write is withheld for private cases, as in production).
+
 ## Diagnostic dumps
 
 Scenarios with a failing check (or all scenarios with `--dump-all`) are dumped

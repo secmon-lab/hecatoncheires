@@ -403,11 +403,13 @@ func runMemoRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 }
 
 func TestMemoRepository_Memory(t *testing.T) {
+	t.Parallel()
 	runMemoRepositoryTest(t, func(t *testing.T) interfaces.Repository {
 		return memory.New()
 	})
 }
 
 func TestMemoRepository_Firestore(t *testing.T) {
+	t.Parallel()
 	runMemoRepositoryTest(t, newFirestoreRepository)
 }

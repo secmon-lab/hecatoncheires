@@ -1369,12 +1369,14 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 }
 
 func TestCaseRepository_Memory(t *testing.T) {
+	t.Parallel()
 	runCaseRepositoryTest(t, func(t *testing.T) interfaces.Repository {
 		return memory.New()
 	})
 }
 
 func TestCaseRepository_Firestore(t *testing.T) {
+	t.Parallel()
 	runCaseRepositoryTest(t, newFirestoreRepository)
 }
 

@@ -10,6 +10,8 @@ import SourceList from './pages/SourceList'
 import SourceDetail from './pages/SourceDetail'
 import ImportNew from './pages/ImportNew'
 import ImportDetail from './pages/ImportDetail'
+import KnowledgeList from './pages/KnowledgeList'
+import KnowledgeDetail from './pages/KnowledgeDetail'
 import WorkspaceSelector from './pages/WorkspaceSelector'
 import WorkspaceGuard from './components/WorkspaceGuard'
 import { AuthGuard } from './components/auth/auth-guard'
@@ -46,6 +48,8 @@ function App() {
           <Route path="drafts/:id" element={<DraftDetailRedirect />} />
           <Route path="sources" element={<SourceList />} />
           <Route path="sources/:id" element={<SourceDetail />} />
+          <Route path="knowledge" element={<KnowledgeList />} />
+          <Route path="knowledge/:id" element={<KnowledgeDetail />} />
           {/* /imports has no list page by design — sessions are addressable
               only by ID. A bare /imports navigation lands here from the
               breadcrumb Layout renders, so redirect it to the new-import

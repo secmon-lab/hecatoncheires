@@ -233,12 +233,14 @@ func runJobRunRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 }
 
 func TestJobRunRepository_Memory(t *testing.T) {
+	t.Parallel()
 	runJobRunRepositoryTest(t, func(t *testing.T) interfaces.Repository {
 		return memory.New()
 	})
 }
 
 func TestJobRunRepository_Firestore(t *testing.T) {
+	t.Parallel()
 	runJobRunRepositoryTest(t, newFirestoreRepository)
 }
 
@@ -583,21 +585,25 @@ func runJobRunEventRepositoryTest(t *testing.T, newRepo func(t *testing.T) inter
 }
 
 func TestJobRunLogRepository_Memory(t *testing.T) {
+	t.Parallel()
 	runJobRunLogRepositoryTest(t, func(t *testing.T) interfaces.Repository {
 		return memory.New()
 	})
 }
 
 func TestJobRunLogRepository_Firestore(t *testing.T) {
+	t.Parallel()
 	runJobRunLogRepositoryTest(t, newFirestoreRepository)
 }
 
 func TestJobRunEventRepository_Memory(t *testing.T) {
+	t.Parallel()
 	runJobRunEventRepositoryTest(t, func(t *testing.T) interfaces.Repository {
 		return memory.New()
 	})
 }
 
 func TestJobRunEventRepository_Firestore(t *testing.T) {
+	t.Parallel()
 	runJobRunEventRepositoryTest(t, newFirestoreRepository)
 }

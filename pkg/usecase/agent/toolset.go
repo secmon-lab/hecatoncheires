@@ -6,6 +6,7 @@ import (
 	"github.com/gollem-dev/gollem"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
+	knowledgetool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/knowledge"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/webfetch"
@@ -47,17 +48,23 @@ type ToolSetResolver struct {
 	notion   []gollem.Tool
 	github   []gollem.Tool
 	webfetch []gollem.Tool
+	// knowledge is the read-only workspace knowledge tool set. It is always
+	// included in every Resolve result (not gated by a planner-requested ID):
+	// investigation sub-agents may always consult shared knowledge, but never
+	// mutate it (write tools are wired only in the case-bound / job paths).
+	knowledge []gollem.Tool
 }
 
 // ToolSetDeps carries the per-turn deps that flavor each toolset's binding.
 // Optional fields (SlackSearch / NotionClient / GitHubClient) may be nil; the
 // corresponding toolset is empty in that case.
 type ToolSetDeps struct {
-	Core     core.Deps
-	Slack    slacktool.Deps
-	Notion   notiontool.Deps
-	GitHub   *githubtool.Client
-	WebFetch *webfetch.Client
+	Core      core.Deps
+	Slack     slacktool.Deps
+	Notion    notiontool.Deps
+	GitHub    *githubtool.Client
+	WebFetch  *webfetch.Client
+	Knowledge knowledgetool.Deps
 }
 
 // NewToolSetResolver builds the per-toolset slices once so each sub-agent
@@ -65,12 +72,17 @@ type ToolSetDeps struct {
 // subset (list / get only) — investigation sub-agents must not mutate the
 // case while a turn is forming.
 func NewToolSetResolver(d ToolSetDeps) *ToolSetResolver {
+	var knowledge []gollem.Tool
+	if d.Knowledge.Accessor != nil {
+		knowledge = knowledgetool.NewReadOnly(d.Knowledge)
+	}
 	return &ToolSetResolver{
-		core:     core.NewReadOnly(d.Core),
-		slack:    slacktool.NewReadOnly(d.Slack),
-		notion:   notiontool.New(d.Notion),
-		github:   githubtool.New(d.GitHub),
-		webfetch: webfetch.New(d.WebFetch),
+		core:      core.NewReadOnly(d.Core),
+		slack:     slacktool.NewReadOnly(d.Slack),
+		notion:    notiontool.New(d.Notion),
+		github:    githubtool.New(d.GitHub),
+		webfetch:  webfetch.New(d.WebFetch),
+		knowledge: knowledge,
 	}
 }
 
@@ -78,11 +90,21 @@ func NewToolSetResolver(d ToolSetDeps) *ToolSetResolver {
 // IDs are skipped (they should already have been rejected by plan validation,
 // but Resolve never panics so a stray ID does not crash a turn).
 func (r *ToolSetResolver) Resolve(ids []string) []gollem.Tool {
-	if r == nil || len(ids) == 0 {
+	if r == nil {
 		return nil
 	}
+	// Knowledge read tools are always available to every sub-agent, regardless
+	// of which toolset IDs the planner requested.
+	if len(ids) == 0 {
+		if len(r.knowledge) == 0 {
+			return nil
+		}
+		out := make([]gollem.Tool, len(r.knowledge))
+		copy(out, r.knowledge)
+		return out
+	}
 	// Pre-compute capacity to avoid repeated growth.
-	total := 0
+	total := len(r.knowledge)
 	for _, id := range ids {
 		switch id {
 		case ToolSetCoreRO:
@@ -98,6 +120,7 @@ func (r *ToolSetResolver) Resolve(ids []string) []gollem.Tool {
 		}
 	}
 	out := make([]gollem.Tool, 0, total)
+	out = append(out, r.knowledge...)
 	for _, id := range ids {
 		switch id {
 		case ToolSetCoreRO:

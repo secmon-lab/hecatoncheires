@@ -301,6 +301,35 @@ input UpdateMemoInput {
   fields: [FieldValueInput!]
 }
 
+# Knowledge — workspace-wide shared knowledge entries. Unlike Memo, knowledge is
+# not scoped to a case and carries no custom fields: a single Markdown claim body
+# plus tags. The embedding vector used for semantic search is intentionally not
+# exposed through the GraphQL surface.
+type Knowledge {
+  id: ID!
+  title: String!
+  # claim is a single Markdown text body (empty string when not yet written).
+  claim: String!
+  tags: [String!]!
+  createdAt: Time!
+  updatedAt: Time!
+}
+
+input CreateKnowledgeInput {
+  title: String!
+  claim: String
+  # At least one tag is required.
+  tags: [String!]!
+}
+
+input UpdateKnowledgeInput {
+  id: ID!
+  title: String
+  claim: String
+  # Omit to leave unchanged; when provided it must contain at least one tag.
+  tags: [String!]
+}
+
 # ActionEvent records a single change to an Action, surfaced in the
 # WebUI activity feed alongside thread messages.
 type ActionEvent {
@@ -673,6 +702,15 @@ type Query {
   # is non-null; when memos are disabled the returned object has an empty
   # fields list so the frontend can hide the Memos tab.
   memoConfiguration(workspaceId: String!): MemoConfiguration!
+
+  # Knowledge — workspace-wide shared knowledge.
+  knowledges(workspaceId: String!, tags: [String!]): [Knowledge!]!
+  knowledge(workspaceId: String!, id: ID!): Knowledge
+  # Distinct tags used across the workspace (for filter / autocomplete).
+  knowledgeTags(workspaceId: String!): [String!]!
+  # Semantic search over knowledge; falls back to substring matching when no
+  # embedding is available. `tags` applies an AND pre-filter.
+  searchKnowledge(workspaceId: String!, query: String!, tags: [String!], limit: Int): [Knowledge!]!
 }
 
 type Mutation {
@@ -773,6 +811,11 @@ type Mutation {
   archiveMemo(workspaceId: String!, caseID: Int!, id: ID!): Memo!
   # unarchiveMemo restores a soft-deleted memo (clears archivedAt).
   unarchiveMemo(workspaceId: String!, caseID: Int!, id: ID!): Memo!
+
+  # Knowledge — workspace-wide shared knowledge.
+  createKnowledge(workspaceId: String!, input: CreateKnowledgeInput!): Knowledge!
+  updateKnowledge(workspaceId: String!, input: UpdateKnowledgeInput!): Knowledge!
+  deleteKnowledge(workspaceId: String!, id: ID!): Boolean!
 }
 
 input UpdateCaseAgentSettingsInput {

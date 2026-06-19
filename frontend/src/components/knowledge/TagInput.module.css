@@ -1,0 +1,85 @@
+.root {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs);
+  align-items: center;
+  min-height: 2.25rem;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-sunken);
+  cursor: text;
+  position: relative;
+}
+
+.root:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.error {
+  border-color: var(--danger);
+}
+
+.removeBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 0 0 0 var(--spacing-xs);
+  cursor: pointer;
+  color: inherit;
+  opacity: 0.6;
+  line-height: 1;
+}
+
+.removeBtn:hover {
+  opacity: 1;
+}
+
+.inputWrap {
+  position: relative;
+  flex: 1;
+  min-width: 8rem;
+}
+
+.input {
+  width: 100%;
+  background: none;
+  border: none;
+  outline: none;
+  font-size: var(--t-sm);
+  color: var(--fg);
+  padding: 0;
+}
+
+.input::placeholder {
+  color: var(--fg-soft);
+}
+
+.suggestions {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  list-style: none;
+  margin: 0;
+  padding: var(--spacing-xs) 0;
+  z-index: 100;
+}
+
+.suggestion {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  cursor: pointer;
+  font-size: var(--t-sm);
+  color: var(--fg);
+}
+
+.suggestion:hover {
+  background: var(--bg-subtle);
+}

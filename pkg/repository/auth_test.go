@@ -100,11 +100,13 @@ func runAuthRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 }
 
 func TestMemoryRepository(t *testing.T) {
+	t.Parallel()
 	runAuthRepositoryTest(t, func(t *testing.T) interfaces.Repository {
 		return memory.New()
 	})
 }
 
 func TestFirestoreRepository(t *testing.T) {
+	t.Parallel()
 	runAuthRepositoryTest(t, newFirestoreRepository)
 }

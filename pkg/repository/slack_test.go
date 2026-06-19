@@ -409,11 +409,13 @@ func runSlackRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.
 }
 
 func TestMemorySlackRepository(t *testing.T) {
+	t.Parallel()
 	runSlackRepositoryTest(t, func(t *testing.T) interfaces.Repository {
 		return memory.New()
 	})
 }
 
 func TestFirestoreSlackRepository(t *testing.T) {
+	t.Parallel()
 	runSlackRepositoryTest(t, newFirestoreRepository)
 }

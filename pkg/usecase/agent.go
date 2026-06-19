@@ -76,6 +76,10 @@ type AgentDeps struct {
 	// not enabled memos, or memos are intentionally withheld).
 	MemoUC *MemoUseCase
 
+	// KnowledgeUC backs the workspace-wide knowledge tools. Optional: nil means
+	// the agent gets no knowledge tools.
+	KnowledgeUC *KnowledgeUseCase
+
 	// CaseUC is required for thread mode: the thread-case orchestrator applies
 	// the agent's materialize / close decisions through it so every case
 	// mutation funnels through the single CaseUseCase entry point.
@@ -118,6 +122,8 @@ func NewAgentUseCase(deps AgentDeps) *AgentUseCase {
 			ActionStepUC:        NewActionStepToolAdapter(deps.ActionStepUC),
 			CaseUC:              NewCaseToolAdapter(deps.CaseUC),
 			MemoUC:              NewMemoToolAdapter(deps.MemoUC),
+			KnowledgeAccessor:   NewKnowledgeToolAccessor(deps.KnowledgeUC),
+			KnowledgeMutator:    NewKnowledgeToolMutator(deps.KnowledgeUC),
 			HeartbeatInterval:   agentcommon.DefaultHeartbeatInterval,
 			HeartbeatStaleAfter: agentcommon.DefaultHeartbeatStaleAfter,
 		}
