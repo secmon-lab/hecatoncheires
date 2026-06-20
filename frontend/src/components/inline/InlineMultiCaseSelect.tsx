@@ -8,6 +8,9 @@ import type { CaseRefItem } from './InlineCaseSelect'
 
 interface Props {
   cases: CaseRefItem[]
+  /** Pre-resolved cases for the current stored values, used for trigger
+   *  labels when values are not present in the picker (cases) list. */
+  resolvedCases?: CaseRefItem[]
   values: string[]
   onSave: (next: string[]) => Promise<void> | void
   ariaLabel: string
@@ -24,6 +27,7 @@ function caseLabel(c: CaseRefItem): string {
 
 export default function InlineMultiCaseSelect({
   cases,
+  resolvedCases = [],
   values,
   onSave,
   ariaLabel,
@@ -38,9 +42,20 @@ export default function InlineMultiCaseSelect({
   const [query, setQuery] = useState('')
   const anchorRef = useRef<HTMLDivElement>(null)
 
+  // Build a combined lookup: picker results + pre-resolved cases. Picker
+  // results take precedence if a case appears in both (more up-to-date).
+  const caseMap = useMemo(() => {
+    const m = new Map<string, CaseRefItem>()
+    for (const c of resolvedCases) m.set(String(c.id), c)
+    for (const c of cases) m.set(String(c.id), c)
+    return m
+  }, [cases, resolvedCases])
+
+  // Selected case objects for trigger label display. Falls back to undefined
+  // when not in either list (unresolvable).
   const selectedCases = useMemo(
-    () => cases.filter((c) => values.includes(String(c.id))),
-    [cases, values],
+    () => values.map((id) => caseMap.get(id)),
+    [caseMap, values],
   )
 
   const filtered = useMemo(() => {
@@ -73,11 +88,14 @@ export default function InlineMultiCaseSelect({
         testId={testId}
         block
       >
-        {selectedCases.length === 0 ? (
+        {values.length === 0 ? (
           <span className={styles.placeholder}>{placeholder ?? t('placeholderSelectCaseRef')}</span>
         ) : (
           <span className={styles.triggerLabel}>
-            {selectedCases.map((c) => caseLabel(c)).join(', ')}
+            {values.map((id, i) => {
+              const c = selectedCases[i]
+              return c != null ? caseLabel(c) : t('caseRefUnavailable', { id })
+            }).join(', ')}
           </span>
         )}
       </InlineFieldFrame>

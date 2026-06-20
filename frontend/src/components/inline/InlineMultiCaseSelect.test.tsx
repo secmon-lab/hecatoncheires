@@ -70,4 +70,38 @@ describe('InlineMultiCaseSelect', () => {
     fireEvent.click(screen.getByTestId('mc'))
     expect(screen.getByTestId('mc-popover')).toHaveTextContent('Loading')
   })
+
+  it('shows resolved title from resolvedCases when a value is not in the picker list', () => {
+    // cases (picker) has ids 10,20,30; stored value "99" is in resolvedCases only
+    const resolvedCases: CaseRefItem[] = [
+      { id: 99, title: 'Old closed case', status: 'CLOSED', workspaceId: 'ws1' },
+    ]
+    renderWithI18n(
+      <InlineMultiCaseSelect
+        cases={cases}
+        resolvedCases={resolvedCases}
+        values={['10', '99']}
+        onSave={vi.fn()}
+        ariaLabel="cases"
+        testId="mc"
+      />,
+    )
+    expect(screen.getByTestId('mc')).toHaveTextContent('Alpha (#10)')
+    expect(screen.getByTestId('mc')).toHaveTextContent('Old closed case (#99)')
+  })
+
+  it('shows unavailable fallback for unresolvable id in multi mode', () => {
+    renderWithI18n(
+      <InlineMultiCaseSelect
+        cases={cases}
+        resolvedCases={[]}
+        values={['10', '888']}
+        onSave={vi.fn()}
+        ariaLabel="cases"
+        testId="mc"
+      />,
+    )
+    expect(screen.getByTestId('mc')).toHaveTextContent('Alpha (#10)')
+    expect(screen.getByTestId('mc')).toHaveTextContent('Unavailable (#888)')
+  })
 })

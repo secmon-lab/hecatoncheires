@@ -93,4 +93,37 @@ describe('InlineCaseSelect', () => {
     fireEvent.click(screen.getByTestId('cr'))
     expect(screen.getByTestId('cr-popover')).toHaveTextContent('Loading')
   })
+
+  it('shows resolved title from resolvedCases when value is not in the picker list', () => {
+    // cases (picker) only has ids 1,2,3; stored value is "99" which is in resolvedCases
+    const resolvedCases: CaseRefItem[] = [
+      { id: 99, title: 'Old closed case', status: 'CLOSED', workspaceId: 'ws1' },
+    ]
+    renderWithI18n(
+      <InlineCaseSelect
+        cases={cases}
+        resolvedCases={resolvedCases}
+        value="99"
+        onSave={vi.fn()}
+        ariaLabel="case ref"
+        testId="cr"
+      />,
+    )
+    expect(screen.getByTestId('cr')).toHaveTextContent('Old closed case (#99)')
+  })
+
+  it('shows unavailable fallback when stored value is not resolvable', () => {
+    // Both picker and resolvedCases are empty for this id
+    renderWithI18n(
+      <InlineCaseSelect
+        cases={cases}
+        resolvedCases={[]}
+        value="888"
+        onSave={vi.fn()}
+        ariaLabel="case ref"
+        testId="cr"
+      />,
+    )
+    expect(screen.getByTestId('cr')).toHaveTextContent('Unavailable (#888)')
+  })
 })

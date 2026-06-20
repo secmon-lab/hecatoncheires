@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useQuery } from '@apollo/client'
 import InlineText from './InlineText'
 import InlineLongText from './InlineLongText'
@@ -10,7 +10,8 @@ import InlineDate from './InlineDate'
 import InlineURL from './InlineURL'
 import InlineCaseSelect from './InlineCaseSelect'
 import InlineMultiCaseSelect from './InlineMultiCaseSelect'
-import { REFERENCEABLE_CASES } from '../../graphql/caseRef'
+import { REFERENCEABLE_CASES, CASE_REFS_BY_IDS } from '../../graphql/caseRef'
+import type { CaseRefItem } from './InlineCaseSelect'
 
 interface FieldOption {
   id: string
@@ -57,6 +58,7 @@ function CaseRefInlineLoader({ field, value, onSave, disabled, testId, multi }: 
     return () => clearTimeout(timer)
   }, [searchQuery])
 
+  // Picker / search results (used for the dropdown list)
   const { data, loading } = useQuery(REFERENCEABLE_CASES, {
     variables: {
       workspaceId: field.referenceWorkspaceId ?? '',
@@ -66,12 +68,29 @@ function CaseRefInlineLoader({ field, value, onSave, disabled, testId, multi }: 
     skip: !field.referenceWorkspaceId,
   })
 
-  const cases = data?.referenceableCases ?? []
+  const cases: CaseRefItem[] = data?.referenceableCases ?? []
+
+  // Resolve the currently stored value(s) so the trigger label always shows
+  // a proper title even when the stored case is outside the picker results.
+  const currentIds = useMemo(() => {
+    const raw = multi
+      ? (Array.isArray(value) ? value : [])
+      : (value != null && value !== '' ? [String(value)] : [])
+    return raw.map(Number).filter((n) => !Number.isNaN(n) && n > 0)
+  }, [multi, value])
+
+  const { data: resolvedData } = useQuery(CASE_REFS_BY_IDS, {
+    variables: { workspaceId: field.referenceWorkspaceId ?? '', ids: currentIds },
+    skip: currentIds.length === 0 || !field.referenceWorkspaceId,
+  })
+
+  const resolvedCases: CaseRefItem[] = resolvedData?.caseRefsByIds ?? []
 
   if (multi) {
     return (
       <InlineMultiCaseSelect
         cases={cases}
+        resolvedCases={resolvedCases}
         values={Array.isArray(value) ? value : []}
         onSave={(v) => onSave(v)}
         ariaLabel={field.name}
@@ -86,6 +105,7 @@ function CaseRefInlineLoader({ field, value, onSave, disabled, testId, multi }: 
   return (
     <InlineCaseSelect
       cases={cases}
+      resolvedCases={resolvedCases}
       value={value ?? null}
       onSave={(v) => onSave(v)}
       ariaLabel={field.name}
