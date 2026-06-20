@@ -104,4 +104,40 @@ describe('InlineMultiCaseSelect', () => {
     expect(screen.getByTestId('mc')).toHaveTextContent('Alpha (#10)')
     expect(screen.getByTestId('mc')).toHaveTextContent('Unavailable (#888)')
   })
+
+  it('shows neutral #id while resolvedLoading=true (not yet resolved)', () => {
+    // resolvedLoading=true means CASE_REFS_BY_IDS is still in flight
+    renderWithI18n(
+      <InlineMultiCaseSelect
+        cases={cases}
+        resolvedCases={[]}
+        resolvedLoading={true}
+        values={['10', '888']}
+        onSave={vi.fn()}
+        ariaLabel="cases"
+        testId="mc"
+      />,
+    )
+    // id "10" is in the picker list — shows normally
+    expect(screen.getByTestId('mc')).toHaveTextContent('Alpha (#10)')
+    // id "888" is unresolvable but still loading — shows neutral "#888"
+    expect(screen.getByTestId('mc')).toHaveTextContent('#888')
+    expect(screen.getByTestId('mc')).not.toHaveTextContent('Unavailable (#888)')
+  })
+
+  it('shows unavailable fallback once resolvedLoading=false and id is not resolved', () => {
+    renderWithI18n(
+      <InlineMultiCaseSelect
+        cases={cases}
+        resolvedCases={[]}
+        resolvedLoading={false}
+        values={['10', '888']}
+        onSave={vi.fn()}
+        ariaLabel="cases"
+        testId="mc"
+      />,
+    )
+    expect(screen.getByTestId('mc')).toHaveTextContent('Alpha (#10)')
+    expect(screen.getByTestId('mc')).toHaveTextContent('Unavailable (#888)')
+  })
 })

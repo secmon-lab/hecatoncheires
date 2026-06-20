@@ -292,6 +292,11 @@ func (uc *CaseUseCase) verifyCaseRefsExist(ctx context.Context, workspaceID stri
 // Single values arrive as a string, multi values as []string / []any (depending
 // on whether they went through typed coercion or a raw decode).
 func caseRefIDs(fv model.FieldValue) ([]int64, error) {
+	// A cleared optional case_ref arrives with a nil value; treat it as no
+	// references rather than a type error.
+	if fv.Value == nil {
+		return nil, nil
+	}
 	parse := func(s string) (int64, bool, error) {
 		if s == "" {
 			return 0, false, nil
@@ -1111,7 +1116,9 @@ func (uc *CaseUseCase) ListReferenceableCases(ctx context.Context, workspaceID, 
 
 	matched := make([]*model.Case, 0, len(cases))
 	for _, c := range cases {
-		if c.IsPrivate {
+		// List excludes drafts by default, but enforce the "drafts are never
+		// referenceable" rule explicitly so it does not depend on that default.
+		if c.IsPrivate || c.Status.Normalize() == types.CaseStatusDraft {
 			continue
 		}
 		if q != "" {
@@ -1239,7 +1246,14 @@ func (uc *CaseUseCase) RenderCaseFieldValues(ctx context.Context, workspaceID st
 			out[id] = fv.Value
 			continue
 		}
-		fd := defByID[id]
+		fd, ok := defByID[id]
+		if !ok || fd.ReferenceWorkspace == "" {
+			// Field removed from the schema (drift) or with no target workspace:
+			// fall back to the raw stored value instead of failing the whole
+			// field_values render with a doomed cross-workspace lookup.
+			out[id] = fv.Value
+			continue
+		}
 		ids, err := caseRefIDs(fv)
 		if err != nil {
 			return nil, goerr.Wrap(err, "invalid stored case reference value",

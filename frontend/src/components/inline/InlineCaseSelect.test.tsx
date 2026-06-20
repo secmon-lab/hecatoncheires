@@ -126,4 +126,36 @@ describe('InlineCaseSelect', () => {
     )
     expect(screen.getByTestId('cr')).toHaveTextContent('Unavailable (#888)')
   })
+
+  it('shows neutral #id while resolvedLoading=true (not yet resolved)', () => {
+    // resolvedLoading=true means the CASE_REFS_BY_IDS query is still in flight
+    renderWithI18n(
+      <InlineCaseSelect
+        cases={cases}
+        resolvedCases={[]}
+        resolvedLoading={true}
+        value="888"
+        onSave={vi.fn()}
+        ariaLabel="case ref"
+        testId="cr"
+      />,
+    )
+    expect(screen.getByTestId('cr')).toHaveTextContent('#888')
+    expect(screen.getByTestId('cr')).not.toHaveTextContent('Unavailable (#888)')
+  })
+
+  it('shows unavailable fallback once resolvedLoading=false and value is not resolved', () => {
+    renderWithI18n(
+      <InlineCaseSelect
+        cases={cases}
+        resolvedCases={[]}
+        resolvedLoading={false}
+        value="888"
+        onSave={vi.fn()}
+        ariaLabel="case ref"
+        testId="cr"
+      />,
+    )
+    expect(screen.getByTestId('cr')).toHaveTextContent('Unavailable (#888)')
+  })
 })

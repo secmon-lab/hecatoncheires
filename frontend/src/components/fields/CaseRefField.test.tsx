@@ -66,6 +66,26 @@ const resolveId888EmptyMock = {
   },
 }
 
+// CASE_REFS_BY_IDS for id "888" with infinite delay — simulates in-flight loading
+const resolveId888LoadingMock = {
+  request: {
+    query: CASE_REFS_BY_IDS,
+    variables: { workspaceId: 'ws1', ids: [888] },
+  },
+  delay: Infinity,
+  result: { data: { caseRefsByIds: [] } },
+}
+
+// CASE_REFS_BY_IDS for ids ["888","2"] with infinite delay
+const resolveIds888And2LoadingMock = {
+  request: {
+    query: CASE_REFS_BY_IDS,
+    variables: { workspaceId: 'ws1', ids: [888, 2] },
+  },
+  delay: Infinity,
+  result: { data: { caseRefsByIds: [] } },
+}
+
 function renderWithProviders(ui: React.ReactNode, mocks: any[]) {
   return render(
     <MockedProvider mocks={mocks} addTypename={false}>
@@ -138,6 +158,23 @@ describe('CaseRefField (single)', () => {
       expect(screen.getByText('Unavailable (#888)')).toBeInTheDocument()
     })
   })
+
+  it('shows neutral #id while resolution query is still loading (single)', () => {
+    // resolveId888LoadingMock has delay: Infinity so the query never resolves
+    renderWithProviders(
+      <CaseRefField
+        fieldId="f1"
+        label="Related Case"
+        value="888"
+        onChange={vi.fn()}
+        referenceWorkspaceId="ws1"
+      />,
+      [referenceableMock, resolveId888LoadingMock],
+    )
+    // The trigger label should show "#888" (neutral), not "Unavailable (#888)"
+    expect(screen.getByText('#888')).toBeInTheDocument()
+    expect(screen.queryByText('Unavailable (#888)')).toBeNull()
+  })
 })
 
 describe('CaseRefField (multi)', () => {
@@ -190,5 +227,23 @@ describe('CaseRefField (multi)', () => {
     await waitFor(() => {
       expect(screen.getByText('Unavailable (#888)')).toBeInTheDocument()
     })
+  })
+
+  it('shows neutral #id while resolution query is still loading (multi)', () => {
+    // resolveIds888And2LoadingMock has delay: Infinity so the query never resolves
+    renderWithProviders(
+      <CaseRefField
+        fieldId="f2"
+        label="Related Cases"
+        value={['888', '2']}
+        onChange={vi.fn()}
+        referenceWorkspaceId="ws1"
+        multi
+      />,
+      [referenceableMock, resolveIds888And2LoadingMock],
+    )
+    // id "888" is unresolvable but query still loading → show "#888"
+    expect(screen.getByText('#888')).toBeInTheDocument()
+    expect(screen.queryByText('Unavailable (#888)')).toBeNull()
   })
 })

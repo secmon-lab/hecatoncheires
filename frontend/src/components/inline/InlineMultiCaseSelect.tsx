@@ -11,6 +11,9 @@ interface Props {
   /** Pre-resolved cases for the current stored values, used for trigger
    *  labels when values are not present in the picker (cases) list. */
   resolvedCases?: CaseRefItem[]
+  /** Whether the CASE_REFS_BY_IDS resolution query is still in flight.
+   *  While true, unresolved ids show a neutral "#id" instead of "Unavailable". */
+  resolvedLoading?: boolean
   values: string[]
   onSave: (next: string[]) => Promise<void> | void
   ariaLabel: string
@@ -28,6 +31,7 @@ function caseLabel(c: CaseRefItem): string {
 export default function InlineMultiCaseSelect({
   cases,
   resolvedCases = [],
+  resolvedLoading = false,
   values,
   onSave,
   ariaLabel,
@@ -94,7 +98,7 @@ export default function InlineMultiCaseSelect({
           <span className={styles.triggerLabel}>
             {values.map((id, i) => {
               const c = selectedCases[i]
-              return c != null ? caseLabel(c) : t('caseRefUnavailable', { id })
+              return c != null ? caseLabel(c) : (resolvedLoading ? `#${id}` : t('caseRefUnavailable', { id }))
             }).join(', ')}
           </span>
         )}

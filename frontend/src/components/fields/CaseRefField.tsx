@@ -70,7 +70,7 @@ export default function CaseRefField({
     return raw.map(Number).filter((n) => !Number.isNaN(n) && n > 0)
   }, [multi, value])
 
-  const { data: resolvedData } = useQuery(CASE_REFS_BY_IDS, {
+  const { data: resolvedData, loading: resolvedLoading } = useQuery(CASE_REFS_BY_IDS, {
     variables: { workspaceId: referenceWorkspaceId, ids: currentIds },
     skip: currentIds.length === 0 || !referenceWorkspaceId,
   })
@@ -90,7 +90,7 @@ export default function CaseRefField({
       const resolvedLabel = resolvedMap.get(id) ?? options.find((o) => o.value === id)?.label
       return {
         value: id,
-        label: resolvedLabel ?? t('caseRefUnavailable', { id }),
+        label: resolvedLabel ?? (resolvedLoading ? `#${id}` : t('caseRefUnavailable', { id })),
       }
     })
 
@@ -133,7 +133,7 @@ export default function CaseRefField({
         label:
           resolvedMap.get(singleValue) ??
           options.find((o) => o.value === singleValue)?.label ??
-          t('caseRefUnavailable', { id: singleValue }),
+          (resolvedLoading ? `#${singleValue}` : t('caseRefUnavailable', { id: singleValue })),
       }
     : null
 

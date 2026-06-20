@@ -200,28 +200,38 @@ func extractRequiredString(args map[string]any, key string) (string, error) {
 }
 
 // extractInt64Slice reads a required array of integers. gollem decodes arrays
-// as []any whose elements are float64 / int, so each element is normalised.
+// as []any whose elements are float64 / int, but concrete []int64 / []int are
+// also accepted so non-LLM callers and tests need not box every element.
 func extractInt64Slice(args map[string]any, key string) ([]int64, error) {
 	v, ok := args[key]
 	if !ok || v == nil {
 		return nil, fmt.Errorf("%s is required", key)
 	}
-	arr, ok := v.([]any)
-	if !ok {
+	switch arr := v.(type) {
+	case []int64:
+		return arr, nil
+	case []int:
+		out := make([]int64, len(arr))
+		for i, n := range arr {
+			out[i] = int64(n)
+		}
+		return out, nil
+	case []any:
+		out := make([]int64, 0, len(arr))
+		for i, item := range arr {
+			switch n := item.(type) {
+			case int:
+				out = append(out, int64(n))
+			case int64:
+				out = append(out, n)
+			case float64:
+				out = append(out, int64(n))
+			default:
+				return nil, fmt.Errorf("%s[%d] must be an integer, got %T", key, i, item)
+			}
+		}
+		return out, nil
+	default:
 		return nil, fmt.Errorf("%s must be an array of integers, got %T", key, v)
 	}
-	out := make([]int64, 0, len(arr))
-	for i, item := range arr {
-		switch n := item.(type) {
-		case int:
-			out = append(out, int64(n))
-		case int64:
-			out = append(out, n)
-		case float64:
-			out = append(out, int64(n))
-		default:
-			return nil, fmt.Errorf("%s[%d] must be an integer, got %T", key, i, item)
-		}
-	}
-	return out, nil
 }

@@ -17,6 +17,9 @@ interface Props {
   /** Pre-resolved cases for the current stored value, used for the trigger
    *  label when the value is not present in the picker (cases) list. */
   resolvedCases?: CaseRefItem[]
+  /** Whether the CASE_REFS_BY_IDS resolution query is still in flight.
+   *  While true, unresolved ids show a neutral "#id" instead of "Unavailable". */
+  resolvedLoading?: boolean
   value: string | null
   onSave: (next: string | null) => Promise<void> | void
   ariaLabel: string
@@ -34,6 +37,7 @@ function caseLabel(c: CaseRefItem): string {
 export default function InlineCaseSelect({
   cases,
   resolvedCases = [],
+  resolvedLoading = false,
   value,
   onSave,
   ariaLabel,
@@ -93,8 +97,9 @@ export default function InlineCaseSelect({
         {selectedCase ? (
           <span className={styles.triggerLabel}>{caseLabel(selectedCase)}</span>
         ) : value != null ? (
-          // Value is stored but could not be resolved — show unavailable fallback
-          <span className={styles.triggerLabel}>{t('caseRefUnavailable', { id: value })}</span>
+          // Value is stored but could not be resolved — show neutral id while loading,
+          // or the unavailable fallback once resolution has completed with no result.
+          <span className={styles.triggerLabel}>{resolvedLoading ? `#${value}` : t('caseRefUnavailable', { id: value })}</span>
         ) : (
           <span className={styles.placeholder}>{placeholder ?? t('placeholderSelectCaseRef')}</span>
         )}

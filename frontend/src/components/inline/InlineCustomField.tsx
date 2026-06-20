@@ -79,7 +79,7 @@ function CaseRefInlineLoader({ field, value, onSave, disabled, testId, multi }: 
     return raw.map(Number).filter((n) => !Number.isNaN(n) && n > 0)
   }, [multi, value])
 
-  const { data: resolvedData } = useQuery(CASE_REFS_BY_IDS, {
+  const { data: resolvedData, loading: resolvedLoading } = useQuery(CASE_REFS_BY_IDS, {
     variables: { workspaceId: field.referenceWorkspaceId ?? '', ids: currentIds },
     skip: currentIds.length === 0 || !field.referenceWorkspaceId,
   })
@@ -91,6 +91,7 @@ function CaseRefInlineLoader({ field, value, onSave, disabled, testId, multi }: 
       <InlineMultiCaseSelect
         cases={cases}
         resolvedCases={resolvedCases}
+        resolvedLoading={resolvedLoading}
         values={Array.isArray(value) ? value : []}
         onSave={(v) => onSave(v)}
         ariaLabel={field.name}
@@ -106,6 +107,7 @@ function CaseRefInlineLoader({ field, value, onSave, disabled, testId, multi }: 
     <InlineCaseSelect
       cases={cases}
       resolvedCases={resolvedCases}
+      resolvedLoading={resolvedLoading}
       value={value ?? null}
       onSave={(v) => onSave(v)}
       ariaLabel={field.name}
