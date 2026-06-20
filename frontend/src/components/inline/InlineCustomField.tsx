@@ -1,3 +1,5 @@
+import { useState, useEffect } from 'react'
+import { useQuery } from '@apollo/client'
 import InlineText from './InlineText'
 import InlineLongText from './InlineLongText'
 import InlineNumber from './InlineNumber'
@@ -6,6 +8,9 @@ import InlineMultiSelect from './InlineMultiSelect'
 import InlineUserSelect, { type UserItem } from './InlineUserSelect'
 import InlineDate from './InlineDate'
 import InlineURL from './InlineURL'
+import InlineCaseSelect from './InlineCaseSelect'
+import InlineMultiCaseSelect from './InlineMultiCaseSelect'
+import { REFERENCEABLE_CASES } from '../../graphql/caseRef'
 
 interface FieldOption {
   id: string
@@ -20,6 +25,7 @@ interface FieldDefinition {
   required?: boolean
   description?: string | null
   options?: FieldOption[] | null
+  referenceWorkspaceId?: string | null
 }
 
 interface Props {
@@ -31,6 +37,65 @@ interface Props {
   testId?: string
   /** Hint that this TEXT field is multi-line. */
   longText?: boolean
+}
+
+interface CaseRefLoaderProps {
+  field: FieldDefinition
+  value: any
+  onSave: (next: any) => Promise<void> | void
+  disabled?: boolean
+  testId: string
+  multi: boolean
+}
+
+function CaseRefInlineLoader({ field, value, onSave, disabled, testId, multi }: CaseRefLoaderProps) {
+  const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedQuery, setDebouncedQuery] = useState('')
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(searchQuery), 300)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
+
+  const { data, loading } = useQuery(REFERENCEABLE_CASES, {
+    variables: {
+      workspaceId: field.referenceWorkspaceId ?? '',
+      query: debouncedQuery || undefined,
+      limit: 50,
+    },
+    skip: !field.referenceWorkspaceId,
+  })
+
+  const cases = data?.referenceableCases ?? []
+
+  if (multi) {
+    return (
+      <InlineMultiCaseSelect
+        cases={cases}
+        values={Array.isArray(value) ? value : []}
+        onSave={(v) => onSave(v)}
+        ariaLabel={field.name}
+        placeholder="—"
+        disabled={disabled}
+        testId={testId}
+        loading={loading}
+        onSearchChange={setSearchQuery}
+      />
+    )
+  }
+  return (
+    <InlineCaseSelect
+      cases={cases}
+      value={value ?? null}
+      onSave={(v) => onSave(v)}
+      ariaLabel={field.name}
+      placeholder="—"
+      disabled={disabled}
+      testId={testId}
+      loading={loading}
+      onSearchChange={setSearchQuery}
+    />
+  )
 }
 
 // Inline edit renderer for custom fields. Maps field.type → the appropriate
@@ -163,6 +228,30 @@ export default function InlineCustomField({
           placeholder={placeholder}
           disabled={disabled}
           testId={tid}
+        />
+      )
+
+    case 'CASE_REF':
+      return (
+        <CaseRefInlineLoader
+          field={field}
+          value={value}
+          onSave={onSave}
+          disabled={disabled}
+          testId={tid}
+          multi={false}
+        />
+      )
+
+    case 'MULTI_CASE_REF':
+      return (
+        <CaseRefInlineLoader
+          field={field}
+          value={value}
+          onSave={onSave}
+          disabled={disabled}
+          testId={tid}
+          multi={true}
         />
       )
 

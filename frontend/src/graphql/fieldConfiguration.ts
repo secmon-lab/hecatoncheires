@@ -9,6 +9,7 @@ export const GET_FIELD_CONFIGURATION = gql`
         type
         required
         description
+        referenceWorkspaceId
         options {
           id
           name

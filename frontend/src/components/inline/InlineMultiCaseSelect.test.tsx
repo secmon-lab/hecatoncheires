@@ -1,0 +1,73 @@
+import { describe, it, expect, vi } from 'vitest'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import '@testing-library/jest-dom/vitest'
+import { I18nProvider } from '../../i18n'
+import InlineMultiCaseSelect from './InlineMultiCaseSelect'
+import type { CaseRefItem } from './InlineCaseSelect'
+
+const cases: CaseRefItem[] = [
+  { id: 10, title: 'Alpha', status: 'OPEN', workspaceId: 'ws1' },
+  { id: 20, title: 'Beta', status: 'OPEN', workspaceId: 'ws1' },
+  { id: 30, title: 'Gamma', status: 'CLOSED', workspaceId: 'ws1' },
+]
+
+function renderWithI18n(ui: React.ReactNode) {
+  return render(<I18nProvider>{ui}</I18nProvider>)
+}
+
+describe('InlineMultiCaseSelect', () => {
+  it('renders selected case labels in the trigger', () => {
+    renderWithI18n(
+      <InlineMultiCaseSelect cases={cases} values={['10', '20']} onSave={vi.fn()} ariaLabel="cases" testId="mc" />,
+    )
+    expect(screen.getByTestId('mc')).toHaveTextContent('Alpha (#10)')
+    expect(screen.getByTestId('mc')).toHaveTextContent('Beta (#20)')
+  })
+
+  it('shows placeholder when values is empty', () => {
+    renderWithI18n(
+      <InlineMultiCaseSelect cases={cases} values={[]} onSave={vi.fn()} ariaLabel="cases" placeholder="Pick cases..." testId="mc" />,
+    )
+    expect(screen.getByTestId('mc')).toHaveTextContent('Pick cases...')
+  })
+
+  it('toggles a case on (adds to list)', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    renderWithI18n(
+      <InlineMultiCaseSelect cases={cases} values={['10']} onSave={onSave} ariaLabel="cases" testId="mc" />,
+    )
+    fireEvent.click(screen.getByTestId('mc'))
+    fireEvent.click(screen.getByTestId('mc-option-20'))
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(['10', '20']))
+  })
+
+  it('toggles a case off (removes from list)', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    renderWithI18n(
+      <InlineMultiCaseSelect cases={cases} values={['10', '20']} onSave={onSave} ariaLabel="cases" testId="mc" />,
+    )
+    fireEvent.click(screen.getByTestId('mc'))
+    fireEvent.click(screen.getByTestId('mc-option-10'))
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(['20']))
+  })
+
+  it('filters options by search query', () => {
+    renderWithI18n(
+      <InlineMultiCaseSelect cases={cases} values={[]} onSave={vi.fn()} ariaLabel="cases" testId="mc" />,
+    )
+    fireEvent.click(screen.getByTestId('mc'))
+    const search = screen.getByTestId('mc-search')
+    fireEvent.change(search, { target: { value: 'beta' } })
+    expect(screen.queryByTestId('mc-option-10')).toBeNull()
+    expect(screen.getByTestId('mc-option-20')).toBeInTheDocument()
+    expect(screen.queryByTestId('mc-option-30')).toBeNull()
+  })
+
+  it('shows loading state', () => {
+    renderWithI18n(
+      <InlineMultiCaseSelect cases={[]} values={[]} onSave={vi.fn()} ariaLabel="cases" testId="mc" loading />,
+    )
+    fireEvent.click(screen.getByTestId('mc'))
+    expect(screen.getByTestId('mc-popover')).toHaveTextContent('Loading')
+  })
+})

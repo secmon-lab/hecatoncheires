@@ -59,6 +59,11 @@ type AssistDeps struct {
 	// records as GraphQL/Slack-modal creates. Required.
 	ActionUC *ActionUseCase
 
+	// CaseUC backs the case_ref read tools
+	// (core__search_referenceable_cases / core__get_referenceable_cases).
+	// Optional: nil disables those tools (no case_ref fields configured).
+	CaseUC *CaseUseCase
+
 	// Optional Slack tool clients. SlackService is the Bot-token client;
 	// SlackSearch and SlackRetriever sit on the User OAuth Token.
 	SlackService   slack.Service
@@ -164,6 +169,7 @@ func (uc *AssistUseCase) processCase(ctx context.Context, entry *model.Workspace
 		CaseID:      c.ID,
 		StatusSet:   entry.ActionStatusSet,
 		ActionUC:    NewActionToolAdapter(uc.deps.ActionUC),
+		CaseRefUC:   uc.deps.CaseUC,
 	})
 	slackTools := slacktool.NewForAssist(slacktool.Deps{
 		Bot:       uc.deps.SlackService,

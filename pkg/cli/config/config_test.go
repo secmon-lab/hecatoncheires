@@ -1646,3 +1646,188 @@ type = "text"
 		gt.Error(t, err)
 	})
 }
+
+// TestFieldDefinition_Validate_CaseRef tests the per-field validation
+// rules introduced with the case_ref / multi_case_ref types.
+func TestFieldDefinition_Validate_CaseRef(t *testing.T) {
+	t.Run("case_ref without reference_workspace is rejected", func(t *testing.T) {
+		content := `
+[[fields]]
+id = "linked"
+name = "Linked Case"
+type = "case_ref"
+`
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "ws.toml")
+		gt.NoError(t, os.WriteFile(path, []byte(content), 0644)).Required()
+
+		_, err := config.LoadFieldSchema(path)
+		gt.Value(t, err).NotNil()
+		gt.Error(t, err).Is(config.ErrMissingReferenceWorkspace)
+	})
+
+	t.Run("case_ref with reference_workspace is accepted", func(t *testing.T) {
+		content := `
+[[fields]]
+id = "linked"
+name = "Linked Case"
+type = "case_ref"
+reference_workspace = "other"
+`
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "ws.toml")
+		gt.NoError(t, os.WriteFile(path, []byte(content), 0644)).Required()
+
+		schema, err := config.LoadFieldSchema(path)
+		gt.NoError(t, err).Required()
+		gt.Array(t, schema.Fields).Length(1).Required()
+		gt.Value(t, schema.Fields[0].ReferenceWorkspace).Equal("other")
+	})
+
+	t.Run("multi_case_ref without reference_workspace is rejected", func(t *testing.T) {
+		content := `
+[[fields]]
+id = "links"
+name = "Linked Cases"
+type = "multi_case_ref"
+`
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "ws.toml")
+		gt.NoError(t, os.WriteFile(path, []byte(content), 0644)).Required()
+
+		_, err := config.LoadFieldSchema(path)
+		gt.Value(t, err).NotNil()
+		gt.Error(t, err).Is(config.ErrMissingReferenceWorkspace)
+	})
+
+	t.Run("text field with reference_workspace is rejected", func(t *testing.T) {
+		content := `
+[[fields]]
+id = "summary"
+name = "Summary"
+type = "text"
+reference_workspace = "other"
+`
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "ws.toml")
+		gt.NoError(t, os.WriteFile(path, []byte(content), 0644)).Required()
+
+		_, err := config.LoadFieldSchema(path)
+		gt.Value(t, err).NotNil()
+		gt.Error(t, err).Is(config.ErrUnexpectedReferenceWorkspace)
+	})
+
+	t.Run("select field with reference_workspace is rejected", func(t *testing.T) {
+		content := `
+[[fields]]
+id = "sev"
+name = "Severity"
+type = "select"
+reference_workspace = "x"
+
+  [[fields.options]]
+  id = "low"
+  name = "Low"
+`
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "ws.toml")
+		gt.NoError(t, os.WriteFile(path, []byte(content), 0644)).Required()
+
+		_, err := config.LoadFieldSchema(path)
+		gt.Value(t, err).NotNil()
+		gt.Error(t, err).Is(config.ErrUnexpectedReferenceWorkspace)
+	})
+}
+
+// TestLoadWorkspaceConfigs_CaseRef tests the cross-workspace validation
+// of case_ref fields (reference_workspace must name a loaded workspace).
+func TestLoadWorkspaceConfigs_CaseRef(t *testing.T) {
+	writeToml := func(t *testing.T, dir, name, content string) string {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		gt.NoError(t, os.WriteFile(path, []byte(content), 0644)).Required()
+		return path
+	}
+
+	wsA := func(refWorkspace string) string {
+		return `
+[workspace]
+id = "ws-a"
+name = "Workspace A"
+
+[[fields]]
+id = "ref"
+name = "Ref"
+type = "case_ref"
+reference_workspace = "` + refWorkspace + `"
+`
+	}
+
+	wsB := `
+[workspace]
+id = "ws-b"
+name = "Workspace B"
+
+[[fields]]
+id = "title"
+name = "Title"
+type = "text"
+`
+
+	t.Run("cross-workspace reference to existing workspace is accepted", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		writeToml(t, tmpDir, "a.toml", wsA("ws-b"))
+		writeToml(t, tmpDir, "b.toml", wsB)
+
+		configs, err := config.LoadWorkspaceConfigs([]string{tmpDir})
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(2)
+	})
+
+	t.Run("self-reference (pointing at own workspace) is accepted", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		// ws-a references itself
+		writeToml(t, tmpDir, "a.toml", wsA("ws-a"))
+
+		configs, err := config.LoadWorkspaceConfigs([]string{tmpDir})
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1)
+		gt.Value(t, configs[0].ID).Equal("ws-a")
+	})
+
+	t.Run("reference to unknown workspace is rejected", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		writeToml(t, tmpDir, "a.toml", wsA("ws-missing"))
+
+		_, err := config.LoadWorkspaceConfigs([]string{tmpDir})
+		gt.Value(t, err).NotNil()
+		gt.Error(t, err).Is(config.ErrUnknownReferenceWorkspace)
+	})
+}
+
+// TestLoadWorkspaceConfigs_CaseRefInMemo tests that case_ref
+// fields inside [memo] are rejected, because memo fields are not wired to the
+// picker, agent tools, or existence / privacy verification for Cases.
+func TestLoadWorkspaceConfigs_CaseRefInMemo(t *testing.T) {
+	content := `
+[workspace]
+id = "risk"
+name = "Risk"
+
+[memo]
+description = "Memo"
+
+[[memo.fields]]
+id = "linked"
+name = "Linked Case"
+type = "case_ref"
+reference_workspace = "risk"
+`
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "risk.toml")
+	gt.NoError(t, os.WriteFile(configPath, []byte(content), 0644)).Required()
+
+	_, err := config.LoadWorkspaceConfigs([]string{configPath})
+	gt.Value(t, err).NotNil()
+	gt.Error(t, err).Is(config.ErrUnexpectedReferenceWorkspace)
+}

@@ -127,3 +127,55 @@ func TestCoerceFieldInputs(t *testing.T) {
 		gt.Value(t, out["summary"].Type).Equal(types.FieldType(""))
 	})
 }
+
+func coerceTestSchemaWithCaseRef() *config.FieldSchema {
+	return &config.FieldSchema{
+		Fields: []config.FieldDefinition{
+			{ID: "ref", Name: "Ref", Type: types.FieldTypeCaseRef, ReferenceWorkspace: "other"},
+			{ID: "refs", Name: "Refs", Type: types.FieldTypeMultiCaseRef, ReferenceWorkspace: "other"},
+		},
+	}
+}
+
+func TestCoerceFieldInputs_CaseRef(t *testing.T) {
+	schema := coerceTestSchemaWithCaseRef()
+
+	t.Run("single case_ref coerces scalar Value to string", func(t *testing.T) {
+		out, violations := model.CoerceFieldInputs(schema, []model.FieldInput{
+			{FieldID: "ref", Value: "42"},
+		})
+		gt.Array(t, violations).Length(0)
+		gt.Map(t, out).HasKey("ref")
+		gt.Value(t, out["ref"].Type).Equal(types.FieldTypeCaseRef)
+		gt.Value(t, out["ref"].Value).Equal("42")
+	})
+
+	t.Run("multi_case_ref coerces Values slice to []string", func(t *testing.T) {
+		out, violations := model.CoerceFieldInputs(schema, []model.FieldInput{
+			{FieldID: "refs", Values: []string{"42", "57"}},
+		})
+		gt.Array(t, violations).Length(0)
+		gt.Map(t, out).HasKey("refs")
+		gt.Value(t, out["refs"].Type).Equal(types.FieldTypeMultiCaseRef)
+		gt.Value(t, out["refs"].Value).Equal([]string{"42", "57"})
+	})
+
+	t.Run("multi_case_ref falls back to scalar Value as single-element slice", func(t *testing.T) {
+		out, violations := model.CoerceFieldInputs(schema, []model.FieldInput{
+			{FieldID: "refs", Value: "42"},
+		})
+		gt.Array(t, violations).Length(0)
+		gt.Map(t, out).HasKey("refs")
+		gt.Value(t, out["refs"].Type).Equal(types.FieldTypeMultiCaseRef)
+		gt.Value(t, out["refs"].Value).Equal([]string{"42"})
+	})
+
+	t.Run("multi_case_ref with neither Value nor Values yields empty slice", func(t *testing.T) {
+		out, violations := model.CoerceFieldInputs(schema, []model.FieldInput{
+			{FieldID: "refs"},
+		})
+		gt.Array(t, violations).Length(0)
+		gt.Map(t, out).HasKey("refs")
+		gt.Value(t, out["refs"].Value).Equal([]string{})
+	})
+}

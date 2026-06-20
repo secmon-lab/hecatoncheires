@@ -266,6 +266,7 @@ func (uc *UseCase) buildToolResolver(req TurnRequest) *agent.ToolSetResolver {
 		Core: core.Deps{
 			Repo:        d.Repo,
 			WorkspaceID: wsID,
+			CaseRefUC:   d.CaseRefUC,
 		},
 		Slack: slacktool.Deps{
 			Bot:       d.SlackBot,

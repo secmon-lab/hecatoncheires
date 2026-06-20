@@ -12,8 +12,8 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
-	memotool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/memo"
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
+	memotool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/memo"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/webfetch"
@@ -249,6 +249,7 @@ func (uc *UseCase) buildTools(req TurnRequest) []gollem.Tool {
 		StatusSet:    statusSet,
 		ActionUC:     d.ActionUC,
 		ActionStepUC: d.ActionStepUC,
+		CaseRefUC:    d.CaseRefUC,
 	})
 	slackTools := slacktool.NewReadOnly(slacktool.Deps{
 		Bot:       d.SlackBot,

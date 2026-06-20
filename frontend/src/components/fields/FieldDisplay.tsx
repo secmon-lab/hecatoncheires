@@ -1,6 +1,9 @@
+import { useQuery } from '@apollo/client'
 import { Avatar } from '../Primitives'
 import { IconExt } from '../Icons'
 import { displayName } from '../../utils/user'
+import { CASE_REFS_BY_IDS } from '../../graphql/caseRef'
+import { useTranslation } from '../../i18n'
 
 interface FieldOption {
   id: string
@@ -12,6 +15,7 @@ interface FieldDef {
   name: string
   type: string
   options?: FieldOption[]
+  referenceWorkspaceId?: string | null
 }
 
 interface User {
@@ -25,6 +29,105 @@ interface Props {
   field: FieldDef
   value: any
   users?: User[]
+}
+
+interface CaseRef {
+  id: number
+  title: string
+  status: string
+  workspaceId: string
+}
+
+function CaseRefDisplay({ field, value, multi }: { field: FieldDef; value: any; multi: boolean }) {
+  const { t } = useTranslation()
+  const ids: string[] = multi
+    ? Array.isArray(value) ? value : []
+    : (value != null && value !== '' ? [String(value)] : [])
+
+  const numericIds = ids.map(Number).filter((n) => !Number.isNaN(n) && n > 0)
+
+  const { data, loading } = useQuery(CASE_REFS_BY_IDS, {
+    variables: {
+      workspaceId: field.referenceWorkspaceId ?? '',
+      ids: numericIds,
+    },
+    skip: numericIds.length === 0 || !field.referenceWorkspaceId,
+  })
+
+  if (ids.length === 0) {
+    return <span className="soft" style={{ fontSize: 13 }}>—</span>
+  }
+
+  if (loading) {
+    return <span style={{ fontSize: 13, color: 'var(--fg-muted)' }}>…</span>
+  }
+
+  const resolved: CaseRef[] = data?.caseRefsByIds ?? []
+  const resolvedMap = new Map(resolved.map((c) => [String(c.id), c]))
+
+  if (!multi) {
+    const id = ids[0]
+    const ref = resolvedMap.get(id)
+    if (!ref) {
+      return (
+        <span style={{ fontSize: 13, color: 'var(--fg-muted)' }}>
+          {t('caseRefUnavailable', { id })}
+        </span>
+      )
+    }
+    return (
+      <a
+        href={`/ws/${ref.workspaceId}/cases/${ref.id}`}
+        style={{ color: 'var(--accent)', fontSize: 13 }}
+      >
+        {ref.title} (#{ref.id})
+      </a>
+    )
+  }
+
+  return (
+    <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
+      {ids.map((id) => {
+        const ref = resolvedMap.get(id)
+        if (!ref) {
+          return (
+            <span
+              key={id}
+              className="chip"
+              style={{
+                fontSize: 11,
+                padding: '1px 8px',
+                borderRadius: 999,
+                border: '1px solid var(--line)',
+                background: 'var(--bg-sunken)',
+                color: 'var(--fg-muted)',
+              }}
+            >
+              {t('caseRefUnavailable', { id })}
+            </span>
+          )
+        }
+        return (
+          <a
+            key={id}
+            href={`/ws/${ref.workspaceId}/cases/${ref.id}`}
+            className="chip"
+            style={{
+              fontSize: 11,
+              padding: '1px 8px',
+              borderRadius: 999,
+              border: '1px solid var(--line)',
+              background: 'var(--bg-sunken)',
+              color: 'var(--accent)',
+              textDecoration: 'none',
+            }}
+          >
+            {ref.title} (#{ref.id})
+          </a>
+        )
+      })}
+    </div>
+  )
 }
 
 // Read-only display for a custom field value, used in the case detail
@@ -123,6 +226,12 @@ export default function FieldDisplay({ field, value, users = [] }: Props) {
         </div>
       )
     }
+
+    case 'CASE_REF':
+      return <CaseRefDisplay field={field} value={value} multi={false} />
+
+    case 'MULTI_CASE_REF':
+      return <CaseRefDisplay field={field} value={value} multi={true} />
 
     default:
       return <span style={{ fontSize: 13 }}>{String(value)}</span>

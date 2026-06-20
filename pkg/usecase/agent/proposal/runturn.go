@@ -365,6 +365,10 @@ func (uc *UseCase) buildToolSetResolver(_ TurnRequest) *agent.ToolSetResolver {
 			WorkspaceID:  "",
 			ActionUC:     d.ActionUC,
 			ActionStepUC: d.ActionStepUC,
+			// CaseRefUC intentionally left nil: draft mode is workspace-agnostic
+			// (WorkspaceID == ""), so case_ref tools that need a concrete
+			// workspace+field schema to resolve reference_workspace cannot function
+			// here.
 		},
 		Slack: slacktool.Deps{
 			Bot:       d.SlackBot,

@@ -117,6 +117,7 @@ func NewAgentUseCase(deps AgentDeps) *AgentUseCase {
 			ActionUC:            NewActionToolAdapter(deps.ActionUC),
 			ActionStepUC:        NewActionStepToolAdapter(deps.ActionStepUC),
 			CaseUC:              NewCaseToolAdapter(deps.CaseUC),
+			CaseRefUC:           deps.CaseUC,
 			MemoUC:              NewMemoToolAdapter(deps.MemoUC),
 			HeartbeatInterval:   agentcommon.DefaultHeartbeatInterval,
 			HeartbeatStaleAfter: agentcommon.DefaultHeartbeatStaleAfter,
