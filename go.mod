@@ -9,7 +9,7 @@ require (
 	github.com/bradleyfalzon/ghinstallation/v2 v2.17.0
 	github.com/fatih/color v1.18.0
 	github.com/getsentry/sentry-go v0.46.1
-	github.com/go-chi/chi/v5 v5.2.3
+	github.com/go-chi/chi/v5 v5.2.4
 	github.com/goccy/go-yaml v1.19.0
 	github.com/google/go-github/v75 v75.0.0
 	github.com/google/uuid v1.6.0
