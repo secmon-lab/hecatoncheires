@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
@@ -4156,4 +4158,380 @@ cases:
 	}
 	gt.NoError(t, json.Unmarshal(resp.Data, &draftsOut)).Required()
 	gt.Array(t, draftsOut.Drafts).Length(0)
+}
+
+func TestGraphQLHandler_ReferenceableCases(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+
+	// Create two normal (non-private, OPEN) cases in testWorkspaceID.
+	case1 := &model.Case{
+		ReporterID:  "U-TEST-DEFAULT",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Title:       "Referenceable Case One",
+		Description: "First public case",
+		AssigneeIDs: []string{},
+	}
+	createdCase1, err := repo.Case().Create(ctx, testWorkspaceID, case1)
+	gt.NoError(t, err).Required()
+
+	case2 := &model.Case{
+		ReporterID:  "U-TEST-DEFAULT",
+		CreatedAt:   time.Now().UTC().Add(-time.Second), // older than case1
+		UpdatedAt:   time.Now().UTC().Add(-time.Second),
+		Title:       "Referenceable Case Two",
+		Description: "Second public case",
+		AssigneeIDs: []string{},
+	}
+	createdCase2, err := repo.Case().Create(ctx, testWorkspaceID, case2)
+	gt.NoError(t, err).Required()
+
+	// Create one private case in testWorkspaceID — must be excluded from results.
+	privateCase := &model.Case{
+		ReporterID:     "U-TEST-DEFAULT",
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
+		Title:          "Private Case",
+		Description:    "Should not appear in referenceable cases",
+		IsPrivate:      true,
+		ChannelUserIDs: []string{"UMEMBER"},
+		AssigneeIDs:    []string{},
+	}
+	createdPrivate, err := repo.Case().Create(ctx, testWorkspaceID, privateCase)
+	gt.NoError(t, err).Required()
+
+	// Create a case in a different workspace to verify workspace scoping.
+	otherWS := fmt.Sprintf("ref-ws-%d", time.Now().UnixNano())
+	otherCase := &model.Case{
+		ReporterID:  "U-TEST-DEFAULT",
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+		Title:       "Other Workspace Case",
+		Description: "Belongs to a different workspace",
+		AssigneeIDs: []string{},
+	}
+	_, err = repo.Case().Create(ctx, otherWS, otherCase)
+	gt.NoError(t, err).Required()
+
+	srv, err := setupGraphQLServer(repo)
+	gt.NoError(t, err).Required()
+
+	t.Run("referenceableCases returns non-private cases only", func(t *testing.T) {
+		query := `
+			query($workspaceId: String!, $query: String, $limit: Int) {
+				referenceableCases(workspaceId: $workspaceId, query: $query, limit: $limit) {
+					id
+					title
+					status
+					workspaceId
+				}
+			}
+		`
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+		}
+
+		rec := executeGraphQLRequest(t, srv, query, variables)
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var result struct {
+			ReferenceableCases []struct {
+				ID          int    `json:"id"`
+				Title       string `json:"title"`
+				Status      string `json:"status"`
+				WorkspaceID string `json:"workspaceId"`
+			} `json:"referenceableCases"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+
+		// Must contain the two public cases and exclude the private case.
+		gt.Array(t, result.ReferenceableCases).Length(2)
+
+		foundCase1, foundCase2 := false, false
+		for _, c := range result.ReferenceableCases {
+			gt.Value(t, c.WorkspaceID).Equal(testWorkspaceID)
+			gt.Value(t, c.ID).NotEqual(int(createdPrivate.ID))
+			if c.ID == int(createdCase1.ID) {
+				foundCase1 = true
+				gt.Value(t, c.Title).Equal("Referenceable Case One")
+				gt.Value(t, c.Status).Equal("OPEN")
+			}
+			if c.ID == int(createdCase2.ID) {
+				foundCase2 = true
+				gt.Value(t, c.Title).Equal("Referenceable Case Two")
+				gt.Value(t, c.Status).Equal("OPEN")
+			}
+		}
+		gt.Bool(t, foundCase1).True()
+		gt.Bool(t, foundCase2).True()
+	})
+
+	t.Run("referenceableCases filters by title query", func(t *testing.T) {
+		query := `
+			query($workspaceId: String!, $query: String) {
+				referenceableCases(workspaceId: $workspaceId, query: $query) {
+					id
+					title
+				}
+			}
+		`
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"query":       "Case One",
+		}
+
+		rec := executeGraphQLRequest(t, srv, query, variables)
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var result struct {
+			ReferenceableCases []struct {
+				ID    int    `json:"id"`
+				Title string `json:"title"`
+			} `json:"referenceableCases"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+
+		gt.Array(t, result.ReferenceableCases).Length(1)
+		gt.Value(t, result.ReferenceableCases[0].ID).Equal(int(createdCase1.ID))
+		gt.Value(t, result.ReferenceableCases[0].Title).Equal("Referenceable Case One")
+	})
+
+	t.Run("caseRefsByIds resolves given IDs and omits private cases", func(t *testing.T) {
+		query := `
+			query($workspaceId: String!, $ids: [Int!]!) {
+				caseRefsByIds(workspaceId: $workspaceId, ids: $ids) {
+					id
+					title
+					status
+					workspaceId
+				}
+			}
+		`
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			// Request case1, case2, and the private case; only the public ones should be returned.
+			"ids": []int{int(createdCase1.ID), int(createdCase2.ID), int(createdPrivate.ID)},
+		}
+
+		rec := executeGraphQLRequest(t, srv, query, variables)
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var result struct {
+			CaseRefsByIds []struct {
+				ID          int    `json:"id"`
+				Title       string `json:"title"`
+				Status      string `json:"status"`
+				WorkspaceID string `json:"workspaceId"`
+			} `json:"caseRefsByIds"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+
+		// Private case must be excluded; only the two public cases should be returned.
+		gt.Array(t, result.CaseRefsByIds).Length(2)
+		foundCase1, foundCase2 := false, false
+		for _, c := range result.CaseRefsByIds {
+			gt.Value(t, c.WorkspaceID).Equal(testWorkspaceID)
+			gt.Value(t, c.ID).NotEqual(int(createdPrivate.ID))
+			if c.ID == int(createdCase1.ID) {
+				foundCase1 = true
+				gt.Value(t, c.Title).Equal("Referenceable Case One")
+			}
+			if c.ID == int(createdCase2.ID) {
+				foundCase2 = true
+				gt.Value(t, c.Title).Equal("Referenceable Case Two")
+			}
+		}
+		gt.Bool(t, foundCase1).True()
+		gt.Bool(t, foundCase2).True()
+	})
+
+	t.Run("referenceWorkspaceId exposed via fieldConfiguration for case_ref field", func(t *testing.T) {
+		// Build a workspace registry with a case_ref field that points at otherWS.
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: testWorkspaceID, Name: "Test Workspace"},
+			FieldSchema: &config.FieldSchema{
+				Fields: []config.FieldDefinition{
+					{
+						ID:                 "ref-field",
+						Name:               "Related Case",
+						Type:               types.FieldTypeCaseRef,
+						Required:           false,
+						ReferenceWorkspace: otherWS,
+					},
+				},
+				Labels: config.EntityLabels{Case: "Case"},
+			},
+		})
+
+		// Build a server that uses this registry.
+		uc := usecase.New(repo, registry)
+		resolver := gqlctrl.NewResolver(repo, uc)
+		srv := handler.NewDefaultServer(
+			gqlctrl.NewExecutableSchema(gqlctrl.Config{Resolvers: resolver}),
+		)
+		gqlHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			loaders := gqlctrl.NewDataLoaders(repo, nil)
+			ctx := gqlctrl.WithDataLoaders(r.Context(), loaders)
+			srv.ServeHTTP(w, r.WithContext(ctx))
+		})
+		registryHandler, err := httpctrl.New(gqlHandler)
+		gt.NoError(t, err).Required()
+
+		fieldQuery := `
+			query($workspaceId: String!) {
+				fieldConfiguration(workspaceId: $workspaceId) {
+					fields {
+						id
+						type
+						referenceWorkspaceId
+					}
+				}
+			}
+		`
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+		}
+
+		rec := executeGraphQLRequest(t, registryHandler, fieldQuery, variables)
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var result struct {
+			FieldConfiguration struct {
+				Fields []struct {
+					ID                   string  `json:"id"`
+					Type                 string  `json:"type"`
+					ReferenceWorkspaceID *string `json:"referenceWorkspaceId"`
+				} `json:"fields"`
+			} `json:"fieldConfiguration"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+
+		gt.Array(t, result.FieldConfiguration.Fields).Length(1)
+		field := result.FieldConfiguration.Fields[0]
+		gt.Value(t, field.ID).Equal("ref-field")
+		gt.Value(t, field.Type).Equal("CASE_REF")
+		gt.Value(t, field.ReferenceWorkspaceID).NotNil().Required()
+		gt.Value(t, *field.ReferenceWorkspaceID).Equal(otherWS)
+	})
+}
+
+// TestGraphQLHandler_CaseRefWrite drives the WRITE path end-to-end through the
+// updateCase GraphQL mutation: setting a case_ref field value referencing a
+// public case in the target workspace succeeds and round-trips, while
+// referencing a private or non-existent case is rejected at the GraphQL
+// boundary by verifyCaseRefsExist (not just at the usecase layer).
+func TestGraphQLHandler_CaseRefWrite(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+
+	// Target (reference) workspace with one public and one private case.
+	otherWS := fmt.Sprintf("ref-ws-%d", time.Now().UnixNano())
+	pubRef, err := repo.Case().Create(ctx, otherWS, &model.Case{
+		ReporterID: "U-TEST-DEFAULT", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+		Title: "Public Target", AssigneeIDs: []string{},
+	})
+	gt.NoError(t, err).Required()
+	privRef, err := repo.Case().Create(ctx, otherWS, &model.Case{
+		ReporterID: "U-TEST-DEFAULT", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+		Title: "Private Target", IsPrivate: true, ChannelUserIDs: []string{"UMEMBER"}, AssigneeIDs: []string{},
+	})
+	gt.NoError(t, err).Required()
+
+	// Base case in testWorkspaceID whose case_ref field we mutate.
+	baseCase, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+		ReporterID: "U-TEST-DEFAULT", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+		Title: "Base", AssigneeIDs: []string{},
+	})
+	gt.NoError(t, err).Required()
+
+	// Registry: testWorkspaceID has a case_ref field pointing at otherWS.
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: testWorkspaceID, Name: "Test Workspace"},
+		FieldSchema: &config.FieldSchema{
+			Fields: []config.FieldDefinition{
+				{ID: "ref_field", Name: "Related Case", Type: types.FieldTypeCaseRef, ReferenceWorkspace: otherWS},
+			},
+			Labels: config.EntityLabels{Case: "Case"},
+		},
+	})
+
+	uc := usecase.New(repo, registry)
+	resolver := gqlctrl.NewResolver(repo, uc)
+	srv := handler.NewDefaultServer(gqlctrl.NewExecutableSchema(gqlctrl.Config{Resolvers: resolver}))
+	gqlHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		loaders := gqlctrl.NewDataLoaders(repo, nil)
+		ctx := gqlctrl.WithDataLoaders(r.Context(), loaders)
+		srv.ServeHTTP(w, r.WithContext(ctx))
+	})
+	handlerWS, err := httpctrl.New(gqlHandler)
+	gt.NoError(t, err).Required()
+
+	mutation := `
+		mutation($workspaceId: String!, $input: UpdateCaseInput!) {
+			updateCase(workspaceId: $workspaceId, input: $input) {
+				id
+				fields { fieldId value }
+			}
+		}
+	`
+	setRef := func(value string) (*graphQLResponse, *httptest.ResponseRecorder) {
+		variables := map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"input": map[string]interface{}{
+				"id":     baseCase.ID,
+				"fields": []map[string]interface{}{{"fieldId": "ref_field", "value": value}},
+			},
+		}
+		rec := executeGraphQLRequest(t, handlerWS, mutation, variables)
+		return parseGraphQLResponse(t, rec), rec
+	}
+
+	t.Run("sets and round-trips a public case reference", func(t *testing.T) {
+		resp, rec := setRef(fmt.Sprintf("%d", pubRef.ID))
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var result struct {
+			UpdateCase struct {
+				Fields []struct {
+					FieldID string      `json:"fieldId"`
+					Value   interface{} `json:"value"`
+				} `json:"fields"`
+			} `json:"updateCase"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+		gt.Array(t, result.UpdateCase.Fields).Length(1).Required()
+		gt.Value(t, result.UpdateCase.Fields[0].FieldID).Equal("ref_field")
+		gt.Value(t, result.UpdateCase.Fields[0].Value).Equal(fmt.Sprintf("%d", pubRef.ID))
+
+		// Persisted value matches.
+		stored, err := repo.Case().Get(ctx, testWorkspaceID, baseCase.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, stored.FieldValues["ref_field"].Value).Equal(fmt.Sprintf("%d", pubRef.ID))
+	})
+
+	t.Run("rejects a private case reference", func(t *testing.T) {
+		resp, _ := setRef(fmt.Sprintf("%d", privRef.ID))
+		gt.Number(t, len(resp.Errors)).Greater(0)
+	})
+
+	t.Run("rejects a non-existent case reference", func(t *testing.T) {
+		resp, _ := setRef("99999999")
+		gt.Number(t, len(resp.Errors)).Greater(0)
+	})
 }

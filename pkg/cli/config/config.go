@@ -238,12 +238,13 @@ func (o *FieldOption) Validate(fieldID string) error {
 
 // FieldDefinition represents a custom field definition
 type FieldDefinition struct {
-	ID          string        `toml:"id"`
-	Name        string        `toml:"name"`
-	Type        string        `toml:"type"`
-	Required    bool          `toml:"required"`
-	Description string        `toml:"description"`
-	Options     []FieldOption `toml:"options"`
+	ID                 string        `toml:"id"`
+	Name               string        `toml:"name"`
+	Type               string        `toml:"type"`
+	Required           bool          `toml:"required"`
+	Description        string        `toml:"description"`
+	Options            []FieldOption `toml:"options"`
+	ReferenceWorkspace string        `toml:"reference_workspace"`
 }
 
 // Validate checks if the FieldDefinition is valid
@@ -293,6 +294,35 @@ func (f *FieldDefinition) Validate() error {
 		}
 	}
 
+	// reference_workspace is required for case_ref types and forbidden for
+	// every other type. Whether the referenced workspace actually exists is
+	// checked after all workspaces are loaded (see validateCaseRefFields),
+	// because a single FieldDefinition cannot see its sibling workspaces.
+	if fieldType.IsCaseRef() {
+		if f.ReferenceWorkspace == "" {
+			return goerr.Wrap(ErrMissingReferenceWorkspace, "case_ref fields must set reference_workspace",
+				goerr.V(FieldIDKey, f.ID),
+				goerr.V(FieldTypeKey, f.Type))
+		}
+		// A required case_ref cannot be collected by the Slack case-creation
+		// modal — buildFieldInputBlock has no Slack element for a searchable
+		// cross-workspace case picker, so the field would be absent from the
+		// modal yet still demanded by required-field validation, making the
+		// case un-creatable from Slack. Case references are relationship links
+		// added after creation (via Web UI / agent), not creation-time
+		// mandatory inputs, so reject required at config load rather than ship
+		// an un-fillable required field.
+		if f.Required {
+			return goerr.Wrap(ErrRequiredCaseRefUnsupported, "case_ref fields cannot be required",
+				goerr.V(FieldIDKey, f.ID),
+				goerr.V(FieldTypeKey, f.Type))
+		}
+	} else if f.ReferenceWorkspace != "" {
+		return goerr.Wrap(ErrUnexpectedReferenceWorkspace, "reference_workspace is only valid for case_ref fields",
+			goerr.V(FieldIDKey, f.ID),
+			goerr.V(FieldTypeKey, f.Type))
+	}
+
 	return nil
 }
 
@@ -321,6 +351,16 @@ func (a *AppConfig) Validate() error {
 			if err := field.Validate(); err != nil {
 				return goerr.Wrap(err, "invalid memo field",
 					goerr.V(FieldIndexKey, idx))
+			}
+			// Case-reference fields are a Case-only feature: the picker, agent
+			// tools and existence/privacy verification all hang off the Case
+			// path. Allowing them on memo fields would persist unverified
+			// references, so reject them here rather than ship a half-wired type.
+			if types.FieldType(field.Type).IsCaseRef() {
+				return goerr.Wrap(ErrUnexpectedReferenceWorkspace,
+					"case_ref fields are not supported in [memo]",
+					goerr.V(FieldIDKey, field.ID),
+					goerr.V(FieldTypeKey, field.Type))
 			}
 			if memoFieldIDs[field.ID] {
 				return goerr.Wrap(ErrDuplicateFieldID, "duplicate memo field ID",
@@ -505,6 +545,33 @@ func LoadWorkspaceConfigs(paths []string) ([]*WorkspaceConfig, error) {
 		}
 		seenIDs[wc.ID] = f
 		configs = append(configs, wc)
+	}
+
+	// Cross-workspace check: a case_ref field's reference_workspace must
+	// name a workspace that actually exists across the loaded configs. This can
+	// only run once every workspace ID is known, so it lives here rather than in
+	// per-file Validate(). Self-reference (pointing at the field's own
+	// workspace) is allowed because the ID is in the same set.
+	knownWorkspaces := make(map[string]bool, len(configs))
+	for _, wc := range configs {
+		knownWorkspaces[wc.ID] = true
+	}
+	for _, wc := range configs {
+		if wc.FieldSchema == nil {
+			continue
+		}
+		for _, fd := range wc.FieldSchema.Fields {
+			if !fd.Type.IsCaseRef() {
+				continue
+			}
+			if !knownWorkspaces[fd.ReferenceWorkspace] {
+				return nil, goerr.Wrap(ErrUnknownReferenceWorkspace,
+					"case_ref field points to an unknown workspace",
+					goerr.V(WorkspaceIDKey, wc.ID),
+					goerr.V(FieldIDKey, fd.ID),
+					goerr.V("reference_workspace", fd.ReferenceWorkspace))
+			}
+		}
 	}
 
 	return configs, nil
@@ -712,12 +779,13 @@ func toDomainFields(in []FieldDefinition) []domainConfig.FieldDefinition {
 		}
 
 		fields[i] = domainConfig.FieldDefinition{
-			ID:          field.ID,
-			Name:        field.Name,
-			Type:        types.FieldType(field.Type),
-			Required:    field.Required,
-			Description: field.Description,
-			Options:     options,
+			ID:                 field.ID,
+			Name:               field.Name,
+			Type:               types.FieldType(field.Type),
+			Required:           field.Required,
+			Description:        field.Description,
+			Options:            options,
+			ReferenceWorkspace: field.ReferenceWorkspace,
 		}
 	}
 	return fields

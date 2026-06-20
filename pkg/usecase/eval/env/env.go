@@ -17,9 +17,9 @@ import (
 
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/actionwriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
-	memotool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/memo"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
+	memotool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/memo"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/webfetch"
@@ -268,6 +268,7 @@ func buildJobRunner(
 			StatusSet:    statusSet,
 			ActionUC:     actionAdapter,
 			ActionStepUC: stepAdapter,
+			CaseRefUC:    uc.Case,
 		}
 		out := make([]gollem.Tool, 0, 16)
 		out = append(out, core.NewReadOnly(coreDeps)...)

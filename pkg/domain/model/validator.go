@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -174,6 +175,10 @@ func (v *FieldValidator) validateFieldValue(fieldDef config.FieldDefinition, fv 
 		return v.validateDate(fieldDef, fv)
 	case types.FieldTypeURL:
 		return v.validateURL(fieldDef, fv)
+	case types.FieldTypeCaseRef:
+		return v.validateCaseRef(fieldDef, fv)
+	case types.FieldTypeMultiCaseRef:
+		return v.validateMultiCaseRef(fieldDef, fv)
 	default:
 		return goerr.Wrap(ErrInvalidFieldType, "unsupported field type",
 			goerr.V(FieldIDKey, fieldDef.ID),
@@ -344,5 +349,56 @@ func (v *FieldValidator) validateURL(fieldDef config.FieldDefinition, fv FieldVa
 	}
 	// Note: We don't validate URL format here, just check it's a string
 	// URL format validation can be added in the future if needed
+	return nil
+}
+
+// validateCaseRef validates a single case_ref field value. It only
+// checks the shape (a string parseable as a Case ID); existence, privacy and
+// draft checks require I/O and are performed in the usecase layer
+// (verifyCaseRefsExist), mirroring how user / multi-user existence is
+// verified outside this pure validator.
+func (v *FieldValidator) validateCaseRef(fieldDef config.FieldDefinition, fv FieldValue) error {
+	id, ok := fv.Value.(string)
+	if !ok {
+		return goerr.Wrap(ErrInvalidFieldType, "value must be string (case ID)",
+			goerr.V(ExpectedTypeKey, types.FieldTypeCaseRef),
+			goerr.V(ActualTypeKey, fmt.Sprintf("%T", fv.Value)))
+	}
+	if _, err := strconv.ParseInt(id, 10, 64); err != nil {
+		return goerr.Wrap(ErrInvalidFieldType, "case reference must be a numeric case ID",
+			goerr.V(FieldValueKey, id))
+	}
+	return nil
+}
+
+// validateMultiCaseRef validates a multi_case_ref field value: an
+// array of strings each parseable as a Case ID. As with validateCaseRef,
+// existence / privacy / draft checks are deferred to the usecase layer.
+func (v *FieldValidator) validateMultiCaseRef(fieldDef config.FieldDefinition, fv FieldValue) error {
+	ids, ok := fv.Value.([]string)
+	if !ok {
+		if values, ok := fv.Value.([]interface{}); ok {
+			ids = make([]string, len(values))
+			for i, val := range values {
+				strVal, ok := val.(string)
+				if !ok {
+					return goerr.Wrap(ErrInvalidFieldType, "multi_case_ref value must be array of strings",
+						goerr.V(ExpectedTypeKey, types.FieldTypeMultiCaseRef),
+						goerr.V(ActualTypeKey, fmt.Sprintf("%T", fv.Value)))
+				}
+				ids[i] = strVal
+			}
+		} else {
+			return goerr.Wrap(ErrInvalidFieldType, "value must be array of strings (case IDs)",
+				goerr.V(ExpectedTypeKey, types.FieldTypeMultiCaseRef),
+				goerr.V(ActualTypeKey, fmt.Sprintf("%T", fv.Value)))
+		}
+	}
+	for _, id := range ids {
+		if _, err := strconv.ParseInt(id, 10, 64); err != nil {
+			return goerr.Wrap(ErrInvalidFieldType, "case reference must be a numeric case ID",
+				goerr.V(FieldValueKey, id))
+		}
+	}
 	return nil
 }

@@ -617,6 +617,10 @@ export const msgKeys = {
   memoIdLabel: 'memoIdLabel',
   memoCreatorLabel: 'memoCreatorLabel',
   memoCountLabel: 'memoCountLabel',
+
+  // Case reference field
+  placeholderSelectCaseRef: 'placeholderSelectCaseRef',
+  caseRefUnavailable: 'caseRefUnavailable',
 } as const
 
 export type MsgKey = keyof typeof msgKeys

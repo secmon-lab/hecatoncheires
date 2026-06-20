@@ -622,4 +622,8 @@ export const ja: Messages = {
   memoIdLabel: 'ID',
   memoCreatorLabel: '作成者',
   memoCountLabel: '{count} 件',
+
+  // Case reference field
+  placeholderSelectCaseRef: 'ケースを選択...',
+  caseRefUnavailable: '参照不可 (#{id})',
 }

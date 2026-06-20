@@ -139,6 +139,7 @@ description = "Overall severity assessment"
 | `type` | string | **Yes** | Field type (see [Field Types](#field-types)) |
 | `required` | boolean | No | Whether the field is required (default: `false`) |
 | `description` | string | No | Help text shown in the UI |
+| `reference_workspace` | string | Case-reference only | Target workspace ID whose Cases this field references. **Required** for `case_ref` / `multi_case_ref`, and rejected for every other type. Must name a configured workspace (self-reference allowed) |
 
 ### Field ID Format
 
@@ -269,18 +270,60 @@ name = "Reference URL"
 type = "url"
 ```
 
+### `case_ref`
+
+Reference to a single Case in another (or the same) workspace, selected through
+a searchable dropdown. The target workspace is fixed by the `reference_workspace`
+property (required); only Cases in that workspace can be referenced.
+
+```toml
+[[fields]]
+id = "related_incident"
+name = "Related Incident"
+type = "case_ref"
+reference_workspace = "incident-response"
+```
+
+### `multi_case_ref`
+
+Reference to multiple Cases in the workspace named by `reference_workspace`
+(required). Same rules as `case_ref`, but stores a list.
+
+```toml
+[[fields]]
+id = "related_cases"
+name = "Related Cases"
+type = "multi_case_ref"
+reference_workspace = "incident-response"
+```
+
+> **Private Cases are never referenceable.** A private Case in the target
+> workspace is excluded from the picker, hidden from the agent search/detail
+> tools, and rejected when set as a value — regardless of who is editing. Draft
+> Cases are likewise not referenceable. `reference_workspace` may name the
+> field's own workspace (self-reference is allowed), and is validated at startup
+> against the set of configured workspaces.
+>
+> **Case-reference fields cannot be `required`.** The Slack case-creation modal
+> has no element for a searchable cross-workspace case picker, so a required
+> case reference would be un-fillable from Slack. Set them via the Web UI or
+> agent tools after the Case exists; config load rejects `required = true` on
+> these types.
+
 ### Summary
 
-| Type | Description | Requires Options |
-|------|-------------|-----------------|
-| `text` | Single-line text input | No |
-| `number` | Numeric input | No |
-| `select` | Single selection from options | **Yes** |
-| `multi-select` | Multiple selections from options | **Yes** |
-| `user` | Single Slack user reference | No |
-| `multi-user` | Multiple Slack user references | No |
-| `date` | Date picker | No |
-| `url` | URL input | No |
+| Type | Description | Requires Options | Requires `reference_workspace` |
+|------|-------------|-----------------|-----------------|
+| `text` | Single-line text input | No | No |
+| `number` | Numeric input | No | No |
+| `select` | Single selection from options | **Yes** | No |
+| `multi-select` | Multiple selections from options | **Yes** | No |
+| `user` | Single Slack user reference | No | No |
+| `multi-user` | Multiple Slack user references | No | No |
+| `date` | Date picker | No | No |
+| `url` | URL input | No | No |
+| `case_ref` | Single Case reference in another workspace | No | **Yes** |
+| `multi_case_ref` | Multiple Case references in another workspace | No | **Yes** |
 
 ---
 

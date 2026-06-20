@@ -33,6 +33,19 @@ var (
 	ErrMissingMonitorChannel = goerr.New("thread mode requires [slack] channel")
 	ErrInvalidMonitorChannel = goerr.New("invalid Slack channel ID")
 	ErrMissingCaseStatus     = goerr.New("thread mode requires [case.status]")
+	// ErrMissingReferenceWorkspace is returned when a case_ref /
+	// multi_case_ref field omits reference_workspace.
+	ErrMissingReferenceWorkspace = goerr.New("case_ref field requires reference_workspace")
+	// ErrUnexpectedReferenceWorkspace is returned when reference_workspace is set
+	// on a field whose type is not a case_ref type.
+	ErrUnexpectedReferenceWorkspace = goerr.New("reference_workspace is only valid for case_ref fields")
+	// ErrUnknownReferenceWorkspace is returned when reference_workspace points at
+	// a workspace ID that is not defined across the loaded configs.
+	ErrUnknownReferenceWorkspace = goerr.New("reference_workspace points to an unknown workspace")
+	// ErrRequiredCaseRefUnsupported is returned when a case_ref / multi_case_ref
+	// field is marked required: the Slack case-creation modal cannot collect a
+	// case reference, so a required one would make the case un-creatable.
+	ErrRequiredCaseRefUnsupported = goerr.New("case_ref fields cannot be required")
 )
 
 // Context keys for error values

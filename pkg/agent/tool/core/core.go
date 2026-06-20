@@ -49,6 +49,27 @@ type ActionStepMutator interface {
 	Delete(ctx context.Context, workspaceID string, actionID int64, stepID string) error
 }
 
+// CaseRefReader is the narrow surface of CaseUseCase that the
+// case_ref read tools (core__search_referenceable_cases /
+// core__get_referenceable_cases) depend on. Defined here to avoid importing
+// pkg/usecase (which already imports this package). All methods enforce the
+// project rule that private and draft Cases are never referenceable.
+type CaseRefReader interface {
+	// ReferenceWorkspaceForField resolves the field's configured
+	// reference_workspace from the current case's workspace schema, erroring
+	// when fieldID is unknown or not a case_ref field.
+	ReferenceWorkspaceForField(workspaceID, fieldID string) (string, error)
+	// ListReferenceableCases returns non-private, non-draft candidate cases in
+	// the reference workspace (picker/search summaries).
+	ListReferenceableCases(ctx context.Context, workspaceID, query string, limit int) ([]model.CaseRef, error)
+	// GetReferenceableCases batch-fetches full non-private, non-draft cases by
+	// ID from the reference workspace.
+	GetReferenceableCases(ctx context.Context, workspaceID string, ids []int64) ([]*model.Case, error)
+	// RenderCaseFieldValues flattens a case's field values, resolving nested
+	// case_ref values to {id,title,status} one level deep.
+	RenderCaseFieldValues(ctx context.Context, workspaceID string, fieldValues map[string]model.FieldValue) (map[string]any, error)
+}
+
 // UpdateActionParams describes a partial Action update from the agent tool
 // path. nil pointer means "no change". Empty pointer plus its corresponding
 // Clear* flag is how the caller asks for an explicit clear (e.g. the user
@@ -79,6 +100,10 @@ type Deps struct {
 	// ActionStepUseCase entry points. Required for the same reason as
 	// ActionUC; tools fail loudly when nil.
 	ActionStepUC ActionStepMutator
+	// CaseRefUC backs the case_ref read tools. nil disables them (a
+	// workspace with no case_ref fields needs nothing here); the tools
+	// are only built when this is wired.
+	CaseRefUC CaseRefReader
 }
 
 // New builds core tools for the agent mention use case: action management.
@@ -89,7 +114,7 @@ func New(deps Deps) []gollem.Tool {
 		statusSet = model.DefaultActionStatusSet()
 	}
 
-	return []gollem.Tool{
+	tools := []gollem.Tool{
 		&listActionsTool{repo: deps.Repo, workspaceID: deps.WorkspaceID, caseID: deps.CaseID},
 		&getActionTool{repo: deps.Repo, workspaceID: deps.WorkspaceID},
 		&createActionTool{actionUC: deps.ActionUC, workspaceID: deps.WorkspaceID, caseID: deps.CaseID, statusSet: statusSet},
@@ -104,6 +129,7 @@ func New(deps Deps) []gollem.Tool {
 		&renameActionStepTool{stepUC: deps.ActionStepUC, workspaceID: deps.WorkspaceID},
 		&deleteActionStepTool{stepUC: deps.ActionStepUC, workspaceID: deps.WorkspaceID},
 	}
+	return append(tools, caseRefTools(deps)...)
 }
 
 // NewForAssist builds tools for the assist use case. Currently identical to
@@ -129,7 +155,21 @@ func NewReadOnly(deps Deps) []gollem.Tool {
 	if deps.ActionStepUC != nil {
 		tools = append(tools, &listActionStepsTool{stepUC: deps.ActionStepUC, workspaceID: deps.WorkspaceID})
 	}
-	return tools
+	return append(tools, caseRefTools(deps)...)
+}
+
+// caseRefTools builds the read-only case_ref tools when a
+// CaseRefReader is wired. Returns nil otherwise so callers (mention,
+// investigation sub-agents, Jobs) that have no case_ref fields get no
+// extra tools.
+func caseRefTools(deps Deps) []gollem.Tool {
+	if deps.CaseRefUC == nil {
+		return nil
+	}
+	return []gollem.Tool{
+		&searchReferenceableCasesTool{uc: deps.CaseRefUC, workspaceID: deps.WorkspaceID},
+		&getReferenceableCasesTool{uc: deps.CaseRefUC, workspaceID: deps.WorkspaceID},
+	}
 }
 
 // NewWriterForJob builds the writer subset of the core tool family suitable

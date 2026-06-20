@@ -8,6 +8,8 @@ import (
 	"io"
 	"strconv"
 	"time"
+
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 )
 
 type SourceConfig interface {
@@ -82,6 +84,14 @@ type AssistLogConnection struct {
 	Items      []*AssistLog `json:"items"`
 	TotalCount int          `json:"totalCount"`
 	HasMore    bool         `json:"hasMore"`
+}
+
+// A referenceable case (non-private, non-draft) used by case_ref fields.
+type CaseRef struct {
+	ID          int              `json:"id"`
+	Title       string           `json:"title"`
+	Status      types.CaseStatus `json:"status"`
+	WorkspaceID string           `json:"workspaceId"`
 }
 
 type ChannelUserConnection struct {
@@ -175,12 +185,13 @@ type FieldConfiguration struct {
 }
 
 type FieldDefinition struct {
-	ID          string         `json:"id"`
-	Name        string         `json:"name"`
-	Type        FieldType      `json:"type"`
-	Required    bool           `json:"required"`
-	Description *string        `json:"description,omitempty"`
-	Options     []*FieldOption `json:"options,omitempty"`
+	ID                   string         `json:"id"`
+	Name                 string         `json:"name"`
+	Type                 FieldType      `json:"type"`
+	Required             bool           `json:"required"`
+	Description          *string        `json:"description,omitempty"`
+	Options              []*FieldOption `json:"options,omitempty"`
+	ReferenceWorkspaceID *string        `json:"referenceWorkspaceId,omitempty"`
 }
 
 type FieldOption struct {
@@ -679,14 +690,16 @@ func (e ActionEventKind) MarshalJSON() ([]byte, error) {
 type FieldType string
 
 const (
-	FieldTypeText        FieldType = "TEXT"
-	FieldTypeNumber      FieldType = "NUMBER"
-	FieldTypeSelect      FieldType = "SELECT"
-	FieldTypeMultiSelect FieldType = "MULTI_SELECT"
-	FieldTypeUser        FieldType = "USER"
-	FieldTypeMultiUser   FieldType = "MULTI_USER"
-	FieldTypeDate        FieldType = "DATE"
-	FieldTypeURL         FieldType = "URL"
+	FieldTypeText         FieldType = "TEXT"
+	FieldTypeNumber       FieldType = "NUMBER"
+	FieldTypeSelect       FieldType = "SELECT"
+	FieldTypeMultiSelect  FieldType = "MULTI_SELECT"
+	FieldTypeUser         FieldType = "USER"
+	FieldTypeMultiUser    FieldType = "MULTI_USER"
+	FieldTypeDate         FieldType = "DATE"
+	FieldTypeURL          FieldType = "URL"
+	FieldTypeCaseRef      FieldType = "CASE_REF"
+	FieldTypeMultiCaseRef FieldType = "MULTI_CASE_REF"
 )
 
 var AllFieldType = []FieldType{
@@ -698,11 +711,13 @@ var AllFieldType = []FieldType{
 	FieldTypeMultiUser,
 	FieldTypeDate,
 	FieldTypeURL,
+	FieldTypeCaseRef,
+	FieldTypeMultiCaseRef,
 }
 
 func (e FieldType) IsValid() bool {
 	switch e {
-	case FieldTypeText, FieldTypeNumber, FieldTypeSelect, FieldTypeMultiSelect, FieldTypeUser, FieldTypeMultiUser, FieldTypeDate, FieldTypeURL:
+	case FieldTypeText, FieldTypeNumber, FieldTypeSelect, FieldTypeMultiSelect, FieldTypeUser, FieldTypeMultiUser, FieldTypeDate, FieldTypeURL, FieldTypeCaseRef, FieldTypeMultiCaseRef:
 		return true
 	}
 	return false

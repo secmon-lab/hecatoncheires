@@ -15,6 +15,13 @@ const (
 	FieldTypeMultiUser   FieldType = "multi-user"
 	FieldTypeDate        FieldType = "date"
 	FieldTypeURL         FieldType = "url"
+	// FieldTypeCaseRef references a single Case by its numeric ID in the
+	// workspace named by the field definition's ReferenceWorkspace. The stored
+	// value is the referenced Case ID as a string (mirrors select / user).
+	FieldTypeCaseRef FieldType = "case_ref"
+	// FieldTypeMultiCaseRef references multiple Cases by ID. The stored
+	// value is a []string of Case IDs (mirrors multi-select / multi-user).
+	FieldTypeMultiCaseRef FieldType = "multi_case_ref"
 )
 
 // AllFieldTypes returns all valid field types
@@ -28,6 +35,8 @@ func AllFieldTypes() []FieldType {
 		FieldTypeMultiUser,
 		FieldTypeDate,
 		FieldTypeURL,
+		FieldTypeCaseRef,
+		FieldTypeMultiCaseRef,
 	}
 }
 
@@ -41,11 +50,18 @@ func (t FieldType) IsValid() bool {
 		FieldTypeUser,
 		FieldTypeMultiUser,
 		FieldTypeDate,
-		FieldTypeURL:
+		FieldTypeURL,
+		FieldTypeCaseRef,
+		FieldTypeMultiCaseRef:
 		return true
 	default:
 		return false
 	}
+}
+
+// IsCaseRef reports whether the type references Cases (single or multi).
+func (t FieldType) IsCaseRef() bool {
+	return t == FieldTypeCaseRef || t == FieldTypeMultiCaseRef
 }
 
 // String returns the string representation of the field type

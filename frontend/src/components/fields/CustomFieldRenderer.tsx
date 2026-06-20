@@ -6,6 +6,7 @@ import UserField from './UserField'
 import MultiUserField from './MultiUserField'
 import DateField from './DateField'
 import URLField from './URLField'
+import CaseRefField from './CaseRefField'
 
 interface FieldOption {
   id: string
@@ -21,6 +22,7 @@ interface FieldDefinition {
   required: boolean
   description?: string
   options?: FieldOption[]
+  referenceWorkspaceId?: string | null
 }
 
 interface User {
@@ -164,6 +166,37 @@ export default function CustomFieldRenderer({
           label={field.name}
           value={value || ''}
           onChange={handleChange}
+          required={field.required}
+          description={field.description}
+          error={error}
+          disabled={disabled}
+        />
+      )
+
+    case 'CASE_REF':
+      return (
+        <CaseRefField
+          fieldId={field.id}
+          label={field.name}
+          value={value || ''}
+          onChange={handleChange}
+          referenceWorkspaceId={field.referenceWorkspaceId ?? ''}
+          required={field.required}
+          description={field.description}
+          error={error}
+          disabled={disabled}
+        />
+      )
+
+    case 'MULTI_CASE_REF':
+      return (
+        <CaseRefField
+          fieldId={field.id}
+          label={field.name}
+          value={value || []}
+          onChange={handleChange}
+          referenceWorkspaceId={field.referenceWorkspaceId ?? ''}
+          multi
           required={field.required}
           description={field.description}
           error={error}

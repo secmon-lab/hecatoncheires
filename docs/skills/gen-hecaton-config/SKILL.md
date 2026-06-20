@@ -115,10 +115,11 @@ Each element defines a custom field displayed in the case form and detail view.
 |---------------|---------|----------|---------------------------------------------|
 | `id`          | string  | **Yes**  | Unique identifier. Pattern: `^[a-z0-9]+(-[a-z0-9]+)*$` |
 | `name`        | string  | **Yes**  | Display name shown in the UI                |
-| `type`        | string  | **Yes**  | One of the 8 supported types (see below)    |
+| `type`        | string  | **Yes**  | One of the 10 supported types (see below)   |
 | `required`    | boolean | No       | Whether the field is required (default: `false`) |
 | `description` | string  | No       | Help text shown in the UI                   |
 | `options`     | array   | Conditional | Required for `select` and `multi-select` types |
+| `reference_workspace` | string | Conditional | **Required** for `case_ref` / `multi_case_ref`; forbidden for all other types. Target workspace ID whose Cases the field references (self-reference allowed) |
 
 ### Supported field types
 
@@ -132,6 +133,12 @@ Each element defines a custom field displayed in the case form and detail view.
 | `multi-user`   | Multiple Slack user references             | No                 |
 | `date`         | Date picker                                | No                 |
 | `url`          | URL input with validation                  | No                 |
+| `case_ref` | Reference to one Case in `reference_workspace` (searchable picker) | No (needs `reference_workspace`) |
+| `multi_case_ref` | Reference to multiple Cases in `reference_workspace` | No (needs `reference_workspace`) |
+
+Private and draft Cases are never referenceable: they are excluded from the
+picker and rejected as values. `reference_workspace` must name a configured
+workspace (the field's own workspace is allowed for self-reference).
 
 ### Option properties (for `select` / `multi-select`)
 
@@ -165,11 +172,13 @@ The generated config must satisfy all of the following:
 1. `[workspace] id` is present and matches `^[a-z0-9]+(-[a-z0-9]+)*$` (max 63 chars)
 2. Every field `id` matches `^[a-z0-9]+(-[a-z0-9]+)*$`
 3. Every field `name` is non-empty
-4. Every field `type` is one of: `text`, `number`, `select`, `multi-select`, `user`, `multi-user`, `date`, `url`
+4. Every field `type` is one of: `text`, `number`, `select`, `multi-select`, `user`, `multi-user`, `date`, `url`, `case_ref`, `multi_case_ref`
 5. No duplicate field IDs across the entire configuration
 6. `select` and `multi-select` fields have at least one option
 7. Every option `id` matches the same pattern and is unique within its parent field
 8. Every option `name` is non-empty
+9. `case_ref` / `multi_case_ref` fields set `reference_workspace` to a configured workspace ID; no other field type sets `reference_workspace`
+10. `case_ref` / `multi_case_ref` fields are never `required = true` (they cannot be collected by the Slack case-creation modal)
 9. `[workspace] emoji` and `[workspace] color` are not both set; `color`, if present, is a 6-digit `#RRGGBB` hex code
 
 ### Complete example

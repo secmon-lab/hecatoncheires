@@ -253,6 +253,7 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 			Registry:       registry,
 			LLM:            uc.llmClient,
 			ActionUC:       uc.Action,
+			CaseUC:         uc.Case,
 			SlackService:   uc.slackService,
 			SlackSearch:    uc.slackSearch,
 			SlackRetriever: uc.slackRetriever,

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -174,7 +175,166 @@ func (uc *CaseUseCase) validateCaseWrite(
 	if err := uc.verifyUsersExist(ctx, assigneeIDs, enriched); err != nil {
 		return nil, err
 	}
+	if err := uc.verifyCaseRefsExist(ctx, workspaceID, enriched); err != nil {
+		return nil, err
+	}
 	return enriched, nil
+}
+
+// verifyCaseRefsExist confirms that every case_ref / multi-case-
+// reference value points at a Case that exists in the field's configured
+// reference_workspace and is neither private nor a draft. Private and draft
+// Cases are never referenceable (project requirement), independent of the
+// requesting user — so this check runs even in bot/system contexts that carry
+// no auth token. Lookups are batched per reference_workspace (N+1-safe).
+func (uc *CaseUseCase) verifyCaseRefsExist(ctx context.Context, workspaceID string, fieldValues map[string]model.FieldValue) error {
+	if len(fieldValues) == 0 {
+		return nil
+	}
+	schema := uc.fieldSchemaForWorkspace(workspaceID)
+	if schema == nil {
+		return nil
+	}
+	defByID := make(map[string]config.FieldDefinition, len(schema.Fields))
+	for _, fd := range schema.Fields {
+		defByID[fd.ID] = fd
+	}
+
+	// reference_workspace -> set of Case IDs to fetch.
+	idsByWS := make(map[string]map[int64]struct{})
+	// per (fieldID) -> its referenced (workspace, ids) for violation attribution.
+	type fieldRefs struct {
+		refWS string
+		ids   []int64
+	}
+	var perField []struct {
+		fieldID string
+		refs    fieldRefs
+	}
+
+	for _, fv := range fieldValues {
+		if !fv.Type.IsCaseRef() {
+			continue
+		}
+		fd, ok := defByID[string(fv.FieldID)]
+		if !ok || fd.ReferenceWorkspace == "" {
+			// Unknown field id is reported by the field validator; a missing
+			// reference_workspace is rejected at config load. Skip defensively.
+			continue
+		}
+		ids, err := caseRefIDs(fv)
+		if err != nil {
+			return goerr.Wrap(err, "invalid case reference value",
+				goerr.V("field_id", fv.FieldID))
+		}
+		if len(ids) == 0 {
+			continue
+		}
+		if idsByWS[fd.ReferenceWorkspace] == nil {
+			idsByWS[fd.ReferenceWorkspace] = make(map[int64]struct{})
+		}
+		for _, id := range ids {
+			idsByWS[fd.ReferenceWorkspace][id] = struct{}{}
+		}
+		perField = append(perField, struct {
+			fieldID string
+			refs    fieldRefs
+		}{fieldID: string(fv.FieldID), refs: fieldRefs{refWS: fd.ReferenceWorkspace, ids: ids}})
+	}
+
+	if len(idsByWS) == 0 {
+		return nil
+	}
+
+	// Batch-fetch each reference workspace exactly once.
+	fetched := make(map[string]map[int64]*model.Case, len(idsByWS))
+	for refWS, idSet := range idsByWS {
+		ids := make([]int64, 0, len(idSet))
+		for id := range idSet {
+			ids = append(ids, id)
+		}
+		found, err := uc.repo.Case().GetByIDs(ctx, refWS, ids)
+		if err != nil {
+			return goerr.Wrap(err, "failed to look up referenced cases",
+				goerr.V("reference_workspace", refWS))
+		}
+		fetched[refWS] = found
+	}
+
+	var violations []string
+	for _, pf := range perField {
+		found := fetched[pf.refs.refWS]
+		for _, id := range pf.refs.ids {
+			c, ok := found[id]
+			switch {
+			case !ok:
+				violations = append(violations, fmt.Sprintf(
+					"field %q: referenced case #%d not found in workspace %q", pf.fieldID, id, pf.refs.refWS))
+			case c.IsPrivate:
+				violations = append(violations, fmt.Sprintf(
+					"field %q: referenced case #%d is private and cannot be referenced", pf.fieldID, id))
+			case c.Status == types.CaseStatusDraft:
+				violations = append(violations, fmt.Sprintf(
+					"field %q: referenced case #%d is a draft and cannot be referenced", pf.fieldID, id))
+			}
+		}
+	}
+	if len(violations) > 0 {
+		sort.Strings(violations)
+		return goerr.Wrap(model.ErrCaseFieldValidation,
+			"case reference validation failed:\n- "+strings.Join(violations, "\n- "),
+			goerr.V("violations", violations))
+	}
+	return nil
+}
+
+// caseRefIDs extracts the numeric Case IDs from a case_ref value.
+// Single values arrive as a string, multi values as []string / []any (depending
+// on whether they went through typed coercion or a raw decode).
+func caseRefIDs(fv model.FieldValue) ([]int64, error) {
+	// A cleared optional case_ref arrives with a nil value; treat it as no
+	// references rather than a type error.
+	if fv.Value == nil {
+		return nil, nil
+	}
+	parse := func(s string) (int64, bool, error) {
+		if s == "" {
+			return 0, false, nil
+		}
+		n, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			return 0, false, goerr.Wrap(err, "case reference must be a numeric case ID",
+				goerr.V("value", s))
+		}
+		return n, true, nil
+	}
+
+	switch fv.Type {
+	case types.FieldTypeCaseRef:
+		s, ok := fv.Value.(string)
+		if !ok {
+			return nil, goerr.New("case_ref value must be a string")
+		}
+		n, present, err := parse(s)
+		if err != nil || !present {
+			return nil, err
+		}
+		return []int64{n}, nil
+	case types.FieldTypeMultiCaseRef:
+		var out []int64
+		for _, s := range coerceUserIDSlice(fv.Value) {
+			n, present, err := parse(s)
+			if err != nil {
+				return nil, err
+			}
+			if present {
+				out = append(out, n)
+			}
+		}
+		return out, nil
+	default:
+		return nil, nil
+	}
 }
 
 // verifyUsersExist collects every user id referenced by the write — the
@@ -920,6 +1080,214 @@ func (uc *CaseUseCase) ListCases(ctx context.Context, workspaceID string, status
 	}
 
 	return cases, nil
+}
+
+// referenceableCasesLimit caps how many candidate cases a case_ref picker
+// / agent search returns in one call. It also serves as the default when the
+// caller passes a non-positive limit.
+const referenceableCasesLimit = 50
+
+// ListReferenceableCases returns the non-private, non-draft Cases of
+// workspaceID as case_ref candidates. Unlike ListCases, private Cases are
+// dropped entirely (never RestrictCase'd) so a picker cannot even reveal that a
+// private Case exists — the project rule that private Cases are not
+// referenceable. With an empty query, OPEN cases sort first, then by most
+// recently updated. With a query, results match the Case title (substring,
+// case-insensitive) or the Case ID ("#42" / "42"), sorted by most recently
+// updated. At most limit (clamped to referenceableCasesLimit) rows are
+// returned. DRAFT cases are excluded because List excludes them by default.
+func (uc *CaseUseCase) ListReferenceableCases(ctx context.Context, workspaceID, query string, limit int) ([]model.CaseRef, error) {
+	if limit <= 0 || limit > referenceableCasesLimit {
+		limit = referenceableCasesLimit
+	}
+
+	cases, err := uc.repo.Case().List(ctx, workspaceID)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to list referenceable cases",
+			goerr.V("reference_workspace", workspaceID))
+	}
+
+	q := strings.TrimSpace(query)
+	lowerQ := strings.ToLower(q)
+	var idQuery int64 = -1
+	if n, perr := strconv.ParseInt(strings.TrimPrefix(q, "#"), 10, 64); perr == nil {
+		idQuery = n
+	}
+
+	matched := make([]*model.Case, 0, len(cases))
+	for _, c := range cases {
+		// List excludes drafts by default, but enforce the "drafts are never
+		// referenceable" rule explicitly so it does not depend on that default.
+		if c.IsPrivate || c.Status.Normalize() == types.CaseStatusDraft {
+			continue
+		}
+		if q != "" {
+			if !strings.Contains(strings.ToLower(c.Title), lowerQ) && c.ID != idQuery {
+				continue
+			}
+		}
+		matched = append(matched, c)
+	}
+
+	openFirst := q == ""
+	sort.SliceStable(matched, func(i, j int) bool {
+		if openFirst {
+			oi := matched[i].Status.Normalize() == types.CaseStatusOpen
+			oj := matched[j].Status.Normalize() == types.CaseStatusOpen
+			if oi != oj {
+				return oi // OPEN cases sort before non-OPEN
+			}
+		}
+		return matched[i].UpdatedAt.After(matched[j].UpdatedAt)
+	})
+
+	if len(matched) > limit {
+		matched = matched[:limit]
+	}
+
+	refs := make([]model.CaseRef, len(matched))
+	for i, c := range matched {
+		refs[i] = model.NewCaseRef(workspaceID, c)
+	}
+	return refs, nil
+}
+
+// ResolveCaseRefs resolves the given Case IDs in workspaceID to their CaseRef
+// summaries, dropping any ID that is missing, private, or a draft (the caller
+// renders those as "unavailable"). Used to label existing case_ref values
+// for display. A single batch lookup keeps it N+1-safe.
+func (uc *CaseUseCase) ResolveCaseRefs(ctx context.Context, workspaceID string, ids []int64) ([]model.CaseRef, error) {
+	cases, err := uc.GetReferenceableCases(ctx, workspaceID, ids)
+	if err != nil {
+		return nil, err
+	}
+	refs := make([]model.CaseRef, len(cases))
+	for i, c := range cases {
+		refs[i] = model.NewCaseRef(workspaceID, c)
+	}
+	return refs, nil
+}
+
+// GetReferenceableCases batch-fetches the full Cases for the given IDs in
+// workspaceID, returning only those that are referenceable (non-private,
+// non-draft, existing). IDs that are missing / private / draft are omitted, so
+// the caller can diff the input against the result to report them. Results
+// preserve the input ID order. This backs the agent's detail-fetch tool.
+func (uc *CaseUseCase) GetReferenceableCases(ctx context.Context, workspaceID string, ids []int64) ([]*model.Case, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	found, err := uc.repo.Case().GetByIDs(ctx, workspaceID, ids)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to fetch referenceable cases",
+			goerr.V("reference_workspace", workspaceID))
+	}
+	out := make([]*model.Case, 0, len(ids))
+	seen := make(map[int64]struct{}, len(ids))
+	for _, id := range ids {
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		c, ok := found[id]
+		if !ok || c.IsPrivate || c.Status.Normalize() == types.CaseStatusDraft {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+// ReferenceWorkspaceForField returns the reference_workspace configured for the
+// case_ref field fieldID in workspaceID. It errors when the field is
+// unknown or is not a case_ref type, so an agent tool that was handed a
+// wrong field id fails loudly instead of querying the wrong workspace.
+func (uc *CaseUseCase) ReferenceWorkspaceForField(workspaceID, fieldID string) (string, error) {
+	schema := uc.fieldSchemaForWorkspace(workspaceID)
+	if schema == nil {
+		return "", goerr.Wrap(ErrCaseNotFound, "workspace has no field schema",
+			goerr.V("workspace_id", workspaceID))
+	}
+	for _, fd := range schema.Fields {
+		if fd.ID == fieldID {
+			if !fd.Type.IsCaseRef() {
+				return "", goerr.New("field is not a case_ref field",
+					goerr.V("field_id", fieldID), goerr.V("field_type", fd.Type))
+			}
+			return fd.ReferenceWorkspace, nil
+		}
+	}
+	return "", goerr.New("field not defined in the workspace schema",
+		goerr.V("field_id", fieldID), goerr.V("workspace_id", workspaceID))
+}
+
+// RenderCaseFieldValues flattens a Case's field values into a plain map for an
+// agent tool response. Non-reference fields render their raw stored value (as
+// the existing tool responses do). Case-reference fields are resolved one level
+// — each referenced Case ID becomes {id, title, status} — using the field's
+// configured reference_workspace. An ID that no longer resolves (the referenced
+// Case was deleted, made private, or turned into a draft after it was stored)
+// renders as {id, available:false}; this read-time drift is the only place an
+// "unavailable" reference can appear, since writes are gated by
+// verifyCaseRefsExist. A repository lookup failure is propagated, never
+// swallowed.
+func (uc *CaseUseCase) RenderCaseFieldValues(ctx context.Context, workspaceID string, fieldValues map[string]model.FieldValue) (map[string]any, error) {
+	out := make(map[string]any, len(fieldValues))
+	schema := uc.fieldSchemaForWorkspace(workspaceID)
+	defByID := make(map[string]config.FieldDefinition)
+	if schema != nil {
+		for _, fd := range schema.Fields {
+			defByID[fd.ID] = fd
+		}
+	}
+
+	for id, fv := range fieldValues {
+		if !fv.Type.IsCaseRef() {
+			out[id] = fv.Value
+			continue
+		}
+		fd, ok := defByID[id]
+		if !ok || fd.ReferenceWorkspace == "" {
+			// Field removed from the schema (drift) or with no target workspace:
+			// fall back to the raw stored value instead of failing the whole
+			// field_values render with a doomed cross-workspace lookup.
+			out[id] = fv.Value
+			continue
+		}
+		ids, err := caseRefIDs(fv)
+		if err != nil {
+			return nil, goerr.Wrap(err, "invalid stored case reference value",
+				goerr.V("field_id", id))
+		}
+		resolved, err := uc.ResolveCaseRefs(ctx, fd.ReferenceWorkspace, ids)
+		if err != nil {
+			return nil, err
+		}
+		byID := make(map[int64]model.CaseRef, len(resolved))
+		for _, r := range resolved {
+			byID[r.ID] = r
+		}
+		render := func(refID int64) map[string]any {
+			if r, ok := byID[refID]; ok {
+				return map[string]any{"id": r.ID, "title": r.Title, "status": r.Status.String()}
+			}
+			return map[string]any{"id": refID, "available": false}
+		}
+		if fv.Type == types.FieldTypeCaseRef {
+			if len(ids) == 0 {
+				out[id] = nil
+			} else {
+				out[id] = render(ids[0])
+			}
+			continue
+		}
+		arr := make([]any, 0, len(ids))
+		for _, refID := range ids {
+			arr = append(arr, render(refID))
+		}
+		out[id] = arr
+	}
+	return out, nil
 }
 
 func (uc *CaseUseCase) CloseCase(ctx context.Context, workspaceID string, id int64) (*model.Case, error) {

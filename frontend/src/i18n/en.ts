@@ -622,4 +622,8 @@ export const en: Messages = {
   memoIdLabel: 'ID',
   memoCreatorLabel: 'Creator',
   memoCountLabel: '{count} memos',
+
+  // Case reference field
+  placeholderSelectCaseRef: 'Select a case...',
+  caseRefUnavailable: 'Unavailable (#{id})',
 }

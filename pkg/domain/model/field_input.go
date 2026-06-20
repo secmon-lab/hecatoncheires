@@ -62,7 +62,7 @@ func CoerceFieldInputs(schema *config.FieldSchema, in []FieldInput) (map[string]
 
 		var val any
 		switch ft {
-		case types.FieldTypeMultiSelect, types.FieldTypeMultiUser:
+		case types.FieldTypeMultiSelect, types.FieldTypeMultiUser, types.FieldTypeMultiCaseRef:
 			switch {
 			case len(fi.Values) > 0:
 				val = fi.Values

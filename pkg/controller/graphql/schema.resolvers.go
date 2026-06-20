@@ -1117,6 +1117,46 @@ func (r *queryResolver) Drafts(ctx context.Context, workspaceID string) ([]*grap
 	return result, nil
 }
 
+// ReferenceableCases is the resolver for the referenceableCases field.
+func (r *queryResolver) ReferenceableCases(ctx context.Context, workspaceID string, query *string, limit *int) ([]*graphql1.CaseRef, error) {
+	q := ""
+	if query != nil {
+		q = *query
+	}
+	l := 50
+	if limit != nil {
+		l = *limit
+	}
+	refs, err := r.UseCases.Case.ListReferenceableCases(ctx, workspaceID, q, l)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to list referenceable cases",
+			goerr.V("workspace_id", workspaceID))
+	}
+	result := make([]*graphql1.CaseRef, len(refs))
+	for i, ref := range refs {
+		result[i] = toGraphQLCaseRef(ref)
+	}
+	return result, nil
+}
+
+// CaseRefsByIds is the resolver for the caseRefsByIds field.
+func (r *queryResolver) CaseRefsByIds(ctx context.Context, workspaceID string, ids []int) ([]*graphql1.CaseRef, error) {
+	int64IDs := make([]int64, len(ids))
+	for i, id := range ids {
+		int64IDs[i] = int64(id)
+	}
+	refs, err := r.UseCases.Case.ResolveCaseRefs(ctx, workspaceID, int64IDs)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to resolve case refs",
+			goerr.V("workspace_id", workspaceID))
+	}
+	result := make([]*graphql1.CaseRef, len(refs))
+	for i, ref := range refs {
+		result[i] = toGraphQLCaseRef(ref)
+	}
+	return result, nil
+}
+
 // Actions is the resolver for the actions field.
 func (r *queryResolver) Actions(ctx context.Context, workspaceID string, filter *graphql1.ActionArchiveFilter) ([]*graphql1.Action, error) {
 	opts := interfaces.ActionListOptions{ArchiveScope: actionArchiveFilterToScope(filter)}
@@ -1199,13 +1239,20 @@ func (r *queryResolver) FieldConfiguration(ctx context.Context, workspaceID stri
 
 		fieldType := toGraphQLFieldType(field.Type)
 
+		var referenceWorkspaceID *string
+		if field.ReferenceWorkspace != "" {
+			v := field.ReferenceWorkspace
+			referenceWorkspaceID = &v
+		}
+
 		fields[i] = &graphql1.FieldDefinition{
-			ID:          field.ID,
-			Name:        field.Name,
-			Type:        fieldType,
-			Required:    field.Required,
-			Description: &field.Description,
-			Options:     options,
+			ID:                   field.ID,
+			Name:                 field.Name,
+			Type:                 fieldType,
+			Required:             field.Required,
+			Description:          &field.Description,
+			Options:              options,
+			ReferenceWorkspaceID: referenceWorkspaceID,
 		}
 	}
 
@@ -1505,13 +1552,19 @@ func (r *queryResolver) MemoConfiguration(ctx context.Context, workspaceID strin
 		}
 		fieldType := toGraphQLFieldType(field.Type)
 		fieldDesc := field.Description
+		var referenceWorkspaceID *string
+		if field.ReferenceWorkspace != "" {
+			v := field.ReferenceWorkspace
+			referenceWorkspaceID = &v
+		}
 		fields = append(fields, &graphql1.FieldDefinition{
-			ID:          field.ID,
-			Name:        field.Name,
-			Type:        fieldType,
-			Required:    field.Required,
-			Description: &fieldDesc,
-			Options:     options,
+			ID:                   field.ID,
+			Name:                 field.Name,
+			Type:                 fieldType,
+			Required:             field.Required,
+			Description:          &fieldDesc,
+			Options:              options,
+			ReferenceWorkspaceID: referenceWorkspaceID,
 		})
 	}
 	return &graphql1.MemoConfiguration{
