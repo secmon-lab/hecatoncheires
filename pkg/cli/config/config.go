@@ -304,6 +304,19 @@ func (f *FieldDefinition) Validate() error {
 				goerr.V(FieldIDKey, f.ID),
 				goerr.V(FieldTypeKey, f.Type))
 		}
+		// A required case_ref cannot be collected by the Slack case-creation
+		// modal — buildFieldInputBlock has no Slack element for a searchable
+		// cross-workspace case picker, so the field would be absent from the
+		// modal yet still demanded by required-field validation, making the
+		// case un-creatable from Slack. Case references are relationship links
+		// added after creation (via Web UI / agent), not creation-time
+		// mandatory inputs, so reject required at config load rather than ship
+		// an un-fillable required field.
+		if f.Required {
+			return goerr.Wrap(ErrRequiredCaseRefUnsupported, "case_ref fields cannot be required",
+				goerr.V(FieldIDKey, f.ID),
+				goerr.V(FieldTypeKey, f.Type))
+		}
 	} else if f.ReferenceWorkspace != "" {
 		return goerr.Wrap(ErrUnexpectedReferenceWorkspace, "reference_workspace is only valid for case_ref fields",
 			goerr.V(FieldIDKey, f.ID),

@@ -178,6 +178,7 @@ The generated config must satisfy all of the following:
 7. Every option `id` matches the same pattern and is unique within its parent field
 8. Every option `name` is non-empty
 9. `case_ref` / `multi_case_ref` fields set `reference_workspace` to a configured workspace ID; no other field type sets `reference_workspace`
+10. `case_ref` / `multi_case_ref` fields are never `required = true` (they cannot be collected by the Slack case-creation modal)
 9. `[workspace] emoji` and `[workspace] color` are not both set; `color`, if present, is a 6-digit `#RRGGBB` hex code
 
 ### Complete example

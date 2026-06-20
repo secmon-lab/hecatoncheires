@@ -1684,6 +1684,40 @@ reference_workspace = "other"
 		gt.Value(t, schema.Fields[0].ReferenceWorkspace).Equal("other")
 	})
 
+	t.Run("required case_ref is rejected", func(t *testing.T) {
+		content := `
+[[fields]]
+id = "linked"
+name = "Linked Case"
+type = "case_ref"
+required = true
+reference_workspace = "other"
+`
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "ws.toml")
+		gt.NoError(t, os.WriteFile(path, []byte(content), 0644)).Required()
+
+		_, err := config.LoadFieldSchema(path)
+		gt.Error(t, err).Is(config.ErrRequiredCaseRefUnsupported)
+	})
+
+	t.Run("required multi_case_ref is rejected", func(t *testing.T) {
+		content := `
+[[fields]]
+id = "links"
+name = "Linked Cases"
+type = "multi_case_ref"
+required = true
+reference_workspace = "other"
+`
+		tmpDir := t.TempDir()
+		path := filepath.Join(tmpDir, "ws.toml")
+		gt.NoError(t, os.WriteFile(path, []byte(content), 0644)).Required()
+
+		_, err := config.LoadFieldSchema(path)
+		gt.Error(t, err).Is(config.ErrRequiredCaseRefUnsupported)
+	})
+
 	t.Run("multi_case_ref without reference_workspace is rejected", func(t *testing.T) {
 		content := `
 [[fields]]

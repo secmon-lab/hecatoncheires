@@ -303,6 +303,12 @@ reference_workspace = "incident-response"
 > Cases are likewise not referenceable. `reference_workspace` may name the
 > field's own workspace (self-reference is allowed), and is validated at startup
 > against the set of configured workspaces.
+>
+> **Case-reference fields cannot be `required`.** The Slack case-creation modal
+> has no element for a searchable cross-workspace case picker, so a required
+> case reference would be un-fillable from Slack. Set them via the Web UI or
+> agent tools after the Case exists; config load rejects `required = true` on
+> these types.
 
 ### Summary
 

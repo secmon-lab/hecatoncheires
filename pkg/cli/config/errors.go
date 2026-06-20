@@ -42,6 +42,10 @@ var (
 	// ErrUnknownReferenceWorkspace is returned when reference_workspace points at
 	// a workspace ID that is not defined across the loaded configs.
 	ErrUnknownReferenceWorkspace = goerr.New("reference_workspace points to an unknown workspace")
+	// ErrRequiredCaseRefUnsupported is returned when a case_ref / multi_case_ref
+	// field is marked required: the Slack case-creation modal cannot collect a
+	// case reference, so a required one would make the case un-creatable.
+	ErrRequiredCaseRefUnsupported = goerr.New("case_ref fields cannot be required")
 )
 
 // Context keys for error values
