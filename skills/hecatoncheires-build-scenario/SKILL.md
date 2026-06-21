@@ -8,7 +8,17 @@ description: Author an eval scenario TOML for `hecatoncheires eval`. Use when th
 Produce a single self-contained scenario `.toml` for `hecatoncheires eval`. A
 scenario carries the system-under-test workspace config (standard top-level
 layout) plus the eval tables (`meta` / `input` / `cases` / `tools` / `persona`
-/ `expect`). Full reference: `docs/eval.md`.
+/ `expect`).
+
+This skill describes only the principles of authoring a scenario. It
+deliberately does **not** restate the concrete config schema, because that
+evolves and would drift out of sync. Always defer to the authoritative,
+always-current sources:
+
+- **Workspace config portion** (`[workspace]`, `[[fields]]`, field types, id
+  formats, `[slack]`, `[case]`, `[[job]]`, …) → `docs/configuration.md`.
+- **Eval tables** (`meta` / `input` / `cases` / `tools` / `persona` / `expect`)
+  → `docs/eval.md`.
 
 ## Steps
 
@@ -21,12 +31,13 @@ layout) plus the eval tables (`meta` / `input` / `cases` / `tools` / `persona`
      seed the target case under `[[cases]]`, and select it with `[run_job]`
      (`id`, optional `target_case`). No `[input]` is needed. Checks assert on the
      job outcome, the case after the run, and any actions the job created.
-2. **Workspace config.** Author it exactly like a real workspace config file at
-   the top level: `[workspace]`, `[[fields]]`, `[slack]` (for
-   `thread_mode_initial` use `mode = "thread"` and a real `channel` id like
-   `C0123456789`), and `[case]` with a status set (`initial` / `closed` /
-   `[[case.status]]`). Field ids and option ids must match
-   `^[a-z][a-z0-9_]*$`.
+2. **Workspace config.** Author the top-level tables (`[workspace]`,
+   `[[fields]]`, `[slack]`, `[case]`, …) exactly like a real workspace config
+   file. Do **not** re-derive the field types, id formats, option/status-set
+   layout, or Slack options from memory — follow `docs/configuration.md`, the
+   single source of truth for the config schema. Eval-specific constraint only:
+   for `thread_mode_initial` the `[slack]` table needs `mode = "thread"` and a
+   real `channel` id (e.g. `C0123456789`).
 3. **Input.** `[input].text` is the first monitored-channel post. Omit
    reporter/channel/thread_ts (synthesized) unless a specific reporter matters.
 3b. **Sources (optional).** Add `[[sources]]` for the workspace's data sources
@@ -82,6 +93,11 @@ The final OK/NG is decided by a human reviewing the per-check verdicts; the
 harness never auto-gates.
 
 ## Minimal example
+
+Illustrative only — it shows how the eval tables sit alongside a workspace
+config. The workspace-config portion (`[workspace]` / `[[fields]]` / `[slack]` /
+`[case]`) follows `docs/configuration.md`; check there if anything below looks
+out of date.
 
 ```toml
 [meta]
