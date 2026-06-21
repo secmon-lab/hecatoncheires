@@ -18,6 +18,11 @@ type FieldDefinition struct {
 	Required    bool
 	Description string
 	Options     []FieldOption // Only used for select and multi-select types
+	// ReferenceWorkspace is the workspace ID whose Cases this field may
+	// reference. Required (and only meaningful) for case_ref /
+	// multi_case_ref types; empty for all other types. May point at the
+	// field's own workspace (self-reference is allowed).
+	ReferenceWorkspace string
 }
 
 // EntityLabels holds display labels for entities

@@ -166,6 +166,13 @@ type ComplexityRoot struct {
 		UpdatedAt             func(childComplexity int) int
 	}
 
+	CaseRef struct {
+		ID          func(childComplexity int) int
+		Status      func(childComplexity int) int
+		Title       func(childComplexity int) int
+		WorkspaceID func(childComplexity int) int
+	}
+
 	ChannelUserConnection struct {
 		HasMore    func(childComplexity int) int
 		Items      func(childComplexity int) int
@@ -183,12 +190,13 @@ type ComplexityRoot struct {
 	}
 
 	FieldDefinition struct {
-		Description func(childComplexity int) int
-		ID          func(childComplexity int) int
-		Name        func(childComplexity int) int
-		Options     func(childComplexity int) int
-		Required    func(childComplexity int) int
-		Type        func(childComplexity int) int
+		Description          func(childComplexity int) int
+		ID                   func(childComplexity int) int
+		Name                 func(childComplexity int) int
+		Options              func(childComplexity int) int
+		ReferenceWorkspaceID func(childComplexity int) int
+		Required             func(childComplexity int) int
+		Type                 func(childComplexity int) int
 	}
 
 	FieldOption struct {
@@ -445,6 +453,7 @@ type ComplexityRoot struct {
 		Case                func(childComplexity int, workspaceID string, id int) int
 		CaseImport          func(childComplexity int, workspaceID string, id string) int
 		CaseJobRunLogs      func(childComplexity int, workspaceID string, caseID int, first *int, after *string) int
+		CaseRefsByIds       func(childComplexity int, workspaceID string, ids []int) int
 		CaseStatusConfig    func(childComplexity int, workspaceID string) int
 		Cases               func(childComplexity int, workspaceID string, status *types.CaseStatus) int
 		Drafts              func(childComplexity int, workspaceID string) int
@@ -459,6 +468,7 @@ type ComplexityRoot struct {
 		MemoConfiguration   func(childComplexity int, workspaceID string) int
 		MemosByCase         func(childComplexity int, workspaceID string, caseID int, filter *graphql1.MemoArchiveFilter) int
 		OpenCaseActions     func(childComplexity int, workspaceID string) int
+		ReferenceableCases  func(childComplexity int, workspaceID string, query *string, limit *int) int
 		SearchKnowledge     func(childComplexity int, workspaceID string, query string, tags []string, limit *int) int
 		SlackJoinedChannels func(childComplexity int) int
 		SlackUsers          func(childComplexity int) int
@@ -623,6 +633,8 @@ type QueryResolver interface {
 	Cases(ctx context.Context, workspaceID string, status *types.CaseStatus) ([]*graphql1.Case, error)
 	Case(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error)
 	Drafts(ctx context.Context, workspaceID string) ([]*graphql1.Case, error)
+	ReferenceableCases(ctx context.Context, workspaceID string, query *string, limit *int) ([]*graphql1.CaseRef, error)
+	CaseRefsByIds(ctx context.Context, workspaceID string, ids []int) ([]*graphql1.CaseRef, error)
 	Actions(ctx context.Context, workspaceID string, filter *graphql1.ActionArchiveFilter) ([]*graphql1.Action, error)
 	Action(ctx context.Context, workspaceID string, id int) (*graphql1.Action, error)
 	ActionsByCase(ctx context.Context, workspaceID string, caseID int, filter *graphql1.ActionArchiveFilter) ([]*graphql1.Action, error)
@@ -1206,6 +1218,31 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.Case.UpdatedAt(childComplexity), true
 
+	case "CaseRef.id":
+		if e.complexity.CaseRef.ID == nil {
+			break
+		}
+
+		return e.complexity.CaseRef.ID(childComplexity), true
+	case "CaseRef.status":
+		if e.complexity.CaseRef.Status == nil {
+			break
+		}
+
+		return e.complexity.CaseRef.Status(childComplexity), true
+	case "CaseRef.title":
+		if e.complexity.CaseRef.Title == nil {
+			break
+		}
+
+		return e.complexity.CaseRef.Title(childComplexity), true
+	case "CaseRef.workspaceId":
+		if e.complexity.CaseRef.WorkspaceID == nil {
+			break
+		}
+
+		return e.complexity.CaseRef.WorkspaceID(childComplexity), true
+
 	case "ChannelUserConnection.hasMore":
 		if e.complexity.ChannelUserConnection.HasMore == nil {
 			break
@@ -1275,6 +1312,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.FieldDefinition.Options(childComplexity), true
+	case "FieldDefinition.referenceWorkspaceId":
+		if e.complexity.FieldDefinition.ReferenceWorkspaceID == nil {
+			break
+		}
+
+		return e.complexity.FieldDefinition.ReferenceWorkspaceID(childComplexity), true
 	case "FieldDefinition.required":
 		if e.complexity.FieldDefinition.Required == nil {
 			break
@@ -2631,6 +2674,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Query.CaseJobRunLogs(childComplexity, args["workspaceId"].(string), args["caseId"].(int), args["first"].(*int), args["after"].(*string)), true
+	case "Query.caseRefsByIds":
+		if e.complexity.Query.CaseRefsByIds == nil {
+			break
+		}
+
+		args, err := ec.field_Query_caseRefsByIds_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Query.CaseRefsByIds(childComplexity, args["workspaceId"].(string), args["ids"].([]int)), true
 	case "Query.caseStatusConfig":
 		if e.complexity.Query.CaseStatusConfig == nil {
 			break
@@ -2780,6 +2834,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Query.OpenCaseActions(childComplexity, args["workspaceId"].(string)), true
+	case "Query.referenceableCases":
+		if e.complexity.Query.ReferenceableCases == nil {
+			break
+		}
+
+		args, err := ec.field_Query_referenceableCases_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Query.ReferenceableCases(childComplexity, args["workspaceId"].(string), args["query"].(*string), args["limit"].(*int)), true
 	case "Query.searchKnowledge":
 		if e.complexity.Query.SearchKnowledge == nil {
 			break
@@ -3243,6 +3308,8 @@ enum FieldType {
   MULTI_USER
   DATE
   URL
+  CASE_REF
+  MULTI_CASE_REF
 }
 
 type FieldOption {
@@ -3259,6 +3326,15 @@ type FieldDefinition {
   required: Boolean!
   description: String
   options: [FieldOption!]
+  referenceWorkspaceId: String
+}
+
+"A referenceable case (non-private, non-draft) used by case_ref fields."
+type CaseRef {
+  id: Int!
+  title: String!
+  status: CaseStatus!
+  workspaceId: String!
 }
 
 type EntityLabels {
@@ -3871,6 +3947,11 @@ type Query {
   # listing; the dedicated query keeps that author-scoped path explicit and
   # avoids piggybacking on the more general filter.
   drafts(workspaceId: String!): [Case!]!
+
+  "List non-private referenceable cases in the target workspace for a case_ref picker. query filters by title substring or case ID; limit caps results (default/max 50)."
+  referenceableCases(workspaceId: String!, query: String, limit: Int): [CaseRef!]!
+  "Resolve specific case IDs to their referenceable (non-private, non-draft) summaries. Missing/private/draft IDs are omitted."
+  caseRefsByIds(workspaceId: String!, ids: [Int!]!): [CaseRef!]!
 
   # Actions
   # ` + "`" + `filter` + "`" + ` defaults to ACTIVE so default views never accidentally surface
@@ -5187,6 +5268,22 @@ func (ec *executionContext) field_Query_caseJobRunLogs_args(ctx context.Context,
 	return args, nil
 }
 
+func (ec *executionContext) field_Query_caseRefsByIds_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "ids", ec.unmarshalNInt2ᚕintᚄ)
+	if err != nil {
+		return nil, err
+	}
+	args["ids"] = arg1
+	return args, nil
+}
+
 func (ec *executionContext) field_Query_caseStatusConfig_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -5398,6 +5495,27 @@ func (ec *executionContext) field_Query_openCaseActions_args(ctx context.Context
 		return nil, err
 	}
 	args["workspaceId"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_Query_referenceableCases_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "query", ec.unmarshalOString2ᚖstring)
+	if err != nil {
+		return nil, err
+	}
+	args["query"] = arg1
+	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "limit", ec.unmarshalOInt2ᚖint)
+	if err != nil {
+		return nil, err
+	}
+	args["limit"] = arg2
 	return args, nil
 }
 
@@ -8305,6 +8423,122 @@ func (ec *executionContext) fieldContext_Case_updatedAt(_ context.Context, field
 	return fc, nil
 }
 
+func (ec *executionContext) _CaseRef_id(ctx context.Context, field graphql.CollectedField, obj *graphql1.CaseRef) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_CaseRef_id,
+		func(ctx context.Context) (any, error) {
+			return obj.ID, nil
+		},
+		nil,
+		ec.marshalNInt2int,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_CaseRef_id(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "CaseRef",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _CaseRef_title(ctx context.Context, field graphql.CollectedField, obj *graphql1.CaseRef) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_CaseRef_title,
+		func(ctx context.Context) (any, error) {
+			return obj.Title, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_CaseRef_title(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "CaseRef",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _CaseRef_status(ctx context.Context, field graphql.CollectedField, obj *graphql1.CaseRef) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_CaseRef_status,
+		func(ctx context.Context) (any, error) {
+			return obj.Status, nil
+		},
+		nil,
+		ec.marshalNCaseStatus2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋtypesᚐCaseStatus,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_CaseRef_status(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "CaseRef",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type CaseStatus does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _CaseRef_workspaceId(ctx context.Context, field graphql.CollectedField, obj *graphql1.CaseRef) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_CaseRef_workspaceId,
+		func(ctx context.Context) (any, error) {
+			return obj.WorkspaceID, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_CaseRef_workspaceId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "CaseRef",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _ChannelUserConnection_items(ctx context.Context, field graphql.CollectedField, obj *graphql1.ChannelUserConnection) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -8467,6 +8701,8 @@ func (ec *executionContext) fieldContext_FieldConfiguration_fields(_ context.Con
 				return ec.fieldContext_FieldDefinition_description(ctx, field)
 			case "options":
 				return ec.fieldContext_FieldDefinition_options(ctx, field)
+			case "referenceWorkspaceId":
+				return ec.fieldContext_FieldDefinition_referenceWorkspaceId(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type FieldDefinition", field.Name)
 		},
@@ -8723,6 +8959,35 @@ func (ec *executionContext) fieldContext_FieldDefinition_options(_ context.Conte
 				return ec.fieldContext_FieldOption_metadata(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type FieldOption", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _FieldDefinition_referenceWorkspaceId(ctx context.Context, field graphql.CollectedField, obj *graphql1.FieldDefinition) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_FieldDefinition_referenceWorkspaceId,
+		func(ctx context.Context) (any, error) {
+			return obj.ReferenceWorkspaceID, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_FieldDefinition_referenceWorkspaceId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "FieldDefinition",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
 		},
 	}
 	return fc, nil
@@ -12266,6 +12531,8 @@ func (ec *executionContext) fieldContext_MemoConfiguration_fields(_ context.Cont
 				return ec.fieldContext_FieldDefinition_description(ctx, field)
 			case "options":
 				return ec.fieldContext_FieldDefinition_options(ctx, field)
+			case "referenceWorkspaceId":
+				return ec.fieldContext_FieldDefinition_referenceWorkspaceId(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type FieldDefinition", field.Name)
 		},
@@ -16093,6 +16360,108 @@ func (ec *executionContext) fieldContext_Query_drafts(ctx context.Context, field
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Query_drafts_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_referenceableCases(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Query_referenceableCases,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Query().ReferenceableCases(ctx, fc.Args["workspaceId"].(string), fc.Args["query"].(*string), fc.Args["limit"].(*int))
+		},
+		nil,
+		ec.marshalNCaseRef2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCaseRefᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Query_referenceableCases(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_CaseRef_id(ctx, field)
+			case "title":
+				return ec.fieldContext_CaseRef_title(ctx, field)
+			case "status":
+				return ec.fieldContext_CaseRef_status(ctx, field)
+			case "workspaceId":
+				return ec.fieldContext_CaseRef_workspaceId(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type CaseRef", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_referenceableCases_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_caseRefsByIds(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Query_caseRefsByIds,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Query().CaseRefsByIds(ctx, fc.Args["workspaceId"].(string), fc.Args["ids"].([]int))
+		},
+		nil,
+		ec.marshalNCaseRef2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCaseRefᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Query_caseRefsByIds(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_CaseRef_id(ctx, field)
+			case "title":
+				return ec.fieldContext_CaseRef_title(ctx, field)
+			case "status":
+				return ec.fieldContext_CaseRef_status(ctx, field)
+			case "workspaceId":
+				return ec.fieldContext_CaseRef_workspaceId(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type CaseRef", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_caseRefsByIds_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -22728,6 +23097,60 @@ func (ec *executionContext) _Case(ctx context.Context, sel ast.SelectionSet, obj
 	return out
 }
 
+var caseRefImplementors = []string{"CaseRef"}
+
+func (ec *executionContext) _CaseRef(ctx context.Context, sel ast.SelectionSet, obj *graphql1.CaseRef) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, caseRefImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("CaseRef")
+		case "id":
+			out.Values[i] = ec._CaseRef_id(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "title":
+			out.Values[i] = ec._CaseRef_title(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "status":
+			out.Values[i] = ec._CaseRef_status(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "workspaceId":
+			out.Values[i] = ec._CaseRef_workspaceId(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
 var channelUserConnectionImplementors = []string{"ChannelUserConnection"}
 
 func (ec *executionContext) _ChannelUserConnection(ctx context.Context, sel ast.SelectionSet, obj *graphql1.ChannelUserConnection) graphql.Marshaler {
@@ -22900,6 +23323,8 @@ func (ec *executionContext) _FieldDefinition(ctx context.Context, sel ast.Select
 			out.Values[i] = ec._FieldDefinition_description(ctx, field, obj)
 		case "options":
 			out.Values[i] = ec._FieldDefinition_options(ctx, field, obj)
+		case "referenceWorkspaceId":
+			out.Values[i] = ec._FieldDefinition_referenceWorkspaceId(ctx, field, obj)
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -24835,6 +25260,50 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 			}
 
 			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "referenceableCases":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_referenceableCases(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "caseRefsByIds":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_caseRefsByIds(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
 		case "actions":
 			field := field
 
@@ -26620,6 +27089,60 @@ func (ec *executionContext) marshalNCase2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecato
 	return ec._Case(ctx, sel, v)
 }
 
+func (ec *executionContext) marshalNCaseRef2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCaseRefᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.CaseRef) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNCaseRef2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCaseRef(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNCaseRef2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐCaseRef(ctx context.Context, sel ast.SelectionSet, v *graphql1.CaseRef) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._CaseRef(ctx, sel, v)
+}
+
 func (ec *executionContext) unmarshalNCaseStatus2githubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋtypesᚐCaseStatus(ctx context.Context, v any) (types.CaseStatus, error) {
 	tmp, err := graphql.UnmarshalString(v)
 	res := types.CaseStatus(tmp)
@@ -27291,6 +27814,36 @@ func (ec *executionContext) marshalNInt2int(ctx context.Context, sel ast.Selecti
 		}
 	}
 	return res
+}
+
+func (ec *executionContext) unmarshalNInt2ᚕintᚄ(ctx context.Context, v any) ([]int, error) {
+	var vSlice []any
+	vSlice = graphql.CoerceList(v)
+	var err error
+	res := make([]int, len(vSlice))
+	for i := range vSlice {
+		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithIndex(i))
+		res[i], err = ec.unmarshalNInt2int(ctx, vSlice[i])
+		if err != nil {
+			return nil, err
+		}
+	}
+	return res, nil
+}
+
+func (ec *executionContext) marshalNInt2ᚕintᚄ(ctx context.Context, sel ast.SelectionSet, v []int) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	for i := range v {
+		ret[i] = ec.marshalNInt2int(ctx, sel, v[i])
+	}
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
 }
 
 func (ec *executionContext) unmarshalNJSON2string(ctx context.Context, v any) (string, error) {

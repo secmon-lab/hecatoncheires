@@ -54,6 +54,16 @@ func TestFieldType_IsValid(t *testing.T) {
 			want:      true,
 		},
 		{
+			name:      "valid case_ref",
+			fieldType: types.FieldTypeCaseRef,
+			want:      true,
+		},
+		{
+			name:      "valid multi_case_ref",
+			fieldType: types.FieldTypeMultiCaseRef,
+			want:      true,
+		},
+		{
 			name:      "invalid type",
 			fieldType: types.FieldType("invalid"),
 			want:      false,
@@ -78,7 +88,7 @@ func TestFieldType_IsValid(t *testing.T) {
 
 func TestAllFieldTypes(t *testing.T) {
 	fieldTypes := types.AllFieldTypes()
-	expectedCount := 8
+	expectedCount := 10
 
 	gt.A(t, fieldTypes).Length(expectedCount)
 
@@ -99,6 +109,8 @@ func TestAllFieldTypes(t *testing.T) {
 		types.FieldTypeMultiUser,
 		types.FieldTypeDate,
 		types.FieldTypeURL,
+		types.FieldTypeCaseRef,
+		types.FieldTypeMultiCaseRef,
 	}
 
 	typeMap := make(map[types.FieldType]bool)
@@ -159,11 +171,60 @@ func TestFieldType_String(t *testing.T) {
 			fieldType: types.FieldTypeURL,
 			want:      "url",
 		},
+		{
+			name:      "case_ref",
+			fieldType: types.FieldTypeCaseRef,
+			want:      "case_ref",
+		},
+		{
+			name:      "multi_case_ref",
+			fieldType: types.FieldTypeMultiCaseRef,
+			want:      "multi_case_ref",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			gt.S(t, tt.fieldType.String()).Equal(tt.want)
+		})
+	}
+}
+
+func TestFieldType_IsCaseRef(t *testing.T) {
+	tests := []struct {
+		name      string
+		fieldType types.FieldType
+		want      bool
+	}{
+		{
+			name:      "case_ref is true",
+			fieldType: types.FieldTypeCaseRef,
+			want:      true,
+		},
+		{
+			name:      "multi_case_ref is true",
+			fieldType: types.FieldTypeMultiCaseRef,
+			want:      true,
+		},
+		{
+			name:      "text is false",
+			fieldType: types.FieldTypeText,
+			want:      false,
+		},
+		{
+			name:      "user is false",
+			fieldType: types.FieldTypeUser,
+			want:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.want {
+				gt.B(t, tt.fieldType.IsCaseRef()).True()
+			} else {
+				gt.B(t, tt.fieldType.IsCaseRef()).False()
+			}
 		})
 	}
 }

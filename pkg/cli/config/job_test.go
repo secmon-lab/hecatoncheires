@@ -1,6 +1,8 @@
 package config_test
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -42,7 +44,7 @@ events.scheduled = { every = "30m" }
 
 	gt.Array(t, app.Jobs).Length(4).Required()
 
-	first, err := app.Jobs[0].Validate()
+	first, err := app.Jobs[0].Validate("")
 	gt.NoError(t, err).Required()
 	gt.Value(t, first.ID).Equal("summarize_on_create")
 	gt.Value(t, first.Events.Case).NotNil()
@@ -50,18 +52,18 @@ events.scheduled = { every = "30m" }
 	gt.Value(t, first.Events.Case.On[0]).Equal(model.CaseLifecycleCreated)
 	gt.Value(t, first.Events.Scheduled).Nil()
 
-	second, err := app.Jobs[1].Validate()
+	second, err := app.Jobs[1].Validate("")
 	gt.NoError(t, err).Required()
 	gt.Value(t, second.Events.Scheduled).NotNil()
 	gt.Value(t, second.Events.Scheduled.CronExpr).Equal("0 9 * * *")
 	gt.Number(t, int64(second.Events.Scheduled.Every)).Equal(0)
 	gt.Value(t, second.Events.Scheduled.Cron).NotNil()
 
-	third, err := app.Jobs[2].Validate()
+	third, err := app.Jobs[2].Validate("")
 	gt.NoError(t, err).Required()
 	gt.Number(t, int64(third.Events.Scheduled.Every)).Equal(int64(time.Hour))
 
-	fourth, err := app.Jobs[3].Validate()
+	fourth, err := app.Jobs[3].Validate("")
 	gt.NoError(t, err).Required()
 	gt.Bool(t, fourth.Disabled).True()
 	gt.Array(t, fourth.Events.Case.On).Length(2)
@@ -91,12 +93,12 @@ events.case = { on = ["created"] }
 	gt.NoError(t, toml.Unmarshal([]byte(src), &app)).Required()
 	gt.Array(t, app.Jobs).Length(2).Required()
 
-	quiet, err := app.Jobs[0].Validate()
+	quiet, err := app.Jobs[0].Validate("")
 	gt.NoError(t, err).Required()
 	gt.Bool(t, quiet.Quiet).True()
 
 	// Absent in TOML defaults to false.
-	loud, err := app.Jobs[1].Validate()
+	loud, err := app.Jobs[1].Validate("")
 	gt.NoError(t, err).Required()
 	gt.Bool(t, loud.Quiet).False()
 }
@@ -113,7 +115,7 @@ events.case = { on = ["created"] }
 		var app config.AppConfig
 		gt.NoError(t, toml.Unmarshal([]byte(src), &app)).Required()
 		gt.NoError(t, app.Validate()).Required()
-		j, err := app.Jobs[0].Validate()
+		j, err := app.Jobs[0].Validate("")
 		gt.NoError(t, err).Required()
 		gt.Value(t, j.Strategy).Equal(model.JobStrategySimple)
 	})
@@ -129,7 +131,7 @@ events.case = { on = ["created"] }
 		var app config.AppConfig
 		gt.NoError(t, toml.Unmarshal([]byte(src), &app)).Required()
 		gt.NoError(t, app.Validate()).Required()
-		j, err := app.Jobs[0].Validate()
+		j, err := app.Jobs[0].Validate("")
 		gt.NoError(t, err).Required()
 		gt.Value(t, j.Strategy).Equal(model.JobStrategyPlanexec)
 	})
@@ -144,7 +146,7 @@ events.case = { on = ["created"] }
 		var app config.AppConfig
 		gt.NoError(t, toml.Unmarshal([]byte(src), &app)).Required()
 		gt.NoError(t, app.Validate()).Required()
-		j, err := app.Jobs[0].Validate()
+		j, err := app.Jobs[0].Validate("")
 		gt.NoError(t, err).Required()
 		gt.Value(t, j.Strategy).Equal(model.JobStrategySimple)
 	})
@@ -316,4 +318,166 @@ events.case = { on = "created" }
 	if err := toml.Unmarshal([]byte(src), &app); err == nil {
 		gt.Error(t, app.Validate())
 	}
+}
+
+func TestJobSection_PromptFile(t *testing.T) {
+	parseJob := func(t *testing.T, src string) *config.JobSection {
+		t.Helper()
+		var app config.AppConfig
+		gt.NoError(t, toml.Unmarshal([]byte(src), &app)).Required()
+		gt.Array(t, app.Jobs).Length(1).Required()
+		return &app.Jobs[0]
+	}
+
+	t.Run("reads prompt from file relative to baseDir", func(t *testing.T) {
+		dir := t.TempDir()
+		// A trailing newline (what editors add) must be trimmed so the
+		// resolved prompt matches an equivalent inline value.
+		gt.NoError(t, os.WriteFile(filepath.Join(dir, "summary.md"),
+			[]byte("summarize: {{.Case.Title}}\n"), 0600)).Required()
+
+		job := parseJob(t, `
+[[job]]
+id = "summary_job"
+prompt_file = "summary.md"
+events.case = { on = ["created"] }
+`)
+		resolved, err := job.Validate(dir)
+		gt.NoError(t, err).Required()
+		gt.Value(t, resolved.ID).Equal("summary_job")
+		gt.String(t, resolved.Prompt).Equal("summarize: {{.Case.Title}}")
+	})
+
+	t.Run("reads prompt from nested relative path", func(t *testing.T) {
+		dir := t.TempDir()
+		gt.NoError(t, os.MkdirAll(filepath.Join(dir, "prompts"), 0750)).Required()
+		gt.NoError(t, os.WriteFile(filepath.Join(dir, "prompts", "nested.md"),
+			[]byte("nested body"), 0600)).Required()
+
+		job := parseJob(t, `
+[[job]]
+id = "nested_job"
+prompt_file = "prompts/nested.md"
+events.case = { on = ["created"] }
+`)
+		resolved, err := job.Validate(dir)
+		gt.NoError(t, err).Required()
+		gt.String(t, resolved.Prompt).Equal("nested body")
+	})
+
+	t.Run("absolute prompt_file is honoured as-is", func(t *testing.T) {
+		dir := t.TempDir()
+		absPath := filepath.Join(dir, "abs.md")
+		gt.NoError(t, os.WriteFile(absPath, []byte("absolute body"), 0600)).Required()
+
+		// baseDir is a different, unrelated directory: an absolute path must
+		// not be joined against it.
+		job := parseJob(t, `
+[[job]]
+id = "abs_job"
+prompt_file = "`+absPath+`"
+events.case = { on = ["created"] }
+`)
+		resolved, err := job.Validate(t.TempDir())
+		gt.NoError(t, err).Required()
+		gt.String(t, resolved.Prompt).Equal("absolute body")
+	})
+
+	t.Run("prompt and prompt_file are mutually exclusive", func(t *testing.T) {
+		dir := t.TempDir()
+		gt.NoError(t, os.WriteFile(filepath.Join(dir, "p.md"), []byte("body"), 0600)).Required()
+		job := parseJob(t, `
+[[job]]
+id = "both_job"
+prompt = "inline"
+prompt_file = "p.md"
+events.case = { on = ["created"] }
+`)
+		_, err := job.Validate(dir)
+		gt.Error(t, err)
+	})
+
+	t.Run("neither prompt nor prompt_file is rejected", func(t *testing.T) {
+		job := parseJob(t, `
+[[job]]
+id = "empty_job"
+events.case = { on = ["created"] }
+`)
+		_, err := job.Validate("")
+		gt.Error(t, err)
+	})
+
+	t.Run("missing prompt file fails", func(t *testing.T) {
+		job := parseJob(t, `
+[[job]]
+id = "missing_job"
+prompt_file = "does_not_exist.md"
+events.case = { on = ["created"] }
+`)
+		_, err := job.Validate(t.TempDir())
+		gt.Error(t, err)
+	})
+
+	t.Run("whitespace-only prompt file fails", func(t *testing.T) {
+		dir := t.TempDir()
+		gt.NoError(t, os.WriteFile(filepath.Join(dir, "blank.md"),
+			[]byte("  \n\t\n"), 0600)).Required()
+		job := parseJob(t, `
+[[job]]
+id = "blank_job"
+prompt_file = "blank.md"
+events.case = { on = ["created"] }
+`)
+		_, err := job.Validate(dir)
+		gt.Error(t, err)
+	})
+
+	t.Run("structural mode accepts prompt_file without reading it", func(t *testing.T) {
+		// baseDir == "" means AppConfig.Validate's structural pass, which must
+		// not touch the filesystem. A prompt_file reference is accepted and the
+		// prompt stays unresolved (empty) until the real load reads it.
+		const src = `
+[[job]]
+id = "deferred_job"
+prompt_file = "anywhere.md"
+events.case = { on = ["created"] }
+`
+		var app config.AppConfig
+		gt.NoError(t, toml.Unmarshal([]byte(src), &app)).Required()
+		gt.NoError(t, app.Validate())
+
+		resolved, err := app.Jobs[0].Validate("")
+		gt.NoError(t, err).Required()
+		gt.Value(t, resolved.ID).Equal("deferred_job")
+		gt.String(t, resolved.Prompt).Equal("")
+	})
+}
+
+func TestLoadWorkspaceConfigs_PromptFileRelativeToConfig(t *testing.T) {
+	// End-to-end: prompt_file must resolve relative to the config file's own
+	// directory, not the process working directory.
+	dir := t.TempDir()
+	gt.NoError(t, os.MkdirAll(filepath.Join(dir, "prompts"), 0750)).Required()
+	gt.NoError(t, os.WriteFile(filepath.Join(dir, "prompts", "job.md"),
+		[]byte("do the thing: {{.Case.Title}}\n"), 0600)).Required()
+
+	const cfg = `
+[workspace]
+id = "ws-promptfile"
+name = "PromptFile WS"
+
+[[job]]
+id = "file_job"
+prompt_file = "prompts/job.md"
+events.case = { on = ["created"] }
+`
+	cfgPath := filepath.Join(dir, "config.toml")
+	gt.NoError(t, os.WriteFile(cfgPath, []byte(cfg), 0600)).Required()
+
+	configs, err := config.LoadWorkspaceConfigs([]string{cfgPath})
+	gt.NoError(t, err).Required()
+	gt.Array(t, configs).Length(1).Required()
+	gt.Array(t, configs[0].Jobs).Length(1).Required()
+	gt.Value(t, configs[0].Jobs[0].ID).Equal("file_job")
+	gt.String(t, configs[0].Jobs[0].Prompt).Equal("do the thing: {{.Case.Title}}")
 }

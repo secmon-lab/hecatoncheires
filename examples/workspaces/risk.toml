@@ -76,6 +76,17 @@ name = "Deadline"
 type = "date"
 required = false
 
+[[fields]]
+id = "related_risks"
+name = "Related Risks"
+type = "multi_case_ref"
+required = false
+description = "Other risks in this workspace that are related to this one. Private risks are never selectable."
+# reference_workspace names the workspace whose Cases this field can reference.
+# Self-reference (the field's own workspace) is allowed; point at another
+# workspace id to link across workspaces.
+reference_workspace = "risk"
+
 # --- Event-driven Agent Jobs ---
 
 # Auto-summarize a newly created case and post the summary to its Slack channel.

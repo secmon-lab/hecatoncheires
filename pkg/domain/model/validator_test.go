@@ -296,6 +296,79 @@ func TestFieldValidator_ValidateCaseFieldsPartial(t *testing.T) {
 	})
 }
 
+func TestFieldValidator_CaseRef(t *testing.T) {
+	schema := &config.FieldSchema{
+		Fields: []config.FieldDefinition{
+			{
+				ID:                 "ref",
+				Name:               "Ref",
+				Type:               types.FieldTypeCaseRef,
+				ReferenceWorkspace: "other",
+			},
+			{
+				ID:                 "refs",
+				Name:               "Refs",
+				Type:               types.FieldTypeMultiCaseRef,
+				ReferenceWorkspace: "other",
+			},
+		},
+	}
+	v := model.NewFieldValidator(schema)
+
+	t.Run("valid single case_ref accepted and Type injected", func(t *testing.T) {
+		out, err := v.ValidateCaseFieldsPartial(map[string]model.FieldValue{
+			"ref": {FieldID: "ref", Value: "42"},
+		})
+		gt.NoError(t, err).Required()
+		gt.Map(t, out).HasKey("ref")
+		gt.Value(t, out["ref"].Type).Equal(types.FieldTypeCaseRef)
+	})
+
+	t.Run("valid multi_case_ref accepted and Type injected", func(t *testing.T) {
+		out, err := v.ValidateCaseFieldsPartial(map[string]model.FieldValue{
+			"refs": {FieldID: "refs", Value: []string{"42", "57"}},
+		})
+		gt.NoError(t, err).Required()
+		gt.Map(t, out).HasKey("refs")
+		gt.Value(t, out["refs"].Type).Equal(types.FieldTypeMultiCaseRef)
+	})
+
+	t.Run("single case_ref with non-numeric string is rejected", func(t *testing.T) {
+		_, err := v.ValidateCaseFieldsPartial(map[string]model.FieldValue{
+			"ref": {FieldID: "ref", Value: "abc"},
+		})
+		gt.Error(t, err).Is(model.ErrInvalidFieldType)
+	})
+
+	t.Run("single case_ref with non-string value is rejected", func(t *testing.T) {
+		_, err := v.ValidateCaseFieldsPartial(map[string]model.FieldValue{
+			"ref": {FieldID: "ref", Value: 42},
+		})
+		gt.Error(t, err).Is(model.ErrInvalidFieldType)
+	})
+
+	t.Run("multi_case_ref with non-string element is rejected via []interface{}", func(t *testing.T) {
+		_, err := v.ValidateCaseFieldsPartial(map[string]model.FieldValue{
+			"refs": {FieldID: "refs", Value: []interface{}{"42", 99}},
+		})
+		gt.Error(t, err).Is(model.ErrInvalidFieldType)
+	})
+
+	t.Run("multi_case_ref with non-numeric string element is rejected", func(t *testing.T) {
+		_, err := v.ValidateCaseFieldsPartial(map[string]model.FieldValue{
+			"refs": {FieldID: "refs", Value: []string{"42", "not-a-number"}},
+		})
+		gt.Error(t, err).Is(model.ErrInvalidFieldType)
+	})
+
+	t.Run("multi_case_ref with non-slice value is rejected", func(t *testing.T) {
+		_, err := v.ValidateCaseFieldsPartial(map[string]model.FieldValue{
+			"refs": {FieldID: "refs", Value: "42"},
+		})
+		gt.Error(t, err).Is(model.ErrInvalidFieldType)
+	})
+}
+
 func mapKeys(m map[string]model.FieldValue) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {

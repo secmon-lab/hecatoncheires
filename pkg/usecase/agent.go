@@ -121,6 +121,7 @@ func NewAgentUseCase(deps AgentDeps) *AgentUseCase {
 			ActionUC:            NewActionToolAdapter(deps.ActionUC),
 			ActionStepUC:        NewActionStepToolAdapter(deps.ActionStepUC),
 			CaseUC:              NewCaseToolAdapter(deps.CaseUC),
+			CaseRefUC:           deps.CaseUC,
 			MemoUC:              NewMemoToolAdapter(deps.MemoUC),
 			KnowledgeAccessor:   NewKnowledgeToolAccessor(deps.KnowledgeUC),
 			KnowledgeMutator:    NewKnowledgeToolMutator(deps.KnowledgeUC),

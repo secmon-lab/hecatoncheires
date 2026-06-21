@@ -653,6 +653,11 @@ func buildFieldInputBlock(field config.FieldDefinition) slack.Block {
 		inputBlock = slack.NewInputBlock(blockID, label, nil, element)
 
 	default:
+		// case_ref / multi_case_ref are intentionally not rendered here: Slack
+		// has no element for a searchable cross-workspace case picker. They are
+		// set via the Web UI or agent tools instead. config validation rejects a
+		// REQUIRED case_ref (ErrRequiredCaseRefUnsupported) so an optional one
+		// silently absent from this modal is the only reachable case.
 		return nil
 	}
 
@@ -1130,6 +1135,11 @@ func buildFieldInputBlockWithValue(field config.FieldDefinition, fv *model.Field
 		inputBlock = slack.NewInputBlock(blockID, label, nil, element)
 
 	default:
+		// case_ref / multi_case_ref are intentionally not rendered here: Slack
+		// has no element for a searchable cross-workspace case picker. They are
+		// set via the Web UI or agent tools instead. config validation rejects a
+		// REQUIRED case_ref (ErrRequiredCaseRefUnsupported) so an optional one
+		// silently absent from this modal is the only reachable case.
 		return nil
 	}
 

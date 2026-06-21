@@ -643,6 +643,10 @@ export const msgKeys = {
   msgDeleteKnowledgeConfirm: 'msgDeleteKnowledgeConfirm',
   warningDeleteKnowledgePermanent: 'warningDeleteKnowledgePermanent',
   btnSaveHint: 'btnSaveHint',
+
+  // Case reference field
+  placeholderSelectCaseRef: 'placeholderSelectCaseRef',
+  caseRefUnavailable: 'caseRefUnavailable',
 } as const
 
 export type MsgKey = keyof typeof msgKeys

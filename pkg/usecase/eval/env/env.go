@@ -271,6 +271,7 @@ func buildJobRunner(
 			StatusSet:    statusSet,
 			ActionUC:     actionAdapter,
 			ActionStepUC: stepAdapter,
+			CaseRefUC:    uc.Case,
 		}
 		out := make([]gollem.Tool, 0, 16)
 		out = append(out, core.NewReadOnly(coreDeps)...)

@@ -57,6 +57,11 @@ type CommonDeps struct {
 	// case-bound agent cannot edit the case itself (the tools are not built).
 	CaseUC casewriter.CaseMutator
 
+	// CaseRefUC backs the case_ref read tools
+	// (core__search_referenceable_cases / core__get_referenceable_cases).
+	// Optional: nil disables those tools (no case_ref fields configured).
+	CaseRefUC core.CaseRefReader
+
 	// MemoUC backs the Case-scoped memo tools (memo__*) in case-bound mode.
 	// Optional: nil means the agent gets no memo tools.
 	MemoUC memotool.MemoMutator

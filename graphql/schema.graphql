@@ -18,6 +18,8 @@ enum FieldType {
   MULTI_USER
   DATE
   URL
+  CASE_REF
+  MULTI_CASE_REF
 }
 
 type FieldOption {
@@ -34,6 +36,15 @@ type FieldDefinition {
   required: Boolean!
   description: String
   options: [FieldOption!]
+  referenceWorkspaceId: String
+}
+
+"A referenceable case (non-private, non-draft) used by case_ref fields."
+type CaseRef {
+  id: Int!
+  title: String!
+  status: CaseStatus!
+  workspaceId: String!
 }
 
 type EntityLabels {
@@ -646,6 +657,11 @@ type Query {
   # listing; the dedicated query keeps that author-scoped path explicit and
   # avoids piggybacking on the more general filter.
   drafts(workspaceId: String!): [Case!]!
+
+  "List non-private referenceable cases in the target workspace for a case_ref picker. query filters by title substring or case ID; limit caps results (default/max 50)."
+  referenceableCases(workspaceId: String!, query: String, limit: Int): [CaseRef!]!
+  "Resolve specific case IDs to their referenceable (non-private, non-draft) summaries. Missing/private/draft IDs are omitted."
+  caseRefsByIds(workspaceId: String!, ids: [Int!]!): [CaseRef!]!
 
   # Actions
   # `filter` defaults to ACTIVE so default views never accidentally surface

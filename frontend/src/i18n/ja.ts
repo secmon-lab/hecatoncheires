@@ -648,4 +648,8 @@ export const ja: Messages = {
   msgDeleteKnowledgeConfirm: '<strong>{title}</strong> を削除してもよろしいですか？',
   warningDeleteKnowledgePermanent: 'この操作は取り消せません。',
   btnSaveHint: '⌘+Enter で保存',
+
+  // Case reference field
+  placeholderSelectCaseRef: 'ケースを選択...',
+  caseRefUnavailable: '参照不可 (#{id})',
 }

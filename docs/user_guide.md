@@ -56,6 +56,10 @@ The case creation modal dynamically includes input fields based on the workspace
 | `multi_user` | Multi-user selector |
 | `date` | Date picker |
 | `url` | URL text input |
+| `case_ref` | Searchable dropdown of Cases in the configured target workspace (single) |
+| `multi_case_ref` | Searchable multi-select of Cases in the target workspace |
+
+For `case_ref` / `multi_case_ref`, only non-private Cases in the field's configured target workspace can be selected; private and draft Cases are never shown.
 
 ## Drafts (save & resume)
 

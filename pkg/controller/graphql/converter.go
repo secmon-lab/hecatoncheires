@@ -348,7 +348,21 @@ func toGraphQLFieldType(ft types.FieldType) graphql1.FieldType {
 		return graphql1.FieldTypeDate
 	case types.FieldTypeURL:
 		return graphql1.FieldTypeURL
+	case types.FieldTypeCaseRef:
+		return graphql1.FieldTypeCaseRef
+	case types.FieldTypeMultiCaseRef:
+		return graphql1.FieldTypeMultiCaseRef
 	default:
 		return graphql1.FieldTypeText
+	}
+}
+
+// toGraphQLCaseRef converts a domain CaseRef to its GraphQL view.
+func toGraphQLCaseRef(ref model.CaseRef) *graphql1.CaseRef {
+	return &graphql1.CaseRef{
+		ID:          int(ref.ID),
+		Title:       ref.Title,
+		Status:      ref.Status.Normalize(),
+		WorkspaceID: ref.WorkspaceID,
 	}
 }

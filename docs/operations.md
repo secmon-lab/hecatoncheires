@@ -80,6 +80,7 @@ invocation per matching `(job, case)` tuple. The full subscription syntax
 
 Read-only:
 - `core__list_actions`, `core__get_action`, `core__list_action_steps`
+- `core__search_referenceable_cases` / `core__get_referenceable_cases` — only present when the workspace defines a `case_ref` / `multi_case_ref` field. The first searches the field's target workspace (resolved from the field id; private and draft Cases are excluded) for the Case id to set; the second batch-fetches full details (including custom field values) for a list of Case ids in that workspace. Set the value itself through `case__update_case`'s `fields`.
 - Slack search / channel-history (via `slack_ro`)
 - Notion search / page-get (via `notion`)
 - GitHub search (via `github`)

@@ -250,6 +250,7 @@ func (uc *UseCase) buildTools(req TurnRequest) []gollem.Tool {
 		StatusSet:    statusSet,
 		ActionUC:     d.ActionUC,
 		ActionStepUC: d.ActionStepUC,
+		CaseRefUC:    d.CaseRefUC,
 	})
 	slackTools := slacktool.NewReadOnly(slacktool.Deps{
 		Bot:       d.SlackBot,

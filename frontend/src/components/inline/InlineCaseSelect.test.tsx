@@ -1,0 +1,161 @@
+import { describe, it, expect, vi } from 'vitest'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import '@testing-library/jest-dom/vitest'
+import { I18nProvider } from '../../i18n'
+import InlineCaseSelect from './InlineCaseSelect'
+import type { CaseRefItem } from './InlineCaseSelect'
+
+const cases: CaseRefItem[] = [
+  { id: 1, title: 'Alpha case', status: 'OPEN', workspaceId: 'ws1' },
+  { id: 2, title: 'Beta case', status: 'OPEN', workspaceId: 'ws1' },
+  { id: 3, title: 'Gamma case', status: 'CLOSED', workspaceId: 'ws1' },
+]
+
+function renderWithI18n(ui: React.ReactNode) {
+  return render(<I18nProvider>{ui}</I18nProvider>)
+}
+
+describe('InlineCaseSelect', () => {
+  it('shows the selected case label in the trigger', () => {
+    renderWithI18n(
+      <InlineCaseSelect cases={cases} value="2" onSave={vi.fn()} ariaLabel="case ref" testId="cr" />,
+    )
+    expect(screen.getByTestId('cr')).toHaveTextContent('Beta case (#2)')
+  })
+
+  it('shows placeholder when value is null', () => {
+    renderWithI18n(
+      <InlineCaseSelect cases={cases} value={null} onSave={vi.fn()} ariaLabel="case ref" placeholder="Select a case..." testId="cr" />,
+    )
+    expect(screen.getByTestId('cr')).toHaveTextContent('Select a case...')
+  })
+
+  it('opens popover on click and shows all options', () => {
+    renderWithI18n(
+      <InlineCaseSelect cases={cases} value={null} onSave={vi.fn()} ariaLabel="case ref" testId="cr" />,
+    )
+    fireEvent.click(screen.getByTestId('cr'))
+    expect(screen.getByTestId('cr-popover')).toBeInTheDocument()
+    expect(screen.getByTestId('cr-option-1')).toBeInTheDocument()
+    expect(screen.getByTestId('cr-option-2')).toBeInTheDocument()
+    expect(screen.getByTestId('cr-option-3')).toBeInTheDocument()
+  })
+
+  it('calls onSave with id string when option picked', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    renderWithI18n(
+      <InlineCaseSelect cases={cases} value={null} onSave={onSave} ariaLabel="case ref" testId="cr" />,
+    )
+    fireEvent.click(screen.getByTestId('cr'))
+    fireEvent.click(screen.getByTestId('cr-option-2'))
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith('2'))
+    expect(screen.queryByTestId('cr-popover')).toBeNull()
+  })
+
+  it('does not call onSave when picking the current value', async () => {
+    const onSave = vi.fn()
+    renderWithI18n(
+      <InlineCaseSelect cases={cases} value="1" onSave={onSave} ariaLabel="case ref" testId="cr" />,
+    )
+    fireEvent.click(screen.getByTestId('cr'))
+    fireEvent.click(screen.getByTestId('cr-option-1'))
+    await waitFor(() => expect(screen.queryByTestId('cr-popover')).toBeNull())
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('filters options by search query (client-side)', () => {
+    renderWithI18n(
+      <InlineCaseSelect cases={cases} value={null} onSave={vi.fn()} ariaLabel="case ref" testId="cr" />,
+    )
+    fireEvent.click(screen.getByTestId('cr'))
+    const search = screen.getByTestId('cr-search')
+    fireEvent.change(search, { target: { value: 'gamma' } })
+    expect(screen.queryByTestId('cr-option-1')).toBeNull()
+    expect(screen.queryByTestId('cr-option-2')).toBeNull()
+    expect(screen.getByTestId('cr-option-3')).toBeInTheDocument()
+  })
+
+  it('calls onSearchChange when search input changes', () => {
+    const onSearchChange = vi.fn()
+    renderWithI18n(
+      <InlineCaseSelect cases={cases} value={null} onSave={vi.fn()} ariaLabel="case ref" testId="cr" onSearchChange={onSearchChange} />,
+    )
+    fireEvent.click(screen.getByTestId('cr'))
+    const search = screen.getByTestId('cr-search')
+    fireEvent.change(search, { target: { value: 'al' } })
+    expect(onSearchChange).toHaveBeenCalledWith('al')
+  })
+
+  it('shows loading message when loading=true', () => {
+    renderWithI18n(
+      <InlineCaseSelect cases={[]} value={null} onSave={vi.fn()} ariaLabel="case ref" testId="cr" loading />,
+    )
+    fireEvent.click(screen.getByTestId('cr'))
+    expect(screen.getByTestId('cr-popover')).toHaveTextContent('Loading')
+  })
+
+  it('shows resolved title from resolvedCases when value is not in the picker list', () => {
+    // cases (picker) only has ids 1,2,3; stored value is "99" which is in resolvedCases
+    const resolvedCases: CaseRefItem[] = [
+      { id: 99, title: 'Old closed case', status: 'CLOSED', workspaceId: 'ws1' },
+    ]
+    renderWithI18n(
+      <InlineCaseSelect
+        cases={cases}
+        resolvedCases={resolvedCases}
+        value="99"
+        onSave={vi.fn()}
+        ariaLabel="case ref"
+        testId="cr"
+      />,
+    )
+    expect(screen.getByTestId('cr')).toHaveTextContent('Old closed case (#99)')
+  })
+
+  it('shows unavailable fallback when stored value is not resolvable', () => {
+    // Both picker and resolvedCases are empty for this id
+    renderWithI18n(
+      <InlineCaseSelect
+        cases={cases}
+        resolvedCases={[]}
+        value="888"
+        onSave={vi.fn()}
+        ariaLabel="case ref"
+        testId="cr"
+      />,
+    )
+    expect(screen.getByTestId('cr')).toHaveTextContent('Unavailable (#888)')
+  })
+
+  it('shows neutral #id while resolvedLoading=true (not yet resolved)', () => {
+    // resolvedLoading=true means the CASE_REFS_BY_IDS query is still in flight
+    renderWithI18n(
+      <InlineCaseSelect
+        cases={cases}
+        resolvedCases={[]}
+        resolvedLoading={true}
+        value="888"
+        onSave={vi.fn()}
+        ariaLabel="case ref"
+        testId="cr"
+      />,
+    )
+    expect(screen.getByTestId('cr')).toHaveTextContent('#888')
+    expect(screen.getByTestId('cr')).not.toHaveTextContent('Unavailable (#888)')
+  })
+
+  it('shows unavailable fallback once resolvedLoading=false and value is not resolved', () => {
+    renderWithI18n(
+      <InlineCaseSelect
+        cases={cases}
+        resolvedCases={[]}
+        resolvedLoading={false}
+        value="888"
+        onSave={vi.fn()}
+        ariaLabel="case ref"
+        testId="cr"
+      />,
+    )
+    expect(screen.getByTestId('cr')).toHaveTextContent('Unavailable (#888)')
+  })
+})

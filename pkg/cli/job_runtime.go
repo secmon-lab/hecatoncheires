@@ -149,6 +149,7 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner) {
 			StatusSet:    statusSet,
 			ActionUC:     actionAdapter,
 			ActionStepUC: stepAdapter,
+			CaseRefUC:    deps.UC.Case,
 		}
 
 		out := make([]gollem.Tool, 0, 16)

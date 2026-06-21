@@ -648,4 +648,8 @@ export const en: Messages = {
   msgDeleteKnowledgeConfirm: 'Are you sure you want to delete <strong>{title}</strong>?',
   warningDeleteKnowledgePermanent: 'This action cannot be undone.',
   btnSaveHint: '⌘+Enter to save',
+
+  // Case reference field
+  placeholderSelectCaseRef: 'Select a case...',
+  caseRefUnavailable: 'Unavailable (#{id})',
 }

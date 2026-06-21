@@ -3055,3 +3055,251 @@ func TestCaseUseCase_UpdateCase_UserExistence(t *testing.T) {
 		gt.Error(t, err).Is(model.ErrCaseFieldValidation)
 	})
 }
+
+// ----- case_ref fields -----
+
+const refWorkspaceID = "ref-ws"
+
+// newCaseRefUC builds a CaseUseCase whose main workspace (testWorkspaceID)
+// defines a single case_ref field "related" and a multi_case_ref
+// field "related_multi", both pointing at refWorkspaceID. The reference
+// workspace itself needs no schema entry — referenceability is decided purely
+// by the referenced case's IsPrivate / draft state.
+func newCaseRefUC(t *testing.T) (*usecase.CaseUseCase, interfaces.Repository) {
+	t.Helper()
+	repo := memory.New()
+	fieldSchema := &config.FieldSchema{
+		Fields: []config.FieldDefinition{
+			{ID: "related", Name: "Related", Type: types.FieldTypeCaseRef, ReferenceWorkspace: refWorkspaceID},
+			{ID: "related_multi", Name: "Related Multi", Type: types.FieldTypeMultiCaseRef, ReferenceWorkspace: refWorkspaceID},
+			{ID: "owner", Name: "Owner", Type: types.FieldTypeUser},
+		},
+	}
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace:   model.Workspace{ID: testWorkspaceID, Name: "Main Workspace"},
+		FieldSchema: fieldSchema,
+	})
+	return usecase.NewCaseUseCase(repo, registry, nil, nil, ""), repo
+}
+
+// seedRefCase persists a case directly into a workspace and returns its ID.
+// Used to populate the reference workspace with public / private / draft /
+// closed cases the case_ref tests reference.
+func seedRefCase(t *testing.T, repo interfaces.Repository, ws, title string, status types.CaseStatus, private bool) int64 {
+	t.Helper()
+	c := &model.Case{
+		Title:      title,
+		Status:     status,
+		ReporterID: "URPT",
+		IsPrivate:  private,
+	}
+	if private {
+		c.ChannelUserIDs = []string{"URPT"}
+	}
+	created, err := repo.Case().Create(context.Background(), ws, c)
+	gt.NoError(t, err).Required()
+	return created.ID
+}
+
+func TestCaseUseCase_VerifyCaseRefsExist(t *testing.T) {
+	ctxWith := func() context.Context {
+		return auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+	}
+
+	setup := func(t *testing.T) (*usecase.CaseUseCase, interfaces.Repository, int64) {
+		uc, repo := newCaseRefUC(t)
+		ctx := ctxWith()
+		base, err := uc.CreateCase(ctx, testWorkspaceID, "Main", "Desc", nil, nil, false, "", "")
+		gt.NoError(t, err).Required()
+		return uc, repo, base.ID
+	}
+
+	t.Run("accepts reference to a public open case", func(t *testing.T) {
+		uc, repo, baseID := setup(t)
+		pub := seedRefCase(t, repo, refWorkspaceID, "DB outage", types.CaseStatusOpen, false)
+
+		updated, err := uc.UpdateCase(ctxWith(), testWorkspaceID, baseID, usecase.CaseUpdate{
+			Fields: map[string]model.FieldValue{
+				"related": {FieldID: "related", Value: fmt.Sprintf("%d", pub)},
+			},
+		})
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.FieldValues["related"].Value).Equal(fmt.Sprintf("%d", pub))
+	})
+
+	t.Run("rejects reference to a private case", func(t *testing.T) {
+		uc, repo, baseID := setup(t)
+		priv := seedRefCase(t, repo, refWorkspaceID, "Secret", types.CaseStatusOpen, true)
+
+		_, err := uc.UpdateCase(ctxWith(), testWorkspaceID, baseID, usecase.CaseUpdate{
+			Fields: map[string]model.FieldValue{
+				"related": {FieldID: "related", Value: fmt.Sprintf("%d", priv)},
+			},
+		})
+		gt.Error(t, err).Is(model.ErrCaseFieldValidation)
+	})
+
+	t.Run("rejects reference to a draft case", func(t *testing.T) {
+		uc, repo, baseID := setup(t)
+		draft := seedRefCase(t, repo, refWorkspaceID, "WIP", types.CaseStatusDraft, false)
+
+		_, err := uc.UpdateCase(ctxWith(), testWorkspaceID, baseID, usecase.CaseUpdate{
+			Fields: map[string]model.FieldValue{
+				"related": {FieldID: "related", Value: fmt.Sprintf("%d", draft)},
+			},
+		})
+		gt.Error(t, err).Is(model.ErrCaseFieldValidation)
+	})
+
+	t.Run("rejects reference to a missing case", func(t *testing.T) {
+		uc, _, baseID := setup(t)
+
+		_, err := uc.UpdateCase(ctxWith(), testWorkspaceID, baseID, usecase.CaseUpdate{
+			Fields: map[string]model.FieldValue{
+				"related": {FieldID: "related", Value: "99999999"},
+			},
+		})
+		gt.Error(t, err).Is(model.ErrCaseFieldValidation)
+	})
+
+	t.Run("multi rejects when any element is private, accepts all public", func(t *testing.T) {
+		uc, repo, baseID := setup(t)
+		a := seedRefCase(t, repo, refWorkspaceID, "A", types.CaseStatusOpen, false)
+		b := seedRefCase(t, repo, refWorkspaceID, "B", types.CaseStatusOpen, false)
+		priv := seedRefCase(t, repo, refWorkspaceID, "Secret", types.CaseStatusOpen, true)
+
+		_, err := uc.UpdateCase(ctxWith(), testWorkspaceID, baseID, usecase.CaseUpdate{
+			Fields: map[string]model.FieldValue{
+				"related_multi": {FieldID: "related_multi", Value: []string{fmt.Sprintf("%d", a), fmt.Sprintf("%d", priv)}},
+			},
+		})
+		gt.Error(t, err).Is(model.ErrCaseFieldValidation)
+
+		updated, err := uc.UpdateCase(ctxWith(), testWorkspaceID, baseID, usecase.CaseUpdate{
+			Fields: map[string]model.FieldValue{
+				"related_multi": {FieldID: "related_multi", Value: []string{fmt.Sprintf("%d", a), fmt.Sprintf("%d", b)}},
+			},
+		})
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.FieldValues["related_multi"].Value).Equal([]string{fmt.Sprintf("%d", a), fmt.Sprintf("%d", b)})
+	})
+}
+
+func TestCaseUseCase_ListReferenceableCases(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("excludes private and draft, lists open first", func(t *testing.T) {
+		uc, repo := newCaseRefUC(t)
+		open := seedRefCase(t, repo, refWorkspaceID, "DB outage", types.CaseStatusOpen, false)
+		closed := seedRefCase(t, repo, refWorkspaceID, "Old incident", types.CaseStatusClosed, false)
+		seedRefCase(t, repo, refWorkspaceID, "Secret", types.CaseStatusOpen, true)
+		seedRefCase(t, repo, refWorkspaceID, "WIP", types.CaseStatusDraft, false)
+
+		refs, err := uc.ListReferenceableCases(ctx, refWorkspaceID, "", 50)
+		gt.NoError(t, err).Required()
+		gt.Array(t, refs).Length(2).Required()
+		gt.Value(t, refs[0].ID).Equal(open)
+		gt.Value(t, refs[0].Status).Equal(types.CaseStatusOpen)
+		gt.Value(t, refs[1].ID).Equal(closed)
+	})
+
+	t.Run("query filters by title substring", func(t *testing.T) {
+		uc, repo := newCaseRefUC(t)
+		dbCase := seedRefCase(t, repo, refWorkspaceID, "DB outage", types.CaseStatusOpen, false)
+		seedRefCase(t, repo, refWorkspaceID, "Network blip", types.CaseStatusOpen, false)
+
+		refs, err := uc.ListReferenceableCases(ctx, refWorkspaceID, "outage", 50)
+		gt.NoError(t, err).Required()
+		gt.Array(t, refs).Length(1).Required()
+		gt.Value(t, refs[0].ID).Equal(dbCase)
+	})
+
+	t.Run("query matches by case id", func(t *testing.T) {
+		uc, repo := newCaseRefUC(t)
+		seedRefCase(t, repo, refWorkspaceID, "Network blip", types.CaseStatusOpen, false)
+		target := seedRefCase(t, repo, refWorkspaceID, "DB outage", types.CaseStatusOpen, false)
+
+		refs, err := uc.ListReferenceableCases(ctx, refWorkspaceID, fmt.Sprintf("#%d", target), 50)
+		gt.NoError(t, err).Required()
+		gt.Array(t, refs).Length(1).Required()
+		gt.Value(t, refs[0].ID).Equal(target)
+	})
+}
+
+func TestCaseUseCase_ResolveCaseRefs(t *testing.T) {
+	ctx := context.Background()
+	uc, repo := newCaseRefUC(t)
+	pub := seedRefCase(t, repo, refWorkspaceID, "Public", types.CaseStatusOpen, false)
+	priv := seedRefCase(t, repo, refWorkspaceID, "Secret", types.CaseStatusOpen, true)
+
+	refs, err := uc.ResolveCaseRefs(ctx, refWorkspaceID, []int64{pub, priv, 99999999})
+	gt.NoError(t, err).Required()
+	gt.Array(t, refs).Length(1).Required()
+	gt.Value(t, refs[0].ID).Equal(pub)
+	gt.Value(t, refs[0].Title).Equal("Public")
+}
+
+func TestCaseUseCase_GetReferenceableCases(t *testing.T) {
+	ctx := context.Background()
+	uc, repo := newCaseRefUC(t)
+	pub := seedRefCase(t, repo, refWorkspaceID, "Public", types.CaseStatusOpen, false)
+	priv := seedRefCase(t, repo, refWorkspaceID, "Secret", types.CaseStatusOpen, true)
+	draft := seedRefCase(t, repo, refWorkspaceID, "WIP", types.CaseStatusDraft, false)
+
+	cases, err := uc.GetReferenceableCases(ctx, refWorkspaceID, []int64{pub, priv, draft, 99999999})
+	gt.NoError(t, err).Required()
+	gt.Array(t, cases).Length(1).Required()
+	gt.Value(t, cases[0].ID).Equal(pub)
+	gt.Value(t, cases[0].Title).Equal("Public")
+}
+
+func TestCaseUseCase_ReferenceWorkspaceForField(t *testing.T) {
+	uc, _ := newCaseRefUC(t)
+
+	t.Run("resolves the configured reference workspace", func(t *testing.T) {
+		ws, err := uc.ReferenceWorkspaceForField(testWorkspaceID, "related")
+		gt.NoError(t, err).Required()
+		gt.Value(t, ws).Equal(refWorkspaceID)
+	})
+
+	t.Run("errors for a non case_ref field", func(t *testing.T) {
+		_, err := uc.ReferenceWorkspaceForField(testWorkspaceID, "owner")
+		gt.Error(t, err)
+	})
+
+	t.Run("errors for an unknown field", func(t *testing.T) {
+		_, err := uc.ReferenceWorkspaceForField(testWorkspaceID, "ghost")
+		gt.Error(t, err)
+	})
+}
+
+func TestCaseUseCase_RenderCaseFieldValues(t *testing.T) {
+	ctx := context.Background()
+	uc, repo := newCaseRefUC(t)
+	pub := seedRefCase(t, repo, refWorkspaceID, "DB outage", types.CaseStatusOpen, false)
+	priv := seedRefCase(t, repo, refWorkspaceID, "Secret", types.CaseStatusOpen, true)
+
+	t.Run("renders non-reference fields raw and resolves references", func(t *testing.T) {
+		out, err := uc.RenderCaseFieldValues(ctx, testWorkspaceID, map[string]model.FieldValue{
+			"owner":   {FieldID: "owner", Type: types.FieldTypeUser, Value: "U1"},
+			"related": {FieldID: "related", Type: types.FieldTypeCaseRef, Value: fmt.Sprintf("%d", pub)},
+		})
+		gt.NoError(t, err).Required()
+		gt.Value(t, out["owner"]).Equal("U1")
+		resolved := out["related"].(map[string]any)
+		gt.Value(t, resolved["id"]).Equal(pub)
+		gt.Value(t, resolved["title"]).Equal("DB outage")
+		gt.Value(t, resolved["status"]).Equal("OPEN")
+	})
+
+	t.Run("marks a private reference as unavailable on read drift", func(t *testing.T) {
+		out, err := uc.RenderCaseFieldValues(ctx, testWorkspaceID, map[string]model.FieldValue{
+			"related": {FieldID: "related", Type: types.FieldTypeCaseRef, Value: fmt.Sprintf("%d", priv)},
+		})
+		gt.NoError(t, err).Required()
+		resolved := out["related"].(map[string]any)
+		gt.Value(t, resolved["id"]).Equal(priv)
+		gt.Value(t, resolved["available"]).Equal(false)
+	})
+}

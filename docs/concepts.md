@@ -42,8 +42,10 @@ Knowledge, and a bound Slack channel. See the
 ### Field
 A customizable attribute on a Case, defined per Workspace in `config.toml`.
 Field types include `text`, `number`, `select`, `multi-select`, `user`,
-`multi-user`, `date`, and `url`. Select-type fields carry options with optional
-metadata (e.g. scores). See [Configuration → Field Definitions](configuration.md#field-definitions).
+`multi-user`, `date`, `url`, and `case_ref` / `multi_case_ref`
+(references to non-private Cases in another configured workspace). Select-type
+fields carry options with optional metadata (e.g. scores). See
+[Configuration → Field Definitions](configuration.md#field-definitions).
 
 ### Action
 A unit of work attached to a Case (e.g. "investigate", "mitigate"). An Action
