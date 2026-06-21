@@ -33,6 +33,18 @@ var KnownToolSetIDs = []string{
 	ToolSetWebFetch,
 }
 
+// KnownToolSetIDsNoCore is KnownToolSetIDs without the core (action) toolset.
+// Thread-mode agents advertise this list to the planner: a thread-mode
+// workspace manages no Actions, so the planner must never be offered the
+// core read tools (list/get action). Paired with ToolSetDeps.OmitCore so the
+// resolver also withholds the underlying tools.
+var KnownToolSetIDsNoCore = []string{
+	ToolSetSlackRO,
+	ToolSetNotion,
+	ToolSetGitHub,
+	ToolSetWebFetch,
+}
+
 // IsKnownToolSetID reports whether id is a member of KnownToolSetIDs.
 func IsKnownToolSetID(id string) bool {
 	return slices.Contains(KnownToolSetIDs, id)
@@ -65,6 +77,13 @@ type ToolSetDeps struct {
 	GitHub    *githubtool.Client
 	WebFetch  *webfetch.Client
 	Knowledge knowledgetool.Deps
+
+	// OmitCore omits the core (action) toolset entirely. Set by thread-mode
+	// agents: a thread-mode workspace manages no Actions, so even the
+	// read-only list/get-action tools must not exist. Without this the
+	// resolver would always build them (they only need Repo), since the
+	// core read tools do not depend on ActionUC being wired.
+	OmitCore bool
 }
 
 // NewToolSetResolver builds the per-toolset slices once so each sub-agent
@@ -72,12 +91,16 @@ type ToolSetDeps struct {
 // subset (list / get only) — investigation sub-agents must not mutate the
 // case while a turn is forming.
 func NewToolSetResolver(d ToolSetDeps) *ToolSetResolver {
+	var coreTools []gollem.Tool
+	if !d.OmitCore {
+		coreTools = core.NewReadOnly(d.Core)
+	}
 	var knowledge []gollem.Tool
 	if d.Knowledge.Accessor != nil {
 		knowledge = knowledgetool.NewReadOnly(d.Knowledge)
 	}
 	return &ToolSetResolver{
-		core:      core.NewReadOnly(d.Core),
+		core:      coreTools,
 		slack:     slacktool.NewReadOnly(d.Slack),
 		notion:    notiontool.New(d.Notion),
 		github:    githubtool.New(d.GitHub),

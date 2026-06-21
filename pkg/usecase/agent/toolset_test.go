@@ -39,6 +39,33 @@ func TestToolSetResolver_ResolveCore(t *testing.T) {
 	gt.Array(t, tools).Length(2)
 }
 
+func TestToolSetResolver_OmitCore(t *testing.T) {
+	// Thread-mode workspaces manage no Actions: OmitCore must withhold the
+	// core read tools even though they only need Repo (which is wired here).
+	r := agent.NewToolSetResolver(agent.ToolSetDeps{
+		OmitCore: true,
+		Core:     core.Deps{WorkspaceID: "ws", CaseID: 1},
+	})
+	gt.Array(t, r.Resolve([]string{agent.ToolSetCoreRO})).Length(0)
+}
+
+func TestKnownToolSetIDsNoCore(t *testing.T) {
+	t.Run("excludes the core toolset", func(t *testing.T) {
+		for _, id := range agent.KnownToolSetIDsNoCore {
+			gt.Bool(t, id == agent.ToolSetCoreRO).False()
+		}
+	})
+	t.Run("retains the non-core toolsets", func(t *testing.T) {
+		want := []string{
+			agent.ToolSetSlackRO,
+			agent.ToolSetNotion,
+			agent.ToolSetGitHub,
+			agent.ToolSetWebFetch,
+		}
+		gt.Array(t, agent.KnownToolSetIDsNoCore).Equal(want)
+	})
+}
+
 func TestToolSetResolver_ResolveMultipleAndUnknown(t *testing.T) {
 	r := agent.NewToolSetResolver(agent.ToolSetDeps{
 		Core:   core.Deps{Repo: nil, WorkspaceID: "ws", CaseID: 1},

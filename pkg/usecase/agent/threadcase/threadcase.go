@@ -199,10 +199,12 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 				"trigger_ts":   req.TriggerTS,
 			},
 		},
-		UserInput:         buildUserInput(req.SystemMessages, req.DeltaMessages, req.MentionText, req.MentionTS),
-		SystemPrompt:      buildSystemPrompt(req.Case, req.Workspace, req.Mode),
-		ToolResolver:      resolver,
-		KnownToolIDs:      agent.KnownToolSetIDs,
+		UserInput:    buildUserInput(req.SystemMessages, req.DeltaMessages, req.MentionText, req.MentionTS),
+		SystemPrompt: buildSystemPrompt(req.Case, req.Workspace, req.Mode),
+		ToolResolver: resolver,
+		// Thread-mode workspaces manage no Actions, so the planner must not be
+		// offered the core (action) toolset; OmitCore below withholds the tools.
+		KnownToolIDs:      agent.KnownToolSetIDsNoCore,
 		AllowQuestion:     true,
 		OnQuestion:        onQuestion,
 		FinalOutputSchema: finalSchema,
@@ -254,9 +256,10 @@ func (uc *UseCase) persistSession(ctx context.Context, ssn *model.Session, ended
 	}
 }
 
-// buildToolResolver composes the read-only sub-agent tool resolver. The core
-// pool is the read-only subset (no mutation): thread-mode investigation never
-// mutates the case via tools — Case writes happen via the returned Decision.
+// buildToolResolver composes the read-only sub-agent tool resolver. Thread-mode
+// workspaces manage no Actions, so the core (action) toolset is omitted entirely
+// — investigation reads Slack / Notion / GitHub / the web, and Case writes happen
+// via the returned Decision, never the action tools.
 func (uc *UseCase) buildToolResolver(req TurnRequest) *agent.ToolSetResolver {
 	d := uc.deps
 	wsID := ""
@@ -264,6 +267,7 @@ func (uc *UseCase) buildToolResolver(req TurnRequest) *agent.ToolSetResolver {
 		wsID = req.Workspace.Workspace.ID
 	}
 	return agent.NewToolSetResolver(agent.ToolSetDeps{
+		OmitCore: true,
 		Core: core.Deps{
 			Repo:        d.Repo,
 			WorkspaceID: wsID,

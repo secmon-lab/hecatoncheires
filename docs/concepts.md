@@ -114,7 +114,11 @@ Each Workspace chooses how Cases bind to Slack, via `[slack] mode`:
   thread runs an investigation agent that can answer, fill in the Case fields, or
   close the Case. Thread-mode Cases do **not** use Actions or Drafts; instead the
   configurable status set (`[case.status]`) attaches to the Case itself and the
-  Kanban board shows Cases. Jobs run identically in both modes.
+  Kanban board shows Cases. Because thread-mode Workspaces manage no Actions,
+  **agent execution there is given no Action tools** — neither the investigation
+  agent nor Jobs can read or mutate Actions, and the Job system prompt omits the
+  Actions section. Jobs otherwise run in both modes and can still edit Case
+  fields and status, post to Slack, and use memos.
 
 See [Configuration → Case Section](configuration.md#case-section-thread-mode) and
 [Slack Integration](slack.md#thread-mode-monitored-channel).

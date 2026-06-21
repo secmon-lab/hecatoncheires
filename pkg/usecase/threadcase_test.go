@@ -49,7 +49,9 @@ func newScriptedClient(scripts []string) gollem.LLMClient {
 	}
 }
 
-const tcInvestigatePlan = `{"message":"investigate","tasks":[{"id":"t-1","title":"Review","description":"Review the thread","acceptance_criteria":"done","tools":["core_ro"]}]}`
+// Thread-mode manages no Actions, so the planner is offered no core (action)
+// toolset; the read-only Slack toolset stands in.
+const tcInvestigatePlan = `{"message":"investigate","tasks":[{"id":"t-1","title":"Review","description":"Review the thread","acceptance_criteria":"done","tools":["slack_ro"]}]}`
 
 const tcReplanDone = `{"message":"done","tasks":[]}`
 

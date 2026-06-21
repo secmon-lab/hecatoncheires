@@ -166,7 +166,9 @@ func newThreadCase() *model.Case {
 }
 
 // investigatePlan is the round-1 plan that runs one read-only sub-agent.
-const investigatePlan = `{"message":"investigate the thread","tasks":[{"id":"t-1","title":"Review thread","description":"Review the message","acceptance_criteria":"reviewed","tools":["core_ro"]}]}`
+// Thread-mode manages no Actions, so the planner is offered no core (action)
+// toolset; the read-only Slack toolset stands in.
+const investigatePlan = `{"message":"investigate the thread","tasks":[{"id":"t-1","title":"Review thread","description":"Review the message","acceptance_criteria":"reviewed","tools":["slack_ro"]}]}`
 
 const replanDone = `{"message":"enough context","tasks":[]}`
 
@@ -360,6 +362,20 @@ func TestBuildSystemPrompt_ThreadContext(t *testing.T) {
 	gt.String(t, prompt).Contains("severity")
 	gt.String(t, prompt).Contains("DONE")
 	gt.String(t, prompt).Contains("CANNOT create or manage Actions")
+}
+
+func TestBuildToolResolver_OmitsActionTools(t *testing.T) {
+	uc, _ := newThreadcaseUC(t, newScriptedLLM(nil))
+	ws := newThreadWorkspace()
+
+	resolver := uc.BuildToolResolverForTest(threadcase.TurnRequest{Workspace: ws})
+
+	// The core (action) toolset is withheld: thread-mode manages no Actions.
+	gt.Array(t, resolver.Resolve([]string{agent.ToolSetCoreRO})).Length(0)
+	// The planner is never told the core toolset exists.
+	for _, id := range agent.KnownToolSetIDsNoCore {
+		gt.Bool(t, id == agent.ToolSetCoreRO).False()
+	}
 }
 
 func TestBuildSystemPrompt_CreateMode_WorkspacePrompt(t *testing.T) {

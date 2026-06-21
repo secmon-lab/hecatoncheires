@@ -111,88 +111,18 @@ type jobRuntimeDeps struct {
 // ToolBuilder that binds every read-only and writer tool the spec calls
 // for to each invocation.
 func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner) {
-	actionAdapter := usecase.NewActionToolAdapter(deps.UC.Action)
-	stepAdapter := usecase.NewActionStepToolAdapter(deps.UC.ActionStep)
-	caseAdapter := usecase.NewCaseToolAdapter(deps.UC.Case)
-	memoAdapter := usecase.NewMemoToolAdapter(deps.UC.Memo)
-	knowledgeAccessor := usecase.NewKnowledgeToolAccessor(deps.UC.Knowledge)
-	knowledgeMutator := usecase.NewKnowledgeToolMutator(deps.UC.Knowledge)
+	adapters := jobToolAdapters{
+		action:            usecase.NewActionToolAdapter(deps.UC.Action),
+		step:              usecase.NewActionStepToolAdapter(deps.UC.ActionStep),
+		caseUC:            usecase.NewCaseToolAdapter(deps.UC.Case),
+		caseRef:           deps.UC.Case,
+		memo:              usecase.NewMemoToolAdapter(deps.UC.Memo),
+		knowledgeAccessor: usecase.NewKnowledgeToolAccessor(deps.UC.Knowledge),
+		knowledgeMutator:  usecase.NewKnowledgeToolMutator(deps.UC.Knowledge),
+	}
 
 	toolBuilder := job.ToolBuilderFunc(func(_ context.Context, c *model.Case, ws *model.WorkspaceEntry) []gollem.Tool {
-		var statusSet *model.ActionStatusSet
-		var caseStatusSet *model.ActionStatusSet
-		var fieldSchema *modelconfig.FieldSchema
-		if ws != nil {
-			statusSet = ws.ActionStatusSet
-			caseStatusSet = ws.CaseStatusSet
-			fieldSchema = ws.FieldSchema
-		}
-		caseID := int64(0)
-		channelID := ""
-		threadTS := ""
-		if c != nil {
-			caseID = c.ID
-			channelID = c.SlackChannelID
-			// Thread-mode cases post Job output into the case thread rather
-			// than the monitored channel's root.
-			threadTS = c.SlackThreadTS
-		}
-		wsID := ""
-		if ws != nil {
-			wsID = ws.Workspace.ID
-		}
-
-		coreDeps := core.Deps{
-			Repo:         deps.Repo,
-			WorkspaceID:  wsID,
-			CaseID:       caseID,
-			StatusSet:    statusSet,
-			ActionUC:     actionAdapter,
-			ActionStepUC: stepAdapter,
-			CaseRefUC:    deps.UC.Case,
-		}
-
-		out := make([]gollem.Tool, 0, 16)
-		out = append(out, core.NewReadOnly(coreDeps)...)
-		out = append(out, actionwriter.New(coreDeps)...)
-		out = append(out, casewriter.New(casewriter.Deps{
-			CaseUC:      caseAdapter,
-			WorkspaceID: wsID,
-			CaseID:      caseID,
-			Schema:      fieldSchema,
-			StatusSet:   caseStatusSet,
-		})...)
-		if deps.SlackService != nil && channelID != "" {
-			out = append(out, slackpost.New(slackpost.Deps{
-				Poster:          slackPosterAdapter{svc: deps.SlackService},
-				ChannelID:       channelID,
-				DefaultThreadTS: threadTS,
-			})...)
-		}
-		out = append(out, webfetch.New(deps.WebFetch)...)
-		// Case-scoped memo tools, wired only when the workspace enabled memos.
-		if ws != nil && ws.MemoConfig.Enabled() {
-			out = append(out, memotool.New(memotool.Deps{
-				Repo:        deps.Repo,
-				WorkspaceID: wsID,
-				CaseID:      caseID,
-				MemoUC:      memoAdapter,
-				Schema:      ws.MemoConfig.FieldSchema,
-			})...)
-		}
-		// Workspace-wide knowledge tools. Read is always offered; write is
-		// withheld while the Job runs against a PRIVATE case (its contents must
-		// not leak into shared knowledge).
-		if knowledgeAccessor != nil {
-			kdeps := knowledgetool.Deps{WorkspaceID: wsID, Accessor: knowledgeAccessor}
-			if knowledgeMutator != nil && c != nil && !c.IsPrivate {
-				kdeps.Mutator = knowledgeMutator
-				out = append(out, knowledgetool.New(kdeps)...)
-			} else {
-				out = append(out, knowledgetool.NewReadOnly(kdeps)...)
-			}
-		}
-		return out
+		return buildJobTools(deps, adapters, c, ws)
 	})
 
 	executors := map[model.JobStrategy]jobagent.JobExecutor{
@@ -249,4 +179,105 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner) {
 	})
 	jobUC := job.NewUseCase(deps.Registry, runner)
 	return jobUC, runner
+}
+
+// jobToolAdapters groups the usecase-to-tool adapters once so buildJobTools
+// can be called per Job invocation without rebuilding them each time.
+type jobToolAdapters struct {
+	action            core.ActionMutator
+	step              core.ActionStepMutator
+	caseUC            casewriter.CaseMutator
+	caseRef           core.CaseRefReader
+	memo              memotool.MemoMutator
+	knowledgeAccessor knowledgetool.KnowledgeAccessor
+	knowledgeMutator  knowledgetool.KnowledgeMutator
+}
+
+// buildJobTools assembles the tool slice for a single Job invocation. Action
+// tools (read-only list/get plus the writer set) are bound only for
+// channel-mode workspaces: a thread-mode workspace manages no Actions, so the
+// Job agent must not be able to read or mutate them. Case-editing
+// (casewriter, incl. thread-mode board status), Slack post, web fetch and memo
+// tools are bound in both modes.
+func buildJobTools(deps jobRuntimeDeps, adapters jobToolAdapters, c *model.Case, ws *model.WorkspaceEntry) []gollem.Tool {
+	var statusSet *model.ActionStatusSet
+	var caseStatusSet *model.ActionStatusSet
+	var fieldSchema *modelconfig.FieldSchema
+	if ws != nil {
+		statusSet = ws.ActionStatusSet
+		caseStatusSet = ws.CaseStatusSet
+		fieldSchema = ws.FieldSchema
+	}
+	caseID := int64(0)
+	channelID := ""
+	threadTS := ""
+	if c != nil {
+		caseID = c.ID
+		channelID = c.SlackChannelID
+		// Thread-mode cases post Job output into the case thread rather
+		// than the monitored channel's root.
+		threadTS = c.SlackThreadTS
+	}
+	wsID := ""
+	if ws != nil {
+		wsID = ws.Workspace.ID
+	}
+
+	coreDeps := core.Deps{
+		Repo:         deps.Repo,
+		WorkspaceID:  wsID,
+		CaseID:       caseID,
+		StatusSet:    statusSet,
+		ActionUC:     adapters.action,
+		ActionStepUC: adapters.step,
+		CaseRefUC:    adapters.caseRef,
+	}
+
+	out := make([]gollem.Tool, 0, 16)
+	// Action tools exist only where Actions exist: channel-mode workspaces.
+	// core.NewReadOnly also wires the case_ref read tools (CaseRefUC); those
+	// are case-reference lookups, not Actions, but they live in the core
+	// toolset, so thread-mode forgoes them along with the action tools.
+	if ws == nil || !ws.IsThreadMode() {
+		out = append(out, core.NewReadOnly(coreDeps)...)
+		out = append(out, actionwriter.New(coreDeps)...)
+	}
+	out = append(out, casewriter.New(casewriter.Deps{
+		CaseUC:      adapters.caseUC,
+		WorkspaceID: wsID,
+		CaseID:      caseID,
+		Schema:      fieldSchema,
+		StatusSet:   caseStatusSet,
+	})...)
+	if deps.SlackService != nil && channelID != "" {
+		out = append(out, slackpost.New(slackpost.Deps{
+			Poster:          slackPosterAdapter{svc: deps.SlackService},
+			ChannelID:       channelID,
+			DefaultThreadTS: threadTS,
+		})...)
+	}
+	out = append(out, webfetch.New(deps.WebFetch)...)
+	// Case-scoped memo tools, wired only when the workspace enabled memos.
+	if ws != nil && ws.MemoConfig.Enabled() {
+		out = append(out, memotool.New(memotool.Deps{
+			Repo:        deps.Repo,
+			WorkspaceID: wsID,
+			CaseID:      caseID,
+			MemoUC:      adapters.memo,
+			Schema:      ws.MemoConfig.FieldSchema,
+		})...)
+	}
+	// Workspace-wide knowledge tools (not Actions, so available in both modes).
+	// Read is always offered; write is withheld while the Job runs against a
+	// PRIVATE case (its contents must not leak into shared knowledge).
+	if adapters.knowledgeAccessor != nil {
+		kdeps := knowledgetool.Deps{WorkspaceID: wsID, Accessor: adapters.knowledgeAccessor}
+		if adapters.knowledgeMutator != nil && c != nil && !c.IsPrivate {
+			kdeps.Mutator = adapters.knowledgeMutator
+			out = append(out, knowledgetool.New(kdeps)...)
+		} else {
+			out = append(out, knowledgetool.NewReadOnly(kdeps)...)
+		}
+	}
+	return out
 }
