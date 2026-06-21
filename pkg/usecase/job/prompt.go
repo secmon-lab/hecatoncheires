@@ -90,11 +90,16 @@ type systemPromptData struct {
 	Now       string
 	Workspace systemPromptWorkspace
 	Case      *systemPromptCase
-	Actions   []systemPromptAction
-	Memo      systemPromptMemoSection
-	Trigger   systemPromptTrigger
-	Reason    systemPromptReason
-	Sources   systemPromptSourceSection
+	// ManagesActions is false for thread-mode workspaces, which manage no
+	// Actions. When false the template omits the Actions section and the
+	// action-specific guardrails so the prompt never references a concept the
+	// agent has no tools for.
+	ManagesActions bool
+	Actions        []systemPromptAction
+	Memo           systemPromptMemoSection
+	Trigger        systemPromptTrigger
+	Reason         systemPromptReason
+	Sources        systemPromptSourceSection
 }
 
 // memoSystemPromptMax bounds how many memo id+title pairs are embedded in the
@@ -238,6 +243,11 @@ func BuildSystemPrompt(in PromptInputs) (string, error) {
 func buildSystemPromptData(in PromptInputs) systemPromptData {
 	data := systemPromptData{}
 
+	// Thread-mode workspaces manage no Actions; the Job agent gets no action
+	// tools there, so the prompt must not advertise an Actions section or
+	// action guardrails. nil workspace defaults to channel-mode (actions on).
+	data.ManagesActions = in.Workspace == nil || !in.Workspace.IsThreadMode()
+
 	// Now is the turn's start time (runner.go injects r.clock()); a zero
 	// value means the caller did not supply it, so the section is skipped
 	// rather than rendering a bogus "0001-01-01" timestamp.
@@ -366,16 +376,21 @@ func buildSystemPromptData(in PromptInputs) systemPromptData {
 		data.Case = cs
 	}
 
-	for _, a := range in.Actions {
-		if a == nil || a.IsArchived() {
-			continue
+	// Skip the Actions section entirely for workspaces that manage no Actions
+	// (thread-mode); the template gates on ManagesActions too, but leaving the
+	// slice empty keeps the rendered prompt honest if that guard ever changes.
+	if data.ManagesActions {
+		for _, a := range in.Actions {
+			if a == nil || a.IsArchived() {
+				continue
+			}
+			data.Actions = append(data.Actions, systemPromptAction{
+				ID:         a.ID,
+				Title:      a.Title,
+				Status:     a.Status.String(),
+				AssigneeID: a.AssigneeID,
+			})
 		}
-		data.Actions = append(data.Actions, systemPromptAction{
-			ID:         a.ID,
-			Title:      a.Title,
-			Status:     a.Status.String(),
-			AssigneeID: a.AssigneeID,
-		})
 	}
 
 	data.Sources.Narrowed = in.SourcesNarrowed

@@ -71,6 +71,48 @@ func TestBuildSystemPrompt_CaseCreatedEvent(t *testing.T) {
 	mustContain(t, got, "cannot close the case")
 }
 
+func TestBuildSystemPrompt_ThreadModeOmitsActions(t *testing.T) {
+	j := &model.Job{
+		ID:     "summarize",
+		Prompt: "{{.Case.Title}}",
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	ev := job.Event{
+		Domain:        model.JobEventDomainCase,
+		WorkspaceID:   "ws",
+		CaseID:        42,
+		Timestamp:     time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC),
+		ActorUserID:   "U-CALLER",
+		CaseLifecycle: model.CaseLifecycleCreated,
+	}
+	ws := newWorkspace("ws", "WS")
+	ws.CaseMode = model.CaseModeThread
+
+	// Even if actions were somehow passed in, a thread-mode prompt must not
+	// surface them: the agent has no action tools there.
+	actions := []*model.Action{{ID: 7, Title: "stray", Status: types.ActionStatusTodo}}
+
+	got, err := job.BuildSystemPrompt(job.PromptInputs{
+		Job: j, Workspace: ws, Case: newCase(42), Actions: actions, Event: ev,
+	})
+	gt.NoError(t, err).Required()
+
+	// Action section and action-specific guardrails are gone.
+	mustNotContain(t, got, "# Actions (existing, non-archived)")
+	mustNotContain(t, got, "stray")
+	mustNotContain(t, got, "archive actions")
+	mustNotContain(t, got, "action list")
+	mustContain(t, got, "you do not manage Actions")
+
+	// Non-action sections still render.
+	mustContain(t, got, "# Case")
+	mustContain(t, got, "# Guardrails")
+	mustContain(t, got, "Do not duplicate work")
+	mustContain(t, got, "cannot close the case")
+}
+
 func TestBuildSystemPrompt_CaseClosedEvent(t *testing.T) {
 	j := &model.Job{
 		ID:     "on-close",
