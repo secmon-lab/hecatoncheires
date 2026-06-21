@@ -1049,6 +1049,51 @@ func (r *mutationResolver) UnarchiveMemo(ctx context.Context, workspaceID string
 	return toGraphQLMemo(updated, workspaceID), nil
 }
 
+// CreateKnowledge is the resolver for the createKnowledge field.
+func (r *mutationResolver) CreateKnowledge(ctx context.Context, workspaceID string, input graphql1.CreateKnowledgeInput) (*graphql1.Knowledge, error) {
+	claim := ""
+	if input.Claim != nil {
+		claim = *input.Claim
+	}
+	created, err := r.UseCases.Knowledge.CreateKnowledge(ctx, workspaceID, usecase.CreateKnowledgeInput{
+		Title: input.Title,
+		Claim: claim,
+		Tags:  input.Tags,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLKnowledge(created), nil
+}
+
+// UpdateKnowledge is the resolver for the updateKnowledge field.
+func (r *mutationResolver) UpdateKnowledge(ctx context.Context, workspaceID string, input graphql1.UpdateKnowledgeInput) (*graphql1.Knowledge, error) {
+	// Tags is a nullable list: nil means "leave unchanged", a non-nil slice
+	// replaces the tag set (the usecase rejects an empty replacement).
+	var tags *[]string
+	if input.Tags != nil {
+		tags = &input.Tags
+	}
+	updated, err := r.UseCases.Knowledge.UpdateKnowledge(ctx, workspaceID, usecase.UpdateKnowledgeInput{
+		ID:    model.KnowledgeID(input.ID),
+		Title: input.Title,
+		Claim: input.Claim,
+		Tags:  tags,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLKnowledge(updated), nil
+}
+
+// DeleteKnowledge is the resolver for the deleteKnowledge field.
+func (r *mutationResolver) DeleteKnowledge(ctx context.Context, workspaceID string, id string) (bool, error) {
+	if err := r.UseCases.Knowledge.DeleteKnowledge(ctx, workspaceID, model.KnowledgeID(id)); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // Health is the resolver for the health field.
 func (r *queryResolver) Health(ctx context.Context) (string, error) {
 	return "ok", nil
@@ -1571,6 +1616,54 @@ func (r *queryResolver) MemoConfiguration(ctx context.Context, workspaceID strin
 		Description: cfg.Description,
 		Fields:      fields,
 	}, nil
+}
+
+// Knowledges is the resolver for the knowledges field.
+func (r *queryResolver) Knowledges(ctx context.Context, workspaceID string, tags []string) ([]*graphql1.Knowledge, error) {
+	items, err := r.UseCases.Knowledge.ListKnowledge(ctx, workspaceID, interfaces.KnowledgeListOptions{Tags: tags})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*graphql1.Knowledge, len(items))
+	for i, k := range items {
+		result[i] = toGraphQLKnowledge(k)
+	}
+	return result, nil
+}
+
+// Knowledge is the resolver for the knowledge field.
+func (r *queryResolver) Knowledge(ctx context.Context, workspaceID string, id string) (*graphql1.Knowledge, error) {
+	k, err := r.UseCases.Knowledge.GetKnowledge(ctx, workspaceID, model.KnowledgeID(id))
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLKnowledge(k), nil
+}
+
+// KnowledgeTags is the resolver for the knowledgeTags field.
+func (r *queryResolver) KnowledgeTags(ctx context.Context, workspaceID string) ([]string, error) {
+	tags, err := r.UseCases.Knowledge.ListTags(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return tags, nil
+}
+
+// SearchKnowledge is the resolver for the searchKnowledge field.
+func (r *queryResolver) SearchKnowledge(ctx context.Context, workspaceID string, query string, tags []string, limit *int) ([]*graphql1.Knowledge, error) {
+	in := usecase.SearchKnowledgeInput{Query: query, Tags: tags}
+	if limit != nil {
+		in.Limit = *limit
+	}
+	items, err := r.UseCases.Knowledge.SearchKnowledge(ctx, workspaceID, in)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*graphql1.Knowledge, len(items))
+	for i, k := range items {
+		result[i] = toGraphQLKnowledge(k)
+	}
+	return result, nil
 }
 
 // Action returns ActionResolver implementation.

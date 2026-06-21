@@ -311,6 +311,24 @@ func toGraphQLMemo(m *model.Memo, workspaceID string) *graphql1.Memo {
 	}
 }
 
+// toGraphQLKnowledge maps a domain Knowledge to its GraphQL representation. The
+// embedding vector is intentionally not exposed. Tags is normalized to a non-nil
+// slice to satisfy the [String!]! contract.
+func toGraphQLKnowledge(k *model.Knowledge) *graphql1.Knowledge {
+	tags := k.Tags
+	if tags == nil {
+		tags = []string{}
+	}
+	return &graphql1.Knowledge{
+		ID:        string(k.ID),
+		Title:     k.Title,
+		Claim:     k.Claim,
+		Tags:      tags,
+		CreatedAt: k.CreatedAt,
+		UpdatedAt: k.UpdatedAt,
+	}
+}
+
 // toGraphQLFieldType converts a domain FieldType to GraphQL FieldType
 func toGraphQLFieldType(ft types.FieldType) graphql1.FieldType {
 	switch ft {

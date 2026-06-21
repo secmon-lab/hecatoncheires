@@ -195,11 +195,13 @@ func runActionStepRepositoryTest(t *testing.T, newRepo func(t *testing.T) interf
 func timePtr(t time.Time) *time.Time { return &t }
 
 func TestActionStepRepository_Memory(t *testing.T) {
+	t.Parallel()
 	runActionStepRepositoryTest(t, func(t *testing.T) interfaces.Repository {
 		return memory.New()
 	}, memory.ErrNotFound)
 }
 
 func TestActionStepRepository_Firestore(t *testing.T) {
+	t.Parallel()
 	runActionStepRepositoryTest(t, newFirestoreRepository, repofirestore.ErrNotFound)
 }

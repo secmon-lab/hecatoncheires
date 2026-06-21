@@ -15,6 +15,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/actionwriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
+	knowledgetool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/knowledge"
 	memotool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/memo"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slackpost"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/webfetch"
@@ -114,6 +115,8 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner) {
 	stepAdapter := usecase.NewActionStepToolAdapter(deps.UC.ActionStep)
 	caseAdapter := usecase.NewCaseToolAdapter(deps.UC.Case)
 	memoAdapter := usecase.NewMemoToolAdapter(deps.UC.Memo)
+	knowledgeAccessor := usecase.NewKnowledgeToolAccessor(deps.UC.Knowledge)
+	knowledgeMutator := usecase.NewKnowledgeToolMutator(deps.UC.Knowledge)
 
 	toolBuilder := job.ToolBuilderFunc(func(_ context.Context, c *model.Case, ws *model.WorkspaceEntry) []gollem.Tool {
 		var statusSet *model.ActionStatusSet
@@ -176,6 +179,18 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner) {
 				MemoUC:      memoAdapter,
 				Schema:      ws.MemoConfig.FieldSchema,
 			})...)
+		}
+		// Workspace-wide knowledge tools. Read is always offered; write is
+		// withheld while the Job runs against a PRIVATE case (its contents must
+		// not leak into shared knowledge).
+		if knowledgeAccessor != nil {
+			kdeps := knowledgetool.Deps{WorkspaceID: wsID, Accessor: knowledgeAccessor}
+			if knowledgeMutator != nil && c != nil && !c.IsPrivate {
+				kdeps.Mutator = knowledgeMutator
+				out = append(out, knowledgetool.New(kdeps)...)
+			} else {
+				out = append(out, knowledgetool.NewReadOnly(kdeps)...)
+			}
 		}
 		return out
 	})

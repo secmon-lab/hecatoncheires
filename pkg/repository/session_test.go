@@ -303,11 +303,13 @@ func runSessionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interface
 }
 
 func TestSessionRepository_Memory(t *testing.T) {
+	t.Parallel()
 	runSessionRepositoryTest(t, func(_ *testing.T) interfaces.Repository {
 		return memory.New()
 	})
 }
 
 func TestSessionRepository_Firestore(t *testing.T) {
+	t.Parallel()
 	runSessionRepositoryTest(t, newFirestoreRepository)
 }

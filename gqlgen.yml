@@ -81,12 +81,6 @@ models:
     fields:
       actor:
         resolver: true
-  Knowledge:
-    model:
-      - github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql.Knowledge
-    fields:
-      case:
-        resolver: true
   Memo:
     model:
       - github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql.Memo

@@ -11,6 +11,7 @@ type Repository interface {
 	Case() CaseRepository
 	Action() ActionRepository
 	Memo() MemoRepository
+	Knowledge() KnowledgeRepository
 	Slack() SlackRepository
 	SlackUser() SlackUserRepository
 	Source() SourceRepository

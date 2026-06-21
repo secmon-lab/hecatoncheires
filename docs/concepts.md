@@ -64,12 +64,19 @@ configured per Workspace under `[[action.status]]`. See
 
 ### Source
 An external origin of information (e.g. a Notion page, a GitHub resource, a
-Slack message) that the agent tools can read to extract Knowledge. See
+Slack message) that the agent tools can read while investigating a Case. See
 [Integrations](integrations.md).
 
 ### Knowledge
-A piece of information extracted from a Source and associated with a Case. The
-AI assist agent and agent tools produce and consume Knowledge.
+A **workspace-wide shared knowledge entry**: organization-specific information
+that does not exist in the LLM's general knowledge (operating rules, internal
+proper nouns, past judgements, threat intel, …), captured so it can be reused on
+future Case processing. A Knowledge entry has a title, a single Markdown `claim`
+body, and one or more free-form `tags`; it is **not** tied to a Case and carries
+no custom fields. Both humans (via the WebUI **Knowledge** section) and AI agents
+(via the `knowledge__*` tools) read and write it. Entries are retrieved by
+semantic search (embedding-based, with a substring fallback) and by tag filter.
+See [User Guide → Knowledge](user_guide.md#knowledge).
 
 ### Agent Session
 A persistent AI conversation tied to a Slack thread on a Case. History and

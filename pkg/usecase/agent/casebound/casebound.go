@@ -13,6 +13,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
+	knowledgetool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/knowledge"
 	memotool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/memo"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
@@ -295,7 +296,23 @@ func (uc *UseCase) buildTools(req TurnRequest) []gollem.Tool {
 		})
 	}
 
-	all := make([]gollem.Tool, 0, len(coreTools)+len(slackTools)+len(notionTools)+len(githubTools)+len(webfetchTools)+len(caseTools)+len(memoTools))
+	// Workspace-wide knowledge tools (knowledge__*). Read tools are always
+	// offered when an accessor is configured; the write tools (create/update)
+	// are withheld while processing a PRIVATE case, because shared knowledge is
+	// visible to the whole workspace and a private case's contents must not leak
+	// into it through an agent write.
+	var knowledgeTools []gollem.Tool
+	if d.KnowledgeAccessor != nil {
+		kdeps := knowledgetool.Deps{WorkspaceID: wsID, Accessor: d.KnowledgeAccessor}
+		if d.KnowledgeMutator != nil && req.Case != nil && !req.Case.IsPrivate {
+			kdeps.Mutator = d.KnowledgeMutator
+			knowledgeTools = knowledgetool.New(kdeps)
+		} else {
+			knowledgeTools = knowledgetool.NewReadOnly(kdeps)
+		}
+	}
+
+	all := make([]gollem.Tool, 0, len(coreTools)+len(slackTools)+len(notionTools)+len(githubTools)+len(webfetchTools)+len(caseTools)+len(memoTools)+len(knowledgeTools))
 	all = append(all, coreTools...)
 	all = append(all, slackTools...)
 	all = append(all, notionTools...)
@@ -303,6 +320,7 @@ func (uc *UseCase) buildTools(req TurnRequest) []gollem.Tool {
 	all = append(all, webfetchTools...)
 	all = append(all, caseTools...)
 	all = append(all, memoTools...)
+	all = append(all, knowledgeTools...)
 	return all
 }
 

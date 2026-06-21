@@ -6,12 +6,14 @@ import { useTranslation } from '../i18n'
 import { GET_CASES } from '../graphql/case'
 import { GET_ACTIONS } from '../graphql/action'
 import { GET_SOURCES } from '../graphql/source'
+import { GET_KNOWLEDGES } from '../graphql/knowledge'
 import { useCaseStatuses } from '../hooks/useCaseStatuses'
 import { Avatar } from './Primitives'
 import {
   IconCases,
   IconActions,
   IconSources,
+  IconKnowledge,
   IconSettings,
   IconUser,
 } from './Icons'
@@ -20,6 +22,7 @@ interface NavCount {
   cases: number | null
   actions: number | null
   sources: number | null
+  knowledge: number | null
 }
 
 function useNavCounts(workspaceId: string | undefined): NavCount {
@@ -35,10 +38,15 @@ function useNavCounts(workspaceId: string | undefined): NavCount {
     variables: { workspaceId },
     skip: !workspaceId,
   })
+  const { data: knowledges } = useQuery(GET_KNOWLEDGES, {
+    variables: { workspaceId },
+    skip: !workspaceId,
+  })
   return {
     cases: cases?.cases?.length ?? null,
     actions: actions?.actions?.length ?? null,
     sources: sources?.sources?.length ?? null,
+    knowledge: knowledges?.knowledges?.length ?? null,
   }
 }
 
@@ -62,6 +70,7 @@ export default function Sidebar() {
       count: isThreadMode ? counts.cases : counts.actions,
     },
     { id: 'sources',    label: t('navSources'),    Icon: IconSources,   to: `${wsPrefix}/sources`,    count: counts.sources },
+    { id: 'knowledge',  label: t('navKnowledge'),  Icon: IconKnowledge, to: `${wsPrefix}/knowledge`,  count: counts.knowledge },
   ]
 
   return (

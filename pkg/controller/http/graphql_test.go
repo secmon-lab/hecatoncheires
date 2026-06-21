@@ -4160,6 +4160,131 @@ cases:
 	gt.Array(t, draftsOut.Drafts).Length(0)
 }
 
+type knowledgePayload struct {
+	ID    string   `json:"id"`
+	Title string   `json:"title"`
+	Claim string   `json:"claim"`
+	Tags  []string `json:"tags"`
+}
+
+func TestGraphQLHandler_KnowledgeLifecycle(t *testing.T) {
+	repo := memory.New()
+	h, err := setupGraphQLServer(repo)
+	gt.NoError(t, err).Required()
+
+	// Create
+	createQuery := `mutation($ws: String!, $input: CreateKnowledgeInput!) {
+		createKnowledge(workspaceId: $ws, input: $input) { id title claim tags }
+	}`
+	rec := executeGraphQLRequest(t, h, createQuery, map[string]interface{}{
+		"ws": testWorkspaceID,
+		"input": map[string]interface{}{
+			"title": "GitHub policy",
+			"claim": "## rule\n- pin actions by sha",
+			"tags":  []string{"ops", "github"},
+		},
+	})
+	resp := parseGraphQLResponse(t, rec)
+	gt.Array(t, resp.Errors).Length(0).Required()
+	var createOut struct {
+		CreateKnowledge knowledgePayload `json:"createKnowledge"`
+	}
+	gt.NoError(t, json.Unmarshal(resp.Data, &createOut)).Required()
+	created := createOut.CreateKnowledge
+	gt.String(t, created.ID).NotEqual("")
+	gt.String(t, created.Title).Equal("GitHub policy")
+	gt.String(t, created.Claim).Equal("## rule\n- pin actions by sha")
+	gt.Array(t, created.Tags).Length(2).Required()
+
+	// Create rejected without tags
+	recNoTags := executeGraphQLRequest(t, h, createQuery, map[string]interface{}{
+		"ws": testWorkspaceID,
+		"input": map[string]interface{}{
+			"title": "no tags",
+			"tags":  []string{},
+		},
+	})
+	respNoTags := parseGraphQLResponse(t, recNoTags)
+	gt.Bool(t, len(respNoTags.Errors) > 0).True()
+
+	// List
+	listQuery := `query($ws: String!) { knowledges(workspaceId: $ws) { id title tags } }`
+	rec = executeGraphQLRequest(t, h, listQuery, map[string]interface{}{"ws": testWorkspaceID})
+	resp = parseGraphQLResponse(t, rec)
+	gt.Array(t, resp.Errors).Length(0).Required()
+	var listOut struct {
+		Knowledges []knowledgePayload `json:"knowledges"`
+	}
+	gt.NoError(t, json.Unmarshal(resp.Data, &listOut)).Required()
+	gt.Array(t, listOut.Knowledges).Length(1).Required()
+	gt.String(t, listOut.Knowledges[0].ID).Equal(created.ID)
+
+	// knowledgeTags
+	rec = executeGraphQLRequest(t, h, `query($ws: String!) { knowledgeTags(workspaceId: $ws) }`,
+		map[string]interface{}{"ws": testWorkspaceID})
+	resp = parseGraphQLResponse(t, rec)
+	gt.Array(t, resp.Errors).Length(0).Required()
+	var tagsOut struct {
+		KnowledgeTags []string `json:"knowledgeTags"`
+	}
+	gt.NoError(t, json.Unmarshal(resp.Data, &tagsOut)).Required()
+	gt.Array(t, tagsOut.KnowledgeTags).Length(2).Required()
+	gt.Value(t, tagsOut.KnowledgeTags[0]).Equal("github")
+	gt.Value(t, tagsOut.KnowledgeTags[1]).Equal("ops")
+
+	// searchKnowledge (substring fallback, no embed client wired in tests)
+	rec = executeGraphQLRequest(t, h,
+		`query($ws: String!, $q: String!) { searchKnowledge(workspaceId: $ws, query: $q) { id title } }`,
+		map[string]interface{}{"ws": testWorkspaceID, "q": "github"})
+	resp = parseGraphQLResponse(t, rec)
+	gt.Array(t, resp.Errors).Length(0).Required()
+	var searchOut struct {
+		SearchKnowledge []knowledgePayload `json:"searchKnowledge"`
+	}
+	gt.NoError(t, json.Unmarshal(resp.Data, &searchOut)).Required()
+	gt.Array(t, searchOut.SearchKnowledge).Length(1).Required()
+	gt.String(t, searchOut.SearchKnowledge[0].ID).Equal(created.ID)
+
+	// Update (title + tags)
+	updateQuery := `mutation($ws: String!, $input: UpdateKnowledgeInput!) {
+		updateKnowledge(workspaceId: $ws, input: $input) { id title tags }
+	}`
+	rec = executeGraphQLRequest(t, h, updateQuery, map[string]interface{}{
+		"ws": testWorkspaceID,
+		"input": map[string]interface{}{
+			"id":    created.ID,
+			"title": "GitHub policy v2",
+			"tags":  []string{"ops", "github", "security"},
+		},
+	})
+	resp = parseGraphQLResponse(t, rec)
+	gt.Array(t, resp.Errors).Length(0).Required()
+	var updateOut struct {
+		UpdateKnowledge knowledgePayload `json:"updateKnowledge"`
+	}
+	gt.NoError(t, json.Unmarshal(resp.Data, &updateOut)).Required()
+	gt.String(t, updateOut.UpdateKnowledge.Title).Equal("GitHub policy v2")
+	gt.Array(t, updateOut.UpdateKnowledge.Tags).Length(3)
+
+	// Delete
+	rec = executeGraphQLRequest(t, h,
+		`mutation($ws: String!, $id: ID!) { deleteKnowledge(workspaceId: $ws, id: $id) }`,
+		map[string]interface{}{"ws": testWorkspaceID, "id": created.ID})
+	resp = parseGraphQLResponse(t, rec)
+	gt.Array(t, resp.Errors).Length(0).Required()
+	var deleteOut struct {
+		DeleteKnowledge bool `json:"deleteKnowledge"`
+	}
+	gt.NoError(t, json.Unmarshal(resp.Data, &deleteOut)).Required()
+	gt.Bool(t, deleteOut.DeleteKnowledge).True()
+
+	// List is empty after delete
+	rec = executeGraphQLRequest(t, h, listQuery, map[string]interface{}{"ws": testWorkspaceID})
+	resp = parseGraphQLResponse(t, rec)
+	gt.NoError(t, json.Unmarshal(resp.Data, &listOut)).Required()
+	gt.Array(t, listOut.Knowledges).Length(0)
+}
+
 func TestGraphQLHandler_ReferenceableCases(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.New()

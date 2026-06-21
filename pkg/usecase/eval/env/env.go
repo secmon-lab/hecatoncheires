@@ -19,6 +19,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
+	knowledgetool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/knowledge"
 	memotool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/memo"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
@@ -245,6 +246,8 @@ func buildJobRunner(
 	stepAdapter := usecase.NewActionStepToolAdapter(uc.ActionStep)
 	caseAdapter := usecase.NewCaseToolAdapter(uc.Case)
 	memoAdapter := usecase.NewMemoToolAdapter(uc.Memo)
+	knowledgeAccessor := usecase.NewKnowledgeToolAccessor(uc.Knowledge)
+	knowledgeMutator := usecase.NewKnowledgeToolMutator(uc.Knowledge)
 
 	toolBuilder := job.ToolBuilderFunc(func(_ context.Context, c *model.Case, ws *model.WorkspaceEntry) []gollem.Tool {
 		var statusSet *model.ActionStatusSet
@@ -288,6 +291,15 @@ func buildJobRunner(
 				MemoUC:      memoAdapter,
 				Schema:      ws.MemoConfig.FieldSchema,
 			})...)
+		}
+		if knowledgeAccessor != nil {
+			kdeps := knowledgetool.Deps{WorkspaceID: wsID, Accessor: knowledgeAccessor}
+			if knowledgeMutator != nil && c != nil && !c.IsPrivate {
+				kdeps.Mutator = knowledgeMutator
+				out = append(out, knowledgetool.New(kdeps)...)
+			} else {
+				out = append(out, knowledgetool.NewReadOnly(kdeps)...)
+			}
 		}
 		return out
 	})

@@ -16,6 +16,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
+	knowledgetool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/knowledge"
 	memotool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/memo"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
@@ -64,6 +65,15 @@ type CommonDeps struct {
 	// MemoUC backs the Case-scoped memo tools (memo__*) in case-bound mode.
 	// Optional: nil means the agent gets no memo tools.
 	MemoUC memotool.MemoMutator
+
+	// KnowledgeAccessor backs the read-only workspace knowledge tools
+	// (knowledge__search/get/list_tags). When set, read access is always
+	// offered. KnowledgeMutator backs the write tools (create/update); each
+	// mode wires the write tools only when the agent is permitted to mutate
+	// shared knowledge (i.e. not while processing a private case). Both are
+	// optional: nil means the corresponding tools are not built.
+	KnowledgeAccessor knowledgetool.KnowledgeAccessor
+	KnowledgeMutator  knowledgetool.KnowledgeMutator
 
 	// HeartbeatInterval / HeartbeatStaleAfter govern §5.3 turn-lock activity
 	// detection. Zero values fall back to DefaultHeartbeatInterval /

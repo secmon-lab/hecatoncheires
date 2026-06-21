@@ -629,11 +629,13 @@ func touchSource(s *model.Source, existing *model.Source) *model.Source {
 }
 
 func TestMemorySourceRepository(t *testing.T) {
+	t.Parallel()
 	runSourceRepositoryTest(t, func(t *testing.T) interfaces.Repository {
 		return memory.New()
 	})
 }
 
 func TestFirestoreSourceRepository(t *testing.T) {
+	t.Parallel()
 	runSourceRepositoryTest(t, newFirestoreRepository)
 }

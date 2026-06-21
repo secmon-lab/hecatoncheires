@@ -187,11 +187,13 @@ func runCaseDraftRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 }
 
 func TestMemoryCaseDraftRepository(t *testing.T) {
+	t.Parallel()
 	runCaseDraftRepositoryTest(t, func(t *testing.T) interfaces.Repository {
 		return memory.New()
 	})
 }
 
 func TestFirestoreCaseDraftRepository(t *testing.T) {
+	t.Parallel()
 	runCaseDraftRepositoryTest(t, newFirestoreRepository)
 }

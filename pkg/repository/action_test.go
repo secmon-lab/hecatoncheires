@@ -536,11 +536,13 @@ func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 }
 
 func TestActionRepository_Memory(t *testing.T) {
+	t.Parallel()
 	runActionRepositoryTest(t, func(t *testing.T) interfaces.Repository {
 		return memory.New()
 	})
 }
 
 func TestActionRepository_Firestore(t *testing.T) {
+	t.Parallel()
 	runActionRepositoryTest(t, newFirestoreRepository)
 }

@@ -162,11 +162,13 @@ func runActionMessageRepositoryTest(t *testing.T, newRepo func(t *testing.T) int
 }
 
 func TestActionMessageRepository_Memory(t *testing.T) {
+	t.Parallel()
 	runActionMessageRepositoryTest(t, func(t *testing.T) interfaces.Repository {
 		return memory.New()
 	})
 }
 
 func TestActionMessageRepository_Firestore(t *testing.T) {
+	t.Parallel()
 	runActionMessageRepositoryTest(t, newFirestoreRepository)
 }

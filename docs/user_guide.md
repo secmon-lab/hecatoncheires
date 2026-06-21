@@ -557,6 +557,55 @@ All mutations go through GraphQL (WebUI) or agent tools (LLM).
 Domain models, repository backends, use cases, and Firestore layout for
 Action Steps are documented in [develop/architecture.md](develop/architecture.md).
 
+## Knowledge
+
+The **Knowledge** section (sidebar → Knowledge) is a workspace-wide, shared
+knowledge base for capturing organization-specific information that the LLM does
+not know on its own — operating rules, internal proper nouns, past judgements,
+threat intel, and so on — so it can be reused on future cases. See
+[Concepts → Knowledge](concepts.md#knowledge) for the definition.
+
+A Knowledge entry has three parts:
+
+- **Title** — a one-line heading (required).
+- **Claim** — a single **Markdown** body. Headings, lists, code blocks, and
+  links are rendered in the viewer. Up to ~8,000 characters.
+- **Tags** — one or more free-form labels (**at least one is required**). Tags
+  drive filtering and are suggested from those already used in the workspace.
+
+### Browsing and searching
+
+The list shows each entry as a card (title, a plain-text preview of the claim,
+its tags, author, and last-updated time). You can:
+
+- **Filter by tag** — pick one or more tags; only entries carrying *all* of them
+  are shown.
+- **Search** — type in the search box for semantic search (results ranked by
+  relevance, not just exact keyword match). When the deployment has no embedding
+  client configured, search falls back to substring matching.
+
+### Editing
+
+Open an entry to view the rendered claim; switch to **Edit** to change the raw
+Markdown (a character counter enforces the length limit), edit the title, and
+add/remove tags. **Create** and **Delete** are available from the list and
+detail views. Deletion is permanent and asks for confirmation.
+
+### Who can write
+
+Workspace members can read and write all Knowledge through the WebUI. AI agents
+can also read it always and **write it during case processing — except while
+working a private case**, because shared knowledge is visible to the whole
+workspace and a private case's contents must not leak into it. See
+[the agent tool table](#available-agent-tools).
+
+### Embedding (semantic search)
+
+Semantic search reuses the existing embedding client configured via
+`--embedding-gemini-project-id` / `--embedding-gemini-location` /
+`--embedding-model` (see [CLI Reference](cli.md)). No Knowledge-specific flags or
+environment variables are introduced, and no new Firestore index is required.
+
 ## Chat with the AI in a Slack thread
 
 The agent that responds to `@mention` in Slack threads treats each thread as
@@ -610,9 +659,15 @@ own configuration; missing config silently disables that namespace's tools
 | Namespace | Tools | Gate |
 | --- | --- | --- |
 | `core__*` | Action read/create/update/archive | Always on |
+| `knowledge__*` | Workspace knowledge: `search`/`get`/`list_tags` (read), `create`/`update` (write) | Read always on; **write tools are withheld while processing a private Case** (shared knowledge is workspace-visible, so a private Case's contents must not leak into it) |
 | `slack__*` | Workspace search (read-only), bulk message fetch | Slack bot token; search additionally requires the User OAuth token with `search:read` |
 | `notion__*` | Page/database search, page Markdown fetch | `--notion-api-token` |
 | `github__*` | Issue/PR search, single Issue/PR fetch, file content, commit history | All three `--github-app-*` flags |
+
+The `knowledge__*` tools share the workspace-wide [Knowledge](#knowledge) base
+with the WebUI. Semantic search uses the embedding client (the same one
+configured by `--embedding-*`); when no embedding client is configured the agent
+still works and search falls back to substring matching.
 
 The mention flow uses the **read-only** Slack tool set (no `post_message` —
 the trace UI handles outbound messages). The `assist` flow uses the full

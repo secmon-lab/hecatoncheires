@@ -140,6 +140,12 @@ type CreateGitHubSourceInput struct {
 	Enabled      *bool    `json:"enabled,omitempty"`
 }
 
+type CreateKnowledgeInput struct {
+	Title string   `json:"title"`
+	Claim *string  `json:"claim,omitempty"`
+	Tags  []string `json:"tags"`
+}
+
 type CreateMemoInput struct {
 	CaseID int                `json:"caseID"`
 	Title  string             `json:"title"`
@@ -350,6 +356,15 @@ type JobRunLogConnection struct {
 	NextCursor *string      `json:"nextCursor,omitempty"`
 }
 
+type Knowledge struct {
+	ID        string    `json:"id"`
+	Title     string    `json:"title"`
+	Claim     string    `json:"claim"`
+	Tags      []string  `json:"tags"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
 type MemoConfiguration struct {
 	Description string             `json:"description"`
 	Fields      []*FieldDefinition `json:"fields"`
@@ -510,6 +525,13 @@ type UpdateGitHubSourceInput struct {
 	Description  *string  `json:"description,omitempty"`
 	Repositories []string `json:"repositories,omitempty"`
 	Enabled      *bool    `json:"enabled,omitempty"`
+}
+
+type UpdateKnowledgeInput struct {
+	ID    string   `json:"id"`
+	Title *string  `json:"title,omitempty"`
+	Claim *string  `json:"claim,omitempty"`
+	Tags  []string `json:"tags,omitempty"`
 }
 
 type UpdateMemoInput struct {

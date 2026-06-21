@@ -232,6 +232,9 @@ func (m *mockRepo) Import() interfaces.ImportRepository {
 func (m *mockRepo) Memo() interfaces.MemoRepository {
 	panic("unexpected call: Memo()")
 }
+func (m *mockRepo) Knowledge() interfaces.KnowledgeRepository {
+	panic("unexpected call: Knowledge()")
+}
 func (m *mockRepo) Close() error { return nil }
 
 // newMockRepo builds a mockRepo with default no-op sub-repos

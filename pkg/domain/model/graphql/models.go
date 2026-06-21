@@ -27,7 +27,6 @@ type Case struct {
 	BoardStatus    *string          `json:"boardStatus,omitempty"`
 	Fields         []*FieldValue    `json:"fields"`
 	Actions        []*Action        `json:"actions"`
-	Knowledges     []*Knowledge     `json:"knowledges"`
 	// AgentAdditionalPrompt is the Markdown text appended to the agent
 	// system prompt for this Case. Always present (empty string when
 	// unset) so the schema's String! contract is honoured.
@@ -60,21 +59,6 @@ type Action struct {
 	ArchivedAt *time.Time `json:"archivedAt,omitempty"`
 	CreatedAt  time.Time  `json:"createdAt"`
 	UpdatedAt  time.Time  `json:"updatedAt"`
-}
-
-// Knowledge is a custom GraphQL model with WorkspaceID for argument-based propagation.
-type Knowledge struct {
-	ID          string    `json:"id"`
-	WorkspaceID string    `json:"-"`
-	CaseID      int       `json:"caseID"`
-	Case        *Case     `json:"case,omitempty"`
-	SourceID    string    `json:"sourceID"`
-	SourceURLs  []string  `json:"sourceURLs"`
-	Title       string    `json:"title"`
-	Summary     string    `json:"summary"`
-	SourcedAt   time.Time `json:"sourcedAt"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 // Memo is a custom GraphQL model with WorkspaceID for argument-based propagation.

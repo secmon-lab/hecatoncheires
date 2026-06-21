@@ -522,11 +522,19 @@ func runSlackUserRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 }
 
 func TestMemorySlackUserRepository(t *testing.T) {
+	t.Parallel()
 	runSlackUserRepositoryTest(t, func(t *testing.T) interfaces.Repository {
 		return memory.New()
 	})
 }
 
+// TestFirestoreSlackUserRepository is intentionally left serial (no t.Parallel).
+// The SlackUser repository exposes DeleteAll and GetAll as collection-wide
+// operations with no workspace-level scoping. Running this test concurrently
+// with any other Firestore test that touches the user collection would cause
+// spurious failures: DeleteAll in one sub-test would wipe data written by a
+// concurrent sub-test, and GetAll assertions on exact counts would become
+// non-deterministic.
 func TestFirestoreSlackUserRepository(t *testing.T) {
 	runSlackUserRepositoryTest(t, newFirestoreRepository)
 }

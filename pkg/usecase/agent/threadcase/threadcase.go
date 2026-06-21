@@ -10,6 +10,7 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
+	knowledgetool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/knowledge"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
@@ -276,6 +277,10 @@ func (uc *UseCase) buildToolResolver(req TurnRequest) *agent.ToolSetResolver {
 		Notion:   notiontool.Deps{Client: d.NotionClient},
 		GitHub:   d.GitHubClient,
 		WebFetch: d.WebFetchClient,
+		Knowledge: knowledgetool.Deps{
+			WorkspaceID: wsID,
+			Accessor:    d.KnowledgeAccessor,
+		},
 	})
 }
 
