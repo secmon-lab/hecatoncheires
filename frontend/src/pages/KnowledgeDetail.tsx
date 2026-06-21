@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@apollo/client'
 import {
@@ -55,15 +55,20 @@ export default function KnowledgeDetail() {
   const { data, loading } = useQuery(GET_KNOWLEDGE, {
     variables: { workspaceId: currentWorkspace?.id, id },
     skip: !currentWorkspace || !id || isNew,
-    onCompleted(d) {
-      if (!initialized && d.knowledge) {
-        setTitle(d.knowledge.title)
-        setClaim(d.knowledge.claim ?? '')
-        setTags(d.knowledge.tags)
-        setInitialized(true)
-      }
-    },
   })
+
+  // Initialize the form from loaded data via useEffect rather than the query's
+  // onCompleted callback: onCompleted does not fire on an Apollo cache hit, so a
+  // cached entry would leave the form blank. useEffect re-syncs on every data
+  // change and the `initialized` guard keeps user edits from being clobbered.
+  useEffect(() => {
+    if (!initialized && data?.knowledge) {
+      setTitle(data.knowledge.title)
+      setClaim(data.knowledge.claim ?? '')
+      setTags(data.knowledge.tags)
+      setInitialized(true)
+    }
+  }, [data, initialized])
 
   const refetchList = [
     { query: GET_KNOWLEDGES, variables: { workspaceId: currentWorkspace?.id } },
