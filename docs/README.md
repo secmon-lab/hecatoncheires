@@ -50,6 +50,7 @@ flowchart TD
 | [eval.md](eval.md) | Offline scenario-based evaluation of LLM workflows |
 | [slack.md](slack.md) | Slack App setup and integration |
 | [integrations.md](integrations.md) | Notion and GitHub integrations |
+| [mcp.md](mcp.md) | MCP server (read-only Workspace/Case/Action tools, Rego authorization) |
 | [user_guide.md](user_guide.md) | End-user guide (Slack workflows) |
 | [operations.md](operations.md) | Operations and runbook |
 | [develop/README.md](develop/README.md) | Developer entry point |

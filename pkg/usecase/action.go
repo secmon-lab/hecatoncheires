@@ -578,11 +578,34 @@ func (uc *ActionUseCase) notifyArchiveOnSlack(ctx context.Context, workspaceID s
 	}
 }
 
-func (uc *ActionUseCase) GetAction(ctx context.Context, workspaceID string, id int64) (*model.Action, error) {
+// GetAction returns the action by ID. opts is variadic and optional: existing
+// callers pass none and get the action regardless of its parent Case's
+// privacy (archive scope is irrelevant to a single Get). When the first opts
+// element has ExcludePrivateCaseActions set, the parent Case is loaded and an
+// action belonging to a private Case is reported as ErrAccessDenied — the MCP
+// endpoint relies on this so private-case actions are never returned.
+func (uc *ActionUseCase) GetAction(ctx context.Context, workspaceID string, id int64, opts ...interfaces.ActionListOptions) (*model.Action, error) {
 	action, err := uc.repo.Action().Get(ctx, workspaceID, id)
 	if err != nil {
 		return nil, goerr.Wrap(ErrActionNotFound, "action not found", goerr.V(ActionIDKey, id))
 	}
+
+	var opt interfaces.ActionListOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+	if opt.ExcludePrivateCaseActions {
+		parentCase, caseErr := uc.repo.Case().Get(ctx, workspaceID, action.CaseID)
+		if caseErr != nil {
+			return nil, goerr.Wrap(ErrCaseNotFound, "parent case not found",
+				goerr.V(ActionIDKey, id), goerr.V(CaseIDKey, action.CaseID))
+		}
+		if parentCase.IsPrivate {
+			return nil, goerr.Wrap(ErrAccessDenied, "action belongs to a private case",
+				goerr.V(ActionIDKey, id), goerr.V(CaseIDKey, action.CaseID))
+		}
+	}
+
 	return action, nil
 }
 
@@ -592,25 +615,43 @@ func (uc *ActionUseCase) ListActions(ctx context.Context, workspaceID string, op
 		return nil, goerr.Wrap(err, "failed to list actions")
 	}
 
+	// Two filters may apply. Membership-based access control kicks in when an
+	// auth token is present (drop actions whose private parent Case the caller
+	// is not a member of). ExcludePrivateCaseActions is stricter and token-
+	// independent: it drops every action whose parent Case is private, for
+	// entry points (MCP) that must never expose private cases. Either one
+	// requires loading the parent Cases.
 	token, tokenErr := auth.TokenFromContext(ctx)
-	if tokenErr == nil {
+	needCaseLookup := tokenErr == nil || opts.ExcludePrivateCaseActions
+	if needCaseLookup {
 		caseIDSet := make(map[int64]struct{})
 		for _, action := range actions {
 			caseIDSet[action.CaseID] = struct{}{}
 		}
-		accessibleCases := make(map[int64]bool, len(caseIDSet))
+		caseInfo := make(map[int64]*model.Case, len(caseIDSet))
 		for caseID := range caseIDSet {
 			parentCase, caseErr := uc.repo.Case().Get(ctx, workspaceID, caseID)
 			if caseErr != nil {
 				continue
 			}
-			accessibleCases[caseID] = model.IsCaseAccessible(parentCase, token.Sub)
+			caseInfo[caseID] = parentCase
 		}
 		filtered := make([]*model.Action, 0, len(actions))
 		for _, action := range actions {
-			if accessibleCases[action.CaseID] {
-				filtered = append(filtered, action)
+			parentCase, ok := caseInfo[action.CaseID]
+			// A missing parent Case means we cannot vouch for the action's
+			// visibility, so drop it (this also matches the prior token-path
+			// behaviour where an unresolved case was treated as inaccessible).
+			if !ok {
+				continue
 			}
+			if opts.ExcludePrivateCaseActions && parentCase.IsPrivate {
+				continue
+			}
+			if tokenErr == nil && !model.IsCaseAccessible(parentCase, token.Sub) {
+				continue
+			}
+			filtered = append(filtered, action)
 		}
 		actions = filtered
 	}
@@ -620,6 +661,11 @@ func (uc *ActionUseCase) ListActions(ctx context.Context, workspaceID string, op
 func (uc *ActionUseCase) GetActionsByCase(ctx context.Context, workspaceID string, caseID int64, opts interfaces.ActionListOptions) ([]*model.Action, error) {
 	parentCase, err := uc.repo.Case().Get(ctx, workspaceID, caseID)
 	if err != nil {
+		return []*model.Action{}, nil
+	}
+	// MCP and similar entry points must never expose actions of a private
+	// Case, even to a member: an empty list reveals nothing about the case.
+	if opts.ExcludePrivateCaseActions && parentCase.IsPrivate {
 		return []*model.Action{}, nil
 	}
 	token, tokenErr := auth.TokenFromContext(ctx)

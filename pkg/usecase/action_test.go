@@ -1497,4 +1497,103 @@ func TestActionUseCase_PrivateCaseAccessControl(t *testing.T) {
 		gt.NoError(t, err).Required()
 		gt.Array(t, nonMemberActions).Length(0)
 	})
+
+	t.Run("ExcludePrivateCaseActions drops private-case actions even for members", func(t *testing.T) {
+		repo := memory.New()
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "", nil)
+		memberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMEMBER"})
+
+		pubCase, err := caseUC.CreateCase(memberCtx, testWorkspaceID, "Public Case", "Desc", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+		_, err = actionUC.CreateAction(memberCtx, testWorkspaceID, pubCase.ID, "Public Action", "Desc", "", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+
+		privateCase := &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
+			Title:          "Private Case",
+			Description:    "Secret",
+			IsPrivate:      true,
+			ChannelUserIDs: []string{"UMEMBER"},
+			AssigneeIDs:    []string{},
+		}
+		privCreated, err := repo.Case().Create(memberCtx, testWorkspaceID, privateCase)
+		gt.NoError(t, err).Required()
+		_, err = actionUC.CreateAction(memberCtx, testWorkspaceID, privCreated.ID, "Private Action", "Desc", "", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+
+		// A member normally sees both; with ExcludePrivateCaseActions the
+		// private-case action is dropped regardless of membership.
+		opts := interfaces.ActionListOptions{ExcludePrivateCaseActions: true}
+		actions, err := actionUC.ListActions(memberCtx, testWorkspaceID, opts)
+		gt.NoError(t, err).Required()
+		gt.Array(t, actions).Length(1)
+		gt.Value(t, actions[0].Title).Equal("Public Action")
+
+		// Same result with no auth token at all (system/MCP context).
+		actionsNoToken, err := actionUC.ListActions(context.Background(), testWorkspaceID, opts)
+		gt.NoError(t, err).Required()
+		gt.Array(t, actionsNoToken).Length(1)
+		gt.Value(t, actionsNoToken[0].Title).Equal("Public Action")
+	})
+
+	t.Run("ExcludePrivateCaseActions: GetActionsByCase on private case returns empty for members", func(t *testing.T) {
+		repo := memory.New()
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "", nil)
+		memberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMEMBER"})
+
+		privateCase := &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
+			Title:          "Private Case",
+			Description:    "Secret",
+			IsPrivate:      true,
+			ChannelUserIDs: []string{"UMEMBER"},
+			AssigneeIDs:    []string{},
+		}
+		created, err := repo.Case().Create(memberCtx, testWorkspaceID, privateCase)
+		gt.NoError(t, err).Required()
+		_, err = actionUC.CreateAction(memberCtx, testWorkspaceID, created.ID, "Action", "Desc", "", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+
+		opts := interfaces.ActionListOptions{ExcludePrivateCaseActions: true}
+		actions, err := actionUC.GetActionsByCase(memberCtx, testWorkspaceID, created.ID, opts)
+		gt.NoError(t, err).Required()
+		gt.Array(t, actions).Length(0)
+	})
+
+	t.Run("ExcludePrivateCaseActions: GetAction denies private-case action, allows public", func(t *testing.T) {
+		repo := memory.New()
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "", nil)
+		memberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMEMBER"})
+
+		pubCase, err := caseUC.CreateCase(memberCtx, testWorkspaceID, "Public Case", "Desc", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+		pubAction, err := actionUC.CreateAction(memberCtx, testWorkspaceID, pubCase.ID, "Public Action", "Desc", "", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+
+		privateCase := &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
+			Title:          "Private Case",
+			Description:    "Secret",
+			IsPrivate:      true,
+			ChannelUserIDs: []string{"UMEMBER"},
+			AssigneeIDs:    []string{},
+		}
+		privCreated, err := repo.Case().Create(memberCtx, testWorkspaceID, privateCase)
+		gt.NoError(t, err).Required()
+		privAction, err := actionUC.CreateAction(memberCtx, testWorkspaceID, privCreated.ID, "Private Action", "Desc", "", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+
+		opts := interfaces.ActionListOptions{ExcludePrivateCaseActions: true}
+
+		// Public-case action is returned.
+		got, err := actionUC.GetAction(memberCtx, testWorkspaceID, pubAction.ID, opts)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.Title).Equal("Public Action")
+
+		// Private-case action is denied even though the caller is a member.
+		_, err = actionUC.GetAction(memberCtx, testWorkspaceID, privAction.ID, opts)
+		gt.Error(t, err).Is(usecase.ErrAccessDenied)
+	})
 }

@@ -30,6 +30,7 @@ type Server struct {
 	slackSigningSecret      string
 	workspaceRegistry       *model.WorkspaceRegistry
 	tickHookHandler         *TickHookHandler
+	mcpHandler              http.Handler
 }
 
 type Options func(*Server)
@@ -83,6 +84,16 @@ func WithSlackCommand(handler *SlackCommandHandler) Options {
 func WithTickHook(handler *TickHookHandler) Options {
 	return func(s *Server) {
 		s.tickHookHandler = handler
+	}
+}
+
+// WithMCP wires the MCP (Model Context Protocol) endpoint at /mcp. The handler
+// already embeds its own authorization (Rego policy) and request-context
+// middleware, so it is mounted as-is. nil handler leaves the route
+// unregistered.
+func WithMCP(handler http.Handler) Options {
+	return func(s *Server) {
+		s.mcpHandler = handler
 	}
 }
 
@@ -164,6 +175,13 @@ func New(gqlHandler http.Handler, opts ...Options) (*Server, error) {
 	// behind IAP / private network).
 	if s.tickHookHandler != nil {
 		r.Post("/hooks/tick", s.tickHookHandler.ServeHTTP)
+	}
+
+	// MCP endpoint (Streamable HTTP). The handler embeds its own Rego-based
+	// authorization, so no auth middleware is applied here. Must be registered
+	// before the catch-all SPA route.
+	if s.mcpHandler != nil {
+		r.Handle("/mcp", s.mcpHandler)
 	}
 
 	// Static file serving for SPA (catch-all, must be last)
