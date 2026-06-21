@@ -13,61 +13,40 @@ are useful when working with Hecatoncheires. A Skill is a directory containing a
 
 ## Installing
 
-Claude Code discovers skills from two locations:
+These skills are published through this repo's plugin marketplace
+(`.claude-plugin/marketplace.json`), so the supported way to install them is via
+Claude Code's plugin system. From inside Claude Code:
 
-- **Project scope** — `.claude/skills/` in the repository you are working in.
-  Available only inside that repository, and shareable with everyone who clones
-  it.
-- **Personal scope** — `~/.claude/skills/` in your home directory. Available in
-  every project you open.
-
-Pick whichever scope fits, then make the skill available there. Run these
-commands from the repository root.
-
-### Project scope (recommended for this repo)
-
-```sh
-mkdir -p .claude/skills
-ln -s "$(pwd)/skills/hecatoncheires-build-scenario" .claude/skills/hecatoncheires-build-scenario
+```text
+/plugin marketplace add secmon-lab/hecatoncheires
+/plugin install hecatoncheires-build-scenario@hecatoncheires
 ```
 
-A symlink keeps the skill in sync with the version checked into the repository.
-If you prefer an independent copy, use `cp -R` instead of `ln -s`:
-
-```sh
-mkdir -p .claude/skills
-cp -R skills/hecatoncheires-build-scenario .claude/skills/
-```
-
-### Personal scope (use everywhere)
-
-```sh
-mkdir -p ~/.claude/skills
-cp -R skills/hecatoncheires-build-scenario ~/.claude/skills/
-```
-
-## Verifying
-
-After installing, start Claude Code and run `/help` (or trigger a task that
-matches the skill's `description`). The skill should appear in the available
-skills list and activate automatically when relevant.
+The first command registers this repository as a marketplace; the second installs
+the skill from it. Run `/plugin` to manage installed plugins.
 
 ## Authoring new skills
 
-Add a new directory under `skills/<your-skill-name>/` containing a `SKILL.md`
-with frontmatter:
+1. Add a directory under `skills/<your-skill-name>/` containing a `SKILL.md`
+   with frontmatter:
 
-```markdown
----
-name: your-skill-name
-description: One sentence describing what the skill does and when to use it.
----
+   ```markdown
+   ---
+   name: your-skill-name
+   description: One sentence describing what the skill does and when to use it.
+   ---
 
-# Skill body
+   # Skill body
 
-Instructions Claude Code follows when the skill activates.
-```
+   Instructions Claude Code follows when the skill activates.
+   ```
 
-Keep `name` in kebab-case and matching the directory name, and write a
-`description` that clearly states *when* the skill should trigger — that text is
-how Claude Code decides to load it. Then add a row to the table above.
+   Keep `name` in kebab-case and matching the directory name, and write a
+   `description` that clearly states *when* the skill should trigger — that text
+   is how Claude Code decides to load it.
+
+2. Register the skill as a plugin in `.claude-plugin/marketplace.json` (add an
+   entry under `plugins` with `name`, `source`, `description`, `version`) so it
+   can be installed via `/plugin install`.
+
+3. Add a row to the **Available skills** table above.
