@@ -124,10 +124,12 @@ writes a Trace blob for every turn for diagnostics.
 
 In case-bound mode the agent can edit the bound Case directly via the
 `case__update_case` (title / description / custom fields), `case__assign` /
-`case__unassign` (delta assignee changes), and, for thread-mode workspaces,
-`case__update_case_status` tools — the same tools the
+`case__unassign` (delta assignee changes), and a mode-specific "mark done" tool
+— `case__update_case_status` for thread-mode workspaces (move to a closed board
+status) or `case__close_case` for channel-mode cases (close OPEN -> CLOSED) —
+the same tools the
 event-driven Agent Jobs use. They funnel through `CaseUseCase.UpdateCase` /
-`AssignCase` / `UnassignCase` / `UpdateCaseStatus`, so every entry point (Web
+`AssignCase` / `UnassignCase` / `UpdateCaseStatus` / `CloseCase`, so every entry point (Web
 GraphQL, Slack modal, Job, mention agent) enforces the same validation,
 including the SlackUser existence check on newly assigned users and user-typed
 field values. Assignees are mutated only through the delta `AssignCase` /

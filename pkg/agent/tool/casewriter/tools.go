@@ -2,10 +2,11 @@
 // event-driven Agent Jobs and the case-bound mention agent. Field-style
 // updates (title / description / custom fields) go through case__update_case;
 // assignee changes go through case__assign / case__unassign (delta add/remove,
-// applied atomically so concurrent edits never clobber); board status
-// transitions (including close, when a status is configured as closed) go
-// through case__update_case_status. Archive and delete are intentionally
-// absent.
+// applied atomically so concurrent edits never clobber). Marking a case done
+// is mode-specific: thread-mode workspaces (a configured board status set)
+// close by moving to a closed board status via case__update_case_status, while
+// channel-mode cases (no board status) close via case__close_case. Archive and
+// delete are intentionally absent.
 package casewriter
 
 import (
@@ -26,6 +27,7 @@ import (
 type CaseMutator interface {
 	UpdateCase(ctx context.Context, workspaceID string, id int64, patch CaseUpdate) (*model.Case, error)
 	UpdateCaseStatus(ctx context.Context, workspaceID string, id int64, boardStatus string) (*model.Case, error)
+	CloseCase(ctx context.Context, workspaceID string, id int64) (*model.Case, error)
 	AssignCase(ctx context.Context, workspaceID string, id int64, userIDs []string) (*model.Case, error)
 	UnassignCase(ctx context.Context, workspaceID string, id int64, userIDs []string) (*model.Case, error)
 }
@@ -56,9 +58,12 @@ type Deps struct {
 	StatusSet *model.ActionStatusSet
 }
 
-// New builds the writer-side case tools. case__update_case is always present;
-// case__update_case_status is added only when a board status set is configured
-// (thread-mode workspaces).
+// New builds the writer-side case tools. case__update_case / case__assign /
+// case__unassign are always present. The "mark done" tool is mode-specific and
+// exactly one is built: thread-mode workspaces (a configured board status set)
+// get case__update_case_status (closing by moving to a closed board status),
+// while channel-mode cases (no board status) get case__close_case. Offering
+// only one keeps the LLM from facing two redundant ways to close a case.
 func New(deps Deps) []gollem.Tool {
 	tools := []gollem.Tool{
 		&updateCaseTool{deps: deps},
@@ -67,6 +72,8 @@ func New(deps Deps) []gollem.Tool {
 	}
 	if deps.StatusSet != nil {
 		tools = append(tools, &updateCaseStatusTool{deps: deps})
+	} else {
+		tools = append(tools, &closeCaseTool{deps: deps})
 	}
 	return tools
 }
@@ -349,6 +356,43 @@ func (t *updateCaseStatusTool) Run(ctx context.Context, args map[string]any) (ma
 		"id":           updated.ID,
 		"status":       updated.Status.String(),
 		"board_status": updated.BoardStatus,
+	}, nil
+}
+
+// closeCaseTool marks a channel-mode case done. Thread-mode workspaces close via
+// the board-status tool instead (see New), so this tool is built only when no
+// board status set is configured.
+type closeCaseTool struct {
+	deps Deps
+}
+
+func (t *closeCaseTool) Spec() gollem.ToolSpec {
+	return gollem.ToolSpec{
+		Name: "case__close_case",
+		Description: "Mark the current case as done by closing it (lifecycle " +
+			"OPEN -> CLOSED). Only do this when the work is genuinely resolved. " +
+			"Closing a case that is already closed, or one still in draft, is " +
+			"rejected. This tool takes no parameters.",
+	}
+}
+
+func (t *closeCaseTool) Run(ctx context.Context, args map[string]any) (map[string]any, error) {
+	tool.Update(ctx, "Closing case...")
+
+	if t.deps.CaseUC == nil {
+		return nil, goerr.New("casewriter: CaseUC is not configured")
+	}
+
+	updated, err := t.deps.CaseUC.CloseCase(ctx, t.deps.WorkspaceID, t.deps.CaseID)
+	if err != nil {
+		return nil, goerr.Wrap(err, "close case",
+			goerr.V("workspace_id", t.deps.WorkspaceID),
+			goerr.V("case_id", t.deps.CaseID))
+	}
+
+	return map[string]any{
+		"id":     updated.ID,
+		"status": updated.Status.String(),
 	}, nil
 }
 

@@ -27,6 +27,10 @@ func (fakeCaseMutator) UpdateCaseStatus(context.Context, string, int64, string) 
 	return &model.Case{}, nil
 }
 
+func (fakeCaseMutator) CloseCase(context.Context, string, int64) (*model.Case, error) {
+	return &model.Case{}, nil
+}
+
 func (fakeCaseMutator) AssignCase(_ context.Context, _ string, _ int64, _ []string) (*model.Case, error) {
 	return &model.Case{}, nil
 }
@@ -248,14 +252,15 @@ func TestBuildTools_CaseWriterWiring(t *testing.T) {
 		gt.Bool(t, names["case__update_case_status"]).False()
 	})
 
-	t.Run("with CaseUC and a status set, both case-write tools are present", func(t *testing.T) {
+	t.Run("with CaseUC and a status set, the board-status tool closes (no close tool)", func(t *testing.T) {
 		tools := casebound.BuildToolsForTest(&agent.CommonDeps{CaseUC: fakeCaseMutator{}}, req)
 		names := toolNames(tools)
 		gt.Bool(t, names["case__update_case"]).True()
 		gt.Bool(t, names["case__update_case_status"]).True()
+		gt.Bool(t, names["case__close_case"]).False()
 	})
 
-	t.Run("with CaseUC but no status set, status tool is omitted", func(t *testing.T) {
+	t.Run("with CaseUC but no status set, close tool replaces the status tool", func(t *testing.T) {
 		noStatus := &model.WorkspaceEntry{
 			Workspace:   model.Workspace{ID: "ws-test", Name: "Test"},
 			FieldSchema: entry.FieldSchema,
@@ -265,5 +270,6 @@ func TestBuildTools_CaseWriterWiring(t *testing.T) {
 		names := toolNames(tools)
 		gt.Bool(t, names["case__update_case"]).True()
 		gt.Bool(t, names["case__update_case_status"]).False()
+		gt.Bool(t, names["case__close_case"]).True()
 	})
 }

@@ -88,12 +88,13 @@ Read-only:
 Writer (Job-only):
 - `core__create_action`, `core__update_action`, `core__update_action_status`, `core__set_action_assignee`
 - `core__add_action_step`, `core__set_action_step_done`, `core__rename_action_step`
-- `case__update_case` — title / description / custom field values. Assignees, status changes, and deletion are **not** exposed here (assignees move through `case__assign` / `case__unassign`; status through `case__update_case_status`). Inputs are validated in the usecase: unknown field ids and type / option mismatches are rejected so the agent gets a correctable error. The tool description instructs the agent to review the case's current values (shown in the system prompt) before overwriting, since title and description are full replacements.
+- `case__update_case` — title / description / custom field values. Assignees, status changes, and deletion are **not** exposed here (assignees move through `case__assign` / `case__unassign`; marking the case done goes through `case__update_case_status` or `case__close_case`, depending on the mode). Inputs are validated in the usecase: unknown field ids and type / option mismatches are rejected so the agent gets a correctable error. The tool description instructs the agent to review the case's current values (shown in the system prompt) before overwriting, since title and description are full replacements.
 - `case__assign` / `case__unassign` — add / remove assignees by delta (set union / difference), applied atomically server-side so concurrent edits never clobber one another. `case__assign` rejects user ids that do not exist in the SlackUser store; `case__unassign` does not (a since-deleted user must stay removable).
 - `case__update_case_status` — moves the case to another board status (a closed status closes the case). Only present for thread-mode workspaces (those with a configured `CaseStatusSet`); the parameter enumerates the configured status ids.
+- `case__close_case` — marks the case done by closing it (lifecycle `OPEN` -> `CLOSED`); takes no parameters. The channel-mode counterpart of `case__update_case_status`: it is built only when the workspace has **no** `CaseStatusSet` (channel-mode cases have no board status), so exactly one "mark done" tool is offered per mode. Closing an already-closed or draft case is rejected with a correctable error.
 - `slack__post_to_case_channel` — fixed to `Case.SlackChannelID`; arbitrary channels are not exposed
 
-The same `case__update_case` / `case__update_case_status` tools are also
+The same `case__update_case` / `case__update_case_status` / `case__close_case` tools are also
 available to the case-bound mention agent (`pkg/usecase/agent/casebound`), so a
 human mentioning the bot in a case channel can have it edit the case directly.
 They are wired only when a `CaseUC` is supplied to the agent runtime.
