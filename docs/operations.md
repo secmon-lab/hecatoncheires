@@ -78,25 +78,19 @@ invocation per matching `(job, case)` tuple. The full subscription syntax
 
 ### Tools available to a Job
 
-Read-only:
-- `core__list_actions`, `core__get_action`, `core__list_action_steps`
-- `core__search_referenceable_cases` / `core__get_referenceable_cases` — only present when the workspace defines a `case_ref` / `multi_case_ref` field. The first searches the field's target workspace (resolved from the field id; private and draft Cases are excluded) for the Case id to set; the second batch-fetches full details (including custom field values) for a list of Case ids in that workspace. Set the value itself through `case__update_case`'s `fields`.
-- Slack search / channel-history (via `slack_ro`)
-- Notion search / page-get (via `notion`)
-- GitHub search (via `github`)
+The exact tool palette a Job gets — and how it differs from the interactive
+mention agent — is documented once, in
+**[Agent Tools → Tools available by context](agent_tools.md#tools-available-by-context)**.
+The short version, because it surprises people:
 
-Writer (Job-only):
-- `core__create_action`, `core__update_action`, `core__update_action_status`, `core__set_action_assignee`
-- `core__add_action_step`, `core__set_action_step_done`, `core__rename_action_step`
-- `case__update_case` — title / description / custom field values. Assignees, status changes, and deletion are **not** exposed here (assignees move through `case__assign` / `case__unassign`; status through `case__update_case_status`). Inputs are validated in the usecase: unknown field ids and type / option mismatches are rejected so the agent gets a correctable error. The tool description instructs the agent to review the case's current values (shown in the system prompt) before overwriting, since title and description are full replacements.
-- `case__assign` / `case__unassign` — add / remove assignees by delta (set union / difference), applied atomically server-side so concurrent edits never clobber one another. `case__assign` rejects user ids that do not exist in the SlackUser store; `case__unassign` does not (a since-deleted user must stay removable).
-- `case__update_case_status` — moves the case to another board status (a closed status closes the case). Only present for thread-mode workspaces (those with a configured `CaseStatusSet`); the parameter enumerates the configured status ids.
-- `slack__post_to_case_channel` — fixed to `Case.SlackChannelID`; arbitrary channels are not exposed
-
-The same `case__update_case` / `case__update_case_status` tools are also
-available to the case-bound mention agent (`pkg/usecase/agent/casebound`), so a
-human mentioning the bot in a case channel can have it edit the case directly.
-They are wired only when a `CaseUC` is supplied to the agent runtime.
+- A Job gets **case edits** (`case__update_case`, `case__assign` /
+  `case__unassign`, and `case__update_case_status` where a case status set
+  exists), **action management** in channel-mode workspaces, **workspace
+  knowledge**, **memos** (when enabled), **web fetch**, and a single
+  channel-pinned Slack poster (`slack__post_to_case_channel`).
+- A Job does **NOT** get the Slack *search* tools, Notion, or GitHub. Those are
+  wired only into the interactive / investigation contexts. A Job that needs
+  external context must already have it in the case — it cannot fetch it live.
 
 Writer mutations run as `model.SystemActorID` (`"@system"`). The
 `CaseUseCase.UpdateCase` path skips Slack user-token permission checks
