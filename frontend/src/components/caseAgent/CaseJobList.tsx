@@ -126,6 +126,7 @@ function JobRow({
         className={styles.rowHeader}
         onClick={onToggle}
         aria-expanded={open}
+        aria-controls={`job-prompt-${job.id}`}
       >
         <span className={styles.rowMain}>
           <span className={styles.rowName}>{job.name}</span>
@@ -155,7 +156,7 @@ function JobRow({
       </button>
 
       {open && (
-        <div className={styles.promptWrap}>
+        <div className={styles.promptWrap} id={`job-prompt-${job.id}`}>
           <div className={styles.promptLabelRow}>
             <span className={styles.promptLabel}>{t('caseAgentJobPromptLabel')}</span>
             <span className={styles.promptRule} />

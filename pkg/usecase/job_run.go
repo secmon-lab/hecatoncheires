@@ -396,6 +396,11 @@ func (uc *JobRunUseCase) ListCaseJobs(ctx context.Context, workspaceID string, c
 		return nil, goerr.Wrap(err, "get workspace from registry",
 			goerr.V("workspace_id", workspaceID))
 	}
+	// Defensive parity with ResolveJobName, which also tolerates a nil
+	// entry: no Jobs to list when the workspace has no registry entry.
+	if entry == nil {
+		return []*model.Job{}, nil
+	}
 
 	isOpen := c.Status.Normalize() == types.CaseStatusOpen
 	out := make([]*model.Job, 0, len(entry.Jobs))
