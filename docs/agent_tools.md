@@ -54,7 +54,8 @@ for Jobs (both channel- and thread-mode).
 | `case__update_case` | W | Update title / description / custom field values. | Title and description are **full replacements** — review current values (shown in the system prompt) before overwriting. Cannot change status or assignees. Unknown field ids and type / option mismatches are rejected with a correctable error. |
 | `case__assign` | W | Add assignee(s) by delta (set union). | Rejects user ids absent from the SlackUser store. |
 | `case__unassign` | W | Remove assignee(s) by delta (set difference). | Does **not** reject unknown ids (a since-deleted user must stay removable). Applied atomically server-side, so concurrent edits never clobber. |
-| `case__update_case_status` | W | Move the case to another board status (a closed status closes the case). | Only present for workspaces with a configured case status set (`CaseStatusSet`). The parameter enumerates the configured status ids. **See [Guardrails](#guardrails): Jobs are instructed not to close; the human-driven mention agent may.** |
+| `case__update_case_status` | W | Move the case to another board status (a closed status closes the case). | Thread-mode only — present when the workspace has a configured case status set (`CaseStatusSet`). The parameter enumerates the configured status ids. **See [Guardrails](#guardrails): Jobs are instructed not to close; the human-driven mention agent may.** |
+| `case__close_case` | W | Mark the case done by closing it (`OPEN` -> `CLOSED`); takes no parameters. | Channel-mode only — the counterpart of `case__update_case_status`, built when the workspace has **no** `CaseStatusSet`. Exactly one "mark done" tool is offered per mode. Closing an already-closed or draft case is rejected with a correctable error. |
 
 ### Slack tools (`slack`, `slackpost`)
 
@@ -182,6 +183,8 @@ hard lock.
 | **A Job posts only to the case's bound Slack channel.** | Jobs | **Code.** The only Slack write tool a Job gets is `slack__post_to_case_channel`, hard-pinned to `Case.SlackChannelID`. |
 | **Knowledge stays out of shared storage for private cases.** | Mention agent & Jobs on a private case | **Code.** `knowledge__create_knowledge` / `knowledge__update_knowledge` are withheld; only read tools remain. |
 | **A Job cannot read its own past run traces.** | Jobs | **Prompt.** Determine idempotency from the current case state, the action list, and Slack history — not from prior traces. |
+| **Actions exist only in channel-mode cases.** | All agent contexts | **Code, at the usecase boundary.** The action (`core__*`) tools are withheld from thread-mode in all hosts, *and* `ActionUseCase.CreateAction` / `UpdateAction` (reparent) reject a thread-mode parent (`ErrCaseThreadModeNoActions`) — so every entry point (GraphQL, Slack, agent, eval), not just the tool wiring, is covered. |
+| **Case lifecycle changes follow the mode-specific path.** | All agent contexts | **Code, at the usecase boundary.** Thread-mode cases close/reopen only via board status (`UpdateCaseStatus`); `CloseCase` / `ReopenCase` reject thread-mode (`ErrCaseThreadModeUseStatus`), and `UpdateCaseStatus` rejects channel-mode — keeping `BoardStatus` and the lifecycle `Status` in sync. |
 
 When a guardrail is "prompt only", treat it as a firm design constraint: do not
 write a Job prompt that tries to talk the agent around it (e.g. "ignore the

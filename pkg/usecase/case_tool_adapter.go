@@ -41,6 +41,10 @@ func (a *caseToolAdapter) UpdateCaseStatus(ctx context.Context, workspaceID stri
 	return a.uc.UpdateCaseStatus(ctx, workspaceID, id, boardStatus)
 }
 
+func (a *caseToolAdapter) CloseCase(ctx context.Context, workspaceID string, id int64) (*model.Case, error) {
+	return a.uc.CloseCase(ctx, workspaceID, id)
+}
+
 func (a *caseToolAdapter) AssignCase(ctx context.Context, workspaceID string, id int64, userIDs []string) (*model.Case, error) {
 	return a.uc.AssignCase(ctx, workspaceID, id, userIDs)
 }

@@ -143,6 +143,20 @@ func resolveActionStatusSet(registry *model.WorkspaceRegistry, workspaceID strin
 	return entry.ActionStatusSet
 }
 
+// ensureCaseAcceptsActions rejects an action write whose parent Case is
+// thread-mode. Thread-mode cases have no Actions (they track progress via the
+// configurable board status); enforcing this at the usecase boundary keeps the
+// invariant watertight for every entry point — GraphQL, Slack modal, agent
+// tools, eval — instead of relying on each tool-wiring site to withhold the
+// action tools. Channel-mode cases (the default) pass through unchanged.
+func ensureCaseAcceptsActions(c *model.Case) error {
+	if c.IsThreadBound() {
+		return goerr.Wrap(ErrCaseThreadModeNoActions,
+			"thread-mode case cannot have actions", goerr.V(CaseIDKey, c.ID))
+	}
+	return nil
+}
+
 func (uc *ActionUseCase) CreateAction(ctx context.Context, workspaceID string, caseID int64, title, description string, assigneeID string, slackMessageTS string, status types.ActionStatus, dueDate *time.Time) (*model.Action, error) {
 	if title == "" {
 		return nil, goerr.New("action title is required")
@@ -157,6 +171,10 @@ func (uc *ActionUseCase) CreateAction(ctx context.Context, workspaceID string, c
 	if tokenErr == nil && !model.IsCaseAccessible(caseModel, token.Sub) {
 		return nil, goerr.Wrap(ErrAccessDenied, "cannot create action in private case",
 			goerr.V(CaseIDKey, caseID), goerr.V("user_id", token.Sub))
+	}
+
+	if err := ensureCaseAcceptsActions(caseModel); err != nil {
+		return nil, err
 	}
 
 	statusSet := uc.statusSet(workspaceID)
@@ -344,10 +362,16 @@ func (uc *ActionUseCase) UpdateAction(ctx context.Context, workspaceID string, i
 	}
 
 	if in.CaseID != nil && *in.CaseID != existing.CaseID {
-		if _, err := uc.repo.Case().Get(ctx, workspaceID, *in.CaseID); err != nil {
+		newCase, err := uc.repo.Case().Get(ctx, workspaceID, *in.CaseID)
+		if err != nil {
 			return nil, goerr.Wrap(ErrCaseNotFound, "new case not found",
 				goerr.V(CaseIDKey, *in.CaseID),
 				goerr.V(ActionIDKey, in.ID))
+		}
+		// Reparenting must not move an action into a thread-mode case, which has
+		// no Actions. Same boundary invariant as CreateAction.
+		if err := ensureCaseAcceptsActions(newCase); err != nil {
+			return nil, err
 		}
 	}
 

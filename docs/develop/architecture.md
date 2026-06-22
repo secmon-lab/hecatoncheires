@@ -124,10 +124,12 @@ writes a Trace blob for every turn for diagnostics.
 
 In case-bound mode the agent can edit the bound Case directly via the
 `case__update_case` (title / description / custom fields), `case__assign` /
-`case__unassign` (delta assignee changes), and, for thread-mode workspaces,
-`case__update_case_status` tools — the same tools the
+`case__unassign` (delta assignee changes), and a mode-specific "mark done" tool
+— `case__update_case_status` for thread-mode workspaces (move to a closed board
+status) or `case__close_case` for channel-mode cases (close OPEN -> CLOSED) —
+the same tools the
 event-driven Agent Jobs use. They funnel through `CaseUseCase.UpdateCase` /
-`AssignCase` / `UnassignCase` / `UpdateCaseStatus`, so every entry point (Web
+`AssignCase` / `UnassignCase` / `UpdateCaseStatus` / `CloseCase`, so every entry point (Web
 GraphQL, Slack modal, Job, mention agent) enforces the same validation,
 including the SlackUser existence check on newly assigned users and user-typed
 field values. Assignees are mutated only through the delta `AssignCase` /
@@ -138,6 +140,29 @@ A per-thread **turn lock** (CAS-backed in Firestore, mutex-backed in memory)
 prevents two turns from running concurrently on the same thread. A heartbeat
 goroutine refreshes the lock every 10s; if the holder dies, the next caller
 reclaims the stale lock after the staleness window (default 30s).
+
+#### Case-mode invariants (enforced at the usecase boundary)
+
+A Case is either **channel-mode** (`SlackThreadTS == ""`; dedicated channel) or
+**thread-mode** (`SlackThreadTS != ""`; bound to a Slack thread, tracked by a
+configurable board status / Kanban). Two invariants follow from this split and
+are enforced at the **usecase boundary** — not just by withholding agent tools —
+so every entry point (GraphQL, Slack, agent tools, eval) is covered uniformly:
+
+- **Lifecycle path is mode-specific.** Thread-mode cases change lifecycle only
+  by moving their board status (`UpdateCaseStatus`, which keeps `BoardStatus` and
+  `Status` in sync); `CloseCase` / `ReopenCase` reject thread-mode cases
+  (`ErrCaseThreadModeUseStatus`). Symmetrically, `UpdateCaseStatus` rejects
+  channel-mode cases (no board status). The Web UI mirrors this: the
+  close/reopen button shows only for channel-mode, the Kanban only for
+  thread-mode.
+- **Actions belong to channel-mode only.** Thread-mode cases have no Actions
+  (the configurable status attaches to the Case itself there, not to Actions).
+  `ActionUseCase.CreateAction` and `UpdateAction`'s reparent path reject a
+  thread-mode parent / target (`ErrCaseThreadModeNoActions`). The agent tool
+  wiring additionally withholds the action (`core__*`) tools for thread-mode in
+  all three hosts (Job runtime, case-bound mention agent, eval env) so the LLM
+  is never offered a tool that can only error.
 
 ### State persistence across turns
 

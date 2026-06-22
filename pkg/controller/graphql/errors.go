@@ -53,7 +53,8 @@ func ErrorCode(err error) string {
 		return ErrCodeTitleRequired
 	case errors.Is(err, model.ErrCaseNotDraft),
 		errors.Is(err, usecase.ErrCaseNotDraft),
-		errors.Is(err, usecase.ErrCaseIsDraft):
+		errors.Is(err, usecase.ErrCaseIsDraft),
+		errors.Is(err, usecase.ErrCaseThreadModeUseStatus):
 		return ErrCodeInvalidStatusTransition
 	case errors.Is(err, usecase.ErrFieldValidationFailed):
 		return ErrCodeFieldValidationFailed
@@ -68,7 +69,8 @@ func ErrorCode(err error) string {
 		errors.Is(err, model.ErrInvalidNotionID),
 		errors.Is(err, model.ErrInvalidGitHubRepo),
 		errors.Is(err, usecase.ErrUnknownUser),
-		errors.Is(err, usecase.ErrInvalidArgument):
+		errors.Is(err, usecase.ErrInvalidArgument),
+		errors.Is(err, usecase.ErrCaseThreadModeNoActions):
 		return ErrCodeBadUserInput
 	case errors.Is(err, usecase.ErrCaseNotFound),
 		errors.Is(err, usecase.ErrActionNotFound),

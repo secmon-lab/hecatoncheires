@@ -1342,6 +1342,14 @@ func (uc *CaseUseCase) CloseCase(ctx context.Context, workspaceID string, id int
 			goerr.V(CaseIDKey, id), goerr.V("user_id", token.Sub))
 	}
 
+	// Thread-mode cases close by moving to a closed board status (UpdateCaseStatus),
+	// which keeps BoardStatus and the lifecycle Status in sync. Closing one
+	// directly here would desync them, so reject it at the boundary — this is the
+	// usecase-level counterpart of UpdateCaseStatus rejecting channel-mode cases.
+	if existing.IsThreadBound() {
+		return nil, goerr.Wrap(ErrCaseThreadModeUseStatus, "thread-mode case cannot be closed directly", goerr.V(CaseIDKey, id))
+	}
+
 	status := existing.Status.Normalize()
 	if status == types.CaseStatusDraft {
 		return nil, goerr.Wrap(ErrCaseIsDraft, "draft case cannot be closed", goerr.V(CaseIDKey, id))
@@ -1372,6 +1380,13 @@ func (uc *CaseUseCase) ReopenCase(ctx context.Context, workspaceID string, id in
 	if tokenErr == nil && !model.IsCaseAccessible(existing, token.Sub) {
 		return nil, goerr.Wrap(ErrAccessDenied, "cannot reopen private case",
 			goerr.V(CaseIDKey, id), goerr.V("user_id", token.Sub))
+	}
+
+	// Thread-mode cases reopen by moving to a non-closed board status
+	// (UpdateCaseStatus); reopening directly here would desync BoardStatus and
+	// the lifecycle Status. Reject at the boundary, mirroring CloseCase.
+	if existing.IsThreadBound() {
+		return nil, goerr.Wrap(ErrCaseThreadModeUseStatus, "thread-mode case cannot be reopened directly", goerr.V(CaseIDKey, id))
 	}
 
 	status := existing.Status.Normalize()

@@ -53,8 +53,9 @@ type CommonDeps struct {
 	ActionStepUC core.ActionStepMutator
 
 	// CaseUC backs the casewriter tools (case__update_case /
-	// case__update_case_status) in case-bound mode. Optional: nil means the
-	// case-bound agent cannot edit the case itself (the tools are not built).
+	// case__update_case_status / case__close_case) in case-bound mode. Optional:
+	// nil means the case-bound agent cannot edit the case itself (the tools are
+	// not built).
 	CaseUC casewriter.CaseMutator
 
 	// CaseRefUC backs the case_ref read tools

@@ -26,6 +26,7 @@ type mockCaseUC struct {
 	statusCalls   []statusCall
 	assignCalls   []assignCall
 	unassignCalls []assignCall
+	closeCalls    int
 	resp          *model.Case
 	err           error
 }
@@ -40,6 +41,14 @@ func (m *mockCaseUC) UpdateCase(ctx context.Context, workspaceID string, id int6
 
 func (m *mockCaseUC) UpdateCaseStatus(ctx context.Context, workspaceID string, id int64, boardStatus string) (*model.Case, error) {
 	m.statusCalls = append(m.statusCalls, statusCall{boardStatus: boardStatus})
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.resp, nil
+}
+
+func (m *mockCaseUC) CloseCase(ctx context.Context, workspaceID string, id int64) (*model.Case, error) {
+	m.closeCalls++
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -96,8 +105,9 @@ func testStatusSet(t *testing.T) *model.ActionStatusSet {
 func TestUpdateCaseTool_Title(t *testing.T) {
 	uc := &mockCaseUC{resp: &model.Case{ID: 42, Title: "new", Status: types.CaseStatusOpen}}
 	tools := casewriter.New(casewriter.Deps{CaseUC: uc, WorkspaceID: "ws", CaseID: 42})
-	// New always returns update + assign + unassign (3 tools when no StatusSet).
-	gt.Array(t, tools).Length(3).Required()
+	// New returns update + assign + unassign + close (4 tools when no StatusSet:
+	// channel-mode closes via case__close_case).
+	gt.Array(t, tools).Length(4).Required()
 
 	updateTool := toolByName(t, tools, "case__update_case")
 	gt.Value(t, updateTool).NotNil().Required()
@@ -304,9 +314,59 @@ func TestUpdateCaseTool_DescriptionWarnsAgainstBlindOverwrite(t *testing.T) {
 func TestStatusTool_NotBuiltWithoutStatusSet(t *testing.T) {
 	uc := &mockCaseUC{resp: &model.Case{}}
 	tools := casewriter.New(casewriter.Deps{CaseUC: uc, WorkspaceID: "ws", CaseID: 1})
-	// Without a StatusSet: update + assign + unassign = 3 tools.
-	gt.Array(t, tools).Length(3)
+	// Without a StatusSet: update + assign + unassign + close = 4 tools. The
+	// board-status tool is absent and case__close_case takes its place as the
+	// channel-mode "mark done" path.
+	gt.Array(t, tools).Length(4)
 	gt.Value(t, toolByName(t, tools, "case__update_case_status")).Nil()
+	gt.Value(t, toolByName(t, tools, "case__close_case")).NotNil()
+}
+
+func TestCloseTool_NotBuiltWithStatusSet(t *testing.T) {
+	// Thread-mode workspaces close via the board-status tool, so case__close_case
+	// must NOT be offered alongside it (one "mark done" path per mode).
+	uc := &mockCaseUC{resp: &model.Case{}}
+	tools := casewriter.New(casewriter.Deps{CaseUC: uc, WorkspaceID: "ws", CaseID: 1, StatusSet: testStatusSet(t)})
+	gt.Value(t, toolByName(t, tools, "case__close_case")).Nil()
+	gt.Value(t, toolByName(t, tools, "case__update_case_status")).NotNil()
+}
+
+func TestCloseTool(t *testing.T) {
+	uc := &mockCaseUC{resp: &model.Case{ID: 9, Status: types.CaseStatusClosed}}
+	tools := casewriter.New(casewriter.Deps{CaseUC: uc, WorkspaceID: "ws", CaseID: 9})
+	closeTool := toolByName(t, tools, "case__close_case")
+	gt.Value(t, closeTool).NotNil().Required()
+
+	t.Run("spec takes no parameters", func(t *testing.T) {
+		gt.Number(t, len(closeTool.Spec().Parameters)).Equal(0)
+	})
+
+	t.Run("run closes the case and returns the closed status", func(t *testing.T) {
+		uc.closeCalls = 0
+		out, err := closeTool.Run(context.Background(), map[string]any{})
+		gt.NoError(t, err).Required()
+		gt.Number(t, uc.closeCalls).Equal(1)
+		gt.Number(t, out["id"].(int64)).Equal(int64(9))
+		gt.String(t, out["status"].(string)).Equal(types.CaseStatusClosed.String())
+	})
+
+	t.Run("propagates the usecase error", func(t *testing.T) {
+		sentinel := goerr.New("already closed")
+		failing := &mockCaseUC{err: sentinel}
+		failTools := casewriter.New(casewriter.Deps{CaseUC: failing, WorkspaceID: "ws", CaseID: 9})
+		failClose := toolByName(t, failTools, "case__close_case")
+		gt.Value(t, failClose).NotNil().Required()
+		_, err := failClose.Run(context.Background(), map[string]any{})
+		gt.Error(t, err).Is(sentinel)
+	})
+
+	t.Run("nil CaseUC errors", func(t *testing.T) {
+		nilTools := casewriter.New(casewriter.Deps{WorkspaceID: "ws", CaseID: 9})
+		nilClose := toolByName(t, nilTools, "case__close_case")
+		gt.Value(t, nilClose).NotNil().Required()
+		_, err := nilClose.Run(context.Background(), map[string]any{})
+		gt.Error(t, err)
+	})
 }
 
 func TestStatusTool_BuiltWithStatusSet(t *testing.T) {

@@ -19,6 +19,14 @@ var (
 	// ErrCaseNotDraft is returned by draft-specific operations (Submit /
 	// Discard) when the targeted case is not in DRAFT.
 	ErrCaseNotDraft = errors.New("case is not a draft")
+	// ErrCaseThreadModeUseStatus is returned by CloseCase / ReopenCase when the
+	// targeted case is thread-mode (bound to a Slack thread). Thread-mode cases
+	// change lifecycle by moving the configurable board status via
+	// UpdateCaseStatus, which keeps BoardStatus and the lifecycle Status in sync;
+	// closing / reopening one directly would set Status while leaving BoardStatus
+	// on a mismatched column, desyncing the two. The boundary rejects it so a
+	// mis-wired caller fails loudly instead of producing the inconsistent state.
+	ErrCaseThreadModeUseStatus = errors.New("thread-mode case lifecycle must change via board status")
 	// ErrMissingRequiredOnSubmit is returned by SubmitDraft when the draft
 	// is missing one or more required custom fields. The wrapping goerr
 	// carries the field IDs and human-friendly names (see MissingFieldIDsKey /
@@ -40,6 +48,16 @@ var (
 	// rolled back to DRAFT before this error returns, so callers / frontends
 	// should advise "retry submit".
 	ErrActivationFailed = errors.New("case activation failed")
+
+	// ErrCaseThreadModeNoActions is returned by ActionUseCase write paths when
+	// the parent (or reparent target) Case is thread-mode. Thread-mode cases
+	// track progress through the configurable board status (Kanban) and have no
+	// Actions — the configurable status attaches to the Case itself there, while
+	// in channel mode it attaches to Actions (see model.Case.BoardStatus). The
+	// invariant is enforced at the usecase boundary so every entry point
+	// (GraphQL, Slack, agent tools, eval) is covered, not just the agent tool
+	// wiring that withholds the action tools for thread-mode workspaces.
+	ErrCaseThreadModeNoActions = errors.New("thread-mode case cannot have actions")
 
 	// Action Slack-post state errors
 	ErrSlackMessageAlreadyPosted = errors.New("action already has a Slack message")

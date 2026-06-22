@@ -274,8 +274,14 @@ func buildJobRunner(
 			CaseRefUC:    uc.Case,
 		}
 		out := make([]gollem.Tool, 0, 16)
-		out = append(out, core.NewReadOnly(coreDeps)...)
-		out = append(out, actionwriter.New(coreDeps)...)
+		// Action tools exist only in channel-mode workspaces; thread-mode cases
+		// have no Actions and the usecase boundary rejects action writes there.
+		// Mirror the production Job runtime (pkg/cli/job_runtime.go), which gates
+		// the core/actionwriter tools on workspace mode.
+		if ws == nil || !ws.IsThreadMode() {
+			out = append(out, core.NewReadOnly(coreDeps)...)
+			out = append(out, actionwriter.New(coreDeps)...)
+		}
 		out = append(out, casewriter.New(casewriter.Deps{
 			CaseUC:      caseAdapter,
 			WorkspaceID: wsID,

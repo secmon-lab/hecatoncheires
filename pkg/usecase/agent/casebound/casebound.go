@@ -243,15 +243,25 @@ func (uc *UseCase) buildTools(req TurnRequest) []gollem.Tool {
 	if req.Case != nil {
 		caseID = req.Case.ID
 	}
-	coreTools := core.New(core.Deps{
-		Repo:         d.Repo,
-		WorkspaceID:  wsID,
-		CaseID:       caseID,
-		StatusSet:    statusSet,
-		ActionUC:     d.ActionUC,
-		ActionStepUC: d.ActionStepUC,
-		CaseRefUC:    d.CaseRefUC,
-	})
+	// Action tools exist only where Actions exist: channel-mode cases. A
+	// thread-mode case (bound to a Slack thread) tracks progress via its board
+	// status and has no Actions, so the usecase boundary rejects action writes
+	// there (ErrCaseThreadModeNoActions). Withhold the whole core toolset for
+	// thread-mode rather than offer tools that can only error — mirroring the
+	// Job runtime's exclusion. case_ref read tools live in the core toolset too,
+	// so thread-mode forgoes them along with the action tools.
+	var coreTools []gollem.Tool
+	if req.Case == nil || !req.Case.IsThreadBound() {
+		coreTools = core.New(core.Deps{
+			Repo:         d.Repo,
+			WorkspaceID:  wsID,
+			CaseID:       caseID,
+			StatusSet:    statusSet,
+			ActionUC:     d.ActionUC,
+			ActionStepUC: d.ActionStepUC,
+			CaseRefUC:    d.CaseRefUC,
+		})
+	}
 	slackTools := slacktool.NewReadOnly(slacktool.Deps{
 		Bot:       d.SlackBot,
 		Search:    d.SlackSearch,

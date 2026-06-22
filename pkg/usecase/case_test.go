@@ -758,6 +758,33 @@ func TestCaseUseCase_CloseCase(t *testing.T) {
 		gt.NoError(t, err).Required()
 		gt.Value(t, got.Status).Equal(types.CaseStatusDraft)
 	})
+
+	t.Run("closing a thread-mode case directly is rejected", func(t *testing.T) {
+		// Thread-mode cases must close via UpdateCaseStatus (board status) so the
+		// configurable BoardStatus and lifecycle Status stay in sync. CloseCase
+		// rejects them at the boundary rather than producing the desynced state.
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		created, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+			Title:          "Thread case",
+			Status:         types.CaseStatusOpen,
+			SlackChannelID: "C123",
+			SlackThreadTS:  "1700000000.000100",
+			BoardStatus:    "in_progress",
+		})
+		gt.NoError(t, err).Required()
+
+		_, err = uc.CloseCase(ctx, testWorkspaceID, created.ID)
+		gt.Error(t, err).Is(usecase.ErrCaseThreadModeUseStatus)
+
+		// Status and BoardStatus must be untouched.
+		got, err := repo.Case().Get(ctx, testWorkspaceID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.Status).Equal(types.CaseStatusOpen)
+		gt.Value(t, got.BoardStatus).Equal("in_progress")
+	})
 }
 
 func TestCaseUseCase_ReopenCase(t *testing.T) {
@@ -821,6 +848,32 @@ func TestCaseUseCase_ReopenCase(t *testing.T) {
 		got, err := repo.Case().Get(ctx, testWorkspaceID, created.ID)
 		gt.NoError(t, err).Required()
 		gt.Value(t, got.Status).Equal(types.CaseStatusDraft)
+	})
+
+	t.Run("reopening a thread-mode case directly is rejected", func(t *testing.T) {
+		// Thread-mode cases reopen by moving to a non-closed board status, not
+		// through ReopenCase; rejecting it keeps BoardStatus and Status in sync.
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		created, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+			Title:          "Thread case",
+			Status:         types.CaseStatusClosed,
+			SlackChannelID: "C123",
+			SlackThreadTS:  "1700000000.000200",
+			BoardStatus:    "closed",
+		})
+		gt.NoError(t, err).Required()
+
+		_, err = uc.ReopenCase(ctx, testWorkspaceID, created.ID)
+		gt.Error(t, err).Is(usecase.ErrCaseThreadModeUseStatus)
+
+		// Status and BoardStatus must be untouched.
+		got, err := repo.Case().Get(ctx, testWorkspaceID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.Status).Equal(types.CaseStatusClosed)
+		gt.Value(t, got.BoardStatus).Equal("closed")
 	})
 }
 
