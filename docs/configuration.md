@@ -641,19 +641,23 @@ The AI agent will:
 
 ### Agent tool registry (Slack mention & assist)
 
-The agent's available tools depend on which optional services are wired up.
-Tools are split across three packages: `pkg/agent/tool/core` (case domain
-state), `pkg/agent/tool/slack` (Slack-backed tools), and `pkg/agent/tool/notion`
-(Notion-backed tools). The table below lists what each one provides and which
-configuration enables it.
+> **The full tool catalogue — every tool name, what it does, and which runtime
+> context (Job vs. interactive mention agent) exposes it — lives in
+> [Agent Tools](agent_tools.md).** Read it before naming a tool in any prompt;
+> the palette a Job gets is narrower than the interactive agent's. The table
+> below is only a quick reference for *which optional service enables which
+> tool group* for the interactive mention / assist agent.
 
-| Tool | Enabled by | Purpose |
-|------|------------|---------|
-| `core__list_actions`, `core__get_action`, `core__create_action`, `core__update_action`, `core__update_action_status`, `core__set_action_assignee`, `core__archive_action`, `core__unarchive_action` | Always | Manage the case's action items. `core__list_actions` accepts an optional `include_archived` parameter (default `false`); archived actions are hidden from default views but retained for later restoration via `core__unarchive_action`. There is no destructive delete tool — the archive lifecycle replaces deletion. |
-| `slack__post_message` | Assist only (`HECATONCHEIRES_SLACK_BOT_TOKEN`) | Post a message to the case's Slack channel. |
-| `slack__get_messages` | `HECATONCHEIRES_SLACK_BOT_TOKEN` | Bulk fetch of one or more Slack messages and their thread context (max 10 per call, parallel, partial failure tolerated). |
-| `slack__search_messages` | `HECATONCHEIRES_SLACK_USER_OAUTH_TOKEN` with `search:read` scope | Workspace-wide Slack message search. See [docs/slack.md](slack.md#user-token-scopes). |
-| `notion__search`, `notion__get_page` | `HECATONCHEIRES_NOTION_API_TOKEN` | Notion title search and Markdown content retrieval. See [docs/integrations.md](integrations.md). |
+| Tool group | Enabled by |
+|------------|------------|
+| `core__*` (actions) + `case__*` (case edits) | Always (a case context exists). |
+| `slack__search_messages` | `HECATONCHEIRES_SLACK_USER_OAUTH_TOKEN` with the `search:read` scope. See [docs/slack.md](slack.md#user-token-scopes). |
+| `slack__get_messages`, `slack__post_message` | `HECATONCHEIRES_SLACK_BOT_TOKEN`. |
+| `notion__search`, `notion__get_page` | `HECATONCHEIRES_NOTION_API_TOKEN`. See [docs/integrations.md](integrations.md). |
+| `github__*` | The `--github-app-*` flags. See [docs/integrations.md](integrations.md). |
+| `webfetch` | A configured web-fetch client. |
+| `knowledge__*` | Always (write is withheld on private cases). |
+| `memo__*` | A `[memo]` section with at least one memo field defined. |
 
 ---
 
@@ -943,6 +947,47 @@ Notes:
 
 (\*) At least one of `events.case` / `events.scheduled` must be present.
 
+### Events and scheduling
+
+A Job subscribes to one or both event domains, and the runtime fires **one
+invocation per `(job, case)` pair** — never one invocation for a whole
+workspace. This per-case model is the single most important thing to internalise
+when writing a Job prompt: your prompt runs against **one case at a time**, with
+that case already loaded into the system prompt as `.Case`. **Do not** write a
+prompt that tries to enumerate or loop over cases — the agent has no tool to
+list other cases, and it doesn't need one.
+
+**`events.case`** — fires the moment a case lifecycle transition is persisted:
+
+| `on` value | Fires when |
+|------------|-----------|
+| `created`  | A new (published) case is created. |
+| `closed`   | A case is moved to a closed status. |
+
+**`events.scheduled`** — a periodic sweep (driven by `hecatoncheires tick` or
+`POST /hooks/tick`) decides which Jobs are due. Exactly one of:
+
+| Key | Format | Meaning |
+|-----|--------|---------|
+| `every` | Go duration string (`"24h"`, `"6h"`, `"30m"`, `"1h30m"`) | Fire when at least this long has elapsed since the last successful run for that `(job, case)`. |
+| `cron`  | 5-field cron expression (`min hour day-of-month month day-of-week`), **UTC** | Fire on the cron schedule. No seconds field and no `@`-descriptors (`@hourly` etc.). |
+
+Key facts that are easy to get wrong:
+
+- **Scheduled Jobs run only against OPEN cases** — cases that are still open and
+  published. Closed (`CLOSED`) and draft cases are skipped entirely, so a daily
+  digest Job will simply stop firing for a case once it closes.
+- **Cron is always UTC.** To fire at 08:30 Asia/Tokyo (JST = UTC+9), write
+  `"30 23 * * *"`. There is no per-Job timezone setting.
+- **The first scheduled run is always due**, regardless of `every` / `cron`,
+  because there is no prior run to measure against.
+- A Job may subscribe to **both** domains at once (e.g. react to `created` *and*
+  sweep `every = "1h"`); each matching event produces its own invocation.
+
+The operational mechanics of the sweep — concurrency leasing, duplicate
+suppression, the `tick` CLI vs. the HTTP hook — are covered in
+[Operations → Agent Jobs operations](operations.md#agent-jobs-operations).
+
 ### Session log
 
 Each Job run posts a minimal operational log to the Case's Slack channel so
@@ -994,8 +1039,34 @@ contents are fixed by the runtime — Job authors only control
 | Actions                  | Existing non-archived actions, for de-duplication. |
 | Trigger condition        | The Job's declared subscription (events.case / events.scheduled). |
 | Trigger reason           | The concrete event that fired this invocation (timestamps, actor, lifecycle / cron tick). |
-| Guardrails               | Fixed restrictions: no auto-close, no delete, channel-scoped Slack, etc. |
-| Tools                    | gollem auto-injects the resolved tool list. |
+| Guardrails               | Fixed restrictions the runtime injects. See [Guardrails](#guardrails) below. |
+| Tools                    | gollem auto-injects the resolved tool list — see [Agent Tools](agent_tools.md). |
+
+### Guardrails
+
+The runtime injects a fixed set of restrictions into every Job's system prompt.
+These are **not** configurable from the TOML, and a Job prompt cannot grant
+itself more than they allow (a per-case *Additional prompt* cannot either — it
+is extra context, not extra capability):
+
+- **A Job will not close a case.** Closing is a human-only decision. The agent
+  is told not to move a case to a closed status, even though
+  `case__update_case_status` could technically do it. (The interactive,
+  human-initiated mention agent *may* close a case — this restriction is
+  specific to unattended Jobs.)
+- **A Job cannot delete cases, archive actions, or delete action steps.**
+- **A Job posts only to the case's own bound Slack channel** — never to an
+  arbitrary channel.
+- **A Job cannot read its own past run traces;** it judges idempotency from the
+  current case state, action list, and Slack history. So a "don't repeat
+  yourself" prompt must lean on the visible case state, not on memory of prior
+  runs.
+
+Which of these are enforced in code (the tool is absent) versus only by the
+prompt (the tool exists but the agent is instructed not to use it that way) is
+spelled out in [Agent Tools → Guardrails](agent_tools.md#guardrails). The
+distinction matters: a prompt-only guardrail is a firm instruction, so do not
+write a Job prompt that tries to argue the agent out of it.
 
 ### Per-case agent customisation
 
