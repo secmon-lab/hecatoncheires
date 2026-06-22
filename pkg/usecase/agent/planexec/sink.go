@@ -46,6 +46,10 @@ type PlanInfo struct {
 	Reasoning string
 	// IsReplan is true when this round was a replan (i.e. Round > 1).
 	IsReplan bool
+	// Direct is true when this round chose the direct (no-investigation)
+	// fast path instead of proposing tasks. Round is 1 in this case and no
+	// PhaseStarted / TaskProgress events follow.
+	Direct bool
 }
 
 // TaskInfo describes one investigation task at the moment its trace block

@@ -15,10 +15,11 @@ var ParseReplanResultForTest = parseReplanResult
 var ExtractJSONObjectForTest = extractJSONObject
 
 // PlanSchemaForTest exposes planSchema (the first-round schema).
-func PlanSchemaForTest(knownToolIDs []string, allowQuestion bool) any {
+func PlanSchemaForTest(knownToolIDs []string, allowQuestion, allowDirect bool) any {
 	return planSchema(schemaOptions{
 		knownToolIDs:  knownToolIDs,
 		allowQuestion: allowQuestion,
+		allowDirect:   allowDirect,
 	})
 }
 
@@ -58,3 +59,12 @@ var RenderObservationsForFinalForTest = renderObservationsForFinal
 
 // GenerateFinalResponseForTest exposes generateFinalResponse.
 var GenerateFinalResponseForTest = generateFinalResponse
+
+// DirectPromptInputForTest mirrors directPromptInput.
+type DirectPromptInputForTest = directPromptInput
+
+// RenderDirectUserPromptForTest exposes renderDirectUserPrompt.
+var RenderDirectUserPromptForTest = renderDirectUserPrompt
+
+// GenerateDirectResponseForTest exposes generateDirectResponse.
+var GenerateDirectResponseForTest = generateDirectResponse

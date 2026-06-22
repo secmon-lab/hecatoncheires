@@ -204,8 +204,13 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 		ToolResolver: resolver,
 		// Thread-mode workspaces manage no Actions, so the planner must not be
 		// offered the core (action) toolset; OmitCore below withholds the tools.
-		KnownToolIDs:      agent.KnownToolSetIDsNoCore,
-		AllowQuestion:     true,
+		KnownToolIDs:  agent.KnownToolSetIDsNoCore,
+		AllowQuestion: true,
+		// Direct mode answers a trivial mention without the investigation
+		// loop, replying in plain text. It is disabled for ModeCreate: a
+		// create turn must commit a Case (a side-effecting terminal action),
+		// which the direct path deliberately never does.
+		AllowDirect:       !isCreate,
 		OnQuestion:        onQuestion,
 		FinalOutputSchema: finalSchema,
 		OnFinalize:        onFinalize,
@@ -231,6 +236,16 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 			// The case was committed inside OnFinalize; createdCase is set.
 			uc.persistSession(turnCtx, req.Session, model.SessionEndedWithCaseBoundReply)
 			return &Result{Status: StatusCompleted, Case: createdCase}, nil
+		}
+		if runResult.Direct {
+			// Direct path produced a plain-text reply (no structured Decision).
+			// Treat it as a respond decision so the host posts it as the
+			// thread reply, exactly as it would a parsed respond Decision.
+			uc.persistSession(turnCtx, req.Session, model.SessionEndedWithCaseBoundReply)
+			return &Result{Status: StatusCompleted, Decision: &Decision{
+				Kind:    DecisionRespond,
+				Message: runResult.FinalText,
+			}}, nil
 		}
 		decision, perr := parseDecision(runResult.FinalRaw)
 		if perr != nil {

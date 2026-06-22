@@ -3,6 +3,7 @@ package planexec_test
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -10,6 +11,9 @@ import (
 	"time"
 
 	"github.com/gollem-dev/gollem"
+	"github.com/gollem-dev/gollem/llm/claude"
+	"github.com/gollem-dev/gollem/llm/gemini"
+	"github.com/gollem-dev/gollem/llm/openai"
 	"github.com/gollem-dev/gollem/mock"
 	"github.com/gollem-dev/gollem/trace"
 	"github.com/m-mizutani/goerr/v2"
@@ -81,6 +85,19 @@ func (l *sequencedLLM) calls() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.idx
+}
+
+// inputAt returns the concatenated user-text input the mock received on its
+// i-th Generate call (0-based), or "" if that call did not happen. Lets a
+// test assert *what* each LLM call was actually asked, not merely how many
+// calls fired.
+func (l *sequencedLLM) inputAt(i int) string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if i < 0 || i >= len(l.inputs) {
+		return ""
+	}
+	return l.inputs[i]
 }
 
 type exhaustedError struct{}
@@ -390,4 +407,290 @@ func TestRunner_Run_OnFinalizeAlwaysRejects_Fallback(t *testing.T) {
 	res, err := runner.Run(ctx, req)
 	gt.NoError(t, err).Required()
 	gt.Value(t, res.Status).Equal(planexec.StatusFallbackBudget)
+}
+
+// --- Integration: direct mode (round-1 fast path) -------------------
+
+// recordingResolver records the tool ids it was asked to resolve so a
+// direct-mode test can assert the planner's chosen tools reached the
+// resolver. It returns no concrete tools (the mock LLM needs none).
+type recordingResolver struct {
+	mu    sync.Mutex
+	calls [][]string
+}
+
+func (r *recordingResolver) Resolve(ids []string) []gollem.Tool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, ids)
+	return nil
+}
+
+func (r *recordingResolver) lastCall() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.calls) == 0 {
+		return nil
+	}
+	return r.calls[len(r.calls)-1]
+}
+
+func TestRunner_Run_DirectMode(t *testing.T) {
+	ctx := context.Background()
+	const userMsg = "Thanks, that is all I needed for now."
+	llm := newSequencedLLM([]sequencedResponse{
+		// Round 1: the planner gate. It must receive the user's request and
+		// chooses the direct path (no tasks).
+		{text: `{"message":"answering directly","direct":{}}`, matchSubstr: userMsg},
+		// The direct ReAct reply. matchSubstr pins this second call to the
+		// direct user prompt (prompts/direct.md), proving it is the direct
+		// loop and not, say, a final-synthesis call.
+		{text: "Here is the direct answer.", matchSubstr: "Answer the request directly"},
+	})
+
+	runner := newRunner(t, llm.Client())
+	req := baseRequest()
+	req.UserInput = userMsg
+	req.AllowDirect = true
+
+	var phaseStarted atomic.Bool
+	req.Sink = planexec.SinkFuncs{
+		PhaseStartedFn: func(_ context.Context, _ int, _ []planexec.TaskInfo) {
+			phaseStarted.Store(true)
+		},
+	}
+
+	res, err := runner.Run(ctx, req)
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(planexec.StatusCompleted)
+	gt.Bool(t, res.Direct).True()
+	gt.String(t, res.FinalText).Equal("Here is the direct answer.")
+	gt.Value(t, res.FinalRaw).Nil()
+	// No investigation phase ran.
+	gt.Array(t, res.AllResults).Length(0)
+	gt.Bool(t, phaseStarted.Load()).False()
+
+	async.Wait()
+	// Exactly 2 LLM calls: planner gate + direct reply. No sub-agent, no
+	// replan, no separate final-synthesis call.
+	gt.Number(t, llm.calls()).Equal(2)
+	// Verify the *content* of each call, not just the count:
+	// - call 0 is the planner gate and carries the user's request,
+	gt.String(t, llm.inputAt(0)).Contains(userMsg)
+	// - call 1 is the direct ReAct loop: it runs the direct user prompt and
+	//   restates the user's request (prompts/direct.md interpolates UserInput).
+	gt.String(t, llm.inputAt(1)).Contains("Answer the request directly")
+	gt.String(t, llm.inputAt(1)).Contains(userMsg)
+}
+
+func TestRunner_Run_DirectMode_ResolvesChosenTools(t *testing.T) {
+	ctx := context.Background()
+	llm := newSequencedLLM([]sequencedResponse{
+		{text: `{"message":"ok","direct":{"tools":["slack_ro","github"]}}`},
+		{text: "answer", matchSubstr: "Answer the request directly"},
+	})
+
+	resolver := &recordingResolver{}
+	runner := newRunner(t, llm.Client())
+	req := baseRequest()
+	req.AllowDirect = true
+	req.ToolResolver = resolver
+
+	res, err := runner.Run(ctx, req)
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(planexec.StatusCompleted)
+	gt.Bool(t, res.Direct).True()
+	// The planner's chosen tool ids reached the resolver verbatim.
+	got := resolver.lastCall()
+	gt.Array(t, got).Length(2).Required()
+	gt.String(t, got[0]).Equal("slack_ro")
+	gt.String(t, got[1]).Equal("github")
+}
+
+// The direct path must NOT consult OnFinalize / FinalOutputSchema even when
+// the host wired them — those are reserved for the structured investigate
+// terminal.
+func TestRunner_Run_DirectMode_SkipsOnFinalize(t *testing.T) {
+	ctx := context.Background()
+	llm := newSequencedLLM([]sequencedResponse{
+		{text: `{"message":"ok","direct":{}}`},
+		{text: "plain direct reply", matchSubstr: "Answer the request directly"},
+	})
+
+	runner := newRunner(t, llm.Client())
+	req := baseRequest()
+	req.AllowDirect = true
+	req.FinalOutputSchema = &gollem.Parameter{
+		Type:       gollem.TypeObject,
+		Properties: map[string]*gollem.Parameter{"title": {Type: gollem.TypeString}},
+	}
+	req.OnFinalize = func(_ context.Context, _ json.RawMessage) error {
+		t.Fatal("OnFinalize must not be called on the direct path")
+		return nil
+	}
+
+	res, err := runner.Run(ctx, req)
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(planexec.StatusCompleted)
+	gt.Bool(t, res.Direct).True()
+	gt.String(t, res.FinalText).Equal("plain direct reply")
+	gt.Value(t, res.FinalRaw).Nil()
+}
+
+// --- Integration: real-LLM plan/direct routing ---------------------
+
+// newRoutingTestLLMClient builds a real provider client from the same
+// TEST_LLM_* env vars the eval harness uses. It is gated solely on
+// TEST_LLM_PROVIDER (like pkg/usecase/eval), so `zenv go test ./...` runs it
+// whenever a provider is configured — there is no extra opt-in gate. The
+// provider switch mirrors realLLMForThreadCreate so the conventions stay in
+// lockstep.
+func newRoutingTestLLMClient(t *testing.T) gollem.LLMClient {
+	t.Helper()
+	ctx := context.Background()
+	model := os.Getenv("TEST_LLM_MODEL")
+	switch os.Getenv("TEST_LLM_PROVIDER") {
+	case "openai":
+		key := os.Getenv("TEST_LLM_OPENAI_API_KEY")
+		gt.Value(t, key).NotEqual("")
+		var opts []openai.Option
+		if model != "" {
+			opts = append(opts, openai.WithModel(model))
+		}
+		c, err := openai.New(ctx, key, opts...)
+		gt.NoError(t, err).Required()
+		return c
+	case "claude":
+		key := os.Getenv("TEST_LLM_CLAUDE_API_KEY")
+		project := os.Getenv("TEST_LLM_GEMINI_PROJECT_ID")
+		switch {
+		case key != "":
+			var opts []claude.Option
+			if model != "" {
+				opts = append(opts, claude.WithModel(model))
+			}
+			c, err := claude.New(ctx, key, opts...)
+			gt.NoError(t, err).Required()
+			return c
+		case project != "":
+			location := os.Getenv("TEST_LLM_GEMINI_LOCATION")
+			gt.Value(t, location).NotEqual("")
+			var opts []claude.VertexOption
+			if model != "" {
+				opts = append(opts, claude.WithVertexModel(model))
+			}
+			c, err := claude.NewWithVertex(ctx, location, project, opts...)
+			gt.NoError(t, err).Required()
+			return c
+		default:
+			t.Skip("claude provider needs TEST_LLM_CLAUDE_API_KEY or TEST_LLM_GEMINI_PROJECT_ID")
+			return nil
+		}
+	case "gemini":
+		project := os.Getenv("TEST_LLM_GEMINI_PROJECT_ID")
+		location := os.Getenv("TEST_LLM_GEMINI_LOCATION")
+		gt.Value(t, project).NotEqual("")
+		gt.Value(t, location).NotEqual("")
+		var opts []gemini.Option
+		if model != "" {
+			opts = append(opts, gemini.WithModel(model))
+		}
+		c, err := gemini.New(ctx, project, location, opts...)
+		gt.NoError(t, err).Required()
+		return c
+	default:
+		t.Skip("TEST_LLM_PROVIDER must be openai | claude | gemini")
+		return nil
+	}
+}
+
+// routingSystemPrompt is a compact host base prompt that gives the planner
+// enough role context to make a realistic direct-vs-investigate choice.
+const routingSystemPrompt = "You are an assistant embedded in a case-management Slack thread. " +
+	"You help triage and answer questions about an ongoing case. " +
+	"Read-only investigation tools (Slack history, Notion, GitHub, past cases) are available to your sub-agents."
+
+// TestRunner_Run_RealLLM_PlanVsDirectRouting verifies, against a real LLM,
+// that the round-1 gate actually routes a trivial request through the direct
+// fast path while a request that genuinely needs investigation is planned as
+// tasks. This is the behavioural contract the mock tests cannot prove: the
+// model itself must make the call.
+func TestRunner_Run_RealLLM_PlanVsDirectRouting(t *testing.T) {
+	ctx := context.Background()
+	llm := newRoutingTestLLMClient(t)
+
+	runner, err := planexec.NewRunner(planexec.RunnerDeps{
+		LLMClient:   llm,
+		HistoryRepo: agentarchive.NewMemoryHistoryRepository(),
+		TraceRepo:   agentarchive.NewMemoryTraceRepository(),
+		// Bound the investigate path so the complex case cannot run away.
+		Budget: planexec.BudgetConfig{PlannerLoopMax: 4, SubAgentLoopMax: 6},
+	})
+	gt.NoError(t, err).Required()
+
+	t.Run("trivial request goes direct", func(t *testing.T) {
+		req := baseRequest()
+		req.AllowDirect = true
+		req.SystemPrompt = routingSystemPrompt
+		req.UserInput = "A teammate just wrote: \"Thanks, that's all I needed for now!\" " +
+			"Acknowledge it briefly and politely. No investigation, lookup, or tools are required."
+
+		res, err := runner.Run(ctx, req)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, res.Direct).True()
+		gt.Value(t, res.Status).Equal(planexec.StatusCompleted)
+		gt.String(t, res.FinalText).NotEqual("")
+		// The direct path never runs an investigation phase.
+		gt.Array(t, res.AllResults).Length(0)
+		async.Wait()
+	})
+
+	t.Run("complex request is investigated", func(t *testing.T) {
+		req := baseRequest()
+		req.AllowDirect = true
+		req.SystemPrompt = routingSystemPrompt
+		req.UserInput = "Investigate the root cause of the recurring production login outage on this case: " +
+			"correlate the discussion in this Slack thread, find related past cases, and check the linked " +
+			"Notion runbook and the relevant GitHub commits, then summarise what you found."
+
+		res, err := runner.Run(ctx, req)
+		gt.NoError(t, err).Required()
+		// The model must NOT short-circuit a multi-source investigation.
+		gt.Bool(t, res.Direct).False()
+		// At least one investigation phase ran (true regardless of whether the
+		// loop completed or hit the bounded budget).
+		gt.Number(t, len(res.AllResults)).GreaterOrEqual(1)
+		async.Wait()
+	})
+}
+
+// When AllowDirect is false (the default), a planner that emits a direct
+// payload is rejected and retried; the investigate path still drives the
+// turn to completion.
+func TestRunner_Run_DirectRejectedWhenNotAllowed(t *testing.T) {
+	ctx := context.Background()
+	llm := newSequencedLLM([]sequencedResponse{
+		// Round 1 attempt 1: direct, but AllowDirect is false → rejected.
+		{text: `{"message":"try direct","direct":{}}`},
+		// Round 1 attempt 2: fall back to a valid task plan.
+		{text: `{"message":"plan","tasks":[
+			{"id":"t-1","title":"A","description":"x","acceptance_criteria":"a","tools":["slack_ro"]}
+		]}`},
+		{text: "investigation result"},
+		// Round 2: terminate.
+		{text: `{"message":"done","tasks":[]}`},
+		// Final synthesis.
+		{text: "final plain answer"},
+	})
+
+	runner := newRunner(t, llm.Client())
+	req := baseRequest()
+	// req.AllowDirect defaults to false.
+
+	res, err := runner.Run(ctx, req)
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(planexec.StatusCompleted)
+	gt.Bool(t, res.Direct).False()
+	gt.String(t, res.FinalText).Equal("final plain answer")
+	gt.Array(t, res.AllResults).Length(1)
 }
