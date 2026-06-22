@@ -66,6 +66,32 @@ func TestPlannerPrompt_LanguageOmitted(t *testing.T) {
 	gt.Bool(t, contains(got, "MUST be written in")).False()
 }
 
+func TestPlannerPrompt_DirectEnabled(t *testing.T) {
+	got, err := planexec.RenderPlannerPromptForTest(planexec.PlannerPromptInputForTest{
+		HostPrompt:    "You are the thread planner.",
+		KnownToolIDs:  []string{"slack_ro"},
+		AllowQuestion: true,
+		AllowDirect:   true,
+	})
+	gt.NoError(t, err).Required()
+	// The Direct answer section and its strict guard appear.
+	gt.String(t, got).Contains("Direct answer")
+	gt.String(t, got).Contains("`direct`")
+	gt.String(t, got).Contains("When in ANY doubt")
+}
+
+func TestPlannerPrompt_DirectDisabled(t *testing.T) {
+	got, err := planexec.RenderPlannerPromptForTest(planexec.PlannerPromptInputForTest{
+		HostPrompt:    "You are the thread planner.",
+		KnownToolIDs:  []string{"slack_ro"},
+		AllowQuestion: true,
+		// AllowDirect: false
+	})
+	gt.NoError(t, err).Required()
+	// No Direct answer section when the host did not opt in.
+	gt.Bool(t, contains(got, "Direct answer")).False()
+}
+
 func TestPlannerPrompt_RejectsEmptyHostPrompt(t *testing.T) {
 	_, err := planexec.RenderPlannerPromptForTest(planexec.PlannerPromptInputForTest{
 		KnownToolIDs: []string{"a"},

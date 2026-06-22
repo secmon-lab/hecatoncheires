@@ -203,6 +203,72 @@ func TestRunTurn_MentionRespond(t *testing.T) {
 	gt.String(t, res.Decision.Message).Equal("Here is what I found.")
 }
 
+// A trivial mention can be answered via the direct fast path: the planner
+// emits `direct` on round 1, the runtime replies in a single ReAct pass, and
+// the host receives that plain text as a respond Decision (no investigation,
+// no parseDecision of a structured final).
+func TestRunTurn_MentionDirect(t *testing.T) {
+	ctx := context.Background()
+	llm := newScriptedLLM([]string{
+		`{"message":"answering directly","direct":{}}`,
+		"Here is the quick answer.",
+	})
+	uc, _ := newThreadcaseUC(t, llm)
+	host := &hostStub{}
+
+	res, err := uc.RunTurn(ctx, threadcase.TurnRequest{
+		Session:     newThreadSession(),
+		Workspace:   newThreadWorkspace(),
+		Case:        newThreadCase(),
+		ChannelID:   "C-MONITOR",
+		ThreadTS:    "1700000000.000100",
+		MentionTS:   "1700000005.000001",
+		MentionText: "<@bot> thanks!",
+		TriggerTS:   "1700000005.000001",
+		Mode:        threadcase.ModeMention,
+		Handler:     host,
+	})
+	async.Wait()
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(threadcase.StatusCompleted)
+	gt.Value(t, res.Decision).NotNil().Required()
+	gt.Value(t, res.Decision.Kind).Equal(threadcase.DecisionRespond)
+	gt.String(t, res.Decision.Message).Equal("Here is the quick answer.")
+}
+
+// ModeCreate must NOT offer the direct path (creating a Case is a
+// side-effecting terminal action). A planner that tries `direct` in create
+// mode is rejected and re-planned, then drives the normal investigate →
+// create flow.
+func TestRunTurn_Create_DirectRejected(t *testing.T) {
+	ctx := context.Background()
+	llm := newScriptedLLM([]string{
+		`{"message":"try direct","direct":{}}`, // rejected: AllowDirect is false in create mode
+		investigatePlan,
+		"The reporter cannot log in.",
+		replanDone,
+		validCreateDecision,
+	})
+	uc, _ := newThreadcaseUC(t, llm)
+	host := &hostStub{}
+
+	res, err := uc.RunTurn(ctx, threadcase.TurnRequest{
+		Session:        createTestSession(),
+		Workspace:      createTestWorkspace(),
+		ChannelID:      "C-MONITOR",
+		ThreadTS:       "1700000000.000200",
+		TriggerTS:      "1700000000.000200",
+		Mode:           threadcase.ModeCreate,
+		SystemMessages: []threadcase.ConversationMessage{{Timestamp: "1700000000.000200", UserID: "U-REPORTER", Text: "I cannot log in"}},
+		Handler:        host,
+	})
+	async.Wait()
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(threadcase.StatusCompleted)
+	gt.Value(t, res.Case).NotNil().Required()
+	gt.Array(t, host.creates).Length(1).Required()
+}
+
 func TestRunTurn_Materialize(t *testing.T) {
 	ctx := context.Background()
 	llm := newScriptedLLM([]string{

@@ -81,6 +81,11 @@ func (e *PlanexecJobExecutor) Execute(ctx context.Context, req ExecuteRequest) (
 		ToolResolver:  resolver,
 		KnownToolIDs:  resolver.KnownIDs(),
 		AllowQuestion: false, // Jobs run unattended.
+		// AllowDirect lets a trivially-answerable job skip the investigation
+		// machinery and reply in a single tool-enabled pass. Jobs surface a
+		// plain-text summary (FinalOutputSchema nil), which is exactly what
+		// the direct path produces, so no terminal-shape change is needed.
+		AllowDirect: true,
 		// FinalOutputSchema is nil → plain-text summary surfaces as
 		// RunResult.FinalText, which we copy into ExecuteResult.Summary.
 		Sink: sink,

@@ -290,6 +290,20 @@ is not viable under horizontal scaling; the pending question is persisted
 (`Session.PendingQuestion`, shared backend) and the answer arrives on a
 fresh dispatched event that starts a **new turn**.
 
+**Direct mode (round-1 fast path).** When the host sets
+`RunRequest.AllowDirect`, the planner may answer a *genuinely trivial*
+request on round 1 without any investigation: instead of `tasks` it emits a
+`direct` payload (an optional tool-id subset), and the runtime replies in a
+single tool-enabled ReAct loop, returning plain text in `RunResult.FinalText`
+with `RunResult.Direct == true`. It is strictly a fast path for
+respond-style replies: `FinalOutputSchema` / `OnFinalize` are **not** consulted
+on the direct path, because side-effecting terminal actions (materialize /
+create / close) are by definition not "trivial" and must go through the
+normal `tasks` → replan → structured-final loop. Hosts opt in (`threadcase`
+enables it for mention mode but disables it for `ModeCreate`; `job` enables
+it; structured-only hosts leave it off). The planner prompt guards it hard:
+"when in any doubt, investigate."
+
 ## Budget
 
 The budget model is the combination of **two** controls — there is NO

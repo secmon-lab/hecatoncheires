@@ -53,6 +53,16 @@ type RunRequest struct {
 	// means the planner is tool-less.
 	PlannerTools []gollem.Tool
 
+	// AllowDirect lets the planner short-circuit round 1: when the request
+	// is trivially answerable without any investigation phase, the planner
+	// may emit a `direct` payload instead of `tasks`, and the runtime
+	// answers in a single tool-enabled ReAct loop. The direct path is plain
+	// text only — FinalOutputSchema / OnFinalize are NOT used on it (those
+	// are reserved for the investigate path's structured terminal). Hosts
+	// opt in (proposal-style structured-only flows leave this false).
+	// Default false.
+	AllowDirect bool
+
 	// --- Phase execution -------------------------------------------
 
 	// ToolResolver maps TaskPlan.Tools entries into concrete gollem
@@ -178,4 +188,10 @@ type RunResult struct {
 	// StatusCompleted in this case; the host uses this flag to
 	// distinguish "we answered the user" vs "we asked the user".
 	EndedWithQuestion bool
+	// Direct is true when the turn terminated via the round-1 direct path
+	// (no investigation phase ran). FinalText holds the plain-text reply and
+	// FinalRaw is nil regardless of FinalOutputSchema. Hosts that normally
+	// parse FinalRaw (structured final) MUST treat FinalText as the
+	// user-facing reply when Direct is true.
+	Direct bool
 }

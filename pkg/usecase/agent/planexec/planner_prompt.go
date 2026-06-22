@@ -35,6 +35,10 @@ type plannerPromptInput struct {
 	// AllowQuestion toggles the `question` shape description.
 	AllowQuestion bool
 
+	// AllowDirect toggles the round-1 `direct` (answer-without-investigation)
+	// shape description. Mirrors RunRequest.AllowDirect.
+	AllowDirect bool
+
 	// StructuredFinal is true iff RunRequest.FinalOutputSchema != nil;
 	// the planner is told the final-response phase will be JSON-shaped.
 	StructuredFinal bool

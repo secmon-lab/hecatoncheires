@@ -34,15 +34,37 @@ const (
 )
 
 // PlanResult is the parsed shape of the first planner-round JSON output.
-// At least one task is required for the first round; if the host wants
-// the planner to be able to terminate immediately, it should issue a
-// replan round instead.
+// The planner must choose exactly one of two shapes:
+//   - Tasks: the parallel investigation phase (the default path). At least
+//     one task is required; if the host wants the planner to terminate after
+//     a phase, that is a replan-round concern.
+//   - Direct: skip investigation entirely and answer the user directly
+//     (round-1 fast path). Only valid when the host set
+//     RunRequest.AllowDirect.
 type PlanResult struct {
 	// Message is a 1-2 sentence rationale shown to the user via
 	// Sink.PlanProposed.
 	Message string `json:"message,omitempty"`
 	// Tasks is the parallel investigation phase emitted by the planner.
-	Tasks []TaskPlan `json:"tasks"`
+	// Empty / omitted when Direct is set — the two are mutually exclusive.
+	Tasks []TaskPlan `json:"tasks,omitempty"`
+	// Direct, when non-nil, signals the planner judged the request trivial
+	// enough to answer without any investigation phase. The nil Direct (the
+	// common case) means "investigate via Tasks". Mutually exclusive with
+	// Tasks; rejected unless RunRequest.AllowDirect is true.
+	Direct *DirectPlan `json:"direct,omitempty"`
+}
+
+// DirectPlan is the round-1 "answer directly" payload. It carries only the
+// tools the single direct ReAct agent is permitted to call; everything else
+// about the direct path (system prompt, history, loop limit) is supplied by
+// the runtime, and the response is always plain text (no FinalOutputSchema /
+// OnFinalize on this path).
+type DirectPlan struct {
+	// Tools is the subset of RunRequest.KnownToolIDs the direct agent may
+	// call. May be empty for a pure conversational reply that needs no tool.
+	// Bounded by maxToolsPerTask.
+	Tools []string `json:"tools,omitempty"`
 }
 
 // ReplanResult is the parsed shape of every subsequent planner round.
@@ -155,6 +177,28 @@ func (t *TaskPlan) Validate(knownToolIDs []string) error {
 	return nil
 }
 
+// Validate enforces DirectPlan invariants. knownToolIDs is the host-supplied
+// allowlist (RunRequest.KnownToolIDs); every entry in Tools must be a member.
+// An empty Tools list is allowed — a direct reply need not call any tool.
+func (d *DirectPlan) Validate(knownToolIDs []string) error {
+	if d == nil {
+		return goerr.New("direct plan is nil")
+	}
+	if len(d.Tools) > maxToolsPerTask {
+		return goerr.New("direct plan tools too many entries",
+			goerr.V("got", len(d.Tools)),
+			goerr.V("max", maxToolsPerTask))
+	}
+	for _, id := range d.Tools {
+		if !slices.Contains(knownToolIDs, id) {
+			return goerr.New("direct plan tools contains unknown id",
+				goerr.V("tool_id", id),
+				goerr.V("known", knownToolIDs))
+		}
+	}
+	return nil
+}
+
 // Validate enforces Question invariants. Called from Validate on the
 // containing ReplanResult.
 func (q *Question) Validate() error {
@@ -230,14 +274,33 @@ func (i *QuestionItem) Validate() error {
 	return nil
 }
 
-// parsePlanResult decodes and validates a first-round planner JSON.
-// Tasks must be non-empty within bounds; every TaskPlan is validated
-// against knownToolIDs.
-func parsePlanResult(raw []byte, knownToolIDs []string) (*PlanResult, error) {
+// parsePlanResult decodes and validates a first-round planner JSON. The
+// planner returns one of two shapes:
+//   - Direct (fast path): only honoured when allowDirect is true and Tasks
+//     is empty. The direct.tools list is validated against knownToolIDs.
+//   - Tasks (default): non-empty within bounds; every TaskPlan is validated
+//     against knownToolIDs.
+//
+// allowDirect=false (e.g. a host that has not opted in) rejects a direct
+// payload outright; the system prompt / schema should have suppressed the
+// option but the parser double-checks.
+func parsePlanResult(raw []byte, knownToolIDs []string, allowDirect bool) (*PlanResult, error) {
 	body := extractJSONObject(raw)
 	var p PlanResult
 	if err := json.Unmarshal(body, &p); err != nil {
 		return nil, goerr.Wrap(err, "decode plan json")
+	}
+	if p.Direct != nil {
+		if !allowDirect {
+			return nil, goerr.New("plan produced a direct payload but AllowDirect is false")
+		}
+		if len(p.Tasks) > 0 {
+			return nil, goerr.New("plan sets both tasks and direct; they are mutually exclusive")
+		}
+		if err := p.Direct.Validate(knownToolIDs); err != nil {
+			return nil, goerr.Wrap(err, "direct plan invalid")
+		}
+		return &p, nil
 	}
 	if err := validateTaskList(p.Tasks, knownToolIDs); err != nil {
 		return nil, err
@@ -373,20 +436,50 @@ func extractJSONObject(raw []byte) []byte {
 type schemaOptions struct {
 	knownToolIDs  []string
 	allowQuestion bool
+	allowDirect   bool
 }
 
 // planSchema returns the gollem.Parameter applied to the planner LLM's
-// JSON output for the FIRST round. Only `tasks` is allowed.
+// JSON output for the FIRST round. `tasks` is always offered; `direct` is
+// added only when the host opted in (allowDirect). The schema cannot express
+// the tasks/direct mutual exclusion (gollem has no oneOf), so that, plus the
+// task-count bounds, is enforced Go-side in parsePlanResult.
 func planSchema(opts schemaOptions) *gollem.Parameter {
+	props := map[string]*gollem.Parameter{
+		"message": {
+			Type:        gollem.TypeString,
+			Description: "1-2 sentence rationale shown to the user.",
+		},
+		"tasks": tasksSchema(opts.knownToolIDs),
+	}
+	desc := "Initial planner output: parallel investigation tasks for round 1."
+	if opts.allowDirect {
+		props["direct"] = directSchema(opts.knownToolIDs)
+		desc = "Initial planner output: either parallel investigation `tasks`, or a `direct` answer (round 1 only). Set exactly one."
+	}
 	return &gollem.Parameter{
 		Type:        gollem.TypeObject,
-		Description: "Initial planner output: parallel investigation tasks for round 1.",
+		Description: desc,
+		Properties:  props,
+	}
+}
+
+// directSchema returns the gollem.Parameter for the round-1 `direct` payload.
+// Only `tools` (a subset of the known tool ids) is carried; the rest of the
+// direct path is runtime-supplied.
+func directSchema(knownToolIDs []string) *gollem.Parameter {
+	return &gollem.Parameter{
+		Type:        gollem.TypeObject,
+		Description: "Answer the user directly without any investigation phase. Mutually exclusive with `tasks`; set only one.",
 		Properties: map[string]*gollem.Parameter{
-			"message": {
-				Type:        gollem.TypeString,
-				Description: "1-2 sentence rationale shown to the user.",
+			"tools": {
+				Type:        gollem.TypeArray,
+				Description: "Tool ids the direct agent may call (0-4). Omit or leave empty for a pure conversational reply.",
+				Items: &gollem.Parameter{
+					Type: gollem.TypeString,
+					Enum: knownToolIDs,
+				},
 			},
-			"tasks": tasksSchema(opts.knownToolIDs),
 		},
 	}
 }

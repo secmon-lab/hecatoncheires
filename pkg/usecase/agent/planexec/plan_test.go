@@ -26,7 +26,7 @@ func TestParsePlanResult_OneTask(t *testing.T) {
 			}
 		]
 	}`)
-	p, err := planexec.ParsePlanResultForTest(raw, knownTools)
+	p, err := planexec.ParsePlanResultForTest(raw, knownTools, false)
 	gt.NoError(t, err).Required()
 	gt.String(t, p.Message).Equal("looking into the thread")
 	gt.Array(t, p.Tasks).Length(1).Required()
@@ -37,7 +37,7 @@ func TestParsePlanResult_OneTask(t *testing.T) {
 
 func TestParsePlanResult_RejectsZeroTasks(t *testing.T) {
 	raw := []byte(`{"tasks": []}`)
-	_, err := planexec.ParsePlanResultForTest(raw, knownTools)
+	_, err := planexec.ParsePlanResultForTest(raw, knownTools, false)
 	gt.Error(t, err)
 }
 
@@ -47,7 +47,7 @@ func TestParsePlanResult_RejectsTooManyTasks(t *testing.T) {
 		parts = append(parts, `{"id":"t-`+string(rune('0'+i))+`","title":"t","description":"d","acceptance_criteria":"a","tools":["slack_ro"]}`)
 	}
 	raw := []byte(`{"tasks":[` + strings.Join(parts, ",") + `]}`)
-	_, err := planexec.ParsePlanResultForTest(raw, knownTools)
+	_, err := planexec.ParsePlanResultForTest(raw, knownTools, false)
 	gt.Error(t, err)
 }
 
@@ -56,7 +56,7 @@ func TestParsePlanResult_RejectsDuplicateTaskID(t *testing.T) {
 		{"id":"t-1","title":"a","description":"d","acceptance_criteria":"a","tools":["slack_ro"]},
 		{"id":"t-1","title":"b","description":"d","acceptance_criteria":"a","tools":["slack_ro"]}
 	]}`)
-	_, err := planexec.ParsePlanResultForTest(raw, knownTools)
+	_, err := planexec.ParsePlanResultForTest(raw, knownTools, false)
 	gt.Error(t, err)
 }
 
@@ -64,7 +64,7 @@ func TestParsePlanResult_RejectsUnknownToolID(t *testing.T) {
 	raw := []byte(`{"tasks":[
 		{"id":"t-1","title":"a","description":"d","acceptance_criteria":"a","tools":["fake_set"]}
 	]}`)
-	_, err := planexec.ParsePlanResultForTest(raw, knownTools)
+	_, err := planexec.ParsePlanResultForTest(raw, knownTools, false)
 	gt.Error(t, err)
 }
 
@@ -72,7 +72,7 @@ func TestParsePlanResult_RejectsEmptyToolsList(t *testing.T) {
 	raw := []byte(`{"tasks":[
 		{"id":"t-1","title":"a","description":"d","acceptance_criteria":"a","tools":[]}
 	]}`)
-	_, err := planexec.ParsePlanResultForTest(raw, knownTools)
+	_, err := planexec.ParsePlanResultForTest(raw, knownTools, false)
 	gt.Error(t, err)
 }
 
@@ -80,12 +80,61 @@ func TestParsePlanResult_RejectsMissingTitle(t *testing.T) {
 	raw := []byte(`{"tasks":[
 		{"id":"t-1","title":"","description":"d","acceptance_criteria":"a","tools":["slack_ro"]}
 	]}`)
-	_, err := planexec.ParsePlanResultForTest(raw, knownTools)
+	_, err := planexec.ParsePlanResultForTest(raw, knownTools, false)
 	gt.Error(t, err)
 }
 
 func TestParsePlanResult_RejectsBadJSON(t *testing.T) {
-	_, err := planexec.ParsePlanResultForTest([]byte(`{not json`), knownTools)
+	_, err := planexec.ParsePlanResultForTest([]byte(`{not json`), knownTools, false)
+	gt.Error(t, err)
+}
+
+// ----- parsePlanResult: direct path --------------------------------
+
+func TestParsePlanResult_DirectWithTools(t *testing.T) {
+	raw := []byte(`{"message":"answering now","direct":{"tools":["slack_ro"]}}`)
+	p, err := planexec.ParsePlanResultForTest(raw, knownTools, true)
+	gt.NoError(t, err).Required()
+	gt.Value(t, p.Direct).NotNil().Required()
+	gt.Array(t, p.Direct.Tools).Length(1)
+	gt.String(t, p.Direct.Tools[0]).Equal("slack_ro")
+	gt.Array(t, p.Tasks).Length(0)
+	gt.String(t, p.Message).Equal("answering now")
+}
+
+func TestParsePlanResult_DirectWithoutTools(t *testing.T) {
+	// A pure conversational reply needs no tools — empty tools is valid.
+	raw := []byte(`{"message":"ok","direct":{}}`)
+	p, err := planexec.ParsePlanResultForTest(raw, knownTools, true)
+	gt.NoError(t, err).Required()
+	gt.Value(t, p.Direct).NotNil().Required()
+	gt.Array(t, p.Direct.Tools).Length(0)
+}
+
+func TestParsePlanResult_RejectsDirectWhenNotAllowed(t *testing.T) {
+	raw := []byte(`{"direct":{"tools":["slack_ro"]}}`)
+	_, err := planexec.ParsePlanResultForTest(raw, knownTools, false)
+	gt.Error(t, err)
+}
+
+func TestParsePlanResult_RejectsDirectAndTasksTogether(t *testing.T) {
+	raw := []byte(`{
+		"direct":{"tools":["slack_ro"]},
+		"tasks":[{"id":"t-1","title":"a","description":"d","acceptance_criteria":"a","tools":["slack_ro"]}]
+	}`)
+	_, err := planexec.ParsePlanResultForTest(raw, knownTools, true)
+	gt.Error(t, err)
+}
+
+func TestParsePlanResult_RejectsDirectUnknownToolID(t *testing.T) {
+	raw := []byte(`{"direct":{"tools":["fake_set"]}}`)
+	_, err := planexec.ParsePlanResultForTest(raw, knownTools, true)
+	gt.Error(t, err)
+}
+
+func TestParsePlanResult_RejectsDirectTooManyTools(t *testing.T) {
+	raw := []byte(`{"direct":{"tools":["core_ro","slack_ro","notion","github","core_ro"]}}`)
+	_, err := planexec.ParsePlanResultForTest(raw, knownTools, true)
 	gt.Error(t, err)
 }
 
@@ -278,7 +327,7 @@ func TestParsePlanResult_TolerantOfPreamble(t *testing.T) {
 			}
 		]
 	}`)
-	p, err := planexec.ParsePlanResultForTest(raw, knownTools)
+	p, err := planexec.ParsePlanResultForTest(raw, knownTools, false)
 	gt.NoError(t, err).Required()
 	gt.Array(t, p.Tasks).Length(1)
 }
@@ -286,12 +335,29 @@ func TestParsePlanResult_TolerantOfPreamble(t *testing.T) {
 // ----- schema shape ------------------------------------------------
 
 func TestPlanSchema_Shape(t *testing.T) {
-	raw := planexec.PlanSchemaForTest(knownTools, false)
+	raw := planexec.PlanSchemaForTest(knownTools, false, false)
 	schema, ok := raw.(*gollem.Parameter)
 	gt.Bool(t, ok).True().Required()
 	gt.Value(t, schema.Type).Equal(gollem.TypeObject)
 	gt.Map(t, schema.Properties).HasKey("tasks")
 	gt.Map(t, schema.Properties).HasKey("message")
+	// direct is absent unless allowDirect is set.
+	_, hasDirect := schema.Properties["direct"]
+	gt.Bool(t, hasDirect).False()
+}
+
+func TestPlanSchema_HasDirectWhenAllowed(t *testing.T) {
+	rawAllow := planexec.PlanSchemaForTest(knownTools, false, true)
+	schemaAllow := rawAllow.(*gollem.Parameter)
+	gt.Map(t, schemaAllow.Properties).HasKey("direct")
+	direct := schemaAllow.Properties["direct"]
+	gt.Value(t, direct.Type).Equal(gollem.TypeObject)
+	gt.Map(t, direct.Properties).HasKey("tools")
+
+	rawDisallow := planexec.PlanSchemaForTest(knownTools, false, false)
+	schemaDisallow := rawDisallow.(*gollem.Parameter)
+	_, has := schemaDisallow.Properties["direct"]
+	gt.Bool(t, has).False()
 }
 
 func TestReplanSchema_HasQuestionWhenAllowed(t *testing.T) {

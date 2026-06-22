@@ -114,6 +114,7 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 		Language:        req.LanguageLabel,
 		KnownToolIDs:    req.KnownToolIDs,
 		AllowQuestion:   req.AllowQuestion,
+		AllowDirect:     req.AllowDirect,
 		StructuredFinal: req.FinalOutputSchema != nil,
 	})
 	if err != nil {
@@ -157,6 +158,7 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 			schema = planSchema(schemaOptions{
 				knownToolIDs:  req.KnownToolIDs,
 				allowQuestion: req.AllowQuestion,
+				allowDirect:   req.AllowDirect,
 			})
 		} else {
 			schema = replanSchema(schemaOptions{
@@ -195,7 +197,7 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 		)
 
 		if isFirstRound {
-			p, perr := parsePlanResult(raw, req.KnownToolIDs)
+			p, perr := parsePlanResult(raw, req.KnownToolIDs, req.AllowDirect)
 			if perr != nil {
 				// Retry within the same logical round; the cost is
 				// charged via the next loop iteration's bg.plannerUsed++.
@@ -207,6 +209,44 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 			}
 			// First valid plan accepted — promote to logicalRound 1.
 			logicalRound = 1
+
+			// Direct fast path: the planner judged the request trivial enough
+			// to answer without any investigation. Skip the plan/execute/
+			// replan machinery and produce a plain-text reply in a single
+			// tool-enabled ReAct loop. OnFinalize / FinalOutputSchema are not
+			// consulted here — direct mode is reserved for replies that need
+			// no structured terminal action.
+			if p.Direct != nil {
+				req.Sink.PlanProposed(ctx, PlanInfo{Round: logicalRound, Reasoning: p.Message, IsReplan: false, Direct: true})
+				tools := req.ToolResolver.Resolve(p.Direct.Tools)
+				text, derr := generateDirectResponse(
+					ctx,
+					r.llm,
+					r.historyRepo,
+					recorder,
+					systemPrompt,
+					req.HistoryKey,
+					req.LanguageLabel,
+					req.UserInput,
+					tools,
+					r.budget.SubAgentLoopMax,
+				)
+				if derr != nil {
+					errutil.Handle(ctx, goerr.Wrap(derr, "planexec: direct response failed",
+						goerr.V("trace_id", req.TraceID)), "planexec: direct response failed")
+					return &RunResult{
+						Status:         StatusFallbackError,
+						Direct:         true,
+						FallbackReason: derr.Error(),
+					}, nil
+				}
+				return &RunResult{
+					Status:    StatusCompleted,
+					FinalText: text,
+					Direct:    true,
+				}, nil
+			}
+
 			req.Sink.PlanProposed(ctx, PlanInfo{Round: logicalRound, Reasoning: p.Message, IsReplan: false})
 
 			tasks := p.Tasks
