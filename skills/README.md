@@ -9,6 +9,7 @@ are useful when working with Hecatoncheires. A Skill is a directory containing a
 
 | Skill | What it does |
 | --- | --- |
+| [`hecatoncheires-config`](./hecatoncheires-config/SKILL.md) | Author a Hecatoncheires workspace configuration TOML (`config.toml`). |
 | [`hecatoncheires-build-scenario`](./hecatoncheires-build-scenario/SKILL.md) | Author an eval scenario TOML for `hecatoncheires eval`. |
 
 ## Installing
