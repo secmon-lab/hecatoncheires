@@ -657,7 +657,7 @@ The AI agent will:
 | `github__*` | The `--github-app-*` flags. See [docs/integrations.md](integrations.md). |
 | `webfetch` | A configured web-fetch client. |
 | `knowledge__*` | Always (write is withheld on private cases). |
-| `memo__*` | The workspace's `[memo]` section with `enabled = true`. |
+| `memo__*` | A `[memo]` section with at least one memo field defined. |
 
 ---
 

@@ -80,8 +80,8 @@ always offered; write tools are gated (see notes).
 
 ### Memo tools (`memo`)
 
-Per-case memos. Wired only when the workspace enabled memos
-(`[memo]` with `enabled = true`).
+Per-case memos. Wired only when the workspace defines a `[memo]` section with
+at least one memo field.
 
 | Tool | R/W | Purpose |
 |------|-----|---------|
