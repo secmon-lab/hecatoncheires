@@ -88,3 +88,31 @@ func TestNew_JSONFormatRedactsAuthorization(t *testing.T) {
 	gt.Bool(t, strings.Contains(out, "secret-token")).False()
 	gt.String(t, out).Contains("alice")
 }
+
+// TestNew_JSONFormatRedactsSecretTagAndHeaderMapKey covers the two redaction
+// paths the MCP authorization input relies on: a `masq:"secret"` tagged field
+// (the env allow-list) and an "Authorization" key inside a header map (which
+// cannot carry a struct tag, so it is redacted via masq.WithFieldName).
+func TestNew_JSONFormatRedactsSecretTagAndHeaderMapKey(t *testing.T) {
+	var buf bytes.Buffer
+	logger := logging.New(&buf, slog.LevelDebug, logging.FormatJSON, false)
+
+	type input struct {
+		Env    map[string]string   `masq:"secret"`
+		Header map[string][]string `json:"header"`
+		Tool   string              `json:"tool"`
+	}
+	logger.Info("mcp", slog.Any("input", input{
+		Env:    map[string]string{"MCP_TOKEN": "env-secret-value"},
+		Header: map[string][]string{"Authorization": {"Bearer header-secret-value"}},
+		Tool:   "hecaton_list_cases",
+	}))
+
+	out := buf.String()
+	// The secret-tagged env value must not appear in the log output.
+	gt.Bool(t, strings.Contains(out, "env-secret-value")).False()
+	// The Authorization header value (a map key, not a struct field) must be redacted.
+	gt.Bool(t, strings.Contains(out, "header-secret-value")).False()
+	// Non-sensitive fields are still logged.
+	gt.String(t, out).Contains("hecaton_list_cases")
+}

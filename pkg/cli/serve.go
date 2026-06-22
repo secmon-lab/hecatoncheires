@@ -166,6 +166,7 @@ func cmdServe() *cli.Command {
 	var webfetchCfg config.WebFetch
 	var storageCfg config.Storage
 	var sentryCfg config.Sentry
+	var mcpCfg config.MCP
 
 	flags := []cli.Flag{
 		&cli.StringFlag{
@@ -220,6 +221,7 @@ func cmdServe() *cli.Command {
 	flags = append(flags, webfetchCfg.Flags()...)
 	flags = append(flags, storageCfg.Flags()...)
 	flags = append(flags, sentryCfg.Flags()...)
+	flags = append(flags, mcpCfg.Flags()...)
 
 	return &cli.Command{
 		Name:    "serve",
@@ -584,6 +586,21 @@ func cmdServe() *cli.Command {
 
 			// Register the scheduled-Job sweep webhook.
 			httpOpts = append(httpOpts, httpctrl.WithTickHook(tickHook))
+
+			// Wire the MCP endpoint when enabled. Configure fails loudly if
+			// --mcp is set without a --policy: we never expose the MCP data
+			// surface without a Rego authorization policy.
+			if mcpCfg.IsEnabled() {
+				policyClient, mcpEnv, err := mcpCfg.Configure(c)
+				if err != nil {
+					return goerr.Wrap(err, "failed to configure MCP endpoint")
+				}
+				mcpHandler := httpctrl.NewMCPHandler(uc.Case, uc.Action, registry, policyClient, mcpEnv)
+				httpOpts = append(httpOpts, httpctrl.WithMCP(mcpHandler))
+				logging.Default().Info("MCP endpoint enabled", logAttrsToArgs(mcpCfg.LogAttrs())...)
+			} else {
+				logging.Default().Info("MCP endpoint disabled")
+			}
 
 			// Create HTTP server
 			httpHandler, err := httpctrl.New(gqlHandler, httpOpts...)

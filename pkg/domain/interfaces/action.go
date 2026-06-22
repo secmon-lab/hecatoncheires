@@ -36,6 +36,15 @@ func (s ActionArchiveScope) Allows(isArchived bool) bool {
 type ActionListOptions struct {
 	// ArchiveScope selects active / archived / both. Defaults to active only.
 	ArchiveScope ActionArchiveScope
+
+	// ExcludePrivateCaseActions, when true, drops every action whose parent
+	// Case is private — unconditionally, regardless of channel membership.
+	// This is stricter than the membership-based access control applied when
+	// an auth token is present: it is the policy for entry points (such as
+	// the MCP endpoint) where private Cases and their Actions must never be
+	// exposed, not even to members. Defaults to false so existing callers
+	// keep the membership-based behaviour.
+	ExcludePrivateCaseActions bool
 }
 
 // ActionRepository defines the interface for Action data access

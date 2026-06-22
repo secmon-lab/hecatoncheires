@@ -228,6 +228,9 @@ The application is configured via CLI flags or environment variables:
 - `HECATONCHEIRES_GRAPHIQL` - Enable GraphiQL playground (default: `true`)
 - `HECATONCHEIRES_CLOUD_STORAGE_BUCKET` - Cloud Storage bucket for agent History/Trace persistence (required when Slack is wired). See `docs/develop/architecture.md` § Agent thread session.
 - `HECATONCHEIRES_CLOUD_STORAGE_PREFIX` - Optional object key prefix within the Cloud Storage bucket
+- `HECATONCHEIRES_MCP` - Enable the read-only MCP endpoint at `/mcp` (default: `false`). Requires `HECATONCHEIRES_POLICY`. See `docs/mcp.md`.
+- `HECATONCHEIRES_POLICY` - Rego policy file/directory path(s) authorizing MCP requests (`data.auth.mcp`). Required when MCP is enabled.
+- `HECATONCHEIRES_MCP_ENV` - Allow-list of environment variable names exposed to the Rego policy as `input.env`.
 - Logger configuration (format, level, output destination)
 - Sentry (optional) - `HECATONCHEIRES_SENTRY_DSN` enables Sentry error reporting via `errutil.Handle`. Companion vars: `HECATONCHEIRES_SENTRY_ENV`, `HECATONCHEIRES_SENTRY_RELEASE`. See `docs/operations.md` § Observability (Sentry).
 
