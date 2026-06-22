@@ -7,10 +7,12 @@ import (
 	"time"
 
 	"github.com/m-mizutani/gt"
+	"github.com/robfig/cron/v3"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 )
@@ -185,6 +187,139 @@ func TestJobRunUseCase_GetLog(t *testing.T) {
 
 		_, err := uc.GetLog(ctx, ws, c.ID, "run-missing")
 		gt.Error(t, err).Is(interfaces.ErrJobRunLogNotFound)
+	})
+}
+
+// caseJobsRegistry builds a registry with a representative spread of Job
+// definitions for the given workspace: a case-created Job, two scheduled
+// Jobs (interval + cron), a case-closed Job, and a disabled Job that must
+// never surface.
+func caseJobsRegistry(t *testing.T, ws string) *model.WorkspaceRegistry {
+	t.Helper()
+	cronSched, err := cron.ParseStandard("0 9 * * *")
+	gt.NoError(t, err).Required()
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: ws, Name: "WS"},
+		Jobs: []*model.Job{
+			{
+				ID: "triage", Name: "Initial triage", Description: "evaluate on create",
+				Prompt: "p", Strategy: model.JobStrategyPlanexec,
+				Events: model.JobEvents{Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}}},
+			},
+			{
+				ID: "stale", Name: "Stale check", Description: "remind", Prompt: "p", Quiet: true,
+				Events: model.JobEvents{Scheduled: &model.ScheduledEventConfig{Every: time.Hour}},
+			},
+			{
+				ID: "daily", Name: "Daily summary", Description: "report", Prompt: "p", Strategy: model.JobStrategyPlanexec,
+				Events: model.JobEvents{Scheduled: &model.ScheduledEventConfig{Cron: cronSched, CronExpr: "0 9 * * *"}},
+			},
+			{
+				ID: "closed-notify", Name: "Close notice", Description: "wrap up", Prompt: "p",
+				Events: model.JobEvents{Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleClosed}}},
+			},
+			{
+				ID: "disabled-job", Name: "Disabled", Description: "never", Prompt: "p", Disabled: true,
+				Events: model.JobEvents{Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}}},
+			},
+		},
+	})
+	return registry
+}
+
+func jobIDSet(jobs []*model.Job) map[string]*model.Job {
+	out := make(map[string]*model.Job, len(jobs))
+	for _, j := range jobs {
+		out[j.ID] = j
+	}
+	return out
+}
+
+func TestJobRunUseCase_ListCaseJobs(t *testing.T) {
+	t.Run("open case returns enabled case-event and scheduled jobs", func(t *testing.T) {
+		repo, _, ws, c := setupJobRunTestCase(t)
+		uc := usecase.NewJobRunUseCase(repo, caseJobsRegistry(t, ws))
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UREPORTER"})
+
+		jobs, err := uc.ListCaseJobs(ctx, ws, c.ID)
+		gt.NoError(t, err).Required()
+		gt.Array(t, jobs).Length(4).Required()
+		got := jobIDSet(jobs)
+		gt.Map(t, got).HasKey("triage")
+		gt.Map(t, got).HasKey("stale")
+		gt.Map(t, got).HasKey("daily")
+		gt.Map(t, got).HasKey("closed-notify")
+		// Disabled jobs never surface.
+		_, hasDisabled := got["disabled-job"]
+		gt.Bool(t, hasDisabled).False()
+		// Field fidelity: the scheduled interval Job round-trips its quiet flag.
+		gt.Bool(t, got["stale"].Quiet).True()
+		gt.Value(t, got["triage"].Strategy).Equal(model.JobStrategyPlanexec)
+	})
+
+	t.Run("closed case drops scheduled jobs but keeps case-event jobs", func(t *testing.T) {
+		repo, _, ws, c := setupJobRunTestCase(t)
+		uc := usecase.NewJobRunUseCase(repo, caseJobsRegistry(t, ws))
+
+		raw, err := repo.Case().Get(context.Background(), ws, c.ID)
+		gt.NoError(t, err).Required()
+		raw.Status = types.CaseStatusClosed
+		_, err = repo.Case().Update(context.Background(), ws, raw)
+		gt.NoError(t, err).Required()
+
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UREPORTER"})
+		jobs, err := uc.ListCaseJobs(ctx, ws, c.ID)
+		gt.NoError(t, err).Required()
+		gt.Array(t, jobs).Length(2).Required()
+		got := jobIDSet(jobs)
+		gt.Map(t, got).HasKey("triage")
+		gt.Map(t, got).HasKey("closed-notify")
+		_, hasStale := got["stale"]
+		gt.Bool(t, hasStale).False()
+		_, hasDaily := got["daily"]
+		gt.Bool(t, hasDaily).False()
+	})
+
+	t.Run("private case rejects non-member", func(t *testing.T) {
+		repo, _, ws, c := setupJobRunTestCase(t)
+		uc := usecase.NewJobRunUseCase(repo, caseJobsRegistry(t, ws))
+
+		raw, err := repo.Case().Get(context.Background(), ws, c.ID)
+		gt.NoError(t, err).Required()
+		raw.IsPrivate = true
+		raw.ChannelUserIDs = []string{"UREPORTER"}
+		_, err = repo.Case().Update(context.Background(), ws, raw)
+		gt.NoError(t, err).Required()
+
+		other := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "USTRANGER"})
+		_, err = uc.ListCaseJobs(other, ws, c.ID)
+		gt.Error(t, err).Is(usecase.ErrAccessDenied)
+	})
+
+	t.Run("system context without token bypasses access control", func(t *testing.T) {
+		repo, _, ws, c := setupJobRunTestCase(t)
+		uc := usecase.NewJobRunUseCase(repo, caseJobsRegistry(t, ws))
+
+		raw, err := repo.Case().Get(context.Background(), ws, c.ID)
+		gt.NoError(t, err).Required()
+		raw.IsPrivate = true
+		raw.ChannelUserIDs = []string{"UREPORTER"}
+		_, err = repo.Case().Update(context.Background(), ws, raw)
+		gt.NoError(t, err).Required()
+
+		jobs, err := uc.ListCaseJobs(context.Background(), ws, c.ID)
+		gt.NoError(t, err).Required()
+		gt.Array(t, jobs).Length(4)
+	})
+
+	t.Run("nil registry yields empty slice", func(t *testing.T) {
+		repo, uc, ws, c := setupJobRunTestCase(t) // setup wires registry=nil
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UREPORTER"})
+		jobs, err := uc.ListCaseJobs(ctx, ws, c.ID)
+		gt.NoError(t, err).Required()
+		gt.Array(t, jobs).Length(0)
+		_ = repo
 	})
 }
 

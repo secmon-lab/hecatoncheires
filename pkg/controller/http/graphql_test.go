@@ -15,6 +15,7 @@ import (
 	"github.com/99designs/gqlgen/graphql/handler"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
+	"github.com/robfig/cron/v3"
 	"github.com/vektah/gqlparser/v2/gqlerror"
 
 	gqlctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/graphql"
@@ -3763,6 +3764,160 @@ func TestGraphQLHandler_CaseJobRunLogsQuery(t *testing.T) {
 	gt.Value(t, out.CaseJobRunLogs.NextCursor).NotNil().Required()
 	gt.Value(t, out.CaseJobRunLogs.Items[0].DurationMs).NotNil().Required()
 	gt.Number(t, *out.CaseJobRunLogs.Items[0].DurationMs).Equal(5000)
+}
+
+// TestGraphQLHandler_CaseJobsQuery drives the caseJobs query through the
+// HTTP boundary against a Workspace registry holding Job definitions. It
+// asserts the enabled/relevant filter, the trigger shape per event domain,
+// and that private-case access control refuses a non-member.
+func TestGraphQLHandler_CaseJobsQuery(t *testing.T) {
+	const caseJobsQuery = `
+		query($wsid: String!, $cid: Int!) {
+			caseJobs(workspaceId: $wsid, caseId: $cid) {
+				id name description strategy quiet prompt
+				trigger {
+					caseEvents
+					schedule { everySeconds cron }
+				}
+			}
+		}
+	`
+
+	type caseJobRow struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Strategy    string `json:"strategy"`
+		Quiet       bool   `json:"quiet"`
+		Prompt      string `json:"prompt"`
+		Trigger     struct {
+			CaseEvents []string `json:"caseEvents"`
+			Schedule   *struct {
+				EverySeconds *int    `json:"everySeconds"`
+				Cron         *string `json:"cron"`
+			} `json:"schedule"`
+		} `json:"trigger"`
+	}
+
+	buildRegistryHandler := func(t *testing.T, repo interfaces.Repository) http.Handler {
+		t.Helper()
+		cronSched, err := cron.ParseStandard("0 9 * * *")
+		gt.NoError(t, err).Required()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: testWorkspaceID, Name: "Test Workspace"},
+			Jobs: []*model.Job{
+				{
+					ID: "triage", Name: "Initial triage", Description: "evaluate on create",
+					Prompt: "triage prompt", Strategy: model.JobStrategyPlanexec,
+					Events: model.JobEvents{Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}}},
+				},
+				{
+					ID: "stale", Name: "Stale check", Description: "remind", Prompt: "stale prompt", Quiet: true,
+					Events: model.JobEvents{Scheduled: &model.ScheduledEventConfig{Every: time.Hour}},
+				},
+				{
+					ID: "daily", Name: "Daily summary", Description: "report", Prompt: "daily prompt",
+					Strategy: model.JobStrategyPlanexec,
+					Events:   model.JobEvents{Scheduled: &model.ScheduledEventConfig{Cron: cronSched, CronExpr: "0 9 * * *"}},
+				},
+				{
+					ID: "disabled-job", Name: "Disabled", Description: "never", Prompt: "p", Disabled: true,
+					Events: model.JobEvents{Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}}},
+				},
+			},
+		})
+		uc := usecase.New(repo, registry)
+		resolver := gqlctrl.NewResolver(repo, uc)
+		srv := handler.NewDefaultServer(
+			gqlctrl.NewExecutableSchema(gqlctrl.Config{Resolvers: resolver}),
+		)
+		gqlHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			loaders := gqlctrl.NewDataLoaders(repo, nil)
+			ctx := gqlctrl.WithDataLoaders(r.Context(), loaders)
+			srv.ServeHTTP(w, r.WithContext(ctx))
+		})
+		registryHandler, err := httpctrl.New(gqlHandler)
+		gt.NoError(t, err).Required()
+		return registryHandler
+	}
+
+	t.Run("open case returns enabled jobs with trigger detail", func(t *testing.T) {
+		repo := memory.New()
+		h := buildRegistryHandler(t, repo)
+		c, err := repo.Case().Create(context.Background(), testWorkspaceID, &model.Case{
+			Title:      "agent target",
+			ReporterID: "U-REPORTER",
+			Status:     types.CaseStatusOpen,
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+		})
+		gt.NoError(t, err).Required()
+
+		rec := executeGraphQLRequestWithAuth(t, h, caseJobsQuery, map[string]any{
+			"wsid": testWorkspaceID, "cid": c.ID,
+		}, "U-REPORTER")
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+
+		var out struct {
+			CaseJobs []caseJobRow `json:"caseJobs"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &out)).Required()
+		gt.Array(t, out.CaseJobs).Length(3).Required()
+
+		byID := make(map[string]caseJobRow, len(out.CaseJobs))
+		for _, j := range out.CaseJobs {
+			byID[j.ID] = j
+		}
+		_, hasDisabled := byID["disabled-job"]
+		gt.Bool(t, hasDisabled).False()
+
+		triage := byID["triage"]
+		gt.String(t, triage.Strategy).Equal("PLANEXEC")
+		gt.String(t, triage.Prompt).Equal("triage prompt")
+		gt.Array(t, triage.Trigger.CaseEvents).Length(1).Required()
+		gt.String(t, triage.Trigger.CaseEvents[0]).Equal("CREATED")
+		gt.Value(t, triage.Trigger.Schedule).Nil()
+
+		stale := byID["stale"]
+		gt.Bool(t, stale.Quiet).True()
+		gt.String(t, stale.Strategy).Equal("SIMPLE")
+		gt.Array(t, stale.Trigger.CaseEvents).Length(0)
+		gt.Value(t, stale.Trigger.Schedule).NotNil().Required()
+		gt.Value(t, stale.Trigger.Schedule.EverySeconds).NotNil().Required()
+		gt.Number(t, *stale.Trigger.Schedule.EverySeconds).Equal(3600)
+		gt.Value(t, stale.Trigger.Schedule.Cron).Nil()
+
+		daily := byID["daily"]
+		gt.Value(t, daily.Trigger.Schedule).NotNil().Required()
+		gt.Value(t, daily.Trigger.Schedule.Cron).NotNil().Required()
+		gt.String(t, *daily.Trigger.Schedule.Cron).Equal("0 9 * * *")
+		gt.Value(t, daily.Trigger.Schedule.EverySeconds).Nil()
+	})
+
+	t.Run("private case refuses a non-member", func(t *testing.T) {
+		repo := memory.New()
+		h := buildRegistryHandler(t, repo)
+		c, err := repo.Case().Create(context.Background(), testWorkspaceID, &model.Case{
+			Title:          "private agent target",
+			ReporterID:     "U-REPORTER",
+			Status:         types.CaseStatusOpen,
+			IsPrivate:      true,
+			ChannelUserIDs: []string{"U-REPORTER"},
+			CreatedAt:      time.Now().UTC(),
+			UpdatedAt:      time.Now().UTC(),
+		})
+		gt.NoError(t, err).Required()
+
+		rec := executeGraphQLRequestWithAuth(t, h, caseJobsQuery, map[string]any{
+			"wsid": testWorkspaceID, "cid": c.ID,
+		}, "U-STRANGER")
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(1).Required()
+	})
 }
 
 // TestGraphQLHandler_CaseImportLifecycle drives the import end-to-end

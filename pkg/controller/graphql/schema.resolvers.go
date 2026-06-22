@@ -1536,6 +1536,19 @@ func (r *queryResolver) JobRunEvents(ctx context.Context, workspaceID string, ca
 	return out, nil
 }
 
+// CaseJobs is the resolver for the caseJobs field.
+func (r *queryResolver) CaseJobs(ctx context.Context, workspaceID string, caseID int) ([]*graphql1.CaseJob, error) {
+	jobs, err := r.UseCases.JobRun.ListCaseJobs(ctx, workspaceID, int64(caseID))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*graphql1.CaseJob, 0, len(jobs))
+	for _, j := range jobs {
+		out = append(out, toGraphQLCaseJob(j))
+	}
+	return out, nil
+}
+
 // CaseImport is the resolver for the caseImport field.
 func (r *queryResolver) CaseImport(ctx context.Context, workspaceID string, id string) (*graphql1.ImportSession, error) {
 	session, err := r.UseCases.Import.Get(ctx, workspaceID, model.ImportSessionID(id))

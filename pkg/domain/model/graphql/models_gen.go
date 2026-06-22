@@ -86,6 +86,16 @@ type AssistLogConnection struct {
 	HasMore    bool         `json:"hasMore"`
 }
 
+type CaseJob struct {
+	ID          string      `json:"id"`
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	Strategy    JobStrategy `json:"strategy"`
+	Quiet       bool        `json:"quiet"`
+	Prompt      string      `json:"prompt"`
+	Trigger     *JobTrigger `json:"trigger"`
+}
+
 // A referenceable case (non-private, non-draft) used by case_ref fields.
 type CaseRef struct {
 	ID          int              `json:"id"`
@@ -354,6 +364,16 @@ type JobRunLog struct {
 type JobRunLogConnection struct {
 	Items      []*JobRunLog `json:"items"`
 	NextCursor *string      `json:"nextCursor,omitempty"`
+}
+
+type JobSchedule struct {
+	EverySeconds *int    `json:"everySeconds,omitempty"`
+	Cron         *string `json:"cron,omitempty"`
+}
+
+type JobTrigger struct {
+	CaseEvents []CaseLifecycleEvent `json:"caseEvents"`
+	Schedule   *JobSchedule         `json:"schedule,omitempty"`
 }
 
 type Knowledge struct {
@@ -704,6 +724,61 @@ func (e *ActionEventKind) UnmarshalJSON(b []byte) error {
 }
 
 func (e ActionEventKind) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	e.MarshalGQL(&buf)
+	return buf.Bytes(), nil
+}
+
+type CaseLifecycleEvent string
+
+const (
+	CaseLifecycleEventCreated CaseLifecycleEvent = "CREATED"
+	CaseLifecycleEventClosed  CaseLifecycleEvent = "CLOSED"
+)
+
+var AllCaseLifecycleEvent = []CaseLifecycleEvent{
+	CaseLifecycleEventCreated,
+	CaseLifecycleEventClosed,
+}
+
+func (e CaseLifecycleEvent) IsValid() bool {
+	switch e {
+	case CaseLifecycleEventCreated, CaseLifecycleEventClosed:
+		return true
+	}
+	return false
+}
+
+func (e CaseLifecycleEvent) String() string {
+	return string(e)
+}
+
+func (e *CaseLifecycleEvent) UnmarshalGQL(v any) error {
+	str, ok := v.(string)
+	if !ok {
+		return fmt.Errorf("enums must be strings")
+	}
+
+	*e = CaseLifecycleEvent(str)
+	if !e.IsValid() {
+		return fmt.Errorf("%s is not a valid CaseLifecycleEvent", str)
+	}
+	return nil
+}
+
+func (e CaseLifecycleEvent) MarshalGQL(w io.Writer) {
+	fmt.Fprint(w, strconv.Quote(e.String()))
+}
+
+func (e *CaseLifecycleEvent) UnmarshalJSON(b []byte) error {
+	s, err := strconv.Unquote(string(b))
+	if err != nil {
+		return err
+	}
+	return e.UnmarshalGQL(s)
+}
+
+func (e CaseLifecycleEvent) MarshalJSON() ([]byte, error) {
 	var buf bytes.Buffer
 	e.MarshalGQL(&buf)
 	return buf.Bytes(), nil

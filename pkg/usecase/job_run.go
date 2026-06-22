@@ -14,6 +14,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 )
 
 // JobRunUseCase exposes read-only access to Job execution history and the
@@ -354,6 +355,71 @@ func (uc *JobRunUseCase) findLog(ctx context.Context, workspaceID string, caseID
 		return log, nil
 	}
 	return nil, nil
+}
+
+// ListCaseJobs returns the enabled Job definitions that can fire against
+// the given Case. Definitions come from the in-memory Workspace registry
+// (workspace TOML), never a repository. A scheduled Job is included only
+// while the Case is OPEN — mirroring the ScheduledScanner, which skips
+// DRAFT/CLOSED cases — whereas a case-lifecycle Job is always included.
+//
+// Access control matches the other JobRun reads: the parent Case is
+// loaded first and a non-member caller is refused with ErrAccessDenied;
+// system contexts without an auth token bypass the check. When the
+// registry is unset (early bootstrap) the result is an empty slice.
+func (uc *JobRunUseCase) ListCaseJobs(ctx context.Context, workspaceID string, caseID int64) ([]*model.Job, error) {
+	if workspaceID == "" {
+		return nil, goerr.Wrap(ErrInvalidArgument, "workspace id is empty")
+	}
+	if caseID == 0 {
+		return nil, goerr.Wrap(ErrInvalidArgument, "case id is zero")
+	}
+
+	c, err := uc.repo.Case().Get(ctx, workspaceID, caseID)
+	if err != nil {
+		return nil, goerr.Wrap(ErrCaseNotFound, "case not found",
+			goerr.V(CaseIDKey, caseID))
+	}
+	token, tokenErr := auth.TokenFromContext(ctx)
+	if tokenErr == nil && !model.IsCaseAccessible(c, token.Sub) {
+		return nil, goerr.Wrap(ErrAccessDenied,
+			"cannot read agent jobs of private case",
+			goerr.V(CaseIDKey, caseID),
+			goerr.V("user_id", token.Sub))
+	}
+
+	if uc.registry == nil {
+		return []*model.Job{}, nil
+	}
+	entry, err := uc.registry.Get(workspaceID)
+	if err != nil {
+		return nil, goerr.Wrap(err, "get workspace from registry",
+			goerr.V("workspace_id", workspaceID))
+	}
+	// Defensive parity with ResolveJobName, which also tolerates a nil
+	// entry: no Jobs to list when the workspace has no registry entry.
+	if entry == nil {
+		return []*model.Job{}, nil
+	}
+
+	isOpen := c.Status.Normalize() == types.CaseStatusOpen
+	out := make([]*model.Job, 0, len(entry.Jobs))
+	for _, j := range entry.Jobs {
+		if j == nil || j.Disabled {
+			continue
+		}
+		// A scheduled Job only fires while the Case is OPEN (the scanner
+		// never sweeps DRAFT/CLOSED cases), so it is irrelevant to surface
+		// it on a closed Case. A case-lifecycle Job stays listed regardless
+		// of the current status — it describes how this Case reacts to its
+		// own transitions.
+		listensCaseEvent := j.Events.Case != nil
+		listensScheduledWhenOpen := j.Events.Scheduled != nil && isOpen
+		if listensCaseEvent || listensScheduledWhenOpen {
+			out = append(out, j)
+		}
+	}
+	return out, nil
 }
 
 // checkCaseAccess loads the parent Case and refuses the call when a
