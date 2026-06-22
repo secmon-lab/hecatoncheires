@@ -10,6 +10,12 @@
       "source": "./skills/hecatoncheires-build-scenario",
       "description": "Author eval scenario TOML files for `hecatoncheires eval` (workspace config, input, simulated tool data / sources, answering persona, and the judge checklist).",
       "version": "0.1.0"
+    },
+    {
+      "name": "hecatoncheires-config",
+      "source": "./skills/hecatoncheires-config",
+      "description": "Author a Hecatoncheires workspace configuration TOML (workspace identity, custom fields, case/action status workflows, Slack channel/thread mode, memo, assist, and Jobs), deferring to the in-repo configuration docs as the schema source of truth.",
+      "version": "0.1.0"
     }
   ]
 }
