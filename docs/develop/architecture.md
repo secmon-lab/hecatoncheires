@@ -141,6 +141,29 @@ prevents two turns from running concurrently on the same thread. A heartbeat
 goroutine refreshes the lock every 10s; if the holder dies, the next caller
 reclaims the stale lock after the staleness window (default 30s).
 
+#### Case-mode invariants (enforced at the usecase boundary)
+
+A Case is either **channel-mode** (`SlackThreadTS == ""`; dedicated channel) or
+**thread-mode** (`SlackThreadTS != ""`; bound to a Slack thread, tracked by a
+configurable board status / Kanban). Two invariants follow from this split and
+are enforced at the **usecase boundary** — not just by withholding agent tools —
+so every entry point (GraphQL, Slack, agent tools, eval) is covered uniformly:
+
+- **Lifecycle path is mode-specific.** Thread-mode cases change lifecycle only
+  by moving their board status (`UpdateCaseStatus`, which keeps `BoardStatus` and
+  `Status` in sync); `CloseCase` / `ReopenCase` reject thread-mode cases
+  (`ErrCaseThreadModeUseStatus`). Symmetrically, `UpdateCaseStatus` rejects
+  channel-mode cases (no board status). The Web UI mirrors this: the
+  close/reopen button shows only for channel-mode, the Kanban only for
+  thread-mode.
+- **Actions belong to channel-mode only.** Thread-mode cases have no Actions
+  (the configurable status attaches to the Case itself there, not to Actions).
+  `ActionUseCase.CreateAction` and `UpdateAction`'s reparent path reject a
+  thread-mode parent / target (`ErrCaseThreadModeNoActions`). The agent tool
+  wiring additionally withholds the action (`core__*`) tools for thread-mode in
+  all three hosts (Job runtime, case-bound mention agent, eval env) so the LLM
+  is never offered a tool that can only error.
+
 ### State persistence across turns
 
 The turn lifecycle persists several pieces of state so that a follow-up

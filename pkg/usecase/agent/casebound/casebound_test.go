@@ -273,3 +273,24 @@ func TestBuildTools_CaseWriterWiring(t *testing.T) {
 		gt.Bool(t, names["case__close_case"]).True()
 	})
 }
+
+func TestBuildTools_ActionToolsByMode(t *testing.T) {
+	entry := &model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws-test", Name: "Test"}}
+
+	t.Run("channel-mode case gets the action tools", func(t *testing.T) {
+		req := casebound.TurnRequest{Workspace: entry, Case: &model.Case{ID: 1}}
+		names := toolNames(casebound.BuildToolsForTest(&agent.CommonDeps{}, req))
+		gt.Bool(t, names["core__create_action"]).True()
+		gt.Bool(t, names["core__update_action"]).True()
+	})
+
+	t.Run("thread-mode case omits the action tools", func(t *testing.T) {
+		// Thread-mode cases have no Actions; offering tools the usecase boundary
+		// would reject (ErrCaseThreadModeNoActions) is withheld here, mirroring
+		// the Job runtime exclusion.
+		req := casebound.TurnRequest{Workspace: entry, Case: &model.Case{ID: 1, SlackThreadTS: "1700000000.000001"}}
+		names := toolNames(casebound.BuildToolsForTest(&agent.CommonDeps{}, req))
+		gt.Bool(t, names["core__create_action"]).False()
+		gt.Bool(t, names["core__update_action"]).False()
+	})
+}

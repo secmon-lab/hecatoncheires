@@ -94,6 +94,32 @@ func TestActionUseCase_CreateAction(t *testing.T) {
 		// initial id is BACKLOG.
 		gt.Value(t, created.Status).Equal(types.ActionStatusBacklog)
 	})
+
+	t.Run("create action in a thread-mode case is rejected", func(t *testing.T) {
+		// Thread-mode cases have no Actions (progress is tracked via board
+		// status). The usecase boundary refuses the write so every entry point
+		// is covered, not just the agent tool wiring.
+		repo := memory.New()
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "", nil)
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		threadCase, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+			Title:          "Thread case",
+			Status:         types.CaseStatusOpen,
+			SlackChannelID: "C123",
+			SlackThreadTS:  "1700000000.000300",
+			BoardStatus:    "in_progress",
+		})
+		gt.NoError(t, err).Required()
+
+		_, err = actionUC.CreateAction(ctx, testWorkspaceID, threadCase.ID, "Test Action", "Description", "", "", types.ActionStatusTodo, nil)
+		gt.Error(t, err).Is(usecase.ErrCaseThreadModeNoActions)
+
+		// No action must have been persisted.
+		actions, err := repo.Action().GetByCase(ctx, testWorkspaceID, threadCase.ID, interfaces.ActionListOptions{})
+		gt.NoError(t, err).Required()
+		gt.Array(t, actions).Length(0)
+	})
 }
 
 func TestActionUseCase_UpdateAction(t *testing.T) {
@@ -174,6 +200,40 @@ func TestActionUseCase_UpdateAction(t *testing.T) {
 		})
 		gt.Value(t, err).NotNil()
 		gt.Error(t, err).Is(usecase.ErrActionNotFound)
+	})
+
+	t.Run("reparenting an action into a thread-mode case is rejected", func(t *testing.T) {
+		// The reparent path must enforce the same invariant as CreateAction:
+		// an action cannot be moved into a thread-mode case, which has no Actions.
+		repo := memory.New()
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "", nil)
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		channelCase, err := caseUC.CreateCase(ctx, testWorkspaceID, "Channel Case", "Description", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		threadCase, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+			Title:          "Thread case",
+			Status:         types.CaseStatusOpen,
+			SlackChannelID: "C123",
+			SlackThreadTS:  "1700000000.000400",
+			BoardStatus:    "in_progress",
+		})
+		gt.NoError(t, err).Required()
+
+		created, err := actionUC.CreateAction(ctx, testWorkspaceID, channelCase.ID, "Test Action", "Description", "", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+
+		_, err = actionUC.UpdateAction(ctx, testWorkspaceID, usecase.UpdateActionInput{
+			ID: created.ID, CaseID: &threadCase.ID, SlackSync: usecase.SlackSyncSkip,
+		})
+		gt.Error(t, err).Is(usecase.ErrCaseThreadModeNoActions)
+
+		// The action must stay under its original channel-mode case.
+		got, err := repo.Action().Get(ctx, testWorkspaceID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.CaseID).Equal(channelCase.ID)
 	})
 }
 
