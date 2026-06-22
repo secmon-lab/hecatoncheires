@@ -87,6 +87,19 @@ func (l *sequencedLLM) calls() int {
 	return l.idx
 }
 
+// inputAt returns the concatenated user-text input the mock received on its
+// i-th Generate call (0-based), or "" if that call did not happen. Lets a
+// test assert *what* each LLM call was actually asked, not merely how many
+// calls fired.
+func (l *sequencedLLM) inputAt(i int) string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if i < 0 || i >= len(l.inputs) {
+		return ""
+	}
+	return l.inputs[i]
+}
+
 type exhaustedError struct{}
 
 func (exhaustedError) Error() string { return "sequencedLLM exhausted" }
@@ -424,15 +437,20 @@ func (r *recordingResolver) lastCall() []string {
 
 func TestRunner_Run_DirectMode(t *testing.T) {
 	ctx := context.Background()
+	const userMsg = "Thanks, that is all I needed for now."
 	llm := newSequencedLLM([]sequencedResponse{
-		// Round 1: planner chooses the direct path (no tasks).
-		{text: `{"message":"answering directly","direct":{}}`},
-		// The direct ReAct reply. matchSubstr pins it to the direct prompt.
+		// Round 1: the planner gate. It must receive the user's request and
+		// chooses the direct path (no tasks).
+		{text: `{"message":"answering directly","direct":{}}`, matchSubstr: userMsg},
+		// The direct ReAct reply. matchSubstr pins this second call to the
+		// direct user prompt (prompts/direct.md), proving it is the direct
+		// loop and not, say, a final-synthesis call.
 		{text: "Here is the direct answer.", matchSubstr: "Answer the request directly"},
 	})
 
 	runner := newRunner(t, llm.Client())
 	req := baseRequest()
+	req.UserInput = userMsg
 	req.AllowDirect = true
 
 	var phaseStarted atomic.Bool
@@ -456,6 +474,13 @@ func TestRunner_Run_DirectMode(t *testing.T) {
 	// Exactly 2 LLM calls: planner gate + direct reply. No sub-agent, no
 	// replan, no separate final-synthesis call.
 	gt.Number(t, llm.calls()).Equal(2)
+	// Verify the *content* of each call, not just the count:
+	// - call 0 is the planner gate and carries the user's request,
+	gt.String(t, llm.inputAt(0)).Contains(userMsg)
+	// - call 1 is the direct ReAct loop: it runs the direct user prompt and
+	//   restates the user's request (prompts/direct.md interpolates UserInput).
+	gt.String(t, llm.inputAt(1)).Contains("Answer the request directly")
+	gt.String(t, llm.inputAt(1)).Contains(userMsg)
 }
 
 func TestRunner_Run_DirectMode_ResolvesChosenTools(t *testing.T) {
