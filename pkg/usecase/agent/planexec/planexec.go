@@ -216,6 +216,13 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 			// tool-enabled ReAct loop. OnFinalize / FinalOutputSchema are not
 			// consulted here — direct mode is reserved for replies that need
 			// no structured terminal action.
+			//
+			// The direct agent gets req.SystemPrompt (the host's base persona),
+			// NOT the rendered planner prompt: the latter carries the planner
+			// protocol's "respond with a single JSON object, no prose" output
+			// rules, which directly contradict the plain-text reply the direct
+			// user prompt asks for and would push the model toward malformed
+			// JSON output.
 			if p.Direct != nil {
 				req.Sink.PlanProposed(ctx, PlanInfo{Round: logicalRound, Reasoning: p.Message, IsReplan: false, Direct: true})
 				tools := req.ToolResolver.Resolve(p.Direct.Tools)
@@ -224,7 +231,7 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 					r.llm,
 					r.historyRepo,
 					recorder,
-					systemPrompt,
+					req.SystemPrompt,
 					req.HistoryKey,
 					req.LanguageLabel,
 					req.UserInput,

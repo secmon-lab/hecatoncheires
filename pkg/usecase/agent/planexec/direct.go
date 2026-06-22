@@ -30,12 +30,14 @@ type directPromptInput struct {
 // trivial requests that need no structured terminal action (see
 // prompts/planner.md "Direct answer").
 //
-// systemPrompt is the planner's system prompt, reused so the direct reply
-// inherits the same persona / guidance. historyKey is the shared
-// gollem.WithHistoryRepository key so the direct agent sees the prior
-// conversation. tools is the resolved DirectPlan.Tools set (may be empty for
-// a pure conversational reply). loopLimit bounds the ReAct loop so a
-// tool-using direct reply has room to call a tool and then answer.
+// systemPrompt is the host's base persona prompt (RunRequest.SystemPrompt),
+// NOT the rendered planner prompt: the planner prompt mandates JSON-only
+// output and forbids prose, which would contradict the plain-text reply this
+// path produces. historyKey is the shared gollem.WithHistoryRepository key so
+// the direct agent sees the prior conversation. tools is the resolved
+// DirectPlan.Tools set (may be empty for a pure conversational reply).
+// loopLimit bounds the ReAct loop so a tool-using direct reply has room to
+// call a tool and then answer.
 func generateDirectResponse(
 	ctx context.Context,
 	llm gollem.LLMClient,
