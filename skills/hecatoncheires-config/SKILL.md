@@ -15,21 +15,39 @@ deliberately does **not** restate the concrete schema — the key names, field
 types, id patterns, status colors, validation rules, and template variables all
 evolve, and a copy here would silently drift out of sync with the running
 binary. Always read the authoritative, always-current source before you write
-keys:
+keys.
 
-- **Read `docs/configuration.md` first.** It is the complete reference for
-  every section, every field type, every id/pattern rule, and the validation
-  list. Treat it as ground truth over anything you remember.
-- **`docs/slack.md`** — Slack channel mode vs thread mode, scopes, and the
-  channel/team id formats referenced by `[slack]`.
-- **`docs/cli.md`** — how the file is loaded (`--config`, directory recursion)
-  and the `validate` command used in the final step.
-- For Jobs that reference agent tools, **`docs/integrations.md`** and the
-  workspace's available tools.
+**Where these docs live.** This skill is published through a plugin marketplace
+and is usually installed into *some other* repository, where no local `docs/`
+exists — so the doc paths below are not relative paths to read blindly. Resolve
+each one this way:
 
-If you cannot locate these docs (e.g. working outside the repo), say so and ask
-the user to point you at the current configuration reference rather than
-generating keys from memory.
+- When you are working inside the `secmon-lab/hecatoncheires` repository itself,
+  read the local copy under `docs/` — it matches your working tree (and may be
+  ahead of `main`).
+- Otherwise, fetch the canonical published version from GitHub (default branch
+  `main`) with your web-fetch tool. If you cannot reach it (offline, fetch
+  blocked), say so and ask the user for the current reference rather than
+  inventing keys from memory.
+
+The sources, each named by its `docs/<file>` path and canonical URL:
+
+- **Configuration reference** — `docs/configuration.md` /
+  <https://github.com/secmon-lab/hecatoncheires/blob/main/docs/configuration.md>.
+  The complete reference for every section, every field type, every id/pattern
+  rule, and the validation list. Treat it as ground truth over anything you
+  remember. Read this first.
+- **Slack** — `docs/slack.md` /
+  <https://github.com/secmon-lab/hecatoncheires/blob/main/docs/slack.md>.
+  Channel mode vs thread mode, scopes, and the channel/team id formats
+  referenced by `[slack]`.
+- **CLI** — `docs/cli.md` /
+  <https://github.com/secmon-lab/hecatoncheires/blob/main/docs/cli.md>.
+  How the file is loaded (`--config`, directory recursion) and the `validate`
+  command used in the final step.
+- **Integrations** — `docs/integrations.md` /
+  <https://github.com/secmon-lab/hecatoncheires/blob/main/docs/integrations.md>.
+  For Jobs that reference agent tools, plus the workspace's available tools.
 
 ## How to work
 
@@ -59,11 +77,12 @@ workflow, so converge on intent first, then write, then prove it loads.
    loaded by the real validator is not finished — startup validation is strict
    and rejects subtle mistakes (bad id patterns, dangling status references,
    unparseable templates) that look fine to the eye. If you cannot invoke the
-   binary (sandbox, no build), do **not** silently downgrade to eyeballing the
-   file against the rules list — exercise the same code path the validator uses,
-   `config.LoadWorkspaceConfigs` in `pkg/cli/config`, from a throwaway test or
-   snippet. The loader is the ground truth; a manual rule walkthrough is only a
-   last resort, and say so plainly when that is all you could do.
+   binary (sandbox, no build) but have the source checked out, do **not**
+   silently downgrade to eyeballing the file against the rules list — exercise
+   the same code path the validator uses, `config.LoadWorkspaceConfigs` in
+   `pkg/cli/config`, from a throwaway test or snippet. The loader is the ground
+   truth; a manual rule walkthrough is only a last resort, and say so plainly
+   when that is all you could do.
 
 ## Principles that outlast the schema
 

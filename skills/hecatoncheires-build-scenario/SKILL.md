@@ -13,12 +13,22 @@ layout) plus the eval tables (`meta` / `input` / `cases` / `tools` / `persona`
 This skill describes only the principles of authoring a scenario. It
 deliberately does **not** restate the concrete config schema, because that
 evolves and would drift out of sync. Always defer to the authoritative,
-always-current sources:
+always-current sources.
+
+**Where these docs live.** This skill is published through a plugin marketplace
+and is usually installed into *some other* repository, where no local `docs/`
+exists — so the paths below are not relative paths to read blindly. When you are
+working inside the `secmon-lab/hecatoncheires` repository itself, read the local
+copy under `docs/` (it matches your working tree). Otherwise, fetch the
+canonical published version from GitHub (default branch `main`) with your
+web-fetch tool; if you cannot reach it, say so rather than inventing keys.
 
 - **Workspace config portion** (`[workspace]`, `[[fields]]`, field types, id
-  formats, `[slack]`, `[case]`, `[[job]]`, …) → `docs/configuration.md`.
+  formats, `[slack]`, `[case]`, `[[job]]`, …) → `docs/configuration.md` /
+  <https://github.com/secmon-lab/hecatoncheires/blob/main/docs/configuration.md>.
 - **Eval tables** (`meta` / `input` / `cases` / `tools` / `persona` / `expect`)
-  → `docs/eval.md`.
+  → `docs/eval.md` /
+  <https://github.com/secmon-lab/hecatoncheires/blob/main/docs/eval.md>.
 
 ## Decisions to make
 
