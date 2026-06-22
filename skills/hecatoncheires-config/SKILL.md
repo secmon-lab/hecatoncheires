@@ -30,13 +30,32 @@ each one this way:
   blocked), say so and ask the user for the current reference rather than
   inventing keys from memory.
 
-The sources, each named by its `docs/<file>` path and canonical URL:
+The sources below are listed **in the order you need them**, each named by its
+`docs/<file>` path and canonical URL. Read the one that answers your current
+question — don't guess which file holds a fact:
+
+| You need to know… | Read |
+|-------------------|------|
+| Any TOML section / field / id rule / validation | `docs/configuration.md` (read first) |
+| **The exact name of an agent tool**, and **whether a Job can call it** | `docs/agent_tools.md` |
+| How a scheduled Job fires (per-case, UTC cron, open-cases-only) and the Job guardrails | `docs/configuration.md` § *Job Definitions* (Events and scheduling / Guardrails) |
+| Slack channel vs thread mode, scopes, id formats | `docs/slack.md` |
+| How the config file is loaded + the `validate` command | `docs/cli.md` |
+| Turning Notion / GitHub on (the *enable* side, not the tool list) | `docs/integrations.md` |
 
 - **Configuration reference** — `docs/configuration.md` /
   <https://github.com/secmon-lab/hecatoncheires/blob/main/docs/configuration.md>.
   The complete reference for every section, every field type, every id/pattern
-  rule, and the validation list. Treat it as ground truth over anything you
-  remember. Read this first.
+  rule, and the validation list. Also owns the `[[job]]` schema, the scheduled
+  execution model, and the Job guardrails. Treat it as ground truth over
+  anything you remember. Read this first.
+- **Agent tools** — `docs/agent_tools.md` /
+  <https://github.com/secmon-lab/hecatoncheires/blob/main/docs/agent_tools.md>.
+  **The single source of truth for tool names and which context exposes them.**
+  Read it before you put any tool name in a Job or `[assist]` prompt. A Job's
+  palette is narrower than the interactive agent's — notably Jobs get **no**
+  Slack search, Notion, or GitHub tools — so a plausible-sounding name from
+  another context will silently do nothing.
 - **Slack** — `docs/slack.md` /
   <https://github.com/secmon-lab/hecatoncheires/blob/main/docs/slack.md>.
   Channel mode vs thread mode, scopes, and the channel/team id formats
@@ -47,7 +66,8 @@ The sources, each named by its `docs/<file>` path and canonical URL:
   command used in the final step.
 - **Integrations** — `docs/integrations.md` /
   <https://github.com/secmon-lab/hecatoncheires/blob/main/docs/integrations.md>.
-  For Jobs that reference agent tools, plus the workspace's available tools.
+  How to *enable* Notion and GitHub (tokens, App setup). For the tool **names**
+  and their availability, use `docs/agent_tools.md` instead.
 
 ## How to work
 
@@ -97,8 +117,10 @@ These hold regardless of which keys the current docs define:
   every extra knob is something they have to understand and maintain. If you
   think an addition genuinely helps, suggest it in prose and let them opt in.
   Likewise, don't invent identifiers you can't ground: tool names referenced in
-  a Job or assist prompt must be real (confirm against the docs / the tool
-  registry), not plausible-sounding guesses.
+  a Job or assist prompt must be real **and exposed in that context** — confirm
+  each against `docs/agent_tools.md` (which lists every tool and which context
+  wires it), not from memory or a plausible-sounding guess. A Job naming a tool
+  it doesn't have just does nothing.
 
 - **Ids are contracts; names are cosmetics.** An `id` is referenced by
   templates, queries, stored data, and other configs — renaming it later breaks

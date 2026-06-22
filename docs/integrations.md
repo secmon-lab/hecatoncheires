@@ -2,6 +2,15 @@
 
 Hecatoncheires can wire up external services to surface their content to the AI agent and to feed the Source ingestion pipeline. This document covers the integrations you can enable: Notion and GitHub.
 
+> **Scope note.** This page is about *enabling* the Notion and GitHub services.
+> It is **not** the complete agent-tool list — that lives in
+> [Agent Tools](agent_tools.md). In particular, the Notion and GitHub tools are
+> wired only into the **interactive** mention / investigation agents; they are
+> **not** available to unattended [Jobs](configuration.md#job-definitions-job).
+> If you are writing a Job prompt, check
+> [Agent Tools → Tools available by context](agent_tools.md#tools-available-by-context)
+> for what a Job can actually call.
+
 ## Notion
 
 Hecatoncheires integrates with Notion to surface Notion content to the AI agent through tools registered in `pkg/agent/tool/notion/`:
@@ -56,7 +65,7 @@ When the token is configured, you should see:
 Notion service enabled
 ```
 
-in the server logs at startup. The four agent tool registrations (`core__notion_search`, `core__notion_get_page`) light up automatically when the agent runs.
+in the server logs at startup. The two agent tool registrations (`notion__search`, `notion__get_page`) light up automatically when the agent runs.
 
 If the token is omitted, the Notion-backed agent tools are silently skipped and the server logs:
 
@@ -77,7 +86,7 @@ The `GET /v1/pages/{page_id}/markdown` endpoint was introduced by Notion in earl
 
 - It is dramatically more compact than the raw block-tree API for LLM consumption.
 - File-based blocks (image / file / video / audio / PDF) are returned as pre-signed URLs; those URLs expire after a short period, so consumers must download attachments promptly if they intend to persist them.
-- Pages exceeding ~20,000 blocks are returned with `truncated: true`. Hecatoncheires propagates this flag through `core__notion_get_page` so the agent can warn the user.
+- Pages exceeding ~20,000 blocks are returned with `truncated: true`. Hecatoncheires propagates this flag through `notion__get_page` so the agent can warn the user.
 
 > The third-party `jomei/notionapi` Go client used elsewhere in the codebase does not expose this endpoint, so `pkg/agent/tool/notion/client.go` calls it directly with `net/http` while reusing the same API token. The Markdown endpoint and the Search endpoint live in the agent tool package because they are exclusively used by the agent — `pkg/service/notion` keeps only the Source-facing surface.
 
@@ -91,9 +100,9 @@ The `GET /v1/pages/{page_id}/markdown` endpoint was introduced by Notion in earl
 
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
-| Agent never offers `core__notion_search` | `HECATONCHEIRES_NOTION_API_TOKEN` not set, or the value is empty | Set the token; restart the server. |
-| `core__notion_get_page` returns `non-2xx` with status 404 | Page is not shared with the integration | Open the page in Notion → **Share → Add connections** → select your integration. |
-| `core__notion_search` returns no results despite knowing pages exist | Pages have not been shared with the integration | Same as above — sharing is per-tree, not workspace-wide. |
+| Agent never offers `notion__search` | `HECATONCHEIRES_NOTION_API_TOKEN` not set, or the value is empty | Set the token; restart the server. |
+| `notion__get_page` returns `non-2xx` with status 404 | Page is not shared with the integration | Open the page in Notion → **Share → Add connections** → select your integration. |
+| `notion__search` returns no results despite knowing pages exist | Pages have not been shared with the integration | Same as above — sharing is per-tree, not workspace-wide. |
 | Markdown response has `truncated: true` and ends with `<unknown>` blocks | Page exceeds Notion's render limits, or blocks reference unshared child pages | Split the page, or share the referenced child pages with the integration. |
 | Agent gets a "validation_error: invalid Notion-Version" | Running against a Notion enterprise tenant that pins a lower API version | This is unlikely under default Notion plans; contact Notion support if the response references a different `notion-version` constraint. |
 
@@ -149,5 +158,6 @@ The tools operate within whatever scope the GitHub App's installation grants —
 
 ## See Also
 
+- [Agent Tools](agent_tools.md) — the full agent-tool catalogue and the per-context availability matrix (which tools Jobs get vs. the interactive agent).
 - [Configuration](configuration.md) — CLI flags and environment variables, including `--notion-api-token` and the `--github-app-*` flags.
 - [Slack](slack.md) — Slack app setup and authentication, which power the mention agent and assist flow that consume these integration tools.

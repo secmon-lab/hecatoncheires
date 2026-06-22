@@ -7,7 +7,7 @@ flowchart TD
   Start([docs/README.md])
   Start --> A1["Evaluating<br/>concepts → getting_started"]
   Start --> A2["Deploying<br/>getting_started → deployment → slack → integrations"]
-  Start --> A3["Configuring<br/>configuration → cli"]
+  Start --> A3["Configuring<br/>configuration → cli → agent_tools"]
   Start --> A4["Using (Slack)<br/>user_guide"]
   Start --> A5["Operating<br/>operations"]
   Start --> A6["Developing<br/>develop/"]
@@ -28,6 +28,7 @@ flowchart TD
 ### Configuring — "how do I customize it?"
 1. [Configuration](configuration.md) — the complete `config.toml` reference
 2. [CLI Reference](cli.md) — subcommands, flags, and environment variables
+3. [Agent Tools](agent_tools.md) — the tools the AI agent can call, and which are available to Jobs vs. the interactive mention agent (read this before naming a tool in a Job / assist prompt)
 
 ### Using it on Slack — "how do I operate it day to day?"
 - [User Guide](user_guide.md) — case creation, drafts, actions, AI chat, automation, notifications, import
@@ -47,6 +48,7 @@ flowchart TD
 | [deployment.md](deployment.md) | Production deployment overview |
 | [configuration.md](configuration.md) | `config.toml` complete reference |
 | [cli.md](cli.md) | CLI subcommands, flags, environment variables |
+| [agent_tools.md](agent_tools.md) | Agent tool catalogue, per-context availability matrix, and guardrails |
 | [eval.md](eval.md) | Offline scenario-based evaluation of LLM workflows |
 | [slack.md](slack.md) | Slack App setup and integration |
 | [integrations.md](integrations.md) | Notion and GitHub integrations |
