@@ -218,23 +218,28 @@ from the eval job tool set — action creation is the primary observable.)
 
 `eval --list-tools` prints the catalog. v1:
 
-| Tool | Mode |
-|------|------|
-| `slack_search` | sim + live |
-| `notion_search` | sim + live |
-| `github_search` | **live-only** (simulating it needs a production interface extraction, deferred) |
-| `webfetch` | **live-only** (real HTTP GET + LLM injection screening; the eval LLM does the screening) |
+| Tool | Mode | Notes |
+|------|------|-------|
+| `slack_search` | sim + live | |
+| `notion_search` | sim + live | |
+| `github_search` | **live-only** | simulating it needs a production interface extraction, deferred |
+| `webfetch` | **live-only** | real HTTP GET + LLM injection screening; the eval LLM does the screening |
+| `knowledge__create_tag` | sim | Create a knowledge tag; must call `knowledge__list_tags` first to avoid duplicates. Returns the new tag id. |
+| `knowledge__update_tag` | sim | Rename an existing knowledge tag by id. |
+| `knowledge__delete_tag` | sim | Delete a knowledge tag by id; succeeds only when no knowledge entry references it. |
 
 `sim` tools generate responses from their `background`; `live` tools call the
 real API (require the matching credentials). Every tool call — sim or live — is
 recorded so checks can verify tool usage and dumps can show the trajectory.
 
-The catalog enumerates only the **external-service** tools the harness can
-simulate or declare. In-process, always-present tools that operate on the local
-repository — `core__*` (actions), `memo__*` (memos), and `knowledge__*`
-(workspace knowledge) — are not listed in the catalog and are not
-scenario-configurable; the eval agent is wired with them directly (knowledge
-write is withheld for private cases, as in production).
+The catalog enumerates **external-service** tools and **knowledge tag management**
+tools the harness can simulate or declare. Other in-process, always-present tools
+that operate on the local repository — `core__*` (actions), `memo__*` (memos), and
+the remaining `knowledge__*` tools (search, get, list_tags, create_knowledge,
+update_knowledge, which now accept/return `tag_ids` referencing first-class Tag
+entities) — are not listed in the catalog and are not scenario-configurable; the
+eval agent is wired with them directly (knowledge write is withheld for private
+cases, as in production).
 
 ## Diagnostic dumps
 

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import TagInput from './TagInput'
 
@@ -12,21 +12,40 @@ vi.mock('../../i18n', () => ({
   }),
 }))
 
+const sample = [
+  { id: 't-sec', name: 'security' },
+  { id: 't-ops', name: 'ops' },
+]
+
 describe('TagInput', () => {
-  it('adds a tag on Enter when not composing', () => {
+  it('selects an existing tag by id on Enter when its name is typed', () => {
     const onChange = vi.fn()
-    render(<TagInput tags={[]} onChange={onChange} />)
+    render(<TagInput tags={[]} onChange={onChange} availableTags={sample} />)
     const input = screen.getByTestId('tag-input')
 
     fireEvent.change(input, { target: { value: 'security' } })
     fireEvent.keyDown(input, { key: 'Enter' })
 
-    expect(onChange).toHaveBeenCalledWith(['security'])
+    expect(onChange).toHaveBeenCalledWith(['t-sec'])
   })
 
-  it('does NOT add a tag on Enter while IME is composing (keyCode 229 — legacy Safari signal, also tested by commitOnEnter)', () => {
+  it('creates a new tag via onCreateTag when the typed name is unknown', async () => {
     const onChange = vi.fn()
-    render(<TagInput tags={[]} onChange={onChange} />)
+    const onCreateTag = vi.fn().mockResolvedValue('t-new')
+    render(<TagInput tags={[]} onChange={onChange} availableTags={sample} onCreateTag={onCreateTag} />)
+    const input = screen.getByTestId('tag-input')
+
+    fireEvent.change(input, { target: { value: 'incident' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    await waitFor(() => expect(onCreateTag).toHaveBeenCalledWith('incident'))
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(['t-new']))
+  })
+
+  it('does NOT create or select a tag on Enter while IME is composing (keyCode 229 — legacy Safari signal, also tested by commitOnEnter)', () => {
+    const onChange = vi.fn()
+    const onCreateTag = vi.fn()
+    render(<TagInput tags={[]} onChange={onChange} availableTags={sample} onCreateTag={onCreateTag} />)
     const input = screen.getByTestId('tag-input')
 
     fireEvent.change(input, { target: { value: 'セキュリティ' } })
@@ -36,21 +55,22 @@ describe('TagInput', () => {
     fireEvent.keyDown(input, { key: 'Enter', keyCode: 229 })
 
     expect(onChange).not.toHaveBeenCalled()
+    expect(onCreateTag).not.toHaveBeenCalled()
   })
 
-  it('adds a tag on comma input', () => {
+  it('selects an existing tag by id on comma input', () => {
     const onChange = vi.fn()
-    render(<TagInput tags={[]} onChange={onChange} />)
+    render(<TagInput tags={[]} onChange={onChange} availableTags={sample} />)
     const input = screen.getByTestId('tag-input')
 
-    fireEvent.change(input, { target: { value: 'security,' } })
+    fireEvent.change(input, { target: { value: 'ops,' } })
 
-    expect(onChange).toHaveBeenCalledWith(['security'])
+    expect(onChange).toHaveBeenCalledWith(['t-ops'])
   })
 
   it('does not add a duplicate tag', () => {
     const onChange = vi.fn()
-    render(<TagInput tags={['security']} onChange={onChange} />)
+    render(<TagInput tags={['t-sec']} onChange={onChange} availableTags={sample} />)
     const input = screen.getByTestId('tag-input')
 
     fireEvent.change(input, { target: { value: 'security' } })

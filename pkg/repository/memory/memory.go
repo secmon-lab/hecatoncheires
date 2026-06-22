@@ -12,6 +12,7 @@ type Memory struct {
 	action        *actionRepository
 	memo          *memoRepository
 	knowledge     *knowledgeRepository
+	tag           *tagRepository
 	tokens        *tokenStore
 	slack         *slackRepository
 	slackUser     *slackUserRepository
@@ -38,6 +39,7 @@ func New() *Memory {
 		action:        newActionRepository(),
 		memo:          newMemoRepository(),
 		knowledge:     newKnowledgeRepository(),
+		tag:           newTagRepository(),
 		tokens:        newTokenStore(),
 		slack:         newSlackRepository(),
 		slackUser:     newSlackUserRepository(),
@@ -71,6 +73,10 @@ func (m *Memory) Memo() interfaces.MemoRepository {
 
 func (m *Memory) Knowledge() interfaces.KnowledgeRepository {
 	return m.knowledge
+}
+
+func (m *Memory) Tag() interfaces.TagRepository {
+	return m.tag
 }
 
 func (m *Memory) Slack() interfaces.SlackRepository {

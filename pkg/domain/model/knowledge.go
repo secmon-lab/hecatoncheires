@@ -1,7 +1,6 @@
 package model
 
 import (
-	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -38,10 +37,8 @@ var ErrKnowledgeValidation = goerr.New("knowledge validation failed")
 const (
 	// MaxClaimLength is the maximum rune length of the Markdown claim body.
 	MaxClaimLength = 8000
-	// MaxTags is the maximum number of tags on a single Knowledge entry.
+	// MaxTags is the maximum number of tag references on a single Knowledge entry.
 	MaxTags = 50
-	// MaxTagLength is the maximum rune length of a single tag.
-	MaxTagLength = 64
 )
 
 // Knowledge is a workspace-wide shared knowledge entry: organization-specific
@@ -61,10 +58,12 @@ type Knowledge struct {
 	// and rendered as Markdown by the consumer (Web UI). The agent write tools
 	// produce it directly.
 	Claim string
-	// Tags are free-form string tags used for classification and filtering. At
-	// least one tag is required. They are normalized (trimmed / de-duplicated /
-	// empty-dropped) by the usecase before persistence.
-	Tags []string
+	// TagIDs reference first-class Tag entities for classification and filtering.
+	// At least one tag is required. Tags must be created (create_tag / GraphQL
+	// createTag) before they can be referenced here; the usecase verifies every
+	// ID exists in the workspace before persistence. The slice is de-duplicated
+	// (order preserved) by the usecase.
+	TagIDs []TagID
 	// Embedding is the vector embedding of Title + Claim used for in-memory
 	// cosine semantic search. It is empty when no embedding client is configured
 	// (fail-open). It is never exposed through the GraphQL surface.
@@ -80,7 +79,9 @@ type Knowledge struct {
 // write. Repositories MUST call it before every write so a usecase / handler bug
 // that forgot to inject an identity field fails loudly at the first write.
 //
-// Tags must already be normalized by the caller; Validate does not mutate.
+// TagIDs must already be normalized by the caller; Validate does not mutate.
+// Validate only enforces structural invariants — the existence of each TagID is
+// verified by the usecase (which has repository access).
 func (k *Knowledge) Validate() error {
 	if k == nil {
 		return goerr.Wrap(ErrKnowledgeValidation, "knowledge is nil")
@@ -94,20 +95,16 @@ func (k *Knowledge) Validate() error {
 	if k.Title == "" {
 		return goerr.Wrap(ErrKnowledgeValidation, "title is required")
 	}
-	if len(k.Tags) == 0 {
+	if len(k.TagIDs) == 0 {
 		return goerr.Wrap(ErrKnowledgeValidation, "at least one tag is required")
 	}
-	if len(k.Tags) > MaxTags {
+	if len(k.TagIDs) > MaxTags {
 		return goerr.Wrap(ErrKnowledgeValidation, "too many tags",
-			goerr.V("count", len(k.Tags)), goerr.V("max", MaxTags))
+			goerr.V("count", len(k.TagIDs)), goerr.V("max", MaxTags))
 	}
-	for _, t := range k.Tags {
-		if t == "" {
-			return goerr.Wrap(ErrKnowledgeValidation, "tag must not be empty")
-		}
-		if utf8.RuneCountInString(t) > MaxTagLength {
-			return goerr.Wrap(ErrKnowledgeValidation, "tag is too long",
-				goerr.V("tag", t), goerr.V("max", MaxTagLength))
+	for _, id := range k.TagIDs {
+		if id == "" {
+			return goerr.Wrap(ErrKnowledgeValidation, "tag id must not be empty")
 		}
 	}
 	if utf8.RuneCountInString(k.Claim) > MaxClaimLength {
@@ -123,22 +120,21 @@ func (k *Knowledge) Validate() error {
 	return nil
 }
 
-// NormalizeTags trims whitespace, drops empty entries, and de-duplicates while
-// preserving first-seen order. Tag matching is case-sensitive, so casing is
-// preserved as entered. The usecase applies this before Validate / persistence.
-func NormalizeTags(tags []string) []string {
-	seen := make(map[string]struct{}, len(tags))
-	out := make([]string, 0, len(tags))
-	for _, t := range tags {
-		t = strings.TrimSpace(t)
-		if t == "" {
+// NormalizeTagIDs drops empty entries and de-duplicates while preserving
+// first-seen order. The usecase applies this before existence verification /
+// Validate / persistence.
+func NormalizeTagIDs(ids []TagID) []TagID {
+	seen := make(map[TagID]struct{}, len(ids))
+	out := make([]TagID, 0, len(ids))
+	for _, id := range ids {
+		if id == "" {
 			continue
 		}
-		if _, ok := seen[t]; ok {
+		if _, ok := seen[id]; ok {
 			continue
 		}
-		seen[t] = struct{}{}
-		out = append(out, t)
+		seen[id] = struct{}{}
+		out = append(out, id)
 	}
 	return out
 }

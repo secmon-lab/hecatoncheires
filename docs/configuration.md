@@ -884,6 +884,7 @@ prompt = "Post a status digest to the case Slack channel."
 | `disabled`    | bool     | no       | Defaults to `false` (= active). Set `true` to temporarily disable. |
 | `quiet`       | bool     | no       | Defaults to `false`. Set `true` to suppress the operational Slack session log (see *Session log* below). |
 | `strategy`    | string   | no       | `"simple"` (default) or `"planexec"`. See *Execution strategy* below. |
+| `reflection`  | bool     | no       | Defaults to `false`. Set `true` to run a post-execution reflection pass after a successful run. See *Reflection* below. |
 | `events.case` | table    | (\*)     | `on = ["created" \| "closed", ...]`. Always an array. |
 | `events.scheduled` | table | (\*)   | Exactly one of `every = "1h"` or `cron = "0 9 * * *"`. |
 
@@ -930,6 +931,35 @@ events.case = { on = ["created"] }
 |----------|-------------|
 | `simple` (default) | Single-step actions: post a digest, set a status, send a Slack reply. The Job's prompt is a direct instruction the agent executes in one ReAct loop. |
 | `planexec` | Multi-step investigations: pull context from several sources, cross-reference, and produce a structured summary. The runtime budgets up to 8 planner rounds and 16 parallel sub-agent tasks per turn (configurable in the binary). |
+
+### Reflection
+
+When `reflection = true`, a successful run is followed by a **reflection pass**:
+a knowledge-only agent inherits the run's full conversation (via the run
+history) and curates the workspace's shared **Knowledge** and **Tags** — adding
+durable, non-obvious learnings, augmenting or correcting existing entries, and
+keeping the tag vocabulary tidy. It only has the knowledge / tag tools
+(`knowledge__*`); it cannot touch the case, actions, or Slack.
+
+```toml
+[[job]]
+id = "investigate_and_learn"
+prompt = "Investigate the case and post a summary."
+strategy = "planexec"
+reflection = true
+events.case = { on = ["closed"] }
+```
+
+Reflection is **best-effort and never affects the run's outcome**: if it fails,
+the failure is reported through the error tracker but the Job still counts as
+SUCCESS. It works with both strategies. It is **skipped** for:
+
+- failed runs (only successful runs are reflected on),
+- **private cases** — their contents must not leak into the workspace-wide
+  shared knowledge.
+
+The reflection agent's LLM and tool calls are recorded in the run's event
+timeline under the `reflection` phase, so you can inspect what it learned.
 
 Notes:
 

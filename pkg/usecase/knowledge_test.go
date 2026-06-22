@@ -41,25 +41,37 @@ func (f *fakeEmbedClient) GenerateEmbedding(ctx context.Context, dimension int, 
 
 func newWS() string { return fmt.Sprintf("ws-%d", time.Now().UnixNano()) }
 
+// createTestTag is a helper to create a tag via TagUseCase and return its ID.
+func createTestTag(t *testing.T, ctx context.Context, tagUC *usecase.TagUseCase, ws, name string) model.TagID {
+	t.Helper()
+	tag, err := tagUC.CreateTag(ctx, ws, name)
+	gt.NoError(t, err).Required()
+	return tag.ID
+}
+
 func TestKnowledgeUseCase_CreateAndGet(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.New()
 	embed := &fakeEmbedClient{}
 	uc := usecase.NewKnowledgeUseCase(repo, embed)
+	tagUC := usecase.NewTagUseCase(repo)
 	ws := newWS()
 
+	opsID := createTestTag(t, ctx, tagUC, ws, "ops")
+	githubID := createTestTag(t, ctx, tagUC, ws, "github")
+
 	created, err := uc.CreateKnowledge(ctx, ws, usecase.CreateKnowledgeInput{
-		Title: "GitHub policy",
-		Claim: "use github actions with sha pin",
-		Tags:  []string{" ops ", "github", "ops", ""},
+		Title:  "GitHub policy",
+		Claim:  "use github actions with sha pin",
+		TagIDs: []model.TagID{opsID, githubID, opsID, ""}, // opsID duped, empty dropped
 	})
 	gt.NoError(t, err).Required()
 	gt.Value(t, created.ID).NotEqual(model.KnowledgeID(""))
 
-	// Tags normalized (trim/dedupe/drop-empty), order preserved.
-	gt.Array(t, created.Tags).Length(2).Required()
-	gt.Value(t, created.Tags[0]).Equal("ops")
-	gt.Value(t, created.Tags[1]).Equal("github")
+	// TagIDs normalized (dedupe/drop-empty), order preserved.
+	gt.Array(t, created.TagIDs).Length(2).Required()
+	gt.Value(t, created.TagIDs[0]).Equal(opsID)
+	gt.Value(t, created.TagIDs[1]).Equal(githubID)
 
 	// Embedding generated from title+claim ("github" present -> axis 0).
 	gt.Array(t, created.Embedding).Length(model.EmbeddingDimension).Required()
@@ -71,32 +83,59 @@ func TestKnowledgeUseCase_CreateAndGet(t *testing.T) {
 	gt.NoError(t, err).Required()
 	gt.String(t, got.Title).Equal("GitHub policy")
 	gt.String(t, got.Claim).Equal("use github actions with sha pin")
+	gt.Array(t, got.TagIDs).Length(2).Required()
+	gt.Value(t, got.TagIDs[0]).Equal(opsID)
+	gt.Value(t, got.TagIDs[1]).Equal(githubID)
 }
 
 func TestKnowledgeUseCase_CreateInputValidation(t *testing.T) {
 	ctx := context.Background()
-	uc := usecase.NewKnowledgeUseCase(memory.New(), nil)
+	repo := memory.New()
+	uc := usecase.NewKnowledgeUseCase(repo, nil)
+	tagUC := usecase.NewTagUseCase(repo)
 	ws := newWS()
 
+	opsID := createTestTag(t, ctx, tagUC, ws, "ops")
+
 	t.Run("empty title", func(t *testing.T) {
-		_, err := uc.CreateKnowledge(ctx, ws, usecase.CreateKnowledgeInput{Title: "  ", Tags: []string{"ops"}})
+		_, err := uc.CreateKnowledge(ctx, ws, usecase.CreateKnowledgeInput{Title: "  ", TagIDs: []model.TagID{opsID}})
 		gt.Error(t, err).Is(usecase.ErrKnowledgeInput)
 	})
 	t.Run("no tags", func(t *testing.T) {
-		_, err := uc.CreateKnowledge(ctx, ws, usecase.CreateKnowledgeInput{Title: "x", Tags: []string{" ", ""}})
+		_, err := uc.CreateKnowledge(ctx, ws, usecase.CreateKnowledgeInput{Title: "x", TagIDs: []model.TagID{"", ""}})
 		gt.Error(t, err).Is(usecase.ErrKnowledgeInput)
 	})
 }
 
-func TestKnowledgeUseCase_CreateFailOpenWithoutEmbedClient(t *testing.T) {
+func TestKnowledgeUseCase_CreateUnknownTagFails(t *testing.T) {
 	ctx := context.Background()
-	uc := usecase.NewKnowledgeUseCase(memory.New(), nil)
+	repo := memory.New()
+	uc := usecase.NewKnowledgeUseCase(repo, nil)
 	ws := newWS()
 
+	// Pass a TagID that was never created in the workspace.
+	nonExistent := model.NewTagID()
+	_, err := uc.CreateKnowledge(ctx, ws, usecase.CreateKnowledgeInput{
+		Title:  "some title",
+		Claim:  "some body",
+		TagIDs: []model.TagID{nonExistent},
+	})
+	gt.Error(t, err).Is(usecase.ErrUnknownTag)
+}
+
+func TestKnowledgeUseCase_CreateFailOpenWithoutEmbedClient(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	uc := usecase.NewKnowledgeUseCase(repo, nil)
+	tagUC := usecase.NewTagUseCase(repo)
+	ws := newWS()
+
+	opsID := createTestTag(t, ctx, tagUC, ws, "ops")
+
 	created, err := uc.CreateKnowledge(ctx, ws, usecase.CreateKnowledgeInput{
-		Title: "no embed",
-		Claim: "body",
-		Tags:  []string{"ops"},
+		Title:  "no embed",
+		Claim:  "body",
+		TagIDs: []model.TagID{opsID},
 	})
 	gt.NoError(t, err).Required()
 	gt.Array(t, created.Embedding).Length(0)
@@ -107,28 +146,62 @@ func TestKnowledgeUseCase_Update(t *testing.T) {
 	repo := memory.New()
 	embed := &fakeEmbedClient{}
 	uc := usecase.NewKnowledgeUseCase(repo, embed)
+	tagUC := usecase.NewTagUseCase(repo)
 	ws := newWS()
 
+	npmID := createTestTag(t, ctx, tagUC, ws, "npm")
+	githubID := createTestTag(t, ctx, tagUC, ws, "github")
+	opsID := createTestTag(t, ctx, tagUC, ws, "ops")
+
 	created, err := uc.CreateKnowledge(ctx, ws, usecase.CreateKnowledgeInput{
-		Title: "npm policy", Claim: "min release age", Tags: []string{"npm"},
+		Title:  "npm policy",
+		Claim:  "min release age",
+		TagIDs: []model.TagID{npmID},
 	})
 	gt.NoError(t, err).Required()
 	gt.Value(t, created.Embedding[2]).Equal(float64(1)) // npm axis
 
 	newTitle := "github policy"
-	newTags := []string{"github", "ops"}
+	newTagIDs := []model.TagID{githubID, opsID}
 	updated, err := uc.UpdateKnowledge(ctx, ws, usecase.UpdateKnowledgeInput{
-		ID:    created.ID,
-		Title: &newTitle,
-		Tags:  &newTags,
+		ID:     created.ID,
+		Title:  &newTitle,
+		TagIDs: &newTagIDs,
 	})
 	gt.NoError(t, err).Required()
 	gt.String(t, updated.Title).Equal("github policy")
-	gt.Array(t, updated.Tags).Length(2).Required()
+	gt.Array(t, updated.TagIDs).Length(2).Required()
+	gt.Value(t, updated.TagIDs[0]).Equal(githubID)
+	gt.Value(t, updated.TagIDs[1]).Equal(opsID)
 	// Title changed -> re-embedded; "github" now present (axis 0), npm gone.
 	gt.Value(t, updated.Embedding[0]).Equal(float64(1))
 	gt.Value(t, updated.Embedding[2]).Equal(float64(0))
 	gt.Bool(t, updated.UpdatedAt.After(created.UpdatedAt) || updated.UpdatedAt.Equal(created.UpdatedAt)).True()
+}
+
+func TestKnowledgeUseCase_UpdateUnknownTagFails(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	uc := usecase.NewKnowledgeUseCase(repo, nil)
+	tagUC := usecase.NewTagUseCase(repo)
+	ws := newWS()
+
+	opsID := createTestTag(t, ctx, tagUC, ws, "ops")
+
+	created, err := uc.CreateKnowledge(ctx, ws, usecase.CreateKnowledgeInput{
+		Title:  "some knowledge",
+		Claim:  "body",
+		TagIDs: []model.TagID{opsID},
+	})
+	gt.NoError(t, err).Required()
+
+	nonExistent := model.NewTagID()
+	newTagIDs := []model.TagID{nonExistent}
+	_, err = uc.UpdateKnowledge(ctx, ws, usecase.UpdateKnowledgeInput{
+		ID:     created.ID,
+		TagIDs: &newTagIDs,
+	})
+	gt.Error(t, err).Is(usecase.ErrUnknownTag)
 }
 
 func TestKnowledgeUseCase_SearchSemanticRanking(t *testing.T) {
@@ -136,13 +209,19 @@ func TestKnowledgeUseCase_SearchSemanticRanking(t *testing.T) {
 	repo := memory.New()
 	embed := &fakeEmbedClient{}
 	uc := usecase.NewKnowledgeUseCase(repo, embed)
+	tagUC := usecase.NewTagUseCase(repo)
 	ws := newWS()
 
-	k1, err := uc.CreateKnowledge(ctx, ws, usecase.CreateKnowledgeInput{Title: "GitHub policy", Claim: "github actions", Tags: []string{"ops", "github"}})
+	opsID := createTestTag(t, ctx, tagUC, ws, "ops")
+	githubID := createTestTag(t, ctx, tagUC, ws, "github")
+	secretID := createTestTag(t, ctx, tagUC, ws, "secret")
+	npmID := createTestTag(t, ctx, tagUC, ws, "npm")
+
+	k1, err := uc.CreateKnowledge(ctx, ws, usecase.CreateKnowledgeInput{Title: "GitHub policy", Claim: "github actions", TagIDs: []model.TagID{opsID, githubID}})
 	gt.NoError(t, err).Required()
-	_, err = uc.CreateKnowledge(ctx, ws, usecase.CreateKnowledgeInput{Title: "Secret handling", Claim: "rotate secret tokens", Tags: []string{"ops", "secret"}})
+	_, err = uc.CreateKnowledge(ctx, ws, usecase.CreateKnowledgeInput{Title: "Secret handling", Claim: "rotate secret tokens", TagIDs: []model.TagID{opsID, secretID}})
 	gt.NoError(t, err).Required()
-	_, err = uc.CreateKnowledge(ctx, ws, usecase.CreateKnowledgeInput{Title: "npm policy", Claim: "min release age", Tags: []string{"npm"}})
+	_, err = uc.CreateKnowledge(ctx, ws, usecase.CreateKnowledgeInput{Title: "npm policy", Claim: "min release age", TagIDs: []model.TagID{npmID}})
 	gt.NoError(t, err).Required()
 
 	res, err := uc.SearchKnowledge(ctx, ws, usecase.SearchKnowledgeInput{Query: "github actions"})
@@ -151,7 +230,7 @@ func TestKnowledgeUseCase_SearchSemanticRanking(t *testing.T) {
 	gt.Value(t, res[0].ID).Equal(k1.ID) // highest cosine
 
 	// Tag pre-filter narrows the candidate set.
-	resOps, err := uc.SearchKnowledge(ctx, ws, usecase.SearchKnowledgeInput{Query: "github", Tags: []string{"ops"}})
+	resOps, err := uc.SearchKnowledge(ctx, ws, usecase.SearchKnowledgeInput{Query: "github", TagIDs: []model.TagID{opsID}})
 	gt.NoError(t, err).Required()
 	gt.Array(t, resOps).Length(2).Required()
 	gt.Value(t, resOps[0].ID).Equal(k1.ID)
@@ -164,12 +243,16 @@ func TestKnowledgeUseCase_SearchSemanticRanking(t *testing.T) {
 
 func TestKnowledgeUseCase_SearchSubstringFallback(t *testing.T) {
 	ctx := context.Background()
-	uc := usecase.NewKnowledgeUseCase(memory.New(), nil) // no embed client
+	repo := memory.New()
+	uc := usecase.NewKnowledgeUseCase(repo, nil) // no embed client
+	tagUC := usecase.NewTagUseCase(repo)
 	ws := newWS()
 
-	hit, err := uc.CreateKnowledge(ctx, ws, usecase.CreateKnowledgeInput{Title: "GitHub policy", Claim: "body", Tags: []string{"ops"}})
+	opsID := createTestTag(t, ctx, tagUC, ws, "ops")
+
+	hit, err := uc.CreateKnowledge(ctx, ws, usecase.CreateKnowledgeInput{Title: "GitHub policy", Claim: "body", TagIDs: []model.TagID{opsID}})
 	gt.NoError(t, err).Required()
-	_, err = uc.CreateKnowledge(ctx, ws, usecase.CreateKnowledgeInput{Title: "unrelated", Claim: "nothing here", Tags: []string{"ops"}})
+	_, err = uc.CreateKnowledge(ctx, ws, usecase.CreateKnowledgeInput{Title: "unrelated", Claim: "nothing here", TagIDs: []model.TagID{opsID}})
 	gt.NoError(t, err).Required()
 
 	res, err := uc.SearchKnowledge(ctx, ws, usecase.SearchKnowledgeInput{Query: "github"})
@@ -178,31 +261,16 @@ func TestKnowledgeUseCase_SearchSubstringFallback(t *testing.T) {
 	gt.Value(t, res[0].ID).Equal(hit.ID) // substring match on title ranks first
 }
 
-func TestKnowledgeUseCase_ListTags(t *testing.T) {
-	ctx := context.Background()
-	uc := usecase.NewKnowledgeUseCase(memory.New(), nil)
-	ws := newWS()
-
-	_, err := uc.CreateKnowledge(ctx, ws, usecase.CreateKnowledgeInput{Title: "a", Tags: []string{"ops", "github"}})
-	gt.NoError(t, err).Required()
-	_, err = uc.CreateKnowledge(ctx, ws, usecase.CreateKnowledgeInput{Title: "b", Tags: []string{"github", "security"}})
-	gt.NoError(t, err).Required()
-
-	tags, err := uc.ListTags(ctx, ws)
-	gt.NoError(t, err).Required()
-	// distinct + sorted
-	gt.Array(t, tags).Length(3).Required()
-	gt.Value(t, tags[0]).Equal("github")
-	gt.Value(t, tags[1]).Equal("ops")
-	gt.Value(t, tags[2]).Equal("security")
-}
-
 func TestKnowledgeUseCase_Delete(t *testing.T) {
 	ctx := context.Background()
-	uc := usecase.NewKnowledgeUseCase(memory.New(), nil)
+	repo := memory.New()
+	uc := usecase.NewKnowledgeUseCase(repo, nil)
+	tagUC := usecase.NewTagUseCase(repo)
 	ws := newWS()
 
-	created, err := uc.CreateKnowledge(ctx, ws, usecase.CreateKnowledgeInput{Title: "x", Tags: []string{"ops"}})
+	opsID := createTestTag(t, ctx, tagUC, ws, "ops")
+
+	created, err := uc.CreateKnowledge(ctx, ws, usecase.CreateKnowledgeInput{Title: "x", TagIDs: []model.TagID{opsID}})
 	gt.NoError(t, err).Required()
 
 	gt.NoError(t, uc.DeleteKnowledge(ctx, ws, created.ID)).Required()

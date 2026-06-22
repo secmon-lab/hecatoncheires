@@ -12,6 +12,7 @@ type Repository interface {
 	Action() ActionRepository
 	Memo() MemoRepository
 	Knowledge() KnowledgeRepository
+	Tag() TagRepository
 	Slack() SlackRepository
 	SlackUser() SlackUserRepository
 	Source() SourceRepository

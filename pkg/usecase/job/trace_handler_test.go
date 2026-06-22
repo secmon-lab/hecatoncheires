@@ -317,3 +317,39 @@ func TestJobRunTraceHandler_TruncatesLongFields(t *testing.T) {
 	gt.Array(t, events[1].LLMResponse.Texts).Length(1).Required()
 	gt.Number(t, len(events[1].LLMResponse.Texts[0])).Equal(model.MaxInlineBytes)
 }
+
+func TestJobRunTraceHandler_EnterReflectionPhase_SetsPhase(t *testing.T) {
+	h, repo, _ := newHandlerFixture(t)
+	ctx := context.Background()
+
+	// Before entering the reflection phase, events carry the default "execute" phase.
+	ctxLLM := h.StartLLMCall(ctx)
+	h.EndLLMCall(ctxLLM, &trace.LLMCallData{
+		Model:    "m",
+		Request:  &trace.LLMRequest{},
+		Response: &trace.LLMResponse{},
+	}, nil)
+
+	events, err := repo.JobRunEvent().List(ctx, model.JobRunKey{WorkspaceID: "ws1", CaseID: 42, JobID: "job-A"}, "run-1")
+	gt.NoError(t, err).Required()
+	gt.Array(t, events).Length(2).Required()
+	gt.String(t, events[0].Phase).Equal("execute")
+	gt.String(t, events[1].Phase).Equal("execute")
+
+	// Transition to reflection phase — subsequent events must carry "reflection".
+	h.EnterReflectionPhaseForTest()
+
+	ctxLLM2 := h.StartLLMCall(ctx)
+	h.EndLLMCall(ctxLLM2, &trace.LLMCallData{
+		Model:    "m",
+		Request:  &trace.LLMRequest{},
+		Response: &trace.LLMResponse{},
+	}, nil)
+
+	events2, err := repo.JobRunEvent().List(ctx, model.JobRunKey{WorkspaceID: "ws1", CaseID: 42, JobID: "job-A"}, "run-1")
+	gt.NoError(t, err).Required()
+	gt.Array(t, events2).Length(4).Required()
+	// The two new events (LLM_REQUEST + LLM_RESPONSE) are in the reflection phase.
+	gt.String(t, events2[2].Phase).Equal("reflection")
+	gt.String(t, events2[3].Phase).Equal("reflection")
+}

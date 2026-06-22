@@ -41,3 +41,10 @@ func NewJobRunTraceHandlerForTest(
 ) *jobRunTraceHandler {
 	return newJobRunTraceHandler(eventRepo, routing, seq, clock, truncator)
 }
+
+// EnterReflectionPhaseForTest calls enterReflectionPhase so external test
+// packages can drive the reflection-phase transition without accessing
+// the unexported method directly.
+func (h *jobRunTraceHandler) EnterReflectionPhaseForTest() {
+	h.enterReflectionPhase()
+}

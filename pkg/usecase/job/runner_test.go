@@ -14,7 +14,10 @@ import (
 
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
+	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
+	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	jobagent "github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/job"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
 )
@@ -749,4 +752,212 @@ func TestJobRunner_WorkspaceLoadFailure_NoLog(t *testing.T) {
 	gt.Value(t, jr.LastStatus).Equal(model.JobRunStatusFailed)
 	gt.String(t, jr.LastRunID).Equal("")
 	gt.String(t, jr.LastTraceID).Equal("")
+}
+
+// fakeReflector records every Reflect call it receives.
+type fakeReflector struct {
+	calls []jobagent.ReflectRequest
+	err   error
+}
+
+func (f *fakeReflector) Reflect(_ context.Context, req jobagent.ReflectRequest) error {
+	f.calls = append(f.calls, req)
+	return f.err
+}
+
+// historyWritingExecutor is an executor that saves a non-nil history to the
+// HistoryRepository before returning success. This is necessary because
+// maybeReflect skips reflection when the loaded history is nil.
+type historyWritingExecutor struct {
+	calls atomic.Int32
+}
+
+func (e *historyWritingExecutor) Execute(ctx context.Context, req jobagent.ExecuteRequest) (*jobagent.ExecuteResult, error) {
+	e.calls.Add(1)
+	if req.HistoryRepository != nil && req.HistoryKey != "" {
+		// Save a minimal non-nil history so maybeReflect can load it.
+		if err := req.HistoryRepository.Save(ctx, req.HistoryKey, &gollem.History{
+			Version: gollem.HistoryVersion,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return &jobagent.ExecuteResult{Status: jobagent.ExecuteStatusSuccess}, nil
+}
+
+func reflectionJob(id string, reflection bool) *model.Job {
+	return &model.Job{
+		ID:         id,
+		Prompt:     "x",
+		Reflection: reflection,
+		Events:     model.JobEvents{Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}}},
+	}
+}
+
+func runReflectionJob(
+	t *testing.T,
+	wsID string,
+	j *model.Job,
+	c *model.Case,
+	repo interfaces.Repository,
+	reflector jobagent.Reflector,
+	histRepo gollem.HistoryRepository,
+	exec jobagent.JobExecutor,
+) error {
+	t.Helper()
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: wsID, Name: "WS"},
+		Jobs:      []*model.Job{j},
+	})
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo:        repo,
+		Registry:    registry,
+		LLMClient:   inertLLM(),
+		Executors:   map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: exec},
+		Reflector:   reflector,
+		HistoryRepo: histRepo,
+	})
+	return runner.Run(context.Background(), j, job.Event{
+		Domain:        model.JobEventDomainCase,
+		WorkspaceID:   wsID,
+		CaseID:        c.ID,
+		Timestamp:     time.Now().UTC(),
+		CaseLifecycle: model.CaseLifecycleCreated,
+	})
+}
+
+// TestJobRunner_Reflection_CalledOnSuccess verifies that when reflection=true
+// and the executor succeeds, the reflector is invoked with the correct
+// WorkspaceID, CaseID, JobID, and a non-nil History.
+func TestJobRunner_Reflection_CalledOnSuccess(t *testing.T) {
+	wsID := "ws-reflect"
+	j := reflectionJob("summarize", true)
+	repo, c := setupCase(t, wsID)
+
+	fake := &fakeReflector{}
+	histRepo := agentarchive.NewMemoryHistoryRepository()
+	exec := &historyWritingExecutor{}
+
+	err := runReflectionJob(t, wsID, j, c, repo, fake, histRepo, exec)
+	gt.NoError(t, err).Required()
+
+	gt.Array(t, fake.calls).Length(1).Required()
+	gt.String(t, fake.calls[0].WorkspaceID).Equal(wsID)
+	gt.Number(t, fake.calls[0].CaseID).Equal(c.ID)
+	gt.String(t, fake.calls[0].JobID).Equal(j.ID)
+	gt.Value(t, fake.calls[0].History).NotNil()
+}
+
+// TestJobRunner_Reflection_SkippedWhenFlagFalse verifies that a job with
+// reflection=false never invokes the reflector even when all deps are wired.
+func TestJobRunner_Reflection_SkippedWhenFlagFalse(t *testing.T) {
+	wsID := "ws-no-reflect"
+	j := reflectionJob("summarize", false)
+	repo, c := setupCase(t, wsID)
+
+	fake := &fakeReflector{}
+	histRepo := agentarchive.NewMemoryHistoryRepository()
+	exec := &historyWritingExecutor{}
+
+	err := runReflectionJob(t, wsID, j, c, repo, fake, histRepo, exec)
+	gt.NoError(t, err).Required()
+	gt.Array(t, fake.calls).Length(0)
+}
+
+// TestJobRunner_Reflection_SkippedForPrivateCase verifies that reflection is
+// not triggered for a private case (IsPrivate=true), since private case
+// contents must not leak into shared workspace knowledge.
+func TestJobRunner_Reflection_SkippedForPrivateCase(t *testing.T) {
+	wsID := "ws-private"
+	j := reflectionJob("summarize", true)
+	repo := memory.New() // from event_test.go helpers (uses memory import)
+	created, err := repo.Case().Create(context.Background(), wsID, &model.Case{
+		Title:      "Private",
+		Status:     types.CaseStatusOpen,
+		ReporterID: "U-REP",
+		IsPrivate:  true,
+	})
+	gt.NoError(t, err).Required()
+	c := created
+
+	fake := &fakeReflector{}
+	histRepo := agentarchive.NewMemoryHistoryRepository()
+	exec := &historyWritingExecutor{}
+
+	err = runReflectionJob(t, wsID, j, c, repo, fake, histRepo, exec)
+	gt.NoError(t, err).Required()
+	gt.Array(t, fake.calls).Length(0)
+}
+
+// TestJobRunner_Reflection_SkippedWhenReflectorNil verifies that a nil
+// Reflector causes no panic and reflection is simply skipped.
+func TestJobRunner_Reflection_SkippedWhenReflectorNil(t *testing.T) {
+	wsID := "ws-nil-reflector"
+	j := reflectionJob("summarize", true)
+	repo, c := setupCase(t, wsID)
+	histRepo := agentarchive.NewMemoryHistoryRepository()
+	exec := &historyWritingExecutor{}
+
+	// Pass nil Reflector.
+	err := runReflectionJob(t, wsID, j, c, repo, nil, histRepo, exec)
+	gt.NoError(t, err).Required()
+}
+
+// TestJobRunner_Reflection_SkippedWhenHistoryRepoNil verifies that a nil
+// HistoryRepo prevents reflection (there is no history to load).
+func TestJobRunner_Reflection_SkippedWhenHistoryRepoNil(t *testing.T) {
+	wsID := "ws-nil-history"
+	j := reflectionJob("summarize", true)
+	repo, c := setupCase(t, wsID)
+
+	fake := &fakeReflector{}
+	exec := &historyWritingExecutor{}
+
+	// Pass nil HistoryRepo.
+	err := runReflectionJob(t, wsID, j, c, repo, fake, nil, exec)
+	gt.NoError(t, err).Required()
+	gt.Array(t, fake.calls).Length(0)
+}
+
+// TestJobRunner_Reflection_SkippedOnExecutorFailure verifies that when the
+// executor fails, reflection is not attempted (reflection only runs on success).
+func TestJobRunner_Reflection_SkippedOnExecutorFailure(t *testing.T) {
+	wsID := "ws-exec-fail"
+	j := reflectionJob("summarize", true)
+	repo, c := setupCase(t, wsID)
+
+	fake := &fakeReflector{}
+	histRepo := agentarchive.NewMemoryHistoryRepository()
+	sentinel := errors.New("executor failed")
+	exec := &failingExecutor{err: sentinel}
+
+	err := runReflectionJob(t, wsID, j, c, repo, fake, histRepo, exec)
+	gt.Error(t, err).Is(sentinel)
+	gt.Array(t, fake.calls).Length(0)
+}
+
+// TestJobRunner_Reflection_ErrorIsNonFatal verifies that when the reflector
+// returns an error, the run is still recorded as SUCCESS (reflection errors are
+// non-fatal by design).
+func TestJobRunner_Reflection_ErrorIsNonFatal(t *testing.T) {
+	wsID := "ws-reflect-fail"
+	j := reflectionJob("summarize", true)
+	repo, c := setupCase(t, wsID)
+
+	fake := &fakeReflector{err: errors.New("reflection exploded")}
+	histRepo := agentarchive.NewMemoryHistoryRepository()
+	exec := &historyWritingExecutor{}
+
+	// Run must succeed even though the reflector returned an error.
+	err := runReflectionJob(t, wsID, j, c, repo, fake, histRepo, exec)
+	gt.NoError(t, err).Required()
+
+	// Reflector was called.
+	gt.Array(t, fake.calls).Length(1)
+
+	// JobRun lock doc still records success.
+	jr, getErr := repo.JobRun().Get(context.Background(), model.JobRunKey{WorkspaceID: wsID, CaseID: c.ID, JobID: j.ID})
+	gt.NoError(t, getErr).Required()
+	gt.Value(t, jr.LastStatus).Equal(model.JobRunStatusSuccess)
 }
