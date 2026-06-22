@@ -705,6 +705,14 @@ type Query {
   # Full event timeline of one Run in ascending Sequence order.
   jobRunEvents(workspaceId: String!, caseId: Int!, runId: String!): [JobRunEvent!]!
 
+  # Enabled Job definitions that can fire against the given Case, sourced
+  # from the Workspace TOML registry (read-only). Scheduled Jobs are
+  # included only while the Case is OPEN (mirrors the ScheduledScanner,
+  # which skips DRAFT/CLOSED cases); case-lifecycle Jobs are always
+  # included. Private-case access control applies: a non-member caller is
+  # refused with the same access-denied error as caseJobRunLogs.
+  caseJobs(workspaceId: String!, caseId: Int!): [CaseJob!]!
+
   # Case Import — single session lookup. Sessions are scoped to the creator;
   # the resolver returns "not found" for sessions owned by other users even
   # when the ID is known.
@@ -920,6 +928,50 @@ type JobRunEvent {
   # for transport simplicity. Schema: see model.LLMRequestPayload /
   # LLMResponsePayload / ToolCallPayload / RunErrorPayload.
   payload: JSON!
+}
+
+# CaseLifecycleEvent mirrors model.CaseLifecycle and names the case
+# lifecycle transitions a Job can subscribe to via `events.case.on`.
+enum CaseLifecycleEvent {
+  CREATED
+  CLOSED
+}
+
+# JobSchedule is the scheduled-trigger detail of a Job. Exactly one of
+# everySeconds / cron is non-null (mirrors the mutual exclusion in
+# model.ScheduledEventConfig). everySeconds is the fixed interval in
+# seconds; cron is the original five-field cron expression. The frontend
+# turns these into human-readable trigger labels.
+type JobSchedule {
+  everySeconds: Int
+  cron: String
+}
+
+# JobTrigger describes every condition under which a Job fires against a
+# Case. caseEvents lists subscribed lifecycle events (empty when the Job
+# does not listen to the case domain); schedule is non-null only when the
+# Job has a scheduled trigger. A Job always has at least one of the two.
+type JobTrigger {
+  caseEvents: [CaseLifecycleEvent!]!
+  schedule: JobSchedule
+}
+
+# CaseJob is a read-only view of a workspace Job definition that can fire
+# against a given Case. Definitions live in workspace TOML (in-memory, not
+# persisted), so this type is sourced from the Workspace registry rather
+# than a repository. Only enabled Jobs relevant to the Case are returned
+# (see Query.caseJobs).
+type CaseJob {
+  id: String!
+  name: String!
+  description: String!
+  strategy: JobStrategy!
+  # When true the Job runs without operational Slack notifications.
+  quiet: Boolean!
+  # The Go text/template prompt body, surfaced so operators can inspect
+  # exactly what the Job instructs the agent to do.
+  prompt: String!
+  trigger: JobTrigger!
 }
 
 # ---- Case Import (YAML → Case/Action) ---------------------------------------

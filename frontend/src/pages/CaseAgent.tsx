@@ -5,6 +5,7 @@ import { useMutation, useQuery } from '@apollo/client'
 import {
   GET_CASE_AGENT_SETTINGS,
   GET_CASE_JOB_RUN_LOGS,
+  GET_CASE_JOBS,
   UPDATE_CASE_AGENT_SETTINGS,
 } from '../graphql/caseAgent'
 import { useTranslation } from '../i18n'
@@ -17,6 +18,7 @@ import {
   IconRobot,
 } from '../components/Icons'
 import Button from '../components/Button'
+import CaseJobList, { type CaseJob } from '../components/caseAgent/CaseJobList'
 import Checkbox from '../components/caseAgent/Checkbox'
 import MarkdownView from '../components/caseAgent/MarkdownView'
 import SourceIcon from '../components/caseAgent/SourceIcon'
@@ -123,6 +125,17 @@ export default function CaseAgent() {
     fetchPolicy: 'cache-and-network',
   })
 
+  const {
+    data: jobsData,
+    loading: jobsLoading,
+    error: jobsError,
+    refetch: refetchJobs,
+  } = useQuery<{ caseJobs: CaseJob[] }>(GET_CASE_JOBS, {
+    variables: { workspaceId, caseId },
+    skip: !workspaceId || !caseId,
+    fetchPolicy: 'cache-and-network',
+  })
+
   const [updateSettings, updateState] = useMutation(UPDATE_CASE_AGENT_SETTINGS, {
     refetchQueries: [
       { query: GET_CASE_AGENT_SETTINGS, variables: { workspaceId, caseId } },
@@ -137,6 +150,7 @@ export default function CaseAgent() {
 
   const caseData = data?.case
   const sources = data?.sources ?? []
+  const jobs = jobsData?.caseJobs ?? []
   const runLogs = runLogData?.caseJobRunLogs?.items ?? []
   const nextCursor = runLogData?.caseJobRunLogs?.nextCursor ?? null
 
@@ -467,6 +481,28 @@ export default function CaseAgent() {
           )}
         </div>
         </div>
+      </div>
+
+      {/* Automated Jobs — read-only definitions that fire against this
+          case by condition. Sits between Settings (operator inputs) and
+          Results (past run outcomes) so the page reads inputs → schedule
+          → outcomes top to bottom. */}
+      <div className={styles.jobsBlock}>
+        <div className={styles.sectionHead}>
+          <span className={styles.sectionHeadTitle}>{t('caseAgentSectionJobs')}</span>
+          {!jobsError && !(jobsLoading && jobs.length === 0) && (
+            <span className={styles.sectionHeadCount}>
+              {t('caseAgentJobsCount', { count: jobs.length })}
+            </span>
+          )}
+          <span className={styles.sectionHeadRule} />
+        </div>
+        <CaseJobList
+          jobs={jobs}
+          loading={jobsLoading}
+          error={!!jobsError}
+          onRetry={() => void refetchJobs()}
+        />
       </div>
 
       {/* Results block — the outcome of past runs. Visually separated

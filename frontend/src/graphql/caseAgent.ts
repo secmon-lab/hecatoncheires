@@ -100,6 +100,26 @@ export const GET_CASE_JOB_RUN_LOGS = gql`
   }
 `
 
+export const GET_CASE_JOBS = gql`
+  query GetCaseJobs($workspaceId: String!, $caseId: Int!) {
+    caseJobs(workspaceId: $workspaceId, caseId: $caseId) {
+      id
+      name
+      description
+      strategy
+      quiet
+      prompt
+      trigger {
+        caseEvents
+        schedule {
+          everySeconds
+          cron
+        }
+      }
+    }
+  }
+`
+
 export const GET_JOB_RUN_LOG = gql`
   query GetJobRunLog($workspaceId: String!, $caseId: Int!, $runId: String!) {
     jobRunLog(workspaceId: $workspaceId, caseId: $caseId, runId: $runId) {

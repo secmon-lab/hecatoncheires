@@ -1,0 +1,272 @@
+/* Automated-Jobs section. Sits between Settings and Run history on the
+   CaseAgent page. Colors come exclusively from the design tokens in
+   global.css; dimensions follow the sibling CaseAgent.module.css px
+   convention so the two sections read as one visual family. */
+
+.subtitle {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* ---- Job row ---- */
+.row {
+  border-bottom: 1px solid var(--line);
+}
+.row:last-child {
+  border-bottom: none;
+}
+.rowHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  width: 100%;
+  padding: 16px 18px;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.rowHeader:hover {
+  background: var(--bg-subtle);
+}
+.rowMain {
+  flex: 1 1 280px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.rowName {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-heading);
+}
+.rowDesc {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+.rowMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+  max-width: 100%;
+}
+.chevron {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding-top: 3px;
+  color: var(--fg-soft);
+  transition: transform 0.2s ease;
+}
+.chevronOpen {
+  transform: rotate(90deg);
+}
+
+/* ---- Trigger badges ---- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  padding: 4px 9px;
+  border-radius: 7px;
+  white-space: nowrap;
+}
+/* Case-lifecycle triggers (created / closed) — blue, matching the info
+   hue used for "running" elsewhere on the page. */
+.badgeCase {
+  color: var(--info);
+  background: color-mix(in oklch, var(--info) 12%, transparent);
+}
+/* Schedule triggers (interval / cron) — amber, so time-based firing
+   reads distinctly from lifecycle-based firing at a glance. */
+.badgeSchedule {
+  color: var(--warn);
+  background: color-mix(in oklch, var(--warn) 14%, transparent);
+}
+.cronExpr {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in oklch, var(--warn) 16%, transparent);
+}
+
+/* ---- Strategy / quiet chips ---- */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  line-height: 1.4;
+  padding: 4px 8px;
+  border-radius: 7px;
+  white-space: nowrap;
+  text-transform: uppercase;
+}
+.chipStrategy {
+  color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 12%, transparent);
+}
+.chipQuiet {
+  color: var(--fg-soft);
+  background: var(--bg-sunken);
+  font-weight: 600;
+  text-transform: none;
+}
+
+/* ---- Expanded prompt ---- */
+.promptWrap {
+  padding: 0 18px 18px;
+}
+.promptLabelRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 9px;
+}
+.promptLabel {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  color: var(--text-label);
+}
+.promptRule {
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+.promptBody {
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--text-body);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
+
+/* ---- Empty / error states ---- */
+.state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 20px;
+  text-align: center;
+}
+.stateIcon {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 14px;
+  border-radius: 12px;
+  background: var(--bg-sunken);
+  color: var(--fg-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.stateIconError {
+  background: color-mix(in oklch, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+.stateTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-body);
+}
+.stateDesc {
+  max-width: 360px;
+  margin-top: 5px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+.retryBtn {
+  margin-top: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-body);
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.retryBtn:hover {
+  background: var(--bg-subtle);
+}
+
+/* ---- Loading skeleton ---- */
+@keyframes caseJobShimmer {
+  0% {
+    background-position: -400px 0;
+  }
+  100% {
+    background-position: 400px 0;
+  }
+}
+.skeletonWrap {
+  padding: 6px 0;
+}
+.skeletonRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px;
+  border-bottom: 1px solid var(--line);
+}
+.skeletonRow:last-child {
+  border-bottom: none;
+}
+.skeletonBody {
+  flex: 1;
+}
+.skeletonLineWide,
+.skeletonLineNarrow,
+.skeletonBadge {
+  display: block;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    var(--bg-sunken) 25%,
+    var(--bg-subtle) 50%,
+    var(--bg-sunken) 75%
+  );
+  background-size: 800px 100%;
+  animation: caseJobShimmer 1.3s infinite linear;
+}
+.skeletonLineWide {
+  height: 14px;
+  width: 42%;
+}
+.skeletonLineNarrow {
+  height: 11px;
+  width: 66%;
+  margin-top: 9px;
+}
+.skeletonBadge {
+  height: 22px;
+  width: 96px;
+}

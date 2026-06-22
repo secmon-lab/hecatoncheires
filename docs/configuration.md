@@ -988,6 +988,28 @@ The operational mechanics of the sweep — concurrency leasing, duplicate
 suppression, the `tick` CLI vs. the HTTP hook — are covered in
 [Operations → Agent Jobs operations](operations.md#agent-jobs-operations).
 
+### Inspecting a Case's Jobs (Web UI)
+
+A Case's **Agent** page (`/ws/{workspace}/cases/{id}/agent`) surfaces an
+**Automated Jobs** section — between the *Settings* and *Run history*
+sections — that lists the enabled Jobs which can fire against that Case,
+with their trigger conditions, execution strategy, and (on click) the full
+prompt. It is read-only; Job definitions are managed in the workspace TOML.
+
+What appears there mirrors the firing rules above:
+
+- **Case-lifecycle Jobs** (`events.case`) are always listed, regardless of
+  the Case's current status.
+- **Scheduled Jobs** (`events.scheduled`) are listed only while the Case is
+  **OPEN**, because the scheduled sweep skips `CLOSED`/draft cases.
+- **Disabled Jobs** (`disabled = true`) never appear.
+
+The page is backed by the `caseJobs(workspaceId, caseId): [CaseJob!]!`
+GraphQL query. Like the run-history queries it enforces private-case access
+control: a caller who is not a member of a private Case's channel is refused.
+`CaseJob.trigger.schedule.everySeconds` reports `every` as whole seconds and
+`cron` reports the original cron expression (the two are mutually exclusive).
+
 ### Session log
 
 Each Job run posts a minimal operational log to the Case's Slack channel so
