@@ -63,6 +63,12 @@ func NewMCPHandler(
 	policy interfaces.PolicyClient,
 	env map[string]string,
 ) http.Handler {
+	// policy is the sole authorization gate for the MCP data surface; a nil
+	// client would make every tool call panic on h.policy.Query. Fail fast at
+	// construction instead, so a wiring mistake never ships an open endpoint.
+	if policy == nil {
+		panic("MCP handler requires a non-nil policy client")
+	}
 	h := &mcpHandler{
 		caseUC:   caseUC,
 		actionUC: actionUC,

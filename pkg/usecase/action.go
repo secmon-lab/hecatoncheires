@@ -614,48 +614,76 @@ func (uc *ActionUseCase) ListActions(ctx context.Context, workspaceID string, op
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to list actions")
 	}
+	return uc.filterActionsByParentAccess(ctx, workspaceID, actions, opts)
+}
 
-	// Two filters may apply. Membership-based access control kicks in when an
-	// auth token is present (drop actions whose private parent Case the caller
-	// is not a member of). ExcludePrivateCaseActions is stricter and token-
-	// independent: it drops every action whose parent Case is private, for
-	// entry points (MCP) that must never expose private cases. Either one
-	// requires loading the parent Cases.
-	token, tokenErr := auth.TokenFromContext(ctx)
-	needCaseLookup := tokenErr == nil || opts.ExcludePrivateCaseActions
-	if needCaseLookup {
-		caseIDSet := make(map[int64]struct{})
-		for _, action := range actions {
-			caseIDSet[action.CaseID] = struct{}{}
-		}
-		caseInfo := make(map[int64]*model.Case, len(caseIDSet))
-		for caseID := range caseIDSet {
-			parentCase, caseErr := uc.repo.Case().Get(ctx, workspaceID, caseID)
-			if caseErr != nil {
-				continue
-			}
-			caseInfo[caseID] = parentCase
-		}
-		filtered := make([]*model.Action, 0, len(actions))
-		for _, action := range actions {
-			parentCase, ok := caseInfo[action.CaseID]
-			// A missing parent Case means we cannot vouch for the action's
-			// visibility, so drop it (this also matches the prior token-path
-			// behaviour where an unresolved case was treated as inaccessible).
-			if !ok {
-				continue
-			}
-			if opts.ExcludePrivateCaseActions && parentCase.IsPrivate {
-				continue
-			}
-			if tokenErr == nil && !model.IsCaseAccessible(parentCase, token.Sub) {
-				continue
-			}
-			filtered = append(filtered, action)
-		}
-		actions = filtered
+// GetActions retrieves multiple actions by ID in a single repository batch
+// (GetByIDs) and applies the same parent-Case access control as the listing
+// methods, avoiding the N+1 round-trips a per-ID loop would incur. Results
+// preserve the order of ids; ids that do not resolve — and actions whose
+// parent Case is excluded (private under opts.ExcludePrivateCaseActions, or
+// inaccessible to the caller) — are omitted.
+func (uc *ActionUseCase) GetActions(ctx context.Context, workspaceID string, ids []int64, opts interfaces.ActionListOptions) ([]*model.Action, error) {
+	if len(ids) == 0 {
+		return []*model.Action{}, nil
 	}
-	return actions, nil
+	found, err := uc.repo.Action().GetByIDs(ctx, workspaceID, ids)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to batch get actions")
+	}
+	ordered := make([]*model.Action, 0, len(ids))
+	for _, id := range ids {
+		if a, ok := found[id]; ok {
+			ordered = append(ordered, a)
+		}
+	}
+	return uc.filterActionsByParentAccess(ctx, workspaceID, ordered, opts)
+}
+
+// filterActionsByParentAccess drops actions the caller may not see based on
+// their parent Case. Membership-based access control applies when an auth
+// token is present; opts.ExcludePrivateCaseActions additionally drops every
+// private-case action regardless of membership (the MCP policy). Parent Cases
+// are fetched in one batch (repo.Case().GetByIDs) rather than per-action, and
+// an action whose parent cannot be resolved is dropped.
+func (uc *ActionUseCase) filterActionsByParentAccess(ctx context.Context, workspaceID string, actions []*model.Action, opts interfaces.ActionListOptions) ([]*model.Action, error) {
+	token, tokenErr := auth.TokenFromContext(ctx)
+	// With no caller identity and no private-exclusion there is nothing to
+	// filter (system/bot context reading public data).
+	if tokenErr != nil && !opts.ExcludePrivateCaseActions {
+		return actions, nil
+	}
+
+	caseIDSet := make(map[int64]struct{}, len(actions))
+	for _, action := range actions {
+		caseIDSet[action.CaseID] = struct{}{}
+	}
+	caseIDs := make([]int64, 0, len(caseIDSet))
+	for caseID := range caseIDSet {
+		caseIDs = append(caseIDs, caseID)
+	}
+	caseInfo, err := uc.repo.Case().GetByIDs(ctx, workspaceID, caseIDs)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to batch get parent cases")
+	}
+
+	filtered := make([]*model.Action, 0, len(actions))
+	for _, action := range actions {
+		parentCase, ok := caseInfo[action.CaseID]
+		// A missing parent Case means we cannot vouch for the action's
+		// visibility, so drop it.
+		if !ok {
+			continue
+		}
+		if opts.ExcludePrivateCaseActions && parentCase.IsPrivate {
+			continue
+		}
+		if tokenErr == nil && !model.IsCaseAccessible(parentCase, token.Sub) {
+			continue
+		}
+		filtered = append(filtered, action)
+	}
+	return filtered, nil
 }
 
 func (uc *ActionUseCase) GetActionsByCase(ctx context.Context, workspaceID string, caseID int64, opts interfaces.ActionListOptions) ([]*model.Action, error) {

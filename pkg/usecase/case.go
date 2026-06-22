@@ -1058,6 +1058,45 @@ func (uc *CaseUseCase) GetCase(ctx context.Context, workspaceID string, id int64
 	return caseModel, nil
 }
 
+// GetCases retrieves multiple cases by ID in a single batch, applying the same
+// per-case access control as GetCase. It fetches all requested cases with one
+// repository batch call (repo.Case().GetByIDs) to avoid N+1 round-trips, then:
+//   - omits cases that do not exist;
+//   - omits private drafts the caller did not author (their existence must not
+//     leak);
+//   - RestrictCases non-draft private cases the caller cannot access.
+//
+// Results preserve the order of ids; duplicate ids yield duplicate entries.
+func (uc *CaseUseCase) GetCases(ctx context.Context, workspaceID string, ids []int64) ([]*model.Case, error) {
+	if len(ids) == 0 {
+		return []*model.Case{}, nil
+	}
+
+	found, err := uc.repo.Case().GetByIDs(ctx, workspaceID, ids)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to batch get cases")
+	}
+
+	token, tokenErr := auth.TokenFromContext(ctx)
+	out := make([]*model.Case, 0, len(ids))
+	for _, id := range ids {
+		caseModel, ok := found[id]
+		if !ok {
+			continue
+		}
+		// Mirrors GetCase: a private draft is visible only to its reporter.
+		if caseModel.IsDraft() && caseModel.IsPrivate && tokenErr == nil && caseModel.ReporterID != token.Sub {
+			continue
+		}
+		if tokenErr == nil && !caseModel.IsDraft() && !model.IsCaseAccessible(caseModel, token.Sub) {
+			out = append(out, model.RestrictCase(caseModel))
+			continue
+		}
+		out = append(out, caseModel)
+	}
+	return out, nil
+}
+
 func (uc *CaseUseCase) ListCases(ctx context.Context, workspaceID string, status *types.CaseStatus) ([]*model.Case, error) {
 	var opts []interfaces.ListCaseOption
 	if status != nil {

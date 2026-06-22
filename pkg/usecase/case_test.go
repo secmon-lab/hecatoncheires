@@ -568,6 +568,67 @@ func TestCaseUseCase_GetCase(t *testing.T) {
 	})
 }
 
+func TestCaseUseCase_GetCases(t *testing.T) {
+	t.Run("returns requested cases in order, omits missing", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		c1, err := uc.CreateCase(ctx, testWorkspaceID, "Case 1", "Desc 1", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+		c2, err := uc.CreateCase(ctx, testWorkspaceID, "Case 2", "Desc 2", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		got, err := uc.GetCases(ctx, testWorkspaceID, []int64{c2.ID, 999999, c1.ID})
+		gt.NoError(t, err).Required()
+		gt.Array(t, got).Length(2)
+		// Order follows the requested ids; the missing id is dropped.
+		gt.Value(t, got[0].ID).Equal(c2.ID)
+		gt.Value(t, got[0].Title).Equal("Case 2")
+		gt.Value(t, got[1].ID).Equal(c1.ID)
+		gt.Value(t, got[1].Title).Equal("Case 1")
+	})
+
+	t.Run("empty ids returns empty slice", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		got, err := uc.GetCases(context.Background(), testWorkspaceID, nil)
+		gt.NoError(t, err).Required()
+		gt.Array(t, got).Length(0)
+	})
+
+	t.Run("restricts private case for non-member", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		memberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMEMBER"})
+
+		private := &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
+			Title:          "Private",
+			Description:    "Secret",
+			IsPrivate:      true,
+			ChannelUserIDs: []string{"UMEMBER"},
+			AssigneeIDs:    []string{},
+		}
+		created, err := repo.Case().Create(memberCtx, testWorkspaceID, private)
+		gt.NoError(t, err).Required()
+
+		// Member gets the full case.
+		memberGot, err := uc.GetCases(memberCtx, testWorkspaceID, []int64{created.ID})
+		gt.NoError(t, err).Required()
+		gt.Array(t, memberGot).Length(1)
+		gt.Value(t, memberGot[0].Title).Equal("Private")
+
+		// Non-member gets a RestrictCase'd entry (title cleared, still private).
+		nonMemberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
+		nonMemberGot, err := uc.GetCases(nonMemberCtx, testWorkspaceID, []int64{created.ID})
+		gt.NoError(t, err).Required()
+		gt.Array(t, nonMemberGot).Length(1)
+		gt.Bool(t, nonMemberGot[0].IsPrivate).True()
+		gt.Value(t, nonMemberGot[0].Title).Equal("")
+	})
+}
+
 func TestCaseUseCase_ListCases(t *testing.T) {
 	t.Run("list cases", func(t *testing.T) {
 		repo := memory.New()

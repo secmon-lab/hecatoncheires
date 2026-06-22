@@ -2,7 +2,6 @@ package http
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/m-mizutani/goerr/v2"
@@ -10,7 +9,6 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
-	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 )
 
 // registerTools wires the read-only MCP tool surface. All tools enforce the
@@ -258,17 +256,13 @@ func (h *mcpHandler) runGetCases(ctx context.Context, in getCasesInput) (getCase
 		return getCasesOutput{}, goerr.New("at least one case id is required")
 	}
 
-	out := getCasesOutput{Cases: make([]caseDetail, 0, len(in.IDs))}
-	for _, id := range in.IDs {
-		c, err := h.caseUC.GetCase(ctx, in.WorkspaceID, id)
-		if err != nil {
-			// Not-found ids are silently omitted (batch-get semantics). Any
-			// other error is a genuine failure and is propagated.
-			if errors.Is(err, usecase.ErrCaseNotFound) {
-				continue
-			}
-			return getCasesOutput{}, goerr.Wrap(err, "failed to get case", goerr.V("case_id", id))
-		}
+	cases, err := h.caseUC.GetCases(ctx, in.WorkspaceID, in.IDs)
+	if err != nil {
+		return getCasesOutput{}, goerr.Wrap(err, "failed to get cases")
+	}
+
+	out := getCasesOutput{Cases: make([]caseDetail, 0, len(cases))}
+	for _, c := range cases {
 		// Private cases (full for members, RestrictCase'd for non-members) are
 		// never returned via MCP — omit without revealing their existence.
 		if c.IsPrivate {
@@ -339,18 +333,15 @@ func (h *mcpHandler) runGetActions(ctx context.Context, in getActionsInput) (get
 		return getActionsOutput{}, goerr.New("at least one action id is required")
 	}
 	opts := interfaces.ActionListOptions{ExcludePrivateCaseActions: true}
+	actions, err := h.actionUC.GetActions(ctx, in.WorkspaceID, in.IDs, opts)
+	if err != nil {
+		return getActionsOutput{}, goerr.Wrap(err, "failed to get actions")
+	}
 
-	out := getActionsOutput{Actions: make([]actionDetail, 0, len(in.IDs))}
-	for _, id := range in.IDs {
-		a, err := h.actionUC.GetAction(ctx, in.WorkspaceID, id, opts)
-		if err != nil {
-			// Not-found ids and actions whose parent case is private are
-			// silently omitted; any other error is propagated.
-			if errors.Is(err, usecase.ErrActionNotFound) || errors.Is(err, usecase.ErrAccessDenied) || errors.Is(err, usecase.ErrCaseNotFound) {
-				continue
-			}
-			return getActionsOutput{}, goerr.Wrap(err, "failed to get action", goerr.V("action_id", id))
-		}
+	// Not-found ids and actions whose parent case is private are already
+	// omitted by GetActions.
+	out := getActionsOutput{Actions: make([]actionDetail, 0, len(actions))}
+	for _, a := range actions {
 		out.Actions = append(out.Actions, toActionDetail(a))
 	}
 	return out, nil
