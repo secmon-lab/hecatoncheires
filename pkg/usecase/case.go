@@ -1118,6 +1118,14 @@ func (uc *CaseUseCase) ListCases(ctx context.Context, workspaceID string, status
 		}
 	}
 
+	// The repositories return cases in an unspecified order (memory iterates a
+	// map; Firestore orders by document ID). Sort newest-first here so every
+	// caller gets a stable, intuitive listing without forcing a Firestore
+	// composite index (Status filter + OrderBy would require one).
+	sort.SliceStable(cases, func(i, j int) bool {
+		return cases[i].CreatedAt.After(cases[j].CreatedAt)
+	})
+
 	return cases, nil
 }
 
@@ -1625,6 +1633,11 @@ func (uc *CaseUseCase) ListDrafts(ctx context.Context, workspaceID string) ([]*m
 		}
 		visible = append(visible, d)
 	}
+
+	// Match ListCases: newest-first, repository-order-independent.
+	sort.SliceStable(visible, func(i, j int) bool {
+		return visible[i].CreatedAt.After(visible[j].CreatedAt)
+	})
 	return visible, nil
 }
 

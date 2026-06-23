@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/mock"
@@ -677,6 +678,37 @@ func TestCaseUseCase_ListCases(t *testing.T) {
 		gt.NoError(t, err).Required()
 		gt.Array(t, closedCases).Length(1)
 		gt.Value(t, closedCases[0].Title).Equal("Open Case 1")
+	})
+
+	t.Run("sorts newest-first by created date", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		// Persist cases out of chronological order so the result order cannot
+		// accidentally match insertion order — only an explicit CreatedAt sort
+		// produces newest-first.
+		base := time.Now().UTC()
+		seed := func(title string, createdAt time.Time) {
+			_, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+				Title:      title,
+				Status:     types.CaseStatusOpen,
+				ReporterID: "UTESTUSER",
+				CreatedAt:  createdAt,
+				UpdatedAt:  createdAt,
+			})
+			gt.NoError(t, err).Required()
+		}
+		seed("middle", base.Add(-1*time.Hour))
+		seed("newest", base)
+		seed("oldest", base.Add(-2*time.Hour))
+
+		cases, err := uc.ListCases(ctx, testWorkspaceID, nil)
+		gt.NoError(t, err).Required()
+		gt.Array(t, cases).Length(3)
+		gt.Value(t, cases[0].Title).Equal("newest")
+		gt.Value(t, cases[1].Title).Equal("middle")
+		gt.Value(t, cases[2].Title).Equal("oldest")
 	})
 }
 
@@ -2161,6 +2193,34 @@ func TestCaseUseCase_ListDrafts(t *testing.T) {
 		gt.NoError(t, err).Required()
 		gt.Number(t, len(got)).Equal(1)
 		gt.Value(t, got[0].Title).Equal("Public draft")
+	})
+
+	t.Run("sorts newest-first by created date", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOWNER"})
+
+		base := time.Now().UTC()
+		seed := func(title string, createdAt time.Time) {
+			_, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{
+				Title:      title,
+				Status:     types.CaseStatusDraft,
+				ReporterID: "UOWNER",
+				CreatedAt:  createdAt,
+				UpdatedAt:  createdAt,
+			})
+			gt.NoError(t, err).Required()
+		}
+		seed("middle", base.Add(-1*time.Hour))
+		seed("newest", base)
+		seed("oldest", base.Add(-2*time.Hour))
+
+		got, err := uc.ListDrafts(ctx, testWorkspaceID)
+		gt.NoError(t, err).Required()
+		gt.Array(t, got).Length(3)
+		gt.Value(t, got[0].Title).Equal("newest")
+		gt.Value(t, got[1].Title).Equal("middle")
+		gt.Value(t, got[2].Title).Equal("oldest")
 	})
 }
 
