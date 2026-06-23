@@ -123,7 +123,7 @@ func (m *mockSlackService) GetTeamURL(ctx context.Context) (string, error) {
 	return "https://test-team.slack.com", nil
 }
 
-func (m *mockSlackService) PostMessage(ctx context.Context, channelID string, blocks []goslack.Block, text string, _ ...slack.PostMessageOption) (string, error) {
+func (m *mockSlackService) PostMessage(ctx context.Context, channelID string, blocks []goslack.Block, text string) (string, error) {
 	return "1234567890.123456", nil
 }
 
@@ -135,7 +135,7 @@ func (m *mockSlackService) PostMessageWithAttachment(_ context.Context, _ string
 	return "1234567890.123456", nil
 }
 
-func (m *mockSlackService) PostMessageWithAttachments(_ context.Context, _ string, _ string, _ []goslack.Attachment, _ ...slack.PostMessageOption) (string, error) {
+func (m *mockSlackService) PostMessageWithAttachments(_ context.Context, _ string, _ string, _ []goslack.Attachment) (string, error) {
 	return "1234567890.123456", nil
 }
 

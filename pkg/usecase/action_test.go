@@ -551,7 +551,7 @@ type actionTestSlackMock struct {
 	updateWithAttachmentAttachment goslack.Attachment
 }
 
-func (m *actionTestSlackMock) PostMessage(ctx context.Context, channelID string, blocks []goslack.Block, text string, _ ...slacksvc.PostMessageOption) (string, error) {
+func (m *actionTestSlackMock) PostMessage(ctx context.Context, channelID string, blocks []goslack.Block, text string) (string, error) {
 	m.postMessageCalled = true
 	m.postMessageChannel = channelID
 	m.postMessageBlocks = blocks

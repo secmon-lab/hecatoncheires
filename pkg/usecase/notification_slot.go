@@ -176,7 +176,7 @@ func (c *notificationSlotCoordinator) postNewSlot(ctx context.Context, channelID
 	// Pass an empty fallback text: Slack would otherwise render it as a
 	// duplicate body alongside the Block Kit content. The blocks themselves
 	// already carry everything readers / notification clients need.
-	ts, err := c.slackService.PostMessage(ctx, channelID, blocks, "", slack.WithDisableUnfurl())
+	ts, err := c.slackService.PostMessage(ctx, channelID, blocks, "")
 	if err != nil {
 		errutil.Handle(ctx, err, "failed to post notification slot message")
 		return

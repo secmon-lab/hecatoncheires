@@ -39,7 +39,7 @@ func (m *commandTestSlackService) OpenView(_ context.Context, triggerID string, 
 	return nil
 }
 
-func (m *commandTestSlackService) PostMessage(_ context.Context, channelID string, _ []goslack.Block, text string, _ ...slack.PostMessageOption) (string, error) {
+func (m *commandTestSlackService) PostMessage(_ context.Context, channelID string, _ []goslack.Block, text string) (string, error) {
 	m.postedMessages = append(m.postedMessages, commandTestPostedMessage{
 		ChannelID: channelID,
 		Text:      text,
