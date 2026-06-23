@@ -203,6 +203,7 @@ type systemPromptCase struct {
 	ReporterID            string
 	AssigneeIDs           []string
 	SlackChannelID        string
+	SlackThreadTS         string
 	CreatedAt             string
 	UpdatedAt             string
 	FieldValues           []systemPromptFieldValue
@@ -408,6 +409,7 @@ func buildSystemPromptData(in PromptInputs) systemPromptData {
 			ReporterID:            c.ReporterID,
 			AssigneeIDs:           append([]string(nil), c.AssigneeIDs...),
 			SlackChannelID:        c.SlackChannelID,
+			SlackThreadTS:         c.SlackThreadTS,
 			AgentAdditionalPrompt: c.AgentAdditionalPrompt,
 		}
 		if !c.CreatedAt.IsZero() {

@@ -4,10 +4,11 @@ Hecatoncheires can wire up external services to surface their content to the AI 
 
 > **Scope note.** This page is about *enabling* the Notion and GitHub services.
 > It is **not** the complete agent-tool list — that lives in
-> [Agent Tools](agent_tools.md). In particular, the Notion and GitHub tools are
-> wired only into the **interactive** mention / investigation agents; they are
-> **not** available to unattended [Jobs](configuration.md#job-definitions-job).
-> If you are writing a Job prompt, check
+> [Agent Tools](agent_tools.md). The **Notion** tools are wired into the
+> interactive mention / investigation agents **and into unattended
+> [Jobs](configuration.md#job-definitions-job)** (both modes). The **GitHub**
+> tools remain interactive / investigation only — they are **not** available to
+> Jobs. If you are writing a Job prompt, check
 > [Agent Tools → Tools available by context](agent_tools.md#tools-available-by-context)
 > for what a Job can actually call.
 

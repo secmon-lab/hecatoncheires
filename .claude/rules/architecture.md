@@ -304,6 +304,41 @@ enables it for mention mode but disables it for `ModeCreate`; `job` enables
 it; structured-only hosts leave it off). The planner prompt guards it hard:
 "when in any doubt, investigate."
 
+## Agent tool wiring (host coverage) (NON-NEGOTIABLE)
+
+A new agent tool is, by default, made available to **every** agent host that
+legitimately needs it — not just the one path you happened to be working on.
+The plan-and-execute runtime is driven from several hosts (`agent/proposal`
+for mention/assist case-draft, `agent/job` for scheduled and lifecycle Jobs,
+etc.), and each host assembles its own tool slice. Wiring a tool into only one
+host silently starves the others.
+
+This rule exists because read-only Slack/Notion tools were once wired only
+into the mention/assist usecase path and forgotten on the Job path: the Job
+agent was told (by its prompt) to read its case thread first, had no read
+tool, and instead spammed the thread with "checking…" posts via the only
+Slack tool it did have (the poster).
+
+- When you add a tool, audit **all** host tool-builders and wire it into each
+  one that should have it. For Jobs the single supply point is
+  `buildJobTools()` in `pkg/cli/job_runtime.go`; the mention/assist path is
+  wired via the `usecase` options in `pkg/cli/serve.go`. A tool that exists
+  for one host but not another is a bug unless there is a documented reason.
+- **Non-Action tools default to both channel-mode and thread-mode.** Only
+  Action / `core` tools are mode-gated (Actions exist only in channel-mode).
+  Read-only and auxiliary tools (Slack read, Notion, web fetch, knowledge,
+  memo) are wired in both modes unless a specific, recorded reason excludes
+  them.
+- A tool whose dependency is nil must degrade safely (its constructor returns
+  no tool), so wiring it unconditionally across hosts is safe even when a
+  backend is not configured in a given deployment.
+- **A prompt that instructs the agent to use a tool, and the wiring that
+  actually provides that tool, must ship together.** A prompt that names a
+  tool the host never wires drives the model to violate the prompt. When you
+  change one, verify the other — and verify the agent has the context it needs
+  to call the tool (e.g. a thread-reading tool needs the `thread_ts` exposed in
+  the system prompt, not just the channel id).
+
 ## Budget
 
 The budget model is the combination of **two** controls — there is NO

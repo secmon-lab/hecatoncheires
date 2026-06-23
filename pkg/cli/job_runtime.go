@@ -17,6 +17,8 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
 	knowledgetool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/knowledge"
 	memotool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/memo"
+	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
+	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slackpost"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/webfetch"
 	"github.com/secmon-lab/hecatoncheires/pkg/cli/config"
@@ -77,6 +79,15 @@ func buildTickRuntime(
 		LLMClient: llmClient,
 		UC:        uc,
 		WebFetch:  uc.WebFetchClient(),
+		// Mirror the read-tool wiring done in serve.go so every Job host
+		// resolves the same tool set. The tick CLI builds `uc` without the
+		// Slack / Notion options, so these accessors return nil today and the
+		// tools stay disabled; passing them keeps the host-coverage rule honest
+		// and lights the tools up automatically if the tick uc ever configures
+		// them.
+		SlackSearch:    uc.SlackSearchService(),
+		SlackRetriever: uc.SlackMessageRetriever(),
+		NotionTool:     uc.NotionToolClient(),
 	})
 	uc.Case.SetEventPublisher(jobUC)
 
@@ -102,6 +113,15 @@ type jobRuntimeDeps struct {
 	UC           *usecase.UseCases
 	SlackService slacksvc.Service // may be nil; slack_post tool then no-ops
 	WebFetch     *webfetch.Client // may be nil; webfetch tool then not bound
+
+	// Read-only tools the Job agent uses to read its case thread and do
+	// corroboration. Each is nil-safe: the corresponding constructor binds no
+	// tool when its dependency is nil, so an unconfigured deployment simply
+	// runs without that tool (and the prompt's "do nothing if you can't read"
+	// guard takes over).
+	SlackSearch    slacktool.SearchService    // slack__search_messages
+	SlackRetriever slacktool.MessageRetriever // slack__get_messages via User token
+	NotionTool     notiontool.Client          // notion__search / notion__get_page
 
 	// HistoryRepo / TraceRepo are required when wiring the planexec
 	// executor (it needs persistent storage to replay sub-agent
@@ -279,6 +299,20 @@ func buildJobTools(deps jobRuntimeDeps, adapters jobToolAdapters, c *model.Case,
 			DefaultThreadTS: threadTS,
 		})...)
 	}
+	// Slack read-only tools (slack__get_messages / slack__search_messages). Not
+	// Action tools, so wired in both channel- and thread-mode. NewReadOnly does
+	// NOT include the post tool (posting stays on slackpost above); ChannelID is
+	// intentionally omitted here. get_messages binds on a non-nil Bot and reads
+	// via the User-token Retriever when present, else via the Bot if it is a
+	// channel member; search_messages binds only on a non-nil Search.
+	out = append(out, slacktool.NewReadOnly(slacktool.Deps{
+		Bot:       deps.SlackService,
+		Search:    deps.SlackSearch,
+		Retriever: deps.SlackRetriever,
+	})...)
+	// Notion read-only tools (notion__search / notion__get_page). New returns no
+	// tool when the client is nil, so this is safe in deployments without Notion.
+	out = append(out, notiontool.New(notiontool.Deps{Client: deps.NotionTool})...)
 	out = append(out, webfetch.New(deps.WebFetch)...)
 	// Case-scoped memo tools, wired only when the workspace enabled memos.
 	if ws != nil && ws.MemoConfig.Enabled() {
