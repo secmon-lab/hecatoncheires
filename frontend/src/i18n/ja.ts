@@ -545,6 +545,8 @@ export const ja: Messages = {
   jobRunLogEventRunError: 'エラー',
   jobRunLogLoadError: '実行ログの読み込みに失敗しました。',
   jobRunLogNotFound: '実行ログが見つかりませんでした。',
+  jobRunLogDownloadJson: 'JSONダウンロード',
+  jobRunLogDownloadJsonTitle: '全実行記録をJSON形式でダウンロード',
 
   // Case Import
   btnImport: '取り込み',

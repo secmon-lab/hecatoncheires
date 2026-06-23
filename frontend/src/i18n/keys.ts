@@ -544,6 +544,8 @@ export const msgKeys = {
   jobRunLogEventRunError: 'jobRunLogEventRunError',
   jobRunLogLoadError: 'jobRunLogLoadError',
   jobRunLogNotFound: 'jobRunLogNotFound',
+  jobRunLogDownloadJson: 'jobRunLogDownloadJson',
+  jobRunLogDownloadJsonTitle: 'jobRunLogDownloadJsonTitle',
 
   // Case Import
   btnImport: 'btnImport',
