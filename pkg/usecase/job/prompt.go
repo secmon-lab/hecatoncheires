@@ -9,7 +9,6 @@ import (
 	"sync"
 	"text/template"
 	"time"
-	"unicode/utf8"
 
 	"github.com/m-mizutani/goerr/v2"
 
@@ -637,24 +636,27 @@ func multiSelectIDs(raw any) ([]string, bool) {
 // returns the truncated string and, when truncation occurred, the original
 // rune count so the caller can annotate the elision; when s already fits, the
 // second return is 0 to signal "no annotation needed".
+//
+// Single pass: ranging over a string yields rune-boundary byte indices, so we
+// record the cut point at the (max+1)-th rune and keep counting to the end —
+// the full rune count falls out of the same loop, avoiding a separate
+// utf8.RuneCountInString scan.
 func truncateRunes(s string, max int) (string, int) {
 	if max <= 0 {
 		return "", 0
 	}
-	full := utf8.RuneCountInString(s)
-	if full <= max {
-		return s, 0
-	}
-	// Walk max runes in and cut there; ranging over a string yields rune
-	// boundaries so the slice index is always valid UTF-8.
+	cut := -1
 	count := 0
 	for i := range s {
 		if count == max {
-			return s[:i], full
+			cut = i
 		}
 		count++
 	}
-	return s, 0
+	if cut < 0 {
+		return s, 0
+	}
+	return s[:cut], count
 }
 
 func describeCaseLifecycle(lc model.CaseLifecycle) string {
