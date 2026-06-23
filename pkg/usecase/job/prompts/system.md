@@ -53,6 +53,9 @@ do not assume any other value for "now".
 {{- if .SlackChannelID }}
 - slack_channel_id: {{ .SlackChannelID }}
 {{- end }}
+{{- if .SlackThreadTS }}
+- slack_thread_ts: {{ .SlackThreadTS }}
+{{- end }}
 {{- if .CreatedAt }}
 - created_at: {{ .CreatedAt }}
 {{- end }}

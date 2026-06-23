@@ -322,3 +322,24 @@ func (uc *UseCases) SlackService() slack.Service {
 func (uc *UseCases) WebFetchClient() *webfetch.Client {
 	return uc.webfetchClient
 }
+
+// SlackSearchService returns the Slack User-token-backed search client
+// (nil when no User OAuth Token was configured). Exposed so the Job runtime
+// wiring can bind slack__search_messages into the Job tool set.
+func (uc *UseCases) SlackSearchService() slacktool.SearchService {
+	return uc.slackSearch
+}
+
+// SlackMessageRetriever returns the Slack User-token-backed message retriever
+// (nil when no User OAuth Token was configured). Exposed so the Job runtime
+// wiring can let slack__get_messages read channels the bot has not joined.
+func (uc *UseCases) SlackMessageRetriever() slacktool.MessageRetriever {
+	return uc.slackRetriever
+}
+
+// NotionToolClient returns the agent-tool Notion client (nil when no Notion
+// token was configured). Exposed so the Job runtime wiring can bind
+// notion__search / notion__get_page into the Job tool set.
+func (uc *UseCases) NotionToolClient() notiontool.Client {
+	return uc.notionTool
+}

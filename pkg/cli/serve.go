@@ -459,14 +459,17 @@ func cmdServe() *cli.Command {
 				logging.Default().Info("LLM client not configured; Job runtime will skip dispatch", "error", llmErr.Error())
 			}
 			jobUC, _ := buildJobRuntime(jobRuntimeDeps{
-				Repo:         repo,
-				Registry:     registry,
-				LLMClient:    llmClient,
-				UC:           uc,
-				SlackService: slackSvc,
-				WebFetch:     uc.WebFetchClient(),
-				HistoryRepo:  agentHistoryRepo,
-				TraceRepo:    agentTraceRepo,
+				Repo:           repo,
+				Registry:       registry,
+				LLMClient:      llmClient,
+				UC:             uc,
+				SlackService:   slackSvc,
+				WebFetch:       uc.WebFetchClient(),
+				SlackSearch:    uc.SlackSearchService(),
+				SlackRetriever: uc.SlackMessageRetriever(),
+				NotionTool:     uc.NotionToolClient(),
+				HistoryRepo:    agentHistoryRepo,
+				TraceRepo:      agentTraceRepo,
 			})
 			uc.Case.SetEventPublisher(jobUC)
 			tickScanner := job.NewScheduledScanner(job.ScannerDeps{

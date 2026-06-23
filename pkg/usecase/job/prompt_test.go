@@ -114,6 +114,45 @@ func TestBuildSystemPrompt_ThreadModeOmitsActions(t *testing.T) {
 	mustContain(t, got, "cannot close the case")
 }
 
+func TestBuildSystemPrompt_SlackThreadTS(t *testing.T) {
+	j := &model.Job{
+		ID:     "daily-progress",
+		Prompt: "x",
+		Events: model.JobEvents{
+			Scheduled: &model.ScheduledEventConfig{Every: time.Hour},
+		},
+	}
+	ev := job.Event{
+		Domain:      model.JobEventDomainScheduled,
+		WorkspaceID: "ws",
+		CaseID:      42,
+		Timestamp:   time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC),
+	}
+
+	t.Run("thread-mode case exposes slack_thread_ts so the agent can read its thread", func(t *testing.T) {
+		ws := newWorkspace("ws", "WS")
+		ws.CaseMode = model.CaseModeThread
+		c := newCase(42)
+		c.SlackThreadTS = "1700000000.000100"
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job: j, Workspace: ws, Case: c, Event: ev,
+		})
+		gt.NoError(t, err).Required()
+		mustContain(t, got, "- slack_channel_id: C-CASE")
+		mustContain(t, got, "- slack_thread_ts: 1700000000.000100")
+	})
+
+	t.Run("channel-mode case (no thread) omits the slack_thread_ts line", func(t *testing.T) {
+		c := newCase(42) // newCase leaves SlackThreadTS empty
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job: j, Workspace: newWorkspace("ws", "WS"), Case: c, Event: ev,
+		})
+		gt.NoError(t, err).Required()
+		mustContain(t, got, "- slack_channel_id: C-CASE")
+		mustNotContain(t, got, "slack_thread_ts:")
+	})
+}
+
 func TestBuildSystemPrompt_CaseClosedEvent(t *testing.T) {
 	j := &model.Job{
 		ID:     "on-close",

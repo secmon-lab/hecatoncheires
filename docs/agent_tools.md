@@ -8,7 +8,7 @@ a prompt must be one that is actually wired into that prompt's context;
 naming a tool the context does not expose silently does nothing.
 
 > Quick map for prompt authors:
-> - **Naming a tool in a Job prompt?** Read [Tools available by context](#tools-available-by-context) — Jobs get a *narrower* palette than the interactive mention agent (no Slack search, no Notion, no GitHub).
+> - **Naming a tool in a Job prompt?** Read [Tools available by context](#tools-available-by-context) — Jobs get the Slack read tools (`slack__search_messages` / `slack__get_messages`) and Notion (`notion__*`), but a *narrower* write palette than the interactive mention agent and still **no GitHub** read tools.
 > - **Wondering whether a Job may close / delete / post anywhere?** Read [Guardrails](#guardrails).
 > - **Wiring an external integration (Notion / GitHub) on / off?** See [Integrations](integrations.md); the tools light up automatically when the service is configured.
 
@@ -61,10 +61,10 @@ for Jobs (both channel- and thread-mode).
 
 | Tool | R/W | Purpose | Notes |
 |------|-----|---------|-------|
-| `slack__search_messages` | R | Workspace-wide message search (`search.messages`). | Requires a Slack **User** OAuth token with `search:read`. See [slack.md](slack.md#user-token-scopes). Interactive / investigation contexts only — **not** wired into Jobs. |
-| `slack__get_messages` | R | Bulk-fetch 1–10 messages with thread context (parallel, partial failure tolerated). | Interactive / investigation contexts only — **not** wired into Jobs. |
+| `slack__search_messages` | R | Workspace-wide message search (`search.messages`). | Requires a Slack **User** OAuth token with `search:read`. See [slack.md](slack.md#user-token-scopes). Wired into the interactive / investigation contexts **and into Jobs** (both modes) when the User token is configured. |
+| `slack__get_messages` | R | Bulk-fetch 1–10 messages with thread context (parallel, partial failure tolerated). | Wired into the interactive / investigation contexts **and into Jobs** (both modes) when a Slack service is configured. Reads via the User token when present, else via the bot if it is a channel member. Thread-mode Jobs use this to read their case thread first (the thread's `slack_thread_ts` is in the Job system prompt). |
 | `slack__post_message` | W | Post a message to the case's Slack channel (supports `thread_ts`). | Used by the assist / mention flow, where the agent posts where it directs. Not suppressed by a Job's `quiet`. |
-| `slack__post_to_case_channel` | W | Post a message to the case's bound channel. | **The only Slack tool a Job gets.** The channel id is hard-pinned to `Case.SlackChannelID`; arbitrary channels are not reachable. Wired only when a Slack service is configured and the case has a bound channel. |
+| `slack__post_to_case_channel` | W | Post a message to the case's bound channel. | **The only Slack *write* tool a Job gets** (Jobs also get the read tools above). The channel id is hard-pinned to `Case.SlackChannelID`; arbitrary channels are not reachable. Wired only when a Slack service is configured and the case has a bound channel. |
 
 ### Knowledge tools (`knowledge`)
 
@@ -100,7 +100,7 @@ at least one memo field.
 ### Notion tools (`notion`)
 
 Wired when `HECATONCHEIRES_NOTION_API_TOKEN` is set. See [integrations.md](integrations.md).
-Investigation / interactive contexts only — **not** wired into Jobs.
+Available in the investigation / interactive contexts **and in Jobs** (both modes).
 
 | Tool | R/W | Purpose |
 |------|-----|---------|
@@ -139,16 +139,16 @@ agent, or sub-agents. Listed here for completeness.
 ## Tools available by context
 
 The agent runs in several contexts, and **each wires a different subset**. This
-matrix is the answer to "can my Job call `slack__get_messages`?" (no) or "can
+matrix is the answer to "can my Job call `slack__get_messages`?" (yes) or "can
 the mention agent close a case?" (yes — see [Guardrails](#guardrails)).
 
 | Tool group | Mention agent (channel-mode case) | Job — channel-mode | Job — thread-mode | Thread-case investigation | Proposal sub-agent (case draft) |
 |------------|:---:|:---:|:---:|:---:|:---:|
 | `core` read + Actions (`actionwriter`) | ✓ (full, incl. archive / delete-step) | ✓ (Job subset, no archive / delete-step) | — (thread mode has no Actions) | — | read-only `core__list_actions` / `core__get_action` |
 | `case__*` (casewriter) | ✓ | ✓ | ✓ | — (decisions applied by the host) | — |
-| `slack__search_messages`, `slack__get_messages` (read) | ✓ | — | — | ✓ | ✓ |
+| `slack__search_messages`, `slack__get_messages` (read) | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `slack__post_to_case_channel` | — | ✓ | ✓ | — | — |
-| `notion__*` | ✓ | — | — | ✓ | ✓ |
+| `notion__*` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `github__*` | ✓ | — | — | ✓ | ✓ |
 | `webfetch` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `knowledge__*` (incl. tag CRUD) | ✓ (write if case is non-private) | ✓ (write if case is non-private) | ✓ (write if case is non-private) | read-only | read-only |
@@ -160,13 +160,16 @@ Notes:
 - **"Mention agent"** is the case-bound agent that runs when a human @-mentions
   the bot in a channel-mode case channel (`pkg/usecase/agent/casebound`). It
   gets the widest palette because a human is in the loop.
-- **Jobs** (`[[job]]`, both `simple` and `planexec` strategy) run **unattended**
-  and get a deliberately narrower palette: case + action writes, knowledge,
-  memo, web fetch, and a single channel-pinned Slack *post* tool — but **no
-  Slack search, Notion, or GitHub read tools**. A Job that needs to reason about
-  external context must have that context already in the case, not fetch it
-  live. (Source of truth for Job wiring: `buildJobTools` in
-  `pkg/cli/job_runtime.go`.)
+- **Jobs** (`[[job]]`, both `simple` and `planexec` strategy) run **unattended**.
+  They get case + action writes, knowledge, memo, web fetch, the Slack read
+  tools (`slack__search_messages` / `slack__get_messages`), Notion read tools,
+  and a single channel-pinned Slack *post* tool — but a narrower *write* palette
+  than the mention agent (no archive / delete-step) and **no GitHub** read tools.
+  The Slack read tools let a thread-mode Job read its own case thread before
+  acting (the thread's `slack_thread_ts` is supplied in the Job system prompt),
+  which is exactly why they are wired: a Job told to "read the thread first"
+  must have a tool to do so, or it will misuse the post tool instead. (Source of
+  truth for Job wiring: `buildJobTools` in `pkg/cli/job_runtime.go`.)
 - **Thread-mode** workspaces have no Actions, so the whole `core` / Action
   surface is absent there.
 - **Thread-case investigation** and the **proposal sub-agents** are read-only
