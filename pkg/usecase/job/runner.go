@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/gollem-dev/gollem"
-	"github.com/gollem-dev/gollem/trace"
 	"github.com/google/uuid"
 	"github.com/m-mizutani/goerr/v2"
 
@@ -389,17 +388,6 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 	}
 	sessionThreadTS := r.postStarting(ctx, j, c)
 
-	// Compose the Slack progress handler with the Firestore trace handler so
-	// tool executions surface (deduped, minimal) into the session thread.
-	// Only wire it when there is actually a session thread to post into and
-	// the run is not quiet — otherwise the handler would no-op on every trace
-	// event, so skip the trace.Multi fan-out entirely and keep the bare
-	// handler (the type the cast-based tests assert against).
-	var traceHandler trace.Handler = handler
-	if r.deps.SlackNotifier != nil && channelID != "" && sessionThreadTS != "" && !isQuiet(ctx) {
-		traceHandler = trace.Multi(handler, newSlackProgressHandler(r.deps.SlackNotifier, channelID, sessionThreadTS))
-	}
-
 	var tools []gollem.Tool
 	if r.deps.ToolBuilder != nil {
 		tools = r.deps.ToolBuilder.Build(ctx, c, ws)
@@ -416,7 +404,7 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 		Prompt:            userPrompt,
 		Tools:             tools,
 		LLMClient:         r.deps.LLMClient,
-		TraceHandler:      traceHandler,
+		TraceHandler:      handler,
 		TraceID:           traceID,
 		HistoryRepository: r.deps.HistoryRepo,
 		HistoryKey:        runID,
