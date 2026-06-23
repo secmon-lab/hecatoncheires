@@ -141,4 +141,46 @@ export class ActionListPage extends BasePage {
     const target = this.page.getByTestId(`kanban-column-${this.getColumnSlug(targetColumnTitle)}`);
     await card.dragTo(target);
   }
+
+  /**
+   * Whether the bulk-archive kebab menu button is present on a column.
+   * Only completed (closed) columns expose it.
+   */
+  async isColumnMenuVisible(columnTitle: string): Promise<boolean> {
+    return this.page
+      .getByTestId(`kanban-column-menu-${this.getColumnSlug(columnTitle)}`)
+      .isVisible();
+  }
+
+  /**
+   * Open the kebab menu of a column.
+   */
+  async openColumnMenu(columnTitle: string): Promise<void> {
+    await this.page
+      .getByTestId(`kanban-column-menu-${this.getColumnSlug(columnTitle)}`)
+      .click();
+  }
+
+  /**
+   * Whether the "Archive all" menu item is enabled for a column. The menu
+   * must already be open.
+   */
+  async isArchiveAllEnabled(columnTitle: string): Promise<boolean> {
+    return this.page
+      .getByTestId(`kanban-column-archive-all-${this.getColumnSlug(columnTitle)}`)
+      .isEnabled();
+  }
+
+  /**
+   * Archive every action in a column via the kebab menu, confirming the
+   * dialog, and wait for the board to refresh.
+   */
+  async archiveAllInColumn(columnTitle: string): Promise<void> {
+    await this.openColumnMenu(columnTitle);
+    await this.page
+      .getByTestId(`kanban-column-archive-all-${this.getColumnSlug(columnTitle)}`)
+      .click();
+    await this.page.getByTestId('confirm-bulk-archive-button').click();
+    await this.waitForBoardLoad();
+  }
 }
