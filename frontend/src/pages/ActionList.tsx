@@ -67,6 +67,10 @@ export default function ActionList() {
   // confirmation. Both are status ids (null = none).
   const [menuCol, setMenuCol] = useState<string | null>(null)
   const [confirmArchiveCol, setConfirmArchiveCol] = useState<string | null>(null)
+  // Bulk archive is dispatched asynchronously server-side, so the immediate
+  // refetch still returns these actions as active. Hide them optimistically by
+  // id until they fall out of the board for real.
+  const [archivingIds, setArchivingIds] = useState<Set<number>>(new Set())
   const { statuses, isClosed, label } = useActionStatuses(currentWorkspace?.id)
   // Thread-mode workspaces show a Case board instead of the Action board.
   const { isThreadMode } = useCaseStatuses(currentWorkspace?.id)
@@ -113,9 +117,10 @@ export default function ActionList() {
   const [updateAction] = useMutation(UPDATE_ACTION, {
     refetchQueries: [refetchActionsQuery],
   })
-  const [bulkArchiveActions, { loading: bulkArchiving }] = useMutation(BULK_ARCHIVE_ACTIONS, {
-    refetchQueries: [refetchActionsQuery],
-  })
+  // No refetchQueries: the server archives asynchronously, so an immediate
+  // refetch cannot reflect completion. The optimistic archivingIds set is what
+  // removes the cards; the board reconciles for real on the next natural load.
+  const [bulkArchiveActions, { loading: bulkArchiving }] = useMutation(BULK_ARCHIVE_ACTIONS)
 
   const actions: ActionRow[] = useMemo(() => {
     if (filterCaseId != null) return byCaseData?.actionsByCase || []
@@ -143,14 +148,17 @@ export default function ActionList() {
     return { id: filterCaseId, title: '' }
   }, [filterCaseId, openCases, actions])
   const filtered = useMemo(() => {
-    if (!search.trim()) return actions
+    const visible = archivingIds.size === 0
+      ? actions
+      : actions.filter((a) => !archivingIds.has(a.id))
+    if (!search.trim()) return visible
     const q = search.toLowerCase()
-    return actions.filter((a) =>
+    return visible.filter((a) =>
       a.title.toLowerCase().includes(q) ||
       (a.description || '').toLowerCase().includes(q) ||
       (a.case?.title || '').toLowerCase().includes(q),
     )
-  }, [actions, search])
+  }, [actions, search, archivingIds])
 
   const grouped = useMemo(() => {
     const map: Record<string, ActionRow[]> = {}
@@ -188,12 +196,22 @@ export default function ActionList() {
     const ids = (grouped[colId] ?? []).map((a) => a.id)
     setConfirmArchiveCol(null)
     if (ids.length === 0) return
+    // Optimistically hide the cards: the server archives asynchronously, so an
+    // immediate refetch would still return them as active.
+    setArchivingIds((prev) => new Set([...prev, ...ids]))
     try {
       await bulkArchiveActions({
         variables: { workspaceId: currentWorkspace.id, ids },
       })
     } catch (e) {
+      // The dispatch itself was rejected (e.g. auth / network); un-hide so the
+      // user sees the actions are still there rather than silently losing them.
       console.error('Failed to bulk archive actions', e)
+      setArchivingIds((prev) => {
+        const next = new Set(prev)
+        ids.forEach((id) => next.delete(id))
+        return next
+      })
     }
   }
 

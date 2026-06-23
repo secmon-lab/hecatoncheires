@@ -631,7 +631,7 @@ type MutationResolver interface {
 	UpdateAction(ctx context.Context, workspaceID string, input graphql1.UpdateActionInput) (*graphql1.Action, error)
 	ArchiveAction(ctx context.Context, workspaceID string, id int) (*graphql1.Action, error)
 	UnarchiveAction(ctx context.Context, workspaceID string, id int) (*graphql1.Action, error)
-	BulkArchiveActions(ctx context.Context, workspaceID string, ids []int) ([]*graphql1.Action, error)
+	BulkArchiveActions(ctx context.Context, workspaceID string, ids []int) ([]int, error)
 	PostActionSlackMessage(ctx context.Context, workspaceID string, id int) (*graphql1.Action, error)
 	AddActionStep(ctx context.Context, workspaceID string, input graphql1.AddActionStepInput) (*graphql1.ActionStep, error)
 	SetActionStepDone(ctx context.Context, workspaceID string, input graphql1.SetActionStepDoneInput) (*graphql1.ActionStep, error)
@@ -4286,9 +4286,11 @@ type Mutation {
   # Restore a previously archived action back to active state.
   unarchiveAction(workspaceId: String!, id: Int!): Action!
   # Archive multiple actions in one call (e.g. clearing a completed Kanban
-  # column). Already-archived ids are skipped; the returned list contains only
-  # the actions that were newly archived.
-  bulkArchiveActions(workspaceId: String!, ids: [Int!]!): [Action!]!
+  # column). The archiving runs asynchronously so it survives the request being
+  # cancelled mid-flight; the call returns immediately with the ids accepted
+  # for archiving. Already-archived ids among them are skipped during
+  # processing. Per-action failures are reported server-side, not to the caller.
+  bulkArchiveActions(workspaceId: String!, ids: [Int!]!): [Int!]!
   # Posts the Slack message for an Action whose initial post was missed
   # (legacy tool-created actions before the create paths were unified).
   # Errors if the action already has a Slack message timestamp or if the
@@ -14624,7 +14626,7 @@ func (ec *executionContext) _Mutation_bulkArchiveActions(ctx context.Context, fi
 			return ec.resolvers.Mutation().BulkArchiveActions(ctx, fc.Args["workspaceId"].(string), fc.Args["ids"].([]int))
 		},
 		nil,
-		ec.marshalNAction2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐActionᚄ,
+		ec.marshalNInt2ᚕintᚄ,
 		true,
 		true,
 	)
@@ -14637,45 +14639,7 @@ func (ec *executionContext) fieldContext_Mutation_bulkArchiveActions(ctx context
 		IsMethod:   true,
 		IsResolver: true,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			switch field.Name {
-			case "id":
-				return ec.fieldContext_Action_id(ctx, field)
-			case "caseID":
-				return ec.fieldContext_Action_caseID(ctx, field)
-			case "case":
-				return ec.fieldContext_Action_case(ctx, field)
-			case "title":
-				return ec.fieldContext_Action_title(ctx, field)
-			case "description":
-				return ec.fieldContext_Action_description(ctx, field)
-			case "assigneeID":
-				return ec.fieldContext_Action_assigneeID(ctx, field)
-			case "assignee":
-				return ec.fieldContext_Action_assignee(ctx, field)
-			case "slackMessageTS":
-				return ec.fieldContext_Action_slackMessageTS(ctx, field)
-			case "status":
-				return ec.fieldContext_Action_status(ctx, field)
-			case "dueDate":
-				return ec.fieldContext_Action_dueDate(ctx, field)
-			case "archived":
-				return ec.fieldContext_Action_archived(ctx, field)
-			case "archivedAt":
-				return ec.fieldContext_Action_archivedAt(ctx, field)
-			case "createdAt":
-				return ec.fieldContext_Action_createdAt(ctx, field)
-			case "updatedAt":
-				return ec.fieldContext_Action_updatedAt(ctx, field)
-			case "messages":
-				return ec.fieldContext_Action_messages(ctx, field)
-			case "events":
-				return ec.fieldContext_Action_events(ctx, field)
-			case "steps":
-				return ec.fieldContext_Action_steps(ctx, field)
-			case "stepProgress":
-				return ec.fieldContext_Action_stepProgress(ctx, field)
-			}
-			return nil, fmt.Errorf("no field named %q was found under type Action", field.Name)
+			return nil, errors.New("field of type Int does not have child fields")
 		},
 	}
 	defer func() {

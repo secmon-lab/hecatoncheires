@@ -15,6 +15,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	goslack "github.com/slack-go/slack"
 )
@@ -523,6 +524,24 @@ func (uc *ActionUseCase) BulkArchiveActions(ctx context.Context, workspaceID str
 		archived = append(archived, updated)
 	}
 	return archived, nil
+}
+
+// BulkArchiveActionsAsync runs BulkArchiveActions in the background via
+// async.Dispatch so the operation outlives the HTTP request that triggered
+// it. Clearing a completed column issues one ArchiveAction (DB write + event
+// + Slack post) per action; on a large column that can take longer than the
+// client is willing to wait, and a mid-flight disconnect would otherwise
+// cancel the request context and leave the column half-archived. async.Dispatch
+// hands the work a context with the auth token / logger intact but the
+// cancellation severed, so the whole column is archived even after the
+// GraphQL response (the accepted ids) has been returned. Per-action failures
+// surface through errutil.Handle inside the synchronous core rather than to
+// the caller, which has already returned.
+func (uc *ActionUseCase) BulkArchiveActionsAsync(ctx context.Context, workspaceID string, ids []int64, actor ActorRef) {
+	async.Dispatch(ctx, func(bgCtx context.Context) error {
+		_, err := uc.BulkArchiveActions(bgCtx, workspaceID, ids, actor)
+		return err
+	})
 }
 
 // UnarchiveAction restores a previously archived action back to active state.

@@ -533,6 +533,13 @@ Kanban column (bulk archive):
   archived Action records an `ARCHIVED` `ActionEvent` and posts the same
   Slack notification as archiving it individually. Actions that are
   already archived are skipped silently.
+- The archiving runs **asynchronously** on the server (via
+  `async.Dispatch`), so it finishes even if the browser navigates away or
+  the request is cancelled mid-flight. The WebUI hides the affected cards
+  optimistically the moment you confirm; the board reflects the persisted
+  result on its next load. Per-action failures during processing are
+  reported server-side (`errutil.Handle` → Sentry / log), not surfaced in
+  the UI.
 
 #### GraphQL
 
@@ -549,11 +556,14 @@ Action archiving mutations (in `graphql/schema.graphql`):
 
 - `archiveAction(workspaceId, id)` / `unarchiveAction(workspaceId, id)` —
   archive or restore a single Action.
-- `bulkArchiveActions(workspaceId, ids: [Int!]!): [Action!]!` — archive
+- `bulkArchiveActions(workspaceId, ids: [Int!]!): [Int!]!` — archive
   many Actions in one call (used by the completed-column "Archive all"
-  menu). Already-archived ids are skipped; the result contains only the
-  Actions that were newly archived. Requires an authenticated user, and
-  each id is checked against its parent Case's private-access rules.
+  menu). The archiving is dispatched asynchronously and the call returns
+  immediately with the **accepted ids**; already-archived ids among them
+  are skipped during processing. Requires an authenticated user (checked
+  synchronously); each id is checked against its parent Case's
+  private-access rules inside the async worker, and per-action failures
+  are reported server-side rather than returned to the caller.
 
 #### Agent tools (gollem)
 

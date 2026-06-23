@@ -753,10 +753,14 @@ func (r *mutationResolver) UnarchiveAction(ctx context.Context, workspaceID stri
 
 // BulkArchiveActions is the resolver for the bulkArchiveActions field.
 //
-// Mirrors ArchiveAction's auth requirement: a missing token is a hard error,
-// never a silent fallback to system actor, so the private-case access check
-// inside the usecase always runs for externally-originated requests.
-func (r *mutationResolver) BulkArchiveActions(ctx context.Context, workspaceID string, ids []int) ([]*graphql1.Action, error) {
+// The archiving is dispatched asynchronously (see BulkArchiveActionsAsync) so
+// it survives the request being cancelled mid-flight; the resolver returns the
+// accepted ids immediately. Only the auth check is synchronous: mirroring
+// ArchiveAction, a missing token is a hard error rather than a silent fallback
+// to the system actor, so the per-action private-case check inside the usecase
+// always runs against the real user. Per-action failures during processing are
+// reported via errutil.Handle, not returned here.
+func (r *mutationResolver) BulkArchiveActions(ctx context.Context, workspaceID string, ids []int) ([]int, error) {
 	token, err := auth.TokenFromContext(ctx)
 	if err != nil {
 		return nil, err
@@ -768,17 +772,12 @@ func (r *mutationResolver) BulkArchiveActions(ctx context.Context, workspaceID s
 		int64IDs[i] = int64(id)
 	}
 
-	updated, archiveErr := r.UseCases.Action.BulkArchiveActions(ctx, workspaceID, int64IDs, actor)
-	if archiveErr != nil {
-		return nil, archiveErr
-	}
+	r.UseCases.Action.BulkArchiveActionsAsync(ctx, workspaceID, int64IDs, actor)
 
-	// [Action!]! is a non-null list, so never return nil.
-	result := make([]*graphql1.Action, 0, len(updated))
-	for _, a := range updated {
-		result = append(result, toGraphQLAction(a, workspaceID))
-	}
-	return result, nil
+	// [Int!]! is a non-null list, so never return nil. Echo the accepted ids.
+	accepted := make([]int, 0, len(ids))
+	accepted = append(accepted, ids...)
+	return accepted, nil
 }
 
 // PostActionSlackMessage is the resolver for the postActionSlackMessage field.

@@ -27,6 +27,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 )
 
@@ -1320,12 +1321,11 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 		})
 		gt.NoError(t, err).Required()
 
+		// The mutation returns the accepted ids immediately and archives them
+		// asynchronously, so the return type is a scalar id list (no subfields).
 		mutation := `
 			mutation($workspaceId: String!, $ids: [Int!]!) {
-				bulkArchiveActions(workspaceId: $workspaceId, ids: $ids) {
-					id
-					archived
-				}
+				bulkArchiveActions(workspaceId: $workspaceId, ids: $ids)
 			}
 		`
 		const bulkTestUser = "U-bulk-archive-test"
@@ -1339,22 +1339,23 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 		gt.Value(t, resp.Data).NotNil().Required()
 
 		var result struct {
-			BulkArchiveActions []struct {
-				ID       int  `json:"id"`
-				Archived bool `json:"archived"`
-			} `json:"bulkArchiveActions"`
+			BulkArchiveActions []int `json:"bulkArchiveActions"`
 		}
 		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
-		gt.Array(t, result.BulkArchiveActions).Length(3).Required()
 
-		// Every returned entry must report archived=true. Assert per-id, not
-		// just the count.
-		returned := map[int]bool{}
-		for _, a := range result.BulkArchiveActions {
-			returned[a.ID] = a.Archived
+		// The accepted ids echoed back must be exactly the ids we sent.
+		gotIDs := map[int]bool{}
+		for _, id := range result.BulkArchiveActions {
+			gotIDs[id] = true
 		}
 		for _, id := range []int{int(a1.ID), int(a2.ID), int(a3.ID)} {
-			gt.Bool(t, returned[id]).True()
+			gt.Bool(t, gotIDs[id]).True()
+		}
+
+		// Wait for the background archiving to finish, then assert each action
+		// is actually archived in the repository.
+		async.Wait()
+		for _, id := range []int{int(a1.ID), int(a2.ID), int(a3.ID)} {
 			stored, getErr := repo.Action().Get(ctx, testWorkspaceID, int64(id))
 			gt.NoError(t, getErr).Required()
 			gt.Bool(t, stored.IsArchived()).True()
@@ -1364,6 +1365,7 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 	t.Run("bulk archive without auth token returns error", func(t *testing.T) {
 		// Same hardening as archiveAction: no auth context must surface as a
 		// GraphQL error rather than silently archiving as the system actor.
+		// The auth check is synchronous, so no background work is dispatched.
 		unauth, err := repo.Action().Create(ctx, testWorkspaceID, &model.Action{
 			CaseID: createdCase.ID, Title: "Bulk Unauth", Status: types.ActionStatusTodo,
 		})
@@ -1371,7 +1373,7 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 
 		mutation := `
 			mutation($workspaceId: String!, $ids: [Int!]!) {
-				bulkArchiveActions(workspaceId: $workspaceId, ids: $ids) { id }
+				bulkArchiveActions(workspaceId: $workspaceId, ids: $ids)
 			}
 		`
 		rec := executeGraphQLRequest(t, handler, mutation, map[string]interface{}{
@@ -1382,6 +1384,7 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 		resp := parseGraphQLResponse(t, rec)
 		gt.Array(t, resp.Errors).Length(1).Required()
 
+		async.Wait()
 		stored, err := repo.Action().Get(ctx, testWorkspaceID, unauth.ID)
 		gt.NoError(t, err).Required()
 		gt.Bool(t, stored.IsArchived()).False()

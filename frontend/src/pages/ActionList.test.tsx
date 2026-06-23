@@ -337,25 +337,16 @@ describe('ActionList completed-column bulk archive', () => {
   })
 
   it('archives every action in the completed column after confirmation', async () => {
+    // The mutation returns the accepted ids (archiving happens async server-side).
     const bulkResult = vi.fn(() => ({
-      data: {
-        bulkArchiveActions: [
-          { ...completedA, archived: true, archivedAt: '2026-05-02T00:00:00Z' },
-          { ...completedB, archived: true, archivedAt: '2026-05-02T00:00:00Z' },
-        ],
-      },
+      data: { bulkArchiveActions: [201, 202] },
     }))
     const bulkArchiveMock = {
       request: { query: BULK_ARCHIVE_ACTIONS, variables: { workspaceId: 'risk', ids: [201, 202] } },
       result: bulkResult,
     }
-    // After archiving, the refetch returns the board without the completed ones.
-    const refetchMock = {
-      request: { query: GET_OPEN_CASE_ACTIONS, variables: { workspaceId: 'risk' } },
-      result: { data: { openCaseActions: allOpenActions } },
-    }
 
-    renderWithCompleted([bulkArchiveMock, refetchMock])
+    renderWithCompleted([bulkArchiveMock])
     await waitFor(() => {
       expect(screen.getAllByTestId('action-card')).toHaveLength(5)
     })
@@ -374,7 +365,8 @@ describe('ActionList completed-column bulk archive', () => {
       expect(bulkResult).toHaveBeenCalledTimes(1)
     })
 
-    // After the refetch, the completed cards are gone from the board.
+    // The completed cards are optimistically removed from the board (the
+    // server archives asynchronously, so the UI does not wait for it).
     await waitFor(() => {
       expect(screen.getAllByTestId('action-card')).toHaveLength(3)
     })

@@ -17,6 +17,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 	goslack "github.com/slack-go/slack"
 )
 
@@ -471,6 +472,67 @@ func TestActionUseCase_BulkArchiveActions(t *testing.T) {
 		gt.Array(t, archived).Length(1).Required()
 		gt.Value(t, archived[0].ID).Equal(action.ID)
 		gt.Bool(t, archived[0].IsArchived()).True()
+	})
+}
+
+func TestActionUseCase_BulkArchiveActionsAsync(t *testing.T) {
+	t.Run("archives every action in the background after Wait", func(t *testing.T) {
+		repo := memory.New()
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "", nil)
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		a1, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Async 1", "Desc", "", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+		a2, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Async 2", "Desc", "", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+
+		// Fire-and-forget: the call returns immediately and the archiving
+		// runs on a background goroutine.
+		actionUC.BulkArchiveActionsAsync(ctx, testWorkspaceID, []int64{a1.ID, a2.ID}, usecase.ActorRef{Kind: usecase.ActorKindSystem})
+
+		// Deterministically wait for the dispatched goroutine to finish.
+		async.Wait()
+
+		for _, id := range []int64{a1.ID, a2.ID} {
+			got, getErr := actionUC.GetAction(ctx, testWorkspaceID, id)
+			gt.NoError(t, getErr).Required()
+			gt.Bool(t, got.IsArchived()).True()
+		}
+
+		// Default listing is now empty.
+		remaining, err := actionUC.GetActionsByCase(ctx, testWorkspaceID, c.ID, interfaces.ActionListOptions{})
+		gt.NoError(t, err).Required()
+		gt.Array(t, remaining).Length(0)
+	})
+
+	t.Run("survives cancellation of the originating context", func(t *testing.T) {
+		repo := memory.New()
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "", nil)
+		baseCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		c, err := caseUC.CreateCase(baseCtx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+		action, err := actionUC.CreateAction(baseCtx, testWorkspaceID, c.ID, "Cancelled Ctx", "Desc", "", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+
+		// Cancel the originating context immediately, mimicking the HTTP
+		// request being torn down right after the resolver dispatched.
+		cancelCtx, cancel := context.WithCancel(baseCtx)
+		actionUC.BulkArchiveActionsAsync(cancelCtx, testWorkspaceID, []int64{action.ID}, usecase.ActorRef{Kind: usecase.ActorKindSystem})
+		cancel()
+
+		async.Wait()
+
+		// The archive still completed because async.Dispatch severs the
+		// cancellation signal from the background work.
+		got, err := actionUC.GetAction(baseCtx, testWorkspaceID, action.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, got.IsArchived()).True()
 	})
 }
 

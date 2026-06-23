@@ -136,11 +136,11 @@ export const UNARCHIVE_ACTION = gql`
   }
 `
 
+// Archiving runs asynchronously on the server; the mutation returns the
+// accepted action ids immediately (a scalar Int list, no subfields).
 export const BULK_ARCHIVE_ACTIONS = gql`
   mutation BulkArchiveActions($workspaceId: String!, $ids: [Int!]!) {
-    bulkArchiveActions(workspaceId: $workspaceId, ids: $ids) {
-      ${ACTION_FIELDS}
-    }
+    bulkArchiveActions(workspaceId: $workspaceId, ids: $ids)
   }
 `
 
