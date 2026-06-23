@@ -128,6 +128,25 @@
 }
 .copyBtnOk { color: var(--ok); }
 
+.downloadBtn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--fg-soft);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.downloadBtn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 /* System prompt details */
 .promptDetails {
   margin-bottom: 14px;

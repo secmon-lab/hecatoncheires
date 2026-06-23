@@ -545,6 +545,8 @@ export const en: Messages = {
   jobRunLogEventRunError: 'Error',
   jobRunLogLoadError: 'Failed to load this run log.',
   jobRunLogNotFound: 'Run log not found.',
+  jobRunLogDownloadJson: 'Download JSON',
+  jobRunLogDownloadJsonTitle: 'Download the full execution record as JSON',
 
   // Case Import
   btnImport: 'Import',

@@ -7,6 +7,7 @@ import { useTranslation } from '../i18n'
 import {
   IconChevLeft,
   IconChevRight,
+  IconDownload,
 } from '../components/Icons'
 import StageBadge, { type JobRunStage } from '../components/caseAgent/StageBadge'
 import styles from './JobRunLogDetail.module.css'
@@ -40,6 +41,48 @@ interface JobRunLogDetailData {
   systemPrompt: string
   eventType: string
   eventTriggerAt: string
+}
+
+// ExportedEvent mirrors JobRunEvent but with payload decoded from its
+// transport string into a nested object when it parses as JSON. A payload
+// that fails to parse (truncated / non-JSON on the server side) is kept
+// verbatim so the exported record never loses data.
+interface ExportedEvent extends Omit<JobRunEvent, 'payload'> {
+  payload: unknown
+}
+
+export interface RunExport {
+  exportedAt: string
+  runLog: JobRunLogDetailData
+  events: ExportedEvent[]
+}
+
+// buildRunExport assembles the complete, downloadable execution record from
+// the run metadata and its events. Events are emitted in sequence order and
+// each payload is decoded to nested JSON where possible. Kept as a pure
+// function (no DOM access) so it can be unit-tested in isolation. The
+// caller supplies exportedAt so the function stays deterministic/testable.
+export function buildRunExport(
+  log: JobRunLogDetailData,
+  events: JobRunEvent[],
+  exportedAt: string,
+): RunExport {
+  const ordered = [...events].sort((a, b) => a.sequence - b.sequence)
+  return {
+    exportedAt,
+    runLog: log,
+    events: ordered.map((ev) => {
+      const { payload, ...rest } = ev
+      let decoded: unknown = payload
+      try {
+        decoded = JSON.parse(payload)
+      } catch {
+        // Non-JSON payload: keep the original string rather than dropping it.
+        decoded = payload
+      }
+      return { ...rest, payload: decoded }
+    }),
+  }
 }
 
 const EVENT_COLOR: Record<JobRunEventKind, string> = {
@@ -312,6 +355,21 @@ export default function JobRunLogDetail() {
     window.setTimeout(() => setCopied(null), 1500)
   }
 
+  const downloadJson = () => {
+    const record = buildRunExport(log, events, new Date().toISOString())
+    const blob = new Blob([JSON.stringify(record, null, 2)], {
+      type: 'application/json',
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `jobrun-${caseId}-${log.runId}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className={styles.shell}>
       {/* Breadcrumb */}
@@ -339,6 +397,16 @@ export default function JobRunLogDetail() {
           </div>
           <h1 className={styles.title}>{log.jobName}</h1>
         </div>
+        <button
+          type="button"
+          data-testid="job-run-download-json"
+          className={styles.downloadBtn}
+          onClick={downloadJson}
+          title={t('jobRunLogDownloadJsonTitle')}
+        >
+          <IconDownload size={14} />
+          {t('jobRunLogDownloadJson')}
+        </button>
       </div>
 
       {log.stage === 'FAILED' && log.errorMessage && (
