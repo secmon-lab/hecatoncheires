@@ -365,9 +365,14 @@ export default function JobRunLogDetail() {
     a.href = url
     a.download = `jobrun-${caseId}-${log.runId}.json`
     document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    try {
+      a.click()
+    } finally {
+      document.body.removeChild(a)
+      // Defer revoke: Firefox/Safari resolve the blob URL asynchronously
+      // after click(), so a synchronous revoke can abort the download.
+      window.setTimeout(() => URL.revokeObjectURL(url), 100)
+    }
   }
 
   return (
