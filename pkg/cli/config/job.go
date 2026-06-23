@@ -49,8 +49,12 @@ type JobSection struct {
 	// back to "simple" (the v1 SingleLoopJobExecutor); set to "planexec"
 	// to drive the Job through the plan-and-execute runtime shared with
 	// proposal. Unknown values fail loud at config load time.
-	Strategy string           `toml:"strategy"`
-	Events   JobEventsSection `toml:"events"`
+	Strategy string `toml:"strategy"`
+	// Reflection enables the post-execution reflection pass that curates
+	// workspace Knowledge from a successful run's conversation history.
+	// Defaults to false. Skipped for private cases and failed runs.
+	Reflection bool             `toml:"reflection"`
+	Events     JobEventsSection `toml:"events"`
 }
 
 // JobEventsSection mirrors the `events.<domain> = { ... }` map. At least
@@ -117,6 +121,7 @@ func (s *JobSection) Validate(baseDir string) (*model.Job, error) {
 		Disabled:    s.Disabled,
 		Quiet:       s.Quiet,
 		Strategy:    strategy,
+		Reflection:  s.Reflection,
 		Events:      *events,
 	}
 	// In structural-validation mode (baseDir == "") the prompt lives in a

@@ -42,6 +42,7 @@ type UseCases struct {
 	Action                   *ActionUseCase
 	Memo                     *MemoUseCase
 	Knowledge                *KnowledgeUseCase
+	Tag                      *TagUseCase
 	ActionStep               *ActionStepUseCase
 	Agent                    *AgentUseCase
 	Auth                     AuthUseCaseInterface
@@ -198,6 +199,7 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 	uc.Action = NewActionUseCase(repo, registry, uc.slackService, uc.baseURL, slotCoord)
 	uc.Memo = NewMemoUseCase(repo, registry)
 	uc.Knowledge = NewKnowledgeUseCase(repo, uc.embedClient)
+	uc.Tag = NewTagUseCase(repo)
 	uc.ActionStep = NewActionStepUseCase(repo, uc.slackService, slotCoord)
 
 	// Convert *github.Client to githubAPI interface, preserving nil-ness:
@@ -240,6 +242,7 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 				CaseUC:         uc.Case,
 				MemoUC:         uc.Memo,
 				KnowledgeUC:    uc.Knowledge,
+				TagUC:          uc.Tag,
 				SlackService:   uc.slackService,
 				SlackSearch:    uc.slackSearch,
 				SlackRetriever: uc.slackRetriever,
@@ -285,8 +288,8 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 				WebFetchClient:      uc.webfetchClient,
 				ActionUC:            NewActionToolAdapter(uc.Action),
 				ActionStepUC:        NewActionStepToolAdapter(uc.ActionStep),
-				KnowledgeAccessor:   NewKnowledgeToolAccessor(uc.Knowledge),
-				KnowledgeMutator:    NewKnowledgeToolMutator(uc.Knowledge),
+				KnowledgeAccessor:   NewKnowledgeToolAccessor(uc.Knowledge, uc.Tag),
+				KnowledgeMutator:    NewKnowledgeToolMutator(uc.Knowledge, uc.Tag),
 				HeartbeatInterval:   agent.DefaultHeartbeatInterval,
 				HeartbeatStaleAfter: agent.DefaultHeartbeatStaleAfter,
 			}

@@ -30,6 +30,11 @@ const (
 	ToolNotionSearch = "notion_search"
 	ToolGitHubSearch = "github_search"
 	ToolWebFetch     = "webfetch"
+
+	// Knowledge tag management tools (in-process, simulatable).
+	ToolKnowledgeCreateTag = "knowledge__create_tag"
+	ToolKnowledgeUpdateTag = "knowledge__update_tag"
+	ToolKnowledgeDeleteTag = "knowledge__delete_tag"
 )
 
 // SimulatableTools is the catalog of tool names the harness can simulate.

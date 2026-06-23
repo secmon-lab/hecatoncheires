@@ -249,6 +249,21 @@ func (h *jobRunTraceHandler) AddEvent(ctx context.Context, kind string, data any
 // kept for trace.Handler contract compatibility.
 func (h *jobRunTraceHandler) Finish(ctx context.Context) error { return nil }
 
+// phaseReflection labels the events emitted by the post-execution reflection
+// agent so they are distinguishable from the main "execute" phase events in the
+// JobRunEvent timeline.
+const phaseReflection = "reflection"
+
+// enterReflectionPhase relabels subsequent events as the reflection phase.
+// JobRunner.Run calls it once, after the executor returns and before invoking
+// the reflector, so the reflection agent's LLM / tool events are attributed to
+// "reflection". Safe because the run is single-threaded at that point.
+func (h *jobRunTraceHandler) enterReflectionPhase() {
+	h.mu.Lock()
+	h.phase = phaseReflection
+	h.mu.Unlock()
+}
+
 // EmitRunError appends a RUN_ERROR event using the shared sequencer.
 // Called by JobRunner.Run on lifecycle failures (prepare / execute /
 // finish stages).

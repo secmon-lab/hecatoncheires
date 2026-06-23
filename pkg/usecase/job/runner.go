@@ -98,6 +98,17 @@ type RunnerDeps struct {
 	ToolBuilder   ToolBuilder
 	LeaseDuration time.Duration // 0 → DefaultLeaseDuration
 
+	// Reflector runs the optional post-execution reflection pass (curating
+	// workspace Knowledge from a successful run's history). Nil disables
+	// reflection for every Job regardless of the Job's `reflection` flag.
+	Reflector job.Reflector
+
+	// HistoryRepo persists each run's conversation history (keyed by RunID) so
+	// the reflection pass can replay it via gollem.WithHistory. The SAME
+	// instance MUST be shared with the planexec runner so its planner/final
+	// history is loadable here. Nil disables reflection (no history to carry).
+	HistoryRepo gollem.HistoryRepository
+
 	// SlackNotifier posts the run's operational session log (starting /
 	// tool-progress / completion markers) to the Case's Slack channel. Nil
 	// disables all such notifications; the run still executes and records
@@ -368,14 +379,21 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 		tools = r.deps.ToolBuilder.Build(ctx, c, ws)
 	}
 
+	// The history key is the RunID: a fresh, unique key per run so each run's
+	// conversation is persisted in isolation and the reflection pass loads
+	// exactly this run's history. Always set (the planexec executor requires a
+	// non-empty HistoryKey); HistoryRepository may be nil for the single-loop
+	// path, which then simply does not persist.
 	execReq := job.ExecuteRequest{
-		JobID:        j.ID,
-		SystemPrompt: systemPrompt,
-		Prompt:       userPrompt,
-		Tools:        tools,
-		LLMClient:    r.deps.LLMClient,
-		TraceHandler: traceHandler,
-		TraceID:      traceID,
+		JobID:             j.ID,
+		SystemPrompt:      systemPrompt,
+		Prompt:            userPrompt,
+		Tools:             tools,
+		LLMClient:         r.deps.LLMClient,
+		TraceHandler:      traceHandler,
+		TraceID:           traceID,
+		HistoryRepository: r.deps.HistoryRepo,
+		HistoryKey:        runID,
 	}
 	_, execErr := executor.Execute(ctx, execReq)
 
@@ -394,6 +412,11 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 		logRec.Stage = model.JobRunStageSuccess
 		r.postSessionLog(ctx, channelID, sessionThreadTS,
 			i18n.T(ctx, i18n.MsgJobRunCompleted, j.ID))
+		// Reflection runs only on success, as a best-effort tail that never
+		// affects the run's outcome (failures are reported via errutil and the
+		// Job stays SUCCESS). Gated on the Job opting in, a non-private case,
+		// and the reflection deps being wired.
+		r.maybeReflect(ctx, j, c, key, runID, handler)
 	}
 
 	if finErr := r.deps.Repo.JobRunLog().Finish(ctx, logRec); finErr != nil {
@@ -528,6 +551,46 @@ func (r *JobRunner) resolveSources(ctx context.Context, workspaceID string, c *m
 		}
 	}
 	return out, true, nil
+}
+
+// maybeReflect runs the optional post-execution reflection pass. It is a no-op
+// unless the Job opted in (j.Reflection), the case is non-private, and both the
+// Reflector and HistoryRepo are wired. All failures are non-fatal: reflection
+// is a learning tail, not part of the run's success contract.
+func (r *JobRunner) maybeReflect(ctx context.Context, j *model.Job, c *model.Case, key model.JobRunKey, runID string, handler *jobRunTraceHandler) {
+	if !j.Reflection || r.deps.Reflector == nil || r.deps.HistoryRepo == nil {
+		return
+	}
+	if c == nil || c.IsPrivate {
+		// Private-case contents must not leak into shared workspace knowledge.
+		return
+	}
+
+	history, err := r.deps.HistoryRepo.Load(ctx, runID)
+	if err != nil {
+		errutil.Handle(ctx, goerr.Wrap(err, "load run history for reflection",
+			goerr.V("job_id", j.ID), goerr.V("run_id", runID)), "job: load reflection history")
+		return
+	}
+	if history == nil {
+		// Nothing was persisted (e.g. the executor ran without a history repo),
+		// so there is no conversation to reflect on.
+		return
+	}
+
+	handler.enterReflectionPhase()
+	if reflErr := r.deps.Reflector.Reflect(ctx, job.ReflectRequest{
+		WorkspaceID:    key.WorkspaceID,
+		CaseID:         key.CaseID,
+		JobID:          j.ID,
+		JobName:        j.Name,
+		JobDescription: j.Description,
+		History:        history,
+		TraceHandler:   handler,
+	}); reflErr != nil {
+		errutil.Handle(ctx, goerr.Wrap(reflErr, "job reflection",
+			goerr.V("job_id", j.ID), goerr.V("case_id", key.CaseID)), "job: reflection")
+	}
 }
 
 // recordPrepareFailure writes a FAILED outcome to the JobRun lock doc

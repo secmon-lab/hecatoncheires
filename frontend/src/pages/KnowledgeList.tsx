@@ -1,19 +1,31 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@apollo/client'
-import { GET_KNOWLEDGES, GET_KNOWLEDGE_TAGS, SEARCH_KNOWLEDGE } from '../graphql/knowledge'
+import { GET_KNOWLEDGES, SEARCH_KNOWLEDGE } from '../graphql/knowledge'
+import { GET_TAGS } from '../graphql/tag'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
 import Button from '../components/Button'
 import { IconPlus } from '../components/Icons'
 
+interface TagRef {
+  id: string
+  name: string | null
+}
+
 interface KnowledgeRow {
   id: string
   title: string
   claim: string
-  tags: string[]
+  tags: TagRef[]
   createdAt: string
   updatedAt: string
+}
+
+// tagLabel renders a tag's display text, falling back to its id when the
+// (optional) name is empty.
+function tagLabel(tag: TagRef): string {
+  return tag.name && tag.name.length > 0 ? tag.name : tag.id
 }
 
 function formatDate(iso: string) {
@@ -54,7 +66,7 @@ export default function KnowledgeList() {
   const navigate = useNavigate()
 
   const [searchQuery, setSearchQuery] = useState('')
-  const [selectedTags, setSelectedTags] = useState<string[]>([])
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([])
   const [debouncedQuery, setDebouncedQuery] = useState('')
 
   // Debounce search input
@@ -63,13 +75,13 @@ export default function KnowledgeList() {
     return () => clearTimeout(timer)
   }, [searchQuery])
 
-  const { data: tagsData } = useQuery(GET_KNOWLEDGE_TAGS, {
+  const { data: tagsData } = useQuery(GET_TAGS, {
     variables: { workspaceId: currentWorkspace?.id },
     skip: !currentWorkspace,
   })
 
   const { data: listData, loading: listLoading } = useQuery(GET_KNOWLEDGES, {
-    variables: { workspaceId: currentWorkspace?.id, tags: selectedTags.length > 0 ? selectedTags : undefined },
+    variables: { workspaceId: currentWorkspace?.id, tagIds: selectedTagIds.length > 0 ? selectedTagIds : undefined },
     skip: !currentWorkspace || debouncedQuery.trim().length > 0,
   })
 
@@ -77,7 +89,7 @@ export default function KnowledgeList() {
     variables: {
       workspaceId: currentWorkspace?.id,
       query: debouncedQuery,
-      tags: selectedTags.length > 0 ? selectedTags : undefined,
+      tagIds: selectedTagIds.length > 0 ? selectedTagIds : undefined,
       limit: 50,
     },
     skip: !currentWorkspace || debouncedQuery.trim().length === 0,
@@ -88,15 +100,15 @@ export default function KnowledgeList() {
   const knowledges: KnowledgeRow[] = isSearching
     ? (searchData?.searchKnowledge ?? [])
     : (listData?.knowledges ?? [])
-  const allTags: string[] = tagsData?.knowledgeTags ?? []
+  const allTags: TagRef[] = tagsData?.tags ?? []
 
-  const toggleTag = (tag: string) => {
-    setSelectedTags((prev) =>
-      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag],
+  const toggleTag = (tagId: string) => {
+    setSelectedTagIds((prev) =>
+      prev.includes(tagId) ? prev.filter((t) => t !== tagId) : [...prev, tagId],
     )
   }
 
-  const isAllSelected = selectedTags.length === 0
+  const isAllSelected = selectedTagIds.length === 0
 
   return (
     <div className="h-main-inner">
@@ -134,7 +146,7 @@ export default function KnowledgeList() {
           <button
             type="button"
             className={`chip${isAllSelected ? ' chip-active' : ''}`}
-            onClick={() => setSelectedTags([])}
+            onClick={() => setSelectedTagIds([])}
             style={{
               cursor: 'pointer',
               background: isAllSelected ? 'var(--accent)' : undefined,
@@ -146,13 +158,13 @@ export default function KnowledgeList() {
             {t('knowledgeFilterAll')}
           </button>
           {allTags.map((tag) => {
-            const active = selectedTags.includes(tag)
+            const active = selectedTagIds.includes(tag.id)
             return (
               <button
-                key={tag}
+                key={tag.id}
                 type="button"
                 className="chip"
-                onClick={() => toggleTag(tag)}
+                onClick={() => toggleTag(tag.id)}
                 style={{
                   cursor: 'pointer',
                   background: active ? 'var(--accent)' : undefined,
@@ -161,7 +173,7 @@ export default function KnowledgeList() {
                   fontWeight: active ? 600 : undefined,
                 }}
               >
-                {tag}
+                {tagLabel(tag)}
               </button>
             )
           })}
@@ -211,8 +223,8 @@ export default function KnowledgeList() {
               )}
               <div className="row" style={{ flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
                 {k.tags.map((tag) => (
-                  <span key={tag} className="chip" style={{ fontSize: 'var(--t-xs)' }}>
-                    {tag}
+                  <span key={tag.id} className="chip" style={{ fontSize: 'var(--t-xs)' }}>
+                    {tagLabel(tag)}
                   </span>
                 ))}
                 <span className="spacer" />

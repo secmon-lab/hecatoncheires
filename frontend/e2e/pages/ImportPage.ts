@@ -23,15 +23,14 @@ export class ImportPage extends BasePage {
     super(page);
     this.fileInput = page.locator('input[type="file"]');
     this.dropzone = page.locator('[role="button"][aria-label]').first();
-    // Button text is the same in both en and ja locales for the
-    // Import-related labels (we intentionally kept them un-translated
-    // so cross-locale automation does not break here). Status badges
-    // are uppercase ASCII so they are locale-stable.
+    // Match the accessible name in both locales so cross-locale
+    // automation stays green regardless of the configured default lang.
+    // Status badges are uppercase ASCII so they remain locale-stable.
     this.executeButton = page.getByRole('button', {
-      name: /Execute import/i,
+      name: /Execute import|取り込みを実行/i,
     });
     this.openCasesListButton = page.getByRole('button', {
-      name: /Open cases list|Cases 一覧へ/i,
+      name: /Open cases list|ケース一覧へ/i,
     });
     this.statusBadge = page.locator('main span').filter({
       hasText: /^(PENDING|APPLIED|FAILED)$/,

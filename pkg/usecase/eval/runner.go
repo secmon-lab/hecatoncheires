@@ -57,6 +57,9 @@ func ToolCatalog() []toolCatalogEntry {
 		{Name: toolsim.ToolNotionSearch, Description: "Search Notion pages", ReadOnly: true, Simulatable: true},
 		{Name: toolsim.ToolGitHubSearch, Description: "Search GitHub issues/PRs (live-only in v1)", ReadOnly: true, Simulatable: false},
 		{Name: toolsim.ToolWebFetch, Description: "Fetch a URL and return its content as Markdown, screened for prompt injection (live-only)", ReadOnly: true, Simulatable: false},
+		{Name: toolsim.ToolKnowledgeCreateTag, Description: "Create a knowledge tag; must call knowledge__list_tags first to avoid duplicates. Returns the new tag id.", ReadOnly: false, Simulatable: true},
+		{Name: toolsim.ToolKnowledgeUpdateTag, Description: "Rename an existing knowledge tag by id.", ReadOnly: false, Simulatable: true},
+		{Name: toolsim.ToolKnowledgeDeleteTag, Description: "Delete a knowledge tag by id; succeeds only when no knowledge entry references it.", ReadOnly: false, Simulatable: true},
 	}
 }
 

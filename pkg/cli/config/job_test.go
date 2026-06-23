@@ -453,6 +453,55 @@ events.case = { on = ["created"] }
 	})
 }
 
+func TestJobSection_Reflection(t *testing.T) {
+	t.Run("reflection=true is propagated to model.Job", func(t *testing.T) {
+		const src = `
+[[job]]
+id = "reflect_on"
+prompt = "x"
+reflection = true
+events.case = { on = ["created"] }
+`
+		var app config.AppConfig
+		gt.NoError(t, toml.Unmarshal([]byte(src), &app)).Required()
+		gt.Array(t, app.Jobs).Length(1).Required()
+		j, err := app.Jobs[0].Validate("")
+		gt.NoError(t, err).Required()
+		gt.Bool(t, j.Reflection).True()
+	})
+
+	t.Run("reflection omitted defaults to false", func(t *testing.T) {
+		const src = `
+[[job]]
+id = "reflect_default"
+prompt = "x"
+events.case = { on = ["created"] }
+`
+		var app config.AppConfig
+		gt.NoError(t, toml.Unmarshal([]byte(src), &app)).Required()
+		gt.Array(t, app.Jobs).Length(1).Required()
+		j, err := app.Jobs[0].Validate("")
+		gt.NoError(t, err).Required()
+		gt.Bool(t, j.Reflection).False()
+	})
+
+	t.Run("reflection=false is propagated to model.Job", func(t *testing.T) {
+		const src = `
+[[job]]
+id = "reflect_off"
+prompt = "x"
+reflection = false
+events.case = { on = ["created"] }
+`
+		var app config.AppConfig
+		gt.NoError(t, toml.Unmarshal([]byte(src), &app)).Required()
+		gt.Array(t, app.Jobs).Length(1).Required()
+		j, err := app.Jobs[0].Validate("")
+		gt.NoError(t, err).Required()
+		gt.Bool(t, j.Reflection).False()
+	})
+}
+
 func TestLoadWorkspaceConfigs_PromptFileRelativeToConfig(t *testing.T) {
 	// End-to-end: prompt_file must resolve relative to the config file's own
 	// directory, not the process working directory.

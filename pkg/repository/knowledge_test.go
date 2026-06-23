@@ -35,12 +35,16 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		for i := range embedding {
 			embedding[i] = float64(i) * 0.001
 		}
+		tagID1 := model.NewTagID()
+		tagID2 := model.NewTagID()
+		tagID3 := model.NewTagID()
+
 		input := &model.Knowledge{
 			ID:          model.NewKnowledgeID(),
 			WorkspaceID: wsID,
 			Title:       "Round-trip knowledge",
 			Claim:       "## heading\n\n- bullet one\n- bullet two",
-			Tags:        []string{"ops", "github", "security"},
+			TagIDs:      []model.TagID{tagID1, tagID2, tagID3},
 			Embedding:   embedding,
 			CreatorID:   "U-CREATOR",
 			CreatedAt:   now,
@@ -59,10 +63,10 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		gt.String(t, got.Title).Equal("Round-trip knowledge")
 		gt.String(t, got.Claim).Equal("## heading\n\n- bullet one\n- bullet two")
 		gt.String(t, got.CreatorID).Equal("U-CREATOR")
-		gt.Array(t, got.Tags).Length(3).Required()
-		gt.Value(t, got.Tags[0]).Equal("ops")
-		gt.Value(t, got.Tags[1]).Equal("github")
-		gt.Value(t, got.Tags[2]).Equal("security")
+		gt.Array(t, got.TagIDs).Length(3).Required()
+		gt.Value(t, got.TagIDs[0]).Equal(tagID1)
+		gt.Value(t, got.TagIDs[1]).Equal(tagID2)
+		gt.Value(t, got.TagIDs[2]).Equal(tagID3)
 		gt.Array(t, got.Embedding).Length(model.EmbeddingDimension).Required()
 		gt.Value(t, got.Embedding[1]).Equal(0.001)
 		gt.Value(t, got.Embedding[10]).Equal(0.010)
@@ -83,14 +87,18 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		base := time.Now().UTC()
 
-		mk := func(title string, tags []string, createdOffset time.Duration) model.KnowledgeID {
+		tagOps := model.NewTagID()
+		tagGitHub := model.NewTagID()
+		tagSecurity := model.NewTagID()
+
+		mk := func(title string, tagIDs []model.TagID, createdOffset time.Duration) model.KnowledgeID {
 			id := model.NewKnowledgeID()
 			_, err := repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
 				ID:          id,
 				WorkspaceID: wsID,
 				Title:       title,
 				Claim:       "body",
-				Tags:        tags,
+				TagIDs:      tagIDs,
 				CreatedAt:   base.Add(createdOffset),
 				UpdatedAt:   base.Add(createdOffset),
 			})
@@ -98,9 +106,9 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 			return id
 		}
 
-		idA := mk("A", []string{"ops", "github"}, 0)
-		idB := mk("B", []string{"ops"}, time.Second)
-		mk("C", []string{"security"}, 2*time.Second)
+		idA := mk("A", []model.TagID{tagOps, tagGitHub}, 0)
+		idB := mk("B", []model.TagID{tagOps}, time.Second)
+		mk("C", []model.TagID{tagSecurity}, 2*time.Second)
 
 		// No filter: all three, sorted ascending by CreatedAt (A, B, C).
 		all, err := repo.Knowledge().List(ctx, wsID, interfaces.KnowledgeListOptions{})
@@ -111,20 +119,20 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		gt.String(t, all[2].Title).Equal("C")
 
 		// Single tag "ops": A and B.
-		ops, err := repo.Knowledge().List(ctx, wsID, interfaces.KnowledgeListOptions{Tags: []string{"ops"}})
+		ops, err := repo.Knowledge().List(ctx, wsID, interfaces.KnowledgeListOptions{TagIDs: []model.TagID{tagOps}})
 		gt.NoError(t, err).Required()
 		gt.Array(t, ops).Length(2).Required()
 		gt.Value(t, ops[0].ID).Equal(idA)
 		gt.Value(t, ops[1].ID).Equal(idB)
 
-		// AND filter "ops"+"github": only A.
-		both, err := repo.Knowledge().List(ctx, wsID, interfaces.KnowledgeListOptions{Tags: []string{"ops", "github"}})
+		// AND filter ops+github: only A.
+		both, err := repo.Knowledge().List(ctx, wsID, interfaces.KnowledgeListOptions{TagIDs: []model.TagID{tagOps, tagGitHub}})
 		gt.NoError(t, err).Required()
 		gt.Array(t, both).Length(1).Required()
 		gt.Value(t, both[0].ID).Equal(idA)
 
 		// Non-existent tag: empty.
-		none, err := repo.Knowledge().List(ctx, wsID, interfaces.KnowledgeListOptions{Tags: []string{"nope"}})
+		none, err := repo.Knowledge().List(ctx, wsID, interfaces.KnowledgeListOptions{TagIDs: []model.TagID{model.NewTagID()}})
 		gt.NoError(t, err).Required()
 		gt.Array(t, none).Length(0)
 	})
@@ -134,13 +142,16 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		now := time.Now().UTC()
 
+		tagOps := model.NewTagID()
+		tagUpdated := model.NewTagID()
+
 		id := model.NewKnowledgeID()
 		_, err := repo.Knowledge().Create(ctx, wsID, &model.Knowledge{
 			ID:          id,
 			WorkspaceID: wsID,
 			Title:       "before",
 			Claim:       "before body",
-			Tags:        []string{"ops"},
+			TagIDs:      []model.TagID{tagOps},
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		})
@@ -152,7 +163,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 			WorkspaceID: wsID,
 			Title:       "after",
 			Claim:       "after body",
-			Tags:        []string{"ops", "updated"},
+			TagIDs:      []model.TagID{tagOps, tagUpdated},
 			CreatedAt:   now,
 			UpdatedAt:   later,
 		})
@@ -162,8 +173,9 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		gt.NoError(t, err).Required()
 		gt.String(t, got.Title).Equal("after")
 		gt.String(t, got.Claim).Equal("after body")
-		gt.Array(t, got.Tags).Length(2).Required()
-		gt.Value(t, got.Tags[1]).Equal("updated")
+		gt.Array(t, got.TagIDs).Length(2).Required()
+		gt.Value(t, got.TagIDs[0]).Equal(tagOps)
+		gt.Value(t, got.TagIDs[1]).Equal(tagUpdated)
 		gt.Bool(t, got.UpdatedAt.Equal(later)).True()
 		gt.Bool(t, got.CreatedAt.Equal(now)).True()
 	})
@@ -177,7 +189,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 			ID:          model.NewKnowledgeID(),
 			WorkspaceID: wsID,
 			Title:       "x",
-			Tags:        []string{"ops"},
+			TagIDs:      []model.TagID{model.NewTagID()},
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		})
@@ -194,7 +206,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 			ID:          id,
 			WorkspaceID: wsID,
 			Title:       "to delete",
-			Tags:        []string{"ops"},
+			TagIDs:      []model.TagID{model.NewTagID()},
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		})

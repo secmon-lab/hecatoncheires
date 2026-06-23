@@ -246,8 +246,8 @@ func buildJobRunner(
 	stepAdapter := usecase.NewActionStepToolAdapter(uc.ActionStep)
 	caseAdapter := usecase.NewCaseToolAdapter(uc.Case)
 	memoAdapter := usecase.NewMemoToolAdapter(uc.Memo)
-	knowledgeAccessor := usecase.NewKnowledgeToolAccessor(uc.Knowledge)
-	knowledgeMutator := usecase.NewKnowledgeToolMutator(uc.Knowledge)
+	knowledgeAccessor := usecase.NewKnowledgeToolAccessor(uc.Knowledge, uc.Tag)
+	knowledgeMutator := usecase.NewKnowledgeToolMutator(uc.Knowledge, uc.Tag)
 
 	toolBuilder := job.ToolBuilderFunc(func(_ context.Context, c *model.Case, ws *model.WorkspaceEntry) []gollem.Tool {
 		var statusSet *model.ActionStatusSet

@@ -650,6 +650,8 @@ export const msgKeys = {
   placeholderKnowledgeTitle: 'placeholderKnowledgeTitle',
   placeholderKnowledgeClaim: 'placeholderKnowledgeClaim',
   placeholderKnowledgeTagInput: 'placeholderKnowledgeTagInput',
+  placeholderTagSearch: 'placeholderTagSearch',
+  actionCreateTag: 'actionCreateTag',
   errorKnowledgeTitleRequired: 'errorKnowledgeTitleRequired',
   errorKnowledgeTagsRequired: 'errorKnowledgeTagsRequired',
   errorKnowledgeClaimTooLong: 'errorKnowledgeClaimTooLong',

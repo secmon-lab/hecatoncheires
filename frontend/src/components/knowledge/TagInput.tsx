@@ -4,64 +4,120 @@ import { useTranslation } from '../../i18n'
 import { IconX } from '../Icons'
 import styles from './TagInput.module.css'
 
+export interface TagOption {
+  id: string
+  name: string
+}
+
 interface TagInputProps {
+  /** Selected tag IDs. */
   tags: string[]
   onChange: (tags: string[]) => void
-  suggestions?: string[]
+  /** All available tags with their id and name. */
+  availableTags?: TagOption[]
+  /**
+   * Called when the user types a name that matches no existing tag and
+   * confirms. Should create the tag and return its new ID.
+   */
+  onCreateTag?: (name: string) => Promise<string>
   error?: boolean
   placeholder?: string
 }
 
-export default function TagInput({ tags, onChange, suggestions = [], error, placeholder }: TagInputProps) {
+export default function TagInput({
+  tags,
+  onChange,
+  availableTags = [],
+  onCreateTag,
+  error,
+  placeholder,
+}: TagInputProps) {
   const { t } = useTranslation()
   const [inputValue, setInputValue] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const addTag = (raw: string) => {
-    const trimmed = raw.trim()
-    if (!trimmed || tags.includes(trimmed)) {
+  const nameById = (id: string): string => {
+    return availableTags.find((t) => t.id === id)?.name ?? id
+  }
+
+  const addById = (id: string) => {
+    if (!id || tags.includes(id)) {
       setInputValue('')
       return
     }
-    onChange([...tags, trimmed])
+    onChange([...tags, id])
     setInputValue('')
   }
 
-  const removeTag = (tag: string) => {
-    onChange(tags.filter((t) => t !== tag))
+  const addByName = async (raw: string) => {
+    const trimmed = raw.trim()
+    if (!trimmed) {
+      setInputValue('')
+      return
+    }
+    // Check if a tag with this name already exists (case-insensitive)
+    const existing = availableTags.find(
+      (t) => t.name?.toLowerCase() === trimmed.toLowerCase(),
+    )
+    if (existing) {
+      addById(existing.id)
+      return
+    }
+    if (!onCreateTag) {
+      setInputValue('')
+      return
+    }
+    const newId = await onCreateTag(trimmed)
+    addById(newId)
+  }
+
+  const removeTag = (id: string) => {
+    onChange(tags.filter((t) => t !== id))
   }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value
     // Comma immediately adds the tag
     if (val.endsWith(',')) {
-      addTag(val.slice(0, -1))
+      void addByName(val.slice(0, -1))
     } else {
       setInputValue(val)
     }
   }
 
   const handleKeyDown = commitOnEnter({
-    onCommit: () => addTag(inputValue),
+    onCommit: () => { void addByName(inputValue) },
   })
 
-  // Filtered suggestions: not already added and matching input prefix
+  // Suggestions: existing tags not yet selected, matching input prefix
   const filteredSuggestions = inputValue.trim()
-    ? suggestions.filter(
-        (s) => !tags.includes(s) && s.toLowerCase().startsWith(inputValue.trim().toLowerCase()),
+    ? availableTags.filter(
+        (t) =>
+          !tags.includes(t.id) &&
+          (t.name ?? '').toLowerCase().startsWith(inputValue.trim().toLowerCase()),
       )
     : []
 
+  // Show "create" action when input doesn't exactly match an existing tag
+  const showCreateAction =
+    !!onCreateTag &&
+    inputValue.trim().length > 0 &&
+    !availableTags.some(
+      (t) => (t.name ?? '').toLowerCase() === inputValue.trim().toLowerCase(),
+    )
+
+  const showDropdown = filteredSuggestions.length > 0 || showCreateAction
+
   return (
     <div className={`${styles.root} ${error ? styles.error : ''}`} onClick={() => inputRef.current?.focus()}>
-      {tags.map((tag) => (
-        <span key={tag} className="chip">
-          {tag}
+      {tags.map((id) => (
+        <span key={id} className="chip">
+          {nameById(id)}
           <button
             type="button"
             className={styles.removeBtn}
-            onClick={(e) => { e.stopPropagation(); removeTag(tag) }}
-            aria-label={`Remove ${tag}`}
+            onClick={(e) => { e.stopPropagation(); removeTag(id) }}
+            aria-label={`Remove ${nameById(id)}`}
           >
             <IconX size={10} />
           </button>
@@ -78,17 +134,30 @@ export default function TagInput({ tags, onChange, suggestions = [], error, plac
           placeholder={tags.length === 0 ? (placeholder ?? t('placeholderKnowledgeTagInput')) : ''}
           data-testid="tag-input"
         />
-        {filteredSuggestions.length > 0 && (
+        {showDropdown && (
           <ul className={styles.suggestions}>
-            {filteredSuggestions.slice(0, 6).map((s) => (
+            {filteredSuggestions.slice(0, 6).map((tag) => (
               <li
-                key={s}
+                key={tag.id}
                 className={styles.suggestion}
-                onMouseDown={(e) => { e.preventDefault(); addTag(s) }}
+                data-testid="tag-suggestion"
+                onMouseDown={(e) => { e.preventDefault(); addById(tag.id) }}
               >
-                {s}
+                {tag.name}
               </li>
             ))}
+            {showCreateAction && (
+              <li
+                className={styles.suggestion}
+                data-testid="tag-create-option"
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  void addByName(inputValue)
+                }}
+              >
+                {t('actionCreateTag', { name: inputValue.trim() })}
+              </li>
+            )}
           </ul>
         )}
       </div>

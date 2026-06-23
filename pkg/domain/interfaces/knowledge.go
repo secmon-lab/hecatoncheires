@@ -8,10 +8,10 @@ import (
 
 // KnowledgeListOptions controls how List filters knowledge entries.
 type KnowledgeListOptions struct {
-	// Tags applies an AND filter: only entries carrying every listed tag are
-	// returned. An empty slice returns all entries. Filtering is done in memory
-	// (no Firestore composite index) — see the repository implementations.
-	Tags []string
+	// TagIDs applies an AND filter: only entries referencing every listed tag id
+	// are returned. An empty slice returns all entries. Filtering is done in
+	// memory (no Firestore composite index) — see the repository implementations.
+	TagIDs []model.TagID
 }
 
 // KnowledgeRepository defines the interface for Knowledge data access. Every
@@ -27,7 +27,7 @@ type KnowledgeRepository interface {
 	Get(ctx context.Context, workspaceID string, id model.KnowledgeID) (*model.Knowledge, error)
 
 	// List retrieves the knowledge entries of a workspace, filtered by
-	// opts.Tags (AND). Results are sorted by CreatedAt ascending.
+	// opts.TagIDs (AND). Results are sorted by CreatedAt ascending.
 	List(ctx context.Context, workspaceID string, opts KnowledgeListOptions) ([]*model.Knowledge, error)
 
 	// Update persists changes to an existing knowledge entry. The caller's

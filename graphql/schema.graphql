@@ -312,16 +312,27 @@ input UpdateMemoInput {
   fields: [FieldValueInput!]
 }
 
+# Tag — a workspace-wide, first-class classification label. Tags are created
+# explicitly (createTag) and referenced by Knowledge via their immutable id. The
+# name is optional and mutable.
+type Tag {
+  id: ID!
+  name: String
+  createdAt: Time!
+  updatedAt: Time!
+}
+
 # Knowledge — workspace-wide shared knowledge entries. Unlike Memo, knowledge is
 # not scoped to a case and carries no custom fields: a single Markdown claim body
-# plus tags. The embedding vector used for semantic search is intentionally not
-# exposed through the GraphQL surface.
+# plus tags. Tags are resolved from the referenced tag ids. The embedding vector
+# used for semantic search is intentionally not exposed through the GraphQL
+# surface.
 type Knowledge {
   id: ID!
   title: String!
   # claim is a single Markdown text body (empty string when not yet written).
   claim: String!
-  tags: [String!]!
+  tags: [Tag!]!
   createdAt: Time!
   updatedAt: Time!
 }
@@ -329,16 +340,16 @@ type Knowledge {
 input CreateKnowledgeInput {
   title: String!
   claim: String
-  # At least one tag is required.
-  tags: [String!]!
+  # At least one existing tag id is required. Tags must be created beforehand.
+  tagIds: [ID!]!
 }
 
 input UpdateKnowledgeInput {
   id: ID!
   title: String
   claim: String
-  # Omit to leave unchanged; when provided it must contain at least one tag.
-  tags: [String!]
+  # Omit to leave unchanged; when provided it must contain at least one existing tag id.
+  tagIds: [ID!]
 }
 
 # ActionEvent records a single change to an Action, surfaced in the
@@ -728,13 +739,15 @@ type Query {
   memoConfiguration(workspaceId: String!): MemoConfiguration!
 
   # Knowledge — workspace-wide shared knowledge.
-  knowledges(workspaceId: String!, tags: [String!]): [Knowledge!]!
+  knowledges(workspaceId: String!, tagIds: [ID!]): [Knowledge!]!
   knowledge(workspaceId: String!, id: ID!): Knowledge
-  # Distinct tags used across the workspace (for filter / autocomplete).
-  knowledgeTags(workspaceId: String!): [String!]!
   # Semantic search over knowledge; falls back to substring matching when no
-  # embedding is available. `tags` applies an AND pre-filter.
-  searchKnowledge(workspaceId: String!, query: String!, tags: [String!], limit: Int): [Knowledge!]!
+  # embedding is available. `tagIds` applies an AND pre-filter.
+  searchKnowledge(workspaceId: String!, query: String!, tagIds: [ID!], limit: Int): [Knowledge!]!
+
+  # Tags — workspace-wide classification labels.
+  tags(workspaceId: String!): [Tag!]!
+  tag(workspaceId: String!, id: ID!): Tag
 }
 
 type Mutation {
@@ -840,6 +853,12 @@ type Mutation {
   createKnowledge(workspaceId: String!, input: CreateKnowledgeInput!): Knowledge!
   updateKnowledge(workspaceId: String!, input: UpdateKnowledgeInput!): Knowledge!
   deleteKnowledge(workspaceId: String!, id: ID!): Boolean!
+
+  # Tags — workspace-wide classification labels referenced by Knowledge.
+  createTag(workspaceId: String!, name: String): Tag!
+  updateTag(workspaceId: String!, id: ID!, name: String): Tag!
+  # deleteTag removes a tag; it fails when any knowledge entry still references it.
+  deleteTag(workspaceId: String!, id: ID!): Boolean!
 }
 
 input UpdateCaseAgentSettingsInput {

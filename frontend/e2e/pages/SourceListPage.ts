@@ -75,6 +75,35 @@ export class SourceListPage extends BasePage {
   }
 
   /**
+   * Whether the empty-state row ("No data available") is shown. The e2e test
+   * workspace seeds no sources (source creation needs external integration), so
+   * the list legitimately renders empty.
+   */
+  async isEmptyStateVisible(): Promise<boolean> {
+    try {
+      await this.page.getByText('No data available').first().waitFor({ state: 'visible', timeout: 8000 });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Open the "New Source" type-selection wizard (an in-page modal, not a route).
+   */
+  async openNewSourceForm(): Promise<void> {
+    await this.newSourceButton.click();
+  }
+
+  /**
+   * Locator for the selectable source-type options inside the type-selection
+   * modal (each carries data-testid="source-type-<type>").
+   */
+  sourceTypeOptions(): Locator {
+    return this.page.locator('[data-testid^="source-type-"]');
+  }
+
+  /**
    * Check if the page is loaded
    */
   async isPageLoaded(): Promise<boolean> {

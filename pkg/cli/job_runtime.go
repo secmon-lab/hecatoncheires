@@ -31,6 +31,11 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
 )
 
+// jobReflectionLoopMax bounds the reflection agent's internal tool-calling
+// loop. Set here at the wiring layer (not inside the reflector) so the budget
+// stays configurable from the caller per project convention.
+const jobReflectionLoopMax = 20
+
 // tickRuntime bundles the dependencies the tick CLI / HTTP endpoint
 // need to fire a sweep.
 type tickRuntime struct {
@@ -117,8 +122,8 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner) {
 		caseUC:            usecase.NewCaseToolAdapter(deps.UC.Case),
 		caseRef:           deps.UC.Case,
 		memo:              usecase.NewMemoToolAdapter(deps.UC.Memo),
-		knowledgeAccessor: usecase.NewKnowledgeToolAccessor(deps.UC.Knowledge),
-		knowledgeMutator:  usecase.NewKnowledgeToolMutator(deps.UC.Knowledge),
+		knowledgeAccessor: usecase.NewKnowledgeToolAccessor(deps.UC.Knowledge, deps.UC.Tag),
+		knowledgeMutator:  usecase.NewKnowledgeToolMutator(deps.UC.Knowledge, deps.UC.Tag),
 	}
 
 	toolBuilder := job.ToolBuilderFunc(func(_ context.Context, c *model.Case, ws *model.WorkspaceEntry) []gollem.Tool {
@@ -129,17 +134,21 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner) {
 		model.JobStrategySimple: jobagent.NewSingleLoopJobExecutor(),
 	}
 
-	// Wire the planexec executor when an LLM client is available. We
-	// only need it for workspaces that declared `strategy = "planexec"`
-	// in TOML; constructing it unconditionally is safe because the map
-	// lookup at Run time picks the right one. Falls back to in-memory
-	// history / trace repos when the caller did not pre-configure them
-	// (e.g. the `tick` CLI command in test environments).
+	// Shared history repository: the JobRunner persists each run's conversation
+	// under the RunID and the reflection pass loads it back. The SAME instance
+	// is handed to the planexec runner so planexec runs are reflectable too.
+	historyRepo := deps.HistoryRepo
+	if historyRepo == nil {
+		historyRepo = agentarchive.NewMemoryHistoryRepository()
+	}
+
+	// Wire the planexec executor and the reflection agent when an LLM client is
+	// available. We only need planexec for workspaces that declared
+	// `strategy = "planexec"`; constructing it unconditionally is safe because
+	// the map lookup at Run time picks the right one. Falls back to in-memory
+	// trace repo when the caller did not pre-configure one (e.g. the `tick` CLI).
+	var reflector jobagent.Reflector
 	if deps.LLMClient != nil {
-		historyRepo := deps.HistoryRepo
-		if historyRepo == nil {
-			historyRepo = agentarchive.NewMemoryHistoryRepository()
-		}
 		traceRepo := deps.TraceRepo
 		if traceRepo == nil {
 			traceRepo = agentarchive.NewMemoryTraceRepository()
@@ -159,6 +168,18 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner) {
 				executors[model.JobStrategyPlanexec] = planexecExec
 			}
 		}
+
+		// Reflection agent: knowledge/tag tools only, sharing the same knowledge
+		// use cases as the Job tools. Disabled (nil reflector) if knowledge is
+		// not configured.
+		if refl, rErr := jobagent.NewLLMReflector(jobagent.ReflectorDeps{
+			LLMClient:         deps.LLMClient,
+			KnowledgeAccessor: adapters.knowledgeAccessor,
+			KnowledgeMutator:  adapters.knowledgeMutator,
+			LoopMax:           jobReflectionLoopMax,
+		}); rErr == nil {
+			reflector = refl
+		}
 	}
 
 	// Wire the operational session-log notifier only when a Slack service is
@@ -176,6 +197,8 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner) {
 		Executors:     executors,
 		ToolBuilder:   toolBuilder,
 		SlackNotifier: slackNotifier,
+		Reflector:     reflector,
+		HistoryRepo:   historyRepo,
 	})
 	jobUC := job.NewUseCase(deps.Registry, runner)
 	return jobUC, runner

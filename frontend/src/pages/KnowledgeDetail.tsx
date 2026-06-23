@@ -4,11 +4,11 @@ import { useMutation, useQuery } from '@apollo/client'
 import {
   GET_KNOWLEDGE,
   GET_KNOWLEDGES,
-  GET_KNOWLEDGE_TAGS,
   CREATE_KNOWLEDGE,
   UPDATE_KNOWLEDGE,
   DELETE_KNOWLEDGE,
 } from '../graphql/knowledge'
+import { GET_TAGS, CREATE_TAG } from '../graphql/tag'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
 import Button from '../components/Button'
@@ -46,11 +46,13 @@ export default function KnowledgeDetail() {
   // Track if we've loaded existing data into the form
   const [initialized, setInitialized] = useState(isNew)
 
-  const { data: tagsData } = useQuery(GET_KNOWLEDGE_TAGS, {
+  const { data: tagsData } = useQuery(GET_TAGS, {
     variables: { workspaceId: currentWorkspace?.id },
     skip: !currentWorkspace,
   })
-  const allTags: string[] = tagsData?.knowledgeTags ?? []
+  const availableTags: { id: string; name: string }[] = (
+    tagsData?.tags ?? []
+  ).map((tag: { id: string; name: string | null }) => ({ id: tag.id, name: tag.name ?? '' }))
 
   const { data, loading } = useQuery(GET_KNOWLEDGE, {
     variables: { workspaceId: currentWorkspace?.id, id },
@@ -65,14 +67,14 @@ export default function KnowledgeDetail() {
     if (!initialized && data?.knowledge) {
       setTitle(data.knowledge.title)
       setClaim(data.knowledge.claim ?? '')
-      setTags(data.knowledge.tags)
+      setTags(data.knowledge.tags.map((tag: { id: string }) => tag.id))
       setInitialized(true)
     }
   }, [data, initialized])
 
   const refetchList = [
     { query: GET_KNOWLEDGES, variables: { workspaceId: currentWorkspace?.id } },
-    { query: GET_KNOWLEDGE_TAGS, variables: { workspaceId: currentWorkspace?.id } },
+    { query: GET_TAGS, variables: { workspaceId: currentWorkspace?.id } },
   ]
   const refetchDetail = isNew
     ? refetchList
@@ -84,6 +86,17 @@ export default function KnowledgeDetail() {
   const [createKnowledge] = useMutation(CREATE_KNOWLEDGE, { refetchQueries: refetchList })
   const [updateKnowledge] = useMutation(UPDATE_KNOWLEDGE, { refetchQueries: refetchDetail })
   const [deleteKnowledge] = useMutation(DELETE_KNOWLEDGE, { refetchQueries: refetchList })
+  const [createTag] = useMutation(CREATE_TAG, {
+    refetchQueries: [{ query: GET_TAGS, variables: { workspaceId: currentWorkspace?.id } }],
+  })
+
+  // handleCreateTag creates a new tag and returns its id so TagInput can select
+  // it. Tags must exist before knowledge can reference them.
+  const handleCreateTag = async (name: string): Promise<string> => {
+    if (!currentWorkspace) return ''
+    const res = await createTag({ variables: { workspaceId: currentWorkspace.id, name } })
+    return res.data?.createTag?.id ?? ''
+  }
 
   const knowledge = data?.knowledge
 
@@ -100,7 +113,7 @@ export default function KnowledgeDetail() {
         const result = await createKnowledge({
           variables: {
             workspaceId: currentWorkspace.id,
-            input: { title: title.trim(), claim: claim || undefined, tags },
+            input: { title: title.trim(), claim: claim || undefined, tagIds: tags },
           },
         })
         const newId = result.data?.createKnowledge?.id
@@ -111,7 +124,7 @@ export default function KnowledgeDetail() {
         await updateKnowledge({
           variables: {
             workspaceId: currentWorkspace.id,
-            input: { id: id!, title: title.trim(), claim: claim || undefined, tags },
+            input: { id: id!, title: title.trim(), claim: claim || undefined, tagIds: tags },
           },
         })
       }
@@ -310,7 +323,8 @@ export default function KnowledgeDetail() {
             <TagInput
               tags={tags}
               onChange={setTags}
-              suggestions={allTags}
+              availableTags={availableTags}
+              onCreateTag={handleCreateTag}
               error={tagsError}
             />
             {tagsError && (

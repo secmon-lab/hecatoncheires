@@ -5,7 +5,10 @@ const KNOWLEDGE_FIELDS = gql`
     id
     title
     claim
-    tags
+    tags {
+      id
+      name
+    }
     createdAt
     updatedAt
   }
@@ -13,8 +16,8 @@ const KNOWLEDGE_FIELDS = gql`
 
 export const GET_KNOWLEDGES = gql`
   ${KNOWLEDGE_FIELDS}
-  query GetKnowledges($workspaceId: String!, $tags: [String!]) {
-    knowledges(workspaceId: $workspaceId, tags: $tags) {
+  query GetKnowledges($workspaceId: String!, $tagIds: [ID!]) {
+    knowledges(workspaceId: $workspaceId, tagIds: $tagIds) {
       ...KnowledgeFields
     }
   }
@@ -29,16 +32,10 @@ export const GET_KNOWLEDGE = gql`
   }
 `
 
-export const GET_KNOWLEDGE_TAGS = gql`
-  query GetKnowledgeTags($workspaceId: String!) {
-    knowledgeTags(workspaceId: $workspaceId)
-  }
-`
-
 export const SEARCH_KNOWLEDGE = gql`
   ${KNOWLEDGE_FIELDS}
-  query SearchKnowledge($workspaceId: String!, $query: String!, $tags: [String!], $limit: Int) {
-    searchKnowledge(workspaceId: $workspaceId, query: $query, tags: $tags, limit: $limit) {
+  query SearchKnowledge($workspaceId: String!, $query: String!, $tagIds: [ID!], $limit: Int) {
+    searchKnowledge(workspaceId: $workspaceId, query: $query, tagIds: $tagIds, limit: $limit) {
       ...KnowledgeFields
     }
   }
