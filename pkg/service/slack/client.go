@@ -424,27 +424,30 @@ func (c *client) GetTeamURL(ctx context.Context) (string, error) {
 	return c.teamURL, c.teamURLErr
 }
 
-// disableUnfurlMsgOptions returns the slack-go options that suppress Slack's
-// link and media unfurling. The bot embeds permalinks (cases, actions, run
-// records) and external URLs as inline labels in virtually every message it
-// posts; the auto-generated preview cards are pure noise and push the actual
-// content out of view. Unfurling is therefore disabled unconditionally on
-// every bot-originated post / update, so it is baked into the client rather
-// than left to each caller (a single forgotten call site would let a preview
-// card slip through).
-func disableUnfurlMsgOptions() []slack.MsgOption {
-	return []slack.MsgOption{
+// withUnfurlDisabled appends the slack-go options that suppress Slack's link
+// and media unfurling to the caller's options. The bot embeds permalinks
+// (cases, actions, run records) and external URLs as inline labels in
+// virtually every message it posts; the auto-generated preview cards are pure
+// noise and push the actual content out of view. Unfurling is therefore
+// disabled unconditionally on every bot-originated post / update, so it is
+// baked into the client rather than left to each caller (a single forgotten
+// call site would let a preview card slip through). The result slice is sized
+// to len(opts)+2 up front so it is built in a single allocation.
+func withUnfurlDisabled(opts ...slack.MsgOption) []slack.MsgOption {
+	res := make([]slack.MsgOption, 0, len(opts)+2)
+	res = append(res, opts...)
+	return append(res,
 		slack.MsgOptionDisableLinkUnfurl(),
 		slack.MsgOptionDisableMediaUnfurl(),
-	}
+	)
 }
 
 // PostMessage posts a Block Kit message to a channel and returns the message timestamp
 func (c *client) PostMessage(ctx context.Context, channelID string, blocks []slack.Block, text string) (string, error) {
-	msgOpts := append([]slack.MsgOption{
+	msgOpts := withUnfurlDisabled(
 		slack.MsgOptionBlocks(blocks...),
 		slack.MsgOptionText(text, false),
-	}, disableUnfurlMsgOptions()...)
+	)
 	_, ts, err := c.api.PostMessageContext(ctx, channelID, msgOpts...)
 	if err != nil {
 		return "", goerr.Wrap(err, "failed to post Slack message",
@@ -464,11 +467,11 @@ func (c *client) PostMessage(ctx context.Context, channelID string, blocks []sla
 // the empty *non-nil* slice spread is required to actually marshal
 // "attachments=[]" on the wire.
 func (c *client) UpdateMessage(ctx context.Context, channelID string, timestamp string, blocks []slack.Block, text string) error {
-	msgOpts := append([]slack.MsgOption{
+	msgOpts := withUnfurlDisabled(
 		slack.MsgOptionBlocks(blocks...),
 		slack.MsgOptionText(text, false),
 		slack.MsgOptionAttachments([]slack.Attachment{}...),
-	}, disableUnfurlMsgOptions()...)
+	)
 	_, _, _, err := c.api.UpdateMessageContext(ctx, channelID, timestamp, msgOpts...)
 	if err != nil {
 		return goerr.Wrap(err, "failed to update Slack message",
@@ -482,10 +485,10 @@ func (c *client) UpdateMessage(ctx context.Context, channelID string, timestamp 
 // attachment carrying Block Kit content. See the interface doc for why this
 // shape is used (broadcast preview rendering).
 func (c *client) PostMessageWithAttachment(ctx context.Context, channelID string, text string, attachment slack.Attachment) (string, error) {
-	msgOpts := append([]slack.MsgOption{
+	msgOpts := withUnfurlDisabled(
 		slack.MsgOptionText(text, false),
 		slack.MsgOptionAttachments(attachment),
-	}, disableUnfurlMsgOptions()...)
+	)
 	_, ts, err := c.api.PostMessageContext(ctx, channelID, msgOpts...)
 	if err != nil {
 		return "", goerr.Wrap(err, "failed to post Slack message with attachment",
@@ -498,10 +501,10 @@ func (c *client) PostMessageWithAttachment(ctx context.Context, channelID string
 // inside the supplied attachments. The text parameter is the fallback used for
 // notification previews / clients without Block Kit rendering.
 func (c *client) PostMessageWithAttachments(ctx context.Context, channelID string, text string, attachments []slack.Attachment) (string, error) {
-	msgOpts := append([]slack.MsgOption{
+	msgOpts := withUnfurlDisabled(
 		slack.MsgOptionText(text, false),
 		slack.MsgOptionAttachments(attachments...),
-	}, disableUnfurlMsgOptions()...)
+	)
 	_, ts, err := c.api.PostMessageContext(ctx, channelID, msgOpts...)
 	if err != nil {
 		return "", goerr.Wrap(err, "failed to post Slack message with attachments",
@@ -516,10 +519,10 @@ func (c *client) PostMessageWithAttachments(ctx context.Context, channelID strin
 // replaces the attachments array wholesale, so callers must pass the full
 // desired set each call.
 func (c *client) UpdateMessageWithAttachments(ctx context.Context, channelID string, timestamp string, text string, attachments []slack.Attachment) error {
-	msgOpts := append([]slack.MsgOption{
+	msgOpts := withUnfurlDisabled(
 		slack.MsgOptionText(text, false),
 		slack.MsgOptionAttachments(attachments...),
-	}, disableUnfurlMsgOptions()...)
+	)
 	_, _, _, err := c.api.UpdateMessageContext(ctx, channelID, timestamp, msgOpts...)
 	if err != nil {
 		return goerr.Wrap(err, "failed to update Slack message with attachments",
@@ -535,10 +538,10 @@ func (c *client) UpdateMessageWithAttachments(ctx context.Context, channelID str
 // PostMessageWithAttachment, preserving the top-level-text + single-attachment
 // shape so the broadcast-preview source stays intact across refreshes.
 func (c *client) UpdateMessageWithAttachment(ctx context.Context, channelID string, timestamp string, text string, attachment slack.Attachment) error {
-	msgOpts := append([]slack.MsgOption{
+	msgOpts := withUnfurlDisabled(
 		slack.MsgOptionText(text, false),
 		slack.MsgOptionAttachments(attachment),
-	}, disableUnfurlMsgOptions()...)
+	)
 	_, _, _, err := c.api.UpdateMessageContext(ctx, channelID, timestamp, msgOpts...)
 	if err != nil {
 		return goerr.Wrap(err, "failed to update Slack message with attachment",
@@ -608,10 +611,10 @@ func (c *client) GetConversationHistory(ctx context.Context, channelID string, o
 
 // PostThreadReply posts a text message as a thread reply and returns the message timestamp
 func (c *client) PostThreadReply(ctx context.Context, channelID string, threadTS string, text string) (string, error) {
-	msgOpts := append([]slack.MsgOption{
+	msgOpts := withUnfurlDisabled(
 		slack.MsgOptionText(text, false),
 		slack.MsgOptionTS(threadTS),
-	}, disableUnfurlMsgOptions()...)
+	)
 	_, ts, err := c.api.PostMessageContext(ctx, channelID, msgOpts...)
 	if err != nil {
 		return "", goerr.Wrap(err, "failed to post thread reply",
@@ -625,11 +628,11 @@ func (c *client) PostThreadReply(ctx context.Context, channelID string, threadTS
 // Optional PostThreadOption values (e.g. WithBroadcastToChannel) tweak the underlying chat.postMessage call.
 func (c *client) PostThreadMessage(ctx context.Context, channelID string, threadTS string, blocks []slack.Block, text string, opts ...PostThreadOption) (string, error) {
 	cfg := ApplyPostThreadOptions(opts...)
-	msgOpts := append([]slack.MsgOption{
+	msgOpts := withUnfurlDisabled(
 		slack.MsgOptionBlocks(blocks...),
 		slack.MsgOptionText(text, false),
 		slack.MsgOptionTS(threadTS),
-	}, disableUnfurlMsgOptions()...)
+	)
 	if cfg.Broadcast {
 		msgOpts = append(msgOpts, slack.MsgOptionBroadcast())
 	}
@@ -773,9 +776,9 @@ func (c *client) GetUserGroupMembers(ctx context.Context, groupID string) ([]str
 
 // PostEphemeral posts an ephemeral message visible only to the specified user in a channel.
 func (c *client) PostEphemeral(ctx context.Context, channelID string, userID string, text string) error {
-	msgOpts := append([]slack.MsgOption{
+	msgOpts := withUnfurlDisabled(
 		slack.MsgOptionText(text, false),
-	}, disableUnfurlMsgOptions()...)
+	)
 	_, err := c.api.PostEphemeralContext(ctx, channelID, userID, msgOpts...)
 	if err != nil {
 		return goerr.Wrap(err, "failed to post ephemeral message",
@@ -787,10 +790,10 @@ func (c *client) PostEphemeral(ctx context.Context, channelID string, userID str
 
 // PostEphemeralBlocks posts an ephemeral Block Kit message and returns the message timestamp.
 func (c *client) PostEphemeralBlocks(ctx context.Context, channelID string, userID string, blocks []slack.Block, text string) (string, error) {
-	msgOpts := append([]slack.MsgOption{
+	msgOpts := withUnfurlDisabled(
 		slack.MsgOptionBlocks(blocks...),
 		slack.MsgOptionText(text, false),
-	}, disableUnfurlMsgOptions()...)
+	)
 	ts, err := c.api.PostEphemeralContext(ctx, channelID, userID, msgOpts...)
 	if err != nil {
 		return "", goerr.Wrap(err, "failed to post ephemeral block message",
