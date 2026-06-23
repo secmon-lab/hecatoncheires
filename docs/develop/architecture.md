@@ -163,6 +163,14 @@ so every entry point (GraphQL, Slack, agent tools, eval) is covered uniformly:
   wiring additionally withholds the action (`core__*`) tools for thread-mode in
   all three hosts (Job runtime, case-bound mention agent, eval env) so the LLM
   is never offered a tool that can only error.
+- **Thread-mode Jobs embed the thread's recent messages in the system prompt.**
+  Because a thread-mode Job has no Actions to anchor on, `JobRunner` loads the
+  Case's recent Slack messages (`CaseMessageRepository.List`, bounded to the
+  newest `recentMessageMaxCount` = 32 within `recentMessageWindow` = 24h of the
+  run start, ordered oldest-first) and renders them in a dedicated system-prompt
+  section. Each body is rune-truncated to `recentMessageTruncateRunes` = 140 with
+  the original character count annotated when elided. Channel-mode Jobs skip this
+  read entirely (the section is absent from their prompt).
 
 ### State persistence across turns
 

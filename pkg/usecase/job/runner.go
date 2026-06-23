@@ -11,6 +11,7 @@ import (
 
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/job"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
@@ -20,6 +21,15 @@ import (
 // before invoking the executor. Long enough to absorb LLM latency, short
 // enough that a crashed instance does not lock the row out indefinitely.
 const DefaultLeaseDuration = 10 * time.Minute
+
+// recentMessageMaxCount and recentMessageWindow bound the thread's recent
+// Slack messages embedded in a thread-mode Job's system prompt: at most the
+// newest recentMessageMaxCount messages, and only those within recentMessageWindow
+// of the run's start. Fixed feature parameters (not configurable) per the spec.
+const (
+	recentMessageMaxCount = 32
+	recentMessageWindow   = 24 * time.Hour
+)
 
 // executorKindSingleLoop is the JobRunLog.ExecutorKind value emitted
 // when JobStrategy=simple drives the run. executorKindPlanexec is the
@@ -284,12 +294,28 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 	}
 
 	startedAt := r.clock()
+
+	// Thread-mode workspaces feed the Job agent the thread's recent Slack
+	// messages so it can reason about the latest conversation. Channel-mode
+	// Jobs skip this read entirely (their prompt has no such section). The
+	// window is anchored to startedAt so it matches the prompt's "Current time".
+	var recentMessages []*slack.Message
+	if ws != nil && ws.IsThreadMode() {
+		ms, msgErr := r.loadRecentMessages(ctx, ev.WorkspaceID, ev.CaseID, startedAt)
+		if msgErr != nil {
+			return r.recordPrepareFailure(ctx, key, goerr.Wrap(msgErr, "load recent thread messages",
+				goerr.V("workspace_id", ev.WorkspaceID), goerr.V("case_id", ev.CaseID)))
+		}
+		recentMessages = ms
+	}
+
 	in := PromptInputs{
 		Job:             j,
 		Workspace:       ws,
 		Case:            c,
 		Actions:         actions,
 		Memos:           memos,
+		RecentMessages:  recentMessages,
 		Event:           ev,
 		Now:             startedAt,
 		Sources:         sources,
@@ -551,6 +577,37 @@ func (r *JobRunner) resolveSources(ctx context.Context, workspaceID string, c *m
 		}
 	}
 	return out, true, nil
+}
+
+// loadRecentMessages returns the case thread's recent Slack messages for the
+// system prompt: at most recentMessageMaxCount, only those created within
+// recentMessageWindow of now, ordered oldest-first.
+//
+// CaseMessage().List returns the newest recentMessageMaxCount messages
+// newest-first; we then drop any older than the window (so the cap and the
+// window compose to "the newest <=N within the window") and reverse into
+// chronological order so the prompt reads as a conversation. The window is
+// judged on CreatedAt — the same field the repository orders and prunes by —
+// rather than the Slack EventTS string, keeping recency consistent with the
+// stored order.
+func (r *JobRunner) loadRecentMessages(ctx context.Context, workspaceID string, caseID int64, now time.Time) ([]*slack.Message, error) {
+	msgs, _, err := r.deps.Repo.CaseMessage().List(ctx, workspaceID, caseID, recentMessageMaxCount, "")
+	if err != nil {
+		return nil, goerr.Wrap(err, "list case messages")
+	}
+
+	cutoff := now.Add(-recentMessageWindow)
+	out := make([]*slack.Message, 0, len(msgs))
+	// msgs is newest-first; iterate in reverse to emit oldest-first. A message
+	// at or after the cutoff is in-window; older ones are dropped.
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		if m == nil || m.CreatedAt().Before(cutoff) {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out, nil
 }
 
 // maybeReflect runs the optional post-execution reflection pass. It is a no-op

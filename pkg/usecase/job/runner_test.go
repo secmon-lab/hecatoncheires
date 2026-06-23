@@ -3,6 +3,8 @@ package job_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
@@ -960,4 +963,171 @@ func TestJobRunner_Reflection_ErrorIsNonFatal(t *testing.T) {
 	jr, getErr := repo.JobRun().Get(context.Background(), model.JobRunKey{WorkspaceID: wsID, CaseID: c.ID, JobID: j.ID})
 	gt.NoError(t, getErr).Required()
 	gt.Value(t, jr.LastStatus).Equal(model.JobRunStatusSuccess)
+}
+
+// capturingExecutor records the SystemPrompt of the last Execute call so a
+// test can assert on the prompt the runner assembled and handed to the agent.
+type capturingExecutor struct {
+	systemPrompt string
+}
+
+func (e *capturingExecutor) Execute(_ context.Context, req jobagent.ExecuteRequest) (*jobagent.ExecuteResult, error) {
+	e.systemPrompt = req.SystemPrompt
+	return &jobagent.ExecuteResult{Status: jobagent.ExecuteStatusSuccess}, nil
+}
+
+// putMsg persists one case-scoped Slack message with an explicit CreatedAt so
+// tests can place messages inside or outside the 24h window deterministically.
+func putMsg(t *testing.T, repo interfaces.Repository, wsID string, caseID int64, text string, createdAt time.Time) {
+	t.Helper()
+	m := slack.NewMessageFromData(createdAt.Format("20060102.150405"), "C-CASE", "1700000000.0001", "T1", "U-1", "Alice", text, "", createdAt, nil)
+	gt.NoError(t, repo.CaseMessage().Put(context.Background(), wsID, caseID, m)).Required()
+}
+
+// TestJobRunner_ThreadModeIncludesRecentMessages verifies that a thread-mode
+// Job's system prompt embeds the case thread's recent messages, bounded to the
+// last 24h and the newest 32, oldest-first, with out-of-window messages dropped.
+func TestJobRunner_ThreadModeIncludesRecentMessages(t *testing.T) {
+	ctx := context.Background()
+	wsID := "ws-thread-msgs"
+	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
+
+	j := &model.Job{
+		ID:     "summarize",
+		Prompt: "x",
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	repo, c := setupCaseWithSlack(t, wsID, "C-CASE", "1700000000.0001")
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: wsID, Name: "WS"},
+		CaseMode:  model.CaseModeThread,
+		Jobs:      []*model.Job{j},
+	})
+
+	// Two in-window messages and one just outside the 24h window.
+	putMsg(t, repo, wsID, c.ID, "older-window-msg", now.Add(-20*time.Hour))
+	putMsg(t, repo, wsID, c.ID, "newer-window-msg", now.Add(-1*time.Hour))
+	putMsg(t, repo, wsID, c.ID, "stale-msg", now.Add(-25*time.Hour))
+
+	exec := &capturingExecutor{}
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo: repo, Registry: registry, LLMClient: inertLLM(),
+		Executors: map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: exec},
+		Clock:     func() time.Time { return now },
+	})
+
+	gt.NoError(t, runner.Run(ctx, j, job.Event{
+		Domain:        model.JobEventDomainCase,
+		WorkspaceID:   wsID,
+		CaseID:        c.ID,
+		Timestamp:     now.Add(-time.Second),
+		ActorUserID:   "U-CALLER",
+		CaseLifecycle: model.CaseLifecycleCreated,
+	})).Required()
+
+	sp := exec.systemPrompt
+	gt.String(t, sp).Contains("# Recent thread messages (last 24h, up to 32)")
+	gt.String(t, sp).Contains("older-window-msg")
+	gt.String(t, sp).Contains("newer-window-msg")
+	// Outside the 24h window → excluded.
+	gt.Bool(t, strings.Contains(sp, "stale-msg")).False()
+	// Oldest-first ordering: the -20h message precedes the -1h message.
+	gt.Number(t, strings.Index(sp, "older-window-msg")).LessOrEqual(strings.Index(sp, "newer-window-msg"))
+}
+
+// TestJobRunner_ThreadModeCapsRecentMessages verifies the newest-32 cap: with
+// more than 32 in-window messages, only the newest 32 reach the prompt.
+func TestJobRunner_ThreadModeCapsRecentMessages(t *testing.T) {
+	ctx := context.Background()
+	wsID := "ws-thread-cap"
+	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
+
+	j := &model.Job{
+		ID:     "summarize",
+		Prompt: "x",
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	repo, c := setupCaseWithSlack(t, wsID, "C-CASE", "1700000000.0001")
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: wsID, Name: "WS"},
+		CaseMode:  model.CaseModeThread,
+		Jobs:      []*model.Job{j},
+	})
+
+	// 33 messages all within the window; msg-00 is the oldest, msg-32 newest.
+	// The newest-32 cap must drop exactly msg-00.
+	for i := range 33 {
+		putMsg(t, repo, wsID, c.ID, fmt.Sprintf("msg-%02d", i), now.Add(-time.Duration(33-i)*time.Minute))
+	}
+
+	exec := &capturingExecutor{}
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo: repo, Registry: registry, LLMClient: inertLLM(),
+		Executors: map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: exec},
+		Clock:     func() time.Time { return now },
+	})
+
+	gt.NoError(t, runner.Run(ctx, j, job.Event{
+		Domain:        model.JobEventDomainCase,
+		WorkspaceID:   wsID,
+		CaseID:        c.ID,
+		Timestamp:     now.Add(-time.Second),
+		ActorUserID:   "U-CALLER",
+		CaseLifecycle: model.CaseLifecycleCreated,
+	})).Required()
+
+	sp := exec.systemPrompt
+	gt.Bool(t, strings.Contains(sp, "msg-00")).False() // dropped by the 32 cap
+	gt.String(t, sp).Contains("msg-01")                // oldest survivor
+	gt.String(t, sp).Contains("msg-32")                // newest
+}
+
+// TestJobRunner_ChannelModeOmitsRecentMessages verifies that a channel-mode
+// Job never gets the recent-messages section, even when the case has messages.
+func TestJobRunner_ChannelModeOmitsRecentMessages(t *testing.T) {
+	ctx := context.Background()
+	wsID := "ws-channel-msgs"
+	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
+
+	j := &model.Job{
+		ID:     "summarize",
+		Prompt: "x",
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	repo, c := setupCase(t, wsID)
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: wsID, Name: "WS"}, // default channel mode
+		Jobs:      []*model.Job{j},
+	})
+
+	putMsg(t, repo, wsID, c.ID, "should-not-appear-body", now.Add(-1*time.Hour))
+
+	exec := &capturingExecutor{}
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo: repo, Registry: registry, LLMClient: inertLLM(),
+		Executors: map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: exec},
+		Clock:     func() time.Time { return now },
+	})
+
+	gt.NoError(t, runner.Run(ctx, j, job.Event{
+		Domain:        model.JobEventDomainCase,
+		WorkspaceID:   wsID,
+		CaseID:        c.ID,
+		Timestamp:     now.Add(-time.Second),
+		ActorUserID:   "U-CALLER",
+		CaseLifecycle: model.CaseLifecycleCreated,
+	})).Required()
+
+	sp := exec.systemPrompt
+	gt.Bool(t, strings.Contains(sp, "# Recent thread messages")).False()
+	gt.Bool(t, strings.Contains(sp, "should-not-appear-body")).False()
 }

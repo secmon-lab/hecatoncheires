@@ -21,6 +21,9 @@ func NewRunSequencerForTest() *runSequencer {
 	return newRunSequencer()
 }
 
+// TruncateRunesForTest exposes truncateRunes for tests in other packages.
+var TruncateRunesForTest = truncateRunes
+
 // WithQuietForTest exposes withQuiet for tests in other packages.
 var WithQuietForTest = withQuiet
 

@@ -148,6 +148,20 @@ Current memos ({{ .Memo.TotalCount }} total{{ if .Memo.Overflow }}, showing firs
 (none yet)
 {{- end }}
 {{- end }}
+{{- if not .ManagesActions }}
+
+# Recent thread messages (last 24h, up to 32)
+
+The most recent Slack messages in this case's thread, oldest first. Long
+messages are truncated; the original character count is noted when so.
+{{- if .RecentMessages }}
+{{- range .RecentMessages }}
+- [{{ .Timestamp }}] {{ .Author }}: {{ .Text }}{{ if .FullRuneCount }} … [{{ .FullRuneCount }} chars total]{{ end }}
+{{- end }}
+{{- else }}
+(none)
+{{- end }}
+{{- end }}
 
 # Trigger condition
 

@@ -9,11 +9,13 @@ import (
 	"sync"
 	"text/template"
 	"time"
+	"unicode/utf8"
 
 	"github.com/m-mizutani/goerr/v2"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 )
 
@@ -58,6 +60,14 @@ type PromptInputs struct {
 	// pairs and, when there are more, the total count; full content is fetched
 	// on demand via the memo tools.
 	Memos []*model.Memo
+
+	// RecentMessages is the thread's recent Slack messages, oldest first,
+	// already bounded by the caller to the last recentMessageWindow and at
+	// most recentMessageMaxCount items. It is populated only for thread-mode
+	// workspaces (channel-mode Jobs leave it nil); the system prompt renders
+	// the section only when the workspace manages no Actions.
+	RecentMessages []*slack.Message
+
 	Event Event
 	Now   time.Time
 
@@ -97,9 +107,31 @@ type systemPromptData struct {
 	ManagesActions bool
 	Actions        []systemPromptAction
 	Memo           systemPromptMemoSection
+	// RecentMessages is the thread's recent Slack messages, oldest first.
+	// Only populated for thread-mode workspaces (ManagesActions == false);
+	// the template gates the whole section on ManagesActions and shows
+	// "(none)" when the slice is empty.
+	RecentMessages []systemPromptMessage
 	Trigger        systemPromptTrigger
 	Reason         systemPromptReason
 	Sources        systemPromptSourceSection
+}
+
+// recentMessageTruncateRunes bounds how many runes of each Slack message body
+// the system prompt embeds. Bodies longer than this are truncated and their
+// full rune count is annotated so the agent knows content was elided. Kept as
+// a fixed feature parameter (not configurable) per the spec.
+const recentMessageTruncateRunes = 140
+
+// systemPromptMessage is one recent thread message, formatted for the system
+// prompt. Text is already truncated to recentMessageTruncateRunes; FullRuneCount
+// carries the original rune count only when truncation occurred (0 otherwise),
+// so the template can append the "[N chars total]" annotation conditionally.
+type systemPromptMessage struct {
+	Timestamp     string
+	Author        string
+	Text          string
+	FullRuneCount int
 }
 
 // memoSystemPromptMax bounds how many memo id+title pairs are embedded in the
@@ -340,6 +372,34 @@ func buildSystemPromptData(in PromptInputs) systemPromptData {
 		}
 	}
 
+	// Recent thread messages: thread-mode only. The caller has already
+	// bounded the slice to the last recentMessageWindow and recentMessageMaxCount
+	// and ordered it oldest-first; here we only format and rune-truncate each
+	// body. Channel-mode workspaces (ManagesActions) never reach this block, so
+	// the section is absent from their prompt entirely.
+	if !data.ManagesActions {
+		for _, m := range in.RecentMessages {
+			if m == nil {
+				continue
+			}
+			author := m.UserName()
+			if author == "" {
+				author = m.UserID()
+			}
+			ts := ""
+			if t := m.CreatedAt(); !t.IsZero() {
+				ts = t.UTC().Format(time.RFC3339)
+			}
+			text, fullCount := truncateRunes(m.Text(), recentMessageTruncateRunes)
+			data.RecentMessages = append(data.RecentMessages, systemPromptMessage{
+				Timestamp:     ts,
+				Author:        author,
+				Text:          text,
+				FullRuneCount: fullCount,
+			})
+		}
+	}
+
 	if c := in.Case; c != nil {
 		cs := &systemPromptCase{
 			ID:                    c.ID,
@@ -570,6 +630,31 @@ func multiSelectIDs(raw any) ([]string, bool) {
 	default:
 		return nil, false
 	}
+}
+
+// truncateRunes caps s at max runes (not bytes — the spec counts 文字), so a
+// multi-byte body is never split mid-character the way a byte cap would. It
+// returns the truncated string and, when truncation occurred, the original
+// rune count so the caller can annotate the elision; when s already fits, the
+// second return is 0 to signal "no annotation needed".
+func truncateRunes(s string, max int) (string, int) {
+	if max <= 0 {
+		return "", 0
+	}
+	full := utf8.RuneCountInString(s)
+	if full <= max {
+		return s, 0
+	}
+	// Walk max runes in and cut there; ranging over a string yields rune
+	// boundaries so the slice index is always valid UTF-8.
+	count := 0
+	for i := range s {
+		if count == max {
+			return s[:i], full
+		}
+		count++
+	}
+	return s, 0
 }
 
 func describeCaseLifecycle(lc model.CaseLifecycle) string {
