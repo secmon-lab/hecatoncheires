@@ -254,7 +254,13 @@ export default function CaseList() {
     if (statusFilter === 'OPEN') return openData?.cases || []
     if (statusFilter === 'CLOSED') return closedData?.cases || []
     if (statusFilter === 'DRAFT') return draftData?.drafts || []
-    return [...(openData?.cases || []), ...(closedData?.cases || [])]
+    // ALL view merges two separately-fetched lists, so re-sort the combined
+    // result newest-first; otherwise all OPEN cases would precede all CLOSED.
+    // createdAt is an RFC3339 UTC string, so lexicographic compare equals
+    // chronological order without per-comparison Date allocation.
+    return [...(openData?.cases || []), ...(closedData?.cases || [])].sort(
+      (a, b) => b.createdAt.localeCompare(a.createdAt)
+    )
   }, [statusFilter, openData, closedData, draftData])
 
   const filtered = useMemo(() => {
