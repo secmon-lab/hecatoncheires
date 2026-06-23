@@ -10,6 +10,7 @@ import (
 
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
 )
@@ -216,6 +217,130 @@ func TestRenderUserPrompt_TemplateError(t *testing.T) {
 	}
 	_, err := job.RenderUserPrompt(job.PromptInputs{Job: j, Case: newCase(1)})
 	gt.Error(t, err)
+}
+
+// threadModeJob and threadModeEvent are small fixtures shared by the recent-
+// message tests below: a case-created Job on a thread-mode workspace.
+func threadModeJob() *model.Job {
+	return &model.Job{
+		ID:     "summarize",
+		Prompt: "{{.Case.Title}}",
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+}
+
+func threadModeEvent() job.Event {
+	return job.Event{
+		Domain:        model.JobEventDomainCase,
+		WorkspaceID:   "ws",
+		CaseID:        42,
+		Timestamp:     time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC),
+		ActorUserID:   "U-CALLER",
+		CaseLifecycle: model.CaseLifecycleCreated,
+	}
+}
+
+func recentMsg(text, userID, userName string, createdAt time.Time) *slack.Message {
+	return slack.NewMessageFromData(createdAt.Format("20060102.150405"), "C-CASE", "1700000000.0001", "T1", userID, userName, text, "", createdAt, nil)
+}
+
+func TestBuildSystemPrompt_ThreadModeRecentMessages(t *testing.T) {
+	ws := newWorkspace("ws", "WS")
+	ws.CaseMode = model.CaseModeThread
+
+	short := recentMsg("hello there", "U-1", "Alice", time.Date(2026, 5, 23, 9, 0, 0, 0, time.UTC))
+	// A body of 200 ASCII runes must be truncated to 140 with the original
+	// rune count annotated. No display name → author falls back to user ID.
+	long := recentMsg(strings.Repeat("x", 200), "U-2", "", time.Date(2026, 5, 23, 10, 0, 0, 0, time.UTC))
+
+	got, err := job.BuildSystemPrompt(job.PromptInputs{
+		Job:            threadModeJob(),
+		Workspace:      ws,
+		Case:           newCase(42),
+		RecentMessages: []*slack.Message{short, long},
+		Event:          threadModeEvent(),
+	})
+	gt.NoError(t, err).Required()
+
+	mustContain(t, got, "# Recent thread messages (last 24h, up to 32)")
+	// Oldest-first ordering and author rendering (name, then user-id fallback).
+	mustContain(t, got, "[2026-05-23T09:00:00Z] Alice: hello there")
+	mustContain(t, got, "[2026-05-23T10:00:00Z] U-2: "+strings.Repeat("x", 140))
+	// The long body is truncated and annotated; the short body is not.
+	mustContain(t, got, "[200 chars total]")
+	mustNotContain(t, got, strings.Repeat("x", 141))
+	mustNotContain(t, got, "(none)")
+
+	// Oldest-first: the 09:00 line must precede the 10:00 line.
+	gt.Number(t, strings.Index(got, "Alice: hello there")).LessOrEqual(strings.Index(got, "U-2: "))
+}
+
+func TestBuildSystemPrompt_ThreadModeRecentMessagesEmpty(t *testing.T) {
+	ws := newWorkspace("ws", "WS")
+	ws.CaseMode = model.CaseModeThread
+
+	got, err := job.BuildSystemPrompt(job.PromptInputs{
+		Job:       threadModeJob(),
+		Workspace: ws,
+		Case:      newCase(42),
+		Event:     threadModeEvent(),
+	})
+	gt.NoError(t, err).Required()
+
+	// Thread-mode always renders the section header; an empty window shows
+	// "(none)" so the agent is explicitly told there is no recent traffic.
+	mustContain(t, got, "# Recent thread messages (last 24h, up to 32)")
+	mustContain(t, got, "(none)")
+}
+
+func TestBuildSystemPrompt_ChannelModeOmitsRecentMessages(t *testing.T) {
+	// Channel-mode workspace: even if messages are passed in, the section
+	// must be absent (the agent there has no thread to reason about).
+	msg := recentMsg("should not appear", "U-1", "Alice", time.Date(2026, 5, 23, 9, 0, 0, 0, time.UTC))
+
+	got, err := job.BuildSystemPrompt(job.PromptInputs{
+		Job:            threadModeJob(),
+		Workspace:      newWorkspace("ws", "WS"), // default channel mode
+		Case:           newCase(42),
+		RecentMessages: []*slack.Message{msg},
+		Event:          threadModeEvent(),
+	})
+	gt.NoError(t, err).Required()
+
+	mustNotContain(t, got, "# Recent thread messages")
+	mustNotContain(t, got, "should not appear")
+}
+
+func TestTruncateRunes(t *testing.T) {
+	// Under the cap: returned verbatim, no annotation.
+	out, full := job.TruncateRunesForTest("hello", 140)
+	gt.String(t, out).Equal("hello")
+	gt.Number(t, full).Equal(0)
+
+	// Exactly at the cap: still no annotation.
+	exact := strings.Repeat("a", 140)
+	out, full = job.TruncateRunesForTest(exact, 140)
+	gt.String(t, out).Equal(exact)
+	gt.Number(t, full).Equal(0)
+
+	// One over the cap: truncated to 140 runes, full count reported.
+	over := strings.Repeat("a", 141)
+	out, full = job.TruncateRunesForTest(over, 140)
+	gt.String(t, out).Equal(strings.Repeat("a", 140))
+	gt.Number(t, full).Equal(141)
+
+	// Multibyte: counts runes (文字), not bytes, and never splits a rune.
+	// 5 CJK runes (15 bytes) capped at 3 → 3 runes, full count 5.
+	out, full = job.TruncateRunesForTest("一二三四五", 3)
+	gt.String(t, out).Equal("一二三")
+	gt.Number(t, full).Equal(5)
+
+	// Non-positive cap yields empty, no annotation.
+	out, full = job.TruncateRunesForTest("anything", 0)
+	gt.String(t, out).Equal("")
+	gt.Number(t, full).Equal(0)
 }
 
 func mustContain(t *testing.T, s, sub string) {
