@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/service/slack"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	goslack "github.com/slack-go/slack"
 )
@@ -495,6 +497,51 @@ func (uc *ActionUseCase) ArchiveAction(ctx context.Context, workspaceID string, 
 	uc.recordArchiveEvent(ctx, workspaceID, updated, types.ActionEventArchived, actor)
 	uc.notifyArchiveOnSlack(ctx, workspaceID, updated, parentCase, types.ActionEventArchived, actor)
 	return updated, nil
+}
+
+// BulkArchiveActions archives the given actions by delegating each id to
+// ArchiveAction, so bulk and single archive share the exact same path
+// (access control, idempotency, event recording, Slack notification). The
+// archive body lives only in ArchiveAction and is never duplicated here, so
+// any future change to single-archive behaviour automatically applies to bulk.
+//
+// Idempotency: ids that are already archived are skipped rather than failing
+// the whole batch, since "archive everything in this column" should tolerate
+// rows that someone else already archived. Any other error (access denied,
+// not found, persistence failure) is propagated — bulk archive must not
+// silently swallow a real failure. The returned slice contains only the
+// actions that were newly archived.
+func (uc *ActionUseCase) BulkArchiveActions(ctx context.Context, workspaceID string, ids []int64, actor ActorRef) ([]*model.Action, error) {
+	archived := make([]*model.Action, 0, len(ids))
+	for _, id := range ids {
+		updated, err := uc.ArchiveAction(ctx, workspaceID, id, actor)
+		if err != nil {
+			if errors.Is(err, ErrActionAlreadyArchived) {
+				continue
+			}
+			return nil, goerr.Wrap(err, "failed to bulk archive action", goerr.V(ActionIDKey, id))
+		}
+		archived = append(archived, updated)
+	}
+	return archived, nil
+}
+
+// BulkArchiveActionsAsync runs BulkArchiveActions in the background via
+// async.Dispatch so the operation outlives the HTTP request that triggered
+// it. Clearing a completed column issues one ArchiveAction (DB write + event
+// + Slack post) per action; on a large column that can take longer than the
+// client is willing to wait, and a mid-flight disconnect would otherwise
+// cancel the request context and leave the column half-archived. async.Dispatch
+// hands the work a context with the auth token / logger intact but the
+// cancellation severed, so the whole column is archived even after the
+// GraphQL response (the accepted ids) has been returned. Per-action failures
+// surface through errutil.Handle inside the synchronous core rather than to
+// the caller, which has already returned.
+func (uc *ActionUseCase) BulkArchiveActionsAsync(ctx context.Context, workspaceID string, ids []int64, actor ActorRef) {
+	async.Dispatch(ctx, func(bgCtx context.Context) error {
+		_, err := uc.BulkArchiveActions(bgCtx, workspaceID, ids, actor)
+		return err
+	})
 }
 
 // UnarchiveAction restores a previously archived action back to active state.

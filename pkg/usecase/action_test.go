@@ -17,6 +17,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 	goslack "github.com/slack-go/slack"
 )
 
@@ -315,6 +316,223 @@ func TestActionUseCase_ArchiveAction(t *testing.T) {
 
 		_, err := actionUC.ArchiveAction(ctx, testWorkspaceID, 999, usecase.ActorRef{Kind: usecase.ActorKindSystem})
 		gt.Error(t, err).Is(usecase.ErrActionNotFound)
+	})
+}
+
+func TestActionUseCase_BulkArchiveActions(t *testing.T) {
+	t.Run("archives every given action and records an event for each", func(t *testing.T) {
+		repo := memory.New()
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "", nil)
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		a1, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Action 1", "Desc", "", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+		a2, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Action 2", "Desc", "", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+		a3, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Action 3", "Desc", "", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+
+		archived, err := actionUC.BulkArchiveActions(ctx, testWorkspaceID, []int64{a1.ID, a2.ID, a3.ID}, usecase.ActorRef{Kind: usecase.ActorKindSystem})
+		gt.NoError(t, err).Required()
+		gt.Array(t, archived).Length(3).Required()
+
+		// Every requested action must come back archived. Verify each id
+		// individually (not just the count) and that ArchivedAt is set.
+		byID := map[int64]*model.Action{}
+		for _, a := range archived {
+			byID[a.ID] = a
+		}
+		for _, want := range []int64{a1.ID, a2.ID, a3.ID} {
+			got := byID[want]
+			gt.Value(t, got).NotNil().Required()
+			gt.Bool(t, got.IsArchived()).True()
+			gt.Value(t, got.ArchivedAt).NotNil()
+		}
+
+		// Default listing now excludes all three.
+		remaining, err := actionUC.GetActionsByCase(ctx, testWorkspaceID, c.ID, interfaces.ActionListOptions{})
+		gt.NoError(t, err).Required()
+		gt.Array(t, remaining).Length(0)
+
+		// Each action got exactly one ARCHIVED event, proving bulk reused the
+		// single-archive path rather than skipping event recording.
+		for _, id := range []int64{a1.ID, a2.ID, a3.ID} {
+			events, _, listErr := repo.ActionEvent().List(ctx, testWorkspaceID, id, 100, "")
+			gt.NoError(t, listErr).Required()
+			archiveEventCount := 0
+			for _, e := range events {
+				if e.Kind == types.ActionEventArchived {
+					archiveEventCount++
+				}
+			}
+			gt.Number(t, archiveEventCount).Equal(1)
+		}
+	})
+
+	t.Run("skips already-archived actions and returns only newly archived", func(t *testing.T) {
+		repo := memory.New()
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "", nil)
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		a1, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Already", "Desc", "", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+		a2, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Fresh", "Desc", "", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+
+		// Pre-archive a1 so the bulk call must skip it.
+		_, err = actionUC.ArchiveAction(ctx, testWorkspaceID, a1.ID, usecase.ActorRef{Kind: usecase.ActorKindSystem})
+		gt.NoError(t, err).Required()
+
+		archived, err := actionUC.BulkArchiveActions(ctx, testWorkspaceID, []int64{a1.ID, a2.ID}, usecase.ActorRef{Kind: usecase.ActorKindSystem})
+		gt.NoError(t, err).Required()
+		gt.Array(t, archived).Length(1).Required()
+		gt.Value(t, archived[0].ID).Equal(a2.ID)
+
+		// a1 must not have a second ARCHIVED event from the skipped bulk pass.
+		events, _, err := repo.ActionEvent().List(ctx, testWorkspaceID, a1.ID, 100, "")
+		gt.NoError(t, err).Required()
+		archiveEventCount := 0
+		for _, e := range events {
+			if e.Kind == types.ActionEventArchived {
+				archiveEventCount++
+			}
+		}
+		gt.Number(t, archiveEventCount).Equal(1)
+	})
+
+	t.Run("empty ids returns empty slice without error", func(t *testing.T) {
+		repo := memory.New()
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "", nil)
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		archived, err := actionUC.BulkArchiveActions(ctx, testWorkspaceID, nil, usecase.ActorRef{Kind: usecase.ActorKindSystem})
+		gt.NoError(t, err).Required()
+		gt.Array(t, archived).Length(0)
+	})
+
+	t.Run("non-member cannot bulk archive actions in private case", func(t *testing.T) {
+		repo := memory.New()
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "", nil)
+		memberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMEMBER"})
+		nonMemberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
+
+		privateCase := &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
+			Title:          "Private Case",
+			Description:    "Secret",
+			IsPrivate:      true,
+			ChannelUserIDs: []string{"UMEMBER"},
+			AssigneeIDs:    []string{},
+		}
+		created, err := repo.Case().Create(memberCtx, testWorkspaceID, privateCase)
+		gt.NoError(t, err).Required()
+
+		action, err := actionUC.CreateAction(memberCtx, testWorkspaceID, created.ID, "Member Action", "Desc", "", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+
+		// Non-member's bulk archive must be denied and leave the action active.
+		_, err = actionUC.BulkArchiveActions(nonMemberCtx, testWorkspaceID, []int64{action.ID}, usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: "UOTHER"})
+		gt.Error(t, err).Is(usecase.ErrAccessDenied)
+
+		fetched, err := actionUC.GetAction(memberCtx, testWorkspaceID, action.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, fetched.IsArchived()).False()
+	})
+
+	t.Run("system context without auth token bypasses access control", func(t *testing.T) {
+		repo := memory.New()
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "", nil)
+		// No auth token in ctx: mirrors agent/bot system flows.
+		ctx := context.Background()
+
+		privateCase := &model.Case{
+			ReporterID:     "U-TEST-DEFAULT",
+			Title:          "Private Case",
+			Description:    "Secret",
+			IsPrivate:      true,
+			ChannelUserIDs: []string{"UMEMBER"},
+			AssigneeIDs:    []string{},
+		}
+		created, err := repo.Case().Create(ctx, testWorkspaceID, privateCase)
+		gt.NoError(t, err).Required()
+
+		action, err := actionUC.CreateAction(ctx, testWorkspaceID, created.ID, "System Action", "Desc", "", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+
+		archived, err := actionUC.BulkArchiveActions(ctx, testWorkspaceID, []int64{action.ID}, usecase.ActorRef{Kind: usecase.ActorKindSystem})
+		gt.NoError(t, err).Required()
+		gt.Array(t, archived).Length(1).Required()
+		gt.Value(t, archived[0].ID).Equal(action.ID)
+		gt.Bool(t, archived[0].IsArchived()).True()
+	})
+}
+
+func TestActionUseCase_BulkArchiveActionsAsync(t *testing.T) {
+	t.Run("archives every action in the background after Wait", func(t *testing.T) {
+		repo := memory.New()
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "", nil)
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+
+		a1, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Async 1", "Desc", "", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+		a2, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Async 2", "Desc", "", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+
+		// Fire-and-forget: the call returns immediately and the archiving
+		// runs on a background goroutine.
+		actionUC.BulkArchiveActionsAsync(ctx, testWorkspaceID, []int64{a1.ID, a2.ID}, usecase.ActorRef{Kind: usecase.ActorKindSystem})
+
+		// Deterministically wait for the dispatched goroutine to finish.
+		async.Wait()
+
+		for _, id := range []int64{a1.ID, a2.ID} {
+			got, getErr := actionUC.GetAction(ctx, testWorkspaceID, id)
+			gt.NoError(t, getErr).Required()
+			gt.Bool(t, got.IsArchived()).True()
+		}
+
+		// Default listing is now empty.
+		remaining, err := actionUC.GetActionsByCase(ctx, testWorkspaceID, c.ID, interfaces.ActionListOptions{})
+		gt.NoError(t, err).Required()
+		gt.Array(t, remaining).Length(0)
+	})
+
+	t.Run("survives cancellation of the originating context", func(t *testing.T) {
+		repo := memory.New()
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "", nil)
+		baseCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		c, err := caseUC.CreateCase(baseCtx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		gt.NoError(t, err).Required()
+		action, err := actionUC.CreateAction(baseCtx, testWorkspaceID, c.ID, "Cancelled Ctx", "Desc", "", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+
+		// Cancel the originating context immediately, mimicking the HTTP
+		// request being torn down right after the resolver dispatched.
+		cancelCtx, cancel := context.WithCancel(baseCtx)
+		actionUC.BulkArchiveActionsAsync(cancelCtx, testWorkspaceID, []int64{action.ID}, usecase.ActorRef{Kind: usecase.ActorKindSystem})
+		cancel()
+
+		async.Wait()
+
+		// The archive still completed because async.Dispatch severs the
+		// cancellation signal from the background work.
+		got, err := actionUC.GetAction(baseCtx, testWorkspaceID, action.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, got.IsArchived()).True()
 	})
 }
 

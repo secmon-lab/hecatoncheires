@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@apollo/client'
-import { GET_ACTIONS_BY_CASE, GET_OPEN_CASE_ACTIONS, UPDATE_ACTION } from '../graphql/action'
+import { BULK_ARCHIVE_ACTIONS, GET_ACTIONS_BY_CASE, GET_OPEN_CASE_ACTIONS, UPDATE_ACTION } from '../graphql/action'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { GET_CASES } from '../graphql/case'
 import { useWorkspace } from '../contexts/workspace-context'
@@ -14,7 +14,9 @@ import {
   actionStatusSlug,
 } from '../utils/actionStatusStyle'
 import Button from '../components/Button'
+import Modal from '../components/Modal'
 import {
+  IconDots,
   IconPlus,
   IconSearch,
 } from '../components/Icons'
@@ -61,6 +63,14 @@ export default function ActionList() {
   const [showCreate, setShowCreate] = useState(false)
   const [draggingId, setDraggingId] = useState<number | null>(null)
   const [dragOverCol, setDragOverCol] = useState<string | null>(null)
+  // Column whose kebab menu is open, and the column pending bulk-archive
+  // confirmation. Both are status ids (null = none).
+  const [menuCol, setMenuCol] = useState<string | null>(null)
+  const [confirmArchiveCol, setConfirmArchiveCol] = useState<string | null>(null)
+  // Bulk archive is dispatched asynchronously server-side, so the immediate
+  // refetch still returns these actions as active. Hide them optimistically by
+  // id until they fall out of the board for real.
+  const [archivingIds, setArchivingIds] = useState<Set<number>>(new Set())
   const { statuses, isClosed, label } = useActionStatuses(currentWorkspace?.id)
   // Thread-mode workspaces show a Case board instead of the Action board.
   const { isThreadMode } = useCaseStatuses(currentWorkspace?.id)
@@ -97,13 +107,20 @@ export default function ActionList() {
     skip: !currentWorkspace,
   })
   const caseLabel = configData?.fieldConfiguration?.labels?.case || 'Case'
-  const [updateAction] = useMutation(UPDATE_ACTION, {
-    refetchQueries: [
+  const refetchActionsQuery = useMemo(
+    () =>
       filterCaseId != null
         ? { query: GET_ACTIONS_BY_CASE, variables: { workspaceId: currentWorkspace?.id, caseID: filterCaseId } }
         : { query: GET_OPEN_CASE_ACTIONS, variables: { workspaceId: currentWorkspace?.id } },
-    ],
+    [filterCaseId, currentWorkspace?.id],
+  )
+  const [updateAction] = useMutation(UPDATE_ACTION, {
+    refetchQueries: [refetchActionsQuery],
   })
+  // No refetchQueries: the server archives asynchronously, so an immediate
+  // refetch cannot reflect completion. The optimistic archivingIds set is what
+  // removes the cards; the board reconciles for real on the next natural load.
+  const [bulkArchiveActions, { loading: bulkArchiving }] = useMutation(BULK_ARCHIVE_ACTIONS)
 
   const actions: ActionRow[] = useMemo(() => {
     if (filterCaseId != null) return byCaseData?.actionsByCase || []
@@ -131,14 +148,17 @@ export default function ActionList() {
     return { id: filterCaseId, title: '' }
   }, [filterCaseId, openCases, actions])
   const filtered = useMemo(() => {
-    if (!search.trim()) return actions
+    const visible = archivingIds.size === 0
+      ? actions
+      : actions.filter((a) => !archivingIds.has(a.id))
+    if (!search.trim()) return visible
     const q = search.toLowerCase()
-    return actions.filter((a) =>
+    return visible.filter((a) =>
       a.title.toLowerCase().includes(q) ||
       (a.description || '').toLowerCase().includes(q) ||
       (a.case?.title || '').toLowerCase().includes(q),
     )
-  }, [actions, search])
+  }, [actions, search, archivingIds])
 
   const grouped = useMemo(() => {
     const map: Record<string, ActionRow[]> = {}
@@ -168,6 +188,30 @@ export default function ActionList() {
       })
     } catch (e) {
       console.error('Failed to move action', e)
+    }
+  }
+
+  const handleBulkArchive = async (colId: string) => {
+    if (!currentWorkspace) return
+    const ids = (grouped[colId] ?? []).map((a) => a.id)
+    setConfirmArchiveCol(null)
+    if (ids.length === 0) return
+    // Optimistically hide the cards: the server archives asynchronously, so an
+    // immediate refetch would still return them as active.
+    setArchivingIds((prev) => new Set([...prev, ...ids]))
+    try {
+      await bulkArchiveActions({
+        variables: { workspaceId: currentWorkspace.id, ids },
+      })
+    } catch (e) {
+      // The dispatch itself was rejected (e.g. auth / network); un-hide so the
+      // user sees the actions are still there rather than silently losing them.
+      console.error('Failed to bulk archive actions', e)
+      setArchivingIds((prev) => {
+        const next = new Set(prev)
+        ids.forEach((id) => next.delete(id))
+        return next
+      })
     }
   }
 
@@ -257,6 +301,44 @@ export default function ActionList() {
               />
               {label(col.id)}
               <span className="count">{(grouped[col.id] ?? []).length}</span>
+              {/* Bulk-archive affordance lives only on completed (closed)
+                  columns — that is where finished actions pile up. */}
+              {isClosed(col.id) && (
+                <div className={styles.columnMenuWrap}>
+                  <button
+                    type="button"
+                    className={styles.columnMenuButton}
+                    aria-label={t('ariaColumnMenu', { status: label(col.id) })}
+                    aria-haspopup="menu"
+                    aria-expanded={menuCol === col.id}
+                    data-testid={`kanban-column-menu-${actionStatusSlug(label(col.id))}`}
+                    onClick={() => setMenuCol((v) => (v === col.id ? null : col.id))}
+                  >
+                    <IconDots size={14} />
+                  </button>
+                  {menuCol === col.id && (
+                    <>
+                      <div
+                        aria-hidden="true"
+                        onClick={() => setMenuCol(null)}
+                        style={{ position: 'fixed', inset: 0, zIndex: 100 }}
+                      />
+                      <div role="menu" className={styles.kebabMenu}>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className={styles.kebabItem}
+                          disabled={(grouped[col.id] ?? []).length === 0}
+                          data-testid={`kanban-column-archive-all-${actionStatusSlug(label(col.id))}`}
+                          onClick={() => { setMenuCol(null); setConfirmArchiveCol(col.id) }}
+                        >
+                          {t('menuArchiveColumnActions')}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
             <div className="kan-list">
               {(grouped[col.id] ?? []).map((a) => {
@@ -324,6 +406,38 @@ export default function ActionList() {
         <ActionForm onClose={() => setShowCreate(false)} action={null} />
       )}
 
+      {confirmArchiveCol != null && (
+        <Modal
+          open
+          onClose={() => setConfirmArchiveCol(null)}
+          title={t('titleArchiveColumnActions')}
+          width={460}
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setConfirmArchiveCol(null)}>{t('btnCancel')}</Button>
+              <Button
+                variant="primary"
+                onClick={() => handleBulkArchive(confirmArchiveCol)}
+                disabled={bulkArchiving}
+                data-testid="confirm-bulk-archive-button"
+              >
+                {t('btnArchive')}
+              </Button>
+            </>
+          }
+        >
+          <div
+            style={{ fontSize: 13, lineHeight: 1.6 }}
+            dangerouslySetInnerHTML={{
+              __html: t('msgArchiveColumnActionsConfirm', {
+                count: String((grouped[confirmArchiveCol] ?? []).length),
+                status: escapeHtml(label(confirmArchiveCol)),
+              }),
+            }}
+          />
+        </Modal>
+      )}
+
       {detailActionId && (
         <ActionModal
           actionId={detailActionId}
@@ -332,4 +446,13 @@ export default function ActionList() {
       )}
     </div>
   )
+}
+
+function escapeHtml(s: string) {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
 }

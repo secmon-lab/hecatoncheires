@@ -521,6 +521,26 @@ Kanban card:
   `stepProgress.total > 0`. When an Action has no Steps the badge is
   hidden entirely.
 
+Kanban column (bulk archive):
+
+- The header of each **completed** (closed) status column carries a
+  kebab (⋯) menu. Closed columns are the ones listed in the workspace's
+  `actionConfig.closed`; open columns have no menu. "Archive all in this
+  column" archives every Action currently shown in that column after a
+  confirmation dialog that names the count. The menu item is disabled
+  when the column is empty.
+- Bulk archive reuses the single-archive path per Action, so each
+  archived Action records an `ARCHIVED` `ActionEvent` and posts the same
+  Slack notification as archiving it individually. Actions that are
+  already archived are skipped silently.
+- The archiving runs **asynchronously** on the server (via
+  `async.Dispatch`), so it finishes even if the browser navigates away or
+  the request is cancelled mid-flight. The WebUI hides the affected cards
+  optimistically the moment you confirm; the board reflects the persisted
+  result on its next load. Per-action failures during processing are
+  reported server-side (`errutil.Handle` → Sentry / log), not surfaced in
+  the UI.
+
 #### GraphQL
 
 Schema additions are listed in `graphql/schema.graphql`:
@@ -531,6 +551,19 @@ Schema additions are listed in `graphql/schema.graphql`:
   `deleteActionStep`
 - Inputs: `AddActionStepInput`, `SetActionStepDoneInput`,
   `RenameActionStepInput`, `DeleteActionStepInput`
+
+Action archiving mutations (in `graphql/schema.graphql`):
+
+- `archiveAction(workspaceId, id)` / `unarchiveAction(workspaceId, id)` —
+  archive or restore a single Action.
+- `bulkArchiveActions(workspaceId, ids: [Int!]!): [Int!]!` — archive
+  many Actions in one call (used by the completed-column "Archive all"
+  menu). The archiving is dispatched asynchronously and the call returns
+  immediately with the **accepted ids**; already-archived ids among them
+  are skipped during processing. Requires an authenticated user (checked
+  synchronously); each id is checked against its parent Case's
+  private-access rules inside the async worker, and per-action failures
+  are reported server-side rather than returned to the caller.
 
 #### Agent tools (gollem)
 

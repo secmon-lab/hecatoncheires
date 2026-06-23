@@ -395,6 +395,7 @@ type ComplexityRoot struct {
 		ArchiveAction           func(childComplexity int, workspaceID string, id int) int
 		ArchiveMemo             func(childComplexity int, workspaceID string, caseID int, id string) int
 		AssignCase              func(childComplexity int, workspaceID string, id int, userIDs []string) int
+		BulkArchiveActions      func(childComplexity int, workspaceID string, ids []int) int
 		CloseCase               func(childComplexity int, workspaceID string, id int) int
 		CreateAction            func(childComplexity int, workspaceID string, input graphql1.CreateActionInput) int
 		CreateCase              func(childComplexity int, workspaceID string, input graphql1.CreateCaseInput) int
@@ -630,6 +631,7 @@ type MutationResolver interface {
 	UpdateAction(ctx context.Context, workspaceID string, input graphql1.UpdateActionInput) (*graphql1.Action, error)
 	ArchiveAction(ctx context.Context, workspaceID string, id int) (*graphql1.Action, error)
 	UnarchiveAction(ctx context.Context, workspaceID string, id int) (*graphql1.Action, error)
+	BulkArchiveActions(ctx context.Context, workspaceID string, ids []int) ([]int, error)
 	PostActionSlackMessage(ctx context.Context, workspaceID string, id int) (*graphql1.Action, error)
 	AddActionStep(ctx context.Context, workspaceID string, input graphql1.AddActionStepInput) (*graphql1.ActionStep, error)
 	SetActionStepDone(ctx context.Context, workspaceID string, input graphql1.SetActionStepDoneInput) (*graphql1.ActionStep, error)
@@ -2167,6 +2169,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Mutation.AssignCase(childComplexity, args["workspaceId"].(string), args["id"].(int), args["userIDs"].([]string)), true
+	case "Mutation.bulkArchiveActions":
+		if e.complexity.Mutation.BulkArchiveActions == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_bulkArchiveActions_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Mutation.BulkArchiveActions(childComplexity, args["workspaceId"].(string), args["ids"].([]int)), true
 	case "Mutation.closeCase":
 		if e.complexity.Mutation.CloseCase == nil {
 			break
@@ -4272,6 +4285,12 @@ type Mutation {
   archiveAction(workspaceId: String!, id: Int!): Action!
   # Restore a previously archived action back to active state.
   unarchiveAction(workspaceId: String!, id: Int!): Action!
+  # Archive multiple actions in one call (e.g. clearing a completed Kanban
+  # column). The archiving runs asynchronously so it survives the request being
+  # cancelled mid-flight; the call returns immediately with the ids accepted
+  # for archiving. Already-archived ids among them are skipped during
+  # processing. Per-action failures are reported server-side, not to the caller.
+  bulkArchiveActions(workspaceId: String!, ids: [Int!]!): [Int!]!
   # Posts the Slack message for an Action whose initial post was missed
   # (legacy tool-created actions before the create paths were unified).
   # Errors if the action already has a Slack message timestamp or if the
@@ -4751,6 +4770,22 @@ func (ec *executionContext) field_Mutation_assignCase_args(ctx context.Context, 
 		return nil, err
 	}
 	args["userIDs"] = arg2
+	return args, nil
+}
+
+func (ec *executionContext) field_Mutation_bulkArchiveActions_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "workspaceId", ec.unmarshalNString2string)
+	if err != nil {
+		return nil, err
+	}
+	args["workspaceId"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "ids", ec.unmarshalNInt2ᚕintᚄ)
+	if err != nil {
+		return nil, err
+	}
+	args["ids"] = arg1
 	return args, nil
 }
 
@@ -14574,6 +14609,47 @@ func (ec *executionContext) fieldContext_Mutation_unarchiveAction(ctx context.Co
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Mutation_unarchiveAction_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Mutation_bulkArchiveActions(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Mutation_bulkArchiveActions,
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.resolvers.Mutation().BulkArchiveActions(ctx, fc.Args["workspaceId"].(string), fc.Args["ids"].([]int))
+		},
+		nil,
+		ec.marshalNInt2ᚕintᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Mutation_bulkArchiveActions(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Mutation",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Int does not have child fields")
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Mutation_bulkArchiveActions_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -25906,6 +25982,13 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 		case "unarchiveAction":
 			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
 				return ec._Mutation_unarchiveAction(ctx, field)
+			})
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "bulkArchiveActions":
+			out.Values[i] = ec.OperationContext.RootResolverMiddleware(innerCtx, func(ctx context.Context) (res graphql.Marshaler) {
+				return ec._Mutation_bulkArchiveActions(ctx, field)
 			})
 			if out.Values[i] == graphql.Null {
 				out.Invalids++

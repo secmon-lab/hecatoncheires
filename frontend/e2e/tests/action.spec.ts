@@ -207,6 +207,65 @@ test.describe('Action Management', () => {
     expect(persistedStatus).toBe('COMPLETED');
   });
 
+  test('should bulk archive every action in the completed column', async ({ page }) => {
+    const actionListPage = new ActionListPage(page);
+    const actionFormPage = new ActionFormPage(page);
+    const actionDetailPage = new ActionDetailPage(page);
+
+    // Create two actions and move both into the Completed column.
+    for (const title of ['Done Alpha', 'Done Beta']) {
+      await actionListPage.clickNewActionButton();
+      await actionFormPage.createAction({
+        title,
+        caseTitle: 'Parent Case for Actions',
+      });
+      await actionListPage.waitForBoardLoad();
+      await actionListPage.clickActionByTitle(title);
+      await actionDetailPage.waitForPageLoad();
+      await actionDetailPage.changeStatus('COMPLETED');
+      // Return to the board (closing the modal) before the next iteration.
+      await actionListPage.navigate(TEST_WORKSPACE_ID);
+      await actionListPage.waitForBoardLoad();
+    }
+
+    // Both completed actions are on the board.
+    await expect(actionListPage.getActionCardByTitle('Done Alpha')).toBeVisible();
+    await expect(actionListPage.getActionCardByTitle('Done Beta')).toBeVisible();
+
+    // The bulk-archive menu is exposed only on the completed (closed) column.
+    expect(await actionListPage.isColumnMenuVisible('Completed')).toBeTruthy();
+    expect(await actionListPage.isColumnMenuVisible('To Do')).toBeFalsy();
+    expect(await actionListPage.isColumnMenuVisible('In Progress')).toBeFalsy();
+
+    // Archive all actions in the Completed column.
+    await actionListPage.archiveAllInColumn('Completed');
+
+    // Both completed actions disappear from the board.
+    await expect(actionListPage.getActionCardByTitle('Done Alpha')).toBeHidden();
+    await expect(actionListPage.getActionCardByTitle('Done Beta')).toBeHidden();
+
+    // The archive round-trips to the backend: still gone after a reload.
+    await page.reload();
+    await actionListPage.waitForBoardLoad();
+    await expect(actionListPage.getActionCardByTitle('Done Alpha')).toBeHidden();
+    await expect(actionListPage.getActionCardByTitle('Done Beta')).toBeHidden();
+  });
+
+  test('should not show the bulk archive menu on open columns', async ({ page }) => {
+    const actionListPage = new ActionListPage(page);
+
+    // On a freshly loaded board, only the Completed column carries the menu.
+    expect(await actionListPage.isColumnMenuVisible('Completed')).toBeTruthy();
+    expect(await actionListPage.isColumnMenuVisible('Backlog')).toBeFalsy();
+    expect(await actionListPage.isColumnMenuVisible('To Do')).toBeFalsy();
+    expect(await actionListPage.isColumnMenuVisible('In Progress')).toBeFalsy();
+    expect(await actionListPage.isColumnMenuVisible('Blocked')).toBeFalsy();
+
+    // With no completed actions, the archive item is disabled.
+    await actionListPage.openColumnMenu('Completed');
+    expect(await actionListPage.isArchiveAllEnabled('Completed')).toBeFalsy();
+  });
+
   test('should filter actions by search text', async ({ page }) => {
     const actionListPage = new ActionListPage(page);
     const actionFormPage = new ActionFormPage(page);
