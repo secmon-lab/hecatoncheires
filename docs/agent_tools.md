@@ -68,16 +68,21 @@ for Jobs (both channel- and thread-mode).
 
 ### Knowledge tools (`knowledge`)
 
-Workspace-wide shared Knowledge (semantic + keyword searchable). Read tools are
-always offered; write tools are gated (see notes).
+Workspace-wide shared Knowledge (semantic + keyword searchable). Tags are
+first-class entities referenced by id; use `knowledge__list_tags` to discover
+existing tag ids before creating entries or new tags. Read tools are always
+offered; write tools are gated (see notes).
 
 | Tool | R/W | Purpose | Notes |
 |------|-----|---------|-------|
-| `knowledge__search_knowledge` | R | Search workspace knowledge (semantic + keyword, optional tag filter). | |
-| `knowledge__get_knowledge` | R | Fetch a knowledge entry (title, Markdown claim, tags) by id. | |
-| `knowledge__list_tags` | R | List the distinct tags in use. | |
-| `knowledge__create_knowledge` | W | Create a knowledge entry (Markdown claim, ≥ 1 tag). | Write is **withheld while the agent runs against a PRIVATE case**, so private contents cannot leak into shared knowledge. |
-| `knowledge__update_knowledge` | W | Update a knowledge entry's title / claim / tags (omit to preserve). | Same private-case gating. |
+| `knowledge__search_knowledge` | R | Search workspace knowledge (semantic + keyword, optional `tag_ids` filter). Results carry `tag_ids`. | |
+| `knowledge__get_knowledge` | R | Fetch a knowledge entry (title, Markdown claim, `tag_ids`) by id. | |
+| `knowledge__list_tags` | R | List all tags in use; returns objects with `id` and `name` (not plain strings). Call this first before creating tags or knowledge entries. | |
+| `knowledge__create_tag` | W | Create a new tag; returns its `id`. Must call `knowledge__list_tags` first to avoid creating duplicates. | Write is **withheld while the agent runs against a PRIVATE case**. |
+| `knowledge__update_tag` | W | Rename an existing tag by `id`. | Same private-case gating. |
+| `knowledge__delete_tag` | W | Delete a tag by `id`. Succeeds only when no knowledge entry references it. | Same private-case gating. |
+| `knowledge__create_knowledge` | W | Create a knowledge entry (Markdown claim, `tag_ids` of pre-existing tags — at least one required). | Same private-case gating. |
+| `knowledge__update_knowledge` | W | Update a knowledge entry's title / claim / `tag_ids` (full replacement of tag list; omit to preserve). | Same private-case gating. |
 
 ### Memo tools (`memo`)
 
@@ -146,7 +151,7 @@ the mention agent close a case?" (yes — see [Guardrails](#guardrails)).
 | `notion__*` | ✓ | — | — | ✓ | ✓ |
 | `github__*` | ✓ | — | — | ✓ | ✓ |
 | `webfetch` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `knowledge__*` | ✓ (write if case is non-private) | ✓ (write if case is non-private) | ✓ (write if case is non-private) | read-only | read-only |
+| `knowledge__*` (incl. tag CRUD) | ✓ (write if case is non-private) | ✓ (write if case is non-private) | ✓ (write if case is non-private) | read-only | read-only |
 | `memo__*` | ✓ (if memos enabled) | ✓ (if memos enabled) | ✓ (if memos enabled) | — | — |
 | `wsmeta` | — | — | — | — | planner only |
 
@@ -181,7 +186,7 @@ hard lock.
 | **No deleting cases.** | All agent contexts | No delete tool exists anywhere (archive replaces delete). |
 | **A Job will not archive actions or delete action steps.** | Jobs | **Code.** `core__archive_action` / `core__unarchive_action` / `core__delete_action_step` are not wired into the Job palette. |
 | **A Job posts only to the case's bound Slack channel.** | Jobs | **Code.** The only Slack write tool a Job gets is `slack__post_to_case_channel`, hard-pinned to `Case.SlackChannelID`. |
-| **Knowledge stays out of shared storage for private cases.** | Mention agent & Jobs on a private case | **Code.** `knowledge__create_knowledge` / `knowledge__update_knowledge` are withheld; only read tools remain. |
+| **Knowledge stays out of shared storage for private cases.** | Mention agent & Jobs on a private case | **Code.** `knowledge__create_knowledge` / `knowledge__update_knowledge` / `knowledge__create_tag` / `knowledge__update_tag` / `knowledge__delete_tag` are withheld; only read tools remain. |
 | **A Job cannot read its own past run traces.** | Jobs | **Prompt.** Determine idempotency from the current case state, the action list, and Slack history — not from prior traces. |
 | **Actions exist only in channel-mode cases.** | All agent contexts | **Code, at the usecase boundary.** The action (`core__*`) tools are withheld from thread-mode in all hosts, *and* `ActionUseCase.CreateAction` / `UpdateAction` (reparent) reject a thread-mode parent (`ErrCaseThreadModeNoActions`) — so every entry point (GraphQL, Slack, agent, eval), not just the tool wiring, is covered. |
 | **Case lifecycle changes follow the mode-specific path.** | All agent contexts | **Code, at the usecase boundary.** Thread-mode cases close/reopen only via board status (`UpdateCaseStatus`); `CloseCase` / `ReopenCase` reject thread-mode (`ErrCaseThreadModeUseStatus`), and `UpdateCaseStatus` rejects channel-mode — keeping `BoardStatus` and the lifecycle `Status` in sync. |

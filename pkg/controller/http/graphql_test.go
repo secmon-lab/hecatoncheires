@@ -4315,11 +4315,33 @@ cases:
 	gt.Array(t, draftsOut.Drafts).Length(0)
 }
 
+type tagPayload struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 type knowledgePayload struct {
-	ID    string   `json:"id"`
-	Title string   `json:"title"`
-	Claim string   `json:"claim"`
-	Tags  []string `json:"tags"`
+	ID    string       `json:"id"`
+	Title string       `json:"title"`
+	Claim string       `json:"claim"`
+	Tags  []tagPayload `json:"tags"`
+}
+
+// createTagForTest creates a tag via the GraphQL mutation and returns its id.
+func createTagForTest(t *testing.T, h http.Handler, ws, name string) string {
+	t.Helper()
+	rec := executeGraphQLRequest(t, h,
+		`mutation($ws: String!, $name: String) { createTag(workspaceId: $ws, name: $name) { id name } }`,
+		map[string]interface{}{"ws": ws, "name": name})
+	resp := parseGraphQLResponse(t, rec)
+	gt.Array(t, resp.Errors).Length(0).Required()
+	var out struct {
+		CreateTag tagPayload `json:"createTag"`
+	}
+	gt.NoError(t, json.Unmarshal(resp.Data, &out)).Required()
+	gt.String(t, out.CreateTag.ID).NotEqual("").Required()
+	gt.String(t, out.CreateTag.Name).Equal(name)
+	return out.CreateTag.ID
 }
 
 func TestGraphQLHandler_KnowledgeLifecycle(t *testing.T) {
@@ -4327,16 +4349,20 @@ func TestGraphQLHandler_KnowledgeLifecycle(t *testing.T) {
 	h, err := setupGraphQLServer(repo)
 	gt.NoError(t, err).Required()
 
+	// Tags must be created first; knowledge references them by id.
+	opsID := createTagForTest(t, h, testWorkspaceID, "ops")
+	githubID := createTagForTest(t, h, testWorkspaceID, "github")
+
 	// Create
 	createQuery := `mutation($ws: String!, $input: CreateKnowledgeInput!) {
-		createKnowledge(workspaceId: $ws, input: $input) { id title claim tags }
+		createKnowledge(workspaceId: $ws, input: $input) { id title claim tags { id name } }
 	}`
 	rec := executeGraphQLRequest(t, h, createQuery, map[string]interface{}{
 		"ws": testWorkspaceID,
 		"input": map[string]interface{}{
-			"title": "GitHub policy",
-			"claim": "## rule\n- pin actions by sha",
-			"tags":  []string{"ops", "github"},
+			"title":  "GitHub policy",
+			"claim":  "## rule\n- pin actions by sha",
+			"tagIds": []string{opsID, githubID},
 		},
 	})
 	resp := parseGraphQLResponse(t, rec)
@@ -4350,20 +4376,33 @@ func TestGraphQLHandler_KnowledgeLifecycle(t *testing.T) {
 	gt.String(t, created.Title).Equal("GitHub policy")
 	gt.String(t, created.Claim).Equal("## rule\n- pin actions by sha")
 	gt.Array(t, created.Tags).Length(2).Required()
+	gt.String(t, created.Tags[0].ID).Equal(opsID)
+	gt.String(t, created.Tags[1].ID).Equal(githubID)
 
 	// Create rejected without tags
 	recNoTags := executeGraphQLRequest(t, h, createQuery, map[string]interface{}{
 		"ws": testWorkspaceID,
 		"input": map[string]interface{}{
-			"title": "no tags",
-			"tags":  []string{},
+			"title":  "no tags",
+			"tagIds": []string{},
 		},
 	})
 	respNoTags := parseGraphQLResponse(t, recNoTags)
 	gt.Bool(t, len(respNoTags.Errors) > 0).True()
 
+	// Create rejected with an unknown tag id
+	recBadTag := executeGraphQLRequest(t, h, createQuery, map[string]interface{}{
+		"ws": testWorkspaceID,
+		"input": map[string]interface{}{
+			"title":  "bad tag",
+			"tagIds": []string{"00000000-0000-0000-0000-000000000000"},
+		},
+	})
+	respBadTag := parseGraphQLResponse(t, recBadTag)
+	gt.Bool(t, len(respBadTag.Errors) > 0).True()
+
 	// List
-	listQuery := `query($ws: String!) { knowledges(workspaceId: $ws) { id title tags } }`
+	listQuery := `query($ws: String!) { knowledges(workspaceId: $ws) { id title tags { id name } } }`
 	rec = executeGraphQLRequest(t, h, listQuery, map[string]interface{}{"ws": testWorkspaceID})
 	resp = parseGraphQLResponse(t, rec)
 	gt.Array(t, resp.Errors).Length(0).Required()
@@ -4374,18 +4413,20 @@ func TestGraphQLHandler_KnowledgeLifecycle(t *testing.T) {
 	gt.Array(t, listOut.Knowledges).Length(1).Required()
 	gt.String(t, listOut.Knowledges[0].ID).Equal(created.ID)
 
-	// knowledgeTags
-	rec = executeGraphQLRequest(t, h, `query($ws: String!) { knowledgeTags(workspaceId: $ws) }`,
+	// tags query returns the two created tags (sorted by CreatedAt asc)
+	rec = executeGraphQLRequest(t, h, `query($ws: String!) { tags(workspaceId: $ws) { id name } }`,
 		map[string]interface{}{"ws": testWorkspaceID})
 	resp = parseGraphQLResponse(t, rec)
 	gt.Array(t, resp.Errors).Length(0).Required()
 	var tagsOut struct {
-		KnowledgeTags []string `json:"knowledgeTags"`
+		Tags []tagPayload `json:"tags"`
 	}
 	gt.NoError(t, json.Unmarshal(resp.Data, &tagsOut)).Required()
-	gt.Array(t, tagsOut.KnowledgeTags).Length(2).Required()
-	gt.Value(t, tagsOut.KnowledgeTags[0]).Equal("github")
-	gt.Value(t, tagsOut.KnowledgeTags[1]).Equal("ops")
+	gt.Array(t, tagsOut.Tags).Length(2).Required()
+	gt.Value(t, tagsOut.Tags[0].ID).Equal(opsID)
+	gt.Value(t, tagsOut.Tags[0].Name).Equal("ops")
+	gt.Value(t, tagsOut.Tags[1].ID).Equal(githubID)
+	gt.Value(t, tagsOut.Tags[1].Name).Equal("github")
 
 	// searchKnowledge (substring fallback, no embed client wired in tests)
 	rec = executeGraphQLRequest(t, h,
@@ -4400,16 +4441,17 @@ func TestGraphQLHandler_KnowledgeLifecycle(t *testing.T) {
 	gt.Array(t, searchOut.SearchKnowledge).Length(1).Required()
 	gt.String(t, searchOut.SearchKnowledge[0].ID).Equal(created.ID)
 
-	// Update (title + tags)
+	// Update (title + tags). A new tag must be created before it can be referenced.
+	securityID := createTagForTest(t, h, testWorkspaceID, "security")
 	updateQuery := `mutation($ws: String!, $input: UpdateKnowledgeInput!) {
-		updateKnowledge(workspaceId: $ws, input: $input) { id title tags }
+		updateKnowledge(workspaceId: $ws, input: $input) { id title tags { id name } }
 	}`
 	rec = executeGraphQLRequest(t, h, updateQuery, map[string]interface{}{
 		"ws": testWorkspaceID,
 		"input": map[string]interface{}{
-			"id":    created.ID,
-			"title": "GitHub policy v2",
-			"tags":  []string{"ops", "github", "security"},
+			"id":     created.ID,
+			"title":  "GitHub policy v2",
+			"tagIds": []string{opsID, githubID, securityID},
 		},
 	})
 	resp = parseGraphQLResponse(t, rec)

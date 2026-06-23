@@ -151,9 +151,9 @@ type CreateGitHubSourceInput struct {
 }
 
 type CreateKnowledgeInput struct {
-	Title string   `json:"title"`
-	Claim *string  `json:"claim,omitempty"`
-	Tags  []string `json:"tags"`
+	Title  string   `json:"title"`
+	Claim  *string  `json:"claim,omitempty"`
+	TagIds []string `json:"tagIds"`
 }
 
 type CreateMemoInput struct {
@@ -380,7 +380,7 @@ type Knowledge struct {
 	ID        string    `json:"id"`
 	Title     string    `json:"title"`
 	Claim     string    `json:"claim"`
-	Tags      []string  `json:"tags"`
+	Tags      []*Tag    `json:"tags"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
@@ -508,6 +508,13 @@ type SubmitDraftInput struct {
 	Fields      []*FieldValueInput `json:"fields,omitempty"`
 }
 
+type Tag struct {
+	ID        string    `json:"id"`
+	Name      *string   `json:"name,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
 type UpdateActionInput struct {
 	ID             int        `json:"id"`
 	CaseID         *int       `json:"caseID,omitempty"`
@@ -548,10 +555,10 @@ type UpdateGitHubSourceInput struct {
 }
 
 type UpdateKnowledgeInput struct {
-	ID    string   `json:"id"`
-	Title *string  `json:"title,omitempty"`
-	Claim *string  `json:"claim,omitempty"`
-	Tags  []string `json:"tags,omitempty"`
+	ID     string   `json:"id"`
+	Title  *string  `json:"title,omitempty"`
+	Claim  *string  `json:"claim,omitempty"`
+	TagIds []string `json:"tagIds,omitempty"`
 }
 
 type UpdateMemoInput struct {

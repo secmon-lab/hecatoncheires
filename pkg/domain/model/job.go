@@ -245,6 +245,12 @@ type Job struct {
 	// loader normalises before Validate runs.
 	Strategy JobStrategy
 
+	// Reflection, when true, runs a post-execution reflection pass after a
+	// successful run: a knowledge-only agent reviews the run's conversation
+	// history and curates the workspace's shared Knowledge / Tags. Defaults
+	// to false. Skipped for private cases and for failed runs.
+	Reflection bool
+
 	// Events maps the event domains this Job subscribes to. Validate
 	// guarantees at least one non-nil entry.
 	Events JobEvents

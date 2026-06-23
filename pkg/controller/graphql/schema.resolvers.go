@@ -1056,39 +1056,82 @@ func (r *mutationResolver) CreateKnowledge(ctx context.Context, workspaceID stri
 		claim = *input.Claim
 	}
 	created, err := r.UseCases.Knowledge.CreateKnowledge(ctx, workspaceID, usecase.CreateKnowledgeInput{
-		Title: input.Title,
-		Claim: claim,
-		Tags:  input.Tags,
+		Title:  input.Title,
+		Claim:  claim,
+		TagIDs: toTagIDs(input.TagIds),
 	})
 	if err != nil {
 		return nil, err
 	}
-	return toGraphQLKnowledge(created), nil
+	tagByID, err := r.tagByIDFor(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLKnowledge(created, tagByID), nil
 }
 
 // UpdateKnowledge is the resolver for the updateKnowledge field.
 func (r *mutationResolver) UpdateKnowledge(ctx context.Context, workspaceID string, input graphql1.UpdateKnowledgeInput) (*graphql1.Knowledge, error) {
-	// Tags is a nullable list: nil means "leave unchanged", a non-nil slice
+	// TagIds is a nullable list: nil means "leave unchanged", a non-nil slice
 	// replaces the tag set (the usecase rejects an empty replacement).
-	var tags *[]string
-	if input.Tags != nil {
-		tags = &input.Tags
+	var tagIDs *[]model.TagID
+	if input.TagIds != nil {
+		ids := toTagIDs(input.TagIds)
+		tagIDs = &ids
 	}
 	updated, err := r.UseCases.Knowledge.UpdateKnowledge(ctx, workspaceID, usecase.UpdateKnowledgeInput{
-		ID:    model.KnowledgeID(input.ID),
-		Title: input.Title,
-		Claim: input.Claim,
-		Tags:  tags,
+		ID:     model.KnowledgeID(input.ID),
+		Title:  input.Title,
+		Claim:  input.Claim,
+		TagIDs: tagIDs,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return toGraphQLKnowledge(updated), nil
+	tagByID, err := r.tagByIDFor(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLKnowledge(updated, tagByID), nil
 }
 
 // DeleteKnowledge is the resolver for the deleteKnowledge field.
 func (r *mutationResolver) DeleteKnowledge(ctx context.Context, workspaceID string, id string) (bool, error) {
 	if err := r.UseCases.Knowledge.DeleteKnowledge(ctx, workspaceID, model.KnowledgeID(id)); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// CreateTag is the resolver for the createTag field.
+func (r *mutationResolver) CreateTag(ctx context.Context, workspaceID string, name *string) (*graphql1.Tag, error) {
+	n := ""
+	if name != nil {
+		n = *name
+	}
+	created, err := r.UseCases.Tag.CreateTag(ctx, workspaceID, n)
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLTag(created), nil
+}
+
+// UpdateTag is the resolver for the updateTag field.
+func (r *mutationResolver) UpdateTag(ctx context.Context, workspaceID string, id string, name *string) (*graphql1.Tag, error) {
+	n := ""
+	if name != nil {
+		n = *name
+	}
+	updated, err := r.UseCases.Tag.UpdateTag(ctx, workspaceID, model.TagID(id), n)
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLTag(updated), nil
+}
+
+// DeleteTag is the resolver for the deleteTag field.
+func (r *mutationResolver) DeleteTag(ctx context.Context, workspaceID string, id string) (bool, error) {
+	if err := r.UseCases.Tag.DeleteTag(ctx, workspaceID, model.TagID(id)); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -1632,14 +1675,18 @@ func (r *queryResolver) MemoConfiguration(ctx context.Context, workspaceID strin
 }
 
 // Knowledges is the resolver for the knowledges field.
-func (r *queryResolver) Knowledges(ctx context.Context, workspaceID string, tags []string) ([]*graphql1.Knowledge, error) {
-	items, err := r.UseCases.Knowledge.ListKnowledge(ctx, workspaceID, interfaces.KnowledgeListOptions{Tags: tags})
+func (r *queryResolver) Knowledges(ctx context.Context, workspaceID string, tagIds []string) ([]*graphql1.Knowledge, error) {
+	items, err := r.UseCases.Knowledge.ListKnowledge(ctx, workspaceID, interfaces.KnowledgeListOptions{TagIDs: toTagIDs(tagIds)})
+	if err != nil {
+		return nil, err
+	}
+	tagByID, err := r.tagByIDFor(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
 	result := make([]*graphql1.Knowledge, len(items))
 	for i, k := range items {
-		result[i] = toGraphQLKnowledge(k)
+		result[i] = toGraphQLKnowledge(k, tagByID)
 	}
 	return result, nil
 }
@@ -1650,21 +1697,16 @@ func (r *queryResolver) Knowledge(ctx context.Context, workspaceID string, id st
 	if err != nil {
 		return nil, err
 	}
-	return toGraphQLKnowledge(k), nil
-}
-
-// KnowledgeTags is the resolver for the knowledgeTags field.
-func (r *queryResolver) KnowledgeTags(ctx context.Context, workspaceID string) ([]string, error) {
-	tags, err := r.UseCases.Knowledge.ListTags(ctx, workspaceID)
+	tagByID, err := r.tagByIDFor(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
-	return tags, nil
+	return toGraphQLKnowledge(k, tagByID), nil
 }
 
 // SearchKnowledge is the resolver for the searchKnowledge field.
-func (r *queryResolver) SearchKnowledge(ctx context.Context, workspaceID string, query string, tags []string, limit *int) ([]*graphql1.Knowledge, error) {
-	in := usecase.SearchKnowledgeInput{Query: query, Tags: tags}
+func (r *queryResolver) SearchKnowledge(ctx context.Context, workspaceID string, query string, tagIds []string, limit *int) ([]*graphql1.Knowledge, error) {
+	in := usecase.SearchKnowledgeInput{Query: query, TagIDs: toTagIDs(tagIds)}
 	if limit != nil {
 		in.Limit = *limit
 	}
@@ -1672,11 +1714,37 @@ func (r *queryResolver) SearchKnowledge(ctx context.Context, workspaceID string,
 	if err != nil {
 		return nil, err
 	}
+	tagByID, err := r.tagByIDFor(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
 	result := make([]*graphql1.Knowledge, len(items))
 	for i, k := range items {
-		result[i] = toGraphQLKnowledge(k)
+		result[i] = toGraphQLKnowledge(k, tagByID)
 	}
 	return result, nil
+}
+
+// Tags is the resolver for the tags field.
+func (r *queryResolver) Tags(ctx context.Context, workspaceID string) ([]*graphql1.Tag, error) {
+	items, err := r.UseCases.Tag.ListTags(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*graphql1.Tag, len(items))
+	for i, t := range items {
+		result[i] = toGraphQLTag(t)
+	}
+	return result, nil
+}
+
+// Tag is the resolver for the tag field.
+func (r *queryResolver) Tag(ctx context.Context, workspaceID string, id string) (*graphql1.Tag, error) {
+	t, err := r.UseCases.Tag.GetTag(ctx, workspaceID, model.TagID(id))
+	if err != nil {
+		return nil, err
+	}
+	return toGraphQLTag(t), nil
 }
 
 // Action returns ActionResolver implementation.
@@ -1703,3 +1771,19 @@ type caseResolver struct{ *Resolver }
 type memoResolver struct{ *Resolver }
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
+
+// !!! WARNING !!!
+// The code below was going to be deleted when updating resolvers. It has been copied here so you have
+// one last chance to move it out of harms way if you want. There are two reasons this happens:
+//  - When renaming or deleting a resolver the old code will be put in here. You can safely delete
+//    it when you're done.
+//  - You have helper methods in this file. Move them out to keep these resolver files clean.
+/*
+	func (r *queryResolver) KnowledgeTags(ctx context.Context, workspaceID string) ([]string, error) {
+	tags, err := r.UseCases.Knowledge.ListTags(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return tags, nil
+}
+*/

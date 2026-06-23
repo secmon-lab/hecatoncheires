@@ -230,3 +230,23 @@ func TestJob_Listens(t *testing.T) {
 		gt.Bool(t, s.ListensScheduled()).True()
 	})
 }
+
+func TestJob_Reflection_Field(t *testing.T) {
+	// Reflection=true passes Validate and the field is retained on the struct.
+	j := &model.Job{
+		ID:         "reflect-job",
+		Prompt:     "do a thing",
+		Reflection: true,
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	gt.NoError(t, j.Validate())
+	gt.Bool(t, j.Reflection).True()
+
+	// Reflection=false also passes Validate.
+	j2 := *j
+	j2.Reflection = false
+	gt.NoError(t, j2.Validate())
+	gt.Bool(t, j2.Reflection).False()
+}

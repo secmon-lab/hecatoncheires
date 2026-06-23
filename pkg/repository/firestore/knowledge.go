@@ -29,14 +29,14 @@ func (r *knowledgeRepository) knowledgesCollection(workspaceID string) *firestor
 	return r.client.Collection("workspaces").Doc(workspaceID).Collection("knowledges")
 }
 
-// knowledgeHasAllTags reports whether k carries every tag in want (AND).
-func knowledgeHasAllTags(k *model.Knowledge, want []string) bool {
+// knowledgeHasAllTags reports whether k references every tag id in want (AND).
+func knowledgeHasAllTags(k *model.Knowledge, want []model.TagID) bool {
 	if len(want) == 0 {
 		return true
 	}
-	set := make(map[string]struct{}, len(k.Tags))
-	for _, t := range k.Tags {
-		set[t] = struct{}{}
+	set := make(map[model.TagID]struct{}, len(k.TagIDs))
+	for _, id := range k.TagIDs {
+		set[id] = struct{}{}
 	}
 	for _, w := range want {
 		if _, ok := set[w]; !ok {
@@ -98,9 +98,9 @@ func (r *knowledgeRepository) List(ctx context.Context, workspaceID string, opts
 			return nil, goerr.Wrap(err, "failed to decode knowledge", goerr.V("doc_id", docSnap.Ref.ID))
 		}
 
-		// Tag AND filter is applied in memory: storing tags as an array and
+		// Tag AND filter is applied in memory: storing tag ids as an array and
 		// filtering here avoids a Firestore composite index entirely.
-		if !knowledgeHasAllTags(&k, opts.Tags) {
+		if !knowledgeHasAllTags(&k, opts.TagIDs) {
 			continue
 		}
 

@@ -1,6 +1,7 @@
 package graphql
 
 import (
+	"context"
 	"sort"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
@@ -311,13 +312,56 @@ func toGraphQLMemo(m *model.Memo, workspaceID string) *graphql1.Memo {
 	}
 }
 
+// toGraphQLTag maps a domain Tag to its GraphQL representation. Name is exposed
+// as a nullable scalar (empty string → nil) since the tag name is optional.
+func toGraphQLTag(t *model.Tag) *graphql1.Tag {
+	var name *string
+	if t.Name != "" {
+		n := t.Name
+		name = &n
+	}
+	return &graphql1.Tag{
+		ID:        string(t.ID),
+		Name:      name,
+		CreatedAt: t.CreatedAt,
+		UpdatedAt: t.UpdatedAt,
+	}
+}
+
+// toTagIDs converts a slice of GraphQL ID strings into domain TagIDs.
+func toTagIDs(ids []string) []model.TagID {
+	out := make([]model.TagID, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, model.TagID(id))
+	}
+	return out
+}
+
+// tagByIDFor loads the workspace's tags into a lookup map for resolving
+// Knowledge.tags. The tag vocabulary is small, so one List per request keeps
+// the conversion free of N+1 lookups.
+func (r *Resolver) tagByIDFor(ctx context.Context, workspaceID string) (map[model.TagID]*model.Tag, error) {
+	tags, err := r.UseCases.Tag.ListTags(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[model.TagID]*model.Tag, len(tags))
+	for _, t := range tags {
+		m[t.ID] = t
+	}
+	return m, nil
+}
+
 // toGraphQLKnowledge maps a domain Knowledge to its GraphQL representation. The
-// embedding vector is intentionally not exposed. Tags is normalized to a non-nil
-// slice to satisfy the [String!]! contract.
-func toGraphQLKnowledge(k *model.Knowledge) *graphql1.Knowledge {
-	tags := k.Tags
-	if tags == nil {
-		tags = []string{}
+// embedding vector is intentionally not exposed. TagIDs are resolved to Tag
+// objects via tagByID; ids missing from the map are skipped (never a nil
+// element) and the slice is never nil, to satisfy the [Tag!]! contract.
+func toGraphQLKnowledge(k *model.Knowledge, tagByID map[model.TagID]*model.Tag) *graphql1.Knowledge {
+	tags := make([]*graphql1.Tag, 0, len(k.TagIDs))
+	for _, id := range k.TagIDs {
+		if t, ok := tagByID[id]; ok {
+			tags = append(tags, toGraphQLTag(t))
+		}
 	}
 	return &graphql1.Knowledge{
 		ID:        string(k.ID),

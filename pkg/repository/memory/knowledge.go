@@ -40,9 +40,9 @@ func copyKnowledge(k *model.Knowledge) *model.Knowledge {
 		CreatedAt:   k.CreatedAt,
 		UpdatedAt:   k.UpdatedAt,
 	}
-	if k.Tags != nil {
-		copied.Tags = make([]string, len(k.Tags))
-		copy(copied.Tags, k.Tags)
+	if k.TagIDs != nil {
+		copied.TagIDs = make([]model.TagID, len(k.TagIDs))
+		copy(copied.TagIDs, k.TagIDs)
 	}
 	if k.Embedding != nil {
 		copied.Embedding = make([]float64, len(k.Embedding))
@@ -51,14 +51,14 @@ func copyKnowledge(k *model.Knowledge) *model.Knowledge {
 	return copied
 }
 
-// knowledgeHasAllTags reports whether k carries every tag in want (AND).
-func knowledgeHasAllTags(k *model.Knowledge, want []string) bool {
+// knowledgeHasAllTags reports whether k references every tag id in want (AND).
+func knowledgeHasAllTags(k *model.Knowledge, want []model.TagID) bool {
 	if len(want) == 0 {
 		return true
 	}
-	set := make(map[string]struct{}, len(k.Tags))
-	for _, t := range k.Tags {
-		set[t] = struct{}{}
+	set := make(map[model.TagID]struct{}, len(k.TagIDs))
+	for _, id := range k.TagIDs {
+		set[id] = struct{}{}
 	}
 	for _, w := range want {
 		if _, ok := set[w]; !ok {
@@ -110,7 +110,7 @@ func (r *knowledgeRepository) List(ctx context.Context, workspaceID string, opts
 
 	items := make([]*model.Knowledge, 0, len(ws))
 	for _, k := range ws {
-		if !knowledgeHasAllTags(k, opts.Tags) {
+		if !knowledgeHasAllTags(k, opts.TagIDs) {
 			continue
 		}
 		items = append(items, copyKnowledge(k))

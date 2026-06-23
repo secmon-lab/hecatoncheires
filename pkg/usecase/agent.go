@@ -80,6 +80,10 @@ type AgentDeps struct {
 	// the agent gets no knowledge tools.
 	KnowledgeUC *KnowledgeUseCase
 
+	// TagUC backs the workspace-wide tag tools (and tag existence checks). It is
+	// required alongside KnowledgeUC for any knowledge tools to be wired.
+	TagUC *TagUseCase
+
 	// CaseUC is required for thread mode: the thread-case orchestrator applies
 	// the agent's materialize / close decisions through it so every case
 	// mutation funnels through the single CaseUseCase entry point.
@@ -123,8 +127,8 @@ func NewAgentUseCase(deps AgentDeps) *AgentUseCase {
 			CaseUC:              NewCaseToolAdapter(deps.CaseUC),
 			CaseRefUC:           deps.CaseUC,
 			MemoUC:              NewMemoToolAdapter(deps.MemoUC),
-			KnowledgeAccessor:   NewKnowledgeToolAccessor(deps.KnowledgeUC),
-			KnowledgeMutator:    NewKnowledgeToolMutator(deps.KnowledgeUC),
+			KnowledgeAccessor:   NewKnowledgeToolAccessor(deps.KnowledgeUC, deps.TagUC),
+			KnowledgeMutator:    NewKnowledgeToolMutator(deps.KnowledgeUC, deps.TagUC),
 			HeartbeatInterval:   agentcommon.DefaultHeartbeatInterval,
 			HeartbeatStaleAfter: agentcommon.DefaultHeartbeatStaleAfter,
 		}

@@ -32,20 +32,26 @@ func NewKnowledgeUseCase(repo interfaces.Repository, embedClient interfaces.Embe
 // usecase entry point (before any persistence).
 var ErrKnowledgeInput = goerr.New("invalid knowledge input")
 
+// ErrUnknownTag is returned when a knowledge create/update references a tag id
+// that does not exist in the workspace. The operation is rejected wholesale —
+// no partial write occurs.
+var ErrUnknownTag = goerr.New("unknown tag id")
+
 // CreateKnowledgeInput is the domain-level input for creating a knowledge entry.
 type CreateKnowledgeInput struct {
-	Title string
-	Claim string
-	Tags  []string
+	Title  string
+	Claim  string
+	TagIDs []model.TagID
 }
 
 // Validate enforces input invariants at the entry point: a title and at least
-// one non-empty tag are required, and the claim must be within the length limit.
+// one tag id are required, and the claim must be within the length limit. Tag
+// existence is verified separately against the repository in CreateKnowledge.
 func (input CreateKnowledgeInput) Validate() error {
 	if strings.TrimSpace(input.Title) == "" {
 		return goerr.Wrap(ErrKnowledgeInput, "title is required")
 	}
-	if len(model.NormalizeTags(input.Tags)) == 0 {
+	if len(model.NormalizeTagIDs(input.TagIDs)) == 0 {
 		return goerr.Wrap(ErrKnowledgeInput, "at least one tag is required")
 	}
 	if utf8.RuneCountInString(input.Claim) > model.MaxClaimLength {
@@ -56,12 +62,12 @@ func (input CreateKnowledgeInput) Validate() error {
 }
 
 // UpdateKnowledgeInput is the domain-level input for updating a knowledge entry.
-// Title / Claim / Tags are pointers: nil means "leave unchanged".
+// Title / Claim / TagIDs are pointers: nil means "leave unchanged".
 type UpdateKnowledgeInput struct {
-	ID    model.KnowledgeID
-	Title *string
-	Claim *string
-	Tags  *[]string
+	ID     model.KnowledgeID
+	Title  *string
+	Claim  *string
+	TagIDs *[]model.TagID
 }
 
 // Validate enforces input invariants for the fields that are present.
@@ -72,7 +78,7 @@ func (input UpdateKnowledgeInput) Validate() error {
 	if input.Title != nil && strings.TrimSpace(*input.Title) == "" {
 		return goerr.Wrap(ErrKnowledgeInput, "title must not be empty")
 	}
-	if input.Tags != nil && len(model.NormalizeTags(*input.Tags)) == 0 {
+	if input.TagIDs != nil && len(model.NormalizeTagIDs(*input.TagIDs)) == 0 {
 		return goerr.Wrap(ErrKnowledgeInput, "at least one tag is required")
 	}
 	if input.Claim != nil && utf8.RuneCountInString(*input.Claim) > model.MaxClaimLength {
@@ -87,8 +93,8 @@ type SearchKnowledgeInput struct {
 	// Query is the natural-language search text. Empty returns the (optionally
 	// tag-filtered) list ordered by CreatedAt.
 	Query string
-	// Tags applies an AND pre-filter before ranking.
-	Tags []string
+	// TagIDs applies an AND pre-filter before ranking.
+	TagIDs []model.TagID
 	// Limit caps the number of returned entries. Zero or negative means no cap;
 	// the caller (resolver / tool) supplies the default.
 	Limit int
@@ -101,13 +107,18 @@ func (uc *KnowledgeUseCase) CreateKnowledge(ctx context.Context, workspaceID str
 		return nil, err
 	}
 
+	tagIDs := model.NormalizeTagIDs(input.TagIDs)
+	if err := uc.verifyTagsExist(ctx, workspaceID, tagIDs); err != nil {
+		return nil, err
+	}
+
 	now := time.Now().UTC()
 	knowledge := &model.Knowledge{
 		ID:          model.NewKnowledgeID(),
 		WorkspaceID: workspaceID,
 		Title:       strings.TrimSpace(input.Title),
 		Claim:       input.Claim,
-		Tags:        model.NormalizeTags(input.Tags),
+		TagIDs:      tagIDs,
 		CreatorID:   creatorFromContext(ctx),
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -166,8 +177,12 @@ func (uc *KnowledgeUseCase) UpdateKnowledge(ctx context.Context, workspaceID str
 		knowledge.Claim = *input.Claim
 		contentChanged = true
 	}
-	if input.Tags != nil {
-		knowledge.Tags = model.NormalizeTags(*input.Tags)
+	if input.TagIDs != nil {
+		tagIDs := model.NormalizeTagIDs(*input.TagIDs)
+		if err := uc.verifyTagsExist(ctx, workspaceID, tagIDs); err != nil {
+			return nil, err
+		}
+		knowledge.TagIDs = tagIDs
 	}
 	if contentChanged {
 		knowledge.Embedding = uc.embedKnowledge(ctx, knowledge)
@@ -195,32 +210,41 @@ func (uc *KnowledgeUseCase) DeleteKnowledge(ctx context.Context, workspaceID str
 	return nil
 }
 
-// ListTags returns the distinct set of tags used across the workspace, sorted.
-func (uc *KnowledgeUseCase) ListTags(ctx context.Context, workspaceID string) ([]string, error) {
-	items, err := uc.repo.Knowledge().List(ctx, workspaceID, interfaces.KnowledgeListOptions{})
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to list knowledge tags", goerr.V("workspace_id", workspaceID))
+// verifyTagsExist ensures every tag id exists in the workspace. It loads the
+// workspace tag set once (the vocabulary is small) and checks membership; a
+// single missing id fails the whole operation so no knowledge is ever persisted
+// referencing a non-existent tag. This is the single authoritative guard for
+// every knowledge write path (GraphQL, agent tools, reflection).
+func (uc *KnowledgeUseCase) verifyTagsExist(ctx context.Context, workspaceID string, ids []model.TagID) error {
+	if len(ids) == 0 {
+		return goerr.Wrap(ErrKnowledgeInput, "at least one tag is required")
 	}
-	seen := make(map[string]struct{})
-	tags := make([]string, 0)
-	for _, k := range items {
-		for _, t := range k.Tags {
-			if _, ok := seen[t]; ok {
-				continue
-			}
-			seen[t] = struct{}{}
-			tags = append(tags, t)
+	tags, err := uc.repo.Tag().List(ctx, workspaceID)
+	if err != nil {
+		return goerr.Wrap(err, "failed to list tags for verification", goerr.V("workspace_id", workspaceID))
+	}
+	known := make(map[model.TagID]struct{}, len(tags))
+	for _, t := range tags {
+		known[t.ID] = struct{}{}
+	}
+	missing := make([]model.TagID, 0)
+	for _, id := range ids {
+		if _, ok := known[id]; !ok {
+			missing = append(missing, id)
 		}
 	}
-	sort.Strings(tags)
-	return tags, nil
+	if len(missing) > 0 {
+		return goerr.Wrap(ErrUnknownTag, "knowledge references unknown tag(s); create the tag first",
+			goerr.V("workspace_id", workspaceID), goerr.V("missing_tag_ids", missing))
+	}
+	return nil
 }
 
 // SearchKnowledge ranks entries by semantic similarity to the query. When no
 // embedding is available (no embed client, embedding failure, or candidates
 // without vectors) it falls back to a substring-match score over title + claim.
 func (uc *KnowledgeUseCase) SearchKnowledge(ctx context.Context, workspaceID string, input SearchKnowledgeInput) ([]*model.Knowledge, error) {
-	items, err := uc.repo.Knowledge().List(ctx, workspaceID, interfaces.KnowledgeListOptions{Tags: input.Tags})
+	items, err := uc.repo.Knowledge().List(ctx, workspaceID, interfaces.KnowledgeListOptions{TagIDs: input.TagIDs})
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to list knowledge for search", goerr.V("workspace_id", workspaceID))
 	}
