@@ -61,9 +61,9 @@ type Service interface {
 	GetTeamURL(ctx context.Context) (string, error)
 
 	// PostMessage posts a Block Kit message to a channel and returns the message timestamp.
-	// The text parameter is used as a fallback for notifications.
-	// Pass PostMessageOption values (e.g. WithDisableUnfurl) to tweak posting behavior.
-	PostMessage(ctx context.Context, channelID string, blocks []slack.Block, text string, opts ...PostMessageOption) (string, error)
+	// The text parameter is used as a fallback for notifications. Link / media
+	// unfurling is always suppressed (see the client implementation).
+	PostMessage(ctx context.Context, channelID string, blocks []slack.Block, text string) (string, error)
 
 	// UpdateMessage updates an existing Block Kit message identified by channel and timestamp.
 	UpdateMessage(ctx context.Context, channelID string, timestamp string, blocks []slack.Block, text string) error
@@ -84,9 +84,9 @@ type Service interface {
 	// PostMessageWithAttachments posts a message whose visible body lives
 	// inside one or more Slack attachments. Top-level blocks are not used;
 	// the text parameter is the fallback used for notification previews.
-	// Pass PostMessageOption values (e.g. WithDisableUnfurl) to tweak
-	// posting behaviour. Returns the message timestamp.
-	PostMessageWithAttachments(ctx context.Context, channelID string, text string, attachments []slack.Attachment, opts ...PostMessageOption) (string, error)
+	// Link / media unfurling is always suppressed (see the client
+	// implementation). Returns the message timestamp.
+	PostMessageWithAttachments(ctx context.Context, channelID string, text string, attachments []slack.Attachment) (string, error)
 
 	// UpdateMessageWithAttachments is the update counterpart of
 	// PostMessageWithAttachments. Slack replaces the attachments array
@@ -172,39 +172,6 @@ func ApplyPostThreadOptions(opts ...PostThreadOption) PostThreadOptions {
 // inside the thread while raising its visibility to all members.
 func WithBroadcastToChannel() PostThreadOption {
 	return func(o *PostThreadOptions) { o.Broadcast = true }
-}
-
-// PostMessageOptions captures the resolved configuration produced by applying
-// PostMessageOption values. Exposed so test fakes can observe what the caller
-// requested.
-type PostMessageOptions struct {
-	DisableLinkUnfurl  bool
-	DisableMediaUnfurl bool
-}
-
-// PostMessageOption tweaks how a channel message is posted via PostMessage.
-// Use the With* constructors below; do not construct values manually.
-type PostMessageOption func(*PostMessageOptions)
-
-// ApplyPostMessageOptions walks the given options and returns the resulting
-// configuration. Used internally by the client and by test fakes that need to
-// observe what options were requested.
-func ApplyPostMessageOptions(opts ...PostMessageOption) PostMessageOptions {
-	var cfg PostMessageOptions
-	for _, o := range opts {
-		o(&cfg)
-	}
-	return cfg
-}
-
-// WithDisableUnfurl suppresses Slack's link / media unfurl behaviour for the
-// posted message. Use when the message embeds Slack permalinks as inline
-// labels (`<URL|label>`) and the auto-generated preview card would be noise.
-func WithDisableUnfurl() PostMessageOption {
-	return func(o *PostMessageOptions) {
-		o.DisableLinkUnfurl = true
-		o.DisableMediaUnfurl = true
-	}
 }
 
 // UserGroup represents a Slack user group

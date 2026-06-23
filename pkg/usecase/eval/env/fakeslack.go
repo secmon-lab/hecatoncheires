@@ -66,7 +66,7 @@ func (f *fakeSlack) PostThreadMessage(_ context.Context, channelID, threadTS str
 	return f.record("thread_message", channelID, threadTS, text), nil
 }
 
-func (f *fakeSlack) PostMessage(_ context.Context, channelID string, _ []goslack.Block, text string, _ ...slacksvc.PostMessageOption) (string, error) {
+func (f *fakeSlack) PostMessage(_ context.Context, channelID string, _ []goslack.Block, text string) (string, error) {
 	return f.record("message", channelID, "", text), nil
 }
 
@@ -128,7 +128,7 @@ func (f *fakeSlack) PostMessageWithAttachment(_ context.Context, channelID, text
 	return f.record("message", channelID, "", text), nil
 }
 
-func (f *fakeSlack) PostMessageWithAttachments(_ context.Context, channelID, text string, _ []goslack.Attachment, _ ...slacksvc.PostMessageOption) (string, error) {
+func (f *fakeSlack) PostMessageWithAttachments(_ context.Context, channelID, text string, _ []goslack.Attachment) (string, error) {
 	return f.record("message", channelID, "", text), nil
 }
 

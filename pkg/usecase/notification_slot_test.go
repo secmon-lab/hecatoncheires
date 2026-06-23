@@ -12,7 +12,6 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
-	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 	goslack "github.com/slack-go/slack"
 )
@@ -34,10 +33,9 @@ type slotSlackFake struct {
 }
 
 type slotPostCall struct {
-	ChannelID     string
-	Text          string
-	Blocks        []goslack.Block
-	DisableUnfurl bool
+	ChannelID string
+	Text      string
+	Blocks    []goslack.Block
 }
 
 type slotUpdateCall struct {
@@ -52,15 +50,13 @@ type slotPermalinkCall struct {
 	MessageTS string
 }
 
-func (s *slotSlackFake) PostMessage(_ context.Context, channelID string, blocks []goslack.Block, text string, opts ...slacksvc.PostMessageOption) (string, error) {
+func (s *slotSlackFake) PostMessage(_ context.Context, channelID string, blocks []goslack.Block, text string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cfg := slacksvc.ApplyPostMessageOptions(opts...)
 	s.postCalls = append(s.postCalls, slotPostCall{
-		ChannelID:     channelID,
-		Text:          text,
-		Blocks:        blocks,
-		DisableUnfurl: cfg.DisableLinkUnfurl && cfg.DisableMediaUnfurl,
+		ChannelID: channelID,
+		Text:      text,
+		Blocks:    blocks,
 	})
 	if s.postReturnErr != nil {
 		return "", s.postReturnErr
@@ -139,7 +135,6 @@ func TestNotificationSlotCoordinator_FirstEventPosts(t *testing.T) {
 	gt.Number(t, fake.postCount()).Equal(1)
 	gt.Number(t, fake.updateCount()).Equal(0)
 	gt.Value(t, fake.postCalls[0].ChannelID).Equal("C-room")
-	gt.Bool(t, fake.postCalls[0].DisableUnfurl).True()
 
 	// Fallback text must be empty — Slack otherwise renders it as a
 	// duplicate body alongside the Block Kit content.

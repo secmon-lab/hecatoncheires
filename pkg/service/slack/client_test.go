@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"sync"
 	"testing"
@@ -349,4 +350,115 @@ func TestInviteUsersToChannel_EmptyList_NoApiCall(t *testing.T) {
 	fake.mu.Lock()
 	defer fake.mu.Unlock()
 	gt.Number(t, fake.calls).Equal(0)
+}
+
+// formCaptor records, per Slack API path, the form values of the last request
+// it received and answers "ok". It lets the unfurl test assert what actually
+// went on the wire for each chat.* endpoint.
+type formCaptor struct {
+	mu     sync.Mutex
+	values map[string]url.Values
+}
+
+func (c *formCaptor) handler(responseBody string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		c.mu.Lock()
+		if c.values == nil {
+			c.values = map[string]url.Values{}
+		}
+		// r.Form is repopulated per request; copy the path's values out.
+		c.values[r.URL.Path] = r.Form
+		c.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(responseBody))
+	}
+}
+
+func (c *formCaptor) get(path string) url.Values {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.values[path]
+}
+
+// TestBotPostsDisableUnfurl pins the invariant that every bot-originated post /
+// update / ephemeral message suppresses Slack link & media unfurling. The bot
+// embeds permalinks and URLs everywhere; preview cards would bury the content.
+func TestBotPostsDisableUnfurl(t *testing.T) {
+	captor := &formCaptor{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/chat.postMessage", captor.handler(`{"ok":true,"channel":"C","ts":"1700000000.000100"}`))
+	mux.HandleFunc("/chat.update", captor.handler(`{"ok":true,"channel":"C","ts":"1700000000.000100"}`))
+	mux.HandleFunc("/chat.postEphemeral", captor.handler(`{"ok":true,"message_ts":"1700000000.000100"}`))
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	svc, err := slack.NewWithAPIURLForTest("xoxb-test", srv.URL+"/")
+	gt.NoError(t, err).Required()
+
+	ctx := context.Background()
+	blocks := []goslack.Block{goslack.NewSectionBlock(goslack.NewTextBlockObject(goslack.MarkdownType, "hello", false, false), nil, nil)}
+	att := goslack.Attachment{Text: "att"}
+
+	assertUnfurlDisabled := func(t *testing.T, path string) {
+		t.Helper()
+		vals := captor.get(path)
+		gt.Value(t, vals).NotNil().Required()
+		gt.String(t, vals.Get("unfurl_links")).Equal("false")
+		gt.String(t, vals.Get("unfurl_media")).Equal("false")
+	}
+
+	t.Run("PostMessage", func(t *testing.T) {
+		_, err := svc.PostMessage(ctx, "C", blocks, "fallback")
+		gt.NoError(t, err).Required()
+		assertUnfurlDisabled(t, "/chat.postMessage")
+	})
+
+	t.Run("PostThreadReply", func(t *testing.T) {
+		_, err := svc.PostThreadReply(ctx, "C", "1700000000.000001", "reply")
+		gt.NoError(t, err).Required()
+		assertUnfurlDisabled(t, "/chat.postMessage")
+	})
+
+	t.Run("PostThreadMessage", func(t *testing.T) {
+		_, err := svc.PostThreadMessage(ctx, "C", "1700000000.000001", blocks, "final")
+		gt.NoError(t, err).Required()
+		assertUnfurlDisabled(t, "/chat.postMessage")
+	})
+
+	t.Run("PostMessageWithAttachments", func(t *testing.T) {
+		_, err := svc.PostMessageWithAttachments(ctx, "C", "fallback", []goslack.Attachment{att})
+		gt.NoError(t, err).Required()
+		assertUnfurlDisabled(t, "/chat.postMessage")
+	})
+
+	t.Run("PostMessageWithAttachment", func(t *testing.T) {
+		_, err := svc.PostMessageWithAttachment(ctx, "C", "fallback", att)
+		gt.NoError(t, err).Required()
+		assertUnfurlDisabled(t, "/chat.postMessage")
+	})
+
+	t.Run("UpdateMessage", func(t *testing.T) {
+		err := svc.UpdateMessage(ctx, "C", "1700000000.000100", blocks, "")
+		gt.NoError(t, err).Required()
+		assertUnfurlDisabled(t, "/chat.update")
+	})
+
+	t.Run("UpdateMessageWithAttachments", func(t *testing.T) {
+		err := svc.UpdateMessageWithAttachments(ctx, "C", "1700000000.000100", "", []goslack.Attachment{att})
+		gt.NoError(t, err).Required()
+		assertUnfurlDisabled(t, "/chat.update")
+	})
+
+	t.Run("PostEphemeral", func(t *testing.T) {
+		err := svc.PostEphemeral(ctx, "C", "U", "ephemeral")
+		gt.NoError(t, err).Required()
+		assertUnfurlDisabled(t, "/chat.postEphemeral")
+	})
+
+	t.Run("PostEphemeralBlocks", func(t *testing.T) {
+		_, err := svc.PostEphemeralBlocks(ctx, "C", "U", blocks, "ephemeral")
+		gt.NoError(t, err).Required()
+		assertUnfurlDisabled(t, "/chat.postEphemeral")
+	})
 }

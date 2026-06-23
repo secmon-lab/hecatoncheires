@@ -743,9 +743,11 @@ is rendered as its own Block Kit **context block** (compact / lightly
 de-emphasised text). The context block's mrkdwn carries the Action
 title as a `<URL|label>` Slack permalink at the top, followed by the
 change lines for that Action. Wrapping the title in `<URL|...>` keeps
-the message free of preview cards, and the initial `chat.postMessage`
-is additionally sent with `unfurl_links=false` / `unfurl_media=false`
-for belt-and-braces.
+the message free of preview cards. Link / media unfurling is in any
+case suppressed for every message the bot posts — `unfurl_links=false`
+/ `unfurl_media=false` are applied centrally in the Slack client, so
+neither these slot messages nor any agent reply ever render a preview
+card.
 
 The fallback `text` field on `chat.postMessage` / `chat.update` is
 intentionally **empty**: Slack would otherwise render it as a duplicate
