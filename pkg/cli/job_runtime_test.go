@@ -118,7 +118,8 @@ func TestBuildJobTools_ReadToolsWiredInBothModes(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			names := toolNames(cli.BuildJobToolsWithReadDepsForTest(deps, tc.c, tc.ws))
+			tools := cli.BuildJobToolsWithReadDepsForTest(deps, tc.c, tc.ws)
+			names := toolNames(tools)
 			for _, n := range readToolNames {
 				gt.Bool(t, names[n]).True()
 			}
@@ -128,7 +129,7 @@ func TestBuildJobTools_ReadToolsWiredInBothModes(t *testing.T) {
 			// Read tools are not Action tools, so thread-mode still forgoes
 			// the core__ action tools.
 			if tc.ws.IsThreadMode() {
-				gt.Bool(t, hasActionTool(cli.BuildJobToolsWithReadDepsForTest(deps, tc.c, tc.ws))).False()
+				gt.Bool(t, hasActionTool(tools)).False()
 			}
 		})
 	}

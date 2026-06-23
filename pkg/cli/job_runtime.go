@@ -79,6 +79,15 @@ func buildTickRuntime(
 		LLMClient: llmClient,
 		UC:        uc,
 		WebFetch:  uc.WebFetchClient(),
+		// Mirror the read-tool wiring done in serve.go so every Job host
+		// resolves the same tool set. The tick CLI builds `uc` without the
+		// Slack / Notion options, so these accessors return nil today and the
+		// tools stay disabled; passing them keeps the host-coverage rule honest
+		// and lights the tools up automatically if the tick uc ever configures
+		// them.
+		SlackSearch:    uc.SlackSearchService(),
+		SlackRetriever: uc.SlackMessageRetriever(),
+		NotionTool:     uc.NotionToolClient(),
 	})
 	uc.Case.SetEventPublisher(jobUC)
 
