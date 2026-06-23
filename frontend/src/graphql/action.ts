@@ -136,6 +136,14 @@ export const UNARCHIVE_ACTION = gql`
   }
 `
 
+export const BULK_ARCHIVE_ACTIONS = gql`
+  mutation BulkArchiveActions($workspaceId: String!, $ids: [Int!]!) {
+    bulkArchiveActions(workspaceId: $workspaceId, ids: $ids) {
+      ${ACTION_FIELDS}
+    }
+  }
+`
+
 export const POST_ACTION_SLACK_MESSAGE = gql`
   mutation PostActionSlackMessage($workspaceId: String!, $id: Int!) {
     postActionSlackMessage(workspaceId: $workspaceId, id: $id) {

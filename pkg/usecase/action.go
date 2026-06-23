@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -495,6 +496,33 @@ func (uc *ActionUseCase) ArchiveAction(ctx context.Context, workspaceID string, 
 	uc.recordArchiveEvent(ctx, workspaceID, updated, types.ActionEventArchived, actor)
 	uc.notifyArchiveOnSlack(ctx, workspaceID, updated, parentCase, types.ActionEventArchived, actor)
 	return updated, nil
+}
+
+// BulkArchiveActions archives the given actions by delegating each id to
+// ArchiveAction, so bulk and single archive share the exact same path
+// (access control, idempotency, event recording, Slack notification). The
+// archive body lives only in ArchiveAction and is never duplicated here, so
+// any future change to single-archive behaviour automatically applies to bulk.
+//
+// Idempotency: ids that are already archived are skipped rather than failing
+// the whole batch, since "archive everything in this column" should tolerate
+// rows that someone else already archived. Any other error (access denied,
+// not found, persistence failure) is propagated — bulk archive must not
+// silently swallow a real failure. The returned slice contains only the
+// actions that were newly archived.
+func (uc *ActionUseCase) BulkArchiveActions(ctx context.Context, workspaceID string, ids []int64, actor ActorRef) ([]*model.Action, error) {
+	archived := make([]*model.Action, 0, len(ids))
+	for _, id := range ids {
+		updated, err := uc.ArchiveAction(ctx, workspaceID, id, actor)
+		if err != nil {
+			if errors.Is(err, ErrActionAlreadyArchived) {
+				continue
+			}
+			return nil, goerr.Wrap(err, "failed to bulk archive action", goerr.V(ActionIDKey, id))
+		}
+		archived = append(archived, updated)
+	}
+	return archived, nil
 }
 
 // UnarchiveAction restores a previously archived action back to active state.

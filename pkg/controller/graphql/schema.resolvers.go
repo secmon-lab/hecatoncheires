@@ -751,6 +751,36 @@ func (r *mutationResolver) UnarchiveAction(ctx context.Context, workspaceID stri
 	return toGraphQLAction(updated, workspaceID), nil
 }
 
+// BulkArchiveActions is the resolver for the bulkArchiveActions field.
+//
+// Mirrors ArchiveAction's auth requirement: a missing token is a hard error,
+// never a silent fallback to system actor, so the private-case access check
+// inside the usecase always runs for externally-originated requests.
+func (r *mutationResolver) BulkArchiveActions(ctx context.Context, workspaceID string, ids []int) ([]*graphql1.Action, error) {
+	token, err := auth.TokenFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	actor := usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: token.Sub}
+
+	int64IDs := make([]int64, len(ids))
+	for i, id := range ids {
+		int64IDs[i] = int64(id)
+	}
+
+	updated, archiveErr := r.UseCases.Action.BulkArchiveActions(ctx, workspaceID, int64IDs, actor)
+	if archiveErr != nil {
+		return nil, archiveErr
+	}
+
+	// [Action!]! is a non-null list, so never return nil.
+	result := make([]*graphql1.Action, 0, len(updated))
+	for _, a := range updated {
+		result = append(result, toGraphQLAction(a, workspaceID))
+	}
+	return result, nil
+}
+
 // PostActionSlackMessage is the resolver for the postActionSlackMessage field.
 func (r *mutationResolver) PostActionSlackMessage(ctx context.Context, workspaceID string, id int) (*graphql1.Action, error) {
 	updated, err := r.UseCases.Action.PostSlackMessageToAction(ctx, workspaceID, int64(id))
@@ -1771,19 +1801,3 @@ type caseResolver struct{ *Resolver }
 type memoResolver struct{ *Resolver }
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
-
-// !!! WARNING !!!
-// The code below was going to be deleted when updating resolvers. It has been copied here so you have
-// one last chance to move it out of harms way if you want. There are two reasons this happens:
-//  - When renaming or deleting a resolver the old code will be put in here. You can safely delete
-//    it when you're done.
-//  - You have helper methods in this file. Move them out to keep these resolver files clean.
-/*
-	func (r *queryResolver) KnowledgeTags(ctx context.Context, workspaceID string) ([]string, error) {
-	tags, err := r.UseCases.Knowledge.ListTags(ctx, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	return tags, nil
-}
-*/

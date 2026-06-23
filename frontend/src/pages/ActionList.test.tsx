@@ -4,7 +4,7 @@ import '@testing-library/jest-dom/vitest'
 import { MockedProvider, type MockedResponse } from '@apollo/client/testing'
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { I18nProvider } from '../i18n'
-import { GET_ACTIONS_BY_CASE, GET_OPEN_CASE_ACTIONS } from '../graphql/action'
+import { BULK_ARCHIVE_ACTIONS, GET_ACTIONS_BY_CASE, GET_OPEN_CASE_ACTIONS } from '../graphql/action'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { GET_CASES } from '../graphql/case'
 import ActionList from './ActionList'
@@ -294,5 +294,115 @@ describe('ActionList case filter', () => {
     expect(screen.queryByTestId('action-case-filter-item-3')).toBeNull()
     expect(screen.queryByTestId('action-case-filter-item-4')).toBeNull()
     expect(screen.getByTestId('action-case-filter-item-5')).toBeInTheDocument()
+  })
+})
+
+describe('ActionList completed-column bulk archive', () => {
+  // Two completed actions plus the standard open actions so the COMPLETED
+  // column has cards while other columns also remain populated.
+  const completedA = actionRow(201, 3, 'GitHub incident', 'Finished alpha', 'COMPLETED')
+  const completedB = actionRow(202, 3, 'GitHub incident', 'Finished beta', 'COMPLETED')
+
+  function renderWithCompleted(extraMocks: MockedResponse[] = []) {
+    const initialOpenActions = {
+      request: { query: GET_OPEN_CASE_ACTIONS, variables: { workspaceId: 'risk' } },
+      result: { data: { openCaseActions: [...allOpenActions, completedA, completedB] } },
+    }
+    const mocks = [fieldConfigMock, initialOpenActions, openCasesMock, ...extraMocks]
+    return render(
+      <MemoryRouter initialEntries={['/ws/risk/actions']}>
+        <MockedProvider mocks={mocks}>
+          <I18nProvider defaultLang="en">
+            <Routes>
+              <Route path="/ws/:workspaceId/actions" element={<ActionList />} />
+            </Routes>
+          </I18nProvider>
+        </MockedProvider>
+      </MemoryRouter>,
+    )
+  }
+
+  it('shows the column kebab menu only on the completed column', async () => {
+    renderWithCompleted()
+    await waitFor(() => {
+      expect(screen.getAllByTestId('action-card')).toHaveLength(5)
+    })
+    // The closed (COMPLETED) column exposes the menu...
+    expect(screen.getByTestId('kanban-column-menu-completed')).toBeInTheDocument()
+    // ...while open columns do not.
+    expect(screen.queryByTestId('kanban-column-menu-to-do')).toBeNull()
+    expect(screen.queryByTestId('kanban-column-menu-in-progress')).toBeNull()
+    expect(screen.queryByTestId('kanban-column-menu-backlog')).toBeNull()
+    expect(screen.queryByTestId('kanban-column-menu-blocked')).toBeNull()
+  })
+
+  it('archives every action in the completed column after confirmation', async () => {
+    const bulkResult = vi.fn(() => ({
+      data: {
+        bulkArchiveActions: [
+          { ...completedA, archived: true, archivedAt: '2026-05-02T00:00:00Z' },
+          { ...completedB, archived: true, archivedAt: '2026-05-02T00:00:00Z' },
+        ],
+      },
+    }))
+    const bulkArchiveMock = {
+      request: { query: BULK_ARCHIVE_ACTIONS, variables: { workspaceId: 'risk', ids: [201, 202] } },
+      result: bulkResult,
+    }
+    // After archiving, the refetch returns the board without the completed ones.
+    const refetchMock = {
+      request: { query: GET_OPEN_CASE_ACTIONS, variables: { workspaceId: 'risk' } },
+      result: { data: { openCaseActions: allOpenActions } },
+    }
+
+    renderWithCompleted([bulkArchiveMock, refetchMock])
+    await waitFor(() => {
+      expect(screen.getAllByTestId('action-card')).toHaveLength(5)
+    })
+
+    fireEvent.click(screen.getByTestId('kanban-column-menu-completed'))
+    fireEvent.click(screen.getByTestId('kanban-column-archive-all-completed'))
+
+    // Confirmation dialog must appear before any mutation fires.
+    const confirmBtn = await screen.findByTestId('confirm-bulk-archive-button')
+    expect(bulkResult).not.toHaveBeenCalled()
+
+    fireEvent.click(confirmBtn)
+
+    // The mutation must run with exactly the completed column's action ids.
+    await waitFor(() => {
+      expect(bulkResult).toHaveBeenCalledTimes(1)
+    })
+
+    // After the refetch, the completed cards are gone from the board.
+    await waitFor(() => {
+      expect(screen.getAllByTestId('action-card')).toHaveLength(3)
+    })
+    expect(screen.queryByText('Finished alpha')).toBeNull()
+    expect(screen.queryByText('Finished beta')).toBeNull()
+  })
+
+  it('disables the archive item when the completed column is empty', async () => {
+    const emptyOpenActions = {
+      request: { query: GET_OPEN_CASE_ACTIONS, variables: { workspaceId: 'risk' } },
+      result: { data: { openCaseActions: allOpenActions } },
+    }
+    render(
+      <MemoryRouter initialEntries={['/ws/risk/actions']}>
+        <MockedProvider mocks={[fieldConfigMock, emptyOpenActions, openCasesMock]}>
+          <I18nProvider defaultLang="en">
+            <Routes>
+              <Route path="/ws/:workspaceId/actions" element={<ActionList />} />
+            </Routes>
+          </I18nProvider>
+        </MockedProvider>
+      </MemoryRouter>,
+    )
+    await waitFor(() => {
+      expect(screen.getAllByTestId('action-card')).toHaveLength(3)
+    })
+    fireEvent.click(screen.getByTestId('kanban-column-menu-completed'))
+    const archiveItem = screen.getByTestId('kanban-column-archive-all-completed')
+    expect(archiveItem).toBeDisabled()
   })
 })

@@ -796,6 +796,10 @@ type Mutation {
   archiveAction(workspaceId: String!, id: Int!): Action!
   # Restore a previously archived action back to active state.
   unarchiveAction(workspaceId: String!, id: Int!): Action!
+  # Archive multiple actions in one call (e.g. clearing a completed Kanban
+  # column). Already-archived ids are skipped; the returned list contains only
+  # the actions that were newly archived.
+  bulkArchiveActions(workspaceId: String!, ids: [Int!]!): [Action!]!
   # Posts the Slack message for an Action whose initial post was missed
   # (legacy tool-created actions before the create paths were unified).
   # Errors if the action already has a Slack message timestamp or if the

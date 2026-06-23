@@ -1305,6 +1305,88 @@ func TestGraphQLHandler_ActionMutations(t *testing.T) {
 		gt.Bool(t, stored.IsArchived()).False()
 	})
 
+	t.Run("bulk archive actions archives every id", func(t *testing.T) {
+		// Three active actions standing in for a completed Kanban column.
+		a1, err := repo.Action().Create(ctx, testWorkspaceID, &model.Action{
+			CaseID: createdCase.ID, Title: "Bulk 1", Status: types.ActionStatusTodo,
+		})
+		gt.NoError(t, err).Required()
+		a2, err := repo.Action().Create(ctx, testWorkspaceID, &model.Action{
+			CaseID: createdCase.ID, Title: "Bulk 2", Status: types.ActionStatusTodo,
+		})
+		gt.NoError(t, err).Required()
+		a3, err := repo.Action().Create(ctx, testWorkspaceID, &model.Action{
+			CaseID: createdCase.ID, Title: "Bulk 3", Status: types.ActionStatusTodo,
+		})
+		gt.NoError(t, err).Required()
+
+		mutation := `
+			mutation($workspaceId: String!, $ids: [Int!]!) {
+				bulkArchiveActions(workspaceId: $workspaceId, ids: $ids) {
+					id
+					archived
+				}
+			}
+		`
+		const bulkTestUser = "U-bulk-archive-test"
+		rec := executeGraphQLRequestWithAuth(t, handler, mutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"ids":         []int{int(a1.ID), int(a2.ID), int(a3.ID)},
+		}, bulkTestUser)
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(0)
+		gt.Value(t, resp.Data).NotNil().Required()
+
+		var result struct {
+			BulkArchiveActions []struct {
+				ID       int  `json:"id"`
+				Archived bool `json:"archived"`
+			} `json:"bulkArchiveActions"`
+		}
+		gt.NoError(t, json.Unmarshal(resp.Data, &result)).Required()
+		gt.Array(t, result.BulkArchiveActions).Length(3).Required()
+
+		// Every returned entry must report archived=true. Assert per-id, not
+		// just the count.
+		returned := map[int]bool{}
+		for _, a := range result.BulkArchiveActions {
+			returned[a.ID] = a.Archived
+		}
+		for _, id := range []int{int(a1.ID), int(a2.ID), int(a3.ID)} {
+			gt.Bool(t, returned[id]).True()
+			stored, getErr := repo.Action().Get(ctx, testWorkspaceID, int64(id))
+			gt.NoError(t, getErr).Required()
+			gt.Bool(t, stored.IsArchived()).True()
+		}
+	})
+
+	t.Run("bulk archive without auth token returns error", func(t *testing.T) {
+		// Same hardening as archiveAction: no auth context must surface as a
+		// GraphQL error rather than silently archiving as the system actor.
+		unauth, err := repo.Action().Create(ctx, testWorkspaceID, &model.Action{
+			CaseID: createdCase.ID, Title: "Bulk Unauth", Status: types.ActionStatusTodo,
+		})
+		gt.NoError(t, err).Required()
+
+		mutation := `
+			mutation($workspaceId: String!, $ids: [Int!]!) {
+				bulkArchiveActions(workspaceId: $workspaceId, ids: $ids) { id }
+			}
+		`
+		rec := executeGraphQLRequest(t, handler, mutation, map[string]interface{}{
+			"workspaceId": testWorkspaceID,
+			"ids":         []int{int(unauth.ID)},
+		})
+		gt.Value(t, rec.Code).Equal(http.StatusOK)
+		resp := parseGraphQLResponse(t, rec)
+		gt.Array(t, resp.Errors).Length(1).Required()
+
+		stored, err := repo.Action().Get(ctx, testWorkspaceID, unauth.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, stored.IsArchived()).False()
+	})
+
 	t.Run("actionsByCase respects archive filter", func(t *testing.T) {
 		// Set up: one active and one archived action
 		caseForArchiveQuery, err := repo.Case().Create(ctx, testWorkspaceID, &model.Case{ReporterID: "U-TEST-DEFAULT", Title: "archive query case", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()})

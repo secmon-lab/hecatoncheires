@@ -521,6 +521,19 @@ Kanban card:
   `stepProgress.total > 0`. When an Action has no Steps the badge is
   hidden entirely.
 
+Kanban column (bulk archive):
+
+- The header of each **completed** (closed) status column carries a
+  kebab (⋯) menu. Closed columns are the ones listed in the workspace's
+  `actionConfig.closed`; open columns have no menu. "Archive all in this
+  column" archives every Action currently shown in that column after a
+  confirmation dialog that names the count. The menu item is disabled
+  when the column is empty.
+- Bulk archive reuses the single-archive path per Action, so each
+  archived Action records an `ARCHIVED` `ActionEvent` and posts the same
+  Slack notification as archiving it individually. Actions that are
+  already archived are skipped silently.
+
 #### GraphQL
 
 Schema additions are listed in `graphql/schema.graphql`:
@@ -531,6 +544,16 @@ Schema additions are listed in `graphql/schema.graphql`:
   `deleteActionStep`
 - Inputs: `AddActionStepInput`, `SetActionStepDoneInput`,
   `RenameActionStepInput`, `DeleteActionStepInput`
+
+Action archiving mutations (in `graphql/schema.graphql`):
+
+- `archiveAction(workspaceId, id)` / `unarchiveAction(workspaceId, id)` —
+  archive or restore a single Action.
+- `bulkArchiveActions(workspaceId, ids: [Int!]!): [Action!]!` — archive
+  many Actions in one call (used by the completed-column "Archive all"
+  menu). Already-archived ids are skipped; the result contains only the
+  Actions that were newly archived. Requires an authenticated user, and
+  each id is checked against its parent Case's private-access rules.
 
 #### Agent tools (gollem)
 
