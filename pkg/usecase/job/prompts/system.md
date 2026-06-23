@@ -35,6 +35,17 @@ do not assume any other value for "now".
 {{- end }}
 {{- end }}
 {{- end }}
+{{- if .BoardStatuses }}
+
+# Board Statuses
+
+You may move the case to a different status with the `case__update_case_status`
+tool, passing one of these status ids. A status marked (closed) will close the
+case, so pick it only when the work is genuinely resolved.
+{{- range .BoardStatuses }}
+- {{ .ID }}{{ if .Name }} — {{ .Name }}{{ end }}{{ if .Closed }} (closed){{ end }}{{ if .Description }}: {{ .Description }}{{ end }}
+{{- end }}
+{{- end }}
 
 # Case
 {{- with .Case }}

@@ -648,6 +648,42 @@ func TestBuildSystemPrompt_CustomFieldsSchema(t *testing.T) {
 	})
 }
 
+func TestBuildSystemPrompt_BoardStatuses(t *testing.T) {
+	t.Run("statuses render id, name, closed marker, and description", func(t *testing.T) {
+		statusSet, err := model.NewActionStatusSet("triage", []string{"resolved"}, []model.ActionStatusDefinition{
+			{ID: "triage", Name: "Triage", Description: "Awaiting first assessment"},
+			{ID: "resolved", Name: "Resolved", Description: "Investigation is complete"},
+		})
+		gt.NoError(t, err).Required()
+		ws := newWorkspace("ws", "WS")
+		ws.CaseStatusSet = statusSet
+
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: ws,
+			Case:      newCase(7),
+			Event:     caseCreatedEvent(),
+		})
+		gt.NoError(t, err).Required()
+		mustContain(t, got, "# Board Statuses")
+		mustContain(t, got, "case__update_case_status")
+		// Each status surfaces id, name, and the reasoning-hint description.
+		mustContain(t, got, "- triage — Triage: Awaiting first assessment")
+		mustContain(t, got, "- resolved — Resolved (closed): Investigation is complete")
+	})
+
+	t.Run("board statuses section is omitted when no status set is defined", func(t *testing.T) {
+		got, err := job.BuildSystemPrompt(job.PromptInputs{
+			Job:       caseCreatedJob(),
+			Workspace: newWorkspace("ws", "WS"),
+			Case:      newCase(7),
+			Event:     caseCreatedEvent(),
+		})
+		gt.NoError(t, err).Required()
+		mustNotContain(t, got, "# Board Statuses")
+	})
+}
+
 func TestBuildSystemPrompt_CaseFieldValuesResolution(t *testing.T) {
 	t.Run("select value resolves to option name", func(t *testing.T) {
 		c := newCase(7)
