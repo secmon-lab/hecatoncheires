@@ -108,7 +108,7 @@ export default function ActionList() {
       filterCaseId != null
         ? { query: GET_ACTIONS_BY_CASE, variables: { workspaceId: currentWorkspace?.id, caseID: filterCaseId } }
         : { query: GET_OPEN_CASE_ACTIONS, variables: { workspaceId: currentWorkspace?.id } },
-    [filterCaseId, currentWorkspace],
+    [filterCaseId, currentWorkspace?.id],
   )
   const [updateAction] = useMutation(UPDATE_ACTION, {
     refetchQueries: [refetchActionsQuery],
@@ -184,12 +184,13 @@ export default function ActionList() {
   }
 
   const handleBulkArchive = async (colId: string) => {
+    if (!currentWorkspace) return
     const ids = (grouped[colId] ?? []).map((a) => a.id)
     setConfirmArchiveCol(null)
     if (ids.length === 0) return
     try {
       await bulkArchiveActions({
-        variables: { workspaceId: currentWorkspace!.id, ids },
+        variables: { workspaceId: currentWorkspace.id, ids },
       })
     } catch (e) {
       console.error('Failed to bulk archive actions', e)
@@ -300,6 +301,7 @@ export default function ActionList() {
                   {menuCol === col.id && (
                     <>
                       <div
+                        aria-hidden="true"
                         onClick={() => setMenuCol(null)}
                         style={{ position: 'fixed', inset: 0, zIndex: 100 }}
                       />
