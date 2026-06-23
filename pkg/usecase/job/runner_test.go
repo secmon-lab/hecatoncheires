@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -560,10 +561,61 @@ func TestJobRunner_LLMFailure_AppendsRunError(t *testing.T) {
 	gt.String(t, jr.LastError).Equal("llm timeout")
 }
 
+// notifierCall records one Slack post made through fakeNotifier.
+type notifierCall struct {
+	method    string // "root" | "reply"
+	channelID string
+	threadTS  string
+	text      string
+}
+
+// fakeNotifier records every job.SlackNotifier call so tests can assert
+// count, ordering, and exact field values. Optional errors let tests drive
+// the non-fatal failure paths.
+type fakeNotifier struct {
+	mu       sync.Mutex
+	calls    []notifierCall
+	rootErr  error
+	replyErr error
+	rootTS   string
+}
+
+func (f *fakeNotifier) PostMessage(_ context.Context, channelID, text string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, notifierCall{method: "root", channelID: channelID, text: text})
+	if f.rootErr != nil {
+		return "", f.rootErr
+	}
+	if f.rootTS == "" {
+		return "root-ts", nil
+	}
+	return f.rootTS, nil
+}
+
+func (f *fakeNotifier) PostThreadReply(_ context.Context, channelID, threadTS, text string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, notifierCall{method: "reply", channelID: channelID, threadTS: threadTS, text: text})
+	if f.replyErr != nil {
+		return "", f.replyErr
+	}
+	return "reply-ts", nil
+}
+
+func (f *fakeNotifier) snapshot() []notifierCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]notifierCall, len(f.calls))
+	copy(out, f.calls)
+	return out
+}
+
 // traceDrivingExecutor emits one tool span through the trace handler it
-// receives (which is a trace.Multi when a SlackNotifier is wired), then
-// optionally returns a terminal error. Used to exercise the session-log
-// notifications end to end.
+// receives, then optionally returns a terminal error. Tool spans are
+// recorded to the Firestore trace handler only — they never surface into
+// the Slack session log — so this exercises that the session log carries
+// just the lifecycle markers (starting / completed / failed).
 type traceDrivingExecutor struct {
 	toolName string
 	err      error
@@ -604,7 +656,8 @@ func notifyJob(id string) *model.Job {
 }
 
 // TestJobRunner_ChannelModeSessionLog: starting marker roots a channel-root
-// thread; tool progress and completion reply into it.
+// thread; completion replies into it. Tool spans driven through the trace
+// handler do NOT surface into the session log.
 func TestJobRunner_ChannelModeSessionLog(t *testing.T) {
 	ctx := context.Background()
 	repo, c := setupCaseWithSlack(t, "ws", "C1", "")
@@ -614,7 +667,7 @@ func TestJobRunner_ChannelModeSessionLog(t *testing.T) {
 	gt.NoError(t, runNotifyJob(t, repo, "ws", j, c, fake, &traceDrivingExecutor{toolName: "slack_search"})).Required()
 
 	calls := fake.snapshot()
-	gt.Array(t, calls).Length(3).Required()
+	gt.Array(t, calls).Length(2).Required()
 
 	gt.String(t, calls[0].method).Equal("root")
 	gt.String(t, calls[0].channelID).Equal("C1")
@@ -622,15 +675,11 @@ func TestJobRunner_ChannelModeSessionLog(t *testing.T) {
 
 	gt.String(t, calls[1].method).Equal("reply")
 	gt.String(t, calls[1].threadTS).Equal("root-123")
-	gt.String(t, calls[1].text).Equal(i18n.T(ctx, i18n.MsgJobRunToolExecuted, "slack_search"))
-
-	gt.String(t, calls[2].method).Equal("reply")
-	gt.String(t, calls[2].threadTS).Equal("root-123")
-	gt.String(t, calls[2].text).Equal(i18n.T(ctx, i18n.MsgJobRunCompleted, "triage"))
+	gt.String(t, calls[1].text).Equal(i18n.T(ctx, i18n.MsgJobRunCompleted, "triage"))
 }
 
 // TestJobRunner_ThreadModeSessionLog: thread-mode Case reuses its own thread
-// for the starting marker, progress, and completion (no root post).
+// for the starting marker and completion (no root post, no tool lines).
 func TestJobRunner_ThreadModeSessionLog(t *testing.T) {
 	ctx := context.Background()
 	repo, c := setupCaseWithSlack(t, "ws", "Cmon", "TT")
@@ -640,15 +689,14 @@ func TestJobRunner_ThreadModeSessionLog(t *testing.T) {
 	gt.NoError(t, runNotifyJob(t, repo, "ws", j, c, fake, &traceDrivingExecutor{toolName: "case_writer"})).Required()
 
 	calls := fake.snapshot()
-	gt.Array(t, calls).Length(3).Required()
+	gt.Array(t, calls).Length(2).Required()
 	for _, call := range calls {
 		gt.String(t, call.method).Equal("reply")
 		gt.String(t, call.channelID).Equal("Cmon")
 		gt.String(t, call.threadTS).Equal("TT")
 	}
 	gt.String(t, calls[0].text).Equal(i18n.T(ctx, i18n.MsgJobRunStarting, "triage"))
-	gt.String(t, calls[1].text).Equal(i18n.T(ctx, i18n.MsgJobRunToolExecuted, "case_writer"))
-	gt.String(t, calls[2].text).Equal(i18n.T(ctx, i18n.MsgJobRunCompleted, "triage"))
+	gt.String(t, calls[1].text).Equal(i18n.T(ctx, i18n.MsgJobRunCompleted, "triage"))
 }
 
 // TestJobRunner_QuietSuppressesSessionLog: quiet=true emits no operational

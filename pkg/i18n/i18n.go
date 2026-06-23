@@ -194,11 +194,9 @@ const (
 
 	// Job run session log (Slack thread). Posted by JobRunner around each
 	// Job run to consolidate the run's operational log into one thread.
-	MsgJobRunStarting     // "starting... `%s`" (%s = job id)
-	MsgJobRunCompleted    // "✅ job `%s` completed" (%s = job id)
-	MsgJobRunFailed       // "❌ job `%s` failed: %s" (%s = job id, %s = error)
-	MsgJobRunToolExecuted // "🔧 `%s`" (%s = tool name)
-	MsgJobRunToolFailed   // "⚠️ `%s` failed" (%s = tool name)
+	MsgJobRunStarting  // "starting... `%s`" (%s = job id)
+	MsgJobRunCompleted // "✅ job `%s` completed" (%s = job id)
+	MsgJobRunFailed    // "❌ job `%s` failed: %s" (%s = job id, %s = error)
 
 	msgKeyCount // sentinel for validation
 )
