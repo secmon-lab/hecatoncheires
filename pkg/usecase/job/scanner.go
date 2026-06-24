@@ -189,14 +189,14 @@ func (s *ScheduledScanner) expireSuspendedRun(ctx context.Context, run *model.Jo
 	if err != nil {
 		return goerr.Wrap(err, "re-read job run before expiry")
 	}
-	if !fresh.IsSuspended() || now.Sub(fresh.SuspendedAt) < timeout {
+	if fresh == nil || !fresh.IsSuspended() || now.Sub(fresh.SuspendedAt) < timeout {
 		return nil
 	}
 	runID := fresh.SuspendedRunID
 
 	const reason = "unanswered: no response within the interactive timeout"
 	traceID := ""
-	if logRec, logErr := s.deps.Repo.JobRunLog().Get(ctx, key, runID); logErr == nil {
+	if logRec, logErr := s.deps.Repo.JobRunLog().Get(ctx, key, runID); logErr == nil && logRec != nil {
 		traceID = logRec.TraceID
 		// Finalize any non-terminal log behind the suspension — AWAITING_INPUT
 		// (unanswered) or RUNNING (a resume that crashed mid-flight) — so it

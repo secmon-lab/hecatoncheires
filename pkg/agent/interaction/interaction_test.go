@@ -108,6 +108,19 @@ func TestRequest_Validate(t *testing.T) {
 		gt.Error(t, r.Validate())
 	})
 
+	t.Run("multibyte option within the 75-char limit is accepted", func(t *testing.T) {
+		// 70 Japanese runes = 210 bytes. Slack counts characters, so this is
+		// within the 75-char option limit; a byte-based check would wrongly
+		// reject it.
+		jp := strings.Repeat("あ", 70)
+		r := &interaction.Request{
+			Items: []interaction.Item{
+				{ID: "q1", Text: "環境は?", Type: interaction.ItemSelect, Options: []string{jp, "stg"}},
+			},
+		}
+		gt.NoError(t, r.Validate())
+	})
+
 	t.Run("option longer than Slack's 75 is rejected", func(t *testing.T) {
 		r := &interaction.Request{
 			Items: []interaction.Item{

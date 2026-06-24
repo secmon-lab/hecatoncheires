@@ -703,7 +703,7 @@ func (r *JobRunner) Resume(ctx context.Context, key model.JobRunKey, runID strin
 		}
 		return goerr.Wrap(err, "load run log for resume", goerr.V("run_id", runID))
 	}
-	if logRec.Stage != model.JobRunStageAwaitingInput || logRec.PendingInteraction == nil {
+	if logRec == nil || logRec.Stage != model.JobRunStageAwaitingInput || logRec.PendingInteraction == nil {
 		// Already resumed, completed, or expired — stale, no-op.
 		return nil
 	}
@@ -834,7 +834,7 @@ func (r *JobRunner) suspensionIsActive(ctx context.Context, run *model.JobRun, n
 		return false
 	}
 	log, err := r.deps.Repo.JobRunLog().Get(ctx, run.Key(), run.SuspendedRunID)
-	if err != nil {
+	if err != nil || log == nil {
 		// Cannot confirm an open question — treat as recoverable rather than
 		// blocking the Job forever on an unverifiable marker.
 		return false
@@ -852,7 +852,7 @@ func (r *JobRunner) finalizeOrphanedSuspension(ctx context.Context, run *model.J
 		return
 	}
 	log, err := r.deps.Repo.JobRunLog().Get(ctx, run.Key(), run.SuspendedRunID)
-	if err != nil {
+	if err != nil || log == nil {
 		// Nothing to finalize (already gone / unreadable); the marker is
 		// cleared by the fresh run's RecordRun.
 		return

@@ -12,6 +12,7 @@ package interaction
 
 import (
 	"context"
+	"unicode/utf8"
 
 	"github.com/m-mizutani/goerr/v2"
 )
@@ -94,9 +95,12 @@ func (r *Request) Validate() error {
 	if r == nil {
 		return goerr.New("interaction request is nil")
 	}
-	if len(r.Reason) > maxReasonLen {
+	// Slack length limits are counted in characters, not bytes, so use rune
+	// counts — byte length would wrongly reject valid multi-byte (e.g.
+	// Japanese) questions well within Slack's character budget.
+	if utf8.RuneCountInString(r.Reason) > maxReasonLen {
 		return goerr.New("interaction reason too long",
-			goerr.V("len", len(r.Reason)), goerr.V("max", maxReasonLen))
+			goerr.V("len", utf8.RuneCountInString(r.Reason)), goerr.V("max", maxReasonLen))
 	}
 	if len(r.Items) < minItems {
 		return goerr.New("interaction request must have at least one item",
@@ -119,17 +123,17 @@ func (r *Request) Validate() error {
 				goerr.V("id", it.ID))
 		}
 		seen[it.ID] = struct{}{}
-		if len(it.ID) > maxItemIDLen {
+		if utf8.RuneCountInString(it.ID) > maxItemIDLen {
 			return goerr.New("interaction item id too long",
-				goerr.V("id", it.ID), goerr.V("len", len(it.ID)), goerr.V("max", maxItemIDLen))
+				goerr.V("id", it.ID), goerr.V("len", utf8.RuneCountInString(it.ID)), goerr.V("max", maxItemIDLen))
 		}
 		if it.Text == "" {
 			return goerr.New("interaction item text is empty",
 				goerr.V("id", it.ID))
 		}
-		if len(it.Text) > maxItemText {
+		if utf8.RuneCountInString(it.Text) > maxItemText {
 			return goerr.New("interaction item text too long",
-				goerr.V("id", it.ID), goerr.V("len", len(it.Text)), goerr.V("max", maxItemText))
+				goerr.V("id", it.ID), goerr.V("len", utf8.RuneCountInString(it.Text)), goerr.V("max", maxItemText))
 		}
 		if !it.Type.IsValid() {
 			return goerr.New("invalid interaction item type",
@@ -155,10 +159,10 @@ func (r *Request) Validate() error {
 						goerr.V("id", it.ID))
 				}
 				// Slack uses the option string as both the visible text and
-				// the submitted value, each capped at 75.
-				if len(opt) > maxOptionLen {
+				// the submitted value, each capped at 75 characters.
+				if utf8.RuneCountInString(opt) > maxOptionLen {
 					return goerr.New("select option too long",
-						goerr.V("id", it.ID), goerr.V("len", len(opt)), goerr.V("max", maxOptionLen))
+						goerr.V("id", it.ID), goerr.V("len", utf8.RuneCountInString(opt)), goerr.V("max", maxOptionLen))
 				}
 			}
 		case ItemFreeText:

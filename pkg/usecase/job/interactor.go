@@ -481,7 +481,7 @@ func (r *JobRunner) HandleQuestionSubmit(ctx context.Context, callback *goslack.
 		return goerr.Wrap(err, "load run log for question submit",
 			goerr.V("run_id", ref.RunID))
 	}
-	if logRec.Stage != model.JobRunStageAwaitingInput || logRec.PendingInteraction == nil {
+	if logRec == nil || logRec.Stage != model.JobRunStageAwaitingInput || logRec.PendingInteraction == nil {
 		// Already resumed / completed / expired — drop the stale form.
 		r.markJobQuestionStale(ctx, channelID, messageTS)
 		return nil
