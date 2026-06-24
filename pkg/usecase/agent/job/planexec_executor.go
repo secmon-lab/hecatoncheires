@@ -75,6 +75,12 @@ func (e *PlanexecJobExecutor) Execute(ctx context.Context, req ExecuteRequest) (
 		HistoryKey:    req.HistoryKey,
 		TraceID:       req.TraceID,
 		TraceMetadata: planexecTraceMetadata(req),
+		// Forward the JobRunner's per-event trace handler so the planexec
+		// runtime records LLM / tool events into the JobRunEvent timeline.
+		// Without this, planexec Jobs show an empty event timeline even on
+		// success (the run's own archive recorder writes to a different
+		// repository than the UI reads).
+		TraceHandler:  req.TraceHandler,
 		LanguageLabel: req.Language,
 		UserInput:     req.Prompt,
 		SystemPrompt:  req.SystemPrompt,
@@ -148,11 +154,11 @@ func phaseTracesFromPlanexec(result *planexec.RunResult, startedAt, endedAt time
 	return traces
 }
 
-// planexecTraceMetadata builds the trace.Recorder labels. JobRunner has
-// already created its own trace handler (req.TraceHandler) to capture
-// fine-grained gollem events; planexec's recorder runs in parallel
-// against the trace.Repository so callers can replay the planner
-// reasoning later. The session_id label is required by
+// planexecTraceMetadata builds the trace.Recorder labels. planexec's
+// recorder runs against the trace.Repository so callers can replay the
+// planner reasoning later; it is wired alongside JobRunner's per-event
+// handler (forwarded via RunRequest.TraceHandler), which is what
+// populates the JobRunEvent timeline. The session_id label is required by
 // agentarchive.MemoryTraceRepository — we use the RunID-shaped TraceID
 // so memory and Firestore behave identically.
 func planexecTraceMetadata(req ExecuteRequest) trace.TraceMetadata {

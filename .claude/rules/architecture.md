@@ -339,6 +339,27 @@ Slack tool it did have (the poster).
   to call the tool (e.g. a thread-reading tool needs the `thread_ts` exposed in
   the system prompt, not just the channel id).
 
+## Trace handler wiring (host per-event timeline)
+
+The same "wire it into every agent" discipline applies to the host's
+per-event trace handler, not just tools. A host that wants a per-call
+timeline (the Job host's `jobRunTraceHandler`, which writes the
+`JobRunEvent` records the run-detail UI reads) supplies it via
+`planexec.RunRequest.TraceHandler`. planexec combines it (`combineTrace`
+→ `trace.Multi`) with each agent's own trace sink and wires the result
+into **every** agent the run drives — the planner, each parallel
+sub-agent, the direct reply, and the final synthesis. Wiring it into only
+some agents silently drops the rest from the timeline.
+
+This is exactly how the `planexec`-Job empty-timeline bug happened: the
+handler was built by `JobRunner.Run` and handed to the executor, but the
+planexec executor never forwarded it, and planexec drove its agents with
+only the separate archive recorder. The run succeeded, the system prompt
+showed (it is stored on `JobRunLog` before execution), and the timeline
+stayed empty. `simple` Jobs were unaffected because the single-loop
+executor wires the handler directly via `gollem.WithTrace`. When you add
+a new agent execution to planexec, wire the host handler into it too.
+
 ## Budget
 
 The budget model is the combination of **two** controls — there is NO

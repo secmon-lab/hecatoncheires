@@ -188,6 +188,78 @@ func TestRunner_Run_PlanThenTerminate(t *testing.T) {
 	gt.Number(t, llm.calls()).Equal(4)
 }
 
+// --- Integration: host TraceHandler receives events from every agent -
+
+// TestRunner_Run_ForwardsTraceHandlerToAllAgents pins the fix for the
+// planexec Job empty-timeline bug: a host-supplied TraceHandler must be
+// wired into the planner, every sub-agent, AND the final-response agent,
+// not only the run's internal archive recorder. The flow drives four
+// gollem agent executions (planner round 1, sub-agent t-1, replan round
+// 2, final). gollem invokes StartAgentExecute / Finish on the configured
+// handler once per execution, so the host handler MUST observe four of
+// each. Before the fix the sub-agent execution was wired only to its
+// private loop counter, so the handler would observe three — the missing
+// fourth is exactly the investigation work that vanished from the Job
+// timeline. (Per-call LLM hooks are asserted in the trace_tee unit test
+// via direct invocation; a mock LLM client never fires StartLLMCall, so
+// agent-execution count is the observable wiring signal here.)
+func TestRunner_Run_ForwardsTraceHandlerToAllAgents(t *testing.T) {
+	ctx := context.Background()
+	llm := newSequencedLLM([]sequencedResponse{
+		{text: `{"message":"start","tasks":[
+			{"id":"t-1","title":"A","description":"check thread A","acceptance_criteria":"a","tools":["slack_ro"]}
+		]}`},
+		{text: "Found A details."},
+		{text: `{"message":"done","tasks":[]}`},
+		{text: "Here's what I found: A details."},
+	})
+
+	rec := &recordingTraceHandler{name: "host"}
+	runner := newRunner(t, llm.Client())
+	req := baseRequest()
+	req.TraceHandler = rec
+
+	res, err := runner.Run(ctx, req)
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(planexec.StatusCompleted)
+
+	async.Wait()
+
+	// Four agent executions fired; the host handler must have seen every
+	// one — including the sub-agent's, which is the path the bug dropped.
+	gt.Number(t, llm.calls()).Equal(4)
+	gt.Number(t, rec.snapshotAgentExecutes()).Equal(4)
+	gt.Number(t, rec.snapshotFinishes()).Equal(4)
+}
+
+// TestRunner_Run_NilTraceHandlerKeepsArchiveOnly proves the proposal
+// host path is unchanged: with no host handler, the run still completes
+// and the (separate) archive recorder remains the only trace sink. The
+// run must not panic or change behaviour when TraceHandler is nil.
+func TestRunner_Run_NilTraceHandlerKeepsArchiveOnly(t *testing.T) {
+	ctx := context.Background()
+	llm := newSequencedLLM([]sequencedResponse{
+		{text: `{"message":"start","tasks":[
+			{"id":"t-1","title":"A","description":"check thread A","acceptance_criteria":"a","tools":["slack_ro"]}
+		]}`},
+		{text: "Found A details."},
+		{text: `{"message":"done","tasks":[]}`},
+		{text: "Here's what I found: A details."},
+	})
+
+	runner := newRunner(t, llm.Client())
+	req := baseRequest()
+	req.TraceHandler = nil
+
+	res, err := runner.Run(ctx, req)
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(planexec.StatusCompleted)
+	gt.String(t, res.FinalText).Contains("A details")
+
+	async.Wait()
+	gt.Number(t, llm.calls()).Equal(4)
+}
+
 // --- Integration: plan → phase → replan(question, terminate) --------
 
 func TestRunner_Run_QuestionTerminates(t *testing.T) {

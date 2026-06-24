@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/gollem-dev/gollem"
+	"github.com/gollem-dev/gollem/trace"
 	"github.com/m-mizutani/goerr/v2"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
@@ -98,6 +99,7 @@ func executePhase(
 	resolver ToolResolver,
 	llm gollem.LLMClient,
 	subAgentLoopMax int,
+	hostTrace trace.Handler,
 ) []TaskResult {
 	if len(tasks) == 0 {
 		return nil
@@ -108,7 +110,7 @@ func executePhase(
 		wg.Add(1)
 		async.Dispatch(ctx, func(c context.Context) error {
 			defer wg.Done()
-			results[i] = runOneTask(c, tasks[i], sink, resolver, llm, subAgentLoopMax)
+			results[i] = runOneTask(c, tasks[i], sink, resolver, llm, subAgentLoopMax, hostTrace)
 			return nil
 		})
 	}
@@ -129,6 +131,7 @@ func runOneTask(
 	resolver ToolResolver,
 	llm gollem.LLMClient,
 	subAgentLoopMax int,
+	hostTrace trace.Handler,
 ) TaskResult {
 	started := time.Now()
 	sink.TaskProgress(ctx, task.ID, fmt.Sprintf("running: %s", task.Title))
@@ -156,7 +159,10 @@ func runOneTask(
 		gollem.WithSystemPrompt(sysPrompt),
 		gollem.WithTools(tools...),
 		gollem.WithLoopLimit(subAgentLoopMax),
-		gollem.WithTrace(counter),
+		// counter feeds the per-task loop count; hostTrace (when non-nil)
+		// feeds the host's per-event timeline. combineTrace returns counter
+		// alone when hostTrace is nil, preserving the proposal host path.
+		gollem.WithTrace(combineTrace(counter, hostTrace)),
 		gollem.WithContentBlockMiddleware(progressMW),
 	)
 	resp, execErr := sub.Execute(ctx, gollem.Text(task.Description))

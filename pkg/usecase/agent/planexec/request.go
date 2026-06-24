@@ -30,6 +30,16 @@ type RunRequest struct {
 	// Optional — zero value is fine.
 	TraceMetadata trace.TraceMetadata
 
+	// TraceHandler, when non-nil, is wired (in addition to the run's
+	// internal archive recorder) into every gollem agent the run drives —
+	// planner, sub-agents, direct, and final — so a host can capture
+	// per-call LLM / tool events for its own timeline. The Job host
+	// supplies its jobRunTraceHandler here so planexec Jobs populate the
+	// JobRunEvent timeline the same way the single-loop executor does.
+	// Optional; nil preserves the archive-only behaviour (the proposal
+	// host passes nil).
+	TraceHandler trace.Handler
+
 	// LanguageLabel is interpolated into the planner system prompt's
 	// "respond in" directive (e.g. "Japanese", "English"). Optional —
 	// empty disables the directive.
