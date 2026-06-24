@@ -670,6 +670,11 @@ func TestBuildSystemPrompt_BoardStatuses(t *testing.T) {
 		// Each status surfaces id, name, and the reasoning-hint description.
 		mustContain(t, got, "- triage — Triage: Awaiting first assessment")
 		mustContain(t, got, "- resolved — Resolved (closed): Investigation is complete")
+		// The first status item must start on its own line, not glued onto the
+		// trailing instruction sentence ({{- range}} trims the blank line before
+		// it, but the range body's own leading newline still separates them).
+		mustContain(t, got, "genuinely resolved.\n- triage")
+		mustNotContain(t, got, "resolved.- triage")
 	})
 
 	t.Run("board statuses section is omitted when no status set is defined", func(t *testing.T) {
