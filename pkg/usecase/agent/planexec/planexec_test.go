@@ -228,6 +228,81 @@ func TestRunner_Run_QuestionTerminates(t *testing.T) {
 	gt.Number(t, llm.calls()).Equal(3)
 }
 
+// --- Integration: Resume re-enters at replan with answers folded in -----
+
+func TestRunner_Resume_EntersReplanWithAnswers(t *testing.T) {
+	ctx := context.Background()
+	// The FIRST response after Resume must be parsed as a REPLAN (empty
+	// tasks → terminate). A first-round plan parse would reject empty tasks
+	// (minTasksPerPhase=1), so accepting this proves Resume entered at the
+	// replan branch rather than re-planning from round 0.
+	llm := newSequencedLLM([]sequencedResponse{
+		// Replan round: terminate (the answer was enough).
+		{text: `{"message":"done","tasks":[]}`, matchSubstr: "User answers"},
+		// Final-response LLM call.
+		{text: "Resolved using the user's answer: A."},
+	})
+
+	runner := newRunner(t, llm.Client())
+	req := baseRequest()
+	// A resumed turn may itself ask another question, so OnQuestion stays
+	// wired even though this scenario terminates without re-asking.
+	req.AllowQuestion = true
+	req.OnQuestion = func(_ context.Context, _ planexec.Question) (planexec.QuestionResult, error) {
+		return planexec.QuestionResult{Terminate: true}, nil
+	}
+
+	resumeReq := planexec.ResumeRequest{
+		RunRequest: req,
+		Question: planexec.Question{
+			Reason: "ambiguity",
+			Items: []planexec.QuestionItem{
+				{ID: "q1", Text: "Which environment?", Type: "select", Options: []string{"A", "B"}},
+			},
+		},
+		Answers: []planexec.QuestionAnswer{{ID: "q1", Choice: "A"}},
+	}
+
+	res, err := runner.Resume(ctx, resumeReq)
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(planexec.StatusCompleted)
+	gt.String(t, res.FinalText).Contains("Resolved using the user's answer")
+	gt.Bool(t, res.EndedWithQuestion).False()
+
+	async.Wait()
+	// 2 calls: the resumed replan + the final-response phase. No fresh
+	// round-0 plan and no sub-agent re-execution.
+	gt.Number(t, llm.calls()).Equal(2)
+
+	// The resumed planner input must carry the user's answer verbatim and
+	// be labelled as a question-answer turn, proving the answer was folded
+	// into the conversation rather than discarded.
+	firstInput := llm.inputAt(0)
+	gt.String(t, firstInput).Contains("User answers")
+	gt.String(t, firstInput).Contains("q1")
+	gt.String(t, firstInput).Contains("Which environment?")
+	gt.String(t, firstInput).Contains("Answer (select): A")
+}
+
+func TestRunner_Resume_RejectsEmptyAnswers(t *testing.T) {
+	ctx := context.Background()
+	llm := newSequencedLLM(nil)
+	runner := newRunner(t, llm.Client())
+	req := baseRequest()
+	resumeReq := planexec.ResumeRequest{
+		RunRequest: req,
+		Question: planexec.Question{
+			Reason: "x",
+			Items:  []planexec.QuestionItem{{ID: "q1", Text: "?", Type: "free_text"}},
+		},
+		Answers: nil,
+	}
+	_, err := runner.Resume(ctx, resumeReq)
+	gt.Error(t, err)
+	// No LLM call should have fired on a validation failure.
+	gt.Number(t, llm.calls()).Equal(0)
+}
+
 // --- Integration: budget exhausted → Fallback -----------------------
 
 func TestRunner_Run_PlannerBudgetExhausted(t *testing.T) {

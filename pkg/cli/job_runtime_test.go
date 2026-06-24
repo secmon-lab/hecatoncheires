@@ -164,3 +164,49 @@ func TestBuildJobTools_GetMessagesNeedsBotButSearchIsIndependent(t *testing.T) {
 	gt.Bool(t, names["slack__get_messages"]).True()
 	gt.Bool(t, names["slack__search_messages"]).False()
 }
+
+func TestRegistryHasInteractiveJob(t *testing.T) {
+	mkJob := func(id string, interactive, disabled bool) *model.Job {
+		return &model.Job{
+			ID:          id,
+			Prompt:      "x",
+			Strategy:    model.JobStrategyPlanexec,
+			Interactive: interactive,
+			Disabled:    disabled,
+			Events: model.JobEvents{
+				Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+			},
+		}
+	}
+
+	t.Run("nil registry", func(t *testing.T) {
+		gt.Bool(t, cli.RegistryHasInteractiveJobForTest(nil)).False()
+	})
+
+	t.Run("no interactive job", func(t *testing.T) {
+		reg := model.NewWorkspaceRegistry()
+		reg.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "ws"},
+			Jobs:      []*model.Job{mkJob("a", false, false)},
+		})
+		gt.Bool(t, cli.RegistryHasInteractiveJobForTest(reg)).False()
+	})
+
+	t.Run("enabled interactive job", func(t *testing.T) {
+		reg := model.NewWorkspaceRegistry()
+		reg.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "ws"},
+			Jobs:      []*model.Job{mkJob("a", false, false), mkJob("b", true, false)},
+		})
+		gt.Bool(t, cli.RegistryHasInteractiveJobForTest(reg)).True()
+	})
+
+	t.Run("disabled interactive job does not count", func(t *testing.T) {
+		reg := model.NewWorkspaceRegistry()
+		reg.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "ws"},
+			Jobs:      []*model.Job{mkJob("b", true, true)},
+		})
+		gt.Bool(t, cli.RegistryHasInteractiveJobForTest(reg)).False()
+	})
+}

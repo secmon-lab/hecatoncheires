@@ -13,7 +13,9 @@ import (
 	"github.com/gollem-dev/gollem/trace"
 	"github.com/m-mizutani/goerr/v2"
 
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/interaction"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 )
 
 // ExecuteStatus is the terminal outcome of a Job run. The runtime emits
@@ -25,6 +27,12 @@ const (
 	ExecuteStatusSuccess ExecuteStatus = "SUCCESS"
 	ExecuteStatusFailed  ExecuteStatus = "FAILED"
 	ExecuteStatusNoOp    ExecuteStatus = "NOOP"
+	// ExecuteStatusAwaitingInput is returned when an interactive run
+	// suspended to ask the user a question. The Interactor has already
+	// persisted the pending interaction and posted the Slack form, so the
+	// JobRunner must NOT Finish the run — it stays at Stage=AWAITING_INPUT
+	// until the user answers (resume) or the unanswered sweep expires it.
+	ExecuteStatusAwaitingInput ExecuteStatus = "AWAITING_INPUT"
 )
 
 // ExecuteRequest is the input to a JobExecutor. The runtime constructs
@@ -84,6 +92,19 @@ type ExecuteRequest struct {
 	// directive" — the planexec planner prompt will skip the language
 	// section. Single-loop executor ignores this field.
 	Language string
+
+	// Interactive enables mid-run user interaction for this run. When true
+	// the planexec executor turns on the planner's Question section and
+	// wires OnQuestion to Interactor. Only honoured by the planexec
+	// executor; the single-loop executor ignores it.
+	Interactive bool
+
+	// Interactor is the host port the executor calls when the planner emits
+	// a Question. Required when Interactive is true. The executor adapts
+	// planexec.Question -> interaction.Request, calls Solicit (which
+	// suspends the run and posts the Slack form), and maps the Paused
+	// outcome back to a turn-terminating QuestionResult.
+	Interactor interaction.Interactor
 }
 
 // ExecuteResult is the outcome of a Job run.
@@ -109,6 +130,16 @@ type PhaseTrace struct {
 // (MultiRoundJobExecutor, etc.) plug in here.
 type JobExecutor interface {
 	Execute(ctx context.Context, req ExecuteRequest) (*ExecuteResult, error)
+}
+
+// ResumableJobExecutor is implemented by executors that support resuming a
+// run suspended for user input. Only the planexec executor implements it;
+// interactive Jobs are restricted to the planexec strategy, so the runner
+// type-asserts to this interface on the resume path and rejects a resume
+// against a non-resumable executor.
+type ResumableJobExecutor interface {
+	JobExecutor
+	Resume(ctx context.Context, req ExecuteRequest, pending model.PendingInteraction, answers []interaction.Answer) (*ExecuteResult, error)
 }
 
 // SingleLoopJobExecutor runs the gollem agent once with the supplied

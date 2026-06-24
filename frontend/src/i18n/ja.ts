@@ -485,6 +485,7 @@ export const ja: Messages = {
   caseAgentRunStageRunning: '実行中',
   caseAgentRunStageSuccess: '成功',
   caseAgentRunStageFailed: '失敗',
+  caseAgentRunStageAwaitingInput: '回答待ち',
   caseAgentRunDurationRunning: '実行中',
   caseAgentSectionJobs: '自動実行ジョブ',
   caseAgentJobsSubtitle: 'このケースに対して、条件に応じて自動的に実行される有効なジョブです。定義は読み取り専用です。',

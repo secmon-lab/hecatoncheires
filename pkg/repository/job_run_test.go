@@ -224,6 +224,69 @@ func runJobRunRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		gt.Value(t, runs1[0].LastTraceID).Equal("t1")
 	})
 
+	t.Run("Suspend sets marker and releases lease", func(t *testing.T) {
+		repo := newRepo(t)
+		key := model.JobRunKey{
+			WorkspaceID: fmt.Sprintf("ws-%d", time.Now().UnixNano()),
+			CaseID:      time.Now().UnixNano(),
+			JobID:       "suspend-1",
+		}
+		now := time.Now().UTC().Truncate(time.Millisecond)
+		_, err := repo.JobRun().TryAcquireLease(ctx, key, now, 5*time.Minute)
+		gt.NoError(t, err).Required()
+
+		gt.NoError(t, repo.JobRun().Suspend(ctx, key, "run-suspended", now)).Required()
+
+		got, err := repo.JobRun().Get(ctx, key)
+		gt.NoError(t, err).Required()
+		gt.String(t, got.SuspendedRunID).Equal("run-suspended")
+		gt.Bool(t, got.SuspendedAt.Equal(now)).True()
+		gt.Bool(t, got.IsSuspended()).True()
+		// Lease is released so the suspension marker (not the lease) guards.
+		gt.Bool(t, got.LeaseUntil.IsZero()).True()
+	})
+
+	t.Run("RecordRun clears a prior suspension", func(t *testing.T) {
+		repo := newRepo(t)
+		key := model.JobRunKey{
+			WorkspaceID: fmt.Sprintf("ws-%d", time.Now().UnixNano()),
+			CaseID:      time.Now().UnixNano(),
+			JobID:       "suspend-then-record",
+		}
+		now := time.Now().UTC().Truncate(time.Millisecond)
+		gt.NoError(t, repo.JobRun().Suspend(ctx, key, "run-s", now)).Required()
+		gt.NoError(t, repo.JobRun().RecordRun(ctx, key, model.JobRunStatusSuccess, now.Add(time.Minute), "run-s", "tr", "")).Required()
+
+		got, err := repo.JobRun().Get(ctx, key)
+		gt.NoError(t, err).Required()
+		gt.String(t, got.SuspendedRunID).Equal("")
+		gt.Bool(t, got.SuspendedAt.IsZero()).True()
+		gt.Bool(t, got.IsSuspended()).False()
+		gt.Value(t, got.LastStatus).Equal(model.JobRunStatusSuccess)
+	})
+
+	t.Run("TryAcquireLease re-locks a suspended (lease-released) run", func(t *testing.T) {
+		repo := newRepo(t)
+		key := model.JobRunKey{
+			WorkspaceID: fmt.Sprintf("ws-%d", time.Now().UnixNano()),
+			CaseID:      time.Now().UnixNano(),
+			JobID:       "resume-relock",
+		}
+		now := time.Now().UTC().Truncate(time.Millisecond)
+		gt.NoError(t, repo.JobRun().Suspend(ctx, key, "run-r", now)).Required()
+
+		// Resume re-acquires the lease; the suspension marker is left intact
+		// (cleared only on terminal RecordRun or re-suspend).
+		acquired, err := repo.JobRun().TryAcquireLease(ctx, key, now.Add(time.Minute), 5*time.Minute)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, acquired).True()
+
+		got, err := repo.JobRun().Get(ctx, key)
+		gt.NoError(t, err).Required()
+		gt.String(t, got.SuspendedRunID).Equal("run-r")
+		gt.Bool(t, got.LeaseUntil.After(now)).True()
+	})
+
 	t.Run("invalid key surfaces error", func(t *testing.T) {
 		repo := newRepo(t)
 		_, err := repo.JobRun().Get(ctx, model.JobRunKey{})
@@ -402,6 +465,103 @@ func runJobRunLogRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		got, err := repo.JobRunLog().List(ctx, key, 0)
 		gt.NoError(t, err).Required()
 		gt.Array(t, got).Length(0)
+	})
+
+	t.Run("Suspend then Resume round-trips the pending interaction", func(t *testing.T) {
+		repo := newRepo(t)
+		key := newJobRunKey("ws")
+		started := time.Now().UTC().Truncate(time.Millisecond)
+		log := &model.JobRunLog{
+			WorkspaceID:  key.WorkspaceID,
+			CaseID:       key.CaseID,
+			JobID:        key.JobID,
+			RunID:        "run-suspend",
+			TraceID:      "trace-suspend",
+			Stage:        model.JobRunStageRunning,
+			StartedAt:    started,
+			ExecutorKind: "planexec",
+		}
+		gt.NoError(t, repo.JobRunLog().Create(ctx, log)).Required()
+
+		// Suspend: transition to AWAITING_INPUT carrying the question.
+		log.Stage = model.JobRunStageAwaitingInput
+		log.PendingInteraction = &model.PendingInteraction{
+			PostedChannelID: "C999",
+			PostedMessageTS: "1700000000.000200",
+			Reason:          "need clarification",
+			Items: []model.PendingInteractionItem{
+				{ID: "sev", Text: "Severity?", Type: "select", Options: []string{"high", "low"}},
+				{ID: "note", Text: "Anything else?", Type: "free_text"},
+			},
+		}
+		gt.NoError(t, repo.JobRunLog().Suspend(ctx, log)).Required()
+
+		got, err := repo.JobRunLog().Get(ctx, key, "run-suspend")
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.Stage).Equal(model.JobRunStageAwaitingInput)
+		gt.Bool(t, got.EndedAt.IsZero()).True()
+		gt.Value(t, got.PendingInteraction).NotNil().Required()
+		gt.String(t, got.PendingInteraction.PostedChannelID).Equal("C999")
+		gt.String(t, got.PendingInteraction.PostedMessageTS).Equal("1700000000.000200")
+		gt.String(t, got.PendingInteraction.Reason).Equal("need clarification")
+		gt.Array(t, got.PendingInteraction.Items).Length(2).Required()
+		gt.String(t, got.PendingInteraction.Items[0].ID).Equal("sev")
+		gt.String(t, got.PendingInteraction.Items[0].Type).Equal("select")
+		gt.Array(t, got.PendingInteraction.Items[0].Options).Equal([]string{"high", "low"})
+		gt.String(t, got.PendingInteraction.Items[1].ID).Equal("note")
+		gt.String(t, got.PendingInteraction.Items[1].Type).Equal("free_text")
+
+		// Resume: back to RUNNING with the pending interaction cleared.
+		log.Stage = model.JobRunStageRunning
+		log.PendingInteraction = nil
+		gt.NoError(t, repo.JobRunLog().Resume(ctx, log)).Required()
+
+		resumed, err := repo.JobRunLog().Get(ctx, key, "run-suspend")
+		gt.NoError(t, err).Required()
+		gt.Value(t, resumed.Stage).Equal(model.JobRunStageRunning)
+		gt.Value(t, resumed.PendingInteraction).Nil()
+	})
+
+	t.Run("Suspend rejects non-AWAITING_INPUT stage", func(t *testing.T) {
+		repo := newRepo(t)
+		key := newJobRunKey("ws")
+		started := time.Now().UTC().Truncate(time.Millisecond)
+		log := &model.JobRunLog{
+			WorkspaceID:  key.WorkspaceID,
+			CaseID:       key.CaseID,
+			JobID:        key.JobID,
+			RunID:        "run-bad-suspend",
+			TraceID:      "trace-bad-suspend",
+			Stage:        model.JobRunStageRunning,
+			StartedAt:    started,
+			ExecutorKind: "planexec",
+		}
+		gt.NoError(t, repo.JobRunLog().Create(ctx, log)).Required()
+		// Stage left as RUNNING — Suspend must reject it.
+		gt.Error(t, repo.JobRunLog().Suspend(ctx, log))
+	})
+
+	t.Run("Suspend errors when the log does not exist", func(t *testing.T) {
+		repo := newRepo(t)
+		key := newJobRunKey("ws")
+		log := &model.JobRunLog{
+			WorkspaceID:  key.WorkspaceID,
+			CaseID:       key.CaseID,
+			JobID:        key.JobID,
+			RunID:        "run-absent",
+			TraceID:      "trace-absent",
+			Stage:        model.JobRunStageAwaitingInput,
+			StartedAt:    time.Now().UTC().Truncate(time.Millisecond),
+			ExecutorKind: "planexec",
+			PendingInteraction: &model.PendingInteraction{
+				PostedChannelID: "C1",
+				PostedMessageTS: "1700000000.000300",
+				Items: []model.PendingInteractionItem{
+					{ID: "q", Text: "?", Type: "free_text"},
+				},
+			},
+		}
+		gt.Error(t, repo.JobRunLog().Suspend(ctx, log)).Is(interfaces.ErrJobRunLogNotFound)
 	})
 }
 

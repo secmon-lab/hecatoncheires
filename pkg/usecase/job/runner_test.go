@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"github.com/gollem-dev/gollem"
+	"github.com/gollem-dev/gollem/mock"
 	"github.com/gollem-dev/gollem/trace"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
+	goslack "github.com/slack-go/slack"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
@@ -23,6 +25,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	jobagent "github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/job"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/planexec"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
 )
 
@@ -1178,4 +1181,371 @@ func TestJobRunner_ChannelModeOmitsRecentMessages(t *testing.T) {
 	sp := exec.systemPrompt
 	gt.Bool(t, strings.Contains(sp, "# Recent thread messages")).False()
 	gt.Bool(t, strings.Contains(sp, "should-not-appear-body")).False()
+}
+
+// inputCapturingLLM returns canned responses in order and records the
+// user-text input of every Generate call so a test can assert what each
+// round was asked. Unlike inertLLM it actually drives the planexec loop.
+type inputCapturingLLM struct {
+	mu        sync.Mutex
+	responses []string
+	idx       int
+	inputs    []string
+}
+
+func (l *inputCapturingLLM) client() gollem.LLMClient {
+	return &mock.LLMClientMock{
+		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mock.SessionMock{
+				GenerateFunc: func(_ context.Context, input []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					l.mu.Lock()
+					defer l.mu.Unlock()
+					var sb strings.Builder
+					for _, in := range input {
+						if txt, ok := in.(gollem.Text); ok {
+							sb.WriteString(string(txt))
+							sb.WriteString("\n")
+						}
+					}
+					l.inputs = append(l.inputs, sb.String())
+					if l.idx >= len(l.responses) {
+						return &gollem.Response{}, nil
+					}
+					next := l.responses[l.idx]
+					l.idx++
+					return &gollem.Response{Texts: []string{next}}, nil
+				},
+			}, nil
+		},
+	}
+}
+
+// TestLifecycle_InteractiveJobQuestionThenResume drives the full interactive
+// Job lifecycle through the public entry points: a planexec Job asks the user
+// a question (Run suspends at AWAITING_INPUT), the user submits an answer
+// (HandleQuestionSubmit), and the run resumes to completion. The decisive
+// assertion is HISTORY CONTINUITY: the run's gollem conversation (keyed by the
+// SAME RunID across suspend and resume) accumulates BOTH the sub-agent
+// observation from before the question AND the user's answer after it — proving
+// the resumed planner sees the prior context rather than restarting.
+func TestLifecycle_InteractiveJobQuestionThenResume(t *testing.T) {
+	ctx := context.Background()
+	wsID := "ws-interactive"
+	now := time.Date(2026, 6, 24, 9, 0, 0, 0, time.UTC)
+
+	const observationMarker = "OBSERVATION-MARKER-9f3a"
+
+	llm := &inputCapturingLLM{responses: []string{
+		// Turn 1, round 1: plan one task.
+		`{"message":"start","tasks":[{"id":"t1","title":"A","description":"investigate","acceptance_criteria":"a","tools":["default"]}]}`,
+		// Turn 1: sub-agent observation (carries the marker we assert on later).
+		observationMarker + " was found in the prod logs.",
+		// Turn 1, replan: ask the user which environment.
+		`{"message":"need input","question":{"reason":"which environment?","items":[{"id":"env","text":"Which environment?","type":"select","options":["prod","stg"]}]}}`,
+		// Turn 2 (resume), replan: terminate.
+		`{"message":"done","tasks":[]}`,
+		// Turn 2: final response.
+		"Concluded: the prod environment was affected.",
+	}}
+
+	historyRepo := agentarchive.NewMemoryHistoryRepository()
+	peRunner, err := planexecRunnerForTest(llm.client(), historyRepo)
+	gt.NoError(t, err).Required()
+	planexecExec, err := jobagent.NewPlanexecJobExecutor(peRunner)
+	gt.NoError(t, err).Required()
+
+	repo, c := setupCaseWithSlack(t, wsID, "C-CASE", "1700000000.0001")
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: wsID, Name: "WS"},
+		Jobs:      nil, // set below after we build the Job
+	})
+
+	j := &model.Job{
+		ID:          "interactive_triage",
+		Prompt:      "Investigate {{.Case.Title}} and ask if unclear.",
+		Strategy:    model.JobStrategyPlanexec,
+		Interactive: true,
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	gt.NoError(t, j.Validate()).Required()
+	// Re-register the workspace with the job so Resume can find it.
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: wsID, Name: "WS"},
+		Jobs:      []*model.Job{j},
+	})
+
+	poster := &fakeQuestionPoster{returnTS: "FORM-TS-1"}
+	runner := job.NewJobRunner(job.RunnerDeps{
+		Repo:              repo,
+		Registry:          registry,
+		LLMClient:         llm.client(),
+		Executors:         map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategyPlanexec: planexecExec},
+		HistoryRepo:       historyRepo,
+		InteractionPoster: poster,
+		NewRunID:          func() string { return "RUN-1" },
+		NewTraceID:        func() string { return "TRACE-1" },
+		Clock:             func() time.Time { return now },
+	})
+
+	// --- Turn 1: Run suspends at the question ----------------------------
+	gt.NoError(t, runner.Run(ctx, j, job.Event{
+		Domain:        model.JobEventDomainCase,
+		WorkspaceID:   wsID,
+		CaseID:        c.ID,
+		Timestamp:     now.Add(-time.Second),
+		ActorUserID:   "U-CALLER",
+		CaseLifecycle: model.CaseLifecycleCreated,
+	})).Required()
+
+	key := model.JobRunKey{WorkspaceID: wsID, CaseID: c.ID, JobID: j.ID}
+	suspendedLog, err := repo.JobRunLog().Get(ctx, key, "RUN-1")
+	gt.NoError(t, err).Required()
+	gt.Value(t, suspendedLog.Stage).Equal(model.JobRunStageAwaitingInput)
+	gt.Value(t, suspendedLog.PendingInteraction).NotNil().Required()
+	gt.Array(t, poster.posts).Length(1).Required()
+
+	runDoc, err := repo.JobRun().Get(ctx, key)
+	gt.NoError(t, err).Required()
+	gt.String(t, runDoc.SuspendedRunID).Equal("RUN-1")
+
+	// Extract the resume-context value from the posted form's Submit button.
+	refValue := submitValueFromBlocks(t, poster.posts[0].blocks)
+
+	// --- Turn 2: user answers; HandleQuestionSubmit resumes --------------
+	callback := &goslack.InteractionCallback{
+		BlockActionState: &goslack.BlockActionStates{
+			Values: map[string]map[string]goslack.BlockAction{
+				"job_question_item:env": {
+					"job_question_choice": {SelectedOption: goslack.OptionBlockObject{Value: "prod"}},
+				},
+			},
+		},
+	}
+	callback.Channel.ID = "C-CASE"
+	callback.Message.Timestamp = "FORM-TS-1"
+	action := &goslack.BlockAction{Value: refValue}
+
+	gt.NoError(t, runner.HandleQuestionSubmit(ctx, callback, action)).Required()
+
+	// The run completed under the SAME RunID (no fresh run minted).
+	finalLog, err := repo.JobRunLog().Get(ctx, key, "RUN-1")
+	gt.NoError(t, err).Required()
+	gt.Value(t, finalLog.Stage).Equal(model.JobRunStageSuccess)
+	gt.Value(t, finalLog.PendingInteraction).Nil()
+
+	finalRun, err := repo.JobRun().Get(ctx, key)
+	gt.NoError(t, err).Required()
+	gt.Value(t, finalRun.LastStatus).Equal(model.JobRunStatusSuccess)
+	gt.String(t, finalRun.LastRunID).Equal("RUN-1")
+	// Suspension marker cleared on terminal record.
+	gt.String(t, finalRun.SuspendedRunID).Equal("")
+
+	// The form was swapped to the answered view.
+	gt.Number(t, len(poster.updates)).GreaterOrEqual(1)
+
+	// --- The decisive assertions: history continuity --------------------
+	// gollem persists the conversation under HistoryKey, and the JobRunner
+	// sets HistoryKey == RunID for BOTH the initial run and the resume (the
+	// run completed under the same "RUN-1" asserted above), so the resumed
+	// planner loads the same conversation. We verify the Job-level halves of
+	// that contract on the captured planner inputs:
+	//   1. the pre-question sub-agent observation entered the conversation
+	//      (turn-1 replan input), and
+	//   2. the post-question answer is folded into the resumed planner input
+	//      under the same run — proving resume continued the dialogue rather
+	//      than restarting from a blank round-0 plan.
+	gt.Number(t, len(llm.inputs)).GreaterOrEqual(4)
+	gt.Bool(t, strings.Contains(llm.inputs[2], observationMarker)).True()
+	gt.Bool(t, strings.Contains(llm.inputs[3], "User answers")).True()
+	gt.Bool(t, strings.Contains(llm.inputs[3], "prod")).True()
+	// The marker is NOT re-stated in the resumed input — it lives in the
+	// loaded gollem history, not the fresh turn input — confirming the resume
+	// relies on the persisted conversation rather than re-sending observations.
+	gt.Bool(t, strings.Contains(llm.inputs[3], observationMarker)).False()
+}
+
+// planexecRunnerForTest builds a planexec.Runner sharing the given history
+// repository (so the JobRunner and the planner persist into the same store).
+func planexecRunnerForTest(llm gollem.LLMClient, historyRepo gollem.HistoryRepository) (*planexec.Runner, error) {
+	return planexec.NewRunner(planexec.RunnerDeps{
+		LLMClient:   llm,
+		HistoryRepo: historyRepo,
+		TraceRepo:   agentarchive.NewMemoryTraceRepository(),
+		Budget: planexec.BudgetConfig{
+			PlannerLoopMax:  8,
+			SubAgentLoopMax: 20,
+		},
+	})
+}
+
+// submitValueFromBlocks pulls the Submit button's value out of a posted
+// question form so the test can replay it as the interaction callback action.
+func submitValueFromBlocks(t *testing.T, blocks []goslack.Block) string {
+	t.Helper()
+	for _, b := range blocks {
+		ab, ok := b.(*goslack.ActionBlock)
+		if !ok || ab.Elements == nil {
+			continue
+		}
+		for _, el := range ab.Elements.ElementSet {
+			if btn, ok := el.(*goslack.ButtonBlockElement); ok && btn.ActionID == job.ActionIDJobQuestionSubmit {
+				return btn.Value
+			}
+		}
+	}
+	t.Fatal("submit button not found in posted blocks")
+	return ""
+}
+
+// interactivePlanexecJob is a valid interactive (planexec) Job for recovery tests.
+func interactivePlanexecJob() *model.Job {
+	return &model.Job{
+		ID:          "interactive_triage",
+		Prompt:      "x",
+		Strategy:    model.JobStrategyPlanexec,
+		Interactive: true,
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+}
+
+func newInteractiveRecoveryRunner(repo interfaces.Repository, j *model.Job, exec jobagent.JobExecutor, now time.Time) *job.JobRunner {
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: "ws"},
+		Jobs:      []*model.Job{j},
+	})
+	return job.NewJobRunner(job.RunnerDeps{
+		Repo:      repo,
+		Registry:  registry,
+		LLMClient: inertLLM(),
+		Executors: map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategyPlanexec: exec},
+		Clock:     func() time.Time { return now },
+	})
+}
+
+func interactiveCreatedEvent(caseID int64, now time.Time) job.Event {
+	return job.Event{
+		Domain:        model.JobEventDomainCase,
+		WorkspaceID:   "ws",
+		CaseID:        caseID,
+		Timestamp:     now,
+		ActorUserID:   "U-CALLER",
+		CaseLifecycle: model.CaseLifecycleCreated,
+	}
+}
+
+func TestJobRunner_SkipsGenuinelyActiveSuspendedRun(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 6, 24, 9, 0, 0, 0, time.UTC)
+	repo, c := setupCase(t, "ws")
+	j := interactivePlanexecJob()
+	key := model.JobRunKey{WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID}
+	// Suspended just now (within the 24h timeout) with an AWAITING_INPUT log.
+	suspendRun(t, repo, key, "RUN-ACTIVE", now)
+
+	exec := &recordingExecutor{}
+	runner := newInteractiveRecoveryRunner(repo, j, exec, now)
+	gt.NoError(t, runner.Run(ctx, j, interactiveCreatedEvent(c.ID, now))).Required()
+
+	// The pending question owns the slot: no new run started.
+	gt.Number(t, exec.calls.Load()).Equal(int32(0))
+	log, err := repo.JobRunLog().Get(ctx, key, "RUN-ACTIVE")
+	gt.NoError(t, err).Required()
+	gt.Value(t, log.Stage).Equal(model.JobRunStageAwaitingInput)
+	run, err := repo.JobRun().Get(ctx, key)
+	gt.NoError(t, err).Required()
+	gt.String(t, run.SuspendedRunID).Equal("RUN-ACTIVE")
+}
+
+func TestJobRunner_RecoversStaleSuspendedRunAndProceeds(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 6, 24, 9, 0, 0, 0, time.UTC)
+	repo, c := setupCase(t, "ws")
+	j := interactivePlanexecJob()
+	key := model.JobRunKey{WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID}
+	// Suspended 48h ago — past the 24h timeout, so it is stale.
+	suspendRun(t, repo, key, "RUN-STALE", now.Add(-48*time.Hour))
+
+	exec := &recordingExecutor{}
+	runner := newInteractiveRecoveryRunner(repo, j, exec, now)
+	gt.NoError(t, runner.Run(ctx, j, interactiveCreatedEvent(c.ID, now))).Required()
+
+	// The stale suspension was recovered and a fresh run executed.
+	gt.Number(t, exec.calls.Load()).Equal(int32(1))
+	// The orphaned run log was failed (not left perpetually AWAITING_INPUT).
+	oldLog, err := repo.JobRunLog().Get(ctx, key, "RUN-STALE")
+	gt.NoError(t, err).Required()
+	gt.Value(t, oldLog.Stage).Equal(model.JobRunStageFailed)
+	gt.Value(t, oldLog.PendingInteraction).Nil()
+	// The slot is free again: suspension cleared, last run succeeded.
+	run, err := repo.JobRun().Get(ctx, key)
+	gt.NoError(t, err).Required()
+	gt.String(t, run.SuspendedRunID).Equal("")
+	gt.Value(t, run.LastStatus).Equal(model.JobRunStatusSuccess)
+}
+
+func TestJobRunner_RecoversInconsistentSuspension(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 6, 24, 9, 0, 0, 0, time.UTC)
+	repo, c := setupCase(t, "ws")
+	j := interactivePlanexecJob()
+	key := model.JobRunKey{WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID}
+
+	// Inconsistent state: SuspendedRunID set (recently) but the run log is
+	// still RUNNING — what a crash mid-resume leaves behind. Even within the
+	// timeout, this must be recovered (the question is not actually open).
+	gt.NoError(t, repo.JobRunLog().Create(ctx, newRunningLog(key, "RUN-CRASH", now))).Required()
+	gt.NoError(t, repo.JobRun().Suspend(ctx, key, "RUN-CRASH", now)).Required()
+
+	exec := &recordingExecutor{}
+	runner := newInteractiveRecoveryRunner(repo, j, exec, now)
+	gt.NoError(t, runner.Run(ctx, j, interactiveCreatedEvent(c.ID, now))).Required()
+
+	gt.Number(t, exec.calls.Load()).Equal(int32(1))
+	oldLog, err := repo.JobRunLog().Get(ctx, key, "RUN-CRASH")
+	gt.NoError(t, err).Required()
+	gt.Value(t, oldLog.Stage).Equal(model.JobRunStageFailed)
+	run, err := repo.JobRun().Get(ctx, key)
+	gt.NoError(t, err).Required()
+	gt.String(t, run.SuspendedRunID).Equal("")
+}
+
+// getErrJobRun wraps a JobRunRepository and forces Get to fail, simulating a
+// transient backend read error.
+type getErrJobRun struct {
+	interfaces.JobRunRepository
+}
+
+func (g getErrJobRun) Get(_ context.Context, _ model.JobRunKey) (*model.JobRun, error) {
+	return nil, errors.New("transient backend error")
+}
+
+// getErrRepo is a Repository whose JobRun().Get always fails.
+type getErrRepo struct {
+	interfaces.Repository
+	jr interfaces.JobRunRepository
+}
+
+func (r getErrRepo) JobRun() interfaces.JobRunRepository { return r.jr }
+
+func TestJobRunner_FailsClosedWhenSuspensionCheckErrors(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 6, 24, 9, 0, 0, 0, time.UTC)
+	base, c := setupCase(t, "ws")
+	repo := getErrRepo{Repository: base, jr: getErrJobRun{JobRunRepository: base.JobRun()}}
+
+	j := interactivePlanexecJob()
+	exec := &recordingExecutor{}
+	runner := newInteractiveRecoveryRunner(repo, j, exec, now)
+
+	// A transient Get error must NOT let a new run proceed (which could
+	// clobber a suspended one). Run fails closed.
+	err := runner.Run(ctx, j, interactiveCreatedEvent(c.ID, now))
+	gt.Error(t, err)
+	gt.Number(t, exec.calls.Load()).Equal(int32(0))
 }

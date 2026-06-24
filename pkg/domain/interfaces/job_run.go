@@ -71,11 +71,22 @@ type JobRunRepository interface {
 
 	// RecordRun persists the terminal outcome of a Job run. It also
 	// clears any lease that may still be active (treat RecordRun as
-	// implying release). lastRunAt is the caller's clock at the moment
-	// the run completed — repositories do not stamp it themselves.
-	// runID identifies the specific JobRunLog produced by this run and
-	// is mirrored into JobRun.LastRunID for cross-reference.
+	// implying release) AND clears any suspension marker (a terminal run
+	// is, by definition, no longer awaiting input). lastRunAt is the
+	// caller's clock at the moment the run completed — repositories do not
+	// stamp it themselves. runID identifies the specific JobRunLog produced
+	// by this run and is mirrored into JobRun.LastRunID for cross-reference.
 	RecordRun(ctx context.Context, key model.JobRunKey, status model.JobRunStatus, lastRunAt time.Time, runID, traceID, errMsg string) error
+
+	// Suspend marks the (workspace, case, job) as awaiting user input for
+	// the given runID and releases any active lease in the same atomic
+	// step. While SuspendedRunID is set, the scheduler/dispatcher MUST NOT
+	// start a new run for this tuple (see model.JobRun.IsSuspended). The
+	// lease is released because a human wait can outlast any lease; the
+	// suspension marker is the durable "do not double-start" signal.
+	// suspendedAt is the caller's clock, used later by the unanswered-run
+	// sweep to expire stale suspensions.
+	Suspend(ctx context.Context, key model.JobRunKey, runID string, suspendedAt time.Time) error
 }
 
 // JobRunLogRepository persists one *invocation* of a Job (= one Run)
@@ -100,6 +111,18 @@ type JobRunLogRepository interface {
 	// with Stage / EndedAt / Error populated; the implementation just
 	// persists it.
 	Finish(ctx context.Context, log *model.JobRunLog) error
+
+	// Suspend transitions an existing log to the non-terminal
+	// AWAITING_INPUT stage. The caller supplies the full *JobRunLog with
+	// Stage=AWAITING_INPUT and PendingInteraction populated; EndedAt stays
+	// zero. Errors with ErrJobRunLogNotFound if the log does not exist.
+	Suspend(ctx context.Context, log *model.JobRunLog) error
+
+	// Resume transitions a suspended log back to RUNNING. The caller
+	// supplies the full *JobRunLog with Stage=RUNNING and
+	// PendingInteraction cleared (nil). Errors with ErrJobRunLogNotFound if
+	// the log does not exist.
+	Resume(ctx context.Context, log *model.JobRunLog) error
 
 	// Get returns the log identified by (key, runID), or
 	// (nil, ErrJobRunLogNotFound) when no such log exists.

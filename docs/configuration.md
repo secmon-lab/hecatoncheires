@@ -884,6 +884,7 @@ prompt = "Post a status digest to the case Slack channel."
 | `disabled`    | bool     | no       | Defaults to `false` (= active). Set `true` to temporarily disable. |
 | `quiet`       | bool     | no       | Defaults to `false`. Set `true` to suppress the operational Slack session log (see *Session log* below). |
 | `strategy`    | string   | no       | `"simple"` (default) or `"planexec"`. See *Execution strategy* below. |
+| `interactive` | bool     | no       | Defaults to `false`. Set `true` to let the Job pause mid-run and ask the user a question in Slack, resuming when they answer. **Requires `strategy = "planexec"`.** See *Interactive Jobs* below. |
 | `reflection`  | bool     | no       | Defaults to `false`. Set `true` to run a post-execution reflection pass after a successful run. See *Reflection* below. |
 | `events.case` | table    | (\*)     | `on = ["created" \| "closed", ...]`. Always an array. |
 | `events.scheduled` | table | (\*)   | Exactly one of `every = "1h"` or `cron = "0 9 * * *"`. |
@@ -931,6 +932,54 @@ events.case = { on = ["created"] }
 |----------|-------------|
 | `simple` (default) | Single-step actions: post a digest, set a status, send a Slack reply. The Job's prompt is a direct instruction the agent executes in one ReAct loop. |
 | `planexec` | Multi-step investigations: pull context from several sources, cross-reference, and produce a structured summary. The runtime budgets up to 8 planner rounds and 16 parallel sub-agent tasks per turn (configurable in the binary). |
+
+### Interactive Jobs (`interactive`)
+
+By default a Job runs **unattended** — it never waits for a human. Set
+`interactive = true` to let the Job **pause to ask the user a question** when
+the planner needs clarification, then resume once the user answers.
+
+```toml
+[[job]]
+id = "triage_on_create"
+prompt = "Investigate the case and ask the reporter if anything is unclear."
+strategy = "planexec"   # required for interactive
+interactive = true
+events.case = { on = ["created"] }
+```
+
+How it works:
+
+1. When the planner decides it needs input, the run **suspends**: a Block Kit
+   question form is posted into the Case's Slack thread, and the run is
+   recorded as *awaiting input* (its lease is released so it does not block
+   other work).
+2. The user answers the form and clicks **Submit**.
+3. The run **resumes** under the same conversation history — the planner sees
+   everything it already gathered plus the answer, and continues to a
+   conclusion (it may ask again if needed).
+
+Constraints and behaviour:
+
+- **`strategy = "planexec"` is mandatory.** Setting `interactive = true` on a
+  `simple` Job (or with no `strategy`, which defaults to `simple`) fails at
+  config load — the single-loop runtime has no question mechanism.
+- A question is posted into the Case's Slack thread. An interactive Job whose
+  Case has no Slack thread to ask in fails the run loudly rather than dropping
+  the question.
+- While a run is awaiting input, the scheduler does **not** start a new run for
+  the same Job × Case — the suspended run owns the slot until it is answered.
+- The question form is **not** suppressed by `quiet`: `quiet` only silences the
+  operational session-log markers, whereas a question is a deliberate
+  interaction with the user.
+- The planner budget is granted **fresh** when a run resumes (the human answer
+  is a natural checkpoint), so a resumed turn is not starved by work the
+  pre-question turn already spent.
+
+Interactive Jobs require the agent conversation history to be persisted in a
+shared backend (Cloud Storage) so a resume — which may be handled by a
+different instance — can continue the conversation. This is already the case
+in any deployment with Slack wired (see `HECATONCHEIRES_CLOUD_STORAGE_BUCKET`).
 
 ### Reflection
 

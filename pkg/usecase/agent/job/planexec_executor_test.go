@@ -10,6 +10,8 @@ import (
 	"github.com/gollem-dev/gollem/mock"
 	"github.com/m-mizutani/gt"
 
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/interaction"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/job"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/planexec"
@@ -192,5 +194,165 @@ func TestPlanexecJobExecutor_BudgetExhaustionMapsToError(t *testing.T) {
 		TraceID:      "trace-x",
 		HistoryKey:   "hist-x",
 	})
+	gt.Error(t, runErr)
+}
+
+// fakeInteractor records the interaction.Request it was asked to solicit
+// and always reports the run as paused (the pause/resume model).
+type fakeInteractor struct {
+	mu       sync.Mutex
+	requests []interaction.Request
+}
+
+func (f *fakeInteractor) Solicit(_ context.Context, req interaction.Request) (interaction.Outcome, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.requests = append(f.requests, req)
+	return interaction.Outcome{Paused: true}, nil
+}
+
+func (f *fakeInteractor) last() (interaction.Request, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.requests) == 0 {
+		return interaction.Request{}, false
+	}
+	return f.requests[len(f.requests)-1], true
+}
+
+// TestPlanexecJobExecutor_InteractiveSuspends verifies that when the
+// planner emits a question on an interactive run, the executor routes it to
+// the Interactor and surfaces ExecuteStatusAwaitingInput (not Success).
+func TestPlanexecJobExecutor_InteractiveSuspends(t *testing.T) {
+	ctx := context.Background()
+	llm := newSequencedLLMClient([]string{
+		// Round 1 plan
+		`{"message":"start","tasks":[
+			{"id":"t-1","title":"A","description":"check A","acceptance_criteria":"a","tools":["default"]}
+		]}`,
+		// Sub-agent response
+		"Found something ambiguous about A.",
+		// Replan asks the user.
+		`{"message":"need input","question":{
+			"reason":"which environment?","items":[
+				{"id":"env","text":"Which environment?","type":"select","options":["prod","stg"]}
+			]}}`,
+	})
+
+	runner := newRunner(t, llm)
+	executor, err := job.NewPlanexecJobExecutor(runner)
+	gt.NoError(t, err).Required()
+
+	fi := &fakeInteractor{}
+	res, err := executor.Execute(ctx, job.ExecuteRequest{
+		JobID:        "interactive-job",
+		SystemPrompt: "You are running an interactive job.",
+		Prompt:       "Investigate the case.",
+		LLMClient:    llm,
+		TraceID:      "trace-int-1",
+		HistoryKey:   "hist-int-1",
+		Interactive:  true,
+		Interactor:   fi,
+	})
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(job.ExecuteStatusAwaitingInput)
+	// Suspended runs carry no summary — the answer has not arrived yet.
+	gt.String(t, res.Summary).Equal("")
+
+	// The Interactor must have received the planner's question verbatim
+	// (content, not just a count).
+	got, ok := fi.last()
+	gt.Bool(t, ok).True()
+	gt.String(t, got.Reason).Equal("which environment?")
+	gt.Array(t, got.Items).Length(1).Required()
+	gt.String(t, got.Items[0].ID).Equal("env")
+	gt.String(t, got.Items[0].Text).Equal("Which environment?")
+	gt.Value(t, got.Items[0].Type).Equal(interaction.ItemSelect)
+	gt.Array(t, got.Items[0].Options).Equal([]string{"prod", "stg"})
+}
+
+// TestPlanexecJobExecutor_InteractiveRequiresInteractor ensures the executor
+// fails loudly when Interactive is set without an Interactor.
+func TestPlanexecJobExecutor_InteractiveRequiresInteractor(t *testing.T) {
+	ctx := context.Background()
+	llm := newSequencedLLMClient(nil)
+	runner := newRunner(t, llm)
+	executor, err := job.NewPlanexecJobExecutor(runner)
+	gt.NoError(t, err).Required()
+
+	_, runErr := executor.Execute(ctx, job.ExecuteRequest{
+		JobID:        "j",
+		SystemPrompt: "s",
+		Prompt:       "p",
+		LLMClient:    llm,
+		TraceID:      "trace-1",
+		HistoryKey:   "hist-1",
+		Interactive:  true,
+		Interactor:   nil,
+	})
+	gt.Error(t, runErr)
+}
+
+// TestPlanexecJobExecutor_Resume verifies a suspended run resumes from the
+// persisted question + answers and completes with the final summary.
+func TestPlanexecJobExecutor_Resume(t *testing.T) {
+	ctx := context.Background()
+	llm := newSequencedLLMClient([]string{
+		// Resumed replan terminates (the answer was enough).
+		`{"message":"done","tasks":[]}`,
+		// Final response.
+		"Summary: used the prod environment per the answer.",
+	})
+
+	runner := newRunner(t, llm)
+	executor, err := job.NewPlanexecJobExecutor(runner)
+	gt.NoError(t, err).Required()
+
+	pending := model.PendingInteraction{
+		PostedChannelID: "C1",
+		PostedMessageTS: "1700000000.000400",
+		Reason:          "which environment?",
+		Items: []model.PendingInteractionItem{
+			{ID: "env", Text: "Which environment?", Type: "select", Options: []string{"prod", "stg"}},
+		},
+	}
+	answers := []interaction.Answer{{ID: "env", Choice: "prod"}}
+
+	res, err := executor.Resume(ctx, job.ExecuteRequest{
+		JobID:        "interactive-job",
+		SystemPrompt: "You are running an interactive job.",
+		Prompt:       "Investigate the case.",
+		LLMClient:    llm,
+		TraceID:      "trace-int-1",
+		HistoryKey:   "hist-int-1",
+		Interactor:   &fakeInteractor{},
+	}, pending, answers)
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(job.ExecuteStatusSuccess)
+	gt.String(t, res.Summary).Contains("prod environment")
+}
+
+// TestPlanexecJobExecutor_ResumeRejectsEmptyAnswers guards the resume
+// contract.
+func TestPlanexecJobExecutor_ResumeRejectsEmptyAnswers(t *testing.T) {
+	ctx := context.Background()
+	llm := newSequencedLLMClient(nil)
+	runner := newRunner(t, llm)
+	executor, err := job.NewPlanexecJobExecutor(runner)
+	gt.NoError(t, err).Required()
+
+	_, runErr := executor.Resume(ctx, job.ExecuteRequest{
+		JobID:        "j",
+		SystemPrompt: "s",
+		Prompt:       "p",
+		LLMClient:    llm,
+		TraceID:      "trace-1",
+		HistoryKey:   "hist-1",
+		Interactor:   &fakeInteractor{},
+	}, model.PendingInteraction{
+		PostedChannelID: "C1",
+		PostedMessageTS: "1700000000.000500",
+		Items:           []model.PendingInteractionItem{{ID: "q", Text: "?", Type: "free_text"}},
+	}, nil)
 	gt.Error(t, runErr)
 }

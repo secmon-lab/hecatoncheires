@@ -132,6 +132,27 @@ type jobRuntimeDeps struct {
 	TraceRepo   trace.Repository
 }
 
+// registryHasInteractiveJob reports whether any enabled Job in any workspace
+// is interactive. Used at serve startup to enforce that interactive Jobs —
+// which suspend and resume across requests / instances — have a persistent
+// (shared) agent history backend.
+func registryHasInteractiveJob(registry *model.WorkspaceRegistry) bool {
+	if registry == nil {
+		return false
+	}
+	for _, ws := range registry.List() {
+		if ws == nil {
+			continue
+		}
+		for _, j := range ws.Jobs {
+			if j != nil && !j.Disabled && j.Interactive {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // buildJobRuntime constructs the JobRunner + JobUseCase pair, with a
 // ToolBuilder that binds every read-only and writer tool the spec calls
 // for to each invocation.
@@ -210,7 +231,7 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner) {
 		slackNotifier = slackNotifierAdapter{svc: deps.SlackService}
 	}
 
-	runner := job.NewJobRunner(job.RunnerDeps{
+	deps2 := job.RunnerDeps{
 		Repo:          deps.Repo,
 		Registry:      deps.Registry,
 		LLMClient:     deps.LLMClient,
@@ -219,7 +240,15 @@ func buildJobRuntime(deps jobRuntimeDeps) (*job.UseCase, *job.JobRunner) {
 		SlackNotifier: slackNotifier,
 		Reflector:     reflector,
 		HistoryRepo:   historyRepo,
-	})
+	}
+	// The interactive-Job question form is Block Kit posted/updated directly
+	// via the Slack service (the narrow SlackNotifier cannot carry blocks).
+	// Wired only when Slack is present; without it an interactive Job that
+	// emits a question fails loudly at the Interactor (it has no surface).
+	if deps.SlackService != nil {
+		deps2.InteractionPoster = deps.SlackService
+	}
+	runner := job.NewJobRunner(deps2)
 	jobUC := job.NewUseCase(deps.Registry, runner)
 	return jobUC, runner
 }

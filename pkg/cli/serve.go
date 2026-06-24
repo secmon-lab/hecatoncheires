@@ -450,6 +450,17 @@ func cmdServe() *cli.Command {
 
 			uc := usecase.New(repo, registry, ucOpts...)
 
+			// Interactive Jobs suspend a run and resume it from a later Slack
+			// submit — possibly on a different instance — so their conversation
+			// history MUST live in a shared backend (Cloud Storage). Fail loudly
+			// at startup rather than letting a resume silently lose context.
+			// agentHistoryRepo is non-nil only when Slack + Cloud Storage are
+			// configured (see above), which is also what makes the question
+			// form deliverable in the first place.
+			if agentHistoryRepo == nil && registryHasInteractiveJob(registry) {
+				return goerr.New("interactive Jobs require a persistent agent history backend: configure Slack and Cloud Storage (HECATONCHEIRES_CLOUD_STORAGE_BUCKET)")
+			}
+
 			// Wire the event-driven Job runtime. The JobUseCase listens to
 			// CaseUseCase lifecycle events and dispatches Agent Jobs in the
 			// background. The ScheduledScanner / HTTP hook handler are wired
@@ -458,7 +469,7 @@ func cmdServe() *cli.Command {
 			if llmErr != nil {
 				logging.Default().Info("LLM client not configured; Job runtime will skip dispatch", "error", llmErr.Error())
 			}
-			jobUC, _ := buildJobRuntime(jobRuntimeDeps{
+			jobUC, jobRunner := buildJobRuntime(jobRuntimeDeps{
 				Repo:           repo,
 				Registry:       registry,
 				LLMClient:      llmClient,
@@ -576,7 +587,7 @@ func cmdServe() *cli.Command {
 
 				// Add Slack interaction handler (shares signing secret with webhook)
 				slackInteractionHandler := httpctrl.NewSlackInteractionHandler(
-					uc.Action, uc.Agent, uc.Slack, uc.Case, uc.MentionProposal,
+					uc.Action, uc.Agent, uc.Slack, uc.Case, uc.MentionProposal, jobRunner,
 				)
 
 				// Add slash command handler

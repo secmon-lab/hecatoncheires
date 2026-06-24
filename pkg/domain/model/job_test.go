@@ -171,6 +171,30 @@ func TestJob_Validate(t *testing.T) {
 		j.Strategy = model.JobStrategy("ultra")
 		gt.Error(t, j.Validate())
 	})
+	t.Run("interactive with planexec is accepted", func(t *testing.T) {
+		j := *ok
+		j.Strategy = model.JobStrategyPlanexec
+		j.Interactive = true
+		gt.NoError(t, j.Validate())
+	})
+	t.Run("interactive with simple is rejected", func(t *testing.T) {
+		j := *ok
+		j.Strategy = model.JobStrategySimple
+		j.Interactive = true
+		gt.Error(t, j.Validate())
+	})
+	t.Run("interactive with empty (defaults to simple) strategy is rejected", func(t *testing.T) {
+		j := *ok
+		j.Strategy = ""
+		j.Interactive = true
+		gt.Error(t, j.Validate())
+	})
+	t.Run("non-interactive is accepted on any valid strategy", func(t *testing.T) {
+		j := *ok
+		j.Strategy = model.JobStrategySimple
+		j.Interactive = false
+		gt.NoError(t, j.Validate())
+	})
 }
 
 func TestJobStrategy_IsValid(t *testing.T) {

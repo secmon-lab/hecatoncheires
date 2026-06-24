@@ -1095,20 +1095,22 @@ func (e JobRunEventKind) MarshalJSON() ([]byte, error) {
 type JobRunStage string
 
 const (
-	JobRunStageRunning JobRunStage = "RUNNING"
-	JobRunStageSuccess JobRunStage = "SUCCESS"
-	JobRunStageFailed  JobRunStage = "FAILED"
+	JobRunStageRunning       JobRunStage = "RUNNING"
+	JobRunStageSuccess       JobRunStage = "SUCCESS"
+	JobRunStageFailed        JobRunStage = "FAILED"
+	JobRunStageAwaitingInput JobRunStage = "AWAITING_INPUT"
 )
 
 var AllJobRunStage = []JobRunStage{
 	JobRunStageRunning,
 	JobRunStageSuccess,
 	JobRunStageFailed,
+	JobRunStageAwaitingInput,
 }
 
 func (e JobRunStage) IsValid() bool {
 	switch e {
-	case JobRunStageRunning, JobRunStageSuccess, JobRunStageFailed:
+	case JobRunStageRunning, JobRunStageSuccess, JobRunStageFailed, JobRunStageAwaitingInput:
 		return true
 	}
 	return false

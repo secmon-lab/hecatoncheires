@@ -107,8 +107,6 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 		return nil, goerr.Wrap(err, "validate run request")
 	}
 
-	logger := logging.From(ctx)
-
 	systemPrompt, err := renderPlannerSystemPrompt(plannerPromptInput{
 		HostPrompt:      req.SystemPrompt,
 		Language:        req.LanguageLabel,
@@ -142,9 +140,67 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 
 	bg := newBudget(r.budget)
 	nextInput := bg.formatPrefix() + "\n\n" + req.UserInput
+	return r.runLoop(ctx, req, systemPrompt, recorder, bg, nil, 0, nextInput)
+}
 
-	var allResults []PhaseSummary
-	logicalRound := 0
+// Resume re-enters a suspended turn after the user answered the planner's
+// Question. It mirrors Run's setup (same system prompt, a fresh trace
+// recorder bound to the same TraceID, a fresh budget) but enters the loop
+// at a replan round (logicalRound 1) with the answers folded in as the
+// first input. allResults starts empty: the conversation history keyed by
+// HistoryKey already carries the prior observations, so the planner re-plans
+// with full context without re-executing the completed phases.
+func (r *Runner) Resume(ctx context.Context, req ResumeRequest) (*RunResult, error) {
+	if err := req.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "validate resume request")
+	}
+
+	systemPrompt, err := renderPlannerSystemPrompt(plannerPromptInput{
+		HostPrompt:      req.SystemPrompt,
+		Language:        req.LanguageLabel,
+		KnownToolIDs:    req.KnownToolIDs,
+		AllowQuestion:   req.AllowQuestion,
+		AllowDirect:     req.AllowDirect,
+		StructuredFinal: req.FinalOutputSchema != nil,
+	})
+	if err != nil {
+		return nil, goerr.Wrap(err, "render planner system prompt")
+	}
+
+	recorder := trace.New(
+		trace.WithRepository(r.traceRepo),
+		trace.WithTraceID(req.TraceID),
+		trace.WithMetadata(req.TraceMetadata),
+	)
+	defer func() {
+		cleanupCtx := context.WithoutCancel(ctx)
+		if err := recorder.Finish(cleanupCtx); err != nil {
+			errutil.Handle(cleanupCtx, err, "planexec: persist agent trace")
+		}
+	}()
+
+	bg := newBudget(r.budget)
+	nextInput := formatQuestionAnswers(bg, req.Question, req.Answers)
+	return r.runLoop(ctx, req.RunRequest, systemPrompt, recorder, bg, nil, 1, nextInput)
+}
+
+// runLoop drives the plan/replan loop. Run enters it at logicalRound 0
+// (fresh plan with the job prompt as input); Resume enters it at
+// logicalRound 1 (a replan round) with the user's answers as the first
+// input and a fresh budget. No plan snapshot is threaded in on resume —
+// the conversation history (shared HistoryKey) already carries the prior
+// rounds' observations, so the planner sees them on the next Load.
+func (r *Runner) runLoop(
+	ctx context.Context,
+	req RunRequest,
+	systemPrompt string,
+	recorder *trace.Recorder,
+	bg *budget,
+	allResults []PhaseSummary,
+	logicalRound int,
+	nextInput string,
+) (*RunResult, error) {
+	logger := logging.From(ctx)
 
 	for {
 		if !bg.canPlannerCall() {

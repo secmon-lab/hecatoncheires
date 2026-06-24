@@ -9,6 +9,9 @@ import (
 	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
 )
 
+// RegistryHasInteractiveJobForTest exposes registryHasInteractiveJob.
+var RegistryHasInteractiveJobForTest = registryHasInteractiveJob
+
 // BuildJobToolsForTest exposes buildJobTools so tests can assert the
 // per-workspace-mode tool composition without standing up a full job runtime.
 // Adapters are left zero-valued: buildJobTools only constructs tool structs

@@ -146,6 +146,52 @@ func (r *RunRequest) Validate() error {
 	return nil
 }
 
+// ResumeRequest re-enters a previously-suspended turn after the user has
+// answered a Question. The turn ended earlier with
+// QuestionResult{Terminate: true} (RunResult.EndedWithQuestion); the host
+// persisted the question, collected the answer out-of-band, and now calls
+// Resume.
+//
+// Resume re-enters planexec at a replan round (NOT a fresh plan), folding
+// the answers into the first planner input. It deliberately carries no plan
+// snapshot: the gollem conversation history keyed by RunRequest.HistoryKey
+// already holds every prior round's observations, so the planner sees them
+// on Load. The planner budget is fresh — the human answer is a natural
+// checkpoint, and a strict carry-over would risk a stillborn resume when the
+// budget was already near-exhausted at the moment the question was asked.
+type ResumeRequest struct {
+	// RunRequest carries the same identity / planner / tool / output
+	// configuration as the original Run. HistoryKey MUST equal the
+	// suspended run's key so the conversation continues. UserInput is
+	// validated (non-empty) but not used to drive the first round — the
+	// answers do; callers may set it to the original job prompt.
+	RunRequest
+
+	// Question is the question the planner asked before suspending,
+	// reconstructed by the host from its persisted form. Used to label the
+	// answers in the resumed planner input.
+	Question Question
+
+	// Answers is the user's reply, one entry per answered item. Required
+	// (non-empty).
+	Answers []QuestionAnswer
+}
+
+// Validate enforces the resume contract: the embedded RunRequest must be
+// valid and at least one answer must be present.
+func (r *ResumeRequest) Validate() error {
+	if r == nil {
+		return goerr.New("resume request is nil")
+	}
+	if err := r.RunRequest.Validate(); err != nil {
+		return goerr.Wrap(err, "resume run request invalid")
+	}
+	if len(r.Answers) == 0 {
+		return goerr.New("resume requires at least one answer")
+	}
+	return nil
+}
+
 // RunStatus is the terminal classification of a Runner.Run.
 type RunStatus int
 

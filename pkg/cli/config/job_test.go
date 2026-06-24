@@ -166,6 +166,69 @@ events.case = { on = ["created"] }
 	})
 }
 
+func TestJobSection_Interactive(t *testing.T) {
+	t.Run("interactive with planexec parses", func(t *testing.T) {
+		const src = `
+[[job]]
+id = "j_interactive"
+prompt = "x"
+strategy = "planexec"
+interactive = true
+events.case = { on = ["created"] }
+`
+		var app config.AppConfig
+		gt.NoError(t, toml.Unmarshal([]byte(src), &app)).Required()
+		gt.NoError(t, app.Validate()).Required()
+		j, err := app.Jobs[0].Validate("")
+		gt.NoError(t, err).Required()
+		gt.Bool(t, j.Interactive).True()
+		gt.Value(t, j.Strategy).Equal(model.JobStrategyPlanexec)
+	})
+
+	t.Run("interactive defaults to false", func(t *testing.T) {
+		const src = `
+[[job]]
+id = "j_default"
+prompt = "x"
+strategy = "planexec"
+events.case = { on = ["created"] }
+`
+		var app config.AppConfig
+		gt.NoError(t, toml.Unmarshal([]byte(src), &app)).Required()
+		gt.NoError(t, app.Validate()).Required()
+		j, err := app.Jobs[0].Validate("")
+		gt.NoError(t, err).Required()
+		gt.Bool(t, j.Interactive).False()
+	})
+
+	t.Run("interactive with simple is rejected at load", func(t *testing.T) {
+		const src = `
+[[job]]
+id = "j_bad_interactive"
+prompt = "x"
+strategy = "simple"
+interactive = true
+events.case = { on = ["created"] }
+`
+		var app config.AppConfig
+		gt.NoError(t, toml.Unmarshal([]byte(src), &app)).Required()
+		gt.Error(t, app.Validate())
+	})
+
+	t.Run("interactive without strategy (defaults to simple) is rejected", func(t *testing.T) {
+		const src = `
+[[job]]
+id = "j_bad_default"
+prompt = "x"
+interactive = true
+events.scheduled = { every = "1h" }
+`
+		var app config.AppConfig
+		gt.NoError(t, toml.Unmarshal([]byte(src), &app)).Required()
+		gt.Error(t, app.Validate())
+	})
+}
+
 func TestJobSection_Validate_Errors(t *testing.T) {
 	cases := []struct {
 		name string

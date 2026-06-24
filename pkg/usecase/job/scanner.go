@@ -9,13 +9,30 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
+
+// DefaultUnansweredTimeout is how long an interactive Job run may stay
+// suspended awaiting user input before the scheduled sweep expires it
+// (FAILED) and frees the (job, case) slot. Long enough that a human has a
+// full day to answer; short enough that an abandoned question does not pin
+// the slot forever.
+const DefaultUnansweredTimeout = 24 * time.Hour
+
+// expireLeaseDuration is the short lease the sweep takes while expiring a
+// stale suspended run, just long enough to mutate the records atomically
+// against a concurrent resume.
+const expireLeaseDuration = time.Minute
 
 // ScannerDeps groups the dependencies the ScheduledScanner needs.
 type ScannerDeps struct {
 	Repo      interfaces.Repository
 	Registry  *model.WorkspaceRegistry
 	Publisher EventPublisher
+
+	// UnansweredTimeout overrides DefaultUnansweredTimeout for the
+	// stale-suspended-run sweep. 0 → DefaultUnansweredTimeout.
+	UnansweredTimeout time.Duration
 }
 
 // ScheduledScanner walks every workspace's scheduled Jobs and publishes
@@ -46,6 +63,7 @@ func (s *ScheduledScanner) Scan(ctx context.Context) error {
 			continue
 		}
 		scheduledJobs := make([]*model.Job, 0, len(ws.Jobs))
+		hasInteractive := false
 		for _, j := range ws.Jobs {
 			if j == nil || j.Disabled {
 				continue
@@ -53,8 +71,14 @@ func (s *ScheduledScanner) Scan(ctx context.Context) error {
 			if j.Events.Scheduled != nil {
 				scheduledJobs = append(scheduledJobs, j)
 			}
+			if j.Interactive {
+				hasInteractive = true
+			}
 		}
-		if len(scheduledJobs) == 0 {
+		// Fetch cases when there is scheduled work to dispatch OR an
+		// interactive Job whose suspended runs may need sweeping. A
+		// workspace with neither needs no per-case scan.
+		if len(scheduledJobs) == 0 && !hasInteractive {
 			continue
 		}
 
@@ -84,6 +108,22 @@ func (s *ScheduledScanner) Scan(ctx context.Context) error {
 			for _, r := range runs {
 				byJobID[r.JobID] = r
 			}
+			// Expire interactive runs that have been awaiting input past the
+			// timeout, freeing the slot. A failure to expire one run is
+			// non-fatal — log and continue the sweep.
+			if hasInteractive {
+				for _, r := range runs {
+					if !r.IsSuspended() {
+						continue
+					}
+					if expErr := s.expireSuspendedRun(ctx, r, now); expErr != nil {
+						errutil.Handle(ctx, goerr.Wrap(expErr, "expire stale suspended run",
+							goerr.V("workspace_id", r.WorkspaceID),
+							goerr.V("case_id", r.CaseID),
+							goerr.V("job_id", r.JobID)), "job: expire stale suspended run")
+					}
+				}
+			}
 			for _, j := range scheduledJobs {
 				last, ok := byJobID[j.ID]
 				if !ok {
@@ -108,6 +148,73 @@ func (s *ScheduledScanner) Scan(ctx context.Context) error {
 				s.deps.Publisher.Publish(ctx, ev)
 			}
 		}
+	}
+	return nil
+}
+
+// expireSuspendedRun fails an interactive run that has been awaiting user
+// input past the timeout, freeing the (job, case) slot. It takes a short
+// lease as the exclusion gate against a concurrent resume, re-reads to
+// confirm the run is still suspended (TOCTOU), and transitions the run log to
+// FAILED before recording the terminal outcome (which clears the suspension
+// marker). A run that is not yet stale, already resumed, or actively leased is
+// left untouched.
+func (s *ScheduledScanner) expireSuspendedRun(ctx context.Context, run *model.JobRun, now time.Time) error {
+	timeout := s.deps.UnansweredTimeout
+	if timeout <= 0 {
+		timeout = DefaultUnansweredTimeout
+	}
+	if run.SuspendedAt.IsZero() || now.Sub(run.SuspendedAt) < timeout {
+		return nil
+	}
+	key := run.Key()
+
+	acquired, err := s.deps.Repo.JobRun().TryAcquireLease(ctx, key, now, expireLeaseDuration)
+	if err != nil {
+		return goerr.Wrap(err, "acquire lease to expire suspended run")
+	}
+	if !acquired {
+		// A resume (or another sweep) is in flight — leave it alone.
+		return nil
+	}
+	defer func() {
+		if relErr := s.deps.Repo.JobRun().ReleaseLease(context.Background(), key); relErr != nil {
+			_ = relErr
+		}
+	}()
+
+	// Re-read under the lease: a resume may have cleared the suspension
+	// between the ListByCase snapshot and acquiring the lease.
+	fresh, err := s.deps.Repo.JobRun().Get(ctx, key)
+	if err != nil {
+		return goerr.Wrap(err, "re-read job run before expiry")
+	}
+	if !fresh.IsSuspended() || now.Sub(fresh.SuspendedAt) < timeout {
+		return nil
+	}
+	runID := fresh.SuspendedRunID
+
+	const reason = "unanswered: no response within the interactive timeout"
+	traceID := ""
+	if logRec, logErr := s.deps.Repo.JobRunLog().Get(ctx, key, runID); logErr == nil {
+		traceID = logRec.TraceID
+		// Finalize any non-terminal log behind the suspension — AWAITING_INPUT
+		// (unanswered) or RUNNING (a resume that crashed mid-flight) — so it
+		// does not linger forever; a terminal log is left as-is.
+		if logRec.Stage != model.JobRunStageSuccess && logRec.Stage != model.JobRunStageFailed {
+			logRec.Stage = model.JobRunStageFailed
+			logRec.EndedAt = now
+			logRec.Error = reason
+			logRec.PendingInteraction = nil
+			if finErr := s.deps.Repo.JobRunLog().Finish(ctx, logRec); finErr != nil {
+				errutil.Handle(ctx, finErr, "job: finish expired run log")
+			}
+		}
+	}
+
+	// RecordRun clears the suspension marker and the lease, freeing the slot.
+	if recErr := s.deps.Repo.JobRun().RecordRun(ctx, key, model.JobRunStatusFailed, now, runID, traceID, reason); recErr != nil {
+		return goerr.Wrap(recErr, "record expired run")
 	}
 	return nil
 }
