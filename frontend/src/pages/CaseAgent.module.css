@@ -546,6 +546,12 @@
   border: 1px solid color-mix(in oklch, var(--danger) 28%, transparent);
 }
 .stageFailed .stageDot { background: var(--danger); }
+.stageAwaitingInput {
+  color: var(--warn);
+  background: color-mix(in oklch, var(--warn) 10%, transparent);
+  border: 1px solid color-mix(in oklch, var(--warn) 28%, transparent);
+}
+.stageAwaitingInput .stageDot { background: var(--warn); }
 
 @keyframes stagePulse {
   0%, 100% { box-shadow: 0 0 0 3px color-mix(in oklch, var(--info) 25%, transparent); }

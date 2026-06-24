@@ -127,6 +127,31 @@ func (r *jobRunRepository) RecordRun(ctx context.Context, key model.JobRunKey, s
 	existing.LastRunID = runID
 	existing.LastTraceID = traceID
 	existing.LeaseUntil = time.Time{}
+	// A terminal run is no longer awaiting input; clear any suspension.
+	existing.SuspendedRunID = ""
+	existing.SuspendedAt = time.Time{}
+	r.runs[key] = existing
+	return nil
+}
+
+func (r *jobRunRepository) Suspend(ctx context.Context, key model.JobRunKey, runID string, suspendedAt time.Time) error {
+	if err := key.Validate(); err != nil {
+		return goerr.Wrap(err, "invalid job run key")
+	}
+	if runID == "" {
+		return goerr.New("run id is empty")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	existing, ok := r.runs[key]
+	if !ok {
+		existing = &model.JobRun{WorkspaceID: key.WorkspaceID, CaseID: key.CaseID, JobID: key.JobID}
+	}
+	existing.SuspendedRunID = runID
+	existing.SuspendedAt = suspendedAt
+	// Release the lease: a human wait can outlast any lease, so the
+	// suspension marker (not the lease) guards against double-starting.
+	existing.LeaseUntil = time.Time{}
 	r.runs[key] = existing
 	return nil
 }
@@ -153,6 +178,21 @@ func copyJobRunLog(l *model.JobRunLog) *model.JobRunLog {
 		return nil
 	}
 	cp := *l
+	// Deep-copy the pending interaction so a stored log never aliases the
+	// caller's mutable struct (the resume path clears it in place).
+	if l.PendingInteraction != nil {
+		pi := *l.PendingInteraction
+		if l.PendingInteraction.Items != nil {
+			pi.Items = make([]model.PendingInteractionItem, len(l.PendingInteraction.Items))
+			for i, it := range l.PendingInteraction.Items {
+				pi.Items[i] = it
+				if it.Options != nil {
+					pi.Items[i].Options = append([]string(nil), it.Options...)
+				}
+			}
+		}
+		cp.PendingInteraction = &pi
+	}
 	return &cp
 }
 
@@ -192,6 +232,50 @@ func (r *jobRunLogRepository) Finish(ctx context.Context, log *model.JobRunLog) 
 	defer r.mu.Unlock()
 	if _, ok := r.logs[key]; !ok {
 		return goerr.Wrap(interfaces.ErrJobRunLogNotFound, "job run log not found for Finish",
+			goerr.V("run_id", log.RunID))
+	}
+	r.logs[key] = copyJobRunLog(log)
+	return nil
+}
+
+func (r *jobRunLogRepository) Suspend(ctx context.Context, log *model.JobRunLog) error {
+	if err := log.Validate(); err != nil {
+		return goerr.Wrap(err, "invalid job run log")
+	}
+	if log.Stage != model.JobRunStageAwaitingInput {
+		return goerr.New("Suspend requires stage AWAITING_INPUT",
+			goerr.V("stage", string(log.Stage)))
+	}
+	key := jobRunLogKey{
+		K:     model.JobRunKey{WorkspaceID: log.WorkspaceID, CaseID: log.CaseID, JobID: log.JobID},
+		RunID: log.RunID,
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.logs[key]; !ok {
+		return goerr.Wrap(interfaces.ErrJobRunLogNotFound, "job run log not found for Suspend",
+			goerr.V("run_id", log.RunID))
+	}
+	r.logs[key] = copyJobRunLog(log)
+	return nil
+}
+
+func (r *jobRunLogRepository) Resume(ctx context.Context, log *model.JobRunLog) error {
+	if err := log.Validate(); err != nil {
+		return goerr.Wrap(err, "invalid job run log")
+	}
+	if log.Stage != model.JobRunStageRunning {
+		return goerr.New("Resume requires stage RUNNING",
+			goerr.V("stage", string(log.Stage)))
+	}
+	key := jobRunLogKey{
+		K:     model.JobRunKey{WorkspaceID: log.WorkspaceID, CaseID: log.CaseID, JobID: log.JobID},
+		RunID: log.RunID,
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.logs[key]; !ok {
+		return goerr.Wrap(interfaces.ErrJobRunLogNotFound, "job run log not found for Resume",
 			goerr.V("run_id", log.RunID))
 	}
 	r.logs[key] = copyJobRunLog(log)

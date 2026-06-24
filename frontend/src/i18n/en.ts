@@ -485,6 +485,7 @@ export const en: Messages = {
   caseAgentRunStageRunning: 'Running',
   caseAgentRunStageSuccess: 'Success',
   caseAgentRunStageFailed: 'Failed',
+  caseAgentRunStageAwaitingInput: 'Awaiting input',
   caseAgentRunDurationRunning: 'running',
   caseAgentSectionJobs: 'Automated Jobs',
   caseAgentJobsSubtitle: 'Enabled Jobs that run automatically against this case when their conditions are met. Definitions are read-only.',

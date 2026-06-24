@@ -214,6 +214,45 @@ func (r *jobRunRepository) RecordRun(ctx context.Context, key model.JobRunKey, s
 		run.LastRunID = runID
 		run.LastTraceID = traceID
 		run.LeaseUntil = time.Time{}
+		// A terminal run is no longer awaiting input; clear any suspension.
+		run.SuspendedRunID = ""
+		run.SuspendedAt = time.Time{}
+		if err := tx.Set(docRef, &run); err != nil {
+			return goerr.Wrap(err, "tx set job run")
+		}
+		return nil
+	})
+}
+
+func (r *jobRunRepository) Suspend(ctx context.Context, key model.JobRunKey, runID string, suspendedAt time.Time) error {
+	if err := key.Validate(); err != nil {
+		return goerr.Wrap(err, "invalid job run key")
+	}
+	if runID == "" {
+		return goerr.New("run id is empty")
+	}
+	docRef := r.doc(key)
+	return r.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		snap, err := tx.Get(docRef)
+		var run model.JobRun
+		switch {
+		case err == nil:
+			if decErr := snap.DataTo(&run); decErr != nil {
+				return goerr.Wrap(decErr, "decode existing job run")
+			}
+		case status.Code(err) == codes.NotFound:
+			// fresh record
+		default:
+			return goerr.Wrap(err, "tx get job run")
+		}
+		run.WorkspaceID = key.WorkspaceID
+		run.CaseID = key.CaseID
+		run.JobID = key.JobID
+		run.SuspendedRunID = runID
+		run.SuspendedAt = suspendedAt
+		// Release the lease: a human wait can outlast any lease, so the
+		// suspension marker (not the lease) guards against double-starting.
+		run.LeaseUntil = time.Time{}
 		if err := tx.Set(docRef, &run); err != nil {
 			return goerr.Wrap(err, "tx set job run")
 		}
@@ -270,6 +309,38 @@ func (r *jobRunLogRepository) Finish(ctx context.Context, log *model.JobRunLog) 
 	key := model.JobRunKey{WorkspaceID: log.WorkspaceID, CaseID: log.CaseID, JobID: log.JobID}
 	if _, err := r.doc(key, log.RunID).Set(ctx, log); err != nil {
 		return goerr.Wrap(err, "finish job run log",
+			goerr.V("run_id", log.RunID))
+	}
+	return nil
+}
+
+func (r *jobRunLogRepository) Suspend(ctx context.Context, log *model.JobRunLog) error {
+	if err := log.Validate(); err != nil {
+		return goerr.Wrap(err, "invalid job run log")
+	}
+	if log.Stage != model.JobRunStageAwaitingInput {
+		return goerr.New("Suspend requires stage AWAITING_INPUT",
+			goerr.V("stage", string(log.Stage)))
+	}
+	key := model.JobRunKey{WorkspaceID: log.WorkspaceID, CaseID: log.CaseID, JobID: log.JobID}
+	if _, err := r.doc(key, log.RunID).Set(ctx, log); err != nil {
+		return goerr.Wrap(err, "suspend job run log",
+			goerr.V("run_id", log.RunID))
+	}
+	return nil
+}
+
+func (r *jobRunLogRepository) Resume(ctx context.Context, log *model.JobRunLog) error {
+	if err := log.Validate(); err != nil {
+		return goerr.Wrap(err, "invalid job run log")
+	}
+	if log.Stage != model.JobRunStageRunning {
+		return goerr.New("Resume requires stage RUNNING",
+			goerr.V("stage", string(log.Stage)))
+	}
+	key := model.JobRunKey{WorkspaceID: log.WorkspaceID, CaseID: log.CaseID, JobID: log.JobID}
+	if _, err := r.doc(key, log.RunID).Set(ctx, log); err != nil {
+		return goerr.Wrap(err, "resume job run log",
 			goerr.V("run_id", log.RunID))
 	}
 	return nil

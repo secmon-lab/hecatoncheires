@@ -8,7 +8,9 @@ import (
 	"github.com/gollem-dev/gollem/trace"
 	"github.com/m-mizutani/goerr/v2"
 
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/interaction"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/planexec"
 )
 
@@ -25,6 +27,10 @@ import (
 type PlanexecJobExecutor struct {
 	runner *planexec.Runner
 }
+
+// PlanexecJobExecutor is the only executor that supports resuming a
+// suspended interactive run.
+var _ ResumableJobExecutor = (*PlanexecJobExecutor)(nil)
 
 // NewPlanexecJobExecutor wraps a constructed planexec.Runner. Returns
 // an error if the runner is nil so wiring failures surface at startup.
@@ -58,6 +64,10 @@ func (e *PlanexecJobExecutor) Execute(ctx context.Context, req ExecuteRequest) (
 		return nil, goerr.New("history key is required for planexec executor",
 			goerr.V("job_id", req.JobID))
 	}
+	if req.Interactive && req.Interactor == nil {
+		return nil, goerr.New("interactor is required when interactive",
+			goerr.V("job_id", req.JobID))
+	}
 
 	// Wire progress callback through the tool context so individual
 	// tool calls (executed by sub-agents) can surface back to the
@@ -80,7 +90,10 @@ func (e *PlanexecJobExecutor) Execute(ctx context.Context, req ExecuteRequest) (
 		SystemPrompt:  req.SystemPrompt,
 		ToolResolver:  resolver,
 		KnownToolIDs:  resolver.KnownIDs(),
-		AllowQuestion: false, // Jobs run unattended.
+		// Interactive jobs may ask the user mid-run; non-interactive jobs
+		// run fully unattended (the historical default).
+		AllowQuestion: req.Interactive,
+		OnQuestion:    buildOnQuestion(req),
 		// AllowDirect lets a trivially-answerable job skip the investigation
 		// machinery and reply in a single tool-enabled pass. Jobs surface a
 		// plain-text summary (FinalOutputSchema nil), which is exactly what
@@ -97,10 +110,113 @@ func (e *PlanexecJobExecutor) Execute(ctx context.Context, req ExecuteRequest) (
 			goerr.V("trace_id", req.TraceID))
 	}
 
+	return e.mapResult(result, startedAt, endedAt, req)
+}
+
+// Resume re-enters a suspended interactive run after the user answered. It
+// reconstructs the planexec.Question from the persisted pending interaction,
+// converts the host-neutral answers, and drives planexec.Resume (which
+// re-enters at a replan round with the same HistoryKey). The OnQuestion
+// callback is wired again so the resumed turn can itself ask a follow-up.
+func (e *PlanexecJobExecutor) Resume(ctx context.Context, req ExecuteRequest, pending model.PendingInteraction, answers []interaction.Answer) (*ExecuteResult, error) {
+	if e == nil || e.runner == nil {
+		return nil, goerr.New("planexec job executor not initialized")
+	}
+	if req.HistoryKey == "" {
+		return nil, goerr.New("history key is required for planexec resume",
+			goerr.V("job_id", req.JobID))
+	}
+	if req.Interactor == nil {
+		return nil, goerr.New("interactor is required for resume",
+			goerr.V("job_id", req.JobID))
+	}
+	if len(answers) == 0 {
+		return nil, goerr.New("resume requires at least one answer",
+			goerr.V("job_id", req.JobID))
+	}
+
+	if req.ProgressFunc != nil {
+		ctx = tool.WithUpdate(ctx, req.ProgressFunc)
+	}
+
+	resolver := newJobToolResolver(req.Tools)
+	sink := newJobSink(req.ProgressFunc)
+	// Resume always re-enables questions so a follow-up question can be
+	// asked; mark the request interactive so buildOnQuestion wires the
+	// callback regardless of the original flag.
+	req.Interactive = true
+
+	startedAt := time.Now().UTC()
+	result, err := e.runner.Resume(ctx, planexec.ResumeRequest{
+		RunRequest: planexec.RunRequest{
+			HistoryKey:    req.HistoryKey,
+			TraceID:       req.TraceID,
+			TraceMetadata: planexecTraceMetadata(req),
+			LanguageLabel: req.Language,
+			UserInput:     req.Prompt,
+			SystemPrompt:  req.SystemPrompt,
+			ToolResolver:  resolver,
+			KnownToolIDs:  resolver.KnownIDs(),
+			AllowQuestion: true,
+			OnQuestion:    buildOnQuestion(req),
+			AllowDirect:   true,
+			Sink:          sink,
+		},
+		Question: pendingToQuestion(pending),
+		Answers:  answersToQuestionAnswers(answers),
+	})
+	endedAt := time.Now().UTC()
+	if err != nil {
+		return nil, goerr.Wrap(err, "planexec resume",
+			goerr.V("job_id", req.JobID),
+			goerr.V("trace_id", req.TraceID))
+	}
+
+	return e.mapResult(result, startedAt, endedAt, req)
+}
+
+// buildOnQuestion returns the planexec OnQuestion callback for this run, or
+// nil when the run is not interactive. The callback adapts the planner's
+// planexec.Question into a host-neutral interaction.Request, hands it to the
+// Interactor (which suspends the run and posts the Slack form), and maps the
+// Paused outcome back to a turn-terminating QuestionResult so planexec exits
+// with EndedWithQuestion. The Job host only supports the pause/resume model,
+// never a synchronous in-loop answer, so the callback always terminates.
+func buildOnQuestion(req ExecuteRequest) func(context.Context, planexec.Question) (planexec.QuestionResult, error) {
+	if !req.Interactive || req.Interactor == nil {
+		return nil
+	}
+	return func(ctx context.Context, q planexec.Question) (planexec.QuestionResult, error) {
+		ir := questionToInteractionRequest(q)
+		if _, err := req.Interactor.Solicit(ctx, ir); err != nil {
+			return planexec.QuestionResult{}, goerr.Wrap(err, "solicit user interaction",
+				goerr.V("job_id", req.JobID))
+		}
+		// Solicit suspended the run (persisted the pending interaction,
+		// posted the form). Terminate the planexec turn; resume happens
+		// out-of-band when the user answers.
+		return planexec.QuestionResult{Terminate: true}, nil
+	}
+}
+
+// mapResult translates a planexec.RunResult into the Job-level
+// ExecuteResult shape, distinguishing the suspended-for-input outcome from a
+// normal completion.
+func (e *PlanexecJobExecutor) mapResult(result *planexec.RunResult, startedAt, endedAt time.Time, req ExecuteRequest) (*ExecuteResult, error) {
 	phases := phaseTracesFromPlanexec(result, startedAt, endedAt)
 
 	switch result.Status {
 	case planexec.StatusCompleted:
+		if result.EndedWithQuestion {
+			// The run suspended to ask the user; the Interactor already
+			// persisted state and posted the form. Tell the runner to leave
+			// the run at AWAITING_INPUT rather than finishing it.
+			return &ExecuteResult{
+				Status:    ExecuteStatusAwaitingInput,
+				LoopCount: len(result.AllResults),
+				Phases:    phases,
+			}, nil
+		}
 		return &ExecuteResult{
 			Status:    ExecuteStatusSuccess,
 			Summary:   result.FinalText,
@@ -120,6 +236,52 @@ func (e *PlanexecJobExecutor) Execute(ctx context.Context, req ExecuteRequest) (
 			goerr.V("job_id", req.JobID),
 			goerr.V("status", result.Status))
 	}
+}
+
+// questionToInteractionRequest converts a planexec.Question (runtime) into a
+// host-neutral interaction.Request (port).
+func questionToInteractionRequest(q planexec.Question) interaction.Request {
+	items := make([]interaction.Item, len(q.Items))
+	for i, it := range q.Items {
+		items[i] = interaction.Item{
+			ID:      it.ID,
+			Text:    it.Text,
+			Type:    interaction.ItemType(it.Type),
+			Options: it.Options,
+		}
+	}
+	return interaction.Request{Reason: q.Reason, Items: items}
+}
+
+// pendingToQuestion reconstructs a planexec.Question from the persisted
+// model.PendingInteraction so the resumed planner input can label the
+// answers against the original prompts.
+func pendingToQuestion(p model.PendingInteraction) planexec.Question {
+	items := make([]planexec.QuestionItem, len(p.Items))
+	for i, it := range p.Items {
+		items[i] = planexec.QuestionItem{
+			ID:      it.ID,
+			Text:    it.Text,
+			Type:    planexec.QuestionItemType(it.Type),
+			Options: it.Options,
+		}
+	}
+	return planexec.Question{Reason: p.Reason, Items: items}
+}
+
+// answersToQuestionAnswers converts host-neutral interaction.Answer values
+// into planexec.QuestionAnswer values for the resume input.
+func answersToQuestionAnswers(answers []interaction.Answer) []planexec.QuestionAnswer {
+	out := make([]planexec.QuestionAnswer, len(answers))
+	for i, a := range answers {
+		out[i] = planexec.QuestionAnswer{
+			ID:       a.ID,
+			Choice:   a.Choice,
+			Choices:  a.Choices,
+			FreeText: a.FreeText,
+		}
+	}
+	return out
 }
 
 // phaseTracesFromPlanexec maps planexec.PhaseSummary entries into

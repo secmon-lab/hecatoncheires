@@ -62,6 +62,8 @@ func jobRunStageToGraphQL(s model.JobRunStage) graphql1.JobRunStage {
 		return graphql1.JobRunStageSuccess
 	case model.JobRunStageFailed:
 		return graphql1.JobRunStageFailed
+	case model.JobRunStageAwaitingInput:
+		return graphql1.JobRunStageAwaitingInput
 	default:
 		// Defensive default: unknown stages render as FAILED so a stale
 		// document never silently appears as "running forever" in the UI.

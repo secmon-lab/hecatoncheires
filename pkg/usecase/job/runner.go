@@ -2,12 +2,14 @@ package job
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/gollem-dev/gollem"
 	"github.com/google/uuid"
 	"github.com/m-mizutani/goerr/v2"
 
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/interaction"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
@@ -124,6 +126,21 @@ type RunnerDeps struct {
 	// its trace as before.
 	SlackNotifier SlackNotifier
 
+	// InteractionPoster posts the interactive-Job question form (Block Kit)
+	// into the run's Slack thread. Required for interactive Jobs; nil means
+	// an interactive run that emits a question fails loudly (it has no
+	// surface to ask on). The CLI wires the Slack service here. Distinct
+	// from SlackNotifier because the question form is Block Kit, not a
+	// text-only operational marker, and is NOT gated by the Job's quiet
+	// flag (the question is a deliberate agent interaction, not a log).
+	InteractionPoster jobQuestionPoster
+
+	// UnansweredTimeout bounds how long a run may stay suspended awaiting
+	// user input before Run treats the suspension as stale and recovers it
+	// (so the Job is not blocked forever by an unanswered question). 0 →
+	// DefaultUnansweredTimeout. The scheduled sweep uses the same bound.
+	UnansweredTimeout time.Duration
+
 	// NewRunID generates a fresh RunID for each Run. nil → UUIDv7.
 	NewRunID func() string
 	// NewTraceID generates a fresh TraceID for each Run. nil → UUIDv7.
@@ -233,12 +250,41 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 	defer func() {
 		// Release on exit. RecordRun also clears the lease, so this is
 		// belt-and-braces for the very early error paths that fail
-		// before RecordRun.
+		// before RecordRun. It only zeroes LeaseUntil and never touches
+		// SuspendedRunID, so it is safe even when a run suspends.
 		if relErr := r.deps.Repo.JobRun().ReleaseLease(context.Background(), key); relErr != nil {
 			// Non-fatal; the lease will expire on its own.
 			_ = relErr
 		}
 	}()
+
+	// Do not start a fresh run while a prior run is genuinely suspended
+	// awaiting user input for this (workspace, case, job). The lease is
+	// released while suspended, so TryAcquireLease alone would let a trigger
+	// start a duplicate; SuspendedRunID is the durable guard.
+	//
+	// Fail CLOSED on a Get error (other than not-found): a transient read
+	// failure must not let a new run clobber a suspended one. Only a clean
+	// "never ran" (ErrJobRunNotFound) proceeds.
+	existing, getErr := r.deps.Repo.JobRun().Get(ctx, key)
+	if getErr != nil && !errors.Is(getErr, interfaces.ErrJobRunNotFound) {
+		return goerr.Wrap(getErr, "check job run suspension state before run",
+			goerr.V("job_id", j.ID), goerr.V("case_id", ev.CaseID))
+	}
+	if existing != nil && existing.IsSuspended() {
+		// A suspension is recorded. If it is genuinely active (the user still
+		// has an open question within the timeout), skip this trigger so the
+		// pending run keeps the slot. If it is stale (unanswered past the
+		// timeout) or inconsistent (its run log is no longer AWAITING_INPUT —
+		// e.g. a resume crashed leaving a RUNNING log + dangling marker),
+		// finalize the orphan here so this trigger can start fresh rather than
+		// being blocked forever. The orphan's SuspendedRunID is cleared by
+		// this run's terminal RecordRun (or overwritten if it suspends again).
+		if r.suspensionIsActive(ctx, existing, leaseAt) {
+			return nil
+		}
+		r.finalizeOrphanedSuspension(ctx, existing)
+	}
 
 	// Mark the context so any mutations the executor performs do not
 	// re-publish events.
@@ -409,16 +455,71 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 		HistoryRepository: r.deps.HistoryRepo,
 		HistoryKey:        runID,
 	}
-	_, execErr := executor.Execute(ctx, execReq)
+	// Interactive Jobs (planexec-only, enforced by Job.Validate) may suspend
+	// the run to ask the user. Build the per-run Interactor and wire it; the
+	// question posts into the run's session thread (channel-mode) or the Case
+	// thread (thread-mode). The question is NOT gated by quiet — it is an
+	// agent interaction, not an operational log.
+	if j.Interactive {
+		questionThreadTS := sessionThreadTS
+		if questionThreadTS == "" && c != nil {
+			questionThreadTS = c.SlackThreadTS
+		}
+		requesterUserID := ev.ActorUserID
+		if requesterUserID == "" && c != nil {
+			requesterUserID = c.ReporterID
+		}
+		execReq.Interactive = true
+		execReq.Interactor = newJobInteractor(
+			r.deps.Repo, r.deps.InteractionPoster, key, runID,
+			channelID, questionThreadTS, requesterUserID, logRec, r.clock,
+		)
+	}
+	res, execErr := executor.Execute(ctx, execReq)
+
+	// An interactive run that suspended to ask the user has already
+	// transitioned its log to AWAITING_INPUT and marked the JobRun suspended
+	// (via the Interactor). Leave it paused: do NOT Finish the log or
+	// RecordRun (which would clear the suspension marker). Resume arrives
+	// out-of-band when the user answers.
+	if execErr == nil && res != nil && res.Status == job.ExecuteStatusAwaitingInput {
+		return nil
+	}
 
 	// --- finish stage ----------------------------------------------
+	return r.finishRun(ctx, j, c, key, logRec, handler, channelID, sessionThreadTS, runID, traceID, execErr)
+}
+
+// finishRun transitions the run log to its terminal stage, emits the
+// completion / failure session-log marker, runs the optional reflection
+// pass, and records the outcome on the JobRun lock doc. Shared by the
+// fresh-run and resume paths so both terminate identically. RecordRun also
+// clears any suspension marker (a terminal run is no longer awaiting input).
+func (r *JobRunner) finishRun(
+	ctx context.Context,
+	j *model.Job,
+	c *model.Case,
+	key model.JobRunKey,
+	logRec *model.JobRunLog,
+	handler *jobRunTraceHandler,
+	channelID, sessionThreadTS, runID, traceID string,
+	execErr error,
+) error {
 	endedAt := r.clock()
 	logRec.EndedAt = endedAt
+	// A resumed log may still carry the pending interaction in memory; the
+	// terminal stages forbid it, so clear it before persisting.
+	logRec.PendingInteraction = nil
 	if execErr != nil {
 		logRec.Stage = model.JobRunStageFailed
 		logRec.Error = execErr.Error()
-		if emitErr := handler.EmitRunError(ctx, runErrorStageExecute, execErr.Error()); emitErr != nil {
-			errutil.Handle(ctx, emitErr, "job: append run_error event")
+		// handler is nil on the resume prepare-failure path (no event stream
+		// was set up); the RUN_ERROR event is then skipped but the failure is
+		// still recorded on the log + lock doc below.
+		if handler != nil {
+			if emitErr := handler.EmitRunError(ctx, runErrorStageExecute, execErr.Error()); emitErr != nil {
+				errutil.Handle(ctx, emitErr, "job: append run_error event")
+			}
 		}
 		r.postSessionLog(ctx, channelID, sessionThreadTS,
 			i18n.T(ctx, i18n.MsgJobRunFailed, j.ID, truncateString(execErr.Error(), model.MaxInlineBytes)))
@@ -449,6 +550,323 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 		return goerr.Wrap(recErr, "record successful run")
 	}
 	return execErr
+}
+
+// preparedRun bundles the workspace/case context, rendered prompts, and tool
+// set shared by a fresh Run and a Resume.
+type preparedRun struct {
+	ws           *model.WorkspaceEntry
+	c            *model.Case
+	systemPrompt string
+	userPrompt   string
+	channelID    string
+	tools        []gollem.Tool
+	startedAt    time.Time
+}
+
+// prepareRun loads the workspace/case/actions/sources/memos, renders the
+// prompts, and builds the tool set. It returns a wrapped error rather than
+// recording a prepare-stage failure so each caller (Run / Resume) maps it
+// onto its own failure path.
+func (r *JobRunner) prepareRun(ctx context.Context, j *model.Job, ev Event) (*preparedRun, error) {
+	ws, wsErr := r.deps.Registry.Get(ev.WorkspaceID)
+	if wsErr != nil {
+		return nil, goerr.Wrap(wsErr, "load workspace", goerr.V("workspace_id", ev.WorkspaceID))
+	}
+	c, caseErr := r.deps.Repo.Case().Get(ctx, ev.WorkspaceID, ev.CaseID)
+	if caseErr != nil {
+		return nil, goerr.Wrap(caseErr, "load case",
+			goerr.V("workspace_id", ev.WorkspaceID), goerr.V("case_id", ev.CaseID))
+	}
+	actions, actErr := r.deps.Repo.Action().GetByCase(ctx, ev.WorkspaceID, ev.CaseID, interfaces.ActionListOptions{
+		ArchiveScope: interfaces.ActionArchiveScopeActiveOnly,
+	})
+	if actErr != nil {
+		return nil, goerr.Wrap(actErr, "load actions")
+	}
+	sources, narrowed, srcErr := r.resolveSources(ctx, ev.WorkspaceID, c)
+	if srcErr != nil {
+		return nil, goerr.Wrap(srcErr, "load sources for system prompt")
+	}
+	var memos []*model.Memo
+	if ws != nil && ws.MemoConfig.Enabled() {
+		ms, memoErr := r.deps.Repo.Memo().List(ctx, ev.WorkspaceID, ev.CaseID, interfaces.MemoListOptions{
+			ArchiveScope: interfaces.MemoArchiveScopeActiveOnly,
+		})
+		if memoErr != nil {
+			return nil, goerr.Wrap(memoErr, "load memos")
+		}
+		memos = ms
+	}
+	startedAt := r.clock()
+	var recentMessages []*slack.Message
+	if ws != nil && ws.IsThreadMode() {
+		ms, msgErr := r.loadRecentMessages(ctx, ev.WorkspaceID, ev.CaseID, startedAt)
+		if msgErr != nil {
+			return nil, goerr.Wrap(msgErr, "load recent thread messages",
+				goerr.V("workspace_id", ev.WorkspaceID), goerr.V("case_id", ev.CaseID))
+		}
+		recentMessages = ms
+	}
+	in := PromptInputs{
+		Job:             j,
+		Workspace:       ws,
+		Case:            c,
+		Actions:         actions,
+		Memos:           memos,
+		RecentMessages:  recentMessages,
+		Event:           ev,
+		Now:             startedAt,
+		Sources:         sources,
+		SourcesNarrowed: narrowed,
+	}
+	systemPrompt, err := BuildSystemPrompt(in)
+	if err != nil {
+		return nil, goerr.Wrap(err, "build system prompt")
+	}
+	userPrompt, err := RenderUserPrompt(in)
+	if err != nil {
+		return nil, goerr.Wrap(err, "render user prompt")
+	}
+	channelID := ""
+	if c != nil {
+		channelID = c.SlackChannelID
+	}
+	var tools []gollem.Tool
+	if r.deps.ToolBuilder != nil {
+		tools = r.deps.ToolBuilder.Build(ctx, c, ws)
+	}
+	return &preparedRun{
+		ws: ws, c: c, systemPrompt: systemPrompt, userPrompt: userPrompt,
+		channelID: channelID, tools: tools, startedAt: startedAt,
+	}, nil
+}
+
+// Resume continues a run that suspended awaiting user input. It is the
+// out-of-band counterpart to Run, invoked by the Slack question-submit
+// handler with the decoded run identity and the user's answers. It
+// re-acquires the lease (the exclusion gate against concurrent submits and
+// the unanswered sweep), transitions the suspended log back to RUNNING, and
+// drives the planexec executor's Resume, which re-enters at a replan round
+// with the answers folded in and the same HistoryKey (so the conversation
+// continues). A resumed turn may itself suspend again.
+func (r *JobRunner) Resume(ctx context.Context, key model.JobRunKey, runID string, answers []interaction.Answer) error {
+	if err := key.Validate(); err != nil {
+		return goerr.Wrap(err, "invalid job-run key for resume")
+	}
+	if runID == "" {
+		return goerr.New("run id is empty for resume")
+	}
+	if len(answers) == 0 {
+		return goerr.New("resume requires at least one answer", goerr.V("run_id", runID))
+	}
+
+	ws, wsErr := r.deps.Registry.Get(key.WorkspaceID)
+	if wsErr != nil {
+		return goerr.Wrap(wsErr, "load workspace for resume", goerr.V("workspace_id", key.WorkspaceID))
+	}
+	var j *model.Job
+	for _, candidate := range ws.Jobs {
+		if candidate.ID == key.JobID {
+			j = candidate
+			break
+		}
+	}
+	if j == nil {
+		return goerr.New("job not found for resume", goerr.V("job_id", key.JobID))
+	}
+
+	lease := r.deps.LeaseDuration
+	if lease <= 0 {
+		lease = DefaultLeaseDuration
+	}
+	acquired, err := r.deps.Repo.JobRun().TryAcquireLease(ctx, key, r.clock(), lease)
+	if err != nil {
+		return goerr.Wrap(err, "acquire lease for resume",
+			goerr.V("job_id", key.JobID), goerr.V("run_id", runID))
+	}
+	if !acquired {
+		// Another resume / sweep is in flight — no-op (the submit surface
+		// degrades to a stale form via the handler).
+		return nil
+	}
+	defer func() {
+		if relErr := r.deps.Repo.JobRun().ReleaseLease(context.Background(), key); relErr != nil {
+			_ = relErr
+		}
+	}()
+
+	logRec, err := r.deps.Repo.JobRunLog().Get(ctx, key, runID)
+	if err != nil {
+		if errors.Is(err, interfaces.ErrJobRunLogNotFound) {
+			return nil
+		}
+		return goerr.Wrap(err, "load run log for resume", goerr.V("run_id", runID))
+	}
+	if logRec == nil || logRec.Stage != model.JobRunStageAwaitingInput || logRec.PendingInteraction == nil {
+		// Already resumed, completed, or expired — stale, no-op.
+		return nil
+	}
+	pending := *logRec.PendingInteraction
+
+	strategy := model.NormaliseJobStrategy(j.Strategy)
+	executor, execLookupErr := r.deps.executorFor(strategy)
+	if execLookupErr != nil {
+		return goerr.Wrap(execLookupErr, "select executor for resume",
+			goerr.V("job_id", j.ID), goerr.V("strategy", string(strategy)))
+	}
+	resumable, ok := executor.(job.ResumableJobExecutor)
+	if !ok {
+		return goerr.New("executor does not support resume",
+			goerr.V("job_id", j.ID), goerr.V("strategy", string(strategy)))
+	}
+
+	ctx = WithJobActor(ctx, JobActorMarker{JobID: j.ID})
+	ctx = withQuiet(ctx, j.Quiet)
+
+	// Reconstruct the triggering Event from the run log's provenance so the
+	// prompts render with the same framing as the original turn.
+	ev := Event{
+		Domain:      model.JobEventDomain(logRec.EventType),
+		WorkspaceID: key.WorkspaceID,
+		CaseID:      key.CaseID,
+		Timestamp:   logRec.EventTriggerAt,
+	}
+	prep, prepErr := r.prepareRun(ctx, j, ev)
+	if prepErr != nil {
+		// Mark the run failed: we cannot rebuild the context to continue.
+		return r.finishRun(ctx, j, nil, key, logRec, nil, "", "", runID, logRec.TraceID,
+			goerr.Wrap(prepErr, "prepare resume"))
+	}
+
+	// Continue the run's event Sequence past the suspended turn's events so
+	// the resumed turn's events do not collide on Sequence (same RunID space).
+	startSeq := int64(1)
+	if existing, listErr := r.deps.Repo.JobRunEvent().List(ctx, key, runID); listErr == nil {
+		for _, e := range existing {
+			if e.Sequence >= startSeq {
+				startSeq = e.Sequence + 1
+			}
+		}
+	}
+	handler := newJobRunTraceHandler(
+		r.deps.Repo.JobRunEvent(),
+		jobRunRouting{
+			WorkspaceID: key.WorkspaceID,
+			CaseID:      key.CaseID,
+			JobID:       key.JobID,
+			RunID:       runID,
+			TraceID:     logRec.TraceID,
+		},
+		newRunSequencerStartingAt(startSeq),
+		r.clock,
+		nil,
+	)
+
+	// Transition the log back to RUNNING (clears the pending interaction)
+	// before executing so a crash mid-resume leaves a RUNNING log, not a
+	// stuck AWAITING_INPUT one.
+	logRec.Stage = model.JobRunStageRunning
+	logRec.PendingInteraction = nil
+	logRec.EndedAt = time.Time{}
+	if resumeErr := r.deps.Repo.JobRunLog().Resume(ctx, logRec); resumeErr != nil {
+		return goerr.Wrap(resumeErr, "transition run log to running for resume",
+			goerr.V("run_id", runID))
+	}
+
+	// The re-question thread (if the resumed turn asks again) is the Case
+	// thread for thread-mode Cases; channel-mode resume cannot recreate the
+	// original session thread, so a re-question there fails loudly.
+	questionThreadTS := ""
+	requesterUserID := ""
+	if prep.c != nil {
+		questionThreadTS = prep.c.SlackThreadTS
+		requesterUserID = prep.c.ReporterID
+	}
+	interactor := newJobInteractor(
+		r.deps.Repo, r.deps.InteractionPoster, key, runID,
+		prep.channelID, questionThreadTS, requesterUserID, logRec, r.clock,
+	)
+
+	execReq := job.ExecuteRequest{
+		JobID:             j.ID,
+		SystemPrompt:      prep.systemPrompt,
+		Prompt:            prep.userPrompt,
+		Tools:             prep.tools,
+		LLMClient:         r.deps.LLMClient,
+		TraceHandler:      handler,
+		TraceID:           logRec.TraceID,
+		HistoryRepository: r.deps.HistoryRepo,
+		HistoryKey:        runID,
+		Interactive:       true,
+		Interactor:        interactor,
+	}
+	res, execErr := resumable.Resume(ctx, execReq, pending, answers)
+	if execErr == nil && res != nil && res.Status == job.ExecuteStatusAwaitingInput {
+		// Re-suspended on a follow-up question; leave paused.
+		return nil
+	}
+
+	sessionThreadTS := questionThreadTS
+	return r.finishRun(ctx, j, prep.c, key, logRec, handler, prep.channelID, sessionThreadTS, runID, logRec.TraceID, execErr)
+}
+
+// unansweredTimeout returns the configured suspension timeout, or the
+// default when unset.
+func (r *JobRunner) unansweredTimeout() time.Duration {
+	if r.deps.UnansweredTimeout > 0 {
+		return r.deps.UnansweredTimeout
+	}
+	return DefaultUnansweredTimeout
+}
+
+// suspensionIsActive reports whether the recorded suspension is a genuine,
+// still-open question (so a new trigger must step aside) versus a stale or
+// inconsistent leftover that should be recovered. It is "active" only when
+// the suspended run's log is AWAITING_INPUT and the suspension is within the
+// timeout. A missing log, a non-AWAITING_INPUT stage (e.g. a RUNNING log left
+// by a crashed resume), or an elapsed timeout all count as NOT active.
+func (r *JobRunner) suspensionIsActive(ctx context.Context, run *model.JobRun, now time.Time) bool {
+	if run == nil || run.SuspendedRunID == "" {
+		return false
+	}
+	if run.SuspendedAt.IsZero() || now.Sub(run.SuspendedAt) >= r.unansweredTimeout() {
+		return false
+	}
+	log, err := r.deps.Repo.JobRunLog().Get(ctx, run.Key(), run.SuspendedRunID)
+	if err != nil || log == nil {
+		// Cannot confirm an open question — treat as recoverable rather than
+		// blocking the Job forever on an unverifiable marker.
+		return false
+	}
+	return log.Stage == model.JobRunStageAwaitingInput
+}
+
+// finalizeOrphanedSuspension fails the orphaned run log behind a stale or
+// inconsistent suspension so it does not linger as a perpetual
+// AWAITING_INPUT / RUNNING record. Best-effort: the suspension marker itself
+// is cleared by the fresh run's terminal RecordRun (or overwritten if the
+// fresh run suspends again).
+func (r *JobRunner) finalizeOrphanedSuspension(ctx context.Context, run *model.JobRun) {
+	if run == nil || run.SuspendedRunID == "" {
+		return
+	}
+	log, err := r.deps.Repo.JobRunLog().Get(ctx, run.Key(), run.SuspendedRunID)
+	if err != nil || log == nil {
+		// Nothing to finalize (already gone / unreadable); the marker is
+		// cleared by the fresh run's RecordRun.
+		return
+	}
+	if log.Stage == model.JobRunStageSuccess || log.Stage == model.JobRunStageFailed {
+		return
+	}
+	log.Stage = model.JobRunStageFailed
+	log.EndedAt = r.clock()
+	log.Error = "superseded: suspended run recovered by a new trigger before it was answered"
+	log.PendingInteraction = nil
+	if finErr := r.deps.Repo.JobRunLog().Finish(ctx, log); finErr != nil {
+		errutil.Handle(ctx, finErr, "job: finalize orphaned suspended run log")
+	}
 }
 
 // postStarting posts the "starting..." marker and returns the timestamp

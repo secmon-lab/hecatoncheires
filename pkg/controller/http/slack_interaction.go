@@ -7,6 +7,7 @@ import (
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
+	jobuc "github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/slack-go/slack"
@@ -26,16 +27,22 @@ type SlackInteractionHandler struct {
 	slackUC           *usecase.SlackUseCases
 	caseUC            *usecase.CaseUseCase
 	mentionProposalUC *usecase.MentionProposalUseCase
+	// jobRunner resumes interactive Jobs from their Slack question form.
+	// May be nil when Jobs are not wired (e.g. deployments without the Job
+	// runtime); the job-question route then no-ops.
+	jobRunner *jobuc.JobRunner
 }
 
 // NewSlackInteractionHandler creates a new Slack interaction handler.
-// Every dependency is mandatory.
+// Every dependency except jobRunner is mandatory; jobRunner may be nil in
+// deployments that do not run interactive Jobs.
 func NewSlackInteractionHandler(
 	actionUC *usecase.ActionUseCase,
 	agentUC *usecase.AgentUseCase,
 	slackUC *usecase.SlackUseCases,
 	caseUC *usecase.CaseUseCase,
 	mentionProposalUC *usecase.MentionProposalUseCase,
+	jobRunner *jobuc.JobRunner,
 ) *SlackInteractionHandler {
 	return &SlackInteractionHandler{
 		actionUC:          actionUC,
@@ -43,6 +50,7 @@ func NewSlackInteractionHandler(
 		slackUC:           slackUC,
 		caseUC:            caseUC,
 		mentionProposalUC: mentionProposalUC,
+		jobRunner:         jobRunner,
 	}
 }
 
@@ -181,6 +189,17 @@ func (h *SlackInteractionHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 			// and Slack), after the block_actions ack.
 			async.Dispatch(ctx, func(ctx context.Context) error {
 				return h.agentUC.HandleThreadCaseQuestionSubmit(ctx, &cb, a)
+			})
+
+		case jobuc.ActionIDJobQuestionSubmit:
+			// Submit on an interactive Job's question form. Resumes the
+			// suspended Job run in the async tail (it talks to the LLM and
+			// Slack), after the block_actions ack. No-op if Jobs are not wired.
+			if h.jobRunner == nil {
+				continue
+			}
+			async.Dispatch(ctx, func(ctx context.Context) error {
+				return h.jobRunner.HandleQuestionSubmit(ctx, &cb, a)
 			})
 
 		case usecase.SlackActionIDSaveAsDraft:

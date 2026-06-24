@@ -9,6 +9,7 @@ import (
 	"github.com/m-mizutani/gt"
 	"github.com/robfig/cron/v3"
 
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
 )
@@ -188,4 +189,103 @@ func TestScheduledScanner_FirstRunImmediatelyDue(t *testing.T) {
 	gt.NoError(t, scanner.Scan(ctx)).Required()
 	// No prior JobRun → due on first scan.
 	gt.Array(t, pub.snapshot()).Length(1)
+}
+
+// suspendRun puts a (job, case) into the AWAITING_INPUT state with the given
+// SuspendedAt, mirroring what JobInteractor.Solicit persists at runtime.
+func suspendRun(t *testing.T, repo interfaces.Repository, key model.JobRunKey, runID string, suspendedAt time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	log := &model.JobRunLog{
+		WorkspaceID:  key.WorkspaceID,
+		CaseID:       key.CaseID,
+		JobID:        key.JobID,
+		RunID:        runID,
+		TraceID:      "trace-" + runID,
+		Stage:        model.JobRunStageRunning,
+		StartedAt:    suspendedAt,
+		ExecutorKind: "planexec",
+	}
+	gt.NoError(t, repo.JobRunLog().Create(ctx, log)).Required()
+	log.Stage = model.JobRunStageAwaitingInput
+	log.PendingInteraction = &model.PendingInteraction{
+		PostedChannelID: "C1",
+		PostedMessageTS: "1700000000.0001",
+		Reason:          "which env?",
+		Items: []model.PendingInteractionItem{
+			{ID: "env", Text: "Which environment?", Type: "select", Options: []string{"prod", "stg"}},
+		},
+	}
+	gt.NoError(t, repo.JobRunLog().Suspend(ctx, log)).Required()
+	gt.NoError(t, repo.JobRun().Suspend(ctx, key, runID, suspendedAt)).Required()
+}
+
+func interactiveScannerWorkspace() (*model.WorkspaceRegistry, *model.Job) {
+	registry := model.NewWorkspaceRegistry()
+	j := &model.Job{
+		ID:          "interactive_triage",
+		Prompt:      "x",
+		Strategy:    model.JobStrategyPlanexec,
+		Interactive: true,
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	registry.Register(&model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: "ws"},
+		Jobs:      []*model.Job{j},
+	})
+	return registry, j
+}
+
+func TestScheduledScanner_ExpiresStaleSuspendedRun(t *testing.T) {
+	ctx := context.Background()
+	repo, c := setupCase(t, "ws")
+	registry, j := interactiveScannerWorkspace()
+	key := model.JobRunKey{WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID}
+
+	// Suspended well past the default 24h timeout.
+	suspendRun(t, repo, key, "RUN-STALE", time.Now().UTC().Add(-48*time.Hour))
+
+	scanner := job.NewScheduledScanner(job.ScannerDeps{
+		Repo: repo, Registry: registry, Publisher: &recordingPublisher{},
+	})
+	gt.NoError(t, scanner.Scan(ctx)).Required()
+
+	// The run was expired: log FAILED, suspension marker cleared.
+	log, err := repo.JobRunLog().Get(ctx, key, "RUN-STALE")
+	gt.NoError(t, err).Required()
+	gt.Value(t, log.Stage).Equal(model.JobRunStageFailed)
+	gt.String(t, log.Error).NotEqual("")
+	gt.Value(t, log.PendingInteraction).Nil()
+
+	run, err := repo.JobRun().Get(ctx, key)
+	gt.NoError(t, err).Required()
+	gt.String(t, run.SuspendedRunID).Equal("")
+	gt.Bool(t, run.IsSuspended()).False()
+	gt.Value(t, run.LastStatus).Equal(model.JobRunStatusFailed)
+}
+
+func TestScheduledScanner_KeepsFreshSuspendedRun(t *testing.T) {
+	ctx := context.Background()
+	repo, c := setupCase(t, "ws")
+	registry, j := interactiveScannerWorkspace()
+	key := model.JobRunKey{WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID}
+
+	// Suspended just now — well within the timeout.
+	suspendRun(t, repo, key, "RUN-FRESH", time.Now().UTC())
+
+	scanner := job.NewScheduledScanner(job.ScannerDeps{
+		Repo: repo, Registry: registry, Publisher: &recordingPublisher{},
+	})
+	gt.NoError(t, scanner.Scan(ctx)).Required()
+
+	// Still suspended — the sweep left it alone.
+	log, err := repo.JobRunLog().Get(ctx, key, "RUN-FRESH")
+	gt.NoError(t, err).Required()
+	gt.Value(t, log.Stage).Equal(model.JobRunStageAwaitingInput)
+
+	run, err := repo.JobRun().Get(ctx, key)
+	gt.NoError(t, err).Required()
+	gt.String(t, run.SuspendedRunID).Equal("RUN-FRESH")
 }

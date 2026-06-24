@@ -85,6 +85,21 @@ type JobRun struct {
 	// agreement is assumed; lease durations are large enough to absorb
 	// minor skew).
 	LeaseUntil time.Time
+
+	// SuspendedRunID, when non-empty, names a Run that is currently
+	// suspended awaiting user input (Stage=AWAITING_INPUT in its
+	// JobRunLog). While set, the scheduler/dispatcher MUST NOT start a new
+	// Run for this (workspace, case, job) — the in-flight interactive Run
+	// owns the slot until the user answers (resume clears it) or the
+	// unanswered-run sweep expires it. The lease is released while
+	// suspended (a human wait can outlast any lease), so SuspendedRunID is
+	// the durable "do not double-start" signal, not the lease.
+	SuspendedRunID string
+
+	// SuspendedAt is when the current suspension began; the unanswered-run
+	// sweep uses it to expire stale AWAITING_INPUT runs. Zero when not
+	// suspended.
+	SuspendedAt time.Time
 }
 
 // Key returns the composite JobRunKey for this run, reconstructed from
@@ -108,6 +123,13 @@ func (r *JobRun) IsLeased(now time.Time) bool {
 	return now.Before(r.LeaseUntil)
 }
 
+// IsSuspended reports whether a Run is currently suspended awaiting user
+// input for this (workspace, case, job). New triggers must step aside
+// while this is true.
+func (r *JobRun) IsSuspended() bool {
+	return r != nil && r.SuspendedRunID != ""
+}
+
 // JobRunStage is the lifecycle stage of an individual Run (one invocation
 // of a Job against a Case). Unlike JobRunStatus on the JobRun lock doc,
 // JobRunStage includes RUNNING so a Run record exists while the agent is
@@ -119,12 +141,18 @@ const (
 	JobRunStageRunning JobRunStage = "RUNNING"
 	JobRunStageSuccess JobRunStage = "SUCCESS"
 	JobRunStageFailed  JobRunStage = "FAILED"
+	// JobRunStageAwaitingInput marks an interactive Run that suspended to
+	// ask the user a question. It is a non-terminal stage: EndedAt stays
+	// zero and PendingInteraction carries the question so the resume path
+	// can parse the answer and continue. Only interactive (planexec) Jobs
+	// ever reach it.
+	JobRunStageAwaitingInput JobRunStage = "AWAITING_INPUT"
 )
 
 // IsValid reports whether the stage is a known enum member.
 func (s JobRunStage) IsValid() bool {
 	switch s {
-	case JobRunStageRunning, JobRunStageSuccess, JobRunStageFailed:
+	case JobRunStageRunning, JobRunStageSuccess, JobRunStageFailed, JobRunStageAwaitingInput:
 		return true
 	default:
 		return false
@@ -174,6 +202,16 @@ type JobRunLog struct {
 	// LLMRequest event (it doesn't change turn-to-turn within a Run).
 	// Truncated from the tail to MaxInlineBytes if longer.
 	SystemPrompt string
+
+	// PendingInteraction is set ONLY while Stage == AWAITING_INPUT: it holds
+	// the question put to the user and the Slack message coordinates needed
+	// to update the form in place on resume. It MUST be nil in every other
+	// stage (the resume path clears it). It is the entire persisted state a
+	// suspend needs — no planexec plan snapshot is stored, because the
+	// gollem conversation history (keyed by RunID) already carries the
+	// sub-agent observations and the resume re-enters planexec at the
+	// replan branch with a fresh budget.
+	PendingInteraction *PendingInteraction
 }
 
 // Validate enforces invariants on a JobRunLog. The repository calls this
@@ -224,10 +262,112 @@ func (l *JobRunLog) Validate() error {
 		if l.EndedAt.IsZero() {
 			return goerr.New("ended at must be set on failure")
 		}
+	case JobRunStageAwaitingInput:
+		if !l.EndedAt.IsZero() {
+			return goerr.New("ended at must be zero while awaiting input")
+		}
+		if l.PendingInteraction == nil {
+			return goerr.New("pending interaction is required while awaiting input")
+		}
+		if err := l.PendingInteraction.Validate(); err != nil {
+			return goerr.Wrap(err, "pending interaction invalid")
+		}
+	}
+	// PendingInteraction is meaningful only while suspended; carrying it in
+	// any other stage signals a resume that forgot to clear it.
+	if l.Stage != JobRunStageAwaitingInput && l.PendingInteraction != nil {
+		return goerr.New("pending interaction must be nil unless awaiting input",
+			goerr.V("stage", string(l.Stage)))
 	}
 	if len(l.SystemPrompt) > MaxInlineBytes {
 		return goerr.New("system prompt exceeds MaxInlineBytes (truncate before save)",
 			goerr.V("len", len(l.SystemPrompt)))
+	}
+	return nil
+}
+
+// pendingInteractionItemType enumerates the answer-control types a
+// PendingInteractionItem may carry. They mirror the host-neutral
+// interaction.ItemType values; the persisted form is a plain string so the
+// domain layer does not depend on pkg/agent/interaction.
+const (
+	pendingInteractionSelect      = "select"
+	pendingInteractionMultiSelect = "multi_select"
+	pendingInteractionFreeText    = "free_text"
+)
+
+// PendingInteraction is the persisted snapshot of a question put to the
+// user while an interactive Run is suspended. It lives on the run's
+// JobRunLog (Stage=AWAITING_INPUT). The shape mirrors the host-neutral
+// interaction.Request, but is defined here (domain layer) so persistence
+// does not depend on pkg/agent/interaction; the Job host converts at the
+// boundary.
+type PendingInteraction struct {
+	// PostedChannelID / PostedMessageTS locate the Slack question form so
+	// the resume path can update it in place to an "answered" view.
+	PostedChannelID string
+	PostedMessageTS string
+
+	// Reason is the shared rationale rendered once above the items.
+	Reason string
+
+	// Items is the ordered list of questions (1..5).
+	Items []PendingInteractionItem
+}
+
+// PendingInteractionItem is one question within a PendingInteraction.
+type PendingInteractionItem struct {
+	ID      string
+	Text    string
+	Type    string // select | multi_select | free_text
+	Options []string
+}
+
+// Validate enforces the same invariants the host-neutral interaction.Request
+// enforces, so a snapshot that round-trips through Firestore stays well
+// formed. Slack coordinates are required because the resume path must locate
+// the form to update it.
+func (p *PendingInteraction) Validate() error {
+	if p == nil {
+		return goerr.New("pending interaction is nil")
+	}
+	if p.PostedChannelID == "" {
+		return goerr.New("pending interaction posted channel id is empty")
+	}
+	if p.PostedMessageTS == "" {
+		return goerr.New("pending interaction posted message ts is empty")
+	}
+	if len(p.Items) == 0 {
+		return goerr.New("pending interaction has no items")
+	}
+	if len(p.Items) > 5 {
+		return goerr.New("pending interaction has too many items",
+			goerr.V("items", len(p.Items)))
+	}
+	seen := make(map[string]struct{}, len(p.Items))
+	for i := range p.Items {
+		it := p.Items[i]
+		if it.ID == "" {
+			return goerr.New("pending interaction item id is empty", goerr.V("index", i))
+		}
+		if _, dup := seen[it.ID]; dup {
+			return goerr.New("duplicate pending interaction item id", goerr.V("id", it.ID))
+		}
+		seen[it.ID] = struct{}{}
+		if it.Text == "" {
+			return goerr.New("pending interaction item text is empty", goerr.V("id", it.ID))
+		}
+		switch it.Type {
+		case pendingInteractionSelect, pendingInteractionMultiSelect:
+			if len(it.Options) < 2 {
+				return goerr.New("select item needs at least two options", goerr.V("id", it.ID))
+			}
+		case pendingInteractionFreeText:
+			// Options ignored for free_text.
+		default:
+			return goerr.New("invalid pending interaction item type",
+				goerr.V("id", it.ID), goerr.V("type", it.Type))
+		}
 	}
 	return nil
 }

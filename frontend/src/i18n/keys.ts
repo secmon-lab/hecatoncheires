@@ -484,6 +484,7 @@ export const msgKeys = {
   caseAgentRunStageRunning: 'caseAgentRunStageRunning',
   caseAgentRunStageSuccess: 'caseAgentRunStageSuccess',
   caseAgentRunStageFailed: 'caseAgentRunStageFailed',
+  caseAgentRunStageAwaitingInput: 'caseAgentRunStageAwaitingInput',
   caseAgentRunDurationRunning: 'caseAgentRunDurationRunning',
   caseAgentSectionJobs: 'caseAgentSectionJobs',
   caseAgentJobsSubtitle: 'caseAgentJobsSubtitle',

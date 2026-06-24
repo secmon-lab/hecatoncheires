@@ -59,8 +59,68 @@ func TestJobRunStage_IsValid(t *testing.T) {
 	gt.Bool(t, model.JobRunStageRunning.IsValid()).True()
 	gt.Bool(t, model.JobRunStageSuccess.IsValid()).True()
 	gt.Bool(t, model.JobRunStageFailed.IsValid()).True()
+	gt.Bool(t, model.JobRunStageAwaitingInput.IsValid()).True()
 	gt.Bool(t, model.JobRunStage("OTHER").IsValid()).False()
 	gt.Bool(t, model.JobRunStage("").IsValid()).False()
+}
+
+func TestJobRun_IsSuspended(t *testing.T) {
+	gt.Bool(t, (&model.JobRun{SuspendedRunID: "run-1"}).IsSuspended()).True()
+	gt.Bool(t, (&model.JobRun{}).IsSuspended()).False()
+	var nilRun *model.JobRun
+	gt.Bool(t, nilRun.IsSuspended()).False()
+}
+
+func validPendingInteraction() *model.PendingInteraction {
+	return &model.PendingInteraction{
+		PostedChannelID: "C123",
+		PostedMessageTS: "1700000000.000100",
+		Reason:          "need more info",
+		Items: []model.PendingInteractionItem{
+			{ID: "q1", Text: "Severity?", Type: "select", Options: []string{"high", "low"}},
+			{ID: "q2", Text: "Details?", Type: "free_text"},
+		},
+	}
+}
+
+func TestPendingInteraction_Validate(t *testing.T) {
+	t.Run("ok", func(t *testing.T) {
+		gt.NoError(t, validPendingInteraction().Validate())
+	})
+	t.Run("nil", func(t *testing.T) {
+		var p *model.PendingInteraction
+		gt.Error(t, p.Validate())
+	})
+	t.Run("missing channel", func(t *testing.T) {
+		p := validPendingInteraction()
+		p.PostedChannelID = ""
+		gt.Error(t, p.Validate())
+	})
+	t.Run("missing message ts", func(t *testing.T) {
+		p := validPendingInteraction()
+		p.PostedMessageTS = ""
+		gt.Error(t, p.Validate())
+	})
+	t.Run("no items", func(t *testing.T) {
+		p := validPendingInteraction()
+		p.Items = nil
+		gt.Error(t, p.Validate())
+	})
+	t.Run("duplicate id", func(t *testing.T) {
+		p := validPendingInteraction()
+		p.Items[1].ID = "q1"
+		gt.Error(t, p.Validate())
+	})
+	t.Run("select without options", func(t *testing.T) {
+		p := validPendingInteraction()
+		p.Items[0].Options = []string{"only"}
+		gt.Error(t, p.Validate())
+	})
+	t.Run("invalid type", func(t *testing.T) {
+		p := validPendingInteraction()
+		p.Items[1].Type = "bogus"
+		gt.Error(t, p.Validate())
+	})
 }
 
 func TestJobRunEventKind_IsValid(t *testing.T) {
@@ -179,6 +239,39 @@ func TestJobRunLog_Validate(t *testing.T) {
 			buf[i] = 'a'
 		}
 		l.SystemPrompt = string(buf)
+		gt.Error(t, l.Validate())
+	})
+	t.Run("ok awaiting input", func(t *testing.T) {
+		l := validJobRunLog()
+		l.Stage = model.JobRunStageAwaitingInput
+		l.PendingInteraction = validPendingInteraction()
+		gt.NoError(t, l.Validate())
+	})
+	t.Run("awaiting input with ended at is rejected", func(t *testing.T) {
+		l := validJobRunLog()
+		l.Stage = model.JobRunStageAwaitingInput
+		l.PendingInteraction = validPendingInteraction()
+		l.EndedAt = l.StartedAt.Add(time.Second)
+		gt.Error(t, l.Validate())
+	})
+	t.Run("awaiting input without pending interaction is rejected", func(t *testing.T) {
+		l := validJobRunLog()
+		l.Stage = model.JobRunStageAwaitingInput
+		l.PendingInteraction = nil
+		gt.Error(t, l.Validate())
+	})
+	t.Run("awaiting input with invalid pending interaction is rejected", func(t *testing.T) {
+		l := validJobRunLog()
+		l.Stage = model.JobRunStageAwaitingInput
+		bad := validPendingInteraction()
+		bad.Items = nil
+		l.PendingInteraction = bad
+		gt.Error(t, l.Validate())
+	})
+	t.Run("pending interaction outside awaiting input is rejected", func(t *testing.T) {
+		l := validJobRunLog()
+		l.Stage = model.JobRunStageRunning
+		l.PendingInteraction = validPendingInteraction()
 		gt.Error(t, l.Validate())
 	})
 }

@@ -1,7 +1,7 @@
 import { useTranslation } from '../../i18n'
 import styles from '../../pages/CaseAgent.module.css'
 
-export type JobRunStage = 'RUNNING' | 'SUCCESS' | 'FAILED'
+export type JobRunStage = 'RUNNING' | 'SUCCESS' | 'FAILED' | 'AWAITING_INPUT'
 
 interface Props {
   stage: JobRunStage
@@ -12,6 +12,7 @@ const variantMap: Record<JobRunStage, string> = {
   RUNNING: styles.stageRunning,
   SUCCESS: styles.stageSuccess,
   FAILED: styles.stageFailed,
+  AWAITING_INPUT: styles.stageAwaitingInput,
 }
 
 // StageBadge mirrors the design's StageBadge: a pill with a stage-coloured
@@ -23,6 +24,7 @@ export default function StageBadge({ stage, size = 'md' }: Props) {
     RUNNING: t('caseAgentRunStageRunning'),
     SUCCESS: t('caseAgentRunStageSuccess'),
     FAILED: t('caseAgentRunStageFailed'),
+    AWAITING_INPUT: t('caseAgentRunStageAwaitingInput'),
   }[stage]
   const cls = [styles.stageBadge, variantMap[stage]]
   if (size === 'sm') cls.push(styles.stageBadgeSm)

@@ -52,7 +52,9 @@ func newTestSlackHandler(
 	if slackUC == nil {
 		slackUC = usecase.NewSlackUseCases(repo, registry, agentUC, mentionProposalUC, slackStub)
 	}
-	return httpctrl.NewSlackInteractionHandler(actionUC, agentUC, slackUC, caseUC, mentionProposalUC)
+	// jobRunner is nil here: these controller tests do not exercise the
+	// interactive-Job question route.
+	return httpctrl.NewSlackInteractionHandler(actionUC, agentUC, slackUC, caseUC, mentionProposalUC, nil)
 }
 
 func TestSlackInteractionHandler(t *testing.T) {

@@ -4368,6 +4368,10 @@ enum JobRunStage {
   RUNNING
   SUCCESS
   FAILED
+  # AWAITING_INPUT marks an interactive run suspended waiting for the user
+  # to answer a question in Slack. Non-terminal: the run resumes on answer
+  # or is expired by the unanswered-run sweep.
+  AWAITING_INPUT
 }
 
 # Cursor-paginated slice of JobRunLogs for one Case. nextCursor is null

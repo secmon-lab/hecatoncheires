@@ -32,6 +32,17 @@ func newRunSequencer() *runSequencer {
 	return &runSequencer{next: 1}
 }
 
+// newRunSequencerStartingAt returns a sequencer whose first Next() returns
+// start. Used when resuming a suspended run so the resumed turn's events
+// continue past the suspended turn's events (which share the same RunID
+// event space) instead of colliding on Sequence.
+func newRunSequencerStartingAt(start int64) *runSequencer {
+	if start < 1 {
+		start = 1
+	}
+	return &runSequencer{next: start}
+}
+
 // Next returns the next Sequence and advances the counter.
 func (s *runSequencer) Next() int64 {
 	s.mu.Lock()

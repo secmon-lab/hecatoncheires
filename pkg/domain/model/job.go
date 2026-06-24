@@ -245,6 +245,17 @@ type Job struct {
 	// loader normalises before Validate runs.
 	Strategy JobStrategy
 
+	// Interactive enables mid-run user interaction. When true, the Job may
+	// suspend a run to ask the user a question (planexec Question), persist
+	// the pending interaction on its run state, post a Slack form, and
+	// resume when the user answers. Defaults to false (= the run is fully
+	// unattended). Only meaningful for JobStrategyPlanexec: the simple
+	// single-loop runtime has no Question mechanism, so Validate rejects
+	// interactive simple Jobs. Independent of Quiet — the question form is a
+	// deliberate agent interaction, not an operational log, so Quiet does
+	// not suppress it.
+	Interactive bool
+
 	// Reflection, when true, runs a post-execution reflection pass after a
 	// successful run: a knowledge-only agent reviews the run's conversation
 	// history and curates the workspace's shared Knowledge / Tags. Defaults
@@ -287,6 +298,14 @@ func (j *Job) Validate() error {
 	}
 	if j.Strategy != "" && !j.Strategy.IsValid() {
 		return goerr.New("job strategy is invalid",
+			goerr.V("job_id", j.ID),
+			goerr.V("strategy", string(j.Strategy)))
+	}
+	// Interactive relies on the planexec Question mechanism; the simple
+	// single-loop runtime has no way to solicit input mid-run. Reject the
+	// combination at config-load time rather than silently ignoring the flag.
+	if j.Interactive && NormaliseJobStrategy(j.Strategy) != JobStrategyPlanexec {
+		return goerr.New("interactive job requires strategy=planexec",
 			goerr.V("job_id", j.ID),
 			goerr.V("strategy", string(j.Strategy)))
 	}

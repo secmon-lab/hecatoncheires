@@ -53,8 +53,13 @@ type JobSection struct {
 	// Reflection enables the post-execution reflection pass that curates
 	// workspace Knowledge from a successful run's conversation history.
 	// Defaults to false. Skipped for private cases and failed runs.
-	Reflection bool             `toml:"reflection"`
-	Events     JobEventsSection `toml:"events"`
+	Reflection bool `toml:"reflection"`
+	// Interactive enables mid-run user interaction (planexec Question →
+	// Slack form → resume). Defaults to false. Requires strategy="planexec";
+	// the combination with simple is rejected at config load time by
+	// model.Job.Validate.
+	Interactive bool             `toml:"interactive"`
+	Events      JobEventsSection `toml:"events"`
 }
 
 // JobEventsSection mirrors the `events.<domain> = { ... }` map. At least
@@ -121,6 +126,7 @@ func (s *JobSection) Validate(baseDir string) (*model.Job, error) {
 		Disabled:    s.Disabled,
 		Quiet:       s.Quiet,
 		Strategy:    strategy,
+		Interactive: s.Interactive,
 		Reflection:  s.Reflection,
 		Events:      *events,
 	}
