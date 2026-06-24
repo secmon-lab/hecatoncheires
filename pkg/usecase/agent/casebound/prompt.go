@@ -50,8 +50,9 @@ type promptCurrentAction struct {
 
 // promptFieldOption is one selectable option of a select / multi-select field.
 type promptFieldOption struct {
-	ID   string
-	Name string
+	ID          string
+	Name        string
+	Description string
 }
 
 // promptFieldDef describes a custom field the agent may set via
@@ -69,9 +70,10 @@ type promptFieldDef struct {
 // promptStatus is one board status id the agent may move the case to via
 // case__update_case_status.
 type promptStatus struct {
-	ID     string
-	Name   string
-	Closed bool
+	ID          string
+	Name        string
+	Description string
+	Closed      bool
 }
 
 // promptData holds all data for the casebound system prompt template.
@@ -127,7 +129,7 @@ func buildSystemPrompt(c *model.Case, entry *model.WorkspaceEntry, channelID str
 				Description: fd.Description,
 			}
 			for _, o := range fd.Options {
-				def.Options = append(def.Options, promptFieldOption{ID: o.ID, Name: o.Name})
+				def.Options = append(def.Options, promptFieldOption{ID: o.ID, Name: o.Name, Description: o.Description})
 			}
 			data.FieldSchema = append(data.FieldSchema, def)
 		}
@@ -135,9 +137,10 @@ func buildSystemPrompt(c *model.Case, entry *model.WorkspaceEntry, channelID str
 	if entry != nil && entry.CaseStatusSet != nil {
 		for _, s := range entry.CaseStatusSet.Statuses() {
 			data.BoardStatuses = append(data.BoardStatuses, promptStatus{
-				ID:     s.ID,
-				Name:   s.Name,
-				Closed: entry.CaseStatusSet.IsClosed(s.ID),
+				ID:          s.ID,
+				Name:        s.Name,
+				Description: s.Description,
+				Closed:      entry.CaseStatusSet.IsClosed(s.ID),
 			})
 		}
 	}

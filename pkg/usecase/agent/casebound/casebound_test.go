@@ -201,8 +201,8 @@ func TestBuildUserInput_SkipsCurrentMentionInDelta(t *testing.T) {
 
 func TestBuildSystemPrompt_EditableFieldsAndStatuses(t *testing.T) {
 	statusSet, err := model.NewActionStatusSet("open", []string{"closed"}, []model.ActionStatusDefinition{
-		{ID: "open", Name: "Open"},
-		{ID: "closed", Name: "Closed"},
+		{ID: "open", Name: "Open", Description: "Work has not started"},
+		{ID: "closed", Name: "Closed", Description: "Work is fully resolved"},
 	})
 	gt.NoError(t, err).Required()
 
@@ -210,7 +210,10 @@ func TestBuildSystemPrompt_EditableFieldsAndStatuses(t *testing.T) {
 		Workspace: model.Workspace{ID: "ws-test", Name: "Test"},
 		FieldSchema: &config.FieldSchema{
 			Fields: []config.FieldDefinition{
-				{ID: "severity", Name: "Severity", Type: types.FieldTypeSelect, Required: true, Options: []config.FieldOption{{ID: "high", Name: "High"}, {ID: "low", Name: "Low"}}},
+				{ID: "severity", Name: "Severity", Type: types.FieldTypeSelect, Required: true, Description: "How urgent the case is", Options: []config.FieldOption{
+					{ID: "high", Name: "High", Description: "Needs immediate attention"},
+					{ID: "low", Name: "Low", Description: "Can wait"},
+				}},
 			},
 		},
 		CaseStatusSet: statusSet,
@@ -222,11 +225,21 @@ func TestBuildSystemPrompt_EditableFieldsAndStatuses(t *testing.T) {
 
 	gt.String(t, prompt).Contains("Editable Custom Fields")
 	gt.String(t, prompt).Contains("`severity`")
-	gt.String(t, prompt).Contains("`high`")
+	// The field-level description must reach the agent.
+	gt.String(t, prompt).Contains("How urgent the case is")
 	gt.String(t, prompt).Contains("(required)")
+	// Each select option must surface its id, name, and description.
+	gt.String(t, prompt).Contains("`high`")
+	gt.String(t, prompt).Contains(`name="High"`)
+	gt.String(t, prompt).Contains("Needs immediate attention")
+	gt.String(t, prompt).Contains("`low`")
+	gt.String(t, prompt).Contains("Can wait")
 	gt.String(t, prompt).Contains("Board Statuses")
 	gt.String(t, prompt).Contains("`closed`")
 	gt.String(t, prompt).Contains("(closed)")
+	// Status descriptions must reach the agent so it knows when to pick one.
+	gt.String(t, prompt).Contains("Work has not started")
+	gt.String(t, prompt).Contains("Work is fully resolved")
 }
 
 func TestBuildTools_CaseWriterWiring(t *testing.T) {

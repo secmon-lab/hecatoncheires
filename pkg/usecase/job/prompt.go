@@ -98,7 +98,12 @@ type systemPromptData struct {
 	// the zero value so the template can omit the section entirely.
 	Now       string
 	Workspace systemPromptWorkspace
-	Case      *systemPromptCase
+	// BoardStatuses lists the workspace's case board statuses the agent may
+	// move the case to via case__update_case_status. Populated only when the
+	// workspace defines a case status set (the same condition under which the
+	// status tool is wired); empty otherwise so the template omits the section.
+	BoardStatuses []systemPromptStatus
+	Case          *systemPromptCase
 	// ManagesActions is false for thread-mode workspaces, which manage no
 	// Actions. When false the template omits the Actions section and the
 	// action-specific guardrails so the prompt never references a concept the
@@ -172,6 +177,16 @@ type systemPromptWorkspace struct {
 	Name        string
 	Description string
 	Fields      []systemPromptField
+}
+
+// systemPromptStatus is one case board status the agent may move the case to
+// via case__update_case_status. Closed marks a status configured as closing the
+// case, mirrored from the workspace's case status set.
+type systemPromptStatus struct {
+	ID          string
+	Name        string
+	Description string
+	Closed      bool
 }
 
 type systemPromptField struct {
@@ -324,6 +339,22 @@ func buildSystemPromptData(in PromptInputs) systemPromptData {
 				}
 				fieldMetaByID[f.ID] = meta
 				data.Workspace.Fields = append(data.Workspace.Fields, field)
+			}
+		}
+
+		// Board statuses: advertise the case status set so the agent can drive
+		// case__update_case_status with valid ids, names, and the reasoning hint
+		// each status's description carries. Rendered whenever a status set is
+		// defined — the same condition under which casewriter wires the status
+		// tool — so the prompt and the tool stay in sync.
+		if css := ws.CaseStatusSet; css != nil {
+			for _, s := range css.Statuses() {
+				data.BoardStatuses = append(data.BoardStatuses, systemPromptStatus{
+					ID:          s.ID,
+					Name:        s.Name,
+					Description: s.Description,
+					Closed:      css.IsClosed(s.ID),
+				})
 			}
 		}
 

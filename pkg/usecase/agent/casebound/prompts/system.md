@@ -19,12 +19,13 @@ You are responding in a Slack channel dedicated to the following case.
 
 ## Editable Custom Fields
 You may set these via the `case__update_case` tool's `fields` parameter. Use the field id, and for select / multi-select use the listed option ids.
-{{range .FieldSchema}}- id=`{{.ID}}` name="{{.Name}}" type={{.Type}}{{if .Required}} (required){{end}}{{if .Description}} — {{.Description}}{{end}}{{if .Options}} options=[{{range $i, $o := .Options}}{{if $i}}, {{end}}`{{$o.ID}}`{{end}}]{{end}}
-{{end}}{{end}}{{if .BoardStatuses}}
+{{range .FieldSchema}}- id=`{{.ID}}` name="{{.Name}}" type={{.Type}}{{if .Required}} (required){{end}}{{if .Description}} — {{.Description}}{{end}}
+{{range .Options}}  - option id=`{{.ID}}`{{if .Name}} name="{{.Name}}"{{end}}{{if .Description}} — {{.Description}}{{end}}
+{{end}}{{end}}{{end}}{{if .BoardStatuses}}
 
 ## Board Statuses
 You may move the case via the `case__update_case_status` tool using one of these status ids. A status marked (closed) will close the case.
-{{range .BoardStatuses}}- id=`{{.ID}}` name="{{.Name}}"{{if .Closed}} (closed){{end}}
+{{range .BoardStatuses}}- id=`{{.ID}}` name="{{.Name}}"{{if .Closed}} (closed){{end}}{{if .Description}} — {{.Description}}{{end}}
 {{end}}{{end}}{{if .CurrentAction}}
 
 ## Current Action
