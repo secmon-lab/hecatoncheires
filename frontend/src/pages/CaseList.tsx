@@ -19,7 +19,7 @@ import {
   IconDots,
   IconSettings,
 } from '../components/Icons'
-import { Avatar, AssigneeNamesStack, StatusBadge, SlackLink } from '../components/Primitives'
+import { Avatar, AssigneeNamesStack, StatusBadge, SlackLink, TestBadge } from '../components/Primitives'
 import CaseForm from './CaseForm'
 import { displayName } from '../utils/user'
 import {
@@ -78,6 +78,7 @@ interface CaseRow {
   title: string
   status: 'OPEN' | 'CLOSED' | 'DRAFT'
   isPrivate: boolean
+  isTest: boolean
   accessDenied: boolean
   reporterID?: string | null
   reporter?: CaseUser | null
@@ -679,6 +680,9 @@ export default function CaseList() {
                         </span>
                       ) : (
                         <span className="title truncate" style={{ maxWidth: 380 }}>{c.title}</span>
+                      )}
+                      {!c.accessDenied && c.isTest && (
+                        <span data-testid="test-badge"><TestBadge label={t('badgeTest')} /></span>
                       )}
                     </div>
                   </td>

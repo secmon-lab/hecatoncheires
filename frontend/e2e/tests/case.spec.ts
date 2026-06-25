@@ -103,6 +103,43 @@ test.describe('Case Management', () => {
     expect(description).toContain('Updated description');
   });
 
+  test('should mark a case as a test on create, show the badge, and toggle it on detail', async ({ page }) => {
+    const caseListPage = new CaseListPage(page);
+    const caseFormPage = new CaseFormPage(page);
+    const caseDetailPage = new CaseDetailPage(page);
+
+    const title = `Test Flag Case ${Date.now()}`;
+
+    // Create the case with the "Test case" checkbox ticked.
+    await caseListPage.clickNewCaseButton();
+    await caseFormPage.createCase({
+      title,
+      description: 'Filed as a test',
+      customFields: { category: 'bug' },
+      isTest: true,
+    });
+
+    // The list row shows the Test badge.
+    await caseListPage.waitForTableLoad();
+    await caseListPage.fillSearchFilter(title);
+    expect(await caseListPage.caseExists(title)).toBeTruthy();
+    expect(await caseListPage.caseRowHasTestBadge(title)).toBeTruthy();
+
+    // Detail page shows the badge and the toggle is checked.
+    await caseListPage.clickCaseByTitle(title);
+    await caseDetailPage.waitForPageLoad();
+    expect(await caseDetailPage.hasTestBadge()).toBeTruthy();
+    expect(await caseDetailPage.isTestToggleChecked()).toBeTruthy();
+
+    // Toggle it off; the badge disappears and the change round-trips to the
+    // backend (survives a reload).
+    await caseDetailPage.setTestToggle(false);
+    await page.reload();
+    await caseDetailPage.waitForPageLoad();
+    expect(await caseDetailPage.hasTestBadge()).toBeFalsy();
+    expect(await caseDetailPage.isTestToggleChecked()).toBeFalsy();
+  });
+
   test('should navigate from case detail to the filtered action list', async ({ page }) => {
     const caseListPage = new CaseListPage(page);
     const caseFormPage = new CaseFormPage(page);

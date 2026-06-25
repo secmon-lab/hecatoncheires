@@ -40,7 +40,7 @@ func TestActionToolAdapter_CreateAction(t *testing.T) {
 		actionUC := usecase.NewActionUseCase(repo, nil, nil, "", nil)
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		adapter := usecase.NewActionToolAdapter(actionUC)
@@ -83,7 +83,7 @@ func TestActionToolAdapter_UpdateAction(t *testing.T) {
 			{ID: "U002", Name: "bob", RealName: "Bob"},
 		})).Required()
 
-		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 		gt.Value(t, c.SlackChannelID).NotEqual("")
 

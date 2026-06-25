@@ -143,6 +143,41 @@ handler (`HandleSaveAsDraftClick`) is kept for backward compatibility
 with any in-flight callbacks emitted before the layout change but is
 no longer surfaced through the modal.
 
+### Test cases
+
+A Case carries an `isTest` boolean (default `false`) that marks it as a
+test case rather than a real one to work on. A test case is one created
+either to **verify the system itself** (confirming that case/ticket
+creation works, trying out the mention flow, etc.) or as an **exercise /
+drill** rather than in response to an actual incident or task. It is
+purely a label: it does not change access control, channel creation, or
+any lifecycle behaviour. The Case list and the Case detail page show a
+**Test** badge so test cases are easy to tell apart at a glance.
+
+`isTest` can be set and cleared anywhere a Case is created or edited:
+
+* **Web — create / draft form**: a **Test case** checkbox sits in the
+  Case creation/draft modal (`CaseForm`), alongside **Private case**.
+* **Web — detail page**: an inline **Test** toggle on an open Case's
+  detail header flips the flag via `updateCase(input: { isTest })`.
+* **Slack — `/cmd` create modal**: a **Test case** option in the
+  **Options** checkbox group (next to Private/Draft). It is independent
+  of the other two — ticking it alone yields a normal, non-private,
+  non-draft *test* case.
+* **Slack — `/cmd update` edit modal**: a **Test case** checkbox
+  (pre-ticked to the Case's current value) toggles the flag both ways.
+* **Agent (mention) proposals**: the planner may set `is_test` on its
+  `materialize` output when the request is explicitly a test/drill. When
+  set, the preview card shows a **Test case** note so a one-click
+  **Submit** never hides the flag; the human can also confirm or override
+  it via the **Test case** checkbox in the proposal's **Edit** modal
+  before pressing **Submit**.
+
+The GraphQL surface exposes `Case.isTest: Boolean!` and accepts
+`isTest: Boolean` on `CreateCaseInput`, `CreateDraftInput`,
+`UpdateCaseInput`, and `SubmitDraftInput` (omitted means "leave
+unchanged" on update, `false` on create).
+
 ### Web: Drafts page
 
 Logged-in users see a **Drafts** entry in the workspace sidebar that
@@ -321,7 +356,8 @@ with workspace selector + Submit / Edit / Cancel buttons.
    Each round, the planner emits a JSON plan with one of three actions:
    `investigate` (parallel sub-agent fan-out under read-only tool sets),
    `question`, or `materialize`. The terminal action for a normal mention
-   is `materialize`, which produces `Title`, `Description`, and a
+   is `materialize`, which produces `Title`, `Description`, an optional
+   `is_test` flag (set only for explicit test/drill requests), and a
    `custom_field_values` map for the **planner-selected** workspace's
    `FieldSchema`. Loop budgets (planner / sub-agent / sub-agent inner)
    bound runaway turns; when exhausted, the runtime returns

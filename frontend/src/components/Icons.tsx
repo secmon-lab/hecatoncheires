@@ -51,6 +51,7 @@ export const IconSparkle = (p: P) => <Icon {...p} d="M12 3v3M12 18v3M3 12h3M18 1
 export const IconEdit = (p: P) => <Icon {...p} d="M4 20h4l10-10-4-4L4 16v4zM13.5 6.5l4 4" />
 export const IconKnowledge = (p: P) => <Icon {...p} d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M4 19.5A2.5 2.5 0 0 0 6.5 22H20V2H6.5A2.5 2.5 0 0 0 4 4.5v15z" />
 export const IconDownload = (p: P) => <Icon {...p} d="M12 3v12M7 10l5 5 5-5M5 21h14" />
+export const IconFlask = (p: P) => <Icon {...p} d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3l-5-9V3M7.5 14h9" />
 
 // IconRobot — a friendly "bot" head used as the Agent surface mark.
 // Built as a multi-shape SVG (head rect + antenna + ear stubs + eyes

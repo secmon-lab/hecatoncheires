@@ -55,6 +55,39 @@ export class CaseDetailPage extends BasePage {
   }
 
   /**
+   * Whether the "Test" badge is shown in the detail header.
+   */
+  async hasTestBadge(): Promise<boolean> {
+    return await this.page.getByTestId('test-badge').isVisible();
+  }
+
+  /**
+   * Whether the inline Test toggle is currently checked.
+   */
+  async isTestToggleChecked(): Promise<boolean> {
+    return await this.page.getByTestId('test-case-toggle').isChecked();
+  }
+
+  /**
+   * Flip the inline Test toggle to the desired state and wait for the
+   * badge to reflect the change (the updateCase mutation refetches the
+   * case, so the badge appears/disappears once it lands).
+   */
+  async setTestToggle(checked: boolean): Promise<void> {
+    const toggle = this.page.getByTestId('test-case-toggle');
+    await toggle.waitFor({ state: 'visible', timeout: 5000 });
+    if ((await toggle.isChecked()) !== checked) {
+      await toggle.click();
+    }
+    const badge = this.page.getByTestId('test-badge');
+    if (checked) {
+      await badge.waitFor({ state: 'visible', timeout: 10000 });
+    } else {
+      await badge.waitFor({ state: 'hidden', timeout: 10000 });
+    }
+  }
+
+  /**
    * Inline-edit the case title (Linear-style: click → input → Enter).
    */
   async setTitle(next: string): Promise<void> {

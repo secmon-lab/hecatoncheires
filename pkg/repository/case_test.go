@@ -495,6 +495,60 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.Bool(t, retrieved.IsThreadBound()).True()
 	})
 
+	t.Run("IsTest round-trips on Create and toggles on Update", func(t *testing.T) {
+		// IsTest is a persisted scalar; a Firestore Create that rebuilt the
+		// struct field-by-field would silently drop it (the canonical bug this
+		// suite guards against), so assert it both on Create and after Update.
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID: "U-TEST-FLAG",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      "Test-flagged case",
+			Status:     types.CaseStatusOpen,
+			IsTest:     true,
+		})
+		gt.NoError(t, err).Required()
+		gt.Bool(t, created.IsTest).True()
+
+		retrieved, err := repo.Case().Get(ctx, wsID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, retrieved.IsTest).True()
+
+		// Flip it off and confirm the false value persists (not just "unset").
+		retrieved.IsTest = false
+		updated, err := repo.Case().Update(ctx, wsID, retrieved)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, updated.IsTest).False()
+
+		reRetrieved, err := repo.Case().Get(ctx, wsID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, reRetrieved.IsTest).False()
+	})
+
+	t.Run("IsTest defaults to false when omitted on Create", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID: "U-TEST-DEFAULT",
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+			Title:      "Untagged case",
+			Status:     types.CaseStatusOpen,
+		})
+		gt.NoError(t, err).Required()
+		gt.Bool(t, created.IsTest).False()
+
+		retrieved, err := repo.Case().Get(ctx, wsID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, retrieved.IsTest).False()
+	})
+
 	t.Run("thread-mode case may be created with an empty reporter", func(t *testing.T) {
 		// A channel-root intake post relayed by an integration bot may name no
 		// human, so a thread-mode Create must accept an empty ReporterID

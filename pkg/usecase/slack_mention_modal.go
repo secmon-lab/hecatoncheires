@@ -12,6 +12,8 @@ const (
 	actionIDDraftEditTitle       = "draft_edit_title_input"
 	blockIDDraftEditDescription  = "draft_edit_description"
 	actionIDDraftEditDescription = "draft_edit_description_input"
+	blockIDDraftEditTest         = "draft_edit_test"
+	actionIDDraftEditTest        = "draft_edit_test_input"
 )
 
 // buildDraftEditModal constructs the dynamic Edit modal for the draft. The
@@ -70,6 +72,26 @@ func buildDraftEditModal(entry *model.WorkspaceEntry, mat *model.WorkspaceMateri
 			}
 		}
 	}
+
+	// Test-case flag, pre-ticked from the agent's suggestion so the human can
+	// confirm or override it before the case is created.
+	testOption := goslack.NewOptionBlockObject(
+		caseOptionValueTest,
+		goslack.NewTextBlockObject(goslack.PlainTextType, "Test case", false, false),
+		goslack.NewTextBlockObject(goslack.PlainTextType, "Filed for verification rather than a real case.", false, false),
+	)
+	testEl := goslack.NewCheckboxGroupsBlockElement(actionIDDraftEditTest, testOption)
+	if mat != nil && mat.IsTest {
+		testEl.InitialOptions = []*goslack.OptionBlockObject{testOption}
+	}
+	testBlock := goslack.NewInputBlock(
+		blockIDDraftEditTest,
+		goslack.NewTextBlockObject(goslack.PlainTextType, "Options", false, false),
+		nil,
+		testEl,
+	)
+	testBlock.Optional = true
+	blocks = append(blocks, testBlock)
 
 	return goslack.ModalViewRequest{
 		Type:            goslack.VTModal,

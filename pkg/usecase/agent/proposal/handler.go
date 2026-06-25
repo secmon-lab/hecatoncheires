@@ -125,6 +125,8 @@ type MaterializePayload struct {
 	Title             string
 	Description       string
 	CustomFieldValues map[string]any
+	// IsTest marks the proposed case as a test case. Defaults to false.
+	IsTest bool
 }
 
 // HandlerFuncs is a struct-of-funcs adapter for tests / one-off wiring,

@@ -133,6 +133,7 @@ type CreateCaseInput struct {
 	AssigneeIDs []string           `json:"assigneeIDs,omitempty"`
 	Fields      []*FieldValueInput `json:"fields,omitempty"`
 	IsPrivate   *bool              `json:"isPrivate,omitempty"`
+	IsTest      *bool              `json:"isTest,omitempty"`
 }
 
 type CreateDraftInput struct {
@@ -141,6 +142,7 @@ type CreateDraftInput struct {
 	AssigneeIDs []string           `json:"assigneeIDs,omitempty"`
 	Fields      []*FieldValueInput `json:"fields,omitempty"`
 	IsPrivate   *bool              `json:"isPrivate,omitempty"`
+	IsTest      *bool              `json:"isTest,omitempty"`
 }
 
 type CreateGitHubSourceInput struct {
@@ -506,6 +508,7 @@ type SubmitDraftInput struct {
 	Title       *string            `json:"title,omitempty"`
 	Description *string            `json:"description,omitempty"`
 	Fields      []*FieldValueInput `json:"fields,omitempty"`
+	IsTest      *bool              `json:"isTest,omitempty"`
 }
 
 type Tag struct {
@@ -539,6 +542,7 @@ type UpdateCaseInput struct {
 	Title       *string            `json:"title,omitempty"`
 	Description *string            `json:"description,omitempty"`
 	Fields      []*FieldValueInput `json:"fields,omitempty"`
+	IsTest      *bool              `json:"isTest,omitempty"`
 }
 
 type UpdateCaseStatusInput struct {

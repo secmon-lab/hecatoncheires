@@ -65,7 +65,7 @@ func newStepTestFixture(t *testing.T, channelUserIDs []string, isPrivate bool) *
 	caseUserID := "UCASEMEMBER"
 	ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: caseUserID})
 
-	c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Step Case", "", nil, nil, false, "", "")
+	c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Step Case", "", nil, nil, false, false, "", "")
 	gt.NoError(t, err).Required()
 
 	// Pin a Slack channel + membership directly on the persisted Case so the

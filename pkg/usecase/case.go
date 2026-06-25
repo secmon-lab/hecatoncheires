@@ -452,13 +452,14 @@ func (uc *CaseUseCase) slackChannelPrefixForWorkspace(workspaceID string) string
 // activation side effects (Slack channel, invites, welcome, etc.). It is the
 // public entry point used by createCase mutation and by the slash-command
 // "submit" flow; both share identical post-persistence behaviour.
-func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue, isPrivate bool, sourceTeamID string, requestKey string) (*model.Case, error) {
+func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue, isPrivate bool, isTest bool, sourceTeamID string, requestKey string) (*model.Case, error) {
 	created, err := uc.persistCase(ctx, workspaceID, persistCaseInput{
 		Title:       title,
 		Description: description,
 		Status:      types.CaseStatusOpen,
 		AssigneeIDs: assigneeIDs,
 		IsPrivate:   isPrivate,
+		IsTest:      isTest,
 		FieldValues: fieldValues,
 		RequestKey:  requestKey,
 	})
@@ -500,7 +501,7 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 // The reporter (auth-context Slack user) becomes the draft owner; the
 // returned case carries the assigned ID so the caller can echo it back to
 // the user.
-func (uc *CaseUseCase) CreateDraft(ctx context.Context, workspaceID string, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue, isPrivate bool) (*model.Case, error) {
+func (uc *CaseUseCase) CreateDraft(ctx context.Context, workspaceID string, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue, isPrivate bool, isTest bool) (*model.Case, error) {
 	// Title is intentionally optional for drafts: half-written entries are
 	// the whole point. We still validate field values to keep the draft
 	// usable on Submit without surprise validation failures.
@@ -510,6 +511,7 @@ func (uc *CaseUseCase) CreateDraft(ctx context.Context, workspaceID string, titl
 		Status:      types.CaseStatusDraft,
 		AssigneeIDs: assigneeIDs,
 		IsPrivate:   isPrivate,
+		IsTest:      isTest,
 		FieldValues: fieldValues,
 	})
 }
@@ -522,6 +524,7 @@ type persistCaseInput struct {
 	Status      types.CaseStatus
 	AssigneeIDs []string
 	IsPrivate   bool
+	IsTest      bool
 	FieldValues map[string]model.FieldValue
 	RequestKey  string
 }
@@ -579,6 +582,7 @@ func (uc *CaseUseCase) persistCase(ctx context.Context, workspaceID string, in p
 		ReporterID:  reporterID,
 		AssigneeIDs: in.AssigneeIDs,
 		IsPrivate:   in.IsPrivate,
+		IsTest:      in.IsTest,
 		FieldValues: in.FieldValues,
 		RequestKey:  in.RequestKey,
 		CreatedAt:   now,
@@ -705,6 +709,9 @@ func (uc *CaseUseCase) activateCase(ctx context.Context, workspaceID string, c *
 type CaseUpdate struct {
 	Title       *string
 	Description *string
+	// IsTest, when non-nil, sets the test flag; nil preserves the stored value.
+	// A pointer is required to distinguish "leave unchanged" from "set false".
+	IsTest *bool
 	// nil means "preserve all stored field values". A non-nil map merges its
 	// entries on top of the existing values (callers cannot remove individual
 	// entries via this API).
@@ -752,6 +759,11 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, workspaceID string, id in
 		description = *patch.Description
 	}
 
+	isTest := existingCase.IsTest
+	if patch.IsTest != nil {
+		isTest = *patch.IsTest
+	}
+
 	// Assignees are never touched here — they move only through
 	// AssignCase / UnassignCase. The existing list is preserved verbatim.
 	assigneeIDs := existingCase.AssigneeIDs
@@ -788,6 +800,7 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, workspaceID string, id in
 		AssigneeIDs:    assigneeIDs,
 		SlackChannelID: existingCase.SlackChannelID,
 		IsPrivate:      existingCase.IsPrivate,
+		IsTest:         isTest,
 		ChannelUserIDs: existingCase.ChannelUserIDs,
 		FieldValues:    fieldValues,
 		CreatedAt:      existingCase.CreatedAt,
@@ -1699,6 +1712,9 @@ func (uc *CaseUseCase) SubmitDraft(ctx context.Context, workspaceID string, id i
 		}
 		if patch.Description != nil {
 			c.Description = *patch.Description
+		}
+		if patch.IsTest != nil {
+			c.IsTest = *patch.IsTest
 		}
 		// Assignees are not part of the submit-draft patch; they are managed
 		// via AssignCase / UnassignCase on the draft before promotion.

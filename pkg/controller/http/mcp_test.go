@@ -67,7 +67,7 @@ func newMCPTestEnv(t *testing.T, policy *fakePolicy) *mcpTestEnv {
 	// private case + its action to be invisible over MCP.
 	memberCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMEMBER"})
 
-	pubCase, err := caseUC.CreateCase(memberCtx, testWorkspaceID, "Public Case", "Desc", []string{}, nil, false, "", "")
+	pubCase, err := caseUC.CreateCase(memberCtx, testWorkspaceID, "Public Case", "Desc", []string{}, nil, false, false, "", "")
 	gt.NoError(t, err).Required()
 	pubAct, err := actionUC.CreateAction(memberCtx, testWorkspaceID, pubCase.ID, "Public Action", "Desc", "", "", types.ActionStatusTodo, nil)
 	gt.NoError(t, err).Required()
