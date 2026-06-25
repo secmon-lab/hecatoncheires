@@ -41,6 +41,11 @@ var FormatObservationsForTest = formatObservationsAsUserTurn
 // ExecutePhaseForTest exposes executePhase.
 var ExecutePhaseForTest = executePhase
 
+// CombineTraceForTest exposes combineTrace (and, transitively, the
+// multiTraceHandler fan-out) so external tests can assert the
+// single/none/multi collapsing behaviour and the broadcast semantics.
+var CombineTraceForTest = combineTrace
+
 // PlannerPromptInputForTest mirrors plannerPromptInput so tests can
 // build inputs without re-importing the internal alias.
 type PlannerPromptInputForTest = plannerPromptInput

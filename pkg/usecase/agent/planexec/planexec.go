@@ -138,6 +138,14 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 		}
 	}()
 
+	// traced combines the run's internal archive recorder with the host's
+	// optional per-event handler (req.TraceHandler). Sub-agents combine
+	// req.TraceHandler with their own per-task LLM-call counter instead
+	// (see runPhase), so the archive recorder stays scoped to the planner /
+	// direct / final agents exactly as before. When req.TraceHandler is nil
+	// (the proposal host), combineTrace returns recorder unchanged.
+	traced := combineTrace(recorder, req.TraceHandler)
+
 	bg := newBudget(r.budget)
 	nextInput := bg.formatPrefix() + "\n\n" + req.UserInput
 	return r.runLoop(ctx, req, systemPrompt, recorder, bg, nil, 0, nextInput)
@@ -227,7 +235,7 @@ func (r *Runner) runLoop(
 			gollem.WithSystemPrompt(systemPrompt),
 			gollem.WithTools(req.PlannerTools...),
 			gollem.WithHistoryRepository(r.historyRepo, req.HistoryKey),
-			gollem.WithTrace(recorder),
+			gollem.WithTrace(traced),
 			gollem.WithContentType(gollem.ContentTypeJSON),
 			gollem.WithResponseSchema(schema),
 			gollem.WithLoopLimit(plannerPerCallLoopLimit),
@@ -286,7 +294,7 @@ func (r *Runner) runLoop(
 					ctx,
 					r.llm,
 					r.historyRepo,
-					recorder,
+					traced,
 					req.SystemPrompt,
 					req.HistoryKey,
 					req.LanguageLabel,
@@ -365,7 +373,7 @@ func (r *Runner) runLoop(
 				ctx,
 				r.llm,
 				r.historyRepo,
-				recorder,
+				traced,
 				systemPrompt,
 				req.HistoryKey,
 				req.LanguageLabel,
@@ -428,7 +436,12 @@ func (r *Runner) runPhase(
 		infos[i] = TaskInfo{ID: t.ID, Title: t.Title}
 	}
 	req.Sink.PhaseStarted(ctx, logicalRound, infos)
-	return executePhase(ctx, tasks, req.Sink, req.ToolResolver, r.llm, r.budget.SubAgentLoopMax)
+	// req.TraceHandler (the host's per-event handler, e.g. the Job timeline)
+	// is combined with each sub-agent's own LLM-call counter inside
+	// executePhase so sub-agent LLM / tool events reach the host timeline.
+	// The archive recorder stays planner/direct/final-scoped (not threaded
+	// here) to preserve the existing archive shape.
+	return executePhase(ctx, tasks, req.Sink, req.ToolResolver, r.llm, r.budget.SubAgentLoopMax, req.TraceHandler)
 }
 
 // fallbackBudget assembles the StatusFallbackBudget RunResult and emits

@@ -8,6 +8,7 @@ import (
 
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/mock"
+	"github.com/gollem-dev/gollem/trace"
 	"github.com/m-mizutani/gt"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/interaction"
@@ -16,6 +17,46 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/job"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/planexec"
 )
+
+// agentExecuteCounter is a minimal gollem trace.Handler that counts how
+// many agent executions it was wired into. gollem calls StartAgentExecute
+// once per gollem.Agent.Execute on the configured handler, so the count
+// reveals whether the Job's TraceHandler reached every agent the planexec
+// run drives.
+type agentExecuteCounter struct {
+	mu       sync.Mutex
+	executes int
+}
+
+func (c *agentExecuteCounter) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.executes
+}
+
+func (c *agentExecuteCounter) StartAgentExecute(ctx context.Context) context.Context {
+	c.mu.Lock()
+	c.executes++
+	c.mu.Unlock()
+	return ctx
+}
+func (c *agentExecuteCounter) EndAgentExecute(context.Context, error)                {}
+func (c *agentExecuteCounter) StartLLMCall(ctx context.Context) context.Context      { return ctx }
+func (c *agentExecuteCounter) EndLLMCall(context.Context, *trace.LLMCallData, error) {}
+func (c *agentExecuteCounter) StartToolExec(ctx context.Context, _ string, _ map[string]any) context.Context {
+	return ctx
+}
+func (c *agentExecuteCounter) EndToolExec(context.Context, map[string]any, error) {}
+func (c *agentExecuteCounter) StartSubAgent(ctx context.Context, _ string) context.Context {
+	return ctx
+}
+func (c *agentExecuteCounter) EndSubAgent(context.Context, error) {}
+func (c *agentExecuteCounter) StartChildAgent(ctx context.Context, _ string) context.Context {
+	return ctx
+}
+func (c *agentExecuteCounter) EndChildAgent(context.Context, error)  {}
+func (c *agentExecuteCounter) AddEvent(context.Context, string, any) {}
+func (c *agentExecuteCounter) Finish(context.Context) error          { return nil }
 
 // sequencedResponses is a tiny canned-reply mock LLM. Each Generate
 // pops the next text; if the request input does not contain the
@@ -115,6 +156,48 @@ func TestPlanexecJobExecutor_PlanThenFinal(t *testing.T) {
 	gt.String(t, joined).Contains("Plan round 1")
 	gt.String(t, joined).Contains("Phase 1")
 	gt.String(t, joined).Contains("[t-1]")
+}
+
+// TestPlanexecJobExecutor_ForwardsTraceHandler pins the fix for the
+// planexec Job empty-timeline bug at the executor boundary: the executor
+// MUST forward ExecuteRequest.TraceHandler into planexec.RunRequest so
+// the handler the JobRunner builds (a jobRunTraceHandler writing the
+// JobRunEvent timeline) reaches the planexec agents. The flow drives four
+// agent executions (planner, sub-agent, replan, final); if the executor
+// dropped the handler — the original bug — the counter would stay at
+// zero. We assert four, proving every agent (sub-agent included) was
+// wired.
+func TestPlanexecJobExecutor_ForwardsTraceHandler(t *testing.T) {
+	ctx := context.Background()
+	llm := newSequencedLLMClient([]string{
+		`{"message":"start","tasks":[
+			{"id":"t-1","title":"A","description":"check A","acceptance_criteria":"a","tools":["default"]}
+		]}`,
+		"Found details about A.",
+		`{"message":"done","tasks":[]}`,
+		"Summary: A details.",
+	})
+
+	runner := newRunner(t, llm)
+	executor, err := job.NewPlanexecJobExecutor(runner)
+	gt.NoError(t, err).Required()
+
+	counter := &agentExecuteCounter{}
+	res, err := executor.Execute(ctx, job.ExecuteRequest{
+		JobID:        "test-job",
+		SystemPrompt: "You are running an automated job.",
+		Prompt:       "Investigate the case.",
+		LLMClient:    llm,
+		TraceID:      "trace-pe-trace",
+		HistoryKey:   "hist-pe-trace",
+		TraceHandler: counter,
+	})
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(job.ExecuteStatusSuccess)
+
+	// planner + sub-agent t-1 + replan + final = 4 agent executions, all
+	// wired to the forwarded handler.
+	gt.Number(t, counter.count()).Equal(4)
 }
 
 // TestPlanexecJobExecutor_RejectsMissingFields exercises the

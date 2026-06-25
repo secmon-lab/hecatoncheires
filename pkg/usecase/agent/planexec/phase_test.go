@@ -196,7 +196,7 @@ func TestExecutePhase_MixedSuccessAndFailure(t *testing.T) {
 		{ID: "t-1", Title: "A", Description: "check thread A", AcceptanceCriteria: "a", Tools: []string{"slack_ro"}},
 		{ID: "t-2", Title: "B", Description: "check thread B", AcceptanceCriteria: "b", Tools: []string{"slack_ro"}},
 	}
-	results := planexec.ExecutePhaseForTest(ctx, tasks, sink, stubResolverNoTools{}, llm, 20)
+	results := planexec.ExecutePhaseForTest(ctx, tasks, sink, stubResolverNoTools{}, llm, 20, nil)
 	async.Wait()
 
 	gt.Array(t, results).Length(2).Required()
@@ -233,7 +233,7 @@ func TestExecutePhase_TruncatesLongSummary(t *testing.T) {
 	tasks := []planexec.TaskPlan{
 		{ID: "t-1", Title: "long", Description: "long task", AcceptanceCriteria: "x", Tools: []string{"slack_ro"}},
 	}
-	results := planexec.ExecutePhaseForTest(ctx, tasks, sink, stubResolverNoTools{}, llm, 20)
+	results := planexec.ExecutePhaseForTest(ctx, tasks, sink, stubResolverNoTools{}, llm, 20, nil)
 	async.Wait()
 
 	gt.Array(t, results).Length(1).Required()
@@ -249,7 +249,7 @@ func TestExecutePhase_EmptyTasksReturnsNil(t *testing.T) {
 	ctx := context.Background()
 	llm := newFakeLLM(nil)
 	sink := newRecordingSink()
-	results := planexec.ExecutePhaseForTest(ctx, nil, sink, stubResolverNoTools{}, llm, 20)
+	results := planexec.ExecutePhaseForTest(ctx, nil, sink, stubResolverNoTools{}, llm, 20, nil)
 	async.Wait()
 	gt.Array(t, results).Length(0)
 }

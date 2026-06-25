@@ -215,7 +215,8 @@ lexicographically the same way they sort numerically.
   (all top-level scalars, BigQuery-friendly).
 - Lifecycle: `Stage` (`RUNNING` / `SUCCESS` / `FAILED`), `StartedAt`,
   `EndedAt`, `Error`.
-- Runtime: `ExecutorKind` (v1: `"single_loop"`), `ExecutorVersion`.
+- Runtime: `ExecutorKind` (`"single_loop"` for `simple`, `"plan_execute"`
+  for `planexec`), `ExecutorVersion`.
 - Provenance: `EventType` (e.g. `case`, `scheduled`), `EventTriggerAt`.
 - `SystemPrompt`: the full system prompt, truncated from the tail at
   ~800 KiB. Held once per Run rather than duplicated on every LLM call.
@@ -240,18 +241,41 @@ If you need full fidelity for a particular Job, consider a custom trace
 backend; the public `trace.Handler` interface is `gollem.WithTrace`-able
 from any executor.
 
-#### Forward compatibility (plan-execute)
+#### Strategy coverage
 
-Two fields on every `JobRunEvent` are wired today but stay constant in
-v1 single-loop runtime:
+Both Job strategies populate the event timeline:
 
-- `Phase` — v1 always `"execute"`. A future plan-execute runtime may
-  emit `"plan"`, `"execute"`, `"review"`.
-- `AgentLabel` — v1 always `""`. A future multi-agent runtime sets this
-  to e.g. `"planner"`, `"executor"`, `"investigator-1"`.
+- `simple` (single-loop) records the one gollem agent's `LLM_REQUEST` /
+  `LLM_RESPONSE` / `TOOL_CALL` events.
+- `planexec` records events from **every** agent the run drives — the
+  planner rounds, each parallel investigation sub-agent, the round-1
+  direct reply (when taken), and the final-response synthesis — so a
+  multi-step investigation shows its whole trail, not just a summary.
+  (The Job's per-event handler is wired into all of them alongside the
+  separate trace archive recorder; before this was wired, `planexec`
+  Jobs showed an empty timeline despite succeeding.)
+
+Two fields on every `JobRunEvent` carry attribution but are currently
+coarse:
+
+- `Phase` — always `"execute"` (or `"reflection"` for the optional
+  post-run reflection pass). The finer `"plan"` / `"investigate"` /
+  `"final"` labelling for `planexec` is not emitted yet.
+- `AgentLabel` — always `""`. `planexec` sub-agents are independent
+  root agents (not gollem-internal sub-agents), so the per-agent label
+  hook does not fire; events are ordered by `Sequence` but not attributed
+  to a named sub-agent.
+
+Because `planexec` sub-agents run in parallel (up to the plan's per-phase
+fan-out), a `TOOL_CALL`'s `ParentSequence` is best-effort under
+concurrency — it points at the most recent `LLM_RESPONSE` the shared
+handler observed, which may belong to a sibling sub-agent. The timeline
+remains complete and `Sequence`-ordered; only the parent linkage and
+per-agent attribution are approximate. `simple` Jobs are single-threaded
+and therefore exact.
 
 Combined with `JobRunLog.ExecutorKind`, downstream consumers can filter
-"runs of the new runtime" without an Firestore schema change.
+by runtime without a Firestore schema change.
 
 #### BigQuery export
 
