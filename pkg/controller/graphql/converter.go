@@ -142,6 +142,7 @@ func toGraphQLCase(c *model.Case, workspaceID string) *graphql1.Case {
 		Description:           c.Description,
 		Status:                c.Status.Normalize(),
 		IsPrivate:             c.IsPrivate,
+		IsTest:                c.IsTest,
 		AccessDenied:          c.AccessDenied,
 		ChannelUserIDs:        channelUserIDs,
 		ReporterID:            reporterID,

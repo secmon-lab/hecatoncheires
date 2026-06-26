@@ -8,6 +8,7 @@ export const GET_CASES = gql`
       description
       status
       isPrivate
+      isTest
       accessDenied
       reporterID
       reporter {
@@ -45,6 +46,7 @@ export const GET_CASE = gql`
       description
       status
       isPrivate
+      isTest
       accessDenied
       channelUserCount
       reporterID
@@ -120,6 +122,7 @@ export const CREATE_CASE = gql`
       description
       status
       isPrivate
+      isTest
       accessDenied
       reporterID
       reporter {
@@ -154,6 +157,7 @@ export const UPDATE_CASE = gql`
       description
       status
       isPrivate
+      isTest
       accessDenied
       reporterID
       reporter {
@@ -194,6 +198,7 @@ export const CLOSE_CASE = gql`
       description
       status
       isPrivate
+      isTest
       accessDenied
       reporterID
       reporter {
@@ -228,6 +233,7 @@ export const REOPEN_CASE = gql`
       description
       status
       isPrivate
+      isTest
       accessDenied
       reporterID
       reporter {

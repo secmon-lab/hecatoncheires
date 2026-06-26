@@ -112,6 +112,9 @@ type planMaterialize struct {
 	Title             string         `json:"title"`
 	Description       string         `json:"description"`
 	CustomFieldValues map[string]any `json:"custom_field_values"`
+	// IsTest marks the proposed case as a test case (filed for verification
+	// rather than a real case). Defaults to false when the planner omits it.
+	IsTest bool `json:"is_test"`
 }
 
 // Limits applied at validation time. Adjusting these requires updating the
@@ -444,6 +447,10 @@ func planSchema() *gollem.Parameter {
 			// gollem requires Properties for object types; supply an empty
 			// map so the open-shape object is accepted.
 			Properties: map[string]*gollem.Parameter{},
+		},
+		"is_test": {
+			Type:        gollem.TypeBoolean,
+			Description: "Set true only when this is not a real case to work on: either verifying the system itself (confirming case/ticket creation works) or an exercise/drill rather than an actual incident. Defaults to false; use false for every genuine case.",
 		},
 	}
 

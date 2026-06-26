@@ -484,7 +484,8 @@ func (r *mutationResolver) CreateCase(ctx context.Context, workspaceID string, i
 	}
 
 	isPrivate := input.IsPrivate != nil && *input.IsPrivate
-	created, err := r.UseCases.Case.CreateCase(ctx, workspaceID, input.Title, description, assigneeIDs, fieldValues, isPrivate, "", "")
+	isTest := input.IsTest != nil && *input.IsTest
+	created, err := r.UseCases.Case.CreateCase(ctx, workspaceID, input.Title, description, assigneeIDs, fieldValues, isPrivate, isTest, "", "")
 	if err != nil {
 		return nil, err
 	}
@@ -497,6 +498,7 @@ func (r *mutationResolver) UpdateCase(ctx context.Context, workspaceID string, i
 	patch := usecase.CaseUpdate{
 		Title:       input.Title,
 		Description: input.Description,
+		IsTest:      input.IsTest,
 	}
 	if input.Fields != nil {
 		patch.Fields = toDomainFieldValues(input.Fields)
@@ -589,8 +591,9 @@ func (r *mutationResolver) CreateDraft(ctx context.Context, workspaceID string, 
 		description = *input.Description
 	}
 	isPrivate := input.IsPrivate != nil && *input.IsPrivate
+	isTest := input.IsTest != nil && *input.IsTest
 
-	created, err := r.UseCases.Case.CreateDraft(ctx, workspaceID, title, description, assigneeIDs, fieldValues, isPrivate)
+	created, err := r.UseCases.Case.CreateDraft(ctx, workspaceID, title, description, assigneeIDs, fieldValues, isPrivate, isTest)
 	if err != nil {
 		return nil, err
 	}
@@ -610,6 +613,9 @@ func (r *mutationResolver) SubmitDraft(ctx context.Context, workspaceID string, 
 		}
 		if input.Fields != nil {
 			p.Fields = toDomainFieldValues(input.Fields)
+		}
+		if input.IsTest != nil {
+			p.IsTest = input.IsTest
 		}
 		patch = &p
 	}

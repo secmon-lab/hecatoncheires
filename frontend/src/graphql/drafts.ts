@@ -14,6 +14,7 @@ export const GET_DRAFTS = gql`
       description
       status
       isPrivate
+      isTest
       accessDenied
       reporterID
       reporter {
@@ -51,6 +52,7 @@ export const GET_DRAFT = gql`
       description
       status
       isPrivate
+      isTest
       reporterID
       assigneeIDs
       createdAt

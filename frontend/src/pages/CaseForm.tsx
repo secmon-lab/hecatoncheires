@@ -12,7 +12,7 @@ import { useTranslation } from '../i18n'
 import Modal from '../components/Modal'
 import Button from '../components/Button'
 import CustomFieldRenderer from '../components/fields/CustomFieldRenderer'
-import { IconLock } from '../components/Icons'
+import { IconLock, IconFlask } from '../components/Icons'
 import { sanitizeFieldValues } from '../utils/sanitizeFieldValues'
 import { displayName } from '../utils/user'
 
@@ -28,6 +28,7 @@ interface CaseItem {
   title: string
   description: string
   isPrivate: boolean
+  isTest?: boolean
   assigneeIDs: string[]
   fields: Array<{ fieldId: string; value: any }>
   // Drives the footer button set. `'DRAFT'` switches to the Save / Submit
@@ -54,6 +55,7 @@ export default function CaseForm({ caseItem, onClose, onSubmitted }: CaseFormPro
   const [title, setTitle] = useState(caseItem?.title || '')
   const [description, setDescription] = useState(caseItem?.description || '')
   const [isPrivate, setIsPrivate] = useState(caseItem?.isPrivate ?? false)
+  const [isTest, setIsTest] = useState(caseItem?.isTest ?? false)
   const [assigneeIDs, setAssigneeIDs] = useState<string[]>(caseItem?.assigneeIDs || [])
   const [fieldValues, setFieldValues] = useState<Record<string, any>>(() => {
     const map: Record<string, any> = {}
@@ -163,6 +165,7 @@ export default function CaseForm({ caseItem, onClose, onSubmitted }: CaseFormPro
             input: {
               title,
               description,
+              isTest,
               fields: fieldArr,
             },
           },
@@ -177,6 +180,7 @@ export default function CaseForm({ caseItem, onClose, onSubmitted }: CaseFormPro
               id: caseItem.id,
               title,
               description,
+              isTest,
               fields: fieldArr,
             },
           },
@@ -191,6 +195,7 @@ export default function CaseForm({ caseItem, onClose, onSubmitted }: CaseFormPro
               title,
               description,
               isPrivate,
+              isTest,
               assigneeIDs,
               fields: fieldArr,
             },
@@ -220,6 +225,7 @@ export default function CaseForm({ caseItem, onClose, onSubmitted }: CaseFormPro
             id: caseItem.id,
             title,
             description,
+            isTest,
             fields: fieldArr,
           },
         },
@@ -248,6 +254,7 @@ export default function CaseForm({ caseItem, onClose, onSubmitted }: CaseFormPro
             title: title || null,
             description: description || null,
             isPrivate,
+            isTest,
             assigneeIDs,
             fields: fieldArr,
           },
@@ -377,6 +384,26 @@ export default function CaseForm({ caseItem, onClose, onSubmitted }: CaseFormPro
             </div>
           </div>
         )}
+        {/* Test-case toggle: editable on both create and edit so a case can be
+            marked or un-marked as a test at any point. */}
+        <label className="row" style={{ gap: 8, padding: 10, border: '1px solid color-mix(in oklch, var(--info) 30%, var(--line))', borderRadius: 6, background: 'color-mix(in oklch, var(--info) 8%, transparent)', alignItems: 'flex-start', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={isTest}
+            onChange={(e) => setIsTest(e.target.checked)}
+            style={{ marginTop: 2 }}
+            data-testid="test-case-checkbox"
+          />
+          <div>
+            <div className="row" style={{ gap: 6, fontSize: 13, fontWeight: 500 }}>
+              <IconFlask size={12} sw={2} />
+              {t('labelTestCase', { caseLabel })}
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--fg-muted)', marginTop: 2 }}>
+              {t('hintTestCase', { caseLabelLower: caseLabel.toLowerCase() })}
+            </div>
+          </div>
+        </label>
         {!isEdit && (
           <label className="row" style={{ gap: 8, padding: 10, border: '1px solid color-mix(in oklch, var(--warn) 30%, var(--line))', borderRadius: 6, background: 'color-mix(in oklch, var(--warn) 8%, transparent)', alignItems: 'flex-start', cursor: 'pointer' }}>
             <input

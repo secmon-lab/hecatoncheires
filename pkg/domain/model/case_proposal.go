@@ -80,6 +80,9 @@ type WorkspaceMaterialization struct {
 	Title             string
 	Description       string
 	CustomFieldValues map[string]FieldValue // key = FieldID defined in workspace's FieldSchema
+	// IsTest carries the agent's test-case suggestion through the preview so
+	// the human can confirm or override it before the case is created.
+	IsTest bool
 }
 
 // NewCaseProposal constructs a fresh draft with a new ID, current timestamps,

@@ -167,6 +167,7 @@ func (h *slackDraftHandler) Materialize(ctx context.Context, ssn *model.Session,
 	mat := &model.WorkspaceMaterialization{
 		Title:             m.Title,
 		Description:       m.Description,
+		IsTest:            m.IsTest,
 		CustomFieldValues: map[string]model.FieldValue{},
 	}
 	if entry.FieldSchema != nil {

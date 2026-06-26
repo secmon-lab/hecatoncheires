@@ -291,3 +291,162 @@ func TestHandleEditSubmit_RecordsReporter(t *testing.T) {
 	gt.Value(t, cases[0].ReporterID).Equal(reporterID)
 	gt.Value(t, cases[0].Title).Equal("Edited title")
 }
+
+// TestHandleSubmit_CarriesIsTest pins the mention preview "Submit" path's
+// test-flag contract: the agent's materialization IsTest must reach the
+// created Case (this is the only entry point where isTest can be set without
+// any explicit human action, so a silent regression here is the hardest to
+// notice).
+func TestHandleSubmit_CarriesIsTest(t *testing.T) {
+	const reporterID = "U-MENTION-ISTEST"
+	repo := memory.New()
+	seedSlackUsers(t, repo, reporterID)
+	registry := newRegistryWithSchema("ws-istest", "WS IsTest", &config.FieldSchema{})
+	slackMock := newCollectorOnlyMockSlack()
+	mentionUC := usecase.NewMentionProposalUseCase(repo, registry, slackMock, newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON("ws-istest"))))
+	caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+
+	d := model.NewCaseProposal(time.Now().UTC(), reporterID)
+	d.SelectedWorkspaceID = "ws-istest"
+	d.Materialization = &model.WorkspaceMaterialization{
+		Title:       "Drill from mention",
+		Description: "body",
+		IsTest:      true,
+	}
+	d.EphemeralChannelID = "C-ISTEST"
+	d.EphemeralMessageTS = "1700000040.000000"
+	gt.NoError(t, repo.CaseProposal().Save(context.Background(), d)).Required()
+
+	respURL, _ := captureResponseURL(t)
+	cb := &goslack.InteractionCallback{
+		Type:        goslack.InteractionTypeBlockActions,
+		ResponseURL: respURL,
+		User:        goslack.User{ID: reporterID},
+		Team:        goslack.Team{ID: "T-WS"},
+		ActionCallback: goslack.ActionCallbacks{
+			BlockActions: []*goslack.BlockAction{
+				{ActionID: usecase.ActionIDDraftSubmit, Value: string(d.ID)},
+			},
+		},
+	}
+
+	gt.NoError(t, mentionUC.HandleSubmit(context.Background(), caseUC, cb, cb.ActionCallback.BlockActions[0])).Required()
+
+	cases, err := repo.Case().List(context.Background(), "ws-istest")
+	gt.NoError(t, err).Required()
+	gt.Array(t, cases).Length(1).Required()
+	gt.Value(t, cases[0].Title).Equal("Drill from mention")
+	gt.Bool(t, cases[0].IsTest).True()
+}
+
+// TestHandleEditSubmit_TogglesIsTest covers the human-override leg: the
+// proposal Edit modal carries the Test-case checkbox, and HandleEditSubmit
+// must honour whatever the human leaves it set to (overriding the agent's
+// suggestion both ways).
+func TestHandleEditSubmit_TogglesIsTest(t *testing.T) {
+	editSubmitWithTest := func(t *testing.T, checked bool) *model.Case {
+		t.Helper()
+		const reporterID = "U-EDIT-ISTEST"
+		repo := memory.New()
+		seedSlackUsers(t, repo, reporterID)
+		wsID := "ws-edit-istest"
+		registry := newRegistryWithSchema(wsID, "WS Edit IsTest", &config.FieldSchema{})
+		slackMock := newCollectorOnlyMockSlack()
+		mentionUC := usecase.NewMentionProposalUseCase(repo, registry, slackMock, newDraftUC(t, repo, stubPlannerLLM(stubMaterializePlannerJSON(wsID))))
+		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+
+		d := model.NewCaseProposal(time.Now().UTC(), reporterID)
+		d.SelectedWorkspaceID = wsID
+		// Agent suggested a test case; the human may keep or clear it.
+		d.Materialization = &model.WorkspaceMaterialization{Title: "Suggested", Description: "body", IsTest: true}
+		d.EphemeralChannelID = "C-EDIT-ISTEST"
+		d.EphemeralMessageTS = "1700000050.000000"
+		gt.NoError(t, repo.CaseProposal().Save(context.Background(), d)).Required()
+
+		meta, _ := json.Marshal(map[string]string{
+			"workspace_id":         wsID,
+			"proposal_id":          string(d.ID),
+			"ephemeral_channel_id": d.EphemeralChannelID,
+			"ephemeral_message_ts": d.EphemeralMessageTS,
+		})
+
+		selected := []goslack.OptionBlockObject{}
+		if checked {
+			selected = append(selected, goslack.OptionBlockObject{Value: usecase.CaseOptionValueTestForTest})
+		}
+		cb := &goslack.InteractionCallback{
+			Type: goslack.InteractionTypeViewSubmission,
+			User: goslack.User{ID: reporterID},
+			Team: goslack.Team{ID: "T-WS"},
+			View: goslack.View{
+				CallbackID:      usecase.SlackCallbackIDDraftEdit,
+				PrivateMetadata: string(meta),
+				State: &goslack.ViewState{
+					Values: map[string]map[string]goslack.BlockAction{
+						usecase.BlockIDDraftEditTitleForTest: {
+							usecase.ActionIDDraftEditTitleForTest: {Value: "Edited"},
+						},
+						usecase.BlockIDDraftEditTestForTest: {
+							usecase.ActionIDDraftEditTestForTest: {SelectedOptions: selected},
+						},
+					},
+				},
+			},
+		}
+		gt.NoError(t, mentionUC.HandleEditSubmit(context.Background(), caseUC, cb)).Required()
+
+		cases, err := repo.Case().List(context.Background(), wsID)
+		gt.NoError(t, err).Required()
+		gt.Array(t, cases).Length(1).Required()
+		return cases[0]
+	}
+
+	t.Run("checkbox ticked keeps the agent's test flag", func(t *testing.T) {
+		c := editSubmitWithTest(t, true)
+		gt.Bool(t, c.IsTest).True()
+	})
+
+	t.Run("checkbox cleared overrides the agent's test flag to false", func(t *testing.T) {
+		c := editSubmitWithTest(t, false)
+		gt.Bool(t, c.IsTest).False()
+	})
+}
+
+// TestBuildDraftEditModal_PreTicksIsTest verifies the Edit modal seeds the
+// Test-case checkbox from the materialization so the human sees (and can
+// override) the agent's suggestion.
+func TestBuildDraftEditModal_PreTicksIsTest(t *testing.T) {
+	entry := &model.WorkspaceEntry{
+		Workspace:   model.Workspace{ID: "ws-1", Name: "WS One"},
+		FieldSchema: &config.FieldSchema{},
+	}
+
+	findTestCheckbox := func(view goslack.ModalViewRequest) *goslack.CheckboxGroupsBlockElement {
+		for _, block := range view.Blocks.BlockSet {
+			input, ok := block.(*goslack.InputBlock)
+			if !ok || input.BlockID != usecase.BlockIDDraftEditTestForTest {
+				continue
+			}
+			cg, ok := input.Element.(*goslack.CheckboxGroupsBlockElement)
+			if ok {
+				return cg
+			}
+		}
+		return nil
+	}
+
+	t.Run("pre-ticked when materialization is a test", func(t *testing.T) {
+		view := usecase.BuildDraftEditModalForTest(entry, &model.WorkspaceMaterialization{Title: "t", IsTest: true}, "{}")
+		cg := findTestCheckbox(view)
+		gt.Value(t, cg).NotNil().Required()
+		gt.Array(t, cg.InitialOptions).Length(1).Required()
+		gt.Value(t, cg.InitialOptions[0].Value).Equal(usecase.CaseOptionValueTestForTest)
+	})
+
+	t.Run("not ticked when materialization is not a test", func(t *testing.T) {
+		view := usecase.BuildDraftEditModalForTest(entry, &model.WorkspaceMaterialization{Title: "t", IsTest: false}, "{}")
+		cg := findTestCheckbox(view)
+		gt.Value(t, cg).NotNil().Required()
+		gt.Array(t, cg.InitialOptions).Length(0)
+	})
+}

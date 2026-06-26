@@ -148,6 +148,9 @@ type Case {
   description: String
   status: CaseStatus!
   isPrivate: Boolean!
+  # isTest marks a case filed for testing/verification, distinguished from
+  # production cases in the list and detail UI.
+  isTest: Boolean!
   accessDenied: Boolean!
   channelUserCount: Int!
   channelUsers(limit: Int, offset: Int, filter: String): ChannelUserConnection!
@@ -377,6 +380,8 @@ input CreateCaseInput {
   assigneeIDs: [String!]
   fields: [FieldValueInput!]
   isPrivate: Boolean
+  # isTest marks the case as a test case. Defaults to false when omitted.
+  isTest: Boolean
 }
 
 # CreateDraftInput mirrors CreateCaseInput but every field is optional —
@@ -389,6 +394,8 @@ input CreateDraftInput {
   assigneeIDs: [String!]
   fields: [FieldValueInput!]
   isPrivate: Boolean
+  # isTest marks the draft as a test case. Defaults to false when omitted.
+  isTest: Boolean
 }
 
 input UpdateCaseInput {
@@ -401,6 +408,8 @@ input UpdateCaseInput {
   title: String
   description: String
   fields: [FieldValueInput!]
+  # isTest, when provided, sets the test flag; omit to preserve the current value.
+  isTest: Boolean
 }
 
 # SubmitDraftInput carries the last-minute edits that the user wants to
@@ -414,6 +423,8 @@ input SubmitDraftInput {
   title: String
   description: String
   fields: [FieldValueInput!]
+  # isTest, when provided, sets the test flag before the draft is promoted.
+  isTest: Boolean
 }
 
 input CreateActionInput {

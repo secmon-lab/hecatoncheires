@@ -61,7 +61,7 @@ func setupJobRunTestCase(t *testing.T) (interfaces.Repository, *usecase.JobRunUs
 	uc := usecase.NewJobRunUseCase(repo, nil)
 	ws := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 	ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UREPORTER"})
-	c, err := caseUC.CreateCase(ctx, ws, "agent target", "", nil, nil, false, "", "")
+	c, err := caseUC.CreateCase(ctx, ws, "agent target", "", nil, nil, false, false, "", "")
 	gt.NoError(t, err).Required()
 	return repo, uc, ws, c
 }

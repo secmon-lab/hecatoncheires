@@ -252,6 +252,8 @@ func TestRunTurn_InvestigateThenMaterialize(t *testing.T) {
 	gt.Value(t, host.materialized[0].WorkspaceID).Equal("ws-1")
 	gt.Value(t, host.materialized[0].Title).Equal("API outage")
 	gt.Value(t, host.materialized[0].CustomFieldValues["severity"]).Equal("high")
+	// is_test omitted in the planner output → false in the payload.
+	gt.Bool(t, host.materialized[0].IsTest).False()
 
 	// Two logical planner rounds → two distinct round messages in
 	// roundLines (plan-1, plan-2). Within each round, the runtime
@@ -276,6 +278,57 @@ func TestRunTurn_InvestigateThenMaterialize(t *testing.T) {
 	gt.Bool(t, len(taskLines) >= 2).True()
 	gt.String(t, taskLines[len(taskLines)-1]).Contains("inner loops")
 	gt.String(t, taskLines[len(taskLines)-1]).Contains("Recent thread")
+}
+
+// TestRunTurn_MaterializeCarriesIsTest verifies the planner's is_test flag
+// survives the round → MaterializePayload mapping so the host (and ultimately
+// the created Case) can honour the agent's test-case suggestion.
+func TestRunTurn_MaterializeCarriesIsTest(t *testing.T) {
+	ctx := context.Background()
+	llm := &mock.LLMClientMock{
+		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mock.SessionMock{
+				GenerateFunc: func(_ context.Context, input []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					if len(input) == 0 {
+						return nil, errors.New("no input")
+					}
+					txt, ok := input[0].(gollem.Text)
+					if !ok {
+						return nil, errors.New("expected gollem.Text")
+					}
+					if strings.Contains(string(txt), "[budget] planner round 0/8") {
+						return &gollem.Response{Texts: []string{`{
+							"reasoning":"user says this is a drill",
+							"action":"materialize",
+							"materialize":{
+								"workspace_id":"ws-1",
+								"title":"Test drill",
+								"description":"Brief.",
+								"custom_field_values":{},
+								"is_test":true
+							}
+						}`}}, nil
+					}
+					return nil, errors.New("unexpected planner input: " + string(txt))
+				},
+			}, nil
+		},
+	}
+
+	uc := mustDraft(t, llm, 8, 16)
+	host := &hostStub{}
+	res, err := uc.RunTurn(ctx, proposal.TurnRequest{
+		Session:   newOpenSession(),
+		UserInput: "@bot create a test case for the drill",
+		Trigger:   proposal.TriggerAppMention,
+		TriggerTS: "1700000010.000002",
+		Handler:   host,
+	})
+	async.Wait()
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.EndedWith).Equal(model.SessionEndedWithMaterialize)
+	gt.Array(t, host.materialized).Length(1).Required()
+	gt.Bool(t, host.materialized[0].IsTest).True()
 }
 
 func TestRunTurn_PlannerBudgetExhaustionFallback(t *testing.T) {

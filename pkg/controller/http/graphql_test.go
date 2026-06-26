@@ -460,6 +460,80 @@ func TestGraphQLHandler_CreateCaseMutation(t *testing.T) {
 	})
 }
 
+func TestGraphQLHandler_CaseIsTestFlag(t *testing.T) {
+	repo := memory.New()
+	seedSlackUsersHTTP(t, repo, "U001")
+	handler, err := setupGraphQLServer(repo)
+	gt.NoError(t, err).Required()
+
+	createMutation := `
+		mutation($workspaceId: String!, $input: CreateCaseInput!) {
+			createCase(workspaceId: $workspaceId, input: $input) {
+				id
+				isTest
+			}
+		}
+	`
+	createVars := map[string]interface{}{
+		"workspaceId": testWorkspaceID,
+		"input": map[string]interface{}{
+			"title":  "Test-flagged case",
+			"isTest": true,
+		},
+	}
+	rec := executeGraphQLRequestWithAuth(t, handler, createMutation, createVars, "U-ISTEST-REPORTER")
+	gt.Value(t, rec.Code).Equal(http.StatusOK)
+	resp := parseGraphQLResponse(t, rec)
+	gt.Array(t, resp.Errors).Length(0)
+
+	var created struct {
+		CreateCase struct {
+			ID     int  `json:"id"`
+			IsTest bool `json:"isTest"`
+		} `json:"createCase"`
+	}
+	gt.NoError(t, json.Unmarshal(resp.Data, &created)).Required()
+	gt.Bool(t, created.CreateCase.IsTest).True()
+
+	// Persisted as test.
+	saved, err := repo.Case().Get(context.Background(), testWorkspaceID, int64(created.CreateCase.ID))
+	gt.NoError(t, err).Required()
+	gt.Bool(t, saved.IsTest).True()
+
+	// updateCase flips it back off and the response/store reflect false.
+	updateMutation := `
+		mutation($workspaceId: String!, $input: UpdateCaseInput!) {
+			updateCase(workspaceId: $workspaceId, input: $input) {
+				id
+				isTest
+			}
+		}
+	`
+	updateVars := map[string]interface{}{
+		"workspaceId": testWorkspaceID,
+		"input": map[string]interface{}{
+			"id":     created.CreateCase.ID,
+			"isTest": false,
+		},
+	}
+	rec = executeGraphQLRequestWithAuth(t, handler, updateMutation, updateVars, "U-ISTEST-REPORTER")
+	gt.Value(t, rec.Code).Equal(http.StatusOK)
+	resp = parseGraphQLResponse(t, rec)
+	gt.Array(t, resp.Errors).Length(0)
+
+	var updated struct {
+		UpdateCase struct {
+			IsTest bool `json:"isTest"`
+		} `json:"updateCase"`
+	}
+	gt.NoError(t, json.Unmarshal(resp.Data, &updated)).Required()
+	gt.Bool(t, updated.UpdateCase.IsTest).False()
+
+	saved, err = repo.Case().Get(context.Background(), testWorkspaceID, int64(created.CreateCase.ID))
+	gt.NoError(t, err).Required()
+	gt.Bool(t, saved.IsTest).False()
+}
+
 func TestGraphQLHandler_UpdateCaseMutation(t *testing.T) {
 	repo := memory.New()
 	seedSlackUsersHTTP(t, repo, "U001", "U002", "U003")

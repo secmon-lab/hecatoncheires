@@ -62,6 +62,7 @@ type Case struct {
 	BoardStatus string
 
 	IsPrivate      bool                  // Private mode flag
+	IsTest         bool                  // Marks a case filed for testing/verification, distinguished from production cases
 	ChannelUserIDs []string              // Slack User IDs of channel members (synced for all cases)
 	AccessDenied   bool                  // Runtime-only: set by UseCase when access is restricted (not persisted)
 	FieldValues    map[string]FieldValue // key = FieldID

@@ -196,7 +196,14 @@ No `options`. The host renders a multiline plain-text input.
 
 ### materialize
 
-Terminal. Produce a CaseDraft for the host to render in the preview UI. Provide `workspace_id` (one of the registered workspaces), `title`, `description`, and `custom_field_values` matching that workspace's FieldSchema.
+Terminal. Produce a CaseDraft for the host to render in the preview UI. Provide `workspace_id` (one of the registered workspaces), `title`, `description`, and `custom_field_values` matching that workspace's FieldSchema. Optionally set `is_test` (boolean).
+
+Set `is_test` to `true` ONLY when the case is not a real one to work on, i.e. it falls into one of these:
+
+- **Verifying the system itself** — the request exists to confirm that Hecatoncheires works, e.g. checking that case/ticket creation succeeds, trying out the mention flow, or any "does this tool work" smoke check.
+- **An exercise / drill** — the case is created for practice or a tabletop/dry-run exercise, not in response to an actual incident or task.
+
+Set it to `false` for every genuine, real-world case. When in any doubt, leave it `false` — the human can still tick the "Test case" box in the preview's Edit modal. It defaults to `false` when omitted.
 
 **Hard prerequisites** (the schema does not enforce these — discipline yourself):
 

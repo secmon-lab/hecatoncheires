@@ -122,17 +122,18 @@ func TestSlackUseCases_HandleSlashCommand(t *testing.T) {
 		}
 		gt.Value(t, optionsBlock).NotNil().Required()
 
-		// The checkbox group carries two options in order: Private case,
-		// Draft mode. Both share the same checkbox group element (keyed
-		// by the legacy SlackBlockIDCasePrivate / SlackActionIDCasePrivate
+		// The checkbox group carries three options in order: Private case,
+		// Draft mode, Test case. All share the same checkbox group element
+		// (keyed by the legacy SlackBlockIDCasePrivate / SlackActionIDCasePrivate
 		// constants); the values are distinguished only by their option
 		// value strings.
 		checkboxGroup, ok := optionsBlock.Element.(*goslack.CheckboxGroupsBlockElement)
 		gt.Bool(t, ok).True()
 		gt.Value(t, checkboxGroup.ActionID).Equal(usecase.SlackActionIDCasePrivate)
-		gt.Array(t, checkboxGroup.Options).Length(2).Required()
+		gt.Array(t, checkboxGroup.Options).Length(3).Required()
 		gt.Value(t, checkboxGroup.Options[0].Value).Equal("private")
 		gt.Value(t, checkboxGroup.Options[1].Value).Equal("draft")
+		gt.Value(t, checkboxGroup.Options[2].Value).Equal("test")
 
 		// No body-level Save-as-Draft button remains on the modal.
 		for _, block := range slackMock.openViewRequest.Blocks.BlockSet {
@@ -581,6 +582,58 @@ func TestSlackUseCases_HandleCaseCreationSubmit(t *testing.T) {
 		gt.Bool(t, cases[0].IsPrivate).False()
 	})
 
+	t.Run("creates a test case when the test option is checked", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
+		})
+
+		slackMock := &commandTestSlackService{}
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
+		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+		seedSlackUsers(t, repo, "U001")
+
+		meta, _ := json.Marshal(map[string]string{
+			"workspace_id": "risk",
+			"channel_id":   "C001",
+		})
+		callback := &goslack.InteractionCallback{
+			User: goslack.User{ID: "U001"},
+			View: goslack.View{
+				PrivateMetadata: string(meta),
+				State: &goslack.ViewState{
+					Values: map[string]map[string]goslack.BlockAction{
+						"hc_case_title_block": {
+							"hc_case_title": {Value: "Test Case"},
+						},
+						"hc_case_desc_block": {
+							"hc_case_desc": {Value: "Drill"},
+						},
+						usecase.SlackBlockIDCasePrivate: {
+							usecase.SlackActionIDCasePrivate: {
+								SelectedOptions: []goslack.OptionBlockObject{
+									{Value: "test"},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		err := slackUC.HandleCaseCreationSubmit(context.Background(), caseUC, callback)
+		gt.NoError(t, err).Required()
+
+		cases, err := repo.Case().List(context.Background(), "risk")
+		gt.NoError(t, err).Required()
+		gt.Array(t, cases).Length(1)
+		gt.Value(t, cases[0].Title).Equal("Test Case")
+		gt.Bool(t, cases[0].IsTest).True()
+		// The test option alone must not also flip private.
+		gt.Bool(t, cases[0].IsPrivate).False()
+	})
+
 	t.Run("returns error when title is empty", func(t *testing.T) {
 		repo := memory.New()
 		registry := model.NewWorkspaceRegistry()
@@ -950,8 +1003,8 @@ func TestSlackUseCases_HandleSlashCommand_EditCase(t *testing.T) {
 		gt.Value(t, meta.ChannelID).Equal("C-CASE-CHANNEL")
 		gt.Value(t, meta.CaseID).Equal(created.ID)
 
-		// Verify blocks: Title + Description + Assignees + 1 custom field = 4 blocks
-		gt.Number(t, len(slackMock.openViewRequest.Blocks.BlockSet)).Equal(4)
+		// Verify blocks: Title + Description + Assignees + Test option + 1 custom field = 5 blocks
+		gt.Number(t, len(slackMock.openViewRequest.Blocks.BlockSet)).Equal(5)
 	})
 
 	t.Run("opens create modal when channel has no linked case", func(t *testing.T) {
@@ -1113,6 +1166,69 @@ func TestSlackUseCases_HandleCaseEditSubmit(t *testing.T) {
 		gt.Value(t, slackMock.postedMessages[0].ChannelID).Equal("C-CASE")
 		gt.String(t, slackMock.postedMessages[0].Text).Contains("Updated Title")
 		gt.String(t, slackMock.postedMessages[0].Text).Contains("updated")
+	})
+
+	t.Run("toggles the test flag from the edit modal checkbox", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "risk", Name: "Risk Management"},
+		})
+		// Existing non-test case.
+		created, err := repo.Case().Create(context.Background(), "risk", &model.Case{
+			ReporterID: "U-TEST-DEFAULT",
+			Title:      "Existing",
+			IsTest:     false,
+		})
+		gt.NoError(t, err).Required()
+
+		slackMock := &commandTestSlackService{}
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
+		caseUC := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+
+		meta, _ := json.Marshal(map[string]any{
+			"workspace_id": "risk",
+			"channel_id":   "C-CASE",
+			"case_id":      created.ID,
+		})
+		callback := &goslack.InteractionCallback{
+			User: goslack.User{ID: "U001"},
+			View: goslack.View{
+				PrivateMetadata: string(meta),
+				State: &goslack.ViewState{
+					Values: map[string]map[string]goslack.BlockAction{
+						"hc_case_title_block": {
+							"hc_case_title": {Value: "Existing"},
+						},
+						usecase.SlackBlockIDCaseTest: {
+							usecase.SlackActionIDCaseTest: {
+								SelectedOptions: []goslack.OptionBlockObject{
+									{Value: "test"},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		err = slackUC.HandleCaseEditSubmit(context.Background(), caseUC, callback)
+		gt.NoError(t, err).Required()
+
+		updated, err := repo.Case().Get(context.Background(), "risk", created.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, updated.IsTest).True()
+
+		// Submitting again with the checkbox unticked flips it back off.
+		callback.View.State.Values[usecase.SlackBlockIDCaseTest][usecase.SlackActionIDCaseTest] = goslack.BlockAction{
+			SelectedOptions: []goslack.OptionBlockObject{},
+		}
+		err = slackUC.HandleCaseEditSubmit(context.Background(), caseUC, callback)
+		gt.NoError(t, err).Required()
+
+		cleared, err := repo.Case().Get(context.Background(), "risk", created.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, cleared.IsTest).False()
 	})
 
 	t.Run("replaces assignees from multi-user select payload", func(t *testing.T) {
@@ -1339,8 +1455,8 @@ func TestBuildFieldInputBlockWithValue(t *testing.T) {
 
 		gt.Bool(t, slackMock.openViewCalled).True()
 		gt.Value(t, slackMock.openViewRequest.CallbackID).Equal(usecase.SlackCallbackIDEditCase)
-		// Title + Description + Assignees + 1 custom field = 4 blocks
-		gt.Number(t, len(slackMock.openViewRequest.Blocks.BlockSet)).Equal(4)
+		// Title + Description + Assignees + Test option + 1 custom field = 5 blocks
+		gt.Number(t, len(slackMock.openViewRequest.Blocks.BlockSet)).Equal(5)
 	})
 
 	t.Run("date field with initial value", func(t *testing.T) {
@@ -1406,8 +1522,8 @@ func TestBuildFieldInputBlockWithValue(t *testing.T) {
 
 		gt.Bool(t, slackMock.openViewCalled).True()
 		gt.Value(t, slackMock.openViewRequest.CallbackID).Equal(usecase.SlackCallbackIDEditCase)
-		// Title + Description + Assignees + 1 custom field = 4 blocks
-		gt.Number(t, len(slackMock.openViewRequest.Blocks.BlockSet)).Equal(4)
+		// Title + Description + Assignees + Test option + 1 custom field = 5 blocks
+		gt.Number(t, len(slackMock.openViewRequest.Blocks.BlockSet)).Equal(5)
 	})
 }
 

@@ -148,7 +148,7 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 
 	bg := newBudget(r.budget)
 	nextInput := bg.formatPrefix() + "\n\n" + req.UserInput
-	return r.runLoop(ctx, req, systemPrompt, recorder, bg, nil, 0, nextInput)
+	return r.runLoop(ctx, req, systemPrompt, recorder, traced, bg, nil, 0, nextInput)
 }
 
 // Resume re-enters a suspended turn after the user answered the planner's
@@ -187,9 +187,11 @@ func (r *Runner) Resume(ctx context.Context, req ResumeRequest) (*RunResult, err
 		}
 	}()
 
+	traced := combineTrace(recorder, req.TraceHandler)
+
 	bg := newBudget(r.budget)
 	nextInput := formatQuestionAnswers(bg, req.Question, req.Answers)
-	return r.runLoop(ctx, req.RunRequest, systemPrompt, recorder, bg, nil, 1, nextInput)
+	return r.runLoop(ctx, req.RunRequest, systemPrompt, recorder, traced, bg, nil, 1, nextInput)
 }
 
 // runLoop drives the plan/replan loop. Run enters it at logicalRound 0
@@ -203,6 +205,11 @@ func (r *Runner) runLoop(
 	req RunRequest,
 	systemPrompt string,
 	recorder *trace.Recorder,
+	// traced is the trace handler for the planner / direct / final agents:
+	// the run's archive recorder combined with the host's per-event handler
+	// (see combineTrace). recorder stays separate because sub-agents scope
+	// tracing differently (see runPhase).
+	traced trace.Handler,
 	bg *budget,
 	allResults []PhaseSummary,
 	logicalRound int,

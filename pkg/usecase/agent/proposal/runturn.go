@@ -311,6 +311,7 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 				Title:             p.Materialize.Title,
 				Description:       p.Materialize.Description,
 				CustomFieldValues: p.Materialize.CustomFieldValues,
+				IsTest:            p.Materialize.IsTest,
 			}); err != nil {
 				return nil, goerr.Wrap(err, "handler Materialize")
 			}

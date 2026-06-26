@@ -153,6 +153,7 @@ type ComplexityRoot struct {
 		Fields                func(childComplexity int) int
 		ID                    func(childComplexity int) int
 		IsPrivate             func(childComplexity int) int
+		IsTest                func(childComplexity int) int
 		IsThreadBound         func(childComplexity int) int
 		Reporter              func(childComplexity int) int
 		ReporterID            func(childComplexity int) int
@@ -1185,6 +1186,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Case.IsPrivate(childComplexity), true
+	case "Case.isTest":
+		if e.complexity.Case.IsTest == nil {
+			break
+		}
+
+		return e.complexity.Case.IsTest(childComplexity), true
 	case "Case.isThreadBound":
 		if e.complexity.Case.IsThreadBound == nil {
 			break
@@ -3637,6 +3644,9 @@ type Case {
   description: String
   status: CaseStatus!
   isPrivate: Boolean!
+  # isTest marks a case filed for testing/verification, distinguished from
+  # production cases in the list and detail UI.
+  isTest: Boolean!
   accessDenied: Boolean!
   channelUserCount: Int!
   channelUsers(limit: Int, offset: Int, filter: String): ChannelUserConnection!
@@ -3866,6 +3876,8 @@ input CreateCaseInput {
   assigneeIDs: [String!]
   fields: [FieldValueInput!]
   isPrivate: Boolean
+  # isTest marks the case as a test case. Defaults to false when omitted.
+  isTest: Boolean
 }
 
 # CreateDraftInput mirrors CreateCaseInput but every field is optional —
@@ -3878,6 +3890,8 @@ input CreateDraftInput {
   assigneeIDs: [String!]
   fields: [FieldValueInput!]
   isPrivate: Boolean
+  # isTest marks the draft as a test case. Defaults to false when omitted.
+  isTest: Boolean
 }
 
 input UpdateCaseInput {
@@ -3890,6 +3904,8 @@ input UpdateCaseInput {
   title: String
   description: String
   fields: [FieldValueInput!]
+  # isTest, when provided, sets the test flag; omit to preserve the current value.
+  isTest: Boolean
 }
 
 # SubmitDraftInput carries the last-minute edits that the user wants to
@@ -3903,6 +3919,8 @@ input SubmitDraftInput {
   title: String
   description: String
   fields: [FieldValueInput!]
+  # isTest, when provided, sets the test flag before the draft is promoted.
+  isTest: Boolean
 }
 
 input CreateActionInput {
@@ -6124,6 +6142,8 @@ func (ec *executionContext) fieldContext_Action_case(_ context.Context, field gr
 				return ec.fieldContext_Case_status(ctx, field)
 			case "isPrivate":
 				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "isTest":
+				return ec.fieldContext_Case_isTest(ctx, field)
 			case "accessDenied":
 				return ec.fieldContext_Case_accessDenied(ctx, field)
 			case "channelUserCount":
@@ -8080,6 +8100,35 @@ func (ec *executionContext) _Case_isPrivate(ctx context.Context, field graphql.C
 }
 
 func (ec *executionContext) fieldContext_Case_isPrivate(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Case",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Boolean does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Case_isTest(ctx context.Context, field graphql.CollectedField, obj *graphql1.Case) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Case_isTest,
+		func(ctx context.Context) (any, error) {
+			return obj.IsTest, nil
+		},
+		nil,
+		ec.marshalNBoolean2bool,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Case_isTest(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Case",
 		Field:      field,
@@ -10394,6 +10443,8 @@ func (ec *executionContext) fieldContext_ImportCaseResult_createdCase(_ context.
 				return ec.fieldContext_Case_status(ctx, field)
 			case "isPrivate":
 				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "isTest":
+				return ec.fieldContext_Case_isTest(ctx, field)
 			case "accessDenied":
 				return ec.fieldContext_Case_accessDenied(ctx, field)
 			case "channelUserCount":
@@ -12990,6 +13041,8 @@ func (ec *executionContext) fieldContext_Memo_case(_ context.Context, field grap
 				return ec.fieldContext_Case_status(ctx, field)
 			case "isPrivate":
 				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "isTest":
+				return ec.fieldContext_Case_isTest(ctx, field)
 			case "accessDenied":
 				return ec.fieldContext_Case_accessDenied(ctx, field)
 			case "channelUserCount":
@@ -13326,6 +13379,8 @@ func (ec *executionContext) fieldContext_Mutation_createCase(ctx context.Context
 				return ec.fieldContext_Case_status(ctx, field)
 			case "isPrivate":
 				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "isTest":
+				return ec.fieldContext_Case_isTest(ctx, field)
 			case "accessDenied":
 				return ec.fieldContext_Case_accessDenied(ctx, field)
 			case "channelUserCount":
@@ -13419,6 +13474,8 @@ func (ec *executionContext) fieldContext_Mutation_updateCase(ctx context.Context
 				return ec.fieldContext_Case_status(ctx, field)
 			case "isPrivate":
 				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "isTest":
+				return ec.fieldContext_Case_isTest(ctx, field)
 			case "accessDenied":
 				return ec.fieldContext_Case_accessDenied(ctx, field)
 			case "channelUserCount":
@@ -13512,6 +13569,8 @@ func (ec *executionContext) fieldContext_Mutation_assignCase(ctx context.Context
 				return ec.fieldContext_Case_status(ctx, field)
 			case "isPrivate":
 				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "isTest":
+				return ec.fieldContext_Case_isTest(ctx, field)
 			case "accessDenied":
 				return ec.fieldContext_Case_accessDenied(ctx, field)
 			case "channelUserCount":
@@ -13605,6 +13664,8 @@ func (ec *executionContext) fieldContext_Mutation_unassignCase(ctx context.Conte
 				return ec.fieldContext_Case_status(ctx, field)
 			case "isPrivate":
 				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "isTest":
+				return ec.fieldContext_Case_isTest(ctx, field)
 			case "accessDenied":
 				return ec.fieldContext_Case_accessDenied(ctx, field)
 			case "channelUserCount":
@@ -13739,6 +13800,8 @@ func (ec *executionContext) fieldContext_Mutation_closeCase(ctx context.Context,
 				return ec.fieldContext_Case_status(ctx, field)
 			case "isPrivate":
 				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "isTest":
+				return ec.fieldContext_Case_isTest(ctx, field)
 			case "accessDenied":
 				return ec.fieldContext_Case_accessDenied(ctx, field)
 			case "channelUserCount":
@@ -13832,6 +13895,8 @@ func (ec *executionContext) fieldContext_Mutation_reopenCase(ctx context.Context
 				return ec.fieldContext_Case_status(ctx, field)
 			case "isPrivate":
 				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "isTest":
+				return ec.fieldContext_Case_isTest(ctx, field)
 			case "accessDenied":
 				return ec.fieldContext_Case_accessDenied(ctx, field)
 			case "channelUserCount":
@@ -13925,6 +13990,8 @@ func (ec *executionContext) fieldContext_Mutation_updateCaseStatus(ctx context.C
 				return ec.fieldContext_Case_status(ctx, field)
 			case "isPrivate":
 				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "isTest":
+				return ec.fieldContext_Case_isTest(ctx, field)
 			case "accessDenied":
 				return ec.fieldContext_Case_accessDenied(ctx, field)
 			case "channelUserCount":
@@ -14018,6 +14085,8 @@ func (ec *executionContext) fieldContext_Mutation_syncCaseChannelUsers(ctx conte
 				return ec.fieldContext_Case_status(ctx, field)
 			case "isPrivate":
 				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "isTest":
+				return ec.fieldContext_Case_isTest(ctx, field)
 			case "accessDenied":
 				return ec.fieldContext_Case_accessDenied(ctx, field)
 			case "channelUserCount":
@@ -14111,6 +14180,8 @@ func (ec *executionContext) fieldContext_Mutation_createDraft(ctx context.Contex
 				return ec.fieldContext_Case_status(ctx, field)
 			case "isPrivate":
 				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "isTest":
+				return ec.fieldContext_Case_isTest(ctx, field)
 			case "accessDenied":
 				return ec.fieldContext_Case_accessDenied(ctx, field)
 			case "channelUserCount":
@@ -14204,6 +14275,8 @@ func (ec *executionContext) fieldContext_Mutation_submitDraft(ctx context.Contex
 				return ec.fieldContext_Case_status(ctx, field)
 			case "isPrivate":
 				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "isTest":
+				return ec.fieldContext_Case_isTest(ctx, field)
 			case "accessDenied":
 				return ec.fieldContext_Case_accessDenied(ctx, field)
 			case "channelUserCount":
@@ -15684,6 +15757,8 @@ func (ec *executionContext) fieldContext_Mutation_updateCaseAgentSettings(ctx co
 				return ec.fieldContext_Case_status(ctx, field)
 			case "isPrivate":
 				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "isTest":
+				return ec.fieldContext_Case_isTest(ctx, field)
 			case "accessDenied":
 				return ec.fieldContext_Case_accessDenied(ctx, field)
 			case "channelUserCount":
@@ -17028,6 +17103,8 @@ func (ec *executionContext) fieldContext_Query_cases(ctx context.Context, field 
 				return ec.fieldContext_Case_status(ctx, field)
 			case "isPrivate":
 				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "isTest":
+				return ec.fieldContext_Case_isTest(ctx, field)
 			case "accessDenied":
 				return ec.fieldContext_Case_accessDenied(ctx, field)
 			case "channelUserCount":
@@ -17121,6 +17198,8 @@ func (ec *executionContext) fieldContext_Query_case(ctx context.Context, field g
 				return ec.fieldContext_Case_status(ctx, field)
 			case "isPrivate":
 				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "isTest":
+				return ec.fieldContext_Case_isTest(ctx, field)
 			case "accessDenied":
 				return ec.fieldContext_Case_accessDenied(ctx, field)
 			case "channelUserCount":
@@ -17214,6 +17293,8 @@ func (ec *executionContext) fieldContext_Query_drafts(ctx context.Context, field
 				return ec.fieldContext_Case_status(ctx, field)
 			case "isPrivate":
 				return ec.fieldContext_Case_isPrivate(ctx, field)
+			case "isTest":
+				return ec.fieldContext_Case_isTest(ctx, field)
 			case "accessDenied":
 				return ec.fieldContext_Case_accessDenied(ctx, field)
 			case "channelUserCount":
@@ -21797,7 +21878,7 @@ func (ec *executionContext) unmarshalInputCreateCaseInput(ctx context.Context, o
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"title", "description", "assigneeIDs", "fields", "isPrivate"}
+	fieldsInOrder := [...]string{"title", "description", "assigneeIDs", "fields", "isPrivate", "isTest"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -21839,6 +21920,13 @@ func (ec *executionContext) unmarshalInputCreateCaseInput(ctx context.Context, o
 				return it, err
 			}
 			it.IsPrivate = data
+		case "isTest":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("isTest"))
+			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.IsTest = data
 		}
 	}
 
@@ -21852,7 +21940,7 @@ func (ec *executionContext) unmarshalInputCreateDraftInput(ctx context.Context, 
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"title", "description", "assigneeIDs", "fields", "isPrivate"}
+	fieldsInOrder := [...]string{"title", "description", "assigneeIDs", "fields", "isPrivate", "isTest"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -21894,6 +21982,13 @@ func (ec *executionContext) unmarshalInputCreateDraftInput(ctx context.Context, 
 				return it, err
 			}
 			it.IsPrivate = data
+		case "isTest":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("isTest"))
+			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.IsTest = data
 		}
 	}
 
@@ -22345,7 +22440,7 @@ func (ec *executionContext) unmarshalInputSubmitDraftInput(ctx context.Context, 
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"title", "description", "fields"}
+	fieldsInOrder := [...]string{"title", "description", "fields", "isTest"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -22373,6 +22468,13 @@ func (ec *executionContext) unmarshalInputSubmitDraftInput(ctx context.Context, 
 				return it, err
 			}
 			it.Fields = data
+		case "isTest":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("isTest"))
+			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.IsTest = data
 		}
 	}
 
@@ -22517,7 +22619,7 @@ func (ec *executionContext) unmarshalInputUpdateCaseInput(ctx context.Context, o
 		asMap[k] = v
 	}
 
-	fieldsInOrder := [...]string{"id", "title", "description", "fields"}
+	fieldsInOrder := [...]string{"id", "title", "description", "fields", "isTest"}
 	for _, k := range fieldsInOrder {
 		v, ok := asMap[k]
 		if !ok {
@@ -22552,6 +22654,13 @@ func (ec *executionContext) unmarshalInputUpdateCaseInput(ctx context.Context, o
 				return it, err
 			}
 			it.Fields = data
+		case "isTest":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("isTest"))
+			data, err := ec.unmarshalOBoolean2ᚖbool(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.IsTest = data
 		}
 	}
 
@@ -23822,6 +23931,11 @@ func (ec *executionContext) _Case(ctx context.Context, sel ast.SelectionSet, obj
 			}
 		case "isPrivate":
 			out.Values[i] = ec._Case_isPrivate(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "isTest":
+			out.Values[i] = ec._Case_isTest(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				atomic.AddUint32(&out.Invalids, 1)
 			}

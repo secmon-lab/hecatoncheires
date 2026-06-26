@@ -48,8 +48,9 @@ import {
   IconDots,
   IconRobot,
   IconX,
+  IconFlask,
 } from '../components/Icons'
-import { Avatar, PrivateBadge, StatusBadge } from '../components/Primitives'
+import { Avatar, PrivateBadge, TestBadge, StatusBadge } from '../components/Primitives'
 import CaseDeleteDialog from './CaseDeleteDialog'
 import ActionForm from './ActionForm'
 import ActionModal from './ActionModal'
@@ -203,6 +204,7 @@ export default function CaseDetail() {
 
   const c = data?.case
   const isPrivate = !!c?.isPrivate
+  const isTest = !!c?.isTest
   const slackChannelID: string = c?.slackChannelID || ''
   const slackChannelURL: string | null = c?.slackChannelURL || null
   const channelUserCount: number = c?.channelUserCount || 0
@@ -358,6 +360,12 @@ export default function CaseDetail() {
       variables: { workspaceId: currentWorkspace!.id, input: { id: caseId, description: next } },
     })
   }
+  const handleTestChange = async (next: boolean) => {
+    if (next === isTest) return
+    await updateCase({
+      variables: { workspaceId: currentWorkspace!.id, input: { id: caseId, isTest: next } },
+    })
+  }
   const handleFieldChange = async (fieldId: string, value: any) => {
     // Send only the changed field. The backend merges this with existing
     // values, so we don't risk re-validating stale entries (e.g. option IDs
@@ -499,9 +507,14 @@ export default function CaseDetail() {
                 testId="case-title"
               />
             </h1>
-            {isPrivate && (
+            {(isPrivate || isTest) && (
               <div className="h-detail-badges">
-                <span data-testid="private-badge"><PrivateBadge label={t('badgePrivate')} /></span>
+                {isTest && (
+                  <span data-testid="test-badge"><TestBadge label={t('badgeTest')} /></span>
+                )}
+                {isPrivate && (
+                  <span data-testid="private-badge"><PrivateBadge label={t('badgePrivate')} /></span>
+                )}
               </div>
             )}
           </div>
@@ -520,6 +533,19 @@ export default function CaseDetail() {
                 {t('labelBy')} <span className="name">{displayName(c.reporter)}</span>
               </span>
             )}
+            {/* Inline Test toggle — the WebUI edit surface for an OPEN case's
+                test flag (drafts use the CaseForm checkbox instead). */}
+            <label className="row" style={{ gap: 4, cursor: 'pointer' }} title={t('hintTestCase', { caseLabelLower: caseLabel.toLowerCase() })}>
+              <input
+                type="checkbox"
+                checked={isTest}
+                disabled={updating}
+                onChange={(e) => { void handleTestChange(e.target.checked) }}
+                data-testid="test-case-toggle"
+              />
+              <IconFlask size={11} sw={2} style={{ verticalAlign: '-1px' }} />
+              {t('badgeTest')}
+            </label>
           </div>
 
           {/* private banner — only relevant once the case is linked to a Slack
@@ -1029,6 +1055,7 @@ export default function CaseDetail() {
             title: c.title,
             description: c.description ?? '',
             isPrivate: !!c.isPrivate,
+            isTest: !!c.isTest,
             assigneeIDs: c.assigneeIDs ?? [],
             fields: (c.fields ?? []).map((f: any) => ({ fieldId: f.fieldId, value: f.value })),
             status: 'DRAFT',

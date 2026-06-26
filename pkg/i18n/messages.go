@@ -121,6 +121,8 @@ var messagesEN = [msgKeyCount]string{
 	MsgFieldCaseOptions:   "Options",
 	MsgFieldDraftMode:     "Draft mode",
 	MsgFieldDraftModeDesc: "Save as a draft instead of opening the case immediately. No Slack channel is created until the draft is submitted.",
+	MsgFieldTestCase:      "Test case",
+	MsgFieldTestCaseDesc:  "Mark this as a test case — for verifying the system or a drill, not a real case to work on.",
 
 	// Case assignees
 	MsgFieldCaseAssignees: "Assignees",
@@ -272,6 +274,8 @@ var messagesJA = [msgKeyCount]string{
 	MsgFieldCaseOptions:   "オプション",
 	MsgFieldDraftMode:     "下書きモード",
 	MsgFieldDraftModeDesc: "ケースを即時公開せず、下書きとして保存します。下書きを送信するまで Slack チャンネルは作成されません。",
+	MsgFieldTestCase:      "テストケース",
+	MsgFieldTestCaseDesc:  "実対応するケースではなく、システムの動作確認や演習として起票したことを示します。",
 
 	// Case assignees
 	MsgFieldCaseAssignees: "担当者",

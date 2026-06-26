@@ -87,6 +87,7 @@ func copyCase(c *model.Case) *model.Case {
 		SlackThreadTS:         c.SlackThreadTS,
 		BoardStatus:           c.BoardStatus,
 		IsPrivate:             c.IsPrivate,
+		IsTest:                c.IsTest,
 		ChannelUserIDs:        channelUserIDs,
 		FieldValues:           fieldValues,
 		RequestKey:            c.RequestKey,

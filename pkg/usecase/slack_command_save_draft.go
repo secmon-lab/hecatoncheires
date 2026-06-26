@@ -64,17 +64,10 @@ func (uc *SlackUseCases) HandleSaveAsDraftClick(ctx context.Context, caseUC *Cas
 		}
 	}
 
-	isPrivate := false
-	if privateBlock, ok := blockValues[SlackBlockIDCasePrivate]; ok {
-		if privateAction, ok := privateBlock[SlackActionIDCasePrivate]; ok {
-			for _, opt := range privateAction.SelectedOptions {
-				if opt.Value == "private" {
-					isPrivate = true
-					break
-				}
-			}
-		}
-	}
+	// The create modal's Options checkbox group carries private/draft/test;
+	// reuse the shared reader so the save-as-draft path honours the same
+	// flags (the draft flag is irrelevant here — this path is already a draft).
+	isPrivate, _, isTest := readCaseOptionFlags(blockValues)
 
 	fieldValuesMap := extractFieldValues(blockValues)
 
@@ -88,7 +81,7 @@ func (uc *SlackUseCases) HandleSaveAsDraftClick(ctx context.Context, caseUC *Cas
 	// and "Save as Draft → Submit".
 	assigneeIDs := []string{callback.User.ID}
 
-	created, err := caseUC.CreateDraft(ctx, meta.WorkspaceID, title, description, assigneeIDs, fieldValuesMap, isPrivate)
+	created, err := caseUC.CreateDraft(ctx, meta.WorkspaceID, title, description, assigneeIDs, fieldValuesMap, isPrivate, isTest)
 	if err != nil {
 		uc.notifySaveDraftFailure(ctx, meta.ChannelID, callback.User.ID)
 		return goerr.Wrap(err, "failed to save draft",

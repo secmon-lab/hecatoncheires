@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react'
-import { IconLock, IconSlack } from './Icons'
+import { IconLock, IconSlack, IconFlask } from './Icons'
 import { displayName } from '../utils/user'
 
 /* ─── Avatar ─── */
@@ -150,6 +150,15 @@ export function PrivateBadge({ label = 'Private' }: { label?: string }) {
   return (
     <span className="badge private">
       <IconLock size={11} sw={2} />
+      {label}
+    </span>
+  )
+}
+
+export function TestBadge({ label = 'Test' }: { label?: string }) {
+  return (
+    <span className="badge info">
+      <IconFlask size={11} sw={2} />
       {label}
     </span>
   )

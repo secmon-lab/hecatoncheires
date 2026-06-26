@@ -65,7 +65,7 @@ func TestCaseUseCase_CreateCase(t *testing.T) {
 			"priority": {FieldID: "priority", Value: "high"},
 		}
 
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{"U001"}, fieldValues, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{"U001"}, fieldValues, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		gt.Number(t, created.ID).NotEqual(0)
@@ -85,7 +85,7 @@ func TestCaseUseCase_CreateCase(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		_, err := uc.CreateCase(ctx, testWorkspaceID, "", "Description", []string{}, nil, false, "", "")
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "", "Description", []string{}, nil, false, false, "", "")
 		gt.Value(t, err).NotNil()
 	})
 
@@ -117,7 +117,7 @@ func TestCaseUseCase_CreateCase(t *testing.T) {
 			"priority": {FieldID: "priority", Value: "invalid"},
 		}
 
-		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, fieldValues, false, "", "")
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, fieldValues, false, false, "", "")
 		gt.Value(t, err).NotNil()
 		gt.Error(t, err).Is(model.ErrCaseFieldValidation)
 	})
@@ -143,7 +143,7 @@ func TestCaseUseCase_CreateCase(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, false, "", "")
 		gt.Value(t, err).NotNil()
 		gt.Error(t, err).Is(model.ErrCaseFieldValidation)
 	})
@@ -158,7 +158,7 @@ func TestCaseUseCase_UpdateCase_Drafts(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 
 		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
-		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Half written", "old body", nil, nil, false)
+		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Half written", "old body", nil, nil, false, false)
 		gt.NoError(t, err).Required()
 
 		peerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UPEER"})
@@ -183,7 +183,7 @@ func TestCaseUseCase_UpdateCase_Drafts(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 
 		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
-		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Hidden", "", nil, nil, true)
+		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Hidden", "", nil, nil, true, false)
 		gt.NoError(t, err).Required()
 
 		peerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UPEER"})
@@ -202,7 +202,7 @@ func TestCaseUseCase_UpdateCase_Drafts(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
-		open, err := uc.CreateCase(ctx, testWorkspaceID, "Live", "", nil, nil, false, "", "")
+		open, err := uc.CreateCase(ctx, testWorkspaceID, "Live", "", nil, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		var patch usecase.CaseUpdate
@@ -244,7 +244,7 @@ func TestCaseUseCase_UpdateCase(t *testing.T) {
 		fieldValues := map[string]model.FieldValue{
 			"priority": {FieldID: "priority", Value: "high"},
 		}
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Original Title", "Original Description", []string{"U001"}, fieldValues, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Original Title", "Original Description", []string{"U001"}, fieldValues, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		// Update case
@@ -277,7 +277,7 @@ func TestCaseUseCase_UpdateCase(t *testing.T) {
 			"stage":    {FieldID: "stage", Value: "screen"},
 			"priority": {FieldID: "priority", Value: "low"},
 		}
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Original", "OrigDesc", []string{"U001"}, original, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Original", "OrigDesc", []string{"U001"}, original, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		// Empty patch: nothing should change.
@@ -330,6 +330,81 @@ func TestCaseUseCase_UpdateCase(t *testing.T) {
 	})
 }
 
+func TestCaseUseCase_IsTestFlag(t *testing.T) {
+	t.Run("CreateCase persists the IsTest flag", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+		seedSlackUsers(t, repo, "U001")
+
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test flagged", "Desc", []string{"U001"}, nil, false, true, "", "")
+		gt.NoError(t, err).Required()
+		gt.Bool(t, created.IsTest).True()
+
+		retrieved, err := uc.GetCase(ctx, testWorkspaceID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, retrieved.IsTest).True()
+	})
+
+	t.Run("CreateCase without the flag defaults to false", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+		seedSlackUsers(t, repo, "U001")
+
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Plain", "Desc", []string{"U001"}, nil, false, false, "", "")
+		gt.NoError(t, err).Required()
+		gt.Bool(t, created.IsTest).False()
+	})
+
+	t.Run("CreateDraft persists the IsTest flag", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+		seedSlackUsers(t, repo, "U001")
+
+		created, err := uc.CreateDraft(ctx, testWorkspaceID, "Draft", "Desc", []string{"U001"}, nil, false, true)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, created.IsTest).True()
+
+		retrieved, err := uc.GetDraft(ctx, testWorkspaceID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, retrieved.IsTest).True()
+	})
+
+	t.Run("UpdateCase toggles IsTest only when the patch sets it", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+		seedSlackUsers(t, repo, "U001")
+
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Toggle me", "Desc", []string{"U001"}, nil, false, true, "", "")
+		gt.NoError(t, err).Required()
+		gt.Bool(t, created.IsTest).True()
+
+		// A patch with IsTest == nil must preserve the stored true value.
+		preserved, err := uc.UpdateCase(ctx, testWorkspaceID, created.ID, usecase.CaseUpdate{})
+		gt.NoError(t, err).Required()
+		gt.Bool(t, preserved.IsTest).True()
+
+		// A patch that sets IsTest=false must flip it off.
+		off := false
+		cleared, err := uc.UpdateCase(ctx, testWorkspaceID, created.ID, usecase.CaseUpdate{IsTest: &off})
+		gt.NoError(t, err).Required()
+		gt.Bool(t, cleared.IsTest).False()
+
+		retrieved, err := uc.GetCase(ctx, testWorkspaceID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, retrieved.IsTest).False()
+
+		// And back on.
+		on := true
+		reEnabled, err := uc.UpdateCase(ctx, testWorkspaceID, created.ID, usecase.CaseUpdate{IsTest: &on})
+		gt.NoError(t, err).Required()
+		gt.Bool(t, reEnabled.IsTest).True()
+	})
+}
+
 func TestCaseUseCase_AssignCase(t *testing.T) {
 	t.Run("adds users as a set union and persists", func(t *testing.T) {
 		repo := memory.New()
@@ -337,7 +412,7 @@ func TestCaseUseCase_AssignCase(t *testing.T) {
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
 		seedSlackUsers(t, repo, "UCREATOR", "U001", "U002")
 
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", []string{"U001"}, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", []string{"U001"}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		updated, err := uc.AssignCase(ctx, testWorkspaceID, created.ID, []string{"U002"})
@@ -355,7 +430,7 @@ func TestCaseUseCase_AssignCase(t *testing.T) {
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
 		seedSlackUsers(t, repo, "UCREATOR", "U001")
 
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", []string{"U001"}, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", []string{"U001"}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		updated, err := uc.AssignCase(ctx, testWorkspaceID, created.ID, []string{"U001"})
@@ -369,7 +444,7 @@ func TestCaseUseCase_AssignCase(t *testing.T) {
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
 		seedSlackUsers(t, repo, "UCREATOR", "U001")
 
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", []string{"U001"}, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", []string{"U001"}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		updated, err := uc.AssignCase(ctx, testWorkspaceID, created.ID, []string{})
@@ -383,7 +458,7 @@ func TestCaseUseCase_AssignCase(t *testing.T) {
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
 		seedSlackUsers(t, repo, "UCREATOR")
 
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", []string{}, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		_, err = uc.AssignCase(ctx, testWorkspaceID, created.ID, []string{"UGHOST"})
@@ -427,7 +502,7 @@ func TestCaseUseCase_UnassignCase(t *testing.T) {
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
 		seedSlackUsers(t, repo, "UCREATOR", "U001", "U002", "U003")
 
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", []string{"U001", "U002", "U003"}, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", []string{"U001", "U002", "U003"}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		updated, err := uc.UnassignCase(ctx, testWorkspaceID, created.ID, []string{"U002"})
@@ -445,7 +520,7 @@ func TestCaseUseCase_UnassignCase(t *testing.T) {
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
 		seedSlackUsers(t, repo, "UCREATOR", "U001")
 
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", []string{"U001"}, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", []string{"U001"}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		updated, err := uc.UnassignCase(ctx, testWorkspaceID, created.ID, []string{})
@@ -511,7 +586,7 @@ func TestCaseUseCase_DeleteCase(t *testing.T) {
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		// Create case
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		// Create action for the case
@@ -548,7 +623,7 @@ func TestCaseUseCase_GetCase(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		retrieved, err := uc.GetCase(ctx, testWorkspaceID, created.ID)
@@ -575,9 +650,9 @@ func TestCaseUseCase_GetCases(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		c1, err := uc.CreateCase(ctx, testWorkspaceID, "Case 1", "Desc 1", []string{}, nil, false, "", "")
+		c1, err := uc.CreateCase(ctx, testWorkspaceID, "Case 1", "Desc 1", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
-		c2, err := uc.CreateCase(ctx, testWorkspaceID, "Case 2", "Desc 2", []string{}, nil, false, "", "")
+		c2, err := uc.CreateCase(ctx, testWorkspaceID, "Case 2", "Desc 2", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		got, err := uc.GetCases(ctx, testWorkspaceID, []int64{c2.ID, 999999, c1.ID})
@@ -637,10 +712,10 @@ func TestCaseUseCase_ListCases(t *testing.T) {
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		// Create multiple cases
-		_, err := uc.CreateCase(ctx, testWorkspaceID, "Case 1", "Description 1", []string{}, nil, false, "", "")
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Case 1", "Description 1", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
-		_, err = uc.CreateCase(ctx, testWorkspaceID, "Case 2", "Description 2", []string{}, nil, false, "", "")
+		_, err = uc.CreateCase(ctx, testWorkspaceID, "Case 2", "Description 2", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		cases, err := uc.ListCases(ctx, testWorkspaceID, nil)
@@ -655,10 +730,10 @@ func TestCaseUseCase_ListCases(t *testing.T) {
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		// Create cases (all default to OPEN)
-		case1, err := uc.CreateCase(ctx, testWorkspaceID, "Open Case 1", "desc", []string{}, nil, false, "", "")
+		case1, err := uc.CreateCase(ctx, testWorkspaceID, "Open Case 1", "desc", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
-		_, err = uc.CreateCase(ctx, testWorkspaceID, "Open Case 2", "desc", []string{}, nil, false, "", "")
+		_, err = uc.CreateCase(ctx, testWorkspaceID, "Open Case 2", "desc", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		// Close one case
@@ -717,7 +792,7 @@ func TestCaseUseCase_CreateCase_DefaultStatus(t *testing.T) {
 	uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 	ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-	created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+	created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, false, "", "")
 	gt.NoError(t, err).Required()
 	gt.Value(t, created.Status).Equal(types.CaseStatusOpen)
 
@@ -733,7 +808,7 @@ func TestCaseUseCase_CloseCase(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 		gt.Value(t, created.Status).Equal(types.CaseStatusOpen)
 
@@ -749,7 +824,7 @@ func TestCaseUseCase_CloseCase(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		_, err = uc.CloseCase(ctx, testWorkspaceID, created.ID)
@@ -825,7 +900,7 @@ func TestCaseUseCase_ReopenCase(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		_, err = uc.CloseCase(ctx, testWorkspaceID, created.ID)
@@ -843,7 +918,7 @@ func TestCaseUseCase_ReopenCase(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		_, err = uc.ReopenCase(ctx, testWorkspaceID, created.ID)
@@ -957,7 +1032,7 @@ func TestCaseUseCase_CreateCase_SlackInvite(t *testing.T) {
 		token := auth.NewToken("UCREATOR", "creator@example.com", "Creator")
 		ctx := auth.ContextWithToken(context.Background(), token)
 
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{"UASSIGNEE1", "UASSIGNEE2"}, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{"UASSIGNEE1", "UASSIGNEE2"}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 		gt.Value(t, created.SlackChannelID).NotEqual("")
 
@@ -982,7 +1057,7 @@ func TestCaseUseCase_CreateCase_SlackInvite(t *testing.T) {
 		token := auth.NewToken("UCREATOR", "creator@example.com", "Creator")
 		ctx := auth.ContextWithToken(context.Background(), token)
 
-		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{"UCREATOR", "UOTHER"}, nil, false, "", "")
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{"UCREATOR", "UOTHER"}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		// UCREATOR should appear only once
@@ -1007,7 +1082,7 @@ func TestCaseUseCase_CreateCase_SlackInvite(t *testing.T) {
 		token := auth.NewToken("UCREATOR", "creator@example.com", "Creator")
 		ctx := auth.ContextWithToken(context.Background(), token)
 
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{"UASSIGNEE"}, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{"UASSIGNEE"}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 		gt.Value(t, created.SlackChannelID).NotEqual("")
 	})
@@ -1024,7 +1099,7 @@ func TestCaseUseCase_CreateCase_SlackInvite(t *testing.T) {
 
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{"UASSIGNEE"}, nil, false, "", "")
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{"UASSIGNEE"}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		// Creator and assignee should be invited
@@ -1044,7 +1119,7 @@ func TestCaseUseCase_CreateCase_SlackInvite(t *testing.T) {
 
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		// Only creator should be invited
@@ -1065,7 +1140,7 @@ func TestCaseUseCase_CreateCase_BookmarkAndMapping(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, mock, nil, "https://example.com")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		// Verify bookmark was added
@@ -1085,7 +1160,7 @@ func TestCaseUseCase_CreateCase_BookmarkAndMapping(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		// Bookmark should not have been added
@@ -1105,7 +1180,7 @@ func TestCaseUseCase_CreateCase_BookmarkAndMapping(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, mock, nil, "https://example.com")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 		gt.Value(t, created.SlackChannelID).NotEqual("")
 	})
@@ -1136,7 +1211,7 @@ func TestCaseUseCase_CreateCase_WelcomeMessages(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, registry, mock, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
 
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Phishing", "desc", []string{}, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Phishing", "desc", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, mock.postedTexts).Length(2).Required()
@@ -1179,7 +1254,7 @@ func TestCaseUseCase_CreateCase_WelcomeMessages(t *testing.T) {
 		fieldValues := map[string]model.FieldValue{
 			"severity": {FieldID: "severity", Type: types.FieldTypeSelect, Value: "high"},
 		}
-		_, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "desc", []string{}, fieldValues, false, "", "")
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "desc", []string{}, fieldValues, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, mock.postedTexts).Length(1).Required()
@@ -1200,7 +1275,7 @@ func TestCaseUseCase_CreateCase_WelcomeMessages(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, registry, mock, nil, "https://example.com")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
 
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "desc", []string{}, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "desc", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		expectedURL := fmt.Sprintf("https://example.com/ws/%s/cases/%d", testWorkspaceID, created.ID)
@@ -1225,7 +1300,7 @@ func TestCaseUseCase_CreateCase_WelcomeMessages(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, registry, mock, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
 
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "desc", []string{}, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "desc", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 		gt.Value(t, created.SlackChannelID).NotEqual("")
 		// Both messages were attempted even though the first failed.
@@ -1242,7 +1317,7 @@ func TestCaseUseCase_CreateCase_WelcomeMessages(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
 
-		_, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "desc", []string{}, nil, false, "", "")
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "desc", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 		gt.Array(t, mock.postedTexts).Length(0)
 	})
@@ -1260,7 +1335,7 @@ func TestCaseUseCase_CreateCase_WelcomeMessages(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, registry, mock, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
 
-		_, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "desc", []string{}, nil, true, "", "")
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "desc", []string{}, nil, true, false, "", "")
 		gt.NoError(t, err).Required()
 		gt.Array(t, mock.postedTexts).Length(1)
 		gt.Value(t, mock.postedTexts[0]).Equal("private welcome")
@@ -1278,7 +1353,7 @@ func TestCaseUseCase_PrivateCaseAccessControl(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Private Case", "Secret", []string{}, nil, true, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Private Case", "Secret", []string{}, nil, true, false, "", "")
 		gt.NoError(t, err).Required()
 		gt.Value(t, created.IsPrivate).Equal(true)
 	})
@@ -1342,7 +1417,7 @@ func TestCaseUseCase_PrivateCaseAccessControl(t *testing.T) {
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMEMBER"})
 
 		// Create public case
-		_, err := uc.CreateCase(ctx, testWorkspaceID, "Public Case", "Visible", []string{}, nil, false, "", "")
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Public Case", "Visible", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		// Create private case with UMEMBER as member
@@ -1459,7 +1534,7 @@ func TestCaseUseCase_PrivateCaseAccessControl(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UANYONE"})
 
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Public Case", "Visible", []string{}, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Public Case", "Visible", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		retrieved, err := uc.GetCase(ctx, testWorkspaceID, created.ID)
@@ -1510,7 +1585,7 @@ func TestCaseUseCase_SyncCaseChannelUsers(t *testing.T) {
 		})
 		gt.NoError(t, err).Required()
 
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Desc", []string{}, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Desc", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 		gt.Value(t, created.SlackChannelID).NotEqual("")
 
@@ -1530,7 +1605,7 @@ func TestCaseUseCase_SyncCaseChannelUsers(t *testing.T) {
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		// Create case without slack service (no channel)
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Desc", []string{}, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Desc", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		_, err = uc.SyncCaseChannelUsers(ctx, testWorkspaceID, created.ID)
@@ -1564,7 +1639,7 @@ func TestCaseUseCase_CreateCase_AutoInvite(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, registry, mock, nil, "")
 
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
-		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		// Creator + auto-invite users
@@ -1591,7 +1666,7 @@ func TestCaseUseCase_CreateCase_AutoInvite(t *testing.T) {
 		seedSlackUsers(t, repo, "UASSIGNEE")
 
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
-		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{"UASSIGNEE"}, nil, false, "", "")
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{"UASSIGNEE"}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		// UCREATOR and UASSIGNEE should appear only once each
@@ -1623,7 +1698,7 @@ func TestCaseUseCase_CreateCase_AutoInvite(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, registry, mock, nil, "")
 
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
-		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		// Creator + group members
@@ -1661,7 +1736,7 @@ func TestCaseUseCase_CreateCase_AutoInvite(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, registry, mock, nil, "")
 
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
-		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		// Creator + resolved group members
@@ -1690,7 +1765,7 @@ func TestCaseUseCase_CreateCase_AutoInvite(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, registry, mock, nil, "")
 
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 		gt.Value(t, created.SlackChannelID).NotEqual("")
 
@@ -1723,7 +1798,7 @@ func TestCaseUseCase_CreateCase_AutoInvite(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, registry, mock, nil, "")
 
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
-		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, "", "")
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		gt.Bool(t, listUserGroupsCalled).False()
@@ -1745,7 +1820,7 @@ func TestCaseUseCase_CreateCase_AutoInvite(t *testing.T) {
 		seedSlackUsers(t, repo, "UASSIGNEE")
 
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
-		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{"UASSIGNEE"}, nil, false, "", "")
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{"UASSIGNEE"}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		gt.Array(t, mock.invitedUserIDs).Length(2)
@@ -1761,7 +1836,7 @@ func TestCaseUseCase_ReporterID(t *testing.T) {
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UREPORTER"})
 		seedSlackUsers(t, repo, "UASSIGNEE")
 
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Reporter Test", "desc", []string{"UASSIGNEE"}, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Reporter Test", "desc", []string{"UASSIGNEE"}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 		gt.String(t, created.ReporterID).Equal("UREPORTER")
 	})
@@ -1777,7 +1852,7 @@ func TestCaseUseCase_ReporterID(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := context.Background()
 
-		_, err := uc.CreateCase(ctx, testWorkspaceID, "No Reporter", "desc", []string{}, nil, false, "", "")
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "No Reporter", "desc", []string{}, nil, false, false, "", "")
 		gt.Error(t, err).Is(model.ErrCaseMissingReporter)
 	})
 
@@ -1787,7 +1862,7 @@ func TestCaseUseCase_ReporterID(t *testing.T) {
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UREPORTER"})
 		seedSlackUsers(t, repo, "UOTHER")
 
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Reporter Preserved", "desc", []string{}, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Reporter Preserved", "desc", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 		gt.String(t, created.ReporterID).Equal("UREPORTER")
 
@@ -1806,7 +1881,7 @@ func TestCaseUseCase_ReporterID(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UREPORTER"})
 
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Persisted Reporter", "desc", []string{}, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Persisted Reporter", "desc", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		retrieved, err := uc.GetCase(ctx, testWorkspaceID, created.ID)
@@ -1849,7 +1924,7 @@ func TestCaseUseCase_CreateCase_CrossWorkspaceConnect(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, registry, slackMock, adminMock, "")
 
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Cross WS Case", "Description", []string{}, nil, false, "TSOURCE", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Cross WS Case", "Description", []string{}, nil, false, false, "TSOURCE", "")
 		gt.NoError(t, err).Required()
 		gt.Value(t, created.SlackChannelID).NotEqual("")
 
@@ -1877,7 +1952,7 @@ func TestCaseUseCase_CreateCase_CrossWorkspaceConnect(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, registry, slackMock, adminMock, "")
 
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
-		_, err := uc.CreateCase(ctx, testWorkspaceID, "Same WS Case", "Description", []string{}, nil, false, "TSAME", "")
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "Same WS Case", "Description", []string{}, nil, false, false, "TSAME", "")
 		gt.NoError(t, err).Required()
 
 		// ConnectChannelToWorkspace should NOT have been called
@@ -1901,7 +1976,7 @@ func TestCaseUseCase_CreateCase_CrossWorkspaceConnect(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, registry, slackMock, adminMock, "")
 
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
-		_, err := uc.CreateCase(ctx, testWorkspaceID, "No Source Team", "Description", []string{}, nil, false, "", "")
+		_, err := uc.CreateCase(ctx, testWorkspaceID, "No Source Team", "Description", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		gt.String(t, adminMock.connectedChannelID).Equal("")
@@ -1928,7 +2003,7 @@ func TestCaseUseCase_CreateCase_CrossWorkspaceConnect(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, registry, slackMock, adminMock, "")
 
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Connect Fail Case", "Description", []string{}, nil, false, "TSOURCE", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Connect Fail Case", "Description", []string{}, nil, false, false, "TSOURCE", "")
 		gt.NoError(t, err).Required()
 		gt.Value(t, created.SlackChannelID).NotEqual("")
 	})
@@ -1950,7 +2025,7 @@ func TestCaseUseCase_CreateCase_CrossWorkspaceConnect(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, registry, slackMock, nil, "")
 
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "No Admin Svc", "Description", []string{}, nil, false, "TSOURCE", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "No Admin Svc", "Description", []string{}, nil, false, false, "TSOURCE", "")
 		gt.NoError(t, err).Required()
 		gt.Value(t, created.SlackChannelID).NotEqual("")
 	})
@@ -1969,13 +2044,13 @@ func TestCaseUseCase_CreateCase_DuplicateRequestKey(t *testing.T) {
 		requestKey := "test-idempotency-key-1"
 
 		// First call creates the case
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "First Case", "Description", []string{}, nil, false, "", requestKey)
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "First Case", "Description", []string{}, nil, false, false, "", requestKey)
 		gt.NoError(t, err).Required()
 		gt.Value(t, created.Title).Equal("First Case")
 		gt.String(t, created.RequestKey).Equal(requestKey)
 
 		// Second call with same key returns existing case
-		duplicate, err := uc.CreateCase(ctx, testWorkspaceID, "Different Title", "Different Desc", []string{}, nil, false, "", requestKey)
+		duplicate, err := uc.CreateCase(ctx, testWorkspaceID, "Different Title", "Different Desc", []string{}, nil, false, false, "", requestKey)
 		gt.NoError(t, err).Required()
 		gt.Value(t, duplicate.ID).Equal(created.ID)
 		gt.Value(t, duplicate.Title).Equal("First Case")
@@ -1996,10 +2071,10 @@ func TestCaseUseCase_CreateCase_DuplicateRequestKey(t *testing.T) {
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
 		// Create two cases with empty key — both should succeed
-		case1, err := uc.CreateCase(ctx, testWorkspaceID, "Case 1", "Desc", []string{}, nil, false, "", "")
+		case1, err := uc.CreateCase(ctx, testWorkspaceID, "Case 1", "Desc", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
-		case2, err := uc.CreateCase(ctx, testWorkspaceID, "Case 2", "Desc", []string{}, nil, false, "", "")
+		case2, err := uc.CreateCase(ctx, testWorkspaceID, "Case 2", "Desc", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, case1.ID).NotEqual(case2.ID)
@@ -2014,10 +2089,10 @@ func TestCaseUseCase_CreateCase_DuplicateRequestKey(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
 
-		case1, err := uc.CreateCase(ctx, testWorkspaceID, "Case A", "Desc", []string{}, nil, false, "", "key-a")
+		case1, err := uc.CreateCase(ctx, testWorkspaceID, "Case A", "Desc", []string{}, nil, false, false, "", "key-a")
 		gt.NoError(t, err).Required()
 
-		case2, err := uc.CreateCase(ctx, testWorkspaceID, "Case B", "Desc", []string{}, nil, false, "", "key-b")
+		case2, err := uc.CreateCase(ctx, testWorkspaceID, "Case B", "Desc", []string{}, nil, false, false, "", "key-b")
 		gt.NoError(t, err).Required()
 
 		gt.Value(t, case1.ID).NotEqual(case2.ID)
@@ -2038,7 +2113,7 @@ func TestCaseUseCase_CreateDraft(t *testing.T) {
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UAUTHOR"})
 		seedSlackUsers(t, repo, "UASSIGN")
 
-		got, err := uc.CreateDraft(ctx, testWorkspaceID, "Half-written", "Desc", []string{"UASSIGN"}, nil, true)
+		got, err := uc.CreateDraft(ctx, testWorkspaceID, "Half-written", "Desc", []string{"UASSIGN"}, nil, true, false)
 		gt.NoError(t, err).Required()
 		gt.Value(t, got.Status).Equal(types.CaseStatusDraft)
 		gt.Value(t, got.Title).Equal("Half-written")
@@ -2066,7 +2141,7 @@ func TestCaseUseCase_CreateDraft(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UAUTHOR"})
 
-		got, err := uc.CreateDraft(ctx, testWorkspaceID, "", "Just a body", nil, nil, false)
+		got, err := uc.CreateDraft(ctx, testWorkspaceID, "", "Just a body", nil, nil, false, false)
 		gt.NoError(t, err).Required()
 		gt.Value(t, got.Status).Equal(types.CaseStatusDraft)
 		gt.Value(t, got.Title).Equal("")
@@ -2099,7 +2174,7 @@ func TestCaseUseCase_CreateDraft(t *testing.T) {
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UAUTHOR"})
 
 		// No "category" supplied — required field missing.
-		got, err := uc.CreateDraft(ctx, testWorkspaceID, "Half", "", nil, nil, false)
+		got, err := uc.CreateDraft(ctx, testWorkspaceID, "Half", "", nil, nil, false, false)
 		gt.NoError(t, err).Required()
 		gt.Value(t, got.Status).Equal(types.CaseStatusDraft)
 		gt.Number(t, len(got.FieldValues)).Equal(0)
@@ -2116,17 +2191,17 @@ func TestCaseUseCase_ListDrafts(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 
 		mineCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
-		mineA, err := uc.CreateDraft(mineCtx, testWorkspaceID, "Mine A", "", nil, nil, false)
+		mineA, err := uc.CreateDraft(mineCtx, testWorkspaceID, "Mine A", "", nil, nil, false, false)
 		gt.NoError(t, err).Required()
-		mineB, err := uc.CreateDraft(mineCtx, testWorkspaceID, "Mine B", "", nil, nil, false)
+		mineB, err := uc.CreateDraft(mineCtx, testWorkspaceID, "Mine B", "", nil, nil, false, false)
 		gt.NoError(t, err).Required()
 
 		otherCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
-		theirs, err := uc.CreateDraft(otherCtx, testWorkspaceID, "Theirs", "", nil, nil, false)
+		theirs, err := uc.CreateDraft(otherCtx, testWorkspaceID, "Theirs", "", nil, nil, false, false)
 		gt.NoError(t, err).Required()
 
 		// Open case by UMINE — must NOT appear in drafts.
-		_, err = uc.CreateCase(mineCtx, testWorkspaceID, "Submitted", "", nil, nil, false, "", "")
+		_, err = uc.CreateCase(mineCtx, testWorkspaceID, "Submitted", "", nil, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		got, err := uc.ListDrafts(mineCtx, testWorkspaceID)
@@ -2152,9 +2227,9 @@ func TestCaseUseCase_ListDrafts(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 
 		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOWNER"})
-		privateDraft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Secret", "", nil, nil, true)
+		privateDraft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Secret", "", nil, nil, true, false)
 		gt.NoError(t, err).Required()
-		publicDraft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Public", "", nil, nil, false)
+		publicDraft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Public", "", nil, nil, false, false)
 		gt.NoError(t, err).Required()
 
 		// The owner sees both their public and their private draft.
@@ -2184,9 +2259,9 @@ func TestCaseUseCase_ListDrafts(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 
 		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOWNER"})
-		_, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Public draft", "", nil, nil, false)
+		_, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Public draft", "", nil, nil, false, false)
 		gt.NoError(t, err).Required()
-		_, err = uc.CreateDraft(ownerCtx, testWorkspaceID, "Private draft", "", nil, nil, true)
+		_, err = uc.CreateDraft(ownerCtx, testWorkspaceID, "Private draft", "", nil, nil, true, false)
 		gt.NoError(t, err).Required()
 
 		got, err := uc.ListDrafts(context.Background(), testWorkspaceID)
@@ -2230,7 +2305,7 @@ func TestCaseUseCase_GetDraft(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
 
-		created, err := uc.CreateDraft(ctx, testWorkspaceID, "Mine", "Body", nil, nil, false)
+		created, err := uc.CreateDraft(ctx, testWorkspaceID, "Mine", "Body", nil, nil, false, false)
 		gt.NoError(t, err).Required()
 
 		got, err := uc.GetDraft(ctx, testWorkspaceID, created.ID)
@@ -2247,7 +2322,7 @@ func TestCaseUseCase_GetDraft(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 
 		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
-		created, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Shared", "", nil, nil, false)
+		created, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Shared", "", nil, nil, false, false)
 		gt.NoError(t, err).Required()
 
 		otherCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
@@ -2262,7 +2337,7 @@ func TestCaseUseCase_GetDraft(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 
 		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
-		created, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Hidden", "", nil, nil, true)
+		created, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Hidden", "", nil, nil, true, false)
 		gt.NoError(t, err).Required()
 
 		otherCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
@@ -2275,7 +2350,7 @@ func TestCaseUseCase_GetDraft(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
 
-		open, err := uc.CreateCase(ctx, testWorkspaceID, "Open Case", "", nil, nil, false, "", "")
+		open, err := uc.CreateCase(ctx, testWorkspaceID, "Open Case", "", nil, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		_, err = uc.GetDraft(ctx, testWorkspaceID, open.ID)
@@ -2304,7 +2379,7 @@ func TestCaseUseCase_SubmitDraft(t *testing.T) {
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UAUTHOR"})
 		seedSlackUsers(t, repo, "UASSIGN")
 
-		draft, err := uc.CreateDraft(ctx, testWorkspaceID, "Will Submit", "Body", []string{"UASSIGN"}, nil, false)
+		draft, err := uc.CreateDraft(ctx, testWorkspaceID, "Will Submit", "Body", []string{"UASSIGN"}, nil, false, false)
 		gt.NoError(t, err).Required()
 		gt.Value(t, draft.Status).Equal(types.CaseStatusDraft)
 
@@ -2343,7 +2418,7 @@ func TestCaseUseCase_SubmitDraft(t *testing.T) {
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UAUTHOR"})
 		seedSlackUsers(t, repo, "UOLD", "UNEW")
 
-		draft, err := uc.CreateDraft(ctx, testWorkspaceID, "Half-written", "old body", []string{"UOLD"}, nil, false)
+		draft, err := uc.CreateDraft(ctx, testWorkspaceID, "Half-written", "old body", []string{"UOLD"}, nil, false, false)
 		gt.NoError(t, err).Required()
 
 		// Swap assignees before submitting: remove UOLD, add UNEW.
@@ -2386,7 +2461,7 @@ func TestCaseUseCase_SubmitDraft(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UAUTHOR"})
 
-		draft, err := uc.CreateDraft(ctx, testWorkspaceID, "", "Body only", nil, nil, false)
+		draft, err := uc.CreateDraft(ctx, testWorkspaceID, "", "Body only", nil, nil, false, false)
 		gt.NoError(t, err).Required()
 
 		_, err = uc.SubmitDraft(ctx, testWorkspaceID, draft.ID, nil)
@@ -2412,7 +2487,7 @@ func TestCaseUseCase_SubmitDraft(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
 
 		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UALICE"})
-		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Public draft", "", nil, nil, false)
+		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Public draft", "", nil, nil, false, false)
 		gt.NoError(t, err).Required()
 
 		submitterCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UBOB"})
@@ -2444,7 +2519,7 @@ func TestCaseUseCase_SubmitDraft(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
 
 		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
-		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Shared", "", nil, nil, false)
+		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Shared", "", nil, nil, false, false)
 		gt.NoError(t, err).Required()
 
 		otherCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
@@ -2462,7 +2537,7 @@ func TestCaseUseCase_SubmitDraft(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 
 		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
-		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Secret", "", nil, nil, true)
+		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Secret", "", nil, nil, true, false)
 		gt.NoError(t, err).Required()
 
 		otherCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
@@ -2496,7 +2571,7 @@ func TestCaseUseCase_SubmitDraft(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UAUTHOR"})
 
-		draft, err := uc.CreateDraft(ctx, testWorkspaceID, "Has Title", "", nil, nil, false)
+		draft, err := uc.CreateDraft(ctx, testWorkspaceID, "Has Title", "", nil, nil, false, false)
 		gt.NoError(t, err).Required()
 
 		_, err = uc.SubmitDraft(ctx, testWorkspaceID, draft.ID, nil)
@@ -2528,7 +2603,7 @@ func TestCaseUseCase_SubmitDraft(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, mock, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UAUTHOR"})
 
-		draft, err := uc.CreateDraft(ctx, testWorkspaceID, "Will Fail", "Body", nil, nil, false)
+		draft, err := uc.CreateDraft(ctx, testWorkspaceID, "Will Fail", "Body", nil, nil, false, false)
 		gt.NoError(t, err).Required()
 
 		_, err = uc.SubmitDraft(ctx, testWorkspaceID, draft.ID, nil)
@@ -2547,7 +2622,7 @@ func TestCaseUseCase_SubmitDraft(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UAUTHOR"})
 
-		open, err := uc.CreateCase(ctx, testWorkspaceID, "Already Open", "", nil, nil, false, "", "")
+		open, err := uc.CreateCase(ctx, testWorkspaceID, "Already Open", "", nil, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		_, err = uc.SubmitDraft(ctx, testWorkspaceID, open.ID, nil)
@@ -2561,7 +2636,7 @@ func TestCaseUseCase_DiscardDraft(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
 
-		draft, err := uc.CreateDraft(ctx, testWorkspaceID, "Discard Me", "", nil, nil, false)
+		draft, err := uc.CreateDraft(ctx, testWorkspaceID, "Discard Me", "", nil, nil, false, false)
 		gt.NoError(t, err).Required()
 
 		err = uc.DiscardDraft(ctx, testWorkspaceID, draft.ID)
@@ -2579,7 +2654,7 @@ func TestCaseUseCase_DiscardDraft(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 
 		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
-		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Shared", "", nil, nil, false)
+		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Shared", "", nil, nil, false, false)
 		gt.NoError(t, err).Required()
 
 		otherCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
@@ -2594,7 +2669,7 @@ func TestCaseUseCase_DiscardDraft(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 
 		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
-		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Hidden", "", nil, nil, true)
+		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Hidden", "", nil, nil, true, false)
 		gt.NoError(t, err).Required()
 
 		otherCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UOTHER"})
@@ -2612,7 +2687,7 @@ func TestCaseUseCase_DiscardDraft(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
 
-		open, err := uc.CreateCase(ctx, testWorkspaceID, "Open", "", nil, nil, false, "", "")
+		open, err := uc.CreateCase(ctx, testWorkspaceID, "Open", "", nil, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		err = uc.DiscardDraft(ctx, testWorkspaceID, open.ID)
@@ -2626,7 +2701,7 @@ func TestCaseUseCase_GetCase_DraftVisibility(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 
 		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
-		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Public draft", "", nil, nil, false)
+		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Public draft", "", nil, nil, false, false)
 		gt.NoError(t, err).Required()
 
 		// Reporter sees their draft.
@@ -2650,7 +2725,7 @@ func TestCaseUseCase_GetCase_DraftVisibility(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 
 		ownerCtx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
-		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Secret", "", nil, nil, true)
+		draft, err := uc.CreateDraft(ownerCtx, testWorkspaceID, "Secret", "", nil, nil, true, false)
 		gt.NoError(t, err).Required()
 
 		got, err := uc.GetCase(ownerCtx, testWorkspaceID, draft.ID)
@@ -2697,7 +2772,7 @@ func TestCaseUseCase_PublishesCreatedLifecycle(t *testing.T) {
 	uc.SetEventPublisher(pub)
 
 	ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-CALLER"})
-	created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", nil, nil, false, "", "")
+	created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", nil, nil, false, false, "", "")
 	gt.NoError(t, err).Required()
 
 	gt.Array(t, pub.events).Length(1).Required()
@@ -2719,7 +2794,7 @@ func TestCaseUseCase_PublishesClosedLifecycle(t *testing.T) {
 	uc.SetEventPublisher(pub)
 
 	ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-CALLER"})
-	created, err := uc.CreateCase(ctx, testWorkspaceID, "T", "", nil, nil, false, "", "")
+	created, err := uc.CreateCase(ctx, testWorkspaceID, "T", "", nil, nil, false, false, "", "")
 	gt.NoError(t, err).Required()
 	gt.Array(t, pub.events).Length(1).Required()
 
@@ -2741,7 +2816,7 @@ func TestCaseUseCase_NoPublishWhenNotConfigured(t *testing.T) {
 	// no SetEventPublisher
 
 	ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-CALLER"})
-	_, err := uc.CreateCase(ctx, testWorkspaceID, "T", "", nil, nil, false, "", "")
+	_, err := uc.CreateCase(ctx, testWorkspaceID, "T", "", nil, nil, false, false, "", "")
 	gt.NoError(t, err).Required()
 	// Compiles and runs without panic.
 }
@@ -2850,7 +2925,7 @@ func TestLifecycle_CreateCaseTriggersAgentJob(t *testing.T) {
 	caseUC.SetEventPublisher(jobUC)
 
 	ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-CALLER"})
-	created, err := caseUC.CreateCase(ctx, wsID, "Lifecycle test", "auto summary please", nil, nil, false, "", "")
+	created, err := caseUC.CreateCase(ctx, wsID, "Lifecycle test", "auto summary please", nil, nil, false, false, "", "")
 	gt.NoError(t, err).Required()
 
 	async.Wait()
@@ -2886,7 +2961,7 @@ func TestCaseUseCase_UpdateAgentSettings(t *testing.T) {
 		})
 		gt.NoError(t, err).Required()
 
-		c, err := uc.CreateCase(ctx, testWorkspaceID, "agent settings target", "desc", nil, nil, false, "", "")
+		c, err := uc.CreateCase(ctx, testWorkspaceID, "agent settings target", "desc", nil, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 		return repo, uc, src1.ID, src2.ID, c
 	}
@@ -2944,7 +3019,7 @@ func TestCaseUseCase_UpdateAgentSettings(t *testing.T) {
 		uc := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UREPORTER"})
 
-		c, err := uc.CreateCase(ctx, testWorkspaceID, "private case", "", nil, nil, true, "", "")
+		c, err := uc.CreateCase(ctx, testWorkspaceID, "private case", "", nil, nil, true, false, "", "")
 		gt.NoError(t, err).Required()
 
 		// Mark the case as private with explicit channel membership.
@@ -3155,7 +3230,7 @@ func TestCaseUseCase_UpdateCase_UserExistence(t *testing.T) {
 		uc, repo := newUC(t)
 		seedSlackUsers(t, repo, "UCREATOR")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", nil, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", nil, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		// Assignees are now mutated via AssignCase, not UpdateCase.
@@ -3167,7 +3242,7 @@ func TestCaseUseCase_UpdateCase_UserExistence(t *testing.T) {
 		uc, repo := newUC(t)
 		seedSlackUsers(t, repo, "UCREATOR", "UREAL")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", nil, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", nil, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		// Assignees are now mutated via AssignCase, not UpdateCase.
@@ -3180,7 +3255,7 @@ func TestCaseUseCase_UpdateCase_UserExistence(t *testing.T) {
 		uc, repo := newUC(t)
 		seedSlackUsers(t, repo, "UCREATOR")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", nil, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", nil, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		_, err = uc.UpdateCase(ctx, testWorkspaceID, created.ID, usecase.CaseUpdate{
@@ -3195,7 +3270,7 @@ func TestCaseUseCase_UpdateCase_UserExistence(t *testing.T) {
 		uc, repo := newUC(t)
 		seedSlackUsers(t, repo, "UCREATOR", "UA", "UB")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", nil, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", nil, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		_, err = uc.UpdateCase(ctx, testWorkspaceID, created.ID, usecase.CaseUpdate{
@@ -3218,7 +3293,7 @@ func TestCaseUseCase_UpdateCase_UserExistence(t *testing.T) {
 		uc, repo := newUC(t)
 		seedSlackUsers(t, repo, "UCREATOR")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
-		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", nil, nil, false, "", "")
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Title", "Desc", nil, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		_, err = uc.UpdateCase(ctx, testWorkspaceID, created.ID, usecase.CaseUpdate{
@@ -3284,7 +3359,7 @@ func TestCaseUseCase_VerifyCaseRefsExist(t *testing.T) {
 	setup := func(t *testing.T) (*usecase.CaseUseCase, interfaces.Repository, int64) {
 		uc, repo := newCaseRefUC(t)
 		ctx := ctxWith()
-		base, err := uc.CreateCase(ctx, testWorkspaceID, "Main", "Desc", nil, nil, false, "", "")
+		base, err := uc.CreateCase(ctx, testWorkspaceID, "Main", "Desc", nil, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 		return uc, repo, base.ID
 	}

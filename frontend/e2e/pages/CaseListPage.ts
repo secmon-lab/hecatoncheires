@@ -52,6 +52,13 @@ export class CaseListPage extends BasePage {
   }
 
   /**
+   * Whether the row for the given case title shows the "Test" badge.
+   */
+  async caseRowHasTestBadge(title: string): Promise<boolean> {
+    return await this.getCaseRowByTitle(title).getByTestId('test-badge').isVisible();
+  }
+
+  /**
    * Check if a case with the given title exists
    */
   async caseExists(title: string): Promise<boolean> {

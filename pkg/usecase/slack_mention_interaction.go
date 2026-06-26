@@ -215,6 +215,7 @@ func (uc *MentionProposalUseCase) HandleSubmit(ctx context.Context, caseUC *Case
 		[]string{callback.User.ID},
 		mat.CustomFieldValues,
 		false,
+		mat.IsTest,
 		callback.Team.ID,
 		uuid.New().String(),
 	)
@@ -353,6 +354,7 @@ func (uc *MentionProposalUseCase) HandleEditSubmit(ctx context.Context, caseUC *
 	title := readPlainInput(blockValues, blockIDDraftEditTitle, actionIDDraftEditTitle)
 	description := readPlainInput(blockValues, blockIDDraftEditDescription, actionIDDraftEditDescription)
 	fieldValues := extractFieldValues(blockValues)
+	isTest := readDraftEditTestFlag(blockValues)
 
 	// Same auth-context injection as the preview-submit path above —
 	// the modal submission is also a Slack interactivity callback with
@@ -367,6 +369,7 @@ func (uc *MentionProposalUseCase) HandleEditSubmit(ctx context.Context, caseUC *
 		[]string{callback.User.ID},
 		fieldValues,
 		false,
+		isTest,
 		callback.Team.ID,
 		uuid.New().String(),
 	)
@@ -501,4 +504,24 @@ func readPlainInput(blockValues map[string]map[string]goslack.BlockAction, block
 		return ""
 	}
 	return action.Value
+}
+
+// readDraftEditTestFlag reads the Test-case checkbox from the proposal Edit
+// modal. The modal always renders the checkbox, so its submitted state is
+// authoritative; absent / unticked means false.
+func readDraftEditTestFlag(blockValues map[string]map[string]goslack.BlockAction) bool {
+	block, ok := blockValues[blockIDDraftEditTest]
+	if !ok {
+		return false
+	}
+	action, ok := block[actionIDDraftEditTest]
+	if !ok {
+		return false
+	}
+	for _, opt := range action.SelectedOptions {
+		if opt.Value == caseOptionValueTest {
+			return true
+		}
+	}
+	return false
 }

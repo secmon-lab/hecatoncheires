@@ -148,6 +148,25 @@ func TestParseAndValidate_Materialize(t *testing.T) {
 	gt.Value(t, p.Materialize.WorkspaceID).Equal("ws-1")
 	gt.Value(t, p.Materialize.Title).Equal("API outage")
 	gt.Value(t, p.Materialize.CustomFieldValues["severity"]).Equal("high")
+	// is_test omitted defaults to false.
+	gt.Bool(t, p.Materialize.IsTest).False()
+}
+
+func TestParseAndValidate_MaterializeIsTest(t *testing.T) {
+	raw := []byte(`{
+		"reasoning": "user explicitly says this is a drill",
+		"action": "materialize",
+		"materialize": {
+			"workspace_id": "ws-1",
+			"title": "Test drill",
+			"description": "Brief.",
+			"custom_field_values": {},
+			"is_test": true
+		}
+	}`)
+	p, err := proposal.ParseAndValidateForTest(raw)
+	gt.NoError(t, err).Required()
+	gt.Bool(t, p.Materialize.IsTest).True()
 }
 
 func TestParseAndValidate_RejectsBadJSON(t *testing.T) {
@@ -305,6 +324,9 @@ func TestPlanSchema_Shape(t *testing.T) {
 	gt.Map(t, schema.Properties).HasKey("investigate")
 	gt.Map(t, schema.Properties).HasKey("question")
 	gt.Map(t, schema.Properties).HasKey("materialize")
+	// materialize exposes the optional is_test boolean to the planner.
+	gt.Map(t, schema.Properties["materialize"].Properties).HasKey("is_test")
+	gt.Value(t, schema.Properties["materialize"].Properties["is_test"].Type).Equal(gollem.TypeBoolean)
 	// action enum covers the three planActions.
 	actionEnum := schema.Properties["action"].Enum
 	gt.Array(t, actionEnum).Length(3)

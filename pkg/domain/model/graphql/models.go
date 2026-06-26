@@ -16,6 +16,7 @@ type Case struct {
 	Description    string           `json:"description"`
 	Status         types.CaseStatus `json:"status"`
 	IsPrivate      bool             `json:"isPrivate"`
+	IsTest         bool             `json:"isTest"`
 	AccessDenied   bool             `json:"accessDenied"`
 	ChannelUserIDs []string         `json:"-"` // Internal: used by channelUsers resolver
 	ReporterID     *string          `json:"reporterID,omitempty"`

@@ -511,8 +511,17 @@ func buildPreviewBlocks(
 	//    markdown block also dodges the per-section "Show more" cutoff.
 	blocks := []goslack.Block{
 		buildTitleAndDescriptionMarkdown("mention_draft_body", mat.Title, mat.Description),
-		goslack.NewDividerBlock(),
 	}
+	// Surface the test-case suggestion right under the title so a one-click
+	// Submit (which skips the Edit modal) does not hide the flag from the
+	// user before the Case is created.
+	if mat.IsTest {
+		blocks = append(blocks, goslack.NewContextBlock(
+			"mention_draft_test",
+			goslack.NewTextBlockObject(goslack.MarkdownType, ":test_tube: *Test case* — filed for verification rather than a real case.", false, false),
+		))
+	}
+	blocks = append(blocks, goslack.NewDividerBlock())
 
 	// 3. Custom fields (definition list, required-missing flagged).
 	if selected.FieldSchema != nil {

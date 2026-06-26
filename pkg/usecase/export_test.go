@@ -151,6 +151,9 @@ const (
 	ActionIDDraftEditTitleForTest       = actionIDDraftEditTitle
 	BlockIDDraftEditDescriptionForTest  = blockIDDraftEditDescription
 	ActionIDDraftEditDescriptionForTest = actionIDDraftEditDescription
+	BlockIDDraftEditTestForTest         = blockIDDraftEditTest
+	ActionIDDraftEditTestForTest        = actionIDDraftEditTest
+	CaseOptionValueTestForTest          = caseOptionValueTest
 )
 
 // NotificationSlotCoordinatorForTest is the test-only alias for the

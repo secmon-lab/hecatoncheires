@@ -71,7 +71,7 @@ func TestSlackInteractionHandler(t *testing.T) {
 		})).Required()
 
 		ctx := auth.ContextWithToken(t.Context(), &auth.Token{Sub: "UTESTUSER"})
-		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Desc", []string{}, nil, false, "", "")
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Desc", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		action, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Desc", "U001", "", types.ActionStatusTodo, nil)
@@ -95,7 +95,7 @@ func TestSlackInteractionHandler(t *testing.T) {
 		})).Required()
 
 		ctx := auth.ContextWithToken(t.Context(), &auth.Token{Sub: "UTESTUSER"})
-		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Desc", []string{}, nil, false, "", "")
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Desc", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		action, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Test Action", "Desc", "U001", "", types.ActionStatusTodo, nil)
@@ -511,7 +511,7 @@ func TestSlackInteractionHandler_ViewSubmission(t *testing.T) {
 
 		// Create an existing case
 		ctx := auth.ContextWithToken(t.Context(), &auth.Token{Sub: "UTESTUSER"})
-		created, err := caseUC.CreateCase(ctx, "risk", "Original Title", "Original desc", []string{}, nil, false, "", "")
+		created, err := caseUC.CreateCase(ctx, "risk", "Original Title", "Original desc", []string{}, nil, false, false, "", "")
 		gt.NoError(t, err).Required()
 
 		handler := newTestSlackHandler(t, repo, registry, actionUC, slackUC, caseUC)

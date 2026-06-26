@@ -151,6 +151,8 @@ const (
 	MsgFieldCaseOptions   // Block label "Options"
 	MsgFieldDraftMode     // Option label "Draft mode"
 	MsgFieldDraftModeDesc // Description for the Draft mode option
+	MsgFieldTestCase      // Option label "Test case"
+	MsgFieldTestCaseDesc  // Description for the Test case option
 
 	// Case assignees field
 	MsgFieldCaseAssignees

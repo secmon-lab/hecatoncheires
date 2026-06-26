@@ -42,6 +42,10 @@ const (
 	SlackActionIDCasePrivate     = "hc_case_private"
 	SlackBlockIDCaseAssignees    = "hc_case_assignees_block"
 	SlackActionIDCaseAssignees   = "hc_case_assignees"
+	// Edit modal's standalone "Options" checkbox group, currently carrying
+	// only the Test-case flag (private/draft are creation-only concerns).
+	SlackBlockIDCaseTest  = "hc_case_test_block"
+	SlackActionIDCaseTest = "hc_case_test"
 
 	// Command choice modal block / action IDs
 	SlackBlockIDCommandChoice  = "hc_command_choice_block"
@@ -85,6 +89,7 @@ const (
 	// distinguished only by their option value.
 	caseOptionValuePrivate = "private"
 	caseOptionValueDraft   = "draft"
+	caseOptionValueTest    = "test"
 )
 
 // commandMetadata is stored in modal private_metadata as JSON
@@ -269,7 +274,7 @@ func (uc *SlackUseCases) HandleCaseCreationSubmit(ctx context.Context, caseUC *C
 	// Extract custom field values from the view state
 	fieldValues := extractFieldValues(blockValues)
 
-	isPrivate, isDraft := readCaseOptionFlags(blockValues)
+	isPrivate, isDraft, isTest := readCaseOptionFlags(blockValues)
 
 	userID := callback.User.ID
 
@@ -284,11 +289,11 @@ func (uc *SlackUseCases) HandleCaseCreationSubmit(ctx context.Context, caseUC *C
 	createCtx := auth.ContextWithToken(ctx, &auth.Token{Sub: userID})
 
 	if isDraft {
-		return uc.createDraftFromSubmit(createCtx, caseUC, callback, meta, title, description, fieldValues, isPrivate)
+		return uc.createDraftFromSubmit(createCtx, caseUC, callback, meta, title, description, fieldValues, isPrivate, isTest)
 	}
 
 	// Create case using existing CaseUseCase
-	created, err := caseUC.CreateCase(createCtx, meta.WorkspaceID, title, description, []string{userID}, fieldValues, isPrivate, meta.SourceTeamID, meta.RequestKey)
+	created, err := caseUC.CreateCase(createCtx, meta.WorkspaceID, title, description, []string{userID}, fieldValues, isPrivate, isTest, meta.SourceTeamID, meta.RequestKey)
 	if err != nil {
 		return goerr.Wrap(err, "failed to create case via slash command",
 			goerr.V("workspace_id", meta.WorkspaceID),
@@ -328,20 +333,20 @@ func (uc *SlackUseCases) HandleCaseCreationSubmit(ctx context.Context, caseUC *C
 	return nil
 }
 
-// readCaseOptionFlags pulls the (private, draft) booleans out of the
-// case creation modal's Options checkbox group. Both flags share the
+// readCaseOptionFlags pulls the (private, draft, test) booleans out of the
+// case creation modal's Options checkbox group. All flags share the
 // same checkbox group element keyed by SlackBlockIDCasePrivate /
 // SlackActionIDCasePrivate (legacy IDs kept stable to ride along with
 // any in-flight callbacks), and are distinguished only by their option
 // value strings.
-func readCaseOptionFlags(blockValues map[string]map[string]slack.BlockAction) (isPrivate, isDraft bool) {
+func readCaseOptionFlags(blockValues map[string]map[string]slack.BlockAction) (isPrivate, isDraft, isTest bool) {
 	optBlock, ok := blockValues[SlackBlockIDCasePrivate]
 	if !ok {
-		return false, false
+		return false, false, false
 	}
 	optAction, ok := optBlock[SlackActionIDCasePrivate]
 	if !ok {
-		return false, false
+		return false, false, false
 	}
 	for _, opt := range optAction.SelectedOptions {
 		switch opt.Value {
@@ -349,9 +354,31 @@ func readCaseOptionFlags(blockValues map[string]map[string]slack.BlockAction) (i
 			isPrivate = true
 		case caseOptionValueDraft:
 			isDraft = true
+		case caseOptionValueTest:
+			isTest = true
 		}
 	}
-	return isPrivate, isDraft
+	return isPrivate, isDraft, isTest
+}
+
+// readCaseTestFlag pulls the Test-case boolean out of the case edit
+// modal's standalone Test checkbox group (SlackBlockIDCaseTest /
+// SlackActionIDCaseTest). Absent / unticked means false.
+func readCaseTestFlag(blockValues map[string]map[string]slack.BlockAction) bool {
+	optBlock, ok := blockValues[SlackBlockIDCaseTest]
+	if !ok {
+		return false
+	}
+	optAction, ok := optBlock[SlackActionIDCaseTest]
+	if !ok {
+		return false
+	}
+	for _, opt := range optAction.SelectedOptions {
+		if opt.Value == caseOptionValueTest {
+			return true
+		}
+	}
+	return false
 }
 
 // createDraftFromSubmit is the view_submission counterpart to the
@@ -371,11 +398,12 @@ func (uc *SlackUseCases) createDraftFromSubmit(
 	title, description string,
 	fieldValues map[string]model.FieldValue,
 	isPrivate bool,
+	isTest bool,
 ) error {
 	userID := callback.User.ID
 	ctx = auth.ContextWithToken(ctx, &auth.Token{Sub: userID})
 
-	created, err := caseUC.CreateDraft(ctx, meta.WorkspaceID, title, description, []string{userID}, fieldValues, isPrivate)
+	created, err := caseUC.CreateDraft(ctx, meta.WorkspaceID, title, description, []string{userID}, fieldValues, isPrivate, isTest)
 	if err != nil {
 		uc.notifyDraftSubmitFailure(ctx, meta.ChannelID, userID)
 		return goerr.Wrap(err, "failed to save draft via slash command",
@@ -525,7 +553,12 @@ func (uc *SlackUseCases) buildCaseCreationModal(ctx context.Context, workspaceID
 		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgFieldDraftMode), false, false),
 		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgFieldDraftModeDesc), false, false),
 	)
-	optionsCheckbox := slack.NewCheckboxGroupsBlockElement(SlackActionIDCasePrivate, privateOption, draftOption)
+	testOption := slack.NewOptionBlockObject(
+		caseOptionValueTest,
+		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgFieldTestCase), false, false),
+		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgFieldTestCaseDesc), false, false),
+	)
+	optionsCheckbox := slack.NewCheckboxGroupsBlockElement(SlackActionIDCasePrivate, privateOption, draftOption, testOption)
 	optionsInput := slack.NewInputBlock(
 		SlackBlockIDCasePrivate,
 		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgFieldCaseOptions), false, false),
@@ -868,10 +901,30 @@ func (uc *SlackUseCases) buildCaseEditModal(ctx context.Context, workspaceID, ch
 	)
 	assigneeInput.Optional = true
 
+	// Test-case flag. A single-option checkbox group, pre-ticked when the
+	// case is already marked as a test, so editing can toggle it both ways.
+	testOption := slack.NewOptionBlockObject(
+		caseOptionValueTest,
+		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgFieldTestCase), false, false),
+		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgFieldTestCaseDesc), false, false),
+	)
+	testCheckbox := slack.NewCheckboxGroupsBlockElement(SlackActionIDCaseTest, testOption)
+	if existingCase.IsTest {
+		testCheckbox.InitialOptions = []*slack.OptionBlockObject{testOption}
+	}
+	testInput := slack.NewInputBlock(
+		SlackBlockIDCaseTest,
+		slack.NewTextBlockObject(slack.PlainTextType, i18n.T(ctx, i18n.MsgFieldCaseOptions), false, false),
+		nil,
+		testCheckbox,
+	)
+	testInput.Optional = true
+
 	blocks := []slack.Block{
 		titleInput,
 		descInput,
 		assigneeInput,
+		testInput,
 	}
 
 	// Add custom field inputs with prefilled values
@@ -931,9 +984,14 @@ func (uc *SlackUseCases) HandleCaseEditSubmit(ctx context.Context, caseUC *CaseU
 	fieldValues := extractFieldValues(blockValues)
 	userID := callback.User.ID
 
+	// The edit modal always renders the Test-case checkbox, so its
+	// submitted state is authoritative: read it as a definite value and
+	// pass a non-nil pointer so the toggle works both directions.
+	isTest := readCaseTestFlag(blockValues)
 	patch := CaseUpdate{
 		Title:       &title,
 		Description: &description,
+		IsTest:      &isTest,
 		Fields:      fieldValues,
 	}
 	updated, err := caseUC.UpdateCase(ctx, meta.WorkspaceID, meta.CaseID, patch)

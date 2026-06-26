@@ -214,7 +214,9 @@ func (uc *ImportUseCase) Execute(ctx context.Context, workspaceID string, id mod
 
 		createdCase, ccErr := uc.caseUC.CreateDraft(
 			ctx, workspaceID,
-			c.Title, c.Description, c.AssigneeIDs, c.FieldValues, c.IsPrivate,
+			// Imported cases are real cases by default; the import format
+			// carries no test flag, so IsTest is always false here.
+			c.Title, c.Description, c.AssigneeIDs, c.FieldValues, c.IsPrivate, false,
 		)
 		if ccErr != nil {
 			c.Result = model.ImportCaseResult{

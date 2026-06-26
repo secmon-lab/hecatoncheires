@@ -87,6 +87,18 @@ export class CaseFormPage extends BasePage {
   }
 
   /**
+   * Toggle the "Test case" checkbox to the desired checked state. The
+   * checkbox is shown on both the create and edit forms.
+   */
+  async setTestCase(checked: boolean): Promise<void> {
+    const checkbox = this.page.getByTestId('test-case-checkbox');
+    await checkbox.waitFor({ state: 'visible', timeout: 5000 });
+    if ((await checkbox.isChecked()) !== checked) {
+      await checkbox.click();
+    }
+  }
+
+  /**
    * Fill a custom field by field ID
    * Automatically detects if it's a select or input field
    */
@@ -164,6 +176,7 @@ export class CaseFormPage extends BasePage {
     title: string;
     description?: string;
     customFields?: Record<string, string>;
+    isTest?: boolean;
   }): Promise<void> {
     await this.waitForFormVisible();
     await this.fillTitle(data.title);
@@ -176,6 +189,10 @@ export class CaseFormPage extends BasePage {
       for (const [fieldId, value] of Object.entries(data.customFields)) {
         await this.fillCustomField(fieldId, value);
       }
+    }
+
+    if (data.isTest) {
+      await this.setTestCase(true);
     }
 
     await this.submit();
