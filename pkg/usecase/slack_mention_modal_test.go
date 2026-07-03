@@ -1,6 +1,7 @@
 package usecase_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -41,7 +42,7 @@ func TestBuildDraftEditModal_DescriptionClampedForLongInput(t *testing.T) {
 		Description: long,
 	}
 
-	view := usecase.BuildDraftEditModalForTest(entry, mat, "{}")
+	view := usecase.BuildDraftEditModalForTest(context.Background(), entry, mat, "{}")
 	desc := findInputBlock(t, view, "draft_edit_description")
 	descEl, ok := desc.Element.(*goslack.PlainTextInputBlockElement)
 	gt.Bool(t, ok).True()
@@ -67,7 +68,7 @@ func TestBuildDraftEditModal_TitlePassesThroughEvenWhenLong(t *testing.T) {
 		Description: "ok",
 	}
 
-	view := usecase.BuildDraftEditModalForTest(entry, mat, "{}")
+	view := usecase.BuildDraftEditModalForTest(context.Background(), entry, mat, "{}")
 	title := findInputBlock(t, view, "draft_edit_title")
 	titleEl, ok := title.Element.(*goslack.PlainTextInputBlockElement)
 	gt.Bool(t, ok).True()
@@ -84,7 +85,7 @@ func TestBuildDraftEditModal_ShortDescriptionUnchanged(t *testing.T) {
 		Description: "small description body",
 	}
 
-	view := usecase.BuildDraftEditModalForTest(entry, mat, "{}")
+	view := usecase.BuildDraftEditModalForTest(context.Background(), entry, mat, "{}")
 	desc := findInputBlock(t, view, "draft_edit_description")
 	descEl, ok := desc.Element.(*goslack.PlainTextInputBlockElement)
 	gt.Bool(t, ok).True()
@@ -109,7 +110,7 @@ func TestBuildDraftEditModal_UserFieldRejectsNonSlackID(t *testing.T) {
 		},
 	}
 
-	view := usecase.BuildDraftEditModalForTest(entry, mat, "{}")
+	view := usecase.BuildDraftEditModalForTest(context.Background(), entry, mat, "{}")
 	ownerBlock := findInputBlock(t, view, "hc_field_block_owner")
 	sel, ok := ownerBlock.Element.(*goslack.SelectBlockElement)
 	gt.Bool(t, ok).True()
@@ -133,7 +134,7 @@ func TestBuildDraftEditModal_UserFieldAcceptsSlackID(t *testing.T) {
 		},
 	}
 
-	view := usecase.BuildDraftEditModalForTest(entry, mat, "{}")
+	view := usecase.BuildDraftEditModalForTest(context.Background(), entry, mat, "{}")
 	ownerBlock := findInputBlock(t, view, "hc_field_block_owner")
 	sel, ok := ownerBlock.Element.(*goslack.SelectBlockElement)
 	gt.Bool(t, ok).True()
@@ -160,7 +161,7 @@ func TestBuildDraftEditModal_MultiUserFieldFiltersMalformed(t *testing.T) {
 		},
 	}
 
-	view := usecase.BuildDraftEditModalForTest(entry, mat, "{}")
+	view := usecase.BuildDraftEditModalForTest(context.Background(), entry, mat, "{}")
 	ownersBlock := findInputBlock(t, view, "hc_field_block_owners")
 	sel, ok := ownersBlock.Element.(*goslack.MultiSelectBlockElement)
 	gt.Bool(t, ok).True()

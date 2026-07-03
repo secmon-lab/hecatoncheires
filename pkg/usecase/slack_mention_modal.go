@@ -1,9 +1,10 @@
 package usecase
 
 import (
-	"fmt"
+	"context"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	goslack "github.com/slack-go/slack"
 )
 
@@ -20,12 +21,11 @@ const (
 // fixed inputs (title + description) are followed by one input block per
 // custom field defined in the workspace's FieldSchema, with initial values
 // drawn from the materialization.
-func buildDraftEditModal(entry *model.WorkspaceEntry, mat *model.WorkspaceMaterialization, privateMetadata string) goslack.ModalViewRequest {
+func buildDraftEditModal(ctx context.Context, entry *model.WorkspaceEntry, mat *model.WorkspaceMaterialization, privateMetadata string) goslack.ModalViewRequest {
 	blocks := []goslack.Block{
 		goslack.NewSectionBlock(
 			goslack.NewTextBlockObject(goslack.MarkdownType,
-				fmt.Sprintf("*Workspace*: %s\n_To switch workspace, cancel this modal and use the selector in the preview._",
-					fallbackText(entry.Workspace.Name, entry.Workspace.ID)), false, false),
+				i18n.T(ctx, i18n.MsgMentionEditWorkspace, fallbackText(entry.Workspace.Name, entry.Workspace.ID)), false, false),
 			nil, nil,
 		),
 	}
@@ -40,7 +40,7 @@ func buildDraftEditModal(entry *model.WorkspaceEntry, mat *model.WorkspaceMateri
 	}
 	blocks = append(blocks, goslack.NewInputBlock(
 		blockIDDraftEditTitle,
-		goslack.NewTextBlockObject(goslack.PlainTextType, "Title", false, false),
+		goslack.NewTextBlockObject(goslack.PlainTextType, i18n.T(ctx, i18n.MsgFieldTitle), false, false),
 		nil,
 		titleEl,
 	))
@@ -52,7 +52,7 @@ func buildDraftEditModal(entry *model.WorkspaceEntry, mat *model.WorkspaceMateri
 	}
 	descBlock := goslack.NewInputBlock(
 		blockIDDraftEditDescription,
-		goslack.NewTextBlockObject(goslack.PlainTextType, "Description", false, false),
+		goslack.NewTextBlockObject(goslack.PlainTextType, i18n.T(ctx, i18n.MsgFieldDescription), false, false),
 		nil,
 		descEl,
 	)
@@ -77,8 +77,8 @@ func buildDraftEditModal(entry *model.WorkspaceEntry, mat *model.WorkspaceMateri
 	// confirm or override it before the case is created.
 	testOption := goslack.NewOptionBlockObject(
 		caseOptionValueTest,
-		goslack.NewTextBlockObject(goslack.PlainTextType, "Test case", false, false),
-		goslack.NewTextBlockObject(goslack.PlainTextType, "Filed for verification rather than a real case.", false, false),
+		goslack.NewTextBlockObject(goslack.PlainTextType, i18n.T(ctx, i18n.MsgFieldTestCase), false, false),
+		goslack.NewTextBlockObject(goslack.PlainTextType, i18n.T(ctx, i18n.MsgFieldTestCaseDesc), false, false),
 	)
 	testEl := goslack.NewCheckboxGroupsBlockElement(actionIDDraftEditTest, testOption)
 	if mat != nil && mat.IsTest {
@@ -86,7 +86,7 @@ func buildDraftEditModal(entry *model.WorkspaceEntry, mat *model.WorkspaceMateri
 	}
 	testBlock := goslack.NewInputBlock(
 		blockIDDraftEditTest,
-		goslack.NewTextBlockObject(goslack.PlainTextType, "Options", false, false),
+		goslack.NewTextBlockObject(goslack.PlainTextType, i18n.T(ctx, i18n.MsgFieldCaseOptions), false, false),
 		nil,
 		testEl,
 	)
@@ -96,9 +96,9 @@ func buildDraftEditModal(entry *model.WorkspaceEntry, mat *model.WorkspaceMateri
 	return goslack.ModalViewRequest{
 		Type:            goslack.VTModal,
 		CallbackID:      SlackCallbackIDDraftEdit,
-		Title:           goslack.NewTextBlockObject(goslack.PlainTextType, "Edit Case Draft", false, false),
-		Submit:          goslack.NewTextBlockObject(goslack.PlainTextType, "Submit", false, false),
-		Close:           goslack.NewTextBlockObject(goslack.PlainTextType, "Cancel", false, false),
+		Title:           goslack.NewTextBlockObject(goslack.PlainTextType, i18n.T(ctx, i18n.MsgMentionEditModalTitle), false, false),
+		Submit:          goslack.NewTextBlockObject(goslack.PlainTextType, i18n.T(ctx, i18n.MsgMentionBtnSubmit), false, false),
+		Close:           goslack.NewTextBlockObject(goslack.PlainTextType, i18n.T(ctx, i18n.MsgMentionBtnCancel), false, false),
 		PrivateMetadata: privateMetadata,
 		Blocks:          goslack.Blocks{BlockSet: blocks},
 	}

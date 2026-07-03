@@ -200,6 +200,17 @@ const (
 	MsgJobRunCompleted // "✅ job `%s` completed" (%s = job id)
 	MsgJobRunFailed    // "❌ job `%s` failed: %s" (%s = job id, %s = error)
 
+	// Agent mention-draft preview & Edit modal (pkg/usecase/slack_mention_*).
+	MsgMentionPreviewFallback // Notification fallback text for the preview ephemeral.
+	MsgMentionPreviewTestNote // Context note shown on the preview when the draft is a test case.
+	MsgMentionWorkspaceLabel  // Workspace selector placeholder/label on the preview.
+	MsgMentionEditWorkspace   // "*Workspace*: %s ..." heading in the Edit modal (%s = workspace name).
+	MsgMentionBtnSubmit       // "Submit" button (preview + Edit modal).
+	MsgMentionBtnEdit         // "Edit" button on the preview.
+	MsgMentionBtnCancel       // "Cancel" button on the preview.
+	MsgMentionEditModalTitle  // Title of the draft Edit modal.
+	MsgMentionSubmitFailed    // Appended to the preview fallback when case creation failed and the user should Edit.
+
 	msgKeyCount // sentinel for validation
 )
 

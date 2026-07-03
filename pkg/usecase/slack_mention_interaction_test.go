@@ -436,7 +436,7 @@ func TestBuildDraftEditModal_PreTicksIsTest(t *testing.T) {
 	}
 
 	t.Run("pre-ticked when materialization is a test", func(t *testing.T) {
-		view := usecase.BuildDraftEditModalForTest(entry, &model.WorkspaceMaterialization{Title: "t", IsTest: true}, "{}")
+		view := usecase.BuildDraftEditModalForTest(context.Background(), entry, &model.WorkspaceMaterialization{Title: "t", IsTest: true}, "{}")
 		cg := findTestCheckbox(view)
 		gt.Value(t, cg).NotNil().Required()
 		gt.Array(t, cg.InitialOptions).Length(1).Required()
@@ -444,7 +444,7 @@ func TestBuildDraftEditModal_PreTicksIsTest(t *testing.T) {
 	})
 
 	t.Run("not ticked when materialization is not a test", func(t *testing.T) {
-		view := usecase.BuildDraftEditModalForTest(entry, &model.WorkspaceMaterialization{Title: "t", IsTest: false}, "{}")
+		view := usecase.BuildDraftEditModalForTest(context.Background(), entry, &model.WorkspaceMaterialization{Title: "t", IsTest: false}, "{}")
 		cg := findTestCheckbox(view)
 		gt.Value(t, cg).NotNil().Required()
 		gt.Array(t, cg.InitialOptions).Length(0)

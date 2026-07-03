@@ -493,16 +493,17 @@ const (
 )
 
 func buildPreviewBlocks(
+	ctx context.Context,
 	draft *model.CaseProposal,
 	selected *model.WorkspaceEntry,
 	candidates []*model.WorkspaceEntry,
 ) ([]goslack.Block, string) {
 	if draft == nil || selected == nil {
-		return nil, "Case draft preview"
+		return nil, i18n.T(ctx, i18n.MsgMentionPreviewFallback)
 	}
 	mat := draft.Materialization
 	if mat == nil {
-		return nil, "Case draft preview"
+		return nil, i18n.T(ctx, i18n.MsgMentionPreviewFallback)
 	}
 
 	// 1. Title + description rendered as a single Slack `markdown` block.
@@ -518,7 +519,7 @@ func buildPreviewBlocks(
 	if mat.IsTest {
 		blocks = append(blocks, goslack.NewContextBlock(
 			"mention_draft_test",
-			goslack.NewTextBlockObject(goslack.MarkdownType, ":test_tube: *Test case* — filed for verification rather than a real case.", false, false),
+			goslack.NewTextBlockObject(goslack.MarkdownType, i18n.T(ctx, i18n.MsgMentionPreviewTestNote), false, false),
 		))
 	}
 	blocks = append(blocks, goslack.NewDividerBlock())
@@ -548,7 +549,7 @@ func buildPreviewBlocks(
 	}
 	wsSelect := goslack.NewOptionsSelectBlockElement(
 		goslack.OptTypeStatic,
-		goslack.NewTextBlockObject(goslack.PlainTextType, "Workspace", false, false),
+		goslack.NewTextBlockObject(goslack.PlainTextType, i18n.T(ctx, i18n.MsgMentionWorkspaceLabel), false, false),
 		ActionIDDraftSelectWS,
 		wsOptions...,
 	)
@@ -560,12 +561,12 @@ func buildPreviewBlocks(
 	editBtn := goslack.NewButtonBlockElement(
 		ActionIDDraftEdit,
 		string(draft.ID),
-		goslack.NewTextBlockObject(goslack.PlainTextType, "Edit", false, false),
+		goslack.NewTextBlockObject(goslack.PlainTextType, i18n.T(ctx, i18n.MsgMentionBtnEdit), false, false),
 	)
 	cancelBtn := goslack.NewButtonBlockElement(
 		ActionIDDraftCancel,
 		string(draft.ID),
-		goslack.NewTextBlockObject(goslack.PlainTextType, "Cancel", false, false),
+		goslack.NewTextBlockObject(goslack.PlainTextType, i18n.T(ctx, i18n.MsgMentionBtnCancel), false, false),
 	)
 	cancelBtn.Style = goslack.StyleDanger
 
@@ -577,7 +578,7 @@ func buildPreviewBlocks(
 		submitBtn := goslack.NewButtonBlockElement(
 			ActionIDDraftSubmit,
 			string(draft.ID),
-			goslack.NewTextBlockObject(goslack.PlainTextType, "Submit", false, false),
+			goslack.NewTextBlockObject(goslack.PlainTextType, i18n.T(ctx, i18n.MsgMentionBtnSubmit), false, false),
 		)
 		submitBtn.Style = goslack.StylePrimary
 		elements = append(elements, submitBtn, editBtn, cancelBtn)

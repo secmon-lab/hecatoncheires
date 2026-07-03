@@ -168,6 +168,16 @@ var messagesEN = [msgKeyCount]string{
 	MsgJobRunStarting:  "starting... `%s`",
 	MsgJobRunCompleted: ":white_check_mark: job `%s` completed",
 	MsgJobRunFailed:    ":x: job `%s` failed: %s",
+
+	MsgMentionPreviewFallback: "Case draft preview",
+	MsgMentionPreviewTestNote: ":test_tube: *Test case* — for verifying the system or a drill, not a real case to work on.",
+	MsgMentionWorkspaceLabel:  "Workspace",
+	MsgMentionEditWorkspace:   "*Workspace*: %s\n_To switch workspace, cancel this modal and use the selector in the preview._",
+	MsgMentionBtnSubmit:       "Submit",
+	MsgMentionBtnEdit:         "Edit",
+	MsgMentionBtnCancel:       "Cancel",
+	MsgMentionEditModalTitle:  "Edit Case Draft",
+	MsgMentionSubmitFailed:    " (creation failed; please use Edit to fill required fields)",
 }
 
 var messagesJA = [msgKeyCount]string{
@@ -321,4 +331,14 @@ var messagesJA = [msgKeyCount]string{
 	MsgJobRunStarting:  "起動中... `%s`",
 	MsgJobRunCompleted: ":white_check_mark: ジョブ `%s` が完了しました",
 	MsgJobRunFailed:    ":x: ジョブ `%s` が失敗しました: %s",
+
+	MsgMentionPreviewFallback: "ケース下書きのプレビュー",
+	MsgMentionPreviewTestNote: ":test_tube: *テストケース* — 実対応ではなく、システムの動作確認や演習用です。",
+	MsgMentionWorkspaceLabel:  "ワークスペース",
+	MsgMentionEditWorkspace:   "*ワークスペース*: %s\n_ワークスペースを切り替えるには、このモーダルを閉じてプレビューのセレクターを使ってください。_",
+	MsgMentionBtnSubmit:       "送信",
+	MsgMentionBtnEdit:         "編集",
+	MsgMentionBtnCancel:       "キャンセル",
+	MsgMentionEditModalTitle:  "ケース下書きを編集",
+	MsgMentionSubmitFailed:    "（作成に失敗しました。必須項目を入力するには「編集」を使ってください）",
 }
