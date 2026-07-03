@@ -563,6 +563,40 @@ func runJobRunLogRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		}
 		gt.Error(t, repo.JobRunLog().Suspend(ctx, log)).Is(interfaces.ErrJobRunLogNotFound)
 	})
+
+	t.Run("Resume errors when the log does not exist", func(t *testing.T) {
+		repo := newRepo(t)
+		key := newJobRunKey("ws")
+		log := &model.JobRunLog{
+			WorkspaceID:  key.WorkspaceID,
+			CaseID:       key.CaseID,
+			JobID:        key.JobID,
+			RunID:        "run-absent-resume",
+			TraceID:      "trace-absent-resume",
+			Stage:        model.JobRunStageRunning,
+			StartedAt:    time.Now().UTC().Truncate(time.Millisecond),
+			ExecutorKind: "planexec",
+		}
+		gt.Error(t, repo.JobRunLog().Resume(ctx, log)).Is(interfaces.ErrJobRunLogNotFound)
+	})
+
+	t.Run("Finish errors when the log does not exist", func(t *testing.T) {
+		repo := newRepo(t)
+		key := newJobRunKey("ws")
+		started := time.Now().UTC().Truncate(time.Millisecond)
+		log := &model.JobRunLog{
+			WorkspaceID:  key.WorkspaceID,
+			CaseID:       key.CaseID,
+			JobID:        key.JobID,
+			RunID:        "run-absent-finish",
+			TraceID:      "trace-absent-finish",
+			Stage:        model.JobRunStageSuccess,
+			StartedAt:    started,
+			EndedAt:      started.Add(time.Second),
+			ExecutorKind: "single_loop",
+		}
+		gt.Error(t, repo.JobRunLog().Finish(ctx, log)).Is(interfaces.ErrJobRunLogNotFound)
+	})
 }
 
 func runJobRunEventRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.Repository) {

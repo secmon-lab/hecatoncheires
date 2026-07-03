@@ -75,6 +75,26 @@ type RunRequest struct {
 
 	// --- Phase execution -------------------------------------------
 
+	// AllowSubAgentWrites lets this run's sub-agents perform writes /
+	// side-effecting actions (post a message, update a field, ...) with
+	// the tools the planner assigns them, instead of being restricted to
+	// observation-only investigation. Default false → sub-agents are told
+	// they are observation-only (the historical behaviour).
+	//
+	// The flag governs only the sub-agent prompt wording; the tools a
+	// sub-agent can physically call are decided by ToolResolver. A caller
+	// that sets this false MUST supply a read-only resolver so a sub-agent
+	// is never handed a write tool it is then told not to use — that
+	// prompt-vs-capability mismatch is exactly the failure this feature
+	// fixes. A caller that sets it true supplies a resolver that includes
+	// the write tools, and the planner assigns them per task.
+	//
+	// job sets true (Job deliverables are side effects, e.g. a Slack post);
+	// threadcase sets false (its terminal Create/reply/update is committed
+	// via the structured-final OnFinalize / returned Decision, so its
+	// sub-agents stay observation-only).
+	AllowSubAgentWrites bool
+
 	// ToolResolver maps TaskPlan.Tools entries into concrete gollem
 	// tool slices for each sub-agent. Required.
 	ToolResolver ToolResolver

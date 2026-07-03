@@ -83,6 +83,15 @@ var subAgentPromptTmpl string
 
 var subAgentPromptTemplate = template.Must(template.New("planexec_subagent").Parse(subAgentPromptTmpl))
 
+// subAgentPromptInput is the data fed into prompts/subagent.md. It embeds
+// the per-task fields and adds AllowWrites so the template can toggle the
+// observation-only vs may-write instruction. AllowWrites mirrors the run's
+// RunRequest.AllowSubAgentWrites.
+type subAgentPromptInput struct {
+	TaskPlan
+	AllowWrites bool
+}
+
 // executePhase dispatches a sub-agent goroutine per task, blocks until
 // all complete, and returns results in the same order as the input. Per-
 // task failures surface as TaskStatusFailed TaskResults rather than being
@@ -100,6 +109,7 @@ func executePhase(
 	llm gollem.LLMClient,
 	subAgentLoopMax int,
 	hostTrace trace.Handler,
+	allowWrites bool,
 ) []TaskResult {
 	if len(tasks) == 0 {
 		return nil
@@ -110,7 +120,7 @@ func executePhase(
 		wg.Add(1)
 		async.Dispatch(ctx, func(c context.Context) error {
 			defer wg.Done()
-			results[i] = runOneTask(c, tasks[i], sink, resolver, llm, subAgentLoopMax, hostTrace)
+			results[i] = runOneTask(c, tasks[i], sink, resolver, llm, subAgentLoopMax, hostTrace, allowWrites)
 			return nil
 		})
 	}
@@ -132,12 +142,13 @@ func runOneTask(
 	llm gollem.LLMClient,
 	subAgentLoopMax int,
 	hostTrace trace.Handler,
+	allowWrites bool,
 ) TaskResult {
 	started := time.Now()
 	sink.TaskProgress(ctx, task.ID, fmt.Sprintf("running: %s", task.Title))
 
 	tools := resolver.Resolve(task.Tools)
-	sysPrompt, err := buildSubAgentSystemPrompt(task)
+	sysPrompt, err := buildSubAgentSystemPrompt(task, allowWrites)
 	if err != nil {
 		elapsed := time.Since(started).Round(time.Millisecond)
 		sink.TaskProgress(ctx, task.ID, fmt.Sprintf("failed to render prompt (%s): %v", elapsed, err))
@@ -209,9 +220,10 @@ func runOneTask(
 // fields. Returns an error only when template execution fails — should
 // never happen with valid struct data, but the guard prevents a
 // malformed task from silently producing an empty prompt.
-func buildSubAgentSystemPrompt(task TaskPlan) (string, error) {
+func buildSubAgentSystemPrompt(task TaskPlan, allowWrites bool) (string, error) {
 	var buf bytes.Buffer
-	if err := subAgentPromptTemplate.Execute(&buf, task); err != nil {
+	input := subAgentPromptInput{TaskPlan: task, AllowWrites: allowWrites}
+	if err := subAgentPromptTemplate.Execute(&buf, input); err != nil {
 		return "", goerr.Wrap(err, "render sub-agent system prompt",
 			goerr.V("task_id", task.ID))
 	}

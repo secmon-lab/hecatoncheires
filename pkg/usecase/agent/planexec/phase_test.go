@@ -26,7 +26,7 @@ func TestSubAgentPrompt_RendersTaskFields(t *testing.T) {
 		AcceptanceCriteria: "Top ten messages summarised.",
 		Tools:              []string{"slack_ro"},
 	}
-	got, err := planexec.RenderSubAgentPromptForTest(task)
+	got, err := planexec.RenderSubAgentPromptForTest(task, false)
 	gt.NoError(t, err).Required()
 	gt.String(t, got).Contains("- ID: t-1")
 	gt.String(t, got).Contains("- Title: Recent thread")
@@ -39,10 +39,32 @@ func TestSubAgentPrompt_EmptyFieldsStillWellFormed(t *testing.T) {
 	// All required fields are usually enforced by TaskPlan.Validate
 	// before this template is reached, but the template itself must
 	// not panic on zero values.
-	got, err := planexec.RenderSubAgentPromptForTest(planexec.TaskPlan{})
+	got, err := planexec.RenderSubAgentPromptForTest(planexec.TaskPlan{}, false)
 	gt.NoError(t, err).Required()
 	gt.String(t, got).Contains("## Your Task")
 	gt.String(t, got).Contains("Output rules")
+}
+
+func TestSubAgentPrompt_ObservationOnlyByDefault(t *testing.T) {
+	task := planexec.TaskPlan{ID: "t-1", Title: "Investigate", Description: "d", AcceptanceCriteria: "a"}
+	got, err := planexec.RenderSubAgentPromptForTest(task, false)
+	gt.NoError(t, err).Required()
+	// allowWrites=false keeps the observation-only prohibition.
+	gt.String(t, got).Contains("observation-only")
+	gt.String(t, got).Contains("Do NOT post messages or mutate")
+}
+
+func TestSubAgentPrompt_WriteModeGrantsWrites(t *testing.T) {
+	task := planexec.TaskPlan{ID: "t-1", Title: "Post", Description: "post the summary", AcceptanceCriteria: "posted"}
+	got, err := planexec.RenderSubAgentPromptForTest(task, true)
+	gt.NoError(t, err).Required()
+	// allowWrites=true drops the observation-only prohibition entirely and
+	// grants the write permission (guarded by "after ... enough supporting
+	// information").
+	gt.Bool(t, contains(got, "observation-only")).False()
+	gt.Bool(t, contains(got, "Do NOT post messages or mutate")).False()
+	gt.String(t, got).Contains("you MAY use it")
+	gt.String(t, got).Contains("enough supporting information")
 }
 
 // ----- formatObservationsAsUserTurn ---------------------------------
@@ -196,7 +218,7 @@ func TestExecutePhase_MixedSuccessAndFailure(t *testing.T) {
 		{ID: "t-1", Title: "A", Description: "check thread A", AcceptanceCriteria: "a", Tools: []string{"slack_ro"}},
 		{ID: "t-2", Title: "B", Description: "check thread B", AcceptanceCriteria: "b", Tools: []string{"slack_ro"}},
 	}
-	results := planexec.ExecutePhaseForTest(ctx, tasks, sink, stubResolverNoTools{}, llm, 20, nil)
+	results := planexec.ExecutePhaseForTest(ctx, tasks, sink, stubResolverNoTools{}, llm, 20, nil, false)
 	async.Wait()
 
 	gt.Array(t, results).Length(2).Required()
@@ -233,7 +255,7 @@ func TestExecutePhase_TruncatesLongSummary(t *testing.T) {
 	tasks := []planexec.TaskPlan{
 		{ID: "t-1", Title: "long", Description: "long task", AcceptanceCriteria: "x", Tools: []string{"slack_ro"}},
 	}
-	results := planexec.ExecutePhaseForTest(ctx, tasks, sink, stubResolverNoTools{}, llm, 20, nil)
+	results := planexec.ExecutePhaseForTest(ctx, tasks, sink, stubResolverNoTools{}, llm, 20, nil, false)
 	async.Wait()
 
 	gt.Array(t, results).Length(1).Required()
@@ -249,7 +271,7 @@ func TestExecutePhase_EmptyTasksReturnsNil(t *testing.T) {
 	ctx := context.Background()
 	llm := newFakeLLM(nil)
 	sink := newRecordingSink()
-	results := planexec.ExecutePhaseForTest(ctx, nil, sink, stubResolverNoTools{}, llm, 20, nil)
+	results := planexec.ExecutePhaseForTest(ctx, nil, sink, stubResolverNoTools{}, llm, 20, nil, false)
 	async.Wait()
 	gt.Array(t, results).Length(0)
 }

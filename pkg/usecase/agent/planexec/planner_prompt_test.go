@@ -92,6 +92,32 @@ func TestPlannerPrompt_DirectDisabled(t *testing.T) {
 	gt.Bool(t, contains(got, "Direct answer")).False()
 }
 
+func TestPlannerPrompt_SubAgentWritesEnabled(t *testing.T) {
+	got, err := planexec.RenderPlannerPromptForTest(planexec.PlannerPromptInputForTest{
+		HostPrompt:          "Run scheduled job analysis.",
+		KnownToolIDs:        []string{"default"},
+		AllowSubAgentWrites: true,
+	})
+	gt.NoError(t, err).Required()
+	// The "Actions and writes" guidance and its key rules appear.
+	gt.String(t, got).Contains("Actions and writes")
+	gt.String(t, got).Contains("investigate first")
+	gt.String(t, got).Contains("self-evident")
+	gt.String(t, got).Contains("same phase")
+	gt.String(t, got).Contains("final response cannot perform actions")
+}
+
+func TestPlannerPrompt_SubAgentWritesDisabled(t *testing.T) {
+	got, err := planexec.RenderPlannerPromptForTest(planexec.PlannerPromptInputForTest{
+		HostPrompt:   "You are the thread planner.",
+		KnownToolIDs: []string{"slack_ro"},
+		// AllowSubAgentWrites: false
+	})
+	gt.NoError(t, err).Required()
+	// No write guidance when the host did not opt in.
+	gt.Bool(t, contains(got, "Actions and writes")).False()
+}
+
 func TestPlannerPrompt_RejectsEmptyHostPrompt(t *testing.T) {
 	_, err := planexec.RenderPlannerPromptForTest(planexec.PlannerPromptInputForTest{
 		KnownToolIDs: []string{"a"},

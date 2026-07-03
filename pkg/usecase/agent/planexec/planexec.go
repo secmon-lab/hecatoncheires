@@ -107,14 +107,7 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 		return nil, goerr.Wrap(err, "validate run request")
 	}
 
-	systemPrompt, err := renderPlannerSystemPrompt(plannerPromptInput{
-		HostPrompt:      req.SystemPrompt,
-		Language:        req.LanguageLabel,
-		KnownToolIDs:    req.KnownToolIDs,
-		AllowQuestion:   req.AllowQuestion,
-		AllowDirect:     req.AllowDirect,
-		StructuredFinal: req.FinalOutputSchema != nil,
-	})
+	systemPrompt, err := buildPlannerSystemPrompt(req)
 	if err != nil {
 		return nil, goerr.Wrap(err, "render planner system prompt")
 	}
@@ -163,14 +156,7 @@ func (r *Runner) Resume(ctx context.Context, req ResumeRequest) (*RunResult, err
 		return nil, goerr.Wrap(err, "validate resume request")
 	}
 
-	systemPrompt, err := renderPlannerSystemPrompt(plannerPromptInput{
-		HostPrompt:      req.SystemPrompt,
-		Language:        req.LanguageLabel,
-		KnownToolIDs:    req.KnownToolIDs,
-		AllowQuestion:   req.AllowQuestion,
-		AllowDirect:     req.AllowDirect,
-		StructuredFinal: req.FinalOutputSchema != nil,
-	})
+	systemPrompt, err := buildPlannerSystemPrompt(req.RunRequest)
 	if err != nil {
 		return nil, goerr.Wrap(err, "render planner system prompt")
 	}
@@ -448,7 +434,7 @@ func (r *Runner) runPhase(
 	// executePhase so sub-agent LLM / tool events reach the host timeline.
 	// The archive recorder stays planner/direct/final-scoped (not threaded
 	// here) to preserve the existing archive shape.
-	return executePhase(ctx, tasks, req.Sink, req.ToolResolver, r.llm, r.budget.SubAgentLoopMax, req.TraceHandler)
+	return executePhase(ctx, tasks, req.Sink, req.ToolResolver, r.llm, r.budget.SubAgentLoopMax, req.TraceHandler, req.AllowSubAgentWrites)
 }
 
 // fallbackBudget assembles the StatusFallbackBudget RunResult and emits

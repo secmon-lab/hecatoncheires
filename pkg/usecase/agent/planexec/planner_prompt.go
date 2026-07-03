@@ -42,6 +42,29 @@ type plannerPromptInput struct {
 	// StructuredFinal is true iff RunRequest.FinalOutputSchema != nil;
 	// the planner is told the final-response phase will be JSON-shaped.
 	StructuredFinal bool
+
+	// AllowSubAgentWrites toggles the "Actions and writes" guidance:
+	// when true, the planner is told tasks may perform writes/actions
+	// (not only investigation), how to sequence them, and that the final
+	// response cannot perform side effects. Mirrors
+	// RunRequest.AllowSubAgentWrites.
+	AllowSubAgentWrites bool
+}
+
+// buildPlannerSystemPrompt maps a RunRequest into the planner system
+// prompt. Run and Resume configure the planner identically, so this keeps
+// the field-mapping in one place. It uses no Runner state, hence a free
+// function rather than a method.
+func buildPlannerSystemPrompt(req RunRequest) (string, error) {
+	return renderPlannerSystemPrompt(plannerPromptInput{
+		HostPrompt:          req.SystemPrompt,
+		Language:            req.LanguageLabel,
+		KnownToolIDs:        req.KnownToolIDs,
+		AllowQuestion:       req.AllowQuestion,
+		AllowDirect:         req.AllowDirect,
+		StructuredFinal:     req.FinalOutputSchema != nil,
+		AllowSubAgentWrites: req.AllowSubAgentWrites,
+	})
 }
 
 // renderPlannerSystemPrompt builds the planner system prompt by piping

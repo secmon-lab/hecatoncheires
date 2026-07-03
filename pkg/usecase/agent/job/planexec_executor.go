@@ -105,6 +105,13 @@ func (e *PlanexecJobExecutor) Execute(ctx context.Context, req ExecuteRequest) (
 		// plain-text summary (FinalOutputSchema nil), which is exactly what
 		// the direct path produces, so no terminal-shape change is needed.
 		AllowDirect: true,
+		// AllowSubAgentWrites lets the Job's sub-agents actually perform the
+		// deliverable action (e.g. post the result to the case channel) once
+		// the planner has gathered enough context, instead of being confined
+		// to observation-only investigation. The Job tool set (buildJobTools)
+		// already includes the write tools, so this makes the prompt agree
+		// with the capability the sub-agents are handed.
+		AllowSubAgentWrites: true,
 		// FinalOutputSchema is nil → plain-text summary surfaces as
 		// RunResult.FinalText, which we copy into ExecuteResult.Summary.
 		Sink: sink,
@@ -155,18 +162,19 @@ func (e *PlanexecJobExecutor) Resume(ctx context.Context, req ExecuteRequest, pe
 	startedAt := time.Now().UTC()
 	result, err := e.runner.Resume(ctx, planexec.ResumeRequest{
 		RunRequest: planexec.RunRequest{
-			HistoryKey:    req.HistoryKey,
-			TraceID:       req.TraceID,
-			TraceMetadata: planexecTraceMetadata(req),
-			LanguageLabel: req.Language,
-			UserInput:     req.Prompt,
-			SystemPrompt:  req.SystemPrompt,
-			ToolResolver:  resolver,
-			KnownToolIDs:  resolver.KnownIDs(),
-			AllowQuestion: true,
-			OnQuestion:    buildOnQuestion(req),
-			AllowDirect:   true,
-			Sink:          sink,
+			HistoryKey:          req.HistoryKey,
+			TraceID:             req.TraceID,
+			TraceMetadata:       planexecTraceMetadata(req),
+			LanguageLabel:       req.Language,
+			UserInput:           req.Prompt,
+			SystemPrompt:        req.SystemPrompt,
+			ToolResolver:        resolver,
+			KnownToolIDs:        resolver.KnownIDs(),
+			AllowQuestion:       true,
+			OnQuestion:          buildOnQuestion(req),
+			AllowDirect:         true,
+			AllowSubAgentWrites: true,
+			Sink:                sink,
 		},
 		Question: pendingToQuestion(pending),
 		Answers:  answersToQuestionAnswers(answers),

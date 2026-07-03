@@ -299,6 +299,31 @@ func (r *jobRunLogRepository) Create(ctx context.Context, log *model.JobRunLog) 
 	return nil
 }
 
+// setExistingLog writes log only if its document already exists, returning
+// ErrJobRunLogNotFound otherwise. Finish / Suspend / Resume all transition a
+// log that Create must have written first; a plain Set (upsert) would silently
+// resurrect a run that was never created (or was deleted) instead of failing
+// loudly, which is exactly how the memory and Firestore backends diverged. The
+// existence check and the write run in one transaction so they stay atomic
+// against a concurrent delete.
+func (r *jobRunLogRepository) setExistingLog(ctx context.Context, log *model.JobRunLog, op string) error {
+	key := model.JobRunKey{WorkspaceID: log.WorkspaceID, CaseID: log.CaseID, JobID: log.JobID}
+	ref := r.doc(key, log.RunID)
+	return r.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		if _, err := tx.Get(ref); err != nil {
+			if status.Code(err) == codes.NotFound {
+				return goerr.Wrap(interfaces.ErrJobRunLogNotFound, "job run log not found",
+					goerr.V("op", op), goerr.V("run_id", log.RunID))
+			}
+			return goerr.Wrap(err, "get job run log", goerr.V("op", op), goerr.V("run_id", log.RunID))
+		}
+		if err := tx.Set(ref, log); err != nil {
+			return goerr.Wrap(err, "write job run log", goerr.V("op", op), goerr.V("run_id", log.RunID))
+		}
+		return nil
+	})
+}
+
 func (r *jobRunLogRepository) Finish(ctx context.Context, log *model.JobRunLog) error {
 	if err := log.Validate(); err != nil {
 		return goerr.Wrap(err, "invalid job run log")
@@ -306,12 +331,7 @@ func (r *jobRunLogRepository) Finish(ctx context.Context, log *model.JobRunLog) 
 	if log.Stage == model.JobRunStageRunning {
 		return goerr.New("Finish must transition out of RUNNING")
 	}
-	key := model.JobRunKey{WorkspaceID: log.WorkspaceID, CaseID: log.CaseID, JobID: log.JobID}
-	if _, err := r.doc(key, log.RunID).Set(ctx, log); err != nil {
-		return goerr.Wrap(err, "finish job run log",
-			goerr.V("run_id", log.RunID))
-	}
-	return nil
+	return r.setExistingLog(ctx, log, "Finish")
 }
 
 func (r *jobRunLogRepository) Suspend(ctx context.Context, log *model.JobRunLog) error {
@@ -322,12 +342,7 @@ func (r *jobRunLogRepository) Suspend(ctx context.Context, log *model.JobRunLog)
 		return goerr.New("Suspend requires stage AWAITING_INPUT",
 			goerr.V("stage", string(log.Stage)))
 	}
-	key := model.JobRunKey{WorkspaceID: log.WorkspaceID, CaseID: log.CaseID, JobID: log.JobID}
-	if _, err := r.doc(key, log.RunID).Set(ctx, log); err != nil {
-		return goerr.Wrap(err, "suspend job run log",
-			goerr.V("run_id", log.RunID))
-	}
-	return nil
+	return r.setExistingLog(ctx, log, "Suspend")
 }
 
 func (r *jobRunLogRepository) Resume(ctx context.Context, log *model.JobRunLog) error {
@@ -338,12 +353,7 @@ func (r *jobRunLogRepository) Resume(ctx context.Context, log *model.JobRunLog) 
 		return goerr.New("Resume requires stage RUNNING",
 			goerr.V("stage", string(log.Stage)))
 	}
-	key := model.JobRunKey{WorkspaceID: log.WorkspaceID, CaseID: log.CaseID, JobID: log.JobID}
-	if _, err := r.doc(key, log.RunID).Set(ctx, log); err != nil {
-		return goerr.Wrap(err, "resume job run log",
-			goerr.V("run_id", log.RunID))
-	}
-	return nil
+	return r.setExistingLog(ctx, log, "Resume")
 }
 
 func (r *jobRunLogRepository) Get(ctx context.Context, key model.JobRunKey, runID string) (*model.JobRunLog, error) {
