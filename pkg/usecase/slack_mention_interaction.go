@@ -13,6 +13,7 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/proposal"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	goslack "github.com/slack-go/slack"
@@ -224,8 +225,8 @@ func (uc *MentionProposalUseCase) HandleSubmit(ctx context.Context, caseUC *Case
 		entry, getErr := uc.registry.Get(draft.SelectedWorkspaceID)
 		if getErr == nil {
 			candidates := uc.accessibleWorkspaces(callback.User.ID)
-			blocks, fallback := buildPreviewBlocks(draft, entry, candidates)
-			_ = uc.respondReplaceOriginal(ctx, callback.ResponseURL, blocks, fallback+" (creation failed; please use Edit to fill required fields)")
+			blocks, fallback := buildPreviewBlocks(ctx, draft, entry, candidates)
+			_ = uc.respondReplaceOriginal(ctx, callback.ResponseURL, blocks, fallback+i18n.T(ctx, i18n.MsgMentionSubmitFailed))
 		}
 		return goerr.Wrap(err, "failed to create case from draft",
 			goerr.V("proposal_id", draft.ID),
@@ -271,7 +272,7 @@ func (uc *MentionProposalUseCase) HandleEdit(ctx context.Context, callback *gosl
 		return goerr.Wrap(err, "failed to marshal edit metadata")
 	}
 
-	view := buildDraftEditModal(entry, draft.Materialization, string(metaJSON))
+	view := buildDraftEditModal(ctx, entry, draft.Materialization, string(metaJSON))
 	if err := uc.slackService.OpenView(ctx, callback.TriggerID, view); err != nil {
 		return goerr.Wrap(err, "failed to open draft edit modal")
 	}

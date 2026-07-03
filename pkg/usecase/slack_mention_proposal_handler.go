@@ -217,7 +217,7 @@ func (h *slackDraftHandler) Materialize(ctx context.Context, ssn *model.Session,
 		return goerr.New("draft missing after materialize", goerr.V("proposal_id", string(h.proposalID)))
 	}
 
-	blocks, fallback := buildPreviewBlocks(d, entry, h.candidates)
+	blocks, fallback := buildPreviewBlocks(ctx, d, entry, h.candidates)
 
 	h.processingMu.Lock()
 	processingTS := h.processingTS
