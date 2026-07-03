@@ -102,10 +102,14 @@ type SlackSection struct {
 	Mode string `toml:"mode"`
 	// Channel is the monitored Slack channel ID for thread mode (e.g. C0123...).
 	Channel string `toml:"channel"`
-	// AcceptBot, when true, makes bot-authored channel-root posts
-	// (e.g. an intake-form app's relayed request) start a case in thread mode.
-	// Default false: only human channel-root posts start a case.
+	// AcceptBot, when true, makes bot-authored events (a channel-root post in
+	// instant mode, or an @mention in mention mode) start a case in thread mode.
+	// Default false: only human-authored events start a case.
 	AcceptBot bool `toml:"accept_bot"`
+	// Trigger selects what starts a case in thread mode: "instant" (default,
+	// every channel-root post) or "mention" (only an @mention of the bot).
+	// Ignored in channel mode.
+	Trigger string `toml:"trigger"`
 }
 
 // CaseSection represents the [case] section in a TOML config. It mirrors
@@ -203,6 +207,7 @@ type WorkspaceConfig struct {
 	CaseCreatePrompt    string
 	Jobs                []*model.Job
 	CaseMode            model.CaseMode
+	CaseTrigger         model.CaseTrigger
 	SlackMonitorChannel string
 	AcceptBot           bool
 	CaseStatusSet       *model.ActionStatusSet
@@ -401,6 +406,13 @@ func (a *AppConfig) validateCaseMode() error {
 	if a.Slack.Mode != "" && !mode.IsValid() {
 		return goerr.Wrap(ErrInvalidCaseMode, "[slack] mode must be \"channel\" or \"thread\"",
 			goerr.V("mode", a.Slack.Mode))
+	}
+
+	// Validate the trigger value regardless of mode so a typo is caught at
+	// startup; it is only meaningful in thread mode (ignored otherwise).
+	if a.Slack.Trigger != "" && !model.CaseTrigger(a.Slack.Trigger).IsValid() {
+		return goerr.Wrap(ErrInvalidCaseTrigger, "[slack] trigger must be \"instant\" or \"mention\"",
+			goerr.V("trigger", a.Slack.Trigger))
 	}
 
 	if !mode.IsThread() {
@@ -652,6 +664,7 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 	}
 
 	caseMode := model.CaseMode(appCfg.Slack.Mode).Normalize()
+	caseTrigger := model.CaseTrigger(appCfg.Slack.Trigger).Normalize()
 	caseStatusSet, err := appCfg.resolveCaseStatusSet()
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to resolve case status set", goerr.V(ConfigPathKey, path))
@@ -676,9 +689,15 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 			logging.Default().Warn("thread-mode workspace ignores channel-mode Slack settings (channel_prefix / invite / welcome_messages)",
 				"workspace_id", wsID, "config_path", path)
 		}
-	} else if appCfg.Case != nil {
-		logging.Default().Warn("channel-mode workspace ignores [case.status]",
-			"workspace_id", wsID, "config_path", path)
+	} else {
+		if appCfg.Case != nil {
+			logging.Default().Warn("channel-mode workspace ignores [case.status]",
+				"workspace_id", wsID, "config_path", path)
+		}
+		if appCfg.Slack.Trigger != "" {
+			logging.Default().Warn("channel-mode workspace ignores [slack] trigger",
+				"workspace_id", wsID, "config_path", path)
+		}
 	}
 
 	return &WorkspaceConfig{
@@ -701,6 +720,7 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 		CaseCreatePrompt:     caseCreatePrompt,
 		Jobs:                 jobs,
 		CaseMode:             caseMode,
+		CaseTrigger:          caseTrigger,
 		SlackMonitorChannel:  appCfg.Slack.Channel,
 		AcceptBot:            appCfg.Slack.AcceptBot,
 		CaseStatusSet:        caseStatusSet,
@@ -753,6 +773,7 @@ func (a *AppConfig) Configure(c *cli.Command) ([]*WorkspaceConfig, *model.Worksp
 			CaseCreatePrompt:      wc.CaseCreatePrompt,
 			Jobs:                  wc.Jobs,
 			CaseMode:              wc.CaseMode,
+			CaseTrigger:           wc.CaseTrigger,
 			SlackMonitorChannelID: wc.SlackMonitorChannel,
 			AcceptBot:             wc.AcceptBot,
 			CaseStatusSet:         wc.CaseStatusSet,

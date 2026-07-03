@@ -387,18 +387,28 @@ Messages are stored with:
 When a workspace is configured with `[slack] mode = "thread"` (see
 [Configuration → Slack Section](configuration.md#slack-section) and
 [Case Section](configuration.md#case-section-thread-mode)), Hecatoncheires watches
-the single channel named in `[slack] channel` and turns conversations into Cases:
+the single channel named in `[slack] channel` and turns conversations into Cases.
+**What starts a Case depends on `[slack] trigger`** (see
+[Configuration → Case trigger](configuration.md#case-trigger-thread-mode)):
 
-- **Top-level human message → Case.** Each new top-level post (excluding bot
-  posts and message subtypes such as edits/joins) creates a Case bound to that
+- **`instant` (default) — top-level message → Case.** Each new top-level post
+  (excluding message subtypes such as edits/joins) creates a Case bound to that
   message's thread. The bot replies in-thread with a link to the web UI, and an
   LLM materializes the Case title, description, and custom fields.
+- **`mention` — `@mention` → Case.** A Case is started only when the bot is
+  @mentioned, either at the channel root or inside a thread that has no Case yet.
+  Plain posts are left alone. The mention text (and, in a thread, the surrounding
+  conversation) seeds the same initialization agent as `instant`.
 - **Thread reply → recorded on the Case.** Replies in the thread are saved to the
   Case's message history.
-- **`@mention` in the thread → investigation agent.** Mentioning the bot runs a
-  plan-and-execute agent over the Case context. It can answer in-thread, ask a
-  follow-up question, update the Case fields, or close the Case when the thread
-  indicates the issue is resolved.
+- **`@mention` in a thread that already has a Case → investigation agent.**
+  Mentioning the bot runs a plan-and-execute agent over the Case context. It can
+  answer in-thread, ask a follow-up question, update the Case fields, or close the
+  Case when the thread indicates the issue is resolved. (This is independent of
+  `trigger`.)
+
+Bot-authored triggers (an intake-form app's post or mention) start a Case only
+when `[slack] accept_bot = true`.
 
 Thread-mode Cases do **not** create Actions or Drafts. Jobs run identically to
 channel mode and post their output into the Case thread.
@@ -407,8 +417,10 @@ channel mode and post their output into the Case thread.
 
 1. Subscribe to `message.channels` (and `message.groups` if the monitored channel
    is private) — see [Subscribe to Bot Events](#3-subscribe-to-bot-events).
-2. Invite the bot to the monitored channel (`/invite @your-bot-name`).
-3. Set `[slack] channel` to the channel **ID** (e.g. `C0123456789`), not the name.
+2. Subscribe to `app_mention` — required for `trigger = "mention"`, and for the
+   in-thread investigation agent in either mode.
+3. Invite the bot to the monitored channel (`/invite @your-bot-name`).
+4. Set `[slack] channel` to the channel **ID** (e.g. `C0123456789`), not the name.
 
 ---
 

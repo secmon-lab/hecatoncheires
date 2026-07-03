@@ -458,6 +458,287 @@ func TestLifecycle_ThreadCaseCreate_QuestionResume(t *testing.T) {
 	gt.Number(t, ssn2.CaseID).Equal(c.ID)
 }
 
+// TestThreadCase_MentionCreation covers the mention-trigger path: a channel-root
+// @mention starts a Case exactly like the instant post path, seeded with the
+// mention text and attributed to the mentioner.
+func TestThreadCase_MentionCreation(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	reg := newThreadWorkspaceRegistry()
+	slackMock := &agentTestSlackService{}
+	caseUC := usecase.NewCaseUseCase(repo, reg, slackMock, nil, "https://app.test")
+
+	llm := newScriptedClient([]string{
+		tcInvestigatePlan,
+		"The mention reports a login outage.",
+		tcReplanDone,
+		`{"kind":"materialize","title":"Login outage","description":"Users cannot log in.","fields":[{"field_id":"severity","value":"high"}]}`,
+	})
+
+	agentUC := usecase.NewAgentUseCase(usecase.AgentDeps{
+		Repo:         repo,
+		Registry:     reg,
+		LLM:          llm,
+		HistoryRepo:  agentarchive.NewMemoryHistoryRepository(),
+		TraceRepo:    agentarchive.NewMemoryTraceRepository(),
+		SlackService: slackMock,
+		CaseUC:       caseUC,
+	})
+
+	entry, err := reg.Get("support")
+	gt.NoError(t, err).Required()
+
+	// A channel-root mention: no thread_ts, so the mention's own ts is the thread.
+	msg := slackmodel.NewMessageFromData(
+		"1700000000.000100", "C-MONITOR", "", "T1", "U-REPORTER", "alice",
+		"<@UBOT001> cannot log in to the portal", "1700000000.000100", time.Now(), nil)
+
+	gt.NoError(t, agentUC.HandleThreadCaseMentionCreation(ctx, msg, entry)).Required()
+	async.Wait()
+
+	c, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", "1700000000.000100")
+	gt.NoError(t, err).Required()
+	gt.Value(t, c).NotNil().Required()
+	gt.Value(t, c.Title).Equal("Login outage")
+	gt.Value(t, c.Description).Equal("Users cannot log in.")
+	gt.Value(t, c.BoardStatus).Equal("TRIAGE")
+	gt.Value(t, c.ReporterID).Equal("U-REPORTER")
+	gt.Value(t, c.SlackThreadTS).Equal("1700000000.000100")
+	gt.Value(t, c.FieldValues["severity"].Value).Equal("high")
+}
+
+// TestThreadCase_MentionCreation_InThread covers a mention inside a case-less
+// thread: the Case binds to the thread root (not the mention's own ts), and the
+// thread context is pulled in to seed the create agent.
+func TestThreadCase_MentionCreation_InThread(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	reg := newThreadWorkspaceRegistry()
+	repliesFetched := false
+	slackMock := &agentTestSlackService{
+		getConversationRepliesFn: func(_ context.Context, channelID, threadTS string, _ int) ([]slack.ConversationMessage, error) {
+			repliesFetched = true
+			gt.Value(t, channelID).Equal("C-MONITOR")
+			gt.Value(t, threadTS).Equal("1700000000.000100")
+			return []slack.ConversationMessage{
+				{Timestamp: "1700000000.000100", UserID: "U-REPORTER", Text: "the portal is down"},
+				{Timestamp: "1700000000.000500", UserID: "U-ASKER", Text: "<@UBOT001> please make this a case"},
+			}, nil
+		},
+	}
+	caseUC := usecase.NewCaseUseCase(repo, reg, slackMock, nil, "https://app.test")
+
+	llm := newScriptedClient([]string{
+		tcInvestigatePlan,
+		"The thread reports a portal outage.",
+		tcReplanDone,
+		`{"kind":"materialize","title":"Portal outage","description":"The portal is down.","fields":[{"field_id":"severity","value":"low"}]}`,
+	})
+
+	agentUC := usecase.NewAgentUseCase(usecase.AgentDeps{
+		Repo:         repo,
+		Registry:     reg,
+		LLM:          llm,
+		HistoryRepo:  agentarchive.NewMemoryHistoryRepository(),
+		TraceRepo:    agentarchive.NewMemoryTraceRepository(),
+		SlackService: slackMock,
+		CaseUC:       caseUC,
+	})
+
+	entry, err := reg.Get("support")
+	gt.NoError(t, err).Required()
+
+	// An in-thread mention: thread_ts points at the root; the mention's own ts
+	// differs. U-ASKER (a triager) mentions the bot on U-REPORTER's thread. The
+	// case must bind to the root, and attribute the reporter to the thread's
+	// originator (U-REPORTER), not the triager who mentioned.
+	msg := slackmodel.NewMessageFromData(
+		"1700000000.000500", "C-MONITOR", "1700000000.000100", "T1", "U-ASKER", "bob",
+		"<@UBOT001> please make this a case", "1700000000.000500", time.Now(), nil)
+
+	gt.NoError(t, agentUC.HandleThreadCaseMentionCreation(ctx, msg, entry)).Required()
+	async.Wait()
+
+	gt.Bool(t, repliesFetched).True() // thread context was collected for the seed
+
+	c, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", "1700000000.000100")
+	gt.NoError(t, err).Required()
+	gt.Value(t, c).NotNil().Required()
+	gt.Value(t, c.Title).Equal("Portal outage")
+	gt.Value(t, c.SlackThreadTS).Equal("1700000000.000100")
+	gt.Value(t, c.ReporterID).Equal("U-REPORTER")
+
+	// No case is bound to the mention's own ts.
+	byMention, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", "1700000000.000500")
+	gt.NoError(t, err).Required()
+	gt.Value(t, byMention).Nil()
+}
+
+// TestThreadCase_MentionCreation_Idempotent verifies a mention on a thread that
+// already has a Case does not start a second creation turn.
+func TestThreadCase_MentionCreation_Idempotent(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	reg := newThreadWorkspaceRegistry()
+	slackMock := &agentTestSlackService{}
+	caseUC := usecase.NewCaseUseCase(repo, reg, slackMock, nil, "https://app.test")
+
+	// A planner that fails the test if it is ever invoked.
+	probe := &mockLLMClient{
+		newSessionFn: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			t.Fatal("planner must not run when the thread already has a case")
+			return nil, nil
+		},
+	}
+	agentUC := usecase.NewAgentUseCase(usecase.AgentDeps{
+		Repo:         repo,
+		Registry:     reg,
+		LLM:          probe,
+		HistoryRepo:  agentarchive.NewMemoryHistoryRepository(),
+		TraceRepo:    agentarchive.NewMemoryTraceRepository(),
+		SlackService: slackMock,
+		CaseUC:       caseUC,
+	})
+	entry, err := reg.Get("support")
+	gt.NoError(t, err).Required()
+
+	// Pre-existing case bound to the thread.
+	_, err = caseUC.CreateThreadCase(ctx, "support", "C-MONITOR", "1700000000.000100", "U-REPORTER", "Existing", "Already a case")
+	gt.NoError(t, err).Required()
+
+	msg := slackmodel.NewMessageFromData(
+		"1700000000.000700", "C-MONITOR", "1700000000.000100", "T1", "U-ASKER", "bob",
+		"<@UBOT001> another mention", "1700000000.000700", time.Now(), nil)
+	gt.NoError(t, agentUC.HandleThreadCaseMentionCreation(ctx, msg, entry)).Required()
+	async.Wait()
+}
+
+// TestLifecycle_ThreadCaseMentionCreate_FollowupResume drives the mention path
+// across two turns: the first mention defers with a question, and a follow-up
+// mention on the still-case-less thread resumes the same session (superseding
+// the pending question) and commits the case. It also asserts that a plain reply
+// the user added *between* the two mentions — which triggers nothing and is
+// recorded nowhere in mention mode — is still surfaced to the create agent on the
+// follow-up turn (the delta re-scan).
+func TestLifecycle_ThreadCaseMentionCreate_FollowupResume(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	reg := newThreadWorkspaceRegistry()
+
+	// The thread as Slack would return it on the follow-up: root mention, an
+	// intervening plain reply, then the follow-up mention. The intervening reply
+	// carries the only place the "deploy at 3pm" detail appears.
+	const interveningDetail = "actually it started right after the deploy at 3pm"
+	slackMock := &agentTestSlackService{
+		getConversationRepliesFn: func(_ context.Context, _, _ string, _ int) ([]slack.ConversationMessage, error) {
+			return []slack.ConversationMessage{
+				{Timestamp: "1700000000.000100", UserID: "U-REPORTER", Text: "<@UBOT001> something is wrong with the portal"},
+				{Timestamp: "1700000000.000150", UserID: "U-REPORTER", Text: interveningDetail},
+				{Timestamp: "1700000000.000201", UserID: "U-REPORTER", Text: "<@UBOT001> it is high severity"},
+			}, nil
+		},
+	}
+	caseUC := usecase.NewCaseUseCase(repo, reg, slackMock, nil, "https://app.test")
+
+	// A scripted client that also records every text input handed to the model,
+	// so the test can assert the intervening reply reached the planner.
+	var mu sync.Mutex
+	var recordedInputs []string
+	scripts := []string{
+		// Turn 1 (first mention): plan -> sub-agent -> replan asks a question.
+		tcInvestigatePlan,
+		"Need to know the severity before creating the case.",
+		`{"message":"need info","question":{"reason":"What severity?","items":[{"id":"q1","text":"Severity?","type":"select","options":["high","low"]}]}}`,
+		// Turn 2 (follow-up mention): plan -> sub-agent -> replan done -> create.
+		tcInvestigatePlan,
+		"The follow-up mention says it is high severity.",
+		tcReplanDone,
+		`{"title":"Login outage","description":"Users cannot log in.","fields":[{"field_id":"severity","value":"high"}]}`,
+	}
+	idx := 0
+	llm := &mockLLMClient{
+		newSessionFn: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mockLLMSession{
+				generateContentFn: func(_ context.Context, in ...gollem.Input) (*gollem.Response, error) {
+					mu.Lock()
+					defer mu.Unlock()
+					for _, x := range in {
+						if txt, ok := x.(gollem.Text); ok {
+							recordedInputs = append(recordedInputs, string(txt))
+						}
+					}
+					if idx >= len(scripts) {
+						return nil, errors.New("no more scripted responses")
+					}
+					out := scripts[idx]
+					idx++
+					return &gollem.Response{Texts: []string{out}}, nil
+				},
+			}, nil
+		},
+	}
+
+	agentUC := usecase.NewAgentUseCase(usecase.AgentDeps{
+		Repo:         repo,
+		Registry:     reg,
+		LLM:          llm,
+		HistoryRepo:  agentarchive.NewMemoryHistoryRepository(),
+		TraceRepo:    agentarchive.NewMemoryTraceRepository(),
+		SlackService: slackMock,
+		CaseUC:       caseUC,
+	})
+	entry, err := reg.Get("support")
+	gt.NoError(t, err).Required()
+
+	// Turn 1: a channel-root mention. The agent asks a question and does not create.
+	first := slackmodel.NewMessageFromData(
+		"1700000000.000100", "C-MONITOR", "", "T1", "U-REPORTER", "alice",
+		"<@UBOT001> something is wrong with the portal", "1700000000.000100", time.Now(), nil)
+	gt.NoError(t, agentUC.HandleThreadCaseMentionCreation(ctx, first, entry)).Required()
+	async.Wait()
+
+	noCase, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", "1700000000.000100")
+	gt.NoError(t, err).Required()
+	gt.Value(t, noCase).Nil()
+
+	ssn, err := repo.Session().GetByThread(ctx, "C-MONITOR", "1700000000.000100")
+	gt.NoError(t, err).Required()
+	gt.Value(t, ssn).NotNil().Required()
+	gt.Value(t, ssn.LastAction).Equal(model.SessionEndedWithQuestion)
+	// The first mention advanced the delta watermark, so the follow-up scans only
+	// messages newer than it.
+	gt.Value(t, ssn.LastMentionTS).Equal("1700000000.000100")
+	sessionIDTurn1 := ssn.ID
+
+	// Turn 2: a follow-up mention inside the same still-case-less thread resumes
+	// the create agent, superseding the pending question, and commits the case.
+	followup := slackmodel.NewMessageFromData(
+		"1700000000.000201", "C-MONITOR", "1700000000.000100", "T1", "U-REPORTER", "alice",
+		"<@UBOT001> it is high severity", "1700000000.000201", time.Now(), nil)
+	gt.NoError(t, agentUC.HandleThreadCaseMentionCreation(ctx, followup, entry)).Required()
+	async.Wait()
+
+	c, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", "1700000000.000100")
+	gt.NoError(t, err).Required()
+	gt.Value(t, c).NotNil().Required()
+	gt.Value(t, c.Title).Equal("Login outage")
+	gt.Value(t, c.ReporterID).Equal("U-REPORTER")
+	gt.Value(t, c.FieldValues["severity"].Value).Equal("high")
+
+	// The same thread session was reused across both turns and is now bound to
+	// the created case.
+	ssn2, err := repo.Session().GetByThread(ctx, "C-MONITOR", "1700000000.000100")
+	gt.NoError(t, err).Required()
+	gt.Value(t, ssn2.ID).Equal(sessionIDTurn1)
+	gt.Number(t, ssn2.CaseID).Equal(c.ID)
+
+	// The intervening plain reply reached the create agent on the follow-up turn.
+	mu.Lock()
+	joined := strings.Join(recordedInputs, "\n")
+	mu.Unlock()
+	gt.String(t, joined).Contains(interveningDetail)
+}
+
 // realLLMForThreadCreate builds a real LLM client for the gated thread-create
 // test. The dedicated gate is TEST_THREAD_CREATE; the client itself is built
 // from the same TEST_LLM_* env vars the eval harness uses.

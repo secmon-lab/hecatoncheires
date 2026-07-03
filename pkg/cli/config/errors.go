@@ -30,6 +30,7 @@ var (
 	// the allowed rune length.
 	ErrInvalidWorkspaceEmoji = goerr.New("invalid workspace emoji")
 	ErrInvalidCaseMode       = goerr.New("invalid case mode")
+	ErrInvalidCaseTrigger    = goerr.New("invalid case trigger")
 	ErrMissingMonitorChannel = goerr.New("thread mode requires [slack] channel")
 	ErrInvalidMonitorChannel = goerr.New("invalid Slack channel ID")
 	ErrMissingCaseStatus     = goerr.New("thread mode requires [case.status]")
