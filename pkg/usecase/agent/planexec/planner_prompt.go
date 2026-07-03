@@ -51,6 +51,22 @@ type plannerPromptInput struct {
 	AllowSubAgentWrites bool
 }
 
+// buildPlannerSystemPrompt maps a RunRequest into the planner system
+// prompt. Run and Resume configure the planner identically, so this keeps
+// the field-mapping in one place. It uses no Runner state, hence a free
+// function rather than a method.
+func buildPlannerSystemPrompt(req RunRequest) (string, error) {
+	return renderPlannerSystemPrompt(plannerPromptInput{
+		HostPrompt:          req.SystemPrompt,
+		Language:            req.LanguageLabel,
+		KnownToolIDs:        req.KnownToolIDs,
+		AllowQuestion:       req.AllowQuestion,
+		AllowDirect:         req.AllowDirect,
+		StructuredFinal:     req.FinalOutputSchema != nil,
+		AllowSubAgentWrites: req.AllowSubAgentWrites,
+	})
+}
+
 // renderPlannerSystemPrompt builds the planner system prompt by piping
 // the host's base prompt + planexec-side loop / schema rules through
 // prompts/planner.md.

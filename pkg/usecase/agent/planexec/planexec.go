@@ -107,15 +107,7 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 		return nil, goerr.Wrap(err, "validate run request")
 	}
 
-	systemPrompt, err := renderPlannerSystemPrompt(plannerPromptInput{
-		HostPrompt:          req.SystemPrompt,
-		Language:            req.LanguageLabel,
-		KnownToolIDs:        req.KnownToolIDs,
-		AllowQuestion:       req.AllowQuestion,
-		AllowDirect:         req.AllowDirect,
-		StructuredFinal:     req.FinalOutputSchema != nil,
-		AllowSubAgentWrites: req.AllowSubAgentWrites,
-	})
+	systemPrompt, err := buildPlannerSystemPrompt(req)
 	if err != nil {
 		return nil, goerr.Wrap(err, "render planner system prompt")
 	}
@@ -164,15 +156,7 @@ func (r *Runner) Resume(ctx context.Context, req ResumeRequest) (*RunResult, err
 		return nil, goerr.Wrap(err, "validate resume request")
 	}
 
-	systemPrompt, err := renderPlannerSystemPrompt(plannerPromptInput{
-		HostPrompt:          req.SystemPrompt,
-		Language:            req.LanguageLabel,
-		KnownToolIDs:        req.KnownToolIDs,
-		AllowQuestion:       req.AllowQuestion,
-		AllowDirect:         req.AllowDirect,
-		StructuredFinal:     req.FinalOutputSchema != nil,
-		AllowSubAgentWrites: req.AllowSubAgentWrites,
-	})
+	systemPrompt, err := buildPlannerSystemPrompt(req.RunRequest)
 	if err != nil {
 		return nil, goerr.Wrap(err, "render planner system prompt")
 	}
