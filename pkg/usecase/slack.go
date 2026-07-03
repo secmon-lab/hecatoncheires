@@ -247,51 +247,75 @@ func (uc *SlackUseCases) threadModeEntry(channelID string) (*model.WorkspaceEntr
 }
 
 // handleThreadModeEvent dispatches a Slack event that landed in a thread-mode
-// monitored channel:
-//   - channel-root message by a human → thread-mode case creation (and, when
-//     the workspace sets accept_bot, by an integration bot too).
-//   - app_mention inside an existing case thread → thread-mode investigation agent.
+// monitored channel. Two things vary by the workspace's case trigger
+// ([slack] trigger):
 //
-// Anything else is ignored. Case creation is initiated ONLY by a channel-root
-// post; a mention or reply in a thread that has no case yet is NOT treated as a
-// creation/resume signal — such threads are left alone. (Top-level mentions are
-// likewise ignored: the accompanying message event already drives creation.)
+//	instant (default):
+//	  - channel-root message (human, or a bot when accept_bot) → case creation.
+//	  - top-level mention → ignored (the message event drives creation).
+//	  - mention in a case-less thread → ignored.
+//
+//	mention:
+//	  - channel-root mention → case creation.
+//	  - mention in a case-less thread → case creation (thread context seeds it).
+//	  - a plain post (no mention) → ignored.
+//	  A bot-authored mention triggers only when accept_bot is set.
+//
+// In BOTH modes, a mention inside an existing case thread runs the thread-mode
+// investigation agent.
 func (uc *SlackUseCases) handleThreadModeEvent(ctx context.Context, event *slackevents.EventsAPIEvent, msg *slack.Message, entry *model.WorkspaceEntry) {
 	if uc.agent == nil {
 		return
 	}
 	wsID := entry.Workspace.ID
+	mentionTrigger := entry.CaseTrigger.IsMention()
 
 	if appMention, ok := event.InnerEvent.Data.(*slackevents.AppMentionEvent); ok {
 		threadTS := appMention.ThreadTimeStamp
-		if threadTS == "" || threadTS == appMention.TimeStamp {
-			// Top-level mention; case creation is handled by the message event.
+		isRoot := threadTS == "" || threadTS == appMention.TimeStamp
+
+		if !isRoot {
+			c, err := uc.repo.Case().GetBySlackThread(ctx, wsID, appMention.Channel, threadTS)
+			if err != nil {
+				errutil.Handle(ctx, err, "thread mode: look up case for mention")
+				return
+			}
+			if c != nil {
+				// Mention inside an existing case thread → investigation agent
+				// (both modes).
+				ctx = uc.contextWithUserLang(ctx, appMention.User)
+				if err := uc.agent.HandleThreadCaseMention(ctx, msg, entry, c); err != nil {
+					errutil.Handle(ctx, goerr.Wrap(err, "failed to handle thread case mention",
+						goerr.V("channel_id", appMention.Channel),
+						goerr.V("thread_ts", threadTS),
+					), "failed to handle thread case mention")
+				}
+				return
+			}
+			// Mention in a case-less thread: a creation trigger only in mention
+			// mode. In instant mode such threads are left alone.
+			if mentionTrigger && uc.isMentionCreationTrigger(ctx, appMention, entry) {
+				uc.startThreadCaseMentionCreation(ctx, appMention, msg, entry)
+			}
 			return
 		}
-		c, err := uc.repo.Case().GetBySlackThread(ctx, wsID, appMention.Channel, threadTS)
-		if err != nil {
-			errutil.Handle(ctx, err, "thread mode: look up case for mention")
-			return
-		}
-		if c == nil {
-			// A mention in a thread that is not bound to a case: ignore. Case
-			// creation is initiated only by a channel-root post, never by
-			// activity inside an arbitrary thread.
-			return
-		}
-		ctx = uc.contextWithUserLang(ctx, appMention.User)
-		if err := uc.agent.HandleThreadCaseMention(ctx, msg, entry, c); err != nil {
-			errutil.Handle(ctx, goerr.Wrap(err, "failed to handle thread case mention",
-				goerr.V("channel_id", appMention.Channel),
-				goerr.V("thread_ts", threadTS),
-			), "failed to handle thread case mention")
+
+		// Top-level mention: a creation trigger only in mention mode. In instant
+		// mode the accompanying message event drives creation, so ignore here.
+		if mentionTrigger && uc.isMentionCreationTrigger(ctx, appMention, entry) {
+			uc.startThreadCaseMentionCreation(ctx, appMention, msg, entry)
 		}
 		return
 	}
 
 	if msgEv, ok := event.InnerEvent.Data.(*slackevents.MessageEvent); ok {
-		// Only a channel-root post starts a case. Replies inside a thread (case
-		// thread or not) carry no creation/resume semantics and are ignored.
+		// In mention mode a plain post is never a creation trigger; the
+		// accompanying app_mention (if any) drives creation instead.
+		if mentionTrigger {
+			return
+		}
+		// Instant mode: only a channel-root post starts a case. Replies inside a
+		// thread (case thread or not) carry no creation semantics and are ignored.
 		if uc.isThreadCaseCreationTrigger(ctx, msgEv, entry) {
 			ctx = uc.contextWithUserLang(ctx, msgEv.User)
 			if err := uc.agent.HandleThreadCaseCreation(ctx, msg, entry); err != nil {
@@ -302,6 +326,39 @@ func (uc *SlackUseCases) handleThreadModeEvent(ctx context.Context, event *slack
 			}
 		}
 	}
+}
+
+// startThreadCaseMentionCreation runs the mention-triggered case creation with
+// the mentioner's language context, funnelling errors through errutil.
+func (uc *SlackUseCases) startThreadCaseMentionCreation(ctx context.Context, appMention *slackevents.AppMentionEvent, msg *slack.Message, entry *model.WorkspaceEntry) {
+	ctx = uc.contextWithUserLang(ctx, appMention.User)
+	if err := uc.agent.HandleThreadCaseMentionCreation(ctx, msg, entry); err != nil {
+		errutil.Handle(ctx, goerr.Wrap(err, "failed to handle thread case mention creation",
+			goerr.V("channel_id", appMention.Channel),
+			goerr.V("thread_ts", appMention.ThreadTimeStamp),
+			goerr.V("message_ts", appMention.TimeStamp),
+		), "failed to handle thread case mention creation")
+	}
+}
+
+// isMentionCreationTrigger reports whether an app_mention in a case-less
+// location should start a case in mention-trigger mode. A human mention always
+// qualifies. A bot-authored mention (an integration app @-mentioning the bot)
+// qualifies ONLY when the workspace opts in via [slack] accept_bot — mirroring
+// the instant-mode bot-post gate. The bot never triggers on its own mention.
+func (uc *SlackUseCases) isMentionCreationTrigger(ctx context.Context, ev *slackevents.AppMentionEvent, entry *model.WorkspaceEntry) bool {
+	// Never react to our own bot's mention — that would be a self-trigger loop.
+	if uc.slackService != nil {
+		if botUserID, err := uc.slackService.GetBotUserID(ctx); err == nil && botUserID != "" && ev.User == botUserID {
+			return false
+		}
+	}
+	// Bot-authored mention: a trigger only when the workspace opted in.
+	if ev.BotID != "" {
+		return entry != nil && entry.AcceptBot
+	}
+	// Human mention.
+	return ev.User != ""
 }
 
 // isThreadCaseCreationTrigger reports whether a message event in a monitored

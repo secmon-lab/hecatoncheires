@@ -1352,6 +1352,62 @@ type = "text"
 		gt.Array(t, set.IDs()).Length(2)
 		// accept_bot defaults to false when omitted.
 		gt.Value(t, configs[0].AcceptBot).Equal(false)
+		// trigger defaults to instant when omitted.
+		gt.Value(t, configs[0].CaseTrigger).Equal(model.CaseTriggerInstant)
+	})
+
+	t.Run("thread mode selects mention trigger", func(t *testing.T) {
+		configs, err := writeAndLoad(t, `
+[workspace]
+id = "support"
+
+[slack]
+mode = "thread"
+channel = "C0123ABC"
+trigger = "mention"
+
+[case]
+initial = "TRIAGE"
+closed = ["DONE"]
+
+  [[case.status]]
+  id = "TRIAGE"
+  name = "Triage"
+  color = "active"
+
+  [[case.status]]
+  id = "DONE"
+  name = "Done"
+  color = "success"
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`)
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1).Required()
+		gt.Value(t, configs[0].CaseTrigger).Equal(model.CaseTriggerMention)
+	})
+
+	t.Run("invalid trigger is rejected", func(t *testing.T) {
+		_, err := writeAndLoad(t, `
+[workspace]
+id = "support"
+
+[slack]
+mode = "thread"
+channel = "C0123ABC"
+trigger = "bogus"
+
+[case]
+initial = "TRIAGE"
+  [[case.status]]
+  id = "TRIAGE"
+  name = "Triage"
+`)
+		gt.Error(t, err).Required()
+		gt.Bool(t, errors.Is(err, config.ErrInvalidCaseTrigger)).True()
 	})
 
 	t.Run("thread mode opts into bot posts via accept_bot", func(t *testing.T) {

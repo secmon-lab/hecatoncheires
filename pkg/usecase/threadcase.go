@@ -76,28 +76,140 @@ func (uc *AgentUseCase) HandleThreadCaseCreation(ctx context.Context, msg *slack
 		return nil
 	}
 
-	// The reporter is, as a rule, the post's author (msg.UserID, set above).
-	// Body inference is the EXCEPTION, used only when the post has no human
-	// author — a channel-root intake form relayed by an integration bot. There
-	// we best-effort attribute the case to the human named in the body (the
-	// first Slack user mention, typically the requester), skipping our own bot's
-	// user ID so a form that @-mentions the bot before the requester does not
-	// misattribute the case to the bot. If none is present the reporter stays
-	// empty: a thread-mode case is allowed to have no reporter (see
-	// model.Case.ValidateNew), so creation still proceeds.
-	if reporter == "" {
-		botUserID := ""
-		if uc.deps.SlackService != nil {
-			if id, berr := uc.deps.SlackService.GetBotUserID(ctx); berr == nil {
-				botUserID = id
-			}
-		}
-		reporter = firstSlackUserMention(text, botUserID)
-	}
+	reporter = uc.resolveThreadCaseReporter(ctx, reporter, text)
 
 	return uc.runThreadCaseCreation(ctx, entry, channelID, threadTS, reporter,
 		[]threadcase.ConversationMessage{{Timestamp: threadTS, UserID: reporter, Text: text}},
-		"", "", threadTS)
+		nil, "", "", threadTS)
+}
+
+// resolveThreadCaseReporter returns the reporter for a new thread-mode case.
+// The event author is used as-is when present. Body inference is the EXCEPTION,
+// used only when the trigger has no human author — a channel-root intake form
+// relayed by an integration bot, or a bot-authored @mention. There we
+// best-effort attribute the case to the human named in the body (the first
+// Slack user mention, typically the requester), skipping our own bot's user ID
+// so a form that @-mentions the bot before the requester does not misattribute
+// the case to the bot. If none is present the reporter stays empty: a
+// thread-mode case is allowed to have no reporter (see model.Case.ValidateNew),
+// so creation still proceeds.
+func (uc *AgentUseCase) resolveThreadCaseReporter(ctx context.Context, author, text string) string {
+	if author != "" {
+		return author
+	}
+	return firstSlackUserMention(text, uc.botUserID(ctx))
+}
+
+// botUserID returns the bot's own Slack user ID, or "" when the Slack service is
+// unavailable or the lookup fails. Best-effort: callers use it only to skip the
+// bot's own messages, so an empty result degrades to "do not skip".
+func (uc *AgentUseCase) botUserID(ctx context.Context) string {
+	if uc.deps.SlackService == nil {
+		return ""
+	}
+	id, err := uc.deps.SlackService.GetBotUserID(ctx)
+	if err != nil {
+		return ""
+	}
+	return id
+}
+
+// HandleThreadCaseMentionCreation starts (or resumes) a thread-mode Case from an
+// @mention in a monitored channel that has no Case yet. It is the mention-trigger
+// counterpart of HandleThreadCaseCreation: the mention — at the channel root or
+// inside a case-less thread — is the creation trigger, and the mention text is
+// folded into the create agent's seed. The bot-authored / accept_bot gate is
+// applied by the caller (handleThreadModeEvent) before this runs.
+//
+// The first mention on a thread seeds a fresh creation turn; a channel-root
+// mention seeds the mention text alone (like instant), while an in-thread
+// mention seeds the whole thread (root + replies + this mention). A follow-up
+// mention while the thread is still not a Case resumes the in-flight session,
+// superseding any pending question with the new intent (mirrors
+// ResumeThreadCaseCreation). Per-thread serialization comes from the turn lock
+// keyed on (channel, threadTS); TriggerTS is the mention's own TS so a
+// re-delivered mention dedups without a follow-up being mistaken for a retry.
+func (uc *AgentUseCase) HandleThreadCaseMentionCreation(ctx context.Context, msg *slackmodel.Message, entry *model.WorkspaceEntry) error {
+	if uc.threadcase == nil || uc.deps.CaseUC == nil || entry == nil {
+		return nil
+	}
+	wsID := entry.Workspace.ID
+	channelID := msg.ChannelID()
+
+	// Resolve the thread root: a channel-root mention roots a new thread at its
+	// own TS; an in-thread mention binds to the existing thread root. app_mention
+	// does not normalise thread_ts == ts, so treat that as a root too.
+	threadTS := msg.ThreadTS()
+	isRoot := threadTS == "" || threadTS == msg.ID()
+	if isRoot {
+		threadTS = msg.ID()
+	}
+
+	// Idempotency: once the thread is a Case, creation is done — a mention there
+	// is handled by the investigation path (HandleThreadCaseMention), not here.
+	existing, err := uc.deps.Repo.Case().GetBySlackThread(ctx, wsID, channelID, threadTS)
+	if err != nil {
+		return goerr.Wrap(err, "look up existing thread case",
+			goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
+	}
+	if existing != nil {
+		return nil
+	}
+
+	// Follow-up mention: a session already exists for this still-case-less
+	// thread. Resume the in-flight turn with the new mention as the latest intent
+	// (supersedes a pending question) instead of seeding a second fresh turn.
+	// Re-scan the thread so plain replies the user added between mentions — which
+	// trigger nothing and are recorded nowhere in mention mode — still reach the
+	// create agent. partitionConversation returns only messages newer than the
+	// last processed mention (keyed on Session.LastMentionTS), so the prior
+	// turn's context is not re-injected. MentionTS is always passed (here and on
+	// the first mention below) so that watermark advances.
+	session, err := uc.deps.Repo.Session().GetByThread(ctx, channelID, threadTS)
+	if err != nil {
+		return goerr.Wrap(err, "look up session for mention creation",
+			goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
+	}
+	if session != nil {
+		// Keep the reporter the first turn already attributed (the thread's
+		// originator for an in-thread mention), so a follow-up mention by a
+		// different person does not overwrite it.
+		reporter := uc.resolveThreadCaseReporter(ctx, session.CreatorUserID, msg.Text())
+		_, delta, cerr := uc.partitionConversation(ctx, msg, session, uc.botUserID(ctx))
+		if cerr != nil {
+			return goerr.Wrap(cerr, "partition conversation for mention follow-up",
+				goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
+		}
+		return uc.runThreadCaseCreation(ctx, entry, channelID, threadTS, reporter,
+			nil, toThreadcaseMessages(delta), msg.Text(), msg.ID(), msg.ID())
+	}
+
+	// First mention: seed a fresh creation turn. A channel-root mention is its
+	// own seed; an in-thread mention pulls the whole thread (root + replies) as
+	// context. In both cases the mention text is surfaced separately as the
+	// current intent, and MentionTS advances the delta watermark for follow-ups.
+	if isRoot {
+		// The mentioner is the root author, so they are the reporter.
+		reporter := uc.resolveThreadCaseReporter(ctx, msg.UserID(), msg.Text())
+		return uc.runThreadCaseCreation(ctx, entry, channelID, threadTS, reporter,
+			nil, nil, msg.Text(), msg.ID(), msg.ID())
+	}
+
+	ctxMsgs, cerr := uc.collectContextMessages(ctx, msg)
+	if cerr != nil {
+		return goerr.Wrap(cerr, "collect thread context for mention creation",
+			goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
+	}
+	// Prefer the thread's originator (the person who raised the issue) as the
+	// reporter over the mentioner, who may just be triaging someone else's
+	// thread. Fall back to the mentioner, then to body inference.
+	rootAuthor := msg.UserID()
+	if len(ctxMsgs) > 0 && ctxMsgs[0].UserID != "" {
+		rootAuthor = ctxMsgs[0].UserID
+	}
+	reporter := uc.resolveThreadCaseReporter(ctx, rootAuthor, msg.Text())
+	return uc.runThreadCaseCreation(ctx, entry, channelID, threadTS, reporter,
+		toThreadcaseMessages(ctxMsgs), nil, msg.Text(), msg.ID(), msg.ID())
 }
 
 // ResumeThreadCaseCreation continues the initialization (create) agent on a
@@ -130,17 +242,19 @@ func (uc *AgentUseCase) ResumeThreadCaseCreation(ctx context.Context, msg *slack
 	}
 
 	return uc.runThreadCaseCreation(ctx, entry, channelID, threadTS, reporter,
-		nil, msg.Text(), msg.ID(), msg.ID())
+		nil, nil, msg.Text(), msg.ID(), msg.ID())
 }
 
 // runThreadCaseCreation is the shared body for the initial post and the resume
-// paths. systemMessages seeds the first turn; mentionText / mentionTS feed a
-// resume. triggerTS is the turn-lock dedup key.
+// paths. systemMessages seeds the first turn; deltaMessages carries thread
+// messages newer than the last processed mention (mention follow-ups);
+// mentionText / mentionTS feed the current mention. triggerTS is the turn-lock
+// dedup key.
 func (uc *AgentUseCase) runThreadCaseCreation(
 	ctx context.Context,
 	entry *model.WorkspaceEntry,
 	channelID, threadTS, reporter string,
-	systemMessages []threadcase.ConversationMessage,
+	systemMessages, deltaMessages []threadcase.ConversationMessage,
 	mentionText, mentionTS, triggerTS string,
 ) error {
 	wsID := entry.Workspace.ID
@@ -181,6 +295,7 @@ func (uc *AgentUseCase) runThreadCaseCreation(
 		TriggerTS:      triggerTS,
 		Mode:           threadcase.ModeCreate,
 		SystemMessages: systemMessages,
+		DeltaMessages:  deltaMessages,
 		Handler:        uc.newThreadcaseCreateHandler(channelID, threadTS, reporter, entry, traceMsg),
 	})
 	if runErr != nil {

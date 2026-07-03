@@ -209,7 +209,7 @@ func (uc *AgentUseCase) HandleThreadCaseQuestionSubmit(ctx context.Context, call
 	}
 
 	// Resume the create agent with the structured answers as the latest input.
-	return uc.runThreadCaseCreation(ctx, entry, channelID, threadTS, reporter, nil, answerText, messageTS, messageTS)
+	return uc.runThreadCaseCreation(ctx, entry, channelID, threadTS, reporter, nil, nil, answerText, messageTS, messageTS)
 }
 
 // repostThreadQuestionWithError re-renders the form with a banner listing the

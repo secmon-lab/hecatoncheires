@@ -44,6 +44,10 @@ type WorkspaceEntry struct {
 
 	// CaseMode selects channel-per-case (default) or thread-per-case binding.
 	CaseMode CaseMode
+	// CaseTrigger selects what starts a Case in thread mode: instant (default,
+	// every channel-root post) or mention (only an @mention of the bot). Only
+	// meaningful when CaseMode is thread.
+	CaseTrigger CaseTrigger
 	// SlackMonitorChannelID is the channel watched for thread-mode case
 	// creation. Required (and only meaningful) when CaseMode is thread.
 	SlackMonitorChannelID string

@@ -458,7 +458,8 @@ channel_prefix = "risk"
 | `channel_prefix` | string | No | workspace ID | Prefix for auto-created Slack channel names (channel mode only) |
 | `mode` | string | No | `channel` | Case binding mode: `channel` (one Case per dedicated channel) or `thread` (one Case per thread in a monitored channel) |
 | `channel` | string | Conditional | — | The monitored Slack channel ID (e.g. `C0123456789`). **Required when `mode = "thread"`.** Use the channel **ID**, not the name |
-| `accept_bot` | bool | No | `false` | Thread mode only. When `true`, **bot-authored** channel-root posts (e.g. an intake-form app's relayed request) also start a Case; every bot root post is picked up. When `false`, only human channel-root posts start a Case. |
+| `trigger` | string | No | `instant` | Thread mode only. What starts a Case: `instant` (every channel-root post) or `mention` (only an @mention of the bot — at the channel root or inside a thread that has no Case yet). Ignored in channel mode (startup warning). See [Case trigger](#case-trigger-thread-mode). |
+| `accept_bot` | bool | No | `false` | Thread mode only. When `true`, **bot-authored** events also start a Case (a channel-root post in `instant` mode, an @mention in `mention` mode) — e.g. an intake-form app's relayed request. When `false`, only human-authored events start a Case, so the channel is not flooded with a Case per bot notification. |
 
 When a case is created (channel mode), Hecatoncheires can automatically create a Slack channel with the naming pattern: `{channel_prefix}-{case_number}`.
 
@@ -797,21 +798,43 @@ workspaces; dragging a Case into a `closed` column closes the Case. The
 investigation agent can also move a Case to a closed status when a mention
 indicates the issue is resolved.
 
+### Case trigger (thread mode)
+
+`[slack] trigger` selects **what starts a Case** in a monitored channel:
+
+- **`instant`** (default): every channel-root post starts a Case. This is the
+  original thread-mode behaviour — good for a dedicated intake channel where each
+  post is a request.
+- **`mention`**: a Case is started **only when the bot is @mentioned**, either in
+  a channel-root message or inside a thread that has no Case yet. A plain post
+  (no mention) is left alone. Use this in a busy, shared channel where only some
+  conversations should become Cases. The mention text (and, for an in-thread
+  mention, the surrounding thread) seeds the initialization agent, so the Case is
+  created from the same context a human would have read.
+
+In **both** modes an @mention inside a thread that **already** has a Case runs the
+investigation agent (respond / update / close), not creation. The
+`accept_bot` gate applies to whichever event drives creation in the chosen mode:
+a bot-authored channel-root post in `instant`, or a bot-authored @mention in
+`mention`. A follow-up @mention on a still-Case-less thread resumes the in-flight
+initialization (superseding a pending question) rather than starting a second
+turn; the per-thread turn lock serialises concurrent triggers.
+
 ### Case agent prompts (`[case.prompts]`)
 
-Thread-mode case **initialization** is agent-driven and is started **only** by
-a post at the channel root. The root post may be authored by a human **or** by
-an integration bot — e.g. an intake-form app that relays a request on a person's
-behalf. **Bot-authored root posts are opt-in**: they start a Case only when the
-workspace sets `[slack] accept_bot = true` (default `false`, so a
-channel is not flooded with a Case per bot notification); human root posts always
-start a Case. (A mention or a reply inside a thread that has no Case yet is
-ignored — only a channel-root post starts a Case.) The Case **reporter** is, as a
-rule, the post's author. Only when the root post is bot-authored (so it has no
+Thread-mode case **initialization** is agent-driven and is started by the
+configured [case trigger](#case-trigger-thread-mode) — a channel-root post
+(`instant`) or an @mention (`mention`). The trigger may be authored by a human
+**or** by an integration bot — e.g. an intake-form app that relays a request on a
+person's behalf. **Bot-authored triggers are opt-in**: they start a Case only when
+the workspace sets `[slack] accept_bot = true` (default `false`, so a
+channel is not flooded with a Case per bot notification); human triggers always
+start a Case. The Case **reporter** is, as a
+rule, the trigger's author. Only when the trigger is bot-authored (so it has no
 human author) is the reporter taken from the first Slack user mention in the body
-(typically the requester named in the form); if the post names no user, the
+(typically the requester named in the form); if it names no user, the
 reporter is left **empty** — a thread-mode Case is allowed to have no reporter,
-so creation still proceeds. When such a root post arrives, the bot does **not**
+so creation still proceeds. When such a trigger arrives, the bot does **not**
 create a Case immediately.
 Instead it runs a plan-and-execute agent that investigates
 (all read-only search tools are available), may ask the reporter to clarify
