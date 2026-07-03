@@ -42,6 +42,13 @@ type plannerPromptInput struct {
 	// StructuredFinal is true iff RunRequest.FinalOutputSchema != nil;
 	// the planner is told the final-response phase will be JSON-shaped.
 	StructuredFinal bool
+
+	// AllowSubAgentWrites toggles the "Actions and writes" guidance:
+	// when true, the planner is told tasks may perform writes/actions
+	// (not only investigation), how to sequence them, and that the final
+	// response cannot perform side effects. Mirrors
+	// RunRequest.AllowSubAgentWrites.
+	AllowSubAgentWrites bool
 }
 
 // renderPlannerSystemPrompt builds the planner system prompt by piping

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -840,4 +841,151 @@ func TestRunner_Run_DirectRejectedWhenNotAllowed(t *testing.T) {
 	gt.Bool(t, res.Direct).False()
 	gt.String(t, res.FinalText).Equal("final plain answer")
 	gt.Array(t, res.AllResults).Length(1)
+}
+
+// --- Sub-agent writes (AllowSubAgentWrites) -------------------------
+
+// recordingWriteTool is a gollem.Tool that records its invocations so a
+// test can prove a sub-agent actually performed the write it was assigned,
+// rather than merely describing it in text.
+type recordingWriteTool struct {
+	mu    sync.Mutex
+	calls []map[string]any
+}
+
+func (t *recordingWriteTool) Spec() gollem.ToolSpec {
+	return gollem.ToolSpec{
+		Name:        "slack_write",
+		Description: "Post a plain-text message to the case's Slack channel.",
+		Parameters: map[string]*gollem.Parameter{
+			"text": {Type: gollem.TypeString, Description: "message text", Required: true},
+		},
+	}
+}
+
+func (t *recordingWriteTool) Run(_ context.Context, args map[string]any) (map[string]any, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.calls = append(t.calls, args)
+	return map[string]any{"posted": true}, nil
+}
+
+func (t *recordingWriteTool) callCount() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.calls)
+}
+
+func (t *recordingWriteTool) firstText() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.calls) == 0 {
+		return ""
+	}
+	s, _ := t.calls[0]["text"].(string)
+	return s
+}
+
+// writeToolResolver hands the recording write tool to any task whose tool
+// list names "slack_write", and nothing otherwise.
+type writeToolResolver struct{ tool gollem.Tool }
+
+func (r writeToolResolver) Resolve(ids []string) []gollem.Tool {
+	if slices.Contains(ids, "slack_write") {
+		return []gollem.Tool{r.tool}
+	}
+	return nil
+}
+
+// TestRunner_Run_SubAgentPerformsWrite drives the full loop with a mock LLM
+// that dispatches a write task and issues a tool call from the sub-agent. It
+// proves that, with AllowSubAgentWrites=true, a sub-agent actually invokes an
+// assigned write tool end-to-end (planner → write task → sub-agent tool call
+// → replan terminate → final), which is exactly what the observation-only
+// restriction previously prevented.
+func TestRunner_Run_SubAgentPerformsWrite(t *testing.T) {
+	ctx := context.Background()
+	writeTool := &recordingWriteTool{}
+	round := atomic.Int32{}
+	llm := &mock.LLMClientMock{
+		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mock.SessionMock{
+				GenerateFunc: func(_ context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					switch round.Add(1) {
+					case 1: // planner round 1: dispatch a single write task
+						return &gollem.Response{Texts: []string{`{"message":"post the summary","tasks":[
+							{"id":"t-1","title":"Post","description":"Post the one-line summary to the channel.","acceptance_criteria":"summary posted","tools":["slack_write"]}
+						]}`}}, nil
+					case 2: // sub-agent: call the write tool
+						return &gollem.Response{FunctionCalls: []*gollem.FunctionCall{{
+							ID:        "call-1",
+							Name:      "slack_write",
+							Arguments: map[string]any{"text": "One-line summary."},
+						}}}, nil
+					case 3: // sub-agent: report after the tool result comes back
+						return &gollem.Response{Texts: []string{"Posted the one-line summary to the channel."}}, nil
+					case 4: // replan: terminate (no more tasks)
+						return &gollem.Response{Texts: []string{`{"message":"done","tasks":[]}`}}, nil
+					default: // final synthesis
+						return &gollem.Response{Texts: []string{"Summary posted."}}, nil
+					}
+				},
+			}, nil
+		},
+	}
+
+	runner := newRunner(t, llm)
+	req := baseRequest()
+	req.AllowSubAgentWrites = true
+	req.KnownToolIDs = []string{"slack_write"}
+	req.ToolResolver = writeToolResolver{tool: writeTool}
+
+	res, err := runner.Run(ctx, req)
+	gt.NoError(t, err).Required()
+	async.Wait()
+
+	gt.Value(t, res.Status).Equal(planexec.StatusCompleted)
+	// The sub-agent actually invoked the write tool exactly once, with the
+	// text the model chose — not merely wrote it into the final summary.
+	gt.Number(t, writeTool.callCount()).Equal(1)
+	gt.String(t, writeTool.firstText()).Equal("One-line summary.")
+}
+
+// TestRunner_Run_RealLLM_SubAgentPerformsWrite is the live-LLM counterpart:
+// against a real provider, the planner must dispatch a write task and the
+// sub-agent must actually call the posting tool to satisfy the goal. Gated on
+// TEST_LLM_PROVIDER via newRoutingTestLLMClient, like the routing test.
+func TestRunner_Run_RealLLM_SubAgentPerformsWrite(t *testing.T) {
+	ctx := context.Background()
+	llm := newRoutingTestLLMClient(t)
+
+	writeTool := &recordingWriteTool{}
+	runner, err := planexec.NewRunner(planexec.RunnerDeps{
+		LLMClient:   llm,
+		HistoryRepo: agentarchive.NewMemoryHistoryRepository(),
+		TraceRepo:   agentarchive.NewMemoryTraceRepository(),
+		Budget:      planexec.BudgetConfig{PlannerLoopMax: 5, SubAgentLoopMax: 6},
+	})
+	gt.NoError(t, err).Required()
+
+	req := baseRequest()
+	// AllowDirect stays false so a side-effecting goal cannot be short-
+	// circuited through the direct path — it must go through a task.
+	req.AllowSubAgentWrites = true
+	req.KnownToolIDs = []string{"slack_write"}
+	req.ToolResolver = writeToolResolver{tool: writeTool}
+	req.SystemPrompt = "You are an agent handling a support case. Your deliverable is to POST a short " +
+		"acknowledgement to the case's Slack channel using the `slack_write` tool. Writing the message " +
+		"as text without actually calling the tool does NOT count as done."
+	req.UserInput = "A new case was just created: \"Login page returns HTTP 500 for some users.\" " +
+		"Post a one-line acknowledgement to the channel confirming the case is being looked into."
+
+	res, err := runner.Run(ctx, req)
+	gt.NoError(t, err).Required()
+	async.Wait()
+
+	gt.Value(t, res.Status).Equal(planexec.StatusCompleted)
+	// The live model must have driven a sub-agent to actually call the write
+	// tool at least once.
+	gt.Number(t, writeTool.callCount()).GreaterOrEqual(1)
 }

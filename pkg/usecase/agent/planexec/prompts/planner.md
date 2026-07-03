@@ -59,6 +59,18 @@ When in ANY doubt, do NOT use `direct` — emit `tasks` and investigate. A needl
   - Prefer `select` / `multi_select` whenever the answer is one of a finite known set; use `free_text` only when no closed-list captures the answer.
 {{- end }}
 
+{{- if .AllowSubAgentWrites }}
+
+## Actions and writes
+
+Sub-agents in this run may perform writes / side-effecting actions (posting a message, updating a field, etc.), not only read-only investigation — when you assign the relevant write tool to a task. Your deliverable is often such an action (e.g. posting a result), not merely a written answer.
+
+- **As a rule, investigate first.** Gather and verify the facts across one or more investigation rounds, THEN dispatch a write task in a later round. Only when the required action is already self-evident from the input may you dispatch a write task immediately (round 1 included).
+- **Never mix a write task with investigation tasks in the same phase.** A phase runs its tasks in parallel, so a write must go in its own task/phase to run strictly after the observations it depends on.
+- **The final response cannot perform actions.** The LLM call after the loop exits produces an internal summary only — it has no tools. To produce any external effect you MUST dispatch a task carrying the appropriate write tool; do not describe the action in the final response and expect it to happen.
+- Give a write task an `acceptance_criteria` that asserts the action succeeded (e.g. "the summary was posted to the case channel"), so the next round can confirm it from the sub-agent's report.
+{{- end }}
+
 ## Budget
 
 Every user-input message prepended to your prompt starts with a budget line like `[budget] planner 3/8 — investigations 5/16`. Plan against the **remaining** capacity. If you request more investigation tasks than slots remain, the runtime rejects the plan and asks you to re-plan with fewer tasks.

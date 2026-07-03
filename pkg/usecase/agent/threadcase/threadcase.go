@@ -204,8 +204,15 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 		ToolResolver: resolver,
 		// Thread-mode workspaces manage no Actions, so the planner must not be
 		// offered the core (action) toolset; OmitCore below withholds the tools.
-		KnownToolIDs:  agent.KnownToolSetIDsNoCore,
-		AllowQuestion: true,
+		KnownToolIDs: agent.KnownToolSetIDsNoCore,
+		// Sub-agents stay observation-only: threadcase commits its terminal
+		// Create/reply/update through the structured-final OnFinalize (below)
+		// or the returned Decision, never through a sub-agent write. The
+		// resolver hands sub-agents read-only tools; keeping this false makes
+		// the prompt agree with that. (Default is false; set explicitly to
+		// record the intent at the call site.)
+		AllowSubAgentWrites: false,
+		AllowQuestion:       true,
 		// Direct mode answers a trivial mention without the investigation
 		// loop, replying in plain text. It is disabled for ModeCreate: a
 		// create turn must commit a Case (a side-effecting terminal action),

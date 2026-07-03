@@ -174,6 +174,12 @@ Notes:
   surface is absent there.
 - **Thread-case investigation** and the **proposal sub-agents** are read-only
   investigators; their conclusions are applied by the host, not by a write tool.
+  **Job (`planexec`) sub-agents, by contrast, may use write tools** (e.g. the
+  Slack poster) to carry out the Job's deliverable action once the planner has
+  gathered enough context — the planner assigns the write tool to a dedicated
+  task. This is gated by `RunRequest.AllowSubAgentWrites` (true for Jobs, false
+  for thread-case); the resolver still bounds which tools each sub-agent can
+  physically call, so the flag and the tool set always agree.
 
 ## Guardrails
 

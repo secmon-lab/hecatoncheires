@@ -158,6 +158,113 @@ func TestPlanexecJobExecutor_PlanThenFinal(t *testing.T) {
 	gt.String(t, joined).Contains("[t-1]")
 }
 
+// jobWriteTool records its invocations so the test can prove a Job
+// sub-agent actually performed the write it was assigned.
+type jobWriteTool struct {
+	mu    sync.Mutex
+	calls []map[string]any
+}
+
+func (t *jobWriteTool) Spec() gollem.ToolSpec {
+	return gollem.ToolSpec{
+		Name:        "slack__post_to_case_channel",
+		Description: "Post a plain-text message to the case's Slack channel.",
+		Parameters: map[string]*gollem.Parameter{
+			"text": {Type: gollem.TypeString, Description: "message text", Required: true},
+		},
+	}
+}
+
+func (t *jobWriteTool) Run(_ context.Context, args map[string]any) (map[string]any, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.calls = append(t.calls, args)
+	return map[string]any{"posted": true}, nil
+}
+
+func (t *jobWriteTool) callCount() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.calls)
+}
+
+func (t *jobWriteTool) firstText() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.calls) == 0 {
+		return ""
+	}
+	s, _ := t.calls[0]["text"].(string)
+	return s
+}
+
+// TestPlanexecJobExecutor_SubAgentPerformsWrite pins the fix for the
+// reported bug (pre_review_on_create investigated but never posted): the
+// Job path sets AllowSubAgentWrites=true, so a sub-agent that is assigned a
+// write tool actually calls it instead of refusing as observation-only. The
+// mock LLM dispatches a write task, the sub-agent issues the tool call, and
+// we assert the tool ran with the chosen text.
+func TestPlanexecJobExecutor_SubAgentPerformsWrite(t *testing.T) {
+	ctx := context.Background()
+	writeTool := &jobWriteTool{}
+
+	// The Job tool resolver exposes every ExecuteRequest.Tools entry under
+	// the single "default" bucket, so the planner assigns tools:["default"].
+	round := 0
+	var roundMu sync.Mutex
+	llm := &mock.LLMClientMock{
+		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mock.SessionMock{
+				GenerateFunc: func(_ context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					roundMu.Lock()
+					round++
+					n := round
+					roundMu.Unlock()
+					switch n {
+					case 1: // planner round 1: dispatch a write task
+						return &gollem.Response{Texts: []string{`{"message":"post the review","tasks":[
+							{"id":"t-1","title":"Post","description":"Post the pre-review to the channel.","acceptance_criteria":"review posted","tools":["default"]}
+						]}`}}, nil
+					case 2: // sub-agent: call the write tool
+						return &gollem.Response{FunctionCalls: []*gollem.FunctionCall{{
+							ID:        "call-1",
+							Name:      "slack__post_to_case_channel",
+							Arguments: map[string]any{"text": "Pre-review complete."},
+						}}}, nil
+					case 3: // sub-agent: report after the tool result
+						return &gollem.Response{Texts: []string{"Posted the pre-review to the channel."}}, nil
+					case 4: // replan: terminate
+						return &gollem.Response{Texts: []string{`{"message":"done","tasks":[]}`}}, nil
+					default: // final synthesis
+						return &gollem.Response{Texts: []string{"Pre-review posted."}}, nil
+					}
+				},
+			}, nil
+		},
+	}
+
+	runner := newRunner(t, llm)
+	executor, err := job.NewPlanexecJobExecutor(runner)
+	gt.NoError(t, err).Required()
+
+	res, err := executor.Execute(ctx, job.ExecuteRequest{
+		JobID:        "test-job",
+		SystemPrompt: "You are running a pre-review job. Post the review to the case channel.",
+		Prompt:       "Run the pre-review for this case.",
+		Tools:        []gollem.Tool{writeTool},
+		LLMClient:    llm,
+		TraceID:      "trace-pe-write",
+		HistoryKey:   "hist-pe-write",
+	})
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(job.ExecuteStatusSuccess)
+
+	// The sub-agent actually invoked the write tool once, with the chosen
+	// text — the deliverable reached Slack instead of only being described.
+	gt.Number(t, writeTool.callCount()).Equal(1)
+	gt.String(t, writeTool.firstText()).Equal("Pre-review complete.")
+}
+
 // TestPlanexecJobExecutor_ForwardsTraceHandler pins the fix for the
 // planexec Job empty-timeline bug at the executor boundary: the executor
 // MUST forward ExecuteRequest.TraceHandler into planexec.RunRequest so

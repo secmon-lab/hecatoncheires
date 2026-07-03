@@ -938,10 +938,15 @@ time.
 The `strategy` field selects which runtime drives the Job's LLM loop.
 Defaults to `simple`, which is the v1 behaviour: a single
 `gollem.Agent.Execute` call with the configured tool set. Set it to
-`planexec` to opt into the plan-and-execute runtime shared with the
-proposal mode — a planner LLM emits a list of parallel sub-agent tasks,
-the runtime fans them out, replans with the observations, and finishes
-with a structured summary.
+`planexec` to opt into the plan-and-execute runtime — a planner LLM emits
+a list of parallel sub-agent tasks, the runtime fans them out, replans
+with the observations, and finishes with a plain-text summary. A Job's
+sub-agents may perform the deliverable action themselves (e.g. post the
+result to the case channel via `slack__post_to_case_channel`) once the
+planner has gathered enough context — they are not restricted to
+observation-only investigation. As a rule the planner investigates first
+and dispatches the write as a later task, but it may write immediately
+when the action is self-evident.
 
 ```toml
 [[job]]
