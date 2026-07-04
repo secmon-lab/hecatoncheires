@@ -37,6 +37,10 @@ test_hassuffix_error_flagged if {
 	count(fail) == 1 with input as strings_err_call("HasSuffix")
 }
 
+test_equalfold_error_flagged if {
+	count(fail) == 1 with input as strings_err_call("EqualFold")
+}
+
 # strings.Contains on a plain string argument (no .Error() call) — allowed.
 test_contains_plain_string_allowed if {
 	count(fail) == 0 with input as json.patch(

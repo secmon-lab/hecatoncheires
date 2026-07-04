@@ -103,14 +103,14 @@ expect = "pass"
 # ---------------------------------------------------------------------------
 
 [[test.cases]]
-name   = "direct slog.Info/Error/InfoContext logger calls are flagged"
+name   = "direct slog.Info/Error/InfoContext/With logger calls are flagged"
 policy = ".goast/no_slog_global.rego"
 source = ".goast/testdata/no_slog_global/bad.go"
 expect = "fail"
-count  = 3
+count  = 4
 
   [[test.cases.violations]]
-  line     = 7
+  line     = 8
   message  = "do not call slog.Info directly; obtain a logger via logging.From(ctx)"
   severity = "ERROR"
 
@@ -125,11 +125,11 @@ expect = "pass"
 # ---------------------------------------------------------------------------
 
 [[test.cases]]
-name   = "strings.Contains/HasPrefix on err.Error() are flagged"
+name   = "strings.Contains/HasPrefix/EqualFold on err.Error() are flagged"
 policy = ".goast/no_strings_contains_error.rego"
 source = ".goast/testdata/no_strings_contains_error/bad.go"
 expect = "fail"
-count  = 2
+count  = 3
 
   [[test.cases.violations]]
   line     = 7
@@ -246,6 +246,12 @@ expect = "pass"
 name   = "export_test.go using the internal package is exempt"
 policy = ".goast/test_file_conventions.rego"
 source = ".goast/testdata/test_conventions/export_test.go"
+expect = "pass"
+
+[[test.cases]]
+name   = "main_test.go using package main is exempt (main is not importable)"
+policy = ".goast/test_file_conventions.rego"
+source = ".goast/testdata/test_conventions/main_test.go"
 expect = "pass"
 
 [[test.cases]]

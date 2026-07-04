@@ -9,7 +9,7 @@ package goast
 # on a third-party error's message (Slack "missing_scope", an HTTP "non-2xx",
 # ...) has no typed sentinel to match and legitimately inspects the surfaced
 # text. The rule targets production error-handling logic, not test assertions.
-str_text_predicate := {"Contains", "HasPrefix", "HasSuffix"}
+str_text_predicate := {"Contains", "HasPrefix", "HasSuffix", "EqualFold"}
 
 fail contains res if {
 	input.Kind == "CallExpr"

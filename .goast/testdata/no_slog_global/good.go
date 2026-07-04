@@ -10,4 +10,5 @@ func good(l *slog.Logger) {
 	h := slog.NewJSONHandler(nil, nil)
 	_ = slog.New(h)
 	l.Info("logging via an injected instance is fine")
+	_ = l.With("k", "v") // .With on an instance is fine — only slog.With is banned
 }

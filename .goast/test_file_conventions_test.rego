@@ -30,6 +30,12 @@ test_export_test_go_exempt if {
 	count(fail) == 0 with input as file_node("export_test.go", "cli")
 }
 
+# package main is exempt: a main package is not importable, so main_test.go
+# must use package main to reach the internals under test.
+test_main_test_package_exempt if {
+	count(fail) == 0 with input as file_node("main_test.go", "main")
+}
+
 # A non-test .go file is not subject to the rule at all.
 test_non_test_file_ignored if {
 	count(fail) == 0 with input as file_node("serve.go", "cli")

@@ -5,6 +5,11 @@ package goast
 # context-scoped logger; every log site must obtain a logger via
 # logging.From(ctx) (pkg/utils/logging).
 #
+# slog.With is included: it returns a logger bound to the global default
+# handler, so slog.With(...).Info(...) bypasses logging.From(ctx) just as
+# slog.Info would. (A .With(...) call on an injected *slog.Logger is fine — its
+# target is Fun.X.Name == "logger", not "slog".)
+#
 # Deliberately NOT matched (these are not logger calls):
 #   - attribute constructors: slog.String / Any / Int64 / Group / ...
 #   - logger/handler construction: slog.New / NewJSONHandler / Default
@@ -14,6 +19,7 @@ package goast
 banned_slog_logger_method := {
 	"Debug", "Info", "Warn", "Error", "Log",
 	"DebugContext", "InfoContext", "WarnContext", "ErrorContext", "LogAttrs",
+	"With",
 }
 
 fail contains res if {

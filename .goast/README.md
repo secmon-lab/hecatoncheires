@@ -53,12 +53,12 @@ Three verification layers, cheapest first (all wired in
 |--------|------|-------|------------|
 | `no_fmt_print` | `fmt.Print*`, builtin `print`/`println` | `./pkg` | eval CLI (`pkg/cli/eval.go`), eval harness (`pkg/usecase/eval/**`) |
 | `usecase_context_first` | exported use-case funcs without `context.Context` first | `pkg/usecase` | `New*`/`With*`/`Is*`/`Has*`/`Can*`/`Parse*`, pure getters (see `exempt_name`), `pkg/usecase/eval/**`, `_test.go` |
-| `no_slog_global` | direct `slog.Debug/Info/Warn/Error/Log` and `*Context`/`LogAttrs` | `./pkg` | attribute constructors and `slog.New*` are not matched by construction |
-| `no_strings_contains_error` | `strings.Contains/HasPrefix/HasSuffix` on `err.Error()` | production | `_test.go` (assertions on third-party error text have no typed sentinel) |
+| `no_slog_global` | direct `slog.Debug/Info/Warn/Error/Log`, `*Context`/`LogAttrs`, and `slog.With` | `./pkg` | attribute constructors and `slog.New*` are not matched by construction |
+| `no_strings_contains_error` | `strings.Contains/HasPrefix/HasSuffix/EqualFold` on `err.Error()` | production | `_test.go` (assertions on third-party error text have no typed sentinel) |
 | `no_firestore_struct_tags` | `firestore:"..."` struct field tags | `./pkg` | none (a firestore mention in a comment is not a Tag, so never matched) |
 | `repo_no_doc_converter` | `toXxxDoc`/`fromXxxDoc` funcs and `XxxDoc` types | `pkg/repository` | none |
 | `no_discarded_close` | `_ = x.Close()`, bare `x.Close()`, bare `defer x.Close()` | production | `_test.go` (httptest teardown), `pkg/utils/safe`; `safe.Close(...)` is the sanctioned form |
-| `test_file_conventions` | (a) `_test.go` using an internal package; (b) `*_e2e_test.go`/`*_integration_test.go` filenames | `./pkg` | `export_test.go` (the sanctioned internal-access seam) |
+| `test_file_conventions` | (a) `_test.go` using an internal package; (b) `*_e2e_test.go`/`*_integration_test.go` filenames | `./pkg` | `export_test.go` (the sanctioned internal-access seam); `package main` (not importable, so `main_test.go` must stay internal) |
 
 ## Deliberately NOT enforced by goast
 

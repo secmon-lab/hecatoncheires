@@ -42,6 +42,13 @@ test_slog_logattrs_flagged if {
 	count(fail) == 1 with input as slog_call("LogAttrs")
 }
 
+# slog.With returns a logger bound to the global default — banned.
+test_slog_with_flagged if {
+	some res in fail with input as slog_call("With")
+	res.pos == 105
+	res.msg == "do not call slog.With directly; obtain a logger via logging.From(ctx)"
+}
+
 # Attribute constructors are allowed.
 test_slog_string_allowed if {
 	count(fail) == 0 with input as slog_call("String")

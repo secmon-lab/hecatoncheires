@@ -3,13 +3,16 @@ package goast
 # Two File-level test conventions.
 
 # (a) External test package. A _test.go file must declare package <pkg>_test so
-# tests exercise only the exported contract. The single exception is
-# export_test.go — the sanctioned internal seam that re-exports identifiers
-# under a *ForTest alias (it intentionally uses the internal package).
+# tests exercise only the exported contract. Exceptions:
+#   - export_test.go — the sanctioned internal seam that re-exports identifiers
+#     under a *ForTest alias (it intentionally uses the internal package).
+#   - package main — a main package is not importable, so an external main_test
+#     package cannot reach its identifiers; main_test.go must use package main.
 fail contains res if {
 	input.Kind == "File"
 	endswith(input.FileName, "_test.go")
 	input.FileName != "export_test.go"
+	input.Node.Name.Name != "main"
 	not endswith(input.Node.Name.Name, "_test")
 
 	res := {
