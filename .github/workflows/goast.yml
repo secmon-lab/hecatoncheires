@@ -57,14 +57,11 @@ jobs:
       - name: Test policies against real Go (goast test)
         run: goast test
 
-      # Apply the policies to the Go source. The two policy files are listed
-      # explicitly (rather than `-p .goast`) so the adjacent *_test.rego files
-      # are NOT compiled into the evaluation — their test rules would otherwise
-      # run on every AST node for no benefit.
+      # Apply the policies to the Go source. Pointing -p at the .goast directory
+      # picks up every policy automatically, so a new rule can never be silently
+      # omitted from CI. The adjacent *_test.rego files are compiled too, but
+      # they only define test_* rules and helpers that goast eval never queries
+      # (it reads data.goast.fail), so they add neither findings nor measurable
+      # cost. See .goast/README.md for the policy catalog.
       - name: Check code
-        run: |
-          goast eval \
-            -p .goast/no_fmt_print.rego \
-            -p .goast/usecase_context_first.rego \
-            --fail --ignore-auto-generated \
-            ./pkg
+        run: goast eval -p .goast --fail --ignore-auto-generated ./pkg

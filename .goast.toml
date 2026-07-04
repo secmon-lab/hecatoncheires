@@ -97,3 +97,171 @@ name   = "exported ctx-less funcs outside pkg/usecase are ignored"
 policy = ".goast/usecase_context_first.rego"
 source = ".goast/testdata/pkg/controller/ctrl.go"
 expect = "pass"
+
+# ---------------------------------------------------------------------------
+# no_slog_global.rego
+# ---------------------------------------------------------------------------
+
+[[test.cases]]
+name   = "direct slog.Info/Error/InfoContext/With logger calls are flagged"
+policy = ".goast/no_slog_global.rego"
+source = ".goast/testdata/no_slog_global/bad.go"
+expect = "fail"
+count  = 4
+
+  [[test.cases.violations]]
+  line     = 8
+  message  = "do not call slog.Info directly; obtain a logger via logging.From(ctx)"
+  severity = "ERROR"
+
+[[test.cases]]
+name   = "attribute constructors, handler/logger construction, and instance calls are allowed"
+policy = ".goast/no_slog_global.rego"
+source = ".goast/testdata/no_slog_global/good.go"
+expect = "pass"
+
+# ---------------------------------------------------------------------------
+# no_strings_contains_error.rego
+# ---------------------------------------------------------------------------
+
+[[test.cases]]
+name   = "strings.Contains/HasPrefix/EqualFold on err.Error() are flagged"
+policy = ".goast/no_strings_contains_error.rego"
+source = ".goast/testdata/no_strings_contains_error/bad.go"
+expect = "fail"
+count  = 3
+
+  [[test.cases.violations]]
+  line     = 7
+  message  = "do not discriminate errors with strings.Contains(err.Error()); use errors.Is/As against a typed sentinel"
+  severity = "ERROR"
+
+[[test.cases]]
+name   = "strings ops on plain strings and errors.Is are allowed"
+policy = ".goast/no_strings_contains_error.rego"
+source = ".goast/testdata/no_strings_contains_error/good.go"
+expect = "pass"
+
+[[test.cases]]
+name   = "error-text matching inside a _test.go file is exempt"
+policy = ".goast/no_strings_contains_error.rego"
+source = ".goast/testdata/no_strings_contains_error/exempt_test.go"
+expect = "pass"
+
+# ---------------------------------------------------------------------------
+# no_firestore_struct_tags.rego
+# ---------------------------------------------------------------------------
+
+[[test.cases]]
+name   = "firestore:\"...\" struct tags are flagged"
+policy = ".goast/no_firestore_struct_tags.rego"
+source = ".goast/testdata/no_firestore_struct_tags/bad.go"
+expect = "fail"
+count  = 2
+
+  [[test.cases.violations]]
+  line     = 5
+  message  = 'do not add firestore:"..." struct tags; persist *model.X directly (Repository write contract)'
+  severity = "ERROR"
+
+[[test.cases]]
+name   = "a firestore mention in a comment and json tags are allowed"
+policy = ".goast/no_firestore_struct_tags.rego"
+source = ".goast/testdata/no_firestore_struct_tags/good.go"
+expect = "pass"
+
+# ---------------------------------------------------------------------------
+# repo_no_doc_converter.rego
+# ---------------------------------------------------------------------------
+
+[[test.cases]]
+name   = "mirror doc type and to/from converters under pkg/repository are flagged"
+policy = ".goast/repo_no_doc_converter.rego"
+source = ".goast/testdata/pkg/repository/bad.go"
+expect = "fail"
+count  = 3
+
+  [[test.cases.violations]]
+  line     = 5
+  message  = 'repository must not define mirror doc type "caseDoc"; the domain model is the wire format'
+  severity = "ERROR"
+
+[[test.cases]]
+name   = "a repository with no doc type or converters is allowed"
+policy = ".goast/repo_no_doc_converter.rego"
+source = ".goast/testdata/pkg/repository/good.go"
+expect = "pass"
+
+# ---------------------------------------------------------------------------
+# no_discarded_close.rego
+# ---------------------------------------------------------------------------
+
+[[test.cases]]
+name   = "discarded, bare, deferred, and two-level bare closes are all flagged"
+policy = ".goast/no_discarded_close.rego"
+source = ".goast/testdata/no_discarded_close/bad.go"
+expect = "fail"
+count  = 4
+
+  [[test.cases.violations]]
+  line     = 10
+  message  = "do not discard x.Close(); use safe.Close(ctx, x)"
+  severity = "ERROR"
+
+[[test.cases]]
+name   = "safe.Close (bare and deferred) is allowed"
+policy = ".goast/no_discarded_close.rego"
+source = ".goast/testdata/no_discarded_close/good.go"
+expect = "pass"
+
+[[test.cases]]
+name   = "raw closes inside a _test.go file are exempt"
+policy = ".goast/no_discarded_close.rego"
+source = ".goast/testdata/no_discarded_close/exempt_test.go"
+expect = "pass"
+
+# ---------------------------------------------------------------------------
+# test_file_conventions.rego
+# ---------------------------------------------------------------------------
+
+[[test.cases]]
+name   = "a _test.go file using an internal package is flagged"
+policy = ".goast/test_file_conventions.rego"
+source = ".goast/testdata/test_conventions/internal_test.go"
+expect = "fail"
+count  = 1
+
+  [[test.cases.violations]]
+  line     = 1
+  message  = "test file must use an external sample_test package (found internal package sample); move internal-access seams into export_test.go"
+  severity = "ERROR"
+
+[[test.cases]]
+name   = "an external <pkg>_test package is allowed"
+policy = ".goast/test_file_conventions.rego"
+source = ".goast/testdata/test_conventions/external_test.go"
+expect = "pass"
+
+[[test.cases]]
+name   = "export_test.go using the internal package is exempt"
+policy = ".goast/test_file_conventions.rego"
+source = ".goast/testdata/test_conventions/export_test.go"
+expect = "pass"
+
+[[test.cases]]
+name   = "main_test.go using package main is exempt (main is not importable)"
+policy = ".goast/test_file_conventions.rego"
+source = ".goast/testdata/test_conventions/main_test.go"
+expect = "pass"
+
+[[test.cases]]
+name   = "an _e2e_test.go filename is flagged"
+policy = ".goast/test_file_conventions.rego"
+source = ".goast/testdata/test_conventions/widget_e2e_test.go"
+expect = "fail"
+count  = 1
+
+  [[test.cases.violations]]
+  line     = 1
+  message  = 'non-standard test filename "widget_e2e_test.go"; name test files xyz_test.go (one test file per source file)'
+  severity = "ERROR"

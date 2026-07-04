@@ -43,3 +43,37 @@ func BuildJobToolsWithReadDepsForTest(deps JobReadToolDepsForTest, c *model.Case
 		NotionTool:     deps.Notion,
 	}, jobToolAdapters{}, c, ws)
 }
+
+// --- serve.go seams (GraphQL error → HTTP status mapping) ------------------
+
+// ClassifyErrorForTest exposes classifyError.
+var ClassifyErrorForTest = classifyError
+
+// StatusForExtensionCodeForTest exposes statusForExtensionCode.
+var StatusForExtensionCodeForTest = statusForExtensionCode
+
+// GraphqlErrorStatusMiddlewareForTest exposes graphqlErrorStatusMiddleware.
+var GraphqlErrorStatusMiddlewareForTest = graphqlErrorStatusMiddleware
+
+// HTTPStatusForGraphQLErrorCodesForTest builds a GraphQL error-envelope list
+// from the given extension codes and runs httpStatusForGraphQLErrors over it,
+// so tests can assert the status mapping without naming the internal envelope
+// type (gqlErrorEnvelope stays unexported).
+func HTTPStatusForGraphQLErrorCodesForTest(codes ...string) int {
+	out := make([]gqlErrorEnvelope, len(codes))
+	for i, c := range codes {
+		out[i].Extensions.Code = c
+	}
+	return httpStatusForGraphQLErrors(out)
+}
+
+// --- eval.go / diagnosis.go command constructors --------------------------
+
+// CmdEvalForTest exposes cmdEval.
+var CmdEvalForTest = cmdEval
+
+// CmdDiagnosisForTest exposes cmdDiagnosis.
+var CmdDiagnosisForTest = cmdDiagnosis
+
+// CmdFixUnsentActionForTest exposes cmdFixUnsentAction.
+var CmdFixUnsentActionForTest = cmdFixUnsentAction
