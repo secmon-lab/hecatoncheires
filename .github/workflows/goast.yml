@@ -5,6 +5,7 @@ on:
     paths:
       - 'pkg/**'
       - '.goast/**'
+      - '.goast.toml'
       - 'go.mod'
       - 'go.sum'
       - '.github/workflows/goast.yml'
@@ -32,8 +33,9 @@ jobs:
           cache-dependency-path: go.sum
 
       # Pinned to a commit (not @latest) so the checked version is reproducible.
+      # This commit adds the `goast test` subcommand used below.
       - name: Install goast
-        run: go install github.com/m-mizutani/goast/cmd/goast@ee51abd11ec6620092dca60d0954ab2782e1959f # v0.2.x
+        run: go install github.com/m-mizutani/goast/cmd/goast@134058740ce7dee4a10b565da605a898dec94da4 # v0.2.x + goast test
 
       # OPA is needed to run the policies' own unit tests.
       - name: Install OPA
@@ -42,9 +44,18 @@ jobs:
           version: 1.18.2
 
       # Unit-test the Rego policies first, so a broken policy fails fast and
-      # clearly (before it is applied to the whole source tree).
-      - name: Test policies
+      # clearly (before it is applied to the whole source tree). These fixtures
+      # are hand-written AST JSON.
+      - name: Unit-test policies (opa)
         run: opa test .goast
+
+      # Run the policies through goast's real parse -> walk -> eval pipeline over
+      # the Go fixtures in .goast/testdata, so the AST shapes the rules assume
+      # (Fun.X.Name, Type.Params.List[0], DirName scoping, ...) are verified
+      # against what the Go parser actually emits — the layer `opa test` cannot
+      # cover because it feeds hand-authored JSON. See .goast.toml.
+      - name: Test policies against real Go (goast test)
+        run: goast test
 
       # Apply the policies to the Go source. The two policy files are listed
       # explicitly (rather than `-p .goast`) so the adjacent *_test.rego files
