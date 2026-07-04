@@ -282,6 +282,7 @@ When making changes, before finishing the task, always:
 - Run `go vet ./...`, `go fmt ./...` to format the code
 - Run `golangci-lint run ./...` to check lint error
 - Run `gosec -exclude-generated -quiet ./...` to check security issue
+- Run `opa test .goast` and `goast test` to verify the goast policies (many `CLAUDE.md` conventions — no `slog.*`/`fmt.Print*`, `err.Error()` string matching, `firestore:"..."` tags, raw `x.Close()`, external test packages, etc. — are mechanically enforced here; see `.goast/README.md` for the policy catalog)
 - Run `zenv go test ./...` to ensure ALL tests pass
 - **NEVER run `go build` to verify code.** Use `go vet ./...` instead to check for compile errors
 - **MANDATORY whenever any file under `frontend/` changes**:

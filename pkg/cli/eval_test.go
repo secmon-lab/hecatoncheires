@@ -1,4 +1,4 @@
-package cli
+package cli_test
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/m-mizutani/gt"
+	"github.com/secmon-lab/hecatoncheires/pkg/cli"
 )
 
 func scenarioFixture() string {
@@ -13,20 +14,20 @@ func scenarioFixture() string {
 }
 
 func TestCmdEval_DryRun(t *testing.T) {
-	cmd := cmdEval()
+	cmd := cli.CmdEvalForTest()
 	// --dryrun must not require an LLM or touch the network.
 	err := cmd.Run(context.Background(), []string{"eval", "--dryrun", scenarioFixture()})
 	gt.NoError(t, err)
 }
 
 func TestCmdEval_ListTools(t *testing.T) {
-	cmd := cmdEval()
+	cmd := cli.CmdEvalForTest()
 	err := cmd.Run(context.Background(), []string{"eval", "--list-tools"})
 	gt.NoError(t, err)
 }
 
 func TestCmdEval_NoPaths(t *testing.T) {
-	cmd := cmdEval()
+	cmd := cli.CmdEvalForTest()
 	err := cmd.Run(context.Background(), []string{"eval", "--dryrun"})
 	gt.Error(t, err)
 }
@@ -37,7 +38,7 @@ func TestCmdEval_RunRequiresLLM(t *testing.T) {
 	// surface, not a 5-minute live run against whatever provider happens to be
 	// configured. IsEnabled() keys solely on the provider being non-empty.
 	t.Setenv("HECATONCHEIRES_LLM_PROVIDER", "")
-	cmd := cmdEval()
+	cmd := cli.CmdEvalForTest()
 	// Without --dryrun and without an LLM provider, running must error.
 	err := cmd.Run(context.Background(), []string{"eval", scenarioFixture()})
 	gt.Error(t, err)

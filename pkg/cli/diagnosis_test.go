@@ -1,14 +1,15 @@
-package cli
+package cli_test
 
 import (
 	"testing"
 
 	"github.com/m-mizutani/gt"
+	"github.com/secmon-lab/hecatoncheires/pkg/cli"
 )
 
 func TestCmdDiagnosis(t *testing.T) {
 	t.Run("registers fix-unsent-action subcommand", func(t *testing.T) {
-		cmd := cmdDiagnosis()
+		cmd := cli.CmdDiagnosisForTest()
 		gt.Value(t, cmd.Name).Equal("diagnosis")
 
 		// The diagnosis umbrella exists only to host repair / inspection
@@ -26,7 +27,7 @@ func TestCmdDiagnosis(t *testing.T) {
 	})
 
 	t.Run("fix-unsent-action declares its required flags", func(t *testing.T) {
-		cmd := cmdFixUnsentAction()
+		cmd := cli.CmdFixUnsentActionForTest()
 		gt.Value(t, cmd.Name).Equal("fix-unsent-action")
 
 		// Sanity check that flags are declared. The exact set comes from

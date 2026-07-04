@@ -1,4 +1,4 @@
-package cli
+package cli_test
 
 import (
 	"net/http"
@@ -7,6 +7,7 @@ import (
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/m-mizutani/gt"
+	"github.com/secmon-lab/hecatoncheires/pkg/cli"
 	gqlctrl "github.com/secmon-lab/hecatoncheires/pkg/controller/graphql"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
@@ -36,46 +37,38 @@ func TestClassifyError(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			gt.String(t, classifyError(c.err)).Equal(c.want)
+			gt.String(t, cli.ClassifyErrorForTest(c.err)).Equal(c.want)
 		})
 	}
 }
 
 func TestStatusForExtensionCode(t *testing.T) {
-	gt.Number(t, statusForExtensionCode(gqlctrl.ErrCodeBadUserInput)).Equal(http.StatusBadRequest)
-	gt.Number(t, statusForExtensionCode(gqlctrl.ErrCodeNotFound)).Equal(http.StatusNotFound)
-	gt.Number(t, statusForExtensionCode(gqlctrl.ErrCodeForbidden)).Equal(http.StatusForbidden)
-	gt.Number(t, statusForExtensionCode(gqlctrl.ErrCodeConflict)).Equal(http.StatusConflict)
-	gt.Number(t, statusForExtensionCode(gqlctrl.ErrCodeUnauthenticated)).Equal(http.StatusUnauthorized)
-	gt.Number(t, statusForExtensionCode(gqlctrl.ErrCodeMissingRequiredFields)).Equal(http.StatusBadRequest)
-	gt.Number(t, statusForExtensionCode(gqlctrl.ErrCodeTitleRequired)).Equal(http.StatusBadRequest)
-	gt.Number(t, statusForExtensionCode(gqlctrl.ErrCodeFieldValidationFailed)).Equal(http.StatusBadRequest)
-	gt.Number(t, statusForExtensionCode(gqlctrl.ErrCodeInvalidStatusTransition)).Equal(http.StatusConflict)
-	gt.Number(t, statusForExtensionCode(gqlctrl.ErrCodeActivationFailed)).Equal(0) // server fault → 500 fallback
-	gt.Number(t, statusForExtensionCode("")).Equal(0)
-	gt.Number(t, statusForExtensionCode("WHATEVER")).Equal(0)
+	gt.Number(t, cli.StatusForExtensionCodeForTest(gqlctrl.ErrCodeBadUserInput)).Equal(http.StatusBadRequest)
+	gt.Number(t, cli.StatusForExtensionCodeForTest(gqlctrl.ErrCodeNotFound)).Equal(http.StatusNotFound)
+	gt.Number(t, cli.StatusForExtensionCodeForTest(gqlctrl.ErrCodeForbidden)).Equal(http.StatusForbidden)
+	gt.Number(t, cli.StatusForExtensionCodeForTest(gqlctrl.ErrCodeConflict)).Equal(http.StatusConflict)
+	gt.Number(t, cli.StatusForExtensionCodeForTest(gqlctrl.ErrCodeUnauthenticated)).Equal(http.StatusUnauthorized)
+	gt.Number(t, cli.StatusForExtensionCodeForTest(gqlctrl.ErrCodeMissingRequiredFields)).Equal(http.StatusBadRequest)
+	gt.Number(t, cli.StatusForExtensionCodeForTest(gqlctrl.ErrCodeTitleRequired)).Equal(http.StatusBadRequest)
+	gt.Number(t, cli.StatusForExtensionCodeForTest(gqlctrl.ErrCodeFieldValidationFailed)).Equal(http.StatusBadRequest)
+	gt.Number(t, cli.StatusForExtensionCodeForTest(gqlctrl.ErrCodeInvalidStatusTransition)).Equal(http.StatusConflict)
+	gt.Number(t, cli.StatusForExtensionCodeForTest(gqlctrl.ErrCodeActivationFailed)).Equal(0) // server fault → 500 fallback
+	gt.Number(t, cli.StatusForExtensionCodeForTest("")).Equal(0)
+	gt.Number(t, cli.StatusForExtensionCodeForTest("WHATEVER")).Equal(0)
 }
 
 func TestHTTPStatusForGraphQLErrors(t *testing.T) {
-	mk := func(codes ...string) []gqlErrorEnvelope {
-		out := make([]gqlErrorEnvelope, len(codes))
-		for i, c := range codes {
-			out[i].Extensions.Code = c
-		}
-		return out
-	}
-
-	gt.Number(t, httpStatusForGraphQLErrors(mk("BAD_USER_INPUT"))).Equal(http.StatusBadRequest)
-	gt.Number(t, httpStatusForGraphQLErrors(mk("NOT_FOUND"))).Equal(http.StatusNotFound)
+	gt.Number(t, cli.HTTPStatusForGraphQLErrorCodesForTest("BAD_USER_INPUT")).Equal(http.StatusBadRequest)
+	gt.Number(t, cli.HTTPStatusForGraphQLErrorCodesForTest("NOT_FOUND")).Equal(http.StatusNotFound)
 
 	// One untagged error in the batch → escalate to 500
-	gt.Number(t, httpStatusForGraphQLErrors(mk("BAD_USER_INPUT", ""))).Equal(http.StatusInternalServerError)
+	gt.Number(t, cli.HTTPStatusForGraphQLErrorCodesForTest("BAD_USER_INPUT", "")).Equal(http.StatusInternalServerError)
 
 	// Highest 4xx wins when all are tagged
-	gt.Number(t, httpStatusForGraphQLErrors(mk("BAD_USER_INPUT", "FORBIDDEN"))).Equal(http.StatusForbidden)
+	gt.Number(t, cli.HTTPStatusForGraphQLErrorCodesForTest("BAD_USER_INPUT", "FORBIDDEN")).Equal(http.StatusForbidden)
 
 	// Empty list → 500 fallback
-	gt.Number(t, httpStatusForGraphQLErrors(mk())).Equal(http.StatusInternalServerError)
+	gt.Number(t, cli.HTTPStatusForGraphQLErrorCodesForTest()).Equal(http.StatusInternalServerError)
 }
 
 func TestGraphqlErrorStatusMiddleware_MapsClientErrorsTo4xx(t *testing.T) {
@@ -112,7 +105,7 @@ func TestGraphqlErrorStatusMiddleware_MapsClientErrorsTo4xx(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			h := graphqlErrorStatusMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			h := cli.GraphqlErrorStatusMiddlewareForTest(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = w.Write([]byte(c.body))
 			}))

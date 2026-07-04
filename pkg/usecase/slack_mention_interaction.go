@@ -16,6 +16,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/proposal"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/safe"
 	goslack "github.com/slack-go/slack"
 )
 
@@ -461,7 +462,7 @@ func postJSON(ctx context.Context, url string, body any) error {
 	if err != nil {
 		return goerr.Wrap(err, "failed to POST response_url")
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer safe.Close(ctx, resp.Body)
 	if resp.StatusCode >= 300 {
 		respBody, _ := io.ReadAll(resp.Body)
 		return goerr.New("response_url returned non-2xx",
