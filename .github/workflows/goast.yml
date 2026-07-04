@@ -1,0 +1,59 @@
+name: goast
+
+on:
+  push:
+    paths:
+      - 'pkg/**'
+      - '.goast/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/goast.yml'
+
+jobs:
+  goast:
+    name: goast policy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      GO111MODULE: on
+    steps:
+      - name: Run cicd-sensor
+        uses: cicd-sensor/cicd-sensor-action@6ee257338e68af2b279b321b3346fe5f385aa498 # v0.0.29
+
+      - name: Checkout Source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+          cache-dependency-path: go.sum
+
+      # Pinned to a commit (not @latest) so the checked version is reproducible.
+      - name: Install goast
+        run: go install github.com/m-mizutani/goast/cmd/goast@ee51abd11ec6620092dca60d0954ab2782e1959f # v0.2.x
+
+      # OPA is needed to run the policies' own unit tests.
+      - name: Install OPA
+        uses: open-policy-agent/setup-opa@b2b258e089860efaadaaf71bf6e3aecb4a3eeff1 # v2.4.0
+        with:
+          version: 1.18.2
+
+      # Unit-test the Rego policies first, so a broken policy fails fast and
+      # clearly (before it is applied to the whole source tree).
+      - name: Test policies
+        run: opa test .goast
+
+      # Apply the policies to the Go source. The two policy files are listed
+      # explicitly (rather than `-p .goast`) so the adjacent *_test.rego files
+      # are NOT compiled into the evaluation — their test rules would otherwise
+      # run on every AST node for no benefit.
+      - name: Check code
+        run: |
+          goast eval \
+            -p .goast/no_fmt_print.rego \
+            -p .goast/usecase_context_first.rego \
+            --fail --ignore-auto-generated \
+            ./pkg
