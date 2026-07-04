@@ -9,20 +9,12 @@ should have caught this" into "CI catches this".
 
 ```
 .goast/
-  policy/            # production policies — the ONLY thing goast eval loads
-    *.rego
-  *_test.rego        # opa unit tests (share package goast with policy/)
+  <name>.rego        # production policies
+  <name>_test.rego   # opa unit tests (share package goast)
   testdata/          # Go fixtures for `goast test`
   README.md
 ../.goast.toml       # goast test cases (policy + source paths)
 ```
-
-Production policies live in `.goast/policy/`; the `*_test.rego` unit tests and
-`testdata/` fixtures live one level up in `.goast/`. This split lets
-`goast eval -p .goast/policy` load **every** policy in the directory
-automatically — there is no per-file list to keep in sync, so a new policy can
-never be silently omitted from CI — while structurally keeping the test rules
-out of the evaluation bundle.
 
 ## How it runs
 
@@ -30,17 +22,17 @@ Three verification layers, cheapest first (all wired in
 `.github/workflows/goast.yml`):
 
 1. **`opa test .goast`** — unit-tests each rule against hand-written AST-JSON
-   fixtures in the `*_test.rego` files. Walks `.goast` recursively, so it
-   compiles both `policy/*.rego` and the adjacent `*_test.rego`. Fast and
-   hermetic.
+   fixtures in the adjacent `*_test.rego` files. Fast and hermetic.
 2. **`goast test`** — runs every rule through goast's real parse → walk → eval
    pipeline over the Go fixtures under `testdata/`, so the AST shapes the rules
    assume are checked against what the Go parser actually emits. Cases are
    declared in `../.goast.toml`.
-3. **`goast eval -p .goast/policy --fail ./pkg`** — applies the policies to the
-   whole production tree as the CI gate. Pointing `-p` at `.goast/policy` (a
-   directory of production rules only) means adding a `.goast/policy/*.rego`
-   file is all it takes to enroll a new policy — no workflow edit required.
+3. **`goast eval -p .goast --fail ./pkg`** — applies the policies to the whole
+   production tree as the CI gate. `-p` points at the whole `.goast` directory
+   so every policy is enrolled automatically; a new rule can never be silently
+   omitted from CI. The `*_test.rego` files get compiled too, but they only
+   define `test_*` rules and helpers that `goast eval` never queries (it reads
+   `data.goast.fail`), so they contribute neither findings nor measurable cost.
 
 ## Authoring notes (learned the hard way)
 
@@ -87,12 +79,9 @@ false positives:
 
 1. Write a minimal Go sample, then `goast dump --line N sample.go | jq` to learn
    the exact AST shape — never guess field names.
-2. Add `policy/<name>.rego`, `<name>_test.rego`, and
-   `testdata/<name>/{bad,good}.go`.
-3. Add `[[test.cases]]` entries to `../.goast.toml` for both fixtures (the
-   `policy` path is `.goast/policy/<name>.rego`).
-4. Run `opa test .goast`, `goast test`, and
-   `goast eval -p .goast/policy ./pkg` (expect 0 real violations, or fix the
-   code that violates it).
+2. Add `<name>.rego`, `<name>_test.rego`, and `testdata/<name>/{bad,good}.go`.
+3. Add `[[test.cases]]` entries to `../.goast.toml` for both fixtures.
+4. Run `opa test .goast`, `goast test`, and `goast eval -p .goast ./pkg`
+   (expect 0 real violations, or fix the code that violates it).
 5. Add a row to the catalog above. **No workflow edit is needed** — the CI
-   `goast eval -p .goast/policy` picks the new rule up automatically.
+   `goast eval -p .goast` picks the new rule up automatically.

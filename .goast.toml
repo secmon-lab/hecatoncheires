@@ -22,7 +22,7 @@
 
 [[test.cases]]
 name   = "fmt.Print/Printf/Println and the builtin print/println are all flagged"
-policy = ".goast/policy/no_fmt_print.rego"
+policy = ".goast/no_fmt_print.rego"
 source = ".goast/testdata/no_fmt_print/bad.go"
 expect = "fail"
 count  = 5
@@ -41,26 +41,26 @@ count  = 5
 
 [[test.cases]]
 name   = "Sprintf / Fprintln / Errorf are allowed (no unscoped stdout write)"
-policy = ".goast/policy/no_fmt_print.rego"
+policy = ".goast/no_fmt_print.rego"
 source = ".goast/testdata/no_fmt_print/good.go"
 expect = "pass"
 
 [[test.cases]]
 name   = "a non-eval file under pkg/cli is still flagged"
-policy = ".goast/policy/no_fmt_print.rego"
+policy = ".goast/no_fmt_print.rego"
 source = ".goast/testdata/pkg/cli/serve.go"
 expect = "fail"
 count  = 1
 
 [[test.cases]]
 name   = "pkg/cli/eval.go is exempt (the eval CLI legitimately writes to stdout)"
-policy = ".goast/policy/no_fmt_print.rego"
+policy = ".goast/no_fmt_print.rego"
 source = ".goast/testdata/pkg/cli/eval.go"
 expect = "pass"
 
 [[test.cases]]
 name   = "the eval harness under pkg/usecase/eval is exempt from no_fmt_print"
-policy = ".goast/policy/no_fmt_print.rego"
+policy = ".goast/no_fmt_print.rego"
 source = ".goast/testdata/pkg/usecase/eval/harness.go"
 expect = "pass"
 
@@ -70,7 +70,7 @@ expect = "pass"
 
 [[test.cases]]
 name   = "exported use-case funcs without a context.Context first param are flagged"
-policy = ".goast/policy/usecase_context_first.rego"
+policy = ".goast/usecase_context_first.rego"
 source = ".goast/testdata/pkg/usecase/bad.go"
 expect = "fail"
 count  = 3
@@ -82,19 +82,19 @@ count  = 3
 
 [[test.cases]]
 name   = "ctx-first, unexported, and New*/With*/Is*/Parse*/Validate are allowed"
-policy = ".goast/policy/usecase_context_first.rego"
+policy = ".goast/usecase_context_first.rego"
 source = ".goast/testdata/pkg/usecase/good.go"
 expect = "pass"
 
 [[test.cases]]
 name   = "the eval harness under pkg/usecase/eval is exempt from usecase_context_first"
-policy = ".goast/policy/usecase_context_first.rego"
+policy = ".goast/usecase_context_first.rego"
 source = ".goast/testdata/pkg/usecase/eval/harness.go"
 expect = "pass"
 
 [[test.cases]]
 name   = "exported ctx-less funcs outside pkg/usecase are ignored"
-policy = ".goast/policy/usecase_context_first.rego"
+policy = ".goast/usecase_context_first.rego"
 source = ".goast/testdata/pkg/controller/ctrl.go"
 expect = "pass"
 
@@ -104,7 +104,7 @@ expect = "pass"
 
 [[test.cases]]
 name   = "direct slog.Info/Error/InfoContext logger calls are flagged"
-policy = ".goast/policy/no_slog_global.rego"
+policy = ".goast/no_slog_global.rego"
 source = ".goast/testdata/no_slog_global/bad.go"
 expect = "fail"
 count  = 3
@@ -116,7 +116,7 @@ count  = 3
 
 [[test.cases]]
 name   = "attribute constructors, handler/logger construction, and instance calls are allowed"
-policy = ".goast/policy/no_slog_global.rego"
+policy = ".goast/no_slog_global.rego"
 source = ".goast/testdata/no_slog_global/good.go"
 expect = "pass"
 
@@ -126,7 +126,7 @@ expect = "pass"
 
 [[test.cases]]
 name   = "strings.Contains/HasPrefix on err.Error() are flagged"
-policy = ".goast/policy/no_strings_contains_error.rego"
+policy = ".goast/no_strings_contains_error.rego"
 source = ".goast/testdata/no_strings_contains_error/bad.go"
 expect = "fail"
 count  = 2
@@ -138,13 +138,13 @@ count  = 2
 
 [[test.cases]]
 name   = "strings ops on plain strings and errors.Is are allowed"
-policy = ".goast/policy/no_strings_contains_error.rego"
+policy = ".goast/no_strings_contains_error.rego"
 source = ".goast/testdata/no_strings_contains_error/good.go"
 expect = "pass"
 
 [[test.cases]]
 name   = "error-text matching inside a _test.go file is exempt"
-policy = ".goast/policy/no_strings_contains_error.rego"
+policy = ".goast/no_strings_contains_error.rego"
 source = ".goast/testdata/no_strings_contains_error/exempt_test.go"
 expect = "pass"
 
@@ -154,7 +154,7 @@ expect = "pass"
 
 [[test.cases]]
 name   = "firestore:\"...\" struct tags are flagged"
-policy = ".goast/policy/no_firestore_struct_tags.rego"
+policy = ".goast/no_firestore_struct_tags.rego"
 source = ".goast/testdata/no_firestore_struct_tags/bad.go"
 expect = "fail"
 count  = 2
@@ -166,7 +166,7 @@ count  = 2
 
 [[test.cases]]
 name   = "a firestore mention in a comment and json tags are allowed"
-policy = ".goast/policy/no_firestore_struct_tags.rego"
+policy = ".goast/no_firestore_struct_tags.rego"
 source = ".goast/testdata/no_firestore_struct_tags/good.go"
 expect = "pass"
 
@@ -176,7 +176,7 @@ expect = "pass"
 
 [[test.cases]]
 name   = "mirror doc type and to/from converters under pkg/repository are flagged"
-policy = ".goast/policy/repo_no_doc_converter.rego"
+policy = ".goast/repo_no_doc_converter.rego"
 source = ".goast/testdata/pkg/repository/bad.go"
 expect = "fail"
 count  = 3
@@ -188,7 +188,7 @@ count  = 3
 
 [[test.cases]]
 name   = "a repository with no doc type or converters is allowed"
-policy = ".goast/policy/repo_no_doc_converter.rego"
+policy = ".goast/repo_no_doc_converter.rego"
 source = ".goast/testdata/pkg/repository/good.go"
 expect = "pass"
 
@@ -198,7 +198,7 @@ expect = "pass"
 
 [[test.cases]]
 name   = "discarded, bare, deferred, and two-level bare closes are all flagged"
-policy = ".goast/policy/no_discarded_close.rego"
+policy = ".goast/no_discarded_close.rego"
 source = ".goast/testdata/no_discarded_close/bad.go"
 expect = "fail"
 count  = 4
@@ -210,13 +210,13 @@ count  = 4
 
 [[test.cases]]
 name   = "safe.Close (bare and deferred) is allowed"
-policy = ".goast/policy/no_discarded_close.rego"
+policy = ".goast/no_discarded_close.rego"
 source = ".goast/testdata/no_discarded_close/good.go"
 expect = "pass"
 
 [[test.cases]]
 name   = "raw closes inside a _test.go file are exempt"
-policy = ".goast/policy/no_discarded_close.rego"
+policy = ".goast/no_discarded_close.rego"
 source = ".goast/testdata/no_discarded_close/exempt_test.go"
 expect = "pass"
 
@@ -226,7 +226,7 @@ expect = "pass"
 
 [[test.cases]]
 name   = "a _test.go file using an internal package is flagged"
-policy = ".goast/policy/test_file_conventions.rego"
+policy = ".goast/test_file_conventions.rego"
 source = ".goast/testdata/test_conventions/internal_test.go"
 expect = "fail"
 count  = 1
@@ -238,19 +238,19 @@ count  = 1
 
 [[test.cases]]
 name   = "an external <pkg>_test package is allowed"
-policy = ".goast/policy/test_file_conventions.rego"
+policy = ".goast/test_file_conventions.rego"
 source = ".goast/testdata/test_conventions/external_test.go"
 expect = "pass"
 
 [[test.cases]]
 name   = "export_test.go using the internal package is exempt"
-policy = ".goast/policy/test_file_conventions.rego"
+policy = ".goast/test_file_conventions.rego"
 source = ".goast/testdata/test_conventions/export_test.go"
 expect = "pass"
 
 [[test.cases]]
 name   = "an _e2e_test.go filename is flagged"
-policy = ".goast/policy/test_file_conventions.rego"
+policy = ".goast/test_file_conventions.rego"
 source = ".goast/testdata/test_conventions/widget_e2e_test.go"
 expect = "fail"
 count  = 1
