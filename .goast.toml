@@ -1,0 +1,99 @@
+# Declarative policy tests for this repository's goast policies.
+#
+#   goast test          # run from the repository root
+#
+# This complements the two existing verification layers:
+#   * `opa test .goast` unit-tests each rule against hand-written AST JSON
+#     fixtures (fast, hermetic, but the JSON shape is asserted by hand).
+#   * `goast eval ... ./pkg` applies the rules to the whole production tree.
+#
+# `goast test` sits between them: it runs the rules through goast's real
+# parse -> walk -> eval pipeline over the small Go fixtures under
+# .goast/testdata, so the AST shapes the rules rely on (Fun.X.Name,
+# Type.Params.List[0], DirName scoping, ...) are checked against what the Go
+# parser actually emits rather than against a hand-authored copy of it.
+#
+# `policy` and `source` paths are resolved relative to the current working
+# directory, so run this from the repository root.
+
+# ---------------------------------------------------------------------------
+# no_fmt_print.rego
+# ---------------------------------------------------------------------------
+
+[[test.cases]]
+name   = "fmt.Print/Printf/Println and the builtin print/println are all flagged"
+policy = ".goast/no_fmt_print.rego"
+source = ".goast/testdata/no_fmt_print/bad.go"
+expect = "fail"
+count  = 5
+
+  # The qualified fmt.Print* family reports at the "fmt" identifier position.
+  [[test.cases.violations]]
+  line     = 7
+  message  = "do not use fmt.Print;"
+  severity = "ERROR"
+
+  # The builtin print/println report at the bare-identifier position.
+  [[test.cases.violations]]
+  line     = 10
+  message  = "do not use the builtin println()"
+  severity = "ERROR"
+
+[[test.cases]]
+name   = "Sprintf / Fprintln / Errorf are allowed (no unscoped stdout write)"
+policy = ".goast/no_fmt_print.rego"
+source = ".goast/testdata/no_fmt_print/good.go"
+expect = "pass"
+
+[[test.cases]]
+name   = "a non-eval file under pkg/cli is still flagged"
+policy = ".goast/no_fmt_print.rego"
+source = ".goast/testdata/pkg/cli/serve.go"
+expect = "fail"
+count  = 1
+
+[[test.cases]]
+name   = "pkg/cli/eval.go is exempt (the eval CLI legitimately writes to stdout)"
+policy = ".goast/no_fmt_print.rego"
+source = ".goast/testdata/pkg/cli/eval.go"
+expect = "pass"
+
+[[test.cases]]
+name   = "the eval harness under pkg/usecase/eval is exempt from no_fmt_print"
+policy = ".goast/no_fmt_print.rego"
+source = ".goast/testdata/pkg/usecase/eval/harness.go"
+expect = "pass"
+
+# ---------------------------------------------------------------------------
+# usecase_context_first.rego
+# ---------------------------------------------------------------------------
+
+[[test.cases]]
+name   = "exported use-case funcs without a context.Context first param are flagged"
+policy = ".goast/usecase_context_first.rego"
+source = ".goast/testdata/pkg/usecase/bad.go"
+expect = "fail"
+count  = 3
+
+  [[test.cases.violations]]
+  line     = 8
+  message  = 'exported use-case function "DoWork" must take context.Context'
+  severity = "ERROR"
+
+[[test.cases]]
+name   = "ctx-first, unexported, and New*/With*/Is*/Parse*/Validate are allowed"
+policy = ".goast/usecase_context_first.rego"
+source = ".goast/testdata/pkg/usecase/good.go"
+expect = "pass"
+
+[[test.cases]]
+name   = "the eval harness under pkg/usecase/eval is exempt from usecase_context_first"
+policy = ".goast/usecase_context_first.rego"
+source = ".goast/testdata/pkg/usecase/eval/harness.go"
+expect = "pass"
+
+[[test.cases]]
+name   = "exported ctx-less funcs outside pkg/usecase are ignored"
+policy = ".goast/usecase_context_first.rego"
+source = ".goast/testdata/pkg/controller/ctrl.go"
+expect = "pass"
