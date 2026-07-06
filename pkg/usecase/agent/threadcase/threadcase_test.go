@@ -203,6 +203,100 @@ func TestRunTurn_MentionRespond(t *testing.T) {
 	gt.String(t, res.Decision.Message).Equal("Here is what I found.")
 }
 
+// A ModeMention turn must record a JobRunLog + JobRunEvent trail under the
+// reserved mention JobID so the case agent page lists it alongside Job runs.
+func TestRunTurn_MentionRecordsJobRunLog(t *testing.T) {
+	ctx := context.Background()
+	llm := newScriptedLLM([]string{
+		investigatePlan,
+		"Observed the user's question.",
+		replanDone,
+		`{"kind":"respond","message":"Here is what I found."}`,
+	})
+	uc, deps := newThreadcaseUC(t, llm)
+
+	res, err := uc.RunTurn(ctx, threadcase.TurnRequest{
+		Session:     newThreadSession(),
+		Workspace:   newThreadWorkspace(),
+		Case:        newThreadCase(),
+		ChannelID:   "C-MONITOR",
+		ThreadTS:    "1700000000.000100",
+		MentionTS:   "1700000001.000001",
+		MentionText: "<@bot> any update?",
+		TriggerTS:   "1700000001.000001",
+		Mode:        threadcase.ModeMention,
+		Handler:     &hostStub{},
+	})
+	async.Wait()
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(threadcase.StatusCompleted)
+
+	// The run must surface via the same read path the case agent page uses:
+	// ListByCase returns one JobRun under the reserved mention JobID.
+	key := model.JobRunKey{WorkspaceID: "support", CaseID: 42, JobID: model.MentionRunJobID}
+	runs, err := deps.Repo.JobRun().ListByCase(ctx, "support", 42)
+	gt.NoError(t, err).Required()
+	gt.Array(t, runs).Length(1).Required()
+	gt.String(t, runs[0].JobID).Equal(model.MentionRunJobID)
+	gt.Value(t, runs[0].LastStatus).Equal(model.JobRunStatusSuccess)
+
+	logs, err := deps.Repo.JobRunLog().List(ctx, key, 100)
+	gt.NoError(t, err).Required()
+	gt.Array(t, logs).Length(1).Required()
+	log := logs[0]
+	gt.Value(t, log.Stage).Equal(model.JobRunStageSuccess)
+	gt.String(t, log.EventType).Equal(model.EventTypeMention)
+	gt.String(t, log.ExecutorKind).Equal(model.ExecutorKindPlanexec)
+	gt.String(t, log.JobID).Equal(model.MentionRunJobID)
+	gt.Number(t, log.CaseID).Equal(42)
+	gt.String(t, log.RunID).NotEqual("")
+	gt.String(t, log.TraceID).NotEqual("")
+	gt.String(t, log.Error).Equal("")
+	// TraceID is shared with the planexec archive recorder (both keyed on the
+	// turn owner id) so the two trace sinks correlate.
+	gt.String(t, log.TraceID).Equal(runs[0].LastTraceID)
+
+	// The per-call JobRunEvent stream (LLM_REQUEST / LLM_RESPONSE / TOOL_CALL)
+	// is produced by the gollem LLM client's trace hooks, which only fire for a
+	// real LLM client, not the scripted mock used here. That handler behaviour
+	// is covered directly in pkg/agent/runtrace (handler_test.go); this test's
+	// contract is the JobRunLog + JobRun lifecycle the mention host drives.
+}
+
+// A ModeCreate turn runs before the case exists (creation-time), so it must NOT
+// record a mention run: it is excluded from the mention-trace wiring.
+func TestRunTurn_CreateDoesNotRecordMentionRun(t *testing.T) {
+	ctx := context.Background()
+	llm := newScriptedLLM([]string{
+		investigatePlan,
+		"The reporter cannot log in to production.",
+		replanDone,
+		validCreateDecision,
+	})
+	uc, deps := newThreadcaseUC(t, llm)
+	host := &hostStub{}
+
+	res, err := uc.RunTurn(ctx, threadcase.TurnRequest{
+		Session:        createTestSession(),
+		Workspace:      createTestWorkspace(),
+		ChannelID:      "C-MONITOR",
+		ThreadTS:       "1700000000.000200",
+		TriggerTS:      "1700000000.000200",
+		Mode:           threadcase.ModeCreate,
+		SystemMessages: []threadcase.ConversationMessage{{Timestamp: "1700000000.000200", UserID: "U-REPORTER", Text: "I cannot log in"}},
+		Handler:        host,
+	})
+	async.Wait()
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(threadcase.StatusCompleted)
+	gt.Value(t, res.Case).NotNil().Required()
+
+	// The committed case (ID 1 from the host stub) has no mention run recorded.
+	runs, err := deps.Repo.JobRun().ListByCase(ctx, "support", res.Case.ID)
+	gt.NoError(t, err).Required()
+	gt.Array(t, runs).Length(0)
+}
+
 // A trivial mention can be answered via the direct fast path: the planner
 // emits `direct` on round 1, the runtime replies in a single ReAct pass, and
 // the host receives that plain text as a respond Decision (no investigation,

@@ -292,6 +292,13 @@ func (j *Job) Validate() error {
 	if j.ID == "" {
 		return goerr.New("job id is empty")
 	}
+	if j.ID == MentionRunJobID {
+		// The id is reserved for mention-triggered agent runs, which persist
+		// through the JobRunLog schema under this id. A configured Job must not
+		// claim it or its runs would merge with the mention pseudo-job.
+		return goerr.New("job id is reserved for mention-triggered runs",
+			goerr.V("job_id", j.ID))
+	}
 	if j.Prompt == "" {
 		return goerr.New("job prompt is empty",
 			goerr.V("job_id", j.ID))

@@ -8,7 +8,9 @@ import (
 
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/trace"
+	"github.com/google/uuid"
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/runtrace"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
@@ -179,6 +181,35 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 	systemPrompt := buildSystemPrompt(req.Case, req.Workspace, req.ChannelID, time.Now().UTC(), req.CurrentAction, req.Actions, req.SystemMessages)
 	userInput := buildUserInput(req.DeltaMessages, req.MentionText, req.MentionTS)
 
+	// Record this mention turn as a JobRunLog + JobRunEvent trail so the case
+	// agent page lists it alongside Job runs. It is a mention-triggered run, not
+	// a configured Job, so it persists under the reserved mention JobID with
+	// EventType=mention. The TraceID is shared with the Cloud Storage recorder
+	// above so both trace sinks correlate. Opening the log is observability, not
+	// part of the turn's success contract: a failure here is non-fatal and the
+	// turn still runs (untraced on the Firestore side).
+	var runErr error
+	rec, recOpenErr := runtrace.Open(turnCtx, runtrace.OpenParams{
+		Repo:         uc.deps.Repo,
+		WorkspaceID:  wsID,
+		CaseID:       req.Case.ID,
+		JobID:        model.MentionRunJobID,
+		RunID:        uuid.Must(uuid.NewV7()).String(),
+		TraceID:      handle.OwnerID,
+		EventType:    model.EventTypeMention,
+		ExecutorKind: model.ExecutorKindSingleLoop,
+		SystemPrompt: systemPrompt,
+		StartedAt:    time.Now().UTC(),
+	})
+	if recOpenErr != nil {
+		errutil.Handle(turnCtx, recOpenErr, "casebound: open mention run trace")
+	}
+	defer func() {
+		// Use the parent ctx (not turnCtx) so the terminal log write still runs
+		// when the turn was cancelled by lock loss — mirroring the trace flush.
+		rec.Finish(ctx, runErr)
+	}()
+
 	// Per-tool activity is ephemeral: route it through TraceReplace so each
 	// "Searching…/Fetching…" line overwrites the previous one in place rather
 	// than piling up in the thread.
@@ -186,12 +217,21 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 		req.Handler.TraceReplace(innerCtx, message)
 	})
 
+	// The Cloud Storage recorder captures the durable trace artifact; the
+	// runtrace handler streams the per-call JobRunEvent timeline. Feed both via
+	// trace.Multi. When the log failed to open (rec == nil), degrade to the
+	// archive recorder alone.
+	traced := trace.Handler(recorder)
+	if rec != nil {
+		traced = trace.Multi(recorder, rec.Handler())
+	}
+
 	allTools := uc.buildTools(req)
 	gollemAgent := gollem.New(uc.deps.LLMClient,
 		gollem.WithSystemPrompt(systemPrompt),
 		gollem.WithTools(allTools...),
 		gollem.WithHistoryRepository(uc.deps.HistoryRepo, req.Session.ID),
-		gollem.WithTrace(recorder),
+		gollem.WithTrace(traced),
 		gollem.WithToolMiddleware(
 			func(next gollem.ToolHandler) gollem.ToolHandler {
 				return func(ctx context.Context, tr *gollem.ToolExecRequest) (*gollem.ToolExecResponse, error) {
@@ -210,6 +250,8 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 
 	resp, execErr := gollemAgent.Execute(turnCtx, gollem.Text(userInput))
 	if execErr != nil {
+		// Surface the failure onto the recorded run (deferred Close reads runErr).
+		runErr = execErr
 		return nil, goerr.Wrap(execErr, "execute casebound agent")
 	}
 

@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/gollem-dev/gollem/trace"
+	"github.com/google/uuid"
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/runtrace"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
 	knowledgetool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/knowledge"
@@ -187,9 +189,49 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 		}
 	}
 
+	systemPrompt := buildSystemPrompt(req.Case, req.Workspace, req.Mode)
+
+	// Record a mention turn (ModeMention) as a JobRunLog + JobRunEvent trail so
+	// the case agent page lists it alongside Job runs. ModeCreate runs before a
+	// case exists (it materialises the case) and is a creation-time flow, not a
+	// post-creation mention, so it is intentionally excluded. The run persists
+	// under the reserved mention JobID with EventType=mention; its TraceID is
+	// shared with the planexec archive recorder (both keyed on handle.OwnerID)
+	// so the two trace sinks correlate. Opening the log is observability, not
+	// part of the turn's success contract — a failure here is non-fatal.
+	var runErr error
+	var traceHandler trace.Handler
+	if !isCreate {
+		rec, recOpenErr := runtrace.Open(turnCtx, runtrace.OpenParams{
+			Repo:         uc.deps.Repo,
+			WorkspaceID:  wsID,
+			CaseID:       req.Case.ID,
+			JobID:        model.MentionRunJobID,
+			RunID:        uuid.Must(uuid.NewV7()).String(),
+			TraceID:      handle.OwnerID,
+			EventType:    model.EventTypeMention,
+			ExecutorKind: model.ExecutorKindPlanexec,
+			SystemPrompt: systemPrompt,
+			StartedAt:    time.Now().UTC(),
+		})
+		if recOpenErr != nil {
+			errutil.Handle(turnCtx, recOpenErr, "threadcase: open mention run trace")
+		}
+		if rec != nil {
+			traceHandler = rec.Handler()
+			// Use the parent ctx (not turnCtx) so the terminal log write still
+			// runs when the turn was cancelled by lock loss.
+			defer func() { rec.Finish(ctx, runErr) }()
+		}
+	}
+
 	runResult, runErr := uc.runner.Run(turnCtx, planexec.RunRequest{
 		HistoryKey: req.Session.ID,
 		TraceID:    handle.OwnerID,
+		// TraceHandler streams the per-call JobRunEvent timeline; planexec
+		// combines it with its own archive recorder (trace.Multi) and wires the
+		// result into every agent it drives. Nil for ModeCreate.
+		TraceHandler: traceHandler,
 		TraceMetadata: trace.TraceMetadata{
 			Labels: map[string]string{
 				"session_id":   req.Session.ID,
@@ -200,7 +242,7 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 			},
 		},
 		UserInput:    buildUserInput(req.SystemMessages, req.DeltaMessages, req.MentionText, req.MentionTS),
-		SystemPrompt: buildSystemPrompt(req.Case, req.Workspace, req.Mode),
+		SystemPrompt: systemPrompt,
 		ToolResolver: resolver,
 		// Thread-mode workspaces manage no Actions, so the planner must not be
 		// offered the core (action) toolset; OmitCore below withholds the tools.
@@ -261,6 +303,12 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 		uc.persistSession(turnCtx, req.Session, model.SessionEndedWithCaseBoundReply)
 		return &Result{Status: StatusCompleted, Decision: decision}, nil
 	case planexec.StatusFallbackBudget, planexec.StatusFallbackError:
+		// The planner ended without a decision (budget exhausted or internal
+		// error handled into a fallback). runner.Run returns no error here, so
+		// mark the recorded run FAILED explicitly (deferred Close reads runErr)
+		// while the host still degrades gracefully to a fallback reply.
+		runErr = goerr.New("threadcase planexec ended without a decision",
+			goerr.V("status", int(runResult.Status)))
 		uc.persistSession(turnCtx, req.Session, model.SessionEndedWithCaseBoundReply)
 		return &Result{Status: StatusFallback}, nil
 	default:

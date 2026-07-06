@@ -7,11 +7,14 @@ import (
 	"time"
 
 	"github.com/gollem-dev/gollem"
+	"github.com/gollem-dev/gollem/mock"
 	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
+	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
+	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/casebound"
 )
@@ -37,6 +40,79 @@ func (fakeCaseMutator) AssignCase(_ context.Context, _ string, _ int64, _ []stri
 
 func (fakeCaseMutator) UnassignCase(_ context.Context, _ string, _ int64, _ []string) (*model.Case, error) {
 	return &model.Case{}, nil
+}
+
+// singleReplyLLM returns a mock LLM whose first response is the given final
+// text with no tool calls, so a casebound gollem turn completes in one pass.
+func singleReplyLLM(text string) gollem.LLMClient {
+	return &mock.LLMClientMock{
+		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mock.SessionMock{
+				GenerateFunc: func(_ context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					return &gollem.Response{Texts: []string{text}}, nil
+				},
+			}, nil
+		},
+	}
+}
+
+// A casebound mention turn must record a JobRunLog under the reserved mention
+// JobID (EventType=mention, single-loop executor) so the case agent page lists
+// it, and materialise the JobRun summary that the page's ListByCase reads.
+func TestRunTurn_RecordsMentionJobRunLog(t *testing.T) {
+	ctx := context.Background()
+	repo := memory.New()
+	deps := &agent.CommonDeps{
+		Repo:                repo,
+		LLMClient:           singleReplyLLM("Here is the answer."),
+		HistoryRepo:         agentarchive.NewMemoryHistoryRepository(),
+		TraceRepo:           agentarchive.NewMemoryTraceRepository(),
+		HeartbeatInterval:   200 * time.Millisecond,
+		HeartbeatStaleAfter: 5 * time.Second,
+	}
+	uc, err := casebound.New(deps)
+	gt.NoError(t, err).Required()
+
+	res, err := uc.RunTurn(ctx, casebound.TurnRequest{
+		Session: &model.Session{
+			ID:          "s-cb-1",
+			ChannelID:   "C-CASE",
+			ThreadTS:    "1700000000.000001",
+			WorkspaceID: "ws-1",
+			CaseID:      55,
+		},
+		Workspace:   &model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws-1", Name: "WS"}},
+		Case:        &model.Case{ID: 55, Title: "Case", Status: types.CaseStatusOpen, SlackChannelID: "C-CASE"},
+		ChannelID:   "C-CASE",
+		ThreadTS:    "1700000000.000001",
+		MentionTS:   "1700000001.000001",
+		MentionText: "<@bot> what's up?",
+		TriggerTS:   "1700000001.000001",
+	})
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(casebound.StatusCompleted)
+	gt.String(t, res.FinalText).Equal("Here is the answer.")
+
+	key := model.JobRunKey{WorkspaceID: "ws-1", CaseID: 55, JobID: model.MentionRunJobID}
+	runs, err := repo.JobRun().ListByCase(ctx, "ws-1", 55)
+	gt.NoError(t, err).Required()
+	gt.Array(t, runs).Length(1).Required()
+	gt.String(t, runs[0].JobID).Equal(model.MentionRunJobID)
+	gt.Value(t, runs[0].LastStatus).Equal(model.JobRunStatusSuccess)
+
+	logs, err := repo.JobRunLog().List(ctx, key, 100)
+	gt.NoError(t, err).Required()
+	gt.Array(t, logs).Length(1).Required()
+	log := logs[0]
+	gt.Value(t, log.Stage).Equal(model.JobRunStageSuccess)
+	gt.String(t, log.EventType).Equal(model.EventTypeMention)
+	gt.String(t, log.ExecutorKind).Equal(model.ExecutorKindSingleLoop)
+	gt.Number(t, log.CaseID).Equal(55)
+	gt.String(t, log.RunID).NotEqual("")
+	gt.String(t, log.TraceID).NotEqual("")
+	// The per-call event stream (LLM/tool) is produced by the LLM client's trace
+	// hooks, which the scripted mock does not fire; that behaviour is covered in
+	// pkg/agent/runtrace. This test's contract is the JobRunLog lifecycle.
 }
 
 func toolNames(tools []gollem.Tool) map[string]bool {

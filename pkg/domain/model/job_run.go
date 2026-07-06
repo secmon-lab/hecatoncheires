@@ -168,8 +168,43 @@ func (s JobRunStage) String() string { return string(s) }
 // for rough flow tracing, not exact reproduction.
 const MaxInlineBytes = 800 * 1024
 
-// JobRunLog records ONE invocation of a Job against a Case. Stored at
+// ExecutorKind values recorded on JobRunLog.ExecutorKind. They identify
+// which runtime drove a run so a consumer can tell a single-loop turn from
+// a plan-execute one without re-deriving it.
+const (
+	// ExecutorKindSingleLoop is a single gollem ReAct loop (Job
+	// strategy=simple, and the casebound mention host, which runs gollem
+	// directly).
+	ExecutorKindSingleLoop = "single_loop"
+	// ExecutorKindPlanexec is the plan-and-execute runtime (Job
+	// strategy=planexec, and the threadcase mention host).
+	ExecutorKindPlanexec = "plan_execute"
+)
+
+// MentionRunJobID is the reserved JobID under which mention-triggered agent
+// runs record their JobRunLog / JobRunEvent trail. Such runs (a Slack mention
+// in an existing case, handled by the casebound / threadcase hosts) are NOT
+// TOML-configured Jobs, but they persist through the same JobRunLog schema so
+// the case agent page lists them alongside real Job runs. The id is reserved:
+// Job.Validate rejects a configured Job that claims it, so a real Job can
+// never collide with the mention pseudo-job, and every mention run for a case
+// groups under this single JobRunKey.
+const MentionRunJobID = "mention"
+
+// EventTypeMention is the JobRunLog.EventType provenance value for a
+// mention-triggered run. It distinguishes such runs from the "case" /
+// "scheduled" JobEventDomain values the Job runner copies onto EventType, so
+// the UI can tell why a run happened.
+const EventTypeMention = "mention"
+
+// JobRunLog records ONE invocation of an agent against a Case. Stored at
 // workspaces/{WorkspaceID}/cases/{CaseID}/jobRuns/{JobID}/logs/{RunID}.
+//
+// Despite the "Job" name it holds every case-scoped agent run, not only
+// TOML-configured Job runs: mention-triggered runs (casebound / threadcase)
+// persist here too, under the reserved JobID MentionRunJobID and with
+// EventType=EventTypeMention, so the case agent page lists them alongside
+// Job runs through the same read path.
 //
 // Every identifier is held as a TOP-LEVEL scalar field (no nested Key
 // struct) so that a Firestore -> BigQuery export yields a flat row that

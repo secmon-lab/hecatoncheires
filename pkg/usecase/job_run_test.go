@@ -13,6 +13,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 )
@@ -324,9 +325,11 @@ func TestJobRunUseCase_ListCaseJobs(t *testing.T) {
 }
 
 func TestJobRunUseCase_ResolveJobName(t *testing.T) {
+	ctx := context.Background()
+
 	t.Run("falls back to job id when registry is nil", func(t *testing.T) {
 		uc := usecase.NewJobRunUseCase(memory.New(), nil)
-		gt.String(t, uc.ResolveJobName("ws", "the-job")).Equal("the-job")
+		gt.String(t, uc.ResolveJobName(ctx, "ws", "the-job")).Equal("the-job")
 	})
 
 	t.Run("returns Name from registered Job", func(t *testing.T) {
@@ -339,7 +342,16 @@ func TestJobRunUseCase_ResolveJobName(t *testing.T) {
 			},
 		})
 		uc := usecase.NewJobRunUseCase(repo, registry)
-		gt.String(t, uc.ResolveJobName("ws", "incident-rca")).Equal("Incident RCA")
-		gt.String(t, uc.ResolveJobName("ws", "unknown-job")).Equal("unknown-job")
+		gt.String(t, uc.ResolveJobName(ctx, "ws", "incident-rca")).Equal("Incident RCA")
+		gt.String(t, uc.ResolveJobName(ctx, "ws", "unknown-job")).Equal("unknown-job")
+	})
+
+	t.Run("resolves the reserved mention job id to the localized label", func(t *testing.T) {
+		uc := usecase.NewJobRunUseCase(memory.New(), nil)
+		// The reserved sentinel is not a configured Job; it resolves to the
+		// mention display label pulled from the same i18n source production uses.
+		want := i18n.T(ctx, i18n.MsgAgentMentionRunName)
+		gt.String(t, uc.ResolveJobName(ctx, "ws", model.MentionRunJobID)).Equal(want)
+		gt.String(t, want).NotEqual(model.MentionRunJobID)
 	})
 }

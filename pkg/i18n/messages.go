@@ -165,9 +165,10 @@ var messagesEN = [msgKeyCount]string{
 	MsgDraftSaveFailedEphemeral:    "Failed to save draft. Please try again.",
 
 	// Job run session log
-	MsgJobRunStarting:  "starting... `%s`",
-	MsgJobRunCompleted: ":white_check_mark: job `%s` completed",
-	MsgJobRunFailed:    ":x: job `%s` failed: %s",
+	MsgJobRunStarting:      "starting... `%s`",
+	MsgJobRunCompleted:     ":white_check_mark: job `%s` completed",
+	MsgAgentMentionRunName: "Mention",
+	MsgJobRunFailed:        ":x: job `%s` failed: %s",
 
 	MsgMentionPreviewFallback: "Case draft preview",
 	MsgMentionPreviewTestNote: ":test_tube: *Test case* — for verifying the system or a drill, not a real case to work on.",
@@ -328,9 +329,10 @@ var messagesJA = [msgKeyCount]string{
 	MsgDraftSaveFailedEphemeral:    "下書きの保存に失敗しました。もう一度お試しください。",
 
 	// Job run session log
-	MsgJobRunStarting:  "起動中... `%s`",
-	MsgJobRunCompleted: ":white_check_mark: ジョブ `%s` が完了しました",
-	MsgJobRunFailed:    ":x: ジョブ `%s` が失敗しました: %s",
+	MsgJobRunStarting:      "起動中... `%s`",
+	MsgJobRunCompleted:     ":white_check_mark: ジョブ `%s` が完了しました",
+	MsgAgentMentionRunName: "メンション",
+	MsgJobRunFailed:        ":x: ジョブ `%s` が失敗しました: %s",
 
 	MsgMentionPreviewFallback: "ケース下書きのプレビュー",
 	MsgMentionPreviewTestNote: ":test_tube: *テストケース* — 実対応ではなく、システムの動作確認や演習用です。",
