@@ -131,7 +131,15 @@ type JobRunLogRepository interface {
 	// List returns logs under (key) in descending StartedAt order, up
 	// to limit. limit <= 0 means no limit. Implemented as a single
 	// subcollection scan per call (no cross-Job aggregation here).
-	List(ctx context.Context, key model.JobRunKey, limit int) ([]*model.JobRunLog, error)
+	//
+	// before, when non-zero, restricts results to logs with StartedAt at or
+	// before it (a range filter on the same field as the ordering, so it needs
+	// no composite index). It is the paging cursor for a case whose runs
+	// concentrate under one JobID — notably the reserved mention JobID, whose
+	// per-case history can exceed a single limit window — letting a caller walk
+	// past the newest `limit` instead of being silently capped there. Zero
+	// fetches from the newest.
+	List(ctx context.Context, key model.JobRunKey, limit int, before time.Time) ([]*model.JobRunLog, error)
 }
 
 // JobRunEventRepository persists the per-Run timeline of events

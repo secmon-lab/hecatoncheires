@@ -240,7 +240,7 @@ func TestRunTurn_MentionRecordsJobRunLog(t *testing.T) {
 	gt.String(t, runs[0].JobID).Equal(model.MentionRunJobID)
 	gt.Value(t, runs[0].LastStatus).Equal(model.JobRunStatusSuccess)
 
-	logs, err := deps.Repo.JobRunLog().List(ctx, key, 100)
+	logs, err := deps.Repo.JobRunLog().List(ctx, key, 100, time.Time{})
 	gt.NoError(t, err).Required()
 	gt.Array(t, logs).Length(1).Required()
 	log := logs[0]
@@ -261,6 +261,46 @@ func TestRunTurn_MentionRecordsJobRunLog(t *testing.T) {
 	// real LLM client, not the scripted mock used here. That handler behaviour
 	// is covered directly in pkg/agent/runtrace (handler_test.go); this test's
 	// contract is the JobRunLog + JobRun lifecycle the mention host drives.
+}
+
+// A mention turn that does not reach a clean decision must record the run as
+// FAILED, not SUCCESS — the recorded outcome must match what actually happened.
+// Here the planner terminates immediately but the final response is unusable,
+// so the turn fails (fallback or a parse error); either way the JobRunLog must
+// not be SUCCESS.
+func TestRunTurn_MentionFailureRecordsFailed(t *testing.T) {
+	ctx := context.Background()
+	llm := newScriptedLLM([]string{
+		replanDone,               // planner terminates on round 1
+		"this is not a decision", // final response: not a usable decision
+	})
+	uc, deps := newThreadcaseUC(t, llm)
+
+	res, err := uc.RunTurn(ctx, threadcase.TurnRequest{
+		Session:     newThreadSession(),
+		Workspace:   newThreadWorkspace(),
+		Case:        newThreadCase(),
+		ChannelID:   "C-MONITOR",
+		ThreadTS:    "1700000000.000100",
+		MentionTS:   "1700000009.000001",
+		MentionText: "<@bot> ?",
+		TriggerTS:   "1700000009.000001",
+		Mode:        threadcase.ModeMention,
+		Handler:     &hostStub{},
+	})
+	async.Wait()
+	// The turn did not succeed: either RunTurn returned an error (parse failure)
+	// or it degraded to a fallback. It must never be a completed decision.
+	if err == nil {
+		gt.Value(t, res.Status).Equal(threadcase.StatusFallback)
+	}
+
+	key := model.JobRunKey{WorkspaceID: "support", CaseID: 42, JobID: model.MentionRunJobID}
+	logs, listErr := deps.Repo.JobRunLog().List(ctx, key, 100, time.Time{})
+	gt.NoError(t, listErr).Required()
+	gt.Array(t, logs).Length(1).Required()
+	gt.Value(t, logs[0].Stage).Equal(model.JobRunStageFailed)
+	gt.String(t, logs[0].Error).NotEqual("")
 }
 
 // A ModeCreate turn runs before the case exists (creation-time), so it must NOT

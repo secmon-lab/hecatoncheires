@@ -298,22 +298,29 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 		}
 		decision, perr := parseDecision(runResult.FinalRaw)
 		if perr != nil {
-			return nil, goerr.Wrap(perr, "parse threadcase decision")
+			// The turn failed to produce a usable decision; record it as FAILED
+			// (deferred Finish reads runErr) so the run trace matches the error
+			// actually returned rather than being logged as SUCCESS.
+			runErr = goerr.Wrap(perr, "parse threadcase decision")
+			return nil, runErr
 		}
 		uc.persistSession(turnCtx, req.Session, model.SessionEndedWithCaseBoundReply)
 		return &Result{Status: StatusCompleted, Decision: decision}, nil
 	case planexec.StatusFallbackBudget, planexec.StatusFallbackError:
 		// The planner ended without a decision (budget exhausted or internal
 		// error handled into a fallback). runner.Run returns no error here, so
-		// mark the recorded run FAILED explicitly (deferred Close reads runErr)
+		// mark the recorded run FAILED explicitly (deferred Finish reads runErr)
 		// while the host still degrades gracefully to a fallback reply.
 		runErr = goerr.New("threadcase planexec ended without a decision",
 			goerr.V("status", int(runResult.Status)))
 		uc.persistSession(turnCtx, req.Session, model.SessionEndedWithCaseBoundReply)
 		return &Result{Status: StatusFallback}, nil
 	default:
-		return nil, goerr.New("threadcase planexec returned unknown status",
-			goerr.V("status", runResult.Status))
+		// An unknown status is a programming error; still record the run FAILED
+		// so it does not surface as a SUCCESS with no decision.
+		runErr = goerr.New("threadcase planexec returned unknown status",
+			goerr.V("status", int(runResult.Status)))
+		return nil, runErr
 	}
 }
 

@@ -387,7 +387,7 @@ func (r *jobRunLogRepository) Get(ctx context.Context, key model.JobRunKey, runI
 	return &log, nil
 }
 
-func (r *jobRunLogRepository) List(ctx context.Context, key model.JobRunKey, limit int) ([]*model.JobRunLog, error) {
+func (r *jobRunLogRepository) List(ctx context.Context, key model.JobRunKey, limit int, before time.Time) ([]*model.JobRunLog, error) {
 	if err := key.Validate(); err != nil {
 		return nil, goerr.Wrap(err, "invalid job run key")
 	}
@@ -397,6 +397,13 @@ func (r *jobRunLogRepository) List(ctx context.Context, key model.JobRunKey, lim
 		Collection(jobRunsCollection).Doc(key.JobID).
 		Collection(jobRunLogsCollection).
 		OrderBy("StartedAt", firestore.Desc)
+	if !before.IsZero() {
+		// Range filter on the same field as the ordering — index-free (uses the
+		// automatic single-field index). Inclusive so a caller paging on a
+		// (StartedAt, RunID) cursor still sees ties at the boundary and cuts
+		// precisely in memory.
+		q = q.Where("StartedAt", "<=", before)
+	}
 	if limit > 0 {
 		q = q.Limit(limit)
 	}

@@ -27,8 +27,16 @@ const runErrorStage = "execute"
 // the mention hosts serialise concurrent turns through their own per-thread
 // session lock, so Recorder must not take the Job lease (that would falsely
 // exclude a concurrent mention on a different thread of the same case). A run
-// therefore surfaces in the list at Close; a hard process kill mid-run leaves
-// a RUNNING log with no parent doc, which is simply never listed.
+// therefore surfaces in the list at Finish.
+//
+// A hard process kill between Open and Finish leaves a RUNNING log behind.
+// Only the case's very FIRST mention run has no parent JobRun doc yet, so that
+// orphan stays invisible to ListByCase; once any earlier run has Finished, the
+// parent exists and a later crashed run's RUNNING log WOULD list (as a
+// perpetual RUNNING). Unlike the Job runner, the mention path has no lease
+// sweep to reap such an orphan. This is an accepted edge case: the deferred
+// Finish runs on normal returns and on panics recovered by async.Dispatch, so
+// only an abrupt process death (SIGKILL / OOM) can trigger it.
 type Recorder struct {
 	repo    interfaces.Repository
 	key     model.JobRunKey

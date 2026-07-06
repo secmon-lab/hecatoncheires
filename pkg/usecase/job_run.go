@@ -7,6 +7,7 @@ import (
 	"errors"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/m-mizutani/goerr/v2"
 	"golang.org/x/sync/errgroup"
@@ -140,7 +141,16 @@ func (uc *JobRunUseCase) ListLogsByCase(ctx context.Context, workspaceID string,
 			goerr.V("case_id", caseID))
 	}
 
-	merged, err := uc.collectLogs(ctx, workspaceID, caseID, runs)
+	// When paging, bound each per-Job fetch at the cursor's StartedAt so a
+	// case whose runs concentrate under one JobID (the reserved mention JobID)
+	// can be walked past the newest window instead of being capped there. The
+	// in-memory cursor below still does the precise (StartedAt, RunID) cut.
+	var before time.Time
+	if cursor != nil {
+		before = time.Unix(0, cursor.StartedNanos).UTC()
+	}
+
+	merged, err := uc.collectLogs(ctx, workspaceID, caseID, runs, before)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +208,7 @@ func (uc *JobRunUseCase) ListLogsByCase(ctx context.Context, workspaceID string,
 // collectLogs fans out one List call per JobRun (Job × Case). The
 // upper bound on per-job results is JobRunLogPageMaxSize so that even
 // with several Jobs the merge cost stays bounded.
-func (uc *JobRunUseCase) collectLogs(ctx context.Context, workspaceID string, caseID int64, runs []*model.JobRun) ([]*model.JobRunLog, error) {
+func (uc *JobRunUseCase) collectLogs(ctx context.Context, workspaceID string, caseID int64, runs []*model.JobRun, before time.Time) ([]*model.JobRunLog, error) {
 	if len(runs) == 0 {
 		return nil, nil
 	}
@@ -212,7 +222,7 @@ func (uc *JobRunUseCase) collectLogs(ctx context.Context, workspaceID string, ca
 	for _, r := range runs {
 		key := model.JobRunKey{WorkspaceID: workspaceID, CaseID: caseID, JobID: r.JobID}
 		g.Go(func() error {
-			logs, err := uc.repo.JobRunLog().List(gctx, key, JobRunLogPageMaxSize)
+			logs, err := uc.repo.JobRunLog().List(gctx, key, JobRunLogPageMaxSize, before)
 			if err != nil {
 				return goerr.Wrap(err, "list job run logs",
 					goerr.V("workspace_id", workspaceID),

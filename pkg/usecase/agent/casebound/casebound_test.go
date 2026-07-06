@@ -100,7 +100,7 @@ func TestRunTurn_RecordsMentionJobRunLog(t *testing.T) {
 	gt.String(t, runs[0].JobID).Equal(model.MentionRunJobID)
 	gt.Value(t, runs[0].LastStatus).Equal(model.JobRunStatusSuccess)
 
-	logs, err := repo.JobRunLog().List(ctx, key, 100)
+	logs, err := repo.JobRunLog().List(ctx, key, 100, time.Time{})
 	gt.NoError(t, err).Required()
 	gt.Array(t, logs).Length(1).Required()
 	log := logs[0]

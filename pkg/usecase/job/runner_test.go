@@ -112,7 +112,7 @@ func TestJobRunner_StrategyDispatchPicksRegisteredExecutor(t *testing.T) {
 	// strategy. Read it back through the repository (List for the
 	// (workspace, case, job) key).
 	key := model.JobRunKey{WorkspaceID: "ws", CaseID: c.ID, JobID: j.ID}
-	logs, listErr := repo.JobRunLog().List(context.Background(), key, 0)
+	logs, listErr := repo.JobRunLog().List(context.Background(), key, 0, time.Time{})
 	gt.NoError(t, listErr).Required()
 	gt.Array(t, logs).Length(1).Required()
 	gt.String(t, logs[0].ExecutorKind).Equal("plan_execute")
@@ -796,7 +796,7 @@ func TestJobRunner_WorkspaceLoadFailure_NoLog(t *testing.T) {
 	key := model.JobRunKey{WorkspaceID: wsID, CaseID: c.ID, JobID: j.ID}
 
 	// No JobRunLog written.
-	logs, err := repo.JobRunLog().List(ctx, key, 0)
+	logs, err := repo.JobRunLog().List(ctx, key, 0, time.Time{})
 	gt.NoError(t, err).Required()
 	gt.Array(t, logs).Length(0)
 
