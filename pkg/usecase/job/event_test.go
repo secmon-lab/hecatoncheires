@@ -131,37 +131,65 @@ func TestPublish_DispatchesMatchingJobs(t *testing.T) {
 	gt.Number(t, exec.calls.Load()).Equal(int32(1))
 }
 
-func TestPublish_SkipsWhenContextIsJobActor(t *testing.T) {
-	registry := model.NewWorkspaceRegistry()
-	j := &model.Job{
-		ID:     "summarize",
-		Prompt: "x",
-		Events: model.JobEvents{
-			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
-		},
+func TestPublish_SuppressesOnlyOriginatingJob(t *testing.T) {
+	// The originating Job (whose agent performed the write) must not re-fire
+	// itself, but a DIFFERENT Job listening on the same lifecycle event still
+	// fires — so an on-created Job that closes the case can trigger the
+	// on-closed Job.
+	newFixture := func(t *testing.T) (*job.UseCase, *recordingExecutor, *model.Case) {
+		t.Helper()
+		registry := model.NewWorkspaceRegistry()
+		summarize := &model.Job{
+			ID:     "summarize",
+			Prompt: "x",
+			Events: model.JobEvents{
+				Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleClosed}},
+			},
+		}
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "ws"},
+			Jobs:      []*model.Job{summarize},
+		})
+
+		repo, c := setupCase(t, "ws")
+		exec := &recordingExecutor{}
+		runner := job.NewJobRunner(job.RunnerDeps{
+			Repo: repo, Registry: registry, LLMClient: inertLLM(), Executors: map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: exec},
+		})
+		return job.NewUseCase(registry, runner), exec, c
 	}
-	registry.Register(&model.WorkspaceEntry{
-		Workspace: model.Workspace{ID: "ws"},
-		Jobs:      []*model.Job{j},
+
+	closedEvent := func(c *model.Case) job.Event {
+		return job.Event{
+			Domain:        model.JobEventDomainCase,
+			WorkspaceID:   "ws",
+			CaseID:        c.ID,
+			CaseLifecycle: model.CaseLifecycleClosed,
+		}
+	}
+
+	t.Run("same job id is suppressed", func(t *testing.T) {
+		uc, exec, c := newFixture(t)
+		ctx := job.WithJobActor(context.Background(), job.JobActorMarker{JobID: "summarize"})
+		uc.Publish(ctx, closedEvent(c))
+		async.Wait()
+		gt.Number(t, exec.calls.Load()).Equal(int32(0))
 	})
 
-	repo, c := setupCase(t, "ws")
-
-	exec := &recordingExecutor{}
-	runner := job.NewJobRunner(job.RunnerDeps{
-		Repo: repo, Registry: registry, LLMClient: inertLLM(), Executors: map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: exec},
+	t.Run("different job id still fires", func(t *testing.T) {
+		uc, exec, c := newFixture(t)
+		ctx := job.WithJobActor(context.Background(), job.JobActorMarker{JobID: "other"})
+		uc.Publish(ctx, closedEvent(c))
+		async.Wait()
+		gt.Number(t, exec.calls.Load()).Equal(int32(1))
 	})
-	uc := job.NewUseCase(registry, runner)
 
-	ctx := job.WithJobActor(context.Background(), job.JobActorMarker{JobID: "other"})
-	uc.Publish(ctx, job.Event{
-		Domain:        model.JobEventDomainCase,
-		WorkspaceID:   "ws",
-		CaseID:        c.ID,
-		CaseLifecycle: model.CaseLifecycleCreated,
+	t.Run("no actor marker fires", func(t *testing.T) {
+		uc, exec, c := newFixture(t)
+		uc.Publish(context.Background(), closedEvent(c))
+		async.Wait()
+		gt.Number(t, exec.calls.Load()).Equal(int32(1))
 	})
-	async.Wait()
-	gt.Number(t, exec.calls.Load()).Equal(int32(0))
 }
 
 func TestPublish_IgnoresNonMatchingJobs(t *testing.T) {

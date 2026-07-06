@@ -31,14 +31,15 @@ func NewUseCase(registry *model.WorkspaceRegistry, runner *JobRunner) *UseCase {
 // the caller (typically inside a usecase mutation) returns immediately
 // without paying for the LLM round-trip.
 //
-// Re-entrant Publish calls from within a Job's tool tail are suppressed
-// here, so an agent that calls case_writer.update_case cannot cause its
-// own follow-up event to re-fire the same Job.
+// Re-entrant Publish calls from within a Job's tool tail suppress ONLY
+// the originating Job: an agent that calls case_writer.update_case cannot
+// cause its own follow-up event to re-fire the same Job, but any other
+// Job listening on the resulting lifecycle event still fires. This is what
+// lets an on-created Job that closes the case trigger the on-closed Job.
+// (created / closed are one-way terminal edges, so cross-Job chains cannot
+// form an infinite loop on a single case.)
 func (uc *UseCase) Publish(ctx context.Context, ev Event) {
 	if uc == nil || uc.registry == nil || uc.runner == nil {
-		return
-	}
-	if IsJobActorContext(ctx) {
 		return
 	}
 
@@ -52,7 +53,13 @@ func (uc *UseCase) Publish(ctx context.Context, ev Event) {
 		return
 	}
 
+	originator, isActor := jobActorFromContext(ctx)
+
 	for _, j := range jobs {
+		if isActor && j.ID == originator.JobID {
+			// The originating Job's own write must not re-fire itself.
+			continue
+		}
 		event := ev
 		async.Dispatch(ctx, func(bgCtx context.Context) error {
 			return uc.runner.Run(bgCtx, j, event)

@@ -123,10 +123,14 @@ completion; if the runner crashes the lease times out on its own.
 
 #### Loop suppression
 
-Mutations a Job's tool performs run with a context-marker
-(`job.JobActorMarker`). `JobUseCase.Publish` returns early when it sees
-this marker, so a Job that touches `case__update_case` cannot trigger
-itself again.
+Mutations a Job's tool performs run with a context-marker carrying the
+originating job id (`job.JobActorMarker`). `JobUseCase.Publish` skips
+only the job whose id matches that marker, so a Job that touches
+`case__update_case` cannot re-fire itself — but any *other* Job
+listening on the resulting lifecycle event still fires. This is what
+lets an on-created Job that closes the case trigger the on-closed Job.
+(`created` / `closed` are one-way terminal edges, so cross-Job chains
+cannot form an infinite loop on a single case.)
 
 ### Running scheduled Jobs
 

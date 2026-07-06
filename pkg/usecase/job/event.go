@@ -40,14 +40,17 @@ type EventPublisher interface {
 
 // jobActorContextKey is the private context.Value key used to mark a
 // mutation as originating from a Job's tool. The publisher consults
-// this so a Job that runs case_writer / action_writer cannot publish a
-// follow-up event for its own write — the canonical infinite-loop
-// surface.
+// this so a Job that runs case_writer / action_writer cannot re-fire
+// *itself* via a follow-up event for its own write — the canonical
+// infinite-loop surface.
 type jobActorContextKey struct{}
 
 // JobActorMarker is the value stored under jobActorContextKey. It
-// carries the originating job id for trace purposes; equality of the
-// marker is what suppresses re-publication, not equality of the JobID.
+// carries the originating job id, which the publisher compares against
+// each candidate job: only the job whose ID matches is suppressed, so a
+// Job whose agent triggers a different lifecycle event (e.g. an
+// on-created Job that closes the case) still fires the other Jobs
+// listening on it (e.g. the on-closed Job).
 type JobActorMarker struct {
 	JobID string
 }
@@ -60,14 +63,20 @@ func WithJobActor(ctx context.Context, marker JobActorMarker) context.Context {
 }
 
 // IsJobActorContext reports whether the context carries a JobActorMarker.
-// EventPublisher implementations call this in the Publish hot path to
-// short-circuit recursive dispatch.
 func IsJobActorContext(ctx context.Context) bool {
-	if ctx == nil {
-		return false
-	}
-	_, ok := ctx.Value(jobActorContextKey{}).(JobActorMarker)
+	_, ok := jobActorFromContext(ctx)
 	return ok
+}
+
+// jobActorFromContext returns the originating JobActorMarker and whether
+// one is present. EventPublisher.Publish uses the marker's JobID to
+// suppress only the originating Job's own re-fire, not every Job.
+func jobActorFromContext(ctx context.Context) (JobActorMarker, bool) {
+	if ctx == nil {
+		return JobActorMarker{}, false
+	}
+	marker, ok := ctx.Value(jobActorContextKey{}).(JobActorMarker)
+	return marker, ok
 }
 
 // jobQuietContextKey is the private context.Value key carrying the
