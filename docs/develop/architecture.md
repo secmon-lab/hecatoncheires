@@ -303,6 +303,26 @@ The agent tools available within these sessions are described in
 [Configuration](../configuration.md#agent-tool-registry-slack-mention--assist).
 They share the same GitHub App installation as the Source pipeline.
 
+### Mention runs on the case agent page
+
+The Cloud Storage trace above is the durable, full-fidelity artifact. In
+addition, every post-creation mention turn is recorded as a queryable
+`JobRunLog` + `JobRunEvent` trail in Firestore so it appears on the case
+agent page (`/ws/{workspace}/cases/{id}/agent`) alongside scheduled and
+lifecycle Job runs, through the same `caseJobRunLogs` read path.
+
+- Both mention hosts — `casebound` (channel-mode) and `threadcase`
+  `ModeMention` (thread-mode) — record via `pkg/agent/runtrace`
+  (`runtrace.Recorder` + `runtrace.Handler`), the same machinery the Job
+  runner uses.
+- Mention runs are not configured Jobs, so each mention turn gets its own
+  fresh per-turn JobID and is tagged `EventType = model.EventTypeMention`;
+  the page shows a localized "Mention" label (resolved from the eventType, not
+  the opaque JobID). The `JobRunLog.TraceID` matches the Cloud Storage trace's
+  `traceID`, so the two sinks correlate.
+- Creation-time turns (`threadcase` `ModeCreate`) are excluded — only
+  mentions in an already-created case are listed.
+
 ## See Also
 
 - [develop/README.md](./README.md) — developer documentation index

@@ -9,6 +9,7 @@ import {
   UPDATE_CASE_AGENT_SETTINGS,
 } from '../graphql/caseAgent'
 import { useTranslation } from '../i18n'
+import { runTriggerLabelKey } from '../utils/agentTrigger'
 import {
   IconChevDown,
   IconChevLeft,
@@ -583,7 +584,9 @@ export default function CaseAgent() {
         ) : runLogs.length === 0 ? (
           <div className={styles.statusCard}>{t('caseAgentRunLogsEmpty')}</div>
         ) : (
-          runLogs.map((r) => (
+          runLogs.map((r) => {
+            const triggerKey = runTriggerLabelKey(r.eventType)
+            return (
             <Link
               key={r.runId}
               to={`/ws/${workspaceId}/cases/${caseId}/agent/runs/${r.runId}`}
@@ -619,10 +622,13 @@ export default function CaseAgent() {
                 {formatDuration(r.durationMs, r.stage, t('caseAgentRunDurationRunning'))}
               </span>
               <span className={styles.runColTrigger}>
-                <span className={styles.triggerChip}>{r.eventType || '—'}</span>
+                <span className={styles.triggerChip}>
+                  {triggerKey ? t(triggerKey) : r.eventType || '—'}
+                </span>
               </span>
             </Link>
-          ))
+            )
+          })
         )}
         <div className={styles.pagination}>
           <span className={styles.paginationLabel}>

@@ -15,6 +15,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 )
 
 // JobRunUseCase exposes read-only access to Job execution history and the
@@ -308,8 +309,13 @@ func (uc *JobRunUseCase) ListEvents(ctx context.Context, workspaceID string, cas
 // ResolveJobName returns the human-readable Job name from the workspace
 // TOML registry, falling back to the raw JobID when no entry exists.
 // Exposed so resolvers can label runs without re-loading the registry
-// themselves.
-func (uc *JobRunUseCase) ResolveJobName(workspaceID, jobID string) string {
+// themselves. A mention-triggered run (eventType == EventTypeMention) is not a
+// configured Job — its JobID is an opaque per-turn id — so it resolves to a
+// localized "Mention" label instead.
+func (uc *JobRunUseCase) ResolveJobName(ctx context.Context, workspaceID, jobID, eventType string) string {
+	if eventType == model.EventTypeMention {
+		return i18n.T(ctx, i18n.MsgAgentMentionRunName)
+	}
 	if uc.registry == nil {
 		return jobID
 	}

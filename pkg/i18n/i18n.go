@@ -200,6 +200,12 @@ const (
 	MsgJobRunCompleted // "✅ job `%s` completed" (%s = job id)
 	MsgJobRunFailed    // "❌ job `%s` failed: %s" (%s = job id, %s = error)
 
+	// MsgAgentMentionRunName is the display name shown on the case agent page
+	// for a mention-triggered agent run (a JobRunLog recorded under the
+	// reserved mention JobID). Real Job runs use their TOML name; this labels
+	// the mention pseudo-job.
+	MsgAgentMentionRunName
+
 	// Agent mention-draft preview & Edit modal (pkg/usecase/slack_mention_*).
 	MsgMentionPreviewFallback // Notification fallback text for the preview ephemeral.
 	MsgMentionPreviewTestNote // Context note shown on the preview when the draft is a test case.

@@ -168,8 +168,37 @@ func (s JobRunStage) String() string { return string(s) }
 // for rough flow tracing, not exact reproduction.
 const MaxInlineBytes = 800 * 1024
 
-// JobRunLog records ONE invocation of a Job against a Case. Stored at
+// ExecutorKind values recorded on JobRunLog.ExecutorKind. They identify
+// which runtime drove a run so a consumer can tell a single-loop turn from
+// a plan-execute one without re-deriving it.
+const (
+	// ExecutorKindSingleLoop is a single gollem ReAct loop (Job
+	// strategy=simple, and the casebound mention host, which runs gollem
+	// directly).
+	ExecutorKindSingleLoop = "single_loop"
+	// ExecutorKindPlanexec is the plan-and-execute runtime (Job
+	// strategy=planexec, and the threadcase mention host).
+	ExecutorKindPlanexec = "plan_execute"
+)
+
+// EventTypeMention is the JobRunLog.EventType provenance value for a
+// mention-triggered run (a Slack mention in an existing case, handled by the
+// casebound / threadcase hosts). Such runs are NOT TOML-configured Jobs, but
+// they persist through the same JobRunLog schema so the case agent page lists
+// them alongside real Job runs. EventType is the discriminator that tells a
+// mention run apart from the "case" / "scheduled" JobEventDomain values the
+// Job runner writes — each mention turn gets its own fresh JobID, so there is
+// no reserved sentinel to match on.
+const EventTypeMention = "mention"
+
+// JobRunLog records ONE invocation of an agent against a Case. Stored at
 // workspaces/{WorkspaceID}/cases/{CaseID}/jobRuns/{JobID}/logs/{RunID}.
+//
+// Despite the "Job" name it holds every case-scoped agent run, not only
+// TOML-configured Job runs: mention-triggered runs (casebound / threadcase)
+// persist here too, each under its own fresh per-turn JobID and with
+// EventType=EventTypeMention, so the case agent page lists them alongside
+// Job runs through the same read path.
 //
 // Every identifier is held as a TOP-LEVEL scalar field (no nested Key
 // struct) so that a Firestore -> BigQuery export yields a flat row that

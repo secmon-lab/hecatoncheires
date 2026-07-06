@@ -342,9 +342,10 @@ Slack tool it did have (the poster).
 ## Trace handler wiring (host per-event timeline)
 
 The same "wire it into every agent" discipline applies to the host's
-per-event trace handler, not just tools. A host that wants a per-call
-timeline (the Job host's `jobRunTraceHandler`, which writes the
-`JobRunEvent` records the run-detail UI reads) supplies it via
+per-event trace handler, not just tools. The shared handler lives in
+`pkg/agent/runtrace` (`runtrace.Handler`), which turns gollem LLM / tool
+call boundaries into the `JobRunEvent` records the run-detail UI reads.
+A host that wants a per-call timeline supplies it via
 `planexec.RunRequest.TraceHandler`. planexec combines it (`combineTrace`
 → `trace.Multi`) with each agent's own trace sink and wires the result
 into **every** agent the run drives — the planner, each parallel
@@ -359,6 +360,45 @@ showed (it is stored on `JobRunLog` before execution), and the timeline
 stayed empty. `simple` Jobs were unaffected because the single-loop
 executor wires the handler directly via `gollem.WithTrace`. When you add
 a new agent execution to planexec, wire the host handler into it too.
+
+### Mention-triggered runs on the case agent page
+
+`JobRunLog` / `JobRunEvent` are NOT Job-only: the case agent page
+(`caseJobRunLogs`) lists **every** case-scoped agent run through one read
+path. Post-creation Slack mentions handled by the `casebound` (channel-mode,
+direct gollem) and `threadcase` (thread-mode, planexec, `ModeMention` only)
+hosts record the same records via `runtrace.Recorder`. They are not
+configured Jobs, so **each mention turn gets its own fresh per-turn JobID**
+(a UUID) and is tagged `EventType = model.EventTypeMention`. `EventType` — not
+a reserved JobID — is the discriminator: `ResolveJobName` maps a run with that
+eventType to a localized "Mention" label regardless of its opaque JobID, and
+the registry-backed `caseJobs` (Automated Jobs) list never shows them because
+their JobIDs are not in the workspace config. (Per-turn IDs keep each mention
+run a standalone record and sidestep any per-JobID log-window cap; the
+per-case mention count is small — order 10-20 — so the extra `JobRun` docs and
+the O(N) `ListByCase`/`findLog` fan-out are negligible.)
+
+Rules for this path:
+
+- `runtrace.Recorder.Open` creates the RUNNING `JobRunLog`; `Finish`
+  transitions it to SUCCESS/FAILED and calls `RecordRun`, which materialises
+  the `JobRun` summary doc `ListByCase` reads. The summary is materialised at
+  **Finish**, not Open — the mention hosts serialise concurrent turns through
+  their own per-thread session lock, so the Recorder must NOT take the Job
+  lease (it would falsely exclude a concurrent mention on a different thread
+  of the same case). A side effect of per-turn JobIDs: a run interrupted
+  before `Finish` never gets a parent `JobRun` doc, so its orphan RUNNING log
+  is simply never listed (no perpetual-RUNNING row). The lifecycle method is
+  named `Finish` (not `Close`) because it ends a run record, not an
+  `io.Closer` (the goast policy reserves `.Close()` for `safe.Close`).
+- Keep the existing durable trace sink. casebound feeds the Cloud Storage
+  recorder and `runtrace.Recorder.Handler()` through `trace.Multi`; threadcase
+  passes the handler via `planexec.RunRequest.TraceHandler` (planexec already
+  combines it with its archive recorder). Do not replace the archive trace.
+- `ModeCreate` (creation-time materialize) is excluded — the requirement is
+  post-creation mentions.
+- Trace recording is observability: `Open`/`Finish`/event failures are
+  non-fatal (`errutil.Handle`) and must never fail the mention turn.
 
 ## Budget
 

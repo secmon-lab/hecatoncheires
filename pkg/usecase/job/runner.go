@@ -10,6 +10,7 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/interaction"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/runtrace"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/slack"
@@ -32,24 +33,15 @@ const (
 	recentMessageWindow   = 24 * time.Hour
 )
 
-// executorKindSingleLoop is the JobRunLog.ExecutorKind value emitted
-// when JobStrategy=simple drives the run. executorKindPlanexec is the
-// value emitted when JobStrategy=planexec runs through the shared
-// planexec runtime.
-const (
-	executorKindSingleLoop = "single_loop"
-	executorKindPlanexec   = "plan_execute"
-)
-
 // executorKindFor maps a Job.Strategy onto the ExecutorKind value
 // persisted on JobRunLog. Unknown strategies fall back to single_loop —
 // the caller (model.NormaliseJobStrategy + Job.Validate) is responsible
 // for catching typos before they reach this point.
 func executorKindFor(s model.JobStrategy) string {
 	if s == model.JobStrategyPlanexec {
-		return executorKindPlanexec
+		return model.ExecutorKindPlanexec
 	}
-	return executorKindSingleLoop
+	return model.ExecutorKindSingleLoop
 }
 
 // runErrorStageExecute labels RUN_ERROR events emitted when the agent
@@ -398,7 +390,7 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 		ExecutorKind:   executorKindFor(strategy),
 		EventType:      string(ev.Domain),
 		EventTriggerAt: ev.Timestamp.UTC(),
-		SystemPrompt:   truncateString(systemPrompt, model.MaxInlineBytes),
+		SystemPrompt:   runtrace.Truncate(systemPrompt, model.MaxInlineBytes),
 	}
 	if createErr := r.deps.Repo.JobRunLog().Create(ctx, logRec); createErr != nil {
 		// We never reached the event-emitting stage; surface as a
@@ -407,10 +399,10 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 			goerr.V("run_id", runID)))
 	}
 
-	seq := newRunSequencer()
-	handler := newJobRunTraceHandler(
+	seq := runtrace.NewSequencer()
+	handler := runtrace.NewHandler(
 		r.deps.Repo.JobRunEvent(),
-		jobRunRouting{
+		runtrace.Routing{
 			WorkspaceID: key.WorkspaceID,
 			CaseID:      key.CaseID,
 			JobID:       key.JobID,
@@ -419,7 +411,6 @@ func (r *JobRunner) Run(ctx context.Context, j *model.Job, ev Event) error {
 		},
 		seq,
 		r.clock,
-		nil, // default truncator
 	)
 
 	// Post the "starting..." marker and resolve the session thread the
@@ -501,7 +492,7 @@ func (r *JobRunner) finishRun(
 	c *model.Case,
 	key model.JobRunKey,
 	logRec *model.JobRunLog,
-	handler *jobRunTraceHandler,
+	handler *runtrace.Handler,
 	channelID, sessionThreadTS, runID, traceID string,
 	execErr error,
 ) error {
@@ -522,7 +513,7 @@ func (r *JobRunner) finishRun(
 			}
 		}
 		r.postSessionLog(ctx, channelID, sessionThreadTS,
-			i18n.T(ctx, i18n.MsgJobRunFailed, j.ID, truncateString(execErr.Error(), model.MaxInlineBytes)))
+			i18n.T(ctx, i18n.MsgJobRunFailed, j.ID, runtrace.Truncate(execErr.Error(), model.MaxInlineBytes)))
 	} else {
 		logRec.Stage = model.JobRunStageSuccess
 		r.postSessionLog(ctx, channelID, sessionThreadTS,
@@ -749,18 +740,17 @@ func (r *JobRunner) Resume(ctx context.Context, key model.JobRunKey, runID strin
 			}
 		}
 	}
-	handler := newJobRunTraceHandler(
+	handler := runtrace.NewHandler(
 		r.deps.Repo.JobRunEvent(),
-		jobRunRouting{
+		runtrace.Routing{
 			WorkspaceID: key.WorkspaceID,
 			CaseID:      key.CaseID,
 			JobID:       key.JobID,
 			RunID:       runID,
 			TraceID:     logRec.TraceID,
 		},
-		newRunSequencerStartingAt(startSeq),
+		runtrace.NewSequencerStartingAt(startSeq),
 		r.clock,
-		nil,
 	)
 
 	// Transition the log back to RUNNING (clears the pending interaction)
@@ -1020,7 +1010,7 @@ func (r *JobRunner) loadRecentMessages(ctx context.Context, workspaceID string, 
 // unless the Job opted in (j.Reflection), the case is non-private, and both the
 // Reflector and HistoryRepo are wired. All failures are non-fatal: reflection
 // is a learning tail, not part of the run's success contract.
-func (r *JobRunner) maybeReflect(ctx context.Context, j *model.Job, c *model.Case, key model.JobRunKey, runID string, handler *jobRunTraceHandler) {
+func (r *JobRunner) maybeReflect(ctx context.Context, j *model.Job, c *model.Case, key model.JobRunKey, runID string, handler *runtrace.Handler) {
 	if !j.Reflection || r.deps.Reflector == nil || r.deps.HistoryRepo == nil {
 		return
 	}
@@ -1041,7 +1031,7 @@ func (r *JobRunner) maybeReflect(ctx context.Context, j *model.Job, c *model.Cas
 		return
 	}
 
-	handler.enterReflectionPhase()
+	handler.EnterReflectionPhase()
 	if reflErr := r.deps.Reflector.Reflect(ctx, job.ReflectRequest{
 		WorkspaceID:    key.WorkspaceID,
 		CaseID:         key.CaseID,

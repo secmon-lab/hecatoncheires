@@ -6,6 +6,7 @@ import (
 	goslack "github.com/slack-go/slack"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/interaction"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/runtrace"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 )
@@ -44,20 +45,9 @@ func DecodeJobQuestionRefForTest(value string) (workspaceID string, caseID int64
 // supply a fake.
 type JobQuestionPosterForTest = jobQuestionPoster
 
-// JobRunRoutingForTest exposes the internal jobRunRouting type so tests
-// in other packages can construct handlers with a known routing key.
-type JobRunRoutingForTest = jobRunRouting
-
-// JobRunTraceHandlerForTest exposes jobRunTraceHandler.
-type JobRunTraceHandlerForTest = jobRunTraceHandler
-
-// RunSequencerForTest exposes runSequencer.
-type RunSequencerForTest = *runSequencer
-
-// NewRunSequencerForTest constructs a fresh runSequencer for tests.
-func NewRunSequencerForTest() *runSequencer {
-	return newRunSequencer()
-}
+// JobRunTraceHandlerForTest exposes the shared runtrace.Handler under the
+// name the runner tests use to assert on the executor's TraceHandler.
+type JobRunTraceHandlerForTest = runtrace.Handler
 
 // TruncateRunesForTest exposes truncateRunes for tests in other packages.
 var TruncateRunesForTest = truncateRunes
@@ -67,22 +57,3 @@ var WithQuietForTest = withQuiet
 
 // IsQuietForTest exposes isQuiet for tests in other packages.
 var IsQuietForTest = isQuiet
-
-// NewJobRunTraceHandlerForTest constructs a jobRunTraceHandler for tests.
-// clock and truncator may be nil for defaults.
-func NewJobRunTraceHandlerForTest(
-	eventRepo interfaces.JobRunEventRepository,
-	routing JobRunRoutingForTest,
-	seq *runSequencer,
-	clock func() time.Time,
-	truncator payloadTruncator,
-) *jobRunTraceHandler {
-	return newJobRunTraceHandler(eventRepo, routing, seq, clock, truncator)
-}
-
-// EnterReflectionPhaseForTest calls enterReflectionPhase so external test
-// packages can drive the reflection-phase transition without accessing
-// the unexported method directly.
-func (h *jobRunTraceHandler) EnterReflectionPhaseForTest() {
-	h.enterReflectionPhase()
-}

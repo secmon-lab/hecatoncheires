@@ -1,4 +1,4 @@
-package job_test
+package runtrace_test
 
 import (
 	"context"
@@ -11,37 +11,33 @@ import (
 	"github.com/gollem-dev/gollem/trace"
 	"github.com/m-mizutani/gt"
 
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/runtrace"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
-	"github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
 )
 
 func fixedClock(t time.Time) func() time.Time {
 	return func() time.Time { return t }
 }
 
-func newHandlerFixture(t *testing.T) (
-	*job.JobRunTraceHandlerForTest,
-	*memory.Memory,
-	job.RunSequencerForTest,
-) {
+func newHandlerFixture(t *testing.T) (*runtrace.Handler, *memory.Memory) {
 	t.Helper()
 	repo := memory.New()
-	routing := job.JobRunRoutingForTest{
+	routing := runtrace.Routing{
 		WorkspaceID: "ws1",
 		CaseID:      42,
 		JobID:       "job-A",
 		RunID:       "run-1",
 		TraceID:     "trace-1",
 	}
-	seq := job.NewRunSequencerForTest()
+	seq := runtrace.NewSequencer()
 	clock := fixedClock(time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC))
-	h := job.NewJobRunTraceHandlerForTest(repo.JobRunEvent(), routing, seq, clock, nil)
-	return h, repo, seq
+	h := runtrace.NewHandler(repo.JobRunEvent(), routing, seq, clock)
+	return h, repo
 }
 
-func TestRunSequencer_Next_MonotonicUnderConcurrency(t *testing.T) {
-	seq := job.NewRunSequencerForTest()
+func TestSequencer_Next_MonotonicUnderConcurrency(t *testing.T) {
+	seq := runtrace.NewSequencer()
 	const N = 1000
 	var wg sync.WaitGroup
 	results := make([]int64, N)
@@ -72,8 +68,18 @@ func TestRunSequencer_Next_MonotonicUnderConcurrency(t *testing.T) {
 	gt.Number(t, maxV).Equal(N)
 }
 
-func TestJobRunTraceHandler_LLMCall_AppendsRequestAndResponse(t *testing.T) {
-	h, repo, _ := newHandlerFixture(t)
+func TestSequencer_StartingAt(t *testing.T) {
+	seq := runtrace.NewSequencerStartingAt(5)
+	gt.Number(t, seq.Next()).Equal(5)
+	gt.Number(t, seq.Next()).Equal(6)
+
+	// A start below 1 is clamped up to 1.
+	seq2 := runtrace.NewSequencerStartingAt(0)
+	gt.Number(t, seq2.Next()).Equal(1)
+}
+
+func TestHandler_LLMCall_AppendsRequestAndResponse(t *testing.T) {
+	h, repo := newHandlerFixture(t)
 	ctx := context.Background()
 
 	ctxLLM := h.StartLLMCall(ctx)
@@ -136,13 +142,13 @@ func TestJobRunTraceHandler_LLMCall_AppendsRequestAndResponse(t *testing.T) {
 	gt.String(t, respEv.LLMResponse.FunctionCalls[0].ArgumentsJSON).Equal(`{"q":"foo"}`)
 	gt.Number(t, respEv.LLMResponse.InputTokens).Equal(120)
 	gt.Number(t, respEv.LLMResponse.OutputTokens).Equal(60)
-	// DurationMs is computed from the clock; fixedClock returns the same
-	// time, so the difference is 0 ms.
+	// DurationMs is computed from the clock; fixedClock returns the same time,
+	// so the difference is 0 ms.
 	gt.Number(t, respEv.LLMResponse.DurationMs).Equal(0)
 }
 
-func TestJobRunTraceHandler_ToolExec_AppendsToolCallWithParent(t *testing.T) {
-	h, repo, _ := newHandlerFixture(t)
+func TestHandler_ToolExec_AppendsToolCallWithParent(t *testing.T) {
+	h, repo := newHandlerFixture(t)
 	ctx := context.Background()
 
 	// Run an LLM call first so we have a parent for the tool call.
@@ -175,8 +181,8 @@ func TestJobRunTraceHandler_ToolExec_AppendsToolCallWithParent(t *testing.T) {
 	gt.String(t, toolEv.ToolCall.ErrorMessage).Equal("")
 }
 
-func TestJobRunTraceHandler_ToolExec_Error(t *testing.T) {
-	h, repo, _ := newHandlerFixture(t)
+func TestHandler_ToolExec_Error(t *testing.T) {
+	h, repo := newHandlerFixture(t)
 	ctx := context.Background()
 
 	// We need a parent LLM_RESPONSE first.
@@ -201,8 +207,8 @@ func TestJobRunTraceHandler_ToolExec_Error(t *testing.T) {
 	gt.String(t, toolEv.ToolCall.ResultJSON).Equal("")
 }
 
-func TestJobRunTraceHandler_NSerialToolExecs_MonotonicSeq(t *testing.T) {
-	h, repo, _ := newHandlerFixture(t)
+func TestHandler_NSerialToolExecs_MonotonicSeq(t *testing.T) {
+	h, repo := newHandlerFixture(t)
 	ctx := context.Background()
 
 	// One LLM call as parent.
@@ -238,8 +244,8 @@ func TestJobRunTraceHandler_NSerialToolExecs_MonotonicSeq(t *testing.T) {
 	gt.Number(t, events[4].ParentSequence).Equal(2)
 }
 
-func TestJobRunTraceHandler_EmitRunError_SharesSequencer(t *testing.T) {
-	h, repo, _ := newHandlerFixture(t)
+func TestHandler_EmitRunError_SharesSequencer(t *testing.T) {
+	h, repo := newHandlerFixture(t)
 	ctx := context.Background()
 
 	ctxLLM := h.StartLLMCall(ctx)
@@ -264,8 +270,8 @@ func TestJobRunTraceHandler_EmitRunError_SharesSequencer(t *testing.T) {
 	gt.String(t, events[2].RunError.Message).Equal("boom")
 }
 
-func TestJobRunTraceHandler_SubAgentLabel_RoundTrips(t *testing.T) {
-	h, repo, _ := newHandlerFixture(t)
+func TestHandler_SubAgentLabel_RoundTrips(t *testing.T) {
+	h, repo := newHandlerFixture(t)
 	ctx := context.Background()
 
 	ctxSub := h.StartSubAgent(ctx, "planner")
@@ -297,8 +303,8 @@ func TestJobRunTraceHandler_SubAgentLabel_RoundTrips(t *testing.T) {
 	gt.String(t, events[3].AgentLabel).Equal("")
 }
 
-func TestJobRunTraceHandler_TruncatesLongFields(t *testing.T) {
-	h, repo, _ := newHandlerFixture(t)
+func TestHandler_TruncatesLongFields(t *testing.T) {
+	h, repo := newHandlerFixture(t)
 	ctx := context.Background()
 
 	big := strings.Repeat("a", model.MaxInlineBytes+100)
@@ -318,8 +324,8 @@ func TestJobRunTraceHandler_TruncatesLongFields(t *testing.T) {
 	gt.Number(t, len(events[1].LLMResponse.Texts[0])).Equal(model.MaxInlineBytes)
 }
 
-func TestJobRunTraceHandler_EnterReflectionPhase_SetsPhase(t *testing.T) {
-	h, repo, _ := newHandlerFixture(t)
+func TestHandler_EnterReflectionPhase_SetsPhase(t *testing.T) {
+	h, repo := newHandlerFixture(t)
 	ctx := context.Background()
 
 	// Before entering the reflection phase, events carry the default "execute" phase.
@@ -337,7 +343,7 @@ func TestJobRunTraceHandler_EnterReflectionPhase_SetsPhase(t *testing.T) {
 	gt.String(t, events[1].Phase).Equal("execute")
 
 	// Transition to reflection phase — subsequent events must carry "reflection".
-	h.EnterReflectionPhaseForTest()
+	h.EnterReflectionPhase()
 
 	ctxLLM2 := h.StartLLMCall(ctx)
 	h.EndLLMCall(ctxLLM2, &trace.LLMCallData{
@@ -352,4 +358,17 @@ func TestJobRunTraceHandler_EnterReflectionPhase_SetsPhase(t *testing.T) {
 	// The two new events (LLM_REQUEST + LLM_RESPONSE) are in the reflection phase.
 	gt.String(t, events2[2].Phase).Equal("reflection")
 	gt.String(t, events2[3].Phase).Equal("reflection")
+}
+
+func TestTruncate(t *testing.T) {
+	// Shorter than the cap is returned unchanged.
+	gt.String(t, runtrace.Truncate("hello", 100)).Equal("hello")
+	// Exactly the cap is unchanged.
+	gt.String(t, runtrace.Truncate("hello", 5)).Equal("hello")
+	// A max of 0 yields empty.
+	gt.String(t, runtrace.Truncate("hello", 0)).Equal("")
+	// Multi-byte runes are never split: cutting a 3-byte rune at byte 1 snaps
+	// back to a rune boundary (here, the empty string).
+	jp := "あ" // 3 bytes
+	gt.Number(t, len(runtrace.Truncate(jp, 1))).Equal(0)
 }

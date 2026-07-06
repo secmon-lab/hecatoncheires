@@ -13,6 +13,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 )
@@ -324,9 +325,11 @@ func TestJobRunUseCase_ListCaseJobs(t *testing.T) {
 }
 
 func TestJobRunUseCase_ResolveJobName(t *testing.T) {
+	ctx := context.Background()
+
 	t.Run("falls back to job id when registry is nil", func(t *testing.T) {
 		uc := usecase.NewJobRunUseCase(memory.New(), nil)
-		gt.String(t, uc.ResolveJobName("ws", "the-job")).Equal("the-job")
+		gt.String(t, uc.ResolveJobName(ctx, "ws", "the-job", "case")).Equal("the-job")
 	})
 
 	t.Run("returns Name from registered Job", func(t *testing.T) {
@@ -339,7 +342,17 @@ func TestJobRunUseCase_ResolveJobName(t *testing.T) {
 			},
 		})
 		uc := usecase.NewJobRunUseCase(repo, registry)
-		gt.String(t, uc.ResolveJobName("ws", "incident-rca")).Equal("Incident RCA")
-		gt.String(t, uc.ResolveJobName("ws", "unknown-job")).Equal("unknown-job")
+		gt.String(t, uc.ResolveJobName(ctx, "ws", "incident-rca", "case")).Equal("Incident RCA")
+		gt.String(t, uc.ResolveJobName(ctx, "ws", "unknown-job", "case")).Equal("unknown-job")
+	})
+
+	t.Run("resolves a mention run to the localized label regardless of its per-turn job id", func(t *testing.T) {
+		uc := usecase.NewJobRunUseCase(memory.New(), nil)
+		// A mention run carries an opaque per-turn JobID; the eventType is the
+		// discriminator, and the label comes from the same i18n source production
+		// uses. The opaque JobID must never leak through as the display name.
+		want := i18n.T(ctx, i18n.MsgAgentMentionRunName)
+		gt.String(t, uc.ResolveJobName(ctx, "ws", "0193-per-turn-uuid", model.EventTypeMention)).Equal(want)
+		gt.String(t, want).NotEqual("0193-per-turn-uuid")
 	})
 }
