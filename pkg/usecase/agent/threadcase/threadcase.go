@@ -304,7 +304,8 @@ func (uc *UseCase) runCreateTurn(ctx context.Context, req TurnRequest, baseReq p
 		return &Result{Status: StatusCompleted, Case: c}, nil
 	case planexec.StatusFallbackBudget, planexec.StatusFallbackError:
 		*runErr = goerr.New("threadcase planexec ended without a decision",
-			goerr.V("status", int(res.Status)))
+			goerr.V("status", int(res.Status)),
+			goerr.V("reason", res.FallbackReason))
 		uc.persistSession(ctx, req.Session, model.SessionEndedWithCaseBoundReply)
 		return &Result{Status: StatusFallback}, nil
 	default:
@@ -350,7 +351,8 @@ func (uc *UseCase) runMentionTurn(ctx context.Context, req TurnRequest, baseReq 
 		return &Result{Status: StatusCompleted, Decision: res.Data}, nil
 	case planexec.StatusFallbackBudget, planexec.StatusFallbackError:
 		*runErr = goerr.New("threadcase planexec ended without a decision",
-			goerr.V("status", int(res.Status)))
+			goerr.V("status", int(res.Status)),
+			goerr.V("reason", res.FallbackReason))
 		uc.persistSession(ctx, req.Session, model.SessionEndedWithCaseBoundReply)
 		return &Result{Status: StatusFallback}, nil
 	default:

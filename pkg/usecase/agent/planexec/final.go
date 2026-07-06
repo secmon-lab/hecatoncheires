@@ -116,7 +116,8 @@ func generateValidatedFinal[T Validatable](
 	historyKey string,
 	allResults []PhaseSummary,
 ) (*T, error) {
-	schema, err := gollem.ToSchema(*new(T))
+	var zero T
+	schema, err := gollem.ToSchema(zero)
 	if err != nil {
 		return nil, goerr.Wrap(err, "derive final output schema from type")
 	}
