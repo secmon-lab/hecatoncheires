@@ -315,10 +315,11 @@ lifecycle Job runs, through the same `caseJobRunLogs` read path.
   `ModeMention` (thread-mode) — record via `pkg/agent/runtrace`
   (`runtrace.Recorder` + `runtrace.Handler`), the same machinery the Job
   runner uses.
-- Mention runs are not configured Jobs, so they persist under the reserved
-  JobID `model.MentionRunJobID` with `EventType = model.EventTypeMention`;
-  the page shows a localized "Mention" label. The `JobRunLog.TraceID` matches
-  the Cloud Storage trace's `traceID`, so the two sinks correlate.
+- Mention runs are not configured Jobs, so each mention turn gets its own
+  fresh per-turn JobID and is tagged `EventType = model.EventTypeMention`;
+  the page shows a localized "Mention" label (resolved from the eventType, not
+  the opaque JobID). The `JobRunLog.TraceID` matches the Cloud Storage trace's
+  `traceID`, so the two sinks correlate.
 - Creation-time turns (`threadcase` `ModeCreate`) are excluded — only
   mentions in an already-created case are listed.
 

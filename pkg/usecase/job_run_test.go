@@ -324,60 +324,12 @@ func TestJobRunUseCase_ListCaseJobs(t *testing.T) {
 	})
 }
 
-// All mention runs for a case concentrate under the single reserved mention
-// JobID, so the per-Job fetch window (JobRunLogPageMaxSize) would cap the
-// reachable history there. Cursor paging must walk past that window: seeding
-// more than one window's worth and paging to the end must surface every run,
-// including the oldest — which was unreachable before the cursor was pushed
-// down into the per-Job fetch.
-func TestJobRunUseCase_ListLogsByCase_MentionDeepPaging(t *testing.T) {
-	repo, uc, ws, c := setupJobRunTestCase(t)
-	ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UREPORTER"})
-
-	base := time.Date(2026, 5, 24, 9, 0, 0, 0, time.UTC)
-	const total = usecase.JobRunLogPageMaxSize + 20 // exceeds one fetch window
-	want := make(map[string]bool, total)
-	for i := range total {
-		runID := fmt.Sprintf("m-%03d", i)
-		want[runID] = true
-		// Increasing StartedAt so run i is newer than run i-1; the oldest is m-000.
-		seedLog(t, repo, ws, c.ID, model.MentionRunJobID, runID,
-			base.Add(time.Duration(i)*time.Minute), model.JobRunStageSuccess, "")
-	}
-
-	// Page through the entire history in windows smaller than the total.
-	got := make(map[string]bool, total)
-	var after *string
-	pages := 0
-	for {
-		page, err := uc.ListLogsByCase(ctx, ws, c.ID, 50, after)
-		gt.NoError(t, err).Required()
-		for _, it := range page.Items {
-			gt.Bool(t, got[it.RunID]).False() // no duplicates across pages
-			got[it.RunID] = true
-			gt.String(t, it.JobID).Equal(model.MentionRunJobID)
-		}
-		pages++
-		if page.NextCursor == nil {
-			break
-		}
-		after = page.NextCursor
-		gt.Number(t, pages).LessOrEqual(total) // guard against a non-terminating loop
-	}
-
-	// Every seeded run is reachable — including the oldest, which fell outside
-	// the newest-window and was unreachable before the fix.
-	gt.Number(t, len(got)).Equal(total)
-	gt.Bool(t, got["m-000"]).True()
-	gt.Number(t, pages).GreaterOrEqual(3)
-}
-
 func TestJobRunUseCase_ResolveJobName(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("falls back to job id when registry is nil", func(t *testing.T) {
 		uc := usecase.NewJobRunUseCase(memory.New(), nil)
-		gt.String(t, uc.ResolveJobName(ctx, "ws", "the-job")).Equal("the-job")
+		gt.String(t, uc.ResolveJobName(ctx, "ws", "the-job", "case")).Equal("the-job")
 	})
 
 	t.Run("returns Name from registered Job", func(t *testing.T) {
@@ -390,16 +342,17 @@ func TestJobRunUseCase_ResolveJobName(t *testing.T) {
 			},
 		})
 		uc := usecase.NewJobRunUseCase(repo, registry)
-		gt.String(t, uc.ResolveJobName(ctx, "ws", "incident-rca")).Equal("Incident RCA")
-		gt.String(t, uc.ResolveJobName(ctx, "ws", "unknown-job")).Equal("unknown-job")
+		gt.String(t, uc.ResolveJobName(ctx, "ws", "incident-rca", "case")).Equal("Incident RCA")
+		gt.String(t, uc.ResolveJobName(ctx, "ws", "unknown-job", "case")).Equal("unknown-job")
 	})
 
-	t.Run("resolves the reserved mention job id to the localized label", func(t *testing.T) {
+	t.Run("resolves a mention run to the localized label regardless of its per-turn job id", func(t *testing.T) {
 		uc := usecase.NewJobRunUseCase(memory.New(), nil)
-		// The reserved sentinel is not a configured Job; it resolves to the
-		// mention display label pulled from the same i18n source production uses.
+		// A mention run carries an opaque per-turn JobID; the eventType is the
+		// discriminator, and the label comes from the same i18n source production
+		// uses. The opaque JobID must never leak through as the display name.
 		want := i18n.T(ctx, i18n.MsgAgentMentionRunName)
-		gt.String(t, uc.ResolveJobName(ctx, "ws", model.MentionRunJobID)).Equal(want)
-		gt.String(t, want).NotEqual(model.MentionRunJobID)
+		gt.String(t, uc.ResolveJobName(ctx, "ws", "0193-per-turn-uuid", model.EventTypeMention)).Equal(want)
+		gt.String(t, want).NotEqual("0193-per-turn-uuid")
 	})
 }

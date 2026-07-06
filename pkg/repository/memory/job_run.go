@@ -302,7 +302,7 @@ func (r *jobRunLogRepository) Get(ctx context.Context, key model.JobRunKey, runI
 	return copyJobRunLog(log), nil
 }
 
-func (r *jobRunLogRepository) List(ctx context.Context, key model.JobRunKey, limit int, before time.Time) ([]*model.JobRunLog, error) {
+func (r *jobRunLogRepository) List(ctx context.Context, key model.JobRunKey, limit int) ([]*model.JobRunLog, error) {
 	if err := key.Validate(); err != nil {
 		return nil, goerr.Wrap(err, "invalid job run key")
 	}
@@ -311,11 +311,6 @@ func (r *jobRunLogRepository) List(ctx context.Context, key model.JobRunKey, lim
 	var out []*model.JobRunLog
 	for k, v := range r.logs {
 		if k.K != key {
-			continue
-		}
-		// Inclusive upper bound, mirroring the Firestore range filter: keep
-		// boundary ties so the caller's (StartedAt, RunID) cursor cuts precisely.
-		if !before.IsZero() && v.StartedAt.After(before) {
 			continue
 		}
 		out = append(out, copyJobRunLog(v))

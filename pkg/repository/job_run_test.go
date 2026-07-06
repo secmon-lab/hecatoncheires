@@ -445,34 +445,24 @@ func runJobRunLogRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 			})).Required()
 		}
 
-		all, err := repo.JobRunLog().List(ctx, key, 0, time.Time{})
+		all, err := repo.JobRunLog().List(ctx, key, 0)
 		gt.NoError(t, err).Required()
 		gt.Array(t, all).Length(3).Required()
 		gt.String(t, all[0].RunID).Equal("run-2")
 		gt.String(t, all[1].RunID).Equal("run-1")
 		gt.String(t, all[2].RunID).Equal("run-0")
 
-		limited, err := repo.JobRunLog().List(ctx, key, 2, time.Time{})
+		limited, err := repo.JobRunLog().List(ctx, key, 2)
 		gt.NoError(t, err).Required()
 		gt.Array(t, limited).Length(2).Required()
 		gt.String(t, limited[0].RunID).Equal("run-2")
 		gt.String(t, limited[1].RunID).Equal("run-1")
-
-		// before bounds the fetch to logs at or before the given StartedAt
-		// (inclusive), still newest-first. This is the cursor primitive that
-		// lets ListLogsByCase page past the newest window for a case whose runs
-		// concentrate under one JobID.
-		bounded, err := repo.JobRunLog().List(ctx, key, 0, base.Add(1*time.Second))
-		gt.NoError(t, err).Required()
-		gt.Array(t, bounded).Length(2).Required()
-		gt.String(t, bounded[0].RunID).Equal("run-1")
-		gt.String(t, bounded[1].RunID).Equal("run-0")
 	})
 
 	t.Run("List returns empty for absent key", func(t *testing.T) {
 		repo := newRepo(t)
 		key := newJobRunKey("absent")
-		got, err := repo.JobRunLog().List(ctx, key, 0, time.Time{})
+		got, err := repo.JobRunLog().List(ctx, key, 0)
 		gt.NoError(t, err).Required()
 		gt.Array(t, got).Length(0)
 	})

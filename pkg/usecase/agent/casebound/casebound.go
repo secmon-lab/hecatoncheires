@@ -183,17 +183,18 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 
 	// Record this mention turn as a JobRunLog + JobRunEvent trail so the case
 	// agent page lists it alongside Job runs. It is a mention-triggered run, not
-	// a configured Job, so it persists under the reserved mention JobID with
-	// EventType=mention. The TraceID is shared with the Cloud Storage recorder
-	// above so both trace sinks correlate. Opening the log is observability, not
-	// part of the turn's success contract: a failure here is non-fatal and the
-	// turn still runs (untraced on the Firestore side).
+	// a configured Job, so it gets its own fresh per-turn JobID and is tagged
+	// EventType=mention (the discriminator the read path keys the display on).
+	// The TraceID is shared with the Cloud Storage recorder above so both trace
+	// sinks correlate. Opening the log is observability, not part of the turn's
+	// success contract: a failure here is non-fatal and the turn still runs
+	// (untraced on the Firestore side).
 	var runErr error
 	rec, recOpenErr := runtrace.Open(turnCtx, runtrace.OpenParams{
 		Repo:         uc.deps.Repo,
 		WorkspaceID:  wsID,
 		CaseID:       req.Case.ID,
-		JobID:        model.MentionRunJobID,
+		JobID:        uuid.Must(uuid.NewV7()).String(),
 		RunID:        uuid.Must(uuid.NewV7()).String(),
 		TraceID:      handle.OwnerID,
 		EventType:    model.EventTypeMention,

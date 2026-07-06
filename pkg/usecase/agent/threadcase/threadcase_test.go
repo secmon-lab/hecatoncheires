@@ -203,8 +203,8 @@ func TestRunTurn_MentionRespond(t *testing.T) {
 	gt.String(t, res.Decision.Message).Equal("Here is what I found.")
 }
 
-// A ModeMention turn must record a JobRunLog + JobRunEvent trail under the
-// reserved mention JobID so the case agent page lists it alongside Job runs.
+// A ModeMention turn must record a JobRunLog + JobRunEvent trail under its own
+// fresh per-turn JobID so the case agent page lists it alongside Job runs.
 func TestRunTurn_MentionRecordsJobRunLog(t *testing.T) {
 	ctx := context.Background()
 	llm := newScriptedLLM([]string{
@@ -232,22 +232,22 @@ func TestRunTurn_MentionRecordsJobRunLog(t *testing.T) {
 	gt.Value(t, res.Status).Equal(threadcase.StatusCompleted)
 
 	// The run must surface via the same read path the case agent page uses:
-	// ListByCase returns one JobRun under the reserved mention JobID.
-	key := model.JobRunKey{WorkspaceID: "support", CaseID: 42, JobID: model.MentionRunJobID}
+	// ListByCase returns one JobRun under the turn's own fresh JobID.
 	runs, err := deps.Repo.JobRun().ListByCase(ctx, "support", 42)
 	gt.NoError(t, err).Required()
 	gt.Array(t, runs).Length(1).Required()
-	gt.String(t, runs[0].JobID).Equal(model.MentionRunJobID)
+	gt.String(t, runs[0].JobID).NotEqual("") // an opaque per-turn id, not a fixed sentinel
 	gt.Value(t, runs[0].LastStatus).Equal(model.JobRunStatusSuccess)
 
-	logs, err := deps.Repo.JobRunLog().List(ctx, key, 100, time.Time{})
+	key := model.JobRunKey{WorkspaceID: "support", CaseID: 42, JobID: runs[0].JobID}
+	logs, err := deps.Repo.JobRunLog().List(ctx, key, 100)
 	gt.NoError(t, err).Required()
 	gt.Array(t, logs).Length(1).Required()
 	log := logs[0]
 	gt.Value(t, log.Stage).Equal(model.JobRunStageSuccess)
 	gt.String(t, log.EventType).Equal(model.EventTypeMention)
 	gt.String(t, log.ExecutorKind).Equal(model.ExecutorKindPlanexec)
-	gt.String(t, log.JobID).Equal(model.MentionRunJobID)
+	gt.String(t, log.JobID).Equal(runs[0].JobID)
 	gt.Number(t, log.CaseID).Equal(42)
 	gt.String(t, log.RunID).NotEqual("")
 	gt.String(t, log.TraceID).NotEqual("")
@@ -295,8 +295,11 @@ func TestRunTurn_MentionFailureRecordsFailed(t *testing.T) {
 		gt.Value(t, res.Status).Equal(threadcase.StatusFallback)
 	}
 
-	key := model.JobRunKey{WorkspaceID: "support", CaseID: 42, JobID: model.MentionRunJobID}
-	logs, listErr := deps.Repo.JobRunLog().List(ctx, key, 100, time.Time{})
+	runs, listErr := deps.Repo.JobRun().ListByCase(ctx, "support", 42)
+	gt.NoError(t, listErr).Required()
+	gt.Array(t, runs).Length(1).Required()
+	key := model.JobRunKey{WorkspaceID: "support", CaseID: 42, JobID: runs[0].JobID}
+	logs, listErr := deps.Repo.JobRunLog().List(ctx, key, 100)
 	gt.NoError(t, listErr).Required()
 	gt.Array(t, logs).Length(1).Required()
 	gt.Value(t, logs[0].Stage).Equal(model.JobRunStageFailed)

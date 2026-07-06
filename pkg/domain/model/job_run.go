@@ -181,20 +181,14 @@ const (
 	ExecutorKindPlanexec = "plan_execute"
 )
 
-// MentionRunJobID is the reserved JobID under which mention-triggered agent
-// runs record their JobRunLog / JobRunEvent trail. Such runs (a Slack mention
-// in an existing case, handled by the casebound / threadcase hosts) are NOT
-// TOML-configured Jobs, but they persist through the same JobRunLog schema so
-// the case agent page lists them alongside real Job runs. The id is reserved:
-// Job.Validate rejects a configured Job that claims it, so a real Job can
-// never collide with the mention pseudo-job, and every mention run for a case
-// groups under this single JobRunKey.
-const MentionRunJobID = "mention"
-
 // EventTypeMention is the JobRunLog.EventType provenance value for a
-// mention-triggered run. It distinguishes such runs from the "case" /
-// "scheduled" JobEventDomain values the Job runner copies onto EventType, so
-// the UI can tell why a run happened.
+// mention-triggered run (a Slack mention in an existing case, handled by the
+// casebound / threadcase hosts). Such runs are NOT TOML-configured Jobs, but
+// they persist through the same JobRunLog schema so the case agent page lists
+// them alongside real Job runs. EventType is the discriminator that tells a
+// mention run apart from the "case" / "scheduled" JobEventDomain values the
+// Job runner writes — each mention turn gets its own fresh JobID, so there is
+// no reserved sentinel to match on.
 const EventTypeMention = "mention"
 
 // JobRunLog records ONE invocation of an agent against a Case. Stored at
@@ -202,7 +196,7 @@ const EventTypeMention = "mention"
 //
 // Despite the "Job" name it holds every case-scoped agent run, not only
 // TOML-configured Job runs: mention-triggered runs (casebound / threadcase)
-// persist here too, under the reserved JobID MentionRunJobID and with
+// persist here too, each under its own fresh per-turn JobID and with
 // EventType=EventTypeMention, so the case agent page lists them alongside
 // Job runs through the same read path.
 //

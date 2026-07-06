@@ -93,14 +93,17 @@ func TestRunTurn_RecordsMentionJobRunLog(t *testing.T) {
 	gt.Value(t, res.Status).Equal(casebound.StatusCompleted)
 	gt.String(t, res.FinalText).Equal("Here is the answer.")
 
-	key := model.JobRunKey{WorkspaceID: "ws-1", CaseID: 55, JobID: model.MentionRunJobID}
+	// The mention turn records exactly one run under its own fresh per-turn
+	// JobID (no shared sentinel), discovered via the same read path the case
+	// agent page uses.
 	runs, err := repo.JobRun().ListByCase(ctx, "ws-1", 55)
 	gt.NoError(t, err).Required()
 	gt.Array(t, runs).Length(1).Required()
-	gt.String(t, runs[0].JobID).Equal(model.MentionRunJobID)
+	gt.String(t, runs[0].JobID).NotEqual("") // an opaque per-turn id, not a fixed sentinel
 	gt.Value(t, runs[0].LastStatus).Equal(model.JobRunStatusSuccess)
 
-	logs, err := repo.JobRunLog().List(ctx, key, 100, time.Time{})
+	key := model.JobRunKey{WorkspaceID: "ws-1", CaseID: 55, JobID: runs[0].JobID}
+	logs, err := repo.JobRunLog().List(ctx, key, 100)
 	gt.NoError(t, err).Required()
 	gt.Array(t, logs).Length(1).Required()
 	log := logs[0]
@@ -108,6 +111,7 @@ func TestRunTurn_RecordsMentionJobRunLog(t *testing.T) {
 	gt.String(t, log.EventType).Equal(model.EventTypeMention)
 	gt.String(t, log.ExecutorKind).Equal(model.ExecutorKindSingleLoop)
 	gt.Number(t, log.CaseID).Equal(55)
+	gt.String(t, log.JobID).Equal(runs[0].JobID)
 	gt.String(t, log.RunID).NotEqual("")
 	gt.String(t, log.TraceID).NotEqual("")
 	// The per-call event stream (LLM/tool) is produced by the LLM client's trace

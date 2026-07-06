@@ -1580,7 +1580,7 @@ func (r *queryResolver) CaseJobRunLogs(ctx context.Context, workspaceID string, 
 	}
 	items := make([]*graphql1.JobRunLog, 0, len(result.Items))
 	for _, log := range result.Items {
-		items = append(items, toGraphQLJobRunLog(log, r.UseCases.JobRun.ResolveJobName(ctx, workspaceID, log.JobID)))
+		items = append(items, toGraphQLJobRunLog(log, r.UseCases.JobRun.ResolveJobName(ctx, workspaceID, log.JobID, log.EventType)))
 	}
 	return &graphql1.JobRunLogConnection{
 		Items:      items,
@@ -1594,7 +1594,7 @@ func (r *queryResolver) JobRunLog(ctx context.Context, workspaceID string, caseI
 	if err != nil {
 		return nil, err
 	}
-	return toGraphQLJobRunLog(log, r.UseCases.JobRun.ResolveJobName(ctx, workspaceID, log.JobID)), nil
+	return toGraphQLJobRunLog(log, r.UseCases.JobRun.ResolveJobName(ctx, workspaceID, log.JobID, log.EventType)), nil
 }
 
 // JobRunEvents is the resolver for the jobRunEvents field.

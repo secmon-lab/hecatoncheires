@@ -29,14 +29,13 @@ const runErrorStage = "execute"
 // exclude a concurrent mention on a different thread of the same case). A run
 // therefore surfaces in the list at Finish.
 //
-// A hard process kill between Open and Finish leaves a RUNNING log behind.
-// Only the case's very FIRST mention run has no parent JobRun doc yet, so that
-// orphan stays invisible to ListByCase; once any earlier run has Finished, the
-// parent exists and a later crashed run's RUNNING log WOULD list (as a
-// perpetual RUNNING). Unlike the Job runner, the mention path has no lease
-// sweep to reap such an orphan. This is an accepted edge case: the deferred
-// Finish runs on normal returns and on panics recovered by async.Dispatch, so
-// only an abrupt process death (SIGKILL / OOM) can trigger it.
+// Because each mention turn uses its OWN fresh JobID, its parent JobRun doc
+// exists only once that turn Finishes. A hard process kill between Open and
+// Finish therefore leaves a RUNNING log whose parent JobRun doc was never
+// written, so ListByCase never returns it and the orphan stays invisible — no
+// perpetual-RUNNING row pollutes the list. This is an accepted edge case: the
+// deferred Finish runs on normal returns and on panics recovered by
+// async.Dispatch, so only an abrupt process death (SIGKILL / OOM) can reach it.
 type Recorder struct {
 	repo    interfaces.Repository
 	key     model.JobRunKey
@@ -52,7 +51,7 @@ type OpenParams struct {
 	Repo         interfaces.Repository
 	WorkspaceID  string
 	CaseID       int64
-	JobID        string // reserved sentinel, e.g. model.MentionRunJobID
+	JobID        string // fresh per-turn id for a mention run; a config id for a Job
 	RunID        string
 	TraceID      string
 	EventType    string // provenance, e.g. model.EventTypeMention

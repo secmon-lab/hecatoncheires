@@ -194,8 +194,8 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 	// Record a mention turn (ModeMention) as a JobRunLog + JobRunEvent trail so
 	// the case agent page lists it alongside Job runs. ModeCreate runs before a
 	// case exists (it materialises the case) and is a creation-time flow, not a
-	// post-creation mention, so it is intentionally excluded. The run persists
-	// under the reserved mention JobID with EventType=mention; its TraceID is
+	// post-creation mention, so it is intentionally excluded. The run gets its
+	// own fresh per-turn JobID and is tagged EventType=mention; its TraceID is
 	// shared with the planexec archive recorder (both keyed on handle.OwnerID)
 	// so the two trace sinks correlate. Opening the log is observability, not
 	// part of the turn's success contract — a failure here is non-fatal.
@@ -206,7 +206,7 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 			Repo:         uc.deps.Repo,
 			WorkspaceID:  wsID,
 			CaseID:       req.Case.ID,
-			JobID:        model.MentionRunJobID,
+			JobID:        uuid.Must(uuid.NewV7()).String(),
 			RunID:        uuid.Must(uuid.NewV7()).String(),
 			TraceID:      handle.OwnerID,
 			EventType:    model.EventTypeMention,

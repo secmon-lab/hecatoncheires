@@ -62,7 +62,7 @@ func (*JobExecution) Run(ctx context.Context, e *env.Env, sc *scenario.Scenario,
 	async.Wait()
 
 	key := model.JobRunKey{WorkspaceID: wsID, CaseID: target.ID, JobID: jobModel.ID}
-	logs, err := e.Repo.JobRunLog().List(ctx, key, 0, time.Time{})
+	logs, err := e.Repo.JobRunLog().List(ctx, key, 0)
 	if err != nil {
 		return nil, goerr.Wrap(err, "list job run logs")
 	}

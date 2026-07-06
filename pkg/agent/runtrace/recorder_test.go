@@ -19,7 +19,7 @@ func openParams(repo *memory.Memory, started time.Time) runtrace.OpenParams {
 		Repo:         repo,
 		WorkspaceID:  "ws-1",
 		CaseID:       7,
-		JobID:        model.MentionRunJobID,
+		JobID:        "job-mention-1",
 		RunID:        "run-abc",
 		TraceID:      "trace-abc",
 		EventType:    model.EventTypeMention,
@@ -37,7 +37,7 @@ func TestRecorder_SuccessLifecycle(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.New()
 	started := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
-	key := model.JobRunKey{WorkspaceID: "ws-1", CaseID: 7, JobID: model.MentionRunJobID}
+	key := model.JobRunKey{WorkspaceID: "ws-1", CaseID: 7, JobID: "job-mention-1"}
 
 	rec, err := runtrace.Open(ctx, openParams(repo, started))
 	gt.NoError(t, err).Required()
@@ -71,7 +71,7 @@ func TestRecorder_SuccessLifecycle(t *testing.T) {
 	runs, err := repo.JobRun().ListByCase(ctx, "ws-1", 7)
 	gt.NoError(t, err).Required()
 	gt.Array(t, runs).Length(1).Required()
-	gt.String(t, runs[0].JobID).Equal(model.MentionRunJobID)
+	gt.String(t, runs[0].JobID).Equal("job-mention-1")
 	gt.Value(t, runs[0].LastStatus).Equal(model.JobRunStatusSuccess)
 	gt.String(t, runs[0].LastRunID).Equal("run-abc")
 	gt.String(t, runs[0].LastTraceID).Equal("trace-abc")
@@ -91,7 +91,7 @@ func TestRecorder_FailureLifecycle(t *testing.T) {
 	ctx := context.Background()
 	repo := memory.New()
 	started := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
-	key := model.JobRunKey{WorkspaceID: "ws-1", CaseID: 7, JobID: model.MentionRunJobID}
+	key := model.JobRunKey{WorkspaceID: "ws-1", CaseID: 7, JobID: "job-mention-1"}
 
 	rec, err := runtrace.Open(ctx, openParams(repo, started))
 	gt.NoError(t, err).Required()
