@@ -594,12 +594,23 @@ func tasksSchema(knownToolIDs []string) *gollem.Parameter {
 }
 
 func questionSchema() *gollem.Parameter {
+	// Mirror tasksSchema: mark every field Question.Validate enforces as Required
+	// and bound `items` to 1..maxQuestionItems, so the provider's structured
+	// output is compelled to emit a well-formed, NON-EMPTY question. Without this
+	// the model can emit an empty `items` array (or an item missing id/text/type),
+	// which parseReplanResult rejects post-hoc and retries — and, exactly like the
+	// task path before it was constrained, a model that keeps emitting an empty
+	// question burns the whole planner budget before the turn falls back. `options`
+	// stays optional because free_text items legitimately omit it.
+	minItems := minQuestionItems
+	maxItems := maxQuestionItems
 	itemProps := map[string]*gollem.Parameter{
-		"id":   {Type: gollem.TypeString, Description: "Item-unique identifier (e.g. q-1)."},
-		"text": {Type: gollem.TypeString, Description: "Question text shown to the user."},
+		"id":   {Type: gollem.TypeString, Description: "Item-unique identifier (e.g. q-1).", Required: true},
+		"text": {Type: gollem.TypeString, Description: "Question text shown to the user.", Required: true},
 		"type": {
 			Type:        gollem.TypeString,
 			Description: "Answer control type. Use free_text only as a last resort.",
+			Required:    true,
 			Enum: []string{
 				string(QuestionItemSelect),
 				string(QuestionItemMultiSelect),
@@ -616,10 +627,13 @@ func questionSchema() *gollem.Parameter {
 		Type:        gollem.TypeObject,
 		Description: "Ask the user for clarification. Use sparingly — prefer continuing investigation when possible.",
 		Properties: map[string]*gollem.Parameter{
-			"reason": {Type: gollem.TypeString, Description: "Why these questions are necessary."},
+			"reason": {Type: gollem.TypeString, Description: "Why these questions are necessary.", Required: true},
 			"items": {
 				Type:        gollem.TypeArray,
-				Description: "Ordered list of questions (1-5).",
+				Description: "Ordered list of questions (1-5). MUST contain at least one item — never an empty list.",
+				Required:    true,
+				MinItems:    &minItems,
+				MaxItems:    &maxItems,
 				Items: &gollem.Parameter{
 					Type:       gollem.TypeObject,
 					Properties: itemProps,
