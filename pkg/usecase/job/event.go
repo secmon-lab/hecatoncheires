@@ -48,9 +48,19 @@ type jobActorContextKey struct{}
 // JobActorMarker is the value stored under jobActorContextKey. It
 // carries the originating job id, which the publisher compares against
 // each candidate job: only the job whose ID matches is suppressed, so a
-// Job whose agent triggers a different lifecycle event (e.g. an
-// on-created Job that closes the case) still fires the other Jobs
-// listening on it (e.g. the on-closed Job).
+// Job whose agent triggers a lifecycle event (e.g. an on-created Job that
+// closes the case) still fires the other Jobs listening on it (e.g. the
+// on-closed Job).
+//
+// NOTE: per-JobID suppression prevents a Job from re-firing *itself*, but
+// it does NOT make cross-Job loops structurally impossible. In thread mode
+// the status tool can move a case out of and back into a closed status, so
+// `closed` is not a one-way edge; two Jobs that both listen on the same
+// lifecycle and whose agents reopen+re-close the case could ping-pong
+// indefinitely. Loop-freedom therefore relies on agents not performing
+// such reopen cycles, not on graph topology. Typical configurations (a
+// summariser / notifier that only reads and posts) do not, which is why we
+// accept this over a heavier topology-independent depth guard.
 type JobActorMarker struct {
 	JobID string
 }
@@ -60,12 +70,6 @@ type JobActorMarker struct {
 // the call as Job-originated and skip event re-publication.
 func WithJobActor(ctx context.Context, marker JobActorMarker) context.Context {
 	return context.WithValue(ctx, jobActorContextKey{}, marker)
-}
-
-// IsJobActorContext reports whether the context carries a JobActorMarker.
-func IsJobActorContext(ctx context.Context) bool {
-	_, ok := jobActorFromContext(ctx)
-	return ok
 }
 
 // jobActorFromContext returns the originating JobActorMarker and whether

@@ -36,8 +36,11 @@ func NewUseCase(registry *model.WorkspaceRegistry, runner *JobRunner) *UseCase {
 // cause its own follow-up event to re-fire the same Job, but any other
 // Job listening on the resulting lifecycle event still fires. This is what
 // lets an on-created Job that closes the case trigger the on-closed Job.
-// (created / closed are one-way terminal edges, so cross-Job chains cannot
-// form an infinite loop on a single case.)
+//
+// This does NOT structurally prevent cross-Job loops: in thread mode a
+// status can be reopened and re-closed, so two Jobs listening on the same
+// lifecycle whose agents reopen+re-close could ping-pong. Loop-freedom
+// relies on agents not doing that (see JobActorMarker), not on topology.
 func (uc *UseCase) Publish(ctx context.Context, ev Event) {
 	if uc == nil || uc.registry == nil || uc.runner == nil {
 		return

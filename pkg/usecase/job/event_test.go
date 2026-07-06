@@ -2,6 +2,7 @@ package job_test
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -60,16 +61,6 @@ func inertLLM() gollem.LLMClient {
 	}
 }
 
-func TestJobActorContext(t *testing.T) {
-	ctx := context.Background()
-	gt.Bool(t, job.IsJobActorContext(ctx)).False()
-
-	ctx = job.WithJobActor(ctx, job.JobActorMarker{JobID: "j-1"})
-	gt.Bool(t, job.IsJobActorContext(ctx)).True()
-
-	gt.Bool(t, job.IsJobActorContext(context.TODO())).False()
-}
-
 func TestQuietContext(t *testing.T) {
 	// Absent marker → not quiet.
 	gt.Bool(t, job.IsQuietForTest(context.Background())).False()
@@ -82,15 +73,31 @@ func TestQuietContext(t *testing.T) {
 	gt.Bool(t, job.IsQuietForTest(nil)).False()
 }
 
-// recordingExecutor counts how many times it was called and what prompts
-// it received. It returns success without exercising the LLM.
+// recordingExecutor counts how many times it was called and records the
+// JobID of every Job it ran, so tests can assert not just how many Jobs
+// fired but which ones. It returns success without exercising the LLM.
 type recordingExecutor struct {
-	calls atomic.Int32
+	calls  atomic.Int32
+	mu     sync.Mutex
+	jobIDs []string
 }
 
 func (r *recordingExecutor) Execute(ctx context.Context, req jobagent.ExecuteRequest) (*jobagent.ExecuteResult, error) {
 	r.calls.Add(1)
+	r.mu.Lock()
+	r.jobIDs = append(r.jobIDs, req.JobID)
+	r.mu.Unlock()
 	return &jobagent.ExecuteResult{Status: jobagent.ExecuteStatusSuccess}, nil
+}
+
+// firedJobIDs returns a copy of the recorded JobIDs, safe to read after
+// async.Wait().
+func (r *recordingExecutor) firedJobIDs() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]string, len(r.jobIDs))
+	copy(out, r.jobIDs)
+	return out
 }
 
 func TestPublish_DispatchesMatchingJobs(t *testing.T) {
@@ -181,14 +188,51 @@ func TestPublish_SuppressesOnlyOriginatingJob(t *testing.T) {
 		ctx := job.WithJobActor(context.Background(), job.JobActorMarker{JobID: "other"})
 		uc.Publish(ctx, closedEvent(c))
 		async.Wait()
-		gt.Number(t, exec.calls.Load()).Equal(int32(1))
+		gt.Array(t, exec.firedJobIDs()).Equal([]string{"summarize"})
 	})
 
 	t.Run("no actor marker fires", func(t *testing.T) {
 		uc, exec, c := newFixture(t)
 		uc.Publish(context.Background(), closedEvent(c))
 		async.Wait()
-		gt.Number(t, exec.calls.Load()).Equal(int32(1))
+		gt.Array(t, exec.firedJobIDs()).Equal([]string{"summarize"})
+	})
+
+	// The core of this fix: when the originating Job and a sibling BOTH match
+	// the same lifecycle in one Publish, only the originator is suppressed and
+	// the sibling still fires. This is the on-created-closes-case →
+	// on-closed-sibling scenario the blanket guard used to break.
+	t.Run("originator suppressed while matching sibling fires", func(t *testing.T) {
+		registry := model.NewWorkspaceRegistry()
+		originator := &model.Job{
+			ID:     "closer",
+			Prompt: "x",
+			Events: model.JobEvents{
+				Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleClosed}},
+			},
+		}
+		sibling := &model.Job{
+			ID:     "notifier",
+			Prompt: "x",
+			Events: model.JobEvents{
+				Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleClosed}},
+			},
+		}
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "ws"},
+			Jobs:      []*model.Job{originator, sibling},
+		})
+		repo, c := setupCase(t, "ws")
+		exec := &recordingExecutor{}
+		runner := job.NewJobRunner(job.RunnerDeps{
+			Repo: repo, Registry: registry, LLMClient: inertLLM(), Executors: map[model.JobStrategy]jobagent.JobExecutor{model.JobStrategySimple: exec},
+		})
+		uc := job.NewUseCase(registry, runner)
+
+		ctx := job.WithJobActor(context.Background(), job.JobActorMarker{JobID: "closer"})
+		uc.Publish(ctx, closedEvent(c))
+		async.Wait()
+		gt.Array(t, exec.firedJobIDs()).Equal([]string{"notifier"})
 	})
 }
 
