@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -53,7 +54,9 @@ func newScriptedClient(scripts []string) gollem.LLMClient {
 // toolset; the read-only Slack toolset stands in.
 const tcInvestigatePlan = `{"message":"investigate","tasks":[{"id":"t-1","title":"Review","description":"Review the thread","acceptance_criteria":"done","tools":["slack_ro"]}]}`
 
-const tcReplanDone = `{"message":"done","tasks":[]}`
+// tcReplanDone terminates the planner loop via an explicit finalize (an empty
+// tasks list no longer signals completion).
+const tcReplanDone = `{"message":"done","finalize":{"reason":"goal met"}}`
 
 func newThreadWorkspaceRegistry() *model.WorkspaceRegistry {
 	set, _ := model.NewActionStatusSet("TRIAGE", []string{"DONE"}, []model.ActionStatusDefinition{
@@ -353,12 +356,36 @@ func TestThreadCase_MentionClose(t *testing.T) {
 	c, err := caseUC.CreateThreadCase(ctx, "support", "C-MONITOR", "1700000000.000100", "U-REPORTER", "Login outage", "body")
 	gt.NoError(t, err).Required()
 
-	llm := newScriptedClient([]string{
-		tcInvestigatePlan,
-		"The thread says it is resolved.",
-		tcReplanDone,
-		`{"kind":"close","message":"Resolved.","close_status":"DONE"}`,
-	})
+	// End-to-end regression for the original bug: a mention asking to close must
+	// actually close the case. Closing is now a sub-agent tool call
+	// (case__update_case_status), NOT a terminal decision — so the sub-agent
+	// issues a real tool call that reaches caseUC and transitions the case. A
+	// call-counted mock is needed because the sub-agent must emit a FunctionCall.
+	var round int32
+	llm := &mockLLMClient{
+		newSessionFn: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mockLLMSession{
+				generateContentFn: func(_ context.Context, _ ...gollem.Input) (*gollem.Response, error) {
+					switch atomic.AddInt32(&round, 1) {
+					case 1: // planner round 1: dispatch a close task using the status tool
+						return &gollem.Response{Texts: []string{`{"message":"close it","tasks":[{"id":"t-1","title":"Close","description":"Close the case as resolved","acceptance_criteria":"status is DONE","tools":["case_status_write"]}]}`}}, nil
+					case 2: // sub-agent: call case__update_case_status
+						return &gollem.Response{FunctionCalls: []*gollem.FunctionCall{{
+							ID:        "call-1",
+							Name:      "case__update_case_status",
+							Arguments: map[string]any{"status": "DONE"},
+						}}}, nil
+					case 3: // sub-agent: report after the tool result
+						return &gollem.Response{Texts: []string{"Moved the case to DONE."}}, nil
+					case 4: // replan: finalize
+						return &gollem.Response{Texts: []string{tcReplanDone}}, nil
+					default: // final respond decision
+						return &gollem.Response{Texts: []string{`{"kind":"respond","message":"Closed the case as resolved."}`}}, nil
+					}
+				},
+			}, nil
+		},
+	}
 	agentUC := usecase.NewAgentUseCase(usecase.AgentDeps{
 		Repo:         repo,
 		Registry:     reg,

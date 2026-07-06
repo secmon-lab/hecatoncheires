@@ -24,8 +24,10 @@ import (
 // total cap.
 type BudgetConfig struct {
 	// PlannerLoopMax bounds the number of planner (or replan) LLM
-	// invocations (rounds) within one Runner.Run. OnFinalize validation /
-	// commit re-tries are additional rounds and consume this same pool.
+	// invocations (rounds) within one run. Planner / replan output that fails
+	// validation is retried within the same pool. (Final-output regeneration in
+	// Run[T] is bounded separately by finalOutputMaxRetry and does NOT consume
+	// planner rounds.)
 	PlannerLoopMax int
 
 	// SubAgentLoopMax bounds the inner gollem loop limit of each

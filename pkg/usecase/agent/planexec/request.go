@@ -2,7 +2,6 @@ package planexec
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/trace"
@@ -67,16 +66,16 @@ type RunRequest struct {
 	// is trivially answerable without any investigation phase, the planner
 	// may emit a `direct` payload instead of `tasks`, and the runtime
 	// answers in a single tool-enabled ReAct loop. The direct path is plain
-	// text only — FinalOutputSchema / OnFinalize are NOT used on it (those
-	// are reserved for the investigate path's structured terminal). Hosts
-	// opt in (proposal-style structured-only flows leave this false).
-	// Default false.
+	// text only: even under Run[T] it returns RunResult.Text (not Data), since
+	// side-effecting terminal actions must go through the investigate →
+	// finalize loop. Hosts opt in (structured-only flows may still enable it
+	// for a trivial text reply). Default false.
 	AllowDirect bool
 
 	// --- Phase execution -------------------------------------------
 
 	// AllowSubAgentWrites lets this run's sub-agents perform writes /
-	// side-effecting actions (post a message, update a field, ...) with
+	// side-effecting actions (post a message, change case status, ...) with
 	// the tools the planner assigns them, instead of being restricted to
 	// observation-only investigation. Default false → sub-agents are told
 	// they are observation-only (the historical behaviour).
@@ -90,9 +89,10 @@ type RunRequest struct {
 	// the write tools, and the planner assigns them per task.
 	//
 	// job sets true (Job deliverables are side effects, e.g. a Slack post);
-	// threadcase sets false (its terminal Create/reply/update is committed
-	// via the structured-final OnFinalize / returned Decision, so its
-	// sub-agents stay observation-only).
+	// threadcase sets true for mention turns (the sub-agent may close /
+	// transition the case via case__update_case_status) and false for create
+	// turns (no case to act on yet; the case is materialized by the host from
+	// the structured final output).
 	AllowSubAgentWrites bool
 
 	// ToolResolver maps TaskPlan.Tools entries into concrete gollem
@@ -114,24 +114,12 @@ type RunRequest struct {
 	OnQuestion func(ctx context.Context, q Question) (QuestionResult, error)
 
 	// --- Final output ----------------------------------------------
-
-	// FinalOutputSchema is the gollem response schema applied to the
-	// final-response LLM call after the loop exits. nil → plain text
-	// in RunResult.FinalText; non-nil → JSON in RunResult.FinalRaw.
-	// proposal passes its materialize schema; job passes nil.
-	FinalOutputSchema *gollem.Parameter
-
-	// OnFinalize is invoked with the structured final output once the
-	// planner loop decides to terminate. The host parses + validates the
-	// output AND performs the terminal side effect (e.g. create the Case).
-	// When it returns a non-nil error — whether validation failed OR the
-	// side effect (persistence) failed — the runner folds the error back
-	// into the next planner round (charged against PlannerLoopMax) so the
-	// planner can investigate / ask / re-emit until it succeeds or the
-	// round budget is exhausted. nil → the turn completes. Optional; only
-	// meaningful when FinalOutputSchema != nil. When nil, the final output
-	// is returned as-is (existing proposal / job behaviour is unaffected).
-	OnFinalize func(ctx context.Context, raw json.RawMessage) error
+	//
+	// The final output is chosen by the entry point, NOT by a request field:
+	// Run[T] produces a validated structured *T, RunText / ResumeText produce
+	// plain text. There is no OnFinalize commit callback — side effects are
+	// performed by the sub-agents' tools inside the loop, and the host applies
+	// whatever the returned *T describes.
 
 	// --- Output ----------------------------------------------------
 
@@ -166,9 +154,6 @@ func (r *RunRequest) Validate() error {
 	}
 	if r.AllowQuestion && r.OnQuestion == nil {
 		return goerr.New("on question callback is required when AllowQuestion is true")
-	}
-	if r.OnFinalize != nil && r.FinalOutputSchema == nil {
-		return goerr.New("final output schema is required when OnFinalize is set")
 	}
 	if r.Sink == nil {
 		return goerr.New("sink is required")
@@ -222,52 +207,23 @@ func (r *ResumeRequest) Validate() error {
 	return nil
 }
 
-// RunStatus is the terminal classification of a Runner.Run.
+// RunStatus is the terminal classification of a run.
 type RunStatus int
 
 const (
-	// StatusCompleted means the loop exited naturally and the
-	// final-response phase produced FinalText or FinalRaw (depending on
-	// FinalOutputSchema). Also used when OnQuestion returned
-	// QuestionResult{Terminate: true} — the host has acknowledged the
-	// question and will resume in a later turn.
+	// StatusCompleted means the loop terminated cleanly: either the planner
+	// declared completion (finalize → final output produced), the round-1
+	// direct path replied, or OnQuestion returned QuestionResult{Terminate:
+	// true} (the host acknowledged the question and will resume in a later
+	// turn — RunResult.EndedWithQuestion distinguishes this case).
 	StatusCompleted RunStatus = iota
-	// StatusFallbackBudget means the planner / sub-agent budget was
-	// exhausted before the loop could terminate. FinalText / FinalRaw
-	// are empty; the host should render a "couldn't reach a conclusion"
-	// message of its choice.
+	// StatusFallbackBudget means the planner budget was exhausted before the
+	// loop could terminate. RunResult.Data / Text are empty; the host should
+	// render a "couldn't reach a conclusion" message of its choice.
 	StatusFallbackBudget
-	// StatusFallbackError means an internal error path made the loop
-	// give up before terminating (e.g. final-response LLM call failed
-	// after the loop body succeeded). FallbackReason carries the
-	// human-readable cause.
+	// StatusFallbackError means an internal error path made the run give up
+	// before terminating (e.g. the direct reply failed, or the structured
+	// final output failed to validate after retries). FallbackReason carries
+	// the human-readable cause.
 	StatusFallbackError
 )
-
-// RunResult is the outcome of Runner.Run. Exactly one of FinalText /
-// FinalRaw is populated when Status == StatusCompleted, governed by
-// RunRequest.FinalOutputSchema:
-//   - schema == nil → FinalText holds the plain-text final response.
-//   - schema != nil → FinalRaw holds the raw JSON bytes; the host
-//     unmarshals into its concrete payload struct.
-//
-// AllResults is the per-phase observation trail surfaced to the host
-// regardless of status, so a fallback can still log what was learnt.
-type RunResult struct {
-	Status         RunStatus
-	FinalText      string
-	FinalRaw       json.RawMessage
-	AllResults     []PhaseSummary
-	FallbackReason string
-	// EndedWithQuestion is true when the loop exited because OnQuestion
-	// returned QuestionResult{Terminate: true}. Status is still
-	// StatusCompleted in this case; the host uses this flag to
-	// distinguish "we answered the user" vs "we asked the user".
-	EndedWithQuestion bool
-	// Direct is true when the turn terminated via the round-1 direct path
-	// (no investigation phase ran). FinalText holds the plain-text reply and
-	// FinalRaw is nil regardless of FinalOutputSchema. Hosts that normally
-	// parse FinalRaw (structured final) MUST treat FinalText as the
-	// user-facing reply when Direct is true.
-	Direct bool
-}

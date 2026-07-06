@@ -275,3 +275,52 @@ func TestExecutePhase_EmptyTasksReturnsNil(t *testing.T) {
 	async.Wait()
 	gt.Array(t, results).Length(0)
 }
+
+// panicResolver panics when a task requests the "panic_tool" id, and returns no
+// tools otherwise. Resolve is called inside runOneTask (before gollem.Execute,
+// so gollem cannot swallow the panic), giving a deterministic way to drive a
+// sub-agent panic through executePhase's recovery path.
+type panicResolver struct{}
+
+func (panicResolver) Resolve(ids []string) []gollem.Tool {
+	for _, id := range ids {
+		if id == "panic_tool" {
+			panic("boom in sub-agent")
+		}
+	}
+	return nil
+}
+
+// TestExecutePhase_RecoversSubAgentPanic pins the failure-propagation fix: when
+// a sub-agent panics, executePhase must (1) fill that task's result with a
+// TaskStatusFailed observation carrying the panic reason — so the planner learns
+// the task failed instead of seeing a contentless zero-value entry — and (2) let
+// the other tasks in the phase complete normally. Without the recover, results[i]
+// would stay a zero-value TaskResult (empty Status).
+func TestExecutePhase_RecoversSubAgentPanic(t *testing.T) {
+	ctx := context.Background()
+	llm := newFakeLLM(map[string]fakeSessionConfig{
+		"check thread A": {text: "summary one"},
+	})
+	sink := newRecordingSink()
+
+	tasks := []planexec.TaskPlan{
+		{ID: "t-1", Title: "A", Description: "check thread A", AcceptanceCriteria: "a", Tools: []string{"slack_ro"}},
+		{ID: "t-2", Title: "Boom", Description: "will panic", AcceptanceCriteria: "b", Tools: []string{"panic_tool"}},
+	}
+	results := planexec.ExecutePhaseForTest(ctx, tasks, sink, panicResolver{}, llm, 20, nil, false)
+	async.Wait()
+
+	gt.Array(t, results).Length(2).Required()
+	byID := map[string]planexec.TaskResult{}
+	for _, r := range results {
+		byID[r.TaskID] = r
+	}
+	// The panicking task surfaces as a failed observation, not a zero value.
+	gt.Value(t, byID["t-2"].Status).Equal(planexec.TaskStatusFailed)
+	gt.String(t, byID["t-2"].Error).Contains("sub-agent panicked")
+	gt.String(t, byID["t-2"].Title).Equal("Boom")
+	// The sibling task still completed — one panic does not sink the phase.
+	gt.Value(t, byID["t-1"].Status).Equal(planexec.TaskStatusCompleted)
+	gt.String(t, byID["t-1"].Summary).Equal("summary one")
+}

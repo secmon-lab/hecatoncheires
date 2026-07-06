@@ -2,7 +2,6 @@ package threadcase
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -11,6 +10,7 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/runtrace"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
 	knowledgetool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/knowledge"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
@@ -158,35 +158,18 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 		return planexec.QuestionResult{Terminate: true}, nil
 	}
 
-	// ModeCreate commits the new case inside the planner loop via OnFinalize so
-	// that both validation failures and persistence failures fold back into a
-	// re-plan. Other modes return a parsed Decision for the host to apply.
+	// Per-mode wiring. A mention turn lets its sub-agent close / transition the
+	// case via the case__update_case_status tool (case_status_write toolset +
+	// AllowSubAgentWrites), so status changes are a tool-driven side effect
+	// inside the loop, not a host-applied terminal decision. A create turn has
+	// no case yet, so it stays observation-only and materializes the new case
+	// from the structured final output.
 	isCreate := req.Mode == ModeCreate
-	finalSchema := decisionSchema()
-	var createdCase *model.Case
-	var onFinalize func(context.Context, json.RawMessage) error
-	if isCreate {
-		finalSchema = createDecisionSchema()
-		onFinalize = func(fctx context.Context, raw json.RawMessage) error {
-			dec, perr := parseCreateDecision(raw)
-			if perr != nil {
-				return perr
-			}
-			fields, verr := validateCreateDecision(req.Workspace, dec)
-			if verr != nil {
-				return verr
-			}
-			c, cerr := req.Handler.Create(fctx, req.Session, CreatePayload{
-				Title:       dec.Title,
-				Description: dec.Description,
-				Fields:      fields,
-			})
-			if cerr != nil {
-				return goerr.Wrap(cerr, "create case")
-			}
-			createdCase = c
-			return nil
-		}
+	knownToolIDs := agent.KnownToolSetIDsNoCore
+	allowWrites := false
+	if req.Mode == ModeMention {
+		knownToolIDs = agent.KnownToolSetIDsThreadWrite
+		allowWrites = true
 	}
 
 	systemPrompt := buildSystemPrompt(req.Case, req.Workspace, req.Mode)
@@ -225,7 +208,7 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 		}
 	}
 
-	runResult, runErr := uc.runner.Run(turnCtx, planexec.RunRequest{
+	baseReq := planexec.RunRequest{
 		HistoryKey: req.Session.ID,
 		TraceID:    handle.OwnerID,
 		// TraceHandler streams the per-call JobRunEvent timeline; planexec
@@ -244,83 +227,138 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 		UserInput:    buildUserInput(req.SystemMessages, req.DeltaMessages, req.MentionText, req.MentionTS),
 		SystemPrompt: systemPrompt,
 		ToolResolver: resolver,
-		// Thread-mode workspaces manage no Actions, so the planner must not be
-		// offered the core (action) toolset; OmitCore below withholds the tools.
-		KnownToolIDs: agent.KnownToolSetIDsNoCore,
-		// Sub-agents stay observation-only: threadcase commits its terminal
-		// Create/reply/update through the structured-final OnFinalize (below)
-		// or the returned Decision, never through a sub-agent write. The
-		// resolver hands sub-agents read-only tools; keeping this false makes
-		// the prompt agree with that. (Default is false; set explicitly to
-		// record the intent at the call site.)
-		AllowSubAgentWrites: false,
+		KnownToolIDs: knownToolIDs,
+		// Mention turns let the sub-agent close / transition the case via
+		// case__update_case_status; create turns stay observation-only (no case
+		// yet — the host materializes it from the final output).
+		AllowSubAgentWrites: allowWrites,
 		AllowQuestion:       true,
-		// Direct mode answers a trivial mention without the investigation
-		// loop, replying in plain text. It is disabled for ModeCreate: a
-		// create turn must commit a Case (a side-effecting terminal action),
-		// which the direct path deliberately never does.
-		AllowDirect:       !isCreate,
-		OnQuestion:        onQuestion,
-		FinalOutputSchema: finalSchema,
-		OnFinalize:        onFinalize,
-		Sink:              sink,
-	})
-	if runErr != nil {
-		return nil, goerr.Wrap(runErr, "run threadcase planexec")
+		// Direct mode answers a trivial mention without the investigation loop,
+		// replying in plain text. Disabled for ModeCreate: a create turn must
+		// materialize a Case, which the direct path deliberately never does.
+		AllowDirect: !isCreate,
+		OnQuestion:  onQuestion,
+		Sink:        sink,
 	}
 
-	// Persist the just-processed mention TS so the next turn's delta scan
-	// starts strictly after this one.
+	// Persist the just-processed mention TS so the next turn's delta scan starts
+	// strictly after this one. Set before dispatching so it is stamped onto the
+	// session the completion branches persist.
 	if req.MentionTS != "" {
 		req.Session.LastMentionTS = req.MentionTS
 	}
 
-	switch runResult.Status {
+	// ModeCreate materializes a NEW case from the validated structured final
+	// output (Run[CreateDecision]); every other mode resolves to a mention
+	// Decision (respond / materialize) via Run[Decision]. Close is neither — it
+	// is a sub-agent tool side effect inside the loop.
+	if isCreate {
+		return uc.runCreateTurn(turnCtx, req, baseReq, &runErr)
+	}
+	return uc.runMentionTurn(turnCtx, req, baseReq, &runErr)
+}
+
+// runCreateTurn drives a ModeCreate turn: run the structured loop, validate the
+// proposed case against the workspace schema, and materialize it via
+// Handler.Create. runErr is set (for the deferred run-trace Finish) on every
+// terminal failure. A create turn never uses the direct fast path
+// (AllowDirect=false), so a completed turn always yields a validated
+// CreateDecision in res.Data.
+func (uc *UseCase) runCreateTurn(ctx context.Context, req TurnRequest, baseReq planexec.RunRequest, runErr *error) (*Result, error) {
+	res, err := planexec.Run[CreateDecision](ctx, uc.runner, baseReq)
+	if err != nil {
+		*runErr = goerr.Wrap(err, "run threadcase planexec (create)")
+		return nil, *runErr
+	}
+
+	switch res.Status {
 	case planexec.StatusCompleted:
-		if runResult.EndedWithQuestion {
-			uc.persistSession(turnCtx, req.Session, model.SessionEndedWithQuestion)
+		if res.EndedWithQuestion {
+			uc.persistSession(ctx, req.Session, model.SessionEndedWithQuestion)
 			return &Result{Status: StatusQuestion}, nil
 		}
-		if isCreate {
-			// The case was committed inside OnFinalize; createdCase is set.
-			uc.persistSession(turnCtx, req.Session, model.SessionEndedWithCaseBoundReply)
-			return &Result{Status: StatusCompleted, Case: createdCase}, nil
+		if res.Data == nil {
+			*runErr = goerr.New("threadcase create completed without a decision")
+			return nil, *runErr
 		}
-		if runResult.Direct {
-			// Direct path produced a plain-text reply (no structured Decision).
-			// Treat it as a respond decision so the host posts it as the
-			// thread reply, exactly as it would a parsed respond Decision.
-			uc.persistSession(turnCtx, req.Session, model.SessionEndedWithCaseBoundReply)
-			return &Result{Status: StatusCompleted, Decision: &Decision{
-				Kind:    DecisionRespond,
-				Message: runResult.FinalText,
-			}}, nil
+		fields, verr := validateCreateDecision(req.Workspace, res.Data)
+		if verr != nil {
+			// The proposed case failed workspace-schema validation. The final
+			// output already passed shape validation (CreateDecision.Validate)
+			// and any regeneration; a schema violation here fails the turn and
+			// is surfaced (recorded FAILED via runErr) rather than silently
+			// dropped.
+			*runErr = goerr.Wrap(verr, "validate create decision")
+			return nil, *runErr
 		}
-		decision, perr := parseDecision(runResult.FinalRaw)
-		if perr != nil {
-			// The turn failed to produce a usable decision; record it as FAILED
-			// (deferred Finish reads runErr) so the run trace matches the error
-			// actually returned rather than being logged as SUCCESS.
-			runErr = goerr.Wrap(perr, "parse threadcase decision")
-			return nil, runErr
+		c, cerr := req.Handler.Create(ctx, req.Session, CreatePayload{
+			Title:       res.Data.Title,
+			Description: res.Data.Description,
+			Fields:      fields,
+		})
+		if cerr != nil {
+			*runErr = goerr.Wrap(cerr, "create case")
+			return nil, *runErr
 		}
-		uc.persistSession(turnCtx, req.Session, model.SessionEndedWithCaseBoundReply)
-		return &Result{Status: StatusCompleted, Decision: decision}, nil
+		uc.persistSession(ctx, req.Session, model.SessionEndedWithCaseBoundReply)
+		return &Result{Status: StatusCompleted, Case: c}, nil
 	case planexec.StatusFallbackBudget, planexec.StatusFallbackError:
-		// The planner ended without a decision (budget exhausted or internal
-		// error handled into a fallback). runner.Run returns no error here, so
-		// mark the recorded run FAILED explicitly (deferred Finish reads runErr)
-		// while the host still degrades gracefully to a fallback reply.
-		runErr = goerr.New("threadcase planexec ended without a decision",
-			goerr.V("status", int(runResult.Status)))
-		uc.persistSession(turnCtx, req.Session, model.SessionEndedWithCaseBoundReply)
+		*runErr = goerr.New("threadcase planexec ended without a decision",
+			goerr.V("status", int(res.Status)),
+			goerr.V("reason", res.FallbackReason))
+		uc.persistSession(ctx, req.Session, model.SessionEndedWithCaseBoundReply)
 		return &Result{Status: StatusFallback}, nil
 	default:
-		// An unknown status is a programming error; still record the run FAILED
-		// so it does not surface as a SUCCESS with no decision.
-		runErr = goerr.New("threadcase planexec returned unknown status",
-			goerr.V("status", int(runResult.Status)))
-		return nil, runErr
+		*runErr = goerr.New("threadcase planexec returned unknown status",
+			goerr.V("status", int(res.Status)))
+		return nil, *runErr
+	}
+}
+
+// runMentionTurn drives a ModeMention turn: run the structured loop and return
+// the terminal Decision (respond / materialize) for the host to apply. A direct
+// fast-path reply is surfaced as a respond Decision. Closing / status changes
+// happened inside the loop via the sub-agent's case__update_case_status tool and
+// are NOT represented here.
+func (uc *UseCase) runMentionTurn(ctx context.Context, req TurnRequest, baseReq planexec.RunRequest, runErr *error) (*Result, error) {
+	res, err := planexec.Run[Decision](ctx, uc.runner, baseReq)
+	if err != nil {
+		*runErr = goerr.Wrap(err, "run threadcase planexec (mention)")
+		return nil, *runErr
+	}
+
+	switch res.Status {
+	case planexec.StatusCompleted:
+		if res.EndedWithQuestion {
+			uc.persistSession(ctx, req.Session, model.SessionEndedWithQuestion)
+			return &Result{Status: StatusQuestion}, nil
+		}
+		if res.Direct {
+			// Direct path produced a plain-text reply (no structured Decision).
+			// Treat it as a respond decision so the host posts it as the thread
+			// reply, exactly as it would a parsed respond Decision.
+			uc.persistSession(ctx, req.Session, model.SessionEndedWithCaseBoundReply)
+			return &Result{Status: StatusCompleted, Decision: &Decision{
+				Kind:    DecisionRespond,
+				Message: res.Text,
+			}}, nil
+		}
+		if res.Data == nil {
+			*runErr = goerr.New("threadcase mention completed without a decision")
+			return nil, *runErr
+		}
+		uc.persistSession(ctx, req.Session, model.SessionEndedWithCaseBoundReply)
+		return &Result{Status: StatusCompleted, Decision: res.Data}, nil
+	case planexec.StatusFallbackBudget, planexec.StatusFallbackError:
+		*runErr = goerr.New("threadcase planexec ended without a decision",
+			goerr.V("status", int(res.Status)),
+			goerr.V("reason", res.FallbackReason))
+		uc.persistSession(ctx, req.Session, model.SessionEndedWithCaseBoundReply)
+		return &Result{Status: StatusFallback}, nil
+	default:
+		*runErr = goerr.New("threadcase planexec returned unknown status",
+			goerr.V("status", int(res.Status)))
+		return nil, *runErr
 	}
 }
 
@@ -333,15 +371,31 @@ func (uc *UseCase) persistSession(ctx context.Context, ssn *model.Session, ended
 	}
 }
 
-// buildToolResolver composes the read-only sub-agent tool resolver. Thread-mode
+// buildToolResolver composes the sub-agent tool resolver. Thread-mode
 // workspaces manage no Actions, so the core (action) toolset is omitted entirely
-// — investigation reads Slack / Notion / GitHub / the web, and Case writes happen
-// via the returned Decision, never the action tools.
+// — investigation reads Slack / Notion / GitHub / the web. The sub-agent's ONE
+// write capability is the case status-change tool (case_status_write): it is
+// wired only when a concrete case exists (mention / materialize turns), letting
+// the sub-agent close / transition that case as the investigation's conclusion.
+// Content materialization (title / description / fields) stays with the host, so
+// case__update_case is never wired here.
 func (uc *UseCase) buildToolResolver(req TurnRequest) *agent.ToolSetResolver {
 	d := uc.deps
 	wsID := ""
 	if req.Workspace != nil {
 		wsID = req.Workspace.Workspace.ID
+	}
+	// The status-change tool is scoped to the case under investigation. A create
+	// turn has no case yet (req.Case == nil), so CaseStatus stays zero and the
+	// resolver builds no status tool for it.
+	var caseStatus casewriter.Deps
+	if req.Case != nil {
+		caseStatus = casewriter.Deps{
+			CaseUC:      d.CaseUC,
+			WorkspaceID: wsID,
+			CaseID:      req.Case.ID,
+			StatusSet:   req.Workspace.CaseStatusSet,
+		}
 	}
 	return agent.NewToolSetResolver(agent.ToolSetDeps{
 		OmitCore: true,
@@ -355,9 +409,10 @@ func (uc *UseCase) buildToolResolver(req TurnRequest) *agent.ToolSetResolver {
 			Search:    d.SlackSearch,
 			Retriever: d.SlackRetriever,
 		},
-		Notion:   notiontool.Deps{Client: d.NotionClient},
-		GitHub:   d.GitHubClient,
-		WebFetch: d.WebFetchClient,
+		Notion:     notiontool.Deps{Client: d.NotionClient},
+		GitHub:     d.GitHubClient,
+		WebFetch:   d.WebFetchClient,
+		CaseStatus: caseStatus,
 		Knowledge: knowledgetool.Deps{
 			WorkspaceID: wsID,
 			Accessor:    d.KnowledgeAccessor,

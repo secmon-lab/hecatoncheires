@@ -399,3 +399,34 @@ func TestStatusTool_BuiltWithStatusSet(t *testing.T) {
 		gt.Array(t, uc.statusCalls).Length(0)
 	})
 }
+
+func TestNewStatusTool_ThreadMode(t *testing.T) {
+	// A board status set means thread-mode: the ONLY tool is
+	// case__update_case_status. The content / assignee tools are deliberately
+	// excluded — a sub-agent may close/transition but never materialize.
+	uc := &mockCaseUC{resp: &model.Case{ID: 5, Status: types.CaseStatusClosed, BoardStatus: "closed"}}
+	tools := casewriter.NewStatusTool(casewriter.Deps{CaseUC: uc, WorkspaceID: "ws", CaseID: 5, StatusSet: testStatusSet(t)})
+	gt.Array(t, tools).Length(1).Required()
+	gt.String(t, tools[0].Spec().Name).Equal("case__update_case_status")
+	gt.Value(t, toolByName(t, tools, "case__update_case")).Nil()
+	gt.Value(t, toolByName(t, tools, "case__assign")).Nil()
+	gt.Value(t, toolByName(t, tools, "case__unassign")).Nil()
+
+	out, err := tools[0].Run(context.Background(), map[string]any{"status": "closed"})
+	gt.NoError(t, err).Required()
+	gt.Array(t, uc.statusCalls).Length(1).Required()
+	gt.String(t, uc.statusCalls[0].boardStatus).Equal("closed")
+	gt.String(t, out["board_status"].(string)).Equal("closed")
+}
+
+func TestNewStatusTool_ChannelMode(t *testing.T) {
+	// No board status set means channel-mode: the ONLY tool is case__close_case.
+	uc := &mockCaseUC{resp: &model.Case{ID: 9, Status: types.CaseStatusClosed}}
+	tools := casewriter.NewStatusTool(casewriter.Deps{CaseUC: uc, WorkspaceID: "ws", CaseID: 9})
+	gt.Array(t, tools).Length(1).Required()
+	gt.String(t, tools[0].Spec().Name).Equal("case__close_case")
+
+	_, err := tools[0].Run(context.Background(), map[string]any{})
+	gt.NoError(t, err).Required()
+	gt.Number(t, uc.closeCalls).Equal(1)
+}

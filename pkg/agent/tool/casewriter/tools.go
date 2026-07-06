@@ -70,12 +70,29 @@ func New(deps Deps) []gollem.Tool {
 		&assignCaseTool{deps: deps},
 		&unassignCaseTool{deps: deps},
 	}
-	if deps.StatusSet != nil {
-		tools = append(tools, &updateCaseStatusTool{deps: deps})
-	} else {
-		tools = append(tools, &closeCaseTool{deps: deps})
-	}
+	tools = append(tools, statusTools(deps)...)
 	return tools
+}
+
+// NewStatusTool builds ONLY the status-change tool — case__update_case_status
+// when a board status set is configured (thread-mode), otherwise case__close_case
+// (channel-mode). It deliberately excludes case__update_case (title / description
+// / field edits are "materialize", owned by the host, not the sub-agent) and
+// case__assign / case__unassign. This is the subset wired into a planexec
+// sub-agent so it can close / transition the case it is investigating while the
+// host keeps ownership of content materialization.
+func NewStatusTool(deps Deps) []gollem.Tool {
+	return statusTools(deps)
+}
+
+// statusTools returns the single mode-appropriate "mark done" tool. Shared by
+// New (full writer set) and NewStatusTool (status-only subset) so both stay in
+// sync on the thread-mode vs channel-mode selection.
+func statusTools(deps Deps) []gollem.Tool {
+	if deps.StatusSet != nil {
+		return []gollem.Tool{&updateCaseStatusTool{deps: deps}}
+	}
+	return []gollem.Tool{&closeCaseTool{deps: deps}}
 }
 
 type updateCaseTool struct {

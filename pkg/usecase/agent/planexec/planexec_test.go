@@ -2,7 +2,6 @@ package planexec_test
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"slices"
 	"strings"
@@ -157,6 +156,20 @@ func baseRequest() planexec.RunRequest {
 	}
 }
 
+// finalPayload is a Validatable structured final-output type for Run[T] tests.
+type finalPayload struct {
+	WorkspaceID string `json:"workspace_id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+}
+
+func (p finalPayload) Validate() error {
+	if p.Title == "" {
+		return goerr.New("title is required")
+	}
+	return nil
+}
+
 // --- Integration: plan → phase → replan(empty) → final --------------
 
 func TestRunner_Run_PlanThenTerminate(t *testing.T) {
@@ -168,18 +181,18 @@ func TestRunner_Run_PlanThenTerminate(t *testing.T) {
 		]}`},
 		// Sub-agent t-1 response (plain text).
 		{text: "Found A details."},
-		// Round 2: replan, terminate (no tasks, no question).
-		{text: `{"message":"done","tasks":[]}`},
+		// Round 2: replan, terminate via explicit finalize.
+		{text: `{"message":"done","finalize":{"reason":"done"}}`},
 		// Final-response LLM call (plain text).
 		{text: "Here's what I found: A details."},
 	})
 
 	runner := newRunner(t, llm.Client())
 	req := baseRequest()
-	res, err := runner.Run(ctx, req)
+	res, err := planexec.RunText(ctx, runner, req)
 	gt.NoError(t, err).Required()
 	gt.Value(t, res.Status).Equal(planexec.StatusCompleted)
-	gt.String(t, res.FinalText).Contains("A details")
+	gt.String(t, res.Text).Contains("A details")
 	gt.Bool(t, res.EndedWithQuestion).False()
 	gt.Array(t, res.AllResults).Length(1).Required()
 	gt.Number(t, len(res.AllResults[0].Tasks)).Equal(1)
@@ -211,7 +224,7 @@ func TestRunner_Run_ForwardsTraceHandlerToAllAgents(t *testing.T) {
 			{"id":"t-1","title":"A","description":"check thread A","acceptance_criteria":"a","tools":["slack_ro"]}
 		]}`},
 		{text: "Found A details."},
-		{text: `{"message":"done","tasks":[]}`},
+		{text: `{"message":"done","finalize":{"reason":"done"}}`},
 		{text: "Here's what I found: A details."},
 	})
 
@@ -220,7 +233,7 @@ func TestRunner_Run_ForwardsTraceHandlerToAllAgents(t *testing.T) {
 	req := baseRequest()
 	req.TraceHandler = rec
 
-	res, err := runner.Run(ctx, req)
+	res, err := planexec.RunText(ctx, runner, req)
 	gt.NoError(t, err).Required()
 	gt.Value(t, res.Status).Equal(planexec.StatusCompleted)
 
@@ -244,7 +257,7 @@ func TestRunner_Run_NilTraceHandlerKeepsArchiveOnly(t *testing.T) {
 			{"id":"t-1","title":"A","description":"check thread A","acceptance_criteria":"a","tools":["slack_ro"]}
 		]}`},
 		{text: "Found A details."},
-		{text: `{"message":"done","tasks":[]}`},
+		{text: `{"message":"done","finalize":{"reason":"done"}}`},
 		{text: "Here's what I found: A details."},
 	})
 
@@ -252,10 +265,10 @@ func TestRunner_Run_NilTraceHandlerKeepsArchiveOnly(t *testing.T) {
 	req := baseRequest()
 	req.TraceHandler = nil
 
-	res, err := runner.Run(ctx, req)
+	res, err := planexec.RunText(ctx, runner, req)
 	gt.NoError(t, err).Required()
 	gt.Value(t, res.Status).Equal(planexec.StatusCompleted)
-	gt.String(t, res.FinalText).Contains("A details")
+	gt.String(t, res.Text).Contains("A details")
 
 	async.Wait()
 	gt.Number(t, llm.calls()).Equal(4)
@@ -288,11 +301,11 @@ func TestRunner_Run_QuestionTerminates(t *testing.T) {
 		return planexec.QuestionResult{Terminate: true}, nil
 	}
 
-	res, err := runner.Run(ctx, req)
+	res, err := planexec.RunText(ctx, runner, req)
 	gt.NoError(t, err).Required()
 	gt.Value(t, res.Status).Equal(planexec.StatusCompleted)
 	gt.Bool(t, res.EndedWithQuestion).True()
-	gt.String(t, res.FinalText).Equal("")
+	gt.String(t, res.Text).Equal("")
 	gt.Bool(t, questionFired.Load()).True()
 
 	async.Wait()
@@ -310,8 +323,8 @@ func TestRunner_Resume_EntersReplanWithAnswers(t *testing.T) {
 	// (minTasksPerPhase=1), so accepting this proves Resume entered at the
 	// replan branch rather than re-planning from round 0.
 	llm := newSequencedLLM([]sequencedResponse{
-		// Replan round: terminate (the answer was enough).
-		{text: `{"message":"done","tasks":[]}`, matchSubstr: "User answers"},
+		// Replan round: terminate via explicit finalize (the answer was enough).
+		{text: `{"message":"done","finalize":{"reason":"done"}}`, matchSubstr: "User answers"},
 		// Final-response LLM call.
 		{text: "Resolved using the user's answer: A."},
 	})
@@ -336,10 +349,10 @@ func TestRunner_Resume_EntersReplanWithAnswers(t *testing.T) {
 		Answers: []planexec.QuestionAnswer{{ID: "q1", Choice: "A"}},
 	}
 
-	res, err := runner.Resume(ctx, resumeReq)
+	res, err := planexec.ResumeText(ctx, runner, resumeReq)
 	gt.NoError(t, err).Required()
 	gt.Value(t, res.Status).Equal(planexec.StatusCompleted)
-	gt.String(t, res.FinalText).Contains("Resolved using the user's answer")
+	gt.String(t, res.Text).Contains("Resolved using the user's answer")
 	gt.Bool(t, res.EndedWithQuestion).False()
 
 	async.Wait()
@@ -370,7 +383,7 @@ func TestRunner_Resume_RejectsEmptyAnswers(t *testing.T) {
 		},
 		Answers: nil,
 	}
-	_, err := runner.Resume(ctx, resumeReq)
+	_, err := planexec.ResumeText(ctx, runner, resumeReq)
 	gt.Error(t, err)
 	// No LLM call should have fired on a validation failure.
 	gt.Number(t, llm.calls()).Equal(0)
@@ -397,7 +410,7 @@ func TestRunner_Run_PlannerBudgetExhausted(t *testing.T) {
 	})
 	gt.NoError(t, err).Required()
 
-	res, err := runner.Run(ctx, baseRequest())
+	res, err := planexec.RunText(ctx, runner, baseRequest())
 	gt.NoError(t, err).Required()
 	gt.Value(t, res.Status).Equal(planexec.StatusFallbackBudget)
 	gt.String(t, res.FallbackReason).Contains("planner budget exhausted")
@@ -415,29 +428,22 @@ func TestRunner_Run_StructuredFinalOutput(t *testing.T) {
 			{"id":"t-1","title":"A","description":"go","acceptance_criteria":"a","tools":["slack_ro"]}
 		]}`},
 		{text: "investigation result"},
-		// Round 2: terminate
-		{text: `{"message":"done","tasks":[]}`},
+		// Round 2: terminate via explicit finalize
+		{text: `{"message":"done","finalize":{"reason":"done"}}`},
 		// Final JSON
 		{text: `{"workspace_id":"ws-1","title":"Found case","description":"long desc"}`},
 	})
 
 	runner := newRunner(t, llm.Client())
 	req := baseRequest()
-	req.FinalOutputSchema = &gollem.Parameter{
-		Type: gollem.TypeObject,
-		Properties: map[string]*gollem.Parameter{
-			"workspace_id": {Type: gollem.TypeString},
-			"title":        {Type: gollem.TypeString},
-			"description":  {Type: gollem.TypeString},
-		},
-	}
 
-	res, err := runner.Run(ctx, req)
+	res, err := planexec.Run[finalPayload](ctx, runner, req)
 	gt.NoError(t, err).Required()
 	gt.Value(t, res.Status).Equal(planexec.StatusCompleted)
-	gt.String(t, res.FinalText).Equal("")
-	gt.String(t, string(res.FinalRaw)).Contains(`"workspace_id":"ws-1"`)
-	gt.String(t, string(res.FinalRaw)).Contains(`"title":"Found case"`)
+	gt.String(t, res.Text).Equal("")
+	gt.Value(t, res.Data).NotNil().Required()
+	gt.String(t, res.Data.WorkspaceID).Equal("ws-1")
+	gt.String(t, res.Data.Title).Equal("Found case")
 }
 
 // --- Integration: validation retry recovery -------------------------
@@ -452,25 +458,25 @@ func TestRunner_Run_RetriesOnValidationFailure(t *testing.T) {
 			{"id":"t-1","title":"A","description":"x","acceptance_criteria":"a","tools":["slack_ro"]}
 		]}`},
 		{text: "ok"},
-		// Round 2: terminate.
-		{text: `{"tasks":[]}`},
+		// Round 2: terminate via explicit finalize.
+		{text: `{"message":"done","finalize":{"reason":"done"}}`},
 		// Final
 		{text: "done."},
 	})
 
 	runner := newRunner(t, llm.Client())
-	res, err := runner.Run(ctx, baseRequest())
+	res, err := planexec.RunText(ctx, runner, baseRequest())
 	gt.NoError(t, err).Required()
 	gt.Value(t, res.Status).Equal(planexec.StatusCompleted)
-	gt.String(t, res.FinalText).Equal("done.")
+	gt.String(t, res.Text).Equal("done.")
 }
 
-// --- Integration: OnFinalize rejects then accepts -------------------
+// --- Integration: structured final output validation retry ----------
 
-// When OnFinalize returns an error (validation OR commit failure), the
-// runner must fold the error back as another planner round and try the
-// final phase again, succeeding once OnFinalize accepts.
-func TestRunner_Run_OnFinalizeRejectThenAccept(t *testing.T) {
+// When the structured final output fails T.Validate(), Run[T] must
+// regenerate within the same final phase (not by re-entering the planner
+// loop), succeeding once a later attempt validates.
+func TestRunner_Run_StructuredFinalValidationRetry(t *testing.T) {
 	ctx := context.Background()
 	llm := newSequencedLLM([]sequencedResponse{
 		// Round 1: one task.
@@ -478,83 +484,49 @@ func TestRunner_Run_OnFinalizeRejectThenAccept(t *testing.T) {
 			{"id":"t-1","title":"A","description":"x","acceptance_criteria":"a","tools":["slack_ro"]}
 		]}`},
 		{text: "investigation result"},
-		// Round 2: terminate → final attempt #1 (rejected by OnFinalize).
-		{text: `{"message":"done","tasks":[]}`},
-		{text: `{"title":""}`}, // empty title → OnFinalize rejects
-		// Round 3: terminate again → final attempt #2 (accepted).
-		{text: `{"message":"retry","tasks":[]}`},
-		{text: `{"title":"Found case"}`},
+		// Round 2: terminate via explicit finalize.
+		{text: `{"message":"done","finalize":{"reason":"done"}}`},
+		// Final output attempt 1: empty title → Validate() fails.
+		{text: `{"title":""}`},
+		// Final output attempt 2: valid.
+		{text: `{"workspace_id":"ws-1","title":"Found case","description":"d"}`},
 	})
 
 	runner := newRunner(t, llm.Client())
 	req := baseRequest()
-	req.FinalOutputSchema = &gollem.Parameter{
-		Type: gollem.TypeObject,
-		Properties: map[string]*gollem.Parameter{
-			"title": {Type: gollem.TypeString},
-		},
-	}
-	var finalizeCalls atomic.Int32
-	var committed atomic.Value
-	req.OnFinalize = func(_ context.Context, raw json.RawMessage) error {
-		finalizeCalls.Add(1)
-		var out struct {
-			Title string `json:"title"`
-		}
-		gt.NoError(t, json.Unmarshal(raw, &out)).Required()
-		if out.Title == "" {
-			return goerr.New("title is required")
-		}
-		committed.Store(out.Title)
-		return nil
-	}
 
-	res, err := runner.Run(ctx, req)
+	res, err := planexec.Run[finalPayload](ctx, runner, req)
 	gt.NoError(t, err).Required()
 	gt.Value(t, res.Status).Equal(planexec.StatusCompleted)
-	// OnFinalize was called twice: first rejected, second accepted.
-	gt.Number(t, int(finalizeCalls.Load())).Equal(2)
-	gt.Value(t, committed.Load()).Equal("Found case")
-	gt.String(t, string(res.FinalRaw)).Contains("Found case")
+	gt.Value(t, res.Data).NotNil().Required()
+	gt.String(t, res.Data.Title).Equal("Found case")
 }
 
-// OnFinalize that keeps rejecting must eventually exhaust the round
-// budget and fall back without completing.
-func TestRunner_Run_OnFinalizeAlwaysRejects_Fallback(t *testing.T) {
+// The structured final output that keeps failing T.Validate() must
+// eventually exhaust the final-phase retries and fall back without
+// completing (it does not re-enter the planner loop).
+func TestRunner_Run_StructuredFinalValidationExhausted(t *testing.T) {
 	ctx := context.Background()
 	llm := newSequencedLLM([]sequencedResponse{
 		{text: `{"message":"start","tasks":[
 			{"id":"t-1","title":"A","description":"x","acceptance_criteria":"a","tools":["slack_ro"]}
 		]}`},
 		{text: "result"},
-		// Round 2: terminate → final (rejected).
-		{text: `{"message":"done","tasks":[]}`},
+		// Round 2: terminate via explicit finalize.
+		{text: `{"message":"done","finalize":{"reason":"done"}}`},
+		// Final output attempts 1-3 (finalOutputMaxRetry(2)+1): always invalid.
 		{text: `{"title":""}`},
-		// Round 3: terminate → final (rejected). Budget (3) now exhausted.
-		{text: `{"message":"again","tasks":[]}`},
+		{text: `{"title":""}`},
 		{text: `{"title":""}`},
 	})
 
-	runner, err := planexec.NewRunner(planexec.RunnerDeps{
-		LLMClient:   llm.Client(),
-		HistoryRepo: agentarchive.NewMemoryHistoryRepository(),
-		TraceRepo:   agentarchive.NewMemoryTraceRepository(),
-		Budget:      planexec.BudgetConfig{PlannerLoopMax: 3, SubAgentLoopMax: 20},
-	})
-	gt.NoError(t, err).Required()
-
+	runner := newRunner(t, llm.Client())
 	req := baseRequest()
-	req.FinalOutputSchema = &gollem.Parameter{
-		Type:       gollem.TypeObject,
-		Properties: map[string]*gollem.Parameter{"title": {Type: gollem.TypeString}},
-	}
-	req.OnFinalize = func(_ context.Context, _ json.RawMessage) error {
-		return goerr.New("always reject")
-	}
 
-	res, err := runner.Run(ctx, req)
+	res, err := planexec.Run[finalPayload](ctx, runner, req)
 	gt.NoError(t, err).Required()
-	gt.Value(t, res.Status).Equal(planexec.StatusFallbackBudget)
+	gt.Value(t, res.Status).Equal(planexec.StatusFallbackError)
+	gt.Value(t, res.Data).Nil()
 }
 
 // --- Integration: direct mode (round-1 fast path) -------------------
@@ -608,12 +580,11 @@ func TestRunner_Run_DirectMode(t *testing.T) {
 		},
 	}
 
-	res, err := runner.Run(ctx, req)
+	res, err := planexec.RunText(ctx, runner, req)
 	gt.NoError(t, err).Required()
 	gt.Value(t, res.Status).Equal(planexec.StatusCompleted)
 	gt.Bool(t, res.Direct).True()
-	gt.String(t, res.FinalText).Equal("Here is the direct answer.")
-	gt.Value(t, res.FinalRaw).Nil()
+	gt.String(t, res.Text).Equal("Here is the direct answer.")
 	// No investigation phase ran.
 	gt.Array(t, res.AllResults).Length(0)
 	gt.Bool(t, phaseStarted.Load()).False()
@@ -644,7 +615,7 @@ func TestRunner_Run_DirectMode_ResolvesChosenTools(t *testing.T) {
 	req.AllowDirect = true
 	req.ToolResolver = resolver
 
-	res, err := runner.Run(ctx, req)
+	res, err := planexec.RunText(ctx, runner, req)
 	gt.NoError(t, err).Required()
 	gt.Value(t, res.Status).Equal(planexec.StatusCompleted)
 	gt.Bool(t, res.Direct).True()
@@ -655,10 +626,11 @@ func TestRunner_Run_DirectMode_ResolvesChosenTools(t *testing.T) {
 	gt.String(t, got[1]).Equal("github")
 }
 
-// The direct path must NOT consult OnFinalize / FinalOutputSchema even when
-// the host wired them — those are reserved for the structured investigate
-// terminal.
-func TestRunner_Run_DirectMode_SkipsOnFinalize(t *testing.T) {
+// The direct path must NOT consult the structured final-output generator
+// even when the host is driving a Run[T] turn — that machinery is reserved
+// for the structured investigate terminal. A direct reply always produces
+// plain text in Text with Data left nil.
+func TestRunner_Run_DirectMode_StructuredSkipsFinalGen(t *testing.T) {
 	ctx := context.Background()
 	llm := newSequencedLLM([]sequencedResponse{
 		{text: `{"message":"ok","direct":{}}`},
@@ -668,21 +640,13 @@ func TestRunner_Run_DirectMode_SkipsOnFinalize(t *testing.T) {
 	runner := newRunner(t, llm.Client())
 	req := baseRequest()
 	req.AllowDirect = true
-	req.FinalOutputSchema = &gollem.Parameter{
-		Type:       gollem.TypeObject,
-		Properties: map[string]*gollem.Parameter{"title": {Type: gollem.TypeString}},
-	}
-	req.OnFinalize = func(_ context.Context, _ json.RawMessage) error {
-		t.Fatal("OnFinalize must not be called on the direct path")
-		return nil
-	}
 
-	res, err := runner.Run(ctx, req)
+	res, err := planexec.Run[finalPayload](ctx, runner, req)
 	gt.NoError(t, err).Required()
 	gt.Value(t, res.Status).Equal(planexec.StatusCompleted)
 	gt.Bool(t, res.Direct).True()
-	gt.String(t, res.FinalText).Equal("plain direct reply")
-	gt.Value(t, res.FinalRaw).Nil()
+	gt.String(t, res.Text).Equal("plain direct reply")
+	gt.Value(t, res.Data).Nil()
 }
 
 // --- Integration: real-LLM plan/direct routing ---------------------
@@ -783,11 +747,11 @@ func TestRunner_Run_RealLLM_PlanVsDirectRouting(t *testing.T) {
 		req.UserInput = "A teammate just wrote: \"Thanks, that's all I needed for now!\" " +
 			"Acknowledge it briefly and politely. No investigation, lookup, or tools are required."
 
-		res, err := runner.Run(ctx, req)
+		res, err := planexec.RunText(ctx, runner, req)
 		gt.NoError(t, err).Required()
 		gt.Bool(t, res.Direct).True()
 		gt.Value(t, res.Status).Equal(planexec.StatusCompleted)
-		gt.String(t, res.FinalText).NotEqual("")
+		gt.String(t, res.Text).NotEqual("")
 		// The direct path never runs an investigation phase.
 		gt.Array(t, res.AllResults).Length(0)
 		async.Wait()
@@ -801,7 +765,7 @@ func TestRunner_Run_RealLLM_PlanVsDirectRouting(t *testing.T) {
 			"correlate the discussion in this Slack thread, find related past cases, and check the linked " +
 			"Notion runbook and the relevant GitHub commits, then summarise what you found."
 
-		res, err := runner.Run(ctx, req)
+		res, err := planexec.RunText(ctx, runner, req)
 		gt.NoError(t, err).Required()
 		// The model must NOT short-circuit a multi-source investigation.
 		gt.Bool(t, res.Direct).False()
@@ -825,8 +789,8 @@ func TestRunner_Run_DirectRejectedWhenNotAllowed(t *testing.T) {
 			{"id":"t-1","title":"A","description":"x","acceptance_criteria":"a","tools":["slack_ro"]}
 		]}`},
 		{text: "investigation result"},
-		// Round 2: terminate.
-		{text: `{"message":"done","tasks":[]}`},
+		// Round 2: terminate via explicit finalize.
+		{text: `{"message":"done","finalize":{"reason":"done"}}`},
 		// Final synthesis.
 		{text: "final plain answer"},
 	})
@@ -835,11 +799,11 @@ func TestRunner_Run_DirectRejectedWhenNotAllowed(t *testing.T) {
 	req := baseRequest()
 	// req.AllowDirect defaults to false.
 
-	res, err := runner.Run(ctx, req)
+	res, err := planexec.RunText(ctx, runner, req)
 	gt.NoError(t, err).Required()
 	gt.Value(t, res.Status).Equal(planexec.StatusCompleted)
 	gt.Bool(t, res.Direct).False()
-	gt.String(t, res.FinalText).Equal("final plain answer")
+	gt.String(t, res.Text).Equal("final plain answer")
 	gt.Array(t, res.AllResults).Length(1)
 }
 
@@ -924,8 +888,8 @@ func TestRunner_Run_SubAgentPerformsWrite(t *testing.T) {
 						}}}, nil
 					case 3: // sub-agent: report after the tool result comes back
 						return &gollem.Response{Texts: []string{"Posted the one-line summary to the channel."}}, nil
-					case 4: // replan: terminate (no more tasks)
-						return &gollem.Response{Texts: []string{`{"message":"done","tasks":[]}`}}, nil
+					case 4: // replan: terminate via explicit finalize
+						return &gollem.Response{Texts: []string{`{"message":"done","finalize":{"reason":"done"}}`}}, nil
 					default: // final synthesis
 						return &gollem.Response{Texts: []string{"Summary posted."}}, nil
 					}
@@ -940,7 +904,7 @@ func TestRunner_Run_SubAgentPerformsWrite(t *testing.T) {
 	req.KnownToolIDs = []string{"slack_write"}
 	req.ToolResolver = writeToolResolver{tool: writeTool}
 
-	res, err := runner.Run(ctx, req)
+	res, err := planexec.RunText(ctx, runner, req)
 	gt.NoError(t, err).Required()
 	async.Wait()
 
@@ -980,7 +944,7 @@ func TestRunner_Run_RealLLM_SubAgentPerformsWrite(t *testing.T) {
 	req.UserInput = "A new case was just created: \"Login page returns HTTP 500 for some users.\" " +
 		"Post a one-line acknowledgement to the channel confirming the case is being looked into."
 
-	res, err := runner.Run(ctx, req)
+	res, err := planexec.RunText(ctx, runner, req)
 	gt.NoError(t, err).Required()
 	async.Wait()
 

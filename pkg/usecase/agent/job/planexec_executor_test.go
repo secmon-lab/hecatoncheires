@@ -116,7 +116,7 @@ func TestPlanexecJobExecutor_PlanThenFinal(t *testing.T) {
 		// Sub-agent response
 		"Found details about A.",
 		// Replan terminate
-		`{"message":"done","tasks":[]}`,
+		`{"message":"done","finalize":{"reason":"done"}}`,
 		// Final response (plain text)
 		"Summary: A details.",
 	})
@@ -234,7 +234,7 @@ func TestPlanexecJobExecutor_SubAgentPerformsWrite(t *testing.T) {
 					case 3: // sub-agent: report after the tool result
 						return &gollem.Response{Texts: []string{"Posted the pre-review to the channel."}}, nil
 					case 4: // replan: terminate
-						return &gollem.Response{Texts: []string{`{"message":"done","tasks":[]}`}}, nil
+						return &gollem.Response{Texts: []string{`{"message":"done","finalize":{"reason":"done"}}`}}, nil
 					default: // final synthesis
 						return &gollem.Response{Texts: []string{"Pre-review posted."}}, nil
 					}
@@ -281,7 +281,7 @@ func TestPlanexecJobExecutor_ForwardsTraceHandler(t *testing.T) {
 			{"id":"t-1","title":"A","description":"check A","acceptance_criteria":"a","tools":["default"]}
 		]}`,
 		"Found details about A.",
-		`{"message":"done","tasks":[]}`,
+		`{"message":"done","finalize":{"reason":"done"}}`,
 		"Summary: A details.",
 	})
 
@@ -489,7 +489,7 @@ func TestPlanexecJobExecutor_Resume(t *testing.T) {
 	ctx := context.Background()
 	llm := newSequencedLLMClient([]string{
 		// Resumed replan terminates (the answer was enough).
-		`{"message":"done","tasks":[]}`,
+		`{"message":"done","finalize":{"reason":"done"}}`,
 		// Final response.
 		"Summary: used the prod environment per the answer.",
 	})

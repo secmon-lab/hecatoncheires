@@ -4,8 +4,11 @@
 - Case status updates (close, etc.) are the **subagent's responsibility, invoked via a tool** inside planexec. `host` and `planexec` itself MUST NOT carry this as a side effect. If a design gives `host`/`planexec` a case side effect, that design is wrong.
 - **materialize** (finalizing case content) is the `host`'s responsibility.
 - `planexec` is a generic plan-execute framework and knows nothing about `case` or other domain concepts. Keep domain concepts out of it.
-- Root cause of the "close reported but not applied" bug: `threadcase`'s `buildToolResolver` wires only read-only Knowledge and never connects the casewriter tool set. Casewriter tools: `case__update_case_status` (thread-mode) / `case__close_case` (channel-mode) / `case__update_case`. `ToolSetResolver` currently exposes only read-only sets like `core_ro` / `slack_ro`.
-- Known design flaw: `planexec` termination is an implicit fallback at `plan.go:70-73` ("Tasks and Question both empty → done"). An explicit terminal action is the decided direction.
+
+## How the split is wired (implemented)
+- The status-change tool is exposed to sub-agents through the `case_status_write` toolset (`agent.ToolSetResolver`), built from `casewriter.NewStatusTool` (which returns ONLY `case__update_case_status` / `case__close_case`, never `case__update_case`). `threadcase.buildToolResolver` wires it for `ModeMention` turns (with `AllowSubAgentWrites=true` and `KnownToolSetIDsThreadWrite`); create turns stay read-only. So "close" is a sub-agent tool call inside the loop, never a host-applied decision. (The original bug was that `buildToolResolver` only wired read-only tools, so the planner routed close through a host `Decision` path that swallowed failures.)
+- **Termination is an explicit `finalize` action** on a replan round (`ReplanResult.Finalize`). A replan must set exactly one of `tasks` / `question` / `finalize`; none is rejected and re-planned. The old implicit "empty tasks → done" is gone.
+- **Final output is type-safe.** `planexec.Run[T Validatable]` decodes the terminal JSON, calls `T.Validate()`, and regenerates on failure (bounded by `finalOutputMaxRetry`). `RunText` / `ResumeText` are the plain-text variants. The old `RunRequest.OnFinalize` / `FinalOutputSchema` commit hooks are removed; `threadcase` materialize/create is applied by the host from the returned `*T` (no in-loop commit-retry). `Runner.Run` / `Runner.Resume` methods no longer exist — use the package functions.
 
 ## Where things live
 - `.cckiro` and `.spec` are gitignored (not tracked). Put durable design docs in `docs/develop/` (next to `architecture.md`).

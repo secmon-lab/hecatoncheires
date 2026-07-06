@@ -150,13 +150,35 @@ func TestParseReplanResult_ContinueTasks(t *testing.T) {
 	gt.Value(t, r.Question).Nil()
 }
 
-func TestParseReplanResult_Terminate(t *testing.T) {
-	// Tasks empty + Question nil → loop should exit.
-	raw := []byte(`{"message":"done"}`)
+func TestParseReplanResult_Finalize(t *testing.T) {
+	// An explicit finalize is the ONLY way to terminate; it carries an optional
+	// reason and leaves tasks / question empty.
+	raw := []byte(`{"message":"done","finalize":{"reason":"goal met"}}`)
 	r, err := planexec.ParseReplanResultForTest(raw, knownTools, false)
 	gt.NoError(t, err).Required()
 	gt.Array(t, r.Tasks).Length(0)
 	gt.Value(t, r.Question).Nil()
+	gt.Value(t, r.Finalize).NotNil().Required()
+	gt.String(t, r.Finalize.Reason).Equal("goal met")
+}
+
+func TestParseReplanResult_NoActionRejected(t *testing.T) {
+	// The old implicit "empty tasks + no question = terminate" is gone: an
+	// output that sets none of tasks / question / finalize is rejected so the
+	// caller folds it back into another replan round.
+	raw := []byte(`{"message":"done"}`)
+	_, err := planexec.ParseReplanResultForTest(raw, knownTools, false)
+	gt.Error(t, err)
+}
+
+func TestParseReplanResult_MultipleActionsRejected(t *testing.T) {
+	// Setting more than one action is ambiguous and rejected.
+	raw := []byte(`{
+		"tasks":[{"id":"t-1","title":"a","description":"d","acceptance_criteria":"a","tools":["slack_ro"]}],
+		"finalize":{"reason":"done"}
+	}`)
+	_, err := planexec.ParseReplanResultForTest(raw, knownTools, true)
+	gt.Error(t, err)
 }
 
 func TestParseReplanResult_QuestionAllowed(t *testing.T) {
@@ -180,9 +202,9 @@ func TestParseReplanResult_QuestionRejectedWhenDisabled(t *testing.T) {
 	gt.Error(t, err)
 }
 
-func TestParseReplanResult_QuestionPriorityOverTasks(t *testing.T) {
-	// Even if Tasks is set alongside Question, the parser should drop
-	// Tasks because Question is the priority signal.
+func TestParseReplanResult_QuestionAndTasksRejected(t *testing.T) {
+	// Question set alongside Tasks is two actions → rejected as ambiguous
+	// (the old behaviour silently dropped Tasks; now the planner must pick one).
 	raw := []byte(`{
 		"question":{
 			"reason":"x",
@@ -190,10 +212,8 @@ func TestParseReplanResult_QuestionPriorityOverTasks(t *testing.T) {
 		},
 		"tasks":[{"id":"t-1","title":"a","description":"d","acceptance_criteria":"a","tools":["slack_ro"]}]
 	}`)
-	r, err := planexec.ParseReplanResultForTest(raw, knownTools, true)
-	gt.NoError(t, err).Required()
-	gt.Value(t, r.Question).NotNil()
-	gt.Array(t, r.Tasks).Length(0)
+	_, err := planexec.ParseReplanResultForTest(raw, knownTools, true)
+	gt.Error(t, err)
 }
 
 func TestParseReplanResult_FreeTextNoOptions(t *testing.T) {

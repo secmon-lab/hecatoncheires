@@ -73,9 +73,9 @@ type Handler interface {
 	// Question posts a question to the user. Returning an error aborts the turn.
 	Question(ctx context.Context, ssn *model.Session, q QuestionPayload) error
 	// Create persists a new case for the ModeCreate flow and returns it. It is
-	// invoked from inside the planner loop (planexec OnFinalize): returning an
-	// error makes the runtime fold the failure back into the next planner
-	// round so the planner can investigate / ask / re-emit. Only called in
+	// invoked by the host AFTER the planexec loop finalizes, with the validated
+	// structured output (Run[CreateDecision]). A returned error fails the turn
+	// (surfaced by the host); there is no in-loop re-plan retry. Only called in
 	// ModeCreate turns.
 	Create(ctx context.Context, ssn *model.Session, p CreatePayload) (*model.Case, error)
 }

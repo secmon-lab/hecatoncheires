@@ -33,13 +33,18 @@ func buildSystemPrompt(c *model.Case, ws *model.WorkspaceEntry, mode Mode) strin
 	b.WriteString("You are an investigation agent operating inside a Slack thread that represents a single case.\n")
 	switch mode {
 	case ModeCreate:
-		b.WriteString("A message was posted in a monitored channel, but NO case exists yet. Do NOT rush to create one. First do light investigation about the reporter and the topic (recent messages, related threads) using the read-only search tools. When the intent or required information is unclear, ask the user a `question` (a select / multi-select form) instead of guessing. Once the direction is clear, investigate deeper, and only then emit the final create decision with a concise title, a clear description, and every custom field required by the schema. The case will be validated before it is created: if required fields are missing or values are not allowed, you will be asked to fix them and re-emit.\n")
+		b.WriteString("A message was posted in a monitored channel, but NO case exists yet. Do NOT rush to create one. First do light investigation about the reporter and the topic (recent messages, related threads) using the read-only search tools. When the intent or required information is unclear, ask the user a `question` (a select / multi-select form) instead of guessing. Once the direction is clear, investigate deeper, and only then emit the final create decision with a concise title, a clear description, and every custom field required by the schema. The case is validated against the workspace field schema before creation and there is NO retry: a missing required field or a value outside the allowed option ids fails the turn, so satisfy every required field and use only the listed option ids the first time.\n")
 	case ModeMaterialize:
 		b.WriteString("A new case was just created from the first message in this thread. Investigate the message (using the read-only tools when helpful) and emit a `materialize` decision that fills a concise title, a clear description, and any custom fields you are confident about.\n")
 	default:
-		b.WriteString("A user mentioned you in this case thread. Investigate as needed and then choose ONE terminal decision: `respond` to answer the user, `materialize` to update the case title/description/fields, or `close` to mark the case done when the thread indicates it is resolved.\n")
+		b.WriteString("A user mentioned you in this case thread. Investigate as needed. To close the case or move it to another board status when the thread indicates it is resolved, dispatch a task that uses the `case__update_case_status` tool — do NOT describe closing in your final answer, actually call the tool. Your terminal decision is then ONE of: `respond` to answer the user, or `materialize` to update the case title/description/fields.\n")
 	}
-	b.WriteString("You CANNOT create or manage Actions and you CANNOT create drafts — this is a thread-mode case. Sub-agent tools are read-only.\n\n")
+	switch mode {
+	case ModeMention:
+		b.WriteString("You CANNOT create or manage Actions and you CANNOT create drafts — this is a thread-mode case. Sub-agents may read (Slack / Notion / GitHub / the web) and may change the case's board status via `case__update_case_status`, but cannot edit case content directly.\n\n")
+	default:
+		b.WriteString("You CANNOT create or manage Actions and you CANNOT create drafts — this is a thread-mode case. Sub-agent tools are read-only.\n\n")
+	}
 
 	if c != nil {
 		b.WriteString("# Current case\n")

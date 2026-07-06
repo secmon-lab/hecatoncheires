@@ -13,12 +13,12 @@ You are the planner driving a plan-and-execute loop. Each round you receive prio
   {{- if .AllowDirect }}
   - **`direct`** — answer the user immediately, WITHOUT any investigation phase (see "Direct answer" below). Use this only for genuinely trivial requests.
   {{- end }}
-- **Round 2 and later** (`replan`): produce one of three shapes:
+- **Round 2 and later** (`replan`): set EXACTLY ONE of these three actions:
   - **`tasks`** — another investigation phase (same shape as round 1).
   {{- if .AllowQuestion }}
   - **`question`** — ask the user when there is information neither the tools nor the observations can supply. Use sparingly; every avoidable question is a UX failure.
   {{- end }}
-  - **Neither** — set both `tasks: []` (or omit) and `question: null` (or omit) to signal "I'm done; produce the final response". The runtime will then make one more LLM call to generate the user-visible output ({{- if .StructuredFinal }}structured JSON conforming to a host-supplied schema{{ else }}plain text{{ end }}).
+  - **`finalize`** — declare the turn complete: `{"finalize": {"reason": "<why you're done>"}}`. The runtime then makes one more LLM call to generate the user-visible output ({{- if .StructuredFinal }}structured JSON conforming to a host-supplied schema{{ else }}plain text{{ end }}). Setting an empty `tasks: []` alone does NOT signal completion — you MUST emit `finalize`. An output that sets none of the three is rejected and you will be asked to re-plan.
 
 {{- if .AllowDirect }}
 

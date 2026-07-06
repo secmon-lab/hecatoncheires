@@ -1,24 +1,26 @@
 package threadcase
 
 import (
-	"encoding/json"
+	"strings"
 
-	"github.com/gollem-dev/gollem"
 	"github.com/m-mizutani/goerr/v2"
 )
 
-// DecisionKind discriminates the terminal action the planner chose for a
-// thread-mode turn. It is the `kind` field of the final structured output.
+// DecisionKind discriminates the terminal action a mention turn resolves to.
+// It is the `kind` field of the structured final output (Run[Decision]).
+//
+// Closing / transitioning the case is NOT a Decision kind: that is a side
+// effect the sub-agent performs during investigation via the
+// case__update_case_status tool. The terminal Decision only covers the two
+// host-applied outcomes — reply to the user, or materialize case content.
 type DecisionKind string
 
 const (
 	// DecisionRespond posts Message as a reply in the case thread.
 	DecisionRespond DecisionKind = "respond"
-	// DecisionMaterialize writes Title / Description / Fields onto the Case.
+	// DecisionMaterialize writes Title / Description / Fields onto the Case
+	// (the host applies it via CaseUC.MaterializeThreadCase).
 	DecisionMaterialize DecisionKind = "materialize"
-	// DecisionClose transitions the Case board status to CloseStatus
-	// (a closed status id) and, via lifecycle sync, closes the Case.
-	DecisionClose DecisionKind = "close"
 )
 
 // DecisionField is one custom-field assignment emitted by a materialize
@@ -26,85 +28,42 @@ const (
 // select); Values carries the multi-select form. The host maps field_id to
 // the workspace field schema to build the typed FieldValue.
 type DecisionField struct {
-	FieldID string   `json:"field_id"`
-	Value   string   `json:"value,omitempty"`
-	Values  []string `json:"values,omitempty"`
+	FieldID string   `json:"field_id" description:"The field id from the workspace schema." required:"true"`
+	Value   string   `json:"value,omitempty" description:"Scalar value (text / number / url / single select option id)."`
+	Values  []string `json:"values,omitempty" description:"Multi-select option ids."`
 }
 
-// Decision is the parsed final structured output of a thread-mode turn.
+// Decision is the structured final output of a mention turn (Run[Decision]).
+// The schema handed to the planner is derived from these struct tags via
+// gollem.ToSchema; Validate enforces the per-kind invariants the schema cannot
+// (a plain JSON schema cannot say "materialize requires title + description").
 type Decision struct {
-	Kind        DecisionKind    `json:"kind"`
-	Message     string          `json:"message,omitempty"`
-	Title       string          `json:"title,omitempty"`
-	Description string          `json:"description,omitempty"`
-	Fields      []DecisionField `json:"fields,omitempty"`
-	CloseStatus string          `json:"close_status,omitempty"`
+	Kind        DecisionKind    `json:"kind" description:"The terminal action: respond (post a reply) or materialize (fill the case title/description/fields). To close or change the case status, do NOT use a decision — call the case__update_case_status tool during investigation instead." enum:"respond,materialize" required:"true"`
+	Message     string          `json:"message,omitempty" description:"For respond: the reply text shown to the user. Omit for materialize."`
+	Title       string          `json:"title,omitempty" description:"For materialize: a concise case title summarising the thread."`
+	Description string          `json:"description,omitempty" description:"For materialize: a clear case description derived from the thread."`
+	Fields      []DecisionField `json:"fields,omitempty" description:"For materialize: custom field assignments. Only include fields you are confident about."`
 }
 
-// decisionSchema is the gollem response schema for the final-response phase.
-// The planner emits exactly one of the three kinds; the other fields are
-// populated according to the chosen kind.
-func decisionSchema() *gollem.Parameter {
-	return &gollem.Parameter{
-		Type:        gollem.TypeObject,
-		Description: "Terminal decision for this thread-mode turn.",
-		Properties: map[string]*gollem.Parameter{
-			"kind": {
-				Type:        gollem.TypeString,
-				Description: "The terminal action: respond (post a reply), materialize (fill the case fields), or close (mark the case done).",
-				Enum: []string{
-					string(DecisionRespond),
-					string(DecisionMaterialize),
-					string(DecisionClose),
-				},
-				Required: true,
-			},
-			"message": {
-				Type:        gollem.TypeString,
-				Description: "For respond: the reply text shown to the user. For close: a short closing note. Omit for materialize.",
-			},
-			"title": {
-				Type:        gollem.TypeString,
-				Description: "For materialize: a concise case title summarising the thread.",
-			},
-			"description": {
-				Type:        gollem.TypeString,
-				Description: "For materialize: a clear case description derived from the thread.",
-			},
-			"fields": {
-				Type:        gollem.TypeArray,
-				Description: "For materialize: custom field assignments. Only include fields you are confident about.",
-				Items: &gollem.Parameter{
-					Type: gollem.TypeObject,
-					Properties: map[string]*gollem.Parameter{
-						"field_id": {Type: gollem.TypeString, Description: "The field id from the workspace schema.", Required: true},
-						"value":    {Type: gollem.TypeString, Description: "Scalar value (text / number / url / single select option id)."},
-						"values":   {Type: gollem.TypeArray, Description: "Multi-select option ids.", Items: &gollem.Parameter{Type: gollem.TypeString}},
-					},
-				},
-			},
-			"close_status": {
-				Type:        gollem.TypeString,
-				Description: "For close: the closed status id to transition the case to.",
-			},
-		},
-	}
-}
-
-// parseDecision unmarshals the final structured output into a Decision and
-// validates the kind.
-func parseDecision(raw []byte) (*Decision, error) {
-	if len(raw) == 0 {
-		return nil, goerr.New("empty decision payload")
-	}
-	var d Decision
-	if err := json.Unmarshal(raw, &d); err != nil {
-		return nil, goerr.Wrap(err, "decode thread-case decision", goerr.V("raw_len", len(raw)))
-	}
+// Validate enforces the mention decision's per-kind invariants so a malformed
+// terminal output is rejected inside planexec's Run[Decision] regeneration loop
+// rather than producing an empty reply or a blank materialize. It satisfies
+// planexec.Validatable.
+func (d Decision) Validate() error {
 	switch d.Kind {
-	case DecisionRespond, DecisionMaterialize, DecisionClose:
-		return &d, nil
+	case DecisionRespond:
+		if strings.TrimSpace(d.Message) == "" {
+			return goerr.New("respond decision requires a non-empty message")
+		}
+	case DecisionMaterialize:
+		if strings.TrimSpace(d.Title) == "" {
+			return goerr.New("materialize decision requires a non-empty title")
+		}
+		if strings.TrimSpace(d.Description) == "" {
+			return goerr.New("materialize decision requires a non-empty description")
+		}
 	default:
-		return nil, goerr.New("unknown thread-case decision kind", goerr.V("kind", string(d.Kind)))
+		return goerr.New("unknown thread-case decision kind", goerr.V("kind", string(d.Kind)))
 	}
+	return nil
 }
