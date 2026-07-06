@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/gollem-dev/gollem/mock"
 	"github.com/m-mizutani/gt"
 
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
@@ -58,7 +60,7 @@ type hostStub struct {
 	questions  []threadcase.QuestionPayload
 	creates    []threadcase.CreatePayload
 	// createErr, when set, is returned by Create for the first n calls to
-	// exercise the OnFinalize re-plan path; createErrRemaining decrements.
+	// exercise the persistence-failure path; createErrRemaining decrements.
 	createErr          error
 	createErrRemaining int
 }
@@ -170,7 +172,49 @@ func newThreadCase() *model.Case {
 // toolset; the read-only Slack toolset stands in.
 const investigatePlan = `{"message":"investigate the thread","tasks":[{"id":"t-1","title":"Review thread","description":"Review the message","acceptance_criteria":"reviewed","tools":["slack_ro"]}]}`
 
-const replanDone = `{"message":"enough context","tasks":[]}`
+// replanDone terminates the loop. Under the explicit-finalize design an empty
+// tasks list no longer signals completion; the planner must emit `finalize`.
+const replanDone = `{"message":"enough context","finalize":{"reason":"goal met"}}`
+
+// recordingCaseMutator is a casewriter.CaseMutator that records status changes
+// so the close test can prove the sub-agent's case__update_case_status tool call
+// actually reached the case usecase (the whole point of the responsibility
+// split: close is a sub-agent tool side effect, not a host-applied decision).
+type recordingCaseMutator struct {
+	mu          sync.Mutex
+	statusCalls []string
+}
+
+func (m *recordingCaseMutator) UpdateCase(_ context.Context, _ string, _ int64, _ casewriter.CaseUpdate) (*model.Case, error) {
+	return &model.Case{}, nil
+}
+
+func (m *recordingCaseMutator) UpdateCaseStatus(_ context.Context, _ string, _ int64, boardStatus string) (*model.Case, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.statusCalls = append(m.statusCalls, boardStatus)
+	return &model.Case{ID: 42, Status: types.CaseStatusClosed, BoardStatus: boardStatus}, nil
+}
+
+func (m *recordingCaseMutator) CloseCase(_ context.Context, _ string, _ int64) (*model.Case, error) {
+	return &model.Case{}, nil
+}
+
+func (m *recordingCaseMutator) AssignCase(_ context.Context, _ string, _ int64, _ []string) (*model.Case, error) {
+	return &model.Case{}, nil
+}
+
+func (m *recordingCaseMutator) UnassignCase(_ context.Context, _ string, _ int64, _ []string) (*model.Case, error) {
+	return &model.Case{}, nil
+}
+
+func (m *recordingCaseMutator) recordedStatuses() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]string, len(m.statusCalls))
+	copy(out, m.statusCalls)
+	return out
+}
 
 func TestRunTurn_MentionRespond(t *testing.T) {
 	ctx := context.Background()
@@ -438,15 +482,45 @@ func TestRunTurn_Materialize(t *testing.T) {
 	gt.Value(t, res.Decision.Fields[0].Value).Equal("high")
 }
 
-func TestRunTurn_Close(t *testing.T) {
+// TestRunTurn_MentionClose is the regression test for the original bug: a
+// mention that asks to close the case must actually close it. Under the fixed
+// design, closing is NOT a terminal decision — the sub-agent performs it via the
+// case__update_case_status tool during investigation, and the terminal decision
+// is a plain respond. The turn is driven by a call-counted mock so the sub-agent
+// can issue a real tool call.
+func TestRunTurn_MentionClose(t *testing.T) {
 	ctx := context.Background()
-	llm := newScriptedLLM([]string{
-		investigatePlan,
-		"The thread says the issue is resolved.",
-		replanDone,
-		`{"kind":"close","message":"Resolved per the thread.","close_status":"DONE"}`,
-	})
-	uc, _ := newThreadcaseUC(t, llm)
+	round := atomic.Int32{}
+	llm := &mock.LLMClientMock{
+		NewSessionFunc: func(_ context.Context, _ ...gollem.SessionOption) (gollem.Session, error) {
+			return &mock.SessionMock{
+				GenerateFunc: func(_ context.Context, _ []gollem.Input, _ ...gollem.GenerateOption) (*gollem.Response, error) {
+					switch round.Add(1) {
+					case 1: // planner round 1: dispatch a close task using the status tool
+						return &gollem.Response{Texts: []string{`{"message":"close the case","tasks":[
+							{"id":"t-1","title":"Close","description":"Close the case as resolved","acceptance_criteria":"case status is DONE","tools":["case_status_write"]}
+						]}`}}, nil
+					case 2: // sub-agent: call case__update_case_status
+						return &gollem.Response{FunctionCalls: []*gollem.FunctionCall{{
+							ID:        "call-1",
+							Name:      "case__update_case_status",
+							Arguments: map[string]any{"status": "DONE"},
+						}}}, nil
+					case 3: // sub-agent: report after the tool result comes back
+						return &gollem.Response{Texts: []string{"Moved the case to DONE."}}, nil
+					case 4: // replan: finalize
+						return &gollem.Response{Texts: []string{replanDone}}, nil
+					default: // final respond decision
+						return &gollem.Response{Texts: []string{`{"kind":"respond","message":"Closed the case as resolved."}`}}, nil
+					}
+				},
+			}, nil
+		},
+	}
+
+	uc, deps := newThreadcaseUC(t, llm)
+	mutator := &recordingCaseMutator{}
+	deps.CaseUC = mutator // wire the case mutator so the status tool is built
 	host := &hostStub{}
 
 	res, err := uc.RunTurn(ctx, threadcase.TurnRequest{
@@ -465,8 +539,10 @@ func TestRunTurn_Close(t *testing.T) {
 	gt.NoError(t, err).Required()
 	gt.Value(t, res.Status).Equal(threadcase.StatusCompleted)
 	gt.Value(t, res.Decision).NotNil().Required()
-	gt.Value(t, res.Decision.Kind).Equal(threadcase.DecisionClose)
-	gt.Value(t, res.Decision.CloseStatus).Equal("DONE")
+	gt.Value(t, res.Decision.Kind).Equal(threadcase.DecisionRespond)
+	// The close actually happened: the sub-agent's tool call reached the case
+	// usecase with the DONE board status.
+	gt.Array(t, mutator.recordedStatuses()).Equal([]string{"DONE"})
 }
 
 func TestRunTurn_Question(t *testing.T) {
@@ -599,13 +675,15 @@ func TestBuildSystemPrompt_CreateMode_WorkspacePrompt(t *testing.T) {
 	gt.Bool(t, strings.Contains(bare, "Workspace-specific instructions")).False()
 }
 
-func TestParseDecision_RejectsUnknownKind(t *testing.T) {
-	_, err := threadcase.ParseDecisionForTest([]byte(`{"kind":"explode"}`))
-	gt.Error(t, err)
-
-	d, err := threadcase.ParseDecisionForTest([]byte(`{"kind":"respond","message":"hi"}`))
-	gt.NoError(t, err).Required()
-	gt.Value(t, d.Kind).Equal(threadcase.DecisionRespond)
+func TestDecision_Validate(t *testing.T) {
+	// Unknown kind is rejected.
+	gt.Error(t, threadcase.Decision{Kind: "explode"}.Validate())
+	// respond requires a non-empty message.
+	gt.Error(t, threadcase.Decision{Kind: threadcase.DecisionRespond}.Validate())
+	gt.NoError(t, threadcase.Decision{Kind: threadcase.DecisionRespond, Message: "hi"}.Validate())
+	// materialize requires both title and description.
+	gt.Error(t, threadcase.Decision{Kind: threadcase.DecisionMaterialize, Title: "t"}.Validate())
+	gt.NoError(t, threadcase.Decision{Kind: threadcase.DecisionMaterialize, Title: "t", Description: "d"}.Validate())
 }
 
 func TestBuildUserInput_FallsBackWhenEmpty(t *testing.T) {
@@ -675,23 +753,24 @@ func TestRunTurn_Create_Success(t *testing.T) {
 	gt.Value(t, host.creates[0].Fields["severity"].Value).Equal("high")
 }
 
-// ModeCreate: the first create decision uses a disallowed option, so OnFinalize
-// rejects it and the planner re-emits a valid decision. Handler.Create is only
-// called once (for the valid decision).
-func TestRunTurn_Create_ValidationRetry(t *testing.T) {
+// ModeCreate: the create decision uses a disallowed option and omits a required
+// field. Shape validation (CreateDecision.Validate — title/description present)
+// passes, so the type-safe layer does not regenerate; the workspace-schema
+// validation the host applies before committing fails, and the turn errors
+// WITHOUT retrying (the host-retry / OnFinalize re-plan loop was removed). The
+// case is never created.
+func TestRunTurn_Create_InvalidFieldsFails(t *testing.T) {
 	ctx := context.Background()
 	llm := newScriptedLLM([]string{
 		investigatePlan,
 		"The reporter cannot log in.",
 		replanDone,
-		`{"title":"Login failure","description":"d","fields":[{"field_id":"severity","value":"critical"}]}`, // invalid option + missing summary
-		replanDone,
-		validCreateDecision,
+		`{"title":"Login failure","description":"d","fields":[{"field_id":"severity","value":"critical"}]}`, // invalid option + missing required summary
 	})
 	uc, _ := newThreadcaseUC(t, llm)
 	host := &hostStub{}
 
-	res, err := uc.RunTurn(ctx, threadcase.TurnRequest{
+	_, err := uc.RunTurn(ctx, threadcase.TurnRequest{
 		Session:        createTestSession(),
 		Workspace:      createTestWorkspace(),
 		ChannelID:      "C-MONITOR",
@@ -702,29 +781,27 @@ func TestRunTurn_Create_ValidationRetry(t *testing.T) {
 		Handler:        host,
 	})
 	async.Wait()
-	gt.NoError(t, err).Required()
-	gt.Value(t, res.Status).Equal(threadcase.StatusCompleted)
-	gt.Value(t, res.Case).NotNil().Required()
-	// Create called once: the invalid decision was rejected before Create.
-	gt.Array(t, host.creates).Length(1).Required()
+	// The turn fails on workspace-schema validation and is surfaced; the case is
+	// never committed.
+	gt.Error(t, err)
+	gt.Array(t, host.creates).Length(0)
 }
 
-// ModeCreate: validation passes but Handler.Create (persistence) fails the
-// first time; the planner re-emits and the second Create succeeds.
-func TestRunTurn_Create_GenerationRetry(t *testing.T) {
+// ModeCreate: validation passes but Handler.Create (persistence) fails. There is
+// no re-plan loop anymore, so the failure is surfaced immediately after a single
+// attempt.
+func TestRunTurn_Create_PersistenceFails(t *testing.T) {
 	ctx := context.Background()
 	llm := newScriptedLLM([]string{
 		investigatePlan,
 		"The reporter cannot log in.",
-		replanDone,
-		validCreateDecision,
 		replanDone,
 		validCreateDecision,
 	})
 	uc, _ := newThreadcaseUC(t, llm)
 	host := &hostStub{createErr: errors.New("write conflict"), createErrRemaining: 1}
 
-	res, err := uc.RunTurn(ctx, threadcase.TurnRequest{
+	_, err := uc.RunTurn(ctx, threadcase.TurnRequest{
 		Session:        createTestSession(),
 		Workspace:      createTestWorkspace(),
 		ChannelID:      "C-MONITOR",
@@ -735,9 +812,7 @@ func TestRunTurn_Create_GenerationRetry(t *testing.T) {
 		Handler:        host,
 	})
 	async.Wait()
-	gt.NoError(t, err).Required()
-	gt.Value(t, res.Status).Equal(threadcase.StatusCompleted)
-	gt.Value(t, res.Case).NotNil().Required()
-	// Create attempted twice: first failed (persistence), second succeeded.
-	gt.Array(t, host.creates).Length(2).Required()
+	gt.Error(t, err)
+	// Create attempted exactly once: no retry.
+	gt.Array(t, host.creates).Length(1).Required()
 }

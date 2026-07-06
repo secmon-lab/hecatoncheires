@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"github.com/gollem-dev/gollem"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
 	knowledgetool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/knowledge"
@@ -21,6 +22,13 @@ const (
 	ToolSetNotion   = "notion"
 	ToolSetGitHub   = "github"
 	ToolSetWebFetch = "webfetch"
+	// ToolSetCaseStatusWrite is the writer toolset carrying ONLY the case
+	// status-change tool (case__update_case_status / case__close_case). It is
+	// the one write capability a thread-mode sub-agent is granted: closing /
+	// transitioning the case it investigates. Content materialization
+	// (title / description / fields) stays with the host, so case__update_case
+	// is deliberately NOT part of this set.
+	ToolSetCaseStatusWrite = "case_status_write"
 )
 
 // KnownToolSetIDs is the canonical list of identifiers a planner is allowed
@@ -45,6 +53,16 @@ var KnownToolSetIDsNoCore = []string{
 	ToolSetWebFetch,
 }
 
+// KnownToolSetIDsThreadWrite is KnownToolSetIDsNoCore plus the case
+// status-change writer toolset. Thread-mode agents advertise this to the
+// planner ONLY when a concrete case exists to act on (mention / materialize
+// turns): the sub-agent may then close / transition that case via
+// case__update_case_status. Creation turns (no case yet) advertise the plain
+// KnownToolSetIDsNoCore instead, so the planner is never offered a writer tool
+// the resolver cannot wire — the prompt-vs-capability mismatch the architecture
+// rule forbids.
+var KnownToolSetIDsThreadWrite = append(append([]string{}, KnownToolSetIDsNoCore...), ToolSetCaseStatusWrite)
+
 // IsKnownToolSetID reports whether id is a member of KnownToolSetIDs.
 func IsKnownToolSetID(id string) bool {
 	return slices.Contains(KnownToolSetIDs, id)
@@ -60,6 +78,12 @@ type ToolSetResolver struct {
 	notion   []gollem.Tool
 	github   []gollem.Tool
 	webfetch []gollem.Tool
+	// caseStatus is the case status-change writer tool set (case_status_write).
+	// Unlike knowledge it is NOT always included: a sub-agent gets it only when
+	// the planner requested ToolSetCaseStatusWrite for that task. Empty unless
+	// ToolSetDeps.CaseStatus.StatusSet is set (a thread-mode case with a board
+	// status set).
+	caseStatus []gollem.Tool
 	// knowledge is the read-only workspace knowledge tool set. It is always
 	// included in every Resolve result (not gated by a planner-requested ID):
 	// investigation sub-agents may always consult shared knowledge, but never
@@ -77,6 +101,13 @@ type ToolSetDeps struct {
 	GitHub    *githubtool.Client
 	WebFetch  *webfetch.Client
 	Knowledge knowledgetool.Deps
+
+	// CaseStatus backs the case_status_write toolset (the status-change tool
+	// only). The status tool is built when CaseStatus.StatusSet is non-nil
+	// (a thread-mode case carrying a board status set); a nil StatusSet leaves
+	// the toolset empty so requesting the ID resolves to nothing. CaseUC /
+	// WorkspaceID / CaseID identify the case the sub-agent may transition.
+	CaseStatus casewriter.Deps
 
 	// OmitCore omits the core (action) toolset entirely. Set by thread-mode
 	// agents: a thread-mode workspace manages no Actions, so even the
@@ -99,13 +130,21 @@ func NewToolSetResolver(d ToolSetDeps) *ToolSetResolver {
 	if d.Knowledge.Accessor != nil {
 		knowledge = knowledgetool.NewReadOnly(d.Knowledge)
 	}
+	// The status-change tool needs both a mutator and a board status set; a nil
+	// StatusSet (non-thread-mode, or a create turn with no case yet) leaves the
+	// set empty so a stray case_status_write request resolves to nothing.
+	var caseStatus []gollem.Tool
+	if d.CaseStatus.StatusSet != nil && d.CaseStatus.CaseUC != nil {
+		caseStatus = casewriter.NewStatusTool(d.CaseStatus)
+	}
 	return &ToolSetResolver{
-		core:      coreTools,
-		slack:     slacktool.NewReadOnly(d.Slack),
-		notion:    notiontool.New(d.Notion),
-		github:    githubtool.New(d.GitHub),
-		webfetch:  webfetch.New(d.WebFetch),
-		knowledge: knowledge,
+		core:       coreTools,
+		slack:      slacktool.NewReadOnly(d.Slack),
+		notion:     notiontool.New(d.Notion),
+		github:     githubtool.New(d.GitHub),
+		webfetch:   webfetch.New(d.WebFetch),
+		caseStatus: caseStatus,
+		knowledge:  knowledge,
 	}
 }
 
@@ -140,6 +179,8 @@ func (r *ToolSetResolver) Resolve(ids []string) []gollem.Tool {
 			total += len(r.github)
 		case ToolSetWebFetch:
 			total += len(r.webfetch)
+		case ToolSetCaseStatusWrite:
+			total += len(r.caseStatus)
 		}
 	}
 	out := make([]gollem.Tool, 0, total)
@@ -156,6 +197,8 @@ func (r *ToolSetResolver) Resolve(ids []string) []gollem.Tool {
 			out = append(out, r.github...)
 		case ToolSetWebFetch:
 			out = append(out, r.webfetch...)
+		case ToolSetCaseStatusWrite:
+			out = append(out, r.caseStatus...)
 		}
 	}
 	return out

@@ -51,7 +51,7 @@ const (
 	// Thread-mode workspaces manage no Actions; the planner is offered no core
 	// (action) toolset, so the read-only Slack toolset stands in here.
 	planJSON        = `{"message":"go","tasks":[{"id":"t1","title":"look","description":"investigate","acceptance_criteria":"done","tools":["slack_ro"]}]}`
-	replanDoneJSON  = `{"message":"done","tasks":[]}`
+	replanDoneJSON  = `{"message":"done","finalize":{"reason":"goal met"}}`
 	subAgentSummary = "summary: portal 503 login failure, severity high."
 	materializeJSON = `{"kind":"materialize","title":"Portal login 503","description":"503 on login.","fields":[{"field_id":"severity","value":"high"}]}`
 	bothPassVerdict = `{"verdicts":[{"id":"title-identifies-login-failure","passed":true,"reason":"title names a portal login failure"},{"id":"severity-high","passed":true,"reason":"severity is high"}]}`

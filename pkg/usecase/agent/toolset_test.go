@@ -8,12 +8,44 @@ import (
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/mock"
 	"github.com/m-mizutani/gt"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
 	notiontool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/notion"
 	slacktool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/slack"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/webfetch"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
 )
+
+// stubCaseMutator is a no-op casewriter.CaseMutator: the toolset tests only
+// assert which tools the resolver builds, never invoke them.
+type stubCaseMutator struct{}
+
+func (stubCaseMutator) UpdateCase(context.Context, string, int64, casewriter.CaseUpdate) (*model.Case, error) {
+	return &model.Case{}, nil
+}
+func (stubCaseMutator) UpdateCaseStatus(context.Context, string, int64, string) (*model.Case, error) {
+	return &model.Case{}, nil
+}
+func (stubCaseMutator) CloseCase(context.Context, string, int64) (*model.Case, error) {
+	return &model.Case{}, nil
+}
+func (stubCaseMutator) AssignCase(context.Context, string, int64, []string) (*model.Case, error) {
+	return &model.Case{}, nil
+}
+func (stubCaseMutator) UnassignCase(context.Context, string, int64, []string) (*model.Case, error) {
+	return &model.Case{}, nil
+}
+
+func testStatusSet(t *testing.T) *model.ActionStatusSet {
+	t.Helper()
+	set, err := model.NewActionStatusSet("open", []string{"closed"}, []model.ActionStatusDefinition{
+		{ID: "open", Name: "Open"},
+		{ID: "closed", Name: "Closed"},
+	})
+	gt.NoError(t, err).Required()
+	return set
+}
 
 func TestIsKnownToolSetID(t *testing.T) {
 	t.Run("known IDs return true", func(t *testing.T) {
@@ -124,4 +156,51 @@ func TestToolSetResolver_ResolveWebFetch(t *testing.T) {
 		r := agent.NewToolSetResolver(agent.ToolSetDeps{WebFetch: nil})
 		gt.Array(t, r.Resolve([]string{agent.ToolSetWebFetch})).Length(0)
 	})
+}
+
+func TestToolSetResolver_CaseStatusWrite(t *testing.T) {
+	t.Run("thread-mode deps resolve to the status-change tool only", func(t *testing.T) {
+		r := agent.NewToolSetResolver(agent.ToolSetDeps{
+			CaseStatus: casewriter.Deps{
+				CaseUC:      stubCaseMutator{},
+				WorkspaceID: "ws",
+				CaseID:      7,
+				StatusSet:   testStatusSet(t),
+			},
+		})
+		tools := r.Resolve([]string{agent.ToolSetCaseStatusWrite})
+		gt.Array(t, tools).Length(1).Required()
+		gt.String(t, tools[0].Spec().Name).Equal("case__update_case_status")
+	})
+
+	t.Run("nil StatusSet builds no status tool (create turn / no case)", func(t *testing.T) {
+		r := agent.NewToolSetResolver(agent.ToolSetDeps{
+			CaseStatus: casewriter.Deps{CaseUC: stubCaseMutator{}, WorkspaceID: "ws"},
+		})
+		gt.Array(t, r.Resolve([]string{agent.ToolSetCaseStatusWrite})).Length(0)
+	})
+
+	t.Run("nil CaseUC builds no status tool", func(t *testing.T) {
+		r := agent.NewToolSetResolver(agent.ToolSetDeps{
+			CaseStatus: casewriter.Deps{WorkspaceID: "ws", StatusSet: testStatusSet(t)},
+		})
+		gt.Array(t, r.Resolve([]string{agent.ToolSetCaseStatusWrite})).Length(0)
+	})
+
+	t.Run("not requested means not included", func(t *testing.T) {
+		r := agent.NewToolSetResolver(agent.ToolSetDeps{
+			CaseStatus: casewriter.Deps{
+				CaseUC:    stubCaseMutator{},
+				StatusSet: testStatusSet(t),
+			},
+		})
+		// Only slack_ro requested (empty) — the status tool must not leak in.
+		gt.Array(t, r.Resolve([]string{agent.ToolSetSlackRO})).Length(0)
+	})
+}
+
+func TestKnownToolSetIDsThreadWrite(t *testing.T) {
+	// It is the no-core list plus exactly the status-write id, in order.
+	want := append(append([]string{}, agent.KnownToolSetIDsNoCore...), agent.ToolSetCaseStatusWrite)
+	gt.Array(t, agent.KnownToolSetIDsThreadWrite).Equal(want)
 }

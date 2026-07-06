@@ -1242,8 +1242,8 @@ func TestLifecycle_InteractiveJobQuestionThenResume(t *testing.T) {
 		observationMarker + " was found in the prod logs.",
 		// Turn 1, replan: ask the user which environment.
 		`{"message":"need input","question":{"reason":"which environment?","items":[{"id":"env","text":"Which environment?","type":"select","options":["prod","stg"]}]}}`,
-		// Turn 2 (resume), replan: terminate.
-		`{"message":"done","tasks":[]}`,
+		// Turn 2 (resume), replan: terminate via explicit finalize.
+		`{"message":"done","finalize":{"reason":"goal met"}}`,
 		// Turn 2: final response.
 		"Concluded: the prod environment was affected.",
 	}}

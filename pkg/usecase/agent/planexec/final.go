@@ -92,6 +92,98 @@ func generateFinalResponse(
 	return combined, nil, nil
 }
 
+// finalOutputMaxRetry bounds how many times generateValidatedFinal re-asks the
+// LLM after a decode / Validate failure before giving up. Mirrors gollem's
+// defaultMaxRetry (3 attempts total). These retries regenerate the final output
+// only; they do NOT re-enter the planner loop (that is what the round budget is
+// for).
+const finalOutputMaxRetry = 2
+
+// generateValidatedFinal produces the structured terminal output for a Run[T]
+// turn. It derives the JSON schema from T (gollem.ToSchema), makes one final
+// LLM call inheriting the planner's system prompt + observation history, decodes
+// the reply into T, and runs T.Validate(). On a decode or Validate failure it
+// feeds the error back and retries (bounded by finalOutputMaxRetry), continuing
+// the same gollem conversation so the model sees its prior attempt. gollem's
+// response-schema check verifies the JSON shape; Validate() is where the host's
+// domain invariants (required fields, allowed values) are enforced — gollem
+// never calls Validate() itself, so planexec layers it here.
+func generateValidatedFinal[T Validatable](
+	ctx context.Context,
+	r *Runner,
+	rc *runContext,
+	language string,
+	historyKey string,
+	allResults []PhaseSummary,
+) (*T, error) {
+	schema, err := gollem.ToSchema(*new(T))
+	if err != nil {
+		return nil, goerr.Wrap(err, "derive final output schema from type")
+	}
+
+	userPrompt, err := renderFinalUserPrompt(finalPromptInput{
+		Observations:    renderObservationsForFinal(allResults),
+		StructuredFinal: true,
+		Language:        language,
+	})
+	if err != nil {
+		return nil, goerr.Wrap(err, "render final user prompt")
+	}
+
+	opts := []gollem.Option{
+		gollem.WithSystemPrompt(rc.systemPrompt),
+		gollem.WithHistoryRepository(r.historyRepo, historyKey),
+		// The final phase is a single user-prompt → model-reply exchange, but
+		// gollem's loop accounting needs one extra slot to detect "no more tool
+		// calls" before terminating. Two is the minimum that lets a structured
+		// output round actually return.
+		gollem.WithLoopLimit(2),
+		gollem.WithContentType(gollem.ContentTypeJSON),
+		gollem.WithResponseSchema(schema),
+	}
+	if rc.traced != nil {
+		opts = append(opts, gollem.WithTrace(rc.traced))
+	}
+	agent := gollem.New(r.llm, opts...)
+
+	input := userPrompt
+	var lastErr error
+	for attempt := 0; attempt <= finalOutputMaxRetry; attempt++ {
+		resp, execErr := agent.Execute(ctx, gollem.Text(input))
+		if execErr != nil {
+			return nil, goerr.Wrap(execErr, "execute final response",
+				goerr.V("attempt", attempt+1))
+		}
+		if resp == nil || resp.IsEmpty() {
+			return nil, goerr.New("final response is empty",
+				goerr.V("attempt", attempt+1))
+		}
+		body := extractJSONObject([]byte(strings.Join(resp.Texts, "\n")))
+
+		var out T
+		if uerr := json.Unmarshal(body, &out); uerr != nil {
+			lastErr = goerr.Wrap(uerr, "decode final output json")
+			input = finalRetryInput(lastErr)
+			continue
+		}
+		if verr := out.Validate(); verr != nil {
+			lastErr = goerr.Wrap(verr, "final output failed validation")
+			input = finalRetryInput(lastErr)
+			continue
+		}
+		return &out, nil
+	}
+	return nil, goerr.Wrap(lastErr, "final output rejected after retries",
+		goerr.V("attempts", finalOutputMaxRetry+1))
+}
+
+// finalRetryInput is the correction message sent to the final-output LLM after
+// a decode / Validate failure.
+func finalRetryInput(cause error) string {
+	return "Your previous final output was rejected: " + cause.Error() +
+		". Please re-emit a JSON object that matches the schema and satisfies every requirement."
+}
+
 // renderFinalUserPrompt executes prompts/final.md.
 func renderFinalUserPrompt(in finalPromptInput) (string, error) {
 	var buf bytes.Buffer

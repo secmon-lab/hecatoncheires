@@ -23,9 +23,9 @@ const plannerPerCallLoopLimit = 8
 // Runner is the reusable plan-and-execute engine. One Runner is wired up
 // at process startup with the shared backend deps (LLM client, history
 // repo, trace repo) and the global budget defaults; per-call inputs
-// (prompts, sink, tool resolver, schema) come in via Runner.Run's
-// RunRequest. Runner is safe for concurrent use across goroutines — it
-// holds no per-call state internally.
+// (prompts, sink, tool resolver, schema) come in via the RunRequest handed
+// to the Run / RunText / ResumeText package functions. Runner is safe for
+// concurrent use across goroutines — it holds no per-call state internally.
 type Runner struct {
 	llm         gollem.LLMClient
 	historyRepo gollem.HistoryRepository
@@ -78,38 +78,23 @@ func NewRunner(deps RunnerDeps) (*Runner, error) {
 	}, nil
 }
 
-// Run drives a single plan-and-execute turn end-to-end. The flow is:
-//
-//  1. Validate the request.
-//  2. Build the planner system prompt (host base + planexec loop rules).
-//  3. Set up a trace.Recorder bound to req.TraceID and req.TraceMetadata.
-//  4. Loop while the planner budget allows:
-//     a. Execute one planner LLM round with the appropriate schema
-//     (planSchema on round 1; replanSchema thereafter).
-//     b. Parse + validate the JSON. On validation failure, surface the
-//     error to errutil.Handle (benign tag) and retry within the same
-//     logical round, charging the next planner call against the
-//     budget.
-//     c. If Question is present (replan rounds only): call OnQuestion;
-//     Terminate=true → exit and return Completed/EndedWithQuestion.
-//     d. If Tasks is empty (replan rounds only): exit the loop and run
-//     the final-response phase.
-//     e. Otherwise: budget-check, executePhase, fold observations into
-//     the next planner-round input, continue.
-//  5. After the loop exits, call generateFinalResponse to produce the
-//     user-visible terminal output (plain text or structured JSON).
-//
-// Errors from the planner / sub-agents / final-response are wrapped
-// with goerr context and surfaced; the caller (host) decides whether
-// to render a fallback message of its choice.
-func (r *Runner) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
-	if err := req.Validate(); err != nil {
-		return nil, goerr.Wrap(err, "validate run request")
-	}
+// runContext bundles the per-turn setup shared by every entry point: the
+// rendered planner prompt, the trace recorder plus the combined trace handler
+// (archive recorder + host handler), and the fresh budget. The returned finish
+// func flushes the recorder and MUST be deferred by the entry point AFTER final
+// output generation, so a structured final LLM call is still captured in the
+// trace (context.WithoutCancel keeps the flush alive when the caller cancelled).
+type runContext struct {
+	systemPrompt string
+	recorder     *trace.Recorder
+	traced       trace.Handler
+	bg           *budget
+}
 
-	systemPrompt, err := buildPlannerSystemPrompt(req)
+func (r *Runner) setup(ctx context.Context, req RunRequest, structuredFinal bool) (*runContext, func(), error) {
+	systemPrompt, err := buildPlannerSystemPrompt(req, structuredFinal)
 	if err != nil {
-		return nil, goerr.Wrap(err, "render planner system prompt")
+		return nil, nil, goerr.Wrap(err, "render planner system prompt")
 	}
 
 	recorder := trace.New(
@@ -118,96 +103,100 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 		trace.WithMetadata(req.TraceMetadata),
 	)
 	// context.WithoutCancel detaches the cleanup from the caller's
-	// cancellation tree so the final trace flush still runs (and can
-	// reach Firestore) when the host already cancelled ctx — e.g. a
-	// heartbeat-driven turn-lock loss or a parent request timeout.
-	// Using ctx directly here means the persisted-trace I/O fails
-	// silently at exactly the moment the trace is most valuable for
-	// debugging.
-	defer func() {
+	// cancellation tree so the final trace flush still runs (and can reach
+	// Firestore) when the host already cancelled ctx — e.g. a heartbeat-driven
+	// turn-lock loss or a parent request timeout. Using ctx directly here means
+	// the persisted-trace I/O fails silently at exactly the moment the trace is
+	// most valuable for debugging.
+	finish := func() {
 		cleanupCtx := context.WithoutCancel(ctx)
 		if err := recorder.Finish(cleanupCtx); err != nil {
 			errutil.Handle(cleanupCtx, err, "planexec: persist agent trace")
 		}
-	}()
+	}
 
 	// traced combines the run's internal archive recorder with the host's
 	// optional per-event handler (req.TraceHandler). Sub-agents combine
-	// req.TraceHandler with their own per-task LLM-call counter instead
-	// (see runPhase), so the archive recorder stays scoped to the planner /
-	// direct / final agents exactly as before. When req.TraceHandler is nil
-	// (the proposal host), combineTrace returns recorder unchanged.
-	traced := combineTrace(recorder, req.TraceHandler)
-
-	bg := newBudget(r.budget)
-	nextInput := bg.formatPrefix() + "\n\n" + req.UserInput
-	return r.runLoop(ctx, req, systemPrompt, recorder, traced, bg, nil, 0, nextInput)
+	// req.TraceHandler with their own per-task LLM-call counter instead (see
+	// runPhase), so the archive recorder stays scoped to the planner / direct /
+	// final agents exactly as before. When req.TraceHandler is nil (the proposal
+	// host), combineTrace returns recorder unchanged.
+	return &runContext{
+		systemPrompt: systemPrompt,
+		recorder:     recorder,
+		traced:       combineTrace(recorder, req.TraceHandler),
+		bg:           newBudget(r.budget),
+	}, finish, nil
 }
 
-// Resume re-enters a suspended turn after the user answered the planner's
-// Question. It mirrors Run's setup (same system prompt, a fresh trace
-// recorder bound to the same TraceID, a fresh budget) but enters the loop
-// at a replan round (logicalRound 1) with the answers folded in as the
-// first input. allResults starts empty: the conversation history keyed by
-// HistoryKey already carries the prior observations, so the planner re-plans
-// with full context without re-executing the completed phases.
-func (r *Runner) Resume(ctx context.Context, req ResumeRequest) (*RunResult, error) {
-	if err := req.Validate(); err != nil {
-		return nil, goerr.Wrap(err, "validate resume request")
-	}
+// loopOutcome classifies how the plan/replan loop terminated. Final output
+// generation (structured / text) happens in the generic entry point AFTER the
+// loop, keyed on this outcome, so planexec itself performs no side effects.
+type loopOutcome int
 
-	systemPrompt, err := buildPlannerSystemPrompt(req.RunRequest)
-	if err != nil {
-		return nil, goerr.Wrap(err, "render planner system prompt")
-	}
+const (
+	// loopFinalize: the planner explicitly declared completion (Finalize). The
+	// entry point generates the user-visible terminal output.
+	loopFinalize loopOutcome = iota
+	// loopQuestion: OnQuestion returned QuestionResult{Terminate:true}; the turn
+	// ended waiting for the user. No final output is generated.
+	loopQuestion
+	// loopDirect: the round-1 direct fast path produced a plain-text reply
+	// (directText). No investigation phase ran and no final output is generated.
+	loopDirect
+	// loopFallbackBudget: the planner budget was exhausted before the loop could
+	// terminate. fallbackReason carries the cause.
+	loopFallbackBudget
+	// loopFallbackError: an internal path gave up before terminating (e.g. the
+	// direct reply failed). fallbackReason carries the cause.
+	loopFallbackError
+)
 
-	recorder := trace.New(
-		trace.WithRepository(r.traceRepo),
-		trace.WithTraceID(req.TraceID),
-		trace.WithMetadata(req.TraceMetadata),
-	)
-	defer func() {
-		cleanupCtx := context.WithoutCancel(ctx)
-		if err := recorder.Finish(cleanupCtx); err != nil {
-			errutil.Handle(cleanupCtx, err, "planexec: persist agent trace")
-		}
-	}()
-
-	traced := combineTrace(recorder, req.TraceHandler)
-
-	bg := newBudget(r.budget)
-	nextInput := formatQuestionAnswers(bg, req.Question, req.Answers)
-	return r.runLoop(ctx, req.RunRequest, systemPrompt, recorder, traced, bg, nil, 1, nextInput)
+// loopResult is the loop's terminal disposition. The entry point turns it into
+// the typed RunResult, generating the final output only for loopFinalize.
+type loopResult struct {
+	outcome        loopOutcome
+	allResults     []PhaseSummary
+	directText     string
+	fallbackReason string
 }
 
-// runLoop drives the plan/replan loop. Run enters it at logicalRound 0
-// (fresh plan with the job prompt as input); Resume enters it at
-// logicalRound 1 (a replan round) with the user's answers as the first
-// input and a fresh budget. No plan snapshot is threaded in on resume —
-// the conversation history (shared HistoryKey) already carries the prior
-// rounds' observations, so the planner sees them on the next Load.
+// runLoop drives the plan/replan loop and returns the terminal disposition
+// WITHOUT generating the user-visible final output — that is the entry point's
+// job (Run[T] / RunText). Run enters it at logicalRound 0 (fresh plan with the
+// job prompt as input); ResumeText enters at logicalRound 1 (a replan round)
+// with the user's answers as the first input and a fresh budget. No plan
+// snapshot is threaded in on resume — the conversation history (shared
+// HistoryKey) already carries the prior rounds' observations, so the planner
+// sees them on the next Load.
+//
+// A non-nil error is a hard failure (planner execute error, empty response,
+// OnQuestion callback error) that the caller propagates; the graceful fallback
+// dispositions travel in loopResult instead.
 func (r *Runner) runLoop(
 	ctx context.Context,
 	req RunRequest,
-	systemPrompt string,
-	recorder *trace.Recorder,
-	// traced is the trace handler for the planner / direct / final agents:
-	// the run's archive recorder combined with the host's per-event handler
-	// (see combineTrace). recorder stays separate because sub-agents scope
-	// tracing differently (see runPhase).
-	traced trace.Handler,
-	bg *budget,
+	rc *runContext,
 	allResults []PhaseSummary,
 	logicalRound int,
 	nextInput string,
-) (*RunResult, error) {
+) (*loopResult, error) {
 	logger := logging.From(ctx)
 
+	// lastCause holds the most recent validation / generation failure so a
+	// budget-exhausted fallback can name the real reason instead of a generic
+	// "budget exhausted" (see budgetFallbackReason).
+	var lastCause error
+
 	for {
-		if !bg.canPlannerCall() {
-			return r.fallbackBudget(allResults), nil
+		if !rc.bg.canPlannerCall() {
+			return &loopResult{
+				outcome:        loopFallbackBudget,
+				allResults:     allResults,
+				fallbackReason: budgetFallbackReason(lastCause),
+			}, nil
 		}
-		bg.plannerUsed++
+		rc.bg.plannerUsed++
 
 		isFirstRound := logicalRound == 0
 		var schema *gollem.Parameter
@@ -225,10 +214,10 @@ func (r *Runner) runLoop(
 		}
 
 		plannerAgent := gollem.New(r.llm,
-			gollem.WithSystemPrompt(systemPrompt),
+			gollem.WithSystemPrompt(rc.systemPrompt),
 			gollem.WithTools(req.PlannerTools...),
 			gollem.WithHistoryRepository(r.historyRepo, req.HistoryKey),
-			gollem.WithTrace(traced),
+			gollem.WithTrace(rc.traced),
 			gollem.WithContentType(gollem.ContentTypeJSON),
 			gollem.WithResponseSchema(schema),
 			gollem.WithLoopLimit(plannerPerCallLoopLimit),
@@ -238,48 +227,47 @@ func (r *Runner) runLoop(
 		if execErr != nil {
 			return nil, goerr.Wrap(execErr, "planner execute",
 				goerr.V("trace_id", req.TraceID),
-				goerr.V("planner_used", bg.plannerUsed))
+				goerr.V("planner_used", rc.bg.plannerUsed))
 		}
 		if resp == nil || resp.IsEmpty() {
 			return nil, goerr.New("planner returned empty response",
 				goerr.V("trace_id", req.TraceID),
-				goerr.V("planner_used", bg.plannerUsed))
+				goerr.V("planner_used", rc.bg.plannerUsed))
 		}
 
 		raw := []byte(resp.Texts[0])
 		logger.Debug("planexec planner round",
 			"trace_id", req.TraceID,
-			"round", bg.plannerUsed,
+			"round", rc.bg.plannerUsed,
 			"raw_len", len(raw),
 		)
 
 		if isFirstRound {
 			p, perr := parsePlanResult(raw, req.KnownToolIDs, req.AllowDirect)
 			if perr != nil {
-				// Retry within the same logical round; the cost is
-				// charged via the next loop iteration's bg.plannerUsed++.
+				// Retry within the same logical round; the cost is charged via
+				// the next loop iteration's bg.plannerUsed++.
+				lastCause = perr
 				errutil.Handle(ctx, goerr.Wrap(perr, "planner output failed validation; retrying",
 					goerr.T(errutil.TagBenign),
 				), "planner output failed validation; retrying")
-				nextInput = formatRetryInput(bg, perr)
+				nextInput = formatRetryInput(rc.bg, perr)
 				continue
 			}
 			// First valid plan accepted — promote to logicalRound 1.
 			logicalRound = 1
 
-			// Direct fast path: the planner judged the request trivial enough
-			// to answer without any investigation. Skip the plan/execute/
-			// replan machinery and produce a plain-text reply in a single
-			// tool-enabled ReAct loop. OnFinalize / FinalOutputSchema are not
-			// consulted here — direct mode is reserved for replies that need
-			// no structured terminal action.
+			// Direct fast path: the planner judged the request trivial enough to
+			// answer without any investigation. Skip the plan/execute/replan
+			// machinery and produce a plain-text reply in a single tool-enabled
+			// ReAct loop. Structured-final generation is not consulted here —
+			// direct mode is reserved for replies that need no terminal action.
 			//
 			// The direct agent gets req.SystemPrompt (the host's base persona),
 			// NOT the rendered planner prompt: the latter carries the planner
 			// protocol's "respond with a single JSON object, no prose" output
 			// rules, which directly contradict the plain-text reply the direct
-			// user prompt asks for and would push the model toward malformed
-			// JSON output.
+			// user prompt asks for and would push the model toward malformed JSON.
 			if p.Direct != nil {
 				req.Sink.PlanProposed(ctx, PlanInfo{Round: logicalRound, Reasoning: p.Message, IsReplan: false, Direct: true})
 				tools := req.ToolResolver.Resolve(p.Direct.Tools)
@@ -287,7 +275,7 @@ func (r *Runner) runLoop(
 					ctx,
 					r.llm,
 					r.historyRepo,
-					traced,
+					rc.traced,
 					req.SystemPrompt,
 					req.HistoryKey,
 					req.LanguageLabel,
@@ -298,17 +286,13 @@ func (r *Runner) runLoop(
 				if derr != nil {
 					errutil.Handle(ctx, goerr.Wrap(derr, "planexec: direct response failed",
 						goerr.V("trace_id", req.TraceID)), "planexec: direct response failed")
-					return &RunResult{
-						Status:         StatusFallbackError,
-						Direct:         true,
-						FallbackReason: derr.Error(),
+					return &loopResult{
+						outcome:        loopFallbackError,
+						allResults:     allResults,
+						fallbackReason: derr.Error(),
 					}, nil
 				}
-				return &RunResult{
-					Status:    StatusCompleted,
-					FinalText: text,
-					Direct:    true,
-				}, nil
+				return &loopResult{outcome: loopDirect, allResults: allResults, directText: text}, nil
 			}
 
 			req.Sink.PlanProposed(ctx, PlanInfo{Round: logicalRound, Reasoning: p.Message, IsReplan: false})
@@ -320,17 +304,18 @@ func (r *Runner) runLoop(
 				Tasks:   tasks,
 				Results: results,
 			})
-			nextInput = bg.formatPrefix() + "\n\n" + formatObservationsAsUserTurn(tasks, results)
+			nextInput = rc.bg.formatPrefix() + "\n\n" + formatObservationsAsUserTurn(tasks, results)
 			continue
 		}
 
 		// Replan round.
 		rr, rerr := parseReplanResult(raw, req.KnownToolIDs, req.AllowQuestion)
 		if rerr != nil {
+			lastCause = rerr
 			errutil.Handle(ctx, goerr.Wrap(rerr, "replan output failed validation; retrying",
 				goerr.T(errutil.TagBenign),
 			), "replan output failed validation; retrying")
-			nextInput = formatRetryInput(bg, rerr)
+			nextInput = formatRetryInput(rc.bg, rerr)
 			continue
 		}
 
@@ -343,65 +328,20 @@ func (r *Runner) runLoop(
 				return nil, goerr.Wrap(qerr, "on question callback")
 			}
 			if qr.Terminate {
-				return &RunResult{
-					Status:            StatusCompleted,
-					AllResults:        allResults,
-					EndedWithQuestion: true,
-				}, nil
+				return &loopResult{outcome: loopQuestion, allResults: allResults}, nil
 			}
-			// Continue with the user's answers folded into the next
-			// planner-round input.
-			nextInput = formatQuestionAnswers(bg, *rr.Question, qr.Items)
+			// Continue with the user's answers folded into the next planner-round
+			// input.
+			nextInput = formatQuestionAnswers(rc.bg, *rr.Question, qr.Items)
 			continue
 		}
 
-		if len(rr.Tasks) == 0 {
-			// The planner wants to terminate. Produce the final response and,
-			// when an OnFinalize hook is wired, let the host validate AND
-			// commit it. A non-nil error from OnFinalize (validation failed OR
-			// the terminal side effect failed) folds back as another round so
-			// the planner can investigate / ask / re-emit until it succeeds or
-			// the round budget is exhausted.
-			text, rawJSON, finalErr := generateFinalResponse(
-				ctx,
-				r.llm,
-				r.historyRepo,
-				traced,
-				systemPrompt,
-				req.HistoryKey,
-				req.LanguageLabel,
-				allResults,
-				req.FinalOutputSchema,
-			)
-			if finalErr != nil {
-				// Surface to errutil so the operator sees the reason even
-				// though the host gets a graceful RunResult back.
-				errutil.Handle(ctx, finalErr, "planexec: final response failed")
-				return &RunResult{
-					Status:         StatusFallbackError,
-					AllResults:     allResults,
-					FallbackReason: finalErr.Error(),
-				}, nil
-			}
-			if req.OnFinalize != nil {
-				if commitErr := req.OnFinalize(ctx, rawJSON); commitErr != nil {
-					// Validation / commit rejection is expected with LLM
-					// output and we retry inline; tag benign so the operator
-					// still sees the line in logs but Sentry does not page on
-					// every LLM hiccup.
-					errutil.Handle(ctx, goerr.Wrap(commitErr, "final output rejected; retrying",
-						goerr.T(errutil.TagBenign),
-					), "final output rejected; retrying")
-					nextInput = formatRetryInput(bg, commitErr)
-					continue
-				}
-			}
-			return &RunResult{
-				Status:     StatusCompleted,
-				FinalText:  text,
-				FinalRaw:   rawJSON,
-				AllResults: allResults,
-			}, nil
+		if rr.Finalize != nil {
+			// The planner explicitly declared completion. The loop ends; the
+			// entry point generates the user-visible final output. Empty tasks
+			// with no explicit finalize never reach here — parseReplanResult
+			// rejects that shape and folds it back into another replan round.
+			return &loopResult{outcome: loopFinalize, allResults: allResults}, nil
 		}
 
 		tasks := rr.Tasks
@@ -411,7 +351,7 @@ func (r *Runner) runLoop(
 			Tasks:   tasks,
 			Results: results,
 		})
-		nextInput = bg.formatPrefix() + "\n\n" + formatObservationsAsUserTurn(tasks, results)
+		nextInput = rc.bg.formatPrefix() + "\n\n" + formatObservationsAsUserTurn(tasks, results)
 	}
 }
 
@@ -437,16 +377,14 @@ func (r *Runner) runPhase(
 	return executePhase(ctx, tasks, req.Sink, req.ToolResolver, r.llm, r.budget.SubAgentLoopMax, req.TraceHandler, req.AllowSubAgentWrites)
 }
 
-// fallbackBudget assembles the StatusFallbackBudget RunResult and emits
-// a Sink.Notify so the host gets a chance to surface the cause without
-// having to inspect the status itself.
-func (r *Runner) fallbackBudget(allResults []PhaseSummary) *RunResult {
-	reason := "planner budget exhausted"
-	return &RunResult{
-		Status:         StatusFallbackBudget,
-		AllResults:     allResults,
-		FallbackReason: reason,
+// budgetFallbackReason names the cause of a budget-exhausted fallback. When the
+// loop was burning rounds retrying a failing planner / replan output, the last
+// such failure is the real story; a bare "budget exhausted" hides it.
+func budgetFallbackReason(lastCause error) string {
+	if lastCause != nil {
+		return "planner budget exhausted; last failure: " + lastCause.Error()
 	}
+	return "planner budget exhausted"
 }
 
 // formatRetryInput prepends the budget prefix and a validation-failure

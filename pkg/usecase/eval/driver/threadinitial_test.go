@@ -30,7 +30,7 @@ func scriptedLLM() *mock.LLMClientMock {
 		case strings.Contains(text, "investigation loop has finished"):
 			return &gollem.Response{Texts: []string{`{"kind":"materialize","title":"Portal login 503","description":"Users get 503 on portal login since this morning.","fields":[{"field_id":"severity","value":"high"}]}`}}, nil
 		case strings.Contains(text, "Observations from prior"):
-			return &gollem.Response{Texts: []string{`{"message":"done","tasks":[]}`}}, nil
+			return &gollem.Response{Texts: []string{`{"message":"done","finalize":{"reason":"goal met"}}`}}, nil
 		case strings.Contains(text, "Thread so far"):
 			// Thread-mode manages no Actions, so the planner is offered no
 			// core (action) toolset; use the read-only Slack toolset instead.

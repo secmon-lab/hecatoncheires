@@ -290,19 +290,42 @@ is not viable under horizontal scaling; the pending question is persisted
 (`Session.PendingQuestion`, shared backend) and the answer arrives on a
 fresh dispatched event that starts a **new turn**.
 
+**Entry points & final output.** planexec is a generic plan-execute
+framework — it knows nothing about `case` and performs no side effects
+itself. It exposes three package-level entry functions (NOT `Runner`
+methods, since Go methods cannot be generic):
+
+- `Run[T Validatable](ctx, runner, req)` — structured turn. After the planner
+  finalizes, planexec generates the terminal JSON, decodes it into `T`, calls
+  `T.Validate()`, and regenerates on failure (bounded by `finalOutputMaxRetry`;
+  gollem's schema check verifies shape only, so `Validate()` is where domain
+  invariants live). Returns `*RunResult[T]` with the validated value in `.Data`.
+- `RunText(ctx, runner, req)` / `ResumeText(ctx, runner, req)` — plain-text
+  turn / resume. The reply is in `RunResult.Text`.
+
+Side effects (closing a case, posting a message, …) are performed by the
+**sub-agents' tools inside the loop**, never by planexec or by a host commit
+callback. The old `RunRequest.OnFinalize` / `FinalOutputSchema` commit hooks
+are gone; a host applies whatever the returned `*T` describes.
+
+**Explicit termination.** The loop terminates ONLY when a replan round emits an
+explicit `finalize` action. A replan must set exactly one of `tasks` /
+`question` / `finalize`; setting none is rejected and folded back into another
+replan round (the old "empty tasks = done" implicit termination is gone, so a
+planner that merely forgot to emit tasks can no longer silently terminate).
+
 **Direct mode (round-1 fast path).** When the host sets
 `RunRequest.AllowDirect`, the planner may answer a *genuinely trivial*
 request on round 1 without any investigation: instead of `tasks` it emits a
 `direct` payload (an optional tool-id subset), and the runtime replies in a
-single tool-enabled ReAct loop, returning plain text in `RunResult.FinalText`
+single tool-enabled ReAct loop, returning plain text in `RunResult.Text`
 with `RunResult.Direct == true`. It is strictly a fast path for
-respond-style replies: `FinalOutputSchema` / `OnFinalize` are **not** consulted
-on the direct path, because side-effecting terminal actions (materialize /
-create / close) are by definition not "trivial" and must go through the
-normal `tasks` → replan → structured-final loop. Hosts opt in (`threadcase`
-enables it for mention mode but disables it for `ModeCreate`; `job` enables
-it; structured-only hosts leave it off). The planner prompt guards it hard:
-"when in any doubt, investigate."
+respond-style replies: even a `Run[T]` turn returns `.Text` (not `.Data`) on
+the direct path, because side-effecting terminal actions are by definition not
+"trivial" and must go through the normal `tasks` → replan → `finalize` loop.
+Hosts opt in (`threadcase` enables it for mention mode but disables it for
+`ModeCreate`; `job` enables it; structured-only hosts leave it off). The
+planner prompt guards it hard: "when in any doubt, investigate."
 
 ## Agent tool wiring (host coverage) (NON-NEGOTIABLE)
 
@@ -406,9 +429,11 @@ The budget model is the combination of **two** controls — there is NO
 running "total sub-agent task count" across a turn:
 
 1. **Round-count limit** — `PlannerLoopMax` bounds the **number of rounds
-   in a turn** (`budget.canPlannerCall()`). Validation/commit re-tries
-   (planexec `OnFinalize` returning an error) are additional rounds and
-   consume this. This is the main loop guard.
+   in a turn** (`budget.canPlannerCall()`). Planner / replan output that fails
+   validation is retried within this same pool. (Final-output regeneration in
+   `Run[T]` — decode/`Validate()` retries — is bounded separately by
+   `finalOutputMaxRetry` and does NOT consume planner rounds.) This is the main
+   loop guard.
 2. **Per-sub-agent budget** — `SubAgentLoopMax` is the inner gollem loop
    limit granted **fresh to every sub-agent** (so the sub-agent budget
    naturally recovers per round).

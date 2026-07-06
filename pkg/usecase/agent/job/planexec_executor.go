@@ -19,8 +19,8 @@ import (
 // JobStrategyPlanexec. Jobs run unattended, so the executor:
 //   - disables the Question section in the planner prompt
 //     (RunRequest.AllowQuestion = false),
-//   - asks for plain-text final output (RunRequest.FinalOutputSchema =
-//     nil) and surfaces it as ExecuteResult.Summary, and
+//   - drives the plain-text entry point (planexec.RunText) and surfaces the
+//     final text as ExecuteResult.Summary, and
 //   - exposes every ToolBuilder-produced tool to every sub-agent (one
 //     bucket named "default" — TaskPlan-level tool sub-selection is a
 //     proposal concern, not a Job concern).
@@ -42,8 +42,8 @@ func NewPlanexecJobExecutor(runner *planexec.Runner) (*PlanexecJobExecutor, erro
 }
 
 // Execute satisfies the JobExecutor interface. It translates
-// ExecuteRequest into planexec.RunRequest, runs the loop, and maps the
-// planexec.RunResult back into the Job-level ExecuteResult shape.
+// ExecuteRequest into planexec.RunRequest, runs the plain-text loop, and maps
+// the planexec.RunResult[string] back into the Job-level ExecuteResult shape.
 func (e *PlanexecJobExecutor) Execute(ctx context.Context, req ExecuteRequest) (*ExecuteResult, error) {
 	if e == nil || e.runner == nil {
 		return nil, goerr.New("planexec job executor not initialized")
@@ -81,7 +81,7 @@ func (e *PlanexecJobExecutor) Execute(ctx context.Context, req ExecuteRequest) (
 	sink := newJobSink(req.ProgressFunc)
 
 	startedAt := time.Now().UTC()
-	result, err := e.runner.Run(ctx, planexec.RunRequest{
+	result, err := planexec.RunText(ctx, e.runner, planexec.RunRequest{
 		HistoryKey:    req.HistoryKey,
 		TraceID:       req.TraceID,
 		TraceMetadata: planexecTraceMetadata(req),
@@ -102,8 +102,8 @@ func (e *PlanexecJobExecutor) Execute(ctx context.Context, req ExecuteRequest) (
 		OnQuestion:    buildOnQuestion(req),
 		// AllowDirect lets a trivially-answerable job skip the investigation
 		// machinery and reply in a single tool-enabled pass. Jobs surface a
-		// plain-text summary (FinalOutputSchema nil), which is exactly what
-		// the direct path produces, so no terminal-shape change is needed.
+		// plain-text summary (RunText), which is exactly what the direct path
+		// produces, so no terminal-shape change is needed.
 		AllowDirect: true,
 		// AllowSubAgentWrites lets the Job's sub-agents actually perform the
 		// deliverable action (e.g. post the result to the case channel) once
@@ -112,8 +112,8 @@ func (e *PlanexecJobExecutor) Execute(ctx context.Context, req ExecuteRequest) (
 		// already includes the write tools, so this makes the prompt agree
 		// with the capability the sub-agents are handed.
 		AllowSubAgentWrites: true,
-		// FinalOutputSchema is nil → plain-text summary surfaces as
-		// RunResult.FinalText, which we copy into ExecuteResult.Summary.
+		// RunText surfaces the plain-text summary as RunResult.Text, which we
+		// copy into ExecuteResult.Summary.
 		Sink: sink,
 	})
 	endedAt := time.Now().UTC()
@@ -160,7 +160,7 @@ func (e *PlanexecJobExecutor) Resume(ctx context.Context, req ExecuteRequest, pe
 	req.Interactive = true
 
 	startedAt := time.Now().UTC()
-	result, err := e.runner.Resume(ctx, planexec.ResumeRequest{
+	result, err := planexec.ResumeText(ctx, e.runner, planexec.ResumeRequest{
 		RunRequest: planexec.RunRequest{
 			HistoryKey:          req.HistoryKey,
 			TraceID:             req.TraceID,
@@ -213,10 +213,10 @@ func buildOnQuestion(req ExecuteRequest) func(context.Context, planexec.Question
 	}
 }
 
-// mapResult translates a planexec.RunResult into the Job-level
+// mapResult translates a planexec.RunResult[string] into the Job-level
 // ExecuteResult shape, distinguishing the suspended-for-input outcome from a
 // normal completion.
-func (e *PlanexecJobExecutor) mapResult(result *planexec.RunResult, startedAt, endedAt time.Time, req ExecuteRequest) (*ExecuteResult, error) {
+func (e *PlanexecJobExecutor) mapResult(result *planexec.RunResult[string], startedAt, endedAt time.Time, req ExecuteRequest) (*ExecuteResult, error) {
 	phases := phaseTracesFromPlanexec(result, startedAt, endedAt)
 
 	switch result.Status {
@@ -233,7 +233,7 @@ func (e *PlanexecJobExecutor) mapResult(result *planexec.RunResult, startedAt, e
 		}
 		return &ExecuteResult{
 			Status:    ExecuteStatusSuccess,
-			Summary:   result.FinalText,
+			Summary:   result.Text,
 			LoopCount: len(result.AllResults),
 			Phases:    phases,
 		}, nil
@@ -304,7 +304,7 @@ func answersToQuestionAnswers(answers []interaction.Answer) []planexec.QuestionA
 // out + replan cycle), so we collapse all phases to the executor's
 // overall startedAt / endedAt for now. ToolCalls is filled in from the
 // number of tasks that actually ran — a coarse proxy.
-func phaseTracesFromPlanexec(result *planexec.RunResult, startedAt, endedAt time.Time) []PhaseTrace {
+func phaseTracesFromPlanexec(result *planexec.RunResult[string], startedAt, endedAt time.Time) []PhaseTrace {
 	if result == nil || len(result.AllResults) == 0 {
 		return []PhaseTrace{{
 			Name:      "planexec",

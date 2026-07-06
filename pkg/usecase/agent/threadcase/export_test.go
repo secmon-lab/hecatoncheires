@@ -7,7 +7,6 @@ import "github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
 var (
 	BuildSystemPromptForTest      = buildSystemPrompt
 	BuildUserInputForTest         = buildUserInput
-	ParseDecisionForTest          = parseDecision
 	ValidateCreateDecisionForTest = validateCreateDecision
 )
 

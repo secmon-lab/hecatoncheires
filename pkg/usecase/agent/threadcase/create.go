@@ -1,69 +1,39 @@
 package threadcase
 
 import (
-	"encoding/json"
 	"strings"
 
-	"github.com/gollem-dev/gollem"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 )
 
-// CreateDecision is the structured final output of a ModeCreate turn: the
-// title / description / custom fields the planner wants the new case to carry.
-// It reuses DecisionField (shared with the materialize decision).
+// CreateDecision is the structured final output of a ModeCreate turn
+// (Run[CreateDecision]): the title / description / custom fields the planner
+// wants the new case to carry. It reuses DecisionField (shared with the
+// materialize decision). The planner schema is derived from these struct tags
+// via gollem.ToSchema; Validate enforces the shape invariants. Workspace-schema
+// field validation (required / options / types) is applied by the host when it
+// commits the case (validateCreateDecision), not here — the value type has no
+// access to the field schema.
 type CreateDecision struct {
-	Title       string          `json:"title"`
-	Description string          `json:"description"`
-	Fields      []DecisionField `json:"fields,omitempty"`
+	Title       string          `json:"title" description:"A concise case title summarising the thread." required:"true"`
+	Description string          `json:"description" description:"A clear case description derived from the thread and your investigation." required:"true"`
+	Fields      []DecisionField `json:"fields,omitempty" description:"Custom field assignments. You MUST satisfy every required field and only use allowed option ids."`
 }
 
-// createDecisionSchema is the gollem response schema for the ModeCreate final
-// phase. The planner emits a concrete case to create; the runtime validates it
-// (required / options / types) and commits it via Handler.Create, folding any
-// failure back into the loop.
-func createDecisionSchema() *gollem.Parameter {
-	return &gollem.Parameter{
-		Type:        gollem.TypeObject,
-		Description: "The case to create from this thread, once you are confident enough to create it.",
-		Properties: map[string]*gollem.Parameter{
-			"title": {
-				Type:        gollem.TypeString,
-				Description: "A concise case title summarising the thread.",
-				Required:    true,
-			},
-			"description": {
-				Type:        gollem.TypeString,
-				Description: "A clear case description derived from the thread and your investigation.",
-				Required:    true,
-			},
-			"fields": {
-				Type:        gollem.TypeArray,
-				Description: "Custom field assignments. You MUST satisfy every required field and only use allowed option ids.",
-				Items: &gollem.Parameter{
-					Type: gollem.TypeObject,
-					Properties: map[string]*gollem.Parameter{
-						"field_id": {Type: gollem.TypeString, Description: "The field id from the workspace schema.", Required: true},
-						"value":    {Type: gollem.TypeString, Description: "Scalar value (text / number / url / single select option id)."},
-						"values":   {Type: gollem.TypeArray, Description: "Multi-select option ids.", Items: &gollem.Parameter{Type: gollem.TypeString}},
-					},
-				},
-			},
-		},
+// Validate enforces the create decision's shape invariants so a title-less or
+// description-less proposal is rejected inside planexec's Run[CreateDecision]
+// regeneration loop. It satisfies planexec.Validatable. Field-value validity is
+// checked by the host against the workspace schema (validateCreateDecision).
+func (d CreateDecision) Validate() error {
+	if strings.TrimSpace(d.Title) == "" {
+		return goerr.New("create decision requires a non-empty title")
 	}
-}
-
-// parseCreateDecision unmarshals the ModeCreate final structured output.
-func parseCreateDecision(raw []byte) (*CreateDecision, error) {
-	if len(raw) == 0 {
-		return nil, goerr.New("empty create decision payload")
+	if strings.TrimSpace(d.Description) == "" {
+		return goerr.New("create decision requires a non-empty description")
 	}
-	var d CreateDecision
-	if err := json.Unmarshal(raw, &d); err != nil {
-		return nil, goerr.Wrap(err, "decode thread-case create decision", goerr.V("raw_len", len(raw)))
-	}
-	return &d, nil
+	return nil
 }
 
 // validateCreateDecision turns a CreateDecision into typed, fully-validated

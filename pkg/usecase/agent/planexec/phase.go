@@ -17,6 +17,7 @@ import (
 
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/async"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
 
 // TaskPlan is one parallel investigation task within a PlanResult or
@@ -120,6 +121,30 @@ func executePhase(
 		wg.Add(1)
 		async.Dispatch(ctx, func(c context.Context) error {
 			defer wg.Done()
+			// Recover a sub-agent panic HERE, inside the closure, so results[i]
+			// is set before the goroutine unwinds. Without this the assignment
+			// below never happens and results[i] stays a zero-value TaskResult
+			// (empty Status), which formatObservationsAsUserTurn renders as a
+			// contentless note — the planner never learns the task failed.
+			// Dual-transmit: a failed observation to the planner AND errutil to
+			// the operator/Sentry, because a panic is a genuine defect, not the
+			// expected "tool returned an error" path.
+			defer func() {
+				if p := recover(); p != nil {
+					perr := goerr.New("sub-agent panicked",
+						goerr.V("task_id", tasks[i].ID),
+						goerr.V("panic", p))
+					results[i] = TaskResult{
+						TaskID:             tasks[i].ID,
+						Title:              tasks[i].Title,
+						AcceptanceCriteria: tasks[i].AcceptanceCriteria,
+						Status:             TaskStatusFailed,
+						Error:              perr.Error(),
+						InnerLoopsMax:      subAgentLoopMax,
+					}
+					errutil.Handle(c, perr, "planexec: sub-agent panic")
+				}
+			}()
 			results[i] = runOneTask(c, tasks[i], sink, resolver, llm, subAgentLoopMax, hostTrace, allowWrites)
 			return nil
 		})

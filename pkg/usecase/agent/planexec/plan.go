@@ -58,8 +58,8 @@ type PlanResult struct {
 // DirectPlan is the round-1 "answer directly" payload. It carries only the
 // tools the single direct ReAct agent is permitted to call; everything else
 // about the direct path (system prompt, history, loop limit) is supplied by
-// the runtime, and the response is always plain text (no FinalOutputSchema /
-// OnFinalize on this path).
+// the runtime, and the response is always plain text — structured-final
+// generation (Run[T]) is not consulted on this path.
 type DirectPlan struct {
 	// Tools is the subset of RunRequest.KnownToolIDs the direct agent may
 	// call. May be empty for a pure conversational reply that needs no tool.
@@ -67,14 +67,32 @@ type DirectPlan struct {
 	Tools []string `json:"tools,omitempty"`
 }
 
-// ReplanResult is the parsed shape of every subsequent planner round.
-// If Question is non-nil it takes priority over Tasks (the latter are
-// ignored). Both being empty / nil signals "we're done — run the final
-// response".
+// ReplanResult is the parsed shape of every subsequent planner round. The
+// planner must choose EXACTLY ONE terminal-or-continuation action per round:
+//   - Tasks: run another investigation phase.
+//   - Question: ask the user (only when the host allows it).
+//   - Finalize: declare completion and produce the final output.
+//
+// An output that sets none of the three is rejected (parseReplanResult) and
+// folded back into another replan round. This is deliberate: the previous
+// design treated "empty tasks + no question" as an implicit completion signal,
+// so a planner that merely forgot to emit tasks would silently terminate (and,
+// in structured hosts, commit) a half-finished turn. Completion is now an
+// explicit act.
 type ReplanResult struct {
-	Message  string     `json:"message,omitempty"`
-	Tasks    []TaskPlan `json:"tasks"`
-	Question *Question  `json:"question,omitempty"`
+	Message  string        `json:"message,omitempty"`
+	Tasks    []TaskPlan    `json:"tasks,omitempty"`
+	Question *Question     `json:"question,omitempty"`
+	Finalize *FinalizePlan `json:"finalize,omitempty"`
+}
+
+// FinalizePlan is the planner's explicit "I'm done" declaration. It carries an
+// optional short rationale; the actual user-visible output is produced by the
+// entry point (final text, or the validated structured object) after the loop
+// exits.
+type FinalizePlan struct {
+	// Reason is a 1-sentence rationale for terminating now (optional).
+	Reason string `json:"reason,omitempty"`
 }
 
 // Question is the host-facing payload when the planner needs human input.
@@ -308,38 +326,62 @@ func parsePlanResult(raw []byte, knownToolIDs []string, allowDirect bool) (*Plan
 	return &p, nil
 }
 
-// parseReplanResult decodes and validates a subsequent-round planner
-// JSON. The replan round allows three shapes:
-//   - Question (priority): host gets asked
+// parseReplanResult decodes and validates a subsequent-round planner JSON. The
+// replan round must set EXACTLY ONE of three actions:
 //   - Tasks (continuation): another phase runs
-//   - Both nil/empty: loop terminates and final-response phase runs
+//   - Question: the host asks the user
+//   - Finalize: the planner declares completion → the final output is produced
+//
+// Setting none is rejected (the caller folds it back into another replan round)
+// so a planner that merely omitted tasks cannot silently terminate the turn.
+// Setting more than one is rejected as ambiguous — the schema cannot express a
+// oneOf, so the parser is the enforcement point.
 //
 // allowQuestion=false (job host) rejects a question payload outright; the
-// system prompt should have suppressed the option but the parser
-// double-checks.
+// system prompt should have suppressed the option but the parser double-checks.
 func parseReplanResult(raw []byte, knownToolIDs []string, allowQuestion bool) (*ReplanResult, error) {
 	body := extractJSONObject(raw)
 	var r ReplanResult
 	if err := json.Unmarshal(body, &r); err != nil {
 		return nil, goerr.Wrap(err, "decode replan json")
 	}
-	if r.Question != nil {
+
+	hasTasks := len(r.Tasks) > 0
+	hasQuestion := r.Question != nil
+	hasFinalize := r.Finalize != nil
+
+	set := 0
+	for _, on := range []bool{hasTasks, hasQuestion, hasFinalize} {
+		if on {
+			set++
+		}
+	}
+	switch set {
+	case 0:
+		return nil, goerr.New("replan set no action: provide exactly one of tasks, question, or finalize")
+	case 1:
+		// ok
+	default:
+		return nil, goerr.New("replan set multiple actions: provide exactly one of tasks, question, or finalize",
+			goerr.V("has_tasks", hasTasks),
+			goerr.V("has_question", hasQuestion),
+			goerr.V("has_finalize", hasFinalize))
+	}
+
+	if hasQuestion {
 		if !allowQuestion {
 			return nil, goerr.New("replan produced a question but AllowQuestion is false")
 		}
 		if err := r.Question.Validate(); err != nil {
 			return nil, goerr.Wrap(err, "replan question invalid")
 		}
-		// Question takes priority; ignore any Tasks set alongside it.
-		r.Tasks = nil
 		return &r, nil
 	}
-	if len(r.Tasks) > 0 {
+	if hasTasks {
 		if err := validateTaskList(r.Tasks, knownToolIDs); err != nil {
 			return nil, err
 		}
 	}
-	// Tasks empty + Question nil is the legitimate termination signal.
 	return &r, nil
 }
 
@@ -493,15 +535,31 @@ func replanSchema(opts schemaOptions) *gollem.Parameter {
 			Type:        gollem.TypeString,
 			Description: "1-2 sentence rationale shown to the user.",
 		},
-		"tasks": tasksSchema(opts.knownToolIDs),
+		"tasks":    tasksSchema(opts.knownToolIDs),
+		"finalize": finalizeSchema(),
 	}
 	if opts.allowQuestion {
 		props["question"] = questionSchema()
 	}
 	return &gollem.Parameter{
 		Type:        gollem.TypeObject,
-		Description: "Replan output: continue with more tasks, ask the user, or signal completion (both empty).",
+		Description: "Replan output: set EXACTLY ONE of `tasks` (run another phase), `question` (ask the user), or `finalize` (declare completion). Leaving all unset is rejected — completion must be explicit via `finalize`.",
 		Properties:  props,
+	}
+}
+
+// finalizeSchema is the `finalize` action shape: an explicit completion
+// declaration carrying only an optional rationale.
+func finalizeSchema() *gollem.Parameter {
+	return &gollem.Parameter{
+		Type:        gollem.TypeObject,
+		Description: "Declare the turn complete and produce the final output. Set this (instead of `tasks`) when the goal is met — an empty `tasks` list alone does NOT signal completion.",
+		Properties: map[string]*gollem.Parameter{
+			"reason": {
+				Type:        gollem.TypeString,
+				Description: "Optional 1-sentence rationale for finishing now.",
+			},
+		},
 	}
 }
 

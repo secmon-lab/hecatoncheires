@@ -216,13 +216,14 @@ plan-and-execute agent in
 `ModeCreate`: it investigates (read-only search tools), may ask the reporter a
 question (terminal `question` action → the turn ends and waits), and only
 commits a Case once it produces a final `create` decision that passes full
-field validation. The commit happens **inside the planner loop** via the
-planexec `OnFinalize` hook (host callback `Handler.Create` →
-`CaseUC.CreateThreadCaseWithFields`): if validation fails (all violations are
-aggregated, not fail-fast) *or* the persistence call fails, the error folds
-back as another planner round so the agent can fix and re-emit, bounded by
-`PlannerLoopMax`. On success the host posts a Block Kit summary; on budget
-exhaustion it posts a fallback notice.
+field validation. The create turn runs `planexec.Run[CreateDecision]`: the
+planner declares completion with an explicit `finalize` action, planexec
+generates + shape-validates the structured `CreateDecision`, and the host then
+validates it against the workspace field schema and commits it via
+`Handler.Create` → `CaseUC.CreateThreadCaseWithFields`. A schema-validation or
+persistence failure fails the turn and is surfaced (there is no in-loop
+re-plan / commit-retry). On success the host posts a Block Kit summary; on
+budget exhaustion it posts a fallback notice.
 
 Because a `question` ends the turn (the per-thread turn-lock cannot be held
 while waiting on an async Slack reply), the task can span multiple turns. A

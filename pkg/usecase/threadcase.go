@@ -432,7 +432,10 @@ func (uc *AgentUseCase) HandleThreadCaseMention(ctx context.Context, msg *slackm
 }
 
 // applyMentionDecision applies a mention-turn terminal decision and posts the
-// appropriate reply to the thread.
+// appropriate reply to the thread. Closing / status changes are NOT handled
+// here: the sub-agent performs them via the case__update_case_status tool during
+// investigation (see pkg/usecase/agent/threadcase), so the only host-applied
+// terminal outcomes are respond and materialize.
 func (uc *AgentUseCase) applyMentionDecision(ctx context.Context, wsID string, entry *model.WorkspaceEntry, caseID int64, channelID, threadTS string, traceMsg *traceMessage, d *threadcase.Decision) {
 	if d == nil {
 		return
@@ -450,23 +453,6 @@ func (uc *AgentUseCase) applyMentionDecision(ctx context.Context, wsID string, e
 		text := d.Message
 		if text == "" {
 			text = i18n.T(ctx, i18n.MsgThreadCaseUpdated)
-		}
-		uc.finalizeTrace(ctx, traceMsg, channelID, threadTS, text)
-	case threadcase.DecisionClose:
-		statusName := d.CloseStatus
-		if uc.deps.CaseUC != nil {
-			if _, err := uc.deps.CaseUC.UpdateCaseStatus(ctx, wsID, caseID, d.CloseStatus); err != nil {
-				errutil.Handle(ctx, err, "thread case: close")
-			}
-		}
-		if entry.CaseStatusSet != nil {
-			if def, ok := entry.CaseStatusSet.Get(d.CloseStatus); ok {
-				statusName = def.Name
-			}
-		}
-		text := d.Message
-		if text == "" {
-			text = i18n.T(ctx, i18n.MsgThreadCaseClosed, statusName)
 		}
 		uc.finalizeTrace(ctx, traceMsg, channelID, threadTS, text)
 	}
