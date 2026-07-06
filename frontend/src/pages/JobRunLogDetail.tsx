@@ -4,6 +4,7 @@ import { useQuery } from '@apollo/client'
 
 import { GET_JOB_RUN_EVENTS, GET_JOB_RUN_LOG } from '../graphql/caseAgent'
 import { useTranslation } from '../i18n'
+import { runTriggerLabelKey } from '../utils/agentTrigger'
 import {
   IconChevLeft,
   IconChevRight,
@@ -432,7 +433,13 @@ export default function JobRunLogDetail() {
         <div className={styles.metaDivider} />
         <MetaKpi label={t('jobRunLogMetaJobId')} value={log.jobId} mono />
         <div className={styles.metaDivider} />
-        <MetaKpi label={t('jobRunLogMetaTrigger')} value={log.eventType || '—'} />
+        <MetaKpi
+          label={t('jobRunLogMetaTrigger')}
+          value={(() => {
+            const k = runTriggerLabelKey(log.eventType)
+            return k ? t(k) : log.eventType || '—'
+          })()}
+        />
       </div>
 
       {/* ID row card */}
