@@ -395,6 +395,12 @@ the single channel named in `[slack] channel` and turns conversations into Cases
   (excluding message subtypes such as edits/joins) creates a Case bound to that
   message's thread. The bot replies in-thread with a link to the web UI, and an
   LLM materializes the Case title, description, and custom fields.
+- **`@mention` inside a thread that has no Case yet → Case (both modes).** In
+  `instant` this is a recovery path: if a thread's root never became a Case (a
+  message subtype or a bot post that `instant` creation skipped, or a thread
+  predating the bot), @mentioning the bot in that thread starts a Case seeded by
+  the whole thread. In `mention` mode it is the primary in-thread trigger. (A
+  bot-authored mention is gated by `accept_bot`, same as everywhere else.)
 - **`mention` — `@mention` → Case.** A Case is started only when the bot is
   @mentioned, either at the channel root or inside a thread that has no Case yet.
   Plain posts are left alone. The mention text (and, in a thread, the surrounding

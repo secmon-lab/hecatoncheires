@@ -253,7 +253,10 @@ func (uc *SlackUseCases) threadModeEntry(channelID string) (*model.WorkspaceEntr
 //	instant (default):
 //	  - channel-root message (human, or a bot when accept_bot) → case creation.
 //	  - top-level mention → ignored (the message event drives creation).
-//	  - mention in a case-less thread → ignored.
+//	  - mention in a case-less thread → case creation (recovery path: a thread
+//	    whose root never became a case — a subtype/bot root that instant creation
+//	    skipped, or a thread predating the bot — is turned into one, seeded by the
+//	    whole thread). A bot-authored mention triggers only when accept_bot is set.
 //
 //	mention:
 //	  - channel-root mention → case creation.
@@ -292,9 +295,16 @@ func (uc *SlackUseCases) handleThreadModeEvent(ctx context.Context, event *slack
 				}
 				return
 			}
-			// Mention in a case-less thread: a creation trigger only in mention
-			// mode. In instant mode such threads are left alone.
-			if mentionTrigger && uc.isMentionCreationTrigger(ctx, appMention, entry) {
+			// Mention in a case-less thread is a creation trigger in BOTH modes.
+			// In mention mode it is the primary trigger; in instant mode it is a
+			// recovery path for a thread whose root never became a case (a
+			// subtype/bot root that instant creation skipped, or a thread that
+			// predates the bot). The whole thread seeds the create agent. The
+			// bot-authored / accept_bot and self-mention gate still applies via
+			// isMentionCreationTrigger. (The channel-root mention branch below
+			// stays mention-only: in instant mode the accompanying message event
+			// drives root creation, so triggering here too would double-create.)
+			if uc.isMentionCreationTrigger(ctx, appMention, entry) {
 				uc.startThreadCaseMentionCreation(ctx, appMention, msg, entry)
 			}
 			return
