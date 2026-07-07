@@ -123,10 +123,23 @@ completion; if the runner crashes the lease times out on its own.
 
 #### Loop suppression
 
-Mutations a Job's tool performs run with a context-marker
-(`job.JobActorMarker`). `JobUseCase.Publish` returns early when it sees
-this marker, so a Job that touches `case__update_case` cannot trigger
-itself again.
+Mutations a Job's tool performs run with a context-marker carrying the
+originating job id (`job.JobActorMarker`). `JobUseCase.Publish` skips
+only the job whose id matches that marker, so a Job that touches
+`case__update_case` cannot re-fire itself — but any *other* Job
+listening on the resulting lifecycle event still fires. This is what
+lets an on-created Job that closes the case trigger the on-closed Job.
+
+Note that per-JobID suppression does **not** make cross-Job loops
+structurally impossible. In thread mode a case can be reopened and
+re-closed via the status tool, so `closed` is not a one-way edge; two
+Jobs that both listen on the same lifecycle and whose agents reopen and
+re-close the case could ping-pong indefinitely. Loop-freedom relies on
+agents not performing such reopen cycles — typical read-and-post Jobs
+(summarisers, notifiers) do not — rather than on the trigger graph's
+topology. If a future Job configuration genuinely needs to reopen cases,
+add a topology-independent safety valve (per-(case, lifecycle) dispatch
+cap or depth guard) before relying on it.
 
 ### Running scheduled Jobs
 
