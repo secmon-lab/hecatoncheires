@@ -258,14 +258,38 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 	return uc.runMentionTurn(turnCtx, req, baseReq, &runErr)
 }
 
-// runCreateTurn drives a ModeCreate turn: run the structured loop, validate the
-// proposed case against the workspace schema, and materialize it via
-// Handler.Create. runErr is set (for the deferred run-trace Finish) on every
-// terminal failure. A create turn never uses the direct fast path
-// (AllowDirect=false), so a completed turn always yields a validated
-// CreateDecision in res.Data.
+// runCreateTurn drives a ModeCreate turn: run the structured loop with a
+// field-validation finalizer, then commit the validated case via Handler.Create.
+// runErr is set (for the deferred run-trace Finish) on every terminal failure.
+// A create turn never uses the direct fast path (AllowDirect=false), so a
+// completed turn always yields a validated CreateDecision in res.Data.
+//
+// The split between the two failure kinds is deliberate:
+//   - Field-validation errors (a non-RFC3339 due_date, a missing required field,
+//     an option outside the schema) are the model's fault and the model can fix
+//     them, so they run INSIDE planexec's final-output regeneration loop via the
+//     finalizer: a rejection is fed back to the planner and the output
+//     regenerated. This is the whole point of the change — such an error used to
+//     kill the turn with no feedback.
+//   - A persistence error from Handler.Create is an infrastructure failure the
+//     model cannot fix by re-emitting the same JSON, so it stays OUT of the loop:
+//     Create runs once after the turn, and a failure falls back rather than
+//     wasting a regeneration cycle re-asking the model to "fix" a write conflict.
 func (uc *UseCase) runCreateTurn(ctx context.Context, req TurnRequest, baseReq planexec.RunRequest, runErr *error) (*Result, error) {
-	res, err := planexec.Run[CreateDecision](ctx, uc.runner, baseReq)
+	// The finalizer validates the proposed fields against the workspace schema
+	// inside the regeneration loop (no side effects) and captures the enriched
+	// field values from the accepted attempt. planexec stops on the first
+	// accepting finalizer, so validatedFields holds exactly that attempt's result.
+	var validatedFields map[string]model.FieldValue
+	res, err := planexec.Run[CreateDecision](ctx, uc.runner, baseReq,
+		func(d *CreateDecision) error {
+			fields, verr := validateCreateDecision(req.Workspace, d)
+			if verr != nil {
+				return verr
+			}
+			validatedFields = fields
+			return nil
+		})
 	if err != nil {
 		*runErr = goerr.Wrap(err, "run threadcase planexec (create)")
 		return nil, *runErr
@@ -281,24 +305,19 @@ func (uc *UseCase) runCreateTurn(ctx context.Context, req TurnRequest, baseReq p
 			*runErr = goerr.New("threadcase create completed without a decision")
 			return nil, *runErr
 		}
-		fields, verr := validateCreateDecision(req.Workspace, res.Data)
-		if verr != nil {
-			// The proposed case failed workspace-schema validation. The final
-			// output already passed shape validation (CreateDecision.Validate)
-			// and any regeneration; a schema violation here fails the turn and
-			// is surfaced (recorded FAILED via runErr) rather than silently
-			// dropped.
-			*runErr = goerr.Wrap(verr, "validate create decision")
-			return nil, *runErr
-		}
+		// The finalizer already validated the fields in-loop; commit the case
+		// once, after the turn. A persistence failure is surfaced (recorded FAILED
+		// via runErr) and the turn falls back — it is NOT fed back to the model,
+		// which cannot repair an infrastructure error.
 		c, cerr := req.Handler.Create(ctx, req.Session, CreatePayload{
 			Title:       res.Data.Title,
 			Description: res.Data.Description,
-			Fields:      fields,
+			Fields:      validatedFields,
 		})
 		if cerr != nil {
 			*runErr = goerr.Wrap(cerr, "create case")
-			return nil, *runErr
+			uc.persistSession(ctx, req.Session, model.SessionEndedWithCaseBoundReply)
+			return &Result{Status: StatusFallback}, nil
 		}
 		uc.persistSession(ctx, req.Session, model.SessionEndedWithCaseBoundReply)
 		return &Result{Status: StatusCompleted, Case: c}, nil

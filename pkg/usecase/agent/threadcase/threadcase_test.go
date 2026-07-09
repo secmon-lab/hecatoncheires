@@ -675,6 +675,33 @@ func TestBuildSystemPrompt_CreateMode_WorkspacePrompt(t *testing.T) {
 	gt.Bool(t, strings.Contains(bare, "Workspace-specific instructions")).False()
 }
 
+// The ModeCreate field-schema block must give the planner the hints it needs to
+// fill fields correctly on the first attempt: which fields are required, and the
+// exact RFC3339 format for date fields (whose bare-date value was the reported
+// failure). The instruction text now promises feedback-and-retry rather than the
+// old "NO retry" wording.
+func TestBuildSystemPrompt_CreateMode_FieldSchemaHints(t *testing.T) {
+	ws := &model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: "support", Name: "Support"},
+		CaseMode:  model.CaseModeThread,
+		FieldSchema: &config.FieldSchema{
+			Fields: []config.FieldDefinition{
+				{ID: "severity", Name: "Severity", Type: types.FieldTypeSelect, Required: true, Options: []config.FieldOption{{ID: "high", Name: "High"}}},
+				{ID: "due_date", Name: "Due date", Type: types.FieldTypeDate},
+			},
+		},
+	}
+	prompt := threadcase.BuildSystemPromptForTest(nil, ws, threadcase.ModeCreate)
+	// Required fields are marked so the planner knows which it must fill.
+	gt.String(t, prompt).Contains("(required)")
+	// Date fields spell out the exact RFC3339 format the validator enforces.
+	gt.String(t, prompt).Contains("format=RFC3339")
+	gt.String(t, prompt).Contains("2026-07-14T00:00:00Z")
+	// The instruction promises feedback-and-retry, not the removed "NO retry".
+	gt.String(t, prompt).Contains("fed back to you")
+	gt.Bool(t, strings.Contains(prompt, "NO retry")).False()
+}
+
 func TestDecision_Validate(t *testing.T) {
 	// Unknown kind is rejected.
 	gt.Error(t, threadcase.Decision{Kind: "explode"}.Validate())
@@ -753,24 +780,25 @@ func TestRunTurn_Create_Success(t *testing.T) {
 	gt.Value(t, host.creates[0].Fields["severity"].Value).Equal("high")
 }
 
-// ModeCreate: the create decision uses a disallowed option and omits a required
-// field. Shape validation (CreateDecision.Validate — title/description present)
-// passes, so the type-safe layer does not regenerate; the workspace-schema
-// validation the host applies before committing fails, and the turn errors
-// WITHOUT retrying (the host-retry / OnFinalize re-plan loop was removed). The
-// case is never created.
-func TestRunTurn_Create_InvalidFieldsFails(t *testing.T) {
+// ModeCreate requirement ①/③: the first create decision uses a disallowed
+// option and omits a required field. The finalizer's workspace-schema
+// validation runs INSIDE planexec's final-output regeneration loop, so the
+// error is fed back to the model and a corrected decision is generated instead
+// of killing the turn. Only the accepted (corrected) decision reaches the
+// post-turn Handler.Create, so the case is committed exactly once.
+func TestRunTurn_Create_InvalidFieldsRetryThenSucceed(t *testing.T) {
 	ctx := context.Background()
 	llm := newScriptedLLM([]string{
 		investigatePlan,
 		"The reporter cannot log in.",
 		replanDone,
 		`{"title":"Login failure","description":"d","fields":[{"field_id":"severity","value":"critical"}]}`, // invalid option + missing required summary
+		validCreateDecision, // regenerated after the validation error is fed back
 	})
 	uc, _ := newThreadcaseUC(t, llm)
 	host := &hostStub{}
 
-	_, err := uc.RunTurn(ctx, threadcase.TurnRequest{
+	res, err := uc.RunTurn(ctx, threadcase.TurnRequest{
 		Session:        createTestSession(),
 		Workspace:      createTestWorkspace(),
 		ChannelID:      "C-MONITOR",
@@ -781,16 +809,23 @@ func TestRunTurn_Create_InvalidFieldsFails(t *testing.T) {
 		Handler:        host,
 	})
 	async.Wait()
-	// The turn fails on workspace-schema validation and is surfaced; the case is
-	// never committed.
-	gt.Error(t, err)
-	gt.Array(t, host.creates).Length(0)
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(threadcase.StatusCompleted)
+	gt.Value(t, res.Case).NotNil().Required()
+	gt.String(t, res.Case.Title).Equal("Login failure")
+	// The invalid attempt failed validation before Create; only the corrected
+	// decision was committed.
+	gt.Array(t, host.creates).Length(1).Required()
+	gt.Value(t, host.creates[0].Fields["severity"].Value).Equal("high")
 }
 
-// ModeCreate: validation passes but Handler.Create (persistence) fails. There is
-// no re-plan loop anymore, so the failure is surfaced immediately after a single
-// attempt.
-func TestRunTurn_Create_PersistenceFails(t *testing.T) {
+// ModeCreate requirement ②: validation passes (the finalizer accepts the
+// decision) but Handler.Create fails. A persistence error is an infrastructure
+// failure the model cannot repair by re-emitting JSON, so it is NOT fed back
+// into the regeneration loop: Create runs exactly once, after the turn, and its
+// failure falls back (StatusFallback) instead of burning a regeneration cycle.
+// The error is surfaced, never swallowed.
+func TestRunTurn_Create_PersistenceFailsFallsBack(t *testing.T) {
 	ctx := context.Background()
 	llm := newScriptedLLM([]string{
 		investigatePlan,
@@ -801,7 +836,7 @@ func TestRunTurn_Create_PersistenceFails(t *testing.T) {
 	uc, _ := newThreadcaseUC(t, llm)
 	host := &hostStub{createErr: errors.New("write conflict"), createErrRemaining: 1}
 
-	_, err := uc.RunTurn(ctx, threadcase.TurnRequest{
+	res, err := uc.RunTurn(ctx, threadcase.TurnRequest{
 		Session:        createTestSession(),
 		Workspace:      createTestWorkspace(),
 		ChannelID:      "C-MONITOR",
@@ -812,7 +847,46 @@ func TestRunTurn_Create_PersistenceFails(t *testing.T) {
 		Handler:        host,
 	})
 	async.Wait()
-	gt.Error(t, err)
-	// Create attempted exactly once: no retry.
+	gt.NoError(t, err).Required()
+	// The persistence failure falls back rather than completing or hard-erroring,
+	// and no case is returned.
+	gt.Value(t, res.Status).Equal(threadcase.StatusFallback)
+	gt.Value(t, res.Case).Nil()
+	// Create was attempted exactly once: the write conflict is NOT fed back for
+	// regeneration.
 	gt.Array(t, host.creates).Length(1).Required()
+}
+
+// ModeCreate: the create decision is invalid on every attempt, so the finalizer
+// rejects it until the final-output retries are exhausted. The turn does not
+// hard-error; it falls back (StatusFallback) and never commits a case — this
+// bounds the feedback loop so a persistently-wrong planner cannot spin forever.
+func TestRunTurn_Create_InvalidFieldsExhaustsRetries(t *testing.T) {
+	ctx := context.Background()
+	invalid := `{"title":"Login failure","description":"d","fields":[{"field_id":"severity","value":"critical"}]}`
+	llm := newScriptedLLM([]string{
+		investigatePlan,
+		"The reporter cannot log in.",
+		replanDone,
+		// finalOutputMaxRetry(2)+1 == 3 final-output attempts, all invalid.
+		invalid, invalid, invalid,
+	})
+	uc, _ := newThreadcaseUC(t, llm)
+	host := &hostStub{}
+
+	res, err := uc.RunTurn(ctx, threadcase.TurnRequest{
+		Session:        createTestSession(),
+		Workspace:      createTestWorkspace(),
+		ChannelID:      "C-MONITOR",
+		ThreadTS:       "1700000000.000200",
+		TriggerTS:      "1700000000.000200",
+		Mode:           threadcase.ModeCreate,
+		SystemMessages: []threadcase.ConversationMessage{{Timestamp: "1700000000.000200", UserID: "U-REPORTER", Text: "I cannot log in"}},
+		Handler:        host,
+	})
+	async.Wait()
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(threadcase.StatusFallback)
+	// Never committed: every attempt failed field validation before Create.
+	gt.Array(t, host.creates).Length(0)
 }

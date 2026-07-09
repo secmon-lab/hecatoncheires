@@ -216,14 +216,22 @@ plan-and-execute agent in
 `ModeCreate`: it investigates (read-only search tools), may ask the reporter a
 question (terminal `question` action → the turn ends and waits), and only
 commits a Case once it produces a final `create` decision that passes full
-field validation. The create turn runs `planexec.Run[CreateDecision]`: the
-planner declares completion with an explicit `finalize` action, planexec
-generates + shape-validates the structured `CreateDecision`, and the host then
-validates it against the workspace field schema and commits it via
-`Handler.Create` → `CaseUC.CreateThreadCaseWithFields`. A schema-validation or
-persistence failure fails the turn and is surfaced (there is no in-loop
-re-plan / commit-retry). On success the host posts a Block Kit summary; on
-budget exhaustion it posts a fallback notice.
+field validation. The create turn runs `planexec.Run[CreateDecision]` with a
+**validation-only host finalizer**: the planner declares completion with an
+explicit `finalize` action, planexec generates + shape-validates the structured
+`CreateDecision`, then runs the finalizer inside its final-output regeneration
+loop. The finalizer validates the decision against the workspace field schema; a
+schema-validation failure (e.g. a non-RFC3339 `due_date`, a missing required
+field, an out-of-schema option) is fed back to the planner and the final output
+regenerated (bounded by `finalOutputMaxRetry`), so the model corrects the value
+in-loop instead of the turn dying with no feedback. The Case is then committed
+**after** the turn via `Handler.Create` → `CaseUC.CreateThreadCaseWithFields`.
+The two failure kinds take different paths on purpose: a field error is the
+model's fault and model-fixable (fed back for regeneration), whereas a
+persistence failure is an infrastructure error the model cannot repair by
+re-emitting the same JSON — it is surfaced and the turn falls back rather than
+wasting a regeneration cycle. On success the host posts a Block Kit summary; on
+retry/budget exhaustion or a persistence failure it posts a fallback notice.
 
 Because a `question` ends the turn (the per-thread turn-lock cannot be held
 while waiting on an async Slack reply), the task can span multiple turns. A
