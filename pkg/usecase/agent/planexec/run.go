@@ -49,15 +49,27 @@ type RunResult[T any] struct {
 // Run drives a single structured plan-and-execute turn end-to-end and returns a
 // validated *T as the terminal output. The flow is: build the planner prompt →
 // loop (plan → sub-agents → replan) until the planner emits an explicit
-// finalize → generate the final JSON, decode into T, run T.Validate(), and
-// regenerate on failure (bounded). Side effects (case status changes etc.) are
-// performed by the sub-agents' tools inside the loop, never by planexec; the
-// host applies whatever the returned *T describes.
+// finalize → generate the final JSON, decode into T, run T.Validate() plus any
+// host finalizers, and regenerate on failure (bounded). Side effects driven by
+// the investigation (case status changes etc.) are performed by the sub-agents'
+// tools inside the loop, never by planexec.
+//
+// finalizers are optional host-supplied validators for the terminal output.
+// Each is called after T.Validate() on the decoded final output; a returned
+// error is fed back to the model and the output regenerated (bounded by
+// finalOutputMaxRetry), exactly like a Validate() failure. They exist because
+// T.Validate() is a pure method on the type and cannot see host context a
+// validation needs — e.g. a workspace field schema known only to the caller. A
+// finalizer validates the output against that external context and MUST be
+// side-effect-free, since a later attempt re-runs every finalizer. Committing
+// the output (persisting the entity, posting a message) belongs AFTER the turn,
+// where the host applies the returned *T — never inside a finalizer, so an
+// infrastructure error the model cannot fix does not burn a regeneration cycle.
 //
 // Run is a package function, not a Runner method, because Go methods cannot be
 // generic. The Runner carries the shared backend deps; T is the caller's
 // terminal-output type.
-func Run[T Validatable](ctx context.Context, r *Runner, req RunRequest) (*RunResult[T], error) {
+func Run[T Validatable](ctx context.Context, r *Runner, req RunRequest, finalizers ...func(*T) error) (*RunResult[T], error) {
 	if err := req.Validate(); err != nil {
 		return nil, goerr.Wrap(err, "validate run request")
 	}
@@ -71,7 +83,7 @@ func Run[T Validatable](ctx context.Context, r *Runner, req RunRequest) (*RunRes
 	if err != nil {
 		return nil, err
 	}
-	return finalizeStructured[T](ctx, r, req, rc, lr)
+	return finalizeStructured[T](ctx, r, req, rc, lr, finalizers)
 }
 
 // RunText drives a plain-text turn: same loop as Run, but the terminal output
@@ -128,7 +140,7 @@ func initialPlannerInput(bg *budget, userInput string) string {
 
 // finalizeStructured maps a loop outcome onto a typed RunResult[T], generating
 // (and validating) the structured final output only for the finalize outcome.
-func finalizeStructured[T Validatable](ctx context.Context, r *Runner, req RunRequest, rc *runContext, lr *loopResult) (*RunResult[T], error) {
+func finalizeStructured[T Validatable](ctx context.Context, r *Runner, req RunRequest, rc *runContext, lr *loopResult, finalizers []func(*T) error) (*RunResult[T], error) {
 	res := &RunResult[T]{AllResults: lr.allResults}
 	switch lr.outcome {
 	case loopQuestion:
@@ -145,7 +157,7 @@ func finalizeStructured[T Validatable](ctx context.Context, r *Runner, req RunRe
 		res.Status = StatusFallbackError
 		res.FallbackReason = lr.fallbackReason
 	case loopFinalize:
-		data, ferr := generateValidatedFinal[T](ctx, r, rc, req.LanguageLabel, req.HistoryKey, lr.allResults)
+		data, ferr := generateValidatedFinal[T](ctx, r, rc, req.LanguageLabel, req.HistoryKey, lr.allResults, finalizers)
 		if ferr != nil {
 			// Surface to errutil so the operator sees the reason even though the
 			// host gets a graceful fallback RunResult back.

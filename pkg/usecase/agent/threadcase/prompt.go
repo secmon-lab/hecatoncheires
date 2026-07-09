@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 )
 
 // Mode discriminates the purpose of a thread-mode turn.
@@ -33,7 +34,7 @@ func buildSystemPrompt(c *model.Case, ws *model.WorkspaceEntry, mode Mode) strin
 	b.WriteString("You are an investigation agent operating inside a Slack thread that represents a single case.\n")
 	switch mode {
 	case ModeCreate:
-		b.WriteString("A message was posted in a monitored channel, but NO case exists yet. Do NOT rush to create one. First do light investigation about the reporter and the topic (recent messages, related threads) using the read-only search tools. When the intent or required information is unclear, ask the user a `question` (a select / multi-select form) instead of guessing. Once the direction is clear, investigate deeper, and only then emit the final create decision with a concise title, a clear description, and every custom field required by the schema. The case is validated against the workspace field schema before creation and there is NO retry: a missing required field or a value outside the allowed option ids fails the turn, so satisfy every required field and use only the listed option ids the first time.\n")
+		b.WriteString("A message was posted in a monitored channel, but NO case exists yet. Do NOT rush to create one. First do light investigation about the reporter and the topic (recent messages, related threads) using the read-only search tools. When the intent or required information is unclear, ask the user a `question` (a select / multi-select form) instead of guessing. Once the direction is clear, investigate deeper, and only then emit the final create decision with a concise title, a clear description, and every custom field required by the schema. The case is validated against the workspace field schema when it is created: satisfy every field marked (required), use only the listed option ids, and give date fields an RFC3339 timestamp. If a value is rejected the error is fed back to you and you get a few attempts to correct it, but aim to get it right the first time.\n")
 	case ModeMaterialize:
 		b.WriteString("A new case was just created from the first message in this thread. Investigate the message (using the read-only tools when helpful) and emit a `materialize` decision that fills a concise title, a clear description, and any custom fields you are confident about.\n")
 	default:
@@ -63,9 +64,12 @@ func buildSystemPrompt(c *model.Case, ws *model.WorkspaceEntry, mode Mode) strin
 	}
 
 	if ws != nil && ws.FieldSchema != nil && len(ws.FieldSchema.Fields) > 0 {
-		b.WriteString("# Custom field schema (for materialize)\n")
+		b.WriteString("# Custom field schema (for materialize / create)\n")
 		for _, f := range ws.FieldSchema.Fields {
 			fmt.Fprintf(&b, "- %s (id=%s, type=%s)", f.Name, f.ID, f.Type)
+			if f.Required {
+				b.WriteString(" (required)")
+			}
 			if f.Description != "" {
 				fmt.Fprintf(&b, " description=%q", f.Description)
 			}
@@ -75,6 +79,12 @@ func buildSystemPrompt(c *model.Case, ws *model.WorkspaceEntry, mode Mode) strin
 					opts = append(opts, o.ID)
 				}
 				fmt.Fprintf(&b, " options=[%s]", strings.Join(opts, ", "))
+			}
+			// Date fields are persisted as RFC3339 strings; the validator rejects
+			// a bare date like "2026-07-14". Spell the exact format out so the
+			// planner emits a valid value on the first attempt.
+			if f.Type == types.FieldTypeDate {
+				b.WriteString(" format=RFC3339 (e.g. 2026-07-14T00:00:00Z)")
 			}
 			b.WriteString("\n")
 		}

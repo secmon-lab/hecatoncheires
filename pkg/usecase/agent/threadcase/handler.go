@@ -72,11 +72,12 @@ type Handler interface {
 	TraceReplace(ctx context.Context, line string)
 	// Question posts a question to the user. Returning an error aborts the turn.
 	Question(ctx context.Context, ssn *model.Session, q QuestionPayload) error
-	// Create persists a new case for the ModeCreate flow and returns it. It is
-	// invoked by the host AFTER the planexec loop finalizes, with the validated
-	// structured output (Run[CreateDecision]). A returned error fails the turn
-	// (surfaced by the host); there is no in-loop re-plan retry. Only called in
-	// ModeCreate turns.
+	// Create persists a new case for the ModeCreate flow and returns it. The host
+	// invokes it once, AFTER the turn completes, with the field values the
+	// in-loop finalizer already validated against the workspace schema. A returned
+	// error is a persistence failure the model cannot repair by re-emitting JSON,
+	// so it is NOT fed back for regeneration; the host surfaces it and falls back.
+	// Only called in ModeCreate turns.
 	Create(ctx context.Context, ssn *model.Session, p CreatePayload) (*model.Case, error)
 }
 

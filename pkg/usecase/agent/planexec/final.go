@@ -102,12 +102,14 @@ const finalOutputMaxRetry = 2
 // generateValidatedFinal produces the structured terminal output for a Run[T]
 // turn. It derives the JSON schema from T (gollem.ToSchema), makes one final
 // LLM call inheriting the planner's system prompt + observation history, decodes
-// the reply into T, and runs T.Validate(). On a decode or Validate failure it
-// feeds the error back and retries (bounded by finalOutputMaxRetry), continuing
-// the same gollem conversation so the model sees its prior attempt. gollem's
-// response-schema check verifies the JSON shape; Validate() is where the host's
-// domain invariants (required fields, allowed values) are enforced — gollem
-// never calls Validate() itself, so planexec layers it here.
+// the reply into T, runs T.Validate(), then applies each host finalizer in
+// order. On a decode, Validate, or finalizer failure it feeds the error back
+// and retries (bounded by finalOutputMaxRetry), continuing the same gollem
+// conversation so the model sees its prior attempt. gollem's response-schema
+// check verifies the JSON shape; Validate() enforces the type's own invariants;
+// finalizers enforce host invariants that need external context (e.g. a
+// workspace field schema) — gollem never calls any of these, so planexec layers
+// them here.
 func generateValidatedFinal[T Validatable](
 	ctx context.Context,
 	r *Runner,
@@ -115,6 +117,7 @@ func generateValidatedFinal[T Validatable](
 	language string,
 	historyKey string,
 	allResults []PhaseSummary,
+	finalizers []func(*T) error,
 ) (*T, error) {
 	var zero T
 	schema, err := gollem.ToSchema(zero)
@@ -172,10 +175,30 @@ func generateValidatedFinal[T Validatable](
 			input = finalRetryInput(lastErr)
 			continue
 		}
+		if ferr := runFinalizers(&out, finalizers); ferr != nil {
+			lastErr = ferr
+			input = finalRetryInput(lastErr)
+			continue
+		}
 		return &out, nil
 	}
 	return nil, goerr.Wrap(lastErr, "final output rejected after retries",
 		goerr.V("attempts", finalOutputMaxRetry+1))
+}
+
+// runFinalizers applies the host finalizers to a decoded, shape-valid final
+// output in order and returns the first error, so a failing finalizer feeds its
+// reason back into the regeneration loop. Finalizers validate against host
+// context and must be side-effect-free (a later attempt re-runs every one).
+// Returns nil when every finalizer accepts (including the zero-finalizer case,
+// which reproduces the prior Validate-only behaviour).
+func runFinalizers[T Validatable](out *T, finalizers []func(*T) error) error {
+	for _, fin := range finalizers {
+		if err := fin(out); err != nil {
+			return goerr.Wrap(err, "final output rejected by finalizer")
+		}
+	}
+	return nil
 }
 
 // finalRetryInput is the correction message sent to the final-output LLM after

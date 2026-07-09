@@ -529,6 +529,90 @@ func TestRunner_Run_StructuredFinalValidationExhausted(t *testing.T) {
 	gt.Value(t, res.Data).Nil()
 }
 
+// --- Integration: host finalizer hook -------------------------------
+
+// A host finalizer that rejects the first (shape-valid) final output must have
+// its error fed back into the same final-output regeneration loop, so a later
+// attempt that the finalizer accepts completes the turn. This is the generic
+// mechanism threadcase uses to fold workspace-schema field validation into the
+// loop (the finalizer validates against host context; it performs no side
+// effects — commits happen after the turn).
+func TestRunner_Run_FinalizerRetryThenSucceed(t *testing.T) {
+	ctx := context.Background()
+	llm := newSequencedLLM([]sequencedResponse{
+		{text: `{"message":"start","tasks":[
+			{"id":"t-1","title":"A","description":"x","acceptance_criteria":"a","tools":["slack_ro"]}
+		]}`},
+		{text: "investigation result"},
+		{text: `{"message":"done","finalize":{"reason":"done"}}`},
+		// Final output attempt 1: shape-valid and passes Validate(), but the
+		// finalizer rejects it.
+		{text: `{"workspace_id":"ws-1","title":"First","description":"d"}`},
+		// Final output attempt 2: regenerated after the finalizer's rejection is
+		// fed back (matchSubstr pins it to the retry input).
+		{text: `{"workspace_id":"ws-1","title":"Second","description":"d"}`, matchSubstr: "rejected"},
+	})
+
+	runner := newRunner(t, llm.Client())
+	req := baseRequest()
+
+	var seen []string
+	fin := func(p *finalPayload) error {
+		seen = append(seen, p.Title)
+		if p.Title != "Second" {
+			return goerr.New("finalizer requires title Second")
+		}
+		return nil
+	}
+
+	res, err := planexec.Run[finalPayload](ctx, runner, req, fin)
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(planexec.StatusCompleted)
+	gt.Value(t, res.Data).NotNil().Required()
+	gt.String(t, res.Data.Title).Equal("Second")
+	// The finalizer saw both attempts, proving the first rejection triggered a
+	// regeneration rather than failing the turn.
+	gt.Array(t, seen).Length(2).Required()
+	gt.String(t, seen[0]).Equal("First")
+	gt.String(t, seen[1]).Equal("Second")
+	// The second final-output call carried the finalizer's rejection reason.
+	gt.String(t, llm.inputAt(4)).Contains("finalizer requires title Second")
+}
+
+// A finalizer that rejects every attempt must exhaust the bounded final-output
+// retries and fall back (StatusFallbackError) rather than looping forever or
+// completing. It must run on every attempt (finalOutputMaxRetry+1).
+func TestRunner_Run_FinalizerExhausted(t *testing.T) {
+	ctx := context.Background()
+	llm := newSequencedLLM([]sequencedResponse{
+		{text: `{"message":"start","tasks":[
+			{"id":"t-1","title":"A","description":"x","acceptance_criteria":"a","tools":["slack_ro"]}
+		]}`},
+		{text: "result"},
+		{text: `{"message":"done","finalize":{"reason":"done"}}`},
+		// Three shape-valid final outputs; the finalizer rejects all of them.
+		{text: `{"workspace_id":"ws-1","title":"A","description":"d"}`},
+		{text: `{"workspace_id":"ws-1","title":"A","description":"d"}`},
+		{text: `{"workspace_id":"ws-1","title":"A","description":"d"}`},
+	})
+
+	runner := newRunner(t, llm.Client())
+	req := baseRequest()
+
+	calls := 0
+	fin := func(_ *finalPayload) error {
+		calls++
+		return goerr.New("always reject")
+	}
+
+	res, err := planexec.Run[finalPayload](ctx, runner, req, fin)
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(planexec.StatusFallbackError)
+	gt.Value(t, res.Data).Nil()
+	// The finalizer ran on every final-output attempt (finalOutputMaxRetry+1 == 3).
+	gt.Number(t, calls).Equal(3)
+}
+
 // --- Integration: direct mode (round-1 fast path) -------------------
 
 // recordingResolver records the tool ids it was asked to resolve so a

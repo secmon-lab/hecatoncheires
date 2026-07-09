@@ -303,10 +303,23 @@ methods, since Go methods cannot be generic):
 - `RunText(ctx, runner, req)` / `ResumeText(ctx, runner, req)` — plain-text
   turn / resume. The reply is in `RunResult.Text`.
 
-Side effects (closing a case, posting a message, …) are performed by the
-**sub-agents' tools inside the loop**, never by planexec or by a host commit
-callback. The old `RunRequest.OnFinalize` / `FinalOutputSchema` commit hooks
-are gone; a host applies whatever the returned `*T` describes.
+Side effects (closing a case, posting a message, persisting the entity, …) are
+performed either by the **sub-agents' tools inside the loop** or by the host
+**after** the turn from the returned `*T` — never by planexec itself, and never
+inside the loop as a commit hook. The old `RunRequest.OnFinalize` /
+`FinalOutputSchema` commit hooks are gone.
+
+`Run[T]` does accept optional `finalizers ...func(*T) error` that run after
+`T.Validate()` inside the final-output regeneration loop, but they are
+**validation-only and side-effect-free**: they let a host enforce an invariant
+that needs context `T.Validate()` cannot see (e.g. a workspace field schema), and
+a returned error is fed back to the model and the output regenerated. This is how
+ModeCreate feeds a bad field value (non-RFC3339 date, missing required field)
+back for correction. Committing the case is still a post-turn `Handler.Create`,
+NOT a finalizer side effect — a persistence failure there is surfaced and falls
+back rather than being fed to the model, which cannot repair an infrastructure
+error by re-emitting JSON. A finalizer must be side-effect-free because a retried
+attempt re-runs it. See `.claude/rules/planexec.md` for the create-path wiring.
 
 **Explicit termination.** The loop terminates ONLY when a replan round emits an
 explicit `finalize` action. A replan must set exactly one of `tasks` /
