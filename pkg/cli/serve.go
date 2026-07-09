@@ -163,6 +163,7 @@ func cmdServe() *cli.Command {
 	var llmCfg config.LLM
 	var embCfg config.Embedding
 	var githubCfg config.GitHub
+	var jiraCfg config.Jira
 	var webfetchCfg config.WebFetch
 	var storageCfg config.Storage
 	var sentryCfg config.Sentry
@@ -218,6 +219,7 @@ func cmdServe() *cli.Command {
 	flags = append(flags, llmCfg.Flags()...)
 	flags = append(flags, embCfg.Flags()...)
 	flags = append(flags, githubCfg.Flags()...)
+	flags = append(flags, jiraCfg.Flags()...)
 	flags = append(flags, webfetchCfg.Flags()...)
 	flags = append(flags, storageCfg.Flags()...)
 	flags = append(flags, sentryCfg.Flags()...)
@@ -415,6 +417,18 @@ func cmdServe() *cli.Command {
 				logging.Default().Info("GitHub App not configured, GitHub Source features will be disabled")
 			}
 
+			// Initialize Jira agent tools if configured.
+			jiraTools, err := jiraCfg.Configure(ctx)
+			if err != nil {
+				return goerr.Wrap(err, "failed to initialize Jira tools")
+			}
+			if jiraTools != nil {
+				ucOpts = append(ucOpts, usecase.WithJiraTools(jiraTools))
+				logging.Default().Info("Jira service enabled", logAttrsToArgs(jiraCfg.LogAttrs())...)
+			} else {
+				logging.Default().Info("Jira not configured, Jira agent tools will be disabled")
+			}
+
 			// Enable the agent webfetch tool. It is built only when an LLM
 			// client is also configured (injection screening is mandatory).
 			if webfetchCfg.IsEnabled() {
@@ -479,6 +493,7 @@ func cmdServe() *cli.Command {
 				SlackSearch:    uc.SlackSearchService(),
 				SlackRetriever: uc.SlackMessageRetriever(),
 				NotionTool:     uc.NotionToolClient(),
+				JiraTools:      jiraTools,
 				HistoryRepo:    agentHistoryRepo,
 				TraceRepo:      agentTraceRepo,
 			})

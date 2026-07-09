@@ -21,6 +21,7 @@ func cmdEval() *cli.Command {
 		llmCfg      config.LLM
 		slackCfg    config.Slack
 		githubCfg   config.GitHub
+		jiraCfg     config.Jira
 		webfetchCfg config.WebFetch
 		notionTok   string
 		reportPath  string
@@ -60,6 +61,7 @@ func cmdEval() *cli.Command {
 	flags = append(flags, llmCfg.Flags()...)
 	flags = append(flags, slackCfg.Flags()...)
 	flags = append(flags, githubCfg.Flags()...)
+	flags = append(flags, jiraCfg.Flags()...)
 	flags = append(flags, webfetchCfg.Flags()...)
 
 	return &cli.Command{
@@ -107,7 +109,7 @@ func cmdEval() *cli.Command {
 				}
 				cfg.LLM = llmClient
 
-				if err := wireLiveTools(ctx, &cfg, &slackCfg, &githubCfg, &webfetchCfg, notionTok); err != nil {
+				if err := wireLiveTools(ctx, &cfg, &slackCfg, &githubCfg, &jiraCfg, &webfetchCfg, notionTok); err != nil {
 					return err
 				}
 			}
@@ -128,7 +130,7 @@ func cmdEval() *cli.Command {
 // wireLiveTools builds real tool clients from flags so scenarios that mark a
 // tool live=true can use them. Each is optional; env errors clearly if a live
 // tool is requested without its client.
-func wireLiveTools(ctx context.Context, cfg *eval.Config, slackCfg *config.Slack, githubCfg *config.GitHub, webfetchCfg *config.WebFetch, notionTok string) error {
+func wireLiveTools(ctx context.Context, cfg *eval.Config, slackCfg *config.Slack, githubCfg *config.GitHub, jiraCfg *config.Jira, webfetchCfg *config.WebFetch, notionTok string) error {
 	if slackCfg.UserOAuthToken() != "" {
 		searchSvc, err := slacktool.NewSearchClient(slackCfg.UserOAuthToken())
 		if err != nil {
@@ -149,13 +151,18 @@ func wireLiveTools(ctx context.Context, cfg *eval.Config, slackCfg *config.Slack
 	}
 	cfg.GitHub = githubSvc
 
+	jiraTools, err := jiraCfg.Configure(ctx)
+	if err != nil {
+		return goerr.Wrap(err, "failed to initialize Jira tools")
+	}
+	cfg.JiraTools = jiraTools
+
 	// WebFetch is live-only: its HTTP-side settings flow through, and the eval
 	// env injects the eval LLM client into the tool before it is built.
 	if webfetchCfg.IsEnabled() {
 		settings := webfetchCfg.Settings()
 		cfg.WebFetch = &settings
 	}
-	_ = ctx
 	return nil
 }
 

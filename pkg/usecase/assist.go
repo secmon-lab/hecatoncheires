@@ -75,6 +75,14 @@ type AssistDeps struct {
 	GitHubClient   *githubtool.Client
 	WebFetchClient *webfetch.Client
 	EmbedClient    interfaces.EmbedClient
+
+	// JiraTools carries the already-expanded Jira read tools (see
+	// pkg/agent/tool/jira). Unlike NotionTool/GitHubClient/WebFetchClient
+	// this is not a client type: the Jira integration is a gollem.ToolSet
+	// with no exported ToolSet-to-[]Tool helper, so config.Jira.Configure
+	// expands it once at startup and hands the result through as a plain
+	// tool slice. nil/empty means Jira is not configured.
+	JiraTools []gollem.Tool
 }
 
 // NewAssistUseCase creates a new AssistUseCase from a deps bundle. See AssistDeps.
@@ -180,13 +188,15 @@ func (uc *AssistUseCase) processCase(ctx context.Context, entry *model.Workspace
 	notionTools := notiontool.New(notiontool.Deps{Client: uc.deps.NotionTool})
 	githubTools := githubtool.New(uc.deps.GitHubClient)
 	webfetchTools := webfetch.New(uc.deps.WebFetchClient)
+	jiraTools := uc.deps.JiraTools
 
-	allTools := make([]gollem.Tool, 0, len(coreTools)+len(slackTools)+len(notionTools)+len(githubTools)+len(webfetchTools))
+	allTools := make([]gollem.Tool, 0, len(coreTools)+len(slackTools)+len(notionTools)+len(githubTools)+len(webfetchTools)+len(jiraTools))
 	allTools = append(allTools, coreTools...)
 	allTools = append(allTools, slackTools...)
 	allTools = append(allTools, notionTools...)
 	allTools = append(allTools, githubTools...)
 	allTools = append(allTools, webfetchTools...)
+	allTools = append(allTools, jiraTools...)
 
 	// Create and execute the agent
 	agent := gollem.New(uc.deps.LLM,

@@ -8,9 +8,9 @@ a prompt must be one that is actually wired into that prompt's context;
 naming a tool the context does not expose silently does nothing.
 
 > Quick map for prompt authors:
-> - **Naming a tool in a Job prompt?** Read [Tools available by context](#tools-available-by-context) — Jobs get the Slack read tools (`slack__search_messages` / `slack__get_messages`) and Notion (`notion__*`), but a *narrower* write palette than the interactive mention agent and still **no GitHub** read tools.
+> - **Naming a tool in a Job prompt?** Read [Tools available by context](#tools-available-by-context) — Jobs get the Slack read tools (`slack__search_messages` / `slack__get_messages`), Notion (`notion__*`), and Jira (`jira_*`), but a *narrower* write palette than the interactive mention agent and still **no GitHub** read tools.
 > - **Wondering whether a Job may close / delete / post anywhere?** Read [Guardrails](#guardrails).
-> - **Wiring an external integration (Notion / GitHub) on / off?** See [Integrations](integrations.md); the tools light up automatically when the service is configured.
+> - **Wiring an external integration (Notion / GitHub / Jira) on / off?** See [Integrations](integrations.md); the tools light up automatically when the service is configured.
 
 The names below are exactly what the LLM sees (e.g. `case__update_case`). They
 are grouped by the package that defines them under `pkg/agent/tool/`.
@@ -120,6 +120,21 @@ Investigation / interactive contexts only — **not** wired into Jobs.
 | `github__get_file` | R | Fetch a file's content at any ref. UTF-8 text only; capped at 1 MB. |
 | `github__list_commits` | R | List commits with optional `path` / `author` / `since` / `until` filters. |
 
+### Jira tools (`jira`)
+
+Read-only Jira Cloud integration (`gollem-dev/tools/jira`, wrapped by
+`pkg/agent/tool/jira`). Wired when `--jira-base-url` / `--jira-email` /
+`--jira-api-token` (or the matching `HECATONCHEIRES_JIRA_*` env vars) are all
+set. See [integrations.md](integrations.md#jira).
+Available in every context, including Jobs — unlike GitHub, which is
+interactive/investigation only.
+
+| Tool | R/W | Purpose |
+|------|-----|---------|
+| `jira_list_projects` | R | List projects accessible to the account (id, key, name, type, lead), with pagination. |
+| `jira_search_issues` | R | Search issues with JQL; a `project` argument is spliced into the JQL via AND. Returns key, summary, status, type, assignee, priority, updated time. |
+| `jira_get_issues` | R | Fetch one or more issues by key/id in a single batch (up to 100); descriptions and optional comments are rendered to Markdown. |
+
 ### Web fetch tool (`webfetch`)
 
 | Tool | R/W | Purpose | Notes |
@@ -150,6 +165,7 @@ the mention agent close a case?" (yes — see [Guardrails](#guardrails)).
 | `slack__post_to_case_channel` | — | ✓ | ✓ | — | — |
 | `notion__*` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `github__*` | ✓ | — | — | ✓ | ✓ |
+| `jira_*` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `webfetch` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `knowledge__*` (incl. tag CRUD) | ✓ (write if case is non-private) | ✓ (write if case is non-private) | ✓ (write if case is non-private) | read-only | read-only |
 | `memo__*` | ✓ (if memos enabled) | ✓ (if memos enabled) | ✓ (if memos enabled) | — | — |
@@ -163,8 +179,12 @@ Notes:
 - **Jobs** (`[[job]]`, both `simple` and `planexec` strategy) run **unattended**.
   They get case + action writes, knowledge, memo, web fetch, the Slack read
   tools (`slack__search_messages` / `slack__get_messages`), Notion read tools,
-  and a single channel-pinned Slack *post* tool — but a narrower *write* palette
-  than the mention agent (no archive / delete-step) and **no GitHub** read tools.
+  Jira read tools, and a single channel-pinned Slack *post* tool — but a
+  narrower *write* palette than the mention agent (no archive / delete-step)
+  and **no GitHub** read tools. Jira is the one integration wired into Jobs
+  that GitHub is not: it carries no repository-scoped write surface to worry
+  about, so it follows the default "non-Action tools go everywhere" rule
+  instead of GitHub's carved-out exception.
   The Slack read tools let a thread-mode Job read its own case thread before
   acting (the thread's `slack_thread_ts` is supplied in the Job system prompt),
   which is exactly why they are wired: a Job told to "read the thread first"

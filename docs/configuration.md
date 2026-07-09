@@ -656,6 +656,7 @@ The AI agent will:
 | `slack__get_messages`, `slack__post_message` | `HECATONCHEIRES_SLACK_BOT_TOKEN`. |
 | `notion__search`, `notion__get_page` | `HECATONCHEIRES_NOTION_API_TOKEN`. See [docs/integrations.md](integrations.md). |
 | `github__*` | The `--github-app-*` flags. See [docs/integrations.md](integrations.md). |
+| `jira_*` | The `--jira-*` flags (`HECATONCHEIRES_JIRA_BASE_URL` / `_EMAIL` / `_API_TOKEN`). See [docs/integrations.md](integrations.md#jira). |
 | `webfetch` | A configured web-fetch client. |
 | `knowledge__*` | Always (write is withheld on private cases). |
 | `memo__*` | A `[memo]` section with at least one memo field defined. |

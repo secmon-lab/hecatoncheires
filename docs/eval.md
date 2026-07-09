@@ -223,6 +223,7 @@ from the eval job tool set — action creation is the primary observable.)
 | `slack_search` | sim + live | |
 | `notion_search` | sim + live | |
 | `github_search` | **live-only** | simulating it needs a production interface extraction, deferred |
+| `jira_search` | **live-only** | wraps the external gollem-dev/tools/jira ToolSet, which has no simulatable interface seam either |
 | `webfetch` | **live-only** | real HTTP GET + LLM injection screening; the eval LLM does the screening |
 | `knowledge__create_tag` | sim | Create a knowledge tag; must call `knowledge__list_tags` first to avoid duplicates. Returns the new tag id. |
 | `knowledge__update_tag` | sim | Rename an existing knowledge tag by id. |

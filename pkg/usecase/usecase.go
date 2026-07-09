@@ -30,6 +30,7 @@ type UseCases struct {
 	slackSearch              slacktool.SearchService
 	slackRetriever           slacktool.MessageRetriever
 	githubClient             *github.Client
+	jiraTools                []gollem.Tool
 	webfetchSettings         *webfetch.ClientConfig
 	webfetchClient           *webfetch.Client
 	llmClient                gollem.LLMClient
@@ -83,6 +84,17 @@ func WithBaseURL(url string) Option {
 func WithGitHubService(c *github.Client) Option {
 	return func(uc *UseCases) {
 		uc.githubClient = c
+	}
+}
+
+// WithJiraTools configures the already-expanded Jira read tools (see
+// pkg/agent/tool/jira). Unlike WithGitHubService this takes a plain tool
+// slice, not a client: gollem exposes no exported helper to turn a
+// gollem.ToolSet into []gollem.Tool, so the caller (pkg/cli/config.Jira.
+// Configure) expands it once at startup before passing it in here.
+func WithJiraTools(tools []gollem.Tool) Option {
+	return func(uc *UseCases) {
+		uc.jiraTools = tools
 	}
 }
 
@@ -250,6 +262,7 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 				GitHubClient:   uc.githubClient,
 				WebFetchClient: uc.webfetchClient,
 				EmbedClient:    uc.embedClient,
+				JiraTools:      uc.jiraTools,
 			})
 		} else if uc.historyRepo != nil || uc.traceRepo != nil {
 			panic("usecase.New: WithHistoryRepository and WithTraceRepository must be paired")
@@ -267,6 +280,7 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 			GitHubClient:   uc.githubClient,
 			WebFetchClient: uc.webfetchClient,
 			EmbedClient:    uc.embedClient,
+			JiraTools:      uc.jiraTools,
 		})
 
 		// MentionProposal is wired only when the persistent History/Trace archive
@@ -286,6 +300,7 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 				NotionClient:        uc.notionTool,
 				GitHubClient:        uc.githubClient,
 				WebFetchClient:      uc.webfetchClient,
+				JiraTools:           uc.jiraTools,
 				ActionUC:            NewActionToolAdapter(uc.Action),
 				ActionStepUC:        NewActionStepToolAdapter(uc.ActionStep),
 				KnowledgeAccessor:   NewKnowledgeToolAccessor(uc.Knowledge, uc.Tag),

@@ -104,6 +104,12 @@ type AgentDeps struct {
 	GitHubClient   *githubtool.Client
 	WebFetchClient *webfetch.Client
 	EmbedClient    interfaces.EmbedClient
+
+	// JiraTools carries the already-expanded Jira read tools (see
+	// pkg/agent/tool/jira / agent.CommonDeps.JiraTools for why this is a
+	// plain tool slice rather than a client type). nil/empty means Jira is
+	// not configured.
+	JiraTools []gollem.Tool
 }
 
 // NewAgentUseCase creates a new AgentUseCase from a deps bundle. See AgentDeps.
@@ -122,6 +128,7 @@ func NewAgentUseCase(deps AgentDeps) *AgentUseCase {
 			NotionClient:        deps.NotionTool,
 			GitHubClient:        deps.GitHubClient,
 			WebFetchClient:      deps.WebFetchClient,
+			JiraTools:           deps.JiraTools,
 			ActionUC:            NewActionToolAdapter(deps.ActionUC),
 			ActionStepUC:        NewActionStepToolAdapter(deps.ActionStepUC),
 			CaseUC:              NewCaseToolAdapter(deps.CaseUC),

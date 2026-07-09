@@ -57,6 +57,9 @@ type Options struct {
 	// WebFetch holds the live-only webfetch HTTP settings; the eval LLM is
 	// injected as the screening client when the tool is built.
 	WebFetch *webfetch.ClientConfig
+	// JiraTools carries the already-expanded Jira read tools (see
+	// pkg/agent/tool/jira). Live-only, like GitHub.
+	JiraTools []gollem.Tool
 }
 
 // Env is a prepared single-scenario environment.
@@ -114,6 +117,9 @@ func Build(ctx context.Context, sc *scenario.Scenario, opts Options) (*Env, erro
 	}
 	if opts.WebFetch != nil {
 		ucOpts = append(ucOpts, usecase.WithWebFetch(*opts.WebFetch))
+	}
+	if len(opts.JiraTools) > 0 {
+		ucOpts = append(ucOpts, usecase.WithJiraTools(opts.JiraTools))
 	}
 
 	uc := usecase.New(repo, registry, ucOpts...)

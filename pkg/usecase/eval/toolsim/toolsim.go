@@ -8,7 +8,9 @@
 // Client). The slack MessageRetriever is stubbed to return nothing (recorded).
 // github_search is concrete (*githubtool.Client) and is therefore live-only in
 // v1 — simulating it would require extracting an interface in production code,
-// which is deferred (see the spec limitations).
+// which is deferred (see the spec limitations). jira_search is likewise
+// live-only: it wraps the external gollem-dev/tools/jira ToolSet, which has no
+// simulatable interface seam either.
 package toolsim
 
 import (
@@ -29,6 +31,7 @@ const (
 	ToolSlackSearch  = "slack_search"
 	ToolNotionSearch = "notion_search"
 	ToolGitHubSearch = "github_search"
+	ToolJiraSearch   = "jira_search"
 	ToolWebFetch     = "webfetch"
 
 	// Knowledge tag management tools (in-process, simulatable).
@@ -38,7 +41,8 @@ const (
 )
 
 // SimulatableTools is the catalog of tool names the harness can simulate.
-// github_search is intentionally absent: it is live-only in v1.
+// github_search and jira_search are intentionally absent: both are live-only
+// in v1.
 func SimulatableTools() []string {
 	return []string{ToolSlackSearch, ToolNotionSearch}
 }

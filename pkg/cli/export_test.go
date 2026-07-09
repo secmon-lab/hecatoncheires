@@ -29,18 +29,21 @@ type JobReadToolDepsForTest struct {
 	Search    slacktool.SearchService
 	Retriever slacktool.MessageRetriever
 	Notion    notiontool.Client
+	Jira      []gollem.Tool
 }
 
 // BuildJobToolsWithReadDepsForTest exposes buildJobTools with the read-only
-// Slack / Notion dependencies populated, so tests can assert that those tools
-// are wired in (and omitted when their deps are nil) across both workspace
-// modes. Only construction is exercised; the deps' methods are never called.
+// Slack / Notion / Jira dependencies populated, so tests can assert that
+// those tools are wired in (and omitted when their deps are nil/empty)
+// across both workspace modes. Only construction is exercised; the deps'
+// methods are never called.
 func BuildJobToolsWithReadDepsForTest(deps JobReadToolDepsForTest, c *model.Case, ws *model.WorkspaceEntry) []gollem.Tool {
 	return buildJobTools(jobRuntimeDeps{
 		SlackService:   deps.Bot,
 		SlackSearch:    deps.Search,
 		SlackRetriever: deps.Retriever,
 		NotionTool:     deps.Notion,
+		JiraTools:      deps.Jira,
 	}, jobToolAdapters{}, c, ws)
 }
 

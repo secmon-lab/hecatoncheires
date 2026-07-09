@@ -56,6 +56,7 @@ func ToolCatalog() []toolCatalogEntry {
 		{Name: toolsim.ToolSlackSearch, Description: "Search Slack messages", ReadOnly: true, Simulatable: true},
 		{Name: toolsim.ToolNotionSearch, Description: "Search Notion pages", ReadOnly: true, Simulatable: true},
 		{Name: toolsim.ToolGitHubSearch, Description: "Search GitHub issues/PRs (live-only in v1)", ReadOnly: true, Simulatable: false},
+		{Name: toolsim.ToolJiraSearch, Description: "List Jira projects and search/fetch issues (live-only in v1)", ReadOnly: true, Simulatable: false},
 		{Name: toolsim.ToolWebFetch, Description: "Fetch a URL and return its content as Markdown, screened for prompt injection (live-only)", ReadOnly: true, Simulatable: false},
 		{Name: toolsim.ToolKnowledgeCreateTag, Description: "Create a knowledge tag; must call knowledge__list_tags first to avoid duplicates. Returns the new tag id.", ReadOnly: false, Simulatable: true},
 		{Name: toolsim.ToolKnowledgeUpdateTag, Description: "Rename an existing knowledge tag by id.", ReadOnly: false, Simulatable: true},
@@ -92,6 +93,10 @@ type Config struct {
 	// WebFetch carries the HTTP-side settings for the live-only webfetch tool;
 	// the eval env injects the eval LLM client before the tool is built.
 	WebFetch *webfetch.ClientConfig
+	// JiraTools carries the already-expanded Jira read tools (see
+	// pkg/agent/tool/jira). Live-only, like GitHub: nil/empty means jira_search
+	// scenarios cannot run live.
+	JiraTools []gollem.Tool
 }
 
 // Run executes the harness over the given paths and writes the summary to
@@ -204,6 +209,7 @@ func runOne(ctx context.Context, sc *scenario.Scenario, registry *driver.Registr
 		LiveNotion:      cfg.LiveNotion,
 		GitHub:          cfg.GitHub,
 		WebFetch:        cfg.WebFetch,
+		JiraTools:       cfg.JiraTools,
 	})
 	if err != nil {
 		return errorResult(res, err)

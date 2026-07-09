@@ -46,6 +46,16 @@ type CommonDeps struct {
 	GitHubClient   *githubtool.Client
 	WebFetchClient *webfetch.Client
 
+	// JiraTools carries the already-expanded Jira read tools (see
+	// pkg/agent/tool/jira). Unlike NotionClient/GitHubClient/WebFetchClient
+	// this is not a client type: gollem exposes no exported helper to turn a
+	// gollem.ToolSet into []gollem.Tool, so config.Jira.Configure expands it
+	// once at startup and hands the result through as a plain tool slice.
+	// nil/empty means Jira is not configured. Consumed both directly here
+	// (casebound's always-on tool set) and via agent.ToolSetDeps.Jira for
+	// the sub-agent resolver (proposal / threadcase investigation).
+	JiraTools []gollem.Tool
+
 	// Action mutator interfaces, used by `core` toolset. Required for
 	// case-bound mode (which uses the full mutating tool set). Optional for
 	// draft mode (read-only sub-agents).
