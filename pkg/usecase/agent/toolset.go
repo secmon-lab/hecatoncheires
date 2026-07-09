@@ -22,6 +22,7 @@ const (
 	ToolSetNotion   = "notion"
 	ToolSetGitHub   = "github"
 	ToolSetWebFetch = "webfetch"
+	ToolSetJira     = "jira"
 	// ToolSetCaseStatusWrite is the writer toolset carrying ONLY the case
 	// status-change tool (case__update_case_status / case__close_case). It is
 	// the one write capability a thread-mode sub-agent is granted: closing /
@@ -39,6 +40,7 @@ var KnownToolSetIDs = []string{
 	ToolSetNotion,
 	ToolSetGitHub,
 	ToolSetWebFetch,
+	ToolSetJira,
 }
 
 // KnownToolSetIDsNoCore is KnownToolSetIDs without the core (action) toolset.
@@ -51,6 +53,7 @@ var KnownToolSetIDsNoCore = []string{
 	ToolSetNotion,
 	ToolSetGitHub,
 	ToolSetWebFetch,
+	ToolSetJira,
 }
 
 // KnownToolSetIDsThreadWrite is KnownToolSetIDsNoCore plus the case
@@ -78,6 +81,11 @@ type ToolSetResolver struct {
 	notion   []gollem.Tool
 	github   []gollem.Tool
 	webfetch []gollem.Tool
+	// jira is the already-expanded Jira read tool set (see
+	// pkg/agent/tool/jira). Unlike notion/github/webfetch this is not built
+	// from a client here: it is handed in pre-expanded via ToolSetDeps.Jira
+	// because gollem has no exported ToolSet-to-[]Tool helper.
+	jira []gollem.Tool
 	// caseStatus is the case status-change writer tool set (case_status_write).
 	// Unlike knowledge it is NOT always included: a sub-agent gets it only when
 	// the planner requested ToolSetCaseStatusWrite for that task. Empty unless
@@ -101,6 +109,11 @@ type ToolSetDeps struct {
 	GitHub    *githubtool.Client
 	WebFetch  *webfetch.Client
 	Knowledge knowledgetool.Deps
+
+	// Jira carries the already-expanded Jira read tools (see
+	// pkg/agent/tool/jira). nil/empty means Jira is not configured, so the
+	// "jira" ToolSet ID resolves to nothing.
+	Jira []gollem.Tool
 
 	// CaseStatus backs the case_status_write toolset (the status-change tool
 	// only). The status tool is built when CaseStatus.StatusSet is non-nil
@@ -143,6 +156,7 @@ func NewToolSetResolver(d ToolSetDeps) *ToolSetResolver {
 		notion:     notiontool.New(d.Notion),
 		github:     githubtool.New(d.GitHub),
 		webfetch:   webfetch.New(d.WebFetch),
+		jira:       d.Jira,
 		caseStatus: caseStatus,
 		knowledge:  knowledge,
 	}
@@ -179,6 +193,8 @@ func (r *ToolSetResolver) Resolve(ids []string) []gollem.Tool {
 			total += len(r.github)
 		case ToolSetWebFetch:
 			total += len(r.webfetch)
+		case ToolSetJira:
+			total += len(r.jira)
 		case ToolSetCaseStatusWrite:
 			total += len(r.caseStatus)
 		}
@@ -197,6 +213,8 @@ func (r *ToolSetResolver) Resolve(ids []string) []gollem.Tool {
 			out = append(out, r.github...)
 		case ToolSetWebFetch:
 			out = append(out, r.webfetch...)
+		case ToolSetJira:
+			out = append(out, r.jira...)
 		case ToolSetCaseStatusWrite:
 			out = append(out, r.caseStatus...)
 		}

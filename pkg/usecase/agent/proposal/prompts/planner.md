@@ -109,7 +109,7 @@ If the mention is `@bot draft a case for the Smith matter`, `<token>` is `Smith`
 
 **Recipe C — workspace clearly Notion- or GitHub-backed:** if the active workspace's `get_workspace.sources` advertises a Notion DB or a GitHub repo and the mention plausibly maps to one of those, add a parallel task using the `notion` or `github` ToolSet. Pair this with Recipe A — Slack remains the primary signal.
 
-**ToolSet cheatsheet** — `slack_ro`: read-only Slack search/read (default first port of call); `notion`: lookup scoped to the active workspace's Notion sources; `github`: repo issues / PRs / discussions; `core_ro`: read-only Case repository, only when the mention seems to *resume* an existing Case.
+**ToolSet cheatsheet** — `slack_ro`: read-only Slack search/read (default first port of call); `notion`: lookup scoped to the active workspace's Notion sources; `github`: repo issues / PRs / discussions; `jira`: list Jira projects and search / fetch Jira issues (use when the mention references a Jira ticket key or the case likely tracks work already logged in Jira); `core_ro`: read-only Case repository, only when the mention seems to *resume* an existing Case.
 
 ## Action choices
 
@@ -122,7 +122,7 @@ Specify 1–5 parallel sub-agent tasks. Each task carries:
 - `title`: short, ID-free, human-readable label (<40 chars) that fits on a Slack context block row alongside an icon. Prefer a noun phrase ("Recent thread context", "Owner team for service-X") over a verb phrase. The user sees this label live during execution.
 - `description`: detailed instruction for the sub-agent.
 - `acceptance_criteria`: 1-sentence measurable bar.
-- `tools`: list of allowed ToolSet IDs from {`core_ro`, `slack_ro`, `notion`, `github`}. Pick the smallest subset.
+- `tools`: list of allowed ToolSet IDs from {`core_ro`, `slack_ro`, `notion`, `github`, `jira`}. Pick the smallest subset.
 
 ### question
 

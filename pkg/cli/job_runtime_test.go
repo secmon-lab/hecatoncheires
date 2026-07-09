@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -22,6 +23,26 @@ type fakeJobBot struct{ slacksvc.Service }
 type fakeJobSearch struct{ slacktool.SearchService }
 type fakeJobRetriever struct{ slacktool.MessageRetriever }
 type fakeJobNotion struct{ notiontool.Client }
+
+// fakeJiraTool is a minimal gollem.Tool stand-in used to populate
+// JobReadToolDepsForTest.Jira without depending on the external jira module.
+type fakeJiraTool struct{ name string }
+
+func (f *fakeJiraTool) Spec() gollem.ToolSpec {
+	return gollem.ToolSpec{Name: f.name, Description: "fake"}
+}
+
+func (f *fakeJiraTool) Run(context.Context, map[string]any) (map[string]any, error) {
+	return nil, nil
+}
+
+func fakeJiraTools() []gollem.Tool {
+	return []gollem.Tool{
+		&fakeJiraTool{name: "jira_list_projects"},
+		&fakeJiraTool{name: "jira_search_issues"},
+		&fakeJiraTool{name: "jira_get_issues"},
+	}
+}
 
 func toolNames(tools []gollem.Tool) map[string]bool {
 	names := make(map[string]bool, len(tools))
@@ -82,13 +103,16 @@ func hasCaseTool(tools []gollem.Tool) bool {
 	return false
 }
 
-// readToolNames are the read-only Slack / Notion tools the Job agent uses to
-// read its case thread and corroborate findings.
+// readToolNames are the read-only Slack / Notion / Jira tools the Job agent
+// uses to read its case thread and corroborate findings.
 var readToolNames = []string{
 	"slack__get_messages",
 	"slack__search_messages",
 	"notion__search",
 	"notion__get_page",
+	"jira_list_projects",
+	"jira_search_issues",
+	"jira_get_issues",
 }
 
 func TestBuildJobTools_ReadToolsWiredInBothModes(t *testing.T) {
@@ -97,6 +121,7 @@ func TestBuildJobTools_ReadToolsWiredInBothModes(t *testing.T) {
 		Search:    &fakeJobSearch{},
 		Retriever: &fakeJobRetriever{},
 		Notion:    &fakeJobNotion{},
+		Jira:      fakeJiraTools(),
 	}
 
 	cases := []struct {
@@ -163,6 +188,22 @@ func TestBuildJobTools_GetMessagesNeedsBotButSearchIsIndependent(t *testing.T) {
 		cli.JobReadToolDepsForTest{Bot: &fakeJobBot{}}, c, ws))
 	gt.Bool(t, names["slack__get_messages"]).True()
 	gt.Bool(t, names["slack__search_messages"]).False()
+}
+
+func TestBuildJobTools_JiraOnlyWiredWhenToolsProvided(t *testing.T) {
+	ws := &model.WorkspaceEntry{Workspace: model.Workspace{ID: "ws"}}
+	c := &model.Case{ID: 1, SlackChannelID: "C1"}
+
+	names := toolNames(cli.BuildJobToolsWithReadDepsForTest(
+		cli.JobReadToolDepsForTest{Jira: fakeJiraTools()}, c, ws))
+	gt.Bool(t, names["jira_list_projects"]).True()
+	gt.Bool(t, names["jira_search_issues"]).True()
+	gt.Bool(t, names["jira_get_issues"]).True()
+
+	names = toolNames(cli.BuildJobToolsWithReadDepsForTest(cli.JobReadToolDepsForTest{}, c, ws))
+	gt.Bool(t, names["jira_list_projects"]).False()
+	gt.Bool(t, names["jira_search_issues"]).False()
+	gt.Bool(t, names["jira_get_issues"]).False()
 }
 
 func TestRegistryHasInteractiveJob(t *testing.T) {

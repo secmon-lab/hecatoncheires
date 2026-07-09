@@ -379,6 +379,7 @@ func (uc *UseCase) buildToolSetResolver(_ TurnRequest) *agent.ToolSetResolver {
 		Notion:   notiontool.Deps{Client: d.NotionClient},
 		GitHub:   d.GitHubClient,
 		WebFetch: d.WebFetchClient,
+		Jira:     d.JiraTools,
 	})
 }
 

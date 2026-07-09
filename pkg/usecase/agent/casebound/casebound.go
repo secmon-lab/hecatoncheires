@@ -313,6 +313,7 @@ func (uc *UseCase) buildTools(req TurnRequest) []gollem.Tool {
 	notionTools := notiontool.New(notiontool.Deps{Client: d.NotionClient})
 	githubTools := githubtool.New(d.GitHubClient)
 	webfetchTools := webfetch.New(d.WebFetchClient)
+	jiraTools := d.JiraTools
 
 	// Case-editing tools (title / description / assignees / custom fields and,
 	// for thread-mode workspaces, board status). Only wired when a CaseUC is
@@ -365,12 +366,13 @@ func (uc *UseCase) buildTools(req TurnRequest) []gollem.Tool {
 		}
 	}
 
-	all := make([]gollem.Tool, 0, len(coreTools)+len(slackTools)+len(notionTools)+len(githubTools)+len(webfetchTools)+len(caseTools)+len(memoTools)+len(knowledgeTools))
+	all := make([]gollem.Tool, 0, len(coreTools)+len(slackTools)+len(notionTools)+len(githubTools)+len(webfetchTools)+len(jiraTools)+len(caseTools)+len(memoTools)+len(knowledgeTools))
 	all = append(all, coreTools...)
 	all = append(all, slackTools...)
 	all = append(all, notionTools...)
 	all = append(all, githubTools...)
 	all = append(all, webfetchTools...)
+	all = append(all, jiraTools...)
 	all = append(all, caseTools...)
 	all = append(all, memoTools...)
 	all = append(all, knowledgeTools...)

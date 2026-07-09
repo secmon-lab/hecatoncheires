@@ -123,6 +123,14 @@ type jobRuntimeDeps struct {
 	SlackRetriever slacktool.MessageRetriever // slack__get_messages via User token
 	NotionTool     notiontool.Client          // notion__search / notion__get_page
 
+	// JiraTools carries the already-expanded Jira read tools (see
+	// pkg/agent/tool/jira). Unlike NotionTool this is not a client type:
+	// gollem exposes no exported helper to turn a gollem.ToolSet into
+	// []gollem.Tool, so config.Jira.Configure expands it once at startup
+	// and hands the result through as a plain tool slice. nil/empty means
+	// Jira is not configured.
+	JiraTools []gollem.Tool
+
 	// HistoryRepo / TraceRepo are required when wiring the planexec
 	// executor (it needs persistent storage to replay sub-agent
 	// reasoning). Nil falls back to in-memory implementations so the
@@ -343,6 +351,11 @@ func buildJobTools(deps jobRuntimeDeps, adapters jobToolAdapters, c *model.Case,
 	// tool when the client is nil, so this is safe in deployments without Notion.
 	out = append(out, notiontool.New(notiontool.Deps{Client: deps.NotionTool})...)
 	out = append(out, webfetch.New(deps.WebFetch)...)
+	// Jira read tools (jira_list_projects / jira_search_issues / jira_get_issues).
+	// Already expanded at startup (see JiraTools doc comment); appended
+	// unconditionally, same as the other integration tool sets above — an
+	// empty/nil slice is a safe no-op.
+	out = append(out, deps.JiraTools...)
 	// Case-scoped memo tools, wired only when the workspace enabled memos.
 	if ws != nil && ws.MemoConfig.Enabled() {
 		out = append(out, memotool.New(memotool.Deps{

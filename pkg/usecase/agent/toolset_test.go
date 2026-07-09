@@ -93,6 +93,7 @@ func TestKnownToolSetIDsNoCore(t *testing.T) {
 			agent.ToolSetNotion,
 			agent.ToolSetGitHub,
 			agent.ToolSetWebFetch,
+			agent.ToolSetJira,
 		}
 		gt.Array(t, agent.KnownToolSetIDsNoCore).Equal(want)
 	})
@@ -196,6 +197,57 @@ func TestToolSetResolver_CaseStatusWrite(t *testing.T) {
 		})
 		// Only slack_ro requested (empty) — the status tool must not leak in.
 		gt.Array(t, r.Resolve([]string{agent.ToolSetSlackRO})).Length(0)
+	})
+}
+
+// fakeTool is a minimal gollem.Tool stand-in used to populate
+// ToolSetDeps.Jira in tests without depending on the external jira module.
+type fakeTool struct {
+	name string
+}
+
+func (f *fakeTool) Spec() gollem.ToolSpec {
+	return gollem.ToolSpec{Name: f.name, Description: "fake"}
+}
+
+func (f *fakeTool) Run(context.Context, map[string]any) (map[string]any, error) {
+	return nil, nil
+}
+
+func TestToolSetResolver_ResolveJira(t *testing.T) {
+	jiraTools := []gollem.Tool{
+		&fakeTool{name: "jira_list_projects"},
+		&fakeTool{name: "jira_search_issues"},
+		&fakeTool{name: "jira_get_issues"},
+	}
+
+	t.Run("jira ID resolves to the configured tools", func(t *testing.T) {
+		r := agent.NewToolSetResolver(agent.ToolSetDeps{Jira: jiraTools})
+		tools := r.Resolve([]string{agent.ToolSetJira})
+		gt.Array(t, tools).Length(3).Required()
+		gt.String(t, tools[0].Spec().Name).Equal("jira_list_projects")
+		gt.String(t, tools[1].Spec().Name).Equal("jira_search_issues")
+		gt.String(t, tools[2].Spec().Name).Equal("jira_get_issues")
+	})
+
+	t.Run("not requested means not included", func(t *testing.T) {
+		r := agent.NewToolSetResolver(agent.ToolSetDeps{Jira: jiraTools})
+		gt.Array(t, r.Resolve([]string{agent.ToolSetSlackRO})).Length(0)
+	})
+
+	t.Run("nil Jira deps yields no tools even when requested", func(t *testing.T) {
+		r := agent.NewToolSetResolver(agent.ToolSetDeps{})
+		gt.Array(t, r.Resolve([]string{agent.ToolSetJira})).Length(0)
+	})
+
+	t.Run("combined with core returns both sets", func(t *testing.T) {
+		r := agent.NewToolSetResolver(agent.ToolSetDeps{
+			Core: core.Deps{WorkspaceID: "ws", CaseID: 1},
+			Jira: jiraTools,
+		})
+		tools := r.Resolve([]string{agent.ToolSetCoreRO, agent.ToolSetJira})
+		// core_ro (2) + jira (3).
+		gt.Array(t, tools).Length(5)
 	})
 }
 
