@@ -189,11 +189,16 @@ func generateValidatedFinal[T Validatable](
 // runFinalizers applies the host finalizers to a decoded, shape-valid final
 // output in order and returns the first error, so a failing finalizer feeds its
 // reason back into the regeneration loop. Finalizers validate against host
-// context and must be side-effect-free (a later attempt re-runs every one).
-// Returns nil when every finalizer accepts (including the zero-finalizer case,
-// which reproduces the prior Validate-only behaviour).
+// context and must be side-effect-free (a later attempt re-runs every one). A
+// nil entry is skipped so a caller passing a maybe-nil validator (e.g. one built
+// only when a dependency is configured) cannot panic the run. Returns nil when
+// every finalizer accepts (including the zero-finalizer case, which reproduces
+// the prior Validate-only behaviour).
 func runFinalizers[T Validatable](out *T, finalizers []func(*T) error) error {
 	for _, fin := range finalizers {
+		if fin == nil {
+			continue
+		}
 		if err := fin(out); err != nil {
 			return goerr.Wrap(err, "final output rejected by finalizer")
 		}

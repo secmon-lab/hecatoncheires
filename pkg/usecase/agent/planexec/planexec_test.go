@@ -613,6 +613,35 @@ func TestRunner_Run_FinalizerExhausted(t *testing.T) {
 	gt.Number(t, calls).Equal(3)
 }
 
+// A nil entry in the finalizers slice must be skipped, not invoked — a caller
+// that passes a maybe-nil validator (or a literal nil) must not panic the run.
+func TestRunner_Run_NilFinalizerSkipped(t *testing.T) {
+	ctx := context.Background()
+	llm := newSequencedLLM([]sequencedResponse{
+		{text: `{"message":"start","tasks":[
+			{"id":"t-1","title":"A","description":"go","acceptance_criteria":"a","tools":["slack_ro"]}
+		]}`},
+		{text: "investigation result"},
+		{text: `{"message":"done","finalize":{"reason":"done"}}`},
+		{text: `{"workspace_id":"ws-1","title":"Found case","description":"long desc"}`},
+	})
+
+	runner := newRunner(t, llm.Client())
+	req := baseRequest()
+
+	// A nil finalizer alongside a real one: the nil is skipped, the real one runs.
+	called := false
+	res, err := planexec.Run[finalPayload](ctx, runner, req, nil, func(*finalPayload) error {
+		called = true
+		return nil
+	})
+	gt.NoError(t, err).Required()
+	gt.Value(t, res.Status).Equal(planexec.StatusCompleted)
+	gt.Value(t, res.Data).NotNil().Required()
+	gt.String(t, res.Data.Title).Equal("Found case")
+	gt.Bool(t, called).True()
+}
+
 // --- Integration: direct mode (round-1 fast path) -------------------
 
 // recordingResolver records the tool ids it was asked to resolve so a
