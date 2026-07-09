@@ -804,7 +804,11 @@ indicates the issue is resolved.
 
 - **`instant`** (default): every channel-root post starts a Case. This is the
   original thread-mode behaviour — good for a dedicated intake channel where each
-  post is a request.
+  post is a request. As a recovery path, an @mention inside a thread that has
+  **no Case yet** also starts one (seeded by the whole thread) — so a thread whose
+  root never became a Case (a message subtype or a bot post that `instant`
+  creation skipped, or a thread predating the bot) can still be turned into a Case
+  by mentioning the bot in it.
 - **`mention`**: a Case is started **only when the bot is @mentioned**, either in
   a channel-root message or inside a thread that has no Case yet. A plain post
   (no mention) is left alone. Use this in a busy, shared channel where only some
@@ -812,11 +816,14 @@ indicates the issue is resolved.
   mention, the surrounding thread) seeds the initialization agent, so the Case is
   created from the same context a human would have read.
 
-In **both** modes an @mention inside a thread that **already** has a Case runs the
-investigation agent (respond / update / close), not creation. The
-`accept_bot` gate applies to whichever event drives creation in the chosen mode:
-a bot-authored channel-root post in `instant`, or a bot-authored @mention in
-`mention`. A follow-up @mention on a still-Case-less thread resumes the in-flight
+In **both** modes an @mention inside a thread that has **no Case yet** starts a
+Case, and an @mention inside a thread that **already** has a Case runs the
+investigation agent (respond / update / close), not creation. The `accept_bot`
+gate applies to whichever event drives creation: a bot-authored channel-root post
+(`instant`) or a bot-authored @mention (either mode). The one instant-only
+difference is the channel root: in `instant` the channel-root **message** drives
+root creation, so a channel-root @mention there is not a separate trigger. A
+follow-up @mention on a still-Case-less thread resumes the in-flight
 initialization (superseding a pending question) rather than starting a second
 turn; the per-thread turn lock serialises concurrent triggers.
 

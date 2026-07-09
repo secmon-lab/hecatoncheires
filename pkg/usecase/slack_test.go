@@ -115,11 +115,13 @@ func TestSlackUseCases_HandleSlackEvent(t *testing.T) {
 	})
 }
 
-// TestSlackUseCases_ThreadModeCreationInitiation verifies the thread-mode
-// routing rule: case creation is initiated ONLY by a channel-root post.
-// A mention or a reply inside a thread that has no case yet must be ignored —
-// no create/resume turn runs (the LLM planner is never invoked, and no session
-// is created for the thread).
+// TestSlackUseCases_ThreadModeCreationInitiation verifies the instant-trigger
+// thread-mode routing rules: a channel-root post initiates creation, and — the
+// recovery path — an @mention inside a thread that has no case yet ALSO
+// initiates creation (both are gated so a bot-authored trigger needs
+// accept_bot). A plain reply inside a case-less thread carries no creation
+// semantics and is ignored (no create turn runs, the planner is never invoked,
+// and no session is created).
 func TestSlackUseCases_ThreadModeCreationInitiation(t *testing.T) {
 	const channel = "C-MONITOR"
 
@@ -162,19 +164,20 @@ func TestSlackUseCases_ThreadModeCreationInitiation(t *testing.T) {
 		return slackUC, repo, &llmInvoked
 	}
 
-	mentionEvent := func(threadTS string) *slackevents.EventsAPIEvent {
+	mentionEvent := func(user, botID, ts, threadTS string) *slackevents.EventsAPIEvent {
 		return &slackevents.EventsAPIEvent{
 			Type: slackevents.CallbackEvent,
 			InnerEvent: slackevents.EventsAPIInnerEvent{
 				Type: string(slackevents.AppMention),
 				Data: &slackevents.AppMentionEvent{
 					Type:            "app_mention",
-					User:            "U-ASKER",
-					Text:            "<@UBOT001> please help",
-					TimeStamp:       "1700000009.000001",
+					User:            user,
+					BotID:           botID,
+					Text:            "<@UBOT001> please make this a case",
+					TimeStamp:       ts,
 					ThreadTimeStamp: threadTS,
 					Channel:         channel,
-					EventTimeStamp:  "1700000009",
+					EventTimeStamp:  ts,
 				},
 			},
 			TeamID: "T1",
@@ -200,19 +203,72 @@ func TestSlackUseCases_ThreadModeCreationInitiation(t *testing.T) {
 		}
 	}
 
-	t.Run("mention in a case-less thread is ignored", func(t *testing.T) {
+	t.Run("mention in a case-less thread initiates creation (recovery path)", func(t *testing.T) {
 		ctx := context.Background()
 		uc, repo, llmInvoked := wire(false)
 
 		threadTS := "1700000000.000100" // a thread with no case bound
-		gt.NoError(t, uc.HandleSlackEvent(ctx, mentionEvent(threadTS))).Required()
+		// A human @mention inside a case-less thread starts a create turn even in
+		// instant mode: the planner runs and a session is created for the thread
+		// root. No case is committed here because the scripted planner errors on
+		// Generate, which the create flow handles gracefully.
+		gt.NoError(t, uc.HandleSlackEvent(ctx, mentionEvent("U-ASKER", "", "1700000009.000001", threadTS))).Required()
 		async.Wait()
 
-		gt.Value(t, llmInvoked.Load()).Equal(false)
+		gt.Value(t, llmInvoked.Load()).Equal(true)
+
+		// The session is bound to the thread root (threadTS), not the mention's ts.
+		ssn, err := repo.Session().GetByThread(ctx, channel, threadTS)
+		gt.NoError(t, err).Required()
+		gt.Value(t, ssn).NotNil()
 
 		c, err := repo.Case().GetBySlackThread(ctx, "support", channel, threadTS)
 		gt.NoError(t, err).Required()
 		gt.Value(t, c).Nil()
+	})
+
+	t.Run("bot-authored mention in a case-less thread is ignored when accept_bot is off", func(t *testing.T) {
+		ctx := context.Background()
+		uc, repo, llmInvoked := wire(false)
+
+		threadTS := "1700000000.000200"
+		// A bot-authored @mention inside a case-less thread must NOT start a case
+		// when accept_bot is off — same gate as a bot-authored channel-root post.
+		gt.NoError(t, uc.HandleSlackEvent(ctx, mentionEvent("", "B-FORMBOT", "1700000011.000001", threadTS))).Required()
+		async.Wait()
+
+		gt.Value(t, llmInvoked.Load()).Equal(false)
+
+		ssn, err := repo.Session().GetByThread(ctx, channel, threadTS)
+		gt.NoError(t, err).Required()
+		gt.Value(t, ssn).Nil()
+	})
+
+	t.Run("bot-authored mention in a case-less thread initiates creation when accept_bot is on", func(t *testing.T) {
+		ctx := context.Background()
+		uc, repo, llmInvoked := wire(true)
+
+		threadTS := "1700000000.000300"
+		gt.NoError(t, uc.HandleSlackEvent(ctx, mentionEvent("", "B-FORMBOT", "1700000012.000001", threadTS))).Required()
+		async.Wait()
+
+		gt.Value(t, llmInvoked.Load()).Equal(true)
+
+		ssn, err := repo.Session().GetByThread(ctx, channel, threadTS)
+		gt.NoError(t, err).Required()
+		gt.Value(t, ssn).NotNil()
+	})
+
+	t.Run("bot's own mention in a case-less thread is ignored even with accept_bot on", func(t *testing.T) {
+		ctx := context.Background()
+		uc, repo, llmInvoked := wire(true)
+
+		threadTS := "1700000000.000400"
+		// A mention authored by our own bot user must never self-trigger a case.
+		gt.NoError(t, uc.HandleSlackEvent(ctx, mentionEvent("UBOT001", "B-SELF", "1700000013.000001", threadTS))).Required()
+		async.Wait()
+
+		gt.Value(t, llmInvoked.Load()).Equal(false)
 
 		ssn, err := repo.Session().GetByThread(ctx, channel, threadTS)
 		gt.NoError(t, err).Required()
