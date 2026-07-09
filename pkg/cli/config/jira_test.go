@@ -104,6 +104,42 @@ func TestJiraConfigure_Configured(t *testing.T) {
 	gt.Bool(t, names["jira_get_issues"]).True()
 }
 
+func TestJiraConfigure_PartialConfigIsAnError(t *testing.T) {
+	testCases := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "only base url set",
+			args: []string{"--jira-base-url=https://example.atlassian.net"},
+		},
+		{
+			name: "only email set",
+			args: []string{"--jira-email=alice@example.com"},
+		},
+		{
+			name: "only api token set",
+			args: []string{"--jira-api-token=token123"},
+		},
+		{
+			name: "base url and email set, token missing",
+			args: []string{
+				"--jira-base-url=https://example.atlassian.net",
+				"--jira-email=alice@example.com",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			j := runJiraFlags(t, tc.args)
+			tools, err := j.Configure(context.Background())
+			gt.Value(t, tools).Nil()
+			gt.Value(t, err).NotNil().Required()
+		})
+	}
+}
+
 func TestJiraConfigure_InvalidBaseURL(t *testing.T) {
 	j := runJiraFlags(t, []string{
 		"--jira-base-url=not a url",

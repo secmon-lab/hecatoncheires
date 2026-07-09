@@ -57,9 +57,15 @@ func (j *Jira) IsConfigured() bool {
 }
 
 // Configure builds the Jira agent tools from the configured flags.
-// Returns nil, nil if not all flags are configured (Jira features will be
-// disabled).
+// Returns nil, nil if none of the three flags are set (Jira features will be
+// disabled). Returns an error if only some are set: a partial configuration
+// is a setup mistake, not an intentional opt-out, and silently disabling the
+// tools would hide it from the operator.
 func (j *Jira) Configure(ctx context.Context) ([]gollem.Tool, error) {
+	anySet := j.baseURL != "" || j.email != "" || j.apiToken != ""
+	if anySet && !j.IsConfigured() {
+		return nil, goerr.New("incomplete Jira configuration: jira-base-url, jira-email, and jira-api-token must all be set")
+	}
 	if !j.IsConfigured() {
 		return nil, nil
 	}
