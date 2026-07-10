@@ -91,7 +91,14 @@ func (t *postToCaseChannelTool) Run(ctx context.Context, args map[string]any) (m
 		if !ok {
 			return nil, goerr.New("thread_ts must be a string", goerr.V("type", fmt.Sprintf("%T", v)))
 		}
-		threadTS = s
+		// Treat an empty string as "not provided": keep the default thread (the
+		// case's thread) instead of overriding it to "" and posting at the
+		// channel root. The schema already says omitting thread_ts posts at the
+		// root, so a model that emits "" to mean "omitted" must not silently push
+		// the reply out of the case thread.
+		if s != "" {
+			threadTS = s
+		}
 	}
 
 	tool.Update(ctx, fmt.Sprintf("Posting to Slack channel %s...", t.deps.ChannelID))

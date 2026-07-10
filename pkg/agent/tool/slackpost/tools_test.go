@@ -99,6 +99,23 @@ func TestPostToCaseChannel_ExplicitThreadOverridesDefault(t *testing.T) {
 	gt.String(t, out["thread_ts"].(string)).Equal("1800000000.000999")
 }
 
+func TestPostToCaseChannel_EmptyThreadKeepsDefault(t *testing.T) {
+	// Regression: a model emitting thread_ts:"" (an empty string, meaning
+	// "omitted") must NOT override DefaultThreadTS to "" and push the reply to
+	// the channel root — that is how on-closed Job output escaped the case
+	// thread. An empty string is treated as "not provided".
+	p := &mockPoster{resp: "5555.0003"}
+	tools := slackpost.New(slackpost.Deps{Poster: p, ChannelID: "C-MONITOR", DefaultThreadTS: "1700000000.000100"})
+
+	out, err := tools[0].Run(context.Background(), map[string]any{"text": "job output", "thread_ts": ""})
+	gt.NoError(t, err).Required()
+	gt.Array(t, p.posts).Length(1).Required()
+	// Posted as a thread reply on the default thread, not at the channel root.
+	gt.String(t, p.posts[0].channelID).Equal("C-MONITOR")
+	gt.String(t, p.posts[0].threadTS).Equal("1700000000.000100")
+	gt.String(t, out["thread_ts"].(string)).Equal("1700000000.000100")
+}
+
 func TestPostToCaseChannel_RejectsMissingChannel(t *testing.T) {
 	p := &mockPoster{}
 	tools := slackpost.New(slackpost.Deps{Poster: p, ChannelID: ""})
