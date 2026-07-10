@@ -742,72 +742,63 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, workspaceID string, id in
 		}
 	}
 
-	title := existingCase.Title
-	if patch.Title != nil {
-		t := *patch.Title
-		// Drafts may carry an empty title — that's the whole point of the
-		// "save in progress" state. The empty-title gate fires again at
-		// SubmitDraft time, before promoting to OPEN.
-		if t == "" && !existingCase.IsDraft() {
-			return nil, goerr.New("case title cannot be empty", goerr.V(CaseIDKey, id))
-		}
-		title = t
+	// Apply the patch onto the loaded Case (PATCH, not PUT): only fields the
+	// caller actually set are overwritten; everything else — SlackThreadTS,
+	// BoardStatus, RequestKey, AgentAdditionalPrompt, AgentSourceIDs, assignees,
+	// Status, timestamps — is left exactly as stored, then persisted verbatim.
+	// Reconstructing a fresh &model.Case{...} (PUT) silently dropped every field
+	// not re-listed: that is how a thread-mode Case lost its SlackThreadTS on any
+	// edit, unbinding it from its Slack thread so GetBySlackThread stopped finding
+	// it — the next mention then created a duplicate Case and the on-closed Job
+	// posted to the channel root instead of the thread.
+	// Drafts may carry an empty title — that's the whole point of the "save in
+	// progress" state. The empty-title gate fires again at SubmitDraft time,
+	// before promoting to OPEN.
+	if patch.Title != nil && *patch.Title == "" && !existingCase.IsDraft() {
+		return nil, goerr.New("case title cannot be empty", goerr.V(CaseIDKey, id))
 	}
 
-	description := existingCase.Description
 	if patch.Description != nil {
-		description = *patch.Description
+		existingCase.Description = *patch.Description
 	}
 
-	isTest := existingCase.IsTest
 	if patch.IsTest != nil {
-		isTest = *patch.IsTest
+		existingCase.IsTest = *patch.IsTest
 	}
-
-	// Assignees are never touched here — they move only through
-	// AssignCase / UnassignCase. The existing list is preserved verbatim.
-	assigneeIDs := existingCase.AssigneeIDs
 
 	// Validate the submitted fields through the shared gate, then merge the
-	// enriched values onto the existing ones. Without a field patch, preserve
-	// the existing map verbatim (no validator pass — stale option IDs from a
-	// prior config must not cause an unrelated update to fail).
-	fieldValues := existingCase.FieldValues
+	// enriched values onto the existing ones. Without a field patch, the map is
+	// left untouched (no validator pass — stale option IDs from a prior config
+	// must not cause an unrelated update to fail).
 	if patch.Fields != nil {
 		validated, err := uc.validateCaseWrite(ctx, workspaceID, validatePartialStrict, patch.Fields, nil)
 		if err != nil {
 			return nil, goerr.Wrap(err, "case write validation failed", goerr.V(CaseIDKey, id))
 		}
-		fieldValues = mergeFieldValues(existingCase.FieldValues, validated)
+		existingCase.FieldValues = mergeFieldValues(existingCase.FieldValues, validated)
 	}
 
-	// Rename Slack channel if title changed and channel exists
-	if uc.slackService != nil && existingCase.SlackChannelID != "" && existingCase.Title != title {
+	// Rename the Slack channel only after EVERY validation has passed. Renaming
+	// is an external side effect that cannot be rolled back, so a later field
+	// validation failure must not leave the channel renamed while the DB still
+	// holds the old title (state desync). existingCase.Title is still the old
+	// title here — it is assigned below.
+	if patch.Title != nil && uc.slackService != nil && existingCase.SlackChannelID != "" && existingCase.Title != *patch.Title {
 		prefix := uc.slackChannelPrefixForWorkspace(workspaceID)
-		if err := uc.slackService.RenameChannel(ctx, existingCase.SlackChannelID, id, title, prefix); err != nil {
+		if err := uc.slackService.RenameChannel(ctx, existingCase.SlackChannelID, id, *patch.Title, prefix); err != nil {
 			return nil, goerr.Wrap(err, "failed to rename Slack channel",
 				goerr.V(CaseIDKey, id),
 				goerr.V("channel_id", existingCase.SlackChannelID))
 		}
 	}
 
-	caseModel := &model.Case{
-		ID:             id,
-		Title:          title,
-		Description:    description,
-		Status:         existingCase.Status,
-		ReporterID:     existingCase.ReporterID,
-		AssigneeIDs:    assigneeIDs,
-		SlackChannelID: existingCase.SlackChannelID,
-		IsPrivate:      existingCase.IsPrivate,
-		IsTest:         isTest,
-		ChannelUserIDs: existingCase.ChannelUserIDs,
-		FieldValues:    fieldValues,
-		CreatedAt:      existingCase.CreatedAt,
-		UpdatedAt:      time.Now().UTC(),
+	if patch.Title != nil {
+		existingCase.Title = *patch.Title
 	}
 
-	updated, err := uc.repo.Case().Update(ctx, workspaceID, caseModel)
+	existingCase.UpdatedAt = time.Now().UTC()
+
+	updated, err := uc.repo.Case().Update(ctx, workspaceID, existingCase)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to update case", goerr.V(CaseIDKey, id))
 	}

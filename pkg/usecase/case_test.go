@@ -405,6 +405,142 @@ func TestCaseUseCase_IsTestFlag(t *testing.T) {
 	})
 }
 
+// TestCaseUseCase_UpdateCase_PreservesUnpatchedFields is a regression guard for a
+// production bug: UpdateCase rebuilt the Case via a field-by-field &model.Case{...}
+// literal (PUT semantics) that omitted SlackThreadTS, BoardStatus, RequestKey,
+// AgentAdditionalPrompt and AgentSourceIDs. Any edit therefore blanked those
+// fields — a thread-mode Case lost its SlackThreadTS, so GetBySlackThread stopped
+// finding it, the next mention created a DUPLICATE Case, and the on-closed Job
+// posted to the channel root instead of the thread. UpdateCase now applies the
+// patch onto the loaded Case (PATCH), so every field the caller did not touch
+// must survive the write.
+func TestCaseUseCase_UpdateCase_PreservesUnpatchedFields(t *testing.T) {
+	repo := memory.New()
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace:             model.Workspace{ID: "support"},
+		CaseMode:              model.CaseModeThread,
+		SlackMonitorChannelID: "C-MONITOR",
+	})
+	uc := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+	ctx := context.Background()
+
+	threadTS := "1783560454.200959"
+	created, err := repo.Case().Create(ctx, "support", &model.Case{
+		Title:                 "Risk review",
+		Description:           "original description",
+		Status:                types.CaseStatusOpen,
+		ReporterID:            "U014DL12P0U",
+		AssigneeIDs:           []string{"U-A", "U-B"},
+		SlackChannelID:        "C-MONITOR",
+		SlackThreadTS:         threadTS,
+		BoardStatus:           "in_review",
+		RequestKey:            "req-key-xyz",
+		AgentAdditionalPrompt: "focus on impersonation risk",
+		AgentSourceIDs:        []model.SourceID{"src-1"},
+		FieldValues:           map[string]model.FieldValue{},
+		CreatedAt:             time.Now().UTC(),
+		UpdatedAt:             time.Now().UTC(),
+	})
+	gt.NoError(t, err).Required()
+
+	// A routine edit that only touches the description.
+	newDesc := "edited description"
+	updated, err := uc.UpdateCase(ctx, "support", created.ID, usecase.CaseUpdate{Description: &newDesc})
+	gt.NoError(t, err).Required()
+
+	// The patched field changed.
+	gt.Value(t, updated.Description).Equal("edited description")
+	// Every field the caller did NOT touch is preserved (these were dropped by
+	// the old rebuild).
+	gt.Value(t, updated.SlackThreadTS).Equal(threadTS)
+	gt.Value(t, updated.BoardStatus).Equal("in_review")
+	gt.Value(t, updated.RequestKey).Equal("req-key-xyz")
+	gt.Value(t, updated.AgentAdditionalPrompt).Equal("focus on impersonation risk")
+	gt.Value(t, updated.AgentSourceIDs).Equal([]model.SourceID{"src-1"})
+	gt.Value(t, updated.ReporterID).Equal("U014DL12P0U")
+	gt.Value(t, updated.SlackChannelID).Equal("C-MONITOR")
+	gt.Value(t, updated.AssigneeIDs).Equal([]string{"U-A", "U-B"})
+	gt.Value(t, updated.Title).Equal("Risk review")
+	gt.Value(t, updated.Status).Equal(types.CaseStatusOpen)
+
+	// The actual production symptom: after an edit the Case must still be
+	// discoverable by its thread, so a follow-up mention resolves to it instead
+	// of creating a duplicate.
+	byThread, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", threadTS)
+	gt.NoError(t, err).Required()
+	gt.Value(t, byThread).NotNil().Required()
+	gt.Value(t, byThread.ID).Equal(created.ID)
+	gt.Value(t, byThread.SlackThreadTS).Equal(threadTS)
+	gt.Value(t, byThread.Description).Equal("edited description")
+}
+
+// TestCaseUseCase_UpdateCase_NoRenameWhenFieldValidationFails guards the update
+// ordering: the Slack channel rename is an external side effect that cannot be
+// rolled back, so it must happen only after EVERY validation has passed. When a
+// title change and an invalid field patch arrive together, the field validation
+// must fail the whole update WITHOUT having renamed the channel — otherwise the
+// channel name and the persisted title desync.
+func TestCaseUseCase_UpdateCase_NoRenameWhenFieldValidationFails(t *testing.T) {
+	repo := memory.New()
+	set, err := model.NewActionStatusSet("triage", []string{"done"}, []model.ActionStatusDefinition{
+		{ID: "triage", Name: "Triage"},
+		{ID: "done", Name: "Done"},
+	})
+	gt.NoError(t, err).Required()
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace:             model.Workspace{ID: "support"},
+		CaseMode:              model.CaseModeThread,
+		SlackMonitorChannelID: "C-MONITOR",
+		CaseStatusSet:         set,
+		FieldSchema: &config.FieldSchema{
+			Fields: []config.FieldDefinition{
+				{ID: "severity", Name: "Severity", Type: types.FieldTypeSelect, Options: []config.FieldOption{{ID: "high", Name: "High"}, {ID: "low", Name: "Low"}}},
+			},
+		},
+	})
+
+	renamed := false
+	slackMock := &mockSlackService{
+		renameChannelFn: func(_ context.Context, _ string, _ int64, _ string, _ string) error {
+			renamed = true
+			return nil
+		},
+	}
+	uc := usecase.NewCaseUseCase(repo, registry, slackMock, nil, "")
+	ctx := context.Background()
+
+	created, err := repo.Case().Create(ctx, "support", &model.Case{
+		Title:          "Original title",
+		Status:         types.CaseStatusOpen,
+		ReporterID:     "U-REP",
+		SlackChannelID: "C-MONITOR",
+		SlackThreadTS:  "1783560454.200959",
+		BoardStatus:    "triage",
+		FieldValues:    map[string]model.FieldValue{},
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
+	})
+	gt.NoError(t, err).Required()
+
+	// Title changes (would trigger a rename) AND fields are invalid ("critical"
+	// is not an allowed severity option). The update must fail on validation.
+	newTitle := "Renamed title"
+	_, err = uc.UpdateCase(ctx, "support", created.ID, usecase.CaseUpdate{
+		Title:  &newTitle,
+		Fields: map[string]model.FieldValue{"severity": {FieldID: "severity", Value: "critical"}},
+	})
+	gt.Error(t, err)
+
+	// The channel was NOT renamed, and the persisted title is unchanged.
+	gt.Bool(t, renamed).False()
+	reloaded, err := repo.Case().Get(ctx, "support", created.ID)
+	gt.NoError(t, err).Required()
+	gt.Value(t, reloaded.Title).Equal("Original title")
+	gt.Value(t, reloaded.SlackThreadTS).Equal("1783560454.200959")
+}
+
 func TestCaseUseCase_AssignCase(t *testing.T) {
 	t.Run("adds users as a set union and persists", func(t *testing.T) {
 		repo := memory.New()
