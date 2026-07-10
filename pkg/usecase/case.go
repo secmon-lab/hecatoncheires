@@ -751,23 +751,11 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, workspaceID string, id in
 	// edit, unbinding it from its Slack thread so GetBySlackThread stopped finding
 	// it — the next mention then created a duplicate Case and the on-closed Job
 	// posted to the channel root instead of the thread.
-	if patch.Title != nil {
-		// Drafts may carry an empty title — that's the whole point of the
-		// "save in progress" state. The empty-title gate fires again at
-		// SubmitDraft time, before promoting to OPEN.
-		if *patch.Title == "" && !existingCase.IsDraft() {
-			return nil, goerr.New("case title cannot be empty", goerr.V(CaseIDKey, id))
-		}
-		// Rename the Slack channel when the title actually changes.
-		if uc.slackService != nil && existingCase.SlackChannelID != "" && existingCase.Title != *patch.Title {
-			prefix := uc.slackChannelPrefixForWorkspace(workspaceID)
-			if err := uc.slackService.RenameChannel(ctx, existingCase.SlackChannelID, id, *patch.Title, prefix); err != nil {
-				return nil, goerr.Wrap(err, "failed to rename Slack channel",
-					goerr.V(CaseIDKey, id),
-					goerr.V("channel_id", existingCase.SlackChannelID))
-			}
-		}
-		existingCase.Title = *patch.Title
+	// Drafts may carry an empty title — that's the whole point of the "save in
+	// progress" state. The empty-title gate fires again at SubmitDraft time,
+	// before promoting to OPEN.
+	if patch.Title != nil && *patch.Title == "" && !existingCase.IsDraft() {
+		return nil, goerr.New("case title cannot be empty", goerr.V(CaseIDKey, id))
 	}
 
 	if patch.Description != nil {
@@ -788,6 +776,24 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, workspaceID string, id in
 			return nil, goerr.Wrap(err, "case write validation failed", goerr.V(CaseIDKey, id))
 		}
 		existingCase.FieldValues = mergeFieldValues(existingCase.FieldValues, validated)
+	}
+
+	// Rename the Slack channel only after EVERY validation has passed. Renaming
+	// is an external side effect that cannot be rolled back, so a later field
+	// validation failure must not leave the channel renamed while the DB still
+	// holds the old title (state desync). existingCase.Title is still the old
+	// title here — it is assigned below.
+	if patch.Title != nil && uc.slackService != nil && existingCase.SlackChannelID != "" && existingCase.Title != *patch.Title {
+		prefix := uc.slackChannelPrefixForWorkspace(workspaceID)
+		if err := uc.slackService.RenameChannel(ctx, existingCase.SlackChannelID, id, *patch.Title, prefix); err != nil {
+			return nil, goerr.Wrap(err, "failed to rename Slack channel",
+				goerr.V(CaseIDKey, id),
+				goerr.V("channel_id", existingCase.SlackChannelID))
+		}
+	}
+
+	if patch.Title != nil {
+		existingCase.Title = *patch.Title
 	}
 
 	existingCase.UpdatedAt = time.Now().UTC()

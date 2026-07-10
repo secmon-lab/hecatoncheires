@@ -475,6 +475,72 @@ func TestCaseUseCase_UpdateCase_PreservesUnpatchedFields(t *testing.T) {
 	gt.Value(t, byThread.Description).Equal("edited description")
 }
 
+// TestCaseUseCase_UpdateCase_NoRenameWhenFieldValidationFails guards the update
+// ordering: the Slack channel rename is an external side effect that cannot be
+// rolled back, so it must happen only after EVERY validation has passed. When a
+// title change and an invalid field patch arrive together, the field validation
+// must fail the whole update WITHOUT having renamed the channel — otherwise the
+// channel name and the persisted title desync.
+func TestCaseUseCase_UpdateCase_NoRenameWhenFieldValidationFails(t *testing.T) {
+	repo := memory.New()
+	set, err := model.NewActionStatusSet("triage", []string{"done"}, []model.ActionStatusDefinition{
+		{ID: "triage", Name: "Triage"},
+		{ID: "done", Name: "Done"},
+	})
+	gt.NoError(t, err).Required()
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace:             model.Workspace{ID: "support"},
+		CaseMode:              model.CaseModeThread,
+		SlackMonitorChannelID: "C-MONITOR",
+		CaseStatusSet:         set,
+		FieldSchema: &config.FieldSchema{
+			Fields: []config.FieldDefinition{
+				{ID: "severity", Name: "Severity", Type: types.FieldTypeSelect, Options: []config.FieldOption{{ID: "high", Name: "High"}, {ID: "low", Name: "Low"}}},
+			},
+		},
+	})
+
+	renamed := false
+	slackMock := &mockSlackService{
+		renameChannelFn: func(_ context.Context, _ string, _ int64, _ string, _ string) error {
+			renamed = true
+			return nil
+		},
+	}
+	uc := usecase.NewCaseUseCase(repo, registry, slackMock, nil, "")
+	ctx := context.Background()
+
+	created, err := repo.Case().Create(ctx, "support", &model.Case{
+		Title:          "Original title",
+		Status:         types.CaseStatusOpen,
+		ReporterID:     "U-REP",
+		SlackChannelID: "C-MONITOR",
+		SlackThreadTS:  "1783560454.200959",
+		BoardStatus:    "triage",
+		FieldValues:    map[string]model.FieldValue{},
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
+	})
+	gt.NoError(t, err).Required()
+
+	// Title changes (would trigger a rename) AND fields are invalid ("critical"
+	// is not an allowed severity option). The update must fail on validation.
+	newTitle := "Renamed title"
+	_, err = uc.UpdateCase(ctx, "support", created.ID, usecase.CaseUpdate{
+		Title:  &newTitle,
+		Fields: map[string]model.FieldValue{"severity": {FieldID: "severity", Value: "critical"}},
+	})
+	gt.Error(t, err)
+
+	// The channel was NOT renamed, and the persisted title is unchanged.
+	gt.Bool(t, renamed).False()
+	reloaded, err := repo.Case().Get(ctx, "support", created.ID)
+	gt.NoError(t, err).Required()
+	gt.Value(t, reloaded.Title).Equal("Original title")
+	gt.Value(t, reloaded.SlackThreadTS).Equal("1783560454.200959")
+}
+
 func TestCaseUseCase_AssignCase(t *testing.T) {
 	t.Run("adds users as a set union and persists", func(t *testing.T) {
 		repo := memory.New()
