@@ -1455,6 +1455,13 @@ type = "text"
 		gt.Value(t, configs[0].ReactionEmoji).Equal("white_check_mark")
 	})
 
+	t.Run("a skin-tone modifier is stripped to the base emoji", func(t *testing.T) {
+		configs, err := writeAndLoad(t, threadWithReaction("wave::skin-tone-2"))
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1).Required()
+		gt.Value(t, configs[0].ReactionEmoji).Equal("wave")
+	})
+
 	t.Run("reaction on channel mode is rejected", func(t *testing.T) {
 		_, err := writeAndLoad(t, `
 [workspace]

@@ -51,9 +51,15 @@ var slackChannelIDPattern = regexp.MustCompile(`^[CG][A-Z0-9]+$`)
 var reactionEmojiPattern = regexp.MustCompile(`^[a-z0-9_'+-]+$`)
 
 // normalizeReactionEmoji strips surrounding whitespace and colons so operators
-// may write the reaction as ":incident:" or "incident" interchangeably.
+// may write the reaction as ":incident:" or "incident" interchangeably, and
+// drops a skin-tone modifier so a configured "wave::skin-tone-2" matches the base
+// emoji that reaction_added events carry (the event side strips it identically).
 func normalizeReactionEmoji(s string) string {
-	return strings.Trim(strings.TrimSpace(s), ":")
+	s = strings.Trim(strings.TrimSpace(s), ":")
+	if base, _, found := strings.Cut(s, "::"); found {
+		return base
+	}
+	return s
 }
 
 // WorkspaceBaseConfig represents the [workspace] section in a TOML config

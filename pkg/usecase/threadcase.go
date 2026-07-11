@@ -332,7 +332,13 @@ func (uc *AgentUseCase) runThreadCaseCreation(ctx context.Context, req caseCreat
 	// on the pending snapshot, so stale it there (which may differ from the case
 	// thread on a cross-channel reaction).
 	if req.mentionText != "" && session.PendingQuestion != nil && session.PendingQuestion.PostedMessageTS != "" {
-		uc.markThreadQuestionStale(ctx, session.PendingQuestion.PostedChannelID, session.PendingQuestion.PostedMessageTS)
+		postedChannel := session.PendingQuestion.PostedChannelID
+		if postedChannel == "" {
+			// Defensive: an older session may not have recorded the form's channel;
+			// the form is posted in the UI thread, so fall back to it.
+			postedChannel = req.uiChannel
+		}
+		uc.markThreadQuestionStale(ctx, postedChannel, session.PendingQuestion.PostedMessageTS)
 	}
 
 	traceMsg := uc.newTraceMessage(req.uiChannel, req.uiTS)
