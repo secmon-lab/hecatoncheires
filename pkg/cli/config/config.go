@@ -45,6 +45,23 @@ const maxWorkspaceEmojiRunes = 16
 // `#team-support`) without over-constraining future ID shapes.
 var slackChannelIDPattern = regexp.MustCompile(`^[CG][A-Z0-9]+$`)
 
+// reactionEmojiPattern matches a normalized Slack reaction emoji name (no
+// surrounding colons). Slack emoji names are lowercase and may include digits,
+// underscores, hyphens, apostrophes, and plus signs (e.g. "+1", "white_check_mark").
+var reactionEmojiPattern = regexp.MustCompile(`^[a-z0-9_'+-]+$`)
+
+// normalizeReactionEmoji strips surrounding whitespace and colons so operators
+// may write the reaction as ":incident:" or "incident" interchangeably, and
+// drops a skin-tone modifier so a configured "wave::skin-tone-2" matches the base
+// emoji that reaction_added events carry (the event side strips it identically).
+func normalizeReactionEmoji(s string) string {
+	s = strings.Trim(strings.TrimSpace(s), ":")
+	if base, _, found := strings.Cut(s, "::"); found {
+		return base
+	}
+	return s
+}
+
 // WorkspaceBaseConfig represents the [workspace] section in a TOML config
 type WorkspaceBaseConfig struct {
 	ID          string `toml:"id"`
@@ -110,6 +127,10 @@ type SlackSection struct {
 	// every channel-root post) or "mention" (only an @mention of the bot).
 	// Ignored in channel mode.
 	Trigger string `toml:"trigger"`
+	// Reaction is the emoji name (with or without surrounding colons) that
+	// triggers case creation when added to any visible message. Thread mode
+	// only; empty disables the reaction trigger.
+	Reaction string `toml:"reaction"`
 }
 
 // CaseSection represents the [case] section in a TOML config. It mirrors
@@ -211,6 +232,9 @@ type WorkspaceConfig struct {
 	SlackMonitorChannel string
 	AcceptBot           bool
 	CaseStatusSet       *model.ActionStatusSet
+	// ReactionEmoji is the normalized (colon-stripped) reaction trigger emoji,
+	// empty when disabled.
+	ReactionEmoji string
 }
 
 // Labels represents entity display labels
@@ -415,6 +439,20 @@ func (a *AppConfig) validateCaseMode() error {
 			goerr.V("trigger", a.Slack.Trigger))
 	}
 
+	// Reaction trigger is thread-mode only, and must be a valid emoji name. A
+	// reaction on a channel-mode workspace has no destination thread, so it is a
+	// hard error rather than an ignored setting.
+	if a.Slack.Reaction != "" {
+		if !mode.IsThread() {
+			return goerr.Wrap(ErrReactionRequiresThreadMode, "[slack] reaction requires mode = \"thread\"",
+				goerr.V("reaction", a.Slack.Reaction))
+		}
+		if norm := normalizeReactionEmoji(a.Slack.Reaction); norm == "" || !reactionEmojiPattern.MatchString(norm) {
+			return goerr.Wrap(ErrInvalidReactionEmoji, "[slack] reaction must be a Slack emoji name (e.g. \"incident\" or \":incident:\")",
+				goerr.V("reaction", a.Slack.Reaction))
+		}
+	}
+
 	if !mode.IsThread() {
 		// Channel mode: monitored channel and [case.status] are not used.
 		return nil
@@ -541,7 +579,8 @@ func LoadWorkspaceConfigs(paths []string) ([]*WorkspaceConfig, error) {
 	}
 
 	var configs []*WorkspaceConfig
-	seenIDs := make(map[string]string) // workspaceID → file path
+	seenIDs := make(map[string]string)       // workspaceID → file path
+	seenReactions := make(map[string]string) // reaction emoji → workspaceID
 	for _, f := range tomlFiles {
 		wc, err := loadSingleWorkspaceConfig(f)
 		if err != nil {
@@ -554,6 +593,19 @@ func LoadWorkspaceConfigs(paths []string) ([]*WorkspaceConfig, error) {
 				goerr.V("first_file", existing),
 				goerr.V("second_file", f),
 			)
+		}
+		// Reaction emojis must be unique across workspaces so emoji-to-workspace
+		// resolution is unambiguous.
+		if wc.ReactionEmoji != "" {
+			if prev, ok := seenReactions[wc.ReactionEmoji]; ok {
+				return nil, goerr.Wrap(ErrDuplicateReactionEmoji,
+					"reaction emoji is configured on more than one workspace",
+					goerr.V("reaction", wc.ReactionEmoji),
+					goerr.V(WorkspaceIDKey, wc.ID),
+					goerr.V("other_workspace_id", prev),
+				)
+			}
+			seenReactions[wc.ReactionEmoji] = wc.ID
 		}
 		seenIDs[wc.ID] = f
 		configs = append(configs, wc)
@@ -724,6 +776,7 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 		SlackMonitorChannel:  appCfg.Slack.Channel,
 		AcceptBot:            appCfg.Slack.AcceptBot,
 		CaseStatusSet:        caseStatusSet,
+		ReactionEmoji:        normalizeReactionEmoji(appCfg.Slack.Reaction),
 	}, nil
 }
 
@@ -777,6 +830,7 @@ func (a *AppConfig) Configure(c *cli.Command) ([]*WorkspaceConfig, *model.Worksp
 			SlackMonitorChannelID: wc.SlackMonitorChannel,
 			AcceptBot:             wc.AcceptBot,
 			CaseStatusSet:         wc.CaseStatusSet,
+			ReactionEmoji:         wc.ReactionEmoji,
 		})
 		logging.Default().Info("Registered workspace", "id", wc.ID, "name", wc.Name, "case_mode", wc.CaseMode.Normalize())
 	}

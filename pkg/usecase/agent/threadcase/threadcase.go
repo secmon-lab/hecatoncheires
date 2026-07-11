@@ -63,6 +63,13 @@ type TurnRequest struct {
 	// Mode selects the turn purpose (materialize on creation vs mention).
 	Mode Mode
 
+	// CreateInstruction is an optional extra instruction appended to the
+	// ModeCreate planner system prompt (under a "# Trigger context" heading).
+	// It lets a host inject trigger-specific guidance the generic prompt cannot
+	// know — e.g. that the case was raised by a reaction on one message and the
+	// surrounding conversation must be read. Empty and ignored for other modes.
+	CreateInstruction string
+
 	Handler Handler
 }
 
@@ -172,7 +179,7 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 		allowWrites = true
 	}
 
-	systemPrompt := buildSystemPrompt(req.Case, req.Workspace, req.Mode)
+	systemPrompt := buildSystemPrompt(req.Case, req.Workspace, req.Mode, req.CreateInstruction)
 
 	// Record a mention turn (ModeMention) as a JobRunLog + JobRunEvent trail so
 	// the case agent page lists it alongside Job runs. ModeCreate runs before a

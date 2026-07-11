@@ -636,7 +636,7 @@ func TestBuildSystemPrompt_ThreadContext(t *testing.T) {
 	c := newThreadCase()
 	c.Title = "Payment outage"
 
-	prompt := threadcase.BuildSystemPromptForTest(c, ws, threadcase.ModeMention)
+	prompt := threadcase.BuildSystemPromptForTest(c, ws, threadcase.ModeMention, "")
 	gt.String(t, prompt).Contains("Payment outage")
 	gt.String(t, prompt).Contains("severity")
 	gt.String(t, prompt).Contains("DONE")
@@ -663,7 +663,7 @@ func TestBuildSystemPrompt_CreateMode_WorkspacePrompt(t *testing.T) {
 
 	// ModeCreate (no case yet) renders the schema and appends the workspace
 	// instructions.
-	prompt := threadcase.BuildSystemPromptForTest(nil, ws, threadcase.ModeCreate)
+	prompt := threadcase.BuildSystemPromptForTest(nil, ws, threadcase.ModeCreate, "")
 	gt.String(t, prompt).Contains("NO case exists yet")
 	gt.String(t, prompt).Contains("severity")
 	gt.String(t, prompt).Contains("Workspace-specific instructions")
@@ -671,8 +671,28 @@ func TestBuildSystemPrompt_CreateMode_WorkspacePrompt(t *testing.T) {
 
 	// Empty CaseCreatePrompt → no workspace-specific section.
 	ws.CaseCreatePrompt = ""
-	bare := threadcase.BuildSystemPromptForTest(nil, ws, threadcase.ModeCreate)
+	bare := threadcase.BuildSystemPromptForTest(nil, ws, threadcase.ModeCreate, "")
 	gt.Bool(t, strings.Contains(bare, "Workspace-specific instructions")).False()
+}
+
+func TestBuildSystemPrompt_CreateInstruction(t *testing.T) {
+	ws := createTestWorkspace()
+	instruction := "Read the messages before and after the anchored message."
+
+	// ModeCreate with an instruction renders the trigger-context section.
+	prompt := threadcase.BuildSystemPromptForTest(nil, ws, threadcase.ModeCreate, instruction)
+	gt.String(t, prompt).Contains("# Trigger context")
+	gt.String(t, prompt).Contains(instruction)
+
+	// Empty instruction → no trigger-context section.
+	bare := threadcase.BuildSystemPromptForTest(nil, ws, threadcase.ModeCreate, "")
+	gt.Bool(t, strings.Contains(bare, "# Trigger context")).False()
+
+	// The instruction is create-only: a mention turn must not carry it.
+	c := newThreadCase()
+	mention := threadcase.BuildSystemPromptForTest(c, ws, threadcase.ModeMention, instruction)
+	gt.Bool(t, strings.Contains(mention, "# Trigger context")).False()
+	gt.Bool(t, strings.Contains(mention, instruction)).False()
 }
 
 // The ModeCreate field-schema block must give the planner the hints it needs to
@@ -691,7 +711,7 @@ func TestBuildSystemPrompt_CreateMode_FieldSchemaHints(t *testing.T) {
 			},
 		},
 	}
-	prompt := threadcase.BuildSystemPromptForTest(nil, ws, threadcase.ModeCreate)
+	prompt := threadcase.BuildSystemPromptForTest(nil, ws, threadcase.ModeCreate, "")
 	// Required fields are marked so the planner knows which it must fill.
 	gt.String(t, prompt).Contains("(required)")
 	// Date fields spell out the exact RFC3339 format the validator enforces.

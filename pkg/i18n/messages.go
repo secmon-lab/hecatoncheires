@@ -85,6 +85,9 @@ var messagesEN = [msgKeyCount]string{
 	MsgThreadCaseSummaryStatus:  "Status",
 	MsgThreadCaseSummaryLink:    "<%s|Open in the web UI>",
 
+	MsgReactionSeedRoot:     ":inbox_tray: <@%s> flagged a message for triage. Source: %s",
+	MsgReactionCaseBacklink: ":white_check_mark: Case created: <%s|Open in the web UI> · <%s|View thread>",
+
 	// Draft (open-mode) trace lines
 	MsgProposalTracePlanning:           "🤔 Planning…",
 	MsgProposalTracePlannerRetry:       "⚠️ Planner output rejected; retrying",
@@ -248,6 +251,9 @@ var messagesJA = [msgKeyCount]string{
 	MsgThreadCaseSummaryDesc:    "説明",
 	MsgThreadCaseSummaryStatus:  "ステータス",
 	MsgThreadCaseSummaryLink:    "<%s|Web UI で開く>",
+
+	MsgReactionSeedRoot:     ":inbox_tray: <@%s> がリアクションでメッセージを起票対象にしました。元メッセージ: %s",
+	MsgReactionCaseBacklink: ":white_check_mark: ケースを作成しました: <%s|Web UI で開く> · <%s|スレッドを開く>",
 
 	// Draft (open-mode) trace lines
 	MsgProposalTracePlanning:           "🤔 計画中…",

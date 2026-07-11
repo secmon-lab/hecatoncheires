@@ -62,6 +62,11 @@ type WorkspaceEntry struct {
 	// Cases in thread mode (the Kanban columns). Non-nil only for thread-mode
 	// workspaces; reuses the generic ActionStatusSet value type.
 	CaseStatusSet *ActionStatusSet
+	// ReactionEmoji is the Slack reaction (emoji name, without surrounding
+	// colons) that triggers case creation for this workspace. Empty when the
+	// reaction trigger is disabled. Only meaningful in thread mode, and unique
+	// across workspaces (enforced at config load).
+	ReactionEmoji string
 }
 
 // IsThreadMode reports whether this workspace uses thread-per-case binding.
@@ -111,6 +116,23 @@ func (r *WorkspaceRegistry) FindByMonitorChannel(channelID string) (*WorkspaceEn
 	for _, id := range r.order {
 		entry := r.entries[id]
 		if entry.IsThreadMode() && entry.SlackMonitorChannelID == channelID {
+			return entry, true
+		}
+	}
+	return nil, false
+}
+
+// FindByReactionEmoji returns the thread-mode workspace entry whose reaction
+// emoji matches. It only considers thread-mode workspaces; the boolean is false
+// when no thread-mode workspace uses the emoji. emoji must already be normalized
+// (no surrounding colons); an empty emoji never matches.
+func (r *WorkspaceRegistry) FindByReactionEmoji(emoji string) (*WorkspaceEntry, bool) {
+	if r == nil || emoji == "" {
+		return nil, false
+	}
+	for _, id := range r.order {
+		entry := r.entries[id]
+		if entry.IsThreadMode() && entry.ReactionEmoji == emoji {
 			return entry, true
 		}
 	}

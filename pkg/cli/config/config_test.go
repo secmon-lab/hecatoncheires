@@ -1410,6 +1410,121 @@ initial = "TRIAGE"
 		gt.Bool(t, errors.Is(err, config.ErrInvalidCaseTrigger)).True()
 	})
 
+	threadWithReaction := func(reaction string) string {
+		return `
+[workspace]
+id = "support"
+
+[slack]
+mode = "thread"
+channel = "C0123ABC"
+reaction = "` + reaction + `"
+
+[case]
+initial = "TRIAGE"
+closed = ["DONE"]
+
+  [[case.status]]
+  id = "TRIAGE"
+  name = "Triage"
+  color = "active"
+
+  [[case.status]]
+  id = "DONE"
+  name = "Done"
+  color = "success"
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`
+	}
+
+	t.Run("thread mode parses and normalizes the reaction emoji", func(t *testing.T) {
+		configs, err := writeAndLoad(t, threadWithReaction(":incident:"))
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1).Required()
+		gt.Value(t, configs[0].ReactionEmoji).Equal("incident")
+	})
+
+	t.Run("reaction without colons is accepted as-is", func(t *testing.T) {
+		configs, err := writeAndLoad(t, threadWithReaction("white_check_mark"))
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1).Required()
+		gt.Value(t, configs[0].ReactionEmoji).Equal("white_check_mark")
+	})
+
+	t.Run("a skin-tone modifier is stripped to the base emoji", func(t *testing.T) {
+		configs, err := writeAndLoad(t, threadWithReaction("wave::skin-tone-2"))
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1).Required()
+		gt.Value(t, configs[0].ReactionEmoji).Equal("wave")
+	})
+
+	t.Run("reaction on channel mode is rejected", func(t *testing.T) {
+		_, err := writeAndLoad(t, `
+[workspace]
+id = "support"
+
+[slack]
+mode = "channel"
+reaction = "incident"
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`)
+		gt.Error(t, err).Required()
+		gt.Bool(t, errors.Is(err, config.ErrReactionRequiresThreadMode)).True()
+	})
+
+	t.Run("invalid reaction emoji is rejected", func(t *testing.T) {
+		_, err := writeAndLoad(t, threadWithReaction("Not Valid!"))
+		gt.Error(t, err).Required()
+		gt.Bool(t, errors.Is(err, config.ErrInvalidReactionEmoji)).True()
+	})
+
+	t.Run("duplicate reaction across workspaces is rejected", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		one := `
+[workspace]
+id = "ws1"
+
+[slack]
+mode = "thread"
+channel = "C0111111"
+reaction = "incident"
+
+[case]
+initial = "TRIAGE"
+  [[case.status]]
+  id = "TRIAGE"
+  name = "Triage"
+`
+		two := `
+[workspace]
+id = "ws2"
+
+[slack]
+mode = "thread"
+channel = "C0222222"
+reaction = ":incident:"
+
+[case]
+initial = "TRIAGE"
+  [[case.status]]
+  id = "TRIAGE"
+  name = "Triage"
+`
+		gt.NoError(t, os.WriteFile(filepath.Join(tmpDir, "ws1.toml"), []byte(one), 0644)).Required()
+		gt.NoError(t, os.WriteFile(filepath.Join(tmpDir, "ws2.toml"), []byte(two), 0644)).Required()
+		_, err := config.LoadWorkspaceConfigs([]string{tmpDir})
+		gt.Error(t, err).Required()
+		gt.Bool(t, errors.Is(err, config.ErrDuplicateReactionEmoji)).True()
+	})
+
 	t.Run("thread mode opts into bot posts via accept_bot", func(t *testing.T) {
 		configs, err := writeAndLoad(t, `
 [workspace]

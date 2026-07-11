@@ -205,6 +205,48 @@ func TestWorkspaceRegistry_FindByMonitorChannel(t *testing.T) {
 	})
 }
 
+func TestWorkspaceRegistry_FindByReactionEmoji(t *testing.T) {
+	reg := model.NewWorkspaceRegistry()
+	reg.Register(&model.WorkspaceEntry{
+		Workspace:     model.Workspace{ID: "channel-ws"},
+		CaseMode:      model.CaseModeChannel,
+		ReactionEmoji: "ignored", // channel mode never matches
+	})
+	reg.Register(&model.WorkspaceEntry{
+		Workspace:             model.Workspace{ID: "thread-ws"},
+		CaseMode:              model.CaseModeThread,
+		SlackMonitorChannelID: "C0MONITOR",
+		ReactionEmoji:         "incident",
+	})
+
+	t.Run("matches the reaction emoji of a thread-mode workspace", func(t *testing.T) {
+		entry, ok := reg.FindByReactionEmoji("incident")
+		gt.Bool(t, ok).True()
+		gt.Value(t, entry.Workspace.ID).Equal("thread-ws")
+	})
+
+	t.Run("does not match a channel-mode workspace even with the emoji set", func(t *testing.T) {
+		_, ok := reg.FindByReactionEmoji("ignored")
+		gt.Bool(t, ok).False()
+	})
+
+	t.Run("does not match an unknown emoji", func(t *testing.T) {
+		_, ok := reg.FindByReactionEmoji("nope")
+		gt.Bool(t, ok).False()
+	})
+
+	t.Run("empty emoji never matches", func(t *testing.T) {
+		_, ok := reg.FindByReactionEmoji("")
+		gt.Bool(t, ok).False()
+	})
+
+	t.Run("nil registry is safe", func(t *testing.T) {
+		var nilReg *model.WorkspaceRegistry
+		_, ok := nilReg.FindByReactionEmoji("incident")
+		gt.Bool(t, ok).False()
+	})
+}
+
 func TestWorkspaceEntry_SlackTeamID(t *testing.T) {
 	reg := model.NewWorkspaceRegistry()
 

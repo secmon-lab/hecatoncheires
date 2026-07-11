@@ -460,6 +460,7 @@ channel_prefix = "risk"
 | `channel` | string | Conditional | — | The monitored Slack channel ID (e.g. `C0123456789`). **Required when `mode = "thread"`.** Use the channel **ID**, not the name |
 | `trigger` | string | No | `instant` | Thread mode only. What starts a Case: `instant` (every channel-root post) or `mention` (only an @mention of the bot — at the channel root or inside a thread that has no Case yet). Ignored in channel mode (startup warning). See [Case trigger](#case-trigger-thread-mode). |
 | `accept_bot` | bool | No | `false` | Thread mode only. When `true`, **bot-authored** events also start a Case (a channel-root post in `instant` mode, an @mention in `mention` mode) — e.g. an intake-form app's relayed request. When `false`, only human-authored events start a Case, so the channel is not flooded with a Case per bot notification. |
+| `reaction` | string | No | — | Thread mode only. Emoji name (with or without surrounding colons, e.g. `incident` or `:incident:`) that starts a Case when added to a message. Must be **unique across workspaces**. Setting it in channel mode is a config error. Requires the `reactions:read` scope and the `reaction_added` event subscription; the bot must be a member of any channel where the emoji is used. See [Reaction-triggered case creation](slack.md#reaction-triggered-case-creation). |
 
 When a case is created (channel mode), Hecatoncheires can automatically create a Slack channel with the naming pattern: `{channel_prefix}-{case_number}`.
 

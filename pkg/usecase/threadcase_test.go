@@ -984,7 +984,7 @@ func TestThreadCase_QuestionSubmit(t *testing.T) {
 			},
 		},
 		ActionCallback: goslack.ActionCallbacks{
-			BlockActions: []*goslack.BlockAction{{ActionID: usecase.ActionIDThreadCreateQuestionSubmit, Value: rootTS}},
+			BlockActions: []*goslack.BlockAction{{ActionID: usecase.ActionIDThreadCreateQuestionSubmit, Value: channel + ":" + rootTS}},
 		},
 	}
 	gt.NoError(t, agentUC.HandleThreadCaseQuestionSubmit(ctx, cb, cb.ActionCallback.BlockActions[0])).Required()
@@ -1037,7 +1037,7 @@ func TestThreadCase_QuestionSubmit_StaleAfterCreate(t *testing.T) {
 		Channel: goslack.Channel{GroupConversation: goslack.GroupConversation{Conversation: goslack.Conversation{ID: channel}}},
 		Message: goslack.Message{Msg: goslack.Msg{Timestamp: "1700000000.000900", ThreadTimestamp: rootTS}},
 		ActionCallback: goslack.ActionCallbacks{
-			BlockActions: []*goslack.BlockAction{{ActionID: usecase.ActionIDThreadCreateQuestionSubmit, Value: rootTS}},
+			BlockActions: []*goslack.BlockAction{{ActionID: usecase.ActionIDThreadCreateQuestionSubmit, Value: channel + ":" + rootTS}},
 		},
 	}
 	gt.NoError(t, agentUC.HandleThreadCaseQuestionSubmit(ctx, cb, cb.ActionCallback.BlockActions[0])).Required()

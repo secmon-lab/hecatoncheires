@@ -229,6 +229,9 @@ func (m *mockRepo) JobRunEvent() interfaces.JobRunEventRepository {
 func (m *mockRepo) Import() interfaces.ImportRepository {
 	panic("unexpected call: Import()")
 }
+func (m *mockRepo) ReactionClaim() interfaces.ReactionClaimRepository {
+	panic("unexpected call: ReactionClaim()")
+}
 func (m *mockRepo) Memo() interfaces.MemoRepository {
 	panic("unexpected call: Memo()")
 }
