@@ -34,6 +34,18 @@ var (
 	ErrMissingMonitorChannel = goerr.New("thread mode requires [slack] channel")
 	ErrInvalidMonitorChannel = goerr.New("invalid Slack channel ID")
 	ErrMissingCaseStatus     = goerr.New("thread mode requires [case.status]")
+	// ErrReactionRequiresThreadMode is returned when [slack] reaction is set on a
+	// workspace that is not in thread mode. Reaction-triggered case creation needs
+	// a destination thread, which only thread mode provides.
+	ErrReactionRequiresThreadMode = goerr.New("[slack] reaction requires mode = \"thread\"")
+	// ErrInvalidReactionEmoji is returned when [slack] reaction, after stripping
+	// surrounding colons, is empty or contains characters outside a Slack emoji
+	// name.
+	ErrInvalidReactionEmoji = goerr.New("invalid Slack reaction emoji name")
+	// ErrDuplicateReactionEmoji is returned when the same reaction emoji is
+	// configured on more than one workspace, which would make emoji-to-workspace
+	// resolution ambiguous.
+	ErrDuplicateReactionEmoji = goerr.New("duplicate Slack reaction emoji across workspaces")
 	// ErrMissingReferenceWorkspace is returned when a case_ref /
 	// multi_case_ref field omits reference_workspace.
 	ErrMissingReferenceWorkspace = goerr.New("case_ref field requires reference_workspace")

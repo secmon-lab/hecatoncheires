@@ -69,6 +69,19 @@ var BuildProposalUserInputForTest = buildProposalUserInput
 // verify reporter extraction from a bot-relayed intake post.
 var FirstSlackUserMentionForTest = firstSlackUserMention
 
+// RenderReactionCreateInstructionForTest exposes renderReactionCreateInstruction
+// so the reaction create-context prompt template can be golden-tested.
+var RenderReactionCreateInstructionForTest = renderReactionCreateInstruction
+
+// NormalizeReactionNameForTest exposes normalizeReactionName for skin-tone tests.
+var NormalizeReactionNameForTest = normalizeReactionName
+
+// EncodeCaseThreadValueForTest / ParseCaseThreadValueForTest expose the question
+// Submit button value codec so its contract (and the legacy fallback) can be
+// tested directly.
+var EncodeCaseThreadValueForTest = encodeCaseThreadValue
+var ParseCaseThreadValueForTest = parseCaseThreadValue
+
 // BuildAssistSystemPrompt is exported for testing
 var BuildAssistSystemPrompt = (*AssistUseCase).buildAssistSystemPrompt
 

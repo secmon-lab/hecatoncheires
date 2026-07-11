@@ -92,6 +92,7 @@ Then start the server:
      - `files:read` (to access file metadata and download files via `url_private`)
      - `groups:read` (to read private channel information and receive membership events)
      - `groups:write` (to create private channels for private cases)
+     - `reactions:read` (optional — required only when a thread-mode workspace sets `[slack] reaction`; lets the bot receive `reaction_added` events for messages it can see)
      - `team:read` (to list workspaces for org-level Slack app support)
      - `usergroups:read` (to list user groups and their members for auto-invite)
      - `users:read` (to fetch user profile information including avatar images)
@@ -315,6 +316,14 @@ Under **Subscribe to bot events**, add the events you want to receive:
 
 The `member_joined_channel` and `member_left_channel` events are required for **Private Case** access control. When these events fire, the application automatically syncs the channel member list to the associated case, keeping access permissions up to date.
 
+**Reaction trigger event** (only when a thread-mode workspace sets `[slack] reaction`):
+
+| Event | Description | Required Bot Scope |
+|-------|-------------|-------------------|
+| `reaction_added` | When a reaction is added to a message | `reactions:read` |
+
+**The bot must be a member of any channel where the trigger emoji is used** — Slack only delivers `reaction_added` for messages the app can see, so a reaction in a channel the bot has not joined is never received (there is nothing to fix in configuration; invite the bot to those channels). See [Reaction-triggered case creation](#reaction-triggered-case-creation).
+
 **Optional events** (if you need private channel or DM support):
 
 | Event | Description | Required Bot Scope |
@@ -427,6 +436,43 @@ channel mode and post their output into the Case thread.
    in-thread investigation agent in either mode.
 3. Invite the bot to the monitored channel (`/invite @your-bot-name`).
 4. Set `[slack] channel` to the channel **ID** (e.g. `C0123456789`), not the name.
+
+### Reaction-triggered case creation
+
+A thread-mode workspace can additionally start a Case when a specific emoji is
+added to a message, on top of the message / mention triggers above. Configure it
+with `[slack] reaction` (thread mode only):
+
+```toml
+[slack]
+mode = "thread"
+channel = "C_CASES"    # the monitored channel where case threads live
+reaction = "incident"  # the emoji that triggers creation (":incident:" also accepted)
+```
+
+The reaction emoji must be **unique across workspaces** so the emoji resolves to
+exactly one workspace. When the trigger emoji is added:
+
+- **Reaction inside the monitored channel** → the reacted message's thread
+  becomes the Case thread directly (a reaction on a reply resolves to the thread
+  root). If that thread is already a Case, the reaction is a no-op.
+- **Reaction in any other channel** → the bot posts a seed message in the
+  monitored channel and creates the Case thread there. The *creation dialog*
+  (progress and any clarifying question) happens in the **reactor's** thread, and
+  once the Case is created a link back to it is posted in that thread. Subsequent
+  discussion continues in the monitored-channel thread like any thread-mode Case.
+
+The person who added the reaction becomes the Case **reporter**. The
+initialization agent is instructed to read the conversation surrounding the
+reacted message (not just the single message) when composing the Case.
+
+**Setup requirements for the reaction trigger:**
+
+1. Add the `reactions:read` Bot Token Scope and subscribe to the `reaction_added`
+   event — see [Subscribe to Bot Events](#3-subscribe-to-bot-events).
+2. **Invite the bot to every channel where the trigger emoji may be used.** Slack
+   delivers `reaction_added` only for messages the bot can see, so a reaction in a
+   channel the bot has not joined is never received.
 
 ---
 

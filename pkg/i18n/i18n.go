@@ -108,6 +108,10 @@ const (
 	MsgThreadCaseSummaryStatus  // "Status" (field label)
 	MsgThreadCaseSummaryLink    // "<%s|Open in web UI>" (url)
 
+	// Reaction-triggered (cross-channel) case creation.
+	MsgReactionSeedRoot     // ":inbox_tray: <@%s> flagged a message for triage. Source: %s" (reporter user id, source permalink)
+	MsgReactionCaseBacklink // ":white_check_mark: Case created: <%s|Open in web UI> · <%s|View thread>" (case url, thread permalink)
+
 	// Draft (open-mode) planner / sub-agent trace lines. These are rendered
 	// into the per-turn Slack progress message so the user can follow what
 	// the agent is doing.

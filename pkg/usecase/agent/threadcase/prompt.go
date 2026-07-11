@@ -28,7 +28,7 @@ const (
 // buildSystemPrompt renders the planner system prompt for a thread-mode turn.
 // It inlines the case snapshot, the workspace field schema, and the board
 // status vocabulary so the planner can fill fields and pick a close status.
-func buildSystemPrompt(c *model.Case, ws *model.WorkspaceEntry, mode Mode) string {
+func buildSystemPrompt(c *model.Case, ws *model.WorkspaceEntry, mode Mode, createInstruction string) string {
 	var b strings.Builder
 
 	b.WriteString("You are an investigation agent operating inside a Slack thread that represents a single case.\n")
@@ -103,6 +103,15 @@ func buildSystemPrompt(c *model.Case, ws *model.WorkspaceEntry, mode Mode) strin
 	if mode == ModeCreate && ws != nil && strings.TrimSpace(ws.CaseCreatePrompt) != "" {
 		b.WriteString("# Workspace-specific instructions\n")
 		b.WriteString(ws.CaseCreatePrompt)
+		b.WriteString("\n")
+	}
+
+	// Host-supplied trigger context (e.g. reaction-initiated creation). Kept
+	// separate from the workspace prompt: it is per-turn, not per-workspace, and
+	// only meaningful while initializing a case.
+	if mode == ModeCreate && strings.TrimSpace(createInstruction) != "" {
+		b.WriteString("# Trigger context\n")
+		b.WriteString(createInstruction)
 		b.WriteString("\n")
 	}
 

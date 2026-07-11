@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"strings"
 
 	"github.com/m-mizutani/goerr/v2"
 	goslack "github.com/slack-go/slack" //nolint:depguard
@@ -22,6 +23,24 @@ import (
 // shared.
 const ActionIDThreadCreateQuestionSubmit = "thread_create_question_submit"
 
+// encodeCaseThreadValue / parseCaseThreadValue carry the case thread (channel +
+// thread_ts) in the Submit button value. The form may be displayed in a
+// different thread than the one the Case is bound to (a cross-channel reaction
+// posts the form in the reactor's source thread), so the resume cannot rely on
+// the form's own location to find the case thread. Slack channel IDs contain no
+// ':' and a message ts uses '.', so the first ':' is an unambiguous separator.
+func encodeCaseThreadValue(channelID, threadTS string) string {
+	return channelID + ":" + threadTS
+}
+
+func parseCaseThreadValue(v string) (channelID, threadTS string, ok bool) {
+	i := strings.IndexByte(v, ':')
+	if i <= 0 || i >= len(v)-1 {
+		return "", "", false
+	}
+	return v[:i], v[i+1:], true
+}
+
 // buildThreadCreateQuestionBlocks renders a planner question for the thread-mode
 // create flow as an interactive Block Kit form: a header (@-mentioning the
 // reporter), one input per item (radio / checkboxes / free-text plus an "Other"
@@ -29,7 +48,7 @@ const ActionIDThreadCreateQuestionSubmit = "thread_create_question_submit"
 // thread TS. It mirrors the open-mode form but routes submission to the
 // thread-create handler. items are the persisted snapshot shape so the same
 // builder serves both the first post and the re-prompt-on-error path.
-func buildThreadCreateQuestionBlocks(reason string, items []model.PendingQuestionItem, threadTS, requesterUserID string) ([]goslack.Block, string) {
+func buildThreadCreateQuestionBlocks(reason string, items []model.PendingQuestionItem, caseThreadValue, requesterUserID string) ([]goslack.Block, string) {
 	header := goslack.NewSectionBlock(
 		goslack.NewTextBlockObject(goslack.MarkdownType, questionHeaderText(reason, requesterUserID), false, false),
 		nil, nil,
@@ -84,7 +103,7 @@ func buildThreadCreateQuestionBlocks(reason string, items []model.PendingQuestio
 
 	submit := goslack.NewButtonBlockElement(
 		ActionIDThreadCreateQuestionSubmit,
-		threadTS,
+		caseThreadValue,
 		goslack.NewTextBlockObject(goslack.PlainTextType, "Submit", false, false),
 	)
 	submit.Style = goslack.StylePrimary
@@ -118,16 +137,22 @@ func threadQuestionToPending(q threadcase.QuestionPayload, channelID, messageTS 
 // parse and validate the answer. It returns the form's message TS. The session
 // is mutated (PendingQuestion set) but NOT persisted here — the threadcase
 // runtime persists the session when the turn ends on a question.
-func (uc *AgentUseCase) postThreadCreateQuestionForm(ctx context.Context, ssn *model.Session, channelID, threadTS, requesterUserID string, q threadcase.QuestionPayload) error {
+// postThreadCreateQuestionForm posts the interactive question form to the UI
+// thread (uiChannel/uiTS) and records the snapshot on the session so the submit
+// handler can parse and validate the answer. The Submit button carries the case
+// thread (caseChannel/caseTS), which may differ from the UI thread on a
+// cross-channel reaction, so the resume can locate the session by the case
+// thread rather than the form's own location.
+func (uc *AgentUseCase) postThreadCreateQuestionForm(ctx context.Context, ssn *model.Session, uiChannel, uiTS, caseChannel, caseTS, requesterUserID string, q threadcase.QuestionPayload) error {
 	if uc.deps.SlackService == nil {
 		return nil
 	}
-	pending := threadQuestionToPending(q, channelID, "")
-	blocks, fallback := buildThreadCreateQuestionBlocks(q.Reason, pending.Items, threadTS, requesterUserID)
-	ts, err := uc.deps.SlackService.PostThreadMessage(ctx, channelID, threadTS, blocks, fallback)
+	pending := threadQuestionToPending(q, uiChannel, "")
+	blocks, fallback := buildThreadCreateQuestionBlocks(q.Reason, pending.Items, encodeCaseThreadValue(caseChannel, caseTS), requesterUserID)
+	ts, err := uc.deps.SlackService.PostThreadMessage(ctx, uiChannel, uiTS, blocks, fallback)
 	if err != nil {
 		return goerr.Wrap(err, "post thread-create question form",
-			goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
+			goerr.V("ui_channel", uiChannel), goerr.V("ui_thread_ts", uiTS))
 	}
 	pending.PostedMessageTS = ts
 	ssn.PendingQuestion = pending
@@ -149,36 +174,46 @@ func (uc *AgentUseCase) HandleThreadCaseQuestionSubmit(ctx context.Context, call
 	}
 	ctx = contextWithSlackUserLang(ctx, uc.deps.SlackService, callback.User.ID)
 
-	channelID := callback.Channel.ID
-	threadTS := callback.Message.ThreadTimestamp
-	if threadTS == "" {
-		threadTS = callback.Message.Timestamp
+	// The case thread is carried in the Submit button value as "channel:ts". It
+	// coincides with the UI thread for normal thread-mode creation and diverges
+	// for a cross-channel reaction. A value without the separator is malformed
+	// (or a stale pre-encoding form) — fail loudly rather than guess.
+	caseChannel, caseTS, ok := parseCaseThreadValue(action.Value)
+	if !ok {
+		return goerr.New("malformed question submit value", goerr.V("value", action.Value))
+	}
+	// The UI thread (where the form is displayed and where form updates go) is
+	// the callback's own location.
+	uiChannel := callback.Channel.ID
+	uiTS := callback.Message.ThreadTimestamp
+	if uiTS == "" {
+		uiTS = callback.Message.Timestamp
 	}
 	messageTS := callback.Message.Timestamp
 
-	entry, ok := uc.deps.Registry.FindByMonitorChannel(channelID)
+	entry, ok := uc.deps.Registry.FindByMonitorChannel(caseChannel)
 	if !ok {
 		return nil
 	}
 	wsID := entry.Workspace.ID
 
 	// If the case is already created, the form is stale.
-	if c, err := uc.deps.Repo.Case().GetBySlackThread(ctx, wsID, channelID, threadTS); err != nil {
+	if c, err := uc.deps.Repo.Case().GetBySlackThread(ctx, wsID, caseChannel, caseTS); err != nil {
 		return goerr.Wrap(err, "look up case for question submit")
 	} else if c != nil {
-		uc.markThreadQuestionStale(ctx, channelID, messageTS)
+		uc.markThreadQuestionStale(ctx, uiChannel, messageTS)
 		return nil
 	}
 
-	session, err := uc.deps.Repo.Session().GetByThread(ctx, channelID, threadTS)
+	session, err := uc.deps.Repo.Session().GetByThread(ctx, caseChannel, caseTS)
 	if err != nil {
 		return goerr.Wrap(err, "load session for question submit",
-			goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
+			goerr.V("case_channel", caseChannel), goerr.V("case_thread_ts", caseTS))
 	}
 	// Stale if the session moved on, has no pending question, or the pending
 	// question is a newer form (a mention superseded this one).
 	if session == nil || session.PendingQuestion == nil || session.PendingQuestion.PostedMessageTS != messageTS {
-		uc.markThreadQuestionStale(ctx, channelID, messageTS)
+		uc.markThreadQuestionStale(ctx, uiChannel, messageTS)
 		return nil
 	}
 
@@ -189,13 +224,13 @@ func (uc *AgentUseCase) HandleThreadCaseQuestionSubmit(ctx context.Context, call
 		reporter = callback.User.ID
 	}
 	if missing := missingDraftQuestionItems(pq, answers); len(missing) > 0 {
-		uc.repostThreadQuestionWithError(ctx, channelID, messageTS, reporter, pq, answers, missing)
+		uc.repostThreadQuestionWithError(ctx, uiChannel, messageTS, encodeCaseThreadValue(caseChannel, caseTS), reporter, pq, answers, missing)
 		return nil
 	}
 
 	// Swap the form into a read-only answered record.
 	answeredBlocks, answeredFallback := buildDraftQuestionAnsweredBlocks(pq, answers)
-	if err := uc.deps.SlackService.UpdateMessage(ctx, channelID, messageTS, answeredBlocks, answeredFallback); err != nil {
+	if err := uc.deps.SlackService.UpdateMessage(ctx, uiChannel, messageTS, answeredBlocks, answeredFallback); err != nil {
 		errutil.Handle(ctx, goerr.Wrap(err, "update thread question form to answered view"),
 			"falling back to text confirmation")
 	}
@@ -209,17 +244,32 @@ func (uc *AgentUseCase) HandleThreadCaseQuestionSubmit(ctx context.Context, call
 	}
 
 	// Resume the create agent with the structured answers as the latest input.
-	return uc.runThreadCaseCreation(ctx, entry, channelID, threadTS, reporter, nil, nil, answerText, messageTS, messageTS)
+	// The dialog (trace / any follow-up question / completion link) surfaces in
+	// the UI thread; the Case stays bound to the case thread. createInstruction
+	// is empty on resume — the seed context already lives in the gollem history
+	// keyed on the session.
+	_, err = uc.runThreadCaseCreation(ctx, caseCreateReq{
+		entry:       entry,
+		caseChannel: caseChannel,
+		caseTS:      caseTS,
+		uiChannel:   uiChannel,
+		uiTS:        uiTS,
+		reporter:    reporter,
+		mentionText: answerText,
+		mentionTS:   messageTS,
+		triggerTS:   messageTS,
+	})
+	return err
 }
 
 // repostThreadQuestionWithError re-renders the form with a banner listing the
 // items that still need an answer, preserving the reporter mention so they are
 // paged again to finish.
-func (uc *AgentUseCase) repostThreadQuestionWithError(ctx context.Context, channelID, messageTS, requesterUserID string, pq *model.PendingQuestion, answers map[string]draftQuestionAnswer, missing []string) {
+func (uc *AgentUseCase) repostThreadQuestionWithError(ctx context.Context, channelID, messageTS, caseThreadValue, requesterUserID string, pq *model.PendingQuestion, answers map[string]draftQuestionAnswer, missing []string) {
 	if uc.deps.SlackService == nil {
 		return
 	}
-	blocks, fallback := buildThreadCreateQuestionBlocks(pq.Reason, pq.Items, pq.PostedMessageTS, requesterUserID)
+	blocks, fallback := buildThreadCreateQuestionBlocks(pq.Reason, pq.Items, caseThreadValue, requesterUserID)
 	banner := goslack.NewContextBlock("thread_create_question_error",
 		goslack.NewTextBlockObject(goslack.MarkdownType,
 			":warning: Please answer every question before submitting.", false, false))

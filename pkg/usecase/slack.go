@@ -73,6 +73,10 @@ func (uc *SlackUseCases) HandleSlackEvent(ctx context.Context, event *slackevent
 	switch event.InnerEvent.Type {
 	case "member_joined_channel", "member_left_channel":
 		return uc.handleMembershipEvent(ctx, event)
+	case "reaction_added":
+		// Reaction-triggered case creation. Handled before slack.NewMessage so a
+		// reaction event does not fall through to the "unsupported type" path.
+		return uc.handleReactionEvent(ctx, event)
 	}
 
 	// Convert event to domain model

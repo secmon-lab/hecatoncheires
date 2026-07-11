@@ -78,9 +78,10 @@ func (uc *AgentUseCase) HandleThreadCaseCreation(ctx context.Context, msg *slack
 
 	reporter = uc.resolveThreadCaseReporter(ctx, reporter, text)
 
-	return uc.runThreadCaseCreation(ctx, entry, channelID, threadTS, reporter,
+	_, err = uc.runThreadCaseCreation(ctx, threadCreateReq(entry, channelID, threadTS, reporter,
 		[]threadcase.ConversationMessage{{Timestamp: threadTS, UserID: reporter, Text: text}},
-		nil, "", "", threadTS)
+		nil, "", "", threadTS, ""))
+	return err
 }
 
 // resolveThreadCaseReporter returns the reporter for a new thread-mode case.
@@ -180,8 +181,9 @@ func (uc *AgentUseCase) HandleThreadCaseMentionCreation(ctx context.Context, msg
 			return goerr.Wrap(cerr, "partition conversation for mention follow-up",
 				goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
 		}
-		return uc.runThreadCaseCreation(ctx, entry, channelID, threadTS, reporter,
-			nil, toThreadcaseMessages(delta), msg.Text(), msg.ID(), msg.ID())
+		_, err = uc.runThreadCaseCreation(ctx, threadCreateReq(entry, channelID, threadTS, reporter,
+			nil, toThreadcaseMessages(delta), msg.Text(), msg.ID(), msg.ID(), ""))
+		return err
 	}
 
 	// First mention: seed a fresh creation turn. A channel-root mention is its
@@ -191,8 +193,9 @@ func (uc *AgentUseCase) HandleThreadCaseMentionCreation(ctx context.Context, msg
 	if isRoot {
 		// The mentioner is the root author, so they are the reporter.
 		reporter := uc.resolveThreadCaseReporter(ctx, msg.UserID(), msg.Text())
-		return uc.runThreadCaseCreation(ctx, entry, channelID, threadTS, reporter,
-			nil, nil, msg.Text(), msg.ID(), msg.ID())
+		_, err = uc.runThreadCaseCreation(ctx, threadCreateReq(entry, channelID, threadTS, reporter,
+			nil, nil, msg.Text(), msg.ID(), msg.ID(), ""))
+		return err
 	}
 
 	ctxMsgs, cerr := uc.collectContextMessages(ctx, msg)
@@ -208,8 +211,9 @@ func (uc *AgentUseCase) HandleThreadCaseMentionCreation(ctx context.Context, msg
 		rootAuthor = ctxMsgs[0].UserID
 	}
 	reporter := uc.resolveThreadCaseReporter(ctx, rootAuthor, msg.Text())
-	return uc.runThreadCaseCreation(ctx, entry, channelID, threadTS, reporter,
-		toThreadcaseMessages(ctxMsgs), nil, msg.Text(), msg.ID(), msg.ID())
+	_, err = uc.runThreadCaseCreation(ctx, threadCreateReq(entry, channelID, threadTS, reporter,
+		toThreadcaseMessages(ctxMsgs), nil, msg.Text(), msg.ID(), msg.ID(), ""))
+	return err
 }
 
 // ResumeThreadCaseCreation continues the initialization (create) agent on a
@@ -241,85 +245,170 @@ func (uc *AgentUseCase) ResumeThreadCaseCreation(ctx context.Context, msg *slack
 		return nil
 	}
 
-	return uc.runThreadCaseCreation(ctx, entry, channelID, threadTS, reporter,
-		nil, nil, msg.Text(), msg.ID(), msg.ID())
+	_, err = uc.runThreadCaseCreation(ctx, threadCreateReq(entry, channelID, threadTS, reporter,
+		nil, nil, msg.Text(), msg.ID(), msg.ID(), ""))
+	return err
 }
 
-// runThreadCaseCreation is the shared body for the initial post and the resume
-// paths. systemMessages seeds the first turn; deltaMessages carries thread
-// messages newer than the last processed mention (mention follow-ups);
-// mentionText / mentionTS feed the current mention. triggerTS is the turn-lock
-// dedup key.
-func (uc *AgentUseCase) runThreadCaseCreation(
-	ctx context.Context,
-	entry *model.WorkspaceEntry,
-	channelID, threadTS, reporter string,
-	systemMessages, deltaMessages []threadcase.ConversationMessage,
-	mentionText, mentionTS, triggerTS string,
-) error {
-	wsID := entry.Workspace.ID
+// caseCreateReq parameterizes the shared thread-mode case-creation flow. It
+// separates two threads that are usually the same:
+//
+//   - caseChannel/caseTS — the thread the Case is bound to (the session key, the
+//     GetBySlackThread key, the CreateThreadCaseWithFields target). Post-creation
+//     mentions and history continue here.
+//   - uiChannel/uiTS — where the creation dialog surfaces (progress trace,
+//     question form, and the completion link).
+//
+// For normal thread-mode creation and same-channel reactions the two are equal.
+// For a cross-channel reaction they diverge: the dialog lives in the reactor's
+// source thread while the Case lives in the workspace's monitored channel.
+type caseCreateReq struct {
+	entry                         *model.WorkspaceEntry
+	caseChannel, caseTS           string
+	uiChannel, uiTS               string
+	reporter                      string
+	systemMessages, deltaMessages []threadcase.ConversationMessage
+	mentionText, mentionTS        string
+	triggerTS                     string
+	// createInstruction is appended to the ModeCreate planner prompt (trigger
+	// context). Empty for normal thread creation.
+	createInstruction string
+}
 
-	session, err := uc.loadOrCreateSession(ctx, wsID, 0, channelID, threadTS)
+// sameThread reports whether the UI and case threads coincide (the normal /
+// same-channel case). When false, the creation dialog is cross-channel.
+func (r caseCreateReq) sameThread() bool {
+	return r.uiChannel == r.caseChannel && r.uiTS == r.caseTS
+}
+
+// threadCreateReq builds a caseCreateReq for the common single-thread case where
+// the creation dialog surfaces in the same thread the Case is bound to (normal
+// thread-mode creation, resume, and same-channel reactions).
+func threadCreateReq(entry *model.WorkspaceEntry, channelID, threadTS, reporter string,
+	systemMessages, deltaMessages []threadcase.ConversationMessage,
+	mentionText, mentionTS, triggerTS, createInstruction string) caseCreateReq {
+	return caseCreateReq{
+		entry:             entry,
+		caseChannel:       channelID,
+		caseTS:            threadTS,
+		uiChannel:         channelID,
+		uiTS:              threadTS,
+		reporter:          reporter,
+		systemMessages:    systemMessages,
+		deltaMessages:     deltaMessages,
+		mentionText:       mentionText,
+		mentionTS:         mentionTS,
+		triggerTS:         triggerTS,
+		createInstruction: createInstruction,
+	}
+}
+
+// runThreadCaseCreation is the shared body for the initial post, resume, and
+// reaction paths. systemMessages seeds the first turn; deltaMessages carries
+// thread messages newer than the last processed mention (mention follow-ups);
+// mentionText / mentionTS feed the current mention. It returns the terminal
+// turn status so a caller (e.g. the cross-channel reaction path) can react to a
+// fallback; the status is StatusFallback on an internal error.
+func (uc *AgentUseCase) runThreadCaseCreation(ctx context.Context, req caseCreateReq) (threadcase.Status, error) {
+	wsID := req.entry.Workspace.ID
+
+	session, err := uc.loadOrCreateSession(ctx, wsID, 0, req.caseChannel, req.caseTS)
 	if err != nil {
 		errutil.Handle(ctx, err, "thread case: load session for create")
-		return nil
+		// Tell the user something went wrong instead of failing silently — this
+		// runs before the progress trace exists, so post directly to the UI thread.
+		uc.postThreadReply(ctx, req.uiChannel, req.uiTS, "⚠️ "+i18n.T(ctx, i18n.MsgAgentError))
+		return threadcase.StatusFallback, nil
 	}
 	// The session predates the case; record the reporter so the create handler
 	// can attribute the case even on a resume turn.
 	if session.CreatorUserID == "" {
-		session.CreatorUserID = reporter
+		session.CreatorUserID = req.reporter
 	}
 
 	// Supersede: when a reply / mention resumes the flow while a question form
 	// is still pending, mark that form stale (removing its Submit button) so it
-	// can no longer be answered. The new message is the latest intent. The form
-	// text stays visible in the thread for later reference; the snapshot is
-	// overwritten when the resumed turn asks again or cleared when it creates.
-	if mentionText != "" && session.PendingQuestion != nil && session.PendingQuestion.PostedMessageTS != "" {
-		uc.markThreadQuestionStale(ctx, channelID, session.PendingQuestion.PostedMessageTS)
+	// can no longer be answered. The form was posted to the UI thread, recorded
+	// on the pending snapshot, so stale it there (which may differ from the case
+	// thread on a cross-channel reaction).
+	if req.mentionText != "" && session.PendingQuestion != nil && session.PendingQuestion.PostedMessageTS != "" {
+		uc.markThreadQuestionStale(ctx, session.PendingQuestion.PostedChannelID, session.PendingQuestion.PostedMessageTS)
 	}
 
-	traceMsg := uc.newTraceMessage(channelID, threadTS)
+	traceMsg := uc.newTraceMessage(req.uiChannel, req.uiTS)
 	// Immediate progress so the user is not left staring at silence while the
 	// agent investigates.
 	traceMsg.appendLine(ctx, i18n.T(ctx, i18n.MsgThreadCaseCreating))
 
 	res, runErr := uc.threadcase.RunTurn(ctx, threadcase.TurnRequest{
-		Session:        session,
-		Workspace:      entry,
-		Case:           nil,
-		ChannelID:      channelID,
-		ThreadTS:       threadTS,
-		MentionText:    mentionText,
-		MentionTS:      mentionTS,
-		TriggerTS:      triggerTS,
-		Mode:           threadcase.ModeCreate,
-		SystemMessages: systemMessages,
-		DeltaMessages:  deltaMessages,
-		Handler:        uc.newThreadcaseCreateHandler(channelID, threadTS, reporter, entry, traceMsg),
+		Session:           session,
+		Workspace:         req.entry,
+		Case:              nil,
+		ChannelID:         req.caseChannel,
+		ThreadTS:          req.caseTS,
+		MentionText:       req.mentionText,
+		MentionTS:         req.mentionTS,
+		TriggerTS:         req.triggerTS,
+		Mode:              threadcase.ModeCreate,
+		SystemMessages:    req.systemMessages,
+		DeltaMessages:     req.deltaMessages,
+		CreateInstruction: req.createInstruction,
+		Handler:           uc.newThreadcaseCreateHandler(req, traceMsg),
 	})
 	if runErr != nil {
 		errutil.Handle(ctx, runErr, "thread case create turn")
-		uc.postThreadReply(ctx, channelID, threadTS, "⚠️ "+i18n.T(ctx, i18n.MsgAgentError))
-		return nil
+		uc.postThreadReply(ctx, req.uiChannel, req.uiTS, "⚠️ "+i18n.T(ctx, i18n.MsgAgentError))
+		return threadcase.StatusFallback, nil
 	}
 
 	switch res.Status {
 	case threadcase.StatusCompleted:
 		if res.Case == nil {
-			return nil
+			return res.Status, nil
 		}
-		uc.bindSessionToCase(ctx, channelID, threadTS, res.Case.ID)
-		uc.postThreadCaseSummary(ctx, wsID, entry, res.Case, traceMsg, channelID, threadTS)
+		uc.bindSessionToCase(ctx, req.caseChannel, req.caseTS, res.Case.ID)
+		uc.postCreatedCaseOutcome(ctx, req, res.Case)
 	case threadcase.StatusQuestion:
 		// The question form was posted by the handler; wait for the user to
 		// answer it via the form's Submit interaction (HandleThreadCaseQuestionSubmit).
 	case threadcase.StatusFallback:
-		uc.finalizeTrace(ctx, traceMsg, channelID, threadTS, i18n.T(ctx, i18n.MsgThreadCaseCreateFallback))
+		uc.finalizeTrace(ctx, traceMsg, req.uiChannel, req.uiTS, i18n.T(ctx, i18n.MsgThreadCaseCreateFallback))
 	case threadcase.StatusBusy, threadcase.StatusIdempotent:
 		// Another turn owns this thread, or a duplicate trigger — drop.
 	}
-	return nil
+	return res.Status, nil
+}
+
+// postCreatedCaseOutcome posts the case summary into the case thread. For a
+// cross-channel reaction (UI thread != case thread) it additionally posts a
+// separate link message back in the reactor's source thread, so the reactor gets
+// the case URL and a jump link without leaving their channel. In both cases the
+// progress "creating…" trace stays put (the summary / link are separate
+// messages, per the two-message reaction UX).
+func (uc *AgentUseCase) postCreatedCaseOutcome(ctx context.Context, req caseCreateReq, c *model.Case) {
+	wsID := req.entry.Workspace.ID
+	uc.postThreadCaseSummary(ctx, wsID, req.entry, c, req.caseChannel, req.caseTS)
+	if req.sameThread() {
+		return
+	}
+	url := uc.deps.CaseUC.CaseURL(wsID, c.ID)
+	threadLink := uc.slackPermalink(ctx, req.caseChannel, req.caseTS)
+	uc.postThreadReply(ctx, req.uiChannel, req.uiTS, i18n.T(ctx, i18n.MsgReactionCaseBacklink, url, threadLink))
+}
+
+// slackPermalink returns the Slack permalink for a message, or "" when the
+// Slack service is unavailable or the lookup fails (best-effort; the link
+// message degrades to the case URL alone).
+func (uc *AgentUseCase) slackPermalink(ctx context.Context, channelID, messageTS string) string {
+	if uc.deps.SlackService == nil {
+		return ""
+	}
+	link, err := uc.deps.SlackService.GetPermalink(ctx, channelID, messageTS)
+	if err != nil {
+		errutil.Handle(ctx, err, "thread case: get permalink")
+		return ""
+	}
+	return link
 }
 
 // bindSessionToCase stamps the freshly created case id onto the thread's
@@ -345,9 +434,11 @@ func (uc *AgentUseCase) bindSessionToCase(ctx context.Context, channelID, thread
 	}
 }
 
-// postThreadCaseSummary posts the Block Kit summary of the just-created case,
-// finalizing the progress message into it when possible.
-func (uc *AgentUseCase) postThreadCaseSummary(ctx context.Context, wsID string, entry *model.WorkspaceEntry, c *model.Case, traceMsg *traceMessage, channelID, threadTS string) {
+// postThreadCaseSummary posts the Block Kit summary of the just-created case as
+// a new reply in the case thread. The progress ("creating…") trace message is
+// left in place — the summary is a separate message, not a finalization of the
+// trace.
+func (uc *AgentUseCase) postThreadCaseSummary(ctx context.Context, wsID string, entry *model.WorkspaceEntry, c *model.Case, channelID, threadTS string) {
 	if uc.deps.SlackService == nil {
 		return
 	}
@@ -487,8 +578,8 @@ func (uc *AgentUseCase) postThreadReply(ctx context.Context, channelID, threadTS
 // turn. Create commits the validated case via CaseUC.CreateThreadCaseWithFields
 // (the reporter / channel / thread identity is captured here, not carried in
 // the payload). Question posts the planner's question to the thread.
-func (uc *AgentUseCase) newThreadcaseCreateHandler(channelID, threadTS, reporter string, entry *model.WorkspaceEntry, traceMsg *traceMessage) threadcase.Handler {
-	wsID := entry.Workspace.ID
+func (uc *AgentUseCase) newThreadcaseCreateHandler(req caseCreateReq, traceMsg *traceMessage) threadcase.Handler {
+	wsID := req.entry.Workspace.ID
 	return threadcase.HandlerFuncs{
 		TraceAppendFn: func(ctx context.Context, line string) {
 			if traceMsg != nil {
@@ -501,13 +592,15 @@ func (uc *AgentUseCase) newThreadcaseCreateHandler(channelID, threadTS, reporter
 			}
 		},
 		QuestionFn: func(ctx context.Context, ssn *model.Session, q threadcase.QuestionPayload) error {
-			// Post the interactive selection form and record the snapshot on
-			// the session (PendingQuestion); the threadcase runtime persists
-			// the session when the turn ends on this question.
-			return uc.postThreadCreateQuestionForm(ctx, ssn, channelID, threadTS, reporter, q)
+			// Post the interactive selection form to the UI thread and record the
+			// snapshot on the session (PendingQuestion); the threadcase runtime
+			// persists the session when the turn ends on this question. The Submit
+			// button carries the case thread so the resume can find the session
+			// regardless of where the form is displayed.
+			return uc.postThreadCreateQuestionForm(ctx, ssn, req.uiChannel, req.uiTS, req.caseChannel, req.caseTS, req.reporter, q)
 		},
 		CreateFn: func(ctx context.Context, _ *model.Session, p threadcase.CreatePayload) (*model.Case, error) {
-			return uc.deps.CaseUC.CreateThreadCaseWithFields(ctx, wsID, channelID, threadTS, reporter, p.Title, p.Description, p.Fields)
+			return uc.deps.CaseUC.CreateThreadCaseWithFields(ctx, wsID, req.caseChannel, req.caseTS, req.reporter, p.Title, p.Description, p.Fields)
 		},
 	}
 }
