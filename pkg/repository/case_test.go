@@ -549,6 +549,46 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		gt.Bool(t, retrieved.IsTest).False()
 	})
 
+	t.Run("IsPrivate round-trips on Create and toggles on Update", func(t *testing.T) {
+		// IsPrivate drives private-case access control; a Create/Update that
+		// rebuilt the struct field-by-field and dropped it would silently
+		// expose a private case. Assert it on Create, after Get, and after a
+		// toggle-to-false Update. ChannelUserIDs is round-tripped alongside
+		// because IsPrivate is meaningless without the member set it gates.
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		members := []string{"U-MEMBER-1", "U-MEMBER-2"}
+		created, err := repo.Case().Create(ctx, wsID, &model.Case{
+			ReporterID:     "U-OWNER",
+			CreatedAt:      time.Now().UTC(),
+			UpdatedAt:      time.Now().UTC(),
+			Title:          "Private case",
+			Status:         types.CaseStatusOpen,
+			IsPrivate:      true,
+			ChannelUserIDs: members,
+		})
+		gt.NoError(t, err).Required()
+		gt.Bool(t, created.IsPrivate).True()
+		gt.Value(t, created.ChannelUserIDs).Equal(members)
+
+		retrieved, err := repo.Case().Get(ctx, wsID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, retrieved.IsPrivate).True()
+		gt.Value(t, retrieved.ChannelUserIDs).Equal(members)
+
+		// Flip it off and confirm the false value persists (not just "unset").
+		retrieved.IsPrivate = false
+		updated, err := repo.Case().Update(ctx, wsID, retrieved)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, updated.IsPrivate).False()
+
+		reRetrieved, err := repo.Case().Get(ctx, wsID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, reRetrieved.IsPrivate).False()
+	})
+
 	t.Run("thread-mode case may be created with an empty reporter", func(t *testing.T) {
 		// A channel-root intake post relayed by an integration bot may name no
 		// human, so a thread-mode Create must accept an empty ReporterID
