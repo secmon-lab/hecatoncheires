@@ -33,9 +33,8 @@ jobs:
           cache-dependency-path: go.sum
 
       # Pinned to a commit (not @latest) so the checked version is reproducible.
-      # This commit adds the `goast test` subcommand used below.
       - name: Install goast
-        run: go install github.com/m-mizutani/goast/cmd/goast@134058740ce7dee4a10b565da605a898dec94da4 # v0.2.x + goast test
+        run: go install github.com/m-mizutani/goast/cmd/goast@589721dc22c81aac66f5598b9ce7fd73aea8bcee # v0.3.0
 
       # OPA is needed to run the policies' own unit tests.
       - name: Install OPA
