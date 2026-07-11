@@ -90,6 +90,9 @@ func runImportRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 
 		in := newValidSession(wsID, "U12345678")
+		// Set a non-default value so a dropped bool is caught: asserting the
+		// default false would pass even if IsPrivate were ignored entirely.
+		in.Snapshot.Cases[0].IsPrivate = true
 		created, err := repo.Create(ctx, in.WorkspaceID, in)
 		gt.NoError(t, err).Required()
 		gt.Value(t, created.ID).Equal(in.ID)
@@ -117,12 +120,17 @@ func runImportRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		gt.Value(t, got.Issues[0].Path).Equal("version")
 		gt.Value(t, got.Issues[0].Severity).Equal(model.ImportIssueWarning)
 
+		gt.Value(t, got.Snapshot.Version).Equal(in.Snapshot.Version)
 		gt.Array(t, got.Snapshot.Cases).Length(1).Required()
 		gc := got.Snapshot.Cases[0]
 		gt.Value(t, gc.Title).Equal("Suspicious login")
 		gt.Value(t, gc.Description).Equal("Multiple failed attempts.")
-		gt.Bool(t, gc.IsPrivate).False()
+		gt.Bool(t, gc.IsPrivate).True()
 		gt.Value(t, gc.AssigneeIDs).Equal([]string{"U12345678"})
+		gt.Map(t, gc.FieldValues).HasKey("severity")
+		gt.Value(t, gc.FieldValues["severity"].Value).Equal("high")
+		gt.Array(t, gc.Issues).Length(1).Required()
+		gt.Value(t, gc.Issues[0].Path).Equal("cases[0].fields.severity")
 		gt.Value(t, gc.Result.Status).Equal(model.ImportItemCreated)
 		gt.Value(t, gc.Result.CreatedCaseID).NotNil().Required()
 		gt.Value(t, *gc.Result.CreatedCaseID).Equal(int64(142))
@@ -130,6 +138,7 @@ func runImportRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 		gt.Array(t, gc.Actions).Length(1).Required()
 		ga := gc.Actions[0]
 		gt.Value(t, ga.Title).Equal("Block IP")
+		gt.Value(t, ga.Description).Equal("Add firewall rule")
 		gt.Value(t, ga.AssigneeID).Equal("U87654321")
 		gt.Value(t, ga.DueDate).NotNil().Required()
 		gt.Bool(t, ga.DueDate.Equal(time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC))).True()
