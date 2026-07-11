@@ -590,7 +590,7 @@ func buildPreviewBlocks(
 	actions.BlockID = BlockIDDraftWSSelect + ":" + string(draft.ID)
 	blocks = append(blocks, actions)
 
-	fallback := fmt.Sprintf("Case draft: %s", mat.Title)
+	fallback := i18n.T(ctx, i18n.MsgMentionPreviewFallbackWithTitle, mat.Title)
 	return blocks, fallback
 }
 
@@ -625,7 +625,7 @@ func buildCaseCreatedTailBlocks(ctx context.Context, created *model.Case) ([]gos
 			goslack.NewTextBlockObject(goslack.MarkdownType, line, false, false),
 		),
 	}
-	fallback := fmt.Sprintf("Created case #%d: %s", created.ID, title)
+	fallback := i18n.T(ctx, i18n.MsgCaseCreatedFallback, created.ID, title)
 	return blocks, fallback
 }
 

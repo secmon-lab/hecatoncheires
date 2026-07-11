@@ -35,6 +35,26 @@ func TestT(t *testing.T) {
 		gt.Value(t, result).Equal("ケース #42 *テストケース* が作成されました。")
 	})
 
+	t.Run("resolves notification fallback keys", func(t *testing.T) {
+		enCtx := i18n.ContextWithLang(context.Background(), i18n.LangEN)
+		jaCtx := i18n.ContextWithLang(context.Background(), i18n.LangJA)
+
+		gt.Value(t, i18n.T(enCtx, i18n.MsgMentionCanceledFallback)).Equal("Case draft canceled")
+		gt.Value(t, i18n.T(jaCtx, i18n.MsgMentionCanceledFallback)).Equal("ケースの下書きをキャンセルしました")
+
+		gt.Value(t, i18n.T(enCtx, i18n.MsgMentionQuestionFallback)).Equal("We need a bit more info to draft this case.")
+		gt.Value(t, i18n.T(jaCtx, i18n.MsgMentionQuestionFallback)).Equal("ケースの下書きにはもう少し情報が必要です。")
+
+		gt.Value(t, i18n.T(enCtx, i18n.MsgMentionPreviewFallbackWithTitle, "Broken auth")).Equal("Case draft: Broken auth")
+		gt.Value(t, i18n.T(jaCtx, i18n.MsgMentionPreviewFallbackWithTitle, "Broken auth")).Equal("ケース下書き: Broken auth")
+
+		gt.Value(t, i18n.T(enCtx, i18n.MsgCaseCreatedFallback, 42, "Broken auth")).Equal("Created case #42: Broken auth")
+		gt.Value(t, i18n.T(jaCtx, i18n.MsgCaseCreatedFallback, 42, "Broken auth")).Equal("ケース #42 を作成しました: Broken auth")
+
+		gt.Value(t, i18n.T(enCtx, i18n.MsgThreadCaseQuestionFallback)).Equal("We need a bit more info to create this case.")
+		gt.Value(t, i18n.T(jaCtx, i18n.MsgThreadCaseQuestionFallback)).Equal("ケースの作成にはもう少し情報が必要です。")
+	})
+
 	t.Run("falls back to default lang for no lang in context", func(t *testing.T) {
 		result := i18n.T(context.Background(), i18n.MsgModalCreateCaseTitle)
 		gt.Value(t, result).Equal("Create Case")

@@ -474,8 +474,6 @@ to the `message.channels` (and `message.groups` for private channels) events. A
 [Case Section](#case-section-thread-mode). See also
 [Slack Integration → Thread mode](slack.md#thread-mode-monitored-channel).
 
-**Note:** The `--slack-channel-prefix` CLI flag can override this configuration for the entire serve command.
-
 ### Auto-Invite (`[slack.invite]`)
 
 The `[slack.invite]` subsection configures automatic invitation of users and user group members to Slack channels when a case is created.

@@ -288,12 +288,13 @@
   border-radius: 3px;
 }
 
-/* Source-kind colored letter chip */
+/* Source-kind colored letter chip. Text color is not set here: every
+   SourceIcon.tsx branch supplies its own color inline together with the
+   matching background. */
 .sourceIcon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
   font-weight: 700;
   letter-spacing: -0.02em;
   border-radius: 4px;

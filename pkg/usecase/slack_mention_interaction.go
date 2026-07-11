@@ -325,7 +325,7 @@ func (uc *MentionProposalUseCase) appendCanceledTail(ctx context.Context, callba
 			goslack.NewTextBlockObject(goslack.MarkdownType, "❌ *Canceled*", false, false),
 		),
 	)
-	const fallback = "Case draft canceled"
+	fallback := i18n.T(ctx, i18n.MsgMentionCanceledFallback)
 	if channelID != "" && messageTS != "" && uc.slackService != nil {
 		return uc.slackService.UpdateMessage(ctx, channelID, messageTS, kept, fallback)
 	}

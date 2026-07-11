@@ -7,6 +7,7 @@ import (
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/proposal"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
@@ -80,7 +81,7 @@ func (a draftQuestionAnswer) IsEmpty() bool {
 // can re-enter the draft flow. requesterUserID is the Slack user id of
 // the person who originally @-mentioned the bot; pass empty to suppress
 // the mention (used in tests / synthetic flows).
-func buildProposalQuestionBlocks(q proposal.QuestionPayload, proposalID model.CaseProposalID, requesterUserID string) ([]goslack.Block, string) {
+func buildProposalQuestionBlocks(ctx context.Context, q proposal.QuestionPayload, proposalID model.CaseProposalID, requesterUserID string) ([]goslack.Block, string) {
 	header := goslack.NewSectionBlock(
 		goslack.NewTextBlockObject(goslack.MarkdownType,
 			questionHeaderText(q.Reason, requesterUserID), false, false),
@@ -162,7 +163,7 @@ func buildProposalQuestionBlocks(q proposal.QuestionPayload, proposalID model.Ca
 	submit.Style = goslack.StylePrimary
 	blocks = append(blocks, goslack.NewActionBlock(BlockIDDraftQuestionActions, submit))
 
-	fallback := "We need a bit more info to draft this case."
+	fallback := i18n.T(ctx, i18n.MsgMentionQuestionFallback)
 	return blocks, fallback
 }
 
@@ -485,7 +486,7 @@ func (uc *MentionProposalUseCase) markQuestionStale(ctx context.Context, channel
 // re-mentioned in the header so the original requester gets paged again
 // to finish answering.
 func (uc *MentionProposalUseCase) repostQuestionWithError(ctx context.Context, channelID, messageTS, requesterUserID string, pq *model.PendingQuestion, answers map[string]draftQuestionAnswer, missing []string) {
-	blocks, fallback := buildProposalQuestionBlocks(proposal.QuestionPayload{
+	blocks, fallback := buildProposalQuestionBlocks(ctx, proposal.QuestionPayload{
 		Reason: pq.Reason,
 		Items:  pendingItemsToDraftItems(pq.Items),
 	}, "", requesterUserID)

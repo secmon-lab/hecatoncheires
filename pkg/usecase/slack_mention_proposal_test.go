@@ -14,6 +14,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/config"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/types"
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/agentarchive"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 	slacksvc "github.com/secmon-lab/hecatoncheires/pkg/service/slack"
@@ -1308,5 +1309,52 @@ func TestBuildCaseCreatedTailBlocks(t *testing.T) {
 		gt.Bool(t, ok).True().Required()
 		gt.String(t, text.Text).Contains("(untitled)")
 		gt.String(t, fallback).Contains("(untitled)")
+	})
+
+	t.Run("fallback is localized via i18n", func(t *testing.T) {
+		created := &model.Case{
+			ID:    42,
+			Title: "Tanaka incident",
+		}
+		enBlocks, enFallback := usecase.BuildCaseCreatedTailBlocksForTest(context.Background(), created)
+		gt.Array(t, enBlocks).Length(1).Required()
+		gt.Value(t, enFallback).Equal("Created case #42: Tanaka incident")
+
+		jaCtx := i18n.ContextWithLang(context.Background(), i18n.LangJA)
+		jaBlocks, jaFallback := usecase.BuildCaseCreatedTailBlocksForTest(jaCtx, created)
+		gt.Array(t, jaBlocks).Length(1).Required()
+		// Compare against the i18n source rather than a hardcoded Japanese
+		// literal so translator tweaks do not break this test.
+		gt.Value(t, jaFallback).Equal(i18n.T(jaCtx, i18n.MsgCaseCreatedFallback, created.ID, created.Title))
+		gt.Value(t, jaFallback).NotEqual(enFallback)
+	})
+}
+
+// TestBuildPreviewBlocks_Fallback locks the preview message's notification
+// fallback to the i18n layer, including the draft title interpolation.
+func TestBuildPreviewBlocks_Fallback(t *testing.T) {
+	draft := &model.CaseProposal{
+		ID: "draft-preview-fallback",
+		Materialization: &model.WorkspaceMaterialization{
+			Title:       "Broken auth",
+			Description: "Login is failing for SSO users",
+		},
+	}
+	selected := &model.WorkspaceEntry{
+		Workspace: model.Workspace{ID: "ws-1", Name: "Risk"},
+	}
+
+	t.Run("default context yields English fallback with title", func(t *testing.T) {
+		blocks, fallback := usecase.BuildPreviewBlocksForTest(context.Background(), draft, selected, nil)
+		gt.Number(t, len(blocks)).GreaterOrEqual(1)
+		gt.Value(t, fallback).Equal("Case draft: Broken auth")
+	})
+
+	t.Run("Japanese context yields localized fallback with title", func(t *testing.T) {
+		jaCtx := i18n.ContextWithLang(context.Background(), i18n.LangJA)
+		blocks, fallback := usecase.BuildPreviewBlocksForTest(jaCtx, draft, selected, nil)
+		gt.Number(t, len(blocks)).GreaterOrEqual(1)
+		gt.Value(t, fallback).Equal(i18n.T(jaCtx, i18n.MsgMentionPreviewFallbackWithTitle, "Broken auth"))
+		gt.Value(t, fallback).NotEqual("Case draft: Broken auth")
 	})
 }
