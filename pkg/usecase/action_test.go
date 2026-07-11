@@ -236,6 +236,135 @@ func TestActionUseCase_UpdateAction(t *testing.T) {
 		gt.NoError(t, err).Required()
 		gt.Value(t, got.CaseID).Equal(channelCase.ID)
 	})
+
+	t.Run("updating an archived action preserves ArchivedAt", func(t *testing.T) {
+		// Regression for #188: UpdateAction rebuilt the persisted Action from a
+		// field-by-field literal that omitted ArchivedAt, so a single update on
+		// an archived Action silently un-archived it (the Firestore Update is a
+		// full Set overwrite). Same class as the SlackThreadTS loss fixed in #185
+		// for Case. The update below must leave the action archived.
+		repo := memory.New()
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "", nil)
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, false, "", "")
+		gt.NoError(t, err).Required()
+
+		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Original Title", "Description", "", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+
+		archived, err := actionUC.ArchiveAction(ctx, testWorkspaceID, created.ID, usecase.ActorRef{Kind: usecase.ActorKindSystem})
+		gt.NoError(t, err).Required()
+		gt.Value(t, archived.ArchivedAt).NotNil().Required()
+		archivedAt := *archived.ArchivedAt
+
+		newTitle := "Updated Title"
+		updated, err := actionUC.UpdateAction(ctx, testWorkspaceID, usecase.UpdateActionInput{
+			ID: created.ID, Title: &newTitle, SlackSync: usecase.SlackSyncSkip,
+		})
+		gt.NoError(t, err).Required()
+
+		// The returned value must still be archived, at the same instant.
+		gt.Value(t, updated.Title).Equal("Updated Title")
+		gt.Value(t, updated.ArchivedAt).NotNil().Required()
+		gt.Bool(t, updated.IsArchived()).True()
+		gt.Bool(t, updated.ArchivedAt.Equal(archivedAt)).True()
+
+		// And the persisted state must agree — this is what a fresh reader (UI,
+		// list query) sees. A dropped ArchivedAt would re-surface the action.
+		fetched, err := repo.Action().Get(ctx, testWorkspaceID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, fetched.ArchivedAt).NotNil().Required()
+		gt.Bool(t, fetched.IsArchived()).True()
+		gt.Bool(t, fetched.ArchivedAt.Equal(archivedAt)).True()
+		gt.Value(t, fetched.Title).Equal("Updated Title")
+	})
+
+	t.Run("updating a non-archived action keeps ArchivedAt nil", func(t *testing.T) {
+		repo := memory.New()
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "", nil)
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, false, "", "")
+		gt.NoError(t, err).Required()
+
+		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Original Title", "Description", "", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+
+		newTitle := "Updated Title"
+		updated, err := actionUC.UpdateAction(ctx, testWorkspaceID, usecase.UpdateActionInput{
+			ID: created.ID, Title: &newTitle, SlackSync: usecase.SlackSyncSkip,
+		})
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.ArchivedAt).Nil()
+		gt.Bool(t, updated.IsArchived()).False()
+
+		fetched, err := repo.Action().Get(ctx, testWorkspaceID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, fetched.ArchivedAt).Nil()
+	})
+
+	t.Run("reparenting an archived action preserves ArchivedAt", func(t *testing.T) {
+		repo := memory.New()
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "", nil)
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		c1, err := caseUC.CreateCase(ctx, testWorkspaceID, "Case 1", "Description 1", []string{}, nil, false, false, "", "")
+		gt.NoError(t, err).Required()
+		c2, err := caseUC.CreateCase(ctx, testWorkspaceID, "Case 2", "Description 2", []string{}, nil, false, false, "", "")
+		gt.NoError(t, err).Required()
+
+		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c1.ID, "Test Action", "Description", "", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+
+		_, err = actionUC.ArchiveAction(ctx, testWorkspaceID, created.ID, usecase.ActorRef{Kind: usecase.ActorKindSystem})
+		gt.NoError(t, err).Required()
+
+		updated, err := actionUC.UpdateAction(ctx, testWorkspaceID, usecase.UpdateActionInput{
+			ID: created.ID, CaseID: &c2.ID, SlackSync: usecase.SlackSyncSkip,
+		})
+		gt.NoError(t, err).Required()
+		gt.Value(t, updated.CaseID).Equal(c2.ID)
+		gt.Value(t, updated.ArchivedAt).NotNil()
+		gt.Bool(t, updated.IsArchived()).True()
+	})
+
+	t.Run("update records change history events (existing snapshot preserved)", func(t *testing.T) {
+		// The value-copy fix must keep `existing` as an untouched pre-update
+		// snapshot so recordActionEvents can diff before vs after. An in-place
+		// mutation would collapse the diff and silently drop all history.
+		repo := memory.New()
+		caseUC := usecase.NewCaseUseCase(repo, nil, nil, nil, "")
+		actionUC := usecase.NewActionUseCase(repo, nil, nil, "", nil)
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UTESTUSER"})
+
+		c, err := caseUC.CreateCase(ctx, testWorkspaceID, "Test Case", "Description", []string{}, nil, false, false, "", "")
+		gt.NoError(t, err).Required()
+
+		created, err := actionUC.CreateAction(ctx, testWorkspaceID, c.ID, "Original Title", "Description", "U001", "", types.ActionStatusTodo, nil)
+		gt.NoError(t, err).Required()
+
+		newTitle := "Updated Title"
+		newStatus := types.ActionStatusInProgress
+		newAssignee := "U002"
+		_, err = actionUC.UpdateAction(ctx, testWorkspaceID, usecase.UpdateActionInput{
+			ID: created.ID, Title: &newTitle, Status: &newStatus, AssigneeID: &newAssignee, SlackSync: usecase.SlackSyncSkip,
+		})
+		gt.NoError(t, err).Required()
+
+		events, _, err := repo.ActionEvent().List(ctx, testWorkspaceID, created.ID, 100, "")
+		gt.NoError(t, err).Required()
+		kinds := map[types.ActionEventKind]int{}
+		for _, e := range events {
+			kinds[e.Kind]++
+		}
+		gt.Number(t, kinds[types.ActionEventTitleChanged]).Equal(1)
+		gt.Number(t, kinds[types.ActionEventStatusChanged]).Equal(1)
+		gt.Number(t, kinds[types.ActionEventAssigneeChanged]).Equal(1)
+	})
 }
 
 func TestActionUseCase_ArchiveAction(t *testing.T) {
