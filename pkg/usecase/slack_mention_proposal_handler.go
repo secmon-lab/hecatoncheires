@@ -122,7 +122,7 @@ func (h *slackDraftHandler) Question(ctx context.Context, ssn *model.Session, q 
 	if ssn != nil && ssn.CreatorUserID != "" {
 		requester = ssn.CreatorUserID
 	}
-	blocks, fallback := buildProposalQuestionBlocks(q, h.proposalID, requester)
+	blocks, fallback := buildProposalQuestionBlocks(ctx, q, h.proposalID, requester)
 	ts, err := h.slackService.PostThreadMessage(ctx, h.channelID, h.threadTS, blocks, fallback)
 	if err != nil {
 		return goerr.Wrap(err, "post draft question form",

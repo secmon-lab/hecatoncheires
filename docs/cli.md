@@ -53,7 +53,6 @@ The `serve` command (alias: `s`) starts the HTTP server.
 | `--slack-bot-token` | `HECATONCHEIRES_SLACK_BOT_TOKEN` | - | No\*\* | Slack Bot User OAuth Token (`xoxb-...`) |
 | `--slack-user-oauth-token` | `HECATONCHEIRES_SLACK_USER_OAUTH_TOKEN` | - | No | Slack User OAuth Token for admin API (`xoxp-...`, required for cross-workspace channel connect in Enterprise Grid) |
 | `--slack-signing-secret` | `HECATONCHEIRES_SLACK_SIGNING_SECRET` | - | No\*\*\* | Slack signing secret for webhook verification |
-| `--slack-channel-prefix` | `HECATONCHEIRES_SLACK_CHANNEL_PREFIX` | `risk` | No | Prefix for auto-created Slack channel names |
 | `--slack-notification-slot-duration` | `HECATONCHEIRES_NOTIFICATION_SLOT_DURATION` | `1h` | No | Rolling window during which Action/Step change notifications are aggregated into a single editable channel message. Set `0` to disable aggregation (legacy `reply_broadcast` per event). See [user_guide.md](./user_guide.md) |
 | `--github-app-id` | `HECATONCHEIRES_GITHUB_APP_ID` | - | No | GitHub App ID for GitHub Source integration |
 | `--github-app-installation-id` | `HECATONCHEIRES_GITHUB_APP_INSTALLATION_ID` | - | No | GitHub App Installation ID |
@@ -93,6 +92,8 @@ The `serve` command (alias: `s`) starts the HTTP server.
 The embedding client is configured separately from `--llm-provider` and is **required whenever LLM is enabled** (`--llm-provider` set on `serve`, or always for `assist`). It is reserved for upcoming similarity-search features; the wiring is preserved so callers can keep the same flags through the redesign. The default model is `gemini-embedding-2`; the dimension is fixed at 768. Application Default Credentials must be authorized for the project. Without `--llm-provider`, `serve` runs in a degraded mode that does not need the embedder either.
 
 \*\*\*\*\* Required whenever `--slack-bot-token` is configured. The agent that responds to Slack mentions persists per-thread conversation History and execution Trace into the bucket so follow-up mentions can resume the session. The service account needs **Storage Object Admin** on the bucket.
+
+The prefix for auto-created Slack channel names is not a CLI flag: it is configured per workspace via the `[slack] channel_prefix` key in the TOML configuration file, and defaults to the workspace ID when unset. See [configuration.md](./configuration.md#slack-section).
 
 See [Authentication Modes](#authentication-modes) below for the two supported authentication configurations.
 

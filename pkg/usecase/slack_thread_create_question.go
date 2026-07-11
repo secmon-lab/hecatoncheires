@@ -8,6 +8,7 @@ import (
 	goslack "github.com/slack-go/slack" //nolint:depguard
 
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/proposal"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/threadcase"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
@@ -48,7 +49,7 @@ func parseCaseThreadValue(v string) (channelID, threadTS string, ok bool) {
 // thread TS. It mirrors the open-mode form but routes submission to the
 // thread-create handler. items are the persisted snapshot shape so the same
 // builder serves both the first post and the re-prompt-on-error path.
-func buildThreadCreateQuestionBlocks(reason string, items []model.PendingQuestionItem, caseThreadValue, requesterUserID string) ([]goslack.Block, string) {
+func buildThreadCreateQuestionBlocks(ctx context.Context, reason string, items []model.PendingQuestionItem, caseThreadValue, requesterUserID string) ([]goslack.Block, string) {
 	header := goslack.NewSectionBlock(
 		goslack.NewTextBlockObject(goslack.MarkdownType, questionHeaderText(reason, requesterUserID), false, false),
 		nil, nil,
@@ -109,7 +110,7 @@ func buildThreadCreateQuestionBlocks(reason string, items []model.PendingQuestio
 	submit.Style = goslack.StylePrimary
 	blocks = append(blocks, goslack.NewActionBlock(BlockIDDraftQuestionActions, submit))
 
-	return blocks, "We need a bit more info to create this case."
+	return blocks, i18n.T(ctx, i18n.MsgThreadCaseQuestionFallback)
 }
 
 // threadQuestionToPending converts the runtime question payload into the
@@ -148,7 +149,7 @@ func (uc *AgentUseCase) postThreadCreateQuestionForm(ctx context.Context, ssn *m
 		return nil
 	}
 	pending := threadQuestionToPending(q, uiChannel, "")
-	blocks, fallback := buildThreadCreateQuestionBlocks(q.Reason, pending.Items, encodeCaseThreadValue(caseChannel, caseTS), requesterUserID)
+	blocks, fallback := buildThreadCreateQuestionBlocks(ctx, q.Reason, pending.Items, encodeCaseThreadValue(caseChannel, caseTS), requesterUserID)
 	ts, err := uc.deps.SlackService.PostThreadMessage(ctx, uiChannel, uiTS, blocks, fallback)
 	if err != nil {
 		return goerr.Wrap(err, "post thread-create question form",
@@ -269,7 +270,7 @@ func (uc *AgentUseCase) repostThreadQuestionWithError(ctx context.Context, chann
 	if uc.deps.SlackService == nil {
 		return
 	}
-	blocks, fallback := buildThreadCreateQuestionBlocks(pq.Reason, pq.Items, caseThreadValue, requesterUserID)
+	blocks, fallback := buildThreadCreateQuestionBlocks(ctx, pq.Reason, pq.Items, caseThreadValue, requesterUserID)
 	banner := goslack.NewContextBlock("thread_create_question_error",
 		goslack.NewTextBlockObject(goslack.MarkdownType,
 			":warning: Please answer every question before submitting.", false, false))

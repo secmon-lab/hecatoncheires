@@ -60,6 +60,19 @@ const MaxTraceBlocksForTest = maxTraceBlocks
 // BuildCaseCreatedTailBlocksForTest is exported for testing
 var BuildCaseCreatedTailBlocksForTest = buildCaseCreatedTailBlocks
 
+// BuildPreviewBlocksForTest exposes buildPreviewBlocks so tests can assert
+// on the localized notification fallback of the draft preview.
+var BuildPreviewBlocksForTest = buildPreviewBlocks
+
+// BuildProposalQuestionBlocksForTest exposes buildProposalQuestionBlocks so
+// tests can assert on the localized notification fallback of the question form.
+var BuildProposalQuestionBlocksForTest = buildProposalQuestionBlocks
+
+// BuildThreadCreateQuestionBlocksForTest exposes buildThreadCreateQuestionBlocks
+// so tests can assert on the localized notification fallback of the
+// thread-mode question form.
+var BuildThreadCreateQuestionBlocksForTest = buildThreadCreateQuestionBlocks
+
 // BuildProposalUserInputForTest exposes the unexported buildProposalUserInput
 // so tests in the external usecase_test package can assert on the
 // planner's first-turn prompt content.

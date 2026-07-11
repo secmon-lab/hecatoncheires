@@ -1,6 +1,8 @@
 # Private Case Access Control
 
-When adding new data models, queries, mutations, or sub-resolvers that relate to Cases or are children of Cases (e.g., Actions, Knowledges, SlackMessages, or any future entities), you MUST handle private case access control:
+When adding new data models, queries, mutations, or sub-resolvers that relate to Cases or are children of Cases (e.g., Actions, SlackMessages, or any future entities), you MUST handle private case access control:
+
+Note: Knowledge is NOT a Case child — it is a workspace-level entity with no CaseID (`pkg/domain/model/knowledge.go`), so it is out of scope for this rule.
 
 ## Checklist for New Case-Related Features
 

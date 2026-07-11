@@ -221,6 +221,14 @@ const (
 	MsgMentionEditModalTitle  // Title of the draft Edit modal.
 	MsgMentionSubmitFailed    // Appended to the preview fallback when case creation failed and the user should Edit.
 
+	// Slack notification fallback texts (chat.postMessage / chat.update
+	// fallback argument: notification preview & accessibility text).
+	MsgMentionCanceledFallback         // Fallback for the "draft canceled" tail message.
+	MsgMentionQuestionFallback         // Fallback for the mention-draft question form.
+	MsgMentionPreviewFallbackWithTitle // "Case draft: %s" (%s = draft title).
+	MsgCaseCreatedFallback             // "Created case #%d: %s" (%d = case ID, %s = title).
+	MsgThreadCaseQuestionFallback      // Fallback for the thread-create question form.
+
 	msgKeyCount // sentinel for validation
 )
 

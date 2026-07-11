@@ -137,24 +137,29 @@ if err := doc.DataTo(&c); err != nil {
 
 ```go
 func (r *caseRepository) Create(ctx context.Context, c *model.Case) (*model.Case, error) {
-    now := time.Now().UTC()
-    created := &model.Case{
-        ID:          nextID,
-        Title:       c.Title,
-        Description: c.Description,
-        CreatedAt:   now,
-        UpdatedAt:   now,
+    // Validate at the persistence boundary; the caller (usecase) owns
+    // everything else, including CreatedAt / UpdatedAt. NEVER stamp
+    // time.Now() here and NEVER rebuild the struct field-by-field —
+    // a rebuild silently drops any field added to model.Case later.
+    // See .claude/rules/architecture.md § Repository write contract.
+    if err := c.Validate(); err != nil {
+        return nil, goerr.Wrap(err, "case validation failed before create")
     }
 
-    docID := fmt.Sprintf("%d", created.ID)
-
-    // Use model directly - NO converter function
-    _, err = r.client.Collection("cases").Doc(docID).Set(ctx, created)
+    nextID, err := r.getNextID(ctx)
     if err != nil {
-        return nil, goerr.Wrap(err, "failed to create case")
+        return nil, goerr.Wrap(err, "failed to get next ID")
+    }
+    // Assign the storage-side ID directly on the caller's pointer and
+    // persist the model verbatim - NO converter function, NO copy.
+    c.ID = nextID
+
+    docID := fmt.Sprintf("%d", c.ID)
+    if _, err := r.client.Collection("cases").Doc(docID).Set(ctx, c); err != nil {
+        return nil, goerr.Wrap(err, "failed to create case", goerr.V("id", c.ID))
     }
 
-    return created, nil
+    return c, nil
 }
 
 func (r *caseRepository) Get(ctx context.Context, id int64) (*model.Case, error) {

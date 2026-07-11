@@ -182,6 +182,13 @@ var messagesEN = [msgKeyCount]string{
 	MsgMentionBtnCancel:       "Cancel",
 	MsgMentionEditModalTitle:  "Edit Case Draft",
 	MsgMentionSubmitFailed:    " (creation failed; please use Edit to fill required fields)",
+
+	// Slack notification fallback texts
+	MsgMentionCanceledFallback:         "Case draft canceled",
+	MsgMentionQuestionFallback:         "We need a bit more info to draft this case.",
+	MsgMentionPreviewFallbackWithTitle: "Case draft: %s",
+	MsgCaseCreatedFallback:             "Created case #%d: %s",
+	MsgThreadCaseQuestionFallback:      "We need a bit more info to create this case.",
 }
 
 var messagesJA = [msgKeyCount]string{
@@ -349,4 +356,11 @@ var messagesJA = [msgKeyCount]string{
 	MsgMentionBtnCancel:       "キャンセル",
 	MsgMentionEditModalTitle:  "ケース下書きを編集",
 	MsgMentionSubmitFailed:    "（作成に失敗しました。必須項目を入力するには「編集」を使ってください）",
+
+	// Slack notification fallback texts
+	MsgMentionCanceledFallback:         "ケースの下書きをキャンセルしました",
+	MsgMentionQuestionFallback:         "ケースの下書きにはもう少し情報が必要です。",
+	MsgMentionPreviewFallbackWithTitle: "ケース下書き: %s",
+	MsgCaseCreatedFallback:             "ケース #%d を作成しました: %s",
+	MsgThreadCaseQuestionFallback:      "ケースの作成にはもう少し情報が必要です。",
 }

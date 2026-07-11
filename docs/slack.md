@@ -718,7 +718,7 @@ Channels are named using the format: `{prefix}-{risk-id}-{normalized-risk-name}`
 For example:
 - Risk ID: `42`
 - Risk Name: "SQL Injection in User Auth"
-- Default Prefix: `risk`
+- Prefix: `risk` (from the workspace's `channel_prefix`; defaults to the workspace ID when unset)
 - Result: `#risk-42-sql-injection-in-user-auth`
 
 With a custom prefix:
@@ -741,18 +741,14 @@ Risk names are automatically normalized to comply with Slack's channel naming ru
 
 ### Customizing the Channel Prefix
 
-You can customize the channel name prefix using the `--slack-channel-prefix` flag or environment variable:
+The channel name prefix is a per-workspace setting: set `channel_prefix` in the `[slack]` section of the workspace's TOML configuration file. If it is not specified, the workspace ID is used as the prefix.
 
-```bash
-# Using CLI flag (default: "risk")
-./hecatoncheires serve --slack-channel-prefix="incident"
-
-# Using environment variable
-export HECATONCHEIRES_SLACK_CHANNEL_PREFIX="security"
-./hecatoncheires serve
+```toml
+[slack]
+channel_prefix = "incident"
 ```
 
-This allows you to organize channels by different categories (e.g., `incident-*`, `security-*`, `vulnerability-*`).
+This allows you to organize channels by different categories per workspace (e.g., `incident-*`, `security-*`, `vulnerability-*`). See [configuration.md](./configuration.md#slack-section) for the full `[slack]` section reference.
 
 ### Required Bot Permissions
 
@@ -780,16 +776,15 @@ Enable automatic channel creation by providing a bot token:
 
 ```bash
 export HECATONCHEIRES_SLACK_BOT_TOKEN="xoxb-your-bot-token"
-export HECATONCHEIRES_SLACK_CHANNEL_PREFIX="risk"  # Optional, defaults to "risk"
 ```
 
-Or using CLI flags:
+Or using a CLI flag:
 
 ```bash
-./hecatoncheires serve \
-  --slack-bot-token="xoxb-your-bot-token" \
-  --slack-channel-prefix="incident"
+./hecatoncheires serve --slack-bot-token="xoxb-your-bot-token"
 ```
+
+The channel name prefix is configured per workspace via `[slack] channel_prefix` in the TOML configuration file (defaults to the workspace ID), not via a CLI flag.
 
 If no bot token is provided, risks will be created without Slack channels (the `slackChannelID` field will be empty).
 
@@ -804,10 +799,12 @@ export HECATONCHEIRES_SLACK_BOT_TOKEN="xoxb-..."
 Creating a risk named "XSS Vulnerability in Dashboard" (ID: 5) will create channel: `#risk-5-xss-vulnerability-in-dashboard`
 
 **Example 2: Custom prefix**
-```bash
-export HECATONCHEIRES_SLACK_BOT_TOKEN="xoxb-..."
-export HECATONCHEIRES_SLACK_CHANNEL_PREFIX="sec"
-./hecatoncheires serve
+
+Set the prefix in the workspace's TOML configuration:
+
+```toml
+[slack]
+channel_prefix = "sec"
 ```
 
 Creating a risk named "Data Leak in API" (ID: 12) will create channel: `#sec-12-data-leak-in-api`
@@ -1159,7 +1156,6 @@ All webhook endpoints require valid Slack signature verification.
 | `HECATONCHEIRES_SLACK_BOT_TOKEN` | No*** | - | Slack Bot User OAuth Token (starts with `xoxb-`) |
 | `HECATONCHEIRES_SLACK_USER_OAUTH_TOKEN` | No | - | Slack User OAuth Token (starts with `xoxp-`) for cross-workspace channel connect in Enterprise Grid. Requires `admin.conversations:write` scope. |
 | `HECATONCHEIRES_SLACK_SIGNING_SECRET` | Yes** | - | Slack Events API signing secret |
-| `HECATONCHEIRES_SLACK_CHANNEL_PREFIX` | No | `risk` | Prefix for auto-created Slack channel names for risks (e.g., `incident` creates `#incident-1-risk-name`) |
 | `HECATONCHEIRES_NO_AUTH` | No | - | Slack user ID for no-auth mode (development only) |
 
 \* Required for OAuth mode. The callback URL is automatically constructed as `${BASE_URL}/api/auth/callback`.
