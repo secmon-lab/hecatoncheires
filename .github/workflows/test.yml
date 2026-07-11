@@ -45,10 +45,9 @@ jobs:
           docker logs firestore-emulator || true
           exit 1
 
-      # Run tests
+      # Run tests. FIRESTORE_EMULATOR_HOST routes the Firestore client to the
+      # emulator; the repository test helper defaults the project/database ids.
       - name: Run tests
         env:
           FIRESTORE_EMULATOR_HOST: 127.0.0.1:8080
-          TEST_FIRESTORE_PROJECT_ID: test-project
-          TEST_FIRESTORE_DATABASE_ID: "(default)"
         run: go test ./... -timeout 30m

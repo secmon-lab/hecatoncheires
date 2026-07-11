@@ -38,10 +38,7 @@ tasks:
           curl -s http://127.0.0.1:8080/ >/dev/null 2>&1 && break
           sleep 1
         done
-        FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 \
-        TEST_FIRESTORE_PROJECT_ID=test-project \
-        TEST_FIRESTORE_DATABASE_ID='(default)' \
-        go test ./... -timeout 30m
+        FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 go test ./... -timeout 30m
 
   test:e2e:
     desc: "Run E2E tests with Playwright (includes backend startup and teardown)"

@@ -71,13 +71,17 @@ go test ./...
 The repository tests include a `TestXxxRepository_Firestore` variant for every
 repository. These exercise the real Firestore read/write path (the memory
 backend copies structs wholesale and can hide field-drop bugs, so the Firestore
-path is the one that actually guards persistence). They **skip** unless
-`TEST_FIRESTORE_PROJECT_ID` and `TEST_FIRESTORE_DATABASE_ID` are set, so a bare
-`go test ./...` runs them as no-ops.
+path is the one that actually guards persistence).
 
-The simplest way to run them is against the Firestore emulator in Docker — no
-GCP project, credentials, or local Java install required (the only prerequisite
-is Docker):
+**These tests always run — they never skip on a missing env var.** A silent
+skip is exactly what let a dropped-field bug through, so a missing backend must
+fail loudly instead of passing as a no-op. Concretely, a bare `go test ./...`
+targets a local Firestore emulator at `127.0.0.1:8080` by default, and **fails
+with a connection error if no emulator is running there**. So run the suite
+through the task below (or have an emulator listening on that port).
+
+The simplest way is against the Firestore emulator in Docker — no GCP project,
+credentials, or local Java install required (the only prerequisite is Docker):
 
 ```bash
 task test:firestore
@@ -93,15 +97,15 @@ suite, and removes the container afterwards.
 > Rosetta*). Without Rosetta the emulator JVM may crash. CI runs on amd64
 > Linux, where the image runs natively.
 
-Under the hood the task sets three test-only environment variables — the
-Firestore client connects to the emulator automatically when
-`FIRESTORE_EMULATOR_HOST` is present:
+Under the hood the task sets one test-only environment variable — the Firestore
+client connects to the emulator automatically when `FIRESTORE_EMULATOR_HOST` is
+present, and the test helper defaults the project/database ids:
 
 | Variable | Value | Purpose |
 |---|---|---|
-| `FIRESTORE_EMULATOR_HOST` | `127.0.0.1:8080` | Routes the client to the emulator (insecure, no auth) |
-| `TEST_FIRESTORE_PROJECT_ID` | `test-project` | Any non-empty project id; the emulator does not validate it |
-| `TEST_FIRESTORE_DATABASE_ID` | `(default)` | Uses the default database |
+| `FIRESTORE_EMULATOR_HOST` | `127.0.0.1:8080` | Routes the client to the emulator (insecure, no auth). Unset → the helper defaults it, so the tests still target a local emulator |
+| `TEST_FIRESTORE_PROJECT_ID` | *(optional)* | Set to a real project id (with ADC, e.g. `zenv task test`) to run the tests against real Firestore instead of the emulator. Unset → defaults to `test-project` |
+| `TEST_FIRESTORE_DATABASE_ID` | *(optional)* | Firestore database id. Unset → defaults to `(default)` |
 
 CI runs the same emulator setup in `.github/workflows/test.yml`, so these tests
 run on every push.
