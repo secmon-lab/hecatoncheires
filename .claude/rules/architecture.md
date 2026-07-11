@@ -237,6 +237,19 @@ Firestore Create path never surfaces. Run the Firestore tests
 against the Firestore emulator in CI and locally — the same shared
 helper produces identical assertions across both implementations.
 
+**The `_Firestore` tests MUST NOT `t.Skip` on a missing env var.**
+The shared helper (`newFirestoreRepository`) never skips: when no
+real-Firestore project is configured it defaults to a local emulator
+(`FIRESTORE_EMULATOR_HOST=127.0.0.1:8080`, project `test-project`,
+database `(default)`), so a bare `go test ./...` runs the tests and
+fails loudly with a connection error when no emulator is reachable,
+instead of passing as a no-op. To target real Firestore instead, set
+`TEST_FIRESTORE_PROJECT_ID` (with ADC). Run the emulator locally via
+`task test:firestore` (Docker); CI starts the same emulator in
+`.github/workflows/test.yml`. Never reintroduce an env-gated skip
+here — that silent skip is the exact failure mode that hid the
+`ReporterID` drop (issue #189).
+
 ## domain (`pkg/domain/`)
 
 Pure types, interfaces, and validation. No I/O, no logging, no

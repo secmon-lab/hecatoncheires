@@ -30,6 +30,24 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
 
-      # Run tests
+      - name: Start Firestore emulator
+        run: |
+          docker run -d --name firestore-emulator -p 8080:8080 \
+            google/cloud-sdk@sha256:c2b7406c44f3aeaf2c90854337c65de4ac7a7ab07e2ab592eb8df140af1129b9 \
+            gcloud emulators firestore start --host-port=0.0.0.0:8080
+          for i in $(seq 1 90); do
+            if curl -s http://127.0.0.1:8080/ >/dev/null 2>&1; then
+              echo "emulator ready"; exit 0
+            fi
+            sleep 1
+          done
+          echo "firestore emulator did not become ready" >&2
+          docker logs firestore-emulator || true
+          exit 1
+
+      # Run tests. FIRESTORE_EMULATOR_HOST routes the Firestore client to the
+      # emulator; the repository test helper defaults the project/database ids.
       - name: Run tests
-        run: go test ./...
+        env:
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8080
+        run: go test ./... -timeout 30m

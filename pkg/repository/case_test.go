@@ -65,8 +65,8 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
 			ReporterID:  "U-TEST-DEFAULT",
-			CreatedAt:   time.Now().UTC(),
-			UpdatedAt:   time.Now().UTC(),
+			CreatedAt:   time.Now().UTC().Truncate(time.Millisecond),
+			UpdatedAt:   time.Now().UTC().Truncate(time.Millisecond),
 			Title:       "CSRF Risk",
 			Description: "Cross-site request forgery",
 			AssigneeIDs: []string{"U789"},
@@ -1383,7 +1383,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		})
 		gt.NoError(t, err).Required()
 
-		stamp := time.Now().UTC()
+		stamp := time.Now().UTC().Truncate(time.Millisecond)
 		added, err := repo.Case().AddAssignees(ctx, wsID, created.ID, []string{"U2", "U3"}, stamp)
 		gt.NoError(t, err).Required()
 		gt.Value(t, added.AssigneeIDs).Equal([]string{"U1", "U2", "U3"})
@@ -1401,7 +1401,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
-		original := time.Now().UTC().Add(-time.Hour)
+		original := time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
 			ReporterID:  "U-TEST-DEFAULT",
 			CreatedAt:   time.Now().UTC(),
@@ -1475,23 +1475,40 @@ func TestCaseRepository_Firestore(t *testing.T) {
 }
 
 // newFirestoreRepository constructs a Firestore-backed
-// interfaces.Repository for tests, skipping the calling test when the
-// emulator / project env vars are not configured. This is the single
-// place that reads TEST_FIRESTORE_PROJECT_ID / TEST_FIRESTORE_DATABASE_ID
-// — every TestXxxRepository_Firestore in this package must call it
-// instead of inlining its own env-check + firestore.New (any divergence
-// here re-creates the "half the Firestore tests silently skip" failure
-// mode that hid the ReporterID drop bug).
+// interfaces.Repository for tests. This is the single place that reads
+// TEST_FIRESTORE_PROJECT_ID / TEST_FIRESTORE_DATABASE_ID — every
+// TestXxxRepository_Firestore in this package must call it instead of
+// inlining its own firestore.New (any divergence here re-creates the
+// "half the Firestore tests silently skip" failure mode that hid the
+// ReporterID drop bug).
+//
+// It never t.Skip's on a missing env var: the Firestore tests must
+// always run so a missing backend fails loudly instead of passing as a
+// no-op (that silent skip is exactly what let the ReporterID-drop bug
+// through — issue #189). Resolution:
+//   - TEST_FIRESTORE_PROJECT_ID set → real Firestore (e.g. `zenv task
+//     test`); FIRESTORE_EMULATOR_HOST is left untouched.
+//   - otherwise → default to a local emulator at 127.0.0.1:8080 (project
+//     "test-project", database "(default)"). If FIRESTORE_EMULATOR_HOST
+//     is already set (CI, `task test:firestore`) it wins; only when it is
+//     unset do we default it so a bare `go test ./...` targets a local
+//     emulator and fails with a connection error when none is running.
 func newFirestoreRepository(t *testing.T) interfaces.Repository {
 	t.Helper()
 
 	projectID := os.Getenv("TEST_FIRESTORE_PROJECT_ID")
-	if projectID == "" {
-		t.Skip("TEST_FIRESTORE_PROJECT_ID not set")
-	}
 	databaseID := os.Getenv("TEST_FIRESTORE_DATABASE_ID")
 	if databaseID == "" {
-		t.Skip("TEST_FIRESTORE_DATABASE_ID not set")
+		databaseID = "(default)"
+	}
+	if projectID == "" {
+		projectID = "test-project"
+		// os.Setenv (not t.Setenv) because these tests use t.Parallel();
+		// the value is identical for every caller so the repeated set is
+		// idempotent, and os's env functions are safe for concurrent use.
+		if _, ok := os.LookupEnv("FIRESTORE_EMULATOR_HOST"); !ok {
+			gt.NoError(t, os.Setenv("FIRESTORE_EMULATOR_HOST", "127.0.0.1:8080")).Required()
+		}
 	}
 
 	repo, err := firestore.New(context.Background(), projectID, databaseID)
