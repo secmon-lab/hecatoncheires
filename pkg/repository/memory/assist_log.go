@@ -39,6 +39,13 @@ func copyAssistLog(l *model.AssistLog) *model.AssistLog {
 }
 
 func (r *assistLogRepository) Create(ctx context.Context, workspaceID string, caseID int64, log *model.AssistLog) (*model.AssistLog, error) {
+	// Guard nil up front: CaseID is assigned (and Validate called) only after
+	// copyAssistLog dereferences log, so a nil log would panic before the
+	// post-assignment Validate could reject it.
+	if log == nil {
+		return nil, goerr.Wrap(model.ErrAssistLogValidation, "assist log is nil")
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

@@ -31,6 +31,13 @@ func (r *firestoreAssistLogRepository) Create(ctx context.Context, workspaceID s
 	// No struct-tag mirror, no converter — model.AssistLog is
 	// persisted verbatim, the only way to guarantee that fields
 	// added later to the domain model don't silently drop on write.
+	//
+	// Guard nil up front: CaseID is assigned (and Validate called) only after
+	// log is dereferenced below, so a nil log would panic before the
+	// post-assignment Validate could reject it.
+	if log == nil {
+		return nil, goerr.Wrap(model.ErrAssistLogValidation, "assist log is nil")
+	}
 	if log.ID == "" {
 		log.ID = model.NewAssistLogID()
 	}

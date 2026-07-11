@@ -35,6 +35,12 @@ func (r *actionEventRepository) Put(ctx context.Context, workspaceID string, act
 	if err := event.Validate(); err != nil {
 		return goerr.Wrap(err, "action event validation failed before put")
 	}
+	// The event is stored under the actionID parameter's key; reject a struct
+	// whose own ActionID points elsewhere so the two can never diverge.
+	if event.ActionID != actionID {
+		return goerr.Wrap(model.ErrActionEventValidation, "action event ActionID does not match parameter",
+			goerr.V("param", actionID), goerr.V("event", event.ActionID))
+	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()

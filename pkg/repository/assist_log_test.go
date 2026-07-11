@@ -26,6 +26,11 @@ func runAssistLogRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 			Summary: "orphan",
 		})
 		gt.Error(t, err).Is(model.ErrAssistLogValidation)
+
+		// A nil log must be rejected without panicking (the deref that assigns
+		// CaseID happens before Validate would run).
+		_, err = repo.AssistLog().Create(ctx, wsID, 7, nil)
+		gt.Error(t, err).Is(model.ErrAssistLogValidation)
 	})
 
 	t.Run("Create creates assist log with UUID", func(t *testing.T) {
