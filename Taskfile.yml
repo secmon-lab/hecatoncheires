@@ -34,8 +34,14 @@ tasks:
           google/cloud-sdk@sha256:c2b7406c44f3aeaf2c90854337c65de4ac7a7ab07e2ab592eb8df140af1129b9 \
           gcloud emulators firestore start --host-port=0.0.0.0:8080
         trap 'docker rm -f hct-firestore-emulator >/dev/null 2>&1' EXIT
-        for i in $(seq 1 90); do
-          curl -s http://127.0.0.1:8080/ >/dev/null 2>&1 && break
+        i=0
+        until curl -s http://127.0.0.1:8080/ >/dev/null 2>&1; do
+          i=$((i+1))
+          if [ "$i" -ge 90 ]; then
+            echo "firestore emulator did not become ready" >&2
+            docker logs hct-firestore-emulator || true
+            exit 1
+          fi
           sleep 1
         done
         FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 go test ./... -timeout 30m
