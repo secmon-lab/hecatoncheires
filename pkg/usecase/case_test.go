@@ -2118,6 +2118,37 @@ func TestCaseUseCase_CreateCase_CrossWorkspaceConnect(t *testing.T) {
 		gt.String(t, adminMock.connectedChannelID).Equal("")
 	})
 
+	t.Run("skips connect when configured team ID is empty", func(t *testing.T) {
+		// Regression for ARGUS-80: a workspace with no SlackTeamID configured
+		// (teamID empty) previously still entered the cross-workspace connect
+		// branch, passing ["", sourceTeamID] to admin.conversations.setTeams and
+		// failing with not_an_enterprise. Without a home team id the connect must
+		// be skipped entirely.
+		repo := memory.New()
+		slackMock := &mockSlackService{
+			createChannelFn: func(_ context.Context, caseID int64, _ string, _ string) (string, error) {
+				return fmt.Sprintf("C%d", caseID), nil
+			},
+		}
+		adminMock := &mockAdminService{}
+
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: testWorkspaceID, Name: "Test Workspace"},
+			// SlackTeamID intentionally left empty.
+		})
+		uc := usecase.NewCaseUseCase(repo, registry, slackMock, adminMock, "")
+
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UCREATOR"})
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Unconfigured Home Team", "Description", []string{}, nil, false, false, "TSOURCE", "")
+		gt.NoError(t, err).Required()
+		gt.Value(t, created.SlackChannelID).NotEqual("")
+
+		// ConnectChannelToWorkspace must NOT be called.
+		gt.String(t, adminMock.connectedChannelID).Equal("")
+		gt.Array(t, adminMock.connectedTeamIDs).Length(0)
+	})
+
 	t.Run("connect failure does not fail case creation", func(t *testing.T) {
 		repo := memory.New()
 		slackMock := &mockSlackService{

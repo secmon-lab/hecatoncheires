@@ -624,7 +624,14 @@ func (uc *CaseUseCase) activateCase(ctx context.Context, workspaceID string, c *
 	}
 
 	// Connect channel to the source workspace if it differs from the configured team.
-	if sourceTeamID != "" && sourceTeamID != teamID {
+	//
+	// Both team IDs must be known: the source team (from the Slack payload) AND
+	// the home team (workspace config, teamID). When the workspace has no
+	// SlackTeamID configured, teamID is empty; without it we cannot build a valid
+	// target_team_ids set, and Slack rejects a request carrying an empty team id
+	// (surfacing as not_an_enterprise on non-Enterprise-Grid workspaces). Skip
+	// rather than fire a call that can only fail.
+	if teamID != "" && sourceTeamID != "" && sourceTeamID != teamID {
 		if uc.slackAdminService != nil {
 			if connectErr := uc.slackAdminService.ConnectChannelToWorkspace(ctx, channelID, []string{teamID, sourceTeamID}); connectErr != nil {
 				errutil.Handle(ctx, connectErr, "failed to connect channel to source workspace")
