@@ -32,11 +32,11 @@ jobs:
 
       - name: Start Firestore emulator
         run: |
-          docker run -d --name firestore-emulator -p 8080:8080 \
+          docker run -d --name firestore-emulator -p 28615:28615 \
             google/cloud-sdk@sha256:c2b7406c44f3aeaf2c90854337c65de4ac7a7ab07e2ab592eb8df140af1129b9 \
-            gcloud emulators firestore start --host-port=0.0.0.0:8080
+            gcloud emulators firestore start --host-port=0.0.0.0:28615
           for i in $(seq 1 90); do
-            if curl -s http://127.0.0.1:8080/ >/dev/null 2>&1; then
+            if curl -s http://127.0.0.1:28615/ >/dev/null 2>&1; then
               echo "emulator ready"; exit 0
             fi
             sleep 1
@@ -49,5 +49,5 @@ jobs:
       # emulator; the repository test helper defaults the project/database ids.
       - name: Run tests
         env:
-          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8080
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:28615
         run: go test ./... -timeout 30m

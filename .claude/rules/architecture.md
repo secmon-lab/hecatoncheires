@@ -240,7 +240,7 @@ helper produces identical assertions across both implementations.
 **The `_Firestore` tests MUST NOT `t.Skip` on a missing env var.**
 The shared helper (`newFirestoreRepository`) never skips: when no
 real-Firestore project is configured it defaults to a local emulator
-(`FIRESTORE_EMULATOR_HOST=127.0.0.1:8080`, project `test-project`,
+(`FIRESTORE_EMULATOR_HOST=127.0.0.1:28615`, project `test-project`,
 database `(default)`), so a bare `go test ./...` runs the tests and
 fails loudly with a connection error when no emulator is reachable,
 instead of passing as a no-op. To target real Firestore instead, set
