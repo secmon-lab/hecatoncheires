@@ -66,6 +66,53 @@ Visit <http://localhost:8080>. The GraphiQL playground (when enabled) is at
 go test ./...
 ```
 
+### Repository tests and the Firestore emulator
+
+The repository tests include a `TestXxxRepository_Firestore` variant for every
+repository. These exercise the real Firestore read/write path (the memory
+backend copies structs wholesale and can hide field-drop bugs, so the Firestore
+path is the one that actually guards persistence). They **skip** unless
+`TEST_FIRESTORE_PROJECT_ID` and `TEST_FIRESTORE_DATABASE_ID` are set, so a bare
+`go test ./...` runs them as no-ops.
+
+The simplest way to run them is against the Firestore emulator in Docker — no
+GCP project, credentials, or local Java install required (the only prerequisite
+is Docker):
+
+```bash
+task test:firestore
+```
+
+This starts the emulator container, points the tests at it, runs the full
+suite, and removes the container afterwards.
+
+> **Apple Silicon note.** `google/cloud-sdk:emulators` is an amd64-only image.
+> On an arm64 Mac it runs under emulation, and the bundled JVM is only stable
+> when your container runtime uses Rosetta (Docker Desktop: *Use Rosetta for
+> x86/amd64 emulation*; Rancher Desktop: *Virtual Machine → Emulation →
+> Rosetta*). Without Rosetta the emulator JVM may crash. CI runs on amd64
+> Linux, where the image runs natively.
+
+Under the hood the task sets three test-only environment variables — the
+Firestore client connects to the emulator automatically when
+`FIRESTORE_EMULATOR_HOST` is present:
+
+| Variable | Value | Purpose |
+|---|---|---|
+| `FIRESTORE_EMULATOR_HOST` | `127.0.0.1:8080` | Routes the client to the emulator (insecure, no auth) |
+| `TEST_FIRESTORE_PROJECT_ID` | `test-project` | Any non-empty project id; the emulator does not validate it |
+| `TEST_FIRESTORE_DATABASE_ID` | `(default)` | Uses the default database |
+
+CI runs the same emulator setup in `.github/workflows/test.yml`, so these tests
+run on every push.
+
+> **Emulator caveat — composite indexes.** The emulator does not enforce
+> Firestore composite index requirements, so a query that would need a new
+> composite index in production still passes here. That gap is covered by the
+> real-Firestore path (`zenv task test`) and by `hecatoncheires migrate`, which
+> manages indexes via the Firestore Admin API (the emulator does not implement
+> the Admin API, so `migrate` cannot and does not run against it).
+
 Frontend end-to-end tests use Playwright against a memory-backed server; see the
 root [README](../README.md) for the e2e workflow.
 
