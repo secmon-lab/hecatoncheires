@@ -2,10 +2,12 @@ package repository_test
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/m-mizutani/gt"
+	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
 )
@@ -74,157 +76,141 @@ func newValidSession(workspaceID, creatorUserID string) *model.ImportSession {
 	}
 }
 
-func TestImportRepository_RoundTrip_Memory(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	repo := memory.New().Import()
+// runImportRepositoryTest exercises the ImportRepository contract against
+// whichever backend newRepo constructs. Like runCaseRepositoryTest it is
+// invoked for both memory and Firestore so a field dropped only on the
+// Firestore Create path (the memory repo round-trips via a full struct
+// copy and hides such bugs) is caught apples-to-apples.
+func runImportRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.Repository) {
+	t.Helper()
 
-	in := newValidSession("ws-acme", "U12345678")
-	created, err := repo.Create(ctx, in.WorkspaceID, in)
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	if created.ID != in.ID {
-		t.Errorf("create returned ID=%q, want %q", created.ID, in.ID)
-	}
+	t.Run("RoundTrip", func(t *testing.T) {
+		ctx := context.Background()
+		repo := newRepo(t).Import()
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 
-	got, err := repo.Get(ctx, in.WorkspaceID, in.ID)
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
+		in := newValidSession(wsID, "U12345678")
+		// Set a non-default value so a dropped bool is caught: asserting the
+		// default false would pass even if IsPrivate were ignored entirely.
+		in.Snapshot.Cases[0].IsPrivate = true
+		created, err := repo.Create(ctx, in.WorkspaceID, in)
+		gt.NoError(t, err).Required()
+		gt.Value(t, created.ID).Equal(in.ID)
 
-	// Round-trip every field exhaustively
-	if got.WorkspaceID != in.WorkspaceID {
-		t.Errorf("WorkspaceID: got %q want %q", got.WorkspaceID, in.WorkspaceID)
-	}
-	if got.CreatorUserID != in.CreatorUserID {
-		t.Errorf("CreatorUserID: got %q want %q", got.CreatorUserID, in.CreatorUserID)
-	}
-	if got.Status != in.Status {
-		t.Errorf("Status: got %q want %q", got.Status, in.Status)
-	}
-	if got.Source.OriginalFileName != in.Source.OriginalFileName {
-		t.Errorf("Source.OriginalFileName: got %q want %q", got.Source.OriginalFileName, in.Source.OriginalFileName)
-	}
-	if got.Source.ContentDigest != in.Source.ContentDigest {
-		t.Errorf("Source.ContentDigest mismatch")
-	}
-	if got.Source.SizeBytes != in.Source.SizeBytes {
-		t.Errorf("Source.SizeBytes mismatch")
-	}
-	if got.FieldSchemaHash != in.FieldSchemaHash {
-		t.Errorf("FieldSchemaHash mismatch")
-	}
-	if !got.CreatedAt.Equal(in.CreatedAt) {
-		t.Errorf("CreatedAt mismatch")
-	}
-	if !got.UpdatedAt.Equal(in.UpdatedAt) {
-		t.Errorf("UpdatedAt mismatch")
-	}
-	if got.ExecutedAt == nil || !got.ExecutedAt.Equal(*in.ExecutedAt) {
-		t.Errorf("ExecutedAt mismatch")
-	}
-	if got.CreatedCount != in.CreatedCount {
-		t.Errorf("CreatedCount mismatch")
-	}
-	if len(got.Issues) != 1 || got.Issues[0].Path != "version" {
-		t.Errorf("session Issues mismatch: %+v", got.Issues)
-	}
-	if len(got.Snapshot.Cases) != 1 {
-		t.Fatalf("snapshot.cases length: got %d want 1", len(got.Snapshot.Cases))
-	}
-	gc := got.Snapshot.Cases[0]
-	if gc.Title != "Suspicious login" {
-		t.Errorf("case title: got %q", gc.Title)
-	}
-	if len(gc.AssigneeIDs) != 1 || gc.AssigneeIDs[0] != "U12345678" {
-		t.Errorf("case AssigneeIDs: %v", gc.AssigneeIDs)
-	}
-	if gc.Result.Status != model.ImportItemCreated {
-		t.Errorf("case result status: %q", gc.Result.Status)
-	}
-	if gc.Result.CreatedCaseID == nil || *gc.Result.CreatedCaseID != 142 {
-		t.Errorf("case result CreatedCaseID: %v", gc.Result.CreatedCaseID)
-	}
-	if len(gc.Actions) != 1 {
-		t.Fatalf("actions length")
-	}
-	ga := gc.Actions[0]
-	if ga.Title != "Block IP" || ga.AssigneeID != "U87654321" {
-		t.Errorf("action mismatch")
-	}
-	if ga.DueDate == nil || !ga.DueDate.Equal(time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC)) {
-		t.Errorf("action DueDate: %v", ga.DueDate)
-	}
-	if ga.Result.Status != model.ImportItemCreated || ga.Result.CreatedActionID == nil || *ga.Result.CreatedActionID != 1421 {
-		t.Errorf("action result: %+v", ga.Result)
-	}
+		got, err := repo.Get(ctx, in.WorkspaceID, in.ID)
+		gt.NoError(t, err).Required()
+
+		// Round-trip every field exhaustively.
+		gt.Value(t, got.WorkspaceID).Equal(in.WorkspaceID)
+		gt.Value(t, got.CreatorUserID).Equal(in.CreatorUserID)
+		gt.Value(t, got.Status).Equal(in.Status)
+		gt.Value(t, got.Source.OriginalFileName).Equal(in.Source.OriginalFileName)
+		gt.Value(t, got.Source.ContentDigest).Equal(in.Source.ContentDigest)
+		gt.Value(t, got.Source.SizeBytes).Equal(in.Source.SizeBytes)
+		gt.Value(t, got.FieldSchemaHash).Equal(in.FieldSchemaHash)
+		gt.Bool(t, got.CreatedAt.Equal(in.CreatedAt)).True()
+		gt.Bool(t, got.UpdatedAt.Equal(in.UpdatedAt)).True()
+		gt.Value(t, got.ExecutedAt).NotNil().Required()
+		gt.Bool(t, got.ExecutedAt.Equal(*in.ExecutedAt)).True()
+		gt.Value(t, got.CreatedCount).Equal(in.CreatedCount)
+		gt.Value(t, got.FailedCount).Equal(in.FailedCount)
+		gt.Value(t, got.SkippedCount).Equal(in.SkippedCount)
+
+		gt.Array(t, got.Issues).Length(1).Required()
+		gt.Value(t, got.Issues[0].Path).Equal("version")
+		gt.Value(t, got.Issues[0].Severity).Equal(model.ImportIssueWarning)
+
+		gt.Value(t, got.Snapshot.Version).Equal(in.Snapshot.Version)
+		gt.Array(t, got.Snapshot.Cases).Length(1).Required()
+		gc := got.Snapshot.Cases[0]
+		gt.Value(t, gc.Title).Equal("Suspicious login")
+		gt.Value(t, gc.Description).Equal("Multiple failed attempts.")
+		gt.Bool(t, gc.IsPrivate).True()
+		gt.Value(t, gc.AssigneeIDs).Equal([]string{"U12345678"})
+		gt.Map(t, gc.FieldValues).HasKey("severity")
+		gt.Value(t, gc.FieldValues["severity"].Value).Equal("high")
+		gt.Array(t, gc.Issues).Length(1).Required()
+		gt.Value(t, gc.Issues[0].Path).Equal("cases[0].fields.severity")
+		gt.Value(t, gc.Result.Status).Equal(model.ImportItemCreated)
+		gt.Value(t, gc.Result.CreatedCaseID).NotNil().Required()
+		gt.Value(t, *gc.Result.CreatedCaseID).Equal(int64(142))
+
+		gt.Array(t, gc.Actions).Length(1).Required()
+		ga := gc.Actions[0]
+		gt.Value(t, ga.Title).Equal("Block IP")
+		gt.Value(t, ga.Description).Equal("Add firewall rule")
+		gt.Value(t, ga.AssigneeID).Equal("U87654321")
+		gt.Value(t, ga.DueDate).NotNil().Required()
+		gt.Bool(t, ga.DueDate.Equal(time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC))).True()
+		gt.Value(t, ga.Result.Status).Equal(model.ImportItemCreated)
+		gt.Value(t, ga.Result.CreatedActionID).NotNil().Required()
+		gt.Value(t, *ga.Result.CreatedActionID).Equal(int64(1421))
+	})
+
+	t.Run("Update", func(t *testing.T) {
+		ctx := context.Background()
+		repo := newRepo(t).Import()
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+
+		in := newValidSession(wsID, "U1")
+		in.Status = model.ImportSessionPending
+		in.ExecutedAt = nil
+		in.Snapshot.Cases[0].Result = model.ImportCaseResult{Status: model.ImportItemPending}
+		in.Snapshot.Cases[0].Actions[0].Result = model.ImportActionResult{Status: model.ImportItemPending}
+		_, err := repo.Create(ctx, in.WorkspaceID, in)
+		gt.NoError(t, err).Required()
+
+		// Mutate and update.
+		exec := time.Date(2026, 5, 25, 11, 0, 0, 0, time.UTC)
+		caseID := int64(200)
+		in.Status = model.ImportSessionApplied
+		in.ExecutedAt = &exec
+		in.Snapshot.Cases[0].Result = model.ImportCaseResult{Status: model.ImportItemCreated, CreatedCaseID: &caseID}
+		in.Snapshot.Cases[0].Actions[0].Result = model.ImportActionResult{Status: model.ImportItemCreated}
+		in.RecomputeCounts()
+		_, err = repo.Update(ctx, in.WorkspaceID, in)
+		gt.NoError(t, err).Required()
+
+		got, err := repo.Get(ctx, in.WorkspaceID, in.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, got.Status).Equal(model.ImportSessionApplied)
+		gt.Value(t, got.ExecutedAt).NotNil().Required()
+		gt.Bool(t, got.ExecutedAt.Equal(exec)).True()
+		gt.Value(t, got.Snapshot.Cases[0].Result.Status).Equal(model.ImportItemCreated)
+		gt.Value(t, got.CreatedCount).Equal(1)
+	})
+
+	t.Run("NotFound", func(t *testing.T) {
+		ctx := context.Background()
+		repo := newRepo(t).Import()
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+
+		// memory and Firestore expose distinct ErrNotFound sentinels, so the
+		// shared helper asserts only that a lookup of a missing session fails.
+		_, err := repo.Get(ctx, wsID, model.NewImportSessionID())
+		gt.Error(t, err)
+	})
+
+	t.Run("ValidateRejectsBadSession", func(t *testing.T) {
+		ctx := context.Background()
+		repo := newRepo(t).Import()
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+
+		bad := newValidSession(wsID, "U1")
+		bad.CreatorUserID = "" // triggers ErrImportSessionMissingCreator
+		_, err := repo.Create(ctx, wsID, bad)
+		gt.Error(t, err).Is(model.ErrImportSessionMissingCreator)
+	})
 }
 
-func TestImportRepository_Update(t *testing.T) {
+func TestImportRepository_Memory(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
-	repo := memory.New().Import()
-
-	in := newValidSession("ws-acme", "U1")
-	in.Status = model.ImportSessionPending
-	in.ExecutedAt = nil
-	in.Snapshot.Cases[0].Result = model.ImportCaseResult{Status: model.ImportItemPending}
-	in.Snapshot.Cases[0].Actions[0].Result = model.ImportActionResult{Status: model.ImportItemPending}
-	if _, err := repo.Create(ctx, in.WorkspaceID, in); err != nil {
-		t.Fatalf("create: %v", err)
-	}
-
-	// Mutate and update
-	exec := time.Date(2026, 5, 25, 11, 0, 0, 0, time.UTC)
-	caseID := int64(200)
-	in.Status = model.ImportSessionApplied
-	in.ExecutedAt = &exec
-	in.Snapshot.Cases[0].Result = model.ImportCaseResult{Status: model.ImportItemCreated, CreatedCaseID: &caseID}
-	in.Snapshot.Cases[0].Actions[0].Result = model.ImportActionResult{Status: model.ImportItemCreated}
-	in.RecomputeCounts()
-	if _, err := repo.Update(ctx, in.WorkspaceID, in); err != nil {
-		t.Fatalf("update: %v", err)
-	}
-
-	got, err := repo.Get(ctx, in.WorkspaceID, in.ID)
-	if err != nil {
-		t.Fatalf("get after update: %v", err)
-	}
-	if got.Status != model.ImportSessionApplied {
-		t.Errorf("status not updated")
-	}
-	if got.Snapshot.Cases[0].Result.Status != model.ImportItemCreated {
-		t.Errorf("case status not updated")
-	}
-	if got.CreatedCount != 1 {
-		t.Errorf("counts not updated: created=%d", got.CreatedCount)
-	}
+	runImportRepositoryTest(t, func(t *testing.T) interfaces.Repository {
+		return memory.New()
+	})
 }
 
-func TestImportRepository_NotFound(t *testing.T) {
+func TestImportRepository_Firestore(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
-	repo := memory.New().Import()
-	_, err := repo.Get(ctx, "ws-acme", model.NewImportSessionID())
-	if err == nil {
-		t.Fatalf("expected error for missing session")
-	}
-	// Memory's ErrNotFound is wrapped; we just confirm an error came back.
-	if errors.Is(err, nil) {
-		t.Fatalf("got nil-wrapping error")
-	}
-}
-
-func TestImportRepository_ValidateRejectsBadSession(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	repo := memory.New().Import()
-	bad := newValidSession("ws-acme", "U1")
-	bad.CreatorUserID = "" // triggers ErrImportSessionMissingCreator
-	if _, err := repo.Create(ctx, "ws-acme", bad); err == nil {
-		t.Fatalf("expected validation error")
-	} else if !errors.Is(err, model.ErrImportSessionMissingCreator) {
-		t.Fatalf("expected ErrImportSessionMissingCreator, got %v", err)
-	}
+	runImportRepositoryTest(t, newFirestoreRepository)
 }
