@@ -178,7 +178,7 @@ func runNotificationSlotRepositoryTest(t *testing.T, newRepo func(t *testing.T) 
 		gt.Error(t, err)
 
 		err = repo.NotificationSlot().Save(ctx, &model.NotificationSlot{})
-		gt.Error(t, err)
+		gt.Error(t, err).Is(model.ErrNotificationSlotValidation)
 
 		err = repo.NotificationSlot().Delete(ctx, "")
 		gt.Error(t, err)

@@ -1,6 +1,13 @@
 package model
 
-import "time"
+import (
+	"time"
+
+	"github.com/m-mizutani/goerr/v2"
+)
+
+// ErrSlackUserValidation is returned when a SlackUser fails its persistence-boundary invariants.
+var ErrSlackUserValidation = goerr.New("slack user validation failed")
 
 // SlackUserID represents a unique identifier for a Slack user
 type SlackUserID string
@@ -13,6 +20,19 @@ type SlackUser struct {
 	Email     string    // Email address (for future features)
 	ImageURL  string    // Avatar URL (empty string = no image)
 	UpdatedAt time.Time // Last synchronized from Slack
+}
+
+// Validate enforces the invariants required before any persistence write.
+// ID is the natural key (the Slack user id), so a user record with no ID
+// fails loudly here instead of landing in storage under an empty key.
+func (u *SlackUser) Validate() error {
+	if u == nil {
+		return goerr.Wrap(ErrSlackUserValidation, "slack user is nil")
+	}
+	if u.ID == "" {
+		return goerr.Wrap(ErrSlackUserValidation, "slack user ID is required")
+	}
+	return nil
 }
 
 // SlackUserMetadata tracks the health and status of Slack user synchronization

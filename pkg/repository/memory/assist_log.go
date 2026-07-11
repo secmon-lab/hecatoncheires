@@ -5,6 +5,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 )
 
@@ -38,6 +39,13 @@ func copyAssistLog(l *model.AssistLog) *model.AssistLog {
 }
 
 func (r *assistLogRepository) Create(ctx context.Context, workspaceID string, caseID int64, log *model.AssistLog) (*model.AssistLog, error) {
+	// Guard nil up front: CaseID is assigned (and Validate called) only after
+	// copyAssistLog dereferences log, so a nil log would panic before the
+	// post-assignment Validate could reject it.
+	if log == nil {
+		return nil, goerr.Wrap(model.ErrAssistLogValidation, "assist log is nil")
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -48,6 +56,12 @@ func (r *assistLogRepository) Create(ctx context.Context, workspaceID string, ca
 		created.ID = model.NewAssistLogID()
 	}
 	created.CaseID = caseID
+
+	// Validate after CaseID is assigned from the parameter (the caller struct
+	// may carry a zero CaseID and rely on the repository to set it).
+	if err := created.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "assist log validation failed before create")
+	}
 
 	r.entries[key] = append(r.entries[key], created)
 	return copyAssistLog(created), nil

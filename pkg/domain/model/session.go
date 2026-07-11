@@ -1,6 +1,13 @@
 package model
 
-import "time"
+import (
+	"time"
+
+	"github.com/m-mizutani/goerr/v2"
+)
+
+// ErrSessionValidation is returned when a Session fails its persistence-boundary invariants.
+var ErrSessionValidation = goerr.New("session validation failed")
 
 // SessionEndReason captures the terminal plan action that ended the most
 // recent turn for a Session. The dispatcher uses it to decide whether a
@@ -110,4 +117,24 @@ func (s *Session) IsCaseBound() bool {
 // a post_question (open mode); case-bound resume is @mention-only.
 func (s *Session) ResumeOnReply() bool {
 	return s != nil && s.LastAction == SessionEndedWithQuestion
+}
+
+// Validate enforces the invariants required before any persistence write.
+// A Session is located by (ChannelID, ThreadTS) and carries a caller-supplied
+// ID, so a record missing any of these three fails loudly here instead of
+// landing in storage under an incomplete key.
+func (s *Session) Validate() error {
+	if s == nil {
+		return goerr.Wrap(ErrSessionValidation, "session is nil")
+	}
+	if s.ID == "" {
+		return goerr.Wrap(ErrSessionValidation, "session ID is required")
+	}
+	if s.ChannelID == "" {
+		return goerr.Wrap(ErrSessionValidation, "session ChannelID is required")
+	}
+	if s.ThreadTS == "" {
+		return goerr.Wrap(ErrSessionValidation, "session ThreadTS is required")
+	}
+	return nil
 }

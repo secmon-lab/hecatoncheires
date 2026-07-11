@@ -62,15 +62,8 @@ func (r *sessionRepository) GetByThread(ctx context.Context, channelID, threadTS
 }
 
 func (r *sessionRepository) Put(ctx context.Context, s *model.Session) error {
-	if s == nil {
-		return goerr.New("session is nil")
-	}
-	if s.ID == "" || s.ChannelID == "" || s.ThreadTS == "" {
-		return goerr.New("session missing required fields",
-			goerr.V("id", s.ID),
-			goerr.V("channel_id", s.ChannelID),
-			goerr.V("thread_ts", s.ThreadTS),
-		)
+	if err := s.Validate(); err != nil {
+		return goerr.Wrap(err, "session validation failed before put")
 	}
 	if _, err := r.docRef(s.ChannelID, s.ThreadTS).Set(ctx, s); err != nil {
 		return goerr.Wrap(err, "failed to put session",
@@ -124,6 +117,9 @@ func (r *sessionRepository) AcquireTurnLock(
 				fresh.CreatedAt = now
 			}
 			fresh.UpdatedAt = now
+			if err := fresh.Validate(); err != nil {
+				return goerr.Wrap(err, "session validation failed before acquire")
+			}
 			if err := tx.Set(doc, fresh); err != nil {
 				return goerr.Wrap(err, "tx set new session")
 			}

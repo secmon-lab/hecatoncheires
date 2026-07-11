@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/m-mizutani/gt"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 )
 
@@ -240,4 +241,26 @@ func TestParseNotionID(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSource_Validate(t *testing.T) {
+	t.Run("valid source passes", func(t *testing.T) {
+		s := &model.Source{ID: model.NewSourceID(), Name: "My DB", SourceType: model.SourceTypeNotionDB}
+		gt.NoError(t, s.Validate())
+	})
+
+	t.Run("nil source is rejected", func(t *testing.T) {
+		var s *model.Source
+		gt.Error(t, s.Validate()).Is(model.ErrSourceValidation)
+	})
+
+	t.Run("missing Name is rejected", func(t *testing.T) {
+		s := &model.Source{SourceType: model.SourceTypeSlack}
+		gt.Error(t, s.Validate()).Is(model.ErrSourceValidation)
+	})
+
+	t.Run("missing SourceType is rejected", func(t *testing.T) {
+		s := &model.Source{Name: "typeless"}
+		gt.Error(t, s.Validate()).Is(model.ErrSourceValidation)
+	})
 }

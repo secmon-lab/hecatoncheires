@@ -56,6 +56,10 @@ func copyAction(a *model.Action) *model.Action {
 }
 
 func (r *actionRepository) Create(ctx context.Context, workspaceID string, action *model.Action) (*model.Action, error) {
+	if err := action.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "action validation failed before create")
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -126,6 +130,10 @@ func (r *actionRepository) List(ctx context.Context, workspaceID string, opts in
 }
 
 func (r *actionRepository) Update(ctx context.Context, workspaceID string, action *model.Action) (*model.Action, error) {
+	if err := action.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "action validation failed before update")
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

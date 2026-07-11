@@ -26,3 +26,25 @@ func TestActionStep_IsDone(t *testing.T) {
 		gt.Bool(t, s.IsDone()).True()
 	})
 }
+
+func TestActionStep_Validate(t *testing.T) {
+	t.Run("valid step passes", func(t *testing.T) {
+		s := &model.ActionStep{ID: "step-1", ActionID: 7, Title: "gather evidence"}
+		gt.NoError(t, s.Validate())
+	})
+
+	t.Run("nil step is rejected", func(t *testing.T) {
+		var s *model.ActionStep
+		gt.Error(t, s.Validate()).Is(model.ErrActionStepValidation)
+	})
+
+	t.Run("missing ID is rejected", func(t *testing.T) {
+		s := &model.ActionStep{ActionID: 7}
+		gt.Error(t, s.Validate()).Is(model.ErrActionStepValidation)
+	})
+
+	t.Run("missing ActionID is rejected", func(t *testing.T) {
+		s := &model.ActionStep{ID: "step-1"}
+		gt.Error(t, s.Validate()).Is(model.ErrActionStepValidation)
+	})
+}

@@ -16,6 +16,25 @@ import (
 func runActionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.Repository) {
 	t.Helper()
 
+	t.Run("Create/Update reject actions with missing CaseID", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		_, err := repo.Action().Create(ctx, wsID, &model.Action{
+			Title:  "orphan",
+			Status: types.ActionStatusTodo,
+		})
+		gt.Error(t, err).Is(model.ErrActionValidation)
+
+		_, err = repo.Action().Update(ctx, wsID, &model.Action{
+			ID:     1,
+			Title:  "orphan update",
+			Status: types.ActionStatusTodo,
+		})
+		gt.Error(t, err).Is(model.ErrActionValidation)
+	})
+
 	t.Run("Create creates action with auto-increment ID", func(t *testing.T) {
 		repo := newRepo(t)
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())

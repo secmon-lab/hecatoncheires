@@ -4,7 +4,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/m-mizutani/goerr/v2"
 )
+
+// ErrAssistLogValidation is returned when an AssistLog fails its persistence-boundary invariants.
+var ErrAssistLogValidation = goerr.New("assist log validation failed")
 
 // AssistLogID is a UUID-based identifier for AssistLog
 type AssistLogID string
@@ -25,4 +29,19 @@ type AssistLog struct {
 	Reasoning string // Rationale behind decisions made
 	NextSteps string // Items to address in future sessions
 	CreatedAt time.Time
+}
+
+// Validate enforces the invariants required before any persistence write.
+// The repository assigns the storage ID (NewAssistLogID when empty) and sets
+// CaseID from its caseID argument, so callers MUST invoke this after that
+// assignment; a log with no owning Case (CaseID == 0) fails loudly here
+// instead of landing in storage.
+func (l *AssistLog) Validate() error {
+	if l == nil {
+		return goerr.Wrap(ErrAssistLogValidation, "assist log is nil")
+	}
+	if l.CaseID == 0 {
+		return goerr.Wrap(ErrAssistLogValidation, "assist log CaseID is required")
+	}
+	return nil
 }
