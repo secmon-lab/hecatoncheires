@@ -56,6 +56,11 @@ func TestAssertCaseWriteAccess(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("nil case fails closed with ErrCaseNotFound", func(t *testing.T) {
+		err := usecase.AssertCaseWriteAccessForTest(nil, "U-anyone", true)
+		gt.Error(t, err).Is(usecase.ErrCaseNotFound)
+	})
 }
 
 func TestTokenActor(t *testing.T) {

@@ -34,6 +34,12 @@ func tokenActor(ctx context.Context) (actorID string, checkAccess bool) {
 // strictly more permissive only for the reporter of their own private draft and
 // never widens access to a non-owner.
 func assertCaseWriteAccess(c *model.Case, actorID string, checkAccess bool) error {
+	// Fail closed and loud on a nil case rather than panicking downstream in
+	// model.IsCaseAccessible (which dereferences c). Every real caller passes a
+	// Get-loaded, error-checked Case, so this only guards against future misuse.
+	if c == nil {
+		return goerr.Wrap(ErrCaseNotFound, "case is nil")
+	}
 	if !checkAccess {
 		return nil
 	}
