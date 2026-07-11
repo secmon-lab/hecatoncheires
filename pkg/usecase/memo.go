@@ -108,28 +108,13 @@ func (uc *MemoUseCase) memoEnabled(workspaceID string) bool {
 	return entry.MemoConfig.Enabled()
 }
 
-// loadAccessibleCase loads the parent Case and enforces private-case access
-// control for WRITE operations. The token==nil pattern bypasses the check for
-// system/agent contexts that carry no auth token (per project policy).
-func (uc *MemoUseCase) loadAccessibleCase(ctx context.Context, workspaceID string, caseID int64) (*model.Case, error) {
-	caseModel, err := uc.repo.Case().Get(ctx, workspaceID, caseID)
-	if err != nil {
-		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, caseID))
-	}
-	if token, tokenErr := auth.TokenFromContext(ctx); tokenErr == nil && !model.IsCaseAccessible(caseModel, token.Sub) {
-		return nil, goerr.Wrap(ErrAccessDenied, "cannot access memo in private case",
-			goerr.V(CaseIDKey, caseID), goerr.V("user_id", token.Sub))
-	}
-	return caseModel, nil
-}
-
 // CreateMemo validates and persists a new memo within a Case. Field values are
 // fully validated (required fields enforced, unknown field ids rejected).
 func (uc *MemoUseCase) CreateMemo(ctx context.Context, workspaceID string, in CreateMemoInput) (*model.Memo, error) {
 	if !uc.memoEnabled(workspaceID) {
 		return nil, goerr.Wrap(ErrMemoNotEnabled, "memo create rejected", goerr.V("workspace_id", workspaceID))
 	}
-	if _, err := uc.loadAccessibleCase(ctx, workspaceID, in.CaseID); err != nil {
+	if _, err := loadCaseForWrite(ctx, uc.repo, workspaceID, in.CaseID); err != nil {
 		return nil, err
 	}
 
@@ -166,7 +151,7 @@ func (uc *MemoUseCase) UpdateMemo(ctx context.Context, workspaceID string, in Up
 	if !uc.memoEnabled(workspaceID) {
 		return nil, goerr.Wrap(ErrMemoNotEnabled, "memo update rejected", goerr.V("workspace_id", workspaceID))
 	}
-	if _, err := uc.loadAccessibleCase(ctx, workspaceID, in.CaseID); err != nil {
+	if _, err := loadCaseForWrite(ctx, uc.repo, workspaceID, in.CaseID); err != nil {
 		return nil, err
 	}
 
@@ -211,7 +196,7 @@ func (uc *MemoUseCase) UnarchiveMemo(ctx context.Context, workspaceID string, ca
 }
 
 func (uc *MemoUseCase) setMemoArchived(ctx context.Context, workspaceID string, caseID int64, id model.MemoID, archived bool) (*model.Memo, error) {
-	if _, err := uc.loadAccessibleCase(ctx, workspaceID, caseID); err != nil {
+	if _, err := loadCaseForWrite(ctx, uc.repo, workspaceID, caseID); err != nil {
 		return nil, err
 	}
 	memo, err := uc.repo.Memo().Get(ctx, workspaceID, caseID, id)
@@ -239,7 +224,7 @@ func (uc *MemoUseCase) setMemoArchived(ctx context.Context, workspaceID string, 
 // GetMemo loads a single memo within a Case. Returns ErrAccessDenied for a
 // private case the (token-bearing) caller cannot access.
 func (uc *MemoUseCase) GetMemo(ctx context.Context, workspaceID string, caseID int64, id model.MemoID) (*model.Memo, error) {
-	if _, err := uc.loadAccessibleCase(ctx, workspaceID, caseID); err != nil {
+	if _, err := loadCaseForWrite(ctx, uc.repo, workspaceID, caseID); err != nil {
 		return nil, err
 	}
 	memo, err := uc.repo.Memo().Get(ctx, workspaceID, caseID, id)

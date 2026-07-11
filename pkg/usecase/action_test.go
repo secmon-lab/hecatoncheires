@@ -2067,3 +2067,24 @@ func TestActionUseCase_PrivateCaseAccessControl(t *testing.T) {
 		gt.Error(t, err).Is(usecase.ErrAccessDenied)
 	})
 }
+
+func TestActorForAccess(t *testing.T) {
+	t.Run("auth token is preferred over Slack actor", func(t *testing.T) {
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-token"})
+		id, check := usecase.ActorForAccessForTest(ctx, usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: "U-slack"})
+		gt.String(t, id).Equal("U-token")
+		gt.Bool(t, check).True()
+	})
+
+	t.Run("falls back to Slack actor when no token", func(t *testing.T) {
+		id, check := usecase.ActorForAccessForTest(context.Background(), usecase.ActorRef{Kind: usecase.ActorKindSlackUser, ID: "U-slack"})
+		gt.String(t, id).Equal("U-slack")
+		gt.Bool(t, check).True()
+	})
+
+	t.Run("system actor without token bypasses the check", func(t *testing.T) {
+		id, check := usecase.ActorForAccessForTest(context.Background(), usecase.ActorRef{Kind: usecase.ActorKindSystem})
+		gt.String(t, id).Equal("")
+		gt.Bool(t, check).False()
+	})
+}
