@@ -726,27 +726,12 @@ type CaseUpdate struct {
 }
 
 func (uc *CaseUseCase) UpdateCase(ctx context.Context, workspaceID string, id int64, patch CaseUpdate) (*model.Case, error) {
-	// Get existing case so we can preserve every field the caller didn't touch.
-	existingCase, err := uc.repo.Case().Get(ctx, workspaceID, id)
+	// Load with the shared write access gate (draft-aware: private drafts fall
+	// back to a reporter check since they have no Slack channel yet). The loaded
+	// Case is preserved verbatim except for the fields the caller touches below.
+	existingCase, err := loadCaseForWrite(ctx, uc.repo, workspaceID, id)
 	if err != nil {
-		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
-	}
-
-	// Access control. Private drafts have no Slack channel yet so the
-	// ChannelUserIDs-based check would lock out the reporter too; fall
-	// back to reporter for private drafts only. Public drafts are
-	// workspace-shared and editable by anyone.
-	token, tokenErr := auth.TokenFromContext(ctx)
-	if tokenErr == nil {
-		if existingCase.IsDraft() {
-			if existingCase.IsPrivate && existingCase.ReporterID != token.Sub {
-				return nil, goerr.Wrap(ErrAccessDenied, "cannot update private draft",
-					goerr.V(CaseIDKey, id), goerr.V("user_id", token.Sub))
-			}
-		} else if !model.IsCaseAccessible(existingCase, token.Sub) {
-			return nil, goerr.Wrap(ErrAccessDenied, "cannot update private case",
-				goerr.V(CaseIDKey, id), goerr.V("user_id", token.Sub))
-		}
+		return nil, err
 	}
 
 	// Apply the patch onto the loaded Case (PATCH, not PUT): only fields the
@@ -813,31 +798,6 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, workspaceID string, id in
 	return updated, nil
 }
 
-// assertCaseEditable loads the case and runs the same access-control gate as
-// UpdateCase (draft-aware: private drafts fall back to a reporter check since
-// they have no Slack channel yet). It is the shared precondition for the
-// assignee mutators below.
-func (uc *CaseUseCase) assertCaseEditable(ctx context.Context, workspaceID string, id int64) (*model.Case, error) {
-	existingCase, err := uc.repo.Case().Get(ctx, workspaceID, id)
-	if err != nil {
-		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
-	}
-
-	token, tokenErr := auth.TokenFromContext(ctx)
-	if tokenErr == nil {
-		if existingCase.IsDraft() {
-			if existingCase.IsPrivate && existingCase.ReporterID != token.Sub {
-				return nil, goerr.Wrap(ErrAccessDenied, "cannot edit private draft",
-					goerr.V(CaseIDKey, id), goerr.V("user_id", token.Sub))
-			}
-		} else if !model.IsCaseAccessible(existingCase, token.Sub) {
-			return nil, goerr.Wrap(ErrAccessDenied, "cannot edit private case",
-				goerr.V(CaseIDKey, id), goerr.V("user_id", token.Sub))
-		}
-	}
-	return existingCase, nil
-}
-
 // AssignCase atomically adds the given Slack user IDs to the case's assignee
 // set. Unlike UpdateCase — which replaces the whole assignee list and therefore
 // loses a concurrent edit inside its read-modify-write window — the add is
@@ -846,7 +806,7 @@ func (uc *CaseUseCase) assertCaseEditable(ctx context.Context, workspaceID strin
 // assignees must resolve to known Slack users. An empty userIDs slice is a
 // no-op that returns the case unchanged.
 func (uc *CaseUseCase) AssignCase(ctx context.Context, workspaceID string, id int64, userIDs []string) (*model.Case, error) {
-	existingCase, err := uc.assertCaseEditable(ctx, workspaceID, id)
+	existingCase, err := loadCaseForWrite(ctx, uc.repo, workspaceID, id)
 	if err != nil {
 		return nil, err
 	}
@@ -873,7 +833,7 @@ func (uc *CaseUseCase) AssignCase(ctx context.Context, workspaceID string, id in
 // existence check (a since-deleted user must still be removable). An empty
 // userIDs slice is a no-op that returns the case unchanged.
 func (uc *CaseUseCase) UnassignCase(ctx context.Context, workspaceID string, id int64, userIDs []string) (*model.Case, error) {
-	existingCase, err := uc.assertCaseEditable(ctx, workspaceID, id)
+	existingCase, err := loadCaseForWrite(ctx, uc.repo, workspaceID, id)
 	if err != nil {
 		return nil, err
 	}
@@ -932,23 +892,18 @@ func diffAssignees(current, desired []string) (toAdd, toRemove []string) {
 // drop an ID the caller meant to keep). Order is preserved exactly as
 // supplied so the UI selection round-trips unchanged.
 func (uc *CaseUseCase) UpdateAgentSettings(ctx context.Context, workspaceID string, caseID int64, additionalPrompt string, enabledSourceIDs []model.SourceID) (*model.Case, error) {
-	existing, err := uc.repo.Case().Get(ctx, workspaceID, caseID)
+	existing, err := loadCaseForWrite(ctx, uc.repo, workspaceID, caseID)
 	if err != nil {
-		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, caseID))
+		return nil, err
 	}
 
-	// Access control. Drafts cannot carry agent settings (no agent runs
-	// against an unsubmitted draft anyway), so reject the call early.
+	// Drafts cannot carry agent settings (no agent runs against an unsubmitted
+	// draft anyway), so reject the call. The shared access gate already ran, so
+	// a non-reporter on a private draft is denied before reaching this point.
 	if existing.IsDraft() {
 		return nil, goerr.Wrap(ErrCaseIsDraft,
 			"agent settings are unavailable on drafts",
 			goerr.V(CaseIDKey, caseID))
-	}
-
-	token, tokenErr := auth.TokenFromContext(ctx)
-	if tokenErr == nil && !model.IsCaseAccessible(existing, token.Sub) {
-		return nil, goerr.Wrap(ErrAccessDenied, "cannot update agent settings on private case",
-			goerr.V(CaseIDKey, caseID), goerr.V("user_id", token.Sub))
 	}
 
 	// Validate Source IDs against the workspace catalogue. We load the
@@ -1007,17 +962,9 @@ func (uc *CaseUseCase) UpdateAgentSettings(ctx context.Context, workspaceID stri
 }
 
 func (uc *CaseUseCase) DeleteCase(ctx context.Context, workspaceID string, id int64) error {
-	// Get existing case for access control
-	existingCase, err := uc.repo.Case().Get(ctx, workspaceID, id)
-	if err != nil {
-		return goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
-	}
-
-	// Access control for private cases
-	token, tokenErr := auth.TokenFromContext(ctx)
-	if tokenErr == nil && !model.IsCaseAccessible(existingCase, token.Sub) {
-		return goerr.Wrap(ErrAccessDenied, "cannot delete private case",
-			goerr.V(CaseIDKey, id), goerr.V("user_id", token.Sub))
+	// Load with the shared write access gate before the cascade delete.
+	if _, err := loadCaseForWrite(ctx, uc.repo, workspaceID, id); err != nil {
+		return err
 	}
 
 	// Cascade-delete actions associated with this case. We pull every
@@ -1349,16 +1296,9 @@ func (uc *CaseUseCase) RenderCaseFieldValues(ctx context.Context, workspaceID st
 }
 
 func (uc *CaseUseCase) CloseCase(ctx context.Context, workspaceID string, id int64) (*model.Case, error) {
-	existing, err := uc.repo.Case().Get(ctx, workspaceID, id)
+	existing, err := loadCaseForWrite(ctx, uc.repo, workspaceID, id)
 	if err != nil {
-		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
-	}
-
-	// Access control for private cases
-	token, tokenErr := auth.TokenFromContext(ctx)
-	if tokenErr == nil && !model.IsCaseAccessible(existing, token.Sub) {
-		return nil, goerr.Wrap(ErrAccessDenied, "cannot close private case",
-			goerr.V(CaseIDKey, id), goerr.V("user_id", token.Sub))
+		return nil, err
 	}
 
 	// Thread-mode cases close by moving to a closed board status (UpdateCaseStatus),
@@ -1389,16 +1329,9 @@ func (uc *CaseUseCase) CloseCase(ctx context.Context, workspaceID string, id int
 }
 
 func (uc *CaseUseCase) ReopenCase(ctx context.Context, workspaceID string, id int64) (*model.Case, error) {
-	existing, err := uc.repo.Case().Get(ctx, workspaceID, id)
+	existing, err := loadCaseForWrite(ctx, uc.repo, workspaceID, id)
 	if err != nil {
-		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
-	}
-
-	// Access control for private cases
-	token, tokenErr := auth.TokenFromContext(ctx)
-	if tokenErr == nil && !model.IsCaseAccessible(existing, token.Sub) {
-		return nil, goerr.Wrap(ErrAccessDenied, "cannot reopen private case",
-			goerr.V(CaseIDKey, id), goerr.V("user_id", token.Sub))
+		return nil, err
 	}
 
 	// Thread-mode cases reopen by moving to a non-closed board status
@@ -1592,15 +1525,9 @@ func (uc *CaseUseCase) UpdateCaseStatus(ctx context.Context, workspaceID string,
 			goerr.V("workspace_id", workspaceID), goerr.V("board_status", boardStatus))
 	}
 
-	existing, err := uc.repo.Case().Get(ctx, workspaceID, id)
+	existing, err := loadCaseForWrite(ctx, uc.repo, workspaceID, id)
 	if err != nil {
-		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, id))
-	}
-
-	// Access control for private cases.
-	if token, tokenErr := auth.TokenFromContext(ctx); tokenErr == nil && !model.IsCaseAccessible(existing, token.Sub) {
-		return nil, goerr.Wrap(ErrAccessDenied, "cannot update private case status",
-			goerr.V(CaseIDKey, id), goerr.V("user_id", token.Sub))
+		return nil, err
 	}
 
 	wasClosed := existing.Status.Normalize() == types.CaseStatusClosed
@@ -1868,16 +1795,9 @@ func (uc *CaseUseCase) CaseURL(workspaceID string, caseID int64) string {
 
 // SyncCaseChannelUsers synchronizes channel members from Slack API to the case
 func (uc *CaseUseCase) SyncCaseChannelUsers(ctx context.Context, workspaceID string, caseID int64) (*model.Case, error) {
-	existing, err := uc.repo.Case().Get(ctx, workspaceID, caseID)
+	existing, err := loadCaseForWrite(ctx, uc.repo, workspaceID, caseID)
 	if err != nil {
-		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, caseID))
-	}
-
-	// Access control for private cases
-	token, tokenErr := auth.TokenFromContext(ctx)
-	if tokenErr == nil && !model.IsCaseAccessible(existing, token.Sub) {
-		return nil, goerr.Wrap(ErrAccessDenied, "cannot sync private case members",
-			goerr.V(CaseIDKey, caseID), goerr.V("user_id", token.Sub))
+		return nil, err
 	}
 
 	if existing.SlackChannelID == "" {

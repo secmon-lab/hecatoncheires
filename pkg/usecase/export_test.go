@@ -94,6 +94,14 @@ type AssistPromptAssistLog = assistPromptAssistLog
 // TestErrAccessDenied is exported for testing
 var TestErrAccessDenied = ErrAccessDenied
 
+// Case write access-control helpers exposed for testing (see case_access.go).
+var (
+	AssertCaseWriteAccessForTest = assertCaseWriteAccess
+	TokenActorForTest            = tokenActor
+	LoadCaseForWriteForTest      = loadCaseForWrite
+	ActorForAccessForTest        = actorForAccess
+)
+
 // NewWelcomeRendererForTest is exported for testing
 var NewWelcomeRendererForTest = newWelcomeRenderer
 

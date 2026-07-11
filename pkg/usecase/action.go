@@ -78,6 +78,25 @@ type ActorRef struct {
 	ID   string // Slack user ID when Kind == ActorKindSlackUser
 }
 
+// actorForAccess resolves the acting user for Action write access control,
+// preferring the context auth token (GraphQL / WebUI path) and falling back to
+// the Slack ActorRef (async Slack callback path, whose dispatched context
+// carries no token — a token-only check would silently bypass access control on
+// Slack-initiated writes). checkAccess is returned separately from actorID so a
+// user-initiated call with an empty ID (malformed token, or a Slack actor
+// missing its user ID) still denies for private cases rather than bypassing;
+// only ActorKindSystem — which has no identified user by design — skips the
+// check. The resolved pair feeds assertCaseWriteAccess.
+func actorForAccess(ctx context.Context, actor ActorRef) (actorID string, checkAccess bool) {
+	if token, err := auth.TokenFromContext(ctx); err == nil {
+		return token.Sub, true
+	}
+	if actor.Kind == ActorKindSlackUser {
+		return actor.ID, true
+	}
+	return "", false
+}
+
 // UpdateActionInput is the unified input for ActionUseCase.UpdateAction.
 type UpdateActionInput struct {
 	ID             int64
@@ -169,10 +188,9 @@ func (uc *ActionUseCase) CreateAction(ctx context.Context, workspaceID string, c
 		return nil, goerr.Wrap(ErrCaseNotFound, "case not found", goerr.V(CaseIDKey, caseID))
 	}
 
-	token, tokenErr := auth.TokenFromContext(ctx)
-	if tokenErr == nil && !model.IsCaseAccessible(caseModel, token.Sub) {
-		return nil, goerr.Wrap(ErrAccessDenied, "cannot create action in private case",
-			goerr.V(CaseIDKey, caseID), goerr.V("user_id", token.Sub))
+	actorID, checkAccess := tokenActor(ctx)
+	if err := assertCaseWriteAccess(caseModel, actorID, checkAccess); err != nil {
+		return nil, err
 	}
 
 	if err := ensureCaseAcceptsActions(caseModel); err != nil {
@@ -269,10 +287,9 @@ func (uc *ActionUseCase) PostSlackMessageToAction(ctx context.Context, workspace
 			goerr.V(CaseIDKey, action.CaseID))
 	}
 
-	if token, tokenErr := auth.TokenFromContext(ctx); tokenErr == nil && !model.IsCaseAccessible(parentCase, token.Sub) {
-		return nil, goerr.Wrap(ErrAccessDenied, "cannot post Slack message for action in private case",
-			goerr.V(ActionIDKey, actionID),
-			goerr.V("user_id", token.Sub))
+	actorID, checkAccess := tokenActor(ctx)
+	if err := assertCaseWriteAccess(parentCase, actorID, checkAccess); err != nil {
+		return nil, err
 	}
 
 	if action.SlackMessageTS != "" {
@@ -340,27 +357,11 @@ func (uc *ActionUseCase) UpdateAction(ctx context.Context, workspaceID string, i
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to get parent case", goerr.V(CaseIDKey, existing.CaseID))
 	}
-	// Resolve the acting user from either the auth token (GraphQL/WebUI) or
-	// the Slack interaction Actor (Slack callback path). The latter is
-	// required because async.Dispatch hands the usecase a fresh background
-	// context with no token, so a tokenErr-only check would silently bypass
-	// access control on Slack-initiated updates. checkAccess is tracked
-	// separately from actorID so that a user-initiated call with an empty
-	// ID (malformed token, Slack actor missing user ID) results in a deny
-	// for private cases rather than a silent bypass; only ActorKindSystem
-	// — which has no identified user by design — skips the check.
-	var actorID string
-	var checkAccess bool
-	if token, tokenErr := auth.TokenFromContext(ctx); tokenErr == nil {
-		actorID = token.Sub
-		checkAccess = true
-	} else if in.Actor.Kind == ActorKindSlackUser {
-		actorID = in.Actor.ID
-		checkAccess = true
-	}
-	if checkAccess && !model.IsCaseAccessible(parentCase, actorID) {
-		return nil, goerr.Wrap(ErrAccessDenied, "cannot update action in private case",
-			goerr.V(ActionIDKey, in.ID), goerr.V("user_id", actorID))
+	// Resolve the acting user from the auth token or the Slack Actor, then run
+	// the shared Case write access gate (see actorForAccess / assertCaseWriteAccess).
+	actorID, checkAccess := actorForAccess(ctx, in.Actor)
+	if err := assertCaseWriteAccess(parentCase, actorID, checkAccess); err != nil {
+		return nil, goerr.Wrap(err, "cannot update action", goerr.V(ActionIDKey, in.ID))
 	}
 
 	if in.CaseID != nil && *in.CaseID != existing.CaseID {
@@ -585,18 +586,9 @@ func (uc *ActionUseCase) loadActionForArchive(ctx context.Context, workspaceID s
 		return nil, nil, goerr.Wrap(err, "failed to get parent case", goerr.V(CaseIDKey, existing.CaseID))
 	}
 
-	var actorID string
-	var checkAccess bool
-	if token, tokenErr := auth.TokenFromContext(ctx); tokenErr == nil {
-		actorID = token.Sub
-		checkAccess = true
-	} else if actor.Kind == ActorKindSlackUser {
-		actorID = actor.ID
-		checkAccess = true
-	}
-	if checkAccess && !model.IsCaseAccessible(parentCase, actorID) {
-		return nil, nil, goerr.Wrap(ErrAccessDenied, "cannot mutate action in private case",
-			goerr.V(ActionIDKey, id), goerr.V("user_id", actorID))
+	actorID, checkAccess := actorForAccess(ctx, actor)
+	if err := assertCaseWriteAccess(parentCase, actorID, checkAccess); err != nil {
+		return nil, nil, goerr.Wrap(err, "cannot mutate action", goerr.V(ActionIDKey, id))
 	}
 
 	return existing, parentCase, nil
