@@ -15,6 +15,19 @@ import (
 func runAssistLogRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.Repository) {
 	t.Helper()
 
+	t.Run("Create rejects assist log with missing CaseID", func(t *testing.T) {
+		repo := newRepo(t)
+		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
+		ctx := context.Background()
+
+		// caseID == 0 is invalid; the repository assigns it onto the log and
+		// validation (post-assignment) must reject the orphan.
+		_, err := repo.AssistLog().Create(ctx, wsID, 0, &model.AssistLog{
+			Summary: "orphan",
+		})
+		gt.Error(t, err).Is(model.ErrAssistLogValidation)
+	})
+
 	t.Run("Create creates assist log with UUID", func(t *testing.T) {
 		repo := newRepo(t)
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())

@@ -33,11 +33,8 @@ func (r *actionStepRepository) stepsCollection(workspaceID string, actionID int6
 }
 
 func (r *actionStepRepository) Put(ctx context.Context, workspaceID string, step *model.ActionStep) error {
-	if step == nil {
-		return goerr.New("action step is nil")
-	}
-	if step.ID == "" {
-		return goerr.New("action step id is empty")
+	if err := step.Validate(); err != nil {
+		return goerr.Wrap(err, "action step validation failed before put")
 	}
 
 	ref := r.stepsCollection(workspaceID, step.ActionID).Doc(step.ID)

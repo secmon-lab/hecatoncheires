@@ -185,10 +185,13 @@ func runActionStepRepositoryTest(t *testing.T, newRepo func(t *testing.T) interf
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		actionID := time.Now().UnixNano()
 
-		gt.Error(t, repo.ActionStep().Put(ctx, wsID, nil))
+		gt.Error(t, repo.ActionStep().Put(ctx, wsID, nil)).Is(model.ErrActionStepValidation)
 		gt.Error(t, repo.ActionStep().Put(ctx, wsID, &model.ActionStep{
 			ID: "", ActionID: actionID, Title: "x",
-		}))
+		})).Is(model.ErrActionStepValidation)
+		gt.Error(t, repo.ActionStep().Put(ctx, wsID, &model.ActionStep{
+			ID: "step-x", ActionID: 0, Title: "x",
+		})).Is(model.ErrActionStepValidation)
 	})
 }
 

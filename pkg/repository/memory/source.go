@@ -85,6 +85,10 @@ func copySource(source *model.Source) *model.Source {
 }
 
 func (r *sourceRepository) Create(ctx context.Context, workspaceID string, source *model.Source) (*model.Source, error) {
+	if err := source.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "source validation failed before create")
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -134,6 +138,10 @@ func (r *sourceRepository) List(ctx context.Context, workspaceID string) ([]*mod
 }
 
 func (r *sourceRepository) Update(ctx context.Context, workspaceID string, source *model.Source) (*model.Source, error) {
+	if err := source.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "source validation failed before update")
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

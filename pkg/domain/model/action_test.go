@@ -25,3 +25,20 @@ func TestAction_IsArchived(t *testing.T) {
 		gt.Bool(t, a.IsArchived()).True()
 	})
 }
+
+func TestAction_Validate(t *testing.T) {
+	t.Run("valid action passes", func(t *testing.T) {
+		a := &model.Action{ID: 1, CaseID: 42, Title: "check logs"}
+		gt.NoError(t, a.Validate())
+	})
+
+	t.Run("nil action is rejected", func(t *testing.T) {
+		var a *model.Action
+		gt.Error(t, a.Validate()).Is(model.ErrActionValidation)
+	})
+
+	t.Run("missing CaseID is rejected", func(t *testing.T) {
+		a := &model.Action{ID: 1, Title: "orphan"}
+		gt.Error(t, a.Validate()).Is(model.ErrActionValidation)
+	})
+}

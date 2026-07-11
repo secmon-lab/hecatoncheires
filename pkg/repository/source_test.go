@@ -19,6 +19,20 @@ func runSourceRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces
 
 	wsID := fmt.Sprintf("test-ws-%d", time.Now().UnixNano())
 
+	t.Run("Create/Update reject sources missing required fields", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		_, err := repo.Source().Create(ctx, wsID, &model.Source{SourceType: model.SourceTypeSlack})
+		gt.Error(t, err).Is(model.ErrSourceValidation)
+
+		_, err = repo.Source().Create(ctx, wsID, &model.Source{Name: "typeless"})
+		gt.Error(t, err).Is(model.ErrSourceValidation)
+
+		_, err = repo.Source().Update(ctx, wsID, &model.Source{ID: model.NewSourceID(), SourceType: model.SourceTypeSlack})
+		gt.Error(t, err).Is(model.ErrSourceValidation)
+	})
+
 	t.Run("Create creates source with UUID", func(t *testing.T) {
 		repo := newRepo(t)
 		ctx := context.Background()

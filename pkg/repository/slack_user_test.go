@@ -15,6 +15,25 @@ import (
 func runSlackUserRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.Repository) {
 	t.Helper()
 
+	t.Run("SaveMany rejects the whole batch when any user lacks an ID", func(t *testing.T) {
+		repo := newRepo(t)
+		ctx := context.Background()
+
+		gt.NoError(t, repo.SlackUser().DeleteAll(ctx)).Required()
+
+		// One valid user, one with an empty ID: the batch must be rejected
+		// before any write, so nothing lands in storage.
+		err := repo.SlackUser().SaveMany(ctx, []*model.SlackUser{
+			{ID: model.SlackUserID(fmt.Sprintf("U-%d", time.Now().UnixNano())), Name: "valid"},
+			{Name: "no-id"},
+		})
+		gt.Error(t, err).Is(model.ErrSlackUserValidation)
+
+		users, err := repo.SlackUser().GetAll(ctx)
+		gt.NoError(t, err).Required()
+		gt.Array(t, users).Length(0)
+	})
+
 	t.Run("SaveMany and GetAll with empty list", func(t *testing.T) {
 		repo := newRepo(t)
 		ctx := context.Background()

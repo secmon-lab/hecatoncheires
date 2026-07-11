@@ -141,6 +141,14 @@ func (r *slackUserRepository) SaveMany(ctx context.Context, users []*model.Slack
 		return nil
 	}
 
+	// Validate all entries before starting the BulkWriter, so a single invalid
+	// record does not leave a partial write behind.
+	for _, user := range users {
+		if err := user.Validate(); err != nil {
+			return goerr.Wrap(err, "slack user validation failed before save")
+		}
+	}
+
 	// Use BulkWriter which automatically handles batching
 	bulkWriter := r.client.BulkWriter(ctx)
 	defer bulkWriter.End()

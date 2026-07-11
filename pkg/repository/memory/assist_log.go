@@ -5,6 +5,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 )
 
@@ -48,6 +49,12 @@ func (r *assistLogRepository) Create(ctx context.Context, workspaceID string, ca
 		created.ID = model.NewAssistLogID()
 	}
 	created.CaseID = caseID
+
+	// Validate after CaseID is assigned from the parameter (the caller struct
+	// may carry a zero CaseID and rely on the repository to set it).
+	if err := created.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "assist log validation failed before create")
+	}
 
 	r.entries[key] = append(r.entries[key], created)
 	return copyAssistLog(created), nil

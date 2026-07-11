@@ -151,10 +151,13 @@ func runActionEventRepositoryTest(t *testing.T, newRepo func(t *testing.T) inter
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		actionID := time.Now().UnixNano()
 
-		gt.Error(t, repo.ActionEvent().Put(ctx, wsID, actionID, nil))
+		gt.Error(t, repo.ActionEvent().Put(ctx, wsID, actionID, nil)).Is(model.ErrActionEventValidation)
 		gt.Error(t, repo.ActionEvent().Put(ctx, wsID, actionID, &model.ActionEvent{
 			ID: "", ActionID: actionID, Kind: types.ActionEventCreated,
-		}))
+		})).Is(model.ErrActionEventValidation)
+		gt.Error(t, repo.ActionEvent().Put(ctx, wsID, actionID, &model.ActionEvent{
+			ID: "evt-x", ActionID: 0, Kind: types.ActionEventCreated,
+		})).Is(model.ErrActionEventValidation)
 	})
 }
 

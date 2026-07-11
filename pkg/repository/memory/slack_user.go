@@ -76,6 +76,14 @@ func (r *slackUserRepository) GetByIDs(ctx context.Context, ids []model.SlackUse
 
 // SaveMany saves multiple Slack users (upsert operation)
 func (r *slackUserRepository) SaveMany(ctx context.Context, users []*model.SlackUser) error {
+	// Validate all entries before writing any, so a single invalid record does
+	// not leave a partial write behind.
+	for _, user := range users {
+		if err := user.Validate(); err != nil {
+			return goerr.Wrap(err, "slack user validation failed before save")
+		}
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

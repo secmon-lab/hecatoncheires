@@ -26,6 +26,9 @@ const (
 // ErrInvalidGitHubRepo is returned when the input cannot be parsed as a GitHub repository
 var ErrInvalidGitHubRepo = goerr.New("invalid GitHub repository")
 
+// ErrSourceValidation is returned when a Source fails its persistence-boundary invariants.
+var ErrSourceValidation = goerr.New("source validation failed")
+
 // SourceID is a UUID-based identifier for Source
 type SourceID string
 
@@ -47,6 +50,23 @@ type Source struct {
 	GitHubConfig     *GitHubConfig
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+}
+
+// Validate enforces the invariants required before any persistence write.
+// The repository assigns the storage ID (NewSourceID when empty), so ID is not
+// checked here; Name and SourceType are the source's mandatory identity/kind
+// fields (every create path supplies a non-empty default for both).
+func (s *Source) Validate() error {
+	if s == nil {
+		return goerr.Wrap(ErrSourceValidation, "source is nil")
+	}
+	if s.Name == "" {
+		return goerr.Wrap(ErrSourceValidation, "source Name is required")
+	}
+	if s.SourceType == "" {
+		return goerr.Wrap(ErrSourceValidation, "source SourceType is required")
+	}
+	return nil
 }
 
 // NotionDBConfig holds Notion DB specific configuration

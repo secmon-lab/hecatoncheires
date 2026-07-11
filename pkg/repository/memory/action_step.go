@@ -36,11 +36,8 @@ func copyActionStep(s *model.ActionStep) *model.ActionStep {
 }
 
 func (r *actionStepRepository) Put(ctx context.Context, workspaceID string, step *model.ActionStep) error {
-	if step == nil {
-		return goerr.New("action step is nil")
-	}
-	if step.ID == "" {
-		return goerr.New("action step id is empty")
+	if err := step.Validate(); err != nil {
+		return goerr.Wrap(err, "action step validation failed before put")
 	}
 
 	r.mu.Lock()

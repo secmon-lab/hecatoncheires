@@ -36,6 +36,12 @@ func (r *firestoreAssistLogRepository) Create(ctx context.Context, workspaceID s
 	}
 	log.CaseID = caseID
 
+	// Validate after CaseID is assigned from the parameter (the caller struct
+	// may carry a zero CaseID and rely on the repository to set it).
+	if err := log.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "assist log validation failed before create")
+	}
+
 	docRef := r.assistsCollection(workspaceID, caseID).Doc(string(log.ID))
 	if _, err := docRef.Set(ctx, log); err != nil {
 		return nil, goerr.Wrap(err, "failed to create assist log")

@@ -26,6 +26,10 @@ func (r *sourceRepository) sourcesCollection(workspaceID string) *firestore.Coll
 }
 
 func (r *sourceRepository) Create(ctx context.Context, workspaceID string, source *model.Source) (*model.Source, error) {
+	if err := source.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "source validation failed before create")
+	}
+
 	if source.ID == "" {
 		source.ID = model.NewSourceID()
 	}
@@ -82,6 +86,10 @@ func (r *sourceRepository) List(ctx context.Context, workspaceID string) ([]*mod
 }
 
 func (r *sourceRepository) Update(ctx context.Context, workspaceID string, source *model.Source) (*model.Source, error) {
+	if err := source.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "source validation failed before update")
+	}
+
 	docRef := r.sourcesCollection(workspaceID).Doc(string(source.ID))
 
 	err := r.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {

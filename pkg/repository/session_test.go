@@ -84,8 +84,10 @@ func runSessionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interface
 
 	t.Run("rejects missing required fields on Put", func(t *testing.T) {
 		repo := newRepo(t)
-		gt.Error(t, repo.Session().Put(ctx, &model.Session{}))
-		gt.Error(t, repo.Session().Put(ctx, nil))
+		gt.Error(t, repo.Session().Put(ctx, &model.Session{})).Is(model.ErrSessionValidation)
+		gt.Error(t, repo.Session().Put(ctx, nil)).Is(model.ErrSessionValidation)
+		gt.Error(t, repo.Session().Put(ctx, &model.Session{ID: "s", ThreadTS: "1.1"})).Is(model.ErrSessionValidation)
+		gt.Error(t, repo.Session().Put(ctx, &model.Session{ID: "s", ChannelID: "C"})).Is(model.ErrSessionValidation)
 	})
 
 	t.Run("AcquireTurnLock creates new session on first call", func(t *testing.T) {

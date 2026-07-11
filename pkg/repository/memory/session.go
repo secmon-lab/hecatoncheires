@@ -49,15 +49,8 @@ func (r *sessionRepository) GetByThread(_ context.Context, channelID, threadTS s
 }
 
 func (r *sessionRepository) Put(_ context.Context, s *model.Session) error {
-	if s == nil {
-		return goerr.New("session is nil")
-	}
-	if s.ID == "" || s.ChannelID == "" || s.ThreadTS == "" {
-		return goerr.New("session missing required fields",
-			goerr.V("id", s.ID),
-			goerr.V("channel_id", s.ChannelID),
-			goerr.V("thread_ts", s.ThreadTS),
-		)
+	if err := s.Validate(); err != nil {
+		return goerr.Wrap(err, "session validation failed before put")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -106,6 +99,9 @@ func (r *sessionRepository) AcquireTurnLock(
 			fresh.CreatedAt = now
 		}
 		fresh.UpdatedAt = now
+		if err := fresh.Validate(); err != nil {
+			return interfaces.AcquireResult{}, goerr.Wrap(err, "session validation failed before acquire")
+		}
 		r.sessions[key] = *fresh
 		copied := *fresh
 		return interfaces.AcquireResult{Acquired: true, Session: &copied}, nil

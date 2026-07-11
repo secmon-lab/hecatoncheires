@@ -45,11 +45,8 @@ func (r *notificationSlotRepository) GetActive(_ context.Context, channelID stri
 }
 
 func (r *notificationSlotRepository) Save(_ context.Context, slot *model.NotificationSlot) error {
-	if slot == nil {
-		return goerr.New("slot is nil")
-	}
-	if slot.ChannelID == "" {
-		return goerr.New("slot.ChannelID is required")
+	if err := slot.Validate(); err != nil {
+		return goerr.Wrap(err, "notification slot validation failed before save")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

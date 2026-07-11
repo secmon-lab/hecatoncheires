@@ -31,11 +31,8 @@ func (r *actionEventRepository) eventsCollection(workspaceID string, actionID in
 }
 
 func (r *actionEventRepository) Put(ctx context.Context, workspaceID string, actionID int64, event *model.ActionEvent) error {
-	if event == nil {
-		return goerr.New("action event is nil")
-	}
-	if event.ID == "" {
-		return goerr.New("action event id is empty")
+	if err := event.Validate(); err != nil {
+		return goerr.Wrap(err, "action event validation failed before put")
 	}
 
 	ref := r.eventsCollection(workspaceID, actionID).Doc(event.ID)

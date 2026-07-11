@@ -70,6 +70,10 @@ func (r *actionRepository) getNextID(ctx context.Context, workspaceID string) (i
 }
 
 func (r *actionRepository) Create(ctx context.Context, workspaceID string, action *model.Action) (*model.Action, error) {
+	if err := action.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "action validation failed before create")
+	}
+
 	nextID, err := r.getNextID(ctx, workspaceID)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to get next ID")
@@ -169,6 +173,10 @@ func (r *actionRepository) List(ctx context.Context, workspaceID string, opts in
 }
 
 func (r *actionRepository) Update(ctx context.Context, workspaceID string, action *model.Action) (*model.Action, error) {
+	if err := action.Validate(); err != nil {
+		return nil, goerr.Wrap(err, "action validation failed before update")
+	}
+
 	docID := fmt.Sprintf("%d", action.ID)
 	docRef := r.actionsCollection(workspaceID).Doc(docID)
 

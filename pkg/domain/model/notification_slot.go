@@ -1,6 +1,13 @@
 package model
 
-import "time"
+import (
+	"time"
+
+	"github.com/m-mizutani/goerr/v2"
+)
+
+// ErrNotificationSlotValidation is returned when a NotificationSlot fails its persistence-boundary invariants.
+var ErrNotificationSlotValidation = goerr.New("notification slot validation failed")
 
 // NotificationSlot is a per-Slack-channel rolling aggregation window for
 // action/step change notifications. While a slot is active, additional
@@ -33,4 +40,17 @@ type NotificationSlotEntry struct {
 	ActionPermalink string    // Slack permalink to the Action card; empty when lookup failed
 	Body            string    // Pre-rendered change line ("@user changed status: A → B")
 	EventTime       time.Time // UTC time the event was recorded
+}
+
+// Validate enforces the invariants required before any persistence write.
+// ChannelID is the primary key, so a slot with no channel fails loudly here
+// instead of landing in storage under an empty key.
+func (s *NotificationSlot) Validate() error {
+	if s == nil {
+		return goerr.Wrap(ErrNotificationSlotValidation, "notification slot is nil")
+	}
+	if s.ChannelID == "" {
+		return goerr.Wrap(ErrNotificationSlotValidation, "notification slot ChannelID is required")
+	}
+	return nil
 }
