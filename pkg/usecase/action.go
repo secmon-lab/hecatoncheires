@@ -377,17 +377,21 @@ func (uc *ActionUseCase) UpdateAction(ctx context.Context, workspaceID string, i
 		}
 	}
 
-	action := &model.Action{
-		ID:             existing.ID,
-		CaseID:         existing.CaseID,
-		Title:          existing.Title,
-		Description:    existing.Description,
-		AssigneeID:     existing.AssigneeID,
-		SlackMessageTS: existing.SlackMessageTS,
-		Status:         existing.Status,
-		DueDate:        existing.DueDate,
-		CreatedAt:      existing.CreatedAt,
-	}
+	// Copy the whole struct so every field — including ArchivedAt and any field
+	// added to model.Action later — is carried over verbatim. A field-by-field
+	// literal silently dropped ArchivedAt, and because repo.Update is a full Set
+	// overwrite, a single UpdateAction on an archived action un-archived it
+	// (issue #188; same class as the SlackThreadTS loss fixed in #185 for Case).
+	//
+	// Copy — do NOT mutate `existing` in place. recordActionEvents below diffs
+	// existing (before) against updated (after); mutating existing would collapse
+	// that diff and silently drop the change history. (This is why UpdateAction
+	// differs from UpdateCase, which mutates its loaded pointer directly but
+	// records no such diff.) The patch below only reassigns fields on the copy;
+	// the shared DueDate/ArchivedAt pointers are never mutated through, so
+	// `existing` stays an untouched pre-update snapshot.
+	copied := *existing
+	action := &copied
 
 	if in.CaseID != nil {
 		action.CaseID = *in.CaseID
