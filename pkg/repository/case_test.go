@@ -1488,7 +1488,7 @@ func TestCaseRepository_Firestore(t *testing.T) {
 // through — issue #189). Resolution:
 //   - TEST_FIRESTORE_PROJECT_ID set → real Firestore (e.g. `zenv task
 //     test`); FIRESTORE_EMULATOR_HOST is left untouched.
-//   - otherwise → default to a local emulator at 127.0.0.1:8080 (project
+//   - otherwise → default to a local emulator at 127.0.0.1:28615 (project
 //     "test-project", database "(default)"). If FIRESTORE_EMULATOR_HOST
 //     is already set (CI, `task test:firestore`) it wins; only when it is
 //     unset do we default it so a bare `go test ./...` targets a local
@@ -1507,7 +1507,11 @@ func newFirestoreRepository(t *testing.T) interfaces.Repository {
 		// the value is identical for every caller so the repeated set is
 		// idempotent, and os's env functions are safe for concurrent use.
 		if _, ok := os.LookupEnv("FIRESTORE_EMULATOR_HOST"); !ok {
-			gt.NoError(t, os.Setenv("FIRESTORE_EMULATOR_HOST", "127.0.0.1:8080")).Required()
+			// 28615 (not the emulator's stock 8080) because 8080 is the
+			// single most contended dev port — the app server itself
+			// defaults to :8080, so a bare `go test ./...` would silently
+			// talk to whatever happens to be listening there.
+			gt.NoError(t, os.Setenv("FIRESTORE_EMULATOR_HOST", "127.0.0.1:28615")).Required()
 		}
 	}
 

@@ -76,7 +76,7 @@ path is the one that actually guards persistence).
 **These tests always run — they never skip on a missing env var.** A silent
 skip is exactly what let a dropped-field bug through, so a missing backend must
 fail loudly instead of passing as a no-op. Concretely, a bare `go test ./...`
-targets a local Firestore emulator at `127.0.0.1:8080` by default, and **fails
+targets a local Firestore emulator at `127.0.0.1:28615` by default, and **fails
 with a connection error if no emulator is running there**. So run the suite
 through the task below (or have an emulator listening on that port).
 
@@ -103,7 +103,7 @@ present, and the test helper defaults the project/database ids:
 
 | Variable | Value | Purpose |
 |---|---|---|
-| `FIRESTORE_EMULATOR_HOST` | `127.0.0.1:8080` | Routes the client to the emulator (insecure, no auth). Unset → the helper defaults it, so the tests still target a local emulator |
+| `FIRESTORE_EMULATOR_HOST` | `127.0.0.1:28615` | Routes the client to the emulator (insecure, no auth). Unset → the helper defaults it, so the tests still target a local emulator. The port is deliberately NOT the emulator's stock 8080 — that is the most contended dev port (the app server itself defaults to `:8080`), and a collision would silently point the tests at the wrong process |
 | `TEST_FIRESTORE_PROJECT_ID` | *(optional)* | Set to a real project id (with ADC, e.g. `zenv task test`) to run the tests against real Firestore instead of the emulator. Unset → defaults to `test-project` |
 | `TEST_FIRESTORE_DATABASE_ID` | *(optional)* | Firestore database id. Unset → defaults to `(default)` |
 
