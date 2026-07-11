@@ -30,7 +30,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 		ctx := context.Background()
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 
-		now := time.Now().UTC()
+		now := time.Now().UTC().Truncate(time.Millisecond)
 		embedding := make([]float64, model.EmbeddingDimension)
 		for i := range embedding {
 			embedding[i] = float64(i) * 0.001
@@ -140,7 +140,7 @@ func runKnowledgeRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfa
 	t.Run("Update persists changes", func(t *testing.T) {
 		ctx := context.Background()
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
-		now := time.Now().UTC()
+		now := time.Now().UTC().Truncate(time.Millisecond)
 
 		tagOps := model.NewTagID()
 		tagUpdated := model.NewTagID()

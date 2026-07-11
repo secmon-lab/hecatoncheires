@@ -27,7 +27,7 @@ func runTagRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.Re
 		ctx := context.Background()
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 
-		now := time.Now().UTC()
+		now := time.Now().UTC().Truncate(time.Millisecond)
 		input := &model.Tag{
 			ID:          model.NewTagID(),
 			WorkspaceID: wsID,
@@ -133,7 +133,7 @@ func runTagRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.Re
 	t.Run("Update persists name change, ID remains immutable", func(t *testing.T) {
 		ctx := context.Background()
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
-		now := time.Now().UTC()
+		now := time.Now().UTC().Truncate(time.Millisecond)
 
 		original := &model.Tag{
 			ID:          model.NewTagID(),

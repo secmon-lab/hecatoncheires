@@ -65,8 +65,8 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
 			ReporterID:  "U-TEST-DEFAULT",
-			CreatedAt:   time.Now().UTC(),
-			UpdatedAt:   time.Now().UTC(),
+			CreatedAt:   time.Now().UTC().Truncate(time.Millisecond),
+			UpdatedAt:   time.Now().UTC().Truncate(time.Millisecond),
 			Title:       "CSRF Risk",
 			Description: "Cross-site request forgery",
 			AssigneeIDs: []string{"U789"},
@@ -1343,7 +1343,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		})
 		gt.NoError(t, err).Required()
 
-		stamp := time.Now().UTC()
+		stamp := time.Now().UTC().Truncate(time.Millisecond)
 		added, err := repo.Case().AddAssignees(ctx, wsID, created.ID, []string{"U2", "U3"}, stamp)
 		gt.NoError(t, err).Required()
 		gt.Value(t, added.AssigneeIDs).Equal([]string{"U1", "U2", "U3"})
@@ -1361,7 +1361,7 @@ func runCaseRepositoryTest(t *testing.T, newRepo func(t *testing.T) interfaces.R
 		wsID := fmt.Sprintf("ws-%d", time.Now().UnixNano())
 		ctx := context.Background()
 
-		original := time.Now().UTC().Add(-time.Hour)
+		original := time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)
 		created, err := repo.Case().Create(ctx, wsID, &model.Case{
 			ReporterID:  "U-TEST-DEFAULT",
 			CreatedAt:   time.Now().UTC(),
