@@ -41,7 +41,7 @@ test.describe('Private Case Mode', () => {
     const urlBefore = page.url();
     await label.click();
     const navigated = await page
-      .waitForURL(/\/cases\/\d+/, { timeout: 1500 })
+      .waitForURL(/\/cases\/\d+/, { timeout: 500 })
       .then(() => true)
       .catch(() => false);
     expect(navigated).toBeFalsy();
@@ -144,7 +144,7 @@ test.describe('Private Case Mode', () => {
     // expect the wait to time out. Resolves early (and fails) if the row
     // wrongly navigates — unlike a blind fixed sleep.
     const navigated = await page
-      .waitForURL(/\/cases\/\d+/, { timeout: 1500 })
+      .waitForURL(/\/cases\/\d+/, { timeout: 500 })
       .then(() => true)
       .catch(() => false);
     expect(navigated).toBeFalsy();

@@ -497,21 +497,22 @@ test.describe('Case Management', () => {
     const timestampsVisible = await caseDetailPage.isTimestampsVisible();
     expect(timestampsVisible).toBeTruthy();
 
-    // The case was just created, so both timestamps must render a real,
-    // recent datetime — not the "—" placeholder shown for a missing/invalid
-    // value, and not some stale/epoch value. Assert they parse and fall
-    // within the last 10 minutes.
+    // The case was just created, so both timestamps must render a real value,
+    // not the "—" placeholder shown for a missing/invalid one.
+    expect(await caseDetailPage.getCreatedTimestamp()).not.toBe('—');
+    expect(await caseDetailPage.getUpdatedTimestamp()).not.toBe('—');
+
+    // For the recency check, parse the machine-readable ISO 8601 value from the
+    // `data-ts` attribute rather than the localized display text — Date.parse
+    // on a localized string is locale-dependent and unreliable. Both stamps
+    // must fall within the last 10 minutes.
     const RECENT_MS = 10 * 60 * 1000;
 
-    const createdTimestamp = await caseDetailPage.getCreatedTimestamp();
-    expect(createdTimestamp).not.toBe('—');
-    const createdMs = Date.parse(createdTimestamp);
+    const createdMs = Date.parse(await caseDetailPage.getCreatedTimestampISO());
     expect(Number.isNaN(createdMs)).toBeFalsy();
     expect(Math.abs(Date.now() - createdMs)).toBeLessThan(RECENT_MS);
 
-    const updatedTimestamp = await caseDetailPage.getUpdatedTimestamp();
-    expect(updatedTimestamp).not.toBe('—');
-    const updatedMs = Date.parse(updatedTimestamp);
+    const updatedMs = Date.parse(await caseDetailPage.getUpdatedTimestampISO());
     expect(Number.isNaN(updatedMs)).toBeFalsy();
     expect(Math.abs(Date.now() - updatedMs)).toBeLessThan(RECENT_MS);
   });

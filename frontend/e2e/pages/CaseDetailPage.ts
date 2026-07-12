@@ -218,6 +218,19 @@ export class CaseDetailPage extends BasePage {
   }
 
   /**
+   * Machine-readable (ISO 8601) Created timestamp from the `data-ts` attribute.
+   * Parsing this is locale-independent, unlike the localized display text.
+   */
+  async getCreatedTimestampISO(): Promise<string> {
+    return (await this.page.getByTestId('created-timestamp-value').getAttribute('data-ts')) || '';
+  }
+
+  /** Machine-readable (ISO 8601) Updated timestamp from the `data-ts` attribute. */
+  async getUpdatedTimestampISO(): Promise<string> {
+    return (await this.page.getByTestId('updated-timestamp-value').getAttribute('data-ts')) || '';
+  }
+
+  /**
    * Check if the empty action state is visible
    */
   async isEmptyActionStateVisible(): Promise<boolean> {
