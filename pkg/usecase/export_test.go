@@ -225,6 +225,14 @@ func NotificationSlotCoordinatorEnabledForTest(c *NotificationSlotCoordinatorFor
 // BuildSlotBlocksForTest exposes the Block Kit renderer for unit tests.
 var BuildSlotBlocksForTest = buildSlotBlocks
 
+// User-facing error classification / rendering seams (see uierr.go).
+var (
+	ClassifyUserErrorForTest    = classifyUserError
+	UnexpectedUserFacingForTest = unexpectedUserFacing
+	PrepareUserErrorForTest     = prepareUserError
+	FallbackReasonErrorForTest  = fallbackReasonError
+)
+
 // Type aliases for testing
 type GitHubPullRequest = githubsvc.PullRequest
 type GitHubIssue = githubsvc.Issue
