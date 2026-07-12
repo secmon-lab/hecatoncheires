@@ -1322,6 +1322,67 @@ type = "url"
 
 ---
 
+## Global Configuration (Workspace Groups)
+
+Everything above lives in a **workspace** config file passed via `--config`,
+where the rule is **one TOML file = one workspace**. Some settings, however,
+span workspaces rather than belonging to any single one. Those live in a
+separate **global** config file passed via `--global-config`
+(`HECATONCHEIRES_GLOBAL_CONFIG`).
+
+Today the global config holds **workspace groups** only. A workspace group
+bundles multiple workspaces for organization and navigation. Grouping is
+**orthogonal**: which group(s) a workspace belongs to never changes the
+workspace's own behavior, and groups are entirely optional — omit
+`--global-config` and the system runs exactly as before.
+
+- A global config file MUST NOT contain a `[workspace]` section, and a
+  workspace file MUST NOT contain `[[workspace_group]]`. Do not place the
+  global config under a `--config` path.
+- `--global-config` accepts one or more file/directory paths (directories are
+  walked for `.toml`), just like `--config`.
+- Unset `--global-config` leaves workspace groups dormant; the GraphQL
+  `workspaceGroups` query returns an empty list.
+
+### `[[workspace_group]]` keys
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `id` | string | **Yes** | Group identifier. Must match `^[a-z0-9]+(-[a-z0-9]+)*$` and be at most 63 characters. Unique across all `--global-config` files. Independent from workspace IDs (a group and a workspace may share a name) |
+| `name` | string | No | Display name. Defaults to `id` when omitted |
+| `description` | string | No | Human-readable description |
+| `members` | array of string | No | Workspace IDs in this group, in declared order. May be empty. Each ID must reference a workspace defined under `--config`; an unknown member fails validation at startup. Duplicates within one group are rejected. A workspace may appear in multiple groups |
+
+### Example
+
+```toml
+# global.toml — pass via --global-config (NOT --config)
+
+[[workspace_group]]
+id          = "operations"
+name        = "Operations"
+description = "Day-to-day operational workspaces."
+members     = ["risk", "recruit"]
+
+# A workspace may belong to more than one group.
+[[workspace_group]]
+id          = "risk-review"
+name        = "Risk Review"
+members     = ["risk"]
+```
+
+Run with both inputs:
+
+```bash
+hecatoncheires serve \
+  --config ./examples/workspaces/ \
+  --global-config ./examples/global.toml
+```
+
+See `examples/global.toml` for a complete example.
+
+---
+
 ## See Also
 
 - [CLI Flags & Environment Variables](cli.md) — server flags, environment variables, and the diagnosis command

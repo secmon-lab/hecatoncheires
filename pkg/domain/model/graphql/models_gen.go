@@ -610,6 +610,13 @@ type Workspace struct {
 	Name string `json:"name"`
 }
 
+type WorkspaceGroup struct {
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	Description *string      `json:"description,omitempty"`
+	Workspaces  []*Workspace `json:"workspaces"`
+}
+
 type ActionArchiveFilter string
 
 const (

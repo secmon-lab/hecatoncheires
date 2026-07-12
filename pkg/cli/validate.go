@@ -52,6 +52,20 @@ func cmdValidate() *cli.Command {
 				)
 			}
 
+			// Validate deployment-wide workspace groups (--global-config),
+			// including that every member references a known workspace.
+			groupRegistry, err := appCfg.ConfigureGroups(c, registry)
+			if err != nil {
+				return goerr.Wrap(err, "workspace group configuration validation failed")
+			}
+			for _, g := range groupRegistry.List() {
+				logger.Info("Workspace group validated",
+					"id", g.ID,
+					"name", g.Name,
+					"member_count", len(g.MemberIDs),
+				)
+			}
+
 			// Step 2: If --check-db is specified, run DB consistency check
 			if !checkDB {
 				logger.Info("`--check-db` not specified, skipping DB consistency check")

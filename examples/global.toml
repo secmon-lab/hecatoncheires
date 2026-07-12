@@ -1,0 +1,28 @@
+# Global (deployment-wide) configuration.
+#
+# Pass this file via --global-config, NOT --config:
+#
+#   hecatoncheires serve \
+#     --config ./examples/workspaces/ \
+#     --global-config ./examples/global.toml
+#
+# Files under --config are always "1 file = 1 workspace"; deployment-wide
+# settings like workspace groups live here instead. This file must NOT contain
+# a [workspace] section, and workspace files must NOT contain [[workspace_group]].
+
+# Workspace groups bundle multiple workspaces for organization / navigation.
+# Membership is orthogonal: it never changes a workspace's own behavior, and
+# groups are entirely optional (omit this file to run without any).
+
+[[workspace_group]]
+id          = "operations"
+name        = "Operations"
+description = "Day-to-day operational workspaces."
+members     = ["risk", "recruit"]   # workspace IDs; each must exist under --config
+
+# A workspace may belong to more than one group.
+[[workspace_group]]
+id          = "risk-review"
+name        = "Risk Review"
+description = "Workspaces reviewed in the quarterly risk meeting."
+members     = ["risk"]

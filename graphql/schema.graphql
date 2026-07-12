@@ -8,6 +8,16 @@ type Workspace {
   name: String!
 }
 
+# WorkspaceGroup bundles multiple workspaces for organizational / navigation
+# purposes. It is orthogonal: membership never changes a workspace's behavior,
+# and a deployment may define zero groups. Configured via --global-config.
+type WorkspaceGroup {
+  id: String!
+  name: String!
+  description: String
+  workspaces: [Workspace!]!
+}
+
 # Field type definitions
 enum FieldType {
   TEXT
@@ -669,6 +679,9 @@ type Query {
   # Workspaces
   workspace(workspaceId: String!): Workspace!
   workspaces: [Workspace!]!
+
+  # Deployment-wide workspace groups. Empty list when none are configured.
+  workspaceGroups: [WorkspaceGroup!]!
 
   # Cases
   cases(workspaceId: String!, status: CaseStatus): [Case!]!

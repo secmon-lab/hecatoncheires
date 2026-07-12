@@ -23,6 +23,7 @@ import (
 type UseCases struct {
 	repo                     interfaces.Repository
 	workspaceRegistry        *model.WorkspaceRegistry
+	workspaceGroups          *model.WorkspaceGroupRegistry
 	notion                   notion.Service
 	notionTool               notiontool.Client
 	slackService             slack.Service
@@ -66,6 +67,17 @@ func WithAuth(auth AuthUseCaseInterface) Option {
 func WithNotion(svc notion.Service) Option {
 	return func(uc *UseCases) {
 		uc.notion = svc
+	}
+}
+
+// WithWorkspaceGroups configures the deployment-wide workspace group registry
+// (loaded from --global-config). Optional: when omitted, New defaults to an
+// empty registry so WorkspaceGroups() never returns nil.
+func WithWorkspaceGroups(r *model.WorkspaceGroupRegistry) Option {
+	return func(uc *UseCases) {
+		if r != nil {
+			uc.workspaceGroups = r
+		}
 	}
 }
 
@@ -190,6 +202,9 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 	uc := &UseCases{
 		repo:              repo,
 		workspaceRegistry: registry,
+		// Default to a non-nil empty registry so WorkspaceGroups() never
+		// returns nil; WithWorkspaceGroups overrides it when supplied.
+		workspaceGroups: model.NewWorkspaceGroupRegistry(),
 	}
 
 	for _, opt := range opts {
@@ -324,6 +339,12 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 // WorkspaceRegistry returns the workspace registry
 func (uc *UseCases) WorkspaceRegistry() *model.WorkspaceRegistry {
 	return uc.workspaceRegistry
+}
+
+// WorkspaceGroups returns the workspace group registry. It is never nil (New
+// initializes an empty one), so callers can List() without a nil check.
+func (uc *UseCases) WorkspaceGroups() *model.WorkspaceGroupRegistry {
+	return uc.workspaceGroups
 }
 
 // SlackService returns the Slack service (may be nil if not configured)

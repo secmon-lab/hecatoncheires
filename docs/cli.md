@@ -44,6 +44,7 @@ The `serve` command (alias: `s`) starts the HTTP server.
 | `--base-url` | `HECATONCHEIRES_BASE_URL` | - | Yes\* | Application base URL (e.g., `https://your-domain.com`). No trailing slash |
 | `--graphiql` | `HECATONCHEIRES_GRAPHIQL` | `true` | No | Enable GraphiQL playground at `/graphiql` |
 | `--config` | `HECATONCHEIRES_CONFIG` | `./config.toml` | No | Path to TOML configuration file |
+| `--global-config` | `HECATONCHEIRES_GLOBAL_CONFIG` | - | No | Paths to deployment-wide config files/directories (TOML) holding `[[workspace_group]]` definitions. Unset leaves workspace groups dormant. See [configuration.md](./configuration.md#global-configuration-workspace-groups) |
 | `--firestore-project-id` | `HECATONCHEIRES_FIRESTORE_PROJECT_ID` | - | Yes | Google Cloud Firestore project ID |
 | `--firestore-database-id` | `HECATONCHEIRES_FIRESTORE_DATABASE_ID` | `(default)` | No | Firestore database ID |
 | `--notion-api-token` | `HECATONCHEIRES_NOTION_API_TOKEN` | - | No | Notion API token for Source integration |
@@ -148,6 +149,7 @@ The `validate` command (alias: `v`) validates configuration files and optionally
 | Flag | Env Var | Default | Required | Description |
 |------|---------|---------|----------|-------------|
 | `--config` | `HECATONCHEIRES_CONFIG` | `./config.toml` | No | Paths to configuration files or directories (TOML). Can be specified multiple times |
+| `--global-config` | `HECATONCHEIRES_GLOBAL_CONFIG` | - | No | Paths to deployment-wide config files/directories (TOML). Validated (including that group members reference known workspaces) when present |
 | `--repository-backend` | `HECATONCHEIRES_REPOSITORY_BACKEND` | `firestore` | No | Repository backend type (`firestore` or `memory`) |
 | `--firestore-project-id` | `HECATONCHEIRES_FIRESTORE_PROJECT_ID` | - | Cond. | Firestore Project ID (required when using firestore backend) |
 | `--firestore-database-id` | `HECATONCHEIRES_FIRESTORE_DATABASE_ID` | - | No | Firestore Database ID |

@@ -68,6 +68,7 @@ exempt_name := {
 	"SlackActionAssigneeBlockID",
 	# field getters / setters
 	"WorkspaceRegistry",
+	"WorkspaceGroups",
 	"SlackService",
 	"WebFetchClient",
 	"SlackSearchService",

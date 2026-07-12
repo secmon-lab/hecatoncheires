@@ -503,6 +503,7 @@ type ComplexityRoot struct {
 		Tags                func(childComplexity int, workspaceID string) int
 		ValidateGitHubRepo  func(childComplexity int, workspaceID string, repository string) int
 		Workspace           func(childComplexity int, workspaceID string) int
+		WorkspaceGroups     func(childComplexity int) int
 		Workspaces          func(childComplexity int) int
 	}
 
@@ -576,6 +577,13 @@ type ComplexityRoot struct {
 	Workspace struct {
 		ID   func(childComplexity int) int
 		Name func(childComplexity int) int
+	}
+
+	WorkspaceGroup struct {
+		Description func(childComplexity int) int
+		ID          func(childComplexity int) int
+		Name        func(childComplexity int) int
+		Workspaces  func(childComplexity int) int
 	}
 }
 
@@ -668,6 +676,7 @@ type QueryResolver interface {
 	Health(ctx context.Context) (string, error)
 	Workspace(ctx context.Context, workspaceID string) (*graphql1.Workspace, error)
 	Workspaces(ctx context.Context) ([]*graphql1.Workspace, error)
+	WorkspaceGroups(ctx context.Context) ([]*graphql1.WorkspaceGroup, error)
 	Cases(ctx context.Context, workspaceID string, status *types.CaseStatus) ([]*graphql1.Case, error)
 	Case(ctx context.Context, workspaceID string, id int) (*graphql1.Case, error)
 	Drafts(ctx context.Context, workspaceID string) ([]*graphql1.Case, error)
@@ -3093,6 +3102,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Query.Workspace(childComplexity, args["workspaceId"].(string)), true
+	case "Query.workspaceGroups":
+		if e.complexity.Query.WorkspaceGroups == nil {
+			break
+		}
+
+		return e.complexity.Query.WorkspaceGroups(childComplexity), true
 	case "Query.workspaces":
 		if e.complexity.Query.Workspaces == nil {
 			break
@@ -3362,6 +3377,31 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.complexity.Workspace.Name(childComplexity), true
 
+	case "WorkspaceGroup.description":
+		if e.complexity.WorkspaceGroup.Description == nil {
+			break
+		}
+
+		return e.complexity.WorkspaceGroup.Description(childComplexity), true
+	case "WorkspaceGroup.id":
+		if e.complexity.WorkspaceGroup.ID == nil {
+			break
+		}
+
+		return e.complexity.WorkspaceGroup.ID(childComplexity), true
+	case "WorkspaceGroup.name":
+		if e.complexity.WorkspaceGroup.Name == nil {
+			break
+		}
+
+		return e.complexity.WorkspaceGroup.Name(childComplexity), true
+	case "WorkspaceGroup.workspaces":
+		if e.complexity.WorkspaceGroup.Workspaces == nil {
+			break
+		}
+
+		return e.complexity.WorkspaceGroup.Workspaces(childComplexity), true
+
 	}
 	return 0, false
 }
@@ -3502,6 +3542,16 @@ scalar Any
 type Workspace {
   id: String!
   name: String!
+}
+
+# WorkspaceGroup bundles multiple workspaces for organizational / navigation
+# purposes. It is orthogonal: membership never changes a workspace's behavior,
+# and a deployment may define zero groups. Configured via --global-config.
+type WorkspaceGroup {
+  id: String!
+  name: String!
+  description: String
+  workspaces: [Workspace!]!
 }
 
 # Field type definitions
@@ -4165,6 +4215,9 @@ type Query {
   # Workspaces
   workspace(workspaceId: String!): Workspace!
   workspaces: [Workspace!]!
+
+  # Deployment-wide workspace groups. Empty list when none are configured.
+  workspaceGroups: [WorkspaceGroup!]!
 
   # Cases
   cases(workspaceId: String!, status: CaseStatus): [Case!]!
@@ -17068,6 +17121,45 @@ func (ec *executionContext) fieldContext_Query_workspaces(_ context.Context, fie
 	return fc, nil
 }
 
+func (ec *executionContext) _Query_workspaceGroups(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Query_workspaceGroups,
+		func(ctx context.Context) (any, error) {
+			return ec.resolvers.Query().WorkspaceGroups(ctx)
+		},
+		nil,
+		ec.marshalNWorkspaceGroup2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐWorkspaceGroupᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_Query_workspaceGroups(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_WorkspaceGroup_id(ctx, field)
+			case "name":
+				return ec.fieldContext_WorkspaceGroup_name(ctx, field)
+			case "description":
+				return ec.fieldContext_WorkspaceGroup_description(ctx, field)
+			case "workspaces":
+				return ec.fieldContext_WorkspaceGroup_workspaces(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type WorkspaceGroup", field.Name)
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Query_cases(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -20283,6 +20375,128 @@ func (ec *executionContext) fieldContext_Workspace_name(_ context.Context, field
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _WorkspaceGroup_id(ctx context.Context, field graphql.CollectedField, obj *graphql1.WorkspaceGroup) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_WorkspaceGroup_id,
+		func(ctx context.Context) (any, error) {
+			return obj.ID, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_WorkspaceGroup_id(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "WorkspaceGroup",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _WorkspaceGroup_name(ctx context.Context, field graphql.CollectedField, obj *graphql1.WorkspaceGroup) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_WorkspaceGroup_name,
+		func(ctx context.Context) (any, error) {
+			return obj.Name, nil
+		},
+		nil,
+		ec.marshalNString2string,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_WorkspaceGroup_name(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "WorkspaceGroup",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _WorkspaceGroup_description(ctx context.Context, field graphql.CollectedField, obj *graphql1.WorkspaceGroup) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_WorkspaceGroup_description,
+		func(ctx context.Context) (any, error) {
+			return obj.Description, nil
+		},
+		nil,
+		ec.marshalOString2ᚖstring,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_WorkspaceGroup_description(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "WorkspaceGroup",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _WorkspaceGroup_workspaces(ctx context.Context, field graphql.CollectedField, obj *graphql1.WorkspaceGroup) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_WorkspaceGroup_workspaces,
+		func(ctx context.Context) (any, error) {
+			return obj.Workspaces, nil
+		},
+		nil,
+		ec.marshalNWorkspace2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐWorkspaceᚄ,
+		true,
+		true,
+	)
+}
+
+func (ec *executionContext) fieldContext_WorkspaceGroup_workspaces(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "WorkspaceGroup",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Workspace_id(ctx, field)
+			case "name":
+				return ec.fieldContext_Workspace_name(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Workspace", field.Name)
 		},
 	}
 	return fc, nil
@@ -26627,6 +26841,28 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 			}
 
 			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "workspaceGroups":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_workspaceGroups(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
 		case "cases":
 			field := field
 
@@ -27809,6 +28045,57 @@ func (ec *executionContext) _Workspace(ctx context.Context, sel ast.SelectionSet
 			}
 		case "name":
 			out.Values[i] = ec._Workspace_name(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.deferred, int32(len(deferred)))
+
+	for label, dfs := range deferred {
+		ec.processDeferredGroup(graphql.DeferredGroup{
+			Label:    label,
+			Path:     graphql.GetPath(ctx),
+			FieldSet: dfs,
+			Context:  ctx,
+		})
+	}
+
+	return out
+}
+
+var workspaceGroupImplementors = []string{"WorkspaceGroup"}
+
+func (ec *executionContext) _WorkspaceGroup(ctx context.Context, sel ast.SelectionSet, obj *graphql1.WorkspaceGroup) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, workspaceGroupImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferred := make(map[string]*graphql.FieldSet)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("WorkspaceGroup")
+		case "id":
+			out.Values[i] = ec._WorkspaceGroup_id(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "name":
+			out.Values[i] = ec._WorkspaceGroup_name(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "description":
+			out.Values[i] = ec._WorkspaceGroup_description(ctx, field, obj)
+		case "workspaces":
+			out.Values[i] = ec._WorkspaceGroup_workspaces(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
@@ -30434,6 +30721,60 @@ func (ec *executionContext) marshalNWorkspace2ᚖgithubᚗcomᚋsecmonᚑlabᚋh
 		return graphql.Null
 	}
 	return ec._Workspace(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNWorkspaceGroup2ᚕᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐWorkspaceGroupᚄ(ctx context.Context, sel ast.SelectionSet, v []*graphql1.WorkspaceGroup) graphql.Marshaler {
+	ret := make(graphql.Array, len(v))
+	var wg sync.WaitGroup
+	isLen1 := len(v) == 1
+	if !isLen1 {
+		wg.Add(len(v))
+	}
+	for i := range v {
+		i := i
+		fc := &graphql.FieldContext{
+			Index:  &i,
+			Result: &v[i],
+		}
+		ctx := graphql.WithFieldContext(ctx, fc)
+		f := func(i int) {
+			defer func() {
+				if r := recover(); r != nil {
+					ec.Error(ctx, ec.Recover(ctx, r))
+					ret = nil
+				}
+			}()
+			if !isLen1 {
+				defer wg.Done()
+			}
+			ret[i] = ec.marshalNWorkspaceGroup2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐWorkspaceGroup(ctx, sel, v[i])
+		}
+		if isLen1 {
+			f(i)
+		} else {
+			go f(i)
+		}
+
+	}
+	wg.Wait()
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNWorkspaceGroup2ᚖgithubᚗcomᚋsecmonᚑlabᚋhecatoncheiresᚋpkgᚋdomainᚋmodelᚋgraphqlᚐWorkspaceGroup(ctx context.Context, sel ast.SelectionSet, v *graphql1.WorkspaceGroup) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._WorkspaceGroup(ctx, sel, v)
 }
 
 func (ec *executionContext) marshalN__Directive2githubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐDirective(ctx context.Context, sel ast.SelectionSet, v introspection.Directive) graphql.Marshaler {
