@@ -9,6 +9,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
 	graphql1 "github.com/secmon-lab/hecatoncheires/pkg/domain/model/graphql"
 	"github.com/secmon-lab/hecatoncheires/pkg/repository/memory"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase"
 )
 
 // TestCaseResolver_Reporter pins the reporter resolution contract: the
@@ -57,5 +58,76 @@ func TestCaseResolver_Reporter(t *testing.T) {
 		user, err := resolver.Case().Reporter(ctx, &graphql1.Case{ID: 4, ReporterID: nil})
 		gt.NoError(t, err)
 		gt.Value(t, user).Nil()
+	})
+}
+
+// buildGroupResolver wires a resolver whose UseCases carry the given workspace
+// and group registries, so WorkspaceGroups() resolves real member workspaces.
+func buildGroupResolver(t *testing.T, wsReg *model.WorkspaceRegistry, groupReg *model.WorkspaceGroupRegistry) *graphqlctrl.Resolver {
+	t.Helper()
+	repo := memory.New()
+	uc := usecase.New(repo, wsReg, usecase.WithWorkspaceGroups(groupReg))
+	return graphqlctrl.NewResolver(repo, uc)
+}
+
+func TestQueryResolver_WorkspaceGroups(t *testing.T) {
+	ctx := context.Background()
+
+	wsReg := model.NewWorkspaceRegistry()
+	wsReg.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "risk", Name: "Risk Management"}})
+	wsReg.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "incident", Name: "Incident"}})
+	wsReg.Register(&model.WorkspaceEntry{Workspace: model.Workspace{ID: "legal", Name: "Legal"}})
+
+	t.Run("resolves groups with their member workspaces", func(t *testing.T) {
+		groupReg := model.NewWorkspaceGroupRegistry()
+		groupReg.Register(&model.WorkspaceGroup{
+			ID: "security", Name: "Security", Description: "Security workspaces",
+			MemberIDs: []string{"risk", "incident"},
+		})
+		groupReg.Register(&model.WorkspaceGroup{
+			ID: "audit", Name: "Audit", MemberIDs: []string{"risk", "legal"},
+		})
+
+		resolver := buildGroupResolver(t, wsReg, groupReg)
+		groups, err := resolver.Query().WorkspaceGroups(ctx)
+		gt.NoError(t, err).Required()
+		gt.Array(t, groups).Length(2).Required()
+
+		// Registration order preserved.
+		gt.Value(t, groups[0].ID).Equal("security")
+		gt.Value(t, groups[0].Name).Equal("Security")
+		gt.Value(t, groups[0].Description).NotNil().Required()
+		gt.Value(t, *groups[0].Description).Equal("Security workspaces")
+		gt.Array(t, groups[0].Workspaces).Length(2).Required()
+		gt.Value(t, groups[0].Workspaces[0].ID).Equal("risk")
+		gt.Value(t, groups[0].Workspaces[0].Name).Equal("Risk Management")
+		gt.Value(t, groups[0].Workspaces[1].ID).Equal("incident")
+
+		// A workspace can appear in multiple groups.
+		gt.Value(t, groups[1].ID).Equal("audit")
+		gt.Value(t, groups[1].Description).Nil() // empty description -> null
+		gt.Array(t, groups[1].Workspaces).Length(2).Required()
+		gt.Value(t, groups[1].Workspaces[0].ID).Equal("risk")
+		gt.Value(t, groups[1].Workspaces[1].ID).Equal("legal")
+	})
+
+	t.Run("no groups configured returns an empty list", func(t *testing.T) {
+		resolver := buildGroupResolver(t, wsReg, model.NewWorkspaceGroupRegistry())
+		groups, err := resolver.Query().WorkspaceGroups(ctx)
+		gt.NoError(t, err).Required()
+		gt.Array(t, groups).Length(0)
+	})
+
+	t.Run("unresolvable member is skipped, keeping the list non-null", func(t *testing.T) {
+		groupReg := model.NewWorkspaceGroupRegistry()
+		// "ghost" is not in the workspace registry; the resolver skips it.
+		groupReg.Register(&model.WorkspaceGroup{ID: "mixed", Name: "Mixed", MemberIDs: []string{"risk", "ghost"}})
+
+		resolver := buildGroupResolver(t, wsReg, groupReg)
+		groups, err := resolver.Query().WorkspaceGroups(ctx)
+		gt.NoError(t, err).Required()
+		gt.Array(t, groups).Length(1).Required()
+		gt.Array(t, groups[0].Workspaces).Length(1).Required()
+		gt.Value(t, groups[0].Workspaces[0].ID).Equal("risk")
 	})
 }

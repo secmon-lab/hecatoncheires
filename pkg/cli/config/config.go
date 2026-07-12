@@ -549,29 +549,9 @@ func LoadFieldSchema(path string) (*domainConfig.FieldSchema, error) {
 // LoadWorkspaceConfigs loads workspace configurations from multiple paths.
 // Each path can be a file or directory. Directories are walked recursively for .toml files.
 func LoadWorkspaceConfigs(paths []string) ([]*WorkspaceConfig, error) {
-	var tomlFiles []string
-	for _, p := range paths {
-		info, err := os.Stat(p)
-		if err != nil {
-			return nil, goerr.Wrap(err, "failed to stat config path", goerr.V(ConfigPathKey, p))
-		}
-
-		if info.IsDir() {
-			err := filepath.WalkDir(p, func(path string, d os.DirEntry, err error) error {
-				if err != nil {
-					return err
-				}
-				if !d.IsDir() && strings.HasSuffix(d.Name(), ".toml") {
-					tomlFiles = append(tomlFiles, path)
-				}
-				return nil
-			})
-			if err != nil {
-				return nil, goerr.Wrap(err, "failed to walk config directory", goerr.V(ConfigPathKey, p))
-			}
-		} else {
-			tomlFiles = append(tomlFiles, p)
-		}
+	tomlFiles, err := collectTOMLFiles(paths)
+	if err != nil {
+		return nil, err
 	}
 
 	if len(tomlFiles) == 0 {
@@ -788,6 +768,11 @@ func (a *AppConfig) Flags() []cli.Flag {
 			Usage:   "Paths to configuration files or directories (TOML). Can be specified multiple times.",
 			Value:   []string{"./config.toml"},
 			Sources: cli.EnvVars("HECATONCHEIRES_CONFIG"),
+		},
+		&cli.StringSliceFlag{
+			Name:    "global-config",
+			Usage:   "Paths to global (deployment-wide) config files or directories (TOML) holding [[workspace_group]] definitions. Optional; unset leaves workspace groups dormant.",
+			Sources: cli.EnvVars("HECATONCHEIRES_GLOBAL_CONFIG"),
 		},
 	}
 }
