@@ -112,6 +112,12 @@ func unexpectedUserFacing(err error) uierr.UserFacing {
 // not paged); Transient/Bug page. An error already tagged benign deeper down
 // stays benign regardless (goerr.With only adds).
 func prepareUserError(ctx context.Context, err error, opMsg string) (text, ref string) {
+	// Defensive: a nil err means there is nothing to surface. Without this a
+	// caller that slipped a nil through would render and post a spurious
+	// "unexpected error" message. Returning empty makes the poster a no-op.
+	if err == nil {
+		return "", ""
+	}
 	uf, ok := classifyUserError(err)
 	if !ok {
 		uf = unexpectedUserFacing(err)
@@ -133,6 +139,10 @@ func prepareUserError(ctx context.Context, err error, opMsg string) (text, ref s
 // prepareUserError for the AgentUseCase error-post sites.
 func (uc *AgentUseCase) replyUserError(ctx context.Context, err error, opMsg, channelID, threadTS string) {
 	text, _ := prepareUserError(ctx, err, opMsg)
+	if text == "" {
+		// nil err (or otherwise nothing to say) — do not post an empty reply.
+		return
+	}
 	uc.postThreadReply(ctx, channelID, threadTS, text)
 }
 

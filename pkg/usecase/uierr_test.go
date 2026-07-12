@@ -100,6 +100,12 @@ func TestPrepareUserError(t *testing.T) {
 		gt.String(t, text).Contains(ref)
 	})
 
+	t.Run("nil error yields empty text and ref (no spurious message)", func(t *testing.T) {
+		text, ref := usecase.PrepareUserErrorForTest(ctx, nil, "op")
+		gt.String(t, text).Equal("")
+		gt.String(t, ref).Equal("")
+	})
+
 	t.Run("unclassified error still renders a 3-part message, not the generic text", func(t *testing.T) {
 		text, ref := usecase.PrepareUserErrorForTest(ctx, errors.New("something broke"), "casebound run turn")
 		gt.String(t, text).Contains(i18n.T(ctx, i18n.MsgUIErrUnexpectedWhat))
