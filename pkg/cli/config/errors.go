@@ -76,16 +76,21 @@ var (
 	// ErrUnknownGroupMember is returned when a group member references a
 	// workspace id that is not defined across the loaded workspace configs.
 	ErrUnknownGroupMember = goerr.New("workspace group member references an unknown workspace")
+	// ErrGlobalConfigContainsWorkspace is returned when a --global-config file
+	// contains a [workspace] section. Workspace definitions belong under
+	// --config (1 file = 1 workspace); the global config is for deployment-wide
+	// settings only, so mixing the two is rejected loudly rather than ignored.
+	ErrGlobalConfigContainsWorkspace = goerr.New("global config file must not contain a [workspace] section")
 )
 
 // Context keys for error values
 const (
-	ConfigPathKey     = "config_path"
-	FieldIDKey        = "field_id"
-	FieldTypeKey      = "field_type"
-	OptionIDKey       = "option_id"
-	FieldIndexKey     = "field_index"
-	OptionIndexKey    = "option_index"
+	ConfigPathKey       = "config_path"
+	FieldIDKey          = "field_id"
+	FieldTypeKey        = "field_type"
+	OptionIDKey         = "option_id"
+	FieldIndexKey       = "field_index"
+	OptionIndexKey      = "option_index"
 	WorkspaceIDKey      = "workspace_id"
 	WorkspaceColorKey   = "workspace_color"
 	WorkspaceEmojiKey   = "workspace_emoji"

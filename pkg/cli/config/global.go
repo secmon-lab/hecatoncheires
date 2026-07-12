@@ -18,6 +18,11 @@ import (
 // that span workspaces. Today it holds workspace group definitions only; new
 // deployment-wide sections can be added here later without a new flag.
 type GlobalConfig struct {
+	// Workspace captures a stray [workspace] section so the loader can reject
+	// it. Workspace definitions belong under --config, never here. It is a raw
+	// map (not the real WorkspaceBaseConfig) because its only use is presence
+	// detection; an empty [workspace] table still unmarshals to a non-nil map.
+	Workspace       map[string]any          `toml:"workspace"`
 	WorkspaceGroups []WorkspaceGroupSection `toml:"workspace_group"`
 }
 
@@ -59,6 +64,21 @@ func (s *WorkspaceGroupSection) Validate() error {
 // and LoadWorkspaceGroups so the two loaders discover files identically.
 func collectTOMLFiles(paths []string) ([]string, error) {
 	var tomlFiles []string
+	// Deduplicate by absolute path so overlapping inputs (a file listed twice,
+	// or a file also reachable through a listed directory) collect it once.
+	// Without this, the same file yields a spurious duplicate-ID error at load.
+	seen := make(map[string]bool)
+	add := func(path string) {
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			abs = filepath.Clean(path)
+		}
+		if seen[abs] {
+			return
+		}
+		seen[abs] = true
+		tomlFiles = append(tomlFiles, path)
+	}
 	for _, p := range paths {
 		info, err := os.Stat(p)
 		if err != nil {
@@ -71,7 +91,7 @@ func collectTOMLFiles(paths []string) ([]string, error) {
 					return err
 				}
 				if !d.IsDir() && strings.HasSuffix(d.Name(), ".toml") {
-					tomlFiles = append(tomlFiles, path)
+					add(path)
 				}
 				return nil
 			})
@@ -79,7 +99,7 @@ func collectTOMLFiles(paths []string) ([]string, error) {
 				return nil, goerr.Wrap(err, "failed to walk config directory", goerr.V(ConfigPathKey, p))
 			}
 		} else {
-			tomlFiles = append(tomlFiles, p)
+			add(p)
 		}
 	}
 	return tomlFiles, nil
@@ -108,6 +128,15 @@ func LoadWorkspaceGroups(paths []string) ([]*model.WorkspaceGroup, error) {
 		var gc GlobalConfig
 		if err := toml.Unmarshal(data, &gc); err != nil {
 			return nil, goerr.Wrap(err, "failed to parse global config TOML", goerr.V(ConfigPathKey, f))
+		}
+
+		// A [workspace] section in a global config file is almost certainly a
+		// misplaced workspace definition. Reject it loudly rather than ignore it
+		// silently (the docs promise this file never carries [workspace]).
+		if gc.Workspace != nil {
+			return nil, goerr.Wrap(ErrGlobalConfigContainsWorkspace,
+				"global config file must not contain a [workspace] section",
+				goerr.V(ConfigPathKey, f))
 		}
 
 		for i := range gc.WorkspaceGroups {

@@ -174,6 +174,38 @@ func TestLoadWorkspaceGroups_NoPaths(t *testing.T) {
 	gt.Array(t, groups).Length(0)
 }
 
+func TestLoadWorkspaceGroups_RejectsWorkspaceSection(t *testing.T) {
+	// A misplaced workspace definition in a global config file must be rejected,
+	// not silently ignored.
+	path := writeGlobalConfig(t, "global.toml", `
+[workspace]
+id = "risk"
+
+[[workspace_group]]
+id = "security"
+members = ["risk"]
+`)
+	_, err := config.LoadWorkspaceGroups([]string{path})
+	gt.Error(t, err).Is(config.ErrGlobalConfigContainsWorkspace)
+}
+
+func TestLoadWorkspaceGroups_DeduplicatesOverlappingPaths(t *testing.T) {
+	// The same file reachable via both a direct path and its directory must be
+	// collected once, not twice (which would look like a duplicate group ID).
+	dir := t.TempDir()
+	path := filepath.Join(dir, "global.toml")
+	gt.NoError(t, os.WriteFile(path, []byte(`
+[[workspace_group]]
+id = "security"
+members = ["risk"]
+`), 0600)).Required()
+
+	groups, err := config.LoadWorkspaceGroups([]string{path, dir, path})
+	gt.NoError(t, err).Required()
+	gt.Array(t, groups).Length(1).Required()
+	gt.Value(t, groups[0].ID).Equal("security")
+}
+
 func TestConfigureGroups_Dormant(t *testing.T) {
 	// No --global-config flag: registry is empty, not nil.
 	reg, err := runConfigureGroups(t, wsRegistry("risk"))
