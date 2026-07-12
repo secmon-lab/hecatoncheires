@@ -11,6 +11,9 @@ import (
 
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/slack-go/slack"
+
+	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
+	"github.com/secmon-lab/hecatoncheires/pkg/utils/uierr"
 )
 
 // resolveDisplayName picks the most user-friendly label Slack exposes for a
@@ -450,8 +453,7 @@ func (c *client) PostMessage(ctx context.Context, channelID string, blocks []sla
 	)
 	_, ts, err := c.api.PostMessageContext(ctx, channelID, msgOpts...)
 	if err != nil {
-		return "", goerr.Wrap(err, "failed to post Slack message",
-			goerr.V("channel_id", channelID))
+		return "", wrapSlackPostError(err, "failed to post Slack message", channelID)
 	}
 	return ts, nil
 }
@@ -617,8 +619,7 @@ func (c *client) PostThreadReply(ctx context.Context, channelID string, threadTS
 	)
 	_, ts, err := c.api.PostMessageContext(ctx, channelID, msgOpts...)
 	if err != nil {
-		return "", goerr.Wrap(err, "failed to post thread reply",
-			goerr.V("channel_id", channelID),
+		return "", wrapSlackPostError(err, "failed to post thread reply", channelID,
 			goerr.V("thread_ts", threadTS))
 	}
 	return ts, nil
@@ -638,8 +639,7 @@ func (c *client) PostThreadMessage(ctx context.Context, channelID string, thread
 	}
 	_, ts, err := c.api.PostMessageContext(ctx, channelID, msgOpts...)
 	if err != nil {
-		return "", goerr.Wrap(err, "failed to post thread message",
-			goerr.V("channel_id", channelID),
+		return "", wrapSlackPostError(err, "failed to post thread message", channelID,
 			goerr.V("thread_ts", threadTS),
 			goerr.V("broadcast", cfg.Broadcast))
 	}
@@ -696,13 +696,42 @@ func wrapSlackViewError(err error, msg, triggerID string) error {
 	return goerr.Wrap(err, msg, opts...)
 }
 
+// wrapSlackPostError wraps a chat.postMessage-family failure. Beyond the
+// diagnostic goerr values (mirroring wrapSlackViewError), it classifies the
+// Slack error code into a uierr.UserFacing and attaches it at this origin, so
+// the user-facing renderer can turn e.g. not_in_channel into an actionable
+// "invite the bot" message instead of the old generic failure text. extra
+// carries call-specific diagnostic values (thread_ts, broadcast, …).
+func wrapSlackPostError(err error, msg, channelID string, extra ...goerr.Option) error {
+	opts := append([]goerr.Option{goerr.V("channel_id", channelID)}, extra...)
+	var se slack.SlackErrorResponse
+	if errors.As(err, &se) {
+		opts = append(opts,
+			goerr.V("slack_error", se.Err),
+			goerr.V("slack_response_messages", se.ResponseMetadata.Messages),
+			goerr.V("slack_response_warnings", se.ResponseMetadata.Warnings),
+		)
+		if uf, ok := uierr.SlackError(se.Err); ok {
+			opts = append(opts, uierr.Attach(uf))
+		}
+	}
+	return goerr.Wrap(err, msg, opts...)
+}
+
 // GetBotUserID retrieves the bot's own user ID via auth.test API.
 // The result is cached permanently (sync.Once) since the bot user ID does not change.
 func (c *client) GetBotUserID(ctx context.Context) (string, error) {
 	c.botUserIDOnce.Do(func() {
 		resp, err := c.api.AuthTestContext(ctx)
 		if err != nil {
-			c.botUserIDErr = goerr.Wrap(err, "failed to call auth.test for bot user ID")
+			c.botUserIDErr = goerr.Wrap(err, "failed to call auth.test for bot user ID",
+				uierr.Attach(uierr.UserFacing{
+					Kind:        uierr.KindPermission,
+					What:        i18n.MsgUIErrSlackAuthWhat,
+					Detail:      i18n.MsgUIErrSlackAuthDetail,
+					Remediation: i18n.MsgUIErrSlackAuthFix,
+					Cause:       "auth.test",
+				}))
 			return
 		}
 		c.botUserID = resp.UserID

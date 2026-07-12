@@ -1227,6 +1227,30 @@ For local development with ngrok:
 
 ### General Issues
 
+#### Understanding error messages in Slack
+
+When a Slack-triggered operation fails (a mention, a reaction, a case draft), the
+bot replies with a structured message instead of a generic "please try again":
+
+```
+⚠️ <what happened>
+*Technical note*: <short cause> (<slack error code / reason>)
+*What you can do*: <how to fix it, or that it can't be fixed by retrying>
+ref: `<8-hex id>`
+```
+
+- **What you can do** tells you whether it is actionable on your side. Common
+  cases: invite the bot to the destination channel (`not_in_channel`), ask an
+  admin to grant a missing scope or re-authorize the app (`missing_scope` /
+  `invalid_auth`), or fill required fields via **Edit** (field validation).
+- **ref** is a correlation id. The same id is attached to the server log entry
+  (and, for unexpected errors, to the Sentry event) for that failure. Quote it
+  when asking an operator to investigate — they can grep logs / Sentry by
+  `ref_id`.
+- Operator/user-actionable errors (permission, validation) are logged but do
+  **not** page Sentry; unexpected errors do. So a Slack error with a clear "What
+  you can do" is usually a configuration fix, not a bug report.
+
 #### User avatars not displaying
 - Verify `HECATONCHEIRES_SLACK_BOT_TOKEN` is set
 - Ensure the app is installed to your workspace

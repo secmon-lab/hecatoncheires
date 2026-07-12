@@ -177,8 +177,10 @@ func (uc *MentionProposalUseCase) HandleAppMention(ctx context.Context, ev *slac
 	})
 	if runErr != nil {
 		uc.removeProcessingMessage(ctx, ev.Channel, processingTS)
+		// notifyMaterializationFailed reports via prepareUserError; return nil so
+		// the async dispatcher does not re-Handle (double report) the same error.
 		uc.notifyMaterializationFailed(ctx, ev, runErr)
-		return goerr.Wrap(runErr, "draft turn failed")
+		return nil
 	}
 	switch result.Status {
 	case proposal.StatusBusy, proposal.StatusIdempotent:
@@ -208,12 +210,11 @@ func (uc *MentionProposalUseCase) HandleAppMention(ctx context.Context, ev *slac
 // ran out of budget or hit an internal error. Best-effort; secondary
 // failures are funneled through errutil.Handle.
 func (uc *MentionProposalUseCase) notifyDraftFallback(ctx context.Context, channelID, threadTS, reason string) {
-	const text = ":warning: I couldn't reach a conclusion within the budget for this turn. Please mention me again with more context."
+	text, _ := prepareUserError(ctx, fallbackReasonError(reason), "draft turn fallback")
 	if _, err := uc.slackService.PostThreadReply(ctx, channelID, threadTS, text); err != nil {
 		errutil.Handle(ctx, goerr.Wrap(err, "post draft fallback reply",
 			goerr.V("channel_id", channelID),
 			goerr.V("thread_ts", threadTS),
-			goerr.V("fallback_reason", reason),
 		), "could not surface draft fallback to user")
 	}
 }
@@ -443,12 +444,11 @@ func (uc *MentionProposalUseCase) notifyMaterializationFailed(ctx context.Contex
 	if threadTS == "" {
 		threadTS = ev.TimeStamp
 	}
-	text := ":warning: Sorry — AI failed to generate a Case draft after several attempts. Please mention me again, or try in a different channel."
+	text, _ := prepareUserError(ctx, cause, "draft materialization failed")
 	if _, err := uc.slackService.PostThreadMessage(ctx, ev.Channel, threadTS, nil, text); err != nil {
 		errutil.Handle(ctx, goerr.Wrap(err, "failed to post materialization-failure message",
 			goerr.V("channel_id", ev.Channel),
 			goerr.V("thread_ts", threadTS),
-			goerr.V("cause", cause.Error()),
 		), "could not surface materialization failure to user")
 	}
 }

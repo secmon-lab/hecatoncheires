@@ -195,7 +195,15 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 	// Skip if bot user ID matches the message sender (prevent infinite loop)
 	botUserID, err := uc.deps.SlackService.GetBotUserID(ctx)
 	if err != nil {
-		return goerr.Wrap(err, "failed to get bot user ID")
+		// Was silent before. The Slack client classified this (token/auth) at
+		// the origin; surface it in the mention's thread. return nil so the async
+		// dispatcher does not re-Handle it.
+		threadTS := msg.ThreadTS()
+		if threadTS == "" {
+			threadTS = msg.ID()
+		}
+		uc.replyUserError(ctx, err, "failed to get bot user ID", msg.ChannelID(), threadTS)
+		return nil
 	}
 	if msg.UserID() == botUserID {
 		logger.Debug("skipping bot's own message", "user_id", msg.UserID())
@@ -289,11 +297,10 @@ func (uc *AgentUseCase) HandleAgentMention(ctx context.Context, msg *slackmodel.
 
 	result, runErr := uc.casebound.RunTurn(ctx, req)
 	if runErr != nil {
-		errMsg := "⚠️ " + i18n.T(ctx, i18n.MsgAgentError)
-		if _, postErr := uc.deps.SlackService.PostThreadReply(ctx, msg.ChannelID(), threadTS, errMsg); postErr != nil {
-			errutil.Handle(ctx, postErr, "post agent error reply")
-		}
-		return goerr.Wrap(runErr, "casebound run turn")
+		// replyUserError reports and posts the 3-part message; return nil so the
+		// async dispatcher does not re-Handle (double report) the same error.
+		uc.replyUserError(ctx, runErr, "casebound run turn", msg.ChannelID(), threadTS)
+		return nil
 	}
 	switch result.Status {
 	case casebound.StatusBusy:

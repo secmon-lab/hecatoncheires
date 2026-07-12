@@ -229,6 +229,50 @@ const (
 	MsgCaseCreatedFallback             // "Created case #%d: %s" (%d = case ID, %s = title).
 	MsgThreadCaseQuestionFallback      // Fallback for the thread-create question form.
 
+	// User-facing error messages (pkg/utils/uierr + pkg/usecase/uierr.go).
+	// Every failure surfaced to a Slack user is rendered as a fixed 3-part
+	// frame: "⚠️ {What}" / "*{LabelDetail}*: {Detail}[ (cause)]" /
+	// "*{LabelFix}*: {Remediation}" / "ref: {id}". Each category below supplies
+	// its What/Detail/Fix; the two labels are shared. All are arg-free — the
+	// variable cause (Slack error code, field names, truncated reason) is
+	// carried in UserFacing.Cause and appended by the renderer.
+	MsgUIErrLabelDetail // "Technical note"
+	MsgUIErrLabelFix    // "What you can do"
+
+	MsgUIErrNotInChannelWhat // bot not a member of the destination channel
+	MsgUIErrNotInChannelDetail
+	MsgUIErrNotInChannelFix
+	MsgUIErrMissingScopeWhat // Slack app lacks a required OAuth scope
+	MsgUIErrMissingScopeDetail
+	MsgUIErrMissingScopeFix
+	MsgUIErrSlackAuthWhat // Slack token invalid / revoked / inactive
+	MsgUIErrSlackAuthDetail
+	MsgUIErrSlackAuthFix
+	MsgUIErrConfigWhat // workspace configuration problem
+	MsgUIErrConfigDetail
+	MsgUIErrConfigFix
+	MsgUIErrAccessDeniedWhat // caller not permitted (private case)
+	MsgUIErrAccessDeniedDetail
+	MsgUIErrAccessDeniedFix
+	MsgUIErrFieldValidationWhat // required/invalid case fields
+	MsgUIErrFieldValidationDetail
+	MsgUIErrFieldValidationFix
+	MsgUIErrAgentNoConclusionWhat // planner exhausted budget / gave up
+	MsgUIErrAgentNoConclusionDetail
+	MsgUIErrAgentNoConclusionFix
+	MsgUIErrStorageWhat // Firestore read/write failure
+	MsgUIErrStorageDetail
+	MsgUIErrStorageFix
+	MsgUIErrRateLimitedWhat // Slack rate limit
+	MsgUIErrRateLimitedDetail
+	MsgUIErrRateLimitedFix
+	MsgUIErrSlackGenericWhat // other Slack API failure
+	MsgUIErrSlackGenericDetail
+	MsgUIErrSlackGenericFix
+	MsgUIErrUnexpectedWhat // unclassified internal error (bug)
+	MsgUIErrUnexpectedDetail
+	MsgUIErrUnexpectedFix
+
 	msgKeyCount // sentinel for validation
 )
 

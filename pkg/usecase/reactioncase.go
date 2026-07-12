@@ -163,12 +163,13 @@ func (uc *AgentUseCase) reactionCreateCrossChannel(ctx context.Context, entry *m
 	seedText := i18n.T(ctx, i18n.MsgReactionSeedRoot, reporter, permalink)
 	seedTS, perr := uc.deps.SlackService.PostMessage(ctx, dest, nil, seedText)
 	if perr != nil {
-		errutil.Handle(ctx, goerr.Wrap(perr, "reaction cross-channel: post seed root",
-			goerr.V("dest_channel", dest)), "reaction cross-channel: post seed root")
 		uc.releaseReactionClaim(ctx, wsID, srcChannel, srcTS)
 		// The reactor pressed the emoji but the seed post failed — tell them in
-		// their own thread instead of leaving the reaction with no response.
-		uc.postThreadReply(ctx, srcChannel, uiRoot, "⚠️ "+i18n.T(ctx, i18n.MsgAgentError))
+		// their own thread instead of leaving the reaction with no response. The
+		// Slack client attached the classification (e.g. not_in_channel) at the
+		// origin, so this renders the actionable "invite the bot" message.
+		uc.replyUserError(ctx, goerr.Wrap(perr, "reaction cross-channel: post seed root",
+			goerr.V("dest_channel", dest)), "reaction cross-channel: post seed root", srcChannel, uiRoot)
 		return nil
 	}
 
