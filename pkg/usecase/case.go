@@ -775,7 +775,14 @@ func (uc *CaseUseCase) UpdateCase(ctx context.Context, workspaceID string, id in
 	// validation failure must not leave the channel renamed while the DB still
 	// holds the old title (state desync). existingCase.Title is still the old
 	// title here — it is assigned below.
-	if patch.Title != nil && uc.slackService != nil && existingCase.SlackChannelID != "" && existingCase.Title != *patch.Title {
+	//
+	// Channel-mode Cases own a dedicated Slack channel whose name mirrors the
+	// title, so a title change renames it. Thread-mode Cases (IsThreadBound)
+	// have NO dedicated channel: SlackChannelID points at the shared monitored
+	// channel that hosts many threads, and renaming it would rename that shared
+	// channel out from under every other thread (and fails with not_authorized
+	// in practice). Skip the rename entirely for thread-mode Cases.
+	if patch.Title != nil && uc.slackService != nil && !existingCase.IsThreadBound() && existingCase.SlackChannelID != "" && existingCase.Title != *patch.Title {
 		prefix := uc.slackChannelPrefixForWorkspace(workspaceID)
 		if err := uc.slackService.RenameChannel(ctx, existingCase.SlackChannelID, id, *patch.Title, prefix); err != nil {
 			return nil, goerr.Wrap(err, "failed to rename Slack channel",
