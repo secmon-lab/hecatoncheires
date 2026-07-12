@@ -483,17 +483,10 @@ func TestCaseUseCase_UpdateCase_PreservesUnpatchedFields(t *testing.T) {
 // channel name and the persisted title desync.
 func TestCaseUseCase_UpdateCase_NoRenameWhenFieldValidationFails(t *testing.T) {
 	repo := memory.New()
-	set, err := model.NewActionStatusSet("triage", []string{"done"}, []model.ActionStatusDefinition{
-		{ID: "triage", Name: "Triage"},
-		{ID: "done", Name: "Done"},
-	})
-	gt.NoError(t, err).Required()
 	registry := model.NewWorkspaceRegistry()
 	registry.Register(&model.WorkspaceEntry{
-		Workspace:             model.Workspace{ID: "support"},
-		CaseMode:              model.CaseModeThread,
-		SlackMonitorChannelID: "C-MONITOR",
-		CaseStatusSet:         set,
+		Workspace: model.Workspace{ID: "support"},
+		CaseMode:  model.CaseModeChannel,
 		FieldSchema: &config.FieldSchema{
 			Fields: []config.FieldDefinition{
 				{ID: "severity", Name: "Severity", Type: types.FieldTypeSelect, Options: []config.FieldOption{{ID: "high", Name: "High"}, {ID: "low", Name: "Low"}}},
@@ -511,13 +504,14 @@ func TestCaseUseCase_UpdateCase_NoRenameWhenFieldValidationFails(t *testing.T) {
 	uc := usecase.NewCaseUseCase(repo, registry, slackMock, nil, "")
 	ctx := context.Background()
 
+	// Channel-mode Case: it owns a dedicated Slack channel, so a title change
+	// WOULD rename it — which is exactly what must be blocked when the same
+	// update carries an invalid field patch.
 	created, err := repo.Case().Create(ctx, "support", &model.Case{
 		Title:          "Original title",
 		Status:         types.CaseStatusOpen,
 		ReporterID:     "U-REP",
-		SlackChannelID: "C-MONITOR",
-		SlackThreadTS:  "1783560454.200959",
-		BoardStatus:    "triage",
+		SlackChannelID: "C-DEDICATED",
 		FieldValues:    map[string]model.FieldValue{},
 		CreatedAt:      time.Now().UTC(),
 		UpdatedAt:      time.Now().UTC(),
@@ -538,7 +532,110 @@ func TestCaseUseCase_UpdateCase_NoRenameWhenFieldValidationFails(t *testing.T) {
 	reloaded, err := repo.Case().Get(ctx, "support", created.ID)
 	gt.NoError(t, err).Required()
 	gt.Value(t, reloaded.Title).Equal("Original title")
-	gt.Value(t, reloaded.SlackThreadTS).Equal("1783560454.200959")
+}
+
+// TestCaseUseCase_UpdateCase_SlackChannelRenameByMode guards the channel-rename
+// side effect against Case mode. A thread-mode Case has no dedicated channel:
+// its SlackChannelID points at the shared monitored channel that hosts many
+// threads, so renaming it on a title change would rename that shared channel
+// out from under every other thread (and fails in production with
+// not_authorized — see Sentry ARGUS-82). Only channel-mode Cases, which own a
+// dedicated channel, may be renamed.
+func TestCaseUseCase_UpdateCase_SlackChannelRenameByMode(t *testing.T) {
+	newTitle := "New title"
+
+	t.Run("thread-mode title change does NOT rename the shared channel", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		set, err := model.NewActionStatusSet("triage", []string{"done"}, []model.ActionStatusDefinition{
+			{ID: "triage", Name: "Triage"},
+			{ID: "done", Name: "Done"},
+		})
+		gt.NoError(t, err).Required()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace:             model.Workspace{ID: "support"},
+			CaseMode:              model.CaseModeThread,
+			SlackMonitorChannelID: "C-MONITOR",
+			CaseStatusSet:         set,
+		})
+
+		renameCalls := 0
+		slackMock := &mockSlackService{
+			renameChannelFn: func(_ context.Context, _ string, _ int64, _ string, _ string) error {
+				renameCalls++
+				return nil
+			},
+		}
+		uc := usecase.NewCaseUseCase(repo, registry, slackMock, nil, "")
+		ctx := context.Background()
+
+		created, err := repo.Case().Create(ctx, "support", &model.Case{
+			Title:          "Original title",
+			Status:         types.CaseStatusOpen,
+			ReporterID:     "U-REP",
+			SlackChannelID: "C-MONITOR",
+			SlackThreadTS:  "1783560454.200959",
+			BoardStatus:    "triage",
+			FieldValues:    map[string]model.FieldValue{},
+			CreatedAt:      time.Now().UTC(),
+			UpdatedAt:      time.Now().UTC(),
+		})
+		gt.NoError(t, err).Required()
+
+		updated, err := uc.UpdateCase(ctx, "support", created.ID, usecase.CaseUpdate{Title: &newTitle})
+		gt.NoError(t, err).Required()
+
+		// No rename, but the title is still updated on the Case itself, and the
+		// thread binding is preserved.
+		gt.Number(t, renameCalls).Equal(0)
+		gt.Value(t, updated.Title).Equal(newTitle)
+		gt.Value(t, updated.SlackThreadTS).Equal("1783560454.200959")
+
+		reloaded, err := repo.Case().Get(ctx, "support", created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, reloaded.Title).Equal(newTitle)
+	})
+
+	t.Run("channel-mode title change renames the dedicated channel", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "support"},
+			CaseMode:  model.CaseModeChannel,
+		})
+
+		var gotChannelID, gotTitle string
+		renameCalls := 0
+		slackMock := &mockSlackService{
+			renameChannelFn: func(_ context.Context, channelID string, _ int64, title string, _ string) error {
+				renameCalls++
+				gotChannelID = channelID
+				gotTitle = title
+				return nil
+			},
+		}
+		uc := usecase.NewCaseUseCase(repo, registry, slackMock, nil, "")
+		ctx := context.Background()
+
+		created, err := repo.Case().Create(ctx, "support", &model.Case{
+			Title:          "Original title",
+			Status:         types.CaseStatusOpen,
+			ReporterID:     "U-REP",
+			SlackChannelID: "C-DEDICATED",
+			FieldValues:    map[string]model.FieldValue{},
+			CreatedAt:      time.Now().UTC(),
+			UpdatedAt:      time.Now().UTC(),
+		})
+		gt.NoError(t, err).Required()
+
+		updated, err := uc.UpdateCase(ctx, "support", created.ID, usecase.CaseUpdate{Title: &newTitle})
+		gt.NoError(t, err).Required()
+
+		gt.Number(t, renameCalls).Equal(1)
+		gt.Value(t, gotChannelID).Equal("C-DEDICATED")
+		gt.Value(t, gotTitle).Equal(newTitle)
+		gt.Value(t, updated.Title).Equal(newTitle)
+	})
 }
 
 func TestCaseUseCase_AssignCase(t *testing.T) {
