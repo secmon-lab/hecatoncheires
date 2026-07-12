@@ -37,3 +37,15 @@ id = "description"
 name = "Description"
 type = "text"
 required = false
+
+# Enable case-scoped memos so the Memos E2E can create/archive/filter them.
+# One optional field keeps memo creation title-only (no required-field gate).
+[memo]
+description = "E2E test memo definition."
+
+[[memo.fields]]
+id = "note"
+name = "Note"
+type = "text"
+required = false
+description = "Free-form note body."

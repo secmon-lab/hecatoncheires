@@ -75,7 +75,7 @@ export default function MemoDetailModal({
     </>
   ) : (
     <>
-      <Button variant="danger" size="sm" onClick={onArchive} style={{ marginRight: 'auto' }}>
+      <Button variant="danger" size="sm" onClick={onArchive} style={{ marginRight: 'auto' }} data-testid="memo-detail-archive-button">
         {t('btnArchive')}
       </Button>
       <Button variant="ghost" onClick={onClose}>

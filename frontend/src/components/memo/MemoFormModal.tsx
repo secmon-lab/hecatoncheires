@@ -183,6 +183,7 @@ export default function MemoFormModal({
             variant="primary"
             onClick={() => { void handleSubmit() }}
             disabled={saving}
+            data-testid="memo-form-submit"
           >
             {isEdit ? t('memoFormSave') : t('memoFormCreate')}
           </Button>

@@ -29,6 +29,7 @@ export function UserMenu() {
         style={{ width: 30, height: 30, padding: 0 }}
         onClick={() => setOpen((v) => !v)}
         aria-label={t('ariaUserMenu')}
+        data-testid="user-menu-button"
       >
         <Avatar size="sm" name={user.name} />
       </button>
@@ -55,6 +56,7 @@ export function UserMenu() {
                   className={lang === l ? 'on' : ''}
                   style={{ flex: 1 }}
                   onClick={() => setLang(l)}
+                  data-testid={`lang-option-${l}`}
                 >
                   {l.toUpperCase()}
                 </button>
@@ -70,6 +72,7 @@ export function UserMenu() {
               color: 'var(--fg)', fontSize: 13, fontFamily: 'inherit',
               cursor: 'pointer', borderTop: '1px solid var(--line)',
             }}
+            data-testid="logout-button"
           >
             {t('btnLogout')}
           </button>

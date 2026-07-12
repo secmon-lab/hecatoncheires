@@ -32,17 +32,15 @@ export class KnowledgeListPage extends BasePage {
   }
 
   /**
-   * Type into the search box (debounced server-side substring search).
+   * Type into the search box (debounced server-side substring search) and
+   * wait until the debounced SearchKnowledge query actually returns, so the
+   * list reflects the filter before the caller asserts on it. Beats a fixed
+   * sleep: it neither races the 300ms debounce nor wastes idle time.
    */
   async search(text: string): Promise<void> {
+    const settled = this.waitForGraphQL('SearchKnowledge');
     await this.searchInput.fill(text);
-    // The list debounces input by 300ms before issuing the search query.
-    await this.page.waitForTimeout(450);
-  }
-
-  async clearSearch(): Promise<void> {
-    await this.searchInput.fill('');
-    await this.page.waitForTimeout(450);
+    await settled;
   }
 
   /**
@@ -74,9 +72,27 @@ export class KnowledgeListPage extends BasePage {
    * distinguishing them from the read-only card tag chips (spans).
    */
   async clickTagFilter(label: string): Promise<void> {
+    // Selecting a tag chip changes the tagIds variable, forcing a fresh
+    // GetKnowledges refetch; wait for that response rather than a fixed frame.
+    const settled = this.waitForGraphQL('GetKnowledges');
     await this.page.locator('button.chip').filter({ hasText: label }).first().click();
-    // Re-query is near-instant but give the list a frame to re-render.
-    await this.page.waitForTimeout(300)
+    await settled;
+  }
+
+  /**
+   * Resolve once a GraphQL response for the given operation returns 200.
+   * Register the returned promise before triggering the request so the
+   * debounced/async query cannot fire before we start listening.
+   */
+  private waitForGraphQL(operationName: string): Promise<unknown> {
+    return this.page.waitForResponse((resp) => {
+      if (!resp.url().includes('/graphql') || resp.status() !== 200) return false;
+      try {
+        return resp.request().postDataJSON()?.operationName === operationName;
+      } catch {
+        return false;
+      }
+    });
   }
 
   /**

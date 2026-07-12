@@ -108,6 +108,59 @@ export class ActionDetailPage extends BasePage {
     await expect(dropdown).toHaveValue(newStatus, { timeout: 5000 });
   }
 
+  // --- Action steps (checklist) ---
+
+  /** The step-list section within the action modal. */
+  stepList(): Locator {
+    return this.page.getByTestId('action-step-list');
+  }
+
+  /** A step row located by its title text. */
+  stepRowByTitle(title: string): Locator {
+    return this.stepList()
+      .locator('[data-testid^="action-step-row-"]')
+      .filter({ hasText: title });
+  }
+
+  /** The done/total progress pill text (e.g. "1/2"); empty when no steps. */
+  async getStepProgress(): Promise<string> {
+    const pill = this.stepList().getByTestId('action-step-progress');
+    if (!(await pill.count())) return '';
+    return (await pill.textContent()) || '';
+  }
+
+  /** Add a step through the inline add-row and wait for it to render. */
+  async addStep(title: string): Promise<void> {
+    await this.stepList().getByTestId('action-step-add-button').click();
+    const input = this.stepList().getByTestId('action-step-add-input');
+    await input.fill(title);
+    await input.press('Enter');
+    await expect(this.stepRowByTitle(title)).toBeVisible();
+  }
+
+  /** Toggle a step's done checkbox by its title. */
+  async toggleStep(title: string): Promise<void> {
+    await this.stepRowByTitle(title)
+      .locator('[data-testid^="action-step-checkbox-"]')
+      .click();
+  }
+
+  /** Whether the step with the given title is marked done. */
+  async isStepDone(title: string): Promise<boolean> {
+    const checked = await this.stepRowByTitle(title)
+      .locator('[data-testid^="action-step-checkbox-"]')
+      .getAttribute('aria-checked');
+    return checked === 'true';
+  }
+
+  /** Delete a step by its title (hover reveals the row's delete control). */
+  async deleteStep(title: string): Promise<void> {
+    const row = this.stepRowByTitle(title);
+    await row.hover();
+    await row.locator('[data-testid^="action-step-delete-"]').click();
+    await expect(row).toHaveCount(0);
+  }
+
   /**
    * Close the modal by clicking the close button
    */

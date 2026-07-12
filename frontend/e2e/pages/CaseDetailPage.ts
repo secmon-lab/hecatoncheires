@@ -218,6 +218,19 @@ export class CaseDetailPage extends BasePage {
   }
 
   /**
+   * Machine-readable (ISO 8601) Created timestamp from the `data-ts` attribute.
+   * Parsing this is locale-independent, unlike the localized display text.
+   */
+  async getCreatedTimestampISO(): Promise<string> {
+    return (await this.page.getByTestId('created-timestamp-value').getAttribute('data-ts')) || '';
+  }
+
+  /** Machine-readable (ISO 8601) Updated timestamp from the `data-ts` attribute. */
+  async getUpdatedTimestampISO(): Promise<string> {
+    return (await this.page.getByTestId('updated-timestamp-value').getAttribute('data-ts')) || '';
+  }
+
+  /**
    * Check if the empty action state is visible
    */
   async isEmptyActionStateVisible(): Promise<boolean> {
@@ -337,11 +350,19 @@ export class CaseDetailPage extends BasePage {
   }
 
   /**
+   * Locator matching every rendered member row. Returned as a Locator (not a
+   * count) so callers can use auto-retrying `expect(...).toHaveCount(n)` and
+   * avoid racing the debounced member filter.
+   */
+  memberItems(): Locator {
+    return this.page.getByTestId('channel-members-section').locator('[class*="memberItem"]');
+  }
+
+  /**
    * Get the number of member items currently displayed
    */
   async getMemberCount(): Promise<number> {
-    const section = this.page.getByTestId('channel-members-section');
-    const members = await section.locator('[class*="memberItem"]').all();
+    const members = await this.memberItems().all();
     return members.length;
   }
 
