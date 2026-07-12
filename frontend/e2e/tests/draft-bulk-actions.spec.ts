@@ -169,8 +169,11 @@ test.describe('Bulk draft actions (Drafts tab)', () => {
     await page.getByTestId('bulk-result-close-button').click();
 
     // Ground truth: the promoted case now lives on the Open tab and is gone
-    // from the Drafts tab. Scope by the unique title via the search filter so
-    // the client-side 20-row pagination can't hide it behind other tests' data.
+    // from the Drafts tab. Reload first so the tab lists are read fresh from
+    // the backend — Apollo's cache-first policy would otherwise serve an
+    // Open-tab list captured before the promotion. Scope by the unique title
+    // so the client-side 20-row pagination can't hide it behind other data.
+    await page.reload();
     await caseListPage.waitForTableLoad();
     await caseListPage.clickStatusTab('Open');
     await caseListPage.fillSearchFilter(draftTitle);
