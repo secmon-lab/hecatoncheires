@@ -6,17 +6,34 @@ import { CaseListPage } from '../pages/CaseListPage';
 import { CaseFormPage } from '../pages/CaseFormPage';
 import { TEST_WORKSPACE_ID } from '../fixtures/testData';
 
+// Unique suffix per created entity. The e2e backend is a single in-memory
+// process shared across all workers with no per-test reset, and the suite
+// runs fullyParallel — so generic reused titles (the old 'Parent Case for
+// Actions', 'Action 1'…) collided across concurrent tests and produced flaky
+// board/card lookups. Every title below is made unique so each test only ever
+// matches its own data.
+function uniq(): string {
+  return `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+}
+
 test.describe('Action Management', () => {
+  // Each test gets its own parent case; set in beforeEach and read by the test
+  // that immediately follows it (Playwright runs beforeEach + its test back to
+  // back on one worker, so this module-scoped handoff is race-free).
+  let parentCaseTitle: string;
+
   test.beforeEach(async ({ page }) => {
     // Create a test case first (Actions require a parent case)
     const caseListPage = new CaseListPage(page);
     const caseFormPage = new CaseFormPage(page);
 
+    parentCaseTitle = `Parent Case ${uniq()}`;
+
     await caseListPage.navigate(TEST_WORKSPACE_ID);
     await caseListPage.waitForTableLoad();
     await caseListPage.clickNewCaseButton();
     await caseFormPage.createCase({
-      title: 'Parent Case for Actions',
+      title: parentCaseTitle,
       description: 'Case to hold test actions',
       customFields: {
         category: 'task',
@@ -47,22 +64,23 @@ test.describe('Action Management', () => {
   test('should create a new action and show it on kanban', async ({ page }) => {
     const actionListPage = new ActionListPage(page);
     const actionFormPage = new ActionFormPage(page);
+    const title = `E2E Test Action ${uniq()}`;
 
     // Click "New Action" button
     await actionListPage.clickNewActionButton();
 
     // Fill in the form
     await actionFormPage.createAction({
-      title: 'E2E Test Action',
+      title,
       description: 'This is a test action created by Playwright',
-      caseTitle: 'Parent Case for Actions',
+      caseTitle: parentCaseTitle,
     });
 
     // Wait for board to update
     await actionListPage.waitForBoardLoad();
 
     // Verify the action appears on the kanban board
-    const exists = await actionListPage.actionExists('E2E Test Action');
+    const exists = await actionListPage.actionExists(title);
     expect(exists).toBeTruthy();
   });
 
@@ -70,42 +88,47 @@ test.describe('Action Management', () => {
     const actionListPage = new ActionListPage(page);
     const actionFormPage = new ActionFormPage(page);
     const actionDetailPage = new ActionDetailPage(page);
+    const title = `Action for Modal View ${uniq()}`;
 
     // Create a test action first
     await actionListPage.clickNewActionButton();
     await actionFormPage.createAction({
-      title: 'Action for Modal View',
+      title,
       description: 'Testing action modal view',
-      caseTitle: 'Parent Case for Actions',
+      caseTitle: parentCaseTitle,
     });
 
     // Wait for board to update
     await actionListPage.waitForBoardLoad();
 
     // Click on the action card to open modal
-    await actionListPage.clickActionByTitle('Action for Modal View');
+    await actionListPage.clickActionByTitle(title);
 
     // Verify modal is loaded
     const isLoaded = await actionDetailPage.isPageLoaded();
     expect(isLoaded).toBeTruthy();
 
     // Verify the title matches
-    const title = await actionDetailPage.getTitle();
-    expect(title).toContain('Action for Modal View');
+    const modalTitle = await actionDetailPage.getTitle();
+    expect(modalTitle).toContain(title);
   });
 
   test('should list multiple actions on kanban', async ({ page }) => {
     const actionListPage = new ActionListPage(page);
     const actionFormPage = new ActionFormPage(page);
+    const run = uniq();
 
     // Create multiple actions
     const actionCount = 3;
+    const titles: string[] = [];
     for (let i = 1; i <= actionCount; i++) {
+      const title = `Action ${i} ${run}`;
+      titles.push(title);
       await actionListPage.clickNewActionButton();
       await actionFormPage.createAction({
-        title: `Action ${i}`,
+        title,
         description: `Description for action ${i}`,
-        caseTitle: 'Parent Case for Actions',
+        caseTitle: parentCaseTitle,
       });
     }
 
@@ -114,8 +137,8 @@ test.describe('Action Management', () => {
     await actionListPage.waitForBoardLoad();
 
     // Verify all actions are listed
-    for (let i = 1; i <= actionCount; i++) {
-      const exists = await actionListPage.actionExists(`Action ${i}`);
+    for (const title of titles) {
+      const exists = await actionListPage.actionExists(title);
       expect(exists).toBeTruthy();
     }
   });
@@ -123,21 +146,22 @@ test.describe('Action Management', () => {
   test('should create an action without description', async ({ page }) => {
     const actionListPage = new ActionListPage(page);
     const actionFormPage = new ActionFormPage(page);
+    const title = `Action Without Description ${uniq()}`;
 
     // Click "New Action" button
     await actionListPage.clickNewActionButton();
 
     // Create action with title only (no description)
     await actionFormPage.createAction({
-      title: 'Action Without Description',
-      caseTitle: 'Parent Case for Actions',
+      title,
+      caseTitle: parentCaseTitle,
     });
 
     // Wait for board to update
     await actionListPage.waitForBoardLoad();
 
     // Verify the action appears on the kanban board
-    const exists = await actionListPage.actionExists('Action Without Description');
+    const exists = await actionListPage.actionExists(title);
     expect(exists).toBeTruthy();
   });
 
@@ -145,17 +169,18 @@ test.describe('Action Management', () => {
     const actionListPage = new ActionListPage(page);
     const actionFormPage = new ActionFormPage(page);
     const actionDetailPage = new ActionDetailPage(page);
+    const title = `Action for Status Change ${uniq()}`;
 
     // Create an action
     await actionListPage.clickNewActionButton();
     await actionFormPage.createAction({
-      title: 'Action for Status Change',
+      title,
       description: 'Testing inline status change',
-      caseTitle: 'Parent Case for Actions',
+      caseTitle: parentCaseTitle,
     });
 
     await actionListPage.waitForBoardLoad();
-    await actionListPage.clickActionByTitle('Action for Status Change');
+    await actionListPage.clickActionByTitle(title);
     await actionDetailPage.waitForPageLoad();
 
     // Verify initial status is BACKLOG
@@ -180,17 +205,18 @@ test.describe('Action Management', () => {
     const actionListPage = new ActionListPage(page);
     const actionFormPage = new ActionFormPage(page);
     const actionDetailPage = new ActionDetailPage(page);
+    const title = `Action to Complete ${uniq()}`;
 
     // Create an action
     await actionListPage.clickNewActionButton();
     await actionFormPage.createAction({
-      title: 'Action to Complete',
+      title,
       description: 'Testing completion',
-      caseTitle: 'Parent Case for Actions',
+      caseTitle: parentCaseTitle,
     });
 
     await actionListPage.waitForBoardLoad();
-    await actionListPage.clickActionByTitle('Action to Complete');
+    await actionListPage.clickActionByTitle(title);
     await actionDetailPage.waitForPageLoad();
 
     // Change status to COMPLETED
@@ -211,13 +237,16 @@ test.describe('Action Management', () => {
     const actionListPage = new ActionListPage(page);
     const actionFormPage = new ActionFormPage(page);
     const actionDetailPage = new ActionDetailPage(page);
+    const run = uniq();
+    const alpha = `Done Alpha ${run}`;
+    const beta = `Done Beta ${run}`;
 
     // Create two actions and move both into the Completed column.
-    for (const title of ['Done Alpha', 'Done Beta']) {
+    for (const title of [alpha, beta]) {
       await actionListPage.clickNewActionButton();
       await actionFormPage.createAction({
         title,
-        caseTitle: 'Parent Case for Actions',
+        caseTitle: parentCaseTitle,
       });
       await actionListPage.waitForBoardLoad();
       await actionListPage.clickActionByTitle(title);
@@ -229,8 +258,8 @@ test.describe('Action Management', () => {
     }
 
     // Both completed actions are on the board.
-    await expect(actionListPage.getActionCardByTitle('Done Alpha')).toBeVisible();
-    await expect(actionListPage.getActionCardByTitle('Done Beta')).toBeVisible();
+    await expect(actionListPage.getActionCardByTitle(alpha)).toBeVisible();
+    await expect(actionListPage.getActionCardByTitle(beta)).toBeVisible();
 
     // The bulk-archive menu is exposed only on the completed (closed) column.
     expect(await actionListPage.isColumnMenuVisible('Completed')).toBeTruthy();
@@ -241,58 +270,63 @@ test.describe('Action Management', () => {
     await actionListPage.archiveAllInColumn('Completed');
 
     // Both completed actions disappear from the board.
-    await expect(actionListPage.getActionCardByTitle('Done Alpha')).toBeHidden();
-    await expect(actionListPage.getActionCardByTitle('Done Beta')).toBeHidden();
+    await expect(actionListPage.getActionCardByTitle(alpha)).toBeHidden();
+    await expect(actionListPage.getActionCardByTitle(beta)).toBeHidden();
 
     // The archive round-trips to the backend: still gone after a reload.
     await page.reload();
     await actionListPage.waitForBoardLoad();
-    await expect(actionListPage.getActionCardByTitle('Done Alpha')).toBeHidden();
-    await expect(actionListPage.getActionCardByTitle('Done Beta')).toBeHidden();
+    await expect(actionListPage.getActionCardByTitle(alpha)).toBeHidden();
+    await expect(actionListPage.getActionCardByTitle(beta)).toBeHidden();
   });
 
-  test('should not show the bulk archive menu on open columns', async ({ page }) => {
+  test('bulk archive menu appears only on the Completed column', async ({ page }) => {
     const actionListPage = new ActionListPage(page);
 
-    // On a freshly loaded board, only the Completed column carries the menu.
+    // The bulk-archive control is a property of the closed/Completed column
+    // alone; the open columns never carry it. We deliberately do NOT assert
+    // "the archive item is disabled because Completed is empty" — the board
+    // shows every action in the workspace, so on the shared in-memory backend
+    // another test's completed action could legitimately populate the column.
+    // The enabled path is covered by the bulk-archive test above, which owns
+    // the completed cards it reasons about.
     expect(await actionListPage.isColumnMenuVisible('Completed')).toBeTruthy();
     expect(await actionListPage.isColumnMenuVisible('Backlog')).toBeFalsy();
     expect(await actionListPage.isColumnMenuVisible('To Do')).toBeFalsy();
     expect(await actionListPage.isColumnMenuVisible('In Progress')).toBeFalsy();
     expect(await actionListPage.isColumnMenuVisible('Blocked')).toBeFalsy();
-
-    // With no completed actions, the archive item is disabled.
-    await actionListPage.openColumnMenu('Completed');
-    expect(await actionListPage.isArchiveAllEnabled('Completed')).toBeFalsy();
   });
 
   test('should filter actions by search text', async ({ page }) => {
     const actionListPage = new ActionListPage(page);
     const actionFormPage = new ActionFormPage(page);
+    const run = uniq();
+    const alpha = `Alpha Task ${run}`;
+    const beta = `Beta Task ${run}`;
 
     // Create actions with distinct names
     await actionListPage.clickNewActionButton();
     await actionFormPage.createAction({
-      title: 'Alpha Task',
-      caseTitle: 'Parent Case for Actions',
+      title: alpha,
+      caseTitle: parentCaseTitle,
     });
 
     await actionListPage.clickNewActionButton();
     await actionFormPage.createAction({
-      title: 'Beta Task',
-      caseTitle: 'Parent Case for Actions',
+      title: beta,
+      caseTitle: parentCaseTitle,
     });
 
     await actionListPage.waitForBoardLoad();
 
-    // Search for "Alpha" — wait for Beta to disappear as filter confirmation
-    await actionListPage.searchActions('Alpha');
-    await expect(actionListPage.getActionCardByTitle('Beta Task')).toBeHidden();
-    await expect(actionListPage.getActionCardByTitle('Alpha Task')).toBeVisible();
+    // Search for the alpha action — wait for beta to disappear as filter confirmation
+    await actionListPage.searchActions(alpha);
+    await expect(actionListPage.getActionCardByTitle(beta)).toBeHidden();
+    await expect(actionListPage.getActionCardByTitle(alpha)).toBeVisible();
 
     // Clear filter and verify both appear
     await actionListPage.clearFilters();
-    await expect(actionListPage.getActionCardByTitle('Alpha Task')).toBeVisible();
-    await expect(actionListPage.getActionCardByTitle('Beta Task')).toBeVisible();
+    await expect(actionListPage.getActionCardByTitle(alpha)).toBeVisible();
+    await expect(actionListPage.getActionCardByTitle(beta)).toBeVisible();
   });
 });

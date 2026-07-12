@@ -337,11 +337,19 @@ export class CaseDetailPage extends BasePage {
   }
 
   /**
+   * Locator matching every rendered member row. Returned as a Locator (not a
+   * count) so callers can use auto-retrying `expect(...).toHaveCount(n)` and
+   * avoid racing the debounced member filter.
+   */
+  memberItems(): Locator {
+    return this.page.getByTestId('channel-members-section').locator('[class*="memberItem"]');
+  }
+
+  /**
    * Get the number of member items currently displayed
    */
   async getMemberCount(): Promise<number> {
-    const section = this.page.getByTestId('channel-members-section');
-    const members = await section.locator('[class*="memberItem"]').all();
+    const members = await this.memberItems().all();
     return members.length;
   }
 

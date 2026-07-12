@@ -68,6 +68,7 @@ export default function CaseDeleteDialog({
           placeholder={caseTitle}
           value={confirmText}
           onChange={(e) => setConfirmText(e.target.value)}
+          data-testid="delete-case-confirm-input"
         />
       </div>
     </Modal>

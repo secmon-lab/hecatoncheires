@@ -21,10 +21,17 @@ async function createDraft(
   caseListPage: CaseListPage,
   caseFormPage: CaseFormPage,
   title: string,
+  // When set, fills the required `category` custom field so the resulting
+  // draft is actually promotable via bulk submit. Omit to create the usual
+  // half-written draft (missing required fields).
+  category?: string,
 ): Promise<void> {
   await caseListPage.clickNewCaseButton();
   await caseFormPage.waitForFormVisible();
   await caseFormPage.fillTitle(title);
+  if (category) {
+    await caseFormPage.fillCustomField('category', category);
+  }
   await caseFormPage.clickSaveAsDraft();
   await page.waitForURL(new RegExp(`/ws/${TEST_WORKSPACE_ID}/cases$`));
   await caseListPage.waitForTableLoad();
@@ -55,23 +62,34 @@ test.describe('Bulk draft actions (Drafts tab)', () => {
     const caseFormPage = new CaseFormPage(page);
 
     const tag = Date.now();
-    await createDraft(page, caseListPage, caseFormPage, `bulk-select-all-A ${tag}`);
-    await createDraft(page, caseListPage, caseFormPage, `bulk-select-all-B ${tag}`);
+    const titleA = `bulk-select-all-A ${tag}`;
+    const titleB = `bulk-select-all-B ${tag}`;
+    await createDraft(page, caseListPage, caseFormPage, titleA);
+    await createDraft(page, caseListPage, caseFormPage, titleB);
 
     await caseListPage.clickStatusTab('Draft');
     // Bulk bar starts hidden.
     await expect(page.getByTestId('bulk-selection-bar')).toHaveCount(0);
 
-    // Header checkbox selects every accessible draft on the current
-    // filter — at minimum the two we just created.
+    const boxA = caseListPage.getCaseRowByTitle(titleA).locator('input[type="checkbox"]');
+    const boxB = caseListPage.getCaseRowByTitle(titleB).locator('input[type="checkbox"]');
+    await expect(boxA).not.toBeChecked();
+    await expect(boxB).not.toBeChecked();
+
+    // Header checkbox selects every accessible draft on the current filter.
+    // The exact count is workspace-wide (other tests' drafts share the tab),
+    // but our two rows specifically must flip to checked — that is what
+    // select-all is supposed to do.
     await page.getByTestId('bulk-header-checkbox').check();
     await expect(page.getByTestId('bulk-selection-bar')).toBeVisible();
-    const countText = await page.getByTestId('bulk-selected-count').textContent();
-    expect(countText).toMatch(/\d+/);
+    await expect(boxA).toBeChecked();
+    await expect(boxB).toBeChecked();
 
-    // Clear collapses the bar again.
+    // Clear collapses the bar again and unchecks our rows.
     await page.getByTestId('bulk-clear-button').click();
     await expect(page.getByTestId('bulk-selection-bar')).toHaveCount(0);
+    await expect(boxA).not.toBeChecked();
+    await expect(boxB).not.toBeChecked();
   });
 
   test('bulk delete shows the confirm dialog; cancel does not delete', async ({ page }) => {
@@ -126,25 +144,40 @@ test.describe('Bulk draft actions (Drafts tab)', () => {
     expect(await caseListPage.caseExists(t2)).toBeFalsy();
   });
 
-  test('bulk submit promotes the selected drafts and reports the outcome', async ({ page }) => {
+  test('bulk submit promotes the selected drafts to OPEN', async ({ page }) => {
     const caseListPage = new CaseListPage(page);
     const caseFormPage = new CaseFormPage(page);
 
     const tag = Date.now();
     const draftTitle = `bulk-submit ${tag}`;
-    await createDraft(page, caseListPage, caseFormPage, draftTitle);
+    // Fill the required `category` so the draft is genuinely promotable —
+    // otherwise SubmitDraft would fail validation and the assertion below
+    // could not distinguish a working feature from a broken one.
+    await createDraft(page, caseListPage, caseFormPage, draftTitle, 'bug');
 
     await caseListPage.clickStatusTab('Draft');
     await caseListPage.getCaseRowByTitle(draftTitle).locator('input[type="checkbox"]').check();
     await page.getByTestId('bulk-submit-button').click();
 
-    // Either success (case promoted) or failure (e.g. missing required
-    // fields in this workspace's schema). Both surface via the result
-    // dialog; failing drafts stay on the Drafts tab.
+    // The result dialog must report exactly one success and no failures.
     await expect(page.getByTestId('bulk-result-dialog-body')).toBeVisible();
-    await expect(page.getByTestId('bulk-result-summary')).toBeVisible();
+    await expect(page.getByTestId('bulk-result-summary')).toContainText('1');
+    const successList = page.getByTestId('bulk-result-success-list');
+    await expect(successList).toBeVisible();
+    await expect(successList.getByText(draftTitle)).toBeVisible();
+    await expect(page.getByTestId('bulk-result-failure-list')).toHaveCount(0);
     await page.getByTestId('bulk-result-close-button').click();
 
+    // Ground truth: the promoted case now lives on the Open tab and is gone
+    // from the Drafts tab. Scope by the unique title via the search filter so
+    // the client-side 20-row pagination can't hide it behind other tests' data.
     await caseListPage.waitForTableLoad();
+    await caseListPage.clickStatusTab('Open');
+    await caseListPage.fillSearchFilter(draftTitle);
+    expect(await caseListPage.caseExists(draftTitle)).toBeTruthy();
+
+    await caseListPage.clickStatusTab('Draft');
+    await caseListPage.fillSearchFilter(draftTitle);
+    expect(await caseListPage.caseExists(draftTitle)).toBeFalsy();
   });
 });

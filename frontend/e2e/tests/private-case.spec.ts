@@ -11,6 +11,43 @@ test.describe('Private Case Mode', () => {
     await caseListPage.waitForTableLoad();
   });
 
+  // Real end-to-end access control: no page.route mocking. A UI-created
+  // private case has no synced Slack channel members in the e2e environment,
+  // so its ChannelUserIDs is empty and the no-auth user is not a member — the
+  // backend genuinely restricts it. This is the one test that drives the
+  // actual access-control code path; the mocked tests below only verify the
+  // frontend's rendering of fabricated access-denied / private payloads.
+  test('a UI-created private case is genuinely access-restricted (no mocking)', async ({ page }) => {
+    const caseListPage = new CaseListPage(page);
+    const caseFormPage = new CaseFormPage(page);
+
+    await caseListPage.clickNewCaseButton();
+    await caseFormPage.createCase({
+      title: `Real Private ${Date.now()}`,
+      description: 'genuinely private, no channel members synced',
+      customFields: { category: 'bug' },
+      isPrivate: true,
+    });
+    await caseListPage.waitForTableLoad();
+
+    // The list renders it as an access-denied "Private" row (the title is
+    // withheld by the backend's RestrictCase, so we key off the label).
+    const label = page.getByTestId('access-denied-label').first();
+    await expect(label).toBeVisible();
+    await expect(label).toHaveText('Private');
+    await expect(page.getByTestId('private-lock-icon').first()).toBeVisible();
+
+    // Clicking the restricted row must not open a detail page.
+    const urlBefore = page.url();
+    await label.click();
+    const navigated = await page
+      .waitForURL(/\/cases\/\d+/, { timeout: 1500 })
+      .then(() => true)
+      .catch(() => false);
+    expect(navigated).toBeFalsy();
+    expect(page.url()).toBe(urlBefore);
+  });
+
   test('should display "Private" label for access-denied cases in case list', async ({
     page,
   }) => {
@@ -103,10 +140,14 @@ test.describe('Private Case Mode', () => {
     const row = page.getByTestId('access-denied-label').first();
     await row.click();
 
-    // Wait a moment to ensure no navigation occurs
-    await page.waitForTimeout(500);
-
-    // URL should not have changed
+    // Prove no navigation to a case-detail URL happens: wait for one and
+    // expect the wait to time out. Resolves early (and fails) if the row
+    // wrongly navigates — unlike a blind fixed sleep.
+    const navigated = await page
+      .waitForURL(/\/cases\/\d+/, { timeout: 1500 })
+      .then(() => true)
+      .catch(() => false);
+    expect(navigated).toBeFalsy();
     expect(page.url()).toBe(urlBefore);
   });
 
@@ -422,18 +463,12 @@ test.describe('Private Case Mode', () => {
     await caseDetailPage.waitForPageLoad();
 
     // Verify all 3 members initially
-    const initialCount = await caseDetailPage.getMemberCount();
-    expect(initialCount).toBe(3);
+    await expect(caseDetailPage.memberItems()).toHaveCount(3);
 
-    // Filter by "alice"
+    // Filter by "alice" — the debounced re-render settles via auto-retry,
+    // no fixed sleep needed.
     await caseDetailPage.filterMembers('Alice');
-
-    // Wait for debounced filter and re-render
-    await page.waitForTimeout(500);
-
-    // Should show only Alice
-    const filteredCount = await caseDetailPage.getMemberCount();
-    expect(filteredCount).toBe(1);
+    await expect(caseDetailPage.memberItems()).toHaveCount(1);
   });
 
   test('should not show channel members section when count is 0', async ({

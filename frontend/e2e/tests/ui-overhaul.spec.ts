@@ -1,19 +1,10 @@
-import { test, expect, Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import { CaseListPage } from '../pages/CaseListPage';
 import { CaseFormPage } from '../pages/CaseFormPage';
 import { CaseDetailPage } from '../pages/CaseDetailPage';
 import { ActionListPage } from '../pages/ActionListPage';
 import { ActionFormPage } from '../pages/ActionFormPage';
 import { TEST_WORKSPACE_ID } from '../fixtures/testData';
-
-// Helpers
-async function pickReactSelectOption(page: Page, selectInputId: string, optionText: string | RegExp) {
-  const input = page.locator(`#${selectInputId}`);
-  await input.click();
-  const opt = page.locator('.rs__option').filter({ hasText: optionText }).first();
-  await opt.waitFor({ state: 'visible', timeout: 3000 });
-  await opt.click();
-}
 
 test.describe('UI overhaul regressions', () => {
   test('root path always shows the workspace selector', async ({ page }) => {
@@ -119,40 +110,6 @@ test.describe('UI overhaul regressions', () => {
     await actionListPage.searchActions('DnD Action');
     expect(await actionListPage.getColumnCount('Backlog')).toBe(0);
     expect(await actionListPage.getColumnCount('In Progress')).toBe(1);
-  });
-
-  // The redesigned CaseDetail no longer exposes an inline react-select for
-  // custom fields (FieldDisplay is read-only; edits go through the modal),
-  // so this regression guard needs a different driving mechanism. Skipping
-  // until the inline-edit flow is reintroduced or the test is rewritten to
-  // exercise the sanitize path via the edit modal.
-  test.skip('CaseDetail: Save still succeeds when stored option ID is no longer in config', async ({ page }) => {
-    const caseListPage = new CaseListPage(page);
-    const caseFormPage = new CaseFormPage(page);
-    const caseDetailPage = new CaseDetailPage(page);
-
-    await caseListPage.navigate(TEST_WORKSPACE_ID);
-    await caseListPage.waitForTableLoad();
-    await caseListPage.clickNewCaseButton();
-    await caseFormPage.createCase({
-      title: 'Save Sanitize Case',
-      customFields: { category: 'bug' },
-    });
-
-    await caseListPage.waitForTableLoad();
-    await caseListPage.fillSearchFilter('Save Sanitize Case');
-    await caseListPage.clickCaseByTitle('Save Sanitize Case');
-    await caseDetailPage.waitForPageLoad();
-
-    // Inject a stored field whose option does not exist in config by faking
-    // a mutation directly is overkill — instead exercise the sanitize path by
-    // re-saving via the inline editor: the request must succeed (status 200).
-    const responsePromise = page.waitForResponse(
-      (r) => r.url().includes('/graphql') && r.request().method() === 'POST'
-    );
-    await pickReactSelectOption(page, 'category', 'Feature');
-    const resp = await responsePromise;
-    expect(resp.status()).toBe(200);
   });
 
   test('react-select dropdowns are not clipped by the modal (use portal)', async ({ page }) => {

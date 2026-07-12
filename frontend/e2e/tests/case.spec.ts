@@ -398,11 +398,16 @@ test.describe('Case Management', () => {
     const caseListPage = new CaseListPage(page);
     const caseFormPage = new CaseFormPage(page);
 
+    // Unique prefix so the exact-count assertions below survive a retry or a
+    // parallel worker: a generic "Paginated Case" filter would match a
+    // previous attempt's 21 rows too and break the "1 / 2" / 20-row math.
+    const prefix = `Paginated-${Date.now()}`;
+
     // Create 21 cases to trigger pagination
     for (let i = 1; i <= 21; i++) {
       await caseListPage.clickNewCaseButton();
       await caseFormPage.createCase({
-        title: `Paginated Case ${i}`,
+        title: `${prefix} ${i}`,
         customFields: { category: 'task' },
       });
     }
@@ -411,7 +416,7 @@ test.describe('Case Management', () => {
     await caseListPage.waitForTableLoad();
 
     // Filter to only show cases from this test to avoid interference
-    await caseListPage.fillSearchFilter('Paginated Case');
+    await caseListPage.fillSearchFilter(prefix);
 
     // Verify first page has 20 rows
     const rowCount = await caseListPage.getRowCount();
@@ -492,13 +497,23 @@ test.describe('Case Management', () => {
     const timestampsVisible = await caseDetailPage.isTimestampsVisible();
     expect(timestampsVisible).toBeTruthy();
 
-    // Verify Created timestamp is non-empty
-    const createdTimestamp = await caseDetailPage.getCreatedTimestamp();
-    expect(createdTimestamp.length).toBeGreaterThan(0);
+    // The case was just created, so both timestamps must render a real,
+    // recent datetime — not the "—" placeholder shown for a missing/invalid
+    // value, and not some stale/epoch value. Assert they parse and fall
+    // within the last 10 minutes.
+    const RECENT_MS = 10 * 60 * 1000;
 
-    // Verify Updated timestamp is non-empty
+    const createdTimestamp = await caseDetailPage.getCreatedTimestamp();
+    expect(createdTimestamp).not.toBe('—');
+    const createdMs = Date.parse(createdTimestamp);
+    expect(Number.isNaN(createdMs)).toBeFalsy();
+    expect(Math.abs(Date.now() - createdMs)).toBeLessThan(RECENT_MS);
+
     const updatedTimestamp = await caseDetailPage.getUpdatedTimestamp();
-    expect(updatedTimestamp.length).toBeGreaterThan(0);
+    expect(updatedTimestamp).not.toBe('—');
+    const updatedMs = Date.parse(updatedTimestamp);
+    expect(Number.isNaN(updatedMs)).toBeFalsy();
+    expect(Math.abs(Date.now() - updatedMs)).toBeLessThan(RECENT_MS);
   });
 
   test('should display Fields section on case detail page', async ({ page }) => {
