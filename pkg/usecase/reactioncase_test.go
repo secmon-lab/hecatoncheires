@@ -98,12 +98,27 @@ func countPostsTo(slackMock *agentTestSlackService, channelID string) int {
 }
 
 func TestReactionCreateContextPrompt(t *testing.T) {
-	out := usecase.RenderReactionCreateInstructionForTest(context.Background(), "1700000000.000100")
-	// The anchor timestamp is interpolated and the core guidance is present.
+	const permalink = "https://slack.example/archives/C1/p1700000000000100"
+
+	// With a permalink: the anchor timestamp is interpolated, the anchor-centric
+	// guidance is present, the surrounding thread is framed as context, and the
+	// permalink is carried into the description instruction.
+	out := usecase.RenderReactionCreateInstructionForTest(context.Background(), "1700000000.000100", permalink)
 	gt.String(t, out).Contains("1700000000.000100")
-	gt.String(t, out).Contains("BEFORE")
-	gt.String(t, out).Contains("AFTER")
+	gt.String(t, out).Contains("CENTER")
 	gt.String(t, out).Contains("anchor")
+	gt.String(t, out).Contains("CONTEXT")
+	gt.String(t, out).Contains(permalink)
+	gt.String(t, out).Contains("points back to its source")
+
+	// Without a permalink: the {{ if .Permalink }} branch is skipped, so no Slack
+	// link instruction is emitted, but the prompt stays well-formed (anchor ts and
+	// anchor-centric guidance still present).
+	noLink := usecase.RenderReactionCreateInstructionForTest(context.Background(), "1700000000.000100", "")
+	gt.String(t, noLink).Contains("1700000000.000100")
+	gt.String(t, noLink).Contains("CENTER")
+	gt.Bool(t, strings.Contains(noLink, "points back to its source")).False()
+	gt.Bool(t, strings.Contains(noLink, "Slack link")).False()
 }
 
 func TestNormalizeReactionName(t *testing.T) {
@@ -156,7 +171,7 @@ func TestReaction_BotLoopGuards_NoOp(t *testing.T) {
 // B1: a reaction inside the monitored channel turns the reacted message's thread
 // into a case directly (same-channel path), with the reactor as reporter.
 func TestReaction_SameChannel_CreatesCase(t *testing.T) {
-	slackUC, _, repo, _ := newReactionSetup(t, newScriptedClient(createDecisionScripts()))
+	slackUC, _, repo, slackMock := newReactionSetup(t, newScriptedClient(createDecisionScripts()))
 	ctx := context.Background()
 
 	ev := reactionEvent("incident", "U-REACTOR", "U-AUTHOR", "C-MONITOR", "1700000000.000100")
@@ -171,6 +186,17 @@ func TestReaction_SameChannel_CreatesCase(t *testing.T) {
 	gt.Value(t, c.SlackThreadTS).Equal("1700000000.000100")
 	// Reporter is the person who reacted, not the message author.
 	gt.Value(t, c.ReporterID).Equal("U-REACTOR")
+
+	// The same-channel path now resolves the anchor's permalink so the create
+	// agent can keep the source link in the description; it must be requested for
+	// the reacted message (anchor), not the thread root synthesised elsewhere.
+	foundAnchorPermalink := false
+	for _, call := range slackMock.permalinkCalls {
+		if call.ChannelID == "C-MONITOR" && call.MessageTS == "1700000000.000100" {
+			foundAnchorPermalink = true
+		}
+	}
+	gt.Bool(t, foundAnchorPermalink).True()
 }
 
 // B3: reacting on a reply binds the case to the thread root (parent), not the

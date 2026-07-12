@@ -32,12 +32,18 @@ var reactionCreateContextTmpl = template.Must(
 	template.New("reaction_create_context").Parse(reactionCreateContextTmplText))
 
 // renderReactionCreateInstruction renders the ModeCreate trigger-context prompt
-// that tells the create agent to read the conversation around the anchored
-// message. Best-effort: an (unexpected) render failure degrades to no extra
-// instruction rather than failing the turn.
-func renderReactionCreateInstruction(ctx context.Context, anchorTS string) string {
+// that tells the create agent to treat the anchored message as the center of
+// the case and read the surrounding conversation to understand why its concern
+// was raised. When permalink is non-empty the prompt also asks the agent to keep
+// the anchor's Slack link in the description. Best-effort: an (unexpected) render
+// failure degrades to no extra instruction rather than failing the turn.
+func renderReactionCreateInstruction(ctx context.Context, anchorTS, permalink string) string {
 	var buf strings.Builder
-	if err := reactionCreateContextTmpl.Execute(&buf, struct{ AnchorTS string }{AnchorTS: anchorTS}); err != nil {
+	input := struct {
+		AnchorTS  string
+		Permalink string
+	}{AnchorTS: anchorTS, Permalink: permalink}
+	if err := reactionCreateContextTmpl.Execute(&buf, input); err != nil {
 		errutil.Handle(ctx, err, "reaction: render create instruction")
 		return ""
 	}
@@ -112,6 +118,7 @@ func (uc *AgentUseCase) reactionCreateSameChannel(ctx context.Context, entry *mo
 	wsID := entry.Workspace.ID
 
 	msgs, anchorTS, threadRoot := uc.fetchReactionContext(ctx, channelID, srcTS)
+	permalink := uc.slackPermalink(ctx, channelID, srcTS)
 
 	existing, err := uc.deps.Repo.Case().GetBySlackThread(ctx, wsID, channelID, threadRoot)
 	if err != nil {
@@ -125,7 +132,7 @@ func (uc *AgentUseCase) reactionCreateSameChannel(ctx context.Context, entry *mo
 	}
 
 	_, err = uc.runThreadCaseCreation(ctx, threadCreateReq(entry, channelID, threadRoot, reporter,
-		msgs, nil, "", "", threadRoot, renderReactionCreateInstruction(ctx, anchorTS)))
+		msgs, nil, "", "", threadRoot, renderReactionCreateInstruction(ctx, anchorTS, permalink)))
 	return err
 }
 
@@ -174,7 +181,7 @@ func (uc *AgentUseCase) reactionCreateCrossChannel(ctx context.Context, entry *m
 		reporter:          reporter,
 		systemMessages:    msgs,
 		triggerTS:         seedTS,
-		createInstruction: renderReactionCreateInstruction(ctx, anchorTS),
+		createInstruction: renderReactionCreateInstruction(ctx, anchorTS, permalink),
 	})
 	// Release the claim only on a hard failure with no pending question, so a
 	// future reaction can retry. A pending question (StatusQuestion) or a
