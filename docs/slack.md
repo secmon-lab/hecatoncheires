@@ -463,8 +463,12 @@ exactly one workspace. When the trigger emoji is added:
   discussion continues in the monitored-channel thread like any thread-mode Case.
 
 The person who added the reaction becomes the Case **reporter**. The
-initialization agent is instructed to read the conversation surrounding the
-reacted message (not just the single message) when composing the Case.
+initialization agent treats the reacted message as the **center** of the Case: it
+reads the surrounding conversation to understand *why* that message's problem,
+complaint, or unmet need was raised, but keeps the Case anchored to that concern
+rather than letting a tangential thread topic take over. When the reacted
+message's Slack link is available it is preserved in the Case description, so the
+Case always points back to its source.
 
 **Setup requirements for the reaction trigger:**
 

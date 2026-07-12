@@ -31,12 +31,18 @@ type agentTestSlackService struct {
 	getBotUserIDFn           func(ctx context.Context) (string, error)
 	postedMessages           []agentPostedMessage
 	updatedMessages          []agentUpdatedMessage
+	permalinkCalls           []agentPermalinkCall
 }
 
 type agentPostedMessage struct {
 	ChannelID string
 	ThreadTS  string
 	Text      string
+}
+
+type agentPermalinkCall struct {
+	ChannelID string
+	MessageTS string
 }
 
 type agentUpdatedMessage struct {
@@ -106,6 +112,7 @@ func (m *agentTestSlackService) PostEphemeralBlocks(_ context.Context, _ string,
 }
 
 func (m *agentTestSlackService) GetPermalink(_ context.Context, channelID string, ts string) (string, error) {
+	m.permalinkCalls = append(m.permalinkCalls, agentPermalinkCall{ChannelID: channelID, MessageTS: ts})
 	return "https://slack.test/" + channelID + "/" + ts, nil
 }
 
