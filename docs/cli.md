@@ -157,6 +157,8 @@ The `validate` command (alias: `v`) validates configuration files and optionally
 
 When `--check-db` is not specified, only the configuration files are validated and the DB consistency check is skipped.
 
+Configuration validation parses every Go `text/template` prompt the config supplies — each `[[job]]` `prompt` / `prompt_file` and every Slack `welcome_messages` entry — with the same template dialect the runtime renders with. A malformed template (an unbalanced `{{ ... }}` action, an unknown function) fails `validate` up-front instead of only erroring the first time the Job runs or a case is created. This is a parse check: it proves the template compiles, not that a specific field reference resolves against a live case (that is exercised at render time).
+
 ---
 
 ## `diagnosis`

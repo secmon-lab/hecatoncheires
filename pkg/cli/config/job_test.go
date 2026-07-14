@@ -593,3 +593,107 @@ events.case = { on = ["created"] }
 	gt.Value(t, configs[0].Jobs[0].ID).Equal("file_job")
 	gt.String(t, configs[0].Jobs[0].Prompt).Equal("do the thing: {{.Case.Title}}")
 }
+
+func TestJobSection_PromptTemplate(t *testing.T) {
+	parseJob := func(t *testing.T, src string) *config.JobSection {
+		t.Helper()
+		var app config.AppConfig
+		gt.NoError(t, toml.Unmarshal([]byte(src), &app)).Required()
+		gt.Array(t, app.Jobs).Length(1).Required()
+		return &app.Jobs[0]
+	}
+
+	t.Run("well-formed inline prompt template passes", func(t *testing.T) {
+		job := parseJob(t, `
+[[job]]
+id = "good_job"
+prompt = "Summarize {{ .Case.Title }} for {{ join .Case.AssigneeIDs \", \" }}"
+events.case = { on = ["created"] }
+`)
+		resolved, err := job.Validate("")
+		gt.NoError(t, err).Required()
+		gt.Value(t, resolved.ID).Equal("good_job")
+	})
+
+	t.Run("broken inline prompt template fails even in structural mode", func(t *testing.T) {
+		// baseDir == "" (structural pass) must still reject a broken inline
+		// template — the prompt is present, so there is nothing deferred.
+		job := parseJob(t, `
+[[job]]
+id = "broken_job"
+prompt = "Summarize {{ .Case.Title"
+events.case = { on = ["created"] }
+`)
+		_, err := job.Validate("")
+		gt.Error(t, err)
+	})
+
+	t.Run("unknown template function fails", func(t *testing.T) {
+		job := parseJob(t, `
+[[job]]
+id = "unknown_func_job"
+prompt = "{{ notARegisteredFunc .Case }}"
+events.case = { on = ["created"] }
+`)
+		_, err := job.Validate("")
+		gt.Error(t, err)
+	})
+
+	t.Run("broken template loaded from prompt_file fails", func(t *testing.T) {
+		dir := t.TempDir()
+		gt.NoError(t, os.WriteFile(filepath.Join(dir, "broken.md"),
+			[]byte("Summarize {{ .Case.Title"), 0600)).Required()
+		job := parseJob(t, `
+[[job]]
+id = "broken_file_job"
+prompt_file = "broken.md"
+events.case = { on = ["created"] }
+`)
+		_, err := job.Validate(dir)
+		gt.Error(t, err)
+	})
+
+	t.Run("broken inline template surfaces through LoadWorkspaceConfigs", func(t *testing.T) {
+		dir := t.TempDir()
+		const cfg = `
+[workspace]
+id = "ws-broken-tmpl"
+name = "Broken Template WS"
+
+[[job]]
+id = "broken_job"
+prompt = "Summarize {{ .Case.Title"
+events.case = { on = ["created"] }
+`
+		cfgPath := filepath.Join(dir, "config.toml")
+		gt.NoError(t, os.WriteFile(cfgPath, []byte(cfg), 0600)).Required()
+
+		_, err := config.LoadWorkspaceConfigs([]string{cfgPath})
+		gt.Error(t, err)
+	})
+
+	t.Run("broken prompt_file template surfaces through LoadWorkspaceConfigs", func(t *testing.T) {
+		// The full validate path (LoadWorkspaceConfigs → loadSingleWorkspaceConfig
+		// → resolveJobs(configDir)) reads prompt_file with a real baseDir, so a
+		// broken template in the referenced markdown must fail validation just
+		// like an inline one — not slip through to the first Job run.
+		dir := t.TempDir()
+		gt.NoError(t, os.WriteFile(filepath.Join(dir, "job.md"),
+			[]byte("Summarize {{ .Case.Title"), 0600)).Required()
+		const cfg = `
+[workspace]
+id = "ws-broken-file-tmpl"
+name = "Broken Template File WS"
+
+[[job]]
+id = "broken_file_job"
+prompt_file = "job.md"
+events.case = { on = ["created"] }
+`
+		cfgPath := filepath.Join(dir, "config.toml")
+		gt.NoError(t, os.WriteFile(cfgPath, []byte(cfg), 0600)).Required()
+
+		_, err := config.LoadWorkspaceConfigs([]string{cfgPath})
+		gt.Error(t, err)
+	})
+}
