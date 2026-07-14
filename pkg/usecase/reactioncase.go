@@ -81,8 +81,8 @@ func (uc *SlackUseCases) handleReactionEvent(ctx context.Context, event *slackev
 	}
 
 	// Self-loop guard: never react to our own reactions, nor to reactions placed
-	// on our own posts (a case summary, a seed root), which would otherwise nest
-	// a case inside a case.
+	// on our own posts (a case summary, a case root placeholder), which would
+	// otherwise nest a case inside a case.
 	if botUserID, err := uc.slackService.GetBotUserID(ctx); err == nil && botUserID != "" {
 		if ev.User == botUserID || ev.ItemUser == botUserID {
 			return nil
@@ -138,8 +138,9 @@ func (uc *AgentUseCase) reactionCreateSameChannel(ctx context.Context, entry *mo
 
 // reactionCreateCrossChannel handles a reaction placed on a message outside the
 // workspace's monitored channel (FR-2): it claims the source message (dedup),
-// posts a seed root in the monitored channel, and runs the creation dialog in
-// the reactor's source thread while binding the Case to the seed thread.
+// posts a placeholder root in the monitored channel (replaced in place by the
+// case summary on completion), and runs the creation dialog in the reactor's
+// source thread while binding the Case to the placeholder thread.
 func (uc *AgentUseCase) reactionCreateCrossChannel(ctx context.Context, entry *model.WorkspaceEntry, reporter, srcChannel, srcTS string) error {
 	if uc.threadcase == nil || uc.deps.CaseUC == nil || uc.deps.SlackService == nil || entry == nil {
 		return nil
@@ -160,35 +161,48 @@ func (uc *AgentUseCase) reactionCreateCrossChannel(ctx context.Context, entry *m
 	permalink := uc.slackPermalink(ctx, srcChannel, srcTS)
 
 	dest := entry.SlackMonitorChannelID
-	seedText := i18n.T(ctx, i18n.MsgReactionSeedRoot, reporter, permalink)
-	seedTS, perr := uc.deps.SlackService.PostMessage(ctx, dest, nil, seedText)
+	// A lightweight placeholder root anchors the case thread in the monitored
+	// channel; postCreatedCaseOutcome replaces it in place with the shared case
+	// summary. The flagged message's reporter and link are posted separately as
+	// an origin reply under that summary, not baked into this root.
+	placeholderText := i18n.T(ctx, i18n.MsgReactionCasePlaceholder)
+	rootTS, perr := uc.deps.SlackService.PostMessage(ctx, dest, nil, placeholderText)
 	if perr != nil {
 		uc.releaseReactionClaim(ctx, wsID, srcChannel, srcTS)
-		// The reactor pressed the emoji but the seed post failed — tell them in
-		// their own thread instead of leaving the reaction with no response. The
+		// The reactor pressed the emoji but the placeholder post failed — tell them
+		// in their own thread instead of leaving the reaction with no response. The
 		// Slack client attached the classification (e.g. not_in_channel) at the
 		// origin, so this renders the actionable "invite the bot" message.
-		uc.replyUserError(ctx, goerr.Wrap(perr, "reaction cross-channel: post seed root",
-			goerr.V("dest_channel", dest)), "reaction cross-channel: post seed root", srcChannel, uiRoot)
+		uc.replyUserError(ctx, goerr.Wrap(perr, "reaction cross-channel: post placeholder root",
+			goerr.V("dest_channel", dest)), "reaction cross-channel: post placeholder root", srcChannel, uiRoot)
 		return nil
 	}
 
 	st, _ := uc.runThreadCaseCreation(ctx, caseCreateReq{
 		entry:             entry,
 		caseChannel:       dest,
-		caseTS:            seedTS,
+		caseTS:            rootTS,
 		uiChannel:         srcChannel,
 		uiTS:              uiRoot,
 		reporter:          reporter,
 		systemMessages:    msgs,
-		triggerTS:         seedTS,
+		triggerTS:         rootTS,
 		createInstruction: renderReactionCreateInstruction(ctx, anchorTS, permalink),
+		sourceChannel:     srcChannel,
+		sourceTS:          srcTS,
 	})
 	// Release the claim only on a hard failure with no pending question, so a
 	// future reaction can retry. A pending question (StatusQuestion) or a
-	// committed case (StatusCompleted) keeps the claim.
+	// committed case (StatusCompleted) keeps the claim. On hard failure also
+	// replace the lingering "Creating a case…" placeholder with an honest failure
+	// note so the monitored channel does not imply work is still ongoing.
 	if st == threadcase.StatusFallback {
 		uc.releaseReactionClaim(ctx, wsID, srcChannel, srcTS)
+		if err := uc.deps.SlackService.UpdateMessage(ctx, dest, rootTS, nil,
+			"⚠️ "+i18n.T(ctx, i18n.MsgThreadCaseCreateFallback)); err != nil {
+			errutil.Handle(ctx, goerr.Wrap(err, "reaction cross-channel: update placeholder to fallback",
+				goerr.V("dest_channel", dest), goerr.V("root_ts", rootTS)), "reaction cross-channel: update placeholder to fallback")
+		}
 	}
 	return nil
 }

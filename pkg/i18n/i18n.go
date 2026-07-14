@@ -109,8 +109,10 @@ const (
 	MsgThreadCaseSummaryLink    // "<%s|Open in web UI>" (url)
 
 	// Reaction-triggered (cross-channel) case creation.
-	MsgReactionSeedRoot     // ":inbox_tray: <@%s> flagged a message for triage. Source: %s" (reporter user id, source permalink)
-	MsgReactionCaseBacklink // ":white_check_mark: Case created: <%s|Open in web UI> · <%s|View thread>" (case url, thread permalink)
+	MsgReactionCasePlaceholder  // "🔍 Creating a case…" — placeholder root posted before creation; replaced in place by the case summary
+	MsgReactionCaseOrigin       // "Reported by <@%s> · <%s|source message>" (reporter user id, source message permalink) — posted as a reply under the summary root
+	MsgReactionCaseOriginNoLink // "Reported by <@%s>" (reporter user id) — origin reply variant when the source permalink is unavailable
+	MsgReactionCaseBacklink     // ":white_check_mark: Case created: <%s|Open in web UI> · <%s|View thread>" (case url, thread permalink)
 
 	// Draft (open-mode) planner / sub-agent trace lines. These are rendered
 	// into the per-turn Slack progress message so the user can follow what

@@ -55,6 +55,14 @@ type Session struct {
 	CreatorUserID string
 	ProposalID    CaseProposalID
 
+	// Reaction-origin metadata — set only for a cross-channel reaction-triggered
+	// case creation, where the case root lives in the monitored channel but the
+	// flagged message lives elsewhere. Persisted so a later resume turn (after a
+	// question) can still link the exact source message. Zero for every other
+	// creation path.
+	ReactionSourceChannelID string
+	ReactionSourceMessageTS string
+
 	// Turn lock fields. Maintained by SessionRepository.AcquireTurnLock /
 	// Heartbeat / ReleaseTurnLock. Heartbeat staleness (TurnHeartbeatAt vs now)
 	// is the activity signal; TurnStartedAt is recorded for traces / UX only.

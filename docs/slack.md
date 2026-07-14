@@ -456,11 +456,15 @@ exactly one workspace. When the trigger emoji is added:
 - **Reaction inside the monitored channel** → the reacted message's thread
   becomes the Case thread directly (a reaction on a reply resolves to the thread
   root). If that thread is already a Case, the reaction is a no-op.
-- **Reaction in any other channel** → the bot posts a seed message in the
-  monitored channel and creates the Case thread there. The *creation dialog*
-  (progress and any clarifying question) happens in the **reactor's** thread, and
-  once the Case is created a link back to it is posted in that thread. Subsequent
-  discussion continues in the monitored-channel thread like any thread-mode Case.
+- **Reaction in any other channel** → the bot posts the Case in the monitored
+  channel as a root message. That root message is the standard "Created a case"
+  summary — identical to every other creation path (no separate "flagged for
+  triage" preamble). The reaction-specific context — who flagged it and a link to
+  the exact flagged message — is posted as a reply under that summary. The
+  *creation dialog* (progress and any clarifying question) happens in the
+  **reactor's** thread, and once the Case is created a link back to it is posted
+  in that thread. Subsequent discussion continues in the monitored-channel thread
+  like any thread-mode Case.
 
 The person who added the reaction becomes the Case **reporter**. The
 initialization agent treats the reacted message as the **center** of the Case: it
