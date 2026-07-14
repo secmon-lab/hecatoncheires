@@ -149,7 +149,7 @@ func (s *JobSection) Validate(baseDir string) (*model.Job, error) {
 	// / `validate` time instead of silently passing here and only erroring at the
 	// first Job run. Deferred (prompt_file, baseDir=="") sections skip this and
 	// are re-validated once the file is read with a real baseDir.
-	if err := jobruntime.ValidateUserPromptTemplate(job.Prompt); err != nil {
+	if _, err := jobruntime.ParseUserPromptTemplate(job.Prompt); err != nil {
 		return nil, goerr.Wrap(err, "invalid job prompt template",
 			goerr.V("job_id", s.ID))
 	}

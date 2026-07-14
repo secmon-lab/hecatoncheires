@@ -739,20 +739,21 @@ func userTemplateFor(j *model.Job) (*template.Template, error) {
 	return tmpl, nil
 }
 
-// ValidateUserPromptTemplate parses src as a Job user-prompt template using the
-// exact same FuncMap the runtime renders with (promptFuncs), returning a
-// wrapped error when it does not parse. Config load and the `validate` command
-// call it so a broken template (an unbalanced action, an unknown function) is
-// caught up-front instead of only at the first Job run. It intentionally shares
-// promptFuncs with userTemplateFor so validation and rendering can never accept
-// a different template dialect.
+// ParseUserPromptTemplate parses src as a Job user-prompt template using the
+// exact same FuncMap the runtime renders with (promptFuncs) and returns the
+// compiled template. Config load and the `validate` command call it (discarding
+// the template) so a broken template — an unbalanced action, an unknown
+// function — is caught up-front instead of only at the first Job run. It
+// intentionally shares promptFuncs with userTemplateFor so validation and
+// rendering can never accept a different template dialect.
 //
 // This is parse-only: it proves the template compiles, not that a particular
 // dot value resolves — the latter needs a live Case/Workspace and is exercised
 // at render time (RenderUserPrompt).
-func ValidateUserPromptTemplate(src string) error {
-	if _, err := template.New("job-user-validate").Funcs(promptFuncs).Parse(src); err != nil {
-		return goerr.Wrap(err, "parse job prompt template")
+func ParseUserPromptTemplate(src string) (*template.Template, error) {
+	tmpl, err := template.New("job-user-validate").Funcs(promptFuncs).Parse(src)
+	if err != nil {
+		return nil, goerr.Wrap(err, "parse job prompt template")
 	}
-	return nil
+	return tmpl, nil
 }
