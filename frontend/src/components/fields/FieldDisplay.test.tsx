@@ -44,4 +44,22 @@ describe('FieldDisplay MARKDOWN', () => {
     )
     expect(container.querySelector('script')).toBeNull()
   })
+
+  it('neutralizes dangerous link protocols (javascript:/data:/vbscript:)', () => {
+    // react-markdown's defaultUrlTransform strips any href whose protocol is
+    // not in its safe allowlist (http/https/irc/mailto/xmpp), so a
+    // javascript: link cannot produce an executable href.
+    const { container } = renderWithI18n(
+      <FieldDisplay
+        field={markdownField}
+        value={'[x](javascript:alert(document.cookie)) [y](data:text/html,<script>1</script>)'}
+      />,
+    )
+    for (const a of Array.from(container.querySelectorAll('a'))) {
+      const href = a.getAttribute('href') ?? ''
+      expect(href.startsWith('javascript:')).toBe(false)
+      expect(href.startsWith('data:')).toBe(false)
+      expect(href.startsWith('vbscript:')).toBe(false)
+    }
+  })
 })

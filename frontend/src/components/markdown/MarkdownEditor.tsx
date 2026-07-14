@@ -20,7 +20,7 @@ interface Props {
 export default function MarkdownEditor({ value, onChange, disabled, testId }: Props) {
   const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState<'write' | 'preview'>('write')
-  const previewIsEmpty = value.trim() === ''
+  const previewIsEmpty = !value || value.trim() === ''
 
   return (
     <div className={styles.editor} data-testid={testId}>
@@ -49,8 +49,9 @@ export default function MarkdownEditor({ value, onChange, disabled, testId }: Pr
 
       {activeTab === 'write' ? (
         <textarea
+          id={testId}
           className={styles.textarea}
-          value={value}
+          value={value || ''}
           onChange={(e) => onChange(e.target.value)}
           disabled={disabled}
           data-testid={testId ? `${testId}-textarea` : undefined}
