@@ -273,6 +273,11 @@ type caseCreateReq struct {
 	// createInstruction is appended to the ModeCreate planner prompt (trigger
 	// context). Empty for normal thread creation.
 	createInstruction string
+	// sourceChannel/sourceTS carry the reaction-flagged source message for a
+	// cross-channel reaction so runThreadCaseCreation can persist it on the
+	// Session (for the origin reply's exact link). Empty for every other path,
+	// including a resume turn — there the Session already holds the reference.
+	sourceChannel, sourceTS string
 }
 
 // sameThread reports whether the UI and case threads coincide (the normal /
@@ -325,6 +330,14 @@ func (uc *AgentUseCase) runThreadCaseCreation(ctx context.Context, req caseCreat
 	if session.CreatorUserID == "" {
 		session.CreatorUserID = req.reporter
 	}
+	// Record the reaction-flagged source message on a fresh session (cross-channel
+	// reaction only) so the origin reply can link the exact source even on a
+	// resume turn, where req no longer carries it. Do not overwrite an existing
+	// reference (a resume turn already has it persisted).
+	if req.sourceTS != "" && session.ReactionSourceMessageTS == "" {
+		session.ReactionSourceChannelID = req.sourceChannel
+		session.ReactionSourceMessageTS = req.sourceTS
+	}
 
 	// Supersede: when a reply / mention resumes the flow while a question form
 	// is still pending, mark that form stale (removing its Submit button) so it
@@ -373,7 +386,7 @@ func (uc *AgentUseCase) runThreadCaseCreation(ctx context.Context, req caseCreat
 			return res.Status, nil
 		}
 		uc.bindSessionToCase(ctx, req.caseChannel, req.caseTS, res.Case.ID)
-		uc.postCreatedCaseOutcome(ctx, req, res.Case)
+		uc.postCreatedCaseOutcome(ctx, req, session, res.Case)
 	case threadcase.StatusQuestion:
 		// The question form was posted by the handler; wait for the user to
 		// answer it via the form's Submit interaction (HandleThreadCaseQuestionSubmit).
@@ -385,21 +398,66 @@ func (uc *AgentUseCase) runThreadCaseCreation(ctx context.Context, req caseCreat
 	return res.Status, nil
 }
 
-// postCreatedCaseOutcome posts the case summary into the case thread. For a
-// cross-channel reaction (UI thread != case thread) it additionally posts a
-// separate link message back in the reactor's source thread, so the reactor gets
-// the case URL and a jump link without leaving their channel. In both cases the
-// progress "creating…" trace stays put (the summary / link are separate
-// messages, per the two-message reaction UX).
-func (uc *AgentUseCase) postCreatedCaseOutcome(ctx context.Context, req caseCreateReq, c *model.Case) {
+// postCreatedCaseOutcome posts the case-creation outcome. For a normal / same-
+// channel creation (UI thread == case thread) it posts the summary as a reply
+// under the existing thread root. For a cross-channel reaction (UI thread !=
+// case thread) the case root is a bot-posted placeholder, so it replaces that
+// placeholder in place with the shared summary, posts the reaction-specific
+// origin (reporter + exact source link) as a reply under it, and posts a
+// back-link in the reactor's source thread so they get the case URL without
+// leaving their channel. The summary itself is identical across all creation
+// paths; reaction-specific context lives only in the origin reply.
+func (uc *AgentUseCase) postCreatedCaseOutcome(ctx context.Context, req caseCreateReq, session *model.Session, c *model.Case) {
 	wsID := req.entry.Workspace.ID
-	uc.postThreadCaseSummary(ctx, wsID, req.entry, c, req.caseChannel, req.caseTS)
 	if req.sameThread() {
+		uc.postThreadCaseSummary(ctx, wsID, req.entry, c, req.caseChannel, req.caseTS)
 		return
 	}
+	// Cross-channel reaction: caseTS is the bot's placeholder root.
+	uc.updateRootCaseSummary(ctx, wsID, req.entry, c, req.caseChannel, req.caseTS)
+	uc.postReactionOriginReply(ctx, req.caseChannel, req.caseTS, req.reporter, session)
 	url := uc.deps.CaseUC.CaseURL(wsID, c.ID)
 	threadLink := uc.slackPermalink(ctx, req.caseChannel, req.caseTS)
 	uc.postThreadReply(ctx, req.uiChannel, req.uiTS, i18n.T(ctx, i18n.MsgReactionCaseBacklink, url, threadLink))
+}
+
+// updateRootCaseSummary replaces the cross-channel placeholder root with the
+// shared case summary in place, so the monitored channel shows a single root
+// message identical to any other creation path. On update failure it falls back
+// to a threaded reply so the summary is never lost.
+func (uc *AgentUseCase) updateRootCaseSummary(ctx context.Context, wsID string, entry *model.WorkspaceEntry, c *model.Case, channelID, rootTS string) {
+	if uc.deps.SlackService == nil {
+		return
+	}
+	url := uc.deps.CaseUC.CaseURL(wsID, c.ID)
+	blocks, fallback := buildThreadCaseSummaryBlocks(ctx, c, entry, url)
+	if err := uc.deps.SlackService.UpdateMessage(ctx, channelID, rootTS, blocks, fallback); err != nil {
+		errutil.Handle(ctx, goerr.Wrap(err, "reaction: update root case summary",
+			goerr.V("channel_id", channelID), goerr.V("root_ts", rootTS)), "reaction: update root case summary")
+		uc.postThreadReply(ctx, channelID, rootTS, fallback)
+	}
+}
+
+// postReactionOriginReply posts the reaction-specific origin (who flagged it and
+// a link to the exact flagged message) as a reply under the summary root. The
+// source message reference is read from the session, which was populated at the
+// start of the creation turn, so this works on both the direct and the resume
+// path. Best-effort: a missing permalink degrades to a reporter-only line.
+func (uc *AgentUseCase) postReactionOriginReply(ctx context.Context, channelID, rootTS, reporterID string, session *model.Session) {
+	if uc.deps.SlackService == nil {
+		return
+	}
+	src := ""
+	if session != nil && session.ReactionSourceMessageTS != "" {
+		src = uc.slackPermalink(ctx, session.ReactionSourceChannelID, session.ReactionSourceMessageTS)
+	}
+	var text string
+	if src != "" {
+		text = i18n.T(ctx, i18n.MsgReactionCaseOrigin, reporterID, src)
+	} else {
+		text = i18n.T(ctx, i18n.MsgReactionCaseOriginNoLink, reporterID)
+	}
+	uc.postThreadReply(ctx, channelID, rootTS, text)
 }
 
 // slackPermalink returns the Slack permalink for a message, or "" when the

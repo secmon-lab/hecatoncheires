@@ -49,18 +49,20 @@ func runSessionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interface
 		now := time.Now().UTC().Truncate(time.Millisecond)
 
 		s := &model.Session{
-			ID:            uuid.Must(uuid.NewV7()).String(),
-			ChannelID:     ch,
-			ThreadTS:      ts,
-			LastMentionTS: ts,
-			LastAction:    model.SessionEndedWithQuestion,
-			WorkspaceID:   "ws-1",
-			CaseID:        42,
-			ActionID:      7,
-			CreatorUserID: "U1",
-			ProposalID:    model.CaseProposalID("draft-1"),
-			CreatedAt:     now,
-			UpdatedAt:     now,
+			ID:                      uuid.Must(uuid.NewV7()).String(),
+			ChannelID:               ch,
+			ThreadTS:                ts,
+			LastMentionTS:           ts,
+			LastAction:              model.SessionEndedWithQuestion,
+			WorkspaceID:             "ws-1",
+			CaseID:                  42,
+			ActionID:                7,
+			CreatorUserID:           "U1",
+			ProposalID:              model.CaseProposalID("draft-1"),
+			ReactionSourceChannelID: "C-SRC",
+			ReactionSourceMessageTS: "1700000000.000100",
+			CreatedAt:               now,
+			UpdatedAt:               now,
 		}
 		gt.NoError(t, repo.Session().Put(ctx, s)).Required()
 
@@ -78,6 +80,8 @@ func runSessionRepositoryTest(t *testing.T, newRepo func(t *testing.T) interface
 		gt.Value(t, got.ActionID).Equal(int64(7))
 		gt.Value(t, got.CreatorUserID).Equal("U1")
 		gt.Value(t, got.ProposalID).Equal(model.CaseProposalID("draft-1"))
+		gt.Value(t, got.ReactionSourceChannelID).Equal("C-SRC")
+		gt.Value(t, got.ReactionSourceMessageTS).Equal("1700000000.000100")
 		gt.Bool(t, got.CreatedAt.Equal(now)).True()
 		gt.Bool(t, got.UpdatedAt.Equal(now)).True()
 	})

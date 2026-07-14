@@ -29,6 +29,7 @@ type agentTestSlackService struct {
 	getConversationHistoryFn func(ctx context.Context, channelID string, oldest time.Time, limit int) ([]slack.ConversationMessage, error)
 	postThreadReplyFn        func(ctx context.Context, channelID string, threadTS string, text string) (string, error)
 	getBotUserIDFn           func(ctx context.Context) (string, error)
+	getPermalinkFn           func(ctx context.Context, channelID string, ts string) (string, error)
 	postedMessages           []agentPostedMessage
 	updatedMessages          []agentUpdatedMessage
 }
@@ -105,7 +106,10 @@ func (m *agentTestSlackService) PostEphemeralBlocks(_ context.Context, _ string,
 	return "ts-eph", nil
 }
 
-func (m *agentTestSlackService) GetPermalink(_ context.Context, channelID string, ts string) (string, error) {
+func (m *agentTestSlackService) GetPermalink(ctx context.Context, channelID string, ts string) (string, error) {
+	if m.getPermalinkFn != nil {
+		return m.getPermalinkFn(ctx, channelID, ts)
+	}
 	return "https://slack.test/" + channelID + "/" + ts, nil
 }
 

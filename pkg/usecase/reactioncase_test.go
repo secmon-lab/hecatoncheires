@@ -227,25 +227,71 @@ func TestReaction_SameChannel_SecondReactionSameThreadNoOp(t *testing.T) {
 	gt.Value(t, c2.ID).Equal(c1.ID)
 }
 
-// B1/FR-2/FR-5: a reaction outside the monitored channel posts a seed root in
-// the monitored channel, binds the case there, and posts a back-link in the
-// source thread.
+// B1/FR-2/FR-5: a reaction outside the monitored channel posts a placeholder
+// root in the monitored channel that is replaced in place by the shared case
+// summary, posts the reaction-specific origin (reporter + exact source link) as
+// a reply under it, binds the case there, and posts a back-link in the source
+// thread. The root summary carries no reaction-specific info — that lives only
+// in the origin reply.
 func TestReaction_CrossChannel_CreatesCaseAndBacklink(t *testing.T) {
 	slackUC, _, repo, slackMock := newReactionSetup(t, newScriptedClient(createDecisionScripts()))
 	ctx := context.Background()
+
+	const srcPermalink = "https://slack.test/C-GENERAL/1700000000.000100"
 
 	ev := reactionEvent("incident", "U-REACTOR", "U-AUTHOR", "C-GENERAL", "1700000000.000100")
 	gt.NoError(t, slackUC.HandleSlackEvent(ctx, ev)).Required()
 	async.Wait()
 
-	// The seed root was posted to the monitored channel (default PostMessage ts).
+	// Exactly one placeholder root reached the monitored channel, and its text is
+	// a neutral placeholder — no source permalink, no "flag" preamble.
 	gt.Number(t, countPostsTo(slackMock, "C-MONITOR")).Equal(1)
-	// The case is bound to the seed thread in the monitored channel.
+	for _, txt := range slackMock.postedTexts {
+		gt.Bool(t, strings.Contains(txt, srcPermalink)).False()
+		gt.Bool(t, strings.Contains(txt, "flag")).False()
+	}
+
+	// The placeholder root (default PostMessage ts) was replaced in place with the
+	// shared summary: it carries the case URL but NOT the reporter mention or the
+	// source permalink (those belong to the origin reply, not the common summary).
+	var summary *agentUpdatedMessage
+	for i := range slackMock.updatedMessages {
+		if slackMock.updatedMessages[i].ChannelID == "C-MONITOR" && slackMock.updatedMessages[i].Timestamp == "1234567890.123456" {
+			summary = &slackMock.updatedMessages[i]
+		}
+	}
+	gt.Value(t, summary).NotNil().Required()
+	gt.Bool(t, strings.Contains(summary.Text, "https://app.test/ws/support/cases/")).True()
+	gt.Bool(t, strings.Contains(summary.Text, "<@U-REACTOR>")).False()
+	gt.Bool(t, strings.Contains(summary.Text, srcPermalink)).False()
+
+	// The origin reply was posted under the summary root (monitored channel,
+	// thread = placeholder ts) carrying the reporter mention and the exact source
+	// message permalink.
+	var origin *agentPostedMessage
+	for i := range slackMock.postedMessages {
+		if slackMock.postedMessages[i].ChannelID == "C-MONITOR" && slackMock.postedMessages[i].ThreadTS == "1234567890.123456" {
+			origin = &slackMock.postedMessages[i]
+		}
+	}
+	gt.Value(t, origin).NotNil().Required()
+	gt.Bool(t, strings.Contains(origin.Text, "<@U-REACTOR>")).True()
+	gt.Bool(t, strings.Contains(origin.Text, srcPermalink)).True()
+
+	// The case is bound to the placeholder thread in the monitored channel.
 	c, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", "1234567890.123456")
 	gt.NoError(t, err).Required()
 	gt.Value(t, c).NotNil().Required()
 	gt.Value(t, c.Title).Equal("Login outage")
 	gt.Value(t, c.ReporterID).Equal("U-REACTOR")
+
+	// The source message reference was persisted on the session so a resume turn
+	// could still link the exact message.
+	ssn, err := repo.Session().GetByThread(ctx, "C-MONITOR", "1234567890.123456")
+	gt.NoError(t, err).Required()
+	gt.Value(t, ssn).NotNil().Required()
+	gt.Value(t, ssn.ReactionSourceChannelID).Equal("C-GENERAL")
+	gt.Value(t, ssn.ReactionSourceMessageTS).Equal("1700000000.000100")
 
 	// A back-link message was posted to the source thread carrying the case URL.
 	foundBacklink := false
@@ -263,7 +309,7 @@ func TestReaction_CrossChannel_CreatesCaseAndBacklink(t *testing.T) {
 }
 
 // B7: two reactions on the same out-of-channel message create only one case; the
-// second is deduped by the claim before any seed root is posted.
+// second is deduped by the claim before any placeholder root is posted.
 func TestReaction_CrossChannel_DedupeOnSourceMessage(t *testing.T) {
 	slackUC, _, _, slackMock := newReactionSetup(t, newScriptedClient(createDecisionScripts()))
 	ctx := context.Background()
@@ -274,13 +320,14 @@ func TestReaction_CrossChannel_DedupeOnSourceMessage(t *testing.T) {
 	gt.NoError(t, slackUC.HandleSlackEvent(ctx, reactionEvent("incident", "U-B", "U-AUTHOR", "C-GENERAL", "1700000000.000100"))).Required()
 	async.Wait()
 
-	// Exactly one seed root reached the monitored channel.
+	// Exactly one placeholder root reached the monitored channel.
 	gt.Number(t, countPostsTo(slackMock, "C-MONITOR")).Equal(1)
 }
 
-// A failed seed-root post must not leave the reactor with no response: an error
-// is posted to their source thread, and the claim is released so a retry works.
-func TestReaction_CrossChannel_SeedRootPostFailureNotifiesReactor(t *testing.T) {
+// A failed placeholder-root post must not leave the reactor with no response: an
+// error is posted to their source thread, and the claim is released so a retry
+// works.
+func TestReaction_CrossChannel_PlaceholderPostFailureNotifiesReactor(t *testing.T) {
 	slackUC, _, repo, slackMock := newReactionSetup(t, newScriptedClient([]string{}))
 	ctx := context.Background()
 
@@ -336,20 +383,25 @@ func TestReaction_CrossChannel_QuestionResume(t *testing.T) {
 
 	const srcChannel = "C-GENERAL"
 	const srcTS = "1700000000.000100"
-	const seedTS = "1234567890.123456" // the default PostMessage ts = the seed root ts
+	const placeholderTS = "1234567890.123456" // the default PostMessage ts = the placeholder root ts
+	const srcPermalink = "https://slack.test/C-GENERAL/1700000000.000100"
 
 	// A reaction outside the monitored channel makes the create agent ask a question.
 	gt.NoError(t, slackUC.HandleSlackEvent(ctx, reactionEvent("incident", "U-REACTOR", "U-AUTHOR", srcChannel, srcTS))).Required()
 	async.Wait()
 
-	// No case yet. The session sits on the case thread (monitored channel, seed
-	// ts), and the question form was posted in the reactor's source thread.
-	noCase, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", seedTS)
+	// No case yet. The session sits on the case thread (monitored channel,
+	// placeholder ts), and the question form was posted in the reactor's source
+	// thread. The source message reference is already persisted so the resume turn
+	// can still link the exact message.
+	noCase, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", placeholderTS)
 	gt.NoError(t, err).Required()
 	gt.Value(t, noCase).Nil()
-	ssn, err := repo.Session().GetByThread(ctx, "C-MONITOR", seedTS)
+	ssn, err := repo.Session().GetByThread(ctx, "C-MONITOR", placeholderTS)
 	gt.NoError(t, err).Required()
 	gt.Value(t, ssn).NotNil().Required()
+	gt.Value(t, ssn.ReactionSourceChannelID).Equal(srcChannel)
+	gt.Value(t, ssn.ReactionSourceMessageTS).Equal(srcTS)
 	gt.Value(t, ssn.PendingQuestion).NotNil().Required()
 	gt.Value(t, ssn.PendingQuestion.PostedChannelID).Equal(srcChannel)
 	formTS := ssn.PendingQuestion.PostedMessageTS
@@ -369,7 +421,7 @@ func TestReaction_CrossChannel_QuestionResume(t *testing.T) {
 			},
 		},
 		ActionCallback: goslack.ActionCallbacks{
-			BlockActions: []*goslack.BlockAction{{ActionID: usecase.ActionIDThreadCreateQuestionSubmit, Value: "C-MONITOR:" + seedTS}},
+			BlockActions: []*goslack.BlockAction{{ActionID: usecase.ActionIDThreadCreateQuestionSubmit, Value: "C-MONITOR:" + placeholderTS}},
 		},
 	}
 	gt.NoError(t, agentUC.HandleThreadCaseQuestionSubmit(ctx, cb, cb.ActionCallback.BlockActions[0])).Required()
@@ -377,11 +429,33 @@ func TestReaction_CrossChannel_QuestionResume(t *testing.T) {
 
 	// Resume reconstructed both threads and committed the case in the monitored
 	// channel with the reactor as reporter.
-	c, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", seedTS)
+	c, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", placeholderTS)
 	gt.NoError(t, err).Required()
 	gt.Value(t, c).NotNil().Required()
 	gt.Value(t, c.Title).Equal("Login outage")
 	gt.Value(t, c.ReporterID).Equal("U-REACTOR")
+
+	// The placeholder root was replaced in place with the shared summary.
+	var summary *agentUpdatedMessage
+	for i := range slackMock.updatedMessages {
+		if slackMock.updatedMessages[i].ChannelID == "C-MONITOR" && slackMock.updatedMessages[i].Timestamp == placeholderTS {
+			summary = &slackMock.updatedMessages[i]
+		}
+	}
+	gt.Value(t, summary).NotNil().Required()
+	gt.Bool(t, strings.Contains(summary.Text, "https://app.test/ws/support/cases/")).True()
+
+	// Even after a question/resume, the origin reply under the summary root links
+	// the exact source message (proving the reference survived via the session).
+	var origin *agentPostedMessage
+	for i := range slackMock.postedMessages {
+		if slackMock.postedMessages[i].ChannelID == "C-MONITOR" && slackMock.postedMessages[i].ThreadTS == placeholderTS {
+			origin = &slackMock.postedMessages[i]
+		}
+	}
+	gt.Value(t, origin).NotNil().Required()
+	gt.Bool(t, strings.Contains(origin.Text, "<@U-REACTOR>")).True()
+	gt.Bool(t, strings.Contains(origin.Text, srcPermalink)).True()
 
 	// The completion back-link was posted back in the source thread.
 	foundBacklink := false
@@ -391,4 +465,66 @@ func TestReaction_CrossChannel_QuestionResume(t *testing.T) {
 		}
 	}
 	gt.Bool(t, foundBacklink).True()
+}
+
+// A hard failure during cross-channel creation replaces the lingering
+// "Creating a case…" placeholder with an honest failure note and releases the
+// claim so a retry can work. An empty script makes the create turn error out.
+func TestReaction_CrossChannel_FallbackReplacesPlaceholder(t *testing.T) {
+	slackUC, _, repo, slackMock := newReactionSetup(t, newScriptedClient([]string{}))
+	ctx := context.Background()
+
+	const srcChannel = "C-GENERAL"
+	const srcTS = "1700000000.000100"
+	const placeholderTS = "1234567890.123456"
+
+	gt.NoError(t, slackUC.HandleSlackEvent(ctx, reactionEvent("incident", "U-REACTOR", "U-AUTHOR", srcChannel, srcTS))).Required()
+	async.Wait()
+
+	// No case was created.
+	c, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", placeholderTS)
+	gt.NoError(t, err).Required()
+	gt.Value(t, c).Nil()
+
+	// The placeholder root was replaced with a failure note (not left as "Creating…").
+	var replaced *agentUpdatedMessage
+	for i := range slackMock.updatedMessages {
+		if slackMock.updatedMessages[i].ChannelID == "C-MONITOR" && slackMock.updatedMessages[i].Timestamp == placeholderTS {
+			replaced = &slackMock.updatedMessages[i]
+		}
+	}
+	gt.Value(t, replaced).NotNil().Required()
+	gt.Bool(t, strings.Contains(replaced.Text, "⚠️")).True()
+
+	// The claim was released so the source message can be reacted again.
+	claimed, err := repo.ReactionClaim().Claim(ctx, "support", srcChannel, srcTS)
+	gt.NoError(t, err).Required()
+	gt.Bool(t, claimed).True()
+}
+
+// When the source permalink cannot be resolved, the origin reply degrades to a
+// reporter-only line (MsgReactionCaseOriginNoLink) with no broken link markup.
+func TestReaction_CrossChannel_OriginReplyDegradesWithoutPermalink(t *testing.T) {
+	slackUC, _, _, slackMock := newReactionSetup(t, newScriptedClient(createDecisionScripts()))
+	ctx := context.Background()
+
+	// The permalink lookup yields nothing (e.g. the bot lost access to the source).
+	slackMock.getPermalinkFn = func(_ context.Context, _ string, _ string) (string, error) {
+		return "", nil
+	}
+
+	gt.NoError(t, slackUC.HandleSlackEvent(ctx, reactionEvent("incident", "U-REACTOR", "U-AUTHOR", "C-GENERAL", "1700000000.000100"))).Required()
+	async.Wait()
+
+	// The origin reply still names the reporter but carries no link markup.
+	var origin *agentPostedMessage
+	for i := range slackMock.postedMessages {
+		if slackMock.postedMessages[i].ChannelID == "C-MONITOR" && slackMock.postedMessages[i].ThreadTS == "1234567890.123456" {
+			origin = &slackMock.postedMessages[i]
+		}
+	}
+	gt.Value(t, origin).NotNil().Required()
+	gt.Bool(t, strings.Contains(origin.Text, "<@U-REACTOR>")).True()
+	gt.Bool(t, strings.Contains(origin.Text, "|source message>")).False()
+	gt.Bool(t, strings.Contains(origin.Text, "|元メッセージ>")).False()
 }
