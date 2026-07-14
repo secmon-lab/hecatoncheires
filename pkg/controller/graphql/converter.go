@@ -397,6 +397,8 @@ func toGraphQLFieldType(ft types.FieldType) graphql1.FieldType {
 		return graphql1.FieldTypeCaseRef
 	case types.FieldTypeMultiCaseRef:
 		return graphql1.FieldTypeMultiCaseRef
+	case types.FieldTypeMarkdown:
+		return graphql1.FieldTypeMarkdown
 	default:
 		return graphql1.FieldTypeText
 	}

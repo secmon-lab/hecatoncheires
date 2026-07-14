@@ -55,4 +55,57 @@ test.describe('Case memos', () => {
     await page.getByTestId('memo-filter-archived').click();
     await expect(memoRow()).toBeVisible();
   });
+
+  test('create a memo with a markdown body, preview it, and see it rendered in the detail modal', async ({ page }) => {
+    const caseListPage = new CaseListPage(page);
+    const caseFormPage = new CaseFormPage(page);
+    const caseDetailPage = new CaseDetailPage(page);
+
+    const caseTitle = `Markdown Case ${uniq()}`;
+    const memoTitle = `Markdown Memo ${uniq()}`;
+
+    await caseListPage.navigate(TEST_WORKSPACE_ID);
+    await caseListPage.waitForTableLoad();
+    await caseListPage.clickNewCaseButton();
+    await caseFormPage.createCase({ title: caseTitle, customFields: { category: 'task' } });
+    await caseListPage.waitForTableLoad();
+    await caseListPage.fillSearchFilter(caseTitle);
+    await caseListPage.clickCaseByTitle(caseTitle);
+    await caseDetailPage.waitForPageLoad();
+
+    const memoRow = () => page.getByTestId('memo-row').filter({ hasText: memoTitle });
+
+    // Open the memo form and fill the markdown 'body' field.
+    await page.getByTestId('new-memo-button').click();
+    await page.locator('#memo-title').fill(memoTitle);
+    const markdownSource = '# Heading\n\n- alpha\n- **bold item**';
+    await page.getByTestId('body-textarea').fill(markdownSource);
+
+    // The Preview tab renders the markdown (heading + list + bold), not raw markers.
+    await page.getByTestId('body-tab-preview').click();
+    const preview = page.getByTestId('body-preview');
+    await expect(preview.locator('h1')).toHaveText('Heading');
+    await expect(preview.locator('li')).toHaveCount(2);
+    await expect(preview.locator('strong')).toHaveText('bold item');
+    await expect(preview).not.toContainText('**');
+
+    // Back to Write tab: the raw source is preserved.
+    await page.getByTestId('body-tab-write').click();
+    await expect(page.getByTestId('body-textarea')).toHaveValue(markdownSource);
+
+    await page.getByTestId('memo-form-submit').click();
+    await expect(memoRow()).toBeVisible();
+
+    // Open the detail modal: the markdown body is rendered.
+    await memoRow().click();
+    const modalHeading = page.getByRole('heading', { level: 1, name: 'Heading' });
+    await expect(modalHeading).toBeVisible();
+    await expect(page.getByText('bold item')).toBeVisible();
+
+    // Reload the whole page and re-open to confirm the value round-tripped to the backend.
+    await page.reload();
+    await caseDetailPage.waitForPageLoad();
+    await memoRow().click();
+    await expect(page.getByRole('heading', { level: 1, name: 'Heading' })).toBeVisible();
+  });
 });

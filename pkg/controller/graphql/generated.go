@@ -3566,6 +3566,7 @@ enum FieldType {
   URL
   CASE_REF
   MULTI_CASE_REF
+  MARKDOWN
 }
 
 type FieldOption {

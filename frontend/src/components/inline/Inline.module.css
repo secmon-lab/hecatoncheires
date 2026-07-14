@@ -282,6 +282,45 @@
   padding: 4px 8px;
 }
 
+/* Sidebar cell for a Markdown field: the raw Markdown source clamped to a
+   few lines (no rendering — the modal renders it). Clickable to open the
+   view/edit modal. */
+.mdClamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  width: 100%;
+  padding: 6px 8px;
+  margin: -6px -8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--fg);
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: pointer;
+  transition: background-color 80ms ease, border-color 80ms ease;
+}
+
+.mdClamp:hover:not(.disabled) {
+  background-color: var(--bg-sunken);
+  border-color: var(--line);
+}
+
+.mdClampEmpty {
+  color: var(--fg-muted);
+}
+
+/* Footer button row for the Markdown view/edit modal. */
+.mdModalFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 /* Popover for InlineSelect. Must render above Modal (z-index: 1000). */
 .popover {
   position: fixed;

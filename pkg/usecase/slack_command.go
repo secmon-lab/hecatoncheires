@@ -618,6 +618,17 @@ func buildFieldInputBlock(field config.FieldDefinition) slack.Block {
 		}
 		inputBlock = slack.NewInputBlock(blockID, label, nil, element)
 
+	case types.FieldTypeMarkdown:
+		// Slack has no Markdown-preview input; markdown fields are edited as a
+		// multiline plain-text element (raw Markdown source). The Web UI renders
+		// the preview.
+		element := slack.NewPlainTextInputBlockElement(nil, actionID)
+		element.Multiline = true
+		if field.Description != "" {
+			element.Placeholder = slack.NewTextBlockObject(slack.PlainTextType, field.Description, false, false)
+		}
+		inputBlock = slack.NewInputBlock(blockID, label, nil, element)
+
 	case types.FieldTypeNumber:
 		element := &slack.NumberInputBlockElement{
 			Type:             slack.METNumber,
@@ -1061,6 +1072,22 @@ func buildFieldInputBlockWithValue(field config.FieldDefinition, fv *model.Field
 		if fv != nil {
 			if s, ok := fv.Value.(string); ok {
 				element.InitialValue = clampPlainText(s, false)
+			}
+		}
+		inputBlock = slack.NewInputBlock(blockID, label, nil, element)
+
+	case types.FieldTypeMarkdown:
+		// Slack has no Markdown-preview input; markdown fields are edited as a
+		// multiline plain-text element (raw Markdown source). The Web UI renders
+		// the preview.
+		element := slack.NewPlainTextInputBlockElement(nil, actionID)
+		element.Multiline = true
+		if field.Description != "" {
+			element.Placeholder = slack.NewTextBlockObject(slack.PlainTextType, field.Description, false, false)
+		}
+		if fv != nil {
+			if s, ok := fv.Value.(string); ok {
+				element.InitialValue = clampPlainText(s, true)
 			}
 		}
 		inputBlock = slack.NewInputBlock(blockID, label, nil, element)

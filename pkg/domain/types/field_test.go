@@ -64,6 +64,11 @@ func TestFieldType_IsValid(t *testing.T) {
 			want:      true,
 		},
 		{
+			name:      "valid markdown",
+			fieldType: types.FieldTypeMarkdown,
+			want:      true,
+		},
+		{
 			name:      "invalid type",
 			fieldType: types.FieldType("invalid"),
 			want:      false,
@@ -88,7 +93,7 @@ func TestFieldType_IsValid(t *testing.T) {
 
 func TestAllFieldTypes(t *testing.T) {
 	fieldTypes := types.AllFieldTypes()
-	expectedCount := 10
+	expectedCount := 11
 
 	gt.A(t, fieldTypes).Length(expectedCount)
 
@@ -111,6 +116,7 @@ func TestAllFieldTypes(t *testing.T) {
 		types.FieldTypeURL,
 		types.FieldTypeCaseRef,
 		types.FieldTypeMultiCaseRef,
+		types.FieldTypeMarkdown,
 	}
 
 	typeMap := make(map[types.FieldType]bool)
@@ -181,6 +187,11 @@ func TestFieldType_String(t *testing.T) {
 			fieldType: types.FieldTypeMultiCaseRef,
 			want:      "multi_case_ref",
 		},
+		{
+			name:      "markdown",
+			fieldType: types.FieldTypeMarkdown,
+			want:      "markdown",
+		},
 	}
 
 	for _, tt := range tests {
@@ -214,6 +225,11 @@ func TestFieldType_IsCaseRef(t *testing.T) {
 		{
 			name:      "user is false",
 			fieldType: types.FieldTypeUser,
+			want:      false,
+		},
+		{
+			name:      "markdown is false",
+			fieldType: types.FieldTypeMarkdown,
 			want:      false,
 		},
 	}

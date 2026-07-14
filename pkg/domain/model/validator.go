@@ -179,6 +179,8 @@ func (v *FieldValidator) validateFieldValue(fieldDef config.FieldDefinition, fv 
 		return v.validateCaseRef(fieldDef, fv)
 	case types.FieldTypeMultiCaseRef:
 		return v.validateMultiCaseRef(fieldDef, fv)
+	case types.FieldTypeMarkdown:
+		return v.validateMarkdown(fieldDef, fv)
 	default:
 		return goerr.Wrap(ErrInvalidFieldType, "unsupported field type",
 			goerr.V(FieldIDKey, fieldDef.ID),
@@ -192,6 +194,20 @@ func (v *FieldValidator) validateText(fieldDef config.FieldDefinition, fv FieldV
 	if !ok {
 		return goerr.Wrap(ErrInvalidFieldType, "value must be string",
 			goerr.V(ExpectedTypeKey, types.FieldTypeText),
+			goerr.V(ActualTypeKey, fmt.Sprintf("%T", fv.Value)))
+	}
+	return nil
+}
+
+// validateMarkdown validates a markdown field value. Markdown is stored as a
+// plain string; any string is valid (no syntax check). It is kept separate
+// from validateText so a type mismatch reports markdown (not text) as the
+// expected type.
+func (v *FieldValidator) validateMarkdown(fieldDef config.FieldDefinition, fv FieldValue) error {
+	_, ok := fv.Value.(string)
+	if !ok {
+		return goerr.Wrap(ErrInvalidFieldType, "value must be string",
+			goerr.V(ExpectedTypeKey, types.FieldTypeMarkdown),
 			goerr.V(ActualTypeKey, fmt.Sprintf("%T", fv.Value)))
 	}
 	return nil

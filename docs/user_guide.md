@@ -49,6 +49,7 @@ The case creation modal dynamically includes input fields based on the workspace
 | Field Type | Modal Input |
 |------------|------------|
 | `text` | Plain text input |
+| `markdown` | Multi-line Markdown input (rendered in the Web UI; multi-line plain-text in Slack) |
 | `number` | Number input |
 | `select` | Single-select dropdown |
 | `multi_select` | Multi-select dropdown |

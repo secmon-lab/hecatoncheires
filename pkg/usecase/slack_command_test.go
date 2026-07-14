@@ -1527,6 +1527,34 @@ func TestBuildFieldInputBlockWithValue(t *testing.T) {
 	})
 }
 
+func TestBuildFieldInputBlock_Markdown(t *testing.T) {
+	t.Run("markdown field renders a multiline plain-text input", func(t *testing.T) {
+		block := usecase.BuildFieldInputBlockForTest(config.FieldDefinition{
+			ID:   "body",
+			Name: "Body",
+			Type: types.FieldTypeMarkdown,
+		})
+		inputBlock, ok := block.(*goslack.InputBlock)
+		gt.Bool(t, ok).True().Required()
+		element, ok := inputBlock.Element.(*goslack.PlainTextInputBlockElement)
+		gt.Bool(t, ok).True().Required()
+		gt.Bool(t, element.Multiline).True()
+	})
+
+	t.Run("markdown field with value injects the raw source as initial value", func(t *testing.T) {
+		block := usecase.BuildFieldInputBlockWithValueForTest(
+			config.FieldDefinition{ID: "body", Name: "Body", Type: types.FieldTypeMarkdown},
+			&model.FieldValue{FieldID: "body", Type: types.FieldTypeMarkdown, Value: "# Title\n\ncontent"},
+		)
+		inputBlock, ok := block.(*goslack.InputBlock)
+		gt.Bool(t, ok).True().Required()
+		element, ok := inputBlock.Element.(*goslack.PlainTextInputBlockElement)
+		gt.Bool(t, ok).True().Required()
+		gt.Bool(t, element.Multiline).True()
+		gt.String(t, element.InitialValue).Equal("# Title\n\ncontent")
+	})
+}
+
 func TestBuildFieldOptions_ClampsLongDescription(t *testing.T) {
 	maxRunes := usecase.SlackOptionDescriptionMaxRunesForTest
 

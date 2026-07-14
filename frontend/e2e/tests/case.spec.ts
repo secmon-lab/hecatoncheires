@@ -634,4 +634,49 @@ test.describe('Case Management', () => {
     const existsInOpen = await caseListPage.caseExists('Case To Reopen');
     expect(existsInOpen).toBeTruthy();
   });
+
+  test('should edit a markdown field via the sidebar cell -> view modal -> editor', async ({ page }) => {
+    const caseListPage = new CaseListPage(page);
+    const caseFormPage = new CaseFormPage(page);
+    const caseDetailPage = new CaseDetailPage(page);
+
+    const title = `Markdown Field Case ${Date.now()}`;
+    await caseListPage.clickNewCaseButton();
+    await caseFormPage.createCase({ title, customFields: { category: 'task' } });
+    await caseListPage.waitForTableLoad();
+    await caseListPage.fillSearchFilter(title);
+    await caseListPage.clickCaseByTitle(title);
+    await caseDetailPage.waitForPageLoad();
+
+    // The sidebar cell for the (empty) markdown 'runbook' field is clickable.
+    const cell = page.getByTestId('field-runbook');
+    await expect(cell).toBeVisible();
+
+    // Clicking opens the view modal; with no value yet there is no rendered heading.
+    await cell.click();
+    await expect(page.getByTestId('field-runbook-edit')).toBeVisible();
+    await expect(page.getByRole('heading', { level: 2, name: 'Steps' })).toHaveCount(0);
+
+    // Edit -> type markdown -> Save.
+    await page.getByTestId('field-runbook-edit').click();
+    const source = '## Steps\n\n1. first\n2. second';
+    await page.getByTestId('field-runbook-md-textarea').fill(source);
+
+    // The editor's Preview tab renders it.
+    await page.getByTestId('field-runbook-md-tab-preview').click();
+    await expect(page.getByTestId('field-runbook-md-preview').locator('h2')).toHaveText('Steps');
+
+    // Back to Write and Save.
+    await page.getByTestId('field-runbook-md-tab-write').click();
+    await page.getByTestId('field-runbook-save').click();
+
+    // The modal returns to view mode and renders the saved markdown.
+    await expect(page.getByRole('heading', { level: 2, name: 'Steps' })).toBeVisible();
+
+    // Reload and re-open to confirm the value round-tripped to the backend.
+    await page.reload();
+    await caseDetailPage.waitForPageLoad();
+    await page.getByTestId('field-runbook').click();
+    await expect(page.getByRole('heading', { level: 2, name: 'Steps' })).toBeVisible();
+  });
 });

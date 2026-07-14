@@ -142,6 +142,11 @@ var ShouldBroadcastAnyActionEventForTest = shouldBroadcastAnyActionEvent
 // external tests can verify the Slack input-length contract.
 var ClampPlainTextForTest = clampPlainText
 
+// CoerceFieldValueForTest exposes the unexported coerceFieldValue helper so
+// external tests can verify the JSON-decoded value → canonical Go shape
+// contract per field type (notably markdown → string).
+var CoerceFieldValueForTest = coerceFieldValue
+
 // ClampSlackOptionDescriptionForTest exposes the unexported
 // clampSlackOptionDescription helper so external tests can verify the
 // 75-rune option-description contract.
@@ -176,6 +181,14 @@ const ClampSuffixSingleLineForTest = clampSuffixSingleLine
 // BuildDraftEditModalForTest exposes buildDraftEditModal so external tests
 // can assert on the rendered Block Kit payload.
 var BuildDraftEditModalForTest = buildDraftEditModal
+
+// BuildFieldInputBlockForTest / BuildFieldInputBlockWithValueForTest expose the
+// custom-field Slack input builders so external tests can assert per-type
+// element shape (e.g. markdown → multiline plain-text input).
+var (
+	BuildFieldInputBlockForTest          = buildFieldInputBlock
+	BuildFieldInputBlockWithValueForTest = buildFieldInputBlockWithValue
+)
 
 // Mention-draft Edit modal block / action IDs exposed for tests that
 // build the view_submission callback directly (e.g. the reporter

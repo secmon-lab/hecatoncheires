@@ -815,6 +815,7 @@ const (
 	FieldTypeURL          FieldType = "URL"
 	FieldTypeCaseRef      FieldType = "CASE_REF"
 	FieldTypeMultiCaseRef FieldType = "MULTI_CASE_REF"
+	FieldTypeMarkdown     FieldType = "MARKDOWN"
 )
 
 var AllFieldType = []FieldType{
@@ -828,11 +829,12 @@ var AllFieldType = []FieldType{
 	FieldTypeURL,
 	FieldTypeCaseRef,
 	FieldTypeMultiCaseRef,
+	FieldTypeMarkdown,
 }
 
 func (e FieldType) IsValid() bool {
 	switch e {
-	case FieldTypeText, FieldTypeNumber, FieldTypeSelect, FieldTypeMultiSelect, FieldTypeUser, FieldTypeMultiUser, FieldTypeDate, FieldTypeURL, FieldTypeCaseRef, FieldTypeMultiCaseRef:
+	case FieldTypeText, FieldTypeNumber, FieldTypeSelect, FieldTypeMultiSelect, FieldTypeUser, FieldTypeMultiUser, FieldTypeDate, FieldTypeURL, FieldTypeCaseRef, FieldTypeMultiCaseRef, FieldTypeMarkdown:
 		return true
 	}
 	return false

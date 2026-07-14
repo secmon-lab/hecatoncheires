@@ -10,6 +10,7 @@ import InlineDate from './InlineDate'
 import InlineURL from './InlineURL'
 import InlineCaseSelect from './InlineCaseSelect'
 import InlineMultiCaseSelect from './InlineMultiCaseSelect'
+import InlineMarkdownField from './InlineMarkdownField'
 import { REFERENCEABLE_CASES, CASE_REFS_BY_IDS } from '../../graphql/caseRef'
 import type { CaseRefItem } from './InlineCaseSelect'
 
@@ -149,6 +150,18 @@ export default function InlineCustomField({
           disabled={disabled}
           testId={tid}
           allowEmpty
+        />
+      )
+
+    case 'MARKDOWN':
+      return (
+        <InlineMarkdownField
+          label={field.name}
+          value={value || ''}
+          onSave={(s) => onSave(s)}
+          placeholder={placeholder}
+          disabled={disabled}
+          testId={tid}
         />
       )
 

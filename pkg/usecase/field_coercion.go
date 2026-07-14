@@ -9,7 +9,7 @@ import "github.com/secmon-lab/hecatoncheires/pkg/domain/types"
 // against a workspace's FieldSchema.
 func coerceFieldValue(v any, t types.FieldType) (any, bool) {
 	switch t {
-	case types.FieldTypeText, types.FieldTypeURL, types.FieldTypeUser, types.FieldTypeDate, types.FieldTypeSelect:
+	case types.FieldTypeText, types.FieldTypeMarkdown, types.FieldTypeURL, types.FieldTypeUser, types.FieldTypeDate, types.FieldTypeSelect:
 		s, ok := v.(string)
 		return s, ok
 	case types.FieldTypeNumber:

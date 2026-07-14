@@ -4,6 +4,7 @@ import { IconExt } from '../Icons'
 import { displayName } from '../../utils/user'
 import { CASE_REFS_BY_IDS } from '../../graphql/caseRef'
 import { useTranslation } from '../../i18n'
+import MarkdownContent from '../markdown/MarkdownContent'
 
 interface FieldOption {
   id: string
@@ -140,6 +141,9 @@ export default function FieldDisplay({ field, value, users = [] }: Props) {
   switch (field.type) {
     case 'TEXT':
       return <span style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{String(value)}</span>
+
+    case 'MARKDOWN':
+      return <MarkdownContent source={String(value)} />
 
     case 'NUMBER':
       return <span className="mono" style={{ fontSize: 13 }}>{String(value)}</span>
