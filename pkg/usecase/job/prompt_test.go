@@ -872,3 +872,46 @@ func TestBuildSystemPrompt_MemoSection(t *testing.T) {
 		gt.Bool(t, strings.Contains(got, "# Memos (case-scoped memory)")).False()
 	})
 }
+
+func TestValidateUserPromptTemplate(t *testing.T) {
+	t.Run("well-formed template parses", func(t *testing.T) {
+		gt.NoError(t, job.ValidateUserPromptTemplate("Summarize case {{ .Case.Title }}"))
+	})
+
+	t.Run("template using the shared join func parses", func(t *testing.T) {
+		// join is registered in promptFuncs; a validator that parsed without
+		// the runtime FuncMap would reject this template as an unknown function,
+		// so this guards against validation/runtime dialect drift.
+		gt.NoError(t, job.ValidateUserPromptTemplate(`{{ join .Case.AssigneeIDs ", " }}`))
+	})
+
+	t.Run("empty source parses (emptiness is a separate invariant)", func(t *testing.T) {
+		// An empty template is a syntactically valid template; the non-empty
+		// prompt requirement is enforced by model.Job.Validate, not here.
+		gt.NoError(t, job.ValidateUserPromptTemplate(""))
+	})
+
+	t.Run("unbalanced action is rejected", func(t *testing.T) {
+		gt.Error(t, job.ValidateUserPromptTemplate("Summarize {{ .Case.Title"))
+	})
+
+	t.Run("unknown function is rejected", func(t *testing.T) {
+		gt.Error(t, job.ValidateUserPromptTemplate("{{ definitelyNotAFunc .Case }}"))
+	})
+
+	t.Run("a template that parses here also renders at runtime", func(t *testing.T) {
+		// The two paths must agree: anything ValidateUserPromptTemplate accepts
+		// must be renderable by RenderUserPrompt (same FuncMap), and anything it
+		// rejects must fail to render.
+		const good = `{{ join .Case.AssigneeIDs "," }} / {{ .Case.Title }}`
+		gt.NoError(t, job.ValidateUserPromptTemplate(good)).Required()
+		rendered, err := job.RenderUserPrompt(job.PromptInputs{Job: &model.Job{ID: "render_check", Prompt: good}, Case: newCase(7)})
+		gt.NoError(t, err).Required()
+		gt.String(t, rendered).Equal("U-A1,U-A2 / Sample")
+
+		const bad = "{{ .Case.Title"
+		gt.Error(t, job.ValidateUserPromptTemplate(bad))
+		_, err = job.RenderUserPrompt(job.PromptInputs{Job: &model.Job{ID: "render_check_bad", Prompt: bad}, Case: newCase(8)})
+		gt.Error(t, err)
+	})
+}

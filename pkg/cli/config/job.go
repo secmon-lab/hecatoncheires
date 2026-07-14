@@ -10,6 +10,7 @@ import (
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/robfig/cron/v3"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
+	jobruntime "github.com/secmon-lab/hecatoncheires/pkg/usecase/job"
 )
 
 // jobIDPattern matches snake_case identifiers. Job IDs are surfaced in
@@ -141,6 +142,15 @@ func (s *JobSection) Validate(baseDir string) (*model.Job, error) {
 	}
 	if err := job.Validate(); err != nil {
 		return nil, goerr.Wrap(err, "job invariant violation",
+			goerr.V("job_id", s.ID))
+	}
+	// Parse the resolved prompt as a Go template with the runtime's FuncMap so a
+	// broken template (unbalanced action, unknown function) fails at config-load
+	// / `validate` time instead of silently passing here and only erroring at the
+	// first Job run. Deferred (prompt_file, baseDir=="") sections skip this and
+	// are re-validated once the file is read with a real baseDir.
+	if err := jobruntime.ValidateUserPromptTemplate(job.Prompt); err != nil {
+		return nil, goerr.Wrap(err, "invalid job prompt template",
 			goerr.V("job_id", s.ID))
 	}
 	return job, nil
