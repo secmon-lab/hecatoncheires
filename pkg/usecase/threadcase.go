@@ -319,10 +319,9 @@ func (uc *AgentUseCase) runThreadCaseCreation(ctx context.Context, req caseCreat
 
 	session, err := uc.loadOrCreateSession(ctx, wsID, 0, req.caseChannel, req.caseTS)
 	if err != nil {
-		errutil.Handle(ctx, err, "thread case: load session for create")
-		// Tell the user something went wrong instead of failing silently — this
-		// runs before the progress trace exists, so post directly to the UI thread.
-		uc.postThreadReply(ctx, req.uiChannel, req.uiTS, "⚠️ "+i18n.T(ctx, i18n.MsgAgentError))
+		// Tell the user what went wrong instead of failing silently — this runs
+		// before the progress trace exists, so post directly to the UI thread.
+		uc.replyUserError(ctx, err, "thread case: load session for create", req.uiChannel, req.uiTS)
 		return threadcase.StatusFallback, nil
 	}
 	// The session predates the case; record the reporter so the create handler
@@ -375,8 +374,7 @@ func (uc *AgentUseCase) runThreadCaseCreation(ctx context.Context, req caseCreat
 		Handler:           uc.newThreadcaseCreateHandler(req, traceMsg),
 	})
 	if runErr != nil {
-		errutil.Handle(ctx, runErr, "thread case create turn")
-		uc.postThreadReply(ctx, req.uiChannel, req.uiTS, "⚠️ "+i18n.T(ctx, i18n.MsgAgentError))
+		uc.replyUserError(ctx, runErr, "thread case create turn", req.uiChannel, req.uiTS)
 		return threadcase.StatusFallback, nil
 	}
 
@@ -391,7 +389,8 @@ func (uc *AgentUseCase) runThreadCaseCreation(ctx context.Context, req caseCreat
 		// The question form was posted by the handler; wait for the user to
 		// answer it via the form's Submit interaction (HandleThreadCaseQuestionSubmit).
 	case threadcase.StatusFallback:
-		uc.finalizeTrace(ctx, traceMsg, req.uiChannel, req.uiTS, i18n.T(ctx, i18n.MsgThreadCaseCreateFallback))
+		uc.finalizeTrace(ctx, traceMsg, req.uiChannel, req.uiTS,
+			uc.userErrorText(ctx, fallbackReasonError(res.FallbackReason), "thread case create fallback"))
 	case threadcase.StatusBusy, threadcase.StatusIdempotent:
 		// Another turn owns this thread, or a duplicate trigger — drop.
 	}
@@ -563,8 +562,10 @@ func (uc *AgentUseCase) HandleThreadCaseMention(ctx context.Context, msg *slackm
 		Handler:        uc.newThreadcaseHandler(channelID, threadTS, traceMsg),
 	})
 	if runErr != nil {
-		uc.postThreadReply(ctx, channelID, threadTS, "⚠️ "+i18n.T(ctx, i18n.MsgAgentError))
-		return goerr.Wrap(runErr, "thread case mention turn")
+		// replyUserError already reports to log/Sentry; return nil so the async
+		// dispatcher does not re-Handle (double report) the same error.
+		uc.replyUserError(ctx, runErr, "thread case mention turn", channelID, threadTS)
+		return nil
 	}
 
 	switch res.Status {
@@ -575,7 +576,7 @@ func (uc *AgentUseCase) HandleThreadCaseMention(ctx context.Context, msg *slackm
 		// Question already posted by the handler; idempotent drops silently.
 		return nil
 	case threadcase.StatusFallback:
-		uc.postThreadReply(ctx, channelID, threadTS, "⚠️ "+i18n.T(ctx, i18n.MsgAgentError))
+		uc.replyUserError(ctx, fallbackReasonError(res.FallbackReason), "thread case mention fallback", channelID, threadTS)
 		return nil
 	case threadcase.StatusCompleted:
 		uc.applyMentionDecision(ctx, wsID, entry, foundCase.ID, channelID, threadTS, traceMsg, res.Decision)
@@ -602,7 +603,11 @@ func (uc *AgentUseCase) applyMentionDecision(ctx context.Context, wsID string, e
 		if uc.deps.CaseUC != nil {
 			fv := buildThreadFieldValues(entry, d.Fields)
 			if _, err := uc.deps.CaseUC.MaterializeThreadCase(ctx, wsID, caseID, d.Title, d.Description, fv); err != nil {
-				errutil.Handle(ctx, err, "thread case: materialize on mention")
+				// Materialize failed — surface it instead of finalizing with the
+				// success text, which would mislabel a failed update as done.
+				uc.finalizeTrace(ctx, traceMsg, channelID, threadTS,
+					uc.userErrorText(ctx, err, "thread case: materialize on mention"))
+				return
 			}
 		}
 		text := d.Message

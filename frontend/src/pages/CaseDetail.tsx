@@ -523,10 +523,10 @@ export default function CaseDetail() {
           <div className="h-detail-meta">
             <span>
               <IconCalendar size={11} style={{ marginRight: 4, verticalAlign: '-2px' }} />
-              {t('labelCreatedTimestamp')} <span className="mono" data-testid="created-timestamp-value">{formatTimestamp(c.createdAt)}</span>
+              {t('labelCreatedTimestamp')} <span className="mono" data-testid="created-timestamp-value" data-ts={c.createdAt ?? ''}>{formatTimestamp(c.createdAt)}</span>
             </span>
             <span>
-              {t('labelUpdatedTimestamp')} <span className="mono" data-testid="updated-timestamp-value">{formatTimestamp(c.updatedAt)}</span>
+              {t('labelUpdatedTimestamp')} <span className="mono" data-testid="updated-timestamp-value" data-ts={c.updatedAt ?? ''}>{formatTimestamp(c.updatedAt)}</span>
             </span>
             {c.reporter && (
               <span>

@@ -398,11 +398,16 @@ test.describe('Case Management', () => {
     const caseListPage = new CaseListPage(page);
     const caseFormPage = new CaseFormPage(page);
 
+    // Unique prefix so the exact-count assertions below survive a retry or a
+    // parallel worker: a generic "Paginated Case" filter would match a
+    // previous attempt's 21 rows too and break the "1 / 2" / 20-row math.
+    const prefix = `Paginated-${Date.now()}`;
+
     // Create 21 cases to trigger pagination
     for (let i = 1; i <= 21; i++) {
       await caseListPage.clickNewCaseButton();
       await caseFormPage.createCase({
-        title: `Paginated Case ${i}`,
+        title: `${prefix} ${i}`,
         customFields: { category: 'task' },
       });
     }
@@ -411,7 +416,7 @@ test.describe('Case Management', () => {
     await caseListPage.waitForTableLoad();
 
     // Filter to only show cases from this test to avoid interference
-    await caseListPage.fillSearchFilter('Paginated Case');
+    await caseListPage.fillSearchFilter(prefix);
 
     // Verify first page has 20 rows
     const rowCount = await caseListPage.getRowCount();
@@ -492,13 +497,24 @@ test.describe('Case Management', () => {
     const timestampsVisible = await caseDetailPage.isTimestampsVisible();
     expect(timestampsVisible).toBeTruthy();
 
-    // Verify Created timestamp is non-empty
-    const createdTimestamp = await caseDetailPage.getCreatedTimestamp();
-    expect(createdTimestamp.length).toBeGreaterThan(0);
+    // The case was just created, so both timestamps must render a real value,
+    // not the "—" placeholder shown for a missing/invalid one.
+    expect(await caseDetailPage.getCreatedTimestamp()).not.toBe('—');
+    expect(await caseDetailPage.getUpdatedTimestamp()).not.toBe('—');
 
-    // Verify Updated timestamp is non-empty
-    const updatedTimestamp = await caseDetailPage.getUpdatedTimestamp();
-    expect(updatedTimestamp.length).toBeGreaterThan(0);
+    // For the recency check, parse the machine-readable ISO 8601 value from the
+    // `data-ts` attribute rather than the localized display text — Date.parse
+    // on a localized string is locale-dependent and unreliable. Both stamps
+    // must fall within the last 10 minutes.
+    const RECENT_MS = 10 * 60 * 1000;
+
+    const createdMs = Date.parse(await caseDetailPage.getCreatedTimestampISO());
+    expect(Number.isNaN(createdMs)).toBeFalsy();
+    expect(Math.abs(Date.now() - createdMs)).toBeLessThan(RECENT_MS);
+
+    const updatedMs = Date.parse(await caseDetailPage.getUpdatedTimestampISO());
+    expect(Number.isNaN(updatedMs)).toBeFalsy();
+    expect(Math.abs(Date.now() - updatedMs)).toBeLessThan(RECENT_MS);
   });
 
   test('should display Fields section on case detail page', async ({ page }) => {

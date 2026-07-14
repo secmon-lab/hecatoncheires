@@ -59,18 +59,42 @@ var (
 	// field is marked required: the Slack case-creation modal cannot collect a
 	// case reference, so a required one would make the case un-creatable.
 	ErrRequiredCaseRefUnsupported = goerr.New("case_ref fields cannot be required")
+
+	// --- Global config ([[workspace_group]]) ---
+
+	// ErrMissingWorkspaceGroupID is returned when a [[workspace_group]] omits id.
+	ErrMissingWorkspaceGroupID = goerr.New("workspace group ID is required")
+	// ErrInvalidWorkspaceGroupID is returned when a workspace group id does not
+	// match the allowed pattern or exceeds the length limit.
+	ErrInvalidWorkspaceGroupID = goerr.New("invalid workspace group ID format")
+	// ErrDuplicateWorkspaceGroupID is returned when the same workspace group id
+	// is defined more than once across the global config files.
+	ErrDuplicateWorkspaceGroupID = goerr.New("duplicate workspace group ID")
+	// ErrDuplicateGroupMember is returned when the same workspace id appears more
+	// than once in a single group's members list.
+	ErrDuplicateGroupMember = goerr.New("duplicate workspace group member")
+	// ErrUnknownGroupMember is returned when a group member references a
+	// workspace id that is not defined across the loaded workspace configs.
+	ErrUnknownGroupMember = goerr.New("workspace group member references an unknown workspace")
+	// ErrGlobalConfigContainsWorkspace is returned when a --global-config file
+	// contains a [workspace] section. Workspace definitions belong under
+	// --config (1 file = 1 workspace); the global config is for deployment-wide
+	// settings only, so mixing the two is rejected loudly rather than ignored.
+	ErrGlobalConfigContainsWorkspace = goerr.New("global config file must not contain a [workspace] section")
 )
 
 // Context keys for error values
 const (
-	ConfigPathKey     = "config_path"
-	FieldIDKey        = "field_id"
-	FieldTypeKey      = "field_type"
-	OptionIDKey       = "option_id"
-	FieldIndexKey     = "field_index"
-	OptionIndexKey    = "option_index"
-	WorkspaceIDKey    = "workspace_id"
-	WorkspaceColorKey = "workspace_color"
-	WorkspaceEmojiKey = "workspace_emoji"
-	WorkspaceEmojiLen = "workspace_emoji_len"
+	ConfigPathKey       = "config_path"
+	FieldIDKey          = "field_id"
+	FieldTypeKey        = "field_type"
+	OptionIDKey         = "option_id"
+	FieldIndexKey       = "field_index"
+	OptionIndexKey      = "option_index"
+	WorkspaceIDKey      = "workspace_id"
+	WorkspaceColorKey   = "workspace_color"
+	WorkspaceEmojiKey   = "workspace_emoji"
+	WorkspaceEmojiLen   = "workspace_emoji_len"
+	WorkspaceGroupIDKey = "workspace_group_id"
+	GroupMemberKey      = "group_member"
 )

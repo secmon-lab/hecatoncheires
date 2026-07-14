@@ -1202,6 +1202,40 @@ func (r *queryResolver) Workspaces(ctx context.Context) ([]*graphql1.Workspace, 
 	return result, nil
 }
 
+// WorkspaceGroups is the resolver for the workspaceGroups field.
+func (r *queryResolver) WorkspaceGroups(ctx context.Context) ([]*graphql1.WorkspaceGroup, error) {
+	groups := r.UseCases.WorkspaceGroups().List()
+	wsReg := r.UseCases.WorkspaceRegistry()
+
+	result := make([]*graphql1.WorkspaceGroup, 0, len(groups))
+	for _, g := range groups {
+		members := make([]*graphql1.Workspace, 0, len(g.MemberIDs))
+		for _, wsID := range g.MemberIDs {
+			entry, err := wsReg.Get(wsID)
+			if err != nil {
+				// Members are validated to exist at config load, so a miss here is
+				// unexpected; skipping keeps the [Workspace!]! contract non-null-safe.
+				continue
+			}
+			members = append(members, &graphql1.Workspace{ID: entry.Workspace.ID, Name: entry.Workspace.Name})
+		}
+
+		var desc *string
+		if g.Description != "" {
+			d := g.Description
+			desc = &d
+		}
+
+		result = append(result, &graphql1.WorkspaceGroup{
+			ID:          g.ID,
+			Name:        g.Name,
+			Description: desc,
+			Workspaces:  members,
+		})
+	}
+	return result, nil
+}
+
 // Cases is the resolver for the cases field.
 func (r *queryResolver) Cases(ctx context.Context, workspaceID string, status *types.CaseStatus) ([]*graphql1.Case, error) {
 	cases, err := r.UseCases.Case.ListCases(ctx, workspaceID, status)

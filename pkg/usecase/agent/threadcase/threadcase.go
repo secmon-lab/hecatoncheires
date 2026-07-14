@@ -100,6 +100,12 @@ type Result struct {
 	// (via Handler.Create inside the planner loop). Nil for other modes and
 	// for non-completed statuses.
 	Case *model.Case
+	// FallbackReason is the human-readable cause of a StatusFallback turn
+	// (propagated from planexec's RunResult.FallbackReason). Empty for other
+	// statuses. The host surfaces it to the user as the technical note of the
+	// fallback message instead of a generic error; it never crosses back into
+	// the loop.
+	FallbackReason string
 }
 
 // RunTurn executes one thread-mode turn: acquire the per-thread lock, run the
@@ -324,7 +330,7 @@ func (uc *UseCase) runCreateTurn(ctx context.Context, req TurnRequest, baseReq p
 		if cerr != nil {
 			*runErr = goerr.Wrap(cerr, "create case")
 			uc.persistSession(ctx, req.Session, model.SessionEndedWithCaseBoundReply)
-			return &Result{Status: StatusFallback}, nil
+			return &Result{Status: StatusFallback, FallbackReason: cerr.Error()}, nil
 		}
 		uc.persistSession(ctx, req.Session, model.SessionEndedWithCaseBoundReply)
 		return &Result{Status: StatusCompleted, Case: c}, nil
@@ -333,7 +339,7 @@ func (uc *UseCase) runCreateTurn(ctx context.Context, req TurnRequest, baseReq p
 			goerr.V("status", int(res.Status)),
 			goerr.V("reason", res.FallbackReason))
 		uc.persistSession(ctx, req.Session, model.SessionEndedWithCaseBoundReply)
-		return &Result{Status: StatusFallback}, nil
+		return &Result{Status: StatusFallback, FallbackReason: res.FallbackReason}, nil
 	default:
 		*runErr = goerr.New("threadcase planexec returned unknown status",
 			goerr.V("status", int(res.Status)))
@@ -380,7 +386,7 @@ func (uc *UseCase) runMentionTurn(ctx context.Context, req TurnRequest, baseReq 
 			goerr.V("status", int(res.Status)),
 			goerr.V("reason", res.FallbackReason))
 		uc.persistSession(ctx, req.Session, model.SessionEndedWithCaseBoundReply)
-		return &Result{Status: StatusFallback}, nil
+		return &Result{Status: StatusFallback, FallbackReason: res.FallbackReason}, nil
 	default:
 		*runErr = goerr.New("threadcase planexec returned unknown status",
 			goerr.V("status", int(res.Status)))

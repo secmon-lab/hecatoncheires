@@ -99,6 +99,18 @@ export class CaseFormPage extends BasePage {
   }
 
   /**
+   * Toggle the "Private case" checkbox (shown only on the create form) to the
+   * desired checked state.
+   */
+  async setPrivate(checked: boolean): Promise<void> {
+    const checkbox = this.page.getByTestId('private-case-checkbox');
+    await checkbox.waitFor({ state: 'visible', timeout: 5000 });
+    if ((await checkbox.isChecked()) !== checked) {
+      await checkbox.click();
+    }
+  }
+
+  /**
    * Fill a custom field by field ID
    * Automatically detects if it's a select or input field
    */
@@ -158,11 +170,14 @@ export class CaseFormPage extends BasePage {
   }
 
   /**
-   * Check if the form is visible
+   * Check if the form modal is visible. Keys off the modal heading — the
+   * same signal waitForFormVisible() uses — since this page object has no
+   * single modal-root locator.
    */
   async isVisible(): Promise<boolean> {
     try {
-      await this.modal.waitFor({ state: 'visible', timeout: 2000 });
+      await this.page.locator('h2').filter({ hasText: /New Case|Edit Case/ })
+        .waitFor({ state: 'visible', timeout: 2000 });
       return true;
     } catch {
       return false;
@@ -177,6 +192,7 @@ export class CaseFormPage extends BasePage {
     description?: string;
     customFields?: Record<string, string>;
     isTest?: boolean;
+    isPrivate?: boolean;
   }): Promise<void> {
     await this.waitForFormVisible();
     await this.fillTitle(data.title);
@@ -193,6 +209,10 @@ export class CaseFormPage extends BasePage {
 
     if (data.isTest) {
       await this.setTestCase(true);
+    }
+
+    if (data.isPrivate) {
+      await this.setPrivate(true);
     }
 
     await this.submit();

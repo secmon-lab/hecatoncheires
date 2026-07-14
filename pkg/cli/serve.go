@@ -244,6 +244,14 @@ func cmdServe() *cli.Command {
 				return goerr.Wrap(err, "failed to load workspace configurations")
 			}
 
+			// Load deployment-wide workspace groups (--global-config). Members
+			// are cross-checked against the workspace registry above; an unset
+			// flag leaves an empty (dormant) registry.
+			groupRegistry, err := appCfg.ConfigureGroups(c, registry)
+			if err != nil {
+				return goerr.Wrap(err, "failed to load workspace group configurations")
+			}
+
 			// Initialize repository based on backend type
 			repo, err := repoCfg.Configure(ctx)
 			if err != nil {
@@ -462,6 +470,7 @@ func cmdServe() *cli.Command {
 				}
 			}()
 
+			ucOpts = append(ucOpts, usecase.WithWorkspaceGroups(groupRegistry))
 			uc := usecase.New(repo, registry, ucOpts...)
 
 			// Interactive Jobs suspend a run and resume it from a later Slack

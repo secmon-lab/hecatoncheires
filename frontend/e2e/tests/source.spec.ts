@@ -33,10 +33,25 @@ test.describe('Source Management', () => {
     await expect(options.first()).toBeVisible();
   });
 
+  test('the Slack source form blocks creation until a channel is chosen', async ({ page }) => {
+    const sourceListPage = new SourceListPage(page);
+
+    await sourceListPage.openNewSourceForm();
+    await page.getByTestId('source-type-SLACK').click();
+
+    // The Slack config form opens; with no channel selected yet its Create
+    // button is disabled (the required-field guard). We assert the guard —
+    // actually completing creation needs a live Slack workspace to resolve
+    // channels, which the e2e environment does not provide.
+    const submit = page.getByTestId('slack-source-submit');
+    await expect(submit).toBeVisible();
+    await expect(submit).toBeDisabled();
+  });
+
   // Note: completing source creation (after the type is chosen) drives the
   // Notion / Slack / GitHub config forms, which require those external services
   // to validate credentials and resolve resources — not available in the e2e
   // environment. Per the E2E quality-bar rule, the external dependency is the
-  // documented reason the create journey stops at the type-selection step here.
+  // documented reason the create journey stops at the guard assertion above.
   // The full persistence path is covered by the Go repository / usecase tests.
 });

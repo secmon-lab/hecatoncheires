@@ -180,6 +180,7 @@ export default function SlackForm({ isOpen, onClose, mode = 'create', source }: 
             variant="primary"
             onClick={handleSubmit}
             disabled={loading || selectedChannels.length === 0 || !name.trim()}
+            data-testid="slack-source-submit"
           >
             {submitLabel}
           </Button>

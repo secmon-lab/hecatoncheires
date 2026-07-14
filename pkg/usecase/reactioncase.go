@@ -32,12 +32,18 @@ var reactionCreateContextTmpl = template.Must(
 	template.New("reaction_create_context").Parse(reactionCreateContextTmplText))
 
 // renderReactionCreateInstruction renders the ModeCreate trigger-context prompt
-// that tells the create agent to read the conversation around the anchored
-// message. Best-effort: an (unexpected) render failure degrades to no extra
-// instruction rather than failing the turn.
-func renderReactionCreateInstruction(ctx context.Context, anchorTS string) string {
+// that tells the create agent to treat the anchored message as the center of
+// the case and read the surrounding conversation to understand why its concern
+// was raised. When permalink is non-empty the prompt also asks the agent to keep
+// the anchor's Slack link in the description. Best-effort: an (unexpected) render
+// failure degrades to no extra instruction rather than failing the turn.
+func renderReactionCreateInstruction(ctx context.Context, anchorTS, permalink string) string {
 	var buf strings.Builder
-	if err := reactionCreateContextTmpl.Execute(&buf, struct{ AnchorTS string }{AnchorTS: anchorTS}); err != nil {
+	input := struct {
+		AnchorTS  string
+		Permalink string
+	}{AnchorTS: anchorTS, Permalink: permalink}
+	if err := reactionCreateContextTmpl.Execute(&buf, input); err != nil {
 		errutil.Handle(ctx, err, "reaction: render create instruction")
 		return ""
 	}
@@ -112,6 +118,7 @@ func (uc *AgentUseCase) reactionCreateSameChannel(ctx context.Context, entry *mo
 	wsID := entry.Workspace.ID
 
 	msgs, anchorTS, threadRoot := uc.fetchReactionContext(ctx, channelID, srcTS)
+	permalink := uc.slackPermalink(ctx, channelID, srcTS)
 
 	existing, err := uc.deps.Repo.Case().GetBySlackThread(ctx, wsID, channelID, threadRoot)
 	if err != nil {
@@ -125,7 +132,7 @@ func (uc *AgentUseCase) reactionCreateSameChannel(ctx context.Context, entry *mo
 	}
 
 	_, err = uc.runThreadCaseCreation(ctx, threadCreateReq(entry, channelID, threadRoot, reporter,
-		msgs, nil, "", "", threadRoot, renderReactionCreateInstruction(ctx, anchorTS)))
+		msgs, nil, "", "", threadRoot, renderReactionCreateInstruction(ctx, anchorTS, permalink)))
 	return err
 }
 
@@ -151,6 +158,7 @@ func (uc *AgentUseCase) reactionCreateCrossChannel(ctx context.Context, entry *m
 	}
 
 	msgs, anchorTS, uiRoot := uc.fetchReactionContext(ctx, srcChannel, srcTS)
+	permalink := uc.slackPermalink(ctx, srcChannel, srcTS)
 
 	dest := entry.SlackMonitorChannelID
 	// A lightweight placeholder root anchors the case thread in the monitored
@@ -160,12 +168,13 @@ func (uc *AgentUseCase) reactionCreateCrossChannel(ctx context.Context, entry *m
 	placeholderText := i18n.T(ctx, i18n.MsgReactionCasePlaceholder)
 	rootTS, perr := uc.deps.SlackService.PostMessage(ctx, dest, nil, placeholderText)
 	if perr != nil {
-		errutil.Handle(ctx, goerr.Wrap(perr, "reaction cross-channel: post placeholder root",
-			goerr.V("dest_channel", dest)), "reaction cross-channel: post placeholder root")
 		uc.releaseReactionClaim(ctx, wsID, srcChannel, srcTS)
 		// The reactor pressed the emoji but the placeholder post failed — tell them
-		// in their own thread instead of leaving the reaction with no response.
-		uc.postThreadReply(ctx, srcChannel, uiRoot, "⚠️ "+i18n.T(ctx, i18n.MsgAgentError))
+		// in their own thread instead of leaving the reaction with no response. The
+		// Slack client attached the classification (e.g. not_in_channel) at the
+		// origin, so this renders the actionable "invite the bot" message.
+		uc.replyUserError(ctx, goerr.Wrap(perr, "reaction cross-channel: post placeholder root",
+			goerr.V("dest_channel", dest)), "reaction cross-channel: post placeholder root", srcChannel, uiRoot)
 		return nil
 	}
 
@@ -178,7 +187,7 @@ func (uc *AgentUseCase) reactionCreateCrossChannel(ctx context.Context, entry *m
 		reporter:          reporter,
 		systemMessages:    msgs,
 		triggerTS:         rootTS,
-		createInstruction: renderReactionCreateInstruction(ctx, anchorTS),
+		createInstruction: renderReactionCreateInstruction(ctx, anchorTS, permalink),
 		sourceChannel:     srcChannel,
 		sourceTS:          srcTS,
 	})

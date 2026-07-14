@@ -200,6 +200,7 @@ function MemoRowItem({ memo, memoFields: _memoFields, summaryFields, colorField,
   return (
     <button
       type="button"
+      data-testid="memo-row"
       onClick={onClick}
       style={{
         display: 'flex',
@@ -469,6 +470,7 @@ export default function MemoTab({ caseId, workspaceId, accessDenied }: Props) {
           <button
             type="button"
             role="tab"
+            data-testid="memo-filter-active"
             aria-selected={filterValue === 'ACTIVE'}
             className={filterValue === 'ACTIVE' ? 'seg-toggle-btn seg-toggle-btn--active' : 'seg-toggle-btn'}
             onClick={() => setFilterValue('ACTIVE')}
@@ -478,6 +480,7 @@ export default function MemoTab({ caseId, workspaceId, accessDenied }: Props) {
           <button
             type="button"
             role="tab"
+            data-testid="memo-filter-archived"
             aria-selected={filterValue === 'ARCHIVED'}
             className={filterValue === 'ARCHIVED' ? 'seg-toggle-btn seg-toggle-btn--active' : 'seg-toggle-btn'}
             onClick={() => setFilterValue('ARCHIVED')}
@@ -487,6 +490,7 @@ export default function MemoTab({ caseId, workspaceId, accessDenied }: Props) {
           <button
             type="button"
             role="tab"
+            data-testid="memo-filter-all"
             aria-selected={filterValue === null}
             className={filterValue === null ? 'seg-toggle-btn seg-toggle-btn--active' : 'seg-toggle-btn'}
             onClick={() => setFilterValue(null)}
@@ -507,6 +511,7 @@ export default function MemoTab({ caseId, workspaceId, accessDenied }: Props) {
           size="sm"
           icon={<IconPlus size={12} />}
           onClick={() => setShowCreateForm(true)}
+          data-testid="new-memo-button"
         >
           {t('btnNewMemo')}
         </Button>

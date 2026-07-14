@@ -467,8 +467,12 @@ exactly one workspace. When the trigger emoji is added:
   like any thread-mode Case.
 
 The person who added the reaction becomes the Case **reporter**. The
-initialization agent is instructed to read the conversation surrounding the
-reacted message (not just the single message) when composing the Case.
+initialization agent treats the reacted message as the **center** of the Case: it
+reads the surrounding conversation to understand *why* that message's problem,
+complaint, or unmet need was raised, but keeps the Case anchored to that concern
+rather than letting a tangential thread topic take over. When the reacted
+message's Slack link is available it is preserved in the Case description, so the
+Case always points back to its source.
 
 **Setup requirements for the reaction trigger:**
 
@@ -1226,6 +1230,30 @@ For local development with ngrok:
 - Check server logs for incoming requests
 
 ### General Issues
+
+#### Understanding error messages in Slack
+
+When a Slack-triggered operation fails (a mention, a reaction, a case draft), the
+bot replies with a structured message instead of a generic "please try again":
+
+```
+⚠️ <what happened>
+*Technical note*: <short cause> (<slack error code / reason>)
+*What you can do*: <how to fix it, or that it can't be fixed by retrying>
+ref: `<8-hex id>`
+```
+
+- **What you can do** tells you whether it is actionable on your side. Common
+  cases: invite the bot to the destination channel (`not_in_channel`), ask an
+  admin to grant a missing scope or re-authorize the app (`missing_scope` /
+  `invalid_auth`), or fill required fields via **Edit** (field validation).
+- **ref** is a correlation id. The same id is attached to the server log entry
+  (and, for unexpected errors, to the Sentry event) for that failure. Quote it
+  when asking an operator to investigate — they can grep logs / Sentry by
+  `ref_id`.
+- Operator/user-actionable errors (permission, validation) are logged but do
+  **not** page Sentry; unexpected errors do. So a Slack error with a clear "What
+  you can do" is usually a configuration fix, not a bug report.
 
 #### User avatars not displaying
 - Verify `HECATONCHEIRES_SLACK_BOT_TOKEN` is set

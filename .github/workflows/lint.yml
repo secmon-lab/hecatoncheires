@@ -46,8 +46,8 @@ jobs:
           args: --timeout 10m ./...
           skip-cache: false
 
-  eslint:
-    name: eslint (frontend)
+  frontend:
+    name: frontend (lint + unit)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -80,3 +80,9 @@ jobs:
 
       - name: Run ESLint
         run: pnpm lint
+
+      # Vitest carries regression guards the E2E harness cannot (IME
+      # composition on Enter handlers per .claude/rules/frontend-keyboard-input.md);
+      # run it here so those unit tests actually gate merges.
+      - name: Run Vitest unit tests
+        run: pnpm test

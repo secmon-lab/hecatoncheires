@@ -24,7 +24,7 @@ export default function MemoArchiveDialog({ memoTitle: _memoTitle, onConfirm, on
           <Button variant="ghost" onClick={onCancel} disabled={archiving}>
             {t('btnCancel')}
           </Button>
-          <Button variant="danger" onClick={onConfirm} disabled={archiving} icon={<IconCheck size={13} />}>
+          <Button variant="danger" onClick={onConfirm} disabled={archiving} icon={<IconCheck size={13} />} data-testid="memo-archive-confirm-button">
             {t('memoArchiveDialogConfirm')}
           </Button>
         </>

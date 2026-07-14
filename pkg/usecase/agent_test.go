@@ -32,12 +32,18 @@ type agentTestSlackService struct {
 	getPermalinkFn           func(ctx context.Context, channelID string, ts string) (string, error)
 	postedMessages           []agentPostedMessage
 	updatedMessages          []agentUpdatedMessage
+	permalinkCalls           []agentPermalinkCall
 }
 
 type agentPostedMessage struct {
 	ChannelID string
 	ThreadTS  string
 	Text      string
+}
+
+type agentPermalinkCall struct {
+	ChannelID string
+	MessageTS string
 }
 
 type agentUpdatedMessage struct {
@@ -107,6 +113,7 @@ func (m *agentTestSlackService) PostEphemeralBlocks(_ context.Context, _ string,
 }
 
 func (m *agentTestSlackService) GetPermalink(ctx context.Context, channelID string, ts string) (string, error) {
+	m.permalinkCalls = append(m.permalinkCalls, agentPermalinkCall{ChannelID: channelID, MessageTS: ts})
 	if m.getPermalinkFn != nil {
 		return m.getPermalinkFn(ctx, channelID, ts)
 	}

@@ -325,6 +325,7 @@ export default function CaseAgent() {
                 className={styles.editBtn}
                 icon={<IconEdit size={12} />}
                 onClick={handleStartPromptEdit}
+                data-testid="agent-prompt-edit-button"
               >
                 {t('btnEdit')}
               </Button>
@@ -338,6 +339,7 @@ export default function CaseAgent() {
                 onChange={(e) => setDraftPrompt(e.target.value.slice(0, PROMPT_LIMIT))}
                 placeholder={t('caseAgentPromptPlaceholder')}
                 aria-label={t('caseAgentAdditionalPrompt')}
+                data-testid="agent-prompt-textarea"
               />
               <div className={styles.promptEditorActions}>
                 <Button size="sm" variant="ghost" onClick={handleCancelPromptEdit}>
@@ -348,13 +350,16 @@ export default function CaseAgent() {
                   variant="primary"
                   onClick={() => void handleSavePrompt()}
                   disabled={updateState.loading}
+                  data-testid="agent-prompt-save-button"
                 >
                   {updateState.loading ? t('caseAgentSaving') : t('btnSave')}
                 </Button>
               </div>
             </div>
           ) : (
-            <MarkdownView source={caseData.agentAdditionalPrompt || ''} />
+            <div data-testid="agent-prompt-display">
+              <MarkdownView source={caseData.agentAdditionalPrompt || ''} />
+            </div>
           )}
         </div>
 
