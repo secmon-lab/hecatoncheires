@@ -383,7 +383,7 @@ func (uc *AgentUseCase) runThreadCaseCreation(ctx context.Context, req caseCreat
 		if res.Case == nil {
 			return res.Status, nil
 		}
-		uc.bindSessionToCase(ctx, session, res.Case.ID)
+		uc.bindSessionToCase(ctx, req.caseChannel, req.caseTS, res.Case.ID)
 		uc.postCreatedCaseOutcome(ctx, req, session, res.Case)
 	case threadcase.StatusQuestion:
 		// The question form was posted by the handler; wait for the user to
@@ -485,13 +485,19 @@ func (uc *AgentUseCase) slackPermalink(ctx context.Context, channelID, messageTS
 
 // bindSessionToCase stamps the freshly created case id onto the thread's
 // session (Session.ID stays stable so the gollem history stays continuous).
-// The caller passes the in-flight session, which the turn already mutated and
-// persisted (RunTurn writes back this same pointer), so there is no need to
-// reload it — that would only add a redundant read and risk dropping the
-// in-memory reaction-origin / creator fields. Best-effort: a failure here only
-// means later mentions re-resolve the case by thread lookup.
-func (uc *AgentUseCase) bindSessionToCase(ctx context.Context, ssn *model.Session, caseID int64) {
-	if ssn == nil {
+// It re-reads the session on purpose: RunTurn swaps its working session to the
+// turn-lock's own object (`req.Session = handle.Session`) and persists the
+// turn's LastAction / PendingQuestion there, so the caller's in-flight pointer
+// is stale after the turn. Binding via that stale pointer would clobber the
+// turn's writes (e.g. re-persist LastAction == question after a resume created
+// the case, which would loop a driver waiting on that flag). Best-effort: a
+// failure here only means later mentions re-resolve the case by thread lookup.
+func (uc *AgentUseCase) bindSessionToCase(ctx context.Context, channelID, threadTS string, caseID int64) {
+	ssn, err := uc.deps.Repo.Session().GetByThread(ctx, channelID, threadTS)
+	if err != nil || ssn == nil {
+		if err != nil {
+			errutil.Handle(ctx, err, "thread case: reload session to bind case")
+		}
 		return
 	}
 	if ssn.CaseID == caseID && ssn.PendingQuestion == nil {
