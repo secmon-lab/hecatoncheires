@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { MockedProvider } from '@apollo/client/testing'
 import { I18nProvider } from '../../i18n'
@@ -102,6 +102,26 @@ describe('InlineCustomField — CASE_REF', () => {
     await waitFor(() => {
       expect(screen.getByTestId('cr')).toHaveTextContent('Unavailable (#99)')
     })
+  })
+})
+
+describe('InlineCustomField — MARKDOWN', () => {
+  const markdownField = { id: 'md1', name: 'Notes', type: 'MARKDOWN' }
+
+  it('dispatches to InlineMarkdownField: cell shows raw source, click renders it', () => {
+    renderWithProviders(
+      <InlineCustomField field={markdownField} value={'## Heading'} onSave={vi.fn()} testId="md" />,
+      [],
+    )
+    const cell = screen.getByTestId('md')
+    // Sidebar cell shows the raw source, not rendered Markdown.
+    expect(cell.textContent).toContain('## Heading')
+    expect(cell.querySelector('h2')).toBeNull()
+
+    // Clicking opens the view modal, which renders the Markdown.
+    // (The modal title is also an h2, so match by accessible name.)
+    fireEvent.click(screen.getByTestId('md'))
+    expect(screen.getByRole('heading', { level: 2, name: 'Heading' }).textContent).toBe('Heading')
   })
 })
 

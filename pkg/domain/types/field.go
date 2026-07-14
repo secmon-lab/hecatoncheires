@@ -22,6 +22,9 @@ const (
 	// FieldTypeMultiCaseRef references multiple Cases by ID. The stored
 	// value is a []string of Case IDs (mirrors multi-select / multi-user).
 	FieldTypeMultiCaseRef FieldType = "multi_case_ref"
+	// FieldTypeMarkdown holds Markdown-formatted text. The stored value is a
+	// plain string (same shape as text); the Web UI renders it as Markdown.
+	FieldTypeMarkdown FieldType = "markdown"
 )
 
 // AllFieldTypes returns all valid field types
@@ -37,6 +40,7 @@ func AllFieldTypes() []FieldType {
 		FieldTypeURL,
 		FieldTypeCaseRef,
 		FieldTypeMultiCaseRef,
+		FieldTypeMarkdown,
 	}
 }
 
@@ -52,7 +56,8 @@ func (t FieldType) IsValid() bool {
 		FieldTypeDate,
 		FieldTypeURL,
 		FieldTypeCaseRef,
-		FieldTypeMultiCaseRef:
+		FieldTypeMultiCaseRef,
+		FieldTypeMarkdown:
 		return true
 	default:
 		return false

@@ -21,6 +21,7 @@ func validationSchema() *config.FieldSchema {
 			{ID: "detected_at", Type: types.FieldTypeDate},
 			{ID: "count", Type: types.FieldTypeNumber},
 			{ID: "owner", Type: types.FieldTypeUser},
+			{ID: "notes", Type: types.FieldTypeMarkdown},
 		},
 	}
 }
@@ -130,6 +131,33 @@ func TestWorkspaceMaterialization_Validate_TypeMismatch(t *testing.T) {
 	}
 	issues, _ := mat.Validate(validationSchema())
 	gt.Bool(t, hasIssue(issues, "severity", "type_mismatch")).True()
+}
+
+func TestWorkspaceMaterialization_Validate_Markdown(t *testing.T) {
+	t.Run("markdown string is accepted", func(t *testing.T) {
+		mat := &model.WorkspaceMaterialization{
+			Title: "ok",
+			CustomFieldValues: map[string]model.FieldValue{
+				"severity": fv("severity", types.FieldTypeSelect, "low"),
+				"notes":    fv("notes", types.FieldTypeMarkdown, "## Summary\n\nAll good."),
+			},
+		}
+		issues, fatal := mat.Validate(validationSchema())
+		gt.Bool(t, fatal).False()
+		gt.Bool(t, hasIssue(issues, "notes", "wrong_shape")).False()
+	})
+
+	t.Run("non-string markdown value is wrong_shape", func(t *testing.T) {
+		mat := &model.WorkspaceMaterialization{
+			Title: "ok",
+			CustomFieldValues: map[string]model.FieldValue{
+				"severity": fv("severity", types.FieldTypeSelect, "low"),
+				"notes":    fv("notes", types.FieldTypeMarkdown, 123),
+			},
+		}
+		issues, _ := mat.Validate(validationSchema())
+		gt.Bool(t, hasIssue(issues, "notes", "wrong_shape")).True()
+	})
 }
 
 func TestWorkspaceMaterialization_Validate_UnknownField(t *testing.T) {

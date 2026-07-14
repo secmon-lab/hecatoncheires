@@ -1,4 +1,5 @@
 import TextField from './TextField'
+import MarkdownField from './MarkdownField'
 import NumberField from './NumberField'
 import SelectField from './SelectField'
 import MultiSelectField from './MultiSelectField'
@@ -59,6 +60,20 @@ export default function CustomFieldRenderer({
     case 'TEXT':
       return (
         <TextField
+          fieldId={field.id}
+          label={field.name}
+          value={value || ''}
+          onChange={handleChange}
+          required={field.required}
+          description={field.description}
+          error={error}
+          disabled={disabled}
+        />
+      )
+
+    case 'MARKDOWN':
+      return (
+        <MarkdownField
           fieldId={field.id}
           label={field.name}
           value={value || ''}

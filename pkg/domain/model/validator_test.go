@@ -369,6 +369,57 @@ func TestFieldValidator_CaseRef(t *testing.T) {
 	})
 }
 
+func TestFieldValidator_Markdown(t *testing.T) {
+	schema := &config.FieldSchema{
+		Fields: []config.FieldDefinition{
+			{
+				ID:       "body",
+				Name:     "Body",
+				Type:     types.FieldTypeMarkdown,
+				Required: true,
+			},
+		},
+	}
+	v := model.NewFieldValidator(schema)
+
+	t.Run("valid markdown string accepted and Type injected", func(t *testing.T) {
+		out, err := v.ValidateCaseFieldsAll(map[string]model.FieldValue{
+			"body": {FieldID: "body", Value: "# Heading\n\n- item"},
+		})
+		gt.NoError(t, err).Required()
+		gt.Map(t, out).HasKey("body")
+		gt.Value(t, out["body"].Type).Equal(types.FieldTypeMarkdown)
+		gt.Value(t, out["body"].Value).Equal("# Heading\n\n- item")
+	})
+
+	t.Run("empty string is valid (explicit empty, same as text)", func(t *testing.T) {
+		out, err := v.ValidateCaseFieldsPartial(map[string]model.FieldValue{
+			"body": {FieldID: "body", Value: ""},
+		})
+		gt.NoError(t, err).Required()
+		gt.Value(t, out["body"].Value).Equal("")
+	})
+
+	t.Run("non-string value is rejected", func(t *testing.T) {
+		_, err := v.ValidateCaseFieldsPartial(map[string]model.FieldValue{
+			"body": {FieldID: "body", Value: 42},
+		})
+		gt.Error(t, err).Is(model.ErrInvalidFieldType)
+	})
+
+	t.Run("slice value is rejected", func(t *testing.T) {
+		_, err := v.ValidateCaseFieldsPartial(map[string]model.FieldValue{
+			"body": {FieldID: "body", Value: []string{"a"}},
+		})
+		gt.Error(t, err).Is(model.ErrInvalidFieldType)
+	})
+
+	t.Run("required markdown field missing is rejected", func(t *testing.T) {
+		_, err := v.ValidateCaseFieldsAll(map[string]model.FieldValue{})
+		gt.Error(t, err).Is(model.ErrCaseFieldValidation)
+	})
+}
+
 func mapKeys(m map[string]model.FieldValue) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {

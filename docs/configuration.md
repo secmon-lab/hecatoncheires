@@ -183,6 +183,24 @@ name = "Description"
 type = "text"
 ```
 
+### `markdown`
+
+Multi-line Markdown text. Stored as a plain string like `text`, but the Web UI
+renders it as Markdown when displaying it, and the editor offers a Write /
+Preview toggle. In the Case detail sidebar the value is shown as a short
+clamped preview of the raw source; clicking it opens a modal that renders the
+Markdown and offers an editor. In Slack modals a Markdown field is edited as a
+multi-line plain-text input (raw Markdown source — Slack has no preview
+element). Available for both Case fields (`[[fields]]`) and memo fields
+(`[[memo.fields]]`).
+
+```toml
+[[fields]]
+id = "runbook"
+name = "Runbook"
+type = "markdown"
+```
+
 ### `number`
 
 Numeric input.
@@ -315,6 +333,7 @@ reference_workspace = "incident-response"
 | Type | Description | Requires Options | Requires `reference_workspace` |
 |------|-------------|-----------------|-----------------|
 | `text` | Single-line text input | No | No |
+| `markdown` | Multi-line Markdown text (rendered in the Web UI) | No | No |
 | `number` | Numeric input | No | No |
 | `select` | Single selection from options | **Yes** | No |
 | `multi-select` | Multiple selections from options | **Yes** | No |

@@ -195,7 +195,7 @@ func validateFieldValue(fd config.FieldDefinition, fv FieldValue) []Materializat
 	}
 
 	switch fd.Type {
-	case types.FieldTypeText, types.FieldTypeUser:
+	case types.FieldTypeText, types.FieldTypeMarkdown, types.FieldTypeUser:
 		if _, ok := fv.Value.(string); !ok {
 			return wrongShape(fd, "expected string")
 		}

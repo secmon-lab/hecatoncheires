@@ -1,0 +1,71 @@
+.editor {
+  display: flex;
+  flex-direction: column;
+}
+
+/* GitHub-style tab bar. Mirrors Inline.module.css .editorTabs. */
+.tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: var(--spacing-sm);
+}
+
+.tab {
+  padding: var(--spacing-xs) var(--spacing-md-sm);
+  font-size: 13px;
+  font-family: inherit;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+  color: var(--fg-muted);
+  border-radius: 4px 4px 0 0;
+  line-height: 1.5;
+}
+
+.tab:hover {
+  color: var(--fg);
+}
+
+.tabActive {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+  font-weight: 500;
+}
+
+.textarea {
+  width: 100%;
+  min-height: 12rem;
+  padding: var(--spacing-sm) 0.625rem;
+  font-size: 13px;
+  line-height: 1.6;
+  font-family: inherit;
+  color: var(--fg);
+  background-color: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  outline: none;
+  box-sizing: border-box;
+  resize: vertical;
+}
+
+.textarea:focus {
+  border-color: var(--accent);
+}
+
+.preview {
+  min-height: 12rem;
+  padding: var(--spacing-sm) 0.625rem;
+  background-color: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: auto;
+  box-sizing: border-box;
+}
+
+.previewEmpty {
+  font-size: 13px;
+  color: var(--fg-muted);
+}
