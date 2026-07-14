@@ -383,7 +383,7 @@ func (uc *AgentUseCase) runThreadCaseCreation(ctx context.Context, req caseCreat
 		if res.Case == nil {
 			return res.Status, nil
 		}
-		uc.bindSessionToCase(ctx, req.caseChannel, req.caseTS, res.Case.ID)
+		uc.bindSessionToCase(ctx, session, res.Case.ID)
 		uc.postCreatedCaseOutcome(ctx, req, session, res.Case)
 	case threadcase.StatusQuestion:
 		// The question form was posted by the handler; wait for the user to
@@ -422,8 +422,11 @@ func (uc *AgentUseCase) postCreatedCaseOutcome(ctx context.Context, req caseCrea
 
 // updateRootCaseSummary replaces the cross-channel placeholder root with the
 // shared case summary in place, so the monitored channel shows a single root
-// message identical to any other creation path. On update failure it falls back
-// to a threaded reply so the summary is never lost.
+// message identical to any other creation path. If the Block Kit update fails
+// (e.g. block validation / payload size), it retries updating the same root with
+// plain text so the root never stays stuck on the "Creating a case…"
+// placeholder; only if that also fails does it fall back to a threaded reply so
+// the summary is never lost.
 func (uc *AgentUseCase) updateRootCaseSummary(ctx context.Context, wsID string, entry *model.WorkspaceEntry, c *model.Case, channelID, rootTS string) {
 	if uc.deps.SlackService == nil {
 		return
@@ -431,9 +434,15 @@ func (uc *AgentUseCase) updateRootCaseSummary(ctx context.Context, wsID string, 
 	url := uc.deps.CaseUC.CaseURL(wsID, c.ID)
 	blocks, fallback := buildThreadCaseSummaryBlocks(ctx, c, entry, url)
 	if err := uc.deps.SlackService.UpdateMessage(ctx, channelID, rootTS, blocks, fallback); err != nil {
-		errutil.Handle(ctx, goerr.Wrap(err, "reaction: update root case summary",
-			goerr.V("channel_id", channelID), goerr.V("root_ts", rootTS)), "reaction: update root case summary")
-		uc.postThreadReply(ctx, channelID, rootTS, fallback)
+		errutil.Handle(ctx, goerr.Wrap(err, "reaction: update root case summary with blocks",
+			goerr.V("channel_id", channelID), goerr.V("root_ts", rootTS)), "reaction: update root case summary with blocks")
+		// Retry with plain text (no blocks) so the placeholder root is not left
+		// stuck; only fall back to a threaded reply if that also fails.
+		if txtErr := uc.deps.SlackService.UpdateMessage(ctx, channelID, rootTS, nil, fallback); txtErr != nil {
+			errutil.Handle(ctx, goerr.Wrap(txtErr, "reaction: update root case summary with text",
+				goerr.V("channel_id", channelID), goerr.V("root_ts", rootTS)), "reaction: update root case summary with text")
+			uc.postThreadReply(ctx, channelID, rootTS, fallback)
+		}
 	}
 }
 
@@ -476,14 +485,13 @@ func (uc *AgentUseCase) slackPermalink(ctx context.Context, channelID, messageTS
 
 // bindSessionToCase stamps the freshly created case id onto the thread's
 // session (Session.ID stays stable so the gollem history stays continuous).
-// Best-effort: a failure here only means later mentions re-resolve the case by
-// thread lookup.
-func (uc *AgentUseCase) bindSessionToCase(ctx context.Context, channelID, threadTS string, caseID int64) {
-	ssn, err := uc.deps.Repo.Session().GetByThread(ctx, channelID, threadTS)
-	if err != nil || ssn == nil {
-		if err != nil {
-			errutil.Handle(ctx, err, "thread case: reload session to bind case")
-		}
+// The caller passes the in-flight session, which the turn already mutated and
+// persisted (RunTurn writes back this same pointer), so there is no need to
+// reload it — that would only add a redundant read and risk dropping the
+// in-memory reaction-origin / creator fields. Best-effort: a failure here only
+// means later mentions re-resolve the case by thread lookup.
+func (uc *AgentUseCase) bindSessionToCase(ctx context.Context, ssn *model.Session, caseID int64) {
+	if ssn == nil {
 		return
 	}
 	if ssn.CaseID == caseID && ssn.PendingQuestion == nil {
