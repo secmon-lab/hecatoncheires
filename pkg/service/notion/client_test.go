@@ -289,6 +289,7 @@ func TestGetDatabaseMetadata_Integration(t *testing.T) {
 
 	if metadata == nil {
 		t.Fatal("GetDatabaseMetadata returned nil")
+		return
 	}
 
 	if metadata.ID == "" {
@@ -350,6 +351,7 @@ func TestGetPageMetadata_Integration(t *testing.T) {
 
 	if metadata == nil {
 		t.Fatal("GetPageMetadata returned nil")
+		return
 	}
 
 	if metadata.ID == "" {
