@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"github.com/gollem-dev/gollem"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casemulti"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
@@ -30,6 +31,13 @@ const (
 	// (title / description / fields) stays with the host, so case__update_case
 	// is deliberately NOT part of this set.
 	ToolSetCaseStatusWrite = "case_status_write"
+	// ToolSetCaseMulti is the cross-case ("workspace-scoped") toolset used by the
+	// workspace-channel agent. Unlike core/case_status_write (pinned to one case),
+	// its tools take case_id as a call-time argument so a single turn can operate
+	// across every case the requesting user can access. Advertised only via
+	// KnownToolSetIDsWorkspaceChannel (never the default lists) so it is not
+	// offered to the per-case mention / proposal planners.
+	ToolSetCaseMulti = "case_multi"
 )
 
 // KnownToolSetIDs is the canonical list of identifiers a planner is allowed
@@ -66,6 +74,19 @@ var KnownToolSetIDsNoCore = []string{
 // rule forbids.
 var KnownToolSetIDsThreadWrite = append(append([]string{}, KnownToolSetIDsNoCore...), ToolSetCaseStatusWrite)
 
+// KnownToolSetIDsWorkspaceChannel is the planner-advertised list for the
+// workspace-channel agent: the cross-case toolset plus the read-only auxiliary
+// toolsets. It deliberately omits core_ro (the case-pinned action read tools) —
+// case_multi carries the cross-case action tools instead.
+var KnownToolSetIDsWorkspaceChannel = []string{
+	ToolSetCaseMulti,
+	ToolSetSlackRO,
+	ToolSetNotion,
+	ToolSetGitHub,
+	ToolSetWebFetch,
+	ToolSetJira,
+}
+
 // IsKnownToolSetID reports whether id is a member of KnownToolSetIDs.
 func IsKnownToolSetID(id string) bool {
 	return slices.Contains(KnownToolSetIDs, id)
@@ -97,6 +118,12 @@ type ToolSetResolver struct {
 	// investigation sub-agents may always consult shared knowledge, but never
 	// mutate it (write tools are wired only in the case-bound / job paths).
 	knowledge []gollem.Tool
+	// caseMulti is the cross-case ("workspace-scoped") tool set (case_multi).
+	// Unlike caseStatus it carries full cross-case read+write tools taking
+	// case_id at call time. Empty unless ToolSetDeps.CaseMulti.CaseUC is set;
+	// gated on the planner requesting ToolSetCaseMulti. Used by the
+	// workspace-channel agent, never the per-case mention / proposal planners.
+	caseMulti []gollem.Tool
 }
 
 // ToolSetDeps carries the per-turn deps that flavor each toolset's binding.
@@ -128,6 +155,11 @@ type ToolSetDeps struct {
 	// resolver would always build them (they only need Repo), since the
 	// core read tools do not depend on ActionUC being wired.
 	OmitCore bool
+
+	// CaseMulti backs the case_multi (cross-case) toolset. Built only when
+	// CaseMulti.CaseUC is non-nil (the workspace-channel host wires it); a nil
+	// CaseUC leaves the toolset empty so requesting the ID resolves to nothing.
+	CaseMulti casemulti.Deps
 }
 
 // NewToolSetResolver builds the per-toolset slices once so each sub-agent
@@ -150,6 +182,12 @@ func NewToolSetResolver(d ToolSetDeps) *ToolSetResolver {
 	if d.CaseStatus.StatusSet != nil && d.CaseStatus.CaseUC != nil {
 		caseStatus = casewriter.NewStatusTool(d.CaseStatus)
 	}
+	// The cross-case toolset is built only when a CaseUsecase is wired (the
+	// workspace-channel host); casemulti.New returns nil otherwise.
+	var caseMulti []gollem.Tool
+	if d.CaseMulti.CaseUC != nil {
+		caseMulti = casemulti.New(d.CaseMulti)
+	}
 	return &ToolSetResolver{
 		core:       coreTools,
 		slack:      slacktool.NewReadOnly(d.Slack),
@@ -159,6 +197,7 @@ func NewToolSetResolver(d ToolSetDeps) *ToolSetResolver {
 		jira:       d.Jira,
 		caseStatus: caseStatus,
 		knowledge:  knowledge,
+		caseMulti:  caseMulti,
 	}
 }
 
@@ -197,6 +236,8 @@ func (r *ToolSetResolver) Resolve(ids []string) []gollem.Tool {
 			total += len(r.jira)
 		case ToolSetCaseStatusWrite:
 			total += len(r.caseStatus)
+		case ToolSetCaseMulti:
+			total += len(r.caseMulti)
 		}
 	}
 	out := make([]gollem.Tool, 0, total)
@@ -217,6 +258,8 @@ func (r *ToolSetResolver) Resolve(ids []string) []gollem.Tool {
 			out = append(out, r.jira...)
 		case ToolSetCaseStatusWrite:
 			out = append(out, r.caseStatus...)
+		case ToolSetCaseMulti:
+			out = append(out, r.caseMulti...)
 		}
 	}
 	return out

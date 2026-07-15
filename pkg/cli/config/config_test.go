@@ -2010,6 +2010,253 @@ type = "text"
 	})
 }
 
+// TestLoadWorkspaceConfigs_WorkspaceChannel tests the [slack] workspace_channel
+// field: channel-mode-only, must be a Slack channel ID, and unique across
+// workspaces (both against other workspace_channel values and monitored
+// channels).
+func TestLoadWorkspaceConfigs_WorkspaceChannel(t *testing.T) {
+	writeAndLoad := func(t *testing.T, content string) ([]*config.WorkspaceConfig, error) {
+		t.Helper()
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		gt.NoError(t, os.WriteFile(configPath, []byte(content), 0644)).Required()
+		return config.LoadWorkspaceConfigs([]string{configPath})
+	}
+
+	t.Run("channel mode with a valid workspace_channel is accepted", func(t *testing.T) {
+		configs, err := writeAndLoad(t, `
+[workspace]
+id = "risk"
+
+[slack]
+workspace_channel = "C0123456789"
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`)
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1).Required()
+		gt.Value(t, configs[0].WorkspaceChannelID).Equal("C0123456789")
+	})
+
+	t.Run("workspace_channel on thread mode is rejected", func(t *testing.T) {
+		_, err := writeAndLoad(t, `
+[workspace]
+id = "support"
+
+[slack]
+mode = "thread"
+channel = "C0123ABC"
+workspace_channel = "C0999999999"
+
+[case]
+initial = "TRIAGE"
+  [[case.status]]
+  id = "TRIAGE"
+  name = "Triage"
+`)
+		gt.Error(t, err).Required()
+		gt.Bool(t, errors.Is(err, config.ErrWorkspaceChannelRequiresChannelMode)).True()
+	})
+
+	t.Run("workspace_agent without workspace_channel is rejected", func(t *testing.T) {
+		_, err := writeAndLoad(t, `
+[workspace]
+id = "risk"
+
+[slack.workspace_agent]
+prompt = "Summarize open cases."
+`)
+		gt.Error(t, err).Required()
+		gt.Bool(t, errors.Is(err, config.ErrMissingWorkspaceChannel)).True()
+	})
+
+	t.Run("workspace_channel as a channel name (not ID) is rejected", func(t *testing.T) {
+		_, err := writeAndLoad(t, `
+[workspace]
+id = "risk"
+
+[slack]
+workspace_channel = "general"
+`)
+		gt.Error(t, err).Required()
+		gt.Bool(t, errors.Is(err, config.ErrInvalidWorkspaceChannel)).True()
+	})
+
+	t.Run("duplicate workspace_channel across workspaces is rejected", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		one := `
+[workspace]
+id = "ws1"
+
+[slack]
+workspace_channel = "C0SHARED0001"
+`
+		two := `
+[workspace]
+id = "ws2"
+
+[slack]
+workspace_channel = "C0SHARED0001"
+`
+		gt.NoError(t, os.WriteFile(filepath.Join(tmpDir, "ws1.toml"), []byte(one), 0644)).Required()
+		gt.NoError(t, os.WriteFile(filepath.Join(tmpDir, "ws2.toml"), []byte(two), 0644)).Required()
+
+		_, err := config.LoadWorkspaceConfigs([]string{tmpDir})
+		gt.Error(t, err).Required()
+		gt.Bool(t, errors.Is(err, config.ErrDuplicateWorkspaceChannel)).True()
+	})
+
+	t.Run("workspace_channel colliding with another workspace's monitored channel is rejected", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		threadWS := `
+[workspace]
+id = "support"
+
+[slack]
+mode = "thread"
+channel = "C0COLLIDE001"
+
+[case]
+initial = "TRIAGE"
+  [[case.status]]
+  id = "TRIAGE"
+  name = "Triage"
+`
+		channelWS := `
+[workspace]
+id = "risk"
+
+[slack]
+workspace_channel = "C0COLLIDE001"
+`
+		gt.NoError(t, os.WriteFile(filepath.Join(tmpDir, "support.toml"), []byte(threadWS), 0644)).Required()
+		gt.NoError(t, os.WriteFile(filepath.Join(tmpDir, "risk.toml"), []byte(channelWS), 0644)).Required()
+
+		_, err := config.LoadWorkspaceConfigs([]string{tmpDir})
+		gt.Error(t, err).Required()
+		gt.Bool(t, errors.Is(err, config.ErrDuplicateWorkspaceChannel)).True()
+	})
+}
+
+// TestLoadWorkspaceConfigs_WorkspaceAgent tests the [slack.workspace_agent]
+// subsection: prompt / prompt_file exclusivity, prompt_file resolution
+// relative to the config file's directory, and the dormant (no section)
+// default.
+func TestLoadWorkspaceConfigs_WorkspaceAgent(t *testing.T) {
+	t.Run("prompt and prompt_file together are rejected", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		content := `
+[workspace]
+id = "risk"
+
+[slack]
+workspace_channel = "C0123456789"
+
+[slack.workspace_agent]
+prompt = "Inline prompt."
+prompt_file = "agent_prompt.txt"
+`
+		gt.NoError(t, os.WriteFile(configPath, []byte(content), 0644)).Required()
+
+		_, err := config.LoadWorkspaceConfigs([]string{configPath})
+		gt.Error(t, err).Required()
+		gt.Bool(t, errors.Is(err, config.ErrWorkspaceAgentPromptConflict)).True()
+	})
+
+	t.Run("prompt_file is read relative to the config file's directory and trimmed", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		promptPath := filepath.Join(tmpDir, "agent_prompt.txt")
+		gt.NoError(t, os.WriteFile(promptPath, []byte("Summarize the workspace.\n\n"), 0644)).Required()
+
+		configPath := filepath.Join(tmpDir, "config.toml")
+		content := `
+[workspace]
+id = "risk"
+
+[slack]
+workspace_channel = "C0123456789"
+
+[slack.workspace_agent]
+prompt_file = "agent_prompt.txt"
+`
+		gt.NoError(t, os.WriteFile(configPath, []byte(content), 0644)).Required()
+
+		configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1).Required()
+		gt.Value(t, configs[0].WorkspaceAgentPrompt).Equal("Summarize the workspace.")
+	})
+
+	t.Run("prompt_file resolving to an empty file is rejected", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		promptPath := filepath.Join(tmpDir, "agent_prompt.txt")
+		gt.NoError(t, os.WriteFile(promptPath, []byte("   \n\t\n"), 0644)).Required()
+
+		configPath := filepath.Join(tmpDir, "config.toml")
+		content := `
+[workspace]
+id = "risk"
+
+[slack]
+workspace_channel = "C0123456789"
+
+[slack.workspace_agent]
+prompt_file = "agent_prompt.txt"
+`
+		gt.NoError(t, os.WriteFile(configPath, []byte(content), 0644)).Required()
+
+		_, err := config.LoadWorkspaceConfigs([]string{configPath})
+		gt.Error(t, err).Required()
+		gt.Bool(t, errors.Is(err, config.ErrWorkspaceAgentPromptEmpty)).True()
+	})
+
+	t.Run("no workspace_channel and no workspace_agent section leaves the feature dormant", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		content := `
+[workspace]
+id = "risk"
+
+[[fields]]
+id = "a"
+name = "A"
+type = "text"
+`
+		gt.NoError(t, os.WriteFile(configPath, []byte(content), 0644)).Required()
+
+		configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1).Required()
+		gt.Value(t, configs[0].WorkspaceChannelID).Equal("")
+		gt.Value(t, configs[0].WorkspaceAgentPrompt).Equal("")
+	})
+
+	t.Run("inline prompt is used as-is", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.toml")
+		content := `
+[workspace]
+id = "risk"
+
+[slack]
+workspace_channel = "C0123456789"
+
+[slack.workspace_agent]
+prompt = "Focus on cross-case patterns."
+`
+		gt.NoError(t, os.WriteFile(configPath, []byte(content), 0644)).Required()
+
+		configs, err := config.LoadWorkspaceConfigs([]string{configPath})
+		gt.NoError(t, err).Required()
+		gt.Array(t, configs).Length(1).Required()
+		gt.Value(t, configs[0].WorkspaceAgentPrompt).Equal("Focus on cross-case patterns.")
+	})
+}
+
 // TestLoadWorkspaceConfigs_CaseRefInMemo tests that case_ref
 // fields inside [memo] are rejected, because memo fields are not wired to the
 // picker, agent tools, or existence / privacy verification for Cases.

@@ -57,6 +57,32 @@ for Jobs (both channel- and thread-mode).
 | `case__update_case_status` | W | Move the case to another board status (a closed status closes the case). | Thread-mode only — present when the workspace has a configured case status set (`CaseStatusSet`). The parameter enumerates the configured status ids. **See [Guardrails](#guardrails): Jobs are instructed not to close; the human-driven mention agent may.** |
 | `case__close_case` | W | Mark the case done by closing it (`OPEN` -> `CLOSED`); takes no parameters. | Channel-mode only — the counterpart of `case__update_case_status`, built when the workspace has **no** `CaseStatusSet`. Exactly one "mark done" tool is offered per mode. Closing an already-closed or draft case is rejected with a correctable error. |
 
+### Workspace agent cross-case tools (`casemulti`)
+
+Wired **only** into the [workspace agent](configuration.md#workspace-channel--agent-channel-mode)
+(a channel-mode workspace's `workspace_channel`). Unlike every other tool above —
+which is pinned to a single Case at construction — these take **`case_id` as a
+call-time argument**, so one turn can read and act across many Cases. Every call
+is access-checked against the **mentioning user's** permissions (private Cases the
+user cannot access are filtered from lists and rejected on direct access), and
+writes are subject to the workspace agent's [write guardrail](#guardrails)
+(nothing is changed unless the user explicitly asks).
+
+| Tool | R/W | Purpose | Notes |
+|------|-----|---------|-------|
+| `case__list_cases` | R | List cases in the workspace (optional `status` filter). | Cases the user cannot access are omitted. |
+| `case__get_case` | R | Fetch one case by `case_id`. | Denied for a private case the user is not a member of. |
+| `case__list_actions` | R | List a case's actions (`case_id`). | |
+| `case__get_action` | R | Fetch one action (`case_id`, `action_id`). | Verifies the action belongs to the case. |
+| `case__create_case` | W | Create a new case (full channel-mode flow: dedicated channel + invites + welcome). | Reporter is the mentioning user. |
+| `case__update_case` | W | Update a case's title / description / fields (`case_id`). | |
+| `case__close_case` | W | Close a case (`case_id`). | |
+| `case__create_action` | W | Add an action to a case (`case_id`). | |
+| `case__update_action` | W | Update an action (`case_id`, `action_id`). | Change attributed to the mentioning user. |
+| `case__update_action_status` | W | Move an action to another status. | |
+| `case__add_action_step` | W | Add a step to an action. | |
+| `case__set_action_step_done` | W | Mark a step done / undone. | |
+
 ### Slack tools (`slack`, `slackpost`)
 
 | Tool | R/W | Purpose | Notes |

@@ -46,6 +46,32 @@ var (
 	// configured on more than one workspace, which would make emoji-to-workspace
 	// resolution ambiguous.
 	ErrDuplicateReactionEmoji = goerr.New("duplicate Slack reaction emoji across workspaces")
+
+	// --- Workspace channel / agent ([slack] workspace_channel + [slack.workspace_agent]) ---
+
+	// ErrWorkspaceChannelRequiresChannelMode is returned when workspace_channel or
+	// [slack.workspace_agent] is set on a workspace that is not in channel mode.
+	// The workspace channel hosts a cross-case agent over per-case channels, which
+	// only exist in channel mode.
+	ErrWorkspaceChannelRequiresChannelMode = goerr.New("[slack] workspace_channel / [slack.workspace_agent] require channel mode")
+	// ErrMissingWorkspaceChannel is returned when [slack.workspace_agent] is set
+	// but [slack] workspace_channel is empty: the agent runs in the workspace
+	// channel and is meaningless without it.
+	ErrMissingWorkspaceChannel = goerr.New("[slack.workspace_agent] requires [slack] workspace_channel")
+	// ErrInvalidWorkspaceChannel is returned when [slack] workspace_channel is not
+	// a Slack channel ID (e.g. a channel name).
+	ErrInvalidWorkspaceChannel = goerr.New("invalid Slack workspace_channel ID")
+	// ErrDuplicateWorkspaceChannel is returned when the same channel ID is used as
+	// a workspace_channel on more than one workspace, or collides with another
+	// workspace's monitored channel, which would make channel-to-workspace routing
+	// ambiguous.
+	ErrDuplicateWorkspaceChannel = goerr.New("duplicate Slack workspace_channel across workspaces")
+	// ErrWorkspaceAgentPromptConflict is returned when [slack.workspace_agent]
+	// sets both prompt and prompt_file (mutually exclusive).
+	ErrWorkspaceAgentPromptConflict = goerr.New("[slack.workspace_agent] prompt and prompt_file are mutually exclusive")
+	// ErrWorkspaceAgentPromptEmpty is returned when [slack.workspace_agent]
+	// prompt_file resolves to an empty file.
+	ErrWorkspaceAgentPromptEmpty = goerr.New("[slack.workspace_agent] prompt_file is empty")
 	// ErrMissingReferenceWorkspace is returned when a case_ref /
 	// multi_case_ref field omits reference_workspace.
 	ErrMissingReferenceWorkspace = goerr.New("case_ref field requires reference_workspace")

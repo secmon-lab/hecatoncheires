@@ -15,6 +15,11 @@ case = "Risk"
 [slack]
 # channel_prefix = "risk"  # Defaults to workspace ID if not specified
 # team_id = "T0123456789"  # Required for org-level Slack apps; omit for workspace-level apps
+# workspace_channel = "C0123456789"  # Optional (channel mode): workspace-level channel for the cross-case agent; bot must be a member
+
+# Optional custom instruction for the workspace agent (prompt or prompt_file, not both):
+# [slack.workspace_agent]
+# prompt = "This workspace tracks security risks."
 
 [[fields]]
 id = "category"

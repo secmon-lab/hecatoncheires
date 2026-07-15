@@ -437,6 +437,18 @@ channel mode and post their output into the Case thread.
 3. Invite the bot to the monitored channel (`/invite @your-bot-name`).
 4. Set `[slack] channel` to the channel **ID** (e.g. `C0123456789`), not the name.
 
+### Workspace channel (channel mode)
+
+A **channel-mode** workspace can designate an optional workspace-level channel
+via `[slack] workspace_channel`. It is not bound to any single Case; @mentioning
+the bot there runs the **workspace agent**, which reads across and acts on every
+Case the mentioning user can access (answer, create a Case, add an Action to the
+right Case). The bot must be a member of the channel, and app_mention events must
+be delivered (as for any mention). No new OAuth scopes are required beyond the
+existing mention / `chat:write` setup. Configure it — including the optional
+`[slack.workspace_agent]` prompt and its write-safety guardrail — under
+[Configuration → Workspace channel & agent](configuration.md#workspace-channel--agent-channel-mode).
+
 ### Reaction-triggered case creation
 
 A thread-mode workspace can additionally start a Case when a specific emoji is

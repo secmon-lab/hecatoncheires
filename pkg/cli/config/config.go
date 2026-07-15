@@ -131,6 +131,63 @@ type SlackSection struct {
 	// triggers case creation when added to any visible message. Thread mode
 	// only; empty disables the reaction trigger.
 	Reaction string `toml:"reaction"`
+	// WorkspaceChannel is the workspace-level shared channel ID where the
+	// cross-case workspace agent runs (and future notifications flow). It
+	// parallels Channel but is channel-mode only; empty disables the feature.
+	WorkspaceChannel string `toml:"workspace_channel"`
+	// WorkspaceAgent configures the cross-case agent that runs in
+	// WorkspaceChannel ([slack.workspace_agent]). nil when the subsection is
+	// omitted. Only meaningful in channel mode with WorkspaceChannel set.
+	WorkspaceAgent *WorkspaceAgentSection `toml:"workspace_agent"`
+}
+
+// WorkspaceAgentSection represents the [slack.workspace_agent] subsection: the
+// custom prompt for the cross-case agent that runs in the workspace channel.
+type WorkspaceAgentSection struct {
+	Prompt     string `toml:"prompt"`
+	PromptFile string `toml:"prompt_file"`
+}
+
+// resolvePrompt determines the effective custom prompt for the workspace agent
+// and enforces prompt / prompt_file exclusivity. Unlike JobSection.resolvePrompt
+// both fields are optional: neither set returns an empty prompt (no custom
+// instruction). baseDir == "" selects structural-validation mode (the exclusivity
+// check runs without touching the filesystem; a prompt_file read is deferred).
+func (s *WorkspaceAgentSection) resolvePrompt(baseDir string) (prompt string, deferred bool, err error) {
+	hasInline := s.Prompt != ""
+	hasFile := s.PromptFile != ""
+	switch {
+	case hasInline && hasFile:
+		return "", false, goerr.Wrap(ErrWorkspaceAgentPromptConflict,
+			"[slack.workspace_agent] prompt and prompt_file are mutually exclusive")
+	case !hasInline && !hasFile:
+		return "", false, nil
+	case hasInline:
+		return s.Prompt, false, nil
+	}
+
+	// hasFile: content comes from a file resolved relative to baseDir.
+	if baseDir == "" {
+		return "", true, nil
+	}
+	path := s.PromptFile
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(baseDir, path)
+	}
+	// #nosec G304 -- prompt_file comes from the operator-supplied config file,
+	// the same trust level as the config path itself (CLI argument).
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false, goerr.Wrap(err, "failed to read workspace agent prompt file",
+			goerr.V("prompt_file", s.PromptFile))
+	}
+	content := strings.TrimRight(string(data), " \t\r\n")
+	if content == "" {
+		return "", false, goerr.Wrap(ErrWorkspaceAgentPromptEmpty,
+			"[slack.workspace_agent] prompt_file is empty",
+			goerr.V("prompt_file", s.PromptFile))
+	}
+	return content, false, nil
 }
 
 // CaseSection represents the [case] section in a TOML config. It mirrors
@@ -235,6 +292,12 @@ type WorkspaceConfig struct {
 	// ReactionEmoji is the normalized (colon-stripped) reaction trigger emoji,
 	// empty when disabled.
 	ReactionEmoji string
+	// WorkspaceChannelID is the workspace-level shared channel ID (channel mode
+	// only), empty when unset.
+	WorkspaceChannelID string
+	// WorkspaceAgentPrompt is the resolved custom prompt for the workspace agent
+	// (from [slack.workspace_agent] prompt/prompt_file), empty when unset.
+	WorkspaceAgentPrompt string
 }
 
 // Labels represents entity display labels
@@ -419,6 +482,42 @@ func (a *AppConfig) Validate() error {
 		return err
 	}
 
+	if err := a.validateWorkspaceChannel(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateWorkspaceChannel validates [slack] workspace_channel and the
+// [slack.workspace_agent] subsection. Both are channel-mode only; the agent
+// section is meaningless without a workspace_channel. prompt/prompt_file
+// exclusivity is checked structurally here (no file read); the actual read is
+// deferred to loadSingleWorkspaceConfig where the config directory is known.
+func (a *AppConfig) validateWorkspaceChannel() error {
+	ch := a.Slack.WorkspaceChannel
+	agent := a.Slack.WorkspaceAgent
+	if ch == "" && agent == nil {
+		return nil // feature dormant
+	}
+	if model.CaseMode(a.Slack.Mode).IsThread() {
+		return goerr.Wrap(ErrWorkspaceChannelRequiresChannelMode,
+			"[slack] workspace_channel / [slack.workspace_agent] require channel mode")
+	}
+	if agent != nil && ch == "" {
+		return goerr.Wrap(ErrMissingWorkspaceChannel,
+			"[slack.workspace_agent] requires [slack] workspace_channel to be set")
+	}
+	if ch != "" && !slackChannelIDPattern.MatchString(ch) {
+		return goerr.Wrap(ErrInvalidWorkspaceChannel,
+			"[slack] workspace_channel must be a Slack channel ID (e.g. C0123456789)",
+			goerr.V("workspace_channel", ch))
+	}
+	if agent != nil {
+		if _, _, err := agent.resolvePrompt(""); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -618,6 +717,29 @@ func LoadWorkspaceConfigs(paths []string) ([]*WorkspaceConfig, error) {
 		}
 	}
 
+	// Channel→workspace routing must be unambiguous: a workspace_channel must not
+	// collide with another workspace's monitored channel or workspace_channel.
+	// (Monitor-vs-monitor uniqueness is out of scope and left unchanged.)
+	channelOwner := make(map[string]string) // channelID → workspaceID
+	for _, wc := range configs {
+		if wc.SlackMonitorChannel != "" {
+			channelOwner[wc.SlackMonitorChannel] = wc.ID
+		}
+	}
+	for _, wc := range configs {
+		if wc.WorkspaceChannelID == "" {
+			continue
+		}
+		if prev, ok := channelOwner[wc.WorkspaceChannelID]; ok && prev != wc.ID {
+			return nil, goerr.Wrap(ErrDuplicateWorkspaceChannel,
+				"workspace_channel collides with another workspace's channel",
+				goerr.V("channel", wc.WorkspaceChannelID),
+				goerr.V(WorkspaceIDKey, wc.ID),
+				goerr.V("other_workspace_id", prev))
+		}
+		channelOwner[wc.WorkspaceChannelID] = wc.ID
+	}
+
 	return configs, nil
 }
 
@@ -713,6 +835,22 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 			goerr.V("max", model.AgentAdditionalPromptMaxLen))
 	}
 
+	// Resolve the workspace-agent custom prompt (prompt_file read relative to the
+	// config file's directory). Structural validation already ran in Validate().
+	workspaceAgentPrompt := ""
+	if appCfg.Slack.WorkspaceAgent != nil {
+		workspaceAgentPrompt, _, err = appCfg.Slack.WorkspaceAgent.resolvePrompt(filepath.Dir(path))
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to resolve workspace agent prompt", goerr.V(ConfigPathKey, path))
+		}
+	}
+	if len(workspaceAgentPrompt) > model.AgentAdditionalPromptMaxLen {
+		return nil, goerr.New("[slack.workspace_agent] prompt exceeds the maximum length",
+			goerr.V(ConfigPathKey, path),
+			goerr.V("len", len(workspaceAgentPrompt)),
+			goerr.V("max", model.AgentAdditionalPromptMaxLen))
+	}
+
 	// Warn about channel-mode-only settings supplied to a thread-mode workspace
 	// (and vice versa) so operators notice ignored configuration at startup.
 	if caseMode.IsThread() {
@@ -757,6 +895,8 @@ func loadSingleWorkspaceConfig(path string) (*WorkspaceConfig, error) {
 		AcceptBot:            appCfg.Slack.AcceptBot,
 		CaseStatusSet:        caseStatusSet,
 		ReactionEmoji:        normalizeReactionEmoji(appCfg.Slack.Reaction),
+		WorkspaceChannelID:   appCfg.Slack.WorkspaceChannel,
+		WorkspaceAgentPrompt: workspaceAgentPrompt,
 	}, nil
 }
 
@@ -797,25 +937,27 @@ func (a *AppConfig) Configure(c *cli.Command) ([]*WorkspaceConfig, *model.Worksp
 				Emoji:       wc.Emoji,
 				Color:       wc.Color,
 			},
-			FieldSchema:           wc.FieldSchema,
-			MemoConfig:            wc.MemoConfig,
-			ActionStatusSet:       wc.ActionStatusSet,
-			SlackChannelPrefix:    wc.SlackChannelPrefix,
-			SlackTeamID:           wc.SlackTeamID,
-			SlackInviteUsers:      wc.SlackInviteUsers,
-			SlackInviteGroups:     wc.SlackInviteGroups,
-			SlackWelcomeMessages:  wc.SlackWelcomeMessages,
-			CompilePrompt:         wc.CompilePrompt,
-			AssistPrompt:          wc.AssistPrompt,
-			AssistLanguage:        wc.AssistLanguage,
-			CaseCreatePrompt:      wc.CaseCreatePrompt,
-			Jobs:                  wc.Jobs,
-			CaseMode:              wc.CaseMode,
-			CaseTrigger:           wc.CaseTrigger,
-			SlackMonitorChannelID: wc.SlackMonitorChannel,
-			AcceptBot:             wc.AcceptBot,
-			CaseStatusSet:         wc.CaseStatusSet,
-			ReactionEmoji:         wc.ReactionEmoji,
+			FieldSchema:             wc.FieldSchema,
+			MemoConfig:              wc.MemoConfig,
+			ActionStatusSet:         wc.ActionStatusSet,
+			SlackChannelPrefix:      wc.SlackChannelPrefix,
+			SlackTeamID:             wc.SlackTeamID,
+			SlackInviteUsers:        wc.SlackInviteUsers,
+			SlackInviteGroups:       wc.SlackInviteGroups,
+			SlackWelcomeMessages:    wc.SlackWelcomeMessages,
+			CompilePrompt:           wc.CompilePrompt,
+			AssistPrompt:            wc.AssistPrompt,
+			AssistLanguage:          wc.AssistLanguage,
+			CaseCreatePrompt:        wc.CaseCreatePrompt,
+			Jobs:                    wc.Jobs,
+			CaseMode:                wc.CaseMode,
+			CaseTrigger:             wc.CaseTrigger,
+			SlackMonitorChannelID:   wc.SlackMonitorChannel,
+			AcceptBot:               wc.AcceptBot,
+			CaseStatusSet:           wc.CaseStatusSet,
+			ReactionEmoji:           wc.ReactionEmoji,
+			SlackWorkspaceChannelID: wc.WorkspaceChannelID,
+			WorkspaceAgentPrompt:    wc.WorkspaceAgentPrompt,
 		})
 		logging.Default().Info("Registered workspace", "id", wc.ID, "name", wc.Name, "case_mode", wc.CaseMode.Normalize())
 	}

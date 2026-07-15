@@ -13,6 +13,7 @@ import (
 	"github.com/gollem-dev/gollem"
 	"github.com/gollem-dev/gollem/trace"
 	"github.com/m-mizutani/goerr/v2"
+	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casemulti"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/casewriter"
 	"github.com/secmon-lab/hecatoncheires/pkg/agent/tool/core"
 	githubtool "github.com/secmon-lab/hecatoncheires/pkg/agent/tool/github"
@@ -72,6 +73,15 @@ type CommonDeps struct {
 	// (core__search_referenceable_cases / core__get_referenceable_cases).
 	// Optional: nil disables those tools (no case_ref fields configured).
 	CaseRefUC core.CaseRefReader
+
+	// CaseMultiUC / CaseMultiActionUC back the cross-case (case_multi) tool set
+	// used by the workspace-channel agent. Unlike CaseUC (single-case
+	// casewriter.CaseMutator), these carry the full cross-case read+write
+	// surface whose tools take case_id at call time. Wired from the concrete
+	// usecases via usecase.NewCaseMultiCaseAdapter / NewCaseMultiActionAdapter.
+	// Optional: nil disables the cross-case tools.
+	CaseMultiUC       casemulti.CaseUsecase
+	CaseMultiActionUC casemulti.ActionUsecase
 
 	// MemoUC backs the Case-scoped memo tools (memo__*) in case-bound mode.
 	// Optional: nil means the agent gets no memo tools.

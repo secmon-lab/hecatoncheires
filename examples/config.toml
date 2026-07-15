@@ -99,6 +99,17 @@ required = false
 [slack]
 channel_prefix = "risk"
 
+# Workspace channel (optional, channel mode only): a workspace-level channel where
+# the cross-case workspace agent runs. Not bound to any single case; @mention the
+# bot there to read/act across every case you can access. The bot must be a member.
+# workspace_channel = "C0123456789"   # channel ID, not name; unique across workspaces
+
+# Optional custom instruction for the workspace agent. prompt and prompt_file are
+# mutually exclusive; the built-in write-safety guardrail cannot be relaxed by it.
+# [slack.workspace_agent]
+# prompt = "This workspace tracks security risks. Prefer concise replies."
+# prompt_file = "prompts/ws_agent.md"   # relative to this config file's directory
+
 # Auto-invite: Automatically invite users and user group members when a case is created
 [slack.invite]
 users = ["U12345678", "U87654321"]              # Slack user IDs to auto-invite

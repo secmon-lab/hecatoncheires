@@ -247,6 +247,54 @@ func TestWorkspaceRegistry_FindByReactionEmoji(t *testing.T) {
 	})
 }
 
+func TestWorkspaceRegistry_FindByWorkspaceChannel(t *testing.T) {
+	reg := model.NewWorkspaceRegistry()
+	reg.Register(&model.WorkspaceEntry{
+		Workspace:               model.Workspace{ID: "channel-ws"},
+		CaseMode:                model.CaseModeChannel,
+		SlackWorkspaceChannelID: "C0WORKSPACE",
+	})
+	reg.Register(&model.WorkspaceEntry{
+		Workspace:               model.Workspace{ID: "thread-ws"},
+		CaseMode:                model.CaseModeThread,
+		SlackMonitorChannelID:   "C0MONITOR",
+		SlackWorkspaceChannelID: "C0WORKSPACE", // ignored: thread mode never matches
+	})
+
+	t.Run("matches the workspace channel of a channel-mode workspace", func(t *testing.T) {
+		entry, ok := reg.FindByWorkspaceChannel("C0WORKSPACE")
+		gt.Bool(t, ok).True()
+		gt.Value(t, entry.Workspace.ID).Equal("channel-ws")
+	})
+
+	t.Run("does not match a thread-mode workspace even with the same channel ID", func(t *testing.T) {
+		reg2 := model.NewWorkspaceRegistry()
+		reg2.Register(&model.WorkspaceEntry{
+			Workspace:               model.Workspace{ID: "thread-only"},
+			CaseMode:                model.CaseModeThread,
+			SlackWorkspaceChannelID: "C0ONLYTHREAD",
+		})
+		_, ok := reg2.FindByWorkspaceChannel("C0ONLYTHREAD")
+		gt.Bool(t, ok).False()
+	})
+
+	t.Run("does not match an unknown channel", func(t *testing.T) {
+		_, ok := reg.FindByWorkspaceChannel("C0UNKNOWN")
+		gt.Bool(t, ok).False()
+	})
+
+	t.Run("empty channel never matches", func(t *testing.T) {
+		_, ok := reg.FindByWorkspaceChannel("")
+		gt.Bool(t, ok).False()
+	})
+
+	t.Run("nil registry is safe", func(t *testing.T) {
+		var nilReg *model.WorkspaceRegistry
+		_, ok := nilReg.FindByWorkspaceChannel("C0WORKSPACE")
+		gt.Bool(t, ok).False()
+	})
+}
+
 func TestWorkspaceEntry_SlackTeamID(t *testing.T) {
 	reg := model.NewWorkspaceRegistry()
 
