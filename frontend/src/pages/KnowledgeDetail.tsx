@@ -237,6 +237,7 @@ export default function KnowledgeDetail() {
                   type="button"
                   className="btn sm"
                   onClick={() => setPreviewMode(false)}
+                  data-testid="knowledge-claim-tab-write"
                   style={{
                     background: !previewMode ? 'var(--accent)' : undefined,
                     color: !previewMode ? 'var(--bg-elev)' : undefined,
@@ -248,6 +249,7 @@ export default function KnowledgeDetail() {
                   type="button"
                   className="btn sm"
                   onClick={() => setPreviewMode(true)}
+                  data-testid="knowledge-claim-tab-preview"
                   style={{
                     background: previewMode ? 'var(--accent)' : undefined,
                     color: previewMode ? 'var(--bg-elev)' : undefined,
@@ -259,7 +261,7 @@ export default function KnowledgeDetail() {
             </div>
 
             {previewMode ? (
-              <div style={{ minHeight: '12rem' }}>
+              <div style={{ minHeight: '12rem' }} data-testid="knowledge-claim-preview">
                 <KnowledgeMarkdownView source={claim} placeholder={t('labelPreviewEmpty')} />
               </div>
             ) : (

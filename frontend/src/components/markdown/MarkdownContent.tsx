@@ -1,4 +1,5 @@
 import ReactMarkdown, { type Components } from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import styles from './MarkdownContent.module.css'
 
 // Open Markdown links in a new tab so navigating an embedded link never
@@ -19,7 +20,7 @@ interface Props {
 export default function MarkdownContent({ source }: Props) {
   return (
     <div className={styles.body}>
-      <ReactMarkdown components={components}>{source}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{source}</ReactMarkdown>
     </div>
   )
 }

@@ -1,4 +1,5 @@
 import ReactMarkdown, { type Components } from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import styles from '../../pages/CaseAgent.module.css'
 
 const components: Components = {
@@ -18,7 +19,7 @@ export default function MarkdownView({ source }: Props) {
   }
   return (
     <div className={styles.promptBody}>
-      <ReactMarkdown components={components}>{source}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{source}</ReactMarkdown>
     </div>
   )
 }

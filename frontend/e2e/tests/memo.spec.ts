@@ -75,19 +75,35 @@ test.describe('Case memos', () => {
 
     const memoRow = () => page.getByTestId('memo-row').filter({ hasText: memoTitle });
 
-    // Open the memo form and fill the markdown 'body' field.
+    // Open the memo form and fill the markdown 'body' field. The body includes a
+    // GFM table, which react-markdown only renders when remark-gfm is wired in.
     await page.getByTestId('new-memo-button').click();
     await page.locator('#memo-title').fill(memoTitle);
-    const markdownSource = '# Heading\n\n- alpha\n- **bold item**';
+    const markdownSource = [
+      '# Heading',
+      '',
+      '- alpha',
+      '- **bold item**',
+      '',
+      '| Col A | Col B |',
+      '| --- | --- |',
+      '| cell one | cell two |',
+    ].join('\n');
     await page.getByTestId('body-textarea').fill(markdownSource);
 
-    // The Preview tab renders the markdown (heading + list + bold), not raw markers.
+    // The Preview tab renders the markdown (heading + list + bold + GFM table),
+    // not raw markers.
     await page.getByTestId('body-tab-preview').click();
     const preview = page.getByTestId('body-preview');
     await expect(preview.locator('h1')).toHaveText('Heading');
     await expect(preview.locator('li')).toHaveCount(2);
     await expect(preview.locator('strong')).toHaveText('bold item');
     await expect(preview).not.toContainText('**');
+    // GFM table renders as a real <table>; the pipe source is not shown literally.
+    await expect(preview.locator('table')).toBeVisible();
+    await expect(preview.locator('th')).toHaveCount(2);
+    await expect(preview.locator('tbody td')).toHaveText(['cell one', 'cell two']);
+    await expect(preview).not.toContainText('| Col A |');
 
     // Back to Write tab: the raw source is preserved.
     await page.getByTestId('body-tab-write').click();
@@ -96,16 +112,20 @@ test.describe('Case memos', () => {
     await page.getByTestId('memo-form-submit').click();
     await expect(memoRow()).toBeVisible();
 
-    // Open the detail modal: the markdown body is rendered.
+    // Open the detail modal: the markdown body is rendered, including the GFM table.
     await memoRow().click();
     const modalHeading = page.getByRole('heading', { level: 1, name: 'Heading' });
     await expect(modalHeading).toBeVisible();
     await expect(page.getByText('bold item')).toBeVisible();
+    await expect(page.getByRole('table')).toBeVisible();
+    await expect(page.getByRole('cell', { name: 'cell one' })).toBeVisible();
+    await expect(page.getByRole('cell', { name: 'cell two' })).toBeVisible();
 
     // Reload the whole page and re-open to confirm the value round-tripped to the backend.
     await page.reload();
     await caseDetailPage.waitForPageLoad();
     await memoRow().click();
     await expect(page.getByRole('heading', { level: 1, name: 'Heading' })).toBeVisible();
+    await expect(page.getByRole('cell', { name: 'cell one' })).toBeVisible();
   });
 });
