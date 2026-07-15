@@ -1,2 +1,29 @@
+# pnpm v10 reads only auth/registry settings from .npmrc; every other setting
+# (overrides, supply-chain age gate, install behaviour) must live here or it is
+# silently ignored. Keep this file the single home for pnpm configuration.
+
 allowBuilds:
   esbuild: true
+
+# Dependency version overrides. Migrated from package.json's "pnpm.overrides"
+# field, which pnpm v10 no longer reads. Pins the transitive `yaml` package to a
+# non-vulnerable release.
+overrides:
+  "yaml@<2.0.0": ">=2.8.3"
+
+# Supply-chain hardening: only install package versions at least 7 days old
+# (10080 minutes) to avoid freshly published malicious releases.
+minimumReleaseAge: 10080
+# Security fixes we must not delay (react-router CVE-2026-21884 / -22029 / -22030).
+minimumReleaseAgeExclude:
+  - react-router-dom
+  - react-router
+
+# Prefer the local content-addressable store before hitting the network.
+preferOffline: true
+# Automatically install peer dependencies.
+autoInstallPeers: true
+# Never prompt before recreating node_modules: every scripted entry point
+# (scripts/e2e.sh, CI, Dockerfile) runs without a TTY, where the interactive
+# purge confirmation aborts the install (ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY).
+confirmModulesPurge: false

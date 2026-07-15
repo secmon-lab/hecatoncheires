@@ -102,3 +102,13 @@
   border: 1px solid var(--line);
   padding: var(--spacing-xs) var(--spacing-sm);
 }
+
+.body thead th {
+  background-color: var(--bg-sunken);
+  text-align: left;
+}
+
+.body del {
+  text-decoration: line-through;
+  color: var(--fg-muted);
+}

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@10.33.2",
+  "packageManager": "pnpm@10.34.4",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
@@ -26,12 +26,8 @@
     "react-dom": "19.2.3",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.15.0",
-    "react-select": "^5.10.2"
-  },
-  "pnpm": {
-    "overrides": {
-      "yaml@<2.0.0": ">=2.8.3"
-    }
+    "react-select": "^5.10.2",
+    "remark-gfm": "^4.0.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.51.0",

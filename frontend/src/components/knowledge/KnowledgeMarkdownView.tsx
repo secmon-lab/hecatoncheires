@@ -1,4 +1,5 @@
 import ReactMarkdown, { type Components } from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import styles from './KnowledgeMarkdownView.module.css'
 
 const components: Components = {
@@ -16,7 +17,7 @@ export default function KnowledgeMarkdownView({ source, placeholder = '—' }: P
   }
   return (
     <div className={styles.body}>
-      <ReactMarkdown components={components}>{source}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{source}</ReactMarkdown>
     </div>
   )
 }

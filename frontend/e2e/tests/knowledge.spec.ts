@@ -22,14 +22,25 @@ test.describe('Knowledge & Tag Management', () => {
     await list.clickAddKnowledge();
 
     // Fill the form and create a brand-new tag inline (create-then-reference).
+    // The claim body carries a GFM table so the Preview tab exercises remark-gfm.
     await form.fillTitle(title);
-    await form.fillClaim('## Rule\n- pin GitHub actions by SHA');
+    await form.fillClaim(
+      '## Rule\n- pin GitHub actions by SHA\n\n| Env | Pinned |\n| --- | --- |\n| prod | yes |',
+    );
     await form.addNewTag(tag);
     expect(await form.hasSelectedTag(tag)).toBeTruthy();
 
     // Saving a new entry navigates to its persisted detail URL.
     await form.saveNewAndWait();
     expect(await form.getTitleValue()).toBe(title);
+
+    // Switching the claim to Preview renders the GFM table as a real <table>.
+    await page.getByTestId('knowledge-claim-tab-preview').click();
+    const claimPreview = page.getByTestId('knowledge-claim-preview');
+    await expect(claimPreview.locator('table')).toBeVisible();
+    await expect(claimPreview.locator('tbody td')).toHaveText(['prod', 'yes']);
+    await expect(claimPreview).not.toContainText('| Env |');
+    await page.getByTestId('knowledge-claim-tab-write').click();
 
     // It shows up in the list, carrying the tag.
     await list.navigate(TEST_WORKSPACE_ID);

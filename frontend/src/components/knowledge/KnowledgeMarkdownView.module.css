@@ -81,3 +81,24 @@
   border-top: 1px solid var(--line);
   margin: 1rem 0;
 }
+
+.body table {
+  border-collapse: collapse;
+  margin: 0 0 0.75rem;
+}
+
+.body th,
+.body td {
+  border: 1px solid var(--line);
+  padding: var(--spacing-xs) var(--spacing-sm);
+}
+
+.body thead th {
+  background-color: var(--bg-sunken);
+  text-align: left;
+}
+
+.body del {
+  text-decoration: line-through;
+  color: var(--fg-muted);
+}
