@@ -7,8 +7,11 @@ WORKDIR /app/frontend
 # pin a moving target like `pnpm@latest` here.
 RUN corepack enable
 
-# Copy package files first for better caching
-COPY frontend/package.json frontend/pnpm-lock.yaml ./
+# Copy package files first for better caching. pnpm-workspace.yaml carries the
+# pnpm settings (overrides, minimumReleaseAge, ...) that pnpm v10 no longer
+# reads from .npmrc / package.json; without it the frozen install fails with
+# ERR_PNPM_LOCKFILE_CONFIG_MISMATCH. .npmrc keeps the registry settings.
+COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml frontend/.npmrc ./
 RUN pnpm install --frozen-lockfile
 
 # Copy source files and build
