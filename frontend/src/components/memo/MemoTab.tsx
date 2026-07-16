@@ -1,5 +1,5 @@
 import { useState, Fragment } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { useQuery } from '@apollo/client'
 import Button from '../Button'
 import { IconSparkle, IconChevRight, IconChevDown, IconPlus } from '../Icons'
@@ -144,25 +144,27 @@ function SkeletonRow() {
   )
 }
 
-// MemoRowItem — single row in the memo list
+// MemoRowItem — single row in the memo list. Rendered as a real link so the
+// dedicated memo URL supports open-in-new-tab / copy-link affordances.
 interface MemoRowProps {
   memo: Memo
   memoFields: FieldDef[]
   summaryFields: FieldDef[]
   colorField: FieldDef | undefined
-  onClick: () => void
+  to: string
+  state: Record<string, unknown>
 }
 
-function MemoRowItem({ memo, memoFields: _memoFields, summaryFields, colorField, onClick }: MemoRowProps) {
+function MemoRowItem({ memo, memoFields: _memoFields, summaryFields, colorField, to, state }: MemoRowProps) {
   const { t } = useTranslation()
   const isArchived = !!memo.archivedAt
   const color = railColor(colorField, memo)
 
   return (
-    <button
-      type="button"
+    <Link
+      to={to}
+      state={state}
       data-testid="memo-row"
-      onClick={onClick}
       style={{
         display: 'flex',
         alignItems: 'stretch',
@@ -175,15 +177,16 @@ function MemoRowItem({ memo, memoFields: _memoFields, summaryFields, colorField,
         cursor: 'pointer',
         width: '100%',
         textAlign: 'left',
-        fontFamily: 'inherit',
+        color: 'inherit',
+        textDecoration: 'none',
         opacity: isArchived ? 0.66 : 1,
         transition: 'border-color 0.1s',
       }}
       onMouseEnter={(e) => {
-        ;(e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border-hover)'
+        ;(e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--border-hover)'
       }}
       onMouseLeave={(e) => {
-        ;(e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border-light)'
+        ;(e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--border-light)'
       }}
     >
       {/* Color rail */}
@@ -327,16 +330,25 @@ function MemoRowItem({ memo, memoFields: _memoFields, summaryFields, colorField,
         </span>
         <IconChevRight size={13} style={{ color: 'var(--fg-soft)', marginTop: 2 }} />
       </div>
-    </button>
+    </Link>
   )
 }
 
 export default function MemoTab({ caseId, workspaceId, accessDenied }: Props) {
   const { t } = useTranslation()
-  const navigate = useNavigate()
+  const location = useLocation()
 
   type FilterValue = 'ACTIVE' | 'ARCHIVED' | null
-  const [filterValue, setFilterValue] = useState<FilterValue>('ACTIVE')
+  // Restore the filter that was active when the user navigated into a memo
+  // detail page: the memo page echoes this component's location state back on
+  // its return links. `null` means the ALL filter, so the state uses an 'ALL'
+  // sentinel to stay distinguishable from "no state".
+  const [filterValue, setFilterValue] = useState<FilterValue>(() => {
+    const s = (location.state as { memoFilter?: string } | null)?.memoFilter
+    if (s === 'ARCHIVED') return 'ARCHIVED'
+    if (s === 'ALL') return null
+    return 'ACTIVE'
+  })
   const [showCreateForm, setShowCreateForm] = useState(false)
 
   const { data: configData } = useQuery(GET_MEMO_CONFIGURATION, {
@@ -500,7 +512,11 @@ export default function MemoTab({ caseId, workspaceId, accessDenied }: Props) {
               memoFields={memoFields}
               summaryFields={summaryFields}
               colorField={colorField}
-              onClick={() => navigate(`/ws/${workspaceId}/cases/${caseId}/memos/${memo.id}`)}
+              to={`/ws/${workspaceId}/cases/${caseId}/memos/${memo.id}`}
+              state={{
+                ...((location.state as Record<string, unknown> | null) ?? {}),
+                memoFilter: filterValue ?? 'ALL',
+              }}
             />
           ))}
         </div>

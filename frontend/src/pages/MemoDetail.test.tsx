@@ -12,14 +12,19 @@ const CASE_ID = 1
 const MEMO_ID = 'memo-1'
 const MEMO_PATH = `/ws/${WS}/cases/${CASE_ID}/memos/${MEMO_ID}`
 
+// These tests intentionally let MockedProvider add __typename (the default) so
+// Apollo's normalized cache behaves like production: a mutation that returns
+// the same Memo entity updates the active GET_MEMO watcher in place. This is
+// what drives the archive → archived-view transition asserted below.
 function memoData(overrides: Partial<Record<string, unknown>> = {}) {
   return {
+    __typename: 'Memo',
     id: MEMO_ID,
     caseID: CASE_ID,
     title: 'Phase check 2026-07-13',
     fields: [
-      { fieldId: 'severity', value: 'high' },
-      { fieldId: 'note', value: 'plain text note' },
+      { __typename: 'FieldValue', fieldId: 'severity', value: 'high' },
+      { __typename: 'FieldValue', fieldId: 'note', value: 'plain text note' },
     ],
     archivedAt: null,
     createdAt: '2026-07-13T01:15:41Z',
@@ -57,20 +62,23 @@ function configMock(): MockedResponse {
     result: {
       data: {
         memoConfiguration: {
+          __typename: 'MemoConfiguration',
           description: 'Memo config',
           fields: [
             {
+              __typename: 'FieldDefinition',
               id: 'severity',
               name: 'Severity',
               type: 'SELECT',
               required: false,
               description: null,
               options: [
-                { id: 'high', name: 'High', description: null, metadata: null },
-                { id: 'low', name: 'Low', description: null, metadata: null },
+                { __typename: 'FieldOption', id: 'high', name: 'High', description: null, metadata: null },
+                { __typename: 'FieldOption', id: 'low', name: 'Low', description: null, metadata: null },
               ],
             },
             {
+              __typename: 'FieldDefinition',
               id: 'note',
               name: 'Note',
               type: 'TEXT',
@@ -82,6 +90,16 @@ function configMock(): MockedResponse {
         },
       },
     },
+  }
+}
+
+function configErrorMock(): MockedResponse {
+  return {
+    request: {
+      query: GET_MEMO_CONFIGURATION,
+      variables: { workspaceId: WS },
+    },
+    error: new Error('config unavailable'),
   }
 }
 
@@ -110,7 +128,7 @@ function archiveErrorMock(): MockedResponse {
 function renderAt(path: string, mocks: MockedResponse[]) {
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <MockedProvider mocks={mocks} addTypename={false}>
+      <MockedProvider mocks={mocks}>
         <I18nProvider defaultLang="en">
           <Routes>
             <Route path="/ws/:workspaceId/cases/:id/memos/:memoId" element={<MemoDetail />} />
@@ -163,18 +181,35 @@ describe('MemoDetail', () => {
     expect(screen.queryByTestId('memo-detail-archive-button')).not.toBeInTheDocument()
   })
 
-  it('shows the load-error state with a retry button on a GraphQL error', async () => {
+  it('shows the load-error state with retry and a back-to-case link on a memo error', async () => {
     renderAt(MEMO_PATH, [memoErrorMock(), configMock()])
 
     await screen.findByTestId('memo-detail-error')
 
     expect(screen.getByText('Failed to load memos')).toBeInTheDocument()
     expect(screen.getByText('Retry')).toBeInTheDocument()
+    // A deep link that fails must still offer a way back to the case.
+    expect(screen.getByTestId('memo-detail-error-back-link')).toHaveAttribute(
+      'href',
+      `/ws/${WS}/cases/${CASE_ID}`,
+    )
     expect(screen.queryByTestId('memo-detail-page')).not.toBeInTheDocument()
     expect(screen.queryByTestId('memo-detail-title')).not.toBeInTheDocument()
   })
 
-  it('archives through the confirm dialog and closes it on success', async () => {
+  it('treats a failed field-configuration load as a full-page error, not a memo with no fields', async () => {
+    renderAt(MEMO_PATH, [memoMock(), configErrorMock()])
+
+    await screen.findByTestId('memo-detail-error')
+
+    // The memo itself loaded fine, but without the field schema we must NOT
+    // silently render the memo with all field values missing.
+    expect(screen.queryByTestId('memo-detail-page')).not.toBeInTheDocument()
+    expect(screen.getByText('Failed to load memos')).toBeInTheDocument()
+    expect(screen.getByTestId('memo-detail-error-back-link')).toBeInTheDocument()
+  })
+
+  it('archives through the confirm dialog and flips the page to the archived view', async () => {
     renderAt(MEMO_PATH, [memoMock(), configMock(), archiveMock()])
 
     await screen.findByTestId('memo-detail-page')
@@ -183,10 +218,15 @@ describe('MemoDetail', () => {
     const confirm = await screen.findByTestId('memo-archive-confirm-button')
     fireEvent.click(confirm)
 
+    // The dialog closes and the normalized-cache update flips the page in
+    // place to the archived state (unarchive action + badge), without
+    // navigating away.
     await waitFor(() => {
       expect(screen.queryByTestId('memo-archive-confirm-button')).not.toBeInTheDocument()
     })
-    // No mutation-error notice on success.
+    expect(await screen.findByTestId('memo-detail-unarchive-button')).toBeInTheDocument()
+    expect(screen.getByText('Archived')).toBeInTheDocument()
+    expect(screen.queryByTestId('memo-detail-archive-button')).not.toBeInTheDocument()
     expect(screen.queryByText('Operation failed. Please try again.')).not.toBeInTheDocument()
   })
 
@@ -199,16 +239,19 @@ describe('MemoDetail', () => {
     fireEvent.click(await screen.findByTestId('memo-archive-confirm-button'))
 
     expect(await screen.findByText('Operation failed. Please try again.')).toBeInTheDocument()
-    // The dialog is closed; the page itself stays rendered.
+    // The dialog is closed; the page (still active) stays rendered.
     expect(screen.queryByTestId('memo-archive-confirm-button')).not.toBeInTheDocument()
     expect(screen.getByTestId('memo-detail-page')).toBeInTheDocument()
+    expect(screen.getByTestId('memo-detail-archive-button')).toBeInTheDocument()
   })
 
-  it('renders nothing for a non-numeric case id', () => {
-    const { container } = renderAt(`/ws/${WS}/cases/abc/memos/${MEMO_ID}`, [])
+  it('renders an error page with a back-to-list link for a non-numeric case id', () => {
+    renderAt(`/ws/${WS}/cases/abc/memos/${MEMO_ID}`, [])
 
+    // No blank screen: an invalid deep link is a dead end without a way out,
+    // so it renders the error page with a link back to the case list.
     expect(screen.queryByTestId('memo-detail-page')).not.toBeInTheDocument()
-    expect(screen.queryByTestId('memo-detail-error')).not.toBeInTheDocument()
-    expect(container.textContent).toBe('')
+    const back = screen.getByTestId('memo-detail-error-back-link')
+    expect(back).toHaveAttribute('href', `/ws/${WS}/cases`)
   })
 })

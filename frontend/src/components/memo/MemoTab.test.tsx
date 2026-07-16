@@ -19,15 +19,19 @@ function configMock(): MockedResponse {
     result: {
       data: {
         memoConfiguration: {
+          __typename: 'MemoConfiguration',
           description: '',
           fields: [
             {
+              __typename: 'FieldDefinition',
               id: 'severity',
               name: 'Severity',
               type: 'SELECT',
               required: false,
               description: null,
-              options: [{ id: 'high', name: 'High', description: null, metadata: null }],
+              options: [
+                { __typename: 'FieldOption', id: 'high', name: 'High', description: null, metadata: null },
+              ],
             },
           ],
         },
@@ -36,54 +40,57 @@ function configMock(): MockedResponse {
   }
 }
 
-function memosMock(): MockedResponse {
+function memoRow(id: string, title: string, archivedAt: string | null) {
+  return {
+    __typename: 'Memo',
+    id,
+    caseID: CASE_ID,
+    title,
+    fields:
+      archivedAt === null
+        ? [{ __typename: 'FieldValue', fieldId: 'severity', value: 'high' }]
+        : [],
+    archivedAt,
+    createdAt: '2026-07-13T01:00:00Z',
+    updatedAt: '2026-07-13T02:00:00Z',
+  }
+}
+
+function memosMock(filter: 'ACTIVE' | 'ARCHIVED'): MockedResponse {
+  const rows =
+    filter === 'ACTIVE'
+      ? [memoRow('memo-a', 'First memo', null), memoRow('memo-b', 'Second memo', null)]
+      : [memoRow('memo-c', 'Archived memo', '2026-07-15T00:00:00Z')]
   return {
     request: {
       query: GET_MEMOS_BY_CASE,
-      variables: { workspaceId: WS, caseID: CASE_ID, filter: 'ACTIVE' },
+      variables: { workspaceId: WS, caseID: CASE_ID, filter },
     },
-    result: {
-      data: {
-        memosByCase: [
-          {
-            id: 'memo-a',
-            caseID: CASE_ID,
-            title: 'First memo',
-            fields: [{ fieldId: 'severity', value: 'high' }],
-            archivedAt: null,
-            createdAt: '2026-07-13T01:00:00Z',
-            updatedAt: '2026-07-13T02:00:00Z',
-          },
-          {
-            id: 'memo-b',
-            caseID: CASE_ID,
-            title: 'Second memo',
-            fields: [],
-            archivedAt: null,
-            createdAt: '2026-07-14T01:00:00Z',
-            updatedAt: '2026-07-14T02:00:00Z',
-          },
-        ],
-      },
-    },
+    result: { data: { memosByCase: rows } },
   }
 }
 
 interface LocationProbeRef {
   path: string
+  state: unknown
 }
 
 function LocationProbe({ target }: { target: LocationProbeRef }) {
   const loc = useLocation()
   target.path = loc.pathname
+  target.state = loc.state
   return null
 }
 
-function renderTab(props: { accessDenied?: boolean } = {}) {
-  const probeRef: LocationProbeRef = { path: '' }
+function renderTab(
+  props: { accessDenied?: boolean } = {},
+  entry: { pathname: string; state?: unknown } = { pathname: `/ws/${WS}/cases/${CASE_ID}` },
+  extraMocks: MockedResponse[] = [],
+) {
+  const probeRef: LocationProbeRef = { path: '', state: null }
   const utils = render(
-    <MemoryRouter initialEntries={[`/ws/${WS}/cases/${CASE_ID}`]}>
-      <MockedProvider mocks={[configMock(), memosMock()]} addTypename={false}>
+    <MemoryRouter initialEntries={[entry]}>
+      <MockedProvider mocks={[configMock(), memosMock('ACTIVE'), ...extraMocks]}>
         <I18nProvider defaultLang="en">
           <MemoTab caseId={CASE_ID} workspaceId={WS} accessDenied={props.accessDenied} />
           <LocationProbe target={probeRef} />
@@ -108,13 +115,39 @@ describe('MemoTab', () => {
     expect(rows[1]).toHaveTextContent('Second memo')
   })
 
-  it('navigates to the memo detail page when a row is clicked', async () => {
+  it('renders each row as a link to the memo page (supports open-in-new-tab)', async () => {
+    renderTab()
+
+    const rows = await screen.findAllByTestId('memo-row')
+    // A real anchor with an href, not a button, so Cmd/Ctrl-click and
+    // copy-link work.
+    expect(rows[0].tagName).toBe('A')
+    expect(rows[0]).toHaveAttribute('href', `/ws/${WS}/cases/${CASE_ID}/memos/memo-a`)
+  })
+
+  it('navigates to the memo page carrying the active filter in location state', async () => {
     const { probeRef } = renderTab()
 
     const rows = await screen.findAllByTestId('memo-row')
     fireEvent.click(rows[0])
 
     expect(probeRef.path).toBe(`/ws/${WS}/cases/${CASE_ID}/memos/memo-a`)
+    // The filter is echoed so returning to the case restores this view.
+    expect((probeRef.state as { memoFilter?: string }).memoFilter).toBe('ACTIVE')
+  })
+
+  it('restores the archived filter from incoming location state', async () => {
+    renderTab(
+      {},
+      { pathname: `/ws/${WS}/cases/${CASE_ID}`, state: { memoFilter: 'ARCHIVED' } },
+      [memosMock('ARCHIVED')],
+    )
+
+    // The Archived tab is pre-selected (not the default Active).
+    const archivedTab = await screen.findByTestId('memo-filter-archived')
+    expect(archivedTab).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByTestId('memo-filter-active')).toHaveAttribute('aria-selected', 'false')
+    expect(await screen.findByText('Archived memo')).toBeInTheDocument()
   })
 
   it('renders nothing when access is denied', () => {

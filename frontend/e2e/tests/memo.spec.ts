@@ -65,14 +65,24 @@ test.describe('Case memos', () => {
     await expect(memoDetailPage.unarchiveButton).toBeVisible();
     await expect(memoDetailPage.editButton).toHaveCount(0);
 
-    // Back on the case: it drops off the Active list…
+    // Back on the case (we entered from the Active filter, so we land on it
+    // again): the archived memo drops off the Active list…
     await memoDetailPage.backToCase();
     await caseDetailPage.waitForPageLoad();
-    await page.getByTestId('memo-filter-active').click();
+    await expect(page.getByTestId('memo-filter-active')).toHaveAttribute('aria-selected', 'true');
     await expect(memoRow()).toHaveCount(0);
 
     // …and shows up under the Archived filter.
     await page.getByTestId('memo-filter-archived').click();
+    await expect(memoRow()).toBeVisible();
+
+    // Open it from the Archived filter and come straight back: the filter is
+    // preserved, so the memo is still listed WITHOUT re-selecting Archived.
+    await memoRow().click();
+    await memoDetailPage.waitForLoaded();
+    await memoDetailPage.backToCase();
+    await caseDetailPage.waitForPageLoad();
+    await expect(page.getByTestId('memo-filter-archived')).toHaveAttribute('aria-selected', 'true');
     await expect(memoRow()).toBeVisible();
 
     // Restore it from its page; the Active list has it back.

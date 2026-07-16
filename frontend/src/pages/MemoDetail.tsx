@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useLocation, useParams } from 'react-router-dom'
 import { useQuery, useMutation } from '@apollo/client'
 
 import Button from '../components/Button'
@@ -38,15 +38,27 @@ function formatDate(iso?: string | null): string {
   return d.toLocaleString()
 }
 
+const backLinkStyle = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 'var(--sp-1)',
+  fontSize: 13,
+  color: 'var(--fg-muted)',
+  textDecoration: 'none',
+} as const
+
 export default function MemoDetail() {
   const { t } = useTranslation()
+  const location = useLocation()
   const { workspaceId, id, memoId } = useParams<{
     workspaceId: string
     id: string
     memoId: string
   }>()
-  const caseId = Number(id)
-  const validParams = !!workspaceId && Number.isFinite(caseId) && !!memoId
+  // Case ids in URLs are positive decimal integers; reject "0x10", "1.5", etc.
+  const caseIdValid = !!id && /^[0-9]+$/.test(id)
+  const caseId = caseIdValid ? Number(id) : NaN
+  const validParams = !!workspaceId && caseIdValid && !!memoId
 
   const [editOpen, setEditOpen] = useState(false)
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false)
@@ -57,7 +69,12 @@ export default function MemoDetail() {
     fetchPolicy: 'cache-and-network',
     skip: !validParams,
   })
-  const { data: configData } = useQuery(GET_MEMO_CONFIGURATION, {
+  const {
+    data: configData,
+    loading: configLoading,
+    error: configError,
+    refetch: refetchConfig,
+  } = useQuery(GET_MEMO_CONFIGURATION, {
     variables: { workspaceId },
     fetchPolicy: 'cache-and-network',
     skip: !validParams,
@@ -69,11 +86,37 @@ export default function MemoDetail() {
   const [archiveMemo, { loading: archiving }] = useMutation(ARCHIVE_MEMO)
   const [unarchiveMemo] = useMutation(UNARCHIVE_MEMO)
 
-  if (!validParams) return null
+  // The router only mounts this page with :workspaceId present; without it
+  // there is no workspace to link back to, so there is nothing to render.
+  if (!workspaceId) return null
+
+  // Echo the location state the case page sent us (memo filter, case-list
+  // origin tab) back on every return path so the case page restores its
+  // context after this detour.
+  const backState = location.state as Record<string, unknown> | null
+
+  if (!validParams) {
+    return (
+      <div className="h-main-inner" data-testid="memo-detail-error">
+        <p style={{ margin: '0 0 var(--sp-3)', color: 'var(--color-error)', fontSize: 13 }}>
+          {t('memoLoadError')}
+        </p>
+        <Link
+          to={`/ws/${workspaceId}/cases`}
+          data-testid="memo-detail-error-back-link"
+          style={backLinkStyle}
+        >
+          <IconChevLeft size={13} />
+          {t('btnBackToList')}
+        </Link>
+      </div>
+    )
+  }
 
   const memo: MemoData | null | undefined = data?.memo
   const memoFields = normalizeMemoFields(configData?.memoConfiguration?.fields)
   const isArchived = !!memo?.archivedAt
+  const caseUrl = `/ws/${workspaceId}/cases/${caseId}`
 
   const handleArchiveConfirm = async () => {
     setActionError(null)
@@ -95,19 +138,38 @@ export default function MemoDetail() {
     }
   }
 
-  if (loading && !data) {
+  if ((loading && !data) || (configLoading && !configData)) {
     return <div className="h-main-inner muted">{t('loading')}</div>
   }
 
-  if (error || !memo) {
+  // A failed field-configuration load must not silently render the memo
+  // without its field values, so it is a full-page error like a memo error.
+  if (error || configError || !memo) {
     return (
       <div className="h-main-inner" data-testid="memo-detail-error">
         <p style={{ margin: '0 0 var(--sp-3)', color: 'var(--color-error)', fontSize: 13 }}>
           {t('memoLoadError')}
         </p>
-        <Button size="sm" onClick={() => { void refetch() }}>
-          {t('memoLoadErrorRetry')}
-        </Button>
+        <div className="row" style={{ gap: 'var(--sp-3)', alignItems: 'center' }}>
+          <Button
+            size="sm"
+            onClick={() => {
+              void refetch()
+              void refetchConfig()
+            }}
+          >
+            {t('memoLoadErrorRetry')}
+          </Button>
+          <Link
+            to={caseUrl}
+            state={backState}
+            data-testid="memo-detail-error-back-link"
+            style={backLinkStyle}
+          >
+            <IconChevLeft size={13} />
+            {t('btnBackToCase')}
+          </Link>
+        </div>
       </div>
     )
   }
@@ -117,16 +179,10 @@ export default function MemoDetail() {
       {/* Back link */}
       <div className="row" style={{ marginBottom: 'var(--sp-3)' }}>
         <Link
-          to={`/ws/${workspaceId}/cases/${caseId}`}
+          to={caseUrl}
+          state={backState}
           data-testid="memo-detail-back-link"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 'var(--sp-1)',
-            fontSize: 13,
-            color: 'var(--fg-muted)',
-            textDecoration: 'none',
-          }}
+          style={backLinkStyle}
         >
           <IconChevLeft size={13} />
           {t('btnBackToCase')}
@@ -287,7 +343,7 @@ export default function MemoDetail() {
       {/* Edit form modal */}
       {editOpen && (
         <MemoFormModal
-          workspaceId={workspaceId!}
+          workspaceId={workspaceId}
           caseId={caseId}
           memoId={memoId}
           memoFields={memoFields}
