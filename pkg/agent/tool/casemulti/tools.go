@@ -223,6 +223,11 @@ func loadAccessibleCase(ctx context.Context, deps Deps, caseID int64) (*model.Ca
 			goerr.V("workspace_id", deps.WorkspaceID),
 			goerr.V("case_id", caseID))
 	}
+	// A CaseUsecase implementation may return (nil, nil) for a missing case;
+	// guard before dereferencing so the tool errors cleanly instead of panicking.
+	if c == nil {
+		return nil, goerr.New("case not found", goerr.V("case_id", caseID))
+	}
 	if c.AccessDenied {
 		return nil, goerr.New("case is private and not accessible to the current user",
 			goerr.V("case_id", caseID))
@@ -244,6 +249,10 @@ func ensureActionBelongsToCase(ctx context.Context, deps Deps, caseID, actionID 
 		return nil, goerr.Wrap(err, "failed to get action",
 			goerr.V("workspace_id", deps.WorkspaceID),
 			goerr.V("action_id", actionID))
+	}
+	// Guard against an ActionUsecase implementation returning (nil, nil).
+	if a == nil {
+		return nil, goerr.New("action not found", goerr.V("action_id", actionID))
 	}
 	if a.CaseID != caseID {
 		return nil, goerr.New("action does not belong to the given case",
@@ -486,6 +495,9 @@ func (t *listCasesTool) Run(ctx context.Context, args map[string]any) (map[strin
 
 	items := make([]map[string]any, 0, len(cases))
 	for _, c := range cases {
+		if c == nil {
+			continue
+		}
 		// FILTER OUT restricted private cases rather than exposing the
 		// stripped/redacted row: this tool's LLM caller must never even learn
 		// such a case exists.
@@ -777,9 +789,12 @@ func (t *listActionsTool) Run(ctx context.Context, args map[string]any) (map[str
 			goerr.V("case_id", caseID))
 	}
 
-	items := make([]map[string]any, len(actions))
-	for i, a := range actions {
-		items[i] = actionToListMap(a)
+	items := make([]map[string]any, 0, len(actions))
+	for _, a := range actions {
+		if a == nil {
+			continue
+		}
+		items = append(items, actionToListMap(a))
 	}
 	return map[string]any{"actions": items}, nil
 }

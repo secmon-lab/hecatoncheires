@@ -19,6 +19,9 @@ import (
 // reply into the mention's thread. The session is case-less (CaseID == 0): the
 // agent operates across every case the user can access, not one bound case.
 func (uc *AgentUseCase) HandleWorkspaceChannelMention(ctx context.Context, msg *slackmodel.Message, entry *model.WorkspaceEntry) error {
+	if msg == nil || entry == nil {
+		return goerr.New("msg and entry are required")
+	}
 	logger := logging.From(ctx)
 	if uc.workspaceAgent == nil {
 		logger.Debug("workspace agent not configured; skipping workspace channel mention")
