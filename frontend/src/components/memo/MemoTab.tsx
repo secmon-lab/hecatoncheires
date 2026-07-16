@@ -1,17 +1,12 @@
 import { useState, Fragment } from 'react'
-import { useQuery, useMutation } from '@apollo/client'
+import { Link, useLocation } from 'react-router-dom'
+import { useQuery } from '@apollo/client'
 import Button from '../Button'
 import { IconSparkle, IconChevRight, IconChevDown, IconPlus } from '../Icons'
 import { useTranslation } from '../../i18n'
-import {
-  GET_MEMOS_BY_CASE,
-  GET_MEMO_CONFIGURATION,
-  ARCHIVE_MEMO,
-  UNARCHIVE_MEMO,
-} from '../../graphql/memo'
-import MemoDetailModal from './MemoDetailModal'
+import { GET_MEMOS_BY_CASE, GET_MEMO_CONFIGURATION } from '../../graphql/memo'
+import { normalizeMemoFields, type FieldDef, type FieldOption } from './memoFields'
 import MemoFormModal from './MemoFormModal'
-import MemoArchiveDialog from './MemoArchiveDialog'
 
 // The AI purple accent color — intentionally not a design token
 const AI_PURPLE = 'oklch(0.55 0.18 290)'
@@ -20,40 +15,6 @@ interface Props {
   caseId: number
   workspaceId: string
   accessDenied?: boolean
-}
-
-interface FieldOption {
-  id: string
-  name: string
-  description?: string
-  metadata?: Record<string, unknown>
-}
-
-interface FieldDef {
-  id: string
-  name: string
-  type: string
-  required: boolean
-  description?: string
-  options?: FieldOption[]
-}
-
-// RawFieldDef mirrors the GraphQL memoConfiguration.fields shape, whose
-// optional values arrive as `| null`; normalized into FieldDef before use.
-interface RawFieldOption {
-  id: string
-  name: string
-  description?: string | null
-  metadata?: Record<string, unknown> | null
-}
-
-interface RawFieldDef {
-  id: string
-  name: string
-  type: string
-  required: boolean
-  description?: string | null
-  options?: RawFieldOption[] | null
 }
 
 interface MemoField {
@@ -183,25 +144,27 @@ function SkeletonRow() {
   )
 }
 
-// MemoRowItem — single row in the memo list
+// MemoRowItem — single row in the memo list. Rendered as a real link so the
+// dedicated memo URL supports open-in-new-tab / copy-link affordances.
 interface MemoRowProps {
   memo: Memo
   memoFields: FieldDef[]
   summaryFields: FieldDef[]
   colorField: FieldDef | undefined
-  onClick: () => void
+  to: string
+  state: Record<string, unknown>
 }
 
-function MemoRowItem({ memo, memoFields: _memoFields, summaryFields, colorField, onClick }: MemoRowProps) {
+function MemoRowItem({ memo, memoFields: _memoFields, summaryFields, colorField, to, state }: MemoRowProps) {
   const { t } = useTranslation()
   const isArchived = !!memo.archivedAt
   const color = railColor(colorField, memo)
 
   return (
-    <button
-      type="button"
+    <Link
+      to={to}
+      state={state}
       data-testid="memo-row"
-      onClick={onClick}
       style={{
         display: 'flex',
         alignItems: 'stretch',
@@ -214,15 +177,16 @@ function MemoRowItem({ memo, memoFields: _memoFields, summaryFields, colorField,
         cursor: 'pointer',
         width: '100%',
         textAlign: 'left',
-        fontFamily: 'inherit',
+        color: 'inherit',
+        textDecoration: 'none',
         opacity: isArchived ? 0.66 : 1,
         transition: 'border-color 0.1s',
       }}
       onMouseEnter={(e) => {
-        ;(e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border-hover)'
+        ;(e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--border-hover)'
       }}
       onMouseLeave={(e) => {
-        ;(e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border-light)'
+        ;(e.currentTarget as HTMLAnchorElement).style.borderColor = 'var(--border-light)'
       }}
     >
       {/* Color rail */}
@@ -366,20 +330,26 @@ function MemoRowItem({ memo, memoFields: _memoFields, summaryFields, colorField,
         </span>
         <IconChevRight size={13} style={{ color: 'var(--fg-soft)', marginTop: 2 }} />
       </div>
-    </button>
+    </Link>
   )
 }
 
 export default function MemoTab({ caseId, workspaceId, accessDenied }: Props) {
   const { t } = useTranslation()
+  const location = useLocation()
 
   type FilterValue = 'ACTIVE' | 'ARCHIVED' | null
-  const [filterValue, setFilterValue] = useState<FilterValue>('ACTIVE')
-  const [selectedMemoId, setSelectedMemoId] = useState<string | null>(null)
+  // Restore the filter that was active when the user navigated into a memo
+  // detail page: the memo page echoes this component's location state back on
+  // its return links. `null` means the ALL filter, so the state uses an 'ALL'
+  // sentinel to stay distinguishable from "no state".
+  const [filterValue, setFilterValue] = useState<FilterValue>(() => {
+    const s = (location.state as { memoFilter?: string } | null)?.memoFilter
+    if (s === 'ARCHIVED') return 'ARCHIVED'
+    if (s === 'ALL') return null
+    return 'ACTIVE'
+  })
   const [showCreateForm, setShowCreateForm] = useState(false)
-  const [editMemoId, setEditMemoId] = useState<string | null>(null)
-  const [archiveMemoId, setArchiveMemoId] = useState<string | null>(null)
-  const [archiveMemoTitle, setArchiveMemoTitle] = useState<string>('')
 
   const { data: configData } = useQuery(GET_MEMO_CONFIGURATION, {
     variables: { workspaceId },
@@ -392,38 +362,10 @@ export default function MemoTab({ caseId, workspaceId, accessDenied }: Props) {
     skip: accessDenied,
   })
 
-  const [archiveMemo, { loading: archiving }] = useMutation(ARCHIVE_MEMO, {
-    refetchQueries: [
-      { query: GET_MEMOS_BY_CASE, variables: { workspaceId, caseID: caseId, filter: filterValue } },
-    ],
-  })
-  const [unarchiveMemo] = useMutation(UNARCHIVE_MEMO, {
-    refetchQueries: [
-      { query: GET_MEMOS_BY_CASE, variables: { workspaceId, caseID: caseId, filter: filterValue } },
-    ],
-  })
-
   if (accessDenied) return null
 
   const memoConfig = configData?.memoConfiguration
-  // Normalize the GraphQL field definitions (whose nullable options/description
-  // are typed `| null`) into the non-null FieldDef shape shared with
-  // CustomFieldRenderer / sanitizeFieldValues.
-  const memoFields: FieldDef[] = (memoConfig?.fields ?? []).map((f: RawFieldDef) => ({
-    id: f.id,
-    name: f.name,
-    type: f.type,
-    required: f.required,
-    description: f.description ?? undefined,
-    options: f.options
-      ? f.options.map((o) => ({
-          id: o.id,
-          name: o.name,
-          description: o.description ?? undefined,
-          metadata: o.metadata ?? undefined,
-        }))
-      : undefined,
-  }))
+  const memoFields: FieldDef[] = normalizeMemoFields(memoConfig?.fields)
   const memos: Memo[] = data?.memosByCase ?? []
 
   // Summary fields: first 2-3 SELECT or MULTI_SELECT fields in schema order
@@ -433,18 +375,6 @@ export default function MemoTab({ caseId, workspaceId, accessDenied }: Props) {
 
   // Color field: first SELECT field in schema order
   const colorField = memoFields.find((f) => f.type === 'SELECT')
-
-  const handleArchiveConfirm = async () => {
-    if (!archiveMemoId) return
-    await archiveMemo({ variables: { workspaceId, caseID: caseId, id: archiveMemoId } })
-    setArchiveMemoId(null)
-    setSelectedMemoId(null)
-  }
-
-  const handleUnarchive = async (memoId: string) => {
-    await unarchiveMemo({ variables: { workspaceId, caseID: caseId, id: memoId } })
-    setSelectedMemoId(null)
-  }
 
   return (
     <div>
@@ -582,60 +512,25 @@ export default function MemoTab({ caseId, workspaceId, accessDenied }: Props) {
               memoFields={memoFields}
               summaryFields={summaryFields}
               colorField={colorField}
-              onClick={() => setSelectedMemoId(memo.id)}
+              to={`/ws/${workspaceId}/cases/${caseId}/memos/${memo.id}`}
+              state={{
+                ...((location.state as Record<string, unknown> | null) ?? {}),
+                memoFilter: filterValue ?? 'ALL',
+              }}
             />
           ))}
         </div>
       )}
 
-      {/* Detail modal */}
-      {selectedMemoId && (
-        <MemoDetailModal
-          workspaceId={workspaceId}
-          caseId={caseId}
-          memoId={selectedMemoId}
-          memoFields={memoFields}
-          onClose={() => setSelectedMemoId(null)}
-          onEdit={() => {
-            setEditMemoId(selectedMemoId)
-            setSelectedMemoId(null)
-          }}
-          onArchive={() => {
-            const memo = memos.find((m) => m.id === selectedMemoId)
-            setArchiveMemoTitle(memo?.title ?? '')
-            setArchiveMemoId(selectedMemoId)
-            setSelectedMemoId(null)
-          }}
-          onUnarchive={() => { void handleUnarchive(selectedMemoId) }}
-        />
-      )}
-
-      {/* Create / Edit form modal */}
-      {(showCreateForm || editMemoId) && (
+      {/* Create form modal (editing happens on the memo detail page) */}
+      {showCreateForm && (
         <MemoFormModal
           workspaceId={workspaceId}
           caseId={caseId}
-          memoId={editMemoId ?? undefined}
           memoFields={memoFields}
-          onClose={() => {
-            setShowCreateForm(false)
-            setEditMemoId(null)
-          }}
-          onSaved={() => {
-            setShowCreateForm(false)
-            setEditMemoId(null)
-          }}
+          onClose={() => setShowCreateForm(false)}
+          onSaved={() => setShowCreateForm(false)}
           activeFilter={filterValue}
-        />
-      )}
-
-      {/* Archive confirm dialog */}
-      {archiveMemoId && (
-        <MemoArchiveDialog
-          memoTitle={archiveMemoTitle}
-          onConfirm={() => { void handleArchiveConfirm() }}
-          onCancel={() => setArchiveMemoId(null)}
-          archiving={archiving}
         />
       )}
     </div>

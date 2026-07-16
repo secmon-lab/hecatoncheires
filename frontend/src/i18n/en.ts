@@ -653,6 +653,7 @@ export const en: Messages = {
   memoIdLabel: 'ID',
   memoCreatorLabel: 'Creator',
   memoCountLabel: '{count} memos',
+  memoActionError: 'Operation failed. Please try again.',
 
   // Knowledge
   navKnowledge: 'Knowledge',

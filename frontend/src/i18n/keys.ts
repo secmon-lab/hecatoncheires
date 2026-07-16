@@ -648,6 +648,7 @@ export const msgKeys = {
   memoIdLabel: 'memoIdLabel',
   memoCreatorLabel: 'memoCreatorLabel',
   memoCountLabel: 'memoCountLabel',
+  memoActionError: 'memoActionError',
 
   // Knowledge
   navKnowledge: 'navKnowledge',
