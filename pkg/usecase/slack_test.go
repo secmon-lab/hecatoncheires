@@ -1107,3 +1107,92 @@ func TestSlackUseCases_CleanupOldMessages(t *testing.T) {
 
 	gt.Value(t, messages[0].ID()).Equal("new.123456")
 }
+
+// TestSlackUseCases_WorkspaceChannelMentionRouting verifies that an
+// app_mention landing in a channel-mode workspace's configured workspace
+// channel ([slack] workspace_channel) is routed to the cross-case workspace
+// agent (AgentUseCase.HandleWorkspaceChannelMention), not to the mention
+// draft-proposal flow (MentionProposalUseCase.HandleAppMention) — see the
+// dispatch order in HandleSlackEvent. mentionProposal is passed as nil: if the
+// dispatcher regressed to that branch it would return nil silently and never
+// touch Slack, so any observed workspace-agent-shaped Slack traffic proves the
+// correct branch ran.
+func TestSlackUseCases_WorkspaceChannelMentionRouting(t *testing.T) {
+	const workspaceChannel = "C-WORKSPACE"
+
+	registry := model.NewWorkspaceRegistry()
+	registry.Register(&model.WorkspaceEntry{
+		Workspace:               model.Workspace{ID: "ws-channel", Name: "Channel WS"},
+		SlackWorkspaceChannelID: workspaceChannel,
+	})
+
+	mentionEvent := func(ts, threadTS string) *slackevents.EventsAPIEvent {
+		return &slackevents.EventsAPIEvent{
+			Type: slackevents.CallbackEvent,
+			InnerEvent: slackevents.EventsAPIInnerEvent{
+				Type: string(slackevents.AppMention),
+				Data: &slackevents.AppMentionEvent{
+					Type:            "app_mention",
+					User:            "U-ASKER",
+					Text:            "<@UBOT001> what's open right now?",
+					TimeStamp:       ts,
+					ThreadTimeStamp: threadTS,
+					Channel:         workspaceChannel,
+					EventTimeStamp:  ts,
+				},
+			},
+			TeamID: "T1",
+		}
+	}
+
+	t.Run("routes to the workspace agent, not the mention draft flow", func(t *testing.T) {
+		repo := memory.New()
+		ctx := context.Background()
+		slackMock := &agentTestSlackService{}
+
+		agentUC := usecase.NewAgentUseCase(usecase.AgentDeps{
+			Repo:         repo,
+			Registry:     registry,
+			LLM:          wsMentionScript("Here is the cross-case answer."),
+			HistoryRepo:  agentarchive.NewMemoryHistoryRepository(),
+			TraceRepo:    agentarchive.NewMemoryTraceRepository(),
+			SlackService: slackMock,
+		})
+
+		// mentionProposal is nil: a regression that routed this event there
+		// instead would return nil with zero Slack calls, which the assertions
+		// below rule out.
+		slackUC := usecase.NewSlackUseCases(repo, registry, agentUC, nil, slackMock)
+
+		const mentionTS = "1700400000.000001"
+		gt.NoError(t, slackUC.HandleSlackEvent(ctx, mentionEvent(mentionTS, ""))).Required()
+
+		gt.Array(t, slackMock.postedMessages).Length(2).Required()
+		gt.Value(t, slackMock.postedMessages[0].ChannelID).Equal(workspaceChannel)
+		gt.Value(t, slackMock.postedMessages[0].ThreadTS).Equal(mentionTS)
+		gt.Value(t, slackMock.postedMessages[1].ChannelID).Equal(workspaceChannel)
+		gt.Value(t, slackMock.postedMessages[1].ThreadTS).Equal(mentionTS)
+		gt.Value(t, slackMock.postedMessages[1].Text).Equal("Here is the cross-case answer.")
+
+		// A case-less session was created for the thread, tied to the
+		// workspace but bound to no Case (CaseID == 0).
+		ssn, err := repo.Session().GetByThread(ctx, workspaceChannel, mentionTS)
+		gt.NoError(t, err).Required()
+		gt.Value(t, ssn).NotNil().Required()
+		gt.Value(t, ssn.WorkspaceID).Equal("ws-channel")
+		gt.Value(t, ssn.CaseID).Equal(int64(0))
+	})
+
+	t.Run("agent nil: no-op even when the channel matches", func(t *testing.T) {
+		repo := memory.New()
+		ctx := context.Background()
+		slackMock := &agentTestSlackService{}
+
+		// No AgentUseCase (agent nil): HandleSlackEvent's workspace-channel
+		// branch must short-circuit before touching Slack.
+		slackUC := usecase.NewSlackUseCases(repo, registry, nil, nil, slackMock)
+
+		gt.NoError(t, slackUC.HandleSlackEvent(ctx, mentionEvent("1700400010.000001", ""))).Required()
+		gt.Array(t, slackMock.postedMessages).Length(0)
+	})
+}

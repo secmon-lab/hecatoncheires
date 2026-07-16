@@ -275,6 +275,10 @@ const (
 	MsgUIErrUnexpectedDetail
 	MsgUIErrUnexpectedFix
 
+	// MsgWorkspaceAgentFallback is posted when the workspace-channel agent turn
+	// ends in a fallback (loop budget exhausted or internal error) with no reply.
+	MsgWorkspaceAgentFallback
+
 	msgKeyCount // sentinel for validation
 )
 

@@ -67,6 +67,16 @@ type WorkspaceEntry struct {
 	// reaction trigger is disabled. Only meaningful in thread mode, and unique
 	// across workspaces (enforced at config load).
 	ReactionEmoji string
+	// SlackWorkspaceChannelID is the workspace-level shared channel where the
+	// cross-case workspace agent runs (and future notifications flow). Channel
+	// mode only; empty when unset. Unique across workspaces / monitor channels
+	// (enforced at config load).
+	SlackWorkspaceChannelID string
+	// WorkspaceAgentPrompt is the operator-supplied custom instruction for the
+	// workspace agent (from [slack.workspace_agent] prompt/prompt_file). It is
+	// appended to the host-owned base system prompt and cannot relax it. Empty
+	// when unset.
+	WorkspaceAgentPrompt string
 }
 
 // IsThreadMode reports whether this workspace uses thread-per-case binding.
@@ -116,6 +126,23 @@ func (r *WorkspaceRegistry) FindByMonitorChannel(channelID string) (*WorkspaceEn
 	for _, id := range r.order {
 		entry := r.entries[id]
 		if entry.IsThreadMode() && entry.SlackMonitorChannelID == channelID {
+			return entry, true
+		}
+	}
+	return nil, false
+}
+
+// FindByWorkspaceChannel returns the channel-mode workspace entry whose
+// workspace channel matches channelID. Thread-mode workspaces are never matched
+// (the workspace channel is a channel-mode feature). The boolean is false when
+// no channel-mode workspace uses the channel.
+func (r *WorkspaceRegistry) FindByWorkspaceChannel(channelID string) (*WorkspaceEntry, bool) {
+	if r == nil || channelID == "" {
+		return nil, false
+	}
+	for _, id := range r.order {
+		entry := r.entries[id]
+		if !entry.IsThreadMode() && entry.SlackWorkspaceChannelID == channelID {
 			return entry, true
 		}
 	}

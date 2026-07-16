@@ -229,6 +229,7 @@ var messagesEN = [msgKeyCount]string{
 	MsgUIErrUnexpectedWhat:          "⚠️ An unexpected error occurred",
 	MsgUIErrUnexpectedDetail:        "Internal error",
 	MsgUIErrUnexpectedFix:           "Please retry. If it keeps happening, report it to an admin with the ref below",
+	MsgWorkspaceAgentFallback:       "I couldn't complete that just now. Please try again, adding a bit more detail if it helps.",
 }
 
 var messagesJA = [msgKeyCount]string{
@@ -443,4 +444,5 @@ var messagesJA = [msgKeyCount]string{
 	MsgUIErrUnexpectedWhat:          "⚠️ 予期しないエラーが発生しました",
 	MsgUIErrUnexpectedDetail:        "内部エラー",
 	MsgUIErrUnexpectedFix:           "再試行してください。続く場合は下の ref を添えて管理者へご報告ください",
+	MsgWorkspaceAgentFallback:       "うまく処理しきれませんでした。もう少し情報を添えて、もう一度試してください。",
 }

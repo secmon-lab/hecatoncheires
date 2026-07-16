@@ -24,6 +24,7 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/casebound"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/planexec"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/threadcase"
+	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/wsagent"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	goslack "github.com/slack-go/slack" //nolint:depguard
@@ -45,6 +46,10 @@ type AgentUseCase struct {
 	// creation, investigate / respond / close on mention). Non-nil whenever
 	// the LLM client is configured.
 	threadcase *threadcase.UseCase
+
+	// workspaceAgent runs the workspace-channel cross-case agent (channel mode).
+	// Non-nil whenever the LLM client is configured.
+	workspaceAgent *wsagent.UseCase
 }
 
 // AgentDeps groups the dependencies AgentUseCase needs. Required fields are
@@ -133,6 +138,8 @@ func NewAgentUseCase(deps AgentDeps) *AgentUseCase {
 			ActionStepUC:        NewActionStepToolAdapter(deps.ActionStepUC),
 			CaseUC:              NewCaseToolAdapter(deps.CaseUC),
 			CaseRefUC:           deps.CaseUC,
+			CaseMultiUC:         NewCaseMultiCaseAdapter(deps.CaseUC),
+			CaseMultiActionUC:   NewCaseMultiActionAdapter(deps.ActionUC, deps.ActionStepUC),
 			MemoUC:              NewMemoToolAdapter(deps.MemoUC),
 			KnowledgeAccessor:   NewKnowledgeToolAccessor(deps.KnowledgeUC, deps.TagUC),
 			KnowledgeMutator:    NewKnowledgeToolMutator(deps.KnowledgeUC, deps.TagUC),
@@ -168,6 +175,16 @@ func NewAgentUseCase(deps AgentDeps) *AgentUseCase {
 			errutil.Handle(context.Background(), goerr.Wrap(tcErr, "failed to build threadcase usecase"), "failed to build threadcase usecase")
 		} else {
 			uc.threadcase = tc
+		}
+
+		// The workspace-channel agent reuses the same backend deps + runner as
+		// threadcase; it only differs in tool set (cross-case) and access actor.
+		if runnerErr == nil {
+			if wa, waErr := wsagent.New(commonDeps, runner); waErr != nil {
+				errutil.Handle(context.Background(), goerr.Wrap(waErr, "failed to build workspace agent usecase"), "failed to build workspace agent usecase")
+			} else {
+				uc.workspaceAgent = wa
+			}
 		}
 	}
 	return uc

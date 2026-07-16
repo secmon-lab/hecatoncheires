@@ -129,6 +129,23 @@ func (uc *SlackUseCases) HandleSlackEvent(ctx context.Context, event *slackevent
 			return nil
 		}
 
+		// A mention in a workspace channel (channel-mode WS) runs the
+		// cross-case workspace agent, not the draft-proposal flow.
+		if wsEntry, isWSChannel := uc.registry.FindByWorkspaceChannel(appMention.Channel); isWSChannel {
+			if uc.agent == nil {
+				return nil
+			}
+			ctx = uc.contextWithUserLang(ctx, appMention.User)
+			if err := uc.agent.HandleWorkspaceChannelMention(ctx, msg, wsEntry); err != nil {
+				errutil.Handle(ctx, goerr.Wrap(err, "failed to handle workspace channel mention",
+					goerr.V("channel_id", appMention.Channel),
+					goerr.V("user_id", appMention.User),
+					goerr.V("workspace_id", wsEntry.Workspace.ID),
+				), "failed to handle workspace channel mention")
+			}
+			return nil
+		}
+
 		if uc.mentionProposal == nil {
 			return nil
 		}
