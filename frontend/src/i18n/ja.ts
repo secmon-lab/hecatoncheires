@@ -653,6 +653,7 @@ export const ja: Messages = {
   memoIdLabel: 'ID',
   memoCreatorLabel: '作成者',
   memoCountLabel: '{count} 件',
+  memoActionError: '操作に失敗しました。もう一度お試しください。',
 
   // Knowledge
   navKnowledge: 'ナレッジ',
