@@ -1,0 +1,428 @@
+/* Home — post-login landing page.
+   Colors, surface backgrounds, borders, and spacing always go through the
+   shared CSS variables from styles/global.css; fixed layout dimensions
+   (grid-template-columns, badge/avatar sizes, max-width) are expressed in
+   rem so they scale with the user's root font size. */
+
+@keyframes homePulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+.page {
+  min-height: 100vh;
+  background: var(--bg-subtle);
+  color: var(--text-body);
+}
+
+.container {
+  max-width: 70rem;
+  margin: 0 auto;
+  padding: var(--sp-8) var(--sp-6) var(--sp-12);
+}
+
+/* ─── Header ─── */
+.header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-8);
+  flex-wrap: wrap;
+}
+
+.greeting {
+  margin: 0 0 var(--sp-1);
+  font-size: var(--t-3xl);
+  font-weight: 600;
+  color: var(--text-heading);
+  letter-spacing: -0.01em;
+  min-height: calc(var(--t-3xl) * 1.2);
+}
+
+.greetingSkeleton {
+  display: inline-block;
+  width: 14rem;
+  height: var(--t-3xl);
+  border-radius: var(--radius-sm);
+  background: var(--bg-muted);
+  animation: homePulse 1.4s ease-in-out infinite;
+  vertical-align: middle;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .greetingSkeleton { animation: none; opacity: 0.7; }
+}
+
+.dateLabel {
+  font-size: var(--t-sm);
+  color: var(--text-muted);
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* ─── Section cards (B / A) ─── */
+.card {
+  background: var(--bg-paper);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-bottom: var(--sp-6);
+}
+
+.cardHeader {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding: var(--sp-5) var(--sp-6);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.cardTitle {
+  margin: 0;
+  font-size: var(--t-lg);
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+.cardSub {
+  font-size: var(--t-sm);
+  color: var(--text-muted);
+}
+
+.cardCount {
+  margin-left: auto;
+  font-size: var(--t-sm);
+  color: var(--text-muted);
+}
+
+.sectionCHeader {
+  display: flex;
+  align-items: baseline;
+  margin-bottom: var(--sp-4);
+}
+
+/* ─── Table scroll wrapper ─── */
+.tableScroll {
+  overflow-x: auto;
+}
+
+/* ─── Section B: Open Cases ─── */
+.caseHeaderRow,
+.caseRow {
+  display: grid;
+  grid-template-columns: minmax(15rem, 1fr) 6.75rem 8rem 7.25rem 10.5rem 6rem;
+  gap: var(--sp-4);
+  min-width: 53.75rem;
+}
+
+.caseHeaderRow {
+  align-items: center;
+  padding: var(--sp-2) var(--sp-6);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  color: var(--text-label);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.caseRow {
+  align-items: center;
+  padding: var(--sp-3) var(--sp-6);
+  border-bottom: 1px solid var(--border-light);
+  border-left: 3px solid transparent;
+  cursor: pointer;
+  color: inherit;
+}
+
+.caseRow:last-child { border-bottom: none; }
+.caseRow:hover { background: var(--bg-subtle); }
+.caseRow:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.caseRowStalled { border-left-color: var(--color-warning); }
+
+.caseTitleLink {
+  display: block;
+  font-weight: 500;
+  color: var(--text-heading);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.caseTitleLink:hover { text-decoration: underline; }
+
+.statusCell {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--t-sm);
+  color: var(--text-body);
+}
+
+.statusDot {
+  width: 0.4375rem;
+  height: 0.4375rem;
+  border-radius: 999px;
+  background: var(--color-success);
+  flex-shrink: 0;
+}
+
+.avatarStack {
+  display: flex;
+  align-items: center;
+}
+
+.avatarChip {
+  width: 1.5rem;
+  height: 1.5rem;
+  margin-right: -0.375rem;
+  border-radius: 999px;
+  border: 1.5px solid var(--bg-paper);
+  background: var(--bg-muted);
+  color: var(--text-label);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.avatarExtra {
+  margin-left: var(--sp-2);
+  font-size: var(--t-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.updatedCell {
+  font-size: var(--t-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.wsBadgeLink {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  text-decoration: none;
+  color: inherit;
+  overflow: hidden;
+  min-width: 0;
+}
+.wsBadgeLink:hover .wsBadgeName { text-decoration: underline; }
+
+.wsBadgeEmoji {
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--t-sm);
+  flex-shrink: 0;
+}
+
+.wsBadgeColor {
+  width: 0.625rem;
+  height: 0.625rem;
+  border-radius: 0.1875rem;
+  flex-shrink: 0;
+}
+
+.wsBadgeName {
+  font-size: var(--t-sm);
+  color: var(--text-body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stalledPill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  justify-self: start;
+  padding: 0.125rem var(--sp-2);
+  border: 1px solid var(--color-warning);
+  color: var(--color-warning);
+  border-radius: 999px;
+  font-size: var(--t-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.stalledDot {
+  width: 0.3125rem;
+  height: 0.3125rem;
+  border-radius: 999px;
+  background: var(--color-warning);
+  flex-shrink: 0;
+}
+
+/* ─── Section A: Due Actions ─── */
+.actionHeaderRow,
+.actionRow {
+  display: grid;
+  grid-template-columns: 8.5rem minmax(13.75rem, 1fr) 14.5rem 10.5rem;
+  gap: var(--sp-4);
+  min-width: 45rem;
+}
+
+.actionHeaderRow {
+  align-items: center;
+  padding: var(--sp-2) var(--sp-6);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  color: var(--text-label);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.actionRow {
+  align-items: center;
+  padding: var(--sp-3) var(--sp-6);
+  border-bottom: 1px solid var(--border-light);
+  border-left: 3px solid transparent;
+  cursor: pointer;
+  color: inherit;
+}
+
+.actionRow:last-child { border-bottom: none; }
+.actionRow:hover { background: var(--bg-subtle); }
+.actionRow:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.actionRowOverdue {
+  border-left-color: var(--color-error);
+  background: var(--bg-muted);
+}
+.actionRowOverdue:hover { background: var(--bg-muted); }
+
+.dueCell { padding-left: var(--sp-3); }
+
+.dueNone {
+  color: var(--text-muted);
+  font-size: var(--t-sm);
+}
+
+.duePillOverdue {
+  display: inline-block;
+  padding: 0.125rem 0.5625rem;
+  border-radius: 999px;
+  background: var(--color-error);
+  color: var(--color-error-fg);
+  font-size: var(--t-xs);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.dueToday {
+  display: inline-block;
+  padding: 0.125rem 0.5625rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-default);
+  color: var(--text-heading);
+  font-size: var(--t-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.dueFuture {
+  color: var(--text-body);
+  font-size: var(--t-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.actionTitle {
+  font-size: var(--t-base);
+  font-weight: 500;
+  color: var(--text-heading);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.caseLink {
+  font-size: var(--t-sm);
+  color: var(--text-muted);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.caseLink:hover {
+  text-decoration: underline;
+  color: var(--color-primary);
+}
+
+/* ─── Loading skeleton rows (shared by both sections) ─── */
+.skeletonRow {
+  display: flex;
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-6);
+}
+
+.skeletonBlock {
+  height: 0.875rem;
+  flex: 1;
+  border-radius: var(--radius-sm);
+  background: var(--bg-muted);
+  animation: homePulse 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeletonBlock { animation: none; opacity: 0.6; }
+}
+
+/* ─── Empty states ─── */
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: var(--sp-1);
+  padding: var(--sp-12) var(--sp-6);
+}
+
+.emptyTitle {
+  font-size: var(--t-base);
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+.emptyBody {
+  font-size: var(--t-sm);
+  color: var(--text-muted);
+}
+
+/* ─── Error states (query failed — distinct from "empty", never silently
+   downgraded to it) ─── */
+.errorState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: var(--sp-3);
+  padding: var(--sp-12) var(--sp-6);
+}
+
+.errorBody {
+  font-size: var(--t-sm);
+  color: var(--color-error);
+}

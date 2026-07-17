@@ -29,6 +29,8 @@ type Repository interface {
 	JobRunEvent() JobRunEventRepository
 	Import() ImportRepository
 	ReactionClaim() ReactionClaimRepository
+	UserPreference() UserPreferenceRepository
+	HomeMessage() HomeMessageRepository
 
 	// Auth methods
 	PutToken(ctx context.Context, token *auth.Token) error

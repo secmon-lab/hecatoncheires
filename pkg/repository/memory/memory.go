@@ -28,8 +28,10 @@ type Memory struct {
 	jobRun        *jobRunRepository
 	jobRunLog     *jobRunLogRepository
 	jobRunEvent   *jobRunEventRepository
-	importRepo    *importRepository
-	reactionClaim *reactionClaimRepository
+	importRepo     *importRepository
+	reactionClaim  *reactionClaimRepository
+	userPreference *userPreferenceRepository
+	homeMessage    *homeMessageRepository
 }
 
 var _ interfaces.Repository = &Memory{}
@@ -56,8 +58,10 @@ func New() *Memory {
 		jobRun:        newJobRunRepository(),
 		jobRunLog:     newJobRunLogRepository(),
 		jobRunEvent:   newJobRunEventRepository(),
-		importRepo:    newImportRepository(),
-		reactionClaim: newReactionClaimRepository(),
+		importRepo:     newImportRepository(),
+		reactionClaim:  newReactionClaimRepository(),
+		userPreference: newUserPreferenceRepository(),
+		homeMessage:    newHomeMessageRepository(),
 	}
 }
 
@@ -143,6 +147,14 @@ func (m *Memory) Import() interfaces.ImportRepository {
 
 func (m *Memory) ReactionClaim() interfaces.ReactionClaimRepository {
 	return m.reactionClaim
+}
+
+func (m *Memory) UserPreference() interfaces.UserPreferenceRepository {
+	return m.userPreference
+}
+
+func (m *Memory) HomeMessage() interfaces.HomeMessageRepository {
+	return m.homeMessage
 }
 
 func (m *Memory) Close() error {

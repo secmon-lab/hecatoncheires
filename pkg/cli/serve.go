@@ -162,6 +162,8 @@ func cmdServe() *cli.Command {
 	var slackCfg config.Slack
 	var llmCfg config.LLM
 	var embCfg config.Embedding
+	var homeMsgCfg config.HomeMessageLLM
+	var dashboardStaleThreshold time.Duration
 	var githubCfg config.GitHub
 	var jiraCfg config.Jira
 	var webfetchCfg config.WebFetch
@@ -210,6 +212,13 @@ func cmdServe() *cli.Command {
 			Sources:     cli.EnvVars("HECATONCHEIRES_DEFAULT_LANG"),
 			Destination: &defaultLangStr,
 		},
+		&cli.DurationFlag{
+			Name:        "dashboard-stale-threshold",
+			Usage:       "Age after which an open Case with no update is flagged as stalled on the home dashboard (0 disables)",
+			Value:       14 * 24 * time.Hour,
+			Sources:     cli.EnvVars("HECATONCHEIRES_DASHBOARD_STALE_THRESHOLD"),
+			Destination: &dashboardStaleThreshold,
+		},
 	}
 
 	// Add shared config flags
@@ -218,6 +227,7 @@ func cmdServe() *cli.Command {
 	flags = append(flags, slackCfg.Flags()...)
 	flags = append(flags, llmCfg.Flags()...)
 	flags = append(flags, embCfg.Flags()...)
+	flags = append(flags, homeMsgCfg.Flags()...)
 	flags = append(flags, githubCfg.Flags()...)
 	flags = append(flags, jiraCfg.Flags()...)
 	flags = append(flags, webfetchCfg.Flags()...)
@@ -411,6 +421,19 @@ func cmdServe() *cli.Command {
 				}
 				ucOpts = append(ucOpts, usecase.WithEmbedClient(embedClient))
 				logging.Default().Info("Embedding client enabled", logAttrsToArgs(embCfg.LogAttrs())...)
+			}
+
+			// Home dashboard: stale threshold is always wired (default carried by
+			// the flag). The greeting uses a dedicated LLM only when explicitly
+			// configured; otherwise the usecase falls back to the shared chat LLM.
+			ucOpts = append(ucOpts, usecase.WithDashboardStaleThreshold(dashboardStaleThreshold))
+			if homeMsgCfg.IsEnabled() {
+				homeMsgClient, err := homeMsgCfg.NewClient(ctx)
+				if err != nil {
+					return goerr.Wrap(err, "failed to initialize home-message LLM client")
+				}
+				ucOpts = append(ucOpts, usecase.WithHomeMessageLLMClient(homeMsgClient))
+				logging.Default().Info("Home-message LLM client enabled", logAttrsToArgs(homeMsgCfg.LogAttrs())...)
 			}
 
 			// Initialize GitHub service if configured

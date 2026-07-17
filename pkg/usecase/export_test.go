@@ -246,6 +246,13 @@ var (
 	FallbackReasonErrorForTest  = fallbackReasonError
 )
 
+// Home dashboard prompt seams (see dashboard.go) exposed so the greeting
+// template can be golden-tested and the language allow-list verified.
+type HomeMessagePromptInputForTest = homeMessagePromptInput
+
+var RenderHomeMessagePromptForTest = renderHomeMessagePrompt
+var NormalizeHomeMessageLangForTest = normalizeHomeMessageLang
+
 // Type aliases for testing
 type GitHubPullRequest = githubsvc.PullRequest
 type GitHubIssue = githubsvc.Issue
