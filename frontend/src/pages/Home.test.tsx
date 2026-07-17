@@ -244,6 +244,30 @@ describe('Home', () => {
     expect(within(row).getByText('+1')).toBeInTheDocument()
   })
 
+  it('renders the workspace badge as the emoji tile when the workspace has an emoji, and as a color square when it only has a color', async () => {
+    renderHome([
+      homeMessageMock('Hi'),
+      openCasesMock([
+        // 'risk' has emoji 🔥 in the mocked workspace list.
+        caseRow({ id: 1, title: 'Emoji ws case', workspaceId: 'risk', workspaceName: 'Risk' }),
+        // 'support' has no emoji but color #2f6fed.
+        caseRow({ id: 2, title: 'Color ws case', workspaceId: 'support', workspaceName: 'Support' }),
+      ]),
+      dueActionsMock([]),
+    ])
+
+    const rows = await screen.findAllByTestId('home-case-row')
+    expect(rows).toHaveLength(2)
+    // Emoji workspace: the badge shows the emoji itself, not a color square.
+    expect(within(rows[0]).getByText('🔥')).toBeInTheDocument()
+    // Color-only workspace: a color square carrying the workspace color.
+    const colorRow = rows[1]
+    const square = colorRow.querySelector('[class*="wsBadgeColor"]') as HTMLElement
+    expect(square).not.toBeNull()
+    expect(square.style.background).toBe('rgb(47, 111, 237)') // #2f6fed
+    expect(within(colorRow).queryByText('🔥')).not.toBeInTheDocument()
+  })
+
   it('shows the open-cases empty state when there are none', async () => {
     renderHome([homeMessageMock('Hi'), openCasesMock([]), dueActionsMock([])])
     await waitFor(() => expect(screen.getByText('No open cases')).toBeInTheDocument())

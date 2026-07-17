@@ -2,7 +2,17 @@
    Colors, surface backgrounds, borders, and spacing always go through the
    shared CSS variables from styles/global.css; fixed layout dimensions
    (grid-template-columns, badge/avatar sizes, max-width) are expressed in
-   rem so they scale with the user's root font size. */
+   rem so they scale with the user's root font size.
+
+   Token choice: this file uses the BASE tokens (--bg / --bg-elev /
+   --bg-sunken / --line / --fg / --fg-muted / --accent / --danger / --warn /
+   --ok) directly, NOT the semantic aliases (--bg-paper / --border-default /
+   --text-muted / --color-* ...). The aliases are declared on :root but
+   reference base tokens that are only defined on body[data-aesthetic][data-theme],
+   so per CSS custom-property resolution they compute to invalid on html and
+   inherit as invalid everywhere — using them silently drops the declaration
+   (verified empirically; this page renders outside .h-app where the fallout
+   was first noticed). */
 
 @keyframes homePulse {
   0%, 100% { opacity: 0.55; }
@@ -11,8 +21,8 @@
 
 .page {
   min-height: 100vh;
-  background: var(--bg-subtle);
-  color: var(--text-body);
+  background: var(--bg);
+  color: var(--fg);
 }
 
 .container {
@@ -35,7 +45,7 @@
   margin: 0 0 var(--sp-1);
   font-size: var(--t-3xl);
   font-weight: 600;
-  color: var(--text-heading);
+  color: var(--fg);
   letter-spacing: -0.01em;
   min-height: calc(var(--t-3xl) * 1.2);
 }
@@ -45,7 +55,7 @@
   width: 14rem;
   height: var(--t-3xl);
   border-radius: var(--radius-sm);
-  background: var(--bg-muted);
+  background: var(--bg-sunken);
   animation: homePulse 1.4s ease-in-out infinite;
   vertical-align: middle;
 }
@@ -56,7 +66,7 @@
 
 .dateLabel {
   font-size: var(--t-sm);
-  color: var(--text-muted);
+  color: var(--fg-muted);
 }
 
 .headerActions {
@@ -67,8 +77,8 @@
 
 /* ─── Section cards (B / A) ─── */
 .card {
-  background: var(--bg-paper);
-  border: 1px solid var(--border-default);
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   overflow: hidden;
   margin-bottom: var(--sp-6);
@@ -79,25 +89,25 @@
   align-items: baseline;
   gap: var(--sp-3);
   padding: var(--sp-5) var(--sp-6);
-  border-bottom: 1px solid var(--border-light);
+  border-bottom: 1px solid var(--line);
 }
 
 .cardTitle {
   margin: 0;
   font-size: var(--t-lg);
   font-weight: 600;
-  color: var(--text-heading);
+  color: var(--fg);
 }
 
 .cardSub {
   font-size: var(--t-sm);
-  color: var(--text-muted);
+  color: var(--fg-muted);
 }
 
 .cardCount {
   margin-left: auto;
   font-size: var(--t-sm);
-  color: var(--text-muted);
+  color: var(--fg-muted);
 }
 
 .sectionCHeader {
@@ -125,34 +135,35 @@
   padding: var(--sp-2) var(--sp-6);
   font-size: var(--t-xs);
   font-weight: 600;
-  color: var(--text-label);
+  color: var(--fg-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  border-bottom: 1px solid var(--border-light);
+  background: var(--bg);
+  border-bottom: 1px solid var(--line-strong);
 }
 
 .caseRow {
   align-items: center;
   padding: var(--sp-3) var(--sp-6);
-  border-bottom: 1px solid var(--border-light);
+  border-bottom: 1px solid var(--line);
   border-left: 3px solid transparent;
   cursor: pointer;
   color: inherit;
 }
 
 .caseRow:last-child { border-bottom: none; }
-.caseRow:hover { background: var(--bg-subtle); }
+.caseRow:hover { background: var(--bg); }
 .caseRow:focus-visible {
-  outline: 2px solid var(--color-primary);
+  outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
-.caseRowStalled { border-left-color: var(--color-warning); }
+.caseRowStalled { border-left-color: var(--warn); }
 
 .caseTitleLink {
   display: block;
   font-weight: 500;
-  color: var(--text-heading);
+  color: var(--fg);
   text-decoration: none;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -165,14 +176,14 @@
   align-items: center;
   gap: var(--sp-2);
   font-size: var(--t-sm);
-  color: var(--text-body);
+  color: var(--fg);
 }
 
 .statusDot {
   width: 0.4375rem;
   height: 0.4375rem;
   border-radius: 999px;
-  background: var(--color-success);
+  background: var(--ok);
   flex-shrink: 0;
 }
 
@@ -186,9 +197,9 @@
   height: 1.5rem;
   margin-right: -0.375rem;
   border-radius: 999px;
-  border: 1.5px solid var(--bg-paper);
-  background: var(--bg-muted);
-  color: var(--text-label);
+  border: 1.5px solid var(--bg-elev);
+  background: var(--bg-sunken);
+  color: var(--fg-muted);
   font-size: var(--t-xs);
   font-weight: 600;
   display: flex;
@@ -200,13 +211,13 @@
 .avatarExtra {
   margin-left: var(--sp-2);
   font-size: var(--t-xs);
-  color: var(--text-muted);
+  color: var(--fg-muted);
   white-space: nowrap;
 }
 
 .updatedCell {
   font-size: var(--t-sm);
-  color: var(--text-muted);
+  color: var(--fg-muted);
   white-space: nowrap;
 }
 
@@ -225,7 +236,7 @@
   width: 1.25rem;
   height: 1.25rem;
   border-radius: var(--radius-sm);
-  background: var(--bg-muted);
+  background: var(--bg-sunken);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -242,7 +253,7 @@
 
 .wsBadgeName {
   font-size: var(--t-sm);
-  color: var(--text-body);
+  color: var(--fg);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -254,8 +265,8 @@
   gap: var(--sp-1);
   justify-self: start;
   padding: 0.125rem var(--sp-2);
-  border: 1px solid var(--color-warning);
-  color: var(--color-warning);
+  border: 1px solid var(--warn);
+  color: var(--warn);
   border-radius: 999px;
   font-size: var(--t-xs);
   font-weight: 600;
@@ -266,7 +277,7 @@
   width: 0.3125rem;
   height: 0.3125rem;
   border-radius: 999px;
-  background: var(--color-warning);
+  background: var(--warn);
   flex-shrink: 0;
 }
 
@@ -284,38 +295,39 @@
   padding: var(--sp-2) var(--sp-6);
   font-size: var(--t-xs);
   font-weight: 600;
-  color: var(--text-label);
+  color: var(--fg-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  border-bottom: 1px solid var(--border-light);
+  background: var(--bg);
+  border-bottom: 1px solid var(--line-strong);
 }
 
 .actionRow {
   align-items: center;
   padding: var(--sp-3) var(--sp-6);
-  border-bottom: 1px solid var(--border-light);
+  border-bottom: 1px solid var(--line);
   border-left: 3px solid transparent;
   cursor: pointer;
   color: inherit;
 }
 
 .actionRow:last-child { border-bottom: none; }
-.actionRow:hover { background: var(--bg-subtle); }
+.actionRow:hover { background: var(--bg); }
 .actionRow:focus-visible {
-  outline: 2px solid var(--color-primary);
+  outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
 .actionRowOverdue {
-  border-left-color: var(--color-error);
-  background: var(--bg-muted);
+  border-left-color: var(--danger);
+  background: var(--bg-sunken);
 }
-.actionRowOverdue:hover { background: var(--bg-muted); }
+.actionRowOverdue:hover { background: var(--bg-sunken); }
 
 .dueCell { padding-left: var(--sp-3); }
 
 .dueNone {
-  color: var(--text-muted);
+  color: var(--fg-muted);
   font-size: var(--t-sm);
 }
 
@@ -323,8 +335,8 @@
   display: inline-block;
   padding: 0.125rem 0.5625rem;
   border-radius: 999px;
-  background: var(--color-error);
-  color: var(--color-error-fg);
+  background: var(--danger);
+  color: var(--danger-fg);
   font-size: var(--t-xs);
   font-weight: 700;
   white-space: nowrap;
@@ -334,15 +346,15 @@
   display: inline-block;
   padding: 0.125rem 0.5625rem;
   border-radius: 999px;
-  border: 1px solid var(--border-default);
-  color: var(--text-heading);
+  border: 1px solid var(--line-strong);
+  color: var(--fg);
   font-size: var(--t-xs);
   font-weight: 600;
   white-space: nowrap;
 }
 
 .dueFuture {
-  color: var(--text-body);
+  color: var(--fg);
   font-size: var(--t-sm);
   font-variant-numeric: tabular-nums;
 }
@@ -350,7 +362,7 @@
 .actionTitle {
   font-size: var(--t-base);
   font-weight: 500;
-  color: var(--text-heading);
+  color: var(--fg);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -358,7 +370,7 @@
 
 .caseLink {
   font-size: var(--t-sm);
-  color: var(--text-muted);
+  color: var(--fg-muted);
   text-decoration: none;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -366,7 +378,7 @@
 }
 .caseLink:hover {
   text-decoration: underline;
-  color: var(--color-primary);
+  color: var(--accent);
 }
 
 /* ─── Loading skeleton rows (shared by both sections) ─── */
@@ -380,7 +392,7 @@
   height: 0.875rem;
   flex: 1;
   border-radius: var(--radius-sm);
-  background: var(--bg-muted);
+  background: var(--bg-sunken);
   animation: homePulse 1.4s ease-in-out infinite;
 }
 
@@ -402,12 +414,12 @@
 .emptyTitle {
   font-size: var(--t-base);
   font-weight: 600;
-  color: var(--text-heading);
+  color: var(--fg);
 }
 
 .emptyBody {
   font-size: var(--t-sm);
-  color: var(--text-muted);
+  color: var(--fg-muted);
 }
 
 /* ─── Error states (query failed — distinct from "empty", never silently
@@ -424,5 +436,5 @@
 
 .errorBody {
   font-size: var(--t-sm);
-  color: var(--color-error);
+  color: var(--danger);
 }
