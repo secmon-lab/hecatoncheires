@@ -27,65 +27,6 @@
   --action-status-success:      oklch(0.65 0.14 150);
   --action-status-neutral-done: oklch(0.55 0.02 270);
   --action-status-failure:      oklch(0.5 0.16 25);
-
-  /* Compatibility aliases.
-     Some module CSS files (source/, fields/, auth/, pages/ActionList) were
-     authored against an external design-token vocabulary (--bg-paper,
-     --border-default, --color-primary, --spacing-*, ...) that this project
-     does not natively use. The canonical tokens here are --bg-elev / --line /
-     --accent / --sp-* / etc., which get redefined per [data-aesthetic][data-theme].
-     These aliases bridge the two vocabularies so module CSS resolves correctly
-     and remains theme-aware (the alias targets are themed; aliases inherit
-     through var() at use site). */
-
-  /* surfaces */
-  --bg-default: var(--bg);
-  --bg-paper:   var(--bg-elev);
-  --bg-subtle:  var(--bg-sunken);
-  --bg-muted:   var(--bg-sunken);
-
-  /* borders */
-  --border-default: var(--line);
-  --border-light:   var(--line);
-  --border-medium:  var(--line-strong);
-  --border-hover:   var(--line-strong);
-
-  /* text */
-  --text-heading: var(--fg);
-  --text-body:    var(--fg);
-  --text-label:   var(--fg-muted);
-  --text-muted:   var(--fg-muted);
-
-  /* primary / accent */
-  --color-primary:        var(--accent);
-  --color-primary-shadow: var(--accent-soft);
-
-  /* status */
-  --color-error:        var(--danger);
-  --color-error-dark:   var(--danger);
-  --color-error-shadow: color-mix(in oklch, var(--danger) 15%, transparent);
-  /* Foreground for text/icons placed directly on a solid --danger fill
-     (e.g. an overdue pill). Mirrors the --accent/--accent-fg pairing below;
-     unlike --accent-fg, --danger-fg is constant across themes because it
-     formalizes the plain-white-on-danger convention already used elsewhere
-     (see .agent-tile-stage-icon.failed, .pip-block further down). */
-  --color-error-fg:     var(--danger-fg);
-  --color-success:      var(--ok);
-  --color-success-dark: var(--ok);
-
-  /* shadow / interactive */
-  --card-shadow:      var(--shadow);
-  --touch-target-min: 40px;
-  --transition-fast:  0.15s ease;
-
-  /* spacing aliases — reference --sp-* scale for consistency.
-     14px is intentionally hardcoded as it has no equivalent in the scale. */
-  --spacing-xs:    var(--sp-1);
-  --spacing-sm:    var(--sp-2);
-  --spacing-md-sm: var(--sp-3);
-  --spacing-md-lg: 14px;
-  --spacing-md:    var(--sp-4);
-  --spacing-lg:    var(--sp-6);
 }
 
 /* density */
@@ -273,6 +214,84 @@
   --side-active-bg: rgba(120,150,255,0.12);
   --side-active-fg: oklch(0.85 0.12 264);
   --logo-bg: transparent;
+}
+
+/* ───────── Compatibility aliases ─────────
+   Some module CSS files (source/, fields/, auth/, pages/ActionList, ...) were
+   authored against an external design-token vocabulary (--bg-paper,
+   --border-default, --color-primary, --color-warning, ...) that this project
+   does not natively use. The canonical tokens are --bg-elev / --line /
+   --accent / --warn / etc., which are (re)defined per
+   [data-aesthetic][data-theme] on <body>.
+
+   These aliases MUST live on the same element as their base tokens. A custom
+   property's var() is substituted using the value of the referenced variable
+   *on the element where the alias is declared* — not lazily at the use site.
+   Defining them on :root (=<html>) made every color/surface/border/text alias
+   resolve against an <html> where --bg-elev/--line/--accent/... are undefined,
+   so each collapsed to the guaranteed-invalid value and was inherited down as
+   "unset" (rendering transparent). Declaring them on [data-aesthetic] (which
+   matches the themed <body>) lets each var() resolve against the live token,
+   after which the resolved value inherits into the whole tree.
+   (Spacing aliases below reference the :root-level --sp-* scale, so they were
+   never broken — they are kept here to keep the vocabulary in one place.) */
+[data-aesthetic] {
+  /* surfaces */
+  --bg-default:  var(--bg);
+  --bg-paper:    var(--bg-elev);
+  --bg-subtle:   var(--bg-sunken);
+  --bg-muted:    var(--bg-sunken);
+  --bg-highlight: var(--accent-soft);
+
+  /* borders */
+  --border-default: var(--line);
+  --border-light:   var(--line);
+  --border-medium:  var(--line-strong);
+  --border-hover:   var(--line-strong);
+  --border-strong:  var(--line-strong);
+
+  /* text */
+  --text-heading: var(--fg);
+  --text-body:    var(--fg);
+  --text-label:   var(--fg-muted);
+  --text-muted:   var(--fg-muted);
+
+  /* primary / accent */
+  --color-primary:        var(--accent);
+  --color-primary-shadow: var(--accent-soft);
+  --color-primary-light:  var(--accent-soft);
+  --color-primary-dark:   color-mix(in oklch, var(--accent) 80%, black);
+
+  /* status */
+  --color-error:        var(--danger);
+  --color-error-dark:   var(--danger);
+  --color-error-shadow: color-mix(in oklch, var(--danger) 15%, transparent);
+  /* Foreground for text/icons placed directly on a solid --danger fill
+     (e.g. an overdue pill). Mirrors the --accent/--accent-fg pairing;
+     unlike --accent-fg, --danger-fg is constant across themes because it
+     formalizes the plain-white-on-danger convention already used elsewhere
+     (see .agent-tile-stage-icon.failed, .pip-block further down). */
+  --color-error-fg:     var(--danger-fg);
+  --color-success:      var(--ok);
+  --color-success-dark: var(--ok);
+  --color-warning:      var(--warn);
+  --color-info:         var(--info);
+
+  /* shadow / interactive */
+  --card-shadow:      var(--shadow);
+  --touch-target-min: 40px;
+  --transition-fast:  0.15s ease;
+
+  /* spacing aliases — reference the :root --sp-* scale for consistency.
+     14px is intentionally hardcoded as it has no equivalent in the scale. */
+  --spacing-xs:    var(--sp-1);
+  --spacing-sm:    var(--sp-2);
+  --spacing-md-sm: var(--sp-3);
+  --spacing-md-lg: 14px;
+  --spacing-md:    var(--sp-4);
+  --spacing-lg:    var(--sp-6);
+  --spacing-xl:    var(--sp-8);
+  --spacing-xxl:   var(--sp-12);
 }
 
 /* ───────── primitives ───────── */
