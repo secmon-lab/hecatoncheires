@@ -70,6 +70,13 @@ The `serve` command (alias: `s`) starts the HTTP server.
 | `--embedding-gemini-project-id` | `HECATONCHEIRES_EMBEDDING_GEMINI_PROJECT_ID` | - | Cond. | Google Cloud project ID for the Gemini embedding client. Required whenever `--llm-provider` is set |
 | `--embedding-gemini-location` | `HECATONCHEIRES_EMBEDDING_GEMINI_LOCATION` | `global` | No | Google Cloud location for the Gemini embedding client |
 | `--embedding-model` | `HECATONCHEIRES_EMBEDDING_MODEL` | `gemini-embedding-2` | No | Gemini embedding model name |
+| `--dashboard-stale-threshold` | `HECATONCHEIRES_DASHBOARD_STALE_THRESHOLD` | `336h` (14d) | No | Age after which an open Case with no update is flagged as "stalled" on the home dashboard. `0` disables the stalled flag |
+| `--home-message-llm-provider` | `HECATONCHEIRES_HOME_MESSAGE_LLM_PROVIDER` | - | No | Dedicated LLM provider (`openai`/`claude`/`gemini`) for the home dashboard greeting. Empty falls back to `--llm-provider`; if neither is set the greeting is disabled |
+| `--home-message-llm-model` | `HECATONCHEIRES_HOME_MESSAGE_LLM_MODEL` | - | No | Model name for the home greeting LLM (provider default if empty) |
+| `--home-message-llm-openai-api-key` | `HECATONCHEIRES_HOME_MESSAGE_LLM_OPENAI_API_KEY` | - | No | OpenAI API key (when `--home-message-llm-provider=openai`) |
+| `--home-message-llm-claude-api-key` | `HECATONCHEIRES_HOME_MESSAGE_LLM_CLAUDE_API_KEY` | - | No | Anthropic Claude API key (when `--home-message-llm-provider=claude`, direct access) |
+| `--home-message-llm-gemini-project-id` | `HECATONCHEIRES_HOME_MESSAGE_LLM_GEMINI_PROJECT_ID` | - | No | Google Cloud project ID (Gemini, or Claude via Vertex AI) for the home greeting LLM |
+| `--home-message-llm-gemini-location` | `HECATONCHEIRES_HOME_MESSAGE_LLM_GEMINI_LOCATION` | `global` | No | Google Cloud location for the home greeting LLM |
 | `--cloud-storage-bucket` | `HECATONCHEIRES_CLOUD_STORAGE_BUCKET` | - | Yes\*\*\*\*\* | Cloud Storage bucket holding agent thread session History/Trace blobs. See [develop/architecture.md](./develop/architecture.md#agent-thread-session-internals) |
 | `--cloud-storage-prefix` | `HECATONCHEIRES_CLOUD_STORAGE_PREFIX` | - | No | Optional object key prefix within the Cloud Storage bucket |
 | `--sentry-dsn` | `HECATONCHEIRES_SENTRY_DSN` | - | No | Sentry DSN. Setting a non-empty value enables Sentry error reporting via `errutil.Handle`. See [operations.md](./operations.md) |

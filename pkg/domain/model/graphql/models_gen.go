@@ -254,6 +254,10 @@ type GitHubRepository struct {
 	Repo  string `json:"repo"`
 }
 
+type HomeMessage struct {
+	Message string `json:"message"`
+}
+
 type ImportActionResult struct {
 	Status          ImportItemResultStatus `json:"status"`
 	CreatedAction   *Action                `json:"createdAction,omitempty"`
@@ -393,6 +397,21 @@ type MemoConfiguration struct {
 }
 
 type Mutation struct {
+}
+
+type MyDueAction struct {
+	WorkspaceID   string  `json:"workspaceId"`
+	WorkspaceName string  `json:"workspaceName"`
+	Action        *Action `json:"action"`
+	CaseID        int     `json:"caseId"`
+	CaseTitle     string  `json:"caseTitle"`
+}
+
+type MyOpenCase struct {
+	WorkspaceID   string `json:"workspaceId"`
+	WorkspaceName string `json:"workspaceName"`
+	Case          *Case  `json:"case"`
+	Stalled       bool   `json:"stalled"`
 }
 
 type NotionDBConfig struct {

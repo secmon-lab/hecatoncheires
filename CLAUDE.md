@@ -228,6 +228,8 @@ The application is configured via CLI flags or environment variables:
 - `HECATONCHEIRES_GRAPHIQL` - Enable GraphiQL playground (default: `true`)
 - `HECATONCHEIRES_CLOUD_STORAGE_BUCKET` - Cloud Storage bucket for agent History/Trace persistence (required when Slack is wired). See `docs/develop/architecture.md` § Agent thread session.
 - `HECATONCHEIRES_CLOUD_STORAGE_PREFIX` - Optional object key prefix within the Cloud Storage bucket
+- `HECATONCHEIRES_DASHBOARD_STALE_THRESHOLD` - Age after which an open Case with no update is flagged as "stalled" on the home dashboard (default: `336h` = 14 days; `0` disables). See `docs/cli.md`.
+- `HECATONCHEIRES_HOME_MESSAGE_LLM_*` - Optional dedicated LLM for the home dashboard greeting (`_PROVIDER`, `_MODEL`, `_OPENAI_API_KEY`, `_CLAUDE_API_KEY`, `_GEMINI_PROJECT_ID`, `_GEMINI_LOCATION`). Falls back to the main LLM (`HECATONCHEIRES_LLM_*`) when unset; greeting is disabled if neither is configured. See `docs/cli.md`.
 - `HECATONCHEIRES_MCP` - Enable the read-only MCP endpoint at `/mcp` (default: `false`). Requires `HECATONCHEIRES_POLICY`. See `docs/mcp.md`.
 - `HECATONCHEIRES_POLICY` - Rego policy file/directory path(s) authorizing MCP requests (`data.auth.mcp`). Required when MCP is enabled.
 - `HECATONCHEIRES_MCP_ENV` - Allow-list of environment variable names exposed to the Rego policy as `input.env`.

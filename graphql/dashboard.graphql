@@ -1,0 +1,39 @@
+# Home dashboard: cross-workspace aggregation of the caller's own work,
+# favorite workspaces, and the LLM-generated greeting.
+
+# One open Case assigned to the caller. workspaceId/workspaceName are carried
+# here because the Case type itself is workspace-scoped elsewhere and has no
+# workspaceId field.
+type MyOpenCase {
+  workspaceId: String!
+  workspaceName: String!
+  case: Case!
+  stalled: Boolean!
+}
+
+# One incomplete Action assigned to the caller on an accessible open Case.
+# caseId/caseTitle are pre-expanded to avoid an N+1 on the parent Case.
+type MyDueAction {
+  workspaceId: String!
+  workspaceName: String!
+  action: Action!
+  caseId: Int!
+  caseTitle: String!
+}
+
+# The home greeting. message is empty when no greeting LLM is configured; the
+# frontend then shows a static fallback.
+type HomeMessage {
+  message: String!
+}
+
+extend type Query {
+  myOpenCases: [MyOpenCase!]!
+  myDueActions: [MyDueAction!]!
+  favoriteWorkspaceIds: [String!]!
+  homeMessage(clientTime: Time!, lang: String!): HomeMessage!
+}
+
+extend type Mutation {
+  setFavoriteWorkspaces(workspaceIds: [String!]!): [String!]!
+}

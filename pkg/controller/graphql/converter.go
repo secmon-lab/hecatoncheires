@@ -88,6 +88,28 @@ func toGraphQLActionStep(s *model.ActionStep) *graphql1.ActionStep {
 }
 
 // toGraphQLCase converts a domain Case to GraphQL Case
+// toGraphQLMyOpenCase converts a dashboard open-case row, reusing toGraphQLCase
+// (which embeds workspaceID for the Case's sub-resolvers).
+func toGraphQLMyOpenCase(m *model.MyOpenCase) *graphql1.MyOpenCase {
+	return &graphql1.MyOpenCase{
+		WorkspaceID:   m.WorkspaceID,
+		WorkspaceName: m.WorkspaceName,
+		Case:          toGraphQLCase(m.Case, m.WorkspaceID),
+		Stalled:       m.Stalled,
+	}
+}
+
+// toGraphQLMyDueAction converts a dashboard due-action row.
+func toGraphQLMyDueAction(m *model.MyDueAction) *graphql1.MyDueAction {
+	return &graphql1.MyDueAction{
+		WorkspaceID:   m.WorkspaceID,
+		WorkspaceName: m.WorkspaceName,
+		Action:        toGraphQLAction(m.Action, m.WorkspaceID),
+		CaseID:        int(m.CaseID),
+		CaseTitle:     m.CaseTitle,
+	}
+}
+
 func toGraphQLCase(c *model.Case, workspaceID string) *graphql1.Case {
 	// Ensure non-null list fields are never nil (schema: [String!]!)
 	assigneeIDs := c.AssigneeIDs

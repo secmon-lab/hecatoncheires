@@ -680,6 +680,36 @@ export const msgKeys = {
   // Case reference field
   placeholderSelectCaseRef: 'placeholderSelectCaseRef',
   caseRefUnavailable: 'caseRefUnavailable',
+
+  // Home page
+  sectionA: 'sectionA',
+  sectionASub: 'sectionASub',
+  sectionB: 'sectionB',
+  sectionC: 'sectionC',
+  colCaseTitle: 'colCaseTitle',
+  colStatus: 'colStatus',
+  colAssignee: 'colAssignee',
+  colUpdated: 'colUpdated',
+  colWs: 'colWs',
+  colDue: 'colDue',
+  colAction: 'colAction',
+  colCase: 'colCase',
+  emptyATitle: 'emptyATitle',
+  emptyABody: 'emptyABody',
+  emptyBTitle: 'emptyBTitle',
+  emptyBBody: 'emptyBBody',
+  today: 'today',
+  noDue: 'noDue',
+  stalled: 'stalled',
+  fav: 'fav',
+  overdue: 'overdue',
+  updated: 'updated',
+  count: 'count',
+  extra: 'extra',
+  homeMessageFallback: 'homeMessageFallback',
+  homeMessageLoadingAria: 'homeMessageLoadingAria',
+  homeSectionLoadError: 'homeSectionLoadError',
+  homeRetry: 'homeRetry',
 } as const
 
 export type MsgKey = keyof typeof msgKeys

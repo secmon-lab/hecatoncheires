@@ -29,8 +29,10 @@ type Firestore struct {
 	jobRun        *jobRunRepository
 	jobRunLog     *jobRunLogRepository
 	jobRunEvent   *jobRunEventRepository
-	importRepo    *importRepository
-	reactionClaim *reactionClaimRepository
+	importRepo     *importRepository
+	reactionClaim  *reactionClaimRepository
+	userPreference *userPreferenceRepository
+	homeMessage    *homeMessageRepository
 }
 
 var _ interfaces.Repository = &Firestore{}
@@ -71,8 +73,10 @@ func New(ctx context.Context, projectID, databaseID string) (*Firestore, error) 
 		jobRun:        newJobRunRepository(client),
 		jobRunLog:     newJobRunLogRepository(client),
 		jobRunEvent:   newJobRunEventRepository(client),
-		importRepo:    newImportRepository(client),
-		reactionClaim: newReactionClaimRepository(client),
+		importRepo:     newImportRepository(client),
+		reactionClaim:  newReactionClaimRepository(client),
+		userPreference: newUserPreferenceRepository(client),
+		homeMessage:    newHomeMessageRepository(client),
 	}
 
 	return f, nil
@@ -160,6 +164,14 @@ func (f *Firestore) Import() interfaces.ImportRepository {
 
 func (f *Firestore) ReactionClaim() interfaces.ReactionClaimRepository {
 	return f.reactionClaim
+}
+
+func (f *Firestore) UserPreference() interfaces.UserPreferenceRepository {
+	return f.userPreference
+}
+
+func (f *Firestore) HomeMessage() interfaces.HomeMessageRepository {
+	return f.homeMessage
 }
 
 func (f *Firestore) Close() error {

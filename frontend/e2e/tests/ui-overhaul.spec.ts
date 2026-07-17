@@ -7,9 +7,9 @@ import { ActionFormPage } from '../pages/ActionFormPage';
 import { TEST_WORKSPACE_ID } from '../fixtures/testData';
 
 test.describe('UI overhaul regressions', () => {
-  test('root path always shows the workspace selector', async ({ page }) => {
+  test('root path always shows the Home page', async ({ page }) => {
     await page.goto('/');
-    await expect(page.getByTestId('workspace-selector')).toBeVisible();
+    await expect(page.getByTestId('home-page')).toBeVisible();
   });
 
   test('CaseDetail header: Close is danger-styled, Delete is in kebab menu', async ({ page }) => {

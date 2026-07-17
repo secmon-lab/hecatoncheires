@@ -12,7 +12,7 @@ import ImportNew from './pages/ImportNew'
 import ImportDetail from './pages/ImportDetail'
 import KnowledgeList from './pages/KnowledgeList'
 import KnowledgeDetail from './pages/KnowledgeDetail'
-import WorkspaceSelector from './pages/WorkspaceSelector'
+import Home from './pages/Home'
 import WorkspaceGuard from './components/WorkspaceGuard'
 import { AuthGuard } from './components/auth/auth-guard'
 
@@ -28,7 +28,7 @@ function App() {
   return (
     <AuthGuard>
       <Routes>
-        <Route path="/" element={<WorkspaceSelector />} />
+        <Route path="/" element={<Home />} />
         <Route path="/ws/:workspaceId" element={<WorkspaceGuard><Layout /></WorkspaceGuard>}>
           <Route index element={<Navigate to="cases" replace />} />
           <Route path="cases" element={<CaseList />} />

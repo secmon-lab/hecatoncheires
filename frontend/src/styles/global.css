@@ -64,6 +64,12 @@
   --color-error:        var(--danger);
   --color-error-dark:   var(--danger);
   --color-error-shadow: color-mix(in oklch, var(--danger) 15%, transparent);
+  /* Foreground for text/icons placed directly on a solid --danger fill
+     (e.g. an overdue pill). Mirrors the --accent/--accent-fg pairing below;
+     unlike --accent-fg, --danger-fg is constant across themes because it
+     formalizes the plain-white-on-danger convention already used elsewhere
+     (see .agent-tile-stage-icon.failed, .pip-block further down). */
+  --color-error-fg:     var(--danger-fg);
   --color-success:      var(--ok);
   --color-success-dark: var(--ok);
 
@@ -104,6 +110,7 @@
   --accent-soft: oklch(0.96 0.025 254);
   --accent-line: oklch(0.85 0.06 254);
   --danger:    oklch(0.55 0.18 25);
+  --danger-fg: #ffffff;
   --warn:      oklch(0.72 0.14 75);
   --ok:        oklch(0.62 0.13 150);
   --info:      oklch(0.6 0.1 230);
@@ -134,6 +141,7 @@
   --accent-soft: oklch(0.28 0.06 254);
   --accent-line: oklch(0.42 0.1 254);
   --danger:    oklch(0.68 0.18 25);
+  --danger-fg: #ffffff;
   --warn:      oklch(0.78 0.13 75);
   --ok:        oklch(0.72 0.13 150);
   --info:      oklch(0.72 0.1 230);
@@ -164,6 +172,7 @@
   --accent-soft: oklch(0.94 0.03 32);
   --accent-line: oklch(0.82 0.06 32);
   --danger:    oklch(0.55 0.18 25);
+  --danger-fg: #ffffff;
   --warn:      oklch(0.72 0.14 75);
   --ok:        oklch(0.6 0.13 150);
   --info:      oklch(0.6 0.1 230);
@@ -192,6 +201,7 @@
   --accent-soft: oklch(0.3 0.06 32);
   --accent-line: oklch(0.42 0.1 32);
   --danger:    oklch(0.68 0.18 25);
+  --danger-fg: #ffffff;
   --warn:      oklch(0.78 0.13 75);
   --ok:        oklch(0.72 0.13 150);
   --info:      oklch(0.72 0.1 230);
@@ -222,6 +232,7 @@
   --accent-soft: oklch(0.95 0.03 264);
   --accent-line: oklch(0.78 0.1 264);
   --danger:    oklch(0.55 0.2 25);
+  --danger-fg: #ffffff;
   --warn:      oklch(0.72 0.16 75);
   --ok:        oklch(0.62 0.15 160);
   --info:      oklch(0.62 0.13 220);
@@ -250,6 +261,7 @@
   --accent-soft: oklch(0.3 0.1 264);
   --accent-line: oklch(0.45 0.14 264);
   --danger:    oklch(0.7 0.2 25);
+  --danger-fg: #ffffff;
   --warn:      oklch(0.8 0.15 75);
   --ok:        oklch(0.75 0.16 160);
   --info:      oklch(0.75 0.13 220);

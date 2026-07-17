@@ -232,6 +232,12 @@ func (m *mockRepo) Import() interfaces.ImportRepository {
 func (m *mockRepo) ReactionClaim() interfaces.ReactionClaimRepository {
 	panic("unexpected call: ReactionClaim()")
 }
+func (m *mockRepo) UserPreference() interfaces.UserPreferenceRepository {
+	panic("unexpected call: UserPreference()")
+}
+func (m *mockRepo) HomeMessage() interfaces.HomeMessageRepository {
+	panic("unexpected call: HomeMessage()")
+}
 func (m *mockRepo) Memo() interfaces.MemoRepository {
 	panic("unexpected call: Memo()")
 }

@@ -40,6 +40,8 @@ type UseCases struct {
 	traceRepo                trace.Repository
 	baseURL                  string
 	notificationSlotDuration time.Duration
+	dashboardStaleThreshold  time.Duration
+	homeMessageLLMClient     gollem.LLMClient
 	Case                     *CaseUseCase
 	Action                   *ActionUseCase
 	Memo                     *MemoUseCase
@@ -54,6 +56,7 @@ type UseCases struct {
 	MentionProposal          *MentionProposalUseCase
 	JobRun                   *JobRunUseCase
 	Import                   *ImportUseCase
+	Dashboard                *DashboardUseCase
 }
 
 type Option func(*UseCases)
@@ -198,6 +201,24 @@ func WithNotificationSlotDuration(d time.Duration) Option {
 	}
 }
 
+// WithDashboardStaleThreshold sets the age after which an open Case with no
+// update is flagged as stalled on the home dashboard. A non-positive value
+// disables stale detection (Stalled is always false).
+func WithDashboardStaleThreshold(d time.Duration) Option {
+	return func(uc *UseCases) {
+		uc.dashboardStaleThreshold = d
+	}
+}
+
+// WithHomeMessageLLMClient sets a dedicated LLM client for the home greeting.
+// When omitted, the shared chat LLM client (WithLLMClient) is used if present;
+// when neither is set, the greeting is disabled (GenerateHomeMessage returns "").
+func WithHomeMessageLLMClient(client gollem.LLMClient) Option {
+	return func(uc *UseCases) {
+		uc.homeMessageLLMClient = client
+	}
+}
+
 func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...Option) *UseCases {
 	uc := &UseCases{
 		repo:              repo,
@@ -332,6 +353,16 @@ func New(repo interfaces.Repository, registry *model.WorkspaceRegistry, opts ...
 		}
 	}
 	uc.Slack = NewSlackUseCases(repo, registry, uc.Agent, uc.MentionProposal, uc.slackService)
+
+	// Dashboard is built last so it sees option-set values (stale threshold,
+	// greeting LLM). The greeting uses a dedicated client when configured,
+	// otherwise falls back to the shared chat LLM (nil when neither is set,
+	// which simply disables the greeting).
+	homeMessageLLM := uc.homeMessageLLMClient
+	if homeMessageLLM == nil {
+		homeMessageLLM = uc.llmClient
+	}
+	uc.Dashboard = newDashboardUseCase(repo, registry, uc.dashboardStaleThreshold, homeMessageLLM)
 
 	return uc
 }
