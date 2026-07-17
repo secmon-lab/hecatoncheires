@@ -13,7 +13,6 @@ import {
 } from '../graphql/dashboard'
 import { toRFC3339WithOffset, formatHomeDate } from '../utils/time'
 import { displayName } from '../utils/user'
-import { workspaceVisual } from '../utils/workspace'
 import { activateOnEnterOrSpace } from '../utils/keyboard'
 import styles from './Home.module.css'
 
@@ -109,12 +108,26 @@ function avatarInitial(u: HomeUser): string {
 
 // ─── Small shared pieces ───
 
-function WsBadge({ id, name }: { id: string; name: string }) {
-  const visual = workspaceVisual({ id, name })
-  if (visual.kind === 'emoji') {
-    return <span className={styles.wsBadgeEmoji} aria-hidden="true">{visual.emoji}</span>
+// WsVisual is the badge appearance of a workspace, looked up from the
+// workspace list (the GraphQL rows only carry workspaceId/workspaceName).
+interface WsVisual {
+  emoji?: string | null
+  color?: string | null
+}
+
+// WsBadge mirrors the approved design's wsBadge() rules exactly:
+// emoji set → a small emoji tile; color set (and no emoji) → a small color
+// square; neither → no badge, the workspace name alone.
+function WsBadge({ visual }: { visual?: WsVisual }) {
+  const emoji = visual?.emoji?.trim()
+  if (emoji) {
+    return <span className={styles.wsBadgeEmoji} aria-hidden="true">{emoji}</span>
   }
-  return <span className={styles.wsBadgeColor} style={{ background: visual.background }} aria-hidden="true" />
+  const color = visual?.color?.trim()
+  if (color) {
+    return <span className={styles.wsBadgeColor} style={{ background: color }} aria-hidden="true" />
+  }
+  return null
 }
 
 function SkeletonRows({ cols }: { cols: number }) {
@@ -131,7 +144,7 @@ function SkeletonRows({ cols }: { cols: number }) {
   )
 }
 
-function CaseRow({ row, now, t }: { row: MyOpenCase; now: Date; t: TFunc }) {
+function CaseRow({ row, now, t, wsVisual }: { row: MyOpenCase; now: Date; t: TFunc; wsVisual?: WsVisual }) {
   const navigate = useNavigate()
   const caseHref = `/ws/${row.workspaceId}/cases/${row.case.id}`
   const wsHref = `/ws/${row.workspaceId}/cases`
@@ -167,7 +180,7 @@ function CaseRow({ row, now, t }: { row: MyOpenCase; now: Date; t: TFunc }) {
       </span>
       <span className={styles.updatedCell}>{dd === 0 ? t('today') : t('updated', { n: dd })}</span>
       <Link to={wsHref} className={styles.wsBadgeLink} onClick={(e) => e.stopPropagation()}>
-        <WsBadge id={row.workspaceId} name={row.workspaceName} />
+        <WsBadge visual={wsVisual} />
         <span className={styles.wsBadgeName}>{row.workspaceName}</span>
       </Link>
       {row.stalled && (
@@ -180,7 +193,7 @@ function CaseRow({ row, now, t }: { row: MyOpenCase; now: Date; t: TFunc }) {
   )
 }
 
-function ActionRow({ row, now, t }: { row: MyDueAction; now: Date; t: TFunc }) {
+function ActionRow({ row, now, t, wsVisual }: { row: MyDueAction; now: Date; t: TFunc; wsVisual?: WsVisual }) {
   const navigate = useNavigate()
   const actionHref = `/ws/${row.workspaceId}/cases/${row.caseId}/actions/${row.action.id}`
   const caseHref = `/ws/${row.workspaceId}/cases/${row.caseId}`
@@ -215,7 +228,7 @@ function ActionRow({ row, now, t }: { row: MyDueAction; now: Date; t: TFunc }) {
         {row.caseTitle}
       </Link>
       <Link to={wsHref} className={styles.wsBadgeLink} onClick={(e) => e.stopPropagation()}>
-        <WsBadge id={row.workspaceId} name={row.workspaceName} />
+        <WsBadge visual={wsVisual} />
         <span className={styles.wsBadgeName}>{row.workspaceName}</span>
       </Link>
     </div>
@@ -260,6 +273,14 @@ export default function Home() {
     () => sortDueActions(actionsData?.myDueActions ?? [], now),
     [actionsData, now],
   )
+
+  // Badge visuals (emoji / color) come from the workspace list — the GraphQL
+  // aggregation rows carry only workspaceId/workspaceName.
+  const wsVisuals = useMemo(() => {
+    return new Map<string, WsVisual>(
+      workspaces.map((w) => [w.id, { emoji: w.emoji, color: w.color }]),
+    )
+  }, [workspaces])
 
   // The greeting is an independent query: a failure or empty message here
   // must never hide the sections below it.
@@ -320,7 +341,13 @@ export default function Home() {
                 <span />
               </div>
               {openCases.map((row) => (
-                <CaseRow key={`${row.workspaceId}-${row.case.id}`} row={row} now={now} t={t} />
+                <CaseRow
+                  key={`${row.workspaceId}-${row.case.id}`}
+                  row={row}
+                  now={now}
+                  t={t}
+                  wsVisual={wsVisuals.get(row.workspaceId)}
+                />
               ))}
             </div>
           )}
@@ -356,7 +383,13 @@ export default function Home() {
                 <span>{t('colWs')}</span>
               </div>
               {dueActions.map((row) => (
-                <ActionRow key={`${row.workspaceId}-${row.action.id}`} row={row} now={now} t={t} />
+                <ActionRow
+                  key={`${row.workspaceId}-${row.action.id}`}
+                  row={row}
+                  now={now}
+                  t={t}
+                  wsVisual={wsVisuals.get(row.workspaceId)}
+                />
               ))}
             </div>
           )}
