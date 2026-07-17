@@ -119,11 +119,11 @@ interface WsVisual {
 // emoji set → a small emoji tile; color set (and no emoji) → a small color
 // square; neither → no badge, the workspace name alone.
 function WsBadge({ visual }: { visual?: WsVisual }) {
-  const emoji = (visual?.emoji || '').trim()
+  const emoji = visual?.emoji?.trim()
   if (emoji) {
     return <span className={styles.wsBadgeEmoji} aria-hidden="true">{emoji}</span>
   }
-  const color = (visual?.color || '').trim()
+  const color = visual?.color?.trim()
   if (color) {
     return <span className={styles.wsBadgeColor} style={{ background: color }} aria-hidden="true" />
   }
@@ -277,9 +277,9 @@ export default function Home() {
   // Badge visuals (emoji / color) come from the workspace list — the GraphQL
   // aggregation rows carry only workspaceId/workspaceName.
   const wsVisuals = useMemo(() => {
-    const m = new Map<string, WsVisual>()
-    for (const w of workspaces) m.set(w.id, { emoji: w.emoji, color: w.color })
-    return m
+    return new Map<string, WsVisual>(
+      workspaces.map((w) => [w.id, { emoji: w.emoji, color: w.color }]),
+    )
   }, [workspaces])
 
   // The greeting is an independent query: a failure or empty message here
