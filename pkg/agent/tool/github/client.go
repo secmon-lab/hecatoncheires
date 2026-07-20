@@ -17,9 +17,11 @@ import (
 // Client wraps the GitHub App-authenticated GraphQL v4 + REST clients.
 // There is exactly one production implementation; tests inject a fake via
 // the package-private interface in tools.go.
+// Both clients are built eagerly in NewClient and never reassigned: a single
+// *Client is shared across concurrent agent runs (CommonDeps.GitHubClient), so
+// lazily populating restClient on first use would be a data race.
 type Client struct {
 	gql        *githubv4.Client
-	restHTTP   *http.Client // backs the lazy REST client (same ghinstallation transport)
 	restClient *ghapi.Client
 }
 
@@ -47,7 +49,12 @@ func NewClient(appID, installationID int64, privateKey string) (*Client, error) 
 	httpClient := &http.Client{Transport: tr}
 	gql := githubv4.NewClient(httpClient)
 
-	return &Client{gql: gql, restHTTP: httpClient}, nil
+	rest, err := ghapi.NewClient(ghapi.WithHTTPClient(httpClient))
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to create GitHub REST client")
+	}
+
+	return &Client{gql: gql, restClient: rest}, nil
 }
 
 // FetchRecentPullRequests fetches PRs created since the given time using the

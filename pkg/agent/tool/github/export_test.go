@@ -27,7 +27,7 @@ func NewTestClient(baseURL string, httpClient *http.Client) *Client {
 
 	gql := githubv4.NewEnterpriseClient(baseURL+"/api/graphql", httpClient)
 
-	return &Client{gql: gql, restHTTP: httpClient, restClient: rest}
+	return &Client{gql: gql, restClient: rest}
 }
 
 // SafeTruncateForTest is exported for testing the byte-safe truncation helper.

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/m-mizutani/gt"
@@ -131,6 +132,49 @@ func TestGetIssue_NotFound(t *testing.T) {
 
 	_, err := c.GetIssue(context.Background(), "foo", "bar", 99)
 	gt.Error(t, err).Is(github.ErrNotFound)
+}
+
+// A single *Client is shared across concurrent agent runs, so every REST call
+// must be safe to make from multiple goroutines. Run under -race.
+func TestGetIssue_ConcurrentCallsAreRaceFree(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/foo/bar/issues/1", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+            "number": 1,
+            "title": "Issue title",
+            "state": "open",
+            "user": {"login": "alice"}
+        }`))
+	})
+	mux.HandleFunc("/repos/foo/bar/issues/1/comments", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[]`))
+	})
+
+	c, _ := newServerClient(t, mux.ServeHTTP)
+
+	const goroutines = 16
+	var wg sync.WaitGroup
+	errs := make([]error, goroutines)
+	titles := make([]string, goroutines)
+	for i := range goroutines {
+		wg.Go(func() {
+			issue, err := c.GetIssue(context.Background(), "foo", "bar", 1)
+			errs[i] = err
+			if issue != nil {
+				titles[i] = issue.Title
+			}
+		})
+	}
+	wg.Wait()
+
+	for i := range goroutines {
+		gt.NoError(t, errs[i])
+		gt.String(t, titles[i]).Equal("Issue title")
+	}
 }
 
 func TestGetIssue_RejectsPullRequest(t *testing.T) {

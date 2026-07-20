@@ -41,24 +41,6 @@ func clampPerPage(n int) int {
 	}
 }
 
-// === REST client lazy-init ===
-
-// rest returns the REST client, initialising it on first access using the
-// same ghinstallation-backed *http.Client that powers the GraphQL client.
-// Held lazily because callers that exercise only the legacy GraphQL methods
-// should not pay for REST initialisation.
-func (c *Client) rest() (*ghapi.Client, error) {
-	if c.restClient != nil {
-		return c.restClient, nil
-	}
-	client, err := ghapi.NewClient(ghapi.WithHTTPClient(c.restHTTP))
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to create GitHub REST client")
-	}
-	c.restClient = client
-	return c.restClient, nil
-}
-
 // === SearchIssuesAndPRs ===
 
 func (c *Client) SearchIssuesAndPRs(ctx context.Context, opts SearchOptions) (*SearchResult, error) {
@@ -174,10 +156,7 @@ func (c *Client) GetIssue(ctx context.Context, owner, repo string, number int) (
 		return nil, goerr.New("number must be > 0", goerr.V("number", number))
 	}
 
-	rest, err := c.rest()
-	if err != nil {
-		return nil, err
-	}
+	rest := c.restClient
 	issue, resp, err := rest.Issues.Get(ctx, owner, repo, number)
 	if err != nil {
 		if isHTTP404(resp, err) {
@@ -217,10 +196,7 @@ func (c *Client) GetIssue(ctx context.Context, owner, repo string, number int) (
 }
 
 func (c *Client) fetchAllComments(ctx context.Context, owner, repo string, number int) ([]Comment, error) {
-	rest, err := c.rest()
-	if err != nil {
-		return nil, err
-	}
+	rest := c.restClient
 	listOpts := &ghapi.IssueListCommentsOptions{
 		ListOptions: ghapi.ListOptions{PerPage: 100},
 	}
@@ -254,10 +230,7 @@ func (c *Client) GetPullRequestDetail(ctx context.Context, owner, repo string, n
 		return nil, goerr.New("number must be > 0", goerr.V("number", number))
 	}
 
-	rest, err := c.rest()
-	if err != nil {
-		return nil, err
-	}
+	rest := c.restClient
 	pr, resp, err := rest.PullRequests.Get(ctx, owner, repo, number)
 	if err != nil {
 		if isHTTP404(resp, err) {
@@ -320,10 +293,7 @@ func (c *Client) GetPullRequestDetail(ctx context.Context, owner, repo string, n
 }
 
 func (c *Client) fetchAllReviewComments(ctx context.Context, owner, repo string, number int) ([]Comment, error) {
-	rest, err := c.rest()
-	if err != nil {
-		return nil, err
-	}
+	rest := c.restClient
 	listOpts := &ghapi.PullRequestListCommentsOptions{
 		ListOptions: ghapi.ListOptions{PerPage: 100},
 	}
@@ -351,10 +321,7 @@ func (c *Client) fetchAllReviewComments(ctx context.Context, owner, repo string,
 }
 
 func (c *Client) fetchAllReviews(ctx context.Context, owner, repo string, number int) ([]Review, error) {
-	rest, err := c.rest()
-	if err != nil {
-		return nil, err
-	}
+	rest := c.restClient
 	listOpts := &ghapi.ListOptions{PerPage: 100}
 	var out []Review
 	for {
@@ -380,10 +347,7 @@ func (c *Client) fetchAllReviews(ctx context.Context, owner, repo string, number
 }
 
 func (c *Client) fetchAllFiles(ctx context.Context, owner, repo string, number int) ([]FileChange, error) {
-	rest, err := c.rest()
-	if err != nil {
-		return nil, err
-	}
+	rest := c.restClient
 	listOpts := &ghapi.ListOptions{PerPage: 100}
 	var out []FileChange
 	for {
@@ -423,10 +387,7 @@ func (c *Client) GetFileContent(ctx context.Context, owner, repo, path, ref stri
 		return nil, goerr.New("path is required")
 	}
 
-	rest, err := c.rest()
-	if err != nil {
-		return nil, err
-	}
+	rest := c.restClient
 	getOpts := &ghapi.RepositoryContentGetOptions{Ref: ref}
 	fileContent, _, resp, err := rest.Repositories.GetContents(ctx, owner, repo, path, getOpts)
 	if err != nil {
@@ -475,10 +436,7 @@ func (c *Client) ListCommits(ctx context.Context, opts ListCommitsOptions) (*Com
 		return nil, goerr.New("owner and repo are required")
 	}
 
-	rest, err := c.rest()
-	if err != nil {
-		return nil, err
-	}
+	rest := c.restClient
 	listOpts := &ghapi.CommitsListOptions{
 		SHA:    opts.Ref,
 		Path:   opts.Path,
