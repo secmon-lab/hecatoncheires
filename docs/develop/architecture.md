@@ -332,6 +332,44 @@ lifecycle Job runs, through the same `caseJobRunLogs` read path.
 - Creation-time turns (`threadcase` `ModeCreate`) are excluded — only
   mentions in an already-created case are listed.
 
+## LLM prompt caching
+
+Every gollem agent and standalone session this codebase creates opts into
+gollem's prompt cache (`gollem.WithPromptCache(true)` /
+`gollem.WithSessionPromptCache(true)`). There is no CLI flag or environment
+variable — it is on unconditionally, because it is a pure cost optimization
+with no behavioural difference in the model's output.
+
+What it changes, per provider:
+
+- **Claude** — gollem marks the stable prefix (system prompt, tool
+  definitions) and the growing conversation tail with ephemeral
+  `cache_control` breakpoints. The system prompt and tools become cache hits
+  from the second call onward, and the moving tail breakpoint means each new
+  turn pays full price only for the newly appended tokens. This is the big
+  win for the plan-and-execute loop, where the planner is re-invoked once per
+  round against a system prompt and tool set that never change.
+- **OpenAI / Gemini** — the flag does not alter the request at all; both
+  providers cache automatically on their side. Cache usage is still reported.
+
+Two caveats worth knowing when reading token numbers:
+
+- Claude only caches prefixes above a model-specific minimum (1024 or 4096
+  tokens depending on the model). Marking anything shorter is a silent no-op
+  on the API side — no error, the cache counters just stay `0`. Short-lived
+  agents (the webfetch analyze session, the assist log summary) will
+  therefore usually show no cache activity, which is expected rather than a
+  misconfiguration.
+- Claude cache entries use the default 5-minute TTL and gollem does not
+  expose a knob for it, so a thread that goes quiet for longer re-pays for
+  the prefix on its next turn.
+
+`gollem.Response` reports `CacheCreationInputToken` (tokens written to the
+cache; Claude only) and `CacheReadInputToken` (tokens served from it).
+`InputToken` remains the *total* input including the cached prefix, so the
+existing token-budget accounting stays correct whether or not a cache hit
+occurred.
+
 ## See Also
 
 - [develop/README.md](./README.md) — developer documentation index

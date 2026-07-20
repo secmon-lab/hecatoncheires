@@ -201,6 +201,7 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 			gollem.WithResponseSchema(planSchema()),
 			gollem.WithLoopLimit(plannerPerCallLoopLimit),
 			gollem.WithContentBlockMiddleware(newPlannerProgressMiddleware(handler, roundKey)),
+			gollem.WithPromptCache(true),
 		)
 	}
 

@@ -200,6 +200,7 @@ func runOneTask(
 		// alone when hostTrace is nil, preserving the proposal host path.
 		gollem.WithTrace(combineTrace(counter, hostTrace)),
 		gollem.WithContentBlockMiddleware(progressMW),
+		gollem.WithPromptCache(true),
 	)
 	resp, execErr := sub.Execute(ctx, gollem.Text(task.Description))
 	elapsed := time.Since(started).Round(time.Millisecond)

@@ -221,6 +221,7 @@ func (r *Runner) runLoop(
 			gollem.WithContentType(gollem.ContentTypeJSON),
 			gollem.WithResponseSchema(schema),
 			gollem.WithLoopLimit(plannerPerCallLoopLimit),
+			gollem.WithPromptCache(true),
 		)
 
 		resp, execErr := plannerAgent.Execute(ctx, gollem.Text(nextInput))

@@ -63,6 +63,7 @@ func generateDirectResponse(
 		gollem.WithHistoryRepository(historyRepo, historyKey),
 		gollem.WithTools(tools...),
 		gollem.WithLoopLimit(loopLimit),
+		gollem.WithPromptCache(true),
 	}
 	if traceHandler != nil {
 		opts = append(opts, gollem.WithTrace(traceHandler))

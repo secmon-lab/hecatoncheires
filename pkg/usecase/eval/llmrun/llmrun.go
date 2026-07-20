@@ -33,6 +33,7 @@ func (c *Completer) Complete(ctx context.Context, systemPrompt, userPrompt strin
 	opts := []gollem.Option{
 		gollem.WithSystemPrompt(systemPrompt),
 		gollem.WithLoopLimit(2),
+		gollem.WithPromptCache(true),
 	}
 	if schema != nil {
 		opts = append(opts,

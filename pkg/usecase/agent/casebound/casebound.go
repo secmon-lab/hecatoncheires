@@ -233,6 +233,7 @@ func (uc *UseCase) RunTurn(ctx context.Context, req TurnRequest) (*Result, error
 		gollem.WithTools(allTools...),
 		gollem.WithHistoryRepository(uc.deps.HistoryRepo, req.Session.ID),
 		gollem.WithTrace(traced),
+		gollem.WithPromptCache(true),
 		gollem.WithToolMiddleware(
 			func(next gollem.ToolHandler) gollem.ToolHandler {
 				return func(ctx context.Context, tr *gollem.ToolExecRequest) (*gollem.ToolExecResponse, error) {

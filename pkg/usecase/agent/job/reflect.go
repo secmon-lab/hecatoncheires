@@ -127,6 +127,7 @@ func (r *LLMReflector) Reflect(ctx context.Context, req ReflectRequest) error {
 		gollem.WithSystemPrompt(reflectionSystemPrompt),
 		gollem.WithHistory(req.History),
 		gollem.WithTools(tools...),
+		gollem.WithPromptCache(true),
 	}
 	if r.loopMax > 0 {
 		opts = append(opts, gollem.WithLoopLimit(r.loopMax))

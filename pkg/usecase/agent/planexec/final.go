@@ -64,6 +64,7 @@ func generateFinalResponse(
 		// detect "no more tool calls" before terminating. Two is the
 		// minimum that lets a structured-output round actually return.
 		gollem.WithLoopLimit(2),
+		gollem.WithPromptCache(true),
 	}
 	if traceHandler != nil {
 		opts = append(opts, gollem.WithTrace(traceHandler))
@@ -144,6 +145,7 @@ func generateValidatedFinal[T Validatable](
 		gollem.WithLoopLimit(2),
 		gollem.WithContentType(gollem.ContentTypeJSON),
 		gollem.WithResponseSchema(schema),
+		gollem.WithPromptCache(true),
 	}
 	if rc.traced != nil {
 		opts = append(opts, gollem.WithTrace(rc.traced))
