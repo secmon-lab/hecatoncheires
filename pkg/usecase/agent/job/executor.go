@@ -190,6 +190,7 @@ func (e *SingleLoopJobExecutor) Execute(ctx context.Context, req ExecuteRequest)
 				}
 			},
 		),
+		gollem.WithPromptCache(true),
 	}
 	if req.HistoryRepository != nil && req.HistoryKey != "" {
 		opts = append(opts, gollem.WithHistoryRepository(req.HistoryRepository, req.HistoryKey))

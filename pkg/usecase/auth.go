@@ -7,9 +7,10 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
-	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/lestrrat-go/jwx/v3/jwk"
+	"github.com/lestrrat-go/jwx/v3/jwt"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/interfaces"
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model/auth"
@@ -240,41 +241,26 @@ func (uc *AuthUseCase) decodeIDToken(ctx context.Context, idToken string) (*Slac
 
 	// Parse and verify the JWT token
 	// Allow 10 seconds of clock skew to handle time synchronization differences
-	token, err := jwt.Parse([]byte(idToken), jwt.WithKeySet(keySet), jwt.WithValidate(true), jwt.WithAudience(uc.clientID), jwt.WithAcceptableSkew(10))
+	token, err := jwt.Parse([]byte(idToken), jwt.WithKeySet(keySet), jwt.WithValidate(true), jwt.WithAudience(uc.clientID), jwt.WithAcceptableSkew(10*time.Second))
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to parse or verify JWT token")
 	}
 
-	// Extract claims
-	sub, ok := token.Get("sub")
-	if !ok {
-		return nil, goerr.New("sub claim not found in token")
+	// Extract claims. Token.Get decodes into the destination, so a missing
+	// claim and a wrong-typed one both surface as an error here.
+	var subStr string
+	if err := token.Get("sub", &subStr); err != nil {
+		return nil, goerr.Wrap(err, "sub claim missing or not a string in ID token")
 	}
 
-	email, ok := token.Get("email")
-	if !ok {
-		return nil, goerr.New("email claim not found in token")
+	var emailStr string
+	if err := token.Get("email", &emailStr); err != nil {
+		return nil, goerr.Wrap(err, "email claim missing or not a string in ID token")
 	}
 
-	name, ok := token.Get("name")
-	if !ok {
-		return nil, goerr.New("name claim not found in token")
-	}
-
-	// Convert to string values
-	subStr, ok := sub.(string)
-	if !ok {
-		return nil, goerr.New("sub claim is not a string")
-	}
-
-	emailStr, ok := email.(string)
-	if !ok {
-		return nil, goerr.New("email claim is not a string")
-	}
-
-	nameStr, ok := name.(string)
-	if !ok {
-		return nil, goerr.New("name claim is not a string")
+	var nameStr string
+	if err := token.Get("name", &nameStr); err != nil {
+		return nil, goerr.Wrap(err, "name claim missing or not a string in ID token")
 	}
 
 	// Slack's OIDC sub claim is the composite "Uxxx-Txxx" (user-team) form

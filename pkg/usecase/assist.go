@@ -202,6 +202,7 @@ func (uc *AssistUseCase) processCase(ctx context.Context, entry *model.Workspace
 	agent := gollem.New(uc.deps.LLM,
 		gollem.WithSystemPrompt(systemPrompt),
 		gollem.WithTools(allTools...),
+		gollem.WithPromptCache(true),
 	)
 
 	resp, err := agent.Execute(ctx, gollem.Text(entry.AssistPrompt))
@@ -401,6 +402,7 @@ func (uc *AssistUseCase) saveAssistLog(ctx context.Context, wsID string, caseID 
 	session, err := uc.deps.LLM.NewSession(ctx,
 		gollem.WithSessionContentType(gollem.ContentTypeJSON),
 		gollem.WithSessionResponseSchema(schema),
+		gollem.WithSessionPromptCache(true),
 	)
 	if err != nil {
 		return goerr.Wrap(err, "failed to create session for assist log summary")

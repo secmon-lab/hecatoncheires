@@ -146,6 +146,7 @@ func (c *Client) analyze(ctx context.Context, text string) (*analyzeResult, erro
 		gollem.WithSessionContentType(gollem.ContentTypeJSON),
 		gollem.WithSessionResponseSchema(analyzeSchema),
 		gollem.WithSessionSystemPrompt(analyzeSystemPrompt),
+		gollem.WithSessionPromptCache(true),
 	)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to create LLM session for webfetch analyze")

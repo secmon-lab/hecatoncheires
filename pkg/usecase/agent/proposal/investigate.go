@@ -103,6 +103,7 @@ func (uc *UseCase) runOneInvestigation(ctx context.Context, task planInvestigate
 		gollem.WithLoopLimit(uc.subAgentLoopMax),
 		gollem.WithTrace(counter),
 		gollem.WithContentBlockMiddleware(progressMW),
+		gollem.WithPromptCache(true),
 	)
 	resp, execErr := sub.Execute(ctx, gollem.Text(task.Description))
 	elapsed := time.Since(started).Round(time.Millisecond)
