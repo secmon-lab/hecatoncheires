@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/bradleyfalzon/ghinstallation/v2"
-	ghapi "github.com/google/go-github/v75/github"
+	ghapi "github.com/google/go-github/v88/github"
 	"github.com/m-mizutani/goerr/v2"
 	"github.com/shurcooL/githubv4"
 )

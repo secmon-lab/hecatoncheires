@@ -2,10 +2,8 @@ package github
 
 import (
 	"net/http"
-	"net/url"
-	"strings"
 
-	ghapi "github.com/google/go-github/v75/github"
+	ghapi "github.com/google/go-github/v88/github"
 	"github.com/shurcooL/githubv4"
 )
 
@@ -16,13 +14,16 @@ import (
 //
 // Exposed only to tests in this package via export_test.go.
 func NewTestClient(baseURL string, httpClient *http.Client) *Client {
-	rest := ghapi.NewClient(httpClient)
-	u, _ := url.Parse(baseURL)
-	if !strings.HasSuffix(u.Path, "/") {
-		u.Path += "/"
+	// WithURLs adds the trailing slash go-github requires, so callers can
+	// pass the raw httptest.Server URL as-is.
+	rest, err := ghapi.NewClient(ghapi.WithHTTPClient(httpClient), ghapi.WithURLs(&baseURL, &baseURL))
+	if err != nil {
+		// baseURL/httpClient come from the caller's httptest.Server, so this
+		// should never fail in practice; panic loudly rather than returning
+		// a half-built test double that would produce confusing downstream
+		// failures.
+		panic(err)
 	}
-	rest.BaseURL = u
-	rest.UploadURL = u
 
 	gql := githubv4.NewEnterpriseClient(baseURL+"/api/graphql", httpClient)
 
