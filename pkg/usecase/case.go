@@ -540,6 +540,24 @@ func (uc *CaseUseCase) persistCase(ctx context.Context, workspaceID string, in p
 		return nil, goerr.New("case title is required")
 	}
 
+	// Private cases are channel-mode-only: the sole effect of IsPrivate is a
+	// dedicated private Slack channel, which thread-mode cases (bound to the
+	// monitored channel) have no equivalent for. Reject the invalid combination
+	// at this shared chokepoint so every create entry point is covered. The
+	// mode is only consulted for a private request, so the common path is
+	// unchanged; a lookup failure here fails closed (propagated), never open.
+	if in.IsPrivate {
+		threadMode, err := uc.workspaceIsThreadMode(workspaceID)
+		if err != nil {
+			return nil, err
+		}
+		if threadMode {
+			return nil, goerr.Wrap(ErrCasePrivateThreadModeUnsupported,
+				"private case requested in thread-mode workspace",
+				goerr.V("workspace_id", workspaceID))
+		}
+	}
+
 	// Check request key: if a case with this key already exists, return it.
 	// RequestKey deduplication applies only to non-draft submissions; drafts
 	// do not currently carry a request key.
@@ -1378,6 +1396,27 @@ func (uc *CaseUseCase) caseStatusSetForWorkspace(workspaceID string) *model.Acti
 		return nil
 	}
 	return entry.CaseStatusSet
+}
+
+// workspaceIsThreadMode reports whether the workspace binds cases to Slack
+// threads (thread mode) rather than dedicated channels (channel mode).
+//
+// A missing registry (uc.workspaceRegistry == nil) resolves to (false, nil):
+// with no registry configured there are no thread-mode workspaces, and many
+// channel-only call sites (and tests) run without one. A registry lookup
+// FAILURE, however, is propagated rather than swallowed — treating "could not
+// determine the mode" as "channel mode" would let the private-case invariant
+// fail open for an unknown / misconfigured workspace ID.
+func (uc *CaseUseCase) workspaceIsThreadMode(workspaceID string) (bool, error) {
+	if uc.workspaceRegistry == nil {
+		return false, nil
+	}
+	entry, err := uc.workspaceRegistry.Get(workspaceID)
+	if err != nil {
+		return false, goerr.Wrap(err, "failed to resolve workspace for thread-mode check",
+			goerr.V("workspace_id", workspaceID))
+	}
+	return entry.IsThreadMode(), nil
 }
 
 // CreateThreadCase creates a thread-mode Case bound to (channelID, threadTS).

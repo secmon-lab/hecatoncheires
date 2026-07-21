@@ -405,6 +405,113 @@ func TestCaseUseCase_IsTestFlag(t *testing.T) {
 	})
 }
 
+// TestCaseUseCase_PrivateCaseThreadModeGuard verifies that isPrivate=true is
+// rejected for thread-mode workspaces at the shared create chokepoint
+// (persistCase), while it stays allowed for channel-mode workspaces. Private
+// cases only make sense in channel mode (their sole effect is a dedicated
+// private Slack channel); thread-mode cases reuse the monitored channel and
+// have no equivalent, so the combination is a domain-invariant violation.
+func TestCaseUseCase_PrivateCaseThreadModeGuard(t *testing.T) {
+	newThreadRegistry := func() *model.WorkspaceRegistry {
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace:             model.Workspace{ID: testWorkspaceID, Name: "Thread WS"},
+			CaseMode:              model.CaseModeThread,
+			SlackMonitorChannelID: "C-MONITOR",
+		})
+		return registry
+	}
+	newChannelRegistry := func() *model.WorkspaceRegistry {
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: testWorkspaceID, Name: "Channel WS"},
+			CaseMode:  model.CaseModeChannel,
+		})
+		return registry
+	}
+
+	t.Run("CreateCase rejects private in thread mode", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, newThreadRegistry(), nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
+
+		created, err := uc.CreateCase(ctx, testWorkspaceID, "Private thread case", "body", nil, nil, true, false, "", "")
+		gt.Error(t, err).Is(usecase.ErrCasePrivateThreadModeUnsupported)
+		gt.Value(t, created).Nil()
+
+		// The guard fires before any persistence, so no case was written.
+		list, err := repo.Case().List(ctx, testWorkspaceID)
+		gt.NoError(t, err).Required()
+		gt.Array(t, list).Length(0)
+	})
+
+	t.Run("CreateDraft rejects private in thread mode", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, newThreadRegistry(), nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
+
+		created, err := uc.CreateDraft(ctx, testWorkspaceID, "Private thread draft", "body", nil, nil, true, false)
+		gt.Error(t, err).Is(usecase.ErrCasePrivateThreadModeUnsupported)
+		gt.Value(t, created).Nil()
+
+		// The guard fires before any persistence, so no draft was written.
+		drafts, err := repo.Case().ListDrafts(ctx, testWorkspaceID)
+		gt.NoError(t, err).Required()
+		gt.Array(t, drafts).Length(0)
+	})
+
+	t.Run("CreateDraft allows non-private in thread mode", func(t *testing.T) {
+		// The guard rejects ONLY the private+thread combination — a normal
+		// thread-mode draft must still go through.
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, newThreadRegistry(), nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
+
+		created, err := uc.CreateDraft(ctx, testWorkspaceID, "Plain thread draft", "body", nil, nil, false, false)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, created.IsPrivate).False()
+		gt.Value(t, created.Status).Equal(types.CaseStatusDraft)
+	})
+
+	t.Run("CreateDraft allows private in channel mode", func(t *testing.T) {
+		repo := memory.New()
+		uc := usecase.NewCaseUseCase(repo, newChannelRegistry(), nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
+
+		created, err := uc.CreateDraft(ctx, testWorkspaceID, "Private channel draft", "body", nil, nil, true, false)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, created.IsPrivate).True()
+
+		// Read back through the repository to confirm IsPrivate persisted.
+		stored, err := uc.GetCase(ctx, testWorkspaceID, created.ID)
+		gt.NoError(t, err).Required()
+		gt.Bool(t, stored.IsPrivate).True()
+	})
+
+	t.Run("private request fails closed when workspace mode is unknown", func(t *testing.T) {
+		// A registry that is present but does not know the workspace must NOT
+		// be treated as channel mode: "cannot determine the mode" is propagated
+		// as an error, never silently allowed. Otherwise a misconfigured /
+		// unknown workspace id would be a fail-open hole in the invariant.
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "some-other-ws", Name: "Other WS"},
+			CaseMode:  model.CaseModeChannel,
+		})
+		uc := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "UMINE"})
+
+		created, err := uc.CreateDraft(ctx, "unregistered-ws", "Private draft", "body", nil, nil, true, false)
+		gt.Error(t, err).Is(model.ErrWorkspaceNotFound)
+		gt.Value(t, created).Nil()
+
+		drafts, err := repo.Case().ListDrafts(ctx, "unregistered-ws")
+		gt.NoError(t, err).Required()
+		gt.Array(t, drafts).Length(0)
+	})
+}
+
 // TestCaseUseCase_UpdateCase_PreservesUnpatchedFields is a regression guard for a
 // production bug: UpdateCase rebuilt the Case via a field-by-field &model.Case{...}
 // literal (PUT semantics) that omitted SlackThreadTS, BoardStatus, RequestKey,

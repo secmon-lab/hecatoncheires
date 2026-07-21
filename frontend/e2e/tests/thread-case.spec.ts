@@ -51,6 +51,29 @@ test.describe('Thread-mode Case board', () => {
     await expect(sidebar.getByText('Actions', { exact: true })).toBeVisible();
   });
 
+  test('New-case form hides the Private toggle in thread mode but shows it in channel mode', async ({ page }) => {
+    const caseList = new CaseListPage(page);
+    const caseForm = new CaseFormPage(page);
+
+    // Thread-mode workspace: the Private toggle must never be exposed, because
+    // private cases are a channel-mode-only feature (they create a dedicated
+    // private channel, which thread-mode cases do not have).
+    await caseList.navigate(THREAD_WS);
+    await caseList.waitForTableLoad();
+    await caseList.clickNewCaseButton();
+    await caseForm.waitForFormVisible();
+    await expect(page.getByTestId('private-case-checkbox')).toHaveCount(0);
+    await caseForm.cancel();
+
+    // Channel-mode workspace: the Private toggle is available on the create form.
+    await caseList.navigate(CHANNEL_WS);
+    await caseList.waitForTableLoad();
+    await caseList.clickNewCaseButton();
+    await caseForm.waitForFormVisible();
+    await expect(page.getByTestId('private-case-checkbox')).toBeVisible();
+    await caseForm.cancel();
+  });
+
   test('case detail in a thread-mode workspace: no Actions, editable board status, no Close button', async ({ page }) => {
     const caseList = new CaseListPage(page);
     const caseForm = new CaseFormPage(page);
