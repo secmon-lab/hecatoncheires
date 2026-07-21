@@ -70,7 +70,8 @@ func ErrorCode(err error) string {
 		errors.Is(err, model.ErrInvalidGitHubRepo),
 		errors.Is(err, usecase.ErrUnknownUser),
 		errors.Is(err, usecase.ErrInvalidArgument),
-		errors.Is(err, usecase.ErrCaseThreadModeNoActions):
+		errors.Is(err, usecase.ErrCaseThreadModeNoActions),
+		errors.Is(err, usecase.ErrCasePrivateThreadModeUnsupported):
 		return ErrCodeBadUserInput
 	case errors.Is(err, usecase.ErrCaseNotFound),
 		errors.Is(err, usecase.ErrActionNotFound),

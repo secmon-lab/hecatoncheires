@@ -8,6 +8,7 @@ import { diffAssignees } from '../utils/assignees'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'
 import { useWorkspace } from '../contexts/workspace-context'
+import { useCaseStatuses } from '../hooks/useCaseStatuses'
 import { useTranslation } from '../i18n'
 import Modal from '../components/Modal'
 import Button from '../components/Button'
@@ -49,6 +50,25 @@ export default function CaseForm({ caseItem, onClose, onSubmitted }: CaseFormPro
   const { currentWorkspace } = useWorkspace()
   const { t } = useTranslation()
   const navigate = useNavigate()
+
+  // Private cases are a channel-mode-only feature: a private case creates a
+  // dedicated private Slack channel, whereas thread-mode cases reuse the
+  // monitored channel and never carry IsPrivate. Only show the private toggle
+  // once we have POSITIVELY confirmed channel mode. isThreadMode is false for
+  // channel-mode, the in-flight query, a failed query, AND a skipped query
+  // alike, so guarding on isThreadMode alone would fail open in several ways:
+  //   - flashing the toggle on while the config is still loading;
+  //   - leaving it on when the config query errored (mode unknown);
+  //   - flashing it on during the initial workspace-context load, when
+  //     currentWorkspace is undefined so useCaseStatuses SKIPS its query and a
+  //     skipped Apollo query reports loading:false / error:undefined.
+  // Requiring a resolved workspace id plus !loading && !error closes all three.
+  const caseStatuses = useCaseStatuses(currentWorkspace?.id)
+  const showPrivateToggle =
+    !!currentWorkspace?.id &&
+    !caseStatuses.loading &&
+    !caseStatuses.error &&
+    !caseStatuses.isThreadMode
 
   const isEdit = caseItem !== null
   const isDraftEdit = isEdit && caseItem?.status === 'DRAFT'
@@ -404,7 +424,7 @@ export default function CaseForm({ caseItem, onClose, onSubmitted }: CaseFormPro
             </div>
           </div>
         </label>
-        {!isEdit && (
+        {!isEdit && showPrivateToggle && (
           <label className="row" style={{ gap: 8, padding: 10, border: '1px solid color-mix(in oklch, var(--warn) 30%, var(--line))', borderRadius: 6, background: 'color-mix(in oklch, var(--warn) 8%, transparent)', alignItems: 'flex-start', cursor: 'pointer' }}>
             <input
               type="checkbox"

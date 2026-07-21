@@ -49,6 +49,16 @@ var (
 	// should advise "retry submit".
 	ErrActivationFailed = errors.New("case activation failed")
 
+	// ErrCasePrivateThreadModeUnsupported is returned by the case create flows
+	// when isPrivate=true is requested for a thread-mode workspace. A private
+	// case's only effect is a dedicated private Slack channel, which channel
+	// mode creates and thread mode has no equivalent for (thread-mode cases
+	// reuse the monitored channel and never carry IsPrivate). The frontend
+	// already hides the private toggle in thread mode; the invariant is enforced
+	// here at the usecase boundary so every entry point (GraphQL, Slack modal,
+	// agent tool, import) is covered, not just the web form.
+	ErrCasePrivateThreadModeUnsupported = errors.New("private case is not supported in thread mode")
+
 	// ErrCaseThreadModeNoActions is returned by ActionUseCase write paths when
 	// the parent (or reparent target) Case is thread-mode. Thread-mode cases
 	// track progress through the configurable board status (Kanban) and have no

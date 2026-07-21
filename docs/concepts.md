@@ -152,6 +152,12 @@ A Case whose bound Slack channel is private. Access is restricted to channel
 members; non-members cannot read the Case or its child entities. Enforced in the
 usecase layer. See [Configuration → Slack Section](configuration.md#slack-section).
 
+Private is a **channel-mode-only** feature: its sole effect is a dedicated
+private Slack channel, which thread-mode Cases (bound to the shared monitored
+channel) have no equivalent for. The web form therefore hides the **Private
+case** checkbox in thread-mode Workspaces, and the create flow rejects a private
+Case there regardless of entry point (web, Slack modal, agent tool, import).
+
 ### Notification slot
 A channel-side aggregation mechanism that batches related notifications into a
 single thread instead of posting each one separately. See

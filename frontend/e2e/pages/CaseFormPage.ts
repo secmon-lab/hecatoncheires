@@ -111,6 +111,15 @@ export class CaseFormPage extends BasePage {
   }
 
   /**
+   * True when the "Private case" checkbox is present on the form. It is only
+   * rendered on the create form of a channel-mode workspace; thread-mode
+   * workspaces must never expose it.
+   */
+  async isPrivateCheckboxVisible(): Promise<boolean> {
+    return await this.page.getByTestId('private-case-checkbox').isVisible();
+  }
+
+  /**
    * Fill a custom field by field ID
    * Automatically detects if it's a select or input field
    */
