@@ -125,6 +125,16 @@ Each Workspace chooses how Cases bind to Slack, via `[slack] mode`:
   character count noted). Jobs otherwise run in both modes and can still edit
   Case fields and status, post to Slack, and use memos.
 
+  A thread-mode Workspace **never creates a dedicated channel**, regardless of
+  how creation is triggered. Besides the monitored channel's own messages,
+  Cases can also be created from the Web UI, a slash command, or a bot mention;
+  in a thread-mode Workspace all of these post a new root message into the
+  monitored channel and bind the Case to that thread (the created Case's summary
+  replaces the root), rather than provisioning a per-Case channel. Only the
+  Case's title, description, and custom fields carry over from those entry
+  points; the assignees and test flag they may offer do not apply to thread-mode
+  Cases (the private flag is a channel-mode-only concept — see "Private case").
+
 See [Configuration → Case Section](configuration.md#case-section-thread-mode) and
 [Slack Integration](slack.md#thread-mode-monitored-channel).
 

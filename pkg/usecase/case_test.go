@@ -3519,7 +3519,7 @@ func TestCaseUseCase_CreateThreadCaseWithFields(t *testing.T) {
 		_, err := uc.CreateThreadCaseWithFields(ctx, "support", "C-MONITOR", "1700000000.000100", "U-REP", "Title",
 			"desc", map[string]model.FieldValue{
 				"severity": {FieldID: "severity", Value: "critical"}, // invalid option; summary missing
-			})
+			}, "")
 		gt.Error(t, err).Is(model.ErrCaseFieldValidation)
 		gt.String(t, err.Error()).Contains("severity")
 		gt.String(t, err.Error()).Contains("summary")
@@ -3532,7 +3532,7 @@ func TestCaseUseCase_CreateThreadCaseWithFields(t *testing.T) {
 			"Users cannot log in.", map[string]model.FieldValue{
 				"severity": {FieldID: "severity", Value: "high"},
 				"summary":  {FieldID: "summary", Value: "login broken"},
-			})
+			}, "")
 		gt.NoError(t, err).Required()
 		gt.Value(t, created.Title).Equal("Login outage")
 		gt.Value(t, created.BoardStatus).Equal("triage")
@@ -3554,10 +3554,10 @@ func TestCaseUseCase_CreateThreadCaseWithFields(t *testing.T) {
 			"d", map[string]model.FieldValue{
 				"severity": {FieldID: "severity", Value: "low"},
 				"summary":  {FieldID: "summary", Value: "s"},
-			})
+			}, "")
 		gt.NoError(t, err).Required()
 		again, err := uc.CreateThreadCaseWithFields(ctx, "support", "C-MONITOR", "1700000000.000300", "U-REP", "T2",
-			"d2", nil)
+			"d2", nil, "")
 		gt.NoError(t, err).Required()
 		gt.Number(t, again.ID).Equal(first.ID)
 	})
@@ -3921,5 +3921,295 @@ func TestCaseUseCase_RenderCaseFieldValues(t *testing.T) {
 		resolved := out["related"].(map[string]any)
 		gt.Value(t, resolved["id"]).Equal(priv)
 		gt.Value(t, resolved["available"]).Equal(false)
+	})
+}
+
+// failCreateRepo wraps a real Repository but swaps the Case repository for one
+// whose Create always fails, so a test can exercise the "root posted, then case
+// persistence failed" branch without a real infrastructure fault.
+type failCreateRepo struct {
+	interfaces.Repository
+	caseRepo interfaces.CaseRepository
+}
+
+func (r *failCreateRepo) Case() interfaces.CaseRepository { return r.caseRepo }
+
+type failCreateCaseRepo struct {
+	interfaces.CaseRepository
+	err error
+}
+
+func (r *failCreateCaseRepo) Create(_ context.Context, _ string, _ *model.Case) (*model.Case, error) {
+	return nil, r.err
+}
+
+// threadModeWorkspace builds a thread-mode WorkspaceEntry bound to C-MONITOR with
+// a two-column board (initial "triage") and a single select field "severity".
+func threadModeWorkspace(t *testing.T) *model.WorkspaceEntry {
+	t.Helper()
+	set, err := model.NewActionStatusSet("triage", []string{"done"}, []model.ActionStatusDefinition{
+		{ID: "triage", Name: "Triage"},
+		{ID: "done", Name: "Done"},
+	})
+	gt.NoError(t, err).Required()
+	return &model.WorkspaceEntry{
+		Workspace:             model.Workspace{ID: "support"},
+		CaseMode:              model.CaseModeThread,
+		SlackMonitorChannelID: "C-MONITOR",
+		CaseStatusSet:         set,
+		FieldSchema: &config.FieldSchema{
+			Fields: []config.FieldDefinition{
+				{ID: "severity", Name: "Severity", Type: types.FieldTypeSelect, Options: []config.FieldOption{{ID: "high", Name: "High"}, {ID: "low", Name: "Low"}}},
+			},
+		},
+	}
+}
+
+// TestCaseUseCase_CreateCase_ThreadMode covers the invariant that a thread-mode
+// workspace never gets a dedicated Slack channel from the shared CreateCase
+// funnel: instead the case is bound to a fresh root posted into the monitored
+// channel (mirroring the reaction cross-channel path), and the web form's
+// assignees / isPrivate / isTest are ignored.
+func TestCaseUseCase_CreateCase_ThreadMode(t *testing.T) {
+	t.Run("routes to monitored-channel thread and creates no dedicated channel", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(threadModeWorkspace(t))
+
+		createChannelCalled := false
+		slackMock := &mockSlackService{
+			createChannelFn: func(_ context.Context, _ int64, _ string, _ string) (string, error) {
+				createChannelCalled = true
+				return "C-SHOULD-NOT-HAPPEN", nil
+			},
+		}
+		uc := usecase.NewCaseUseCase(repo, registry, slackMock, nil, "https://app.example.test")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-WEB-CREATOR"})
+
+		fields := map[string]model.FieldValue{"severity": {FieldID: "severity", Value: "high"}}
+		// isPrivate is false here: private is rejected in thread mode (covered by
+		// TestCaseUseCase_PrivateCaseThreadModeGuard). assignees + isTest are
+		// passed to prove they are ignored, not persisted.
+		created, err := uc.CreateCase(ctx, "support", "Phishing report", "user got a suspicious email",
+			[]string{"U-ASSIGNEE"}, fields, false /*isPrivate*/, true /*isTest*/, "", "")
+		gt.NoError(t, err).Required()
+		gt.Value(t, created).NotNil().Required()
+
+		// Bound to the monitored channel thread; no dedicated channel.
+		gt.Bool(t, createChannelCalled).False()
+		gt.Value(t, created.SlackChannelID).Equal("C-MONITOR")
+		gt.Value(t, created.SlackThreadTS).Equal("1234567890.123456")
+		gt.Value(t, created.Status).Equal(types.CaseStatusOpen)
+		gt.Value(t, created.BoardStatus).Equal("triage")
+		gt.Value(t, created.ReporterID).Equal("U-WEB-CREATOR")
+		gt.Value(t, created.Title).Equal("Phishing report")
+		gt.Value(t, created.Description).Equal("user got a suspicious email")
+		gt.Value(t, created.FieldValues["severity"].Value).Equal("high")
+
+		// assignees + isTest are silently ignored (thread cases do not carry them);
+		// isPrivate stays false because a private thread-mode case is rejected, never
+		// created (see TestCaseUseCase_PrivateCaseThreadModeGuard).
+		gt.Array(t, created.AssigneeIDs).Length(0)
+		gt.Bool(t, created.IsPrivate).False()
+		gt.Bool(t, created.IsTest).False()
+
+		// A placeholder root was posted to the monitored channel, then replaced in
+		// place with the case summary (the summary carries the web link).
+		gt.Array(t, slackMock.postedChannelIDs).Length(1)
+		gt.Value(t, slackMock.postedChannelIDs[0]).Equal("C-MONITOR")
+		gt.Array(t, slackMock.updatedChannelIDs).Length(1)
+		gt.Value(t, slackMock.updatedChannelIDs[0]).Equal("C-MONITOR")
+
+		// Persisted state matches what was returned (round-trip through the repo).
+		reloaded, err := repo.Case().Get(ctx, "support", created.ID)
+		gt.NoError(t, err).Required()
+		gt.Value(t, reloaded.SlackChannelID).Equal("C-MONITOR")
+		gt.Value(t, reloaded.SlackThreadTS).Equal("1234567890.123456")
+		gt.Value(t, reloaded.BoardStatus).Equal("triage")
+		gt.Value(t, reloaded.ReporterID).Equal("U-WEB-CREATOR")
+		gt.Value(t, reloaded.FieldValues["severity"].Value).Equal("high")
+
+		// And it is discoverable by its thread binding.
+		byThread, err := repo.Case().GetBySlackThread(ctx, "support", "C-MONITOR", "1234567890.123456")
+		gt.NoError(t, err).Required()
+		gt.Value(t, byThread).NotNil().Required()
+		gt.Value(t, byThread.ID).Equal(created.ID)
+	})
+
+	t.Run("field validation failure returns error and posts no root", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(threadModeWorkspace(t))
+		slackMock := &mockSlackService{}
+		uc := usecase.NewCaseUseCase(repo, registry, slackMock, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-WEB-CREATOR"})
+
+		// "critical" is not an allowed severity option; the gate must reject it
+		// BEFORE any Slack side effect, so the monitored channel stays clean.
+		fields := map[string]model.FieldValue{"severity": {FieldID: "severity", Value: "critical"}}
+		created, err := uc.CreateCase(ctx, "support", "Bad fields", "", nil, fields, false, false, "", "")
+		gt.Error(t, err)
+		gt.Value(t, created).Nil()
+		gt.Array(t, slackMock.postedChannelIDs).Length(0)
+		gt.Array(t, slackMock.updatedChannelIDs).Length(0)
+	})
+
+	t.Run("thread-mode without Slack falls through to a plain create (no channel, no root)", func(t *testing.T) {
+		// A thread-mode workspace whose deployment has no Slack service (e.g. the
+		// e2e backend) cannot post a monitored-channel root. Creation must still
+		// succeed — and must NOT create a dedicated channel (the invariant): the
+		// fall-through activateCase is a no-op without Slack.
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(threadModeWorkspace(t))
+		uc := usecase.NewCaseUseCase(repo, registry, nil /*no slack*/, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-WEB-CREATOR"})
+
+		created, err := uc.CreateCase(ctx, "support", "No slack here", "", nil, nil, false, false, "", "")
+		gt.NoError(t, err).Required()
+		gt.Value(t, created).NotNil().Required()
+		gt.Value(t, created.Status).Equal(types.CaseStatusOpen)
+		// No dedicated channel was provisioned and no thread binding exists.
+		gt.Value(t, created.SlackChannelID).Equal("")
+		gt.Value(t, created.SlackThreadTS).Equal("")
+	})
+
+	t.Run("channel-mode still creates a dedicated channel (no thread routing)", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(&model.WorkspaceEntry{
+			Workspace: model.Workspace{ID: "support"},
+			CaseMode:  model.CaseModeChannel,
+		})
+
+		createChannelCalled := false
+		slackMock := &mockSlackService{
+			createChannelFn: func(_ context.Context, _ int64, caseName string, _ string) (string, error) {
+				createChannelCalled = true
+				return "C-DEDICATED", nil
+			},
+		}
+		uc := usecase.NewCaseUseCase(repo, registry, slackMock, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-WEB-CREATOR"})
+
+		created, err := uc.CreateCase(ctx, "support", "Channel case", "", nil, nil, false, false, "", "")
+		gt.NoError(t, err).Required()
+		gt.Value(t, created).NotNil().Required()
+		gt.Bool(t, createChannelCalled).True()
+		gt.Value(t, created.SlackChannelID).Equal("C-DEDICATED")
+		gt.Value(t, created.SlackThreadTS).Equal("")
+	})
+
+	t.Run("case persistence failure after root post replaces root with a fallback note", func(t *testing.T) {
+		base := memory.New()
+		repo := &failCreateRepo{
+			Repository: base,
+			caseRepo:   &failCreateCaseRepo{CaseRepository: base.Case(), err: errors.New("firestore write failed")},
+		}
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(threadModeWorkspace(t))
+		slackMock := &mockSlackService{}
+		uc := usecase.NewCaseUseCase(repo, registry, slackMock, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-WEB-CREATOR"})
+
+		fields := map[string]model.FieldValue{"severity": {FieldID: "severity", Value: "high"}}
+		created, err := uc.CreateCase(ctx, "support", "Will fail to persist", "", nil, fields, false, false, "", "")
+		gt.Error(t, err)
+		gt.Value(t, created).Nil()
+
+		// The placeholder root was posted, then rewritten in place to an honest
+		// failure note rather than left implying work is ongoing.
+		gt.Array(t, slackMock.postedChannelIDs).Length(1)
+		gt.Value(t, slackMock.postedChannelIDs[0]).Equal("C-MONITOR")
+		gt.Array(t, slackMock.updatedChannelIDs).Length(1)
+		gt.Value(t, slackMock.updatedChannelIDs[0]).Equal("C-MONITOR")
+		gt.String(t, slackMock.updatedTexts[0]).Contains("⚠️")
+	})
+
+	t.Run("empty title is rejected before any Slack side effect", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(threadModeWorkspace(t))
+		slackMock := &mockSlackService{}
+		uc := usecase.NewCaseUseCase(repo, registry, slackMock, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-WEB-CREATOR"})
+
+		created, err := uc.CreateCase(ctx, "support", "" /*title*/, "desc", nil, nil, false, false, "", "")
+		gt.Error(t, err)
+		gt.Value(t, created).Nil()
+		gt.Array(t, slackMock.postedChannelIDs).Length(0)
+	})
+
+	t.Run("same requestKey dedups a redelivered submission", func(t *testing.T) {
+		repo := memory.New()
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(threadModeWorkspace(t))
+		slackMock := &mockSlackService{}
+		uc := usecase.NewCaseUseCase(repo, registry, slackMock, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-WEB-CREATOR"})
+
+		first, err := uc.CreateCase(ctx, "support", "Duplicate submit", "", nil, nil, false, false, "", "req-1")
+		gt.NoError(t, err).Required()
+		gt.Value(t, first).NotNil().Required()
+
+		// Second delivery of the same submission returns the same case and posts
+		// no second root.
+		again, err := uc.CreateCase(ctx, "support", "Duplicate submit", "", nil, nil, false, false, "", "req-1")
+		gt.NoError(t, err).Required()
+		gt.Value(t, again.ID).Equal(first.ID)
+		gt.Array(t, slackMock.postedChannelIDs).Length(1)
+	})
+
+	t.Run("unknown workspace fails closed instead of creating a channel", func(t *testing.T) {
+		repo := memory.New()
+		// Registry is non-nil but does NOT contain "support": the mode cannot be
+		// resolved, so creation must error rather than fall through to the
+		// channel-creating path.
+		registry := model.NewWorkspaceRegistry()
+		createChannelCalled := false
+		slackMock := &mockSlackService{
+			createChannelFn: func(_ context.Context, _ int64, _ string, _ string) (string, error) {
+				createChannelCalled = true
+				return "C-NOPE", nil
+			},
+		}
+		uc := usecase.NewCaseUseCase(repo, registry, slackMock, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-WEB-CREATOR"})
+
+		created, err := uc.CreateCase(ctx, "support", "Title", "", nil, nil, false, false, "", "")
+		gt.Error(t, err)
+		gt.Value(t, created).Nil()
+		gt.Bool(t, createChannelCalled).False()
+		gt.Array(t, slackMock.postedChannelIDs).Length(0)
+	})
+
+	t.Run("placeholder falls back to a thread reply when the update also fails", func(t *testing.T) {
+		base := memory.New()
+		repo := &failCreateRepo{
+			Repository: base,
+			caseRepo:   &failCreateCaseRepo{CaseRepository: base.Case(), err: errors.New("firestore write failed")},
+		}
+		registry := model.NewWorkspaceRegistry()
+		registry.Register(threadModeWorkspace(t))
+		slackMock := &mockSlackService{
+			updateMessageFn: func(_ context.Context, _ string, _ string, _ []goslack.Block, _ string) error {
+				return errors.New("update failed too")
+			},
+		}
+		uc := usecase.NewCaseUseCase(repo, registry, slackMock, nil, "")
+		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-WEB-CREATOR"})
+
+		fields := map[string]model.FieldValue{"severity": {FieldID: "severity", Value: "high"}}
+		created, err := uc.CreateCase(ctx, "support", "Will fail", "", nil, fields, false, false, "", "")
+		gt.Error(t, err)
+		gt.Value(t, created).Nil()
+
+		// Root posted, update attempted and failed, so the failure note is delivered
+		// as a threaded reply rather than leaving the placeholder stuck.
+		gt.Array(t, slackMock.postedChannelIDs).Length(1)
+		gt.Array(t, slackMock.updatedChannelIDs).Length(1)
+		gt.Array(t, slackMock.threadReplyChannelIDs).Length(1)
+		gt.Value(t, slackMock.threadReplyChannelIDs[0]).Equal("C-MONITOR")
+		gt.String(t, slackMock.threadReplyTexts[0]).Contains("⚠️")
 	})
 }

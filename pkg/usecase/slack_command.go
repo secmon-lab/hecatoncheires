@@ -314,7 +314,11 @@ func (uc *SlackUseCases) HandleCaseCreationSubmit(ctx context.Context, caseUC *C
 	// Post confirmation message to the channel where the command was invoked
 	if meta.ChannelID != "" && uc.slackService != nil {
 		var confirmText string
-		if created.SlackChannelID != "" {
+		// A thread-mode case's SlackChannelID is the shared monitored channel, not
+		// a dedicated per-case channel, so pointing the creator at it would be
+		// misleading. Only the channel-mode case (dedicated channel, no thread
+		// binding) gets the "Channel: <#…>" line.
+		if created.SlackChannelID != "" && !created.IsThreadBound() {
 			confirmText = i18n.T(ctx, i18n.MsgCaseCreatedWithChannel, created.ID, created.Title, created.SlackChannelID)
 		} else {
 			confirmText = i18n.T(ctx, i18n.MsgCaseCreated, created.ID, created.Title)

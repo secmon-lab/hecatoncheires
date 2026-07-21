@@ -614,7 +614,10 @@ func buildCaseCreatedTailBlocks(ctx context.Context, created *model.Case) ([]gos
 	}
 	escapedTitle := escapeMarkdownInline(title)
 	var line string
-	if created.SlackChannelID != "" {
+	// A thread-mode case's SlackChannelID is the shared monitored channel, not a
+	// dedicated per-case channel; only channel-mode cases (dedicated channel, no
+	// thread binding) show the "Channel: <#…>" line.
+	if created.SlackChannelID != "" && !created.IsThreadBound() {
 		line = "✅ " + i18n.T(ctx, i18n.MsgCaseCreatedWithChannel, created.ID, escapedTitle, created.SlackChannelID)
 	} else {
 		line = "✅ " + i18n.T(ctx, i18n.MsgCaseCreated, created.ID, escapedTitle)
