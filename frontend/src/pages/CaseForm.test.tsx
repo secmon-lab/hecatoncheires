@@ -11,10 +11,17 @@ import CaseForm from './CaseForm'
 
 const WORKSPACE_ID = 'risk'
 
+// currentWorkspace is mutable so a test can simulate the initial
+// workspace-context load, where it is undefined.
+let mockCurrentWorkspace: { id: string; name: string } | undefined = {
+  id: WORKSPACE_ID,
+  name: 'Risk',
+}
+
 vi.mock('../contexts/workspace-context', () => ({
   useWorkspace: () => ({
-    currentWorkspace: { id: WORKSPACE_ID, name: 'Risk' },
-    workspaces: [{ id: WORKSPACE_ID, name: 'Risk' }],
+    currentWorkspace: mockCurrentWorkspace,
+    workspaces: mockCurrentWorkspace ? [mockCurrentWorkspace] : [],
     isLoading: false,
     setCurrentWorkspace: vi.fn(),
     switchWorkspace: vi.fn(),
@@ -112,6 +119,7 @@ async function flush() {
 
 afterEach(() => {
   cleanup()
+  mockCurrentWorkspace = { id: WORKSPACE_ID, name: 'Risk' }
 })
 
 describe('CaseForm private-case toggle visibility', () => {
@@ -139,6 +147,17 @@ describe('CaseForm private-case toggle visibility', () => {
 
   it('hides the Private toggle when the mode query errors (mode unknown)', async () => {
     renderForm(erroredStatusMock())
+    await screen.findByTestId('case-title-input')
+    await flush()
+    expect(screen.queryByTestId('private-case-checkbox')).not.toBeInTheDocument()
+  })
+
+  it('hides the Private toggle during initial load (workspace undefined)', async () => {
+    // With no workspace yet, useCaseStatuses SKIPS its query — a skipped Apollo
+    // query reports loading:false / error:undefined, so the toggle must be kept
+    // hidden by the workspace-id gate rather than flashing on.
+    mockCurrentWorkspace = undefined
+    renderForm(channelStatusMock())
     await screen.findByTestId('case-title-input')
     await flush()
     expect(screen.queryByTestId('private-case-checkbox')).not.toBeInTheDocument()
