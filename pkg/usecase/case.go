@@ -482,7 +482,17 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 					"private case requested in thread-mode workspace",
 					goerr.V("workspace_id", workspaceID))
 			}
-			return uc.createThreadModeCase(ctx, workspaceID, entry, title, description, fieldValues, requestKey)
+			// The thread path binds the Case to a freshly posted monitored-channel
+			// root, so it needs a Slack service and a configured monitor channel.
+			// When Slack is not wired (e.g. a test / degraded deployment) fall
+			// through to the standard create path instead of failing: activateCase
+			// is a no-op without Slack, so it still creates NO dedicated channel and
+			// the "thread mode never provisions a channel" invariant holds. In
+			// production a thread-mode workspace always has both, so this branch is
+			// taken.
+			if uc.slackService != nil && entry.SlackMonitorChannelID != "" {
+				return uc.createThreadModeCase(ctx, workspaceID, entry, title, description, fieldValues, requestKey)
+			}
 		}
 	}
 
@@ -546,15 +556,9 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 // Slack redelivery / double-submit of the slash-command or mention-proposal
 // entry points.
 func (uc *CaseUseCase) createThreadModeCase(ctx context.Context, workspaceID string, entry *model.WorkspaceEntry, title, description string, fieldValues map[string]model.FieldValue, requestKey string) (*model.Case, error) {
-	if uc.slackService == nil {
-		return nil, goerr.Wrap(ErrCaseThreadModeSlackRequired, "thread-mode case creation requires Slack service",
-			goerr.V("workspace_id", workspaceID))
-	}
+	// The caller (CreateCase) only routes here when the Slack service and the
+	// monitored channel are both present, so both are safe to use.
 	dest := entry.SlackMonitorChannelID
-	if dest == "" {
-		return nil, goerr.Wrap(ErrCaseThreadModeSlackRequired, "thread-mode workspace has no monitored channel configured",
-			goerr.V("workspace_id", workspaceID))
-	}
 
 	// Title is required for an OPEN case, matching the channel-mode contract in
 	// persistCase. Enforced here (before any Slack side effect) so the same

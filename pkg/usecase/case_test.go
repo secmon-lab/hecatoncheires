@@ -4054,16 +4054,24 @@ func TestCaseUseCase_CreateCase_ThreadMode(t *testing.T) {
 		gt.Array(t, slackMock.updatedChannelIDs).Length(0)
 	})
 
-	t.Run("no Slack service configured returns ErrCaseThreadModeSlackRequired", func(t *testing.T) {
+	t.Run("thread-mode without Slack falls through to a plain create (no channel, no root)", func(t *testing.T) {
+		// A thread-mode workspace whose deployment has no Slack service (e.g. the
+		// e2e backend) cannot post a monitored-channel root. Creation must still
+		// succeed — and must NOT create a dedicated channel (the invariant): the
+		// fall-through activateCase is a no-op without Slack.
 		repo := memory.New()
 		registry := model.NewWorkspaceRegistry()
 		registry.Register(threadModeWorkspace(t))
-		uc := usecase.NewCaseUseCase(repo, registry, nil, nil, "")
+		uc := usecase.NewCaseUseCase(repo, registry, nil /*no slack*/, nil, "")
 		ctx := auth.ContextWithToken(context.Background(), &auth.Token{Sub: "U-WEB-CREATOR"})
 
-		created, err := uc.CreateCase(ctx, "support", "Title", "", nil, nil, false, false, "", "")
-		gt.Error(t, err).Is(usecase.ErrCaseThreadModeSlackRequired)
-		gt.Value(t, created).Nil()
+		created, err := uc.CreateCase(ctx, "support", "No slack here", "", nil, nil, false, false, "", "")
+		gt.NoError(t, err).Required()
+		gt.Value(t, created).NotNil().Required()
+		gt.Value(t, created.Status).Equal(types.CaseStatusOpen)
+		// No dedicated channel was provisioned and no thread binding exists.
+		gt.Value(t, created.SlackChannelID).Equal("")
+		gt.Value(t, created.SlackThreadTS).Equal("")
 	})
 
 	t.Run("channel-mode still creates a dedicated channel (no thread routing)", func(t *testing.T) {
