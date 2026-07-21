@@ -82,8 +82,13 @@ type mockSlackService struct {
 	ephemeralChannelID       string
 	ephemeralUserID          string
 	ephemeralText            string
+	updateMessageFn          func(ctx context.Context, channelID string, timestamp string, blocks []goslack.Block, text string) error
 	postedChannelIDs         []string
 	postedTexts              []string
+	updatedChannelIDs        []string
+	updatedTexts             []string
+	threadReplyChannelIDs    []string
+	threadReplyTexts         []string
 }
 
 func (m *mockSlackService) ListJoinedChannels(ctx context.Context, teamID string) ([]slack.Channel, error) {
@@ -192,6 +197,11 @@ func (m *mockSlackService) PostMessage(ctx context.Context, channelID string, bl
 }
 
 func (m *mockSlackService) UpdateMessage(ctx context.Context, channelID string, timestamp string, blocks []goslack.Block, text string) error {
+	m.updatedChannelIDs = append(m.updatedChannelIDs, channelID)
+	m.updatedTexts = append(m.updatedTexts, text)
+	if m.updateMessageFn != nil {
+		return m.updateMessageFn(ctx, channelID, timestamp, blocks, text)
+	}
 	return nil
 }
 
@@ -224,6 +234,8 @@ func (m *mockSlackService) GetConversationHistory(ctx context.Context, channelID
 }
 
 func (m *mockSlackService) PostThreadReply(ctx context.Context, channelID string, threadTS string, text string) (string, error) {
+	m.threadReplyChannelIDs = append(m.threadReplyChannelIDs, channelID)
+	m.threadReplyTexts = append(m.threadReplyTexts, text)
 	return "1234567890.999999", nil
 }
 

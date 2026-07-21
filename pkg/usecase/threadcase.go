@@ -432,18 +432,7 @@ func (uc *AgentUseCase) updateRootCaseSummary(ctx context.Context, wsID string, 
 		return
 	}
 	url := uc.deps.CaseUC.CaseURL(wsID, c.ID)
-	blocks, fallback := buildThreadCaseSummaryBlocks(ctx, c, entry, url)
-	if err := uc.deps.SlackService.UpdateMessage(ctx, channelID, rootTS, blocks, fallback); err != nil {
-		errutil.Handle(ctx, goerr.Wrap(err, "reaction: update root case summary with blocks",
-			goerr.V("channel_id", channelID), goerr.V("root_ts", rootTS)), "reaction: update root case summary with blocks")
-		// Retry with plain text (no blocks) so the placeholder root is not left
-		// stuck; only fall back to a threaded reply if that also fails.
-		if txtErr := uc.deps.SlackService.UpdateMessage(ctx, channelID, rootTS, nil, fallback); txtErr != nil {
-			errutil.Handle(ctx, goerr.Wrap(txtErr, "reaction: update root case summary with text",
-				goerr.V("channel_id", channelID), goerr.V("root_ts", rootTS)), "reaction: update root case summary with text")
-			uc.postThreadReply(ctx, channelID, rootTS, fallback)
-		}
-	}
+	replaceRootWithCaseSummary(ctx, uc.deps.SlackService, entry, c, channelID, rootTS, url)
 }
 
 // postReactionOriginReply posts the reaction-specific origin (who flagged it and
@@ -683,7 +672,10 @@ func (uc *AgentUseCase) newThreadcaseCreateHandler(req caseCreateReq, traceMsg *
 			return uc.postThreadCreateQuestionForm(ctx, ssn, req.uiChannel, req.uiTS, req.caseChannel, req.caseTS, req.reporter, q)
 		},
 		CreateFn: func(ctx context.Context, _ *model.Session, p threadcase.CreatePayload) (*model.Case, error) {
-			return uc.deps.CaseUC.CreateThreadCaseWithFields(ctx, wsID, req.caseChannel, req.caseTS, req.reporter, p.Title, p.Description, p.Fields)
+			// requestKey is empty: the reaction / thread creation path dedups by
+			// the existing message ts (ReactionClaim + GetBySlackThread), not a
+			// request key.
+			return uc.deps.CaseUC.CreateThreadCaseWithFields(ctx, wsID, req.caseChannel, req.caseTS, req.reporter, p.Title, p.Description, p.Fields, "")
 		},
 	}
 }

@@ -453,6 +453,39 @@ func (uc *CaseUseCase) slackChannelPrefixForWorkspace(workspaceID string) string
 // public entry point used by createCase mutation and by the slash-command
 // "submit" flow; both share identical post-persistence behaviour.
 func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue, isPrivate bool, isTest bool, sourceTeamID string, requestKey string) (*model.Case, error) {
+	// Thread-mode workspaces bind each Case to a Slack thread in the monitored
+	// channel and MUST NOT create a dedicated channel. Route creation there
+	// instead of running the channel-mode activation path. This guard lives in
+	// the shared funnel (not any single entry point) so every caller — GraphQL,
+	// slash-command submit, mention-proposal submit — honours the invariant. The
+	// caller's assigneeIDs / isTest / sourceTeamID are intentionally ignored on
+	// the thread path: thread-mode cases carry only title / description / fields
+	// (+ requestKey for dedup), exactly as reaction-created cases do.
+	if uc.workspaceRegistry != nil {
+		// The mode decides whether a dedicated channel is created — a wrong
+		// answer here is exactly the invariant this guard protects — so a
+		// registry lookup failure must fail closed, not silently fall through to
+		// the channel-mode (channel-creating) path.
+		entry, wsErr := uc.workspaceRegistry.Get(workspaceID)
+		if wsErr != nil {
+			return nil, goerr.Wrap(wsErr, "failed to resolve workspace for case creation",
+				goerr.V("workspace_id", workspaceID))
+		}
+		if entry.IsThreadMode() {
+			// isPrivate is a channel-mode-only concept (its sole effect is a
+			// dedicated private channel). The thread path returns before
+			// persistCase, so persistCase's private-case guard does not cover it —
+			// reject here with the same sentinel so the invariant holds on every
+			// create entry point, not just the channel-mode chokepoint.
+			if isPrivate {
+				return nil, goerr.Wrap(ErrCasePrivateThreadModeUnsupported,
+					"private case requested in thread-mode workspace",
+					goerr.V("workspace_id", workspaceID))
+			}
+			return uc.createThreadModeCase(ctx, workspaceID, entry, title, description, fieldValues, requestKey)
+		}
+	}
+
 	created, err := uc.persistCase(ctx, workspaceID, persistCaseInput{
 		Title:       title,
 		Description: description,
@@ -491,6 +524,105 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 	// forget by design.
 	uc.publishLifecycle(ctx, workspaceID, activated, model.CaseLifecycleCreated)
 	return activated, nil
+}
+
+// createThreadModeCase handles case creation for a thread-mode workspace. Unlike
+// the channel-mode path (CreateCase → activateCase), it does NOT create a
+// dedicated Slack channel. It mirrors the reaction cross-channel path: it posts
+// a fresh root message into the workspace's monitored channel, binds a new
+// thread-mode Case to that message via CreateThreadCaseWithFields, then replaces
+// the placeholder root with the shared case summary.
+//
+// Ordering is forced by the identity model: CreateThreadCaseWithFields requires
+// the thread ts as a mandatory identity field, and a web-originated case has no
+// pre-existing message — so the root must be posted first to mint the ts. The
+// summary's web link needs the DB-assigned case id, which only exists after
+// Create — so the root is posted as a placeholder and replaced afterwards.
+//
+// requestKey carries the caller's idempotency key (empty for the web path). It
+// is honoured here — not only in the channel-mode persistCase — because the
+// thread path posts a NEW root every call, so its (channel, threadTS) binding
+// can never dedup a redelivery; requestKey is the only stable key across a
+// Slack redelivery / double-submit of the slash-command or mention-proposal
+// entry points.
+func (uc *CaseUseCase) createThreadModeCase(ctx context.Context, workspaceID string, entry *model.WorkspaceEntry, title, description string, fieldValues map[string]model.FieldValue, requestKey string) (*model.Case, error) {
+	if uc.slackService == nil {
+		return nil, goerr.Wrap(ErrCaseThreadModeSlackRequired, "thread-mode case creation requires Slack service",
+			goerr.V("workspace_id", workspaceID))
+	}
+	dest := entry.SlackMonitorChannelID
+	if dest == "" {
+		return nil, goerr.Wrap(ErrCaseThreadModeSlackRequired, "thread-mode workspace has no monitored channel configured",
+			goerr.V("workspace_id", workspaceID))
+	}
+
+	// Title is required for an OPEN case, matching the channel-mode contract in
+	// persistCase. Enforced here (before any Slack side effect) so the same
+	// public CreateCase entry point does not silently accept an empty-title case
+	// just because the workspace is thread mode.
+	if title == "" {
+		return nil, goerr.New("case title is required")
+	}
+
+	// Idempotency: a re-delivered submission with the same requestKey must return
+	// the already-created case instead of posting a second root. The lookup is
+	// best-effort (mirrors persistCase): a lookup error is reported but does not
+	// block creation.
+	if requestKey != "" {
+		if existing, rkErr := uc.repo.Case().GetByRequestKey(ctx, workspaceID, requestKey); rkErr != nil {
+			errutil.Handle(ctx, rkErr, "thread-mode case: check request key")
+		} else if existing != nil {
+			return existing, nil
+		}
+	}
+
+	// Validate fields BEFORE posting the root. The monitored channel is a shared,
+	// human-watched channel; posting an anchor for a case that then fails
+	// validation and rewriting it to an error note would be noise on every
+	// mistyped submission. Unlike the reaction path (whose only feedback channel
+	// is Slack), the web / slash / mention callers return the error synchronously,
+	// so we gate first and only touch Slack once the input is known good.
+	// CreateThreadCaseWithFields re-validates authoritatively; this is a gate.
+	if _, err := uc.validateCaseWrite(ctx, workspaceID, validateAll, fieldValues, nil); err != nil {
+		return nil, goerr.Wrap(err, "thread-mode case field validation failed",
+			goerr.V("workspace_id", workspaceID))
+	}
+
+	reporterID := ""
+	if tok, err := auth.TokenFromContext(ctx); err == nil {
+		reporterID = tok.Sub
+	}
+
+	// A lightweight placeholder root anchors the case thread; it is replaced in
+	// place with the case summary once the case is committed.
+	rootTS, err := uc.slackService.PostMessage(ctx, dest, nil, i18n.T(ctx, i18n.MsgReactionCasePlaceholder))
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to post thread-mode case root", goerr.V("dest_channel", dest))
+	}
+
+	created, err := uc.CreateThreadCaseWithFields(ctx, workspaceID, dest, rootTS, reporterID, title, description, fieldValues, requestKey)
+	if err != nil {
+		// The field gate above already ran, so reaching here means an
+		// infrastructure failure (repo write). Replace the lingering placeholder
+		// with an honest failure note so the monitored channel does not imply work
+		// is still ongoing, then surface the error. If even that update fails,
+		// fall back to a threaded reply so the note is never lost (the placeholder
+		// staying stuck is the worst outcome).
+		failNote := "⚠️ " + i18n.T(ctx, i18n.MsgThreadCaseCreateFallback)
+		if uErr := uc.slackService.UpdateMessage(ctx, dest, rootTS, nil, failNote); uErr != nil {
+			errutil.Handle(ctx, goerr.Wrap(uErr, "update thread-mode case root to fallback",
+				goerr.V("dest_channel", dest), goerr.V("root_ts", rootTS)), "update thread-mode case root to fallback")
+			if _, rErr := uc.slackService.PostThreadReply(ctx, dest, rootTS, failNote); rErr != nil {
+				errutil.Handle(ctx, goerr.Wrap(rErr, "post thread-mode case fallback reply",
+					goerr.V("dest_channel", dest), goerr.V("root_ts", rootTS)), "post thread-mode case fallback reply")
+			}
+		}
+		return nil, goerr.Wrap(err, "failed to create thread-mode case",
+			goerr.V("dest_channel", dest), goerr.V("root_ts", rootTS))
+	}
+
+	replaceRootWithCaseSummary(ctx, uc.slackService, entry, created, dest, rootTS, uc.CaseURL(workspaceID, created.ID))
+	return created, nil
 }
 
 // CreateDraft persists a case in status=DRAFT — i.e. an "in-progress" entry
@@ -1473,7 +1605,12 @@ func (uc *CaseUseCase) CreateThreadCase(ctx context.Context, workspaceID, channe
 // thread-mode initialization (create) agent — can be told everything that is
 // wrong in one shot and re-emit. Unlike CreateThreadCase, the case is only
 // created once it satisfies the schema; there is no placeholder pass.
-func (uc *CaseUseCase) CreateThreadCaseWithFields(ctx context.Context, workspaceID, channelID, threadTS, reporterID, title, description string, fieldValues map[string]model.FieldValue) (*model.Case, error) {
+//
+// requestKey is stored on the case for idempotency (empty for the reaction /
+// Slack-thread creation paths, which dedup by their existing message ts). Web /
+// slash / mention creation passes it so a redelivered submission can be deduped
+// via GetByRequestKey before a second thread root is posted.
+func (uc *CaseUseCase) CreateThreadCaseWithFields(ctx context.Context, workspaceID, channelID, threadTS, reporterID, title, description string, fieldValues map[string]model.FieldValue, requestKey string) (*model.Case, error) {
 	if channelID == "" || threadTS == "" {
 		return nil, goerr.New("channelID and threadTS are required for thread case")
 	}
@@ -1510,6 +1647,7 @@ func (uc *CaseUseCase) CreateThreadCaseWithFields(ctx context.Context, workspace
 		SlackThreadTS:  threadTS,
 		BoardStatus:    initialStatus,
 		FieldValues:    fieldValues,
+		RequestKey:     requestKey,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}

@@ -69,6 +69,13 @@ var (
 	// wiring that withholds the action tools for thread-mode workspaces.
 	ErrCaseThreadModeNoActions = errors.New("thread-mode case cannot have actions")
 
+	// ErrCaseThreadModeSlackRequired is returned by CreateCase when a thread-mode
+	// workspace cannot bind a new Case to a Slack thread because the Slack service
+	// is not wired or the workspace has no monitored channel configured. It is a
+	// deployment / configuration fault (not user input), so the GraphQL layer
+	// leaves it unclassified and maps it to a 500.
+	ErrCaseThreadModeSlackRequired = errors.New("thread-mode case creation requires Slack")
+
 	// Action Slack-post state errors
 	ErrSlackMessageAlreadyPosted = errors.New("action already has a Slack message")
 	ErrCaseHasNoSlackChannel     = errors.New("parent case has no Slack channel")
