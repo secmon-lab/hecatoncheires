@@ -235,6 +235,7 @@ The application is configured via CLI flags or environment variables:
 - `HECATONCHEIRES_MCP_ENV` - Allow-list of environment variable names exposed to the Rego policy as `input.env`.
 - Logger configuration (format, level, output destination)
 - Sentry (optional) - `HECATONCHEIRES_SENTRY_DSN` enables Sentry error reporting via `errutil.Handle`. Companion vars: `HECATONCHEIRES_SENTRY_ENV`, `HECATONCHEIRES_SENTRY_RELEASE`. See `docs/operations.md` § Observability (Sentry).
+- BigQuery export - the `export` subcommand full-refreshes each workspace's data into BigQuery (Storage Write API + `bqs` schema evolution). No new flags/env vars; the destination and workspace→dataset mapping live in the `[export]` section of the `--global-config` file. See `docs/export.md`.
 
 ## Testing
 

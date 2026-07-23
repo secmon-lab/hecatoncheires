@@ -267,3 +267,125 @@ members = ["risk", "legal"]
 	gt.Bool(t, slices.Contains(audit.MemberIDs, "risk")).True()
 	gt.Bool(t, slices.Contains(audit.MemberIDs, "legal")).True()
 }
+
+const exportConfigTOML = `
+[export]
+include_private = true
+
+[export.bigquery]
+project = "my-project"
+location = "asia-northeast1"
+
+[[export.bigquery.workspace]]
+id = "risk"
+dataset = "hecato_risk"
+
+[[export.bigquery.workspace]]
+id = "incident"
+dataset = "hecato_incident"
+include_private = false
+`
+
+func TestLoadExportConfig_Basic(t *testing.T) {
+	path := writeGlobalConfig(t, "export.toml", exportConfigTOML)
+
+	section, err := config.LoadExportConfig([]string{path})
+	gt.NoError(t, err).Required()
+	gt.Value(t, section).NotNil().Required()
+	gt.Bool(t, section.IncludePrivate).True()
+	gt.Value(t, section.BigQuery).NotNil().Required()
+	gt.Value(t, section.BigQuery.Project).Equal("my-project")
+	gt.Value(t, section.BigQuery.Location).Equal("asia-northeast1")
+	gt.Array(t, section.BigQuery.Workspaces).Length(2)
+	gt.Value(t, section.BigQuery.Workspaces[0].ID).Equal("risk")
+	gt.Value(t, section.BigQuery.Workspaces[0].Dataset).Equal("hecato_risk")
+
+	// Per-workspace resolution: "risk" inherits the section default (true);
+	// "incident" overrides to false.
+	gt.Bool(t, section.IncludePrivateFor(section.BigQuery.Workspaces[0])).True()
+	gt.Bool(t, section.IncludePrivateFor(section.BigQuery.Workspaces[1])).False()
+}
+
+func TestExportSection_IncludePrivateFor_DefaultsToExcluded(t *testing.T) {
+	// With no include_private set anywhere, the effective value is false — private
+	// data is NOT exported by default.
+	s := &config.ExportSection{BigQuery: &config.ExportBigQuerySection{
+		Project:    "p",
+		Workspaces: []config.ExportWorkspaceMapping{{ID: "risk", Dataset: "ds"}},
+	}}
+	gt.Bool(t, s.IncludePrivateFor(s.BigQuery.Workspaces[0])).False()
+}
+
+func TestLoadExportConfig_None(t *testing.T) {
+	path := writeGlobalConfig(t, "noexport.toml", "[[workspace_group]]\nid = \"g\"\n")
+	section, err := config.LoadExportConfig([]string{path})
+	gt.NoError(t, err).Required()
+	gt.Value(t, section).Nil()
+}
+
+func TestLoadExportConfig_DuplicateAcrossFiles(t *testing.T) {
+	dir := t.TempDir()
+	gt.NoError(t, os.WriteFile(filepath.Join(dir, "a.toml"), []byte(exportConfigTOML), 0600)).Required()
+	gt.NoError(t, os.WriteFile(filepath.Join(dir, "b.toml"), []byte(exportConfigTOML), 0600)).Required()
+
+	_, err := config.LoadExportConfig([]string{dir})
+	gt.Error(t, err).Is(config.ErrDuplicateExportConfig)
+}
+
+func TestExportSection_Validate(t *testing.T) {
+	reg := wsRegistry("risk", "incident")
+
+	t.Run("valid", func(t *testing.T) {
+		section, err := config.LoadExportConfig([]string{writeGlobalConfig(t, "e.toml", exportConfigTOML)})
+		gt.NoError(t, err).Required()
+		gt.NoError(t, section.Validate(reg))
+	})
+
+	t.Run("missing project", func(t *testing.T) {
+		s := &config.ExportSection{BigQuery: &config.ExportBigQuerySection{}}
+		gt.Error(t, s.Validate(reg)).Is(config.ErrInvalidExportConfig)
+	})
+
+	t.Run("missing bigquery", func(t *testing.T) {
+		s := &config.ExportSection{}
+		gt.Error(t, s.Validate(reg)).Is(config.ErrInvalidExportConfig)
+	})
+
+	t.Run("unknown workspace", func(t *testing.T) {
+		s := &config.ExportSection{BigQuery: &config.ExportBigQuerySection{
+			Project:    "p",
+			Workspaces: []config.ExportWorkspaceMapping{{ID: "nope", Dataset: "ds"}},
+		}}
+		gt.Error(t, s.Validate(reg)).Is(config.ErrUnknownExportWorkspace)
+	})
+
+	t.Run("invalid dataset name (hyphen)", func(t *testing.T) {
+		s := &config.ExportSection{BigQuery: &config.ExportBigQuerySection{
+			Project:    "p",
+			Workspaces: []config.ExportWorkspaceMapping{{ID: "risk", Dataset: "bad-name"}},
+		}}
+		gt.Error(t, s.Validate(reg)).Is(config.ErrInvalidExportDataset)
+	})
+
+	t.Run("duplicate workspace id", func(t *testing.T) {
+		s := &config.ExportSection{BigQuery: &config.ExportBigQuerySection{
+			Project: "p",
+			Workspaces: []config.ExportWorkspaceMapping{
+				{ID: "risk", Dataset: "ds1"},
+				{ID: "risk", Dataset: "ds2"},
+			},
+		}}
+		gt.Error(t, s.Validate(reg)).Is(config.ErrDuplicateExportWorkspace)
+	})
+
+	t.Run("duplicate dataset", func(t *testing.T) {
+		s := &config.ExportSection{BigQuery: &config.ExportBigQuerySection{
+			Project: "p",
+			Workspaces: []config.ExportWorkspaceMapping{
+				{ID: "risk", Dataset: "same"},
+				{ID: "incident", Dataset: "same"},
+			},
+		}}
+		gt.Error(t, s.Validate(reg)).Is(config.ErrDuplicateExportWorkspace)
+	})
+}
