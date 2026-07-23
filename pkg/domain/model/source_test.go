@@ -1,7 +1,6 @@
 package model_test
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/m-mizutani/gt"
@@ -92,24 +91,12 @@ func TestParseGitHubRepo(t *testing.T) {
 			t.Parallel()
 			owner, repo, err := model.ParseGitHubRepo(tt.input)
 			if tt.wantErr {
-				if err == nil {
-					t.Errorf("ParseGitHubRepo(%q) expected error, got owner=%q repo=%q", tt.input, owner, repo)
-				}
-				if !errors.Is(err, model.ErrInvalidGitHubRepo) {
-					t.Errorf("ParseGitHubRepo(%q) expected ErrInvalidGitHubRepo, got %v", tt.input, err)
-				}
+				gt.Error(t, err).Is(model.ErrInvalidGitHubRepo)
 				return
 			}
-			if err != nil {
-				t.Errorf("ParseGitHubRepo(%q) unexpected error: %v", tt.input, err)
-				return
-			}
-			if owner != tt.wantOwner {
-				t.Errorf("ParseGitHubRepo(%q) owner = %q, want %q", tt.input, owner, tt.wantOwner)
-			}
-			if repo != tt.wantRepo {
-				t.Errorf("ParseGitHubRepo(%q) repo = %q, want %q", tt.input, repo, tt.wantRepo)
-			}
+			gt.NoError(t, err).Required()
+			gt.Value(t, owner).Equal(tt.wantOwner)
+			gt.Value(t, repo).Equal(tt.wantRepo)
 		})
 	}
 }
@@ -181,7 +168,40 @@ func TestParseNotionID(t *testing.T) {
 			input: "https://www.notion.so/mztn/2e6e628816658068b14bf84b39ad0762?v=2e6e6288166580199635000c717d60e7&source=copy_link",
 			want:  "2e6e6288-1665-8068-b14b-f84b39ad0762",
 		},
+		{
+			name:  "app.notion.com URL with /p path and title prefix",
+			input: "https://app.notion.com/p/myworkspace/My-Database-a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+			want:  wantUUID,
+		},
+		{
+			name:  "URL with uppercase host and scheme",
+			input: "HTTPS://WWW.NOTION.SO/workspace/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+			want:  wantUUID,
+		},
+		{
+			name:  "URL with uppercase hex ID in path",
+			input: "https://www.notion.so/workspace/A1B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6",
+			want:  wantUUID,
+		},
 		// Error cases
+		// Host-spoofing inputs the exact-match allow-list must reject. These
+		// pin the security contract: a future switch to suffix/substring
+		// matching would regress here.
+		{
+			name:    "subdomain of notion host",
+			input:   "https://evil.app.notion.com/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+			wantErr: true,
+		},
+		{
+			name:    "notion host as prefix of attacker domain",
+			input:   "https://app.notion.com.evil.example/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+			wantErr: true,
+		},
+		{
+			name:    "notion host in userinfo before attacker host",
+			input:   "https://app.notion.com@evil.example/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+			wantErr: true,
+		},
 		{
 			name:    "empty string",
 			input:   "",
@@ -224,21 +244,11 @@ func TestParseNotionID(t *testing.T) {
 			t.Parallel()
 			got, err := model.ParseNotionID(tt.input)
 			if tt.wantErr {
-				if err == nil {
-					t.Errorf("ParseNotionID(%q) expected error, got %q", tt.input, got)
-				}
-				if !errors.Is(err, model.ErrInvalidNotionID) {
-					t.Errorf("ParseNotionID(%q) expected ErrInvalidNotionID, got %v", tt.input, err)
-				}
+				gt.Error(t, err).Is(model.ErrInvalidNotionID)
 				return
 			}
-			if err != nil {
-				t.Errorf("ParseNotionID(%q) unexpected error: %v", tt.input, err)
-				return
-			}
-			if got != tt.want {
-				t.Errorf("ParseNotionID(%q) = %q, want %q", tt.input, got, tt.want)
-			}
+			gt.NoError(t, err).Required()
+			gt.Value(t, got).Equal(tt.want)
 		})
 	}
 }

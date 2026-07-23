@@ -88,6 +88,16 @@ type NotionPageConfig struct {
 // hexPattern matches 32 hex characters (a Notion database ID without dashes)
 var hexPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
+// notionHosts is the allow-list of hosts recognized as Notion web URLs.
+// "notion.so" / "www.notion.so" are the classic hosts; "app.notion.com"
+// is the newer host used by shared / copied page links (e.g.
+// "https://app.notion.com/p/workspace/Title-<id>").
+var notionHosts = map[string]struct{}{
+	"notion.so":      {},
+	"www.notion.so":  {},
+	"app.notion.com": {},
+}
+
 // ParseNotionID extracts a Notion ID from either a raw ID or a Notion URL.
 // The returned ID is always in UUID format (8-4-4-4-12) as required by the Notion API.
 // Accepted formats:
@@ -95,6 +105,7 @@ var hexPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 //   - UUID format: "12345678-90ab-cdef-1234-567890abcdef"
 //   - Notion URL: "https://www.notion.so/workspace/abc123def456...?v=..."
 //   - Notion URL: "https://www.notion.so/abc123def456..."
+//   - Notion URL: "https://app.notion.com/p/workspace/Title-abc123def456..."
 func ParseNotionID(input string) (string, error) {
 	input = strings.TrimSpace(input)
 	if input == "" {
@@ -104,8 +115,10 @@ func ParseNotionID(input string) (string, error) {
 	var hex string
 	var err error
 
-	// If the input looks like a URL, parse it
-	if strings.HasPrefix(input, "http://") || strings.HasPrefix(input, "https://") {
+	// If the input looks like a URL, parse it. The scheme is matched
+	// case-insensitively since URL schemes are not case-sensitive.
+	lower := strings.ToLower(input)
+	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
 		hex, err = parseNotionURL(input)
 	} else {
 		// Try as a raw ID (with or without dashes)
@@ -125,8 +138,9 @@ func parseNotionURL(raw string) (string, error) {
 		return "", ErrInvalidNotionID
 	}
 
-	host := u.Hostname()
-	if host != "www.notion.so" && host != "notion.so" {
+	// Hostnames are case-insensitive; normalize before the allow-list check.
+	host := strings.ToLower(u.Hostname())
+	if _, ok := notionHosts[host]; !ok {
 		return "", ErrInvalidNotionID
 	}
 
@@ -141,8 +155,9 @@ func parseNotionURL(raw string) (string, error) {
 	lastSegment := segments[len(segments)-1]
 
 	// The ID may be appended after a title with a hyphen separator.
-	// Extract the last 32 hex characters from the segment.
-	clean := strings.ReplaceAll(lastSegment, "-", "")
+	// Extract the last 32 hex characters from the segment. Hex IDs are
+	// case-insensitive, so normalize to lower case (matching the raw-ID path).
+	clean := strings.ToLower(strings.ReplaceAll(lastSegment, "-", ""))
 	if len(clean) >= 32 {
 		candidate := clean[len(clean)-32:]
 		if hexPattern.MatchString(candidate) {

@@ -74,7 +74,57 @@ describe('parseNotionID', () => {
     ).toBe('2e6e6288-1665-8068-b14b-f84b39ad0762')
   })
 
+  it('extracts ID from app.notion.com URL with /p path and title prefix', () => {
+    expect(
+      parseNotionID(
+        'https://app.notion.com/p/myworkspace/My-Database-a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6',
+      ),
+    ).toBe(wantUUID)
+  })
+
+  it('normalizes uppercase host and scheme', () => {
+    expect(
+      parseNotionID(
+        'HTTPS://WWW.NOTION.SO/workspace/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6',
+      ),
+    ).toBe(wantUUID)
+  })
+
+  it('normalizes uppercase hex ID in URL path', () => {
+    expect(
+      parseNotionID(
+        'https://www.notion.so/workspace/A1B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6',
+      ),
+    ).toBe(wantUUID)
+  })
+
   // Error cases
+  // Host-spoofing inputs the exact-match allow-list must reject. These pin
+  // the security contract: a future switch to suffix/substring matching
+  // would regress here.
+  it('returns null for a subdomain of a notion host', () => {
+    expect(
+      parseNotionID(
+        'https://evil.app.notion.com/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6',
+      ),
+    ).toBeNull()
+  })
+
+  it('returns null when notion host is a prefix of an attacker domain', () => {
+    expect(
+      parseNotionID(
+        'https://app.notion.com.evil.example/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6',
+      ),
+    ).toBeNull()
+  })
+
+  it('returns null when notion host is only in the userinfo', () => {
+    expect(
+      parseNotionID(
+        'https://app.notion.com@evil.example/a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6',
+      ),
+    ).toBeNull()
+  })
   it('returns null for empty string', () => {
     expect(parseNotionID('')).toBeNull()
   })

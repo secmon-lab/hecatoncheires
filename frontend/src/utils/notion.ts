@@ -1,5 +1,11 @@
 const hexPattern = /^[0-9a-f]{32}$/
 
+// notionHosts is the allow-list of hosts recognized as Notion web URLs.
+// "notion.so" / "www.notion.so" are the classic hosts; "app.notion.com"
+// is the newer host used by shared / copied page links.
+// Kept in sync with pkg/domain/model/source.go (notionHosts).
+const notionHosts = new Set(['notion.so', 'www.notion.so', 'app.notion.com'])
+
 /**
  * Extracts a Notion database ID from either a raw ID or a Notion URL.
  * Returns the ID in UUID format (8-4-4-4-12) as required by the Notion API.
@@ -8,6 +14,7 @@ const hexPattern = /^[0-9a-f]{32}$/
  * - Raw ID: "abc123def456789012345678901234567"
  * - UUID format: "12345678-90ab-cdef-1234-567890abcdef"
  * - Notion URL: "https://www.notion.so/workspace/abc123def456...?v=..."
+ * - Notion URL: "https://app.notion.com/p/workspace/Title-abc123def456..."
  */
 export function parseNotionID(input: string): string | null {
   const trimmed = input.trim()
@@ -15,7 +22,10 @@ export function parseNotionID(input: string): string | null {
 
   let hex: string | null
 
-  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+  // The scheme is matched case-insensitively (URL schemes are not
+  // case-sensitive), consistent with the backend parser.
+  const lower = trimmed.toLowerCase()
+  if (lower.startsWith('http://') || lower.startsWith('https://')) {
     hex = parseNotionURL(trimmed)
   } else {
     hex = normalizeNotionID(trimmed)
@@ -34,8 +44,9 @@ function parseNotionURL(raw: string): string | null {
     return null
   }
 
-  const host = url.hostname
-  if (host !== 'www.notion.so' && host !== 'notion.so') {
+  // Hostnames are case-insensitive; normalize before the allow-list check.
+  const host = url.hostname.toLowerCase()
+  if (!notionHosts.has(host)) {
     return null
   }
 
@@ -45,7 +56,9 @@ function parseNotionURL(raw: string): string | null {
 
   const lastSegment = segments[segments.length - 1]
 
-  const clean = lastSegment.replace(/-/g, '')
+  // Hex IDs are case-insensitive, so normalize to lower case (matching the
+  // raw-ID path).
+  const clean = lastSegment.replace(/-/g, '').toLowerCase()
   if (clean.length >= 32) {
     const candidate = clean.slice(-32)
     if (hexPattern.test(candidate)) {
