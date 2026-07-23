@@ -107,6 +107,24 @@ var (
 	// --config (1 file = 1 workspace); the global config is for deployment-wide
 	// settings only, so mixing the two is rejected loudly rather than ignored.
 	ErrGlobalConfigContainsWorkspace = goerr.New("global config file must not contain a [workspace] section")
+
+	// --- Global config ([export]) ---
+
+	// ErrInvalidExportConfig is returned when the [export] section is malformed,
+	// e.g. a missing [export.bigquery] project.
+	ErrInvalidExportConfig = goerr.New("invalid export configuration")
+	// ErrInvalidExportDataset is returned when an [[export.bigquery.workspace]]
+	// dataset name is not a valid BigQuery dataset ID (BigQuery forbids hyphens).
+	ErrInvalidExportDataset = goerr.New("invalid export dataset name")
+	// ErrDuplicateExportWorkspace is returned when the same workspace id — or the
+	// same dataset name — appears more than once in the export config.
+	ErrDuplicateExportWorkspace = goerr.New("duplicate export workspace mapping")
+	// ErrUnknownExportWorkspace is returned when an export workspace mapping
+	// references a workspace id not defined across the loaded workspace configs.
+	ErrUnknownExportWorkspace = goerr.New("export workspace mapping references an unknown workspace")
+	// ErrDuplicateExportConfig is returned when more than one global config file
+	// defines an [export] section.
+	ErrDuplicateExportConfig = goerr.New("duplicate [export] section across global config files")
 )
 
 // Context keys for error values
@@ -123,4 +141,5 @@ const (
 	WorkspaceEmojiLen   = "workspace_emoji_len"
 	WorkspaceGroupIDKey = "workspace_group_id"
 	GroupMemberKey      = "group_member"
+	ExportDatasetKey    = "dataset"
 )

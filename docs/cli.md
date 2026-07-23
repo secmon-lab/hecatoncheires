@@ -15,6 +15,7 @@ Subcommands:
 - [`diagnosis`](#diagnosis) — one-shot data inspection / repair jobs.
 - [`tick`](#tick) — run a single sweep over scheduled Agent Jobs.
 - [`eval`](./eval.md) — run offline scenario-based evaluation of LLM workflows (see [eval.md](./eval.md)).
+- [`export`](./export.md) — full-refresh the current workspace data into BigQuery (see [export.md](./export.md)).
 
 For TOML configuration topics (workspace definitions, field schemas, the `[assist]` section, etc.), see [configuration.md](./configuration.md).
 
@@ -264,9 +265,29 @@ hecatoncheires serve \
 
 ---
 
+## `export`
+
+The `export` command full-refreshes the current data of every configured
+workspace into BigQuery — one dataset per workspace, one table per entity
+(`cases` / `actions` / `memos` / `knowledge` / `tags`). It reuses the repository
+and `--config` / `--global-config` flags (no new flags); the BigQuery
+destination and the workspace→dataset mapping live in the `[export]` section of
+the global config. See [export.md](./export.md) for the configuration, exported
+schema, full-refresh semantics, and required IAM.
+
+```bash
+hecatoncheires export \
+  --global-config ./global.toml \
+  --config ./workspaces/ \
+  --firestore-project-id YOUR_PROJECT_ID
+```
+
+---
+
 ## See Also
 
 - [configuration.md](./configuration.md) — TOML configuration (workspaces, field schemas, the `[assist]` section).
+- [export.md](./export.md) — BigQuery export: `[export]` config, exported schema, full-refresh semantics, IAM.
 - [deployment.md](./deployment.md) — deployment topology and runtime requirements.
 - [operations.md](./operations.md) — operational runbooks for `migrate`, `diagnosis`, and `tick`, plus Sentry / observability.
 - [integrations.md](./integrations.md) — GitHub and Notion source integrations.

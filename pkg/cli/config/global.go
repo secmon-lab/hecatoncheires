@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/m-mizutani/goerr/v2"
@@ -11,6 +12,17 @@ import (
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/logging"
 	"github.com/urfave/cli/v3"
 )
+
+// datasetIDPattern validates a BigQuery dataset ID's character set: letters,
+// numbers, and underscores only. Hyphens are NOT allowed by BigQuery, so a
+// workspace ID (which may contain hyphens) cannot be used directly as a dataset
+// name — the [[export.bigquery.workspace]] mapping supplies an explicit name.
+// The length bound (maxDatasetIDLength) is checked separately because RE2 caps
+// bounded repetition below BigQuery's limit.
+var datasetIDPattern = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+
+// maxDatasetIDLength is BigQuery's maximum dataset ID length.
+const maxDatasetIDLength = 1024
 
 // GlobalConfig represents a deployment-wide configuration file supplied via
 // --global-config. It is distinct from the per-workspace files under --config
@@ -24,6 +36,7 @@ type GlobalConfig struct {
 	// detection; an empty [workspace] table still unmarshals to a non-nil map.
 	Workspace       map[string]any          `toml:"workspace"`
 	WorkspaceGroups []WorkspaceGroupSection `toml:"workspace_group"`
+	Export          *ExportSection          `toml:"export"`
 }
 
 // WorkspaceGroupSection represents a single [[workspace_group]] table.
@@ -206,4 +219,159 @@ func (a *AppConfig) ConfigureGroups(c *cli.Command, ws *model.WorkspaceRegistry)
 	}
 
 	return registry, nil
+}
+
+// ExportSection represents the [export] section of a global config file: the
+// deployment-wide configuration for the `export` subcommand. Nil when no global
+// config declares [export] (the feature is then unavailable).
+type ExportSection struct {
+	// IncludePrivate is the default for every workspace: when true, private Cases
+	// (and their Actions / Memos) are exported too. Defaults to false — private
+	// data is NOT exported unless explicitly opted in. A per-workspace mapping may
+	// override it.
+	IncludePrivate bool `toml:"include_private"`
+	// BigQuery is the BigQuery sink configuration. Required (the only sink today).
+	BigQuery *ExportBigQuerySection `toml:"bigquery"`
+}
+
+// IncludePrivateFor returns the effective include_private for a mapping: the
+// mapping's own value when set, otherwise the section-level default.
+func (s *ExportSection) IncludePrivateFor(m ExportWorkspaceMapping) bool {
+	if m.IncludePrivate != nil {
+		return *m.IncludePrivate
+	}
+	return s.IncludePrivate
+}
+
+// ExportBigQuerySection configures the BigQuery export sink.
+type ExportBigQuerySection struct {
+	// Project is the destination GCP project ID. Required.
+	Project string `toml:"project"`
+	// Location is the BigQuery location (e.g. "US", "asia-northeast1") used when a
+	// dataset must be created. Optional.
+	Location string `toml:"location"`
+	// Workspaces maps each exported workspace to its destination dataset. A
+	// workspace not listed here is not exported.
+	Workspaces []ExportWorkspaceMapping `toml:"workspace"`
+}
+
+// ExportWorkspaceMapping maps one workspace to a BigQuery dataset.
+type ExportWorkspaceMapping struct {
+	// ID is the workspace ID (must exist in the workspace registry).
+	ID string `toml:"id"`
+	// Dataset is the destination BigQuery dataset name. BigQuery dataset names
+	// forbid hyphens, so this is given explicitly rather than derived from ID.
+	Dataset string `toml:"dataset"`
+	// IncludePrivate overrides the section-level default for this workspace when
+	// set (non-nil). Nil means "inherit [export].include_private".
+	IncludePrivate *bool `toml:"include_private"`
+}
+
+// Validate checks the export section against the workspace registry: BigQuery
+// project presence, dataset-name validity, uniqueness of workspace ids and
+// dataset names, and existence of every referenced workspace.
+func (s *ExportSection) Validate(ws *model.WorkspaceRegistry) error {
+	if s.BigQuery == nil {
+		return goerr.Wrap(ErrInvalidExportConfig, "[export.bigquery] section is required")
+	}
+	if s.BigQuery.Project == "" {
+		return goerr.Wrap(ErrInvalidExportConfig, "[export.bigquery] project is required")
+	}
+	seenID := make(map[string]bool, len(s.BigQuery.Workspaces))
+	seenDataset := make(map[string]bool, len(s.BigQuery.Workspaces))
+	for _, m := range s.BigQuery.Workspaces {
+		if m.ID == "" {
+			return goerr.Wrap(ErrInvalidExportConfig, "[[export.bigquery.workspace]] id is required")
+		}
+		if !datasetIDPattern.MatchString(m.Dataset) || len(m.Dataset) > maxDatasetIDLength {
+			return goerr.Wrap(ErrInvalidExportDataset,
+				"dataset name must be letters/numbers/underscores only, at most 1024 chars (BigQuery forbids hyphens)",
+				goerr.V(WorkspaceIDKey, m.ID), goerr.V(ExportDatasetKey, m.Dataset))
+		}
+		if seenID[m.ID] {
+			return goerr.Wrap(ErrDuplicateExportWorkspace, "duplicate export workspace id",
+				goerr.V(WorkspaceIDKey, m.ID))
+		}
+		if seenDataset[m.Dataset] {
+			return goerr.Wrap(ErrDuplicateExportWorkspace, "duplicate export dataset name",
+				goerr.V(ExportDatasetKey, m.Dataset))
+		}
+		seenID[m.ID] = true
+		seenDataset[m.Dataset] = true
+		if _, err := ws.Get(m.ID); err != nil {
+			return goerr.Wrap(ErrUnknownExportWorkspace,
+				"export workspace mapping references an unknown workspace",
+				goerr.V(WorkspaceIDKey, m.ID))
+		}
+	}
+	return nil
+}
+
+// LoadExportConfig walks the given file/dir paths, parses each .toml as a
+// GlobalConfig, and returns the single [export] section found. It returns (nil,
+// nil) when no file declares [export], and an error when more than one does (the
+// export config must have a single home). A stray [workspace] section is
+// rejected, mirroring LoadWorkspaceGroups. Structural validation against the
+// workspace registry is done by ConfigureExport, not here.
+func LoadExportConfig(paths []string) (*ExportSection, error) {
+	tomlFiles, err := collectTOMLFiles(paths)
+	if err != nil {
+		return nil, err
+	}
+
+	var found *ExportSection
+	var foundFile string
+	for _, f := range tomlFiles {
+		// #nosec G304 - path is expected to be provided by CLI argument
+		data, err := os.ReadFile(f)
+		if err != nil {
+			return nil, goerr.Wrap(err, "failed to read global config file", goerr.V(ConfigPathKey, f))
+		}
+
+		var gc GlobalConfig
+		if err := toml.Unmarshal(data, &gc); err != nil {
+			return nil, goerr.Wrap(err, "failed to parse global config TOML", goerr.V(ConfigPathKey, f))
+		}
+		if gc.Workspace != nil {
+			return nil, goerr.Wrap(ErrGlobalConfigContainsWorkspace,
+				"global config file must not contain a [workspace] section",
+				goerr.V(ConfigPathKey, f))
+		}
+		if gc.Export == nil {
+			continue
+		}
+		if found != nil {
+			return nil, goerr.Wrap(ErrDuplicateExportConfig,
+				"more than one global config file defines [export]",
+				goerr.V("first_file", foundFile), goerr.V("second_file", f))
+		}
+		found = gc.Export
+		foundFile = f
+	}
+
+	return found, nil
+}
+
+// ConfigureExport reads the --global-config flag, loads the [export] section,
+// and validates it against the workspace registry. It returns (nil, nil) when no
+// [export] is configured (the export subcommand then errors out with a clear
+// message). It mirrors ConfigureGroups so callers that do not export are
+// untouched.
+func (a *AppConfig) ConfigureExport(c *cli.Command, ws *model.WorkspaceRegistry) (*ExportSection, error) {
+	paths := c.StringSlice("global-config")
+	if len(paths) == 0 {
+		return nil, nil
+	}
+
+	section, err := LoadExportConfig(paths)
+	if err != nil {
+		return nil, err
+	}
+	if section == nil {
+		return nil, nil
+	}
+	if err := section.Validate(ws); err != nil {
+		return nil, err
+	}
+	return section, nil
 }
