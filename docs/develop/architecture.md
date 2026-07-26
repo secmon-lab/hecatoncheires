@@ -171,6 +171,17 @@ so every entry point (GraphQL, Slack, agent tools, eval) is covered uniformly:
   section. Each body is rune-truncated to `recentMessageTruncateRunes` = 140 with
   the original character count annotated when elided. Channel-mode Jobs skip this
   read entirely (the section is absent from their prompt).
+- **OPEN-case creation is mode-decided by one funnel.** Both `CreateCase` and
+  `SubmitDraft` (draft promotion) route through the shared `openInWorkspaceMode`
+  funnel, so the mode decision is made once and every creation entry point stays
+  consistent. In a thread-mode workspace both paths bind the new case to a
+  freshly-posted **monitored-channel thread** and never provision a dedicated
+  channel — draft submission included. Thread-mode activation **fails closed**
+  (`ErrThreadModeSlackUnconfigured`) when the deployment has no Slack service or
+  the workspace has no monitor channel, rather than silently falling back to a
+  plain create; and a private case in thread mode is rejected
+  (`ErrCasePrivateThreadModeUnsupported`), which on the `SubmitDraft` path rolls
+  the draft back to DRAFT with no Slack binding.
 
 ### State persistence across turns
 

@@ -58,6 +58,11 @@ func ErrorCode(err error) string {
 		return ErrCodeInvalidStatusTransition
 	case errors.Is(err, usecase.ErrFieldValidationFailed):
 		return ErrCodeFieldValidationFailed
+	// A thread-mode private rejection is joined with ErrActivationFailed on the
+	// SubmitDraft path (errors.Join). It is a user-fixable input error, so it must
+	// classify as BAD_USER_INPUT ahead of the generic ACTIVATION_FAILED below.
+	case errors.Is(err, usecase.ErrCasePrivateThreadModeUnsupported):
+		return ErrCodeBadUserInput
 	case errors.Is(err, usecase.ErrActivationFailed):
 		return ErrCodeActivationFailed
 
@@ -70,8 +75,7 @@ func ErrorCode(err error) string {
 		errors.Is(err, model.ErrInvalidGitHubRepo),
 		errors.Is(err, usecase.ErrUnknownUser),
 		errors.Is(err, usecase.ErrInvalidArgument),
-		errors.Is(err, usecase.ErrCaseThreadModeNoActions),
-		errors.Is(err, usecase.ErrCasePrivateThreadModeUnsupported):
+		errors.Is(err, usecase.ErrCaseThreadModeNoActions):
 		return ErrCodeBadUserInput
 	case errors.Is(err, usecase.ErrCaseNotFound),
 		errors.Is(err, usecase.ErrActionNotFound),

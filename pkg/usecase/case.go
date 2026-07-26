@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"sort"
@@ -448,54 +449,157 @@ func (uc *CaseUseCase) slackChannelPrefixForWorkspace(workspaceID string) string
 	return entry.SlackChannelPrefix
 }
 
-// CreateCase persists a brand-new case in status=OPEN and runs the full
-// activation side effects (Slack channel, invites, welcome, etc.). It is the
-// public entry point used by createCase mutation and by the slash-command
-// "submit" flow; both share identical post-persistence behaviour.
-func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue, isPrivate bool, isTest bool, sourceTeamID string, requestKey string) (*model.Case, error) {
-	// Thread-mode workspaces bind each Case to a Slack thread in the monitored
-	// channel and MUST NOT create a dedicated channel. Route creation there
-	// instead of running the channel-mode activation path. This guard lives in
-	// the shared funnel (not any single entry point) so every caller — GraphQL,
-	// slash-command submit, mention-proposal submit — honours the invariant. The
-	// caller's assigneeIDs / isTest / sourceTeamID are intentionally ignored on
-	// the thread path: thread-mode cases carry only title / description / fields
-	// (+ requestKey for dedup), exactly as reaction-created cases do.
-	if uc.workspaceRegistry != nil {
-		// The mode decides whether a dedicated channel is created — a wrong
-		// answer here is exactly the invariant this guard protects — so a
-		// registry lookup failure must fail closed, not silently fall through to
-		// the channel-mode (channel-creating) path.
-		entry, wsErr := uc.workspaceRegistry.Get(workspaceID)
-		if wsErr != nil {
-			return nil, goerr.Wrap(wsErr, "failed to resolve workspace for case creation",
-				goerr.V("workspace_id", workspaceID))
-		}
-		if entry.IsThreadMode() {
-			// isPrivate is a channel-mode-only concept (its sole effect is a
-			// dedicated private channel). The thread path returns before
-			// persistCase, so persistCase's private-case guard does not cover it —
-			// reject here with the same sentinel so the invariant holds on every
-			// create entry point, not just the channel-mode chokepoint.
-			if isPrivate {
-				return nil, goerr.Wrap(ErrCasePrivateThreadModeUnsupported,
-					"private case requested in thread-mode workspace",
-					goerr.V("workspace_id", workspaceID))
-			}
-			// The thread path binds the Case to a freshly posted monitored-channel
-			// root, so it needs a Slack service and a configured monitor channel.
-			// When Slack is not wired (e.g. a test / degraded deployment) fall
-			// through to the standard create path instead of failing: activateCase
-			// is a no-op without Slack, so it still creates NO dedicated channel and
-			// the "thread mode never provisions a channel" invariant holds. In
-			// production a thread-mode workspace always has both, so this branch is
-			// taken.
-			if uc.slackService != nil && entry.SlackMonitorChannelID != "" {
-				return uc.createThreadModeCase(ctx, workspaceID, entry, title, description, fieldValues, requestKey)
-			}
+// resolveCaseMode resolves the workspace entry so the OPEN-case funnel can
+// decide the Slack shape. A nil registry means the mode is undeterminable; this
+// only occurs in tests / degraded setups (every production CLI entry point
+// wires a registry via config.Configure), so it is treated as channel mode to
+// preserve historical behaviour — a nil entry is returned with no error. A
+// lookup failure for a wired registry still fails closed (propagated) so a
+// mistyped workspace id cannot silently fall through to channel creation.
+func (uc *CaseUseCase) resolveCaseMode(workspaceID string) (*model.WorkspaceEntry, error) {
+	if uc.workspaceRegistry == nil {
+		return nil, nil
+	}
+	entry, err := uc.workspaceRegistry.Get(workspaceID)
+	if err != nil {
+		return nil, goerr.Wrap(err, "failed to resolve workspace mode",
+			goerr.V("workspace_id", workspaceID))
+	}
+	return entry, nil
+}
+
+// assertThreadCaseVisibility rejects a private case in a thread-mode workspace.
+// A private case's only effect is a dedicated private channel, which thread mode
+// has no equivalent for. This is the single definition of the rule; both the
+// OPEN-case funnel and persistCase (draft creation) call it.
+func assertThreadCaseVisibility(isPrivate bool) error {
+	if isPrivate {
+		return goerr.Wrap(ErrCasePrivateThreadModeUnsupported,
+			"private case requested in thread-mode workspace")
+	}
+	return nil
+}
+
+// applyThreadBinding sets the thread-mode Slack binding fields on a Case: the
+// monitored channel, the root thread ts, the initial board status (only when
+// unset or invalid), and the update timestamp. It is the single place the
+// thread binding is applied, used by both the create path (before repo.Create)
+// and the draft-promotion path (before repo.Update).
+func (uc *CaseUseCase) applyThreadBinding(c *model.Case, workspaceID, channelID, rootTS string, now time.Time) {
+	c.SlackChannelID = channelID
+	c.SlackThreadTS = rootTS
+	if set := uc.caseStatusSetForWorkspace(workspaceID); set != nil {
+		if c.BoardStatus == "" || !set.IsValid(c.BoardStatus) {
+			c.BoardStatus = set.InitialID()
 		}
 	}
+	c.UpdatedAt = now
+}
 
+// openProducers supplies the two ways a case is brought to OPEN: Channel creates
+// the dedicated-channel form, Thread binds it to the monitored-channel thread.
+// openInWorkspaceMode picks exactly one based on the resolved workspace mode.
+type openProducers struct {
+	Channel func(ctx context.Context, entry *model.WorkspaceEntry) (*model.Case, error)
+	Thread  func(ctx context.Context, entry *model.WorkspaceEntry) (*model.Case, error)
+}
+
+// openInWorkspaceMode is the single funnel every OPEN-case path passes through
+// to honour the workspace-mode invariant: thread mode binds to the monitored
+// channel and never provisions a dedicated channel; channel mode creates one.
+// The mode decision, the private guard, and the thread-mode Slack-readiness
+// check live here and nowhere else, so a new entry point cannot forget them.
+func (uc *CaseUseCase) openInWorkspaceMode(ctx context.Context, workspaceID string, isPrivate bool, p openProducers) (*model.Case, error) {
+	entry, err := uc.resolveCaseMode(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	// A nil entry (registry not wired) is treated as channel mode — see
+	// resolveCaseMode. The channel producer tolerates a nil entry.
+	if entry == nil || !entry.IsThreadMode() {
+		return p.Channel(ctx, entry)
+	}
+	if err := assertThreadCaseVisibility(isPrivate); err != nil {
+		return nil, err
+	}
+	// Thread mode never falls back to the channel path: doing so would create a
+	// dedicated channel, the exact invariant violation. A thread-mode workspace
+	// without Slack wiring is a misconfiguration (startup validation normally
+	// rejects it) and fails closed here.
+	if uc.slackService == nil || entry.SlackMonitorChannelID == "" {
+		return nil, goerr.Wrap(ErrThreadModeSlackUnconfigured,
+			"thread-mode workspace requires slack service and monitor channel",
+			goerr.V("workspace_id", workspaceID))
+	}
+	return p.Thread(ctx, entry)
+}
+
+// postMonitoredThreadAnchor posts a lightweight placeholder root into the
+// workspace's monitored channel and returns its ts, which anchors the case
+// thread until it is replaced with the case summary. Single Slack "start a
+// monitored-channel thread" step shared by every thread-mode create / promotion.
+//
+// The Slack service is passed explicitly (not taken from a CaseUseCase field)
+// so each caller supplies the same service it uses for the rest of that flow:
+// the case-creation paths pass uc.slackService, the reaction path passes its
+// own deps.SlackService. This keeps the placeholder, the summary replacement,
+// and any failure note on one Slack backend and removes the hidden cross-object
+// dependency (and nil-panic) a bound method would create.
+func postMonitoredThreadAnchor(ctx context.Context, svc slack.Service, entry *model.WorkspaceEntry) (string, error) {
+	dest := entry.SlackMonitorChannelID
+	rootTS, err := svc.PostMessage(ctx, dest, nil, i18n.T(ctx, i18n.MsgReactionCasePlaceholder))
+	if err != nil {
+		return "", goerr.Wrap(err, "failed to post thread-mode case root", goerr.V("dest_channel", dest))
+	}
+	if rootTS == "" {
+		return "", goerr.New("slack returned empty thread ts for case root", goerr.V("dest_channel", dest))
+	}
+	return rootTS, nil
+}
+
+// failMonitoredThreadAnchor rewrites the placeholder root into an honest failure
+// note when case persistence fails after the anchor was posted, so the monitored
+// channel does not imply work is still ongoing. If the update itself fails it
+// falls back to a threaded reply so the note is never lost. Both failures are
+// non-fatal. The Slack service is passed explicitly for the same reason as
+// postMonitoredThreadAnchor.
+func failMonitoredThreadAnchor(ctx context.Context, svc slack.Service, entry *model.WorkspaceEntry, rootTS string) {
+	dest := entry.SlackMonitorChannelID
+	failNote := "⚠️ " + i18n.T(ctx, i18n.MsgThreadCaseCreateFallback)
+	if uErr := svc.UpdateMessage(ctx, dest, rootTS, nil, failNote); uErr != nil {
+		errutil.Handle(ctx, goerr.Wrap(uErr, "update thread-mode case root to fallback",
+			goerr.V("dest_channel", dest), goerr.V("root_ts", rootTS)), "update thread-mode case root to fallback")
+		if _, rErr := svc.PostThreadReply(ctx, dest, rootTS, failNote); rErr != nil {
+			errutil.Handle(ctx, goerr.Wrap(rErr, "post thread-mode case fallback reply",
+				goerr.V("dest_channel", dest), goerr.V("root_ts", rootTS)), "post thread-mode case fallback reply")
+		}
+	}
+}
+
+// CreateCase persists a brand-new case in status=OPEN and runs the mode-
+// appropriate activation (dedicated Slack channel in channel mode, monitored-
+// channel thread in thread mode). It is the public entry point used by the
+// createCase mutation and the slash-command "submit" flow. The mode decision is
+// delegated to the shared funnel openInWorkspaceMode so every OPEN-case path
+// honours the same invariant.
+func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue, isPrivate bool, isTest bool, sourceTeamID string, requestKey string) (*model.Case, error) {
+	return uc.openInWorkspaceMode(ctx, workspaceID, isPrivate, openProducers{
+		Channel: func(ctx context.Context, entry *model.WorkspaceEntry) (*model.Case, error) {
+			return uc.createChannelModeCase(ctx, workspaceID, entry, title, description, assigneeIDs, fieldValues, isPrivate, isTest, sourceTeamID, requestKey)
+		},
+		// Thread-mode cases carry only title / description / fields (+ requestKey
+		// for dedup); the caller's assigneeIDs / isTest / sourceTeamID are
+		// intentionally ignored, exactly as reaction-created cases are.
+		Thread: func(ctx context.Context, entry *model.WorkspaceEntry) (*model.Case, error) {
+			return uc.createThreadModeCase(ctx, workspaceID, entry, title, description, fieldValues, requestKey)
+		},
+	})
+}
+
+// createChannelModeCase persists a brand-new OPEN case and runs channel-mode
+// activation (dedicated Slack channel, invites, welcome, etc.). Extracted from
+// CreateCase so the channel form is one named producer behind the shared funnel.
+func (uc *CaseUseCase) createChannelModeCase(ctx context.Context, workspaceID string, entry *model.WorkspaceEntry, title, description string, assigneeIDs []string, fieldValues map[string]model.FieldValue, isPrivate bool, isTest bool, sourceTeamID string, requestKey string) (*model.Case, error) {
 	created, err := uc.persistCase(ctx, workspaceID, persistCaseInput{
 		Title:       title,
 		Description: description,
@@ -510,17 +614,16 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 		return nil, err
 	}
 
-	// `persistCase` returns early when an existing requestKey matched; that
-	// case is already active and must not be re-activated.
+	// `persistCase` returns early when an existing requestKey matched; that case
+	// is already active and must not be re-activated.
 	if created.Status != types.CaseStatusOpen || created.SlackChannelID != "" {
 		return created, nil
 	}
 
-	activated, actErr := uc.activateCase(ctx, workspaceID, created, sourceTeamID)
+	activated, actErr := uc.activateChannelModeCase(ctx, workspaceID, entry, created, sourceTeamID)
 	if actErr != nil {
-		// CreateCase's rollback policy: discard the half-formed case so the
-		// whole call appears atomic. SubmitDraft uses a different policy
-		// (status flip back to DRAFT) — see its implementation.
+		// Rollback policy: discard the half-formed case so the whole call appears
+		// atomic. SubmitDraft uses a different policy (status flip back to DRAFT).
 		if delErr := uc.repo.Case().Delete(ctx, workspaceID, created.ID); delErr != nil {
 			return nil, goerr.Wrap(actErr, "case activation failed and rollback delete also failed",
 				goerr.V("rollback_error", delErr),
@@ -529,9 +632,8 @@ func (uc *CaseUseCase) CreateCase(ctx context.Context, workspaceID string, title
 		return nil, actErr
 	}
 
-	// Fire the case lifecycle event AFTER activation succeeded. Failure
-	// here must not roll back the case — the Job dispatch is fire-and-
-	// forget by design.
+	// Fire the case lifecycle event AFTER activation succeeded. Failure here must
+	// not roll back the case — the Job dispatch is fire-and-forget by design.
 	uc.publishLifecycle(ctx, workspaceID, activated, model.CaseLifecycleCreated)
 	return activated, nil
 }
@@ -599,28 +701,18 @@ func (uc *CaseUseCase) createThreadModeCase(ctx context.Context, workspaceID str
 
 	// A lightweight placeholder root anchors the case thread; it is replaced in
 	// place with the case summary once the case is committed.
-	rootTS, err := uc.slackService.PostMessage(ctx, dest, nil, i18n.T(ctx, i18n.MsgReactionCasePlaceholder))
+	rootTS, err := postMonitoredThreadAnchor(ctx, uc.slackService, entry)
 	if err != nil {
-		return nil, goerr.Wrap(err, "failed to post thread-mode case root", goerr.V("dest_channel", dest))
+		return nil, err
 	}
 
-	created, err := uc.CreateThreadCaseWithFields(ctx, workspaceID, dest, rootTS, reporterID, title, description, fieldValues, requestKey)
+	created, err := uc.createThreadBoundCase(ctx, workspaceID, dest, rootTS, reporterID, title, description, fieldValues, requestKey)
 	if err != nil {
 		// The field gate above already ran, so reaching here means an
 		// infrastructure failure (repo write). Replace the lingering placeholder
 		// with an honest failure note so the monitored channel does not imply work
-		// is still ongoing, then surface the error. If even that update fails,
-		// fall back to a threaded reply so the note is never lost (the placeholder
-		// staying stuck is the worst outcome).
-		failNote := "⚠️ " + i18n.T(ctx, i18n.MsgThreadCaseCreateFallback)
-		if uErr := uc.slackService.UpdateMessage(ctx, dest, rootTS, nil, failNote); uErr != nil {
-			errutil.Handle(ctx, goerr.Wrap(uErr, "update thread-mode case root to fallback",
-				goerr.V("dest_channel", dest), goerr.V("root_ts", rootTS)), "update thread-mode case root to fallback")
-			if _, rErr := uc.slackService.PostThreadReply(ctx, dest, rootTS, failNote); rErr != nil {
-				errutil.Handle(ctx, goerr.Wrap(rErr, "post thread-mode case fallback reply",
-					goerr.V("dest_channel", dest), goerr.V("root_ts", rootTS)), "post thread-mode case fallback reply")
-			}
-		}
+		// is still ongoing, then surface the error.
+		failMonitoredThreadAnchor(ctx, uc.slackService, entry, rootTS)
 		return nil, goerr.Wrap(err, "failed to create thread-mode case",
 			goerr.V("dest_channel", dest), goerr.V("root_ts", rootTS))
 	}
@@ -688,9 +780,7 @@ func (uc *CaseUseCase) persistCase(ctx context.Context, workspaceID string, in p
 			return nil, err
 		}
 		if threadMode {
-			return nil, goerr.Wrap(ErrCasePrivateThreadModeUnsupported,
-				"private case requested in thread-mode workspace",
-				goerr.V("workspace_id", workspaceID))
+			return nil, assertThreadCaseVisibility(in.IsPrivate)
 		}
 	}
 
@@ -750,22 +840,33 @@ func (uc *CaseUseCase) persistCase(ctx context.Context, workspaceID string, in p
 	return created, nil
 }
 
-// activateCase runs all post-persistence side effects required to bring an
-// OPEN case to life: Slack channel creation, optional cross-workspace
-// connect, invites, bookmark, welcome messages, and channel-member sync.
-// Returns the updated case (with SlackChannelID / ChannelUserIDs filled in).
+// activateChannelModeCase runs all post-persistence side effects required to
+// bring a channel-mode OPEN case to life: Slack channel creation, optional
+// cross-workspace connect, invites, bookmark, welcome messages, and
+// channel-member sync. Returns the updated case (with SlackChannelID /
+// ChannelUserIDs filled in).
 //
-// activateCase is intentionally non-destructive: on Slack channel creation
-// failure it returns the error without touching the persisted case. The
-// caller decides the rollback policy:
+// It is intentionally non-destructive: on Slack channel creation failure it
+// returns the error without touching the persisted case. The caller decides the
+// rollback policy:
 //
-//   - CreateCase rolls back by deleting the just-persisted case so the
-//     entire "create" call appears atomic to the user.
-//   - SubmitDraft rolls back by flipping the case status back to DRAFT
-//     so the user does not lose work they had saved.
+//   - createChannelModeCase rolls back by deleting the just-persisted case so
+//     the entire "create" call appears atomic to the user.
+//   - SubmitDraft rolls back by flipping the case status back to DRAFT so the
+//     user does not lose work they had saved.
 //
-// Activation is a no-op when no Slack service is configured.
-func (uc *CaseUseCase) activateCase(ctx context.Context, workspaceID string, c *model.Case, sourceTeamID string) (*model.Case, error) {
+// Activation is a no-op when no Slack service is configured. The validated
+// entry (may be nil for callers that cannot supply it) is checked so that a
+// mis-routed thread-mode case never reaches CreateChannel — the only place a
+// dedicated channel is provisioned.
+func (uc *CaseUseCase) activateChannelModeCase(ctx context.Context, workspaceID string, entry *model.WorkspaceEntry, c *model.Case, sourceTeamID string) (*model.Case, error) {
+	// Defend the invariant at the channel-creating boundary: thread-mode cases
+	// must never provision a dedicated channel. The funnel already routes them
+	// away, so this only fires on a wiring bug.
+	if entry != nil && entry.IsThreadMode() {
+		return nil, goerr.New("channel activation attempted on thread-mode workspace",
+			goerr.V(CaseIDKey, c.ID), goerr.V("workspace_id", workspaceID))
+	}
 	if uc.slackService == nil {
 		return c, nil
 	}
@@ -1555,66 +1656,19 @@ func (uc *CaseUseCase) workspaceIsThreadMode(workspaceID string) (bool, error) {
 	return entry.IsThreadMode(), nil
 }
 
-// CreateThreadCase creates a thread-mode Case bound to (channelID, threadTS).
-// It is idempotent: a re-delivered Slack message that maps to an existing
-// thread returns the existing Case unchanged. The reporter is the posting
-// user; the initial board status is the workspace's configured initial status.
+// createThreadBoundCase creates a thread-mode Case bound to a monitored-channel
+// thread (channelID, threadTS), with the supplied title / description / custom
+// fields, running FULL validation before persisting. All field violations are
+// aggregated (not fail-fast) so the caller — the thread-mode create agent — can
+// be told everything wrong in one shot. It is idempotent: a re-delivered Slack
+// message mapping to an existing thread returns the existing Case unchanged.
 // CaseLifecycleCreated is published so Jobs fire exactly as in channel mode.
-func (uc *CaseUseCase) CreateThreadCase(ctx context.Context, workspaceID, channelID, threadTS, reporterID, title, description string) (*model.Case, error) {
-	if channelID == "" || threadTS == "" {
-		return nil, goerr.New("channelID and threadTS are required for thread case")
-	}
-
-	existing, err := uc.repo.Case().GetBySlackThread(ctx, workspaceID, channelID, threadTS)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to check existing thread case",
-			goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
-	}
-	if existing != nil {
-		return existing, nil
-	}
-
-	set := uc.caseStatusSetForWorkspace(workspaceID)
-	initialStatus := ""
-	if set != nil {
-		initialStatus = set.InitialID()
-	}
-
-	now := time.Now().UTC()
-	c := &model.Case{
-		Title:          title,
-		Description:    description,
-		Status:         types.CaseStatusOpen,
-		ReporterID:     reporterID,
-		SlackChannelID: channelID,
-		SlackThreadTS:  threadTS,
-		BoardStatus:    initialStatus,
-		CreatedAt:      now,
-		UpdatedAt:      now,
-	}
-	created, err := uc.repo.Case().Create(ctx, workspaceID, c)
-	if err != nil {
-		return nil, goerr.Wrap(err, "failed to create thread case",
-			goerr.V("channel_id", channelID), goerr.V("thread_ts", threadTS))
-	}
-
-	uc.publishLifecycle(ctx, workspaceID, created, model.CaseLifecycleCreated)
-	return created, nil
-}
-
-// CreateThreadCaseWithFields creates a thread-mode Case with the supplied
-// title / description / custom fields, running FULL validation (required
-// fields, allowed options, value types) before persisting. All violations are
-// aggregated (ValidateCaseFieldsAll), not fail-fast, so the caller — the
-// thread-mode initialization (create) agent — can be told everything that is
-// wrong in one shot and re-emit. Unlike CreateThreadCase, the case is only
-// created once it satisfies the schema; there is no placeholder pass.
 //
 // requestKey is stored on the case for idempotency (empty for the reaction /
 // Slack-thread creation paths, which dedup by their existing message ts). Web /
 // slash / mention creation passes it so a redelivered submission can be deduped
 // via GetByRequestKey before a second thread root is posted.
-func (uc *CaseUseCase) CreateThreadCaseWithFields(ctx context.Context, workspaceID, channelID, threadTS, reporterID, title, description string, fieldValues map[string]model.FieldValue, requestKey string) (*model.Case, error) {
+func (uc *CaseUseCase) createThreadBoundCase(ctx context.Context, workspaceID, channelID, threadTS, reporterID, title, description string, fieldValues map[string]model.FieldValue, requestKey string) (*model.Case, error) {
 	if channelID == "" || threadTS == "" {
 		return nil, goerr.New("channelID and threadTS are required for thread case")
 	}
@@ -1635,26 +1689,20 @@ func (uc *CaseUseCase) CreateThreadCaseWithFields(ctx context.Context, workspace
 	}
 	fieldValues = enriched
 
-	set := uc.caseStatusSetForWorkspace(workspaceID)
-	initialStatus := ""
-	if set != nil {
-		initialStatus = set.InitialID()
-	}
-
 	now := time.Now().UTC()
 	c := &model.Case{
-		Title:          title,
-		Description:    description,
-		Status:         types.CaseStatusOpen,
-		ReporterID:     reporterID,
-		SlackChannelID: channelID,
-		SlackThreadTS:  threadTS,
-		BoardStatus:    initialStatus,
-		FieldValues:    fieldValues,
-		RequestKey:     requestKey,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		Title:       title,
+		Description: description,
+		Status:      types.CaseStatusOpen,
+		ReporterID:  reporterID,
+		FieldValues: fieldValues,
+		RequestKey:  requestKey,
+		CreatedAt:   now,
 	}
+	// Apply the monitored-channel thread binding (channel, thread ts, initial
+	// board status, UpdatedAt) via the shared helper so the create and the
+	// draft-promotion paths bind identically.
+	uc.applyThreadBinding(c, workspaceID, channelID, threadTS, now)
 	created, err := uc.repo.Case().Create(ctx, workspaceID, c)
 	if err != nil {
 		return nil, goerr.Wrap(err, "failed to create thread case with fields",
@@ -1916,14 +1964,47 @@ func (uc *CaseUseCase) SubmitDraft(ctx context.Context, workspaceID string, id i
 		return nil, goerr.Wrap(err, "failed to flip draft to open", goerr.V(CaseIDKey, id))
 	}
 
-	activated, actErr := uc.activateCase(ctx, workspaceID, updated, "")
+	// Snapshot the pre-activation Slack binding so a rollback restores exactly
+	// what the draft had, instead of blindly clearing (which would drop a
+	// pre-existing board status). The thread producer mutates `updated` in place
+	// via applyThreadBinding, so this must be captured before the funnel runs.
+	preChannelID, preThreadTS, preBoardStatus := updated.SlackChannelID, updated.SlackThreadTS, updated.BoardStatus
+
+	// Bring the promoted case to OPEN through the same mode funnel CreateCase
+	// uses: channel mode creates a dedicated channel; thread mode binds the case
+	// to a freshly-posted monitored-channel thread and never creates a channel.
+	activated, actErr := uc.openInWorkspaceMode(ctx, workspaceID, updated.IsPrivate, openProducers{
+		Channel: func(ctx context.Context, entry *model.WorkspaceEntry) (*model.Case, error) {
+			return uc.activateChannelModeCase(ctx, workspaceID, entry, updated, "")
+		},
+		Thread: func(ctx context.Context, entry *model.WorkspaceEntry) (*model.Case, error) {
+			rootTS, err := postMonitoredThreadAnchor(ctx, uc.slackService, entry)
+			if err != nil {
+				return nil, err
+			}
+			uc.applyThreadBinding(updated, workspaceID, entry.SlackMonitorChannelID, rootTS, time.Now().UTC())
+			saved, err := uc.repo.Case().Update(ctx, workspaceID, updated)
+			if err != nil {
+				failMonitoredThreadAnchor(ctx, uc.slackService, entry, rootTS)
+				return nil, goerr.Wrap(err, "failed to bind draft to monitored thread", goerr.V(CaseIDKey, id))
+			}
+			replaceRootWithCaseSummary(ctx, uc.slackService, entry, saved, entry.SlackMonitorChannelID, rootTS, uc.CaseURL(workspaceID, saved.ID))
+			return saved, nil
+		},
+	})
 	if actErr != nil {
-		// SubmitDraft's rollback policy is "preserve the saved work": flip
-		// the status back to DRAFT and keep the row so the user can retry.
-		// activateCase is now non-destructive, so the case row is still
-		// there waiting to be patched.
+		// SubmitDraft's rollback policy is "preserve the saved work": restore the
+		// draft to its pre-activation snapshot (DRAFT status, and the exact Slack
+		// binding / board status it had before promotion) and keep the row so the
+		// user can retry. Restoring the snapshot rather than clearing matters on
+		// the thread path — a Firestore Update that succeeded server-side but
+		// returned an error to us could otherwise leave a thread-bound DRAFT — and
+		// avoids destroying a pre-existing board status on the channel path.
 		if rolled, getErr := uc.repo.Case().Get(ctx, workspaceID, id); getErr == nil {
 			rolled.Status = types.CaseStatusDraft
+			rolled.SlackChannelID = preChannelID
+			rolled.SlackThreadTS = preThreadTS
+			rolled.BoardStatus = preBoardStatus
 			rolled.UpdatedAt = time.Now().UTC()
 			if _, undoErr := uc.repo.Case().Update(ctx, workspaceID, rolled); undoErr != nil {
 				errutil.Handle(ctx, goerr.Wrap(undoErr, "failed to roll status back to draft after activation failure",
@@ -1935,7 +2016,10 @@ func (uc *CaseUseCase) SubmitDraft(ctx context.Context, workspaceID string, id i
 				goerr.V(CaseIDKey, id),
 			), "draft case missing during rollback")
 		}
-		return nil, goerr.Wrap(ErrActivationFailed, actErr.Error(), goerr.V(CaseIDKey, id))
+		// errors.Join keeps both the ErrActivationFailed marker (existing callers /
+		// GraphQL rely on it) and the underlying sentinel (e.g.
+		// ErrCasePrivateThreadModeUnsupported) reachable via errors.Is.
+		return nil, goerr.Wrap(errors.Join(ErrActivationFailed, actErr), "draft activation failed", goerr.V(CaseIDKey, id))
 	}
 
 	// A DRAFT-promoted-to-OPEN case is the first time the entity is

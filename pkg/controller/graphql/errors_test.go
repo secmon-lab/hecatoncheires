@@ -1,6 +1,7 @@
 package graphql_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/m-mizutani/goerr/v2"
@@ -29,6 +30,10 @@ func TestErrorCode(t *testing.T) {
 		{"private case in thread mode", goerr.Wrap(usecase.ErrCasePrivateThreadModeUnsupported, "x"), gqlctrl.ErrCodeBadUserInput},
 		{"field validation failed", goerr.Wrap(usecase.ErrFieldValidationFailed, "x"), gqlctrl.ErrCodeFieldValidationFailed},
 		{"activation failed", goerr.Wrap(usecase.ErrActivationFailed, "x"), gqlctrl.ErrCodeActivationFailed},
+		// SubmitDraft joins ErrActivationFailed with the underlying sentinel; a
+		// private-in-thread rejection must classify as the user-fixable
+		// BAD_USER_INPUT, not the server-fault ACTIVATION_FAILED.
+		{"private joined with activation failed → bad user input", errors.Join(usecase.ErrActivationFailed, goerr.Wrap(usecase.ErrCasePrivateThreadModeUnsupported, "x")), gqlctrl.ErrCodeBadUserInput},
 		{"case not found", goerr.Wrap(usecase.ErrCaseNotFound, "x"), gqlctrl.ErrCodeNotFound},
 		{"access denied", goerr.Wrap(usecase.ErrAccessDenied, "x"), gqlctrl.ErrCodeForbidden},
 		{"already closed", goerr.Wrap(usecase.ErrCaseAlreadyClosed, "x"), gqlctrl.ErrCodeConflict},

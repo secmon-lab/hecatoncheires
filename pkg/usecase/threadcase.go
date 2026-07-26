@@ -675,7 +675,7 @@ func (uc *AgentUseCase) newThreadcaseCreateHandler(req caseCreateReq, traceMsg *
 			// requestKey is empty: the reaction / thread creation path dedups by
 			// the existing message ts (ReactionClaim + GetBySlackThread), not a
 			// request key.
-			return uc.deps.CaseUC.CreateThreadCaseWithFields(ctx, wsID, req.caseChannel, req.caseTS, req.reporter, p.Title, p.Description, p.Fields, "")
+			return uc.deps.CaseUC.createThreadBoundCase(ctx, wsID, req.caseChannel, req.caseTS, req.reporter, p.Title, p.Description, p.Fields, "")
 		},
 	}
 }

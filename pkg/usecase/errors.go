@@ -59,6 +59,16 @@ var (
 	// agent tool, import) is covered, not just the web form.
 	ErrCasePrivateThreadModeUnsupported = errors.New("private case is not supported in thread mode")
 
+	// ErrThreadModeSlackUnconfigured is returned when a thread-mode workspace
+	// must bring a case to OPEN but the Slack service or the monitored channel
+	// is not configured. Thread-mode cases live in the monitored channel's
+	// thread and never provision a dedicated channel, so falling back to the
+	// channel-mode activation path (which would call CreateChannel) is exactly
+	// the invariant violation to avoid. Startup config validation normally
+	// rejects a thread-mode workspace without a monitor channel, so this guards
+	// direct WorkspaceEntry construction (tests / eval) and fails closed.
+	ErrThreadModeSlackUnconfigured = errors.New("thread-mode workspace requires slack service and monitor channel")
+
 	// ErrCaseThreadModeNoActions is returned by ActionUseCase write paths when
 	// the parent (or reparent target) Case is thread-mode. Thread-mode cases
 	// track progress through the configurable board status (Kanban) and have no
