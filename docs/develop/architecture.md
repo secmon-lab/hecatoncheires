@@ -236,7 +236,7 @@ schema-validation failure (e.g. a non-RFC3339 `due_date`, a missing required
 field, an out-of-schema option) is fed back to the planner and the final output
 regenerated (bounded by `finalOutputMaxRetry`), so the model corrects the value
 in-loop instead of the turn dying with no feedback. The Case is then committed
-**after** the turn via `Handler.Create` → `CaseUC.CreateThreadCaseWithFields`.
+**after** the turn via `Handler.Create` → `CaseUC.createThreadBoundCase`.
 The two failure kinds take different paths on purpose: a field error is the
 model's fault and model-fixable (fed back for regeneration), whereas a
 persistence failure is an infrastructure error the model cannot repair by

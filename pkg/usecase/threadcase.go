@@ -254,7 +254,7 @@ func (uc *AgentUseCase) ResumeThreadCaseCreation(ctx context.Context, msg *slack
 // separates two threads that are usually the same:
 //
 //   - caseChannel/caseTS — the thread the Case is bound to (the session key, the
-//     GetBySlackThread key, the CreateThreadCaseWithFields target). Post-creation
+//     GetBySlackThread key, the createThreadBoundCase target). Post-creation
 //     mentions and history continue here.
 //   - uiChannel/uiTS — where the creation dialog surfaces (progress trace,
 //     question form, and the completion link).
@@ -647,7 +647,7 @@ func (uc *AgentUseCase) postThreadReply(ctx context.Context, channelID, threadTS
 }
 
 // newThreadcaseCreateHandler builds the host-side Handler for a ModeCreate
-// turn. Create commits the validated case via CaseUC.CreateThreadCaseWithFields
+// turn. Create commits the validated case via CaseUC.createThreadBoundCase
 // (the reporter / channel / thread identity is captured here, not carried in
 // the payload). Question posts the planner's question to the thread.
 func (uc *AgentUseCase) newThreadcaseCreateHandler(req caseCreateReq, traceMsg *traceMessage) threadcase.Handler {
