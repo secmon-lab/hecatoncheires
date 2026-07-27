@@ -246,6 +246,50 @@ func TestRenderUserPrompt_TemplateExpansion(t *testing.T) {
 	gt.String(t, out).Equal("case Sample created by U-X")
 }
 
+// Job IDs are only unique within a workspace (config.resolveJobs rejects
+// duplicates per workspace, not globally), so the same id — e.g. a standard
+// `assign_on_create` placed in every workspace — legitimately names different
+// prompts. A template cache keyed on the job id alone served whichever
+// workspace's prompt happened to be parsed first, to every workspace.
+func TestRenderUserPrompt_SameJobIDAcrossWorkspaces(t *testing.T) {
+	const sharedID = "assign_on_create"
+
+	first := &model.Job{
+		ID:     sharedID,
+		Prompt: "workspace-a: assign {{.Case.Title}}",
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+	second := &model.Job{
+		ID:     sharedID,
+		Prompt: "workspace-b: review {{.Case.Title}}",
+		Events: model.JobEvents{
+			Case: &model.CaseEventConfig{On: []model.CaseLifecycle{model.CaseLifecycleCreated}},
+		},
+	}
+
+	gotFirst, err := job.RenderUserPrompt(job.PromptInputs{
+		Job: first, Workspace: newWorkspace("workspace-a", "A"), Case: newCase(1),
+	})
+	gt.NoError(t, err).Required()
+	gt.String(t, gotFirst).Equal("workspace-a: assign Sample")
+
+	gotSecond, err := job.RenderUserPrompt(job.PromptInputs{
+		Job: second, Workspace: newWorkspace("workspace-b", "B"), Case: newCase(2),
+	})
+	gt.NoError(t, err).Required()
+	gt.String(t, gotSecond).Equal("workspace-b: review Sample")
+
+	// Re-render the first one to prove the second render did not evict or
+	// overwrite it either — both must stay independently addressable.
+	gotFirstAgain, err := job.RenderUserPrompt(job.PromptInputs{
+		Job: first, Workspace: newWorkspace("workspace-a", "A"), Case: newCase(1),
+	})
+	gt.NoError(t, err).Required()
+	gt.String(t, gotFirstAgain).Equal("workspace-a: assign Sample")
+}
+
 func TestRenderUserPrompt_TemplateError(t *testing.T) {
 	j := &model.Job{
 		ID:     "bad",

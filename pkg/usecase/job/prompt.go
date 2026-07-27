@@ -703,13 +703,23 @@ func describeCaseLifecycle(lc model.CaseLifecycle) string {
 	}
 }
 
-var (
-	userPromptCache sync.Map // key: job ID, value: *template.Template
-)
+// userPromptCache memoises compiled user-prompt templates keyed on the prompt
+// SOURCE, never on the Job ID. A Job ID is unique only *within* a workspace
+// (`resolveJobs` in pkg/cli/config rejects duplicates per workspace), and
+// placing the same standard Job — `assign_on_create`, `daily_progress_check` —
+// in several workspaces is normal usage. This cache is process-global, so
+// keying it on the ID handed whichever workspace was parsed first its compiled
+// template to every same-named Job in the process, and the LLM received another
+// workspace's user prompt. Keying on the source makes that mismatch structurally
+// impossible: a compiled template is a pure function of its source text.
+//
+// Memory is bounded by the number of distinct prompts in the configuration, not
+// by run count, and every prompt string is already retained by its *model.Job.
+var userPromptCache sync.Map // key: prompt source string, value: *template.Template
 
 // RenderUserPrompt renders the Job's `prompt` field as a Go template
-// using PromptInputs as the dot value. Templates are cached per Job ID
-// to avoid re-parsing on every invocation.
+// using PromptInputs as the dot value. Templates are cached per prompt
+// source to avoid re-parsing on every invocation.
 func RenderUserPrompt(in PromptInputs) (string, error) {
 	if in.Job == nil {
 		return "", goerr.New("job is nil")
@@ -727,15 +737,19 @@ func RenderUserPrompt(in PromptInputs) (string, error) {
 }
 
 func userTemplateFor(j *model.Job) (*template.Template, error) {
-	if cached, ok := userPromptCache.Load(j.ID); ok {
+	if cached, ok := userPromptCache.Load(j.Prompt); ok {
 		return cached.(*template.Template), nil
 	}
-	tmpl, err := template.New("job-user-" + j.ID).Funcs(promptFuncs).Parse(j.Prompt)
+	// The template name is deliberately job-independent: the cache entry is
+	// shared by every Job whose prompt has this exact source, so embedding one
+	// Job's ID in the name would misattribute another Job's execute error. The
+	// ID reaches the caller through goerr.V instead.
+	tmpl, err := template.New("job-user").Funcs(promptFuncs).Parse(j.Prompt)
 	if err != nil {
 		return nil, goerr.Wrap(err, "parse job prompt template",
 			goerr.V("job_id", j.ID))
 	}
-	userPromptCache.Store(j.ID, tmpl)
+	userPromptCache.Store(j.Prompt, tmpl)
 	return tmpl, nil
 }
 
