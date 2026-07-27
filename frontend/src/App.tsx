@@ -1,4 +1,4 @@
-import { Navigate, Routes, Route, useParams } from 'react-router-dom'
+import { Navigate, Routes, Route, useParams } from 'react-router'
 import Layout from './components/Layout'
 import CaseList from './pages/CaseList'
 import CaseDetail from './pages/CaseDetail'

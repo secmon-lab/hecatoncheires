@@ -7,7 +7,7 @@ import {
   useMemo,
   ReactNode,
 } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { useMutation, useQuery } from "@apollo/client";
 import {
   GET_FAVORITE_WORKSPACE_IDS,

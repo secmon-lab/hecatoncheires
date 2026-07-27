@@ -1,4 +1,4 @@
-import { useLocation, useParams, useNavigate } from 'react-router-dom'
+import { useLocation, useParams, useNavigate } from 'react-router'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
 import WorkspaceSwitcher from './WorkspaceSwitcher'

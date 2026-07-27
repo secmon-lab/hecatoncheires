@@ -14,9 +14,9 @@ overrides:
 # Supply-chain hardening: only install package versions at least 7 days old
 # (10080 minutes) to avoid freshly published malicious releases.
 minimumReleaseAge: 10080
-# Security fixes we must not delay (react-router CVE-2026-21884 / -22029 / -22030).
+# Security fixes we must not delay (react-router CVE-2026-21884 / -22029 /
+# -22030, and the v8-only fix for GHSA-qwww-vcr4-c8h2).
 minimumReleaseAgeExclude:
-  - react-router-dom
   - react-router
 
 # Prefer the local content-addressable store before hitting the network.

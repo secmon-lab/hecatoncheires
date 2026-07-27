@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { useQuery } from '@apollo/client'
 import { GET_KNOWLEDGES, SEARCH_KNOWLEDGE } from '../graphql/knowledge'
 import { GET_TAGS } from '../graphql/tag'

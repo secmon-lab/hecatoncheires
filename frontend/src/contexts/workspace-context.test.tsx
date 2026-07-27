@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { MockedProvider, type MockedResponse } from '@apollo/client/testing'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter } from 'react-router'
 import type { ReactNode } from 'react'
 import { GraphQLError } from 'graphql'
 import { GET_FAVORITE_WORKSPACE_IDS, SET_FAVORITE_WORKSPACES } from '../graphql/dashboard'

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router'
 import { useMutation, useQuery } from '@apollo/client'
 import { BULK_ARCHIVE_ACTIONS, GET_ACTIONS_BY_CASE, GET_OPEN_CASE_ACTIONS, UPDATE_ACTION } from '../graphql/action'
 import { GET_FIELD_CONFIGURATION } from '../graphql/fieldConfiguration'

@@ -1,6 +1,6 @@
 import { useMemo, type ReactNode } from 'react'
 import { useQuery } from '@apollo/client'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router'
 import { useTranslation, type MsgKey } from '../i18n'
 import { useWorkspace } from '../contexts/workspace-context'
 import { UserMenu } from '../components/UserMenu'

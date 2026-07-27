@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router'
 import { useQuery } from '@apollo/client'
 
 import { GET_JOB_RUN_EVENTS, GET_JOB_RUN_LOG } from '../graphql/caseAgent'

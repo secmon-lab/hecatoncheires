@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router'
 import { useMutation, useQuery } from '@apollo/client'
 import {
   GET_KNOWLEDGE,

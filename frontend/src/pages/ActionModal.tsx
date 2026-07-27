@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { useMutation, useQuery } from '@apollo/client'
 import { GET_ACTION, UPDATE_ACTION, ARCHIVE_ACTION, UNARCHIVE_ACTION, GET_ACTIONS } from '../graphql/action'
 import { GET_SLACK_USERS } from '../graphql/slackUsers'

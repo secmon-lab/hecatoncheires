@@ -1,4 +1,4 @@
-import { NavLink, Link } from 'react-router-dom'
+import { NavLink, Link } from 'react-router'
 import { useQuery } from '@apollo/client'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useAuth } from '../contexts/auth-context'

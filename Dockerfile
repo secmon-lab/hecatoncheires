@@ -1,5 +1,5 @@
 # Frontend build stage
-FROM node:18-alpine@sha256:8d6421d663b4c28fd3ebc498332f249011d118945588d0a35cb9bc4b8ca09d9e AS build-frontend
+FROM node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2 AS build-frontend
 WORKDIR /app/frontend
 
 # Enable Corepack. The actual pnpm version comes from the `packageManager`

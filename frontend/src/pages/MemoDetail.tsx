@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useLocation, useParams } from 'react-router-dom'
+import { Link, useLocation, useParams } from 'react-router'
 import { useQuery, useMutation } from '@apollo/client'
 
 import Button from '../components/Button'
