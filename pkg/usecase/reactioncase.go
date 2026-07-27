@@ -11,7 +11,6 @@ import (
 	"github.com/slack-go/slack/slackevents"
 
 	"github.com/secmon-lab/hecatoncheires/pkg/domain/model"
-	"github.com/secmon-lab/hecatoncheires/pkg/i18n"
 	"github.com/secmon-lab/hecatoncheires/pkg/usecase/agent/threadcase"
 	"github.com/secmon-lab/hecatoncheires/pkg/utils/errutil"
 )
@@ -164,9 +163,10 @@ func (uc *AgentUseCase) reactionCreateCrossChannel(ctx context.Context, entry *m
 	// A lightweight placeholder root anchors the case thread in the monitored
 	// channel; postCreatedCaseOutcome replaces it in place with the shared case
 	// summary. The flagged message's reporter and link are posted separately as
-	// an origin reply under that summary, not baked into this root.
-	placeholderText := i18n.T(ctx, i18n.MsgReactionCasePlaceholder)
-	rootTS, perr := uc.deps.SlackService.PostMessage(ctx, dest, nil, placeholderText)
+	// an origin reply under that summary, not baked into this root. The anchor
+	// post is the shared postMonitoredThreadAnchor step (same as web / slash
+	// thread-mode creation) so the placeholder lifecycle is defined once.
+	rootTS, perr := postMonitoredThreadAnchor(ctx, uc.deps.SlackService, entry)
 	if perr != nil {
 		uc.releaseReactionClaim(ctx, wsID, srcChannel, srcTS)
 		// The reactor pressed the emoji but the placeholder post failed — tell them
@@ -198,11 +198,7 @@ func (uc *AgentUseCase) reactionCreateCrossChannel(ctx context.Context, entry *m
 	// note so the monitored channel does not imply work is still ongoing.
 	if st == threadcase.StatusFallback {
 		uc.releaseReactionClaim(ctx, wsID, srcChannel, srcTS)
-		if err := uc.deps.SlackService.UpdateMessage(ctx, dest, rootTS, nil,
-			"⚠️ "+i18n.T(ctx, i18n.MsgThreadCaseCreateFallback)); err != nil {
-			errutil.Handle(ctx, goerr.Wrap(err, "reaction cross-channel: update placeholder to fallback",
-				goerr.V("dest_channel", dest), goerr.V("root_ts", rootTS)), "reaction cross-channel: update placeholder to fallback")
-		}
+		failMonitoredThreadAnchor(ctx, uc.deps.SlackService, entry, rootTS)
 	}
 	return nil
 }

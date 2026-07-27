@@ -28,6 +28,15 @@ func NewSlackDraftHandlerForTest(
 	)
 }
 
+// CreateThreadBoundCaseForTest exposes the unexported createThreadBoundCase to
+// external tests (package usecase_test). It replaces the former exported
+// CreateThreadCase (deleted; test-only) and CreateThreadCaseWithFields
+// (unexported). Callers that used the fields-less CreateThreadCase pass a nil
+// fieldValues and an empty requestKey.
+func (uc *CaseUseCase) CreateThreadBoundCaseForTest(ctx context.Context, workspaceID, channelID, threadTS, reporterID, title, description string, fieldValues map[string]model.FieldValue, requestKey string) (*model.Case, error) {
+	return uc.createThreadBoundCase(ctx, workspaceID, channelID, threadTS, reporterID, title, description, fieldValues, requestKey)
+}
+
 // BuildTraceContextBlocksForTest is exported for testing
 var BuildTraceContextBlocksForTest = buildTraceContextBlocks
 

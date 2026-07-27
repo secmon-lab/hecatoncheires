@@ -268,7 +268,7 @@ func TestThreadCase_Creation_Idempotent(t *testing.T) {
 	gt.NoError(t, err).Required()
 
 	// Pre-create the thread case so the handler must short-circuit.
-	_, err = caseUC.CreateThreadCase(ctx, "support", "C-MONITOR", "1700000000.000100", "U-REPORTER", "seed", "seed body")
+	_, err = caseUC.CreateThreadBoundCaseForTest(ctx, "support", "C-MONITOR", "1700000000.000100", "U-REPORTER", "seed", "seed body", nil, "")
 	gt.NoError(t, err).Required()
 
 	// An LLM that errors on first call proves materialize never runs.
@@ -306,7 +306,7 @@ func TestThreadCase_MentionRespond(t *testing.T) {
 	entry, err := reg.Get("support")
 	gt.NoError(t, err).Required()
 
-	c, err := caseUC.CreateThreadCase(ctx, "support", "C-MONITOR", "1700000000.000100", "U-REPORTER", "Login outage", "body")
+	c, err := caseUC.CreateThreadBoundCaseForTest(ctx, "support", "C-MONITOR", "1700000000.000100", "U-REPORTER", "Login outage", "body", nil, "")
 	gt.NoError(t, err).Required()
 
 	llm := newScriptedClient([]string{
@@ -353,7 +353,7 @@ func TestThreadCase_MentionClose(t *testing.T) {
 	entry, err := reg.Get("support")
 	gt.NoError(t, err).Required()
 
-	c, err := caseUC.CreateThreadCase(ctx, "support", "C-MONITOR", "1700000000.000100", "U-REPORTER", "Login outage", "body")
+	c, err := caseUC.CreateThreadBoundCaseForTest(ctx, "support", "C-MONITOR", "1700000000.000100", "U-REPORTER", "Login outage", "body", nil, "")
 	gt.NoError(t, err).Required()
 
 	// End-to-end regression for the original bug: a mention asking to close must
@@ -630,7 +630,7 @@ func TestThreadCase_MentionCreation_Idempotent(t *testing.T) {
 	gt.NoError(t, err).Required()
 
 	// Pre-existing case bound to the thread.
-	_, err = caseUC.CreateThreadCase(ctx, "support", "C-MONITOR", "1700000000.000100", "U-REPORTER", "Existing", "Already a case")
+	_, err = caseUC.CreateThreadBoundCaseForTest(ctx, "support", "C-MONITOR", "1700000000.000100", "U-REPORTER", "Existing", "Already a case", nil, "")
 	gt.NoError(t, err).Required()
 
 	msg := slackmodel.NewMessageFromData(
@@ -1028,7 +1028,7 @@ func TestThreadCase_QuestionSubmit_StaleAfterCreate(t *testing.T) {
 	const channel = "C-MONITOR"
 	const rootTS = "1700000000.000100"
 	// Pre-existing case for the thread.
-	_, err := caseUC.CreateThreadCase(ctx, "support", channel, rootTS, "U-REPORTER", "seed", "seed")
+	_, err := caseUC.CreateThreadBoundCaseForTest(ctx, "support", channel, rootTS, "U-REPORTER", "seed", "seed", nil, "")
 	gt.NoError(t, err).Required()
 
 	cb := &goslack.InteractionCallback{
