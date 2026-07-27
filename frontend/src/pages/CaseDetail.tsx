@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { useNavigate, useParams, Link, useLocation } from 'react-router-dom'
+import { useNavigate, useParams, Link, useLocation } from 'react-router'
 import { useQuery, useMutation } from '@apollo/client'
 import {
   GET_CASE,

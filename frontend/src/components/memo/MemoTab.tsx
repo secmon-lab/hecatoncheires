@@ -1,5 +1,5 @@
 import { useState, Fragment } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation } from 'react-router'
 import { useQuery } from '@apollo/client'
 import Button from '../Button'
 import { IconSparkle, IconChevRight, IconChevDown, IconPlus } from '../Icons'

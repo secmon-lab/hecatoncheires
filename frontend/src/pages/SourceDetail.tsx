@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router'
 import { useMutation, useQuery } from '@apollo/client'
 import { GET_SOURCE, DELETE_SOURCE, UPDATE_SOURCE, GET_SOURCES } from '../graphql/source'
 import { useWorkspace } from '../contexts/workspace-context'

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useMutation, useLazyQuery } from '@apollo/client'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { useWorkspace } from '../../contexts/workspace-context'
 import { useTranslation } from '../../i18n'
 import { CheckCircle, AlertCircle, Loader, X } from 'lucide-react'

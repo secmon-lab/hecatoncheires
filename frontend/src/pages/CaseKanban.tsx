@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { useMutation, useQuery } from '@apollo/client'
 import { GET_CASES } from '../graphql/case'
 import { UPDATE_CASE_STATUS } from '../graphql/caseStatus'

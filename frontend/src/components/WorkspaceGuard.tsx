@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useParams, Navigate } from "react-router-dom";
+import { useParams, Navigate } from "react-router";
 import { useWorkspace } from "../contexts/workspace-context";
 
 interface WorkspaceGuardProps {

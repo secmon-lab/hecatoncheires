@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery } from '@apollo/client'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { useWorkspace } from '../contexts/workspace-context'
 import { useTranslation } from '../i18n'
 import { CREATE_CASE_IMPORT } from '../graphql/import'

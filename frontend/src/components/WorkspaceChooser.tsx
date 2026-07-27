@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import { useTranslation } from '../i18n'
 import { workspaceVisual, type WorkspaceVisualInput } from '../utils/workspace'
 import styles from './WorkspaceChooser.module.css'

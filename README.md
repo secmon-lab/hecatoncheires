@@ -53,7 +53,7 @@ Full documentation lives in [docs/](docs/README.md), organized by audience.
 ### Prerequisites
 
 - Go 1.21+
-- Node.js 18+ (for frontend)
+- Node.js 22.22+ (for frontend; required by react-router v8)
 - Corepack-managed pnpm (see below; the version is pinned via the `packageManager` field in `frontend/package.json`)
 - Google Cloud Firestore
 
@@ -97,7 +97,7 @@ go test ./...
 Hecatoncheires includes end-to-end tests using Playwright to verify the complete application workflow.
 
 **Prerequisites:**
-- Node.js 18+ and pnpm
+- Node.js 22.22+ and pnpm
 - The backend server must be running with `--repository-backend=memory` for testing
 
 **Run E2E tests:**

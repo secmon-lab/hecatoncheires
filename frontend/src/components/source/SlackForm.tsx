@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useMutation } from '@apollo/client'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { useWorkspace } from '../../contexts/workspace-context'
 import { useTranslation } from '../../i18n'
 import Modal from '../Modal'

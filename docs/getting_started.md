@@ -8,8 +8,9 @@ production deployment (Firestore, Cloud Storage, Slack App, secrets), see
 ## Prerequisites
 
 - Go 1.21+
-- Node.js 18+ and Corepack-managed pnpm (for building the frontend; the version
-  is pinned via the `packageManager` field in `frontend/package.json`)
+- Node.js 22.22+ and Corepack-managed pnpm (for building the frontend; the
+  version is pinned via the `packageManager` field in `frontend/package.json`.
+  react-router v8 requires Node 22.22+)
 
 Enable Corepack once so the pinned pnpm is used automatically:
 

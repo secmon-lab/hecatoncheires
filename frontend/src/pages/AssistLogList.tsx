@@ -1,4 +1,4 @@
-import { useParams } from 'react-router-dom'
+import { useParams } from 'react-router'
 import { useQuery } from '@apollo/client'
 import { GET_ASSIST_LOGS } from '../graphql/assistLog'
 import { useWorkspace } from '../contexts/workspace-context'
